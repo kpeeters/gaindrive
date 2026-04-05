@@ -1,4 +1,6 @@
 
 #pragma once
 
-std::string stamp();
+#include <string>
+
+std::string stamp(std::string label = "");

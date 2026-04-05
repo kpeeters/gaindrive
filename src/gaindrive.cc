@@ -1,9 +1,16 @@
 #include "gaindrive.hh"
+#include "stamp.hh"
 
 #include <iostream>
 
 GainDrive::GainDrive()
 	{
+	server_.set_logger([](const httplib::Request& req, const httplib::Response& res) {
+		std::cout << stamp(req.remote_addr)
+		          << req.method << " " << req.path
+		          << " -> " << res.status << std::endl;
+		});
+
 	// Catch-all handler for /rest/* — individual endpoints come later.
 	server_.Get("/rest/:endpoint", [](const httplib::Request&, httplib::Response& res) {
 		res.set_content(

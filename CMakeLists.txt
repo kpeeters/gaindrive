@@ -26,7 +26,7 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(httplib cxxopts nlohmann_json)
 
-add_executable(gaindrive src/main.cc src/gaindrive.cc)
+add_executable(gaindrive src/main.cc src/gaindrive.cc src/stamp.cc)
 
 target_link_libraries(gaindrive PRIVATE
 	httplib::httplib

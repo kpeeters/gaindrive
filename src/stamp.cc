@@ -1,6 +1,11 @@
 
 #include "stamp.hh"
 
+#include <string>
+#include <sstream>
+#include <iomanip>
+#include <ctime>
+
 std::string stamp(std::string label)
 	{
 	std::time_t t = std::time(nullptr);
