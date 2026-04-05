@@ -2,8 +2,12 @@
 #include "stamp.hh"
 
 #include <iostream>
+#include <thread>
 
-GainDrive::GainDrive()
+GainDrive::GainDrive(const std::string& db_path,
+                     const std::string& music_root,
+                     bool no_scan)
+	: store_(db_path, music_root)
 	{
 	server_.set_logger([](const httplib::Request& req, const httplib::Response& res) {
 		std::cout << stamp(req.remote_addr)
@@ -20,10 +24,15 @@ GainDrive::GainDrive()
 			R"(</subsonic-response>)",
 			"application/xml");
 		});
+
+	if (!no_scan) {
+		// Scan in background so the server starts accepting requests immediately.
+		std::thread([this]{ store_.scan(); }).detach();
+		}
 	}
 
 void GainDrive::listen(const std::string& host, int port)
 	{
-	std::cout << "Listening on " << host << ":" << port << "\n";
+	std::cout << stamp() << "Listening on " << host << ":" << port << std::endl;
 	server_.listen(host, port);
 	}
