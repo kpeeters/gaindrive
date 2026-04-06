@@ -6,16 +6,19 @@
 #include <nlohmann/json.hpp>
 
 #include "gaindrive.hh"
+#include "mediastore.hh"
 
 int main(int argc, char* argv[])
 	{
 	cxxopts::Options options("gaindrive", "Subsonic-compatible music server");
 	options.add_options()
-		("port",       "Port to listen on",      cxxopts::value<int>()->default_value("4040"))
-		("config",     "Path to config file",    cxxopts::value<std::string>()->default_value("/etc/gaindrive.conf"))
-		("db",         "Path to database file",  cxxopts::value<std::string>()->default_value("/var/lib/gaindrive/gaindrive.db"))
-		("music-root", "Root music directory",   cxxopts::value<std::string>()->default_value("/music"))
+		("port",       "Port to listen on",         cxxopts::value<int>()->default_value("4040"))
+		("config",     "Path to config file",       cxxopts::value<std::string>()->default_value("/etc/gaindrive.conf"))
+		("db",         "Path to database file",     cxxopts::value<std::string>()->default_value("/var/lib/gaindrive/gaindrive.db"))
+		("music-root", "Root music directory",      cxxopts::value<std::string>()->default_value("/music"))
 		("no-scan",    "Skip startup filesystem scan")
+		("add-user",   "Create a user and exit",    cxxopts::value<std::string>())
+		("password",   "Password for --add-user",   cxxopts::value<std::string>())
 		("h,help",     "Show help")
 		;
 
@@ -46,6 +49,21 @@ int main(int argc, char* argv[])
 		catch (const std::exception& e) {
 			std::cerr << "Warning: failed to parse " << config_path << ": " << e.what() << "\n";
 			}
+		}
+
+	// --add-user: create a user in the DB and exit without starting the server.
+	if (args.count("add-user")) {
+		if (!args.count("password")) {
+			std::cerr << "Error: --password is required with --add-user.\n";
+			return 1;
+			}
+		std::string username = args["add-user"].as<std::string>();
+		std::string password = args["password"].as<std::string>();
+		MediaStore store(db_path, music_root);
+		bool ok = store.add_user(username, password, true /* is_admin */);
+		std::cout << (ok ? "User '" + username + "' created."
+		               : "User '" + username + "' already exists.") << "\n";
+		return ok ? 0 : 1;
 		}
 
 	GainDrive gd(db_path, music_root, no_scan);

@@ -1,5 +1,6 @@
 #include "mediastore.hh"
 #include "stamp.hh"
+#include "md5.hh"
 
 #include <iostream>
 #include <algorithm>
@@ -433,4 +434,83 @@ void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id)
 	ins.bind(14, file_size);
 	ins.bind(15, mtime);
 	ins.exec();
+	}
+
+// ---- User management --------------------------------------------------
+
+bool MediaStore::add_user(const std::string& username, const std::string& password,
+                           bool is_admin)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement ins(db_,
+		"INSERT OR IGNORE INTO users (username, password_enc, is_admin) VALUES (?,?,?)");
+	ins.bind(1, username);
+	ins.bind(2, password);
+	ins.bind(3, is_admin ? 1 : 0);
+	ins.exec();
+	return db_.getChanges() > 0;
+	}
+
+bool MediaStore::has_users()
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement sel(db_, "SELECT COUNT(*) FROM users");
+	sel.executeStep();
+	return sel.getColumn(0).getInt() > 0;
+	}
+
+std::optional<MediaStore::UserInfo> MediaStore::get_user(const std::string& username)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement sel(db_,
+		"SELECT username, email, is_admin FROM users WHERE username = ?");
+	sel.bind(1, username);
+	if (!sel.executeStep()) return std::nullopt;
+	UserInfo u;
+	u.username = sel.getColumn(0).getString();
+	u.email    = sel.getColumn(1).isNull() ? "" : sel.getColumn(1).getString();
+	u.is_admin = sel.getColumn(2).getInt() != 0;
+	return u;
+	}
+
+bool MediaStore::validate_auth(const std::string& username,
+                                const std::string& password,
+                                const std::string& token,
+                                const std::string& salt)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement sel(db_,
+		"SELECT password_enc FROM users WHERE username = ?");
+	sel.bind(1, username);
+	if (!sel.executeStep()) return false;
+	std::string stored = sel.getColumn(0).getString();
+
+	bool ok = false;
+
+	if (!password.empty()) {
+		// Some clients send p=enc:HEXHEX (hex-encoded plaintext password).
+		std::string plain = password;
+		if (plain.size() > 4 && plain.substr(0, 4) == "enc:") {
+			std::string hex = plain.substr(4);
+			plain.clear();
+			for (size_t i = 0; i + 1 < hex.size(); i += 2)
+				plain += static_cast<char>(std::stoi(hex.substr(i, 2), nullptr, 16));
+			}
+		ok = (plain == stored);
+		}
+	else if (!token.empty() && !salt.empty()) {
+		std::string expected = md5_hex(stored + salt);
+		std::string tok = token;
+		std::transform(tok.begin(), tok.end(), tok.begin(), ::tolower);
+		ok = (tok == expected);
+		}
+
+	if (ok) {
+		SQLite::Statement upd(db_,
+			"UPDATE users SET last_access = CURRENT_TIMESTAMP WHERE username = ?");
+		upd.bind(1, username);
+		upd.exec();
+		}
+
+	return ok;
 	}

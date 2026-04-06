@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <optional>
 #include <filesystem>
 #include <mutex>
 #include <SQLiteCpp/SQLiteCpp.h>
@@ -14,10 +15,33 @@ class MediaStore {
 		// Safe to call from a background thread.
 		void scan();
 
+		// ---- User management ----
+
+		// Returns false if username already exists.
+		bool add_user(const std::string& username, const std::string& password,
+		              bool is_admin = false);
+
+		bool has_users();
+
+		struct UserInfo {
+			std::string username;
+			std::string email;
+			bool        is_admin;
+			};
+
+		std::optional<UserInfo> get_user(const std::string& username);
+
+		// Validates Subsonic auth params. Supply either password (from p=,
+		// possibly with "enc:" prefix) or token+salt (from t= and s=).
+		bool validate_auth(const std::string& username,
+		                   const std::string& password,
+		                   const std::string& token,
+		                   const std::string& salt);
+
 	private:
 		std::string      music_root_;
 		SQLite::Database db_;
-		std::mutex       db_mutex_;  // guards db_ across scan thread + future API threads
+		std::mutex       db_mutex_;  // guards db_ across scan thread + API threads
 
 		void create_schema();
 
