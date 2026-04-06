@@ -207,26 +207,31 @@ static std::string format_eta(double remaining_sec)
 	return "~" + std::to_string(s / 60) + "m" + std::to_string(s % 60) + "s";
 	}
 
-int MediaStore::count_audio_files()
+MediaStore::Counts MediaStore::count_audio_files()
 	{
-	int n = 0;
+	Counts c{};
 	for (auto& a : fs::directory_iterator(music_root_)) {
 		if (!a.is_directory()) continue;
+		++c.artists;
+		std::cout << stamp() << "(counting) " << a.path().filename().string() << std::endl;
 		for (auto& b : fs::directory_iterator(a.path())) {
 			if (!b.is_directory()) continue;
+			++c.albums;
 			for (auto& f : fs::directory_iterator(b.path())) {
-				if (f.is_regular_file() && is_audio_file(f.path())) ++n;
+				if (f.is_regular_file() && is_audio_file(f.path())) ++c.files;
 				}
 			}
 		}
-	return n;
+	return c;
 	}
 
 void MediaStore::scan()
 	{
-	int total = count_audio_files();
+	Counts totals = count_audio_files();
 	std::cout << stamp() << "Scan started: " << music_root_
-	          << "  (" << total << " files)" << std::endl;
+	          << "  (" << totals.artists << " artists, "
+	          << totals.albums << " albums, "
+	          << totals.files  << " files)" << std::endl;
 
 	using Clock = std::chrono::steady_clock;
 	auto   start_time = Clock::now();
@@ -267,8 +272,8 @@ void MediaStore::scan()
 			else {
 				double elapsed = std::chrono::duration<double>(Clock::now() - start_time).count();
 				double rate    = processed / elapsed;
-				double eta_sec = (total - processed) / rate;
-				progress = std::to_string(processed) + "/" + std::to_string(total)
+				double eta_sec = (totals.files - processed) / rate;
+				progress = std::to_string(processed) + "/" + std::to_string(totals.files)
 				         + " — ETA " + format_eta(eta_sec);
 				}
 			std::cout << stamp() << "  " << album_entry.path().filename().string()
