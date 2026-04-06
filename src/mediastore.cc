@@ -669,16 +669,22 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
-	// Fetch the folder itself.
+	// Fetch the folder itself, with cover art if it's an album folder.
 	SQLite::Statement fsel(db_,
-		"SELECT id, name, parent_id FROM folders WHERE id = ?");
+		"SELECT f.id, f.name, f.parent_id,"
+		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+		"            THEN f.id ELSE -1 END AS cover_art_id"
+		" FROM folders f"
+		" LEFT JOIN albums al ON al.folder_id = f.id"
+		" WHERE f.id = ?");
 	fsel.bind(1, folder_id);
 	if (!fsel.executeStep()) return std::nullopt;
 
 	DirInfo dir;
-	dir.id        = fsel.getColumn(0).getInt();
-	dir.name      = fsel.getColumn(1).getString();
-	dir.parent_id = fsel.getColumn(2).isNull() ? -1 : fsel.getColumn(2).getInt();
+	dir.id           = fsel.getColumn(0).getInt();
+	dir.name         = fsel.getColumn(1).getString();
+	dir.parent_id    = fsel.getColumn(2).isNull() ? -1 : fsel.getColumn(2).getInt();
+	dir.cover_art_id = fsel.getColumn(3).getInt();
 
 	// Child directories (album folders), with artist/album names where available.
 	SQLite::Statement dsel(db_,

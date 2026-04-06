@@ -341,6 +341,8 @@ GainDrive::GainDrive(const std::string& db_path,
 			directory->SetAttribute("name", dir->name.c_str());
 			if (dir->parent_id >= 0)
 				directory->SetAttribute("parent", dir->parent_id);
+			if (dir->cover_art_id >= 0)
+				directory->SetAttribute("coverArt", dir->cover_art_id);
 
 			for (auto& c : dir->children) {
 				auto* child = doc.NewElement("child");

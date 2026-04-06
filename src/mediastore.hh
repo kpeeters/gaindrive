@@ -86,6 +86,7 @@ class MediaStore {
 			int         id;
 			std::string name;
 			int         parent_id;   // -1 if root
+			int         cover_art_id = -1;
 			std::vector<ChildEntry> children;
 			};
 
