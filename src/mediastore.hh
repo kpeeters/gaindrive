@@ -92,7 +92,7 @@ class MediaStore {
 			std::vector<ChildEntry> children;
 			};
 
-		std::optional<DirInfo> get_directory(int folder_id);
+		std::optional<DirInfo> get_directory(int folder_id, bool flat_multi_disc = true);
 
 		// Returns the filesystem path of the cover image for an album folder,
 		// or empty string if none is stored.

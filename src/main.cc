@@ -34,8 +34,9 @@ int main(int argc, char* argv[])
 	int         port       = args["port"].as<int>();
 	std::string db_path    = args["db"].as<std::string>();
 	std::string music_root = args["music-root"].as<std::string>();
-	bool        no_scan    = args.count("no-scan") > 0;
-	bool        debug      = args.count("debug")   > 0;
+	bool        no_scan          = args.count("no-scan") > 0;
+	bool        debug            = args.count("debug")   > 0;
+	bool        flat_multi_disc  = true;
 
 	// Read config file; missing file is not fatal, just use defaults.
 	std::string config_path = args["config"].as<std::string>();
@@ -48,6 +49,7 @@ int main(int argc, char* argv[])
 			if (cfg.contains("music_root")) music_root = cfg["music_root"];
 			// CLI flags take precedence over config for port.
 			if (cfg.contains("port") && !args.count("port")) port = cfg["port"];
+			if (cfg.contains("flat_multi_disc")) flat_multi_disc = cfg["flat_multi_disc"].get<bool>();
 			}
 		catch (const std::exception& e) {
 			std::cerr << "Warning: failed to parse " << config_path << ": " << e.what() << "\n";
@@ -69,7 +71,7 @@ int main(int argc, char* argv[])
 		return ok ? 0 : 1;
 		}
 
-	GainDrive gd(db_path, music_root, no_scan, debug);
+	GainDrive gd(db_path, music_root, no_scan, debug, flat_multi_disc);
 	gd.listen(host, port);
 
 	return 0;

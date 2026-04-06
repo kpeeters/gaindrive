@@ -10,11 +10,13 @@ class GainDrive {
 		GainDrive(const std::string& db_path,
 		          const std::string& music_root,
 		          bool no_scan,
-		          bool debug = false);
+		          bool debug = false,
+		          bool flat_multi_disc = true);
 		void listen(const std::string& host, int port);
 
 	private:
 		bool            debug_;
+		bool            flat_multi_disc_;
 		MediaStore      store_;
 		httplib::Server server_;
 	};

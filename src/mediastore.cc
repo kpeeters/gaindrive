@@ -753,13 +753,15 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs()
 	return result;
 	}
 
-std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id)
+std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
+                                                               bool flat_multi_disc)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
-	// Fetch the folder itself, with cover art if it's an album folder.
+	// Fetch the folder itself. al.id tells us whether this is an album folder.
 	SQLite::Statement fsel(db_,
 		"SELECT f.id, f.name, f.parent_id,"
+		"       al.id AS album_id,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN f.id ELSE -1 END AS cover_art_id"
 		" FROM folders f"
@@ -772,39 +774,46 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id)
 	dir.id           = fsel.getColumn(0).getInt();
 	dir.name         = fsel.getColumn(1).getString();
 	dir.parent_id    = fsel.getColumn(2).isNull() ? -1 : fsel.getColumn(2).getInt();
-	dir.cover_art_id = fsel.getColumn(3).getInt();
+	bool is_album    = !fsel.getColumn(3).isNull();
+	dir.cover_art_id = fsel.getColumn(4).getInt();
 
-	// Child directories (album folders), with artist/album names where available.
-	SQLite::Statement dsel(db_,
-		"SELECT f.id, f.name,"
-		"       COALESCE(a.name, '') AS artist,"
-		"       COALESCE(al.title, f.name) AS album,"
-		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN f.id ELSE -1 END AS cover_art_id"
-		" FROM folders f"
-		" LEFT JOIN albums al ON al.folder_id = f.id"
-		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
-		" LEFT JOIN artists a ON a.id = aa.artist_id"
-		" WHERE f.parent_id = ?"
-		" ORDER BY f.name COLLATE NOCASE");
-	dsel.bind(1, folder_id);
-	while (dsel.executeStep()) {
-		ChildEntry e;
-		e.id           = dsel.getColumn(0).getInt();
-		e.parent_id    = folder_id;
-		e.is_dir       = true;
-		e.title        = dsel.getColumn(1).getString();
-		e.artist       = dsel.getColumn(2).getString();
-		e.album        = dsel.getColumn(3).getString();
-		e.cover_art_id = dsel.getColumn(4).getInt();
-		dir.children.push_back(std::move(e));
+	bool flatten = flat_multi_disc && is_album;
+
+	// Child directories — skipped in flat mode for album folders (disc subdirs
+	// are absorbed into the song list below).
+	if (!flatten) {
+		SQLite::Statement dsel(db_,
+			"SELECT f.id, f.name,"
+			"       COALESCE(a.name, '') AS artist,"
+			"       COALESCE(al.title, f.name) AS album,"
+			"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+			"            THEN f.id ELSE -1 END AS cover_art_id"
+			" FROM folders f"
+			" LEFT JOIN albums al ON al.folder_id = f.id"
+			" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
+			" LEFT JOIN artists a ON a.id = aa.artist_id"
+			" WHERE f.parent_id = ?"
+			" ORDER BY f.name COLLATE NOCASE");
+		dsel.bind(1, folder_id);
+		while (dsel.executeStep()) {
+			ChildEntry e;
+			e.id           = dsel.getColumn(0).getInt();
+			e.parent_id    = folder_id;
+			e.is_dir       = true;
+			e.title        = dsel.getColumn(1).getString();
+			e.artist       = dsel.getColumn(2).getString();
+			e.album        = dsel.getColumn(3).getString();
+			e.cover_art_id = dsel.getColumn(4).getInt();
+			dir.children.push_back(std::move(e));
+			}
 		}
 
-	// Child songs, with artist and album names where available.
-	SQLite::Statement ssel(db_,
+	// Child songs. In flat mode for album folders, also include songs from disc
+	// subfolders (one level down), ordered by disc then track.
+	const char* song_sql_flat =
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
-		"       s.file_size, s.codec, s.path,"
+		"       s.file_size, s.codec, s.folder_id,"
 		"       COALESCE(a.name, '') AS artist,"
 		"       COALESCE(al.title, '') AS album"
 		" FROM songs s"
@@ -812,12 +821,29 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id)
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
 		" WHERE s.folder_id = ?"
-		" ORDER BY s.disc_number, s.track_number, s.filename");
+		"    OR s.folder_id IN (SELECT id FROM folders WHERE parent_id = ?)"
+		" ORDER BY s.disc_number, s.track_number, s.filename";
+
+	const char* song_sql_normal =
+		"SELECT s.id, s.title, s.track_number, s.disc_number,"
+		"       s.year, s.genre, s.duration, s.bitrate,"
+		"       s.file_size, s.codec, s.folder_id,"
+		"       COALESCE(a.name, '') AS artist,"
+		"       COALESCE(al.title, '') AS album"
+		" FROM songs s"
+		" LEFT JOIN albums al ON al.id = s.album_id"
+		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
+		" LEFT JOIN artists a ON a.id = sa.artist_id"
+		" WHERE s.folder_id = ?"
+		" ORDER BY s.disc_number, s.track_number, s.filename";
+
+	SQLite::Statement ssel(db_, flatten ? song_sql_flat : song_sql_normal);
 	ssel.bind(1, folder_id);
+	if (flatten) ssel.bind(2, folder_id);
+
 	while (ssel.executeStep()) {
 		ChildEntry e;
 		e.id           = ssel.getColumn(0).getInt();
-		e.parent_id    = folder_id;
 		e.is_dir       = false;
 		e.title        = ssel.getColumn(1).getString();
 		e.track_number = ssel.getColumn(2).getInt();
@@ -828,7 +854,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id)
 		e.bitrate      = ssel.getColumn(7).getInt();
 		e.file_size    = ssel.getColumn(8).getInt64();
 		e.codec        = ssel.getColumn(9).isNull() ? "" : ssel.getColumn(9).getString();
-		e.path         = ssel.getColumn(10).getString();
+		e.parent_id    = ssel.getColumn(10).getInt();  // actual folder (may be disc subfolder)
 		e.artist       = ssel.getColumn(11).getString();
 		e.album        = ssel.getColumn(12).getString();
 		// Songs inherit cover art from their parent album folder.

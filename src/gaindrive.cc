@@ -297,8 +297,9 @@ static bool check_auth(const httplib::Request& req, httplib::Response& res,
 GainDrive::GainDrive(const std::string& db_path,
                      const std::string& music_root,
                      bool no_scan,
-                     bool debug)
-	: debug_(debug), store_(db_path, music_root)
+                     bool debug,
+                     bool flat_multi_disc)
+	: debug_(debug), flat_multi_disc_(flat_multi_disc), store_(db_path, music_root)
 	{
 	server_.set_logger([](const httplib::Request& req, const httplib::Response& res) {
 		std::cout << stamp(req.remote_addr)
@@ -534,7 +535,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto it = req.params.find("id");
 		if (it == req.params.end()) { err(10, "Required parameter missing: id."); return; }
 
-		auto dir = store_.get_directory(std::stoi(it->second));
+		auto dir = store_.get_directory(std::stoi(it->second), flat_multi_disc_);
 		if (!dir) { err(70, "Directory not found."); return; }
 
 		std::string body;
