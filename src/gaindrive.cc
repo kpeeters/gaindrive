@@ -180,8 +180,20 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::cout << stamp(req.remote_addr)
 		          << req.method << " " << req.path
 		          << " -> " << res.status << std::endl;
-		if (debug && !res.body.empty())
-			std::cout << res.body << std::endl;
+		if (debug) {
+			std::string ct = res.get_header_value("Content-Type");
+			if (!res.body.empty()) {
+				if (ct.find("xml") != std::string::npos)
+					std::cout << res.body << std::endl;
+				else
+					std::cout << "[" << ct << ", " << res.body.size() << " bytes]"
+					          << std::endl;
+				}
+			else if (!ct.empty()) {
+				// Content-provider response (audio stream, image, …).
+				std::cout << "[" << ct << ", streaming]" << std::endl;
+				}
+			}
 		});
 
 	// ping
