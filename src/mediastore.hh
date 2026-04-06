@@ -162,6 +162,16 @@ class MediaStore {
 		// Returns a single playlist with all songs populated, or nullopt if not found.
 		std::optional<PlaylistInfo> get_playlist(int playlist_id);
 
+		// Updates an existing playlist. Returns false if not found or not owned by username.
+		// Only supplied optionals are applied. songs_to_add are appended after survivors;
+		// indices_to_remove are 0-based positions removed before adding.
+		bool update_playlist(int playlist_id, const std::string& username,
+		                     const std::optional<std::string>& name,
+		                     const std::optional<std::string>& comment,
+		                     const std::optional<bool>& is_public,
+		                     const std::vector<int>& songs_to_add,
+		                     const std::vector<int>& indices_to_remove);
+
 	private:
 		std::string      music_root_;
 		SQLite::Database db_;

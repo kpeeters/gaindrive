@@ -120,6 +120,93 @@ static const char* codec_to_mime(const std::string& codec)
 	return "application/octet-stream";
 	}
 
+// Serialises a song ChildEntry into a JSON object.
+static nlohmann::json song_entry_json(const MediaStore::ChildEntry& c)
+	{
+	nlohmann::json s = {
+		{"id",          c.id},
+		{"parent",      c.parent_id},
+		{"isDir",       false},
+		{"title",       c.title},
+		{"artist",      c.artist},
+		{"album",       c.album},
+		{"track",       c.track_number},
+		{"discNumber",  c.disc_number},
+		{"year",        c.year},
+		{"genre",       c.genre},
+		{"size",        c.file_size},
+		{"contentType", codec_to_mime(c.codec)},
+		{"suffix",      c.codec},
+		{"duration",    (int)c.duration},
+		{"bitRate",     c.bitrate}
+		};
+	if (c.cover_art_id >= 0) s["coverArt"] = c.cover_art_id;
+	return s;
+	}
+
+// Creates an XML element for a song with the given tag name.
+static XMLElement* song_entry_xml(XMLDocument& doc,
+                                   const MediaStore::ChildEntry& c,
+                                   const char* tag)
+	{
+	auto* el = doc.NewElement(tag);
+	el->SetAttribute("id",          c.id);
+	el->SetAttribute("parent",      c.parent_id);
+	el->SetAttribute("isDir",       false);
+	el->SetAttribute("title",       c.title.c_str());
+	el->SetAttribute("artist",      c.artist.c_str());
+	el->SetAttribute("album",       c.album.c_str());
+	if (c.cover_art_id >= 0) el->SetAttribute("coverArt", c.cover_art_id);
+	el->SetAttribute("track",       c.track_number);
+	el->SetAttribute("discNumber",  c.disc_number);
+	el->SetAttribute("year",        c.year);
+	el->SetAttribute("genre",       c.genre.c_str());
+	el->SetAttribute("size",        (int64_t)c.file_size);
+	el->SetAttribute("contentType", codec_to_mime(c.codec));
+	el->SetAttribute("suffix",      c.codec.c_str());
+	el->SetAttribute("duration",    (int)c.duration);
+	el->SetAttribute("bitRate",     c.bitrate);
+	return el;
+	}
+
+// Builds the full subsonic response body for a playlist with its songs.
+static std::string playlist_body(const MediaStore::PlaylistInfo& pl, bool use_json)
+	{
+	if (use_json)
+		return subsonic_ok_json([&pl](nlohmann::json& r) {
+			nlohmann::json entries = nlohmann::json::array();
+			for (auto& c : pl.songs)
+				entries.push_back(song_entry_json(c));
+			r["playlist"] = {
+				{"id",        pl.id},
+				{"name",      pl.name},
+				{"comment",   pl.comment},
+				{"owner",     pl.owner},
+				{"public",    pl.is_public},
+				{"songCount", pl.song_count},
+				{"duration",  pl.duration},
+				{"created",   pl.created},
+				{"changed",   pl.updated},
+				{"entry",     entries}
+				};
+			});
+	return subsonic_ok([&pl](XMLDocument& doc, XMLElement* root) {
+		auto* playlist = doc.NewElement("playlist");
+		playlist->SetAttribute("id",        pl.id);
+		playlist->SetAttribute("name",      pl.name.c_str());
+		playlist->SetAttribute("comment",   pl.comment.c_str());
+		playlist->SetAttribute("owner",     pl.owner.c_str());
+		playlist->SetAttribute("public",    pl.is_public);
+		playlist->SetAttribute("songCount", pl.song_count);
+		playlist->SetAttribute("duration",  pl.duration);
+		playlist->SetAttribute("created",   pl.created.c_str());
+		playlist->SetAttribute("changed",   pl.updated.c_str());
+		for (auto& c : pl.songs)
+			playlist->InsertEndChild(song_entry_xml(doc, c, "entry"));
+		root->InsertEndChild(playlist);
+		});
+	}
+
 static std::string url_encode(const std::string& s)
 	{
 	static const char hex[] = "0123456789ABCDEF";
@@ -455,25 +542,13 @@ GainDrive::GainDrive(const std::string& db_path,
 			body = subsonic_ok_json([&dir](nlohmann::json& r) {
 				nlohmann::json children = nlohmann::json::array();
 				for (auto& c : dir->children) {
-					nlohmann::json child = {
-						{"id",     c.id},
-						{"parent", c.parent_id},
-						{"isDir",  c.is_dir},
-						{"title",  c.title},
-						{"artist", c.artist},
-						{"album",  c.album}
-						};
-					if (c.cover_art_id >= 0) child["coverArt"] = c.cover_art_id;
-					if (!c.is_dir) {
-						child["track"]       = c.track_number;
-						child["discNumber"]  = c.disc_number;
-						child["year"]        = c.year;
-						child["genre"]       = c.genre;
-						child["size"]        = c.file_size;
-						child["contentType"] = codec_to_mime(c.codec);
-						child["suffix"]      = c.codec;
-						child["duration"]    = (int)c.duration;
-						child["bitRate"]     = c.bitrate;
+					nlohmann::json child;
+					if (c.is_dir) {
+						child = {{"id",c.id},{"parent",c.parent_id},{"isDir",true},
+						         {"title",c.title},{"artist",c.artist},{"album",c.album}};
+						if (c.cover_art_id >= 0) child["coverArt"] = c.cover_art_id;
+						} else {
+						child = song_entry_json(c);
 						}
 					children.push_back(child);
 					}
@@ -496,25 +571,19 @@ GainDrive::GainDrive(const std::string& db_path,
 					directory->SetAttribute("coverArt", dir->cover_art_id);
 
 				for (auto& c : dir->children) {
-					auto* child = doc.NewElement("child");
-					child->SetAttribute("id",     c.id);
-					child->SetAttribute("parent", c.parent_id);
-					child->SetAttribute("isDir",  c.is_dir);
-					child->SetAttribute("title",  c.title.c_str());
-					child->SetAttribute("artist", c.artist.c_str());
-					child->SetAttribute("album",  c.album.c_str());
-					if (c.cover_art_id >= 0)
-						child->SetAttribute("coverArt", c.cover_art_id);
-					if (!c.is_dir) {
-						child->SetAttribute("track",       c.track_number);
-						child->SetAttribute("discNumber",  c.disc_number);
-						child->SetAttribute("year",        c.year);
-						child->SetAttribute("genre",       c.genre.c_str());
-						child->SetAttribute("size",        (int64_t)c.file_size);
-						child->SetAttribute("contentType", codec_to_mime(c.codec));
-						child->SetAttribute("suffix",      c.codec.c_str());
-						child->SetAttribute("duration",    (int)c.duration);
-						child->SetAttribute("bitRate",     c.bitrate);
+					XMLElement* child;
+					if (c.is_dir) {
+						child = doc.NewElement("child");
+						child->SetAttribute("id",     c.id);
+						child->SetAttribute("parent", c.parent_id);
+						child->SetAttribute("isDir",  true);
+						child->SetAttribute("title",  c.title.c_str());
+						child->SetAttribute("artist", c.artist.c_str());
+						child->SetAttribute("album",  c.album.c_str());
+						if (c.cover_art_id >= 0)
+							child->SetAttribute("coverArt", c.cover_art_id);
+						} else {
+						child = song_entry_xml(doc, c, "child");
 						}
 					directory->InsertEndChild(child);
 					}
@@ -893,79 +962,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			song_ids.push_back(std::stoi(i->second));
 
 		auto pl = store_.create_playlist(user, name, song_ids);
-
-		std::string body;
-		if (use_json)
-			body = subsonic_ok_json([&pl](nlohmann::json& r) {
-				nlohmann::json entries = nlohmann::json::array();
-				for (auto& c : pl.songs) {
-					nlohmann::json s = {
-						{"id",          c.id},
-						{"parent",      c.parent_id},
-						{"isDir",       false},
-						{"title",       c.title},
-						{"artist",      c.artist},
-						{"album",       c.album},
-						{"track",       c.track_number},
-						{"discNumber",  c.disc_number},
-						{"year",        c.year},
-						{"genre",       c.genre},
-						{"size",        c.file_size},
-						{"contentType", codec_to_mime(c.codec)},
-						{"suffix",      c.codec},
-						{"duration",    (int)c.duration},
-						{"bitRate",     c.bitrate}
-						};
-					if (c.cover_art_id >= 0) s["coverArt"] = c.cover_art_id;
-					entries.push_back(s);
-					}
-				r["playlist"] = {
-					{"id",        pl.id},
-					{"name",      pl.name},
-					{"comment",   pl.comment},
-					{"owner",     pl.owner},
-					{"public",    pl.is_public},
-					{"songCount", pl.song_count},
-					{"duration",  pl.duration},
-					{"created",   pl.created},
-					{"changed",   pl.updated},
-					{"entry",     entries}
-					};
-				});
-		else
-			body = subsonic_ok([&pl](XMLDocument& doc, XMLElement* root) {
-				auto* playlist = doc.NewElement("playlist");
-				playlist->SetAttribute("id",        pl.id);
-				playlist->SetAttribute("name",      pl.name.c_str());
-				playlist->SetAttribute("comment",   pl.comment.c_str());
-				playlist->SetAttribute("owner",     pl.owner.c_str());
-				playlist->SetAttribute("public",    pl.is_public);
-				playlist->SetAttribute("songCount", pl.song_count);
-				playlist->SetAttribute("duration",  pl.duration);
-				playlist->SetAttribute("created",   pl.created.c_str());
-				playlist->SetAttribute("changed",   pl.updated.c_str());
-				for (auto& c : pl.songs) {
-					auto* entry = doc.NewElement("entry");
-					entry->SetAttribute("id",          c.id);
-					entry->SetAttribute("parent",      c.parent_id);
-					entry->SetAttribute("isDir",       false);
-					entry->SetAttribute("title",       c.title.c_str());
-					entry->SetAttribute("artist",      c.artist.c_str());
-					entry->SetAttribute("album",       c.album.c_str());
-					if (c.cover_art_id >= 0) entry->SetAttribute("coverArt", c.cover_art_id);
-					entry->SetAttribute("track",       c.track_number);
-					entry->SetAttribute("discNumber",  c.disc_number);
-					entry->SetAttribute("year",        c.year);
-					entry->SetAttribute("genre",       c.genre.c_str());
-					entry->SetAttribute("size",        (int64_t)c.file_size);
-					entry->SetAttribute("contentType", codec_to_mime(c.codec));
-					entry->SetAttribute("suffix",      c.codec.c_str());
-					entry->SetAttribute("duration",    (int)c.duration);
-					entry->SetAttribute("bitRate",     c.bitrate);
-					playlist->InsertEndChild(entry);
-					}
-				root->InsertEndChild(playlist);
-				});
+		std::string body = playlist_body(pl, use_json);
 		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
@@ -989,78 +986,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto pl = store_.get_playlist(std::stoi(it->second));
 		if (!pl) { err(70, "Playlist not found."); return; }
 
-		std::string body;
-		if (use_json)
-			body = subsonic_ok_json([&pl](nlohmann::json& r) {
-				nlohmann::json entries = nlohmann::json::array();
-				for (auto& c : pl->songs) {
-					nlohmann::json s = {
-						{"id",          c.id},
-						{"parent",      c.parent_id},
-						{"isDir",       false},
-						{"title",       c.title},
-						{"artist",      c.artist},
-						{"album",       c.album},
-						{"track",       c.track_number},
-						{"discNumber",  c.disc_number},
-						{"year",        c.year},
-						{"genre",       c.genre},
-						{"size",        c.file_size},
-						{"contentType", codec_to_mime(c.codec)},
-						{"suffix",      c.codec},
-						{"duration",    (int)c.duration},
-						{"bitRate",     c.bitrate}
-						};
-					if (c.cover_art_id >= 0) s["coverArt"] = c.cover_art_id;
-					entries.push_back(s);
-					}
-				r["playlist"] = {
-					{"id",        pl->id},
-					{"name",      pl->name},
-					{"comment",   pl->comment},
-					{"owner",     pl->owner},
-					{"public",    pl->is_public},
-					{"songCount", pl->song_count},
-					{"duration",  pl->duration},
-					{"created",   pl->created},
-					{"changed",   pl->updated},
-					{"entry",     entries}
-					};
-				});
-		else
-			body = subsonic_ok([&pl](XMLDocument& doc, XMLElement* root) {
-				auto* playlist = doc.NewElement("playlist");
-				playlist->SetAttribute("id",        pl->id);
-				playlist->SetAttribute("name",      pl->name.c_str());
-				playlist->SetAttribute("comment",   pl->comment.c_str());
-				playlist->SetAttribute("owner",     pl->owner.c_str());
-				playlist->SetAttribute("public",    pl->is_public);
-				playlist->SetAttribute("songCount", pl->song_count);
-				playlist->SetAttribute("duration",  pl->duration);
-				playlist->SetAttribute("created",   pl->created.c_str());
-				playlist->SetAttribute("changed",   pl->updated.c_str());
-				for (auto& c : pl->songs) {
-					auto* entry = doc.NewElement("entry");
-					entry->SetAttribute("id",          c.id);
-					entry->SetAttribute("parent",      c.parent_id);
-					entry->SetAttribute("isDir",       false);
-					entry->SetAttribute("title",       c.title.c_str());
-					entry->SetAttribute("artist",      c.artist.c_str());
-					entry->SetAttribute("album",       c.album.c_str());
-					if (c.cover_art_id >= 0) entry->SetAttribute("coverArt", c.cover_art_id);
-					entry->SetAttribute("track",       c.track_number);
-					entry->SetAttribute("discNumber",  c.disc_number);
-					entry->SetAttribute("year",        c.year);
-					entry->SetAttribute("genre",       c.genre.c_str());
-					entry->SetAttribute("size",        (int64_t)c.file_size);
-					entry->SetAttribute("contentType", codec_to_mime(c.codec));
-					entry->SetAttribute("suffix",      c.codec.c_str());
-					entry->SetAttribute("duration",    (int)c.duration);
-					entry->SetAttribute("bitRate",     c.bitrate);
-					playlist->InsertEndChild(entry);
-					}
-				root->InsertEndChild(playlist);
-				});
+		std::string body = playlist_body(*pl, use_json);
 		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
@@ -1143,27 +1069,8 @@ GainDrive::GainDrive(const std::string& db_path,
 					}
 
 				nlohmann::json songs = nlohmann::json::array();
-				for (auto& c : sr.songs) {
-					nlohmann::json s = {
-						{"id",          c.id},
-						{"parent",      c.parent_id},
-						{"isDir",       false},
-						{"title",       c.title},
-						{"artist",      c.artist},
-						{"album",       c.album},
-						{"track",       c.track_number},
-						{"discNumber",  c.disc_number},
-						{"year",        c.year},
-						{"genre",       c.genre},
-						{"size",        c.file_size},
-						{"contentType", codec_to_mime(c.codec)},
-						{"suffix",      c.codec},
-						{"duration",    (int)c.duration},
-						{"bitRate",     c.bitrate}
-						};
-					if (c.cover_art_id >= 0) s["coverArt"] = c.cover_art_id;
-					songs.push_back(s);
-					}
+				for (auto& c : sr.songs)
+					songs.push_back(song_entry_json(c));
 
 				r["starred"] = {
 					{"artist", artists},
@@ -1194,29 +1101,52 @@ GainDrive::GainDrive(const std::string& db_path,
 					starred->InsertEndChild(el);
 					}
 
-				for (auto& c : sr.songs) {
-					auto* el = doc.NewElement("song");
-					el->SetAttribute("id",          c.id);
-					el->SetAttribute("parent",      c.parent_id);
-					el->SetAttribute("isDir",       false);
-					el->SetAttribute("title",       c.title.c_str());
-					el->SetAttribute("artist",      c.artist.c_str());
-					el->SetAttribute("album",       c.album.c_str());
-					if (c.cover_art_id >= 0) el->SetAttribute("coverArt", c.cover_art_id);
-					el->SetAttribute("track",       c.track_number);
-					el->SetAttribute("discNumber",  c.disc_number);
-					el->SetAttribute("year",        c.year);
-					el->SetAttribute("genre",       c.genre.c_str());
-					el->SetAttribute("size",        (int64_t)c.file_size);
-					el->SetAttribute("contentType", codec_to_mime(c.codec));
-					el->SetAttribute("suffix",      c.codec.c_str());
-					el->SetAttribute("duration",    (int)c.duration);
-					el->SetAttribute("bitRate",     c.bitrate);
-					starred->InsertEndChild(el);
-					}
+				for (auto& c : sr.songs)
+					starred->InsertEndChild(song_entry_xml(doc, c, "song"));
 
 				root->InsertEndChild(starred);
 				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// updatePlaylist
+	server_.Get("/rest/updatePlaylist.view", [this](const httplib::Request& req,
+	                                                 httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+
+		auto err = [&](int code, const char* msg) {
+			if (use_json)
+				res.set_content(subsonic_error_json(code, msg), "application/json");
+			else
+				res.set_content(subsonic_error(code, msg),      "application/xml");
+			};
+
+		auto it = req.params.find("playlistId");
+		if (it == req.params.end()) { err(10, "Required parameter missing: playlistId."); return; }
+		int playlist_id = std::stoi(it->second);
+		std::string user = req.params.find("u")->second;
+
+		std::optional<std::string> name, comment;
+		std::optional<bool> is_public;
+		if (req.params.count("name"))    name      = req.params.find("name")->second;
+		if (req.params.count("comment")) comment   = req.params.find("comment")->second;
+		if (req.params.count("public"))  is_public = (req.params.find("public")->second == "true");
+
+		std::vector<int> to_add, to_remove;
+		for (auto& [k, v] : req.params) {
+			if      (k == "songIdToAdd")        to_add.push_back(std::stoi(v));
+			else if (k == "songIndexToRemove")  to_remove.push_back(std::stoi(v));
+			}
+
+		if (!store_.update_playlist(playlist_id, user, name, comment, is_public,
+		                             to_add, to_remove)) {
+			err(70, "Playlist not found.");
+			return;
+			}
+
+		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});

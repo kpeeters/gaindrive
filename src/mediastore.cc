@@ -1070,6 +1070,81 @@ MediaStore::PlaylistInfo MediaStore::create_playlist(const std::string& username
 	return pl;
 	}
 
+bool MediaStore::update_playlist(int playlist_id, const std::string& username,
+                                  const std::optional<std::string>& name,
+                                  const std::optional<std::string>& comment,
+                                  const std::optional<bool>& is_public,
+                                  const std::vector<int>& songs_to_add,
+                                  const std::vector<int>& indices_to_remove)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	// Verify ownership.
+	SQLite::Statement own(db_,
+		"SELECT p.id FROM playlists p"
+		" JOIN users u ON u.id = p.user_id"
+		" WHERE p.id = ? AND u.username = ?");
+	own.bind(1, playlist_id);
+	own.bind(2, username);
+	if (!own.executeStep()) return false;
+
+	// Read surviving song_ids in position order, then drop requested indices.
+	SQLite::Statement sel(db_,
+		"SELECT song_id FROM playlist_songs WHERE playlist_id = ? ORDER BY position");
+	sel.bind(1, playlist_id);
+	std::vector<int> kept;
+	while (sel.executeStep())
+		kept.push_back(sel.getColumn(0).getInt());
+
+	// Remove in descending index order to avoid shifting.
+	std::vector<int> sorted_remove = indices_to_remove;
+	std::sort(sorted_remove.rbegin(), sorted_remove.rend());
+	for (int idx : sorted_remove)
+		if (idx >= 0 && idx < (int)kept.size())
+			kept.erase(kept.begin() + idx);
+
+	for (int id : songs_to_add)
+		kept.push_back(id);
+
+	SQLite::Transaction txn(db_);
+
+	// Apply metadata changes.
+	if (name)      {
+		SQLite::Statement q(db_, "UPDATE playlists SET name=? WHERE id=?");
+		q.bind(1, *name); q.bind(2, playlist_id); q.exec();
+		}
+	if (comment)   {
+		SQLite::Statement q(db_, "UPDATE playlists SET comment=? WHERE id=?");
+		q.bind(1, *comment); q.bind(2, playlist_id); q.exec();
+		}
+	if (is_public) {
+		SQLite::Statement q(db_, "UPDATE playlists SET is_public=? WHERE id=?");
+		q.bind(1, *is_public ? 1 : 0); q.bind(2, playlist_id); q.exec();
+		}
+	{
+	SQLite::Statement q(db_, "UPDATE playlists SET updated=CURRENT_TIMESTAMP WHERE id=?");
+	q.bind(1, playlist_id); q.exec();
+	}
+
+	// Replace song list.
+	SQLite::Statement del(db_, "DELETE FROM playlist_songs WHERE playlist_id=?");
+	del.bind(1, playlist_id);
+	del.exec();
+
+	SQLite::Statement ins(db_,
+		"INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?,?,?)");
+	for (int pos = 0; pos < (int)kept.size(); ++pos) {
+		ins.bind(1, playlist_id);
+		ins.bind(2, kept[pos]);
+		ins.bind(3, pos);
+		ins.exec();
+		ins.reset();
+		}
+
+	txn.commit();
+	return true;
+	}
+
 std::vector<MediaStore::PlaylistInfo> MediaStore::get_playlists(const std::string& username)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
