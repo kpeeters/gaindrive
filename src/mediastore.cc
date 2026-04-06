@@ -20,8 +20,7 @@ static const std::set<std::string> AUDIO_EXTENSIONS = {
 
 // Candidate cover art filenames in priority order.  Add more here as needed.
 static const std::vector<std::string> COVER_FILENAMES = {
-	"cover.jpg",
-	// "folder.jpg", "front.jpg", "cover.png",
+	"cover.jpg", "folder.jpg", "front.jpg", "cover.png"
 	};
 
 static std::string find_cover(const fs::path& dir)
