@@ -608,21 +608,60 @@ GainDrive::GainDrive(const std::string& db_path,
 						std::cout << " [" << rel.value("type","?") << "]";
 					std::cout << std::endl;
 
+					// Prefer direct wikipedia relation; fall back to wikidata.
+					std::string wiki_title;
 					for (auto& rel : rels) {
-						if (rel.value("type","") != "wikipedia") continue;
-						std::string wiki_url = rel.value("url", nlohmann::json::object())
-						                           .value("resource","");
-						auto pos = wiki_url.find("/wiki/");
-						if (pos == std::string::npos) continue;
-						std::string title = wiki_url.substr(pos + 6);
-						std::cout << stamp() << "getArtistInfo [" << name
-						          << "] Wikipedia title: " << title << std::endl;
-						// Step 3 — Wikipedia REST summary → bio + thumbnail.
+						std::string type     = rel.value("type","");
+						std::string resource = rel.value("url", nlohmann::json::object())
+						                          .value("resource","");
+						if (type == "wikipedia") {
+							auto pos = resource.find("/wiki/");
+							if (pos != std::string::npos) {
+								wiki_title = resource.substr(pos + 6);
+								std::cout << stamp() << "getArtistInfo [" << name
+								          << "] Wikipedia (direct): " << wiki_title << std::endl;
+								break;
+								}
+							}
+						else if (type == "wikidata" && wiki_title.empty()) {
+							auto pos = resource.rfind('/');
+							if (pos == std::string::npos) continue;
+							std::string entity = resource.substr(pos + 1);
+							std::cout << stamp() << "getArtistInfo [" << name
+							          << "] Wikidata entity: " << entity << std::endl;
+							httplib::SSLClient wd("www.wikidata.org");
+							wd.set_default_headers({
+								{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+								});
+							auto rwd = wd.Get("/w/api.php",
+								httplib::Params{
+									{"action","wbgetentities"},{"ids",entity},
+									{"props","sitelinks"},{"sitefilter","enwiki"},
+									{"format","json"}
+									},
+								httplib::Headers{});
+							if (rwd && rwd->status == 200) {
+								auto jwd = nlohmann::json::parse(rwd->body, nullptr, false);
+								if (!jwd.is_discarded())
+									wiki_title = jwd["entities"][entity]["sitelinks"]["enwiki"]
+									                .value("title","");
+								if (!wiki_title.empty())
+									std::cout << stamp() << "getArtistInfo [" << name
+									          << "] Wikipedia (via Wikidata): "
+									          << wiki_title << std::endl;
+								}
+							}
+						}
+
+					// Step 3 — Wikipedia REST summary → bio + thumbnail.
+					if (!wiki_title.empty()) {
 						httplib::SSLClient wp("en.wikipedia.org");
 						wp.set_default_headers({
 							{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
 							});
-						auto r3 = wp.Get("/api/rest_v1/page/summary/" + title,
+						std::string path_title = wiki_title;
+						for (char& c : path_title) if (c == ' ') c = '_';
+						auto r3 = wp.Get("/api/rest_v1/page/summary/" + path_title,
 						                 httplib::Params{}, httplib::Headers{});
 						if (!r3) {
 							std::cout << stamp() << "getArtistInfo [" << name
@@ -645,7 +684,6 @@ GainDrive::GainDrive(const std::string& db_path,
 								          << std::endl;
 								}
 							}
-						break;
 						}
 					}
 				}
