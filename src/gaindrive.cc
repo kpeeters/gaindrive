@@ -294,7 +294,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		});
 
 	// Catch-all for endpoints not yet implemented.
-	server_.Get("/rest/:endpoint", [](const httplib::Request&, httplib::Response& res) {
+	server_.Get("/rest/:endpoint", [](const httplib::Request& req, httplib::Response& res) {
+		std::cout << stamp() << "NOT IMPLEMENTED: " << req.path << std::endl;
 		res.set_content(subsonic_error(0, "Not implemented."), "application/xml");
 		});
 
