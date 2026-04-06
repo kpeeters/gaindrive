@@ -69,6 +69,7 @@ class MediaStore {
 			std::string title;    // folder name or song title
 			std::string artist;
 			std::string album;
+			int         cover_art_id = -1;  // folder_id for getCoverArt; -1 = none
 			// populated only when !is_dir:
 			int         track_number = 0;
 			int         disc_number  = 1;
@@ -89,6 +90,10 @@ class MediaStore {
 			};
 
 		std::optional<DirInfo> get_directory(int folder_id);
+
+		// Returns the filesystem path of the cover image for an album folder,
+		// or empty string if none is stored.
+		std::string get_cover_path(int folder_id);
 
 		struct SongInfo {
 			int         id;

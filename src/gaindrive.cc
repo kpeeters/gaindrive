@@ -2,9 +2,13 @@
 #include "stamp.hh"
 #include "streamer.hh"
 
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <thread>
+
+#include <reproc++/reproc.hpp>
 
 #include <tinyxml2.h>
 #include <nlohmann/json.hpp>
@@ -95,6 +99,44 @@ static std::string url_encode(const std::string& s)
 		else { out += '%'; out += hex[c >> 4]; out += hex[c & 0xf]; }
 		}
 	return out;
+	}
+
+// Scales an image file to fit within size×size pixels (JPEG output) using
+// ffmpeg.  Isolated here so it can be swapped for a proper image library later.
+static void serve_cover_scaled(httplib::Response& res,
+                                const std::string& path, int size)
+	{
+	std::vector<std::string> args = {
+		"ffmpeg", "-i", path,
+		"-vf", "scale=" + std::to_string(size) + ":" + std::to_string(size)
+		       + ":force_original_aspect_ratio=decrease",
+		"-frames:v", "1", "-f", "mjpeg", "pipe:1"
+		};
+
+	auto proc = std::make_shared<reproc::process>();
+	reproc::options opts;
+	opts.redirect.err.type = reproc::redirect::type::discard;
+
+	auto ec = proc->start(args, opts);
+	if (ec) {
+		std::cout << stamp() << "getCoverArt: ffmpeg launch failed: "
+		          << ec.message() << std::endl;
+		res.status = 500;
+		return;
+		}
+
+	res.set_content_provider(
+		"image/jpeg",
+		[proc](size_t, httplib::DataSink& sink) {
+			uint8_t buf[65536];
+			auto [n, err] = proc->read(reproc::stream::out, buf, sizeof(buf));
+			if (n == 0) { sink.done(); return false; }
+			return sink.write(reinterpret_cast<char*>(buf), n);
+			},
+		[proc](bool success) {
+			if (!success) proc->terminate();
+			proc->wait(reproc::infinite);
+			});
 	}
 
 // Extracts u/p/t/s params and validates auth. Writes error into res on failure.
@@ -305,6 +347,8 @@ GainDrive::GainDrive(const std::string& db_path,
 				child->SetAttribute("title",  c.title.c_str());
 				child->SetAttribute("artist", c.artist.c_str());
 				child->SetAttribute("album",  c.album.c_str());
+				if (c.cover_art_id >= 0)
+					child->SetAttribute("coverArt", c.cover_art_id);
 				if (!c.is_dir) {
 					child->SetAttribute("track",       c.track_number);
 					child->SetAttribute("discNumber",  c.disc_number);
@@ -397,6 +441,54 @@ GainDrive::GainDrive(const std::string& db_path,
 				ai->SetAttribute("lastFmUrl", info.last_fm_url.c_str());
 			root->InsertEndChild(ai);
 			}), "application/xml");
+		});
+
+	// getCoverArt — serve a cover image, optionally scaled.
+	server_.Get("/rest/getCoverArt.view", [this](const httplib::Request& req,
+	                                              httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			res.set_content(subsonic_error(10, "Required parameter missing: id."),
+			                "application/xml");
+			return;
+			}
+
+		std::string path = store_.get_cover_path(std::stoi(it->second));
+		if (path.empty()) {
+			res.status = 404;
+			return;
+			}
+
+		auto size_it = req.params.find("size");
+		if (size_it != req.params.end()) {
+			serve_cover_scaled(res, path, std::stoi(size_it->second));
+			return;
+			}
+
+		// Serve the full-size image directly.
+		namespace fs = std::filesystem;
+		auto file_size = static_cast<size_t>(fs::file_size(path));
+		res.set_content_provider(
+			file_size, "image/jpeg",
+			[path](size_t offset, size_t length, httplib::DataSink& sink) {
+				std::ifstream f(path, std::ios::binary);
+				if (!f) return false;
+				f.seekg(static_cast<std::streamoff>(offset));
+				char   buf[65536];
+				size_t remaining = length;
+				while (remaining > 0) {
+					auto to_read = static_cast<std::streamsize>(
+					    std::min(remaining, sizeof(buf)));
+					f.read(buf, to_read);
+					auto n = static_cast<size_t>(f.gcount());
+					if (n == 0) break;
+					if (!sink.write(buf, n)) return false;
+					remaining -= n;
+					}
+				return true;
+				});
 		});
 
 	// savePlayQueue — persist the client's current queue and playback position.

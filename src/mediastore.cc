@@ -18,6 +18,21 @@ static const std::set<std::string> AUDIO_EXTENSIONS = {
 	".flac", ".mp3", ".ogg", ".m4a", ".aac", ".wav", ".opus", ".wma"
 	};
 
+// Candidate cover art filenames in priority order.  Add more here as needed.
+static const std::vector<std::string> COVER_FILENAMES = {
+	"cover.jpg",
+	// "folder.jpg", "front.jpg", "cover.png",
+	};
+
+static std::string find_cover(const fs::path& dir)
+	{
+	for (auto& name : COVER_FILENAMES) {
+		auto p = dir / name;
+		if (fs::exists(p)) return p.string();
+		}
+	return "";
+	}
+
 static bool is_audio_file(const fs::path& p)
 	{
 	std::string ext = p.extension().string();
@@ -273,6 +288,16 @@ void MediaStore::scan()
 			int album_id        = upsert_album(album_folder_id,
 			                                   album_entry.path().filename().string(),
 			                                   artist_id, 0, "");
+
+			// Store cover art path if found; don't clear an existing path on re-scan.
+			std::string cover = find_cover(album_entry.path());
+			if (!cover.empty()) {
+				SQLite::Statement upd(db_,
+					"UPDATE albums SET cover_path = ? WHERE id = ?");
+				upd.bind(1, cover);
+				upd.bind(2, album_id);
+				upd.exec();
+				}
 
 			for (auto& track_entry : fs::directory_iterator(album_entry.path())) {
 				if (!track_entry.is_regular_file()) continue;
@@ -577,6 +602,16 @@ std::vector<MediaStore::MusicFolder> MediaStore::get_music_folders()
 	return result;
 	}
 
+std::string MediaStore::get_cover_path(int folder_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_,
+		"SELECT cover_path FROM albums WHERE folder_id = ?");
+	q.bind(1, folder_id);
+	if (!q.executeStep() || q.getColumn(0).isNull()) return "";
+	return q.getColumn(0).getString();
+	}
+
 std::optional<MediaStore::SongInfo> MediaStore::get_song(int song_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
@@ -630,7 +665,9 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id)
 	SQLite::Statement dsel(db_,
 		"SELECT f.id, f.name,"
 		"       COALESCE(a.name, '') AS artist,"
-		"       COALESCE(al.title, f.name) AS album"
+		"       COALESCE(al.title, f.name) AS album,"
+		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+		"            THEN f.id ELSE -1 END AS cover_art_id"
 		" FROM folders f"
 		" LEFT JOIN albums al ON al.folder_id = f.id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
@@ -640,12 +677,13 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id)
 	dsel.bind(1, folder_id);
 	while (dsel.executeStep()) {
 		ChildEntry e;
-		e.id        = dsel.getColumn(0).getInt();
-		e.parent_id = folder_id;
-		e.is_dir    = true;
-		e.title     = dsel.getColumn(1).getString();
-		e.artist    = dsel.getColumn(2).getString();
-		e.album     = dsel.getColumn(3).getString();
+		e.id           = dsel.getColumn(0).getInt();
+		e.parent_id    = folder_id;
+		e.is_dir       = true;
+		e.title        = dsel.getColumn(1).getString();
+		e.artist       = dsel.getColumn(2).getString();
+		e.album        = dsel.getColumn(3).getString();
+		e.cover_art_id = dsel.getColumn(4).getInt();
 		dir.children.push_back(std::move(e));
 		}
 
