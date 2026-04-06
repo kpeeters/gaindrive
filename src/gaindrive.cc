@@ -591,15 +591,32 @@ GainDrive::GainDrive(const std::string& db_path,
 				std::this_thread::sleep_for(std::chrono::seconds(1));
 				httplib::Params p2{{"inc","url-rels"},{"fmt","json"}};
 				auto r2 = mb.Get("/ws/2/artist/" + info.mbid, p2, httplib::Headers{});
-				if (r2 && r2->status == 200) {
+				if (!r2) {
+					std::cout << stamp() << "getArtistInfo [" << name
+					          << "] MusicBrainz url-rels request failed" << std::endl;
+					}
+				else if (r2->status != 200) {
+					std::cout << stamp() << "getArtistInfo [" << name
+					          << "] MusicBrainz url-rels HTTP " << r2->status << std::endl;
+					}
+				else {
 					auto j2 = nlohmann::json::parse(r2->body, nullptr, false);
-					for (auto& rel : j2.value("relations", nlohmann::json::array())) {
+					auto rels = j2.value("relations", nlohmann::json::array());
+					std::cout << stamp() << "getArtistInfo [" << name
+					          << "] MusicBrainz url-rels: " << rels.size() << " relation(s)";
+					for (auto& rel : rels)
+						std::cout << " [" << rel.value("type","?") << "]";
+					std::cout << std::endl;
+
+					for (auto& rel : rels) {
 						if (rel.value("type","") != "wikipedia") continue;
 						std::string wiki_url = rel.value("url", nlohmann::json::object())
 						                           .value("resource","");
 						auto pos = wiki_url.find("/wiki/");
 						if (pos == std::string::npos) continue;
 						std::string title = wiki_url.substr(pos + 6);
+						std::cout << stamp() << "getArtistInfo [" << name
+						          << "] Wikipedia title: " << title << std::endl;
 						// Step 3 — Wikipedia REST summary → bio + thumbnail.
 						httplib::SSLClient wp("en.wikipedia.org");
 						wp.set_default_headers({
@@ -607,12 +624,25 @@ GainDrive::GainDrive(const std::string& db_path,
 							});
 						auto r3 = wp.Get("/api/rest_v1/page/summary/" + title,
 						                 httplib::Params{}, httplib::Headers{});
-						if (r3 && r3->status == 200) {
+						if (!r3) {
+							std::cout << stamp() << "getArtistInfo [" << name
+							          << "] Wikipedia request failed" << std::endl;
+							}
+						else if (r3->status != 200) {
+							std::cout << stamp() << "getArtistInfo [" << name
+							          << "] Wikipedia HTTP " << r3->status << std::endl;
+							}
+						else {
 							auto j3 = nlohmann::json::parse(r3->body, nullptr, false);
 							if (!j3.is_discarded()) {
 								info.biography = j3.value("extract","");
 								if (j3.contains("thumbnail"))
 									info.image_url = j3["thumbnail"].value("source","");
+								std::cout << stamp() << "getArtistInfo [" << name
+								          << "] bio=" << info.biography.size()
+								          << " chars, image="
+								          << (info.image_url.empty() ? "(none)" : info.image_url)
+								          << std::endl;
 								}
 							}
 						break;
