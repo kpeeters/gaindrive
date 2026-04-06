@@ -514,3 +514,96 @@ bool MediaStore::validate_auth(const std::string& username,
 
 	return ok;
 	}
+
+// ---- Library browsing ------------------------------------------------
+
+std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs()
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement sel(db_,
+		"SELECT f.id, f.name"
+		" FROM folders f"
+		" WHERE f.parent_id = (SELECT id FROM folders WHERE parent_id IS NULL)"
+		" ORDER BY f.name COLLATE NOCASE");
+
+	std::vector<ArtistDir> result;
+	while (sel.executeStep())
+		result.push_back({sel.getColumn(0).getInt(),
+		                  sel.getColumn(1).getString()});
+	return result;
+	}
+
+std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	// Fetch the folder itself.
+	SQLite::Statement fsel(db_,
+		"SELECT id, name, parent_id FROM folders WHERE id = ?");
+	fsel.bind(1, folder_id);
+	if (!fsel.executeStep()) return std::nullopt;
+
+	DirInfo dir;
+	dir.id        = fsel.getColumn(0).getInt();
+	dir.name      = fsel.getColumn(1).getString();
+	dir.parent_id = fsel.getColumn(2).isNull() ? -1 : fsel.getColumn(2).getInt();
+
+	// Child directories (album folders), with artist/album names where available.
+	SQLite::Statement dsel(db_,
+		"SELECT f.id, f.name,"
+		"       COALESCE(a.name, '') AS artist,"
+		"       COALESCE(al.title, f.name) AS album"
+		" FROM folders f"
+		" LEFT JOIN albums al ON al.folder_id = f.id"
+		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
+		" LEFT JOIN artists a ON a.id = aa.artist_id"
+		" WHERE f.parent_id = ?"
+		" ORDER BY f.name COLLATE NOCASE");
+	dsel.bind(1, folder_id);
+	while (dsel.executeStep()) {
+		ChildEntry e;
+		e.id        = dsel.getColumn(0).getInt();
+		e.parent_id = folder_id;
+		e.is_dir    = true;
+		e.title     = dsel.getColumn(1).getString();
+		e.artist    = dsel.getColumn(2).getString();
+		e.album     = dsel.getColumn(3).getString();
+		dir.children.push_back(std::move(e));
+		}
+
+	// Child songs, with artist and album names where available.
+	SQLite::Statement ssel(db_,
+		"SELECT s.id, s.title, s.track_number, s.disc_number,"
+		"       s.year, s.genre, s.duration, s.bitrate,"
+		"       s.file_size, s.codec, s.path,"
+		"       COALESCE(a.name, '') AS artist,"
+		"       COALESCE(al.title, '') AS album"
+		" FROM songs s"
+		" LEFT JOIN albums al ON al.id = s.album_id"
+		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
+		" LEFT JOIN artists a ON a.id = sa.artist_id"
+		" WHERE s.folder_id = ?"
+		" ORDER BY s.disc_number, s.track_number, s.filename");
+	ssel.bind(1, folder_id);
+	while (ssel.executeStep()) {
+		ChildEntry e;
+		e.id           = ssel.getColumn(0).getInt();
+		e.parent_id    = folder_id;
+		e.is_dir       = false;
+		e.title        = ssel.getColumn(1).getString();
+		e.track_number = ssel.getColumn(2).getInt();
+		e.disc_number  = ssel.getColumn(3).getInt();
+		e.year         = ssel.getColumn(4).getInt();
+		e.genre        = ssel.getColumn(5).isNull() ? "" : ssel.getColumn(5).getString();
+		e.duration     = ssel.getColumn(6).getDouble();
+		e.bitrate      = ssel.getColumn(7).getInt();
+		e.file_size    = ssel.getColumn(8).getInt64();
+		e.codec        = ssel.getColumn(9).isNull() ? "" : ssel.getColumn(9).getString();
+		e.path         = ssel.getColumn(10).getString();
+		e.artist       = ssel.getColumn(11).getString();
+		e.album        = ssel.getColumn(12).getString();
+		dir.children.push_back(std::move(e));
+		}
+
+	return dir;
+	}

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include <optional>
 #include <filesystem>
 #include <mutex>
@@ -37,6 +38,41 @@ class MediaStore {
 		                   const std::string& password,
 		                   const std::string& token,
 		                   const std::string& salt);
+
+		// ---- Library browsing ----
+
+		struct ArtistDir { int id; std::string name; };
+
+		// All artist-level folders (depth-1 children of root), sorted by name.
+		std::vector<ArtistDir> get_artist_dirs();
+
+		struct ChildEntry {
+			int         id;
+			int         parent_id;
+			bool        is_dir;
+			std::string title;    // folder name or song title
+			std::string artist;
+			std::string album;
+			// populated only when !is_dir:
+			int         track_number = 0;
+			int         disc_number  = 1;
+			int         year         = 0;
+			std::string genre;
+			double      duration     = 0;
+			int         bitrate      = 0;
+			int64_t     file_size    = 0;
+			std::string codec;
+			std::string path;
+			};
+
+		struct DirInfo {
+			int         id;
+			std::string name;
+			int         parent_id;   // -1 if root
+			std::vector<ChildEntry> children;
+			};
+
+		std::optional<DirInfo> get_directory(int folder_id);
 
 	private:
 		std::string      music_root_;

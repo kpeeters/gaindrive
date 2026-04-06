@@ -2,6 +2,7 @@
 #include "stamp.hh"
 
 #include <iostream>
+#include <map>
 #include <thread>
 
 // ---- Subsonic XML helpers ---------------------------------------------
@@ -26,6 +27,32 @@ static std::string subsonic_error(int code, const std::string& msg)
 	       "<error code=\"" + std::to_string(code) + "\""
 	       " message=\"" + msg + "\"/>"
 	       "</subsonic-response>";
+	}
+
+// Returns the name stripped of a leading article ("The ", "A ", …) for
+// alphabetical index grouping.
+static std::string sort_key(const std::string& name)
+	{
+	static const std::vector<std::string> articles = {
+		"The ","A ","An ","El ","La ","Los ","Las ",
+		"Le ","Les ","Die ","Das ","Ein ","Eine "
+		};
+	for (auto& art : articles)
+		if (name.size() > art.size() && name.substr(0, art.size()) == art)
+			return name.substr(art.size());
+	return name;
+	}
+
+static std::string codec_to_mime(const std::string& codec)
+	{
+	static const std::map<std::string,std::string> m = {
+		{"flac","audio/flac"}, {"mp3","audio/mpeg"},
+		{"ogg","audio/ogg"},   {"opus","audio/ogg"},
+		{"m4a","audio/mp4"},   {"aac","audio/aac"},
+		{"wav","audio/wav"},   {"wma","audio/x-ms-wma"},
+		};
+	auto it = m.find(codec);
+	return it != m.end() ? it->second : "application/octet-stream";
 	}
 
 // Extracts u/p/t/s params and validates auth. Writes error into res on failure.
@@ -141,6 +168,93 @@ GainDrive::GainDrive(const std::string& db_path,
 			" shareRole=\"false\"/>";
 
 		res.set_content(subsonic_ok(xml), "application/xml");
+		});
+
+	// getIndexes — all artists grouped by first letter.
+	server_.Get("/rest/getIndexes.view", [this](const httplib::Request& req,
+	                                             httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto artists = store_.get_artist_dirs();
+
+		// Sort by article-stripped name, then group by first letter.
+		std::sort(artists.begin(), artists.end(),
+			[](const MediaStore::ArtistDir& a, const MediaStore::ArtistDir& b) {
+				return sort_key(a.name) < sort_key(b.name);
+				});
+
+		// Build map: letter → list of artist XML strings.
+		std::map<std::string, std::string> buckets;
+		for (auto& a : artists) {
+			std::string key = sort_key(a.name);
+			std::string letter = key.empty() ? "#"
+			                   : std::isalpha((unsigned char)key[0])
+			                     ? std::string(1, (char)std::toupper((unsigned char)key[0]))
+			                     : "#";
+			buckets[letter] +=
+				"<artist id=\"" + std::to_string(a.id) + "\""
+				" name=\""      + a.name                + "\"/>";
+			}
+
+		std::string inner =
+			"<indexes lastModified=\"0\""
+			" ignoredArticles=\"The El La Los Las Le Les A An Die Das Ein Eine\">";
+		for (auto& [letter, entries] : buckets)
+			inner += "<index name=\"" + letter + "\">" + entries + "</index>";
+		inner += "</indexes>";
+
+		res.set_content(subsonic_ok(inner), "application/xml");
+		});
+
+	// getMusicDirectory — contents of a folder (album dirs or song files).
+	server_.Get("/rest/getMusicDirectory.view", [this](const httplib::Request& req,
+	                                                    httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			res.set_content(subsonic_error(10, "Required parameter missing: id."),
+			                "application/xml");
+			return;
+			}
+
+		int folder_id = std::stoi(it->second);
+		auto dir = store_.get_directory(folder_id);
+		if (!dir) {
+			res.set_content(subsonic_error(70, "Directory not found."), "application/xml");
+			return;
+			}
+
+		std::string inner = "<directory id=\"" + std::to_string(dir->id) + "\""
+			" name=\"" + dir->name + "\"";
+		if (dir->parent_id >= 0)
+			inner += " parent=\"" + std::to_string(dir->parent_id) + "\"";
+		inner += ">";
+
+		for (auto& c : dir->children) {
+			inner += "<child id=\""     + std::to_string(c.id)        + "\""
+			         " parent=\""       + std::to_string(c.parent_id) + "\""
+			         " isDir=\""        + (c.is_dir ? "true" : "false") + "\""
+			         " title=\""        + c.title                     + "\""
+			         " artist=\""       + c.artist                    + "\""
+			         " album=\""        + c.album                     + "\"";
+			if (!c.is_dir) {
+				inner += " track=\""       + std::to_string(c.track_number) + "\""
+				         " discNumber=\""  + std::to_string(c.disc_number)  + "\""
+				         " year=\""        + std::to_string(c.year)         + "\""
+				         " genre=\""       + c.genre                        + "\""
+				         " size=\""        + std::to_string(c.file_size)    + "\""
+				         " contentType=\"" + codec_to_mime(c.codec)         + "\""
+				         " suffix=\""      + c.codec                        + "\""
+				         " duration=\""    + std::to_string((int)c.duration) + "\""
+				         " bitRate=\""     + std::to_string(c.bitrate)      + "\""
+				         " path=\""        + c.path                         + "\"";
+				}
+			inner += "/>";
+			}
+
+		inner += "</directory>";
+		res.set_content(subsonic_ok(inner), "application/xml");
 		});
 
 	// Catch-all for endpoints not yet implemented.
