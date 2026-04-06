@@ -23,13 +23,31 @@ static const std::vector<std::string> COVER_FILENAMES = {
 	"cover.jpg", "folder.jpg", "front.jpg", "cover.png"
 	};
 
+static bool iends_with(const std::string& s, const std::string& suffix)
+	{
+	if (suffix.size() > s.size()) return false;
+	std::string lo = s;
+	std::transform(lo.begin(), lo.end(), lo.begin(), ::tolower);
+	return lo.compare(lo.size() - suffix.size(), suffix.size(), suffix) == 0;
+	}
+
 static std::string find_cover(const fs::path& dir)
 	{
+	// Pass 1: exact well-known names.
 	for (auto& name : COVER_FILENAMES) {
 		auto p = dir / name;
 		if (fs::exists(p)) return p.string();
 		}
-	return "";
+	// Pass 2: *front.jpg  Pass 3: *.jpg  (single directory scan for both).
+	std::string jpg_fallback;
+	for (auto& entry : fs::directory_iterator(dir)) {
+		if (!entry.is_regular_file()) continue;
+		std::string fname = entry.path().filename().string();
+		if (iends_with(fname, "front.jpg")) return entry.path().string();
+		if (jpg_fallback.empty() && iends_with(fname, ".jpg"))
+			jpg_fallback = entry.path().string();
+		}
+	return jpg_fallback;
 	}
 
 static bool is_audio_file(const fs::path& p)
