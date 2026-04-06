@@ -172,13 +172,16 @@ static bool check_auth(const httplib::Request& req, httplib::Response& res,
 
 GainDrive::GainDrive(const std::string& db_path,
                      const std::string& music_root,
-                     bool no_scan)
-	: store_(db_path, music_root)
+                     bool no_scan,
+                     bool debug)
+	: debug_(debug), store_(db_path, music_root)
 	{
-	server_.set_logger([](const httplib::Request& req, const httplib::Response& res) {
+	server_.set_logger([debug](const httplib::Request& req, const httplib::Response& res) {
 		std::cout << stamp(req.remote_addr)
 		          << req.method << " " << req.path
 		          << " -> " << res.status << std::endl;
+		if (debug && !res.body.empty())
+			std::cout << res.body << std::endl;
 		});
 
 	// ping

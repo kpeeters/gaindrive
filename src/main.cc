@@ -18,6 +18,7 @@ int main(int argc, char* argv[])
 		("db",         "Path to database file",       cxxopts::value<std::string>()->default_value("/var/lib/gaindrive/gaindrive.db"))
 		("music-root", "Root music directory",        cxxopts::value<std::string>()->default_value("/music"))
 		("no-scan",    "Skip startup filesystem scan")
+		("debug",      "Print all API responses to stdout")
 		("add-user",   "Create a user and exit",      cxxopts::value<std::string>())
 		("password",   "Password for --add-user",     cxxopts::value<std::string>())
 		("h,help",     "Show help")
@@ -34,6 +35,7 @@ int main(int argc, char* argv[])
 	std::string db_path    = args["db"].as<std::string>();
 	std::string music_root = args["music-root"].as<std::string>();
 	bool        no_scan    = args.count("no-scan") > 0;
+	bool        debug      = args.count("debug")   > 0;
 
 	// Read config file; missing file is not fatal, just use defaults.
 	std::string config_path = args["config"].as<std::string>();
@@ -67,7 +69,7 @@ int main(int argc, char* argv[])
 		return ok ? 0 : 1;
 		}
 
-	GainDrive gd(db_path, music_root, no_scan);
+	GainDrive gd(db_path, music_root, no_scan, debug);
 	gd.listen(host, port);
 
 	return 0;
