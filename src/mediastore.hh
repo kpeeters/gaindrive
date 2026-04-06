@@ -136,6 +136,26 @@ class MediaStore {
 
 		StarredResult get_starred(const std::string& username);
 
+		// ---- Playlists ----
+
+		struct PlaylistInfo {
+			int         id;
+			std::string name;
+			std::string comment;
+			std::string owner;
+			bool        is_public;
+			int         song_count;
+			int         duration;   // total seconds
+			std::string created;
+			std::string updated;
+			std::vector<ChildEntry> songs;
+			};
+
+		// Creates a new playlist for the user and returns it fully populated.
+		PlaylistInfo create_playlist(const std::string& username,
+		                             const std::string& name,
+		                             const std::vector<int>& song_ids);
+
 	private:
 		std::string      music_root_;
 		SQLite::Database db_;

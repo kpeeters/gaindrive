@@ -866,6 +866,110 @@ GainDrive::GainDrive(const std::string& db_path,
 		Streamer::serve(req, res, si, max_bitrate, format, time_offset);
 		});
 
+	// createPlaylist
+	server_.Get("/rest/createPlaylist.view", [this](const httplib::Request& req,
+	                                                 httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+
+		auto err = [&](int code, const char* msg) {
+			if (use_json)
+				res.set_content(subsonic_error_json(code, msg), "application/json");
+			else
+				res.set_content(subsonic_error(code, msg),      "application/xml");
+			};
+
+		auto it = req.params.find("name");
+		if (it == req.params.end() || it->second.empty()) {
+			err(10, "Required parameter missing: name.");
+			return;
+			}
+		std::string name = it->second;
+		std::string user = req.params.find("u")->second;
+
+		std::vector<int> song_ids;
+		auto range = req.params.equal_range("songId");
+		for (auto i = range.first; i != range.second; ++i)
+			song_ids.push_back(std::stoi(i->second));
+
+		auto pl = store_.create_playlist(user, name, song_ids);
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&pl](nlohmann::json& r) {
+				nlohmann::json entries = nlohmann::json::array();
+				for (auto& c : pl.songs) {
+					nlohmann::json s = {
+						{"id",          c.id},
+						{"parent",      c.parent_id},
+						{"isDir",       false},
+						{"title",       c.title},
+						{"artist",      c.artist},
+						{"album",       c.album},
+						{"track",       c.track_number},
+						{"discNumber",  c.disc_number},
+						{"year",        c.year},
+						{"genre",       c.genre},
+						{"size",        c.file_size},
+						{"contentType", codec_to_mime(c.codec)},
+						{"suffix",      c.codec},
+						{"duration",    (int)c.duration},
+						{"bitRate",     c.bitrate}
+						};
+					if (c.cover_art_id >= 0) s["coverArt"] = c.cover_art_id;
+					entries.push_back(s);
+					}
+				r["playlist"] = {
+					{"id",        pl.id},
+					{"name",      pl.name},
+					{"comment",   pl.comment},
+					{"owner",     pl.owner},
+					{"public",    pl.is_public},
+					{"songCount", pl.song_count},
+					{"duration",  pl.duration},
+					{"created",   pl.created},
+					{"changed",   pl.updated},
+					{"entry",     entries}
+					};
+				});
+		else
+			body = subsonic_ok([&pl](XMLDocument& doc, XMLElement* root) {
+				auto* playlist = doc.NewElement("playlist");
+				playlist->SetAttribute("id",        pl.id);
+				playlist->SetAttribute("name",      pl.name.c_str());
+				playlist->SetAttribute("comment",   pl.comment.c_str());
+				playlist->SetAttribute("owner",     pl.owner.c_str());
+				playlist->SetAttribute("public",    pl.is_public);
+				playlist->SetAttribute("songCount", pl.song_count);
+				playlist->SetAttribute("duration",  pl.duration);
+				playlist->SetAttribute("created",   pl.created.c_str());
+				playlist->SetAttribute("changed",   pl.updated.c_str());
+				for (auto& c : pl.songs) {
+					auto* entry = doc.NewElement("entry");
+					entry->SetAttribute("id",          c.id);
+					entry->SetAttribute("parent",      c.parent_id);
+					entry->SetAttribute("isDir",       false);
+					entry->SetAttribute("title",       c.title.c_str());
+					entry->SetAttribute("artist",      c.artist.c_str());
+					entry->SetAttribute("album",       c.album.c_str());
+					if (c.cover_art_id >= 0) entry->SetAttribute("coverArt", c.cover_art_id);
+					entry->SetAttribute("track",       c.track_number);
+					entry->SetAttribute("discNumber",  c.disc_number);
+					entry->SetAttribute("year",        c.year);
+					entry->SetAttribute("genre",       c.genre.c_str());
+					entry->SetAttribute("size",        (int64_t)c.file_size);
+					entry->SetAttribute("contentType", codec_to_mime(c.codec));
+					entry->SetAttribute("suffix",      c.codec.c_str());
+					entry->SetAttribute("duration",    (int)c.duration);
+					entry->SetAttribute("bitRate",     c.bitrate);
+					playlist->InsertEndChild(entry);
+					}
+				root->InsertEndChild(playlist);
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	// getStarred
 	server_.Get("/rest/getStarred.view", [this](const httplib::Request& req,
 	                                             httplib::Response& res) {
