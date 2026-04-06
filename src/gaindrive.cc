@@ -88,7 +88,7 @@ static std::string subsonic_error_json(int code, const char* msg)
 static std::string fmt_of(const httplib::Request& req)
 	{
 	auto it = req.params.find("f");
-	return (it != req.params.end() && it->second == "json") ? "json" : "xml";
+	return (it != req.params.end() && it->second == "xml") ? "xml" : "json";
 	}
 
 // ---- Helpers ----------------------------------------------------------
