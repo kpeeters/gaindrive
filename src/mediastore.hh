@@ -21,6 +21,9 @@ class MediaStore {
 
 		void create_schema();
 
+		// Quick directory-only walk; opens no files.
+		int  count_audio_files();
+
 		// Helpers used by scan(); all called within a single transaction.
 		int  upsert_folder(const std::filesystem::path& path, int parent_id);
 		int  upsert_artist(const std::string& name);

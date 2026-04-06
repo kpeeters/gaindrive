@@ -199,11 +199,40 @@ void MediaStore::create_schema()
 	txn.commit();
 	}
 
+// Returns a human-readable ETA string, e.g. "~3m20s" or "~45s".
+static std::string format_eta(double remaining_sec)
+	{
+	int s = static_cast<int>(remaining_sec);
+	if (s < 60) return "~" + std::to_string(s) + "s";
+	return "~" + std::to_string(s / 60) + "m" + std::to_string(s % 60) + "s";
+	}
+
+int MediaStore::count_audio_files()
+	{
+	int n = 0;
+	for (auto& a : fs::directory_iterator(music_root_)) {
+		if (!a.is_directory()) continue;
+		for (auto& b : fs::directory_iterator(a.path())) {
+			if (!b.is_directory()) continue;
+			for (auto& f : fs::directory_iterator(b.path())) {
+				if (f.is_regular_file() && is_audio_file(f.path())) ++n;
+				}
+			}
+		}
+	return n;
+	}
+
 void MediaStore::scan()
 	{
-	std::cout << stamp() << "Scan started: " << music_root_ << std::endl;
+	int total = count_audio_files();
+	std::cout << stamp() << "Scan started: " << music_root_
+	          << "  (" << total << " files)" << std::endl;
 
-	int song_count = 0;
+	using Clock = std::chrono::steady_clock;
+	auto   start_time = Clock::now();
+	int    song_count = 0;
+	int    processed  = 0;
+
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Transaction txn(db_);
 
@@ -218,7 +247,6 @@ void MediaStore::scan()
 		for (auto& album_entry : fs::directory_iterator(artist_entry.path())) {
 			if (!album_entry.is_directory()) continue;
 			int album_folder_id = upsert_folder(album_entry.path(), artist_folder_id);
-			std::cout << stamp() << "  " << album_entry.path().filename().string() << std::endl;
 			int album_id        = upsert_album(album_folder_id,
 			                                   album_entry.path().filename().string(),
 			                                   artist_id, 0, "");
@@ -228,7 +256,23 @@ void MediaStore::scan()
 				if (!is_audio_file(track_entry.path())) continue;
 				upsert_song(track_entry.path(), album_id, album_folder_id);
 				++song_count;
+				++processed;
 				}
+
+			// Build progress suffix for this album's log line.
+			std::string progress;
+			if (processed == 0) {
+				progress = "counting...";
+				}
+			else {
+				double elapsed = std::chrono::duration<double>(Clock::now() - start_time).count();
+				double rate    = processed / elapsed;
+				double eta_sec = (total - processed) / rate;
+				progress = std::to_string(processed) + "/" + std::to_string(total)
+				         + " — ETA " + format_eta(eta_sec);
+				}
+			std::cout << stamp() << "  " << album_entry.path().filename().string()
+			          << "  [" << progress << "]" << std::endl;
 			}
 		}
 
