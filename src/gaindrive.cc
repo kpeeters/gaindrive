@@ -198,6 +198,23 @@ GainDrive::GainDrive(const std::string& db_path,
 			}), "application/xml");
 		});
 
+	// getMusicFolders — returns the configured music root(s).
+	server_.Get("/rest/getMusicFolders.view", [this](const httplib::Request& req,
+	                                                  httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		auto folders = store_.get_music_folders();
+		res.set_content(subsonic_ok([&folders](XMLDocument& doc, XMLElement* root) {
+			auto* mf = doc.NewElement("musicFolders");
+			for (auto& f : folders) {
+				auto* el = doc.NewElement("musicFolder");
+				el->SetAttribute("id",   f.id);
+				el->SetAttribute("name", f.name.c_str());
+				mf->InsertEndChild(el);
+				}
+			root->InsertEndChild(mf);
+			}), "application/xml");
+		});
+
 	// getIndexes — all artists grouped by first letter.
 	server_.Get("/rest/getIndexes.view", [this](const httplib::Request& req,
 	                                             httplib::Response& res) {

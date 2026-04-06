@@ -41,6 +41,11 @@ class MediaStore {
 
 		// ---- Library browsing ----
 
+		struct MusicFolder { int id; std::string name; };
+
+		// The configured music root(s) — currently always one entry.
+		std::vector<MusicFolder> get_music_folders();
+
 		struct ArtistDir { int id; std::string name; };
 
 		// All artist-level folders (depth-1 children of root), sorted by name.

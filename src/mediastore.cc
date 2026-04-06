@@ -517,6 +517,18 @@ bool MediaStore::validate_auth(const std::string& username,
 
 // ---- Library browsing ------------------------------------------------
 
+std::vector<MediaStore::MusicFolder> MediaStore::get_music_folders()
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_,
+		"SELECT id, name FROM folders WHERE parent_id IS NULL");
+	std::vector<MusicFolder> result;
+	while (q.executeStep())
+		result.push_back({ q.getColumn(0).getInt(),
+		                   q.getColumn(1).getString() });
+	return result;
+	}
+
 std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs()
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
