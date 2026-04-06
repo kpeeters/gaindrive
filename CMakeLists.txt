@@ -52,7 +52,15 @@ FetchContent_Declare(
 	GIT_TAG        10.0.0
 )
 
-FetchContent_MakeAvailable(httplib cxxopts nlohmann_json SQLiteCpp taglib tinyxml2)
+# reproc++ for spawning ffmpeg child processes.
+set(REPROC++ ON CACHE BOOL "" FORCE)
+FetchContent_Declare(
+	reproc
+	GIT_REPOSITORY https://github.com/DaanDeMeyer/reproc.git
+	GIT_TAG        v14.2.5
+)
+
+FetchContent_MakeAvailable(httplib cxxopts nlohmann_json SQLiteCpp taglib tinyxml2 reproc)
 
 find_package(OpenSSL REQUIRED)
 
@@ -66,6 +74,7 @@ add_executable(gaindrive
 	src/main.cc
 	src/gaindrive.cc
 	src/mediastore.cc
+	src/streamer.cc
 	src/stamp.cc
 )
 
@@ -80,4 +89,5 @@ target_link_libraries(gaindrive PRIVATE
 	tinyxml2::tinyxml2
 	OpenSSL::SSL
 	OpenSSL::Crypto
+	reproc++
 )

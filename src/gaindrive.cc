@@ -1,5 +1,6 @@
 #include "gaindrive.hh"
 #include "stamp.hh"
+#include "streamer.hh"
 
 #include <iostream>
 #include <map>
@@ -396,6 +397,38 @@ GainDrive::GainDrive(const std::string& db_path,
 				ai->SetAttribute("lastFmUrl", info.last_fm_url.c_str());
 			root->InsertEndChild(ai);
 			}), "application/xml");
+		});
+
+	// stream — serve audio file directly or transcode via ffmpeg.
+	server_.Get("/rest/stream.view", [this](const httplib::Request& req,
+	                                        httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			res.set_content(subsonic_error(10, "Required parameter missing: id."),
+			                "application/xml");
+			return;
+			}
+
+		auto song = store_.get_song(std::stoi(it->second));
+		if (!song) {
+			res.set_content(subsonic_error(70, "Song not found."), "application/xml");
+			return;
+			}
+
+		auto qp = [&](const std::string& k, const std::string& def = "") {
+			auto it2 = req.params.find(k);
+			return it2 != req.params.end() ? it2->second : def;
+			};
+
+		int         max_bitrate = std::stoi(qp("maxBitRate", "0"));
+		std::string format      = qp("format");
+		int         time_offset = std::stoi(qp("timeOffset", "0"));
+
+		Streamer::SongInfo si{ song->path, song->codec, song->bitrate,
+		                       song->duration, song->file_size };
+		Streamer::serve(req, res, si, max_bitrate, format, time_offset);
 		});
 
 	// Catch-all for endpoints not yet implemented.

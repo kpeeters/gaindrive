@@ -90,6 +90,17 @@ class MediaStore {
 
 		std::optional<DirInfo> get_directory(int folder_id);
 
+		struct SongInfo {
+			int         id;
+			std::string path;
+			std::string codec;    // e.g. "flac", "mp3"
+			int         bitrate;  // kbps (from tags; 0 if unknown)
+			double      duration; // seconds
+			int64_t     file_size;
+			};
+
+		std::optional<SongInfo> get_song(int song_id);
+
 	private:
 		std::string      music_root_;
 		SQLite::Database db_;
