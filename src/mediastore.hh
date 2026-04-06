@@ -141,5 +141,5 @@ class MediaStore {
 		int  upsert_album (int folder_id, const std::string& title,
 		                   int artist_id, int year, const std::string& genre);
 		void upsert_song  (const std::filesystem::path& path,
-		                   int album_id, int folder_id);
+		                   int album_id, int folder_id, int artist_id);
 	};

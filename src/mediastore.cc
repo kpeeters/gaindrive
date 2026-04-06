@@ -255,6 +255,15 @@ void MediaStore::create_schema()
 	catch (const SQLite::Exception&) {}
 	try { db_.exec("ALTER TABLE artist_info_cache ADD COLUMN image_url TEXT NOT NULL DEFAULT ''"); }
 	catch (const SQLite::Exception&) {}
+
+	// Backfill song_artists from album_artists for any songs that were scanned
+	// before this link was introduced.
+	db_.exec(
+		"INSERT OR IGNORE INTO song_artists (song_id, artist_id, role)"
+		" SELECT s.id, aa.artist_id, 'artist'"
+		" FROM songs s"
+		" JOIN album_artists aa ON aa.album_id = s.album_id AND aa.role = 'albumartist'"
+		);
 	}
 
 // Returns a human-readable ETA string, e.g. "~3m20s" or "~45s".
@@ -329,7 +338,7 @@ void MediaStore::scan()
 			for (auto& track_entry : fs::directory_iterator(album_entry.path())) {
 				if (!track_entry.is_regular_file()) continue;
 				if (!is_audio_file(track_entry.path())) continue;
-				upsert_song(track_entry.path(), album_id, album_folder_id);
+				upsert_song(track_entry.path(), album_id, album_folder_id, artist_id);
 				++song_count;
 				++processed;
 				}
@@ -435,7 +444,8 @@ int MediaStore::upsert_album(int folder_id, const std::string& title,
 	return album_id;
 	}
 
-void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id)
+void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
+                              int artist_id)
 	{
 	int64_t mtime = mtime_of(path);
 
@@ -503,6 +513,15 @@ void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id)
 	ins.bind(14, file_size);
 	ins.bind(15, mtime);
 	ins.exec();
+
+	// Link song to its artist (derived from the folder hierarchy).
+	int song_id = static_cast<int>(db_.getLastInsertRowid());
+	SQLite::Statement lnk(db_,
+		"INSERT OR IGNORE INTO song_artists (song_id, artist_id, role)"
+		" VALUES (?, ?, 'artist')");
+	lnk.bind(1, song_id);
+	lnk.bind(2, artist_id);
+	lnk.exec();
 	}
 
 // ---- User management --------------------------------------------------
