@@ -346,9 +346,14 @@ GainDrive::GainDrive(const std::string& db_path,
 		MediaStore::CachedArtistInfo info;
 		if (cached) {
 			info = *cached;
+			std::cout << stamp() << "getArtistInfo [" << name << "] cached"
+			          << " mbid=" << (info.mbid.empty() ? "(none)" : info.mbid)
+			          << std::endl;
 			}
 		else {
 			// Query MusicBrainz; cache result (even if empty) to avoid repeat lookups.
+			std::cout << stamp() << "getArtistInfo [" << name << "] querying MusicBrainz"
+			          << std::endl;
 			httplib::SSLClient mb("musicbrainz.org");
 			mb.set_default_headers({
 				{"User-Agent", "GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
@@ -359,7 +364,17 @@ GainDrive::GainDrive(const std::string& db_path,
 				{"fmt",   "json"}
 				};
 			auto r = mb.Get("/ws/2/artist", params, httplib::Headers{});
-			if (r && r->status == 200) {
+			if (!r) {
+				std::cout << stamp() << "getArtistInfo [" << name
+				          << "] MusicBrainz request failed (no response)" << std::endl;
+				}
+			else if (r->status != 200) {
+				std::cout << stamp() << "getArtistInfo [" << name
+				          << "] MusicBrainz HTTP " << r->status << std::endl;
+				}
+			else {
+				std::cout << stamp() << "getArtistInfo [" << name
+				          << "] MusicBrainz response: " << r->body << std::endl;
 				auto j = nlohmann::json::parse(r->body, nullptr, false);
 				if (!j.is_discarded() && j.contains("artists") && !j["artists"].empty()) {
 					info.mbid = j["artists"][0].value("id", "");
@@ -368,6 +383,9 @@ GainDrive::GainDrive(const std::string& db_path,
 					}
 				}
 			store_.cache_artist_info(id, info);
+			std::cout << stamp() << "getArtistInfo [" << name << "] cached"
+			          << " mbid=" << (info.mbid.empty() ? "(none)" : info.mbid)
+			          << std::endl;
 			}
 
 		res.set_content(subsonic_ok([&info](XMLDocument& doc, XMLElement* root) {
