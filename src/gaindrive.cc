@@ -866,6 +866,42 @@ GainDrive::GainDrive(const std::string& db_path,
 		Streamer::serve(req, res, si, max_bitrate, format, time_offset);
 		});
 
+	// star
+	server_.Get("/rest/star.view", [this](const httplib::Request& req,
+	                                      httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		std::string user = req.params.find("u")->second;
+
+		for (auto& [k, v] : req.params) {
+			if      (k == "id")       store_.add_star(user, std::stoi(v), 0, 0);
+			else if (k == "albumId")  store_.add_star(user, 0, std::stoi(v), 0);
+			else if (k == "artistId") store_.add_star(user, 0, 0, std::stoi(v));
+			}
+
+		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// unstar
+	server_.Get("/rest/unstar.view", [this](const httplib::Request& req,
+	                                        httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		std::string user = req.params.find("u")->second;
+
+		for (auto& [k, v] : req.params) {
+			if      (k == "id")       store_.remove_star(user, std::stoi(v), 0, 0);
+			else if (k == "albumId")  store_.remove_star(user, 0, std::stoi(v), 0);
+			else if (k == "artistId") store_.remove_star(user, 0, 0, std::stoi(v));
+			}
+
+		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	// Catch-all for endpoints not yet implemented.
 	server_.Get("/rest/:endpoint", [](const httplib::Request& req, httplib::Response& res) {
 		std::cout << stamp() << "NOT IMPLEMENTED: " << req.path << std::endl;

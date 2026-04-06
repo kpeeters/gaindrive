@@ -850,3 +850,43 @@ void MediaStore::create_bookmark(const std::string& username,
 	ins.bind(4, comment);
 	ins.exec();
 	}
+
+void MediaStore::add_star(const std::string& username,
+                          int song_id, int album_id, int artist_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement uid_q(db_, "SELECT id FROM users WHERE username = ?");
+	uid_q.bind(1, username);
+	if (!uid_q.executeStep()) return;
+	int user_id = uid_q.getColumn(0).getInt();
+
+	SQLite::Statement ins(db_,
+		"INSERT OR IGNORE INTO stars (user_id, song_id, album_id, artist_id)"
+		" VALUES (?, NULLIF(?,0), NULLIF(?,0), NULLIF(?,0))");
+	ins.bind(1, user_id);
+	ins.bind(2, song_id);
+	ins.bind(3, album_id);
+	ins.bind(4, artist_id);
+	ins.exec();
+	}
+
+void MediaStore::remove_star(const std::string& username,
+                             int song_id, int album_id, int artist_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement uid_q(db_, "SELECT id FROM users WHERE username = ?");
+	uid_q.bind(1, username);
+	if (!uid_q.executeStep()) return;
+	int user_id = uid_q.getColumn(0).getInt();
+
+	SQLite::Statement del(db_,
+		"DELETE FROM stars WHERE user_id=?"
+		" AND (song_id IS NULLIF(?,0))"
+		" AND (album_id IS NULLIF(?,0))"
+		" AND (artist_id IS NULLIF(?,0))");
+	del.bind(1, user_id);
+	del.bind(2, song_id);
+	del.bind(3, album_id);
+	del.bind(4, artist_id);
+	del.exec();
+	}

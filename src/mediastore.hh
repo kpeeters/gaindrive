@@ -123,6 +123,11 @@ class MediaStore {
 		                     int song_id, int64_t position_ms,
 		                     const std::string& comment);
 
+		// Add/remove a star for the authenticated user.
+		// Exactly one of song_id, album_id, artist_id should be non-zero.
+		void add_star   (const std::string& username, int song_id, int album_id, int artist_id);
+		void remove_star(const std::string& username, int song_id, int album_id, int artist_id);
+
 	private:
 		std::string      music_root_;
 		SQLite::Database db_;
