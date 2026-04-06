@@ -54,6 +54,8 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(httplib cxxopts nlohmann_json SQLiteCpp taglib tinyxml2)
 
+find_package(OpenSSL REQUIRED)
+
 target_include_directories(tag PUBLIC
 	$<BUILD_INTERFACE:${taglib_SOURCE_DIR}>
 	$<BUILD_INTERFACE:${taglib_SOURCE_DIR}/taglib>
@@ -67,6 +69,8 @@ add_executable(gaindrive
 	src/stamp.cc
 )
 
+target_compile_definitions(gaindrive PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
+
 target_link_libraries(gaindrive PRIVATE
 	httplib::httplib
 	cxxopts::cxxopts
@@ -74,4 +78,6 @@ target_link_libraries(gaindrive PRIVATE
 	SQLiteCpp
 	tag
 	tinyxml2::tinyxml2
+	OpenSSL::SSL
+	OpenSSL::Crypto
 )

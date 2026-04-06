@@ -6,6 +6,7 @@
 #include <thread>
 
 #include <tinyxml2.h>
+#include <nlohmann/json.hpp>
 
 using namespace tinyxml2;
 
@@ -81,6 +82,18 @@ static const char* codec_to_mime(const std::string& codec)
 	if (codec == "wav")             return "audio/wav";
 	if (codec == "wma")             return "audio/x-ms-wma";
 	return "application/octet-stream";
+	}
+
+static std::string url_encode(const std::string& s)
+	{
+	static const char hex[] = "0123456789ABCDEF";
+	std::string out;
+	for (unsigned char c : s) {
+		if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+			out += c;
+		else { out += '%'; out += hex[c >> 4]; out += hex[c & 0xf]; }
+		}
+	return out;
 	}
 
 // Extracts u/p/t/s params and validates auth. Writes error into res on failure.
@@ -307,6 +320,63 @@ GainDrive::GainDrive(const std::string& db_path,
 				}
 
 			root->InsertEndChild(directory);
+			}), "application/xml");
+		});
+
+	// getArtistInfo — MusicBrainz lookup, result cached in DB.
+	server_.Get("/rest/getArtistInfo.view", [this](const httplib::Request& req,
+	                                               httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			res.set_content(subsonic_error(10, "Required parameter missing: id."),
+			                "application/xml");
+			return;
+			}
+
+		int id = std::stoi(it->second);
+		std::string name = store_.get_folder_name(id);
+		if (name.empty()) {
+			res.set_content(subsonic_error(70, "Artist not found."), "application/xml");
+			return;
+			}
+
+		auto cached = store_.get_cached_artist_info(id);
+		MediaStore::CachedArtistInfo info;
+		if (cached) {
+			info = *cached;
+			}
+		else {
+			// Query MusicBrainz; cache result (even if empty) to avoid repeat lookups.
+			httplib::SSLClient mb("musicbrainz.org");
+			mb.set_default_headers({
+				{"User-Agent", "GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+				});
+			httplib::Params params{
+				{"query", "artist:\"" + name + "\""},
+				{"limit", "1"},
+				{"fmt",   "json"}
+				};
+			auto r = mb.Get("/ws/2/artist", params, httplib::Headers{});
+			if (r && r->status == 200) {
+				auto j = nlohmann::json::parse(r->body, nullptr, false);
+				if (!j.is_discarded() && j.contains("artists") && !j["artists"].empty()) {
+					info.mbid = j["artists"][0].value("id", "");
+					if (!info.mbid.empty())
+						info.last_fm_url = "https://www.last.fm/music/" + url_encode(name);
+					}
+				}
+			store_.cache_artist_info(id, info);
+			}
+
+		res.set_content(subsonic_ok([&info](XMLDocument& doc, XMLElement* root) {
+			auto* ai = doc.NewElement("artistInfo");
+			if (!info.mbid.empty())
+				ai->SetAttribute("musicBrainzId", info.mbid.c_str());
+			if (!info.last_fm_url.empty())
+				ai->SetAttribute("lastFmUrl", info.last_fm_url.c_str());
+			root->InsertEndChild(ai);
 			}), "application/xml");
 		});
 

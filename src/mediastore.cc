@@ -196,6 +196,13 @@ void MediaStore::create_schema()
 			started DATETIME DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (user_id)
 		);
+
+		CREATE TABLE IF NOT EXISTS artist_info_cache (
+			folder_id   INTEGER PRIMARY KEY REFERENCES folders(id),
+			mbid        TEXT NOT NULL DEFAULT '',
+			last_fm_url TEXT NOT NULL DEFAULT '',
+			fetched_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+		);
 	)");
 	txn.commit();
 	}
@@ -516,6 +523,37 @@ bool MediaStore::validate_auth(const std::string& username,
 	}
 
 // ---- Library browsing ------------------------------------------------
+
+std::string MediaStore::get_folder_name(int folder_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_, "SELECT name FROM folders WHERE id = ?");
+	q.bind(1, folder_id);
+	return q.executeStep() ? q.getColumn(0).getString() : "";
+	}
+
+std::optional<MediaStore::CachedArtistInfo> MediaStore::get_cached_artist_info(int folder_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_,
+		"SELECT mbid, last_fm_url FROM artist_info_cache WHERE folder_id = ?");
+	q.bind(1, folder_id);
+	if (!q.executeStep()) return std::nullopt;
+	return CachedArtistInfo{ q.getColumn(0).getString(),
+	                         q.getColumn(1).getString() };
+	}
+
+void MediaStore::cache_artist_info(int folder_id, const CachedArtistInfo& info)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement ins(db_,
+		"INSERT OR REPLACE INTO artist_info_cache (folder_id, mbid, last_fm_url)"
+		" VALUES (?, ?, ?)");
+	ins.bind(1, folder_id);
+	ins.bind(2, info.mbid);
+	ins.bind(3, info.last_fm_url);
+	ins.exec();
+	}
 
 std::vector<MediaStore::MusicFolder> MediaStore::get_music_folders()
 	{

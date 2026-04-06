@@ -46,6 +46,17 @@ class MediaStore {
 		// The configured music root(s) — currently always one entry.
 		std::vector<MusicFolder> get_music_folders();
 
+		struct CachedArtistInfo {
+			std::string mbid;
+			std::string last_fm_url;
+			};
+
+		// Returns empty string if folder_id not found.
+		std::string get_folder_name(int folder_id);
+
+		std::optional<CachedArtistInfo> get_cached_artist_info(int folder_id);
+		void cache_artist_info(int folder_id, const CachedArtistInfo& info);
+
 		struct ArtistDir { int id; std::string name; };
 
 		// All artist-level folders (depth-1 children of root), sorted by name.
