@@ -1104,3 +1104,68 @@ std::vector<MediaStore::PlaylistInfo> MediaStore::get_playlists(const std::strin
 		}
 	return result;
 	}
+
+std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	SQLite::Statement pmeta(db_,
+		"SELECT p.name, COALESCE(p.comment,''), u.username, p.is_public,"
+		"       p.created, p.updated"
+		" FROM playlists p"
+		" JOIN users u ON u.id = p.user_id"
+		" WHERE p.id = ?");
+	pmeta.bind(1, playlist_id);
+	if (!pmeta.executeStep()) return std::nullopt;
+
+	PlaylistInfo pl;
+	pl.id        = playlist_id;
+	pl.name      = pmeta.getColumn(0).getString();
+	pl.comment   = pmeta.getColumn(1).getString();
+	pl.owner     = pmeta.getColumn(2).getString();
+	pl.is_public = pmeta.getColumn(3).getInt() != 0;
+	pl.created   = pmeta.getColumn(4).getString();
+	pl.updated   = pmeta.getColumn(5).getString();
+
+	SQLite::Statement sq(db_,
+		"SELECT s.id, s.title, s.track_number, s.disc_number,"
+		"       s.year, s.genre, s.duration, s.bitrate,"
+		"       s.file_size, s.codec, s.folder_id,"
+		"       COALESCE(a.name,'') AS artist,"
+		"       COALESCE(al.title,'') AS album,"
+		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+		"            THEN s.folder_id ELSE -1 END AS cover_art_id"
+		" FROM playlist_songs ps"
+		" JOIN songs s ON s.id = ps.song_id"
+		" LEFT JOIN albums al ON al.id = s.album_id"
+		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
+		" LEFT JOIN artists a ON a.id = sa.artist_id"
+		" WHERE ps.playlist_id = ?"
+		" ORDER BY ps.position");
+	sq.bind(1, playlist_id);
+	int total_duration = 0;
+	while (sq.executeStep()) {
+		ChildEntry e;
+		e.id           = sq.getColumn(0).getInt();
+		e.is_dir       = false;
+		e.title        = sq.getColumn(1).getString();
+		e.track_number = sq.getColumn(2).getInt();
+		e.disc_number  = sq.getColumn(3).getInt();
+		e.year         = sq.getColumn(4).getInt();
+		e.genre        = sq.getColumn(5).isNull() ? "" : sq.getColumn(5).getString();
+		e.duration     = sq.getColumn(6).getDouble();
+		e.bitrate      = sq.getColumn(7).getInt();
+		e.file_size    = sq.getColumn(8).getInt64();
+		e.codec        = sq.getColumn(9).isNull() ? "" : sq.getColumn(9).getString();
+		e.parent_id    = sq.getColumn(10).getInt();
+		e.artist       = sq.getColumn(11).getString();
+		e.album        = sq.getColumn(12).getString();
+		e.cover_art_id = sq.getColumn(13).getInt();
+		total_duration += (int)e.duration;
+		pl.songs.push_back(std::move(e));
+		}
+
+	pl.song_count = (int)pl.songs.size();
+	pl.duration   = total_duration;
+	return pl;
+	}

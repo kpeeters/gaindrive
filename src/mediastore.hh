@@ -159,6 +159,9 @@ class MediaStore {
 		// Returns all playlists owned by the user (songs vector is empty).
 		std::vector<PlaylistInfo> get_playlists(const std::string& username);
 
+		// Returns a single playlist with all songs populated, or nullopt if not found.
+		std::optional<PlaylistInfo> get_playlist(int playlist_id);
+
 	private:
 		std::string      music_root_;
 		SQLite::Database db_;
