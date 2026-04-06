@@ -243,10 +243,18 @@ void MediaStore::create_schema()
 			folder_id   INTEGER PRIMARY KEY REFERENCES folders(id),
 			mbid        TEXT NOT NULL DEFAULT '',
 			last_fm_url TEXT NOT NULL DEFAULT '',
+			biography   TEXT NOT NULL DEFAULT '',
+			image_url   TEXT NOT NULL DEFAULT '',
 			fetched_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 		);
 	)");
 	txn.commit();
+
+	// Migrations for existing databases: add columns if they don't exist yet.
+	try { db_.exec("ALTER TABLE artist_info_cache ADD COLUMN biography TEXT NOT NULL DEFAULT ''"); }
+	catch (const SQLite::Exception&) {}
+	try { db_.exec("ALTER TABLE artist_info_cache ADD COLUMN image_url TEXT NOT NULL DEFAULT ''"); }
+	catch (const SQLite::Exception&) {}
 	}
 
 // Returns a human-readable ETA string, e.g. "~3m20s" or "~45s".
@@ -590,22 +598,30 @@ std::optional<MediaStore::CachedArtistInfo> MediaStore::get_cached_artist_info(i
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement q(db_,
-		"SELECT mbid, last_fm_url FROM artist_info_cache WHERE folder_id = ?");
+		"SELECT mbid, last_fm_url, biography, image_url"
+		" FROM artist_info_cache WHERE folder_id = ?");
 	q.bind(1, folder_id);
 	if (!q.executeStep()) return std::nullopt;
-	return CachedArtistInfo{ q.getColumn(0).getString(),
-	                         q.getColumn(1).getString() };
+	CachedArtistInfo a;
+	a.mbid       = q.getColumn(0).getString();
+	a.last_fm_url= q.getColumn(1).getString();
+	a.biography  = q.getColumn(2).getString();
+	a.image_url  = q.getColumn(3).getString();
+	return a;
 	}
 
 void MediaStore::cache_artist_info(int folder_id, const CachedArtistInfo& info)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement ins(db_,
-		"INSERT OR REPLACE INTO artist_info_cache (folder_id, mbid, last_fm_url)"
-		" VALUES (?, ?, ?)");
+		"INSERT OR REPLACE INTO artist_info_cache"
+		" (folder_id, mbid, last_fm_url, biography, image_url)"
+		" VALUES (?, ?, ?, ?, ?)");
 	ins.bind(1, folder_id);
 	ins.bind(2, info.mbid);
 	ins.bind(3, info.last_fm_url);
+	ins.bind(4, info.biography);
+	ins.bind(5, info.image_url);
 	ins.exec();
 	}
 

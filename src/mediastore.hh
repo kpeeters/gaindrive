@@ -49,6 +49,8 @@ class MediaStore {
 		struct CachedArtistInfo {
 			std::string mbid;
 			std::string last_fm_url;
+			std::string biography;   // Wikipedia plain-text extract
+			std::string image_url;   // Wikipedia thumbnail URL
 			};
 
 		// Returns empty string if folder_id not found.

@@ -440,8 +440,6 @@ GainDrive::GainDrive(const std::string& db_path,
 				          << "] MusicBrainz HTTP " << r->status << std::endl;
 				}
 			else {
-				std::cout << stamp() << "getArtistInfo [" << name
-				          << "] MusicBrainz response: " << r->body << std::endl;
 				auto j = nlohmann::json::parse(r->body, nullptr, false);
 				if (!j.is_discarded() && j.contains("artists") && !j["artists"].empty()) {
 					info.mbid = j["artists"][0].value("id", "");
@@ -449,6 +447,41 @@ GainDrive::GainDrive(const std::string& db_path,
 						info.last_fm_url = "https://www.last.fm/music/" + url_encode(name);
 					}
 				}
+
+			// Step 2 — MusicBrainz URL relations → Wikipedia article URL.
+			if (!info.mbid.empty()) {
+				std::this_thread::sleep_for(std::chrono::seconds(1));
+				httplib::Params p2{{"inc","url-rels"},{"fmt","json"}};
+				auto r2 = mb.Get("/ws/2/artist/" + info.mbid, p2, httplib::Headers{});
+				if (r2 && r2->status == 200) {
+					auto j2 = nlohmann::json::parse(r2->body, nullptr, false);
+					for (auto& rel : j2.value("relations", nlohmann::json::array())) {
+						if (rel.value("type","") != "wikipedia") continue;
+						std::string wiki_url = rel.value("url", nlohmann::json::object())
+						                           .value("resource","");
+						auto pos = wiki_url.find("/wiki/");
+						if (pos == std::string::npos) continue;
+						std::string title = wiki_url.substr(pos + 6);
+						// Step 3 — Wikipedia REST summary → bio + thumbnail.
+						httplib::SSLClient wp("en.wikipedia.org");
+						wp.set_default_headers({
+							{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+							});
+						auto r3 = wp.Get("/api/rest_v1/page/summary/" + title,
+						                 httplib::Params{}, httplib::Headers{});
+						if (r3 && r3->status == 200) {
+							auto j3 = nlohmann::json::parse(r3->body, nullptr, false);
+							if (!j3.is_discarded()) {
+								info.biography = j3.value("extract","");
+								if (j3.contains("thumbnail"))
+									info.image_url = j3["thumbnail"].value("source","");
+								}
+							}
+						break;
+						}
+					}
+				}
+
 			store_.cache_artist_info(id, info);
 			std::cout << stamp() << "getArtistInfo [" << name << "] cached"
 			          << " mbid=" << (info.mbid.empty() ? "(none)" : info.mbid)
@@ -457,10 +490,20 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		res.set_content(subsonic_ok([&info](XMLDocument& doc, XMLElement* root) {
 			auto* ai = doc.NewElement("artistInfo");
+			if (!info.biography.empty()) {
+				auto* bio = doc.NewElement("biography");
+				bio->SetText(info.biography.c_str());
+				ai->InsertEndChild(bio);
+				}
 			if (!info.mbid.empty())
 				ai->SetAttribute("musicBrainzId", info.mbid.c_str());
 			if (!info.last_fm_url.empty())
 				ai->SetAttribute("lastFmUrl", info.last_fm_url.c_str());
+			if (!info.image_url.empty()) {
+				ai->SetAttribute("smallImageUrl",  info.image_url.c_str());
+				ai->SetAttribute("mediumImageUrl", info.image_url.c_str());
+				ai->SetAttribute("largeImageUrl",  info.image_url.c_str());
+				}
 			root->InsertEndChild(ai);
 			}), "application/xml");
 		});
