@@ -5,29 +5,56 @@
 #include <map>
 #include <thread>
 
+#include <tinyxml2.h>
+
+using namespace tinyxml2;
+
 // ---- Subsonic XML helpers ---------------------------------------------
 
-static const std::string SUBSONIC_NS  = "http://subsonic.org/restapi";
-static const std::string SUBSONIC_VER = "1.16.1";
+static const char* SUBSONIC_NS  = "http://subsonic.org/restapi";
+static const char* SUBSONIC_VER = "1.16.1";
 
-static std::string subsonic_ok(const std::string& inner = "")
+// Creates a <subsonic-response> root element inside doc and returns it.
+static XMLElement* make_root(XMLDocument& doc, const char* status)
 	{
-	return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-	       "<subsonic-response xmlns=\"" + SUBSONIC_NS + "\""
-	       " status=\"ok\" version=\"" + SUBSONIC_VER + "\">"
-	       + inner +
-	       "</subsonic-response>";
+	doc.InsertEndChild(doc.NewDeclaration());
+	auto* root = doc.NewElement("subsonic-response");
+	root->SetAttribute("xmlns",   SUBSONIC_NS);
+	root->SetAttribute("status",  status);
+	root->SetAttribute("version", SUBSONIC_VER);
+	doc.InsertEndChild(root);
+	return root;
 	}
 
-static std::string subsonic_error(int code, const std::string& msg)
+static std::string to_string(XMLDocument& doc)
 	{
-	return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-	       "<subsonic-response xmlns=\"" + SUBSONIC_NS + "\""
-	       " status=\"failed\" version=\"" + SUBSONIC_VER + "\">"
-	       "<error code=\"" + std::to_string(code) + "\""
-	       " message=\"" + msg + "\"/>"
-	       "</subsonic-response>";
+	XMLPrinter printer;
+	doc.Print(&printer);
+	return printer.CStr();
 	}
+
+// Build a complete ok response, optionally populated by a callback.
+static std::string subsonic_ok(
+	std::function<void(XMLDocument&, XMLElement*)> fn = {})
+	{
+	XMLDocument doc;
+	auto* root = make_root(doc, "ok");
+	if (fn) fn(doc, root);
+	return to_string(doc);
+	}
+
+static std::string subsonic_error(int code, const char* msg)
+	{
+	XMLDocument doc;
+	auto* root = make_root(doc, "failed");
+	auto* err  = doc.NewElement("error");
+	err->SetAttribute("code",    code);
+	err->SetAttribute("message", msg);
+	root->InsertEndChild(err);
+	return to_string(doc);
+	}
+
+// ---- Helpers ----------------------------------------------------------
 
 // Returns the name stripped of a leading article ("The ", "A ", …) for
 // alphabetical index grouping.
@@ -43,26 +70,26 @@ static std::string sort_key(const std::string& name)
 	return name;
 	}
 
-static std::string codec_to_mime(const std::string& codec)
+static const char* codec_to_mime(const std::string& codec)
 	{
-	static const std::map<std::string,std::string> m = {
-		{"flac","audio/flac"}, {"mp3","audio/mpeg"},
-		{"ogg","audio/ogg"},   {"opus","audio/ogg"},
-		{"m4a","audio/mp4"},   {"aac","audio/aac"},
-		{"wav","audio/wav"},   {"wma","audio/x-ms-wma"},
-		};
-	auto it = m.find(codec);
-	return it != m.end() ? it->second : "application/octet-stream";
+	if (codec == "flac")            return "audio/flac";
+	if (codec == "mp3")             return "audio/mpeg";
+	if (codec == "ogg")             return "audio/ogg";
+	if (codec == "opus")            return "audio/ogg";
+	if (codec == "m4a")             return "audio/mp4";
+	if (codec == "aac")             return "audio/aac";
+	if (codec == "wav")             return "audio/wav";
+	if (codec == "wma")             return "audio/x-ms-wma";
+	return "application/octet-stream";
 	}
 
 // Extracts u/p/t/s params and validates auth. Writes error into res on failure.
 static bool check_auth(const httplib::Request& req, httplib::Response& res,
                        MediaStore& store)
 	{
-	auto p  = req.params;
 	auto qp = [&](const std::string& k) -> std::string {
-		auto it = p.find(k);
-		return it != p.end() ? it->second : "";
+		auto it = req.params.find(k);
+		return it != req.params.end() ? it->second : "";
 		};
 
 	std::string u  = qp("u");
@@ -98,25 +125,27 @@ GainDrive::GainDrive(const std::string& db_path,
 		          << " -> " << res.status << std::endl;
 		});
 
-	// ping — simplest possible auth check.
+	// ping
 	server_.Get("/rest/ping.view", [this](const httplib::Request& req,
 	                                      httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 		res.set_content(subsonic_ok(), "application/xml");
 		});
 
-	// getLicense — return a perpetually-valid dummy license.
+	// getLicense — perpetually-valid dummy.
 	server_.Get("/rest/getLicense.view", [this](const httplib::Request& req,
 	                                             httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		res.set_content(subsonic_ok(
-			"<license valid=\"true\""
-			" email=\"gaindrive@example.com\""
-			" licenseExpires=\"2099-01-01T00:00:00\"/>"),
-			"application/xml");
+		res.set_content(subsonic_ok([](XMLDocument& doc, XMLElement* root) {
+			auto* lic = doc.NewElement("license");
+			lic->SetAttribute("valid",          "true");
+			lic->SetAttribute("email",          "gaindrive@example.com");
+			lic->SetAttribute("licenseExpires", "2099-01-01T00:00:00");
+			root->InsertEndChild(lic);
+			}), "application/xml");
 		});
 
-	// getUser — return info for the requested username.
+	// getUser
 	server_.Get("/rest/getUser.view", [this](const httplib::Request& req,
 	                                          httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -133,7 +162,6 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
-		// Non-admin users may only retrieve their own record.
 		std::string requester = qp("u");
 		if (target != requester) {
 			auto ri = store_.get_user(requester);
@@ -150,24 +178,24 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
-		std::string bv = ui->is_admin ? "true" : "false";
-		std::string xml =
-			"<user username=\"" + ui->username + "\""
-			" email=\""         + ui->email    + "\""
-			" scrobblingEnabled=\"false\""
-			" adminRole=\""     + bv + "\""
-			" settingsRole=\""  + bv + "\""
-			" downloadRole=\"true\""
-			" uploadRole=\"false\""
-			" playlistRole=\"true\""
-			" coverArtRole=\"true\""
-			" commentRole=\"false\""
-			" podcastRole=\"false\""
-			" streamRole=\"true\""
-			" jukeboxRole=\"false\""
-			" shareRole=\"false\"/>";
-
-		res.set_content(subsonic_ok(xml), "application/xml");
+		res.set_content(subsonic_ok([&ui](XMLDocument& doc, XMLElement* root) {
+			auto* u = doc.NewElement("user");
+			u->SetAttribute("username",          ui->username.c_str());
+			u->SetAttribute("email",             ui->email.c_str());
+			u->SetAttribute("scrobblingEnabled", false);
+			u->SetAttribute("adminRole",         ui->is_admin);
+			u->SetAttribute("settingsRole",      ui->is_admin);
+			u->SetAttribute("downloadRole",      true);
+			u->SetAttribute("uploadRole",        false);
+			u->SetAttribute("playlistRole",      true);
+			u->SetAttribute("coverArtRole",      true);
+			u->SetAttribute("commentRole",       false);
+			u->SetAttribute("podcastRole",       false);
+			u->SetAttribute("streamRole",        true);
+			u->SetAttribute("jukeboxRole",       false);
+			u->SetAttribute("shareRole",         false);
+			root->InsertEndChild(u);
+			}), "application/xml");
 		});
 
 	// getIndexes — all artists grouped by first letter.
@@ -177,33 +205,39 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		auto artists = store_.get_artist_dirs();
 
-		// Sort by article-stripped name, then group by first letter.
 		std::sort(artists.begin(), artists.end(),
 			[](const MediaStore::ArtistDir& a, const MediaStore::ArtistDir& b) {
 				return sort_key(a.name) < sort_key(b.name);
 				});
 
-		// Build map: letter → list of artist XML strings.
-		std::map<std::string, std::string> buckets;
-		for (auto& a : artists) {
-			std::string key = sort_key(a.name);
-			std::string letter = key.empty() ? "#"
-			                   : std::isalpha((unsigned char)key[0])
-			                     ? std::string(1, (char)std::toupper((unsigned char)key[0]))
-			                     : "#";
-			buckets[letter] +=
-				"<artist id=\"" + std::to_string(a.id) + "\""
-				" name=\""      + a.name                + "\"/>";
-			}
+		res.set_content(subsonic_ok([&artists](XMLDocument& doc, XMLElement* root) {
+			auto* indexes = doc.NewElement("indexes");
+			indexes->SetAttribute("lastModified",    "0");
+			indexes->SetAttribute("ignoredArticles",
+				"The El La Los Las Le Les A An Die Das Ein Eine");
 
-		std::string inner =
-			"<indexes lastModified=\"0\""
-			" ignoredArticles=\"The El La Los Las Le Les A An Die Das Ein Eine\">";
-		for (auto& [letter, entries] : buckets)
-			inner += "<index name=\"" + letter + "\">" + entries + "</index>";
-		inner += "</indexes>";
+			std::map<std::string, XMLElement*> buckets;
+			for (auto& a : artists) {
+				std::string key    = sort_key(a.name);
+				std::string letter = key.empty() || !std::isalpha((unsigned char)key[0])
+				                   ? "#"
+				                   : std::string(1, (char)std::toupper((unsigned char)key[0]));
 
-		res.set_content(subsonic_ok(inner), "application/xml");
+				if (!buckets.count(letter)) {
+					auto* idx = doc.NewElement("index");
+					idx->SetAttribute("name", letter.c_str());
+					indexes->InsertEndChild(idx);
+					buckets[letter] = idx;
+					}
+
+				auto* artist = doc.NewElement("artist");
+				artist->SetAttribute("id",   a.id);
+				artist->SetAttribute("name", a.name.c_str());
+				buckets[letter]->InsertEndChild(artist);
+				}
+
+			root->InsertEndChild(indexes);
+			}), "application/xml");
 		});
 
 	// getMusicDirectory — contents of a folder (album dirs or song files).
@@ -218,43 +252,45 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
-		int folder_id = std::stoi(it->second);
-		auto dir = store_.get_directory(folder_id);
+		auto dir = store_.get_directory(std::stoi(it->second));
 		if (!dir) {
-			res.set_content(subsonic_error(70, "Directory not found."), "application/xml");
+			res.set_content(subsonic_error(70, "Directory not found."),
+			                "application/xml");
 			return;
 			}
 
-		std::string inner = "<directory id=\"" + std::to_string(dir->id) + "\""
-			" name=\"" + dir->name + "\"";
-		if (dir->parent_id >= 0)
-			inner += " parent=\"" + std::to_string(dir->parent_id) + "\"";
-		inner += ">";
+		res.set_content(subsonic_ok([&dir](XMLDocument& doc, XMLElement* root) {
+			auto* directory = doc.NewElement("directory");
+			directory->SetAttribute("id",   dir->id);
+			directory->SetAttribute("name", dir->name.c_str());
+			if (dir->parent_id >= 0)
+				directory->SetAttribute("parent", dir->parent_id);
 
-		for (auto& c : dir->children) {
-			inner += "<child id=\""     + std::to_string(c.id)        + "\""
-			         " parent=\""       + std::to_string(c.parent_id) + "\""
-			         " isDir=\""        + (c.is_dir ? "true" : "false") + "\""
-			         " title=\""        + c.title                     + "\""
-			         " artist=\""       + c.artist                    + "\""
-			         " album=\""        + c.album                     + "\"";
-			if (!c.is_dir) {
-				inner += " track=\""       + std::to_string(c.track_number) + "\""
-				         " discNumber=\""  + std::to_string(c.disc_number)  + "\""
-				         " year=\""        + std::to_string(c.year)         + "\""
-				         " genre=\""       + c.genre                        + "\""
-				         " size=\""        + std::to_string(c.file_size)    + "\""
-				         " contentType=\"" + codec_to_mime(c.codec)         + "\""
-				         " suffix=\""      + c.codec                        + "\""
-				         " duration=\""    + std::to_string((int)c.duration) + "\""
-				         " bitRate=\""     + std::to_string(c.bitrate)      + "\""
-				         " path=\""        + c.path                         + "\"";
+			for (auto& c : dir->children) {
+				auto* child = doc.NewElement("child");
+				child->SetAttribute("id",     c.id);
+				child->SetAttribute("parent", c.parent_id);
+				child->SetAttribute("isDir",  c.is_dir);
+				child->SetAttribute("title",  c.title.c_str());
+				child->SetAttribute("artist", c.artist.c_str());
+				child->SetAttribute("album",  c.album.c_str());
+				if (!c.is_dir) {
+					child->SetAttribute("track",       c.track_number);
+					child->SetAttribute("discNumber",  c.disc_number);
+					child->SetAttribute("year",        c.year);
+					child->SetAttribute("genre",       c.genre.c_str());
+					child->SetAttribute("size",        (int64_t)c.file_size);
+					child->SetAttribute("contentType", codec_to_mime(c.codec));
+					child->SetAttribute("suffix",      c.codec.c_str());
+					child->SetAttribute("duration",    (int)c.duration);
+					child->SetAttribute("bitRate",     c.bitrate);
+					child->SetAttribute("path",        c.path.c_str());
+					}
+				directory->InsertEndChild(child);
 				}
-			inner += "/>";
-			}
 
-		inner += "</directory>";
-		res.set_content(subsonic_ok(inner), "application/xml");
+			root->InsertEndChild(directory);
+			}), "application/xml");
 		});
 
 	// Catch-all for endpoints not yet implemented.

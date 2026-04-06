@@ -46,7 +46,13 @@ FetchContent_Declare(
 	GIT_TAG        v2.0.2
 )
 
-FetchContent_MakeAvailable(httplib cxxopts nlohmann_json SQLiteCpp taglib)
+FetchContent_Declare(
+	tinyxml2
+	GIT_REPOSITORY https://github.com/leethomason/tinyxml2.git
+	GIT_TAG        10.0.0
+)
+
+FetchContent_MakeAvailable(httplib cxxopts nlohmann_json SQLiteCpp taglib tinyxml2)
 
 target_include_directories(tag PUBLIC
 	$<BUILD_INTERFACE:${taglib_SOURCE_DIR}>
@@ -67,4 +73,5 @@ target_link_libraries(gaindrive PRIVATE
 	nlohmann_json::nlohmann_json
 	SQLiteCpp
 	tag
+	tinyxml2::tinyxml2
 )
