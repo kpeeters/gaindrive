@@ -128,6 +128,14 @@ class MediaStore {
 		void add_star   (const std::string& username, int song_id, int album_id, int artist_id);
 		void remove_star(const std::string& username, int song_id, int album_id, int artist_id);
 
+		struct StarredResult {
+			std::vector<ArtistDir>  artists;
+			std::vector<ChildEntry> albums;
+			std::vector<ChildEntry> songs;
+			};
+
+		StarredResult get_starred(const std::string& username);
+
 	private:
 		std::string      music_root_;
 		SQLite::Database db_;

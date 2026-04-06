@@ -866,6 +866,114 @@ GainDrive::GainDrive(const std::string& db_path,
 		Streamer::serve(req, res, si, max_bitrate, format, time_offset);
 		});
 
+	// getStarred
+	server_.Get("/rest/getStarred.view", [this](const httplib::Request& req,
+	                                             httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		std::string user = req.params.find("u")->second;
+		auto sr = store_.get_starred(user);
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&sr](nlohmann::json& r) {
+				nlohmann::json artists = nlohmann::json::array();
+				for (auto& a : sr.artists)
+					artists.push_back({{"id", a.id}, {"name", a.name}});
+
+				nlohmann::json albums = nlohmann::json::array();
+				for (auto& c : sr.albums) {
+					nlohmann::json al = {
+						{"id",     c.id},
+						{"parent", c.parent_id},
+						{"isDir",  true},
+						{"title",  c.title},
+						{"artist", c.artist},
+						{"album",  c.album}
+						};
+					if (c.cover_art_id >= 0) al["coverArt"] = c.cover_art_id;
+					albums.push_back(al);
+					}
+
+				nlohmann::json songs = nlohmann::json::array();
+				for (auto& c : sr.songs) {
+					nlohmann::json s = {
+						{"id",          c.id},
+						{"parent",      c.parent_id},
+						{"isDir",       false},
+						{"title",       c.title},
+						{"artist",      c.artist},
+						{"album",       c.album},
+						{"track",       c.track_number},
+						{"discNumber",  c.disc_number},
+						{"year",        c.year},
+						{"genre",       c.genre},
+						{"size",        c.file_size},
+						{"contentType", codec_to_mime(c.codec)},
+						{"suffix",      c.codec},
+						{"duration",    (int)c.duration},
+						{"bitRate",     c.bitrate}
+						};
+					if (c.cover_art_id >= 0) s["coverArt"] = c.cover_art_id;
+					songs.push_back(s);
+					}
+
+				r["starred"] = {
+					{"artist", artists},
+					{"album",  albums},
+					{"song",   songs}
+					};
+				});
+		else
+			body = subsonic_ok([&sr](XMLDocument& doc, XMLElement* root) {
+				auto* starred = doc.NewElement("starred");
+
+				for (auto& a : sr.artists) {
+					auto* el = doc.NewElement("artist");
+					el->SetAttribute("id",   a.id);
+					el->SetAttribute("name", a.name.c_str());
+					starred->InsertEndChild(el);
+					}
+
+				for (auto& c : sr.albums) {
+					auto* el = doc.NewElement("album");
+					el->SetAttribute("id",     c.id);
+					el->SetAttribute("parent", c.parent_id);
+					el->SetAttribute("isDir",  true);
+					el->SetAttribute("title",  c.title.c_str());
+					el->SetAttribute("artist", c.artist.c_str());
+					el->SetAttribute("album",  c.album.c_str());
+					if (c.cover_art_id >= 0) el->SetAttribute("coverArt", c.cover_art_id);
+					starred->InsertEndChild(el);
+					}
+
+				for (auto& c : sr.songs) {
+					auto* el = doc.NewElement("song");
+					el->SetAttribute("id",          c.id);
+					el->SetAttribute("parent",      c.parent_id);
+					el->SetAttribute("isDir",       false);
+					el->SetAttribute("title",       c.title.c_str());
+					el->SetAttribute("artist",      c.artist.c_str());
+					el->SetAttribute("album",       c.album.c_str());
+					if (c.cover_art_id >= 0) el->SetAttribute("coverArt", c.cover_art_id);
+					el->SetAttribute("track",       c.track_number);
+					el->SetAttribute("discNumber",  c.disc_number);
+					el->SetAttribute("year",        c.year);
+					el->SetAttribute("genre",       c.genre.c_str());
+					el->SetAttribute("size",        (int64_t)c.file_size);
+					el->SetAttribute("contentType", codec_to_mime(c.codec));
+					el->SetAttribute("suffix",      c.codec.c_str());
+					el->SetAttribute("duration",    (int)c.duration);
+					el->SetAttribute("bitRate",     c.bitrate);
+					starred->InsertEndChild(el);
+					}
+
+				root->InsertEndChild(starred);
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	// star
 	server_.Get("/rest/star.view", [this](const httplib::Request& req,
 	                                      httplib::Response& res) {

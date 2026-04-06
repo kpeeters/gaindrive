@@ -890,3 +890,90 @@ void MediaStore::remove_star(const std::string& username,
 	del.bind(4, artist_id);
 	del.exec();
 	}
+
+MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	StarredResult result;
+
+	// Starred songs — cover art inherited from album folder if present.
+	SQLite::Statement sq(db_,
+		"SELECT s.id, s.title, s.track_number, s.disc_number,"
+		"       s.year, s.genre, s.duration, s.bitrate,"
+		"       s.file_size, s.codec, s.folder_id,"
+		"       COALESCE(a.name,'') AS artist,"
+		"       COALESCE(al.title,'') AS album,"
+		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+		"            THEN s.folder_id ELSE -1 END AS cover_art_id"
+		" FROM stars st"
+		" JOIN users u ON u.id = st.user_id"
+		" JOIN songs s ON s.id = st.song_id"
+		" LEFT JOIN albums al ON al.id = s.album_id"
+		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
+		" LEFT JOIN artists a ON a.id = sa.artist_id"
+		" WHERE u.username = ? AND st.song_id IS NOT NULL"
+		" ORDER BY st.created DESC");
+	sq.bind(1, username);
+	while (sq.executeStep()) {
+		ChildEntry e;
+		e.id           = sq.getColumn(0).getInt();
+		e.is_dir       = false;
+		e.title        = sq.getColumn(1).getString();
+		e.track_number = sq.getColumn(2).getInt();
+		e.disc_number  = sq.getColumn(3).getInt();
+		e.year         = sq.getColumn(4).getInt();
+		e.genre        = sq.getColumn(5).isNull() ? "" : sq.getColumn(5).getString();
+		e.duration     = sq.getColumn(6).getDouble();
+		e.bitrate      = sq.getColumn(7).getInt();
+		e.file_size    = sq.getColumn(8).getInt64();
+		e.codec        = sq.getColumn(9).isNull() ? "" : sq.getColumn(9).getString();
+		e.parent_id    = sq.getColumn(10).getInt();
+		e.artist       = sq.getColumn(11).getString();
+		e.album        = sq.getColumn(12).getString();
+		e.cover_art_id = sq.getColumn(13).getInt();
+		result.songs.push_back(std::move(e));
+		}
+
+	// Starred albums — stars.album_id stores the folder id of the album dir.
+	SQLite::Statement aq(db_,
+		"SELECT f.id, COALESCE(f.parent_id,-1),"
+		"       COALESCE(al.title, f.name) AS title,"
+		"       COALESCE(a.name,'') AS artist,"
+		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+		"            THEN f.id ELSE -1 END AS cover_art_id"
+		" FROM stars st"
+		" JOIN users u ON u.id = st.user_id"
+		" JOIN folders f ON f.id = st.album_id"
+		" LEFT JOIN albums al ON al.folder_id = f.id"
+		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
+		" LEFT JOIN artists a ON a.id = aa.artist_id"
+		" WHERE u.username = ? AND st.album_id IS NOT NULL"
+		" ORDER BY st.created DESC");
+	aq.bind(1, username);
+	while (aq.executeStep()) {
+		ChildEntry e;
+		e.id           = aq.getColumn(0).getInt();
+		e.parent_id    = aq.getColumn(1).getInt();
+		e.is_dir       = true;
+		e.title        = aq.getColumn(2).getString();
+		e.album        = e.title;
+		e.artist       = aq.getColumn(3).getString();
+		e.cover_art_id = aq.getColumn(4).getInt();
+		result.albums.push_back(std::move(e));
+		}
+
+	// Starred artists — stars.artist_id stores the folder id of the artist dir.
+	SQLite::Statement arq(db_,
+		"SELECT f.id, f.name"
+		" FROM stars st"
+		" JOIN users u ON u.id = st.user_id"
+		" JOIN folders f ON f.id = st.artist_id"
+		" WHERE u.username = ? AND st.artist_id IS NOT NULL"
+		" ORDER BY st.created DESC");
+	arq.bind(1, username);
+	while (arq.executeStep())
+		result.artists.push_back({arq.getColumn(0).getInt(),
+		                          arq.getColumn(1).getString()});
+
+	return result;
+	}
