@@ -716,7 +716,7 @@ void MediaStore::save_play_queue(const std::string& username,
 		ins.bind(2, sid);
 		ins.bind(3, pos);
 		ins.bind(4, is_curr ? 1 : 0);
-		ins.bind(5, is_curr ? offset_ms : 0LL);
+		ins.bind(5, is_curr ? offset_ms : int64_t(0));
 		ins.bind(6, client);
 		ins.exec();
 		ins.reset();
