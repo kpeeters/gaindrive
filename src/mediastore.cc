@@ -70,7 +70,7 @@ void MediaStore::create_schema()
 
 		CREATE TABLE IF NOT EXISTS albums (
 			id             INTEGER PRIMARY KEY,
-			folder_id      INTEGER NOT NULL REFERENCES folders(id),
+			folder_id      INTEGER NOT NULL REFERENCES folders(id) UNIQUE,
 			title          TEXT NOT NULL,
 			sort_title     TEXT,
 			year           INTEGER,
