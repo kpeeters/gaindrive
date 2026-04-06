@@ -399,6 +399,57 @@ GainDrive::GainDrive(const std::string& db_path,
 			}), "application/xml");
 		});
 
+	// savePlayQueue — persist the client's current queue and playback position.
+	server_.Get("/rest/savePlayQueue.view", [this](const httplib::Request& req,
+	                                               httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto qp = [&](const std::string& k, const std::string& def = "") {
+			auto it = req.params.find(k);
+			return it != req.params.end() ? it->second : def;
+			};
+
+		// Collect all song IDs — the parameter may be repeated.
+		std::vector<int> ids;
+		auto range = req.params.equal_range("id");
+		for (auto it = range.first; it != range.second; ++it)
+			ids.push_back(std::stoi(it->second));
+
+		int     current_id = ids.empty() ? 0 : std::stoi(qp("current", "0"));
+		int64_t offset_ms  = std::stoll(qp("position", "0"));
+		std::string client = qp("c");
+		std::string user   = qp("u");
+
+		store_.save_play_queue(user, ids, current_id, offset_ms, client);
+		res.set_content(subsonic_ok(), "application/xml");
+		});
+
+	// createBookmark — mark a playback position within a song.
+	server_.Get("/rest/createBookmark.view", [this](const httplib::Request& req,
+	                                                httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto qp = [&](const std::string& k, const std::string& def = "") {
+			auto it = req.params.find(k);
+			return it != req.params.end() ? it->second : def;
+			};
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			res.set_content(subsonic_error(10, "Required parameter missing: id."),
+			                "application/xml");
+			return;
+			}
+
+		int     song_id     = std::stoi(it->second);
+		int64_t position_ms = std::stoll(qp("position", "0"));
+		std::string comment = qp("comment");
+		std::string user    = qp("u");
+
+		store_.create_bookmark(user, song_id, position_ms, comment);
+		res.set_content(subsonic_ok(), "application/xml");
+		});
+
 	// stream — serve audio file directly or transcode via ffmpeg.
 	server_.Get("/rest/stream.view", [this](const httplib::Request& req,
 	                                        httplib::Response& res) {

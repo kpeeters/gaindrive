@@ -197,6 +197,16 @@ void MediaStore::create_schema()
 			PRIMARY KEY (user_id)
 		);
 
+		CREATE TABLE IF NOT EXISTS bookmarks (
+			user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			song_id   INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+			position  INTEGER NOT NULL DEFAULT 0,
+			comment   TEXT,
+			created   DATETIME DEFAULT CURRENT_TIMESTAMP,
+			changed   DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (user_id, song_id)
+		);
+
 		CREATE TABLE IF NOT EXISTS artist_info_cache (
 			folder_id   INTEGER PRIMARY KEY REFERENCES folders(id),
 			mbid        TEXT NOT NULL DEFAULT '',
@@ -674,4 +684,68 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id)
 		}
 
 	return dir;
+	}
+
+// ---- Play queue / bookmarks ------------------------------------------
+
+void MediaStore::save_play_queue(const std::string& username,
+                                  const std::vector<int>& song_ids,
+                                  int current_id, int64_t offset_ms,
+                                  const std::string& client)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	SQLite::Statement uid_q(db_, "SELECT id FROM users WHERE username = ?");
+	uid_q.bind(1, username);
+	if (!uid_q.executeStep()) return;
+	int user_id = uid_q.getColumn(0).getInt();
+
+	SQLite::Transaction txn(db_);
+
+	SQLite::Statement del(db_, "DELETE FROM play_queue WHERE user_id = ?");
+	del.bind(1, user_id);
+	del.exec();
+
+	SQLite::Statement ins(db_,
+		"INSERT INTO play_queue (user_id, song_id, position, is_current, offset_ms, client)"
+		" VALUES (?, ?, ?, ?, ?, ?)");
+	for (int pos = 0; pos < static_cast<int>(song_ids.size()); ++pos) {
+		int  sid     = song_ids[pos];
+		bool is_curr = (sid == current_id);
+		ins.bind(1, user_id);
+		ins.bind(2, sid);
+		ins.bind(3, pos);
+		ins.bind(4, is_curr ? 1 : 0);
+		ins.bind(5, is_curr ? offset_ms : 0LL);
+		ins.bind(6, client);
+		ins.exec();
+		ins.reset();
+		}
+
+	txn.commit();
+	}
+
+void MediaStore::create_bookmark(const std::string& username,
+                                  int song_id, int64_t position_ms,
+                                  const std::string& comment)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	SQLite::Statement uid_q(db_, "SELECT id FROM users WHERE username = ?");
+	uid_q.bind(1, username);
+	if (!uid_q.executeStep()) return;
+	int user_id = uid_q.getColumn(0).getInt();
+
+	SQLite::Statement ins(db_,
+		"INSERT INTO bookmarks (user_id, song_id, position, comment, changed)"
+		" VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)"
+		" ON CONFLICT(user_id, song_id) DO UPDATE SET"
+		"   position = excluded.position,"
+		"   comment  = excluded.comment,"
+		"   changed  = CURRENT_TIMESTAMP");
+	ins.bind(1, user_id);
+	ins.bind(2, song_id);
+	ins.bind(3, position_ms);
+	ins.bind(4, comment);
+	ins.exec();
 	}

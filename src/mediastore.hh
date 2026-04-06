@@ -101,6 +101,20 @@ class MediaStore {
 
 		std::optional<SongInfo> get_song(int song_id);
 
+		// ---- Play queue / bookmarks ----
+
+		// Atomically replaces the user's play queue.
+		// current_id is the song currently playing; offset_ms is its position.
+		void save_play_queue(const std::string& username,
+		                     const std::vector<int>& song_ids,
+		                     int current_id, int64_t offset_ms,
+		                     const std::string& client);
+
+		// Creates or updates a bookmark for a single song.
+		void create_bookmark(const std::string& username,
+		                     int song_id, int64_t position_ms,
+		                     const std::string& comment);
+
 	private:
 		std::string      music_root_;
 		SQLite::Database db_;
