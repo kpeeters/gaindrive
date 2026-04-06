@@ -1069,3 +1069,38 @@ MediaStore::PlaylistInfo MediaStore::create_playlist(const std::string& username
 	pl.duration   = total_duration;
 	return pl;
 	}
+
+std::vector<MediaStore::PlaylistInfo> MediaStore::get_playlists(const std::string& username)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	// Song counts and total durations via aggregates; no song rows returned.
+	SQLite::Statement q(db_,
+		"SELECT p.id, p.name, COALESCE(p.comment,''), u.username, p.is_public,"
+		"       COUNT(ps.song_id), COALESCE(SUM(s.duration),0),"
+		"       p.created, p.updated"
+		" FROM playlists p"
+		" JOIN users u ON u.id = p.user_id"
+		" LEFT JOIN playlist_songs ps ON ps.playlist_id = p.id"
+		" LEFT JOIN songs s ON s.id = ps.song_id"
+		" WHERE u.username = ?"
+		" GROUP BY p.id"
+		" ORDER BY p.name COLLATE NOCASE");
+	q.bind(1, username);
+
+	std::vector<PlaylistInfo> result;
+	while (q.executeStep()) {
+		PlaylistInfo pl;
+		pl.id        = q.getColumn(0).getInt();
+		pl.name      = q.getColumn(1).getString();
+		pl.comment   = q.getColumn(2).getString();
+		pl.owner     = q.getColumn(3).getString();
+		pl.is_public = q.getColumn(4).getInt() != 0;
+		pl.song_count= q.getColumn(5).getInt();
+		pl.duration  = q.getColumn(6).getInt();
+		pl.created   = q.getColumn(7).getString();
+		pl.updated   = q.getColumn(8).getString();
+		result.push_back(std::move(pl));
+		}
+	return result;
+	}

@@ -156,6 +156,9 @@ class MediaStore {
 		                             const std::string& name,
 		                             const std::vector<int>& song_ids);
 
+		// Returns all playlists owned by the user (songs vector is empty).
+		std::vector<PlaylistInfo> get_playlists(const std::string& username);
+
 	private:
 		std::string      music_root_;
 		SQLite::Database db_;

@@ -970,6 +970,54 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
+	// getPlaylists
+	server_.Get("/rest/getPlaylists.view", [this](const httplib::Request& req,
+	                                               httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		std::string user = req.params.find("u")->second;
+		auto pls = store_.get_playlists(user);
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&pls](nlohmann::json& r) {
+				nlohmann::json arr = nlohmann::json::array();
+				for (auto& pl : pls)
+					arr.push_back({
+						{"id",        pl.id},
+						{"name",      pl.name},
+						{"comment",   pl.comment},
+						{"owner",     pl.owner},
+						{"public",    pl.is_public},
+						{"songCount", pl.song_count},
+						{"duration",  pl.duration},
+						{"created",   pl.created},
+						{"changed",   pl.updated}
+						});
+				r["playlists"] = {{"playlist", arr}};
+				});
+		else
+			body = subsonic_ok([&pls](XMLDocument& doc, XMLElement* root) {
+				auto* playlists = doc.NewElement("playlists");
+				for (auto& pl : pls) {
+					auto* el = doc.NewElement("playlist");
+					el->SetAttribute("id",        pl.id);
+					el->SetAttribute("name",      pl.name.c_str());
+					el->SetAttribute("comment",   pl.comment.c_str());
+					el->SetAttribute("owner",     pl.owner.c_str());
+					el->SetAttribute("public",    pl.is_public);
+					el->SetAttribute("songCount", pl.song_count);
+					el->SetAttribute("duration",  pl.duration);
+					el->SetAttribute("created",   pl.created.c_str());
+					el->SetAttribute("changed",   pl.updated.c_str());
+					playlists->InsertEndChild(el);
+					}
+				root->InsertEndChild(playlists);
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	// getStarred
 	server_.Get("/rest/getStarred.view", [this](const httplib::Request& req,
 	                                             httplib::Response& res) {
