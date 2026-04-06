@@ -474,7 +474,6 @@ GainDrive::GainDrive(const std::string& db_path,
 						child["suffix"]      = c.codec;
 						child["duration"]    = (int)c.duration;
 						child["bitRate"]     = c.bitrate;
-						child["path"]        = c.path;
 						}
 					children.push_back(child);
 					}
@@ -516,7 +515,6 @@ GainDrive::GainDrive(const std::string& db_path,
 						child->SetAttribute("suffix",      c.codec.c_str());
 						child->SetAttribute("duration",    (int)c.duration);
 						child->SetAttribute("bitRate",     c.bitrate);
-						child->SetAttribute("path",        c.path.c_str());
 						}
 					directory->InsertEndChild(child);
 					}

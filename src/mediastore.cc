@@ -778,6 +778,9 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id)
 		e.path         = ssel.getColumn(10).getString();
 		e.artist       = ssel.getColumn(11).getString();
 		e.album        = ssel.getColumn(12).getString();
+		// Songs inherit cover art from their parent album folder.
+		if (dir.cover_art_id >= 0)
+			e.cover_art_id = dir.cover_art_id;
 		dir.children.push_back(std::move(e));
 		}
 
