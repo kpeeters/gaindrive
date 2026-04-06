@@ -189,6 +189,8 @@ class MediaStore {
 		int  upsert_artist(const std::string& name);
 		int  upsert_album (int folder_id, const std::string& title,
 		                   int artist_id, int year, const std::string& genre);
+		// disc_number: 0 = default to 1, >0 = override (folder-derived disc position)
 		void upsert_song  (const std::filesystem::path& path,
-		                   int album_id, int folder_id, int artist_id);
+		                   int album_id, int folder_id, int artist_id,
+		                   int disc_number = 0);
 	};

@@ -335,12 +335,42 @@ void MediaStore::scan()
 				upd.exec();
 				}
 
-			for (auto& track_entry : fs::directory_iterator(album_entry.path())) {
-				if (!track_entry.is_regular_file()) continue;
-				if (!is_audio_file(track_entry.path())) continue;
-				upsert_song(track_entry.path(), album_id, album_folder_id, artist_id);
+			// Separate disc subdirs from audio files directly in the album dir.
+			std::vector<fs::directory_entry> disc_dirs;
+			std::vector<fs::path>            direct_files;
+			for (auto& e : fs::directory_iterator(album_entry.path())) {
+				if      (e.is_directory())                             disc_dirs.push_back(e);
+				else if (e.is_regular_file() && is_audio_file(e.path())) direct_files.push_back(e.path());
+				}
+			std::sort(disc_dirs.begin(), disc_dirs.end(),
+				[](const fs::directory_entry& a, const fs::directory_entry& b) {
+					return a.path().filename() < b.path().filename();
+					});
+
+			// Disc subfolders: alphabetical order → disc numbers 1..N.
+			int disc_count = (int)disc_dirs.size();
+			for (int dn = 0; dn < disc_count; ++dn) {
+				int disc_folder_id = upsert_folder(disc_dirs[dn].path(), album_folder_id);
+				for (auto& te : fs::directory_iterator(disc_dirs[dn].path())) {
+					if (!te.is_regular_file() || !is_audio_file(te.path())) continue;
+					upsert_song(te.path(), album_id, disc_folder_id, artist_id, dn + 1);
+					++song_count;
+					++processed;
+					}
+				}
+
+			// Audio files directly in the album dir (flat layout, or mixed).
+			for (auto& p : direct_files) {
+				upsert_song(p, album_id, album_folder_id, artist_id, 0);
 				++song_count;
 				++processed;
+				}
+
+			if (disc_count > 1) {
+				SQLite::Statement upd(db_, "UPDATE albums SET disc_count=? WHERE id=?");
+				upd.bind(1, disc_count);
+				upd.bind(2, album_id);
+				upd.exec();
 				}
 
 			// Build progress suffix for this album's log line.
@@ -390,10 +420,22 @@ int MediaStore::upsert_folder(const fs::path& path, int parent_id)
 		ins.exec();
 		}
 
-	SQLite::Statement upd(db_,
-		"UPDATE folders SET last_scanned = CURRENT_TIMESTAMP WHERE path = ?");
-	upd.bind(1, path_str);
-	upd.exec();
+	// Also set parent_id in case the row already existed without it.
+	if (parent_id < 0) {
+		SQLite::Statement upd(db_,
+			"UPDATE folders SET parent_id = NULL, last_scanned = CURRENT_TIMESTAMP"
+			" WHERE path = ?");
+		upd.bind(1, path_str);
+		upd.exec();
+		}
+	else {
+		SQLite::Statement upd(db_,
+			"UPDATE folders SET parent_id = ?, last_scanned = CURRENT_TIMESTAMP"
+			" WHERE path = ?");
+		upd.bind(1, parent_id);
+		upd.bind(2, path_str);
+		upd.exec();
+		}
 
 	SQLite::Statement sel(db_, "SELECT id FROM folders WHERE path = ?");
 	sel.bind(1, path_str);
@@ -445,7 +487,7 @@ int MediaStore::upsert_album(int folder_id, const std::string& title,
 	}
 
 void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
-                              int artist_id)
+                              int artist_id, int disc_number)
 	{
 	int64_t mtime = mtime_of(path);
 
@@ -454,8 +496,18 @@ void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
 		"SELECT file_modified FROM songs WHERE path = ?");
 	chk.bind(1, path.string());
 	if (chk.executeStep()) {
-		if (chk.getColumn(0).getInt64() == mtime)
+		if (chk.getColumn(0).getInt64() == mtime) {
+			// Still update disc_number if it was folder-derived — folders may be reordered.
+			if (disc_number > 0) {
+				SQLite::Statement upd(db_,
+					"UPDATE songs SET disc_number=? WHERE path=? AND disc_number!=?");
+				upd.bind(1, disc_number);
+				upd.bind(2, path.string());
+				upd.bind(3, disc_number);
+				upd.exec();
+				}
 			return;
+			}
 		}
 
 	// Read tags with taglib — open read-only so we never mutate media files.
@@ -493,25 +545,26 @@ void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
 
 	SQLite::Statement ins(db_,
 		"INSERT OR REPLACE INTO songs"
-		" (album_id, folder_id, path, filename, title, track_number,"
+		" (album_id, folder_id, path, filename, title, track_number, disc_number,"
 		"  year, genre, duration, bitrate, sample_rate, channels, codec,"
 		"  file_size, file_modified, last_scanned)"
-		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
+		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
 	ins.bind(1,  album_id);
 	ins.bind(2,  folder_id);
 	ins.bind(3,  path.string());
 	ins.bind(4,  path.filename().string());
 	ins.bind(5,  title);
 	ins.bind(6,  track_nr);
-	ins.bind(7,  year);
-	ins.bind(8,  genre);
-	ins.bind(9,  duration);
-	ins.bind(10, bitrate);
-	ins.bind(11, sr);
-	ins.bind(12, channels);
-	ins.bind(13, codec);
-	ins.bind(14, file_size);
-	ins.bind(15, mtime);
+	ins.bind(7,  disc_number > 0 ? disc_number : 1);
+	ins.bind(8,  year);
+	ins.bind(9,  genre);
+	ins.bind(10, duration);
+	ins.bind(11, bitrate);
+	ins.bind(12, sr);
+	ins.bind(13, channels);
+	ins.bind(14, codec);
+	ins.bind(15, file_size);
+	ins.bind(16, mtime);
 	ins.exec();
 
 	// Link song to its artist (derived from the folder hierarchy).
