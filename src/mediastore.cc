@@ -291,6 +291,8 @@ void MediaStore::scan()
 
 			// Store cover art path if found; don't clear an existing path on re-scan.
 			std::string cover = find_cover(album_entry.path());
+			std::cout << stamp() << "    cover: "
+			          << (cover.empty() ? "(none)" : cover) << std::endl;
 			if (!cover.empty()) {
 				SQLite::Statement upd(db_,
 					"UPDATE albums SET cover_path = ? WHERE id = ?");
