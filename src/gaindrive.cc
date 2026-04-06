@@ -213,61 +213,55 @@ GainDrive::GainDrive(const std::string& db_path,
                      bool debug)
 	: debug_(debug), store_(db_path, music_root)
 	{
-	server_.set_logger([debug](const httplib::Request& req, const httplib::Response& res) {
+	server_.set_logger([](const httplib::Request& req, const httplib::Response& res) {
 		std::cout << stamp(req.remote_addr)
-		          << req.method << " " << req.path
-		          << " -> " << res.status << std::endl;
-		if (debug) {
-			std::string ct = res.get_header_value("Content-Type");
-			if (!res.body.empty()) {
-				bool printable = ct.find("xml")  != std::string::npos
-				              || ct.find("json") != std::string::npos
-				              || ct.find("text") != std::string::npos;
-				if (printable)
-					std::cout << res.body << std::endl;
-				else
-					std::cout << "[binary, " << res.body.size() << " bytes]"
-					          << std::endl;
-				}
-			else if (!ct.empty()) {
-				// Content-provider response (audio stream, image, …).
-				std::cout << "[" << ct << ", streaming]" << std::endl;
+		          << req.method << " " << req.path;
+		if (!req.params.empty()) {
+			std::cout << "?";
+			bool first = true;
+			for (auto& [k, v] : req.params) {
+				if (!first) std::cout << "&";
+				std::cout << k << "=" << v;
+				first = false;
 				}
 			}
+		std::cout << " -> " << res.status << std::endl;
 		});
 
 	// ping
 	server_.Get("/rest/ping.view", [this](const httplib::Request& req,
 	                                      httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		if (fmt_of(req) == "json")
-			res.set_content(subsonic_ok_json(), "application/json");
-		else
-			res.set_content(subsonic_ok(), "application/xml");
+		bool use_json = (fmt_of(req) == "json");
+		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
 	// getLicense — perpetually-valid dummy.
 	server_.Get("/rest/getLicense.view", [this](const httplib::Request& req,
 	                                             httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		if (fmt_of(req) == "json") {
-			res.set_content(subsonic_ok_json([](nlohmann::json& r) {
+		bool use_json = (fmt_of(req) == "json");
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([](nlohmann::json& r) {
 				r["license"] = {
 					{"valid",          true},
 					{"email",          "gaindrive@example.com"},
 					{"licenseExpires", "2099-01-01T00:00:00"}
 					};
-				}), "application/json");
-			}
-		else {
-			res.set_content(subsonic_ok([](XMLDocument& doc, XMLElement* root) {
+				});
+		else
+			body = subsonic_ok([](XMLDocument& doc, XMLElement* root) {
 				auto* lic = doc.NewElement("license");
 				lic->SetAttribute("valid",          "true");
 				lic->SetAttribute("email",          "gaindrive@example.com");
 				lic->SetAttribute("licenseExpires", "2099-01-01T00:00:00");
 				root->InsertEndChild(lic);
-				}), "application/xml");
-			}
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
 	// getUser
@@ -303,8 +297,9 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto ui = store_.get_user(target);
 		if (!ui) { err(70, "User not found."); return; }
 
-		if (fmt_of(req) == "json") {
-			res.set_content(subsonic_ok_json([&ui](nlohmann::json& r) {
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&ui](nlohmann::json& r) {
 				r["user"] = {
 					{"username",          ui->username},
 					{"email",             ui->email},
@@ -321,10 +316,9 @@ GainDrive::GainDrive(const std::string& db_path,
 					{"jukeboxRole",       false},
 					{"shareRole",         false}
 					};
-				}), "application/json");
-			}
-		else {
-			res.set_content(subsonic_ok([&ui](XMLDocument& doc, XMLElement* root) {
+				});
+		else
+			body = subsonic_ok([&ui](XMLDocument& doc, XMLElement* root) {
 				auto* u = doc.NewElement("user");
 				u->SetAttribute("username",          ui->username.c_str());
 				u->SetAttribute("email",             ui->email.c_str());
@@ -341,8 +335,9 @@ GainDrive::GainDrive(const std::string& db_path,
 				u->SetAttribute("jukeboxRole",       false);
 				u->SetAttribute("shareRole",         false);
 				root->InsertEndChild(u);
-				}), "application/xml");
-			}
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
 	// getMusicFolders — returns the configured music root(s).
@@ -350,16 +345,17 @@ GainDrive::GainDrive(const std::string& db_path,
 	                                                  httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 		auto folders = store_.get_music_folders();
-		if (fmt_of(req) == "json") {
-			res.set_content(subsonic_ok_json([&folders](nlohmann::json& r) {
+		bool use_json = (fmt_of(req) == "json");
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&folders](nlohmann::json& r) {
 				nlohmann::json arr = nlohmann::json::array();
 				for (auto& f : folders)
 					arr.push_back({{"id", f.id}, {"name", f.name}});
 				r["musicFolders"]["musicFolder"] = arr;
-				}), "application/json");
-			}
-		else {
-			res.set_content(subsonic_ok([&folders](XMLDocument& doc, XMLElement* root) {
+				});
+		else
+			body = subsonic_ok([&folders](XMLDocument& doc, XMLElement* root) {
 				auto* mf = doc.NewElement("musicFolders");
 				for (auto& f : folders) {
 					auto* el = doc.NewElement("musicFolder");
@@ -368,8 +364,9 @@ GainDrive::GainDrive(const std::string& db_path,
 					mf->InsertEndChild(el);
 					}
 				root->InsertEndChild(mf);
-				}), "application/xml");
-			}
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
 	// getIndexes — all artists grouped by first letter.
@@ -394,8 +391,10 @@ GainDrive::GainDrive(const std::string& db_path,
 			buckets[letter].push_back(&a);
 			}
 
-		if (fmt_of(req) == "json") {
-			res.set_content(subsonic_ok_json([&buckets](nlohmann::json& r) {
+		bool use_json = (fmt_of(req) == "json");
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&buckets](nlohmann::json& r) {
 				nlohmann::json idx_arr = nlohmann::json::array();
 				for (auto& [letter, vec] : buckets) {
 					nlohmann::json artist_arr = nlohmann::json::array();
@@ -408,10 +407,9 @@ GainDrive::GainDrive(const std::string& db_path,
 					{"ignoredArticles", "The El La Los Las Le Les A An Die Das Ein Eine"},
 					{"index",           idx_arr}
 					};
-				}), "application/json");
-			}
-		else {
-			res.set_content(subsonic_ok([&buckets](XMLDocument& doc, XMLElement* root) {
+				});
+		else
+			body = subsonic_ok([&buckets](XMLDocument& doc, XMLElement* root) {
 				auto* indexes = doc.NewElement("indexes");
 				indexes->SetAttribute("lastModified",    "0");
 				indexes->SetAttribute("ignoredArticles",
@@ -428,8 +426,9 @@ GainDrive::GainDrive(const std::string& db_path,
 					indexes->InsertEndChild(idx);
 					}
 				root->InsertEndChild(indexes);
-				}), "application/xml");
-			}
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
 	// getMusicDirectory — contents of a folder (album dirs or song files).
@@ -451,8 +450,9 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto dir = store_.get_directory(std::stoi(it->second));
 		if (!dir) { err(70, "Directory not found."); return; }
 
-		if (use_json) {
-			res.set_content(subsonic_ok_json([&dir](nlohmann::json& r) {
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&dir](nlohmann::json& r) {
 				nlohmann::json children = nlohmann::json::array();
 				for (auto& c : dir->children) {
 					nlohmann::json child = {
@@ -485,10 +485,9 @@ GainDrive::GainDrive(const std::string& db_path,
 					};
 				if (dir->parent_id >= 0)    r["directory"]["parent"]   = dir->parent_id;
 				if (dir->cover_art_id >= 0) r["directory"]["coverArt"] = dir->cover_art_id;
-				}), "application/json");
-			}
-		else {
-			res.set_content(subsonic_ok([&dir](XMLDocument& doc, XMLElement* root) {
+				});
+		else
+			body = subsonic_ok([&dir](XMLDocument& doc, XMLElement* root) {
 				auto* directory = doc.NewElement("directory");
 				directory->SetAttribute("id",   dir->id);
 				directory->SetAttribute("name", dir->name.c_str());
@@ -523,8 +522,9 @@ GainDrive::GainDrive(const std::string& db_path,
 					}
 
 				root->InsertEndChild(directory);
-				}), "application/xml");
-			}
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
 	// getArtistInfo — MusicBrainz lookup, result cached in DB.
@@ -626,8 +626,9 @@ GainDrive::GainDrive(const std::string& db_path,
 			          << std::endl;
 			}
 
-		if (use_json) {
-			res.set_content(subsonic_ok_json([&info](nlohmann::json& r) {
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&info](nlohmann::json& r) {
 				nlohmann::json ai = nlohmann::json::object();
 				if (!info.biography.empty())   ai["biography"]      = info.biography;
 				if (!info.mbid.empty())        ai["musicBrainzId"]  = info.mbid;
@@ -638,10 +639,9 @@ GainDrive::GainDrive(const std::string& db_path,
 					ai["largeImageUrl"]  = info.image_url;
 					}
 				r["artistInfo"] = ai;
-				}), "application/json");
-			}
-		else {
-			res.set_content(subsonic_ok([&info](XMLDocument& doc, XMLElement* root) {
+				});
+		else
+			body = subsonic_ok([&info](XMLDocument& doc, XMLElement* root) {
 				auto* ai = doc.NewElement("artistInfo");
 				if (!info.biography.empty()) {
 					auto* bio = doc.NewElement("biography");
@@ -658,8 +658,9 @@ GainDrive::GainDrive(const std::string& db_path,
 					ai->SetAttribute("largeImageUrl",  info.image_url.c_str());
 					}
 				root->InsertEndChild(ai);
-				}), "application/xml");
-			}
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
 	// getCoverArt — serve a cover image, optionally scaled.
@@ -732,10 +733,10 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string user   = qp("u");
 
 		store_.save_play_queue(user, ids, current_id, offset_ms, client);
-		if (fmt_of(req) == "json")
-			res.set_content(subsonic_ok_json(), "application/json");
-		else
-			res.set_content(subsonic_ok(), "application/xml");
+		bool use_json = (fmt_of(req) == "json");
+		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
 	// createBookmark — mark a playback position within a song.
@@ -761,10 +762,10 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string user    = qp("u");
 
 		store_.create_bookmark(user, song_id, position_ms, comment);
-		if (fmt_of(req) == "json")
-			res.set_content(subsonic_ok_json(), "application/json");
-		else
-			res.set_content(subsonic_ok(), "application/xml");
+		bool use_json = (fmt_of(req) == "json");
+		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
 	// stream — serve audio file directly or transcode via ffmpeg.
