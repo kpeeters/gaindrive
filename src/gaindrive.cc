@@ -183,10 +183,15 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (debug) {
 			std::string ct = res.get_header_value("Content-Type");
 			if (!res.body.empty()) {
-				if (ct.find("xml") != std::string::npos)
+				// Refuse to print binary; scan for non-printable bytes first.
+				bool is_text = true;
+				for (unsigned char c : res.body)
+					if (c < 0x20 && c != '\t' && c != '\n' && c != '\r')
+						{ is_text = false; break; }
+				if (is_text)
 					std::cout << res.body << std::endl;
 				else
-					std::cout << "[" << ct << ", " << res.body.size() << " bytes]"
+					std::cout << "[binary body, " << res.body.size() << " bytes]"
 					          << std::endl;
 				}
 			else if (!ct.empty()) {
