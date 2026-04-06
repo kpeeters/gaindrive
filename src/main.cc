@@ -12,13 +12,14 @@ int main(int argc, char* argv[])
 	{
 	cxxopts::Options options("gaindrive", "Subsonic-compatible music server");
 	options.add_options()
-		("port",       "Port to listen on",         cxxopts::value<int>()->default_value("4040"))
-		("config",     "Path to config file",       cxxopts::value<std::string>()->default_value("/etc/gaindrive.conf"))
-		("db",         "Path to database file",     cxxopts::value<std::string>()->default_value("/var/lib/gaindrive/gaindrive.db"))
-		("music-root", "Root music directory",      cxxopts::value<std::string>()->default_value("/music"))
+		("host",       "Host interface to listen on", cxxopts::value<std::string>()->default_value("127.0.0.1") )
+		("port",       "Port to listen on",           cxxopts::value<int>()->default_value("4040"))
+		("config",     "Path to config file",         cxxopts::value<std::string>()->default_value("/etc/gaindrive.conf"))
+		("db",         "Path to database file",       cxxopts::value<std::string>()->default_value("/var/lib/gaindrive/gaindrive.db"))
+		("music-root", "Root music directory",        cxxopts::value<std::string>()->default_value("/music"))
 		("no-scan",    "Skip startup filesystem scan")
-		("add-user",   "Create a user and exit",    cxxopts::value<std::string>())
-		("password",   "Password for --add-user",   cxxopts::value<std::string>())
+		("add-user",   "Create a user and exit",      cxxopts::value<std::string>())
+		("password",   "Password for --add-user",     cxxopts::value<std::string>())
 		("h,help",     "Show help")
 		;
 
@@ -28,7 +29,7 @@ int main(int argc, char* argv[])
 		return 0;
 		}
 
-	std::string host       = "127.0.0.1";
+	std::string host       = args["host"].as<std::string>();
 	int         port       = args["port"].as<int>();
 	std::string db_path    = args["db"].as<std::string>();
 	std::string music_root = args["music-root"].as<std::string>();
