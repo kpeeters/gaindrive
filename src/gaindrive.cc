@@ -1987,10 +1987,9 @@ GainDrive::GainDrive(const std::string& db_path,
 		             "Create one with --add-user <name> --password <pass>."
 		          << std::endl;
 
-	if (!no_scan) {
+	if (!no_scan)
 		std::thread([this]{ store_.scan(); }).detach();
-		watcher_.start();
-		}
+	watcher_.start();
 	}
 
 void GainDrive::listen(const std::string& host, int port)
