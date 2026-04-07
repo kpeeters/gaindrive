@@ -147,6 +147,22 @@ class MediaStore {
 
 		std::optional<SongInfo> get_song(int song_id);
 
+		// Full song metadata suitable for an API response.
+		std::optional<ChildEntry> get_song_entry(int song_id);
+
+		// ---- Search ----
+
+		struct SearchResult {
+			std::vector<ChildEntry> artists;
+			std::vector<ChildEntry> albums;
+			std::vector<ChildEntry> songs;
+			};
+
+		SearchResult search(const std::string& query,
+		                    int artist_count, int artist_offset,
+		                    int album_count,  int album_offset,
+		                    int song_count,   int song_offset);
+
 		// ---- Play queue / bookmarks ----
 
 		// Atomically replaces the user's play queue.
@@ -175,6 +191,20 @@ class MediaStore {
 		void create_bookmark(const std::string& username,
 		                     int song_id, int64_t position_ms,
 		                     const std::string& comment);
+
+		struct BookmarkInfo {
+			ChildEntry  entry;
+			int64_t     position;  // milliseconds
+			std::string comment;
+			std::string created;
+			std::string changed;
+			std::string username;
+			};
+
+		std::vector<BookmarkInfo> get_bookmarks(const std::string& username);
+
+		// Returns false if no bookmark existed.
+		bool delete_bookmark(const std::string& username, int song_id);
 
 		// Add/remove a star for the authenticated user.
 		// Exactly one of song_id, album_id, artist_id should be non-zero.
@@ -224,6 +254,9 @@ class MediaStore {
 		                     const std::optional<bool>& is_public,
 		                     const std::vector<int>& songs_to_add,
 		                     const std::vector<int>& indices_to_remove);
+
+		// Returns false if not found or not owned by username.
+		bool delete_playlist(int playlist_id, const std::string& username);
 
 	private:
 		std::string      music_root_;

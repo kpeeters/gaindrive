@@ -1483,6 +1483,221 @@ MediaStore::PlaylistInfo MediaStore::create_playlist(const std::string& username
 	return pl;
 	}
 
+bool MediaStore::delete_playlist(int playlist_id, const std::string& username)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement del(db_,
+		"DELETE FROM playlists WHERE id = ?"
+		" AND user_id = (SELECT id FROM users WHERE username = ?)");
+	del.bind(1, playlist_id);
+	del.bind(2, username);
+	del.exec();
+	return db_.getChanges() > 0;
+	}
+
+std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_,
+		"SELECT s.id, s.title, s.track_number, s.disc_number,"
+		"       s.year, s.genre, s.duration, s.bitrate,"
+		"       s.file_size, s.codec, s.folder_id,"
+		"       COALESCE(a.name,'') AS artist,"
+		"       COALESCE(al.title,'') AS album,"
+		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+		"            THEN s.folder_id ELSE -1 END AS cover_art_id"
+		" FROM songs s"
+		" LEFT JOIN albums al ON al.id = s.album_id"
+		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
+		" LEFT JOIN artists a ON a.id = sa.artist_id"
+		" WHERE s.id = ?");
+	q.bind(1, song_id);
+	if (!q.executeStep()) return std::nullopt;
+
+	ChildEntry e;
+	e.id           = q.getColumn(0).getInt();
+	e.is_dir       = false;
+	e.title        = q.getColumn(1).getString();
+	e.track_number = q.getColumn(2).getInt();
+	e.disc_number  = q.getColumn(3).getInt();
+	e.year         = q.getColumn(4).getInt();
+	e.genre        = q.getColumn(5).isNull() ? "" : q.getColumn(5).getString();
+	e.duration     = q.getColumn(6).getDouble();
+	e.bitrate      = q.getColumn(7).getInt();
+	e.file_size    = q.getColumn(8).getInt64();
+	e.codec        = q.getColumn(9).isNull() ? "" : q.getColumn(9).getString();
+	e.parent_id    = q.getColumn(10).getInt();
+	e.artist       = q.getColumn(11).getString();
+	e.album        = q.getColumn(12).getString();
+	e.cover_art_id = q.getColumn(13).getInt();
+	return e;
+	}
+
+MediaStore::SearchResult MediaStore::search(const std::string& query,
+                                             int artist_count, int artist_offset,
+                                             int album_count,  int album_offset,
+                                             int song_count,   int song_offset)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SearchResult result;
+	std::string pattern = "%" + query + "%";
+
+	// Artists — folder-level, depth-1 children of the root.
+	SQLite::Statement aq(db_,
+		"SELECT f.id, f.name"
+		" FROM folders f"
+		" WHERE f.parent_id = (SELECT id FROM folders WHERE parent_id IS NULL)"
+		"   AND LOWER(f.name) LIKE LOWER(?)"
+		" ORDER BY f.name COLLATE NOCASE"
+		" LIMIT ? OFFSET ?");
+	aq.bind(1, pattern);
+	aq.bind(2, artist_count);
+	aq.bind(3, artist_offset);
+	while (aq.executeStep()) {
+		ChildEntry e;
+		e.id        = aq.getColumn(0).getInt();
+		e.is_dir    = true;
+		e.title     = aq.getColumn(1).getString();
+		e.artist    = e.title;
+		e.parent_id = -1;
+		result.artists.push_back(std::move(e));
+		}
+
+	// Albums.
+	SQLite::Statement alq(db_,
+		"SELECT f.id, COALESCE(f.parent_id,-1),"
+		"       COALESCE(al.title, f.name),"
+		"       COALESCE(a.name,''),"
+		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+		"            THEN f.id ELSE -1 END AS cover_art_id"
+		" FROM albums al"
+		" JOIN folders f ON f.id = al.folder_id"
+		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
+		" LEFT JOIN artists a ON a.id = aa.artist_id"
+		" WHERE LOWER(COALESCE(al.title, f.name)) LIKE LOWER(?)"
+		" ORDER BY al.title COLLATE NOCASE"
+		" LIMIT ? OFFSET ?");
+	alq.bind(1, pattern);
+	alq.bind(2, album_count);
+	alq.bind(3, album_offset);
+	while (alq.executeStep()) {
+		ChildEntry e;
+		e.id           = alq.getColumn(0).getInt();
+		e.parent_id    = alq.getColumn(1).getInt();
+		e.is_dir       = true;
+		e.title        = alq.getColumn(2).getString();
+		e.album        = e.title;
+		e.artist       = alq.getColumn(3).getString();
+		e.cover_art_id = alq.getColumn(4).getInt();
+		result.albums.push_back(std::move(e));
+		}
+
+	// Songs.
+	SQLite::Statement sq(db_,
+		"SELECT s.id, s.title, s.track_number, s.disc_number,"
+		"       s.year, s.genre, s.duration, s.bitrate,"
+		"       s.file_size, s.codec, s.folder_id,"
+		"       COALESCE(a.name,'') AS artist,"
+		"       COALESCE(al.title,'') AS album,"
+		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+		"            THEN s.folder_id ELSE -1 END AS cover_art_id"
+		" FROM songs s"
+		" LEFT JOIN albums al ON al.id = s.album_id"
+		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
+		" LEFT JOIN artists a ON a.id = sa.artist_id"
+		" WHERE LOWER(s.title) LIKE LOWER(?)"
+		" ORDER BY s.title COLLATE NOCASE"
+		" LIMIT ? OFFSET ?");
+	sq.bind(1, pattern);
+	sq.bind(2, song_count);
+	sq.bind(3, song_offset);
+	while (sq.executeStep()) {
+		ChildEntry e;
+		e.id           = sq.getColumn(0).getInt();
+		e.is_dir       = false;
+		e.title        = sq.getColumn(1).getString();
+		e.track_number = sq.getColumn(2).getInt();
+		e.disc_number  = sq.getColumn(3).getInt();
+		e.year         = sq.getColumn(4).getInt();
+		e.genre        = sq.getColumn(5).isNull() ? "" : sq.getColumn(5).getString();
+		e.duration     = sq.getColumn(6).getDouble();
+		e.bitrate      = sq.getColumn(7).getInt();
+		e.file_size    = sq.getColumn(8).getInt64();
+		e.codec        = sq.getColumn(9).isNull() ? "" : sq.getColumn(9).getString();
+		e.parent_id    = sq.getColumn(10).getInt();
+		e.artist       = sq.getColumn(11).getString();
+		e.album        = sq.getColumn(12).getString();
+		e.cover_art_id = sq.getColumn(13).getInt();
+		result.songs.push_back(std::move(e));
+		}
+
+	return result;
+	}
+
+std::vector<MediaStore::BookmarkInfo> MediaStore::get_bookmarks(
+	const std::string& username)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_,
+		"SELECT s.id, s.title, s.track_number, s.disc_number,"
+		"       s.year, s.genre, s.duration, s.bitrate,"
+		"       s.file_size, s.codec, s.folder_id,"
+		"       COALESCE(a.name,'') AS artist,"
+		"       COALESCE(al.title,'') AS album,"
+		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+		"            THEN s.folder_id ELSE -1 END AS cover_art_id,"
+		"       b.position, COALESCE(b.comment,''), b.created, b.changed,"
+		"       u.username"
+		" FROM bookmarks b"
+		" JOIN users u ON u.id = b.user_id"
+		" JOIN songs s ON s.id = b.song_id"
+		" LEFT JOIN albums al ON al.id = s.album_id"
+		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
+		" LEFT JOIN artists a ON a.id = sa.artist_id"
+		" WHERE u.username = ?"
+		" ORDER BY b.created");
+	q.bind(1, username);
+
+	std::vector<BookmarkInfo> result;
+	while (q.executeStep()) {
+		BookmarkInfo bm;
+		bm.entry.id           = q.getColumn(0).getInt();
+		bm.entry.is_dir       = false;
+		bm.entry.title        = q.getColumn(1).getString();
+		bm.entry.track_number = q.getColumn(2).getInt();
+		bm.entry.disc_number  = q.getColumn(3).getInt();
+		bm.entry.year         = q.getColumn(4).getInt();
+		bm.entry.genre        = q.getColumn(5).isNull() ? "" : q.getColumn(5).getString();
+		bm.entry.duration     = q.getColumn(6).getDouble();
+		bm.entry.bitrate      = q.getColumn(7).getInt();
+		bm.entry.file_size    = q.getColumn(8).getInt64();
+		bm.entry.codec        = q.getColumn(9).isNull() ? "" : q.getColumn(9).getString();
+		bm.entry.parent_id    = q.getColumn(10).getInt();
+		bm.entry.artist       = q.getColumn(11).getString();
+		bm.entry.album        = q.getColumn(12).getString();
+		bm.entry.cover_art_id = q.getColumn(13).getInt();
+		bm.position           = q.getColumn(14).getInt64();
+		bm.comment            = q.getColumn(15).getString();
+		bm.created            = q.getColumn(16).getString();
+		bm.changed            = q.getColumn(17).getString();
+		bm.username           = q.getColumn(18).getString();
+		result.push_back(std::move(bm));
+		}
+	return result;
+	}
+
+bool MediaStore::delete_bookmark(const std::string& username, int song_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement del(db_,
+		"DELETE FROM bookmarks WHERE song_id = ?"
+		" AND user_id = (SELECT id FROM users WHERE username = ?)");
+	del.bind(1, song_id);
+	del.bind(2, username);
+	del.exec();
+	return db_.getChanges() > 0;
+	}
+
 bool MediaStore::update_playlist(int playlist_id, const std::string& username,
                                   const std::optional<std::string>& name,
                                   const std::optional<std::string>& comment,

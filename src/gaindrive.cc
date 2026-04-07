@@ -1656,6 +1656,241 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
+	// getSong — full metadata for a single track.
+	server_.Get("/rest/getSong.view", [this](const httplib::Request& req,
+	                                         httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+
+		auto err = [&](int code, const char* msg) {
+			if (use_json)
+				res.set_content(subsonic_error_json(code, msg), "application/json");
+			else
+				res.set_content(subsonic_error(code, msg),      "application/xml");
+			};
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) { err(10, "Required parameter missing: id."); return; }
+
+		auto song = store_.get_song_entry(std::stoi(it->second));
+		if (!song) { err(70, "Song not found."); return; }
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&song](nlohmann::json& r) {
+				r["song"] = song_entry_json(*song);
+				});
+		else
+			body = subsonic_ok([&song](XMLDocument& doc, XMLElement* root) {
+				root->InsertEndChild(song_entry_xml(doc, *song, "song"));
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// search2 / search3 — title/name substring search across artists, albums, songs.
+	// Both share identical logic; only the response envelope key differs.
+	auto search_handler = [this](const httplib::Request& req, httplib::Response& res,
+	                              const char* key) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+
+		auto qp = [&](const std::string& k, const std::string& def = "") {
+			auto it = req.params.find(k);
+			return it != req.params.end() ? it->second : def;
+			};
+
+		auto err = [&](int code, const char* msg) {
+			if (use_json)
+				res.set_content(subsonic_error_json(code, msg), "application/json");
+			else
+				res.set_content(subsonic_error(code, msg),      "application/xml");
+			};
+
+		std::string query = qp("query");
+		if (query.empty()) { err(10, "Required parameter missing: query."); return; }
+
+		int artist_count  = std::stoi(qp("artistCount",  "20"));
+		int artist_offset = std::stoi(qp("artistOffset", "0"));
+		int album_count   = std::stoi(qp("albumCount",   "20"));
+		int album_offset  = std::stoi(qp("albumOffset",  "0"));
+		int song_count    = std::stoi(qp("songCount",    "20"));
+		int song_offset   = std::stoi(qp("songOffset",   "0"));
+
+		auto sr = store_.search(query,
+		                        artist_count, artist_offset,
+		                        album_count,  album_offset,
+		                        song_count,   song_offset);
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&sr, key](nlohmann::json& r) {
+				nlohmann::json artists = nlohmann::json::array();
+				for (auto& a : sr.artists)
+					artists.push_back({{"id", a.id}, {"name", a.title}});
+
+				nlohmann::json albums = nlohmann::json::array();
+				for (auto& c : sr.albums) {
+					nlohmann::json al = {
+						{"id",     c.id},
+						{"parent", c.parent_id},
+						{"isDir",  true},
+						{"title",  c.title},
+						{"artist", c.artist},
+						{"album",  c.title}
+						};
+					if (c.cover_art_id >= 0) al["coverArt"] = c.cover_art_id;
+					albums.push_back(al);
+					}
+
+				nlohmann::json songs = nlohmann::json::array();
+				for (auto& s : sr.songs)
+					songs.push_back(song_entry_json(s));
+
+				r[key] = {{"artist", artists}, {"album", albums}, {"song", songs}};
+				});
+		else
+			body = subsonic_ok([&sr, key](XMLDocument& doc, XMLElement* root) {
+				auto* result = doc.NewElement(key);
+
+				for (auto& a : sr.artists) {
+					auto* el = doc.NewElement("artist");
+					el->SetAttribute("id",   a.id);
+					el->SetAttribute("name", a.title.c_str());
+					result->InsertEndChild(el);
+					}
+
+				for (auto& c : sr.albums) {
+					auto* el = doc.NewElement("album");
+					el->SetAttribute("id",     c.id);
+					el->SetAttribute("parent", c.parent_id);
+					el->SetAttribute("isDir",  true);
+					el->SetAttribute("title",  c.title.c_str());
+					el->SetAttribute("artist", c.artist.c_str());
+					el->SetAttribute("album",  c.title.c_str());
+					if (c.cover_art_id >= 0) el->SetAttribute("coverArt", c.cover_art_id);
+					result->InsertEndChild(el);
+					}
+
+				for (auto& s : sr.songs)
+					result->InsertEndChild(song_entry_xml(doc, s, "song"));
+
+				root->InsertEndChild(result);
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		};
+	server_.Get("/rest/search2.view", [search_handler](const httplib::Request& req,
+	                                                    httplib::Response& res) {
+		search_handler(req, res, "searchResult2");
+		});
+	server_.Get("/rest/search3.view", [search_handler](const httplib::Request& req,
+	                                                    httplib::Response& res) {
+		search_handler(req, res, "searchResult3");
+		});
+
+	// getBookmarks — list all bookmarks for the authenticated user.
+	server_.Get("/rest/getBookmarks.view", [this](const httplib::Request& req,
+	                                               httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		std::string user = req.params.find("u")->second;
+		auto bms = store_.get_bookmarks(user);
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&bms](nlohmann::json& r) {
+				nlohmann::json arr = nlohmann::json::array();
+				for (auto& bm : bms) {
+					nlohmann::json b = {
+						{"position", bm.position},
+						{"username", bm.username},
+						{"comment",  bm.comment},
+						{"created",  bm.created},
+						{"changed",  bm.changed},
+						{"entry",    song_entry_json(bm.entry)}
+						};
+					arr.push_back(b);
+					}
+				r["bookmarks"] = {{"bookmark", arr}};
+				});
+		else
+			body = subsonic_ok([&bms](XMLDocument& doc, XMLElement* root) {
+				auto* bookmarks = doc.NewElement("bookmarks");
+				for (auto& bm : bms) {
+					auto* b = doc.NewElement("bookmark");
+					b->SetAttribute("position", bm.position);
+					b->SetAttribute("username", bm.username.c_str());
+					b->SetAttribute("comment",  bm.comment.c_str());
+					b->SetAttribute("created",  bm.created.c_str());
+					b->SetAttribute("changed",  bm.changed.c_str());
+					b->InsertEndChild(song_entry_xml(doc, bm.entry, "entry"));
+					bookmarks->InsertEndChild(b);
+					}
+				root->InsertEndChild(bookmarks);
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// deleteBookmark — remove a bookmark by song id.
+	server_.Get("/rest/deleteBookmark.view", [this](const httplib::Request& req,
+	                                                 httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		std::string user = req.params.find("u")->second;
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			auto msg = "Required parameter missing: id.";
+			res.set_content(use_json ? subsonic_error_json(10, msg)
+			                         : subsonic_error(10, msg),
+			                use_json ? "application/json" : "application/xml");
+			return;
+			}
+
+		if (!store_.delete_bookmark(user, std::stoi(it->second))) {
+			auto msg = "Bookmark not found.";
+			res.set_content(use_json ? subsonic_error_json(70, msg)
+			                         : subsonic_error(70, msg),
+			                use_json ? "application/json" : "application/xml");
+			return;
+			}
+
+		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// deletePlaylist — remove a playlist owned by the authenticated user.
+	server_.Get("/rest/deletePlaylist.view", [this](const httplib::Request& req,
+	                                                 httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		std::string user = req.params.find("u")->second;
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			auto msg = "Required parameter missing: id.";
+			res.set_content(use_json ? subsonic_error_json(10, msg)
+			                         : subsonic_error(10, msg),
+			                use_json ? "application/json" : "application/xml");
+			return;
+			}
+
+		if (!store_.delete_playlist(std::stoi(it->second), user)) {
+			auto msg = "Playlist not found.";
+			res.set_content(use_json ? subsonic_error_json(70, msg)
+			                         : subsonic_error(70, msg),
+			                use_json ? "application/json" : "application/xml");
+			return;
+			}
+
+		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	// listCastDevices — return Chromecast devices found via mDNS on the LAN.
 	server_.Get("/rest/listCastDevices.view", [this](const httplib::Request& req,
 	                                                  httplib::Response& res) {
