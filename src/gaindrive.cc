@@ -895,6 +895,82 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
+	// getArtist — single artist with album list.
+	server_.Get("/rest/getArtist.view", [this](const httplib::Request& req,
+	                                           httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			if (use_json)
+				res.set_content(subsonic_error_json(code, msg), "application/json");
+			else
+				res.set_content(subsonic_error(code, msg),      "application/xml");
+			};
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) { err(10, "Required parameter missing: id."); return; }
+
+		auto info = store_.get_artist(std::stoi(it->second));
+		if (!info) { err(70, "Artist not found."); return; }
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&info](nlohmann::json& r) {
+				nlohmann::json arr = nlohmann::json::array();
+				for (auto& al : info->albums) {
+					nlohmann::json entry = {
+						{"id",        al.id},
+						{"parent",    al.parent_id},
+						{"isDir",     true},
+						{"title",     al.title},
+						{"name",      al.title},
+						{"artist",    al.artist},
+						{"songCount", al.song_count},
+						{"duration",  al.duration},
+						{"created",   al.created}
+						};
+					if (al.cover_art_id >= 0) entry["coverArt"] = al.cover_art_id;
+					if (al.year > 0)          entry["year"]     = al.year;
+					if (!al.genre.empty())    entry["genre"]    = al.genre;
+					arr.push_back(std::move(entry));
+					}
+				r["artist"] = {
+					{"id",         info->artist.id},
+					{"name",       info->artist.name},
+					{"albumCount", info->artist.album_count},
+					{"album",      arr}
+					};
+				});
+		else
+			body = subsonic_ok([&info](XMLDocument& doc, XMLElement* root) {
+				auto* artist_el = doc.NewElement("artist");
+				artist_el->SetAttribute("id",         info->artist.id);
+				artist_el->SetAttribute("name",       info->artist.name.c_str());
+				artist_el->SetAttribute("albumCount", info->artist.album_count);
+				for (auto& al : info->albums) {
+					auto* el = doc.NewElement("album");
+					el->SetAttribute("id",        al.id);
+					el->SetAttribute("parent",    al.parent_id);
+					el->SetAttribute("isDir",     true);
+					el->SetAttribute("title",     al.title.c_str());
+					el->SetAttribute("name",      al.title.c_str());
+					el->SetAttribute("artist",    al.artist.c_str());
+					if (al.cover_art_id >= 0)
+						el->SetAttribute("coverArt", al.cover_art_id);
+					el->SetAttribute("songCount", al.song_count);
+					el->SetAttribute("duration",  al.duration);
+					if (!al.created.empty()) el->SetAttribute("created", al.created.c_str());
+					if (al.year > 0)         el->SetAttribute("year",    al.year);
+					if (!al.genre.empty())   el->SetAttribute("genre",   al.genre.c_str());
+					artist_el->InsertEndChild(el);
+					}
+				root->InsertEndChild(artist_el);
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	// getMusicDirectory — contents of a folder (album dirs or song files).
 	server_.Get("/rest/getMusicDirectory.view", [this](const httplib::Request& req,
 	                                                    httplib::Response& res) {

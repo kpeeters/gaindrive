@@ -118,6 +118,13 @@ class MediaStore {
 			const std::string& genre = "",
 			const std::string& username = "");
 
+		struct ArtistInfo {
+			ArtistDir               artist;
+			std::vector<AlbumEntry> albums;
+			};
+
+		std::optional<ArtistInfo> get_artist(int folder_id);
+
 		// Returns the filesystem path of the cover image for an album folder,
 		// or empty string if none is stored.
 		std::string get_cover_path(int folder_id);

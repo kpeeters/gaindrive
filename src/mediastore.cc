@@ -961,6 +961,59 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 	return result;
 	}
 
+std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	// Look up the artist folder itself.
+	SQLite::Statement fsel(db_,
+		"SELECT id, name FROM folders WHERE id = ?");
+	fsel.bind(1, folder_id);
+	if (!fsel.executeStep()) return std::nullopt;
+
+	ArtistInfo info;
+	info.artist.id   = fsel.getColumn(0).getInt();
+	info.artist.name = fsel.getColumn(1).getString();
+
+	// Fetch albums whose folder is a direct child of this artist folder.
+	SQLite::Statement asel(db_,
+		"SELECT f.id, COALESCE(f.parent_id,-1),"
+		"       COALESCE(al.title, f.name),"
+		"       COALESCE(a.name,''),"
+		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+		"            THEN f.id ELSE -1 END,"
+		"       COALESCE(al.song_count,0),"
+		"       CAST(COALESCE(al.duration,0) AS INTEGER),"
+		"       COALESCE(al.year,0),"
+		"       COALESCE(al.genre,''),"
+		"       COALESCE(al.created,'')"
+		" FROM albums al"
+		" JOIN folders f ON f.id = al.folder_id"
+		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
+		" LEFT JOIN artists a ON a.id = aa.artist_id"
+		" WHERE f.parent_id = ?"
+		" ORDER BY al.year, al.title COLLATE NOCASE");
+	asel.bind(1, folder_id);
+
+	while (asel.executeStep()) {
+		AlbumEntry e;
+		e.id           = asel.getColumn(0).getInt();
+		e.parent_id    = asel.getColumn(1).getInt();
+		e.title        = asel.getColumn(2).getString();
+		e.artist       = asel.getColumn(3).getString();
+		e.cover_art_id = asel.getColumn(4).getInt();
+		e.song_count   = asel.getColumn(5).getInt();
+		e.duration     = asel.getColumn(6).getInt();
+		e.year         = asel.getColumn(7).getInt();
+		e.genre        = asel.getColumn(8).isNull() ? "" : asel.getColumn(8).getString();
+		e.created      = asel.getColumn(9).isNull() ? "" : asel.getColumn(9).getString();
+		info.albums.push_back(std::move(e));
+		}
+
+	info.artist.album_count = (int)info.albums.size();
+	return info;
+	}
+
 // ---- Play queue / bookmarks ------------------------------------------
 
 void MediaStore::save_play_queue(const std::string& username,
