@@ -829,7 +829,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 	// are absorbed into the song list below).
 	if (!flatten) {
 		SQLite::Statement dsel(db_music_,
-			"SELECT f.id, f.name,"
+			"SELECT f.id, COALESCE(al.title, f.name) AS title,"
 			"       COALESCE(a.name, '') AS artist,"
 			"       COALESCE(al.title, f.name) AS album,"
 			"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
