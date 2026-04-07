@@ -306,7 +306,13 @@ MediaStore::Counts MediaStore::count_audio_files()
 			if (!b.is_directory()) continue;
 			++c.albums;
 			for (auto& f : fs::directory_iterator(b.path())) {
-				if (f.is_regular_file() && is_audio_file(f.path())) ++c.files;
+				if (f.is_regular_file() && is_audio_file(f.path()))
+					++c.files;
+				else if (f.is_directory()) {
+					// Disc subdirectory — count one level deeper, same as scan().
+					for (auto& g : fs::directory_iterator(f.path()))
+						if (g.is_regular_file() && is_audio_file(g.path())) ++c.files;
+					}
 				}
 			}
 		}
