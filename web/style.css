@@ -261,8 +261,13 @@ body {
    align-items: baseline;
    gap: 1rem;
    margin-bottom: 1.2rem;
+   padding-top: 0.2rem;
    padding-bottom: 0.8rem;
    border-bottom: 1px solid var(--border);
+   position: sticky;
+   top: 0;
+   background: var(--bg);
+   z-index: 1;
 }
 
 .back-link {
