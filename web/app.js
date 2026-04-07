@@ -191,6 +191,17 @@ async function viewAlbums(artistId, artistName, container) {
       row.className = 'album-row';
       row.dataset.id = album.id;
 
+      const cover = document.createElement('img');
+      cover.className = 'album-cover';
+      cover.width  = 80;
+      cover.height = 80;
+      cover.alt    = '';
+      if (album.coverArt)
+         cover.src = apiUrl('getCoverArt', {id: album.coverArt, size: 80});
+
+      const info = document.createElement('div');
+      info.className = 'album-info';
+
       const title = document.createElement('span');
       title.className = 'album-title';
       title.textContent = album.title;
@@ -202,8 +213,10 @@ async function viewAlbums(artistId, artistName, container) {
       if (album.songCount) parts.push(`${album.songCount} tracks`);
       meta.textContent = parts.join(' · ');
 
-      row.appendChild(title);
-      row.appendChild(meta);
+      info.appendChild(title);
+      info.appendChild(meta);
+      row.appendChild(cover);
+      row.appendChild(info);
       row.addEventListener('click', () => {
          viewTracks(album.id, album.title, artistId, artistName, container);
          });
