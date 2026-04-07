@@ -138,7 +138,7 @@ async function viewArtists(container) {
 
 // ── Shell ───────────────────────────────────────────────────────────────────
 
-function showShell() {
+async function showShell() {
    console.log('[shell] showing main shell');
    document.getElementById('login-screen').hidden = true;
    const shell = document.getElementById('app-shell');
