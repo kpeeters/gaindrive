@@ -86,14 +86,54 @@ async function tryLogin(server, user, password) {
 
 // ── Views ───────────────────────────────────────────────────────────────────
 
-// Placeholder — individual view modules will fill this out.
-function showView(name) {
+async function showView(name) {
    console.log('[view] showView', name);
    document.querySelectorAll('#sidebar a').forEach(a => {
       a.classList.toggle('active', a.dataset.view === name);
    });
-   document.getElementById('content').innerHTML =
-      `<p style="color:var(--text-dim)">${name}</p>`;
+   const content = document.getElementById('content');
+   content.innerHTML = '';
+
+   if (name === 'artists') {
+      await viewArtists(content);
+   } else {
+      content.innerHTML = `<p style="color:var(--text-dim)">${name}</p>`;
+   }
+}
+
+async function viewArtists(container) {
+   console.log('[artists] loading');
+   const sr = await apiCall('getArtists');
+   const indexes = sr.artists?.index ?? [];
+   console.log('[artists] got', indexes.reduce((n, i) => n + i.artist.length, 0), 'artists');
+
+   const frag = document.createDocumentFragment();
+   for (const index of indexes) {
+      const heading = document.createElement('h2');
+      heading.className = 'index-heading';
+      heading.textContent = index.name;
+      frag.appendChild(heading);
+
+      for (const artist of index.artist) {
+         const row = document.createElement('div');
+         row.className = 'artist-row';
+         row.dataset.id = artist.id;
+
+         const name = document.createElement('span');
+         name.className = 'artist-name';
+         name.textContent = artist.name;
+
+         const count = document.createElement('span');
+         count.className = 'artist-albums';
+         count.textContent = artist.albumCount === 1
+            ? '1 album' : `${artist.albumCount} albums`;
+
+         row.appendChild(name);
+         row.appendChild(count);
+         frag.appendChild(row);
+      }
+   }
+   container.appendChild(frag);
 }
 
 // ── Shell ───────────────────────────────────────────────────────────────────
@@ -109,11 +149,11 @@ function showShell() {
    shell.querySelectorAll('[data-view]').forEach(a => {
       a.addEventListener('click', e => {
          e.preventDefault();
-         showView(a.dataset.view);
+         showView(a.dataset.view).catch(err => console.error('[view] error', err));
       });
    });
 
-   showView('artists');
+   await showView('artists');
 }
 
 function showLogin() {
