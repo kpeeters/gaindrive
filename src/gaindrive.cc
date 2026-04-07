@@ -502,6 +502,85 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 	res.set_content(body, use_json ? "application/json" : "application/xml");
 	}
 
+// ---- Album list helper -----------------------------------------------
+
+// Shared implementation for getAlbumList and getAlbumList2.
+// key is "albumList" or "albumList2".
+static void handle_album_list(const httplib::Request& req, httplib::Response& res,
+                               MediaStore& store, bool debug, const char* key)
+	{
+	bool use_json = (fmt_of(req) == "json");
+
+	auto param_int = [&](const char* name, int def) {
+		auto it = req.params.find(name);
+		return it != req.params.end() ? std::stoi(it->second) : def;
+		};
+	auto param_str = [&](const char* name) {
+		auto it = req.params.find(name);
+		return it != req.params.end() ? it->second : std::string{};
+		};
+
+	std::string type     = param_str("type");
+	if (type.empty()) type = "newest";
+	int size             = std::min(500, std::max(1, param_int("size", 10)));
+	int offset           = param_int("offset", 0);
+	int from_year        = param_int("fromYear", 0);
+	int to_year          = param_int("toYear",   0);
+	std::string genre    = param_str("genre");
+	std::string username = param_str("u");
+
+	auto albums = store.get_album_list(type, size, offset,
+	                                   from_year, to_year, genre, username);
+
+	std::string body;
+	if (use_json)
+		body = subsonic_ok_json([&albums, key](nlohmann::json& r) {
+			nlohmann::json arr = nlohmann::json::array();
+			for (auto& al : albums) {
+				nlohmann::json entry = {
+					{"id",        al.id},
+					{"parent",    al.parent_id},
+					{"isDir",     true},
+					{"title",     al.title},
+					{"name",      al.title},
+					{"artist",    al.artist},
+					{"songCount", al.song_count},
+					{"duration",  al.duration},
+					{"created",   al.created}
+					};
+				if (al.cover_art_id >= 0) entry["coverArt"] = al.cover_art_id;
+				if (al.year > 0)          entry["year"]     = al.year;
+				if (!al.genre.empty())    entry["genre"]    = al.genre;
+				arr.push_back(std::move(entry));
+				}
+			r[key] = {{"album", arr}};
+			});
+	else
+		body = subsonic_ok([&albums, key](XMLDocument& doc, XMLElement* root) {
+			auto* list = doc.NewElement(key);
+			for (auto& al : albums) {
+				auto* el = doc.NewElement("album");
+				el->SetAttribute("id",        al.id);
+				el->SetAttribute("parent",    al.parent_id);
+				el->SetAttribute("isDir",     true);
+				el->SetAttribute("title",     al.title.c_str());
+				el->SetAttribute("name",      al.title.c_str());
+				el->SetAttribute("artist",    al.artist.c_str());
+				if (al.cover_art_id >= 0)
+					el->SetAttribute("coverArt", al.cover_art_id);
+				el->SetAttribute("songCount", al.song_count);
+				el->SetAttribute("duration",  al.duration);
+				if (!al.created.empty()) el->SetAttribute("created", al.created.c_str());
+				if (al.year > 0)         el->SetAttribute("year",    al.year);
+				if (!al.genre.empty())   el->SetAttribute("genre",   al.genre.c_str());
+				list->InsertEndChild(el);
+				}
+			root->InsertEndChild(list);
+			});
+	if (debug) std::cout << body << "\n";
+	res.set_content(body, use_json ? "application/json" : "application/xml");
+	}
+
 // ---- GainDrive --------------------------------------------------------
 
 GainDrive::GainDrive(const std::string& db_path,
@@ -828,6 +907,18 @@ GainDrive::GainDrive(const std::string& db_path,
 				});
 		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// getAlbumList / getAlbumList2 — both use the same folder-based logic.
+	server_.Get("/rest/getAlbumList.view", [this](const httplib::Request& req,
+	                                              httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		handle_album_list(req, res, store_, debug_, "albumList");
+		});
+	server_.Get("/rest/getAlbumList2.view", [this](const httplib::Request& req,
+	                                               httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		handle_album_list(req, res, store_, debug_, "albumList2");
 		});
 
 	// getArtistInfo / getArtistInfo2 — MusicBrainz lookup, result cached in DB.

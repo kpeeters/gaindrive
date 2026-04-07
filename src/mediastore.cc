@@ -866,6 +866,96 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 	return dir;
 	}
 
+// ---- Album list ----------------------------------------------------------
+
+std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
+	const std::string& type,
+	int size, int offset,
+	int from_year, int to_year,
+	const std::string& genre,
+	const std::string& username)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	// Base SELECT — common to all types.
+	std::string sql =
+		"SELECT f.id, COALESCE(f.parent_id,-1),"
+		"       COALESCE(al.title, f.name),"
+		"       COALESCE(a.name,''),"
+		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+		"            THEN f.id ELSE -1 END,"
+		"       COALESCE(al.song_count,0),"
+		"       CAST(COALESCE(al.duration,0) AS INTEGER),"
+		"       COALESCE(al.year,0),"
+		"       COALESCE(al.genre,''),"
+		"       COALESCE(al.created,'')"
+		" FROM albums al"
+		" JOIN folders f ON f.id = al.folder_id"
+		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
+		" LEFT JOIN artists a ON a.id = aa.artist_id";
+
+	// Extra joins for play-count-based types.
+	bool play_count_join = (type == "frequent" || type == "recent");
+	if (play_count_join)
+		sql += " LEFT JOIN songs s ON s.album_id = al.id"
+		       " LEFT JOIN play_counts pc ON pc.song_id = s.id"
+		       " AND pc.user_id = (SELECT id FROM users WHERE username = ?)";
+
+	// Join for starred.
+	if (type == "starred")
+		sql += " JOIN stars st ON st.album_id = f.id"
+		       " JOIN users u ON u.id = st.user_id AND u.username = ?";
+
+	// WHERE clause.
+	if      (type == "byYear")  sql += " WHERE al.year BETWEEN ? AND ?";
+	else if (type == "byGenre") sql += " WHERE LOWER(COALESCE(al.genre,'')) = LOWER(?)";
+
+	// GROUP BY needed when aggregating play counts.
+	if (play_count_join) sql += " GROUP BY al.id";
+
+	// ORDER BY.
+	if      (type == "newest")              sql += " ORDER BY al.created DESC";
+	else if (type == "random")              sql += " ORDER BY RANDOM()";
+	else if (type == "alphabeticalByName")  sql += " ORDER BY al.title COLLATE NOCASE";
+	else if (type == "alphabeticalByArtist")
+		sql += " ORDER BY COALESCE(a.name,'') COLLATE NOCASE, al.title COLLATE NOCASE";
+	else if (type == "frequent")            sql += " ORDER BY SUM(COALESCE(pc.count,0)) DESC";
+	else if (type == "recent")              sql += " ORDER BY MAX(COALESCE(pc.last_played,'')) DESC";
+	else if (type == "starred")             sql += " ORDER BY st.created DESC";
+	else if (type == "byYear")              sql += " ORDER BY al.year";
+	else if (type == "byGenre")             sql += " ORDER BY al.title COLLATE NOCASE";
+	else                                    sql += " ORDER BY al.created DESC"; // fallback
+
+	sql += " LIMIT ? OFFSET ?";
+
+	SQLite::Statement q(db_, sql);
+	int idx = 1;
+
+	if (play_count_join)  q.bind(idx++, username);
+	if (type == "starred") q.bind(idx++, username);
+	if (type == "byYear") { q.bind(idx++, from_year); q.bind(idx++, to_year); }
+	if (type == "byGenre")  q.bind(idx++, genre);
+	q.bind(idx++, size);
+	q.bind(idx++, offset);
+
+	std::vector<AlbumEntry> result;
+	while (q.executeStep()) {
+		AlbumEntry e;
+		e.id           = q.getColumn(0).getInt();
+		e.parent_id    = q.getColumn(1).getInt();
+		e.title        = q.getColumn(2).getString();
+		e.artist       = q.getColumn(3).getString();
+		e.cover_art_id = q.getColumn(4).getInt();
+		e.song_count   = q.getColumn(5).getInt();
+		e.duration     = q.getColumn(6).getInt();
+		e.year         = q.getColumn(7).getInt();
+		e.genre        = q.getColumn(8).isNull() ? "" : q.getColumn(8).getString();
+		e.created      = q.getColumn(9).isNull() ? "" : q.getColumn(9).getString();
+		result.push_back(std::move(e));
+		}
+	return result;
+	}
+
 // ---- Play queue / bookmarks ------------------------------------------
 
 void MediaStore::save_play_queue(const std::string& username,

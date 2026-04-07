@@ -94,6 +94,30 @@ class MediaStore {
 
 		std::optional<DirInfo> get_directory(int folder_id, bool flat_multi_disc = true);
 
+		struct AlbumEntry {
+			int         id;           // folder_id (used as Subsonic album id)
+			int         parent_id;    // artist folder_id
+			std::string title;
+			std::string artist;
+			int         cover_art_id = -1;
+			int         song_count   = 0;
+			int         duration     = 0;  // total seconds
+			int         year         = 0;
+			std::string genre;
+			std::string created;
+			};
+
+		// type: newest | random | alphabeticalByName | alphabeticalByArtist |
+		//       frequent | recent | starred | byYear | byGenre
+		// from_year/to_year: used for byYear; genre: used for byGenre.
+		// username: required for frequent, recent, starred.
+		std::vector<AlbumEntry> get_album_list(
+			const std::string& type,
+			int size, int offset,
+			int from_year = 0, int to_year = 0,
+			const std::string& genre = "",
+			const std::string& username = "");
+
 		// Returns the filesystem path of the cover image for an album folder,
 		// or empty string if none is stored.
 		std::string get_cover_path(int folder_id);
