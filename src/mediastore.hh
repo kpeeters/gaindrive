@@ -260,8 +260,8 @@ class MediaStore {
 
 	private:
 		std::string      music_root_;
-		SQLite::Database db_;
-		std::mutex       db_mutex_;  // guards db_ across scan thread + API threads
+		SQLite::Database db_music_;
+		std::mutex       db_mutex_;  // guards db_music_ across scan thread + API threads
 
 		void create_schema();
 

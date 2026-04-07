@@ -70,19 +70,34 @@ static int64_t mtime_of(const fs::path& p)
 
 // ---- MediaStore -------------------------------------------------------
 
+// Insert suffix before ".db" extension, or append if no extension.
+static std::string derive_path(const std::string& base, const std::string& suffix)
+	{
+	auto dot = base.rfind(".db");
+	if (dot != std::string::npos && dot == base.size() - 3)
+		return base.substr(0, dot) + suffix + ".db";
+	return base + suffix;
+	}
+
 MediaStore::MediaStore(const std::string& db_path, const std::string& music_root)
 	: music_root_(music_root),
-	  db_(db_path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)
+	  db_music_(derive_path(db_path, "-music"), SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)
 	{
-	db_.exec("PRAGMA journal_mode=WAL");
-	db_.exec("PRAGMA foreign_keys=ON");
+	std::string client_path = derive_path(db_path, "-client");
+	db_music_.exec("PRAGMA journal_mode=WAL");
+	db_music_.exec("PRAGMA foreign_keys=ON");
+	db_music_.exec("ATTACH DATABASE '" + client_path + "' AS client");
+	db_music_.exec("PRAGMA client.journal_mode=WAL");
+	db_music_.exec("PRAGMA client.foreign_keys=ON");
 	create_schema();
 	}
 
 void MediaStore::create_schema()
 	{
-	SQLite::Transaction txn(db_);
-	db_.exec(R"(
+	SQLite::Transaction txn(db_music_);
+
+	// Music library tables (gaindrive-music.db, main schema).
+	db_music_.exec(R"(
 		CREATE TABLE IF NOT EXISTS folders (
 			id           INTEGER PRIMARY KEY,
 			parent_id    INTEGER REFERENCES folders(id),
@@ -167,7 +182,19 @@ void MediaStore::create_schema()
 		CREATE INDEX IF NOT EXISTS idx_song_artists_artist ON song_artists(artist_id);
 		CREATE INDEX IF NOT EXISTS idx_song_artists_role   ON song_artists(role);
 
-		CREATE TABLE IF NOT EXISTS users (
+		CREATE TABLE IF NOT EXISTS artist_info_cache (
+			folder_id   INTEGER PRIMARY KEY REFERENCES folders(id),
+			mbid        TEXT NOT NULL DEFAULT '',
+			last_fm_url TEXT NOT NULL DEFAULT '',
+			biography   TEXT NOT NULL DEFAULT '',
+			image_url   TEXT NOT NULL DEFAULT '',
+			fetched_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+		);
+	)");
+
+	// Client/user data tables (gaindrive-client.db, attached as "client" schema).
+	db_music_.exec(R"(
+		CREATE TABLE IF NOT EXISTS client.users (
 			id           INTEGER PRIMARY KEY,
 			username     TEXT NOT NULL UNIQUE,
 			password_enc TEXT NOT NULL,
@@ -178,24 +205,24 @@ void MediaStore::create_schema()
 			last_access  DATETIME
 		);
 
-		CREATE TABLE IF NOT EXISTS stars (
+		CREATE TABLE IF NOT EXISTS client.stars (
 			user_id   INTEGER NOT NULL REFERENCES users(id)   ON DELETE CASCADE,
-			song_id   INTEGER          REFERENCES songs(id)   ON DELETE CASCADE,
-			album_id  INTEGER          REFERENCES albums(id)  ON DELETE CASCADE,
-			artist_id INTEGER          REFERENCES artists(id) ON DELETE CASCADE,
+			song_id   INTEGER,
+			album_id  INTEGER,
+			artist_id INTEGER,
 			created   DATETIME DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(user_id, song_id, album_id, artist_id)
 		);
 
-		CREATE TABLE IF NOT EXISTS play_counts (
+		CREATE TABLE IF NOT EXISTS client.play_counts (
 			user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			song_id     INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+			song_id     INTEGER NOT NULL,
 			count       INTEGER DEFAULT 0,
 			last_played DATETIME,
 			PRIMARY KEY (user_id, song_id)
 		);
 
-		CREATE TABLE IF NOT EXISTS playlists (
+		CREATE TABLE IF NOT EXISTS client.playlists (
 			id        INTEGER PRIMARY KEY,
 			user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			name      TEXT NOT NULL,
@@ -205,16 +232,16 @@ void MediaStore::create_schema()
 			updated   DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 
-		CREATE TABLE IF NOT EXISTS playlist_songs (
+		CREATE TABLE IF NOT EXISTS client.playlist_songs (
 			playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
-			song_id     INTEGER NOT NULL REFERENCES songs(id)     ON DELETE CASCADE,
+			song_id     INTEGER NOT NULL,
 			position    INTEGER NOT NULL,
 			PRIMARY KEY (playlist_id, position)
 		);
 
-		CREATE TABLE IF NOT EXISTS play_queue (
+		CREATE TABLE IF NOT EXISTS client.play_queue (
 			user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			song_id    INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+			song_id    INTEGER NOT NULL,
 			position   INTEGER NOT NULL,
 			is_current INTEGER DEFAULT 0,
 			offset_ms  INTEGER DEFAULT 0,
@@ -223,44 +250,36 @@ void MediaStore::create_schema()
 			PRIMARY KEY (user_id, position)
 		);
 
-		CREATE TABLE IF NOT EXISTS now_playing (
+		CREATE TABLE IF NOT EXISTS client.now_playing (
 			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			song_id INTEGER NOT NULL REFERENCES songs(id),
+			song_id INTEGER NOT NULL,
 			client  TEXT,
 			started DATETIME DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (user_id)
 		);
 
-		CREATE TABLE IF NOT EXISTS bookmarks (
+		CREATE TABLE IF NOT EXISTS client.bookmarks (
 			user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			song_id   INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+			song_id   INTEGER NOT NULL,
 			position  INTEGER NOT NULL DEFAULT 0,
 			comment   TEXT,
 			created   DATETIME DEFAULT CURRENT_TIMESTAMP,
 			changed   DATETIME DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (user_id, song_id)
 		);
-
-		CREATE TABLE IF NOT EXISTS artist_info_cache (
-			folder_id   INTEGER PRIMARY KEY REFERENCES folders(id),
-			mbid        TEXT NOT NULL DEFAULT '',
-			last_fm_url TEXT NOT NULL DEFAULT '',
-			biography   TEXT NOT NULL DEFAULT '',
-			image_url   TEXT NOT NULL DEFAULT '',
-			fetched_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
-		);
 	)");
+
 	txn.commit();
 
 	// Migrations for existing databases: add columns if they don't exist yet.
-	try { db_.exec("ALTER TABLE artist_info_cache ADD COLUMN biography TEXT NOT NULL DEFAULT ''"); }
+	try { db_music_.exec("ALTER TABLE artist_info_cache ADD COLUMN biography TEXT NOT NULL DEFAULT ''"); }
 	catch (const SQLite::Exception&) {}
-	try { db_.exec("ALTER TABLE artist_info_cache ADD COLUMN image_url TEXT NOT NULL DEFAULT ''"); }
+	try { db_music_.exec("ALTER TABLE artist_info_cache ADD COLUMN image_url TEXT NOT NULL DEFAULT ''"); }
 	catch (const SQLite::Exception&) {}
 
 	// Backfill song_artists from album_artists for any songs that were scanned
 	// before this link was introduced.
-	db_.exec(
+	db_music_.exec(
 		"INSERT OR IGNORE INTO song_artists (song_id, artist_id, role)"
 		" SELECT s.id, aa.artist_id, 'artist'"
 		" FROM songs s"
@@ -308,7 +327,7 @@ void MediaStore::scan()
 	int    processed  = 0;
 
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Transaction txn(db_);
+	SQLite::Transaction txn(db_music_);
 
 	int root_id = upsert_folder(fs::path(music_root_), -1);
 
@@ -332,7 +351,7 @@ void MediaStore::scan()
 			std::cout << stamp() << "    cover: "
 			          << (cover.empty() ? "(none)" : cover) << std::endl;
 			if (!cover.empty()) {
-				SQLite::Statement upd(db_,
+				SQLite::Statement upd(db_music_,
 					"UPDATE albums SET cover_path = ? WHERE id = ?");
 				upd.bind(1, cover);
 				upd.bind(2, album_id);
@@ -371,7 +390,7 @@ void MediaStore::scan()
 				}
 
 			if (disc_count > 1) {
-				SQLite::Statement upd(db_, "UPDATE albums SET disc_count=? WHERE id=?");
+				SQLite::Statement upd(db_music_, "UPDATE albums SET disc_count=? WHERE id=?");
 				upd.bind(1, disc_count);
 				upd.bind(2, album_id);
 				upd.exec();
@@ -379,7 +398,7 @@ void MediaStore::scan()
 
 			// Derive album year from the first song that has one tagged.
 			{
-			SQLite::Statement upd(db_,
+			SQLite::Statement upd(db_music_,
 				"UPDATE albums SET year = ("
 				"  SELECT year FROM songs WHERE album_id = ? AND year > 0"
 				"  ORDER BY disc_number, track_number LIMIT 1"
@@ -419,7 +438,7 @@ int MediaStore::upsert_folder(const fs::path& path, int parent_id)
 	if (name.empty()) name = path_str;  // for the root itself
 
 	if (parent_id < 0) {
-		SQLite::Statement ins(db_,
+		SQLite::Statement ins(db_music_,
 			"INSERT OR IGNORE INTO folders (path, name, last_scanned)"
 			" VALUES (?, ?, CURRENT_TIMESTAMP)");
 		ins.bind(1, path_str);
@@ -427,7 +446,7 @@ int MediaStore::upsert_folder(const fs::path& path, int parent_id)
 		ins.exec();
 		}
 	else {
-		SQLite::Statement ins(db_,
+		SQLite::Statement ins(db_music_,
 			"INSERT OR IGNORE INTO folders (path, name, parent_id, last_scanned)"
 			" VALUES (?, ?, ?, CURRENT_TIMESTAMP)");
 		ins.bind(1, path_str);
@@ -438,14 +457,14 @@ int MediaStore::upsert_folder(const fs::path& path, int parent_id)
 
 	// Also set parent_id in case the row already existed without it.
 	if (parent_id < 0) {
-		SQLite::Statement upd(db_,
+		SQLite::Statement upd(db_music_,
 			"UPDATE folders SET parent_id = NULL, last_scanned = CURRENT_TIMESTAMP"
 			" WHERE path = ?");
 		upd.bind(1, path_str);
 		upd.exec();
 		}
 	else {
-		SQLite::Statement upd(db_,
+		SQLite::Statement upd(db_music_,
 			"UPDATE folders SET parent_id = ?, last_scanned = CURRENT_TIMESTAMP"
 			" WHERE path = ?");
 		upd.bind(1, parent_id);
@@ -453,7 +472,7 @@ int MediaStore::upsert_folder(const fs::path& path, int parent_id)
 		upd.exec();
 		}
 
-	SQLite::Statement sel(db_, "SELECT id FROM folders WHERE path = ?");
+	SQLite::Statement sel(db_music_, "SELECT id FROM folders WHERE path = ?");
 	sel.bind(1, path_str);
 	sel.executeStep();
 	return sel.getColumn(0).getInt();
@@ -461,12 +480,12 @@ int MediaStore::upsert_folder(const fs::path& path, int parent_id)
 
 int MediaStore::upsert_artist(const std::string& name)
 	{
-	SQLite::Statement ins(db_,
+	SQLite::Statement ins(db_music_,
 		"INSERT OR IGNORE INTO artists (name) VALUES (?)");
 	ins.bind(1, name);
 	ins.exec();
 
-	SQLite::Statement sel(db_, "SELECT id FROM artists WHERE name = ?");
+	SQLite::Statement sel(db_music_, "SELECT id FROM artists WHERE name = ?");
 	sel.bind(1, name);
 	sel.executeStep();
 	return sel.getColumn(0).getInt();
@@ -476,7 +495,7 @@ int MediaStore::upsert_album(int folder_id, const std::string& title,
                               int artist_id, int year, const std::string& genre)
 	{
 	{
-	SQLite::Statement ins(db_,
+	SQLite::Statement ins(db_music_,
 		"INSERT OR IGNORE INTO albums (folder_id, title, year, genre, last_scanned)"
 		" VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)");
 	ins.bind(1, folder_id);
@@ -486,13 +505,13 @@ int MediaStore::upsert_album(int folder_id, const std::string& title,
 	ins.exec();
 	}
 
-	SQLite::Statement sel(db_, "SELECT id FROM albums WHERE folder_id = ?");
+	SQLite::Statement sel(db_music_, "SELECT id FROM albums WHERE folder_id = ?");
 	sel.bind(1, folder_id);
 	sel.executeStep();
 	int album_id = sel.getColumn(0).getInt();
 
 	// Link album to its artist (by folder convention: the artist dir above).
-	SQLite::Statement lnk(db_,
+	SQLite::Statement lnk(db_music_,
 		"INSERT OR IGNORE INTO album_artists (album_id, artist_id, role)"
 		" VALUES (?, ?, 'albumartist')");
 	lnk.bind(1, album_id);
@@ -508,14 +527,14 @@ void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
 	int64_t mtime = mtime_of(path);
 
 	// Skip if the file hasn't changed since last scan.
-	SQLite::Statement chk(db_,
+	SQLite::Statement chk(db_music_,
 		"SELECT file_modified FROM songs WHERE path = ?");
 	chk.bind(1, path.string());
 	if (chk.executeStep()) {
 		if (chk.getColumn(0).getInt64() == mtime) {
 			// Still update disc_number if it was folder-derived — folders may be reordered.
 			if (disc_number > 0) {
-				SQLite::Statement upd(db_,
+				SQLite::Statement upd(db_music_,
 					"UPDATE songs SET disc_number=? WHERE path=? AND disc_number!=?");
 				upd.bind(1, disc_number);
 				upd.bind(2, path.string());
@@ -559,7 +578,7 @@ void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
 	std::string codec = path.extension().string().substr(1);  // strip leading dot
 	std::transform(codec.begin(), codec.end(), codec.begin(), ::tolower);
 
-	SQLite::Statement ins(db_,
+	SQLite::Statement ins(db_music_,
 		"INSERT OR REPLACE INTO songs"
 		" (album_id, folder_id, path, filename, title, track_number, disc_number,"
 		"  year, genre, duration, bitrate, sample_rate, channels, codec,"
@@ -584,8 +603,8 @@ void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
 	ins.exec();
 
 	// Link song to its artist (derived from the folder hierarchy).
-	int song_id = static_cast<int>(db_.getLastInsertRowid());
-	SQLite::Statement lnk(db_,
+	int song_id = static_cast<int>(db_music_.getLastInsertRowid());
+	SQLite::Statement lnk(db_music_,
 		"INSERT OR IGNORE INTO song_artists (song_id, artist_id, role)"
 		" VALUES (?, ?, 'artist')");
 	lnk.bind(1, song_id);
@@ -599,19 +618,19 @@ bool MediaStore::add_user(const std::string& username, const std::string& passwo
                            bool is_admin)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement ins(db_,
-		"INSERT OR IGNORE INTO users (username, password_enc, is_admin) VALUES (?,?,?)");
+	SQLite::Statement ins(db_music_,
+		"INSERT OR IGNORE INTO client.users (username, password_enc, is_admin) VALUES (?,?,?)");
 	ins.bind(1, username);
 	ins.bind(2, password);
 	ins.bind(3, is_admin ? 1 : 0);
 	ins.exec();
-	return db_.getChanges() > 0;
+	return db_music_.getChanges() > 0;
 	}
 
 bool MediaStore::has_users()
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement sel(db_, "SELECT COUNT(*) FROM users");
+	SQLite::Statement sel(db_music_, "SELECT COUNT(*) FROM client.users");
 	sel.executeStep();
 	return sel.getColumn(0).getInt() > 0;
 	}
@@ -619,8 +638,8 @@ bool MediaStore::has_users()
 std::optional<MediaStore::UserInfo> MediaStore::get_user(const std::string& username)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement sel(db_,
-		"SELECT username, email, is_admin FROM users WHERE username = ?");
+	SQLite::Statement sel(db_music_,
+		"SELECT username, email, is_admin FROM client.users WHERE username = ?");
 	sel.bind(1, username);
 	if (!sel.executeStep()) return std::nullopt;
 	UserInfo u;
@@ -636,8 +655,8 @@ bool MediaStore::validate_auth(const std::string& username,
                                 const std::string& salt)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement sel(db_,
-		"SELECT password_enc FROM users WHERE username = ?");
+	SQLite::Statement sel(db_music_,
+		"SELECT password_enc FROM client.users WHERE username = ?");
 	sel.bind(1, username);
 	if (!sel.executeStep()) return false;
 	std::string stored = sel.getColumn(0).getString();
@@ -663,8 +682,8 @@ bool MediaStore::validate_auth(const std::string& username,
 		}
 
 	if (ok) {
-		SQLite::Statement upd(db_,
-			"UPDATE users SET last_access = CURRENT_TIMESTAMP WHERE username = ?");
+		SQLite::Statement upd(db_music_,
+			"UPDATE client.users SET last_access = CURRENT_TIMESTAMP WHERE username = ?");
 		upd.bind(1, username);
 		upd.exec();
 		}
@@ -677,7 +696,7 @@ bool MediaStore::validate_auth(const std::string& username,
 std::string MediaStore::get_folder_name(int folder_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement q(db_, "SELECT name FROM folders WHERE id = ?");
+	SQLite::Statement q(db_music_, "SELECT name FROM folders WHERE id = ?");
 	q.bind(1, folder_id);
 	return q.executeStep() ? q.getColumn(0).getString() : "";
 	}
@@ -685,7 +704,7 @@ std::string MediaStore::get_folder_name(int folder_id)
 std::optional<MediaStore::CachedArtistInfo> MediaStore::get_cached_artist_info(int folder_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement q(db_,
+	SQLite::Statement q(db_music_,
 		"SELECT mbid, last_fm_url, biography, image_url"
 		" FROM artist_info_cache WHERE folder_id = ?");
 	q.bind(1, folder_id);
@@ -701,7 +720,7 @@ std::optional<MediaStore::CachedArtistInfo> MediaStore::get_cached_artist_info(i
 void MediaStore::cache_artist_info(int folder_id, const CachedArtistInfo& info)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement ins(db_,
+	SQLite::Statement ins(db_music_,
 		"INSERT OR REPLACE INTO artist_info_cache"
 		" (folder_id, mbid, last_fm_url, biography, image_url)"
 		" VALUES (?, ?, ?, ?, ?)");
@@ -716,7 +735,7 @@ void MediaStore::cache_artist_info(int folder_id, const CachedArtistInfo& info)
 std::vector<MediaStore::MusicFolder> MediaStore::get_music_folders()
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement q(db_,
+	SQLite::Statement q(db_music_,
 		"SELECT id, name FROM folders WHERE parent_id IS NULL");
 	std::vector<MusicFolder> result;
 	while (q.executeStep())
@@ -728,7 +747,7 @@ std::vector<MediaStore::MusicFolder> MediaStore::get_music_folders()
 std::string MediaStore::get_cover_path(int folder_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement q(db_,
+	SQLite::Statement q(db_music_,
 		"SELECT cover_path FROM albums WHERE folder_id = ?");
 	q.bind(1, folder_id);
 	if (!q.executeStep() || q.getColumn(0).isNull()) return "";
@@ -738,7 +757,7 @@ std::string MediaStore::get_cover_path(int folder_id)
 std::optional<MediaStore::SongInfo> MediaStore::get_song(int song_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement q(db_,
+	SQLite::Statement q(db_music_,
 		"SELECT id, path, codec, bitrate, duration, file_size"
 		" FROM songs WHERE id = ?");
 	q.bind(1, song_id);
@@ -757,7 +776,7 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs()
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	// Count albums per artist via the child folders (album folders are one level down).
-	SQLite::Statement sel(db_,
+	SQLite::Statement sel(db_music_,
 		"SELECT f.id, f.name, COUNT(al.id) AS album_count"
 		" FROM folders f"
 		" LEFT JOIN folders af ON af.parent_id = f.id"
@@ -780,7 +799,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
 	// Fetch the folder itself. al.id tells us whether this is an album folder.
-	SQLite::Statement fsel(db_,
+	SQLite::Statement fsel(db_music_,
 		"SELECT f.id, f.name, f.parent_id,"
 		"       al.id AS album_id,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
@@ -803,7 +822,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 	// Child directories — skipped in flat mode for album folders (disc subdirs
 	// are absorbed into the song list below).
 	if (!flatten) {
-		SQLite::Statement dsel(db_,
+		SQLite::Statement dsel(db_music_,
 			"SELECT f.id, f.name,"
 			"       COALESCE(a.name, '') AS artist,"
 			"       COALESCE(al.title, f.name) AS album,"
@@ -860,7 +879,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		" WHERE s.folder_id = ?"
 		" ORDER BY s.disc_number, s.track_number, s.filename";
 
-	SQLite::Statement ssel(db_, flatten ? song_sql_flat : song_sql_normal);
+	SQLite::Statement ssel(db_music_, flatten ? song_sql_flat : song_sql_normal);
 	ssel.bind(1, folder_id);
 	if (flatten) ssel.bind(2, folder_id);
 
@@ -921,13 +940,13 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 	bool play_count_join = (type == "frequent" || type == "recent");
 	if (play_count_join)
 		sql += " LEFT JOIN songs s ON s.album_id = al.id"
-		       " LEFT JOIN play_counts pc ON pc.song_id = s.id"
-		       " AND pc.user_id = (SELECT id FROM users WHERE username = ?)";
+		       " LEFT JOIN client.play_counts pc ON pc.song_id = s.id"
+		       " AND pc.user_id = (SELECT id FROM client.users WHERE username = ?)";
 
 	// Join for starred.
 	if (type == "starred")
-		sql += " JOIN stars st ON st.album_id = f.id"
-		       " JOIN users u ON u.id = st.user_id AND u.username = ?";
+		sql += " JOIN client.stars st ON st.album_id = f.id"
+		       " JOIN client.users u ON u.id = st.user_id AND u.username = ?";
 
 	// WHERE clause.
 	if      (type == "byYear")  sql += " WHERE al.year BETWEEN ? AND ?";
@@ -951,7 +970,7 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 
 	sql += " LIMIT ? OFFSET ?";
 
-	SQLite::Statement q(db_, sql);
+	SQLite::Statement q(db_music_, sql);
 	int idx = 1;
 
 	if (play_count_join)  q.bind(idx++, username);
@@ -984,7 +1003,7 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id)
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
 	// Look up the artist folder itself.
-	SQLite::Statement fsel(db_,
+	SQLite::Statement fsel(db_music_,
 		"SELECT id, name FROM folders WHERE id = ?");
 	fsel.bind(1, folder_id);
 	if (!fsel.executeStep()) return std::nullopt;
@@ -994,7 +1013,7 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id)
 	info.artist.name = fsel.getColumn(1).getString();
 
 	// Fetch albums whose folder is a direct child of this artist folder.
-	SQLite::Statement asel(db_,
+	SQLite::Statement asel(db_music_,
 		"SELECT f.id, COALESCE(f.parent_id,-1),"
 		"       COALESCE(al.title, f.name),"
 		"       COALESCE(a.name,''),"
@@ -1038,7 +1057,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
 	// Fetch album metadata.
-	SQLite::Statement msel(db_,
+	SQLite::Statement msel(db_music_,
 		"SELECT f.id, COALESCE(f.parent_id,-1),"
 		"       COALESCE(al.title, f.name),"
 		"       COALESCE(a.name,''),"
@@ -1097,7 +1116,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		" WHERE s.folder_id = ?"
 		" ORDER BY s.disc_number, s.track_number, s.filename";
 
-	SQLite::Statement ssel(db_, flat_multi_disc ? song_sql_flat : song_sql_normal);
+	SQLite::Statement ssel(db_music_, flat_multi_disc ? song_sql_flat : song_sql_normal);
 	ssel.bind(1, folder_id);
 	if (flat_multi_disc) ssel.bind(2, folder_id);
 
@@ -1134,19 +1153,19 @@ void MediaStore::save_play_queue(const std::string& username,
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
-	SQLite::Statement uid_q(db_, "SELECT id FROM users WHERE username = ?");
+	SQLite::Statement uid_q(db_music_, "SELECT id FROM client.users WHERE username = ?");
 	uid_q.bind(1, username);
 	if (!uid_q.executeStep()) return;
 	int user_id = uid_q.getColumn(0).getInt();
 
-	SQLite::Transaction txn(db_);
+	SQLite::Transaction txn(db_music_);
 
-	SQLite::Statement del(db_, "DELETE FROM play_queue WHERE user_id = ?");
+	SQLite::Statement del(db_music_, "DELETE FROM client.play_queue WHERE user_id = ?");
 	del.bind(1, user_id);
 	del.exec();
 
-	SQLite::Statement ins(db_,
-		"INSERT INTO play_queue (user_id, song_id, position, is_current, offset_ms, client)"
+	SQLite::Statement ins(db_music_,
+		"INSERT INTO client.play_queue (user_id, song_id, position, is_current, offset_ms, client)"
 		" VALUES (?, ?, ?, ?, ?, ?)");
 	for (int pos = 0; pos < static_cast<int>(song_ids.size()); ++pos) {
 		int  sid     = song_ids[pos];
@@ -1169,7 +1188,7 @@ std::optional<MediaStore::PlayQueue> MediaStore::get_play_queue(
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
-	SQLite::Statement q(db_,
+	SQLite::Statement q(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
 		"       s.file_size, s.codec, s.folder_id,"
@@ -1178,8 +1197,8 @@ std::optional<MediaStore::PlayQueue> MediaStore::get_play_queue(
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN s.folder_id ELSE -1 END AS cover_art_id,"
 		"       pq.is_current, pq.offset_ms, pq.client, pq.updated"
-		" FROM play_queue pq"
-		" JOIN users u ON u.id = pq.user_id"
+		" FROM client.play_queue pq"
+		" JOIN client.users u ON u.id = pq.user_id"
 		" JOIN songs s ON s.id = pq.song_id"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -1230,13 +1249,13 @@ void MediaStore::create_bookmark(const std::string& username,
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
-	SQLite::Statement uid_q(db_, "SELECT id FROM users WHERE username = ?");
+	SQLite::Statement uid_q(db_music_, "SELECT id FROM client.users WHERE username = ?");
 	uid_q.bind(1, username);
 	if (!uid_q.executeStep()) return;
 	int user_id = uid_q.getColumn(0).getInt();
 
-	SQLite::Statement ins(db_,
-		"INSERT INTO bookmarks (user_id, song_id, position, comment, changed)"
+	SQLite::Statement ins(db_music_,
+		"INSERT INTO client.bookmarks (user_id, song_id, position, comment, changed)"
 		" VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)"
 		" ON CONFLICT(user_id, song_id) DO UPDATE SET"
 		"   position = excluded.position,"
@@ -1254,15 +1273,15 @@ void MediaStore::scrobble(const std::string& username, int song_id,
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
-	SQLite::Statement uid_q(db_, "SELECT id FROM users WHERE username = ?");
+	SQLite::Statement uid_q(db_music_, "SELECT id FROM client.users WHERE username = ?");
 	uid_q.bind(1, username);
 	if (!uid_q.executeStep()) return;
 	int user_id = uid_q.getColumn(0).getInt();
 
 	if (submission) {
 		// Completed play — increment count and record timestamp.
-		SQLite::Statement ins(db_,
-			"INSERT INTO play_counts (user_id, song_id, count, last_played)"
+		SQLite::Statement ins(db_music_,
+			"INSERT INTO client.play_counts (user_id, song_id, count, last_played)"
 			" VALUES (?, ?, 1, CURRENT_TIMESTAMP)"
 			" ON CONFLICT(user_id, song_id) DO UPDATE SET"
 			"   count       = count + 1,"
@@ -1272,8 +1291,8 @@ void MediaStore::scrobble(const std::string& username, int song_id,
 		ins.exec();
 		} else {
 		// Now-playing notification — update or replace the single row.
-		SQLite::Statement ins(db_,
-			"INSERT OR REPLACE INTO now_playing (user_id, song_id, client, started)"
+		SQLite::Statement ins(db_music_,
+			"INSERT OR REPLACE INTO client.now_playing (user_id, song_id, client, started)"
 			" VALUES (?, ?, ?, CURRENT_TIMESTAMP)");
 		ins.bind(1, user_id);
 		ins.bind(2, song_id);
@@ -1286,13 +1305,13 @@ void MediaStore::add_star(const std::string& username,
                           int song_id, int album_id, int artist_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement uid_q(db_, "SELECT id FROM users WHERE username = ?");
+	SQLite::Statement uid_q(db_music_, "SELECT id FROM client.users WHERE username = ?");
 	uid_q.bind(1, username);
 	if (!uid_q.executeStep()) return;
 	int user_id = uid_q.getColumn(0).getInt();
 
-	SQLite::Statement ins(db_,
-		"INSERT OR IGNORE INTO stars (user_id, song_id, album_id, artist_id)"
+	SQLite::Statement ins(db_music_,
+		"INSERT OR IGNORE INTO client.stars (user_id, song_id, album_id, artist_id)"
 		" VALUES (?, NULLIF(?,0), NULLIF(?,0), NULLIF(?,0))");
 	ins.bind(1, user_id);
 	ins.bind(2, song_id);
@@ -1305,13 +1324,13 @@ void MediaStore::remove_star(const std::string& username,
                              int song_id, int album_id, int artist_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement uid_q(db_, "SELECT id FROM users WHERE username = ?");
+	SQLite::Statement uid_q(db_music_, "SELECT id FROM client.users WHERE username = ?");
 	uid_q.bind(1, username);
 	if (!uid_q.executeStep()) return;
 	int user_id = uid_q.getColumn(0).getInt();
 
-	SQLite::Statement del(db_,
-		"DELETE FROM stars WHERE user_id=?"
+	SQLite::Statement del(db_music_,
+		"DELETE FROM client.stars WHERE user_id=?"
 		" AND (song_id IS NULLIF(?,0))"
 		" AND (album_id IS NULLIF(?,0))"
 		" AND (artist_id IS NULLIF(?,0))");
@@ -1328,7 +1347,7 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 	StarredResult result;
 
 	// Starred songs — cover art inherited from album folder if present.
-	SQLite::Statement sq(db_,
+	SQLite::Statement sq(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
 		"       s.file_size, s.codec, s.folder_id,"
@@ -1336,8 +1355,8 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN s.folder_id ELSE -1 END AS cover_art_id"
-		" FROM stars st"
-		" JOIN users u ON u.id = st.user_id"
+		" FROM client.stars st"
+		" JOIN client.users u ON u.id = st.user_id"
 		" JOIN songs s ON s.id = st.song_id"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -1366,14 +1385,14 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 		}
 
 	// Starred albums — stars.album_id stores the folder id of the album dir.
-	SQLite::Statement aq(db_,
+	SQLite::Statement aq(db_music_,
 		"SELECT f.id, COALESCE(f.parent_id,-1),"
 		"       COALESCE(al.title, f.name) AS title,"
 		"       COALESCE(a.name,'') AS artist,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN f.id ELSE -1 END AS cover_art_id"
-		" FROM stars st"
-		" JOIN users u ON u.id = st.user_id"
+		" FROM client.stars st"
+		" JOIN client.users u ON u.id = st.user_id"
 		" JOIN folders f ON f.id = st.album_id"
 		" LEFT JOIN albums al ON al.folder_id = f.id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
@@ -1394,10 +1413,10 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 		}
 
 	// Starred artists — stars.artist_id stores the folder id of the artist dir.
-	SQLite::Statement arq(db_,
+	SQLite::Statement arq(db_music_,
 		"SELECT f.id, f.name"
-		" FROM stars st"
-		" JOIN users u ON u.id = st.user_id"
+		" FROM client.stars st"
+		" JOIN client.users u ON u.id = st.user_id"
 		" JOIN folders f ON f.id = st.artist_id"
 		" WHERE u.username = ? AND st.artist_id IS NOT NULL"
 		" ORDER BY st.created DESC");
@@ -1415,22 +1434,22 @@ MediaStore::PlaylistInfo MediaStore::create_playlist(const std::string& username
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
-	SQLite::Statement uid_q(db_, "SELECT id FROM users WHERE username = ?");
+	SQLite::Statement uid_q(db_music_, "SELECT id FROM client.users WHERE username = ?");
 	uid_q.bind(1, username);
 	if (!uid_q.executeStep()) return {};
 	int user_id = uid_q.getColumn(0).getInt();
 
-	SQLite::Transaction txn(db_);
+	SQLite::Transaction txn(db_music_);
 
-	SQLite::Statement pins(db_,
-		"INSERT INTO playlists (user_id, name) VALUES (?, ?)");
+	SQLite::Statement pins(db_music_,
+		"INSERT INTO client.playlists (user_id, name) VALUES (?, ?)");
 	pins.bind(1, user_id);
 	pins.bind(2, name);
 	pins.exec();
-	int playlist_id = (int)db_.getLastInsertRowid();
+	int playlist_id = (int)db_music_.getLastInsertRowid();
 
-	SQLite::Statement sins(db_,
-		"INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)");
+	SQLite::Statement sins(db_music_,
+		"INSERT INTO client.playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)");
 	for (int pos = 0; pos < (int)song_ids.size(); ++pos) {
 		sins.bind(1, playlist_id);
 		sins.bind(2, song_ids[pos]);
@@ -1448,8 +1467,8 @@ MediaStore::PlaylistInfo MediaStore::create_playlist(const std::string& username
 	pl.owner     = username;
 	pl.is_public = false;
 
-	SQLite::Statement pmeta(db_,
-		"SELECT comment, created, updated FROM playlists WHERE id = ?");
+	SQLite::Statement pmeta(db_music_,
+		"SELECT comment, created, updated FROM client.playlists WHERE id = ?");
 	pmeta.bind(1, playlist_id);
 	if (pmeta.executeStep()) {
 		pl.comment = pmeta.getColumn(0).isNull() ? "" : pmeta.getColumn(0).getString();
@@ -1458,7 +1477,7 @@ MediaStore::PlaylistInfo MediaStore::create_playlist(const std::string& username
 		}
 
 	// Fetch songs with full metadata, same joins as get_directory.
-	SQLite::Statement sq(db_,
+	SQLite::Statement sq(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
 		"       s.file_size, s.codec, s.folder_id,"
@@ -1466,7 +1485,7 @@ MediaStore::PlaylistInfo MediaStore::create_playlist(const std::string& username
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN s.folder_id ELSE -1 END AS cover_art_id"
-		" FROM playlist_songs ps"
+		" FROM client.playlist_songs ps"
 		" JOIN songs s ON s.id = ps.song_id"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -1504,19 +1523,19 @@ MediaStore::PlaylistInfo MediaStore::create_playlist(const std::string& username
 bool MediaStore::delete_playlist(int playlist_id, const std::string& username)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement del(db_,
-		"DELETE FROM playlists WHERE id = ?"
-		" AND user_id = (SELECT id FROM users WHERE username = ?)");
+	SQLite::Statement del(db_music_,
+		"DELETE FROM client.playlists WHERE id = ?"
+		" AND user_id = (SELECT id FROM client.users WHERE username = ?)");
 	del.bind(1, playlist_id);
 	del.bind(2, username);
 	del.exec();
-	return db_.getChanges() > 0;
+	return db_music_.getChanges() > 0;
 	}
 
 std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement q(db_,
+	SQLite::Statement q(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
 		"       s.file_size, s.codec, s.folder_id,"
@@ -1561,7 +1580,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 	std::string pattern = "%" + query + "%";
 
 	// Artists — folder-level, depth-1 children of the root.
-	SQLite::Statement aq(db_,
+	SQLite::Statement aq(db_music_,
 		"SELECT f.id, f.name"
 		" FROM folders f"
 		" WHERE f.parent_id = (SELECT id FROM folders WHERE parent_id IS NULL)"
@@ -1582,7 +1601,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		}
 
 	// Albums.
-	SQLite::Statement alq(db_,
+	SQLite::Statement alq(db_music_,
 		"SELECT f.id, COALESCE(f.parent_id,-1),"
 		"       COALESCE(al.title, f.name),"
 		"       COALESCE(a.name,''),"
@@ -1611,7 +1630,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		}
 
 	// Songs.
-	SQLite::Statement sq(db_,
+	SQLite::Statement sq(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
 		"       s.file_size, s.codec, s.folder_id,"
@@ -1656,7 +1675,7 @@ std::vector<MediaStore::BookmarkInfo> MediaStore::get_bookmarks(
 	const std::string& username)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement q(db_,
+	SQLite::Statement q(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
 		"       s.file_size, s.codec, s.folder_id,"
@@ -1666,8 +1685,8 @@ std::vector<MediaStore::BookmarkInfo> MediaStore::get_bookmarks(
 		"            THEN s.folder_id ELSE -1 END AS cover_art_id,"
 		"       b.position, COALESCE(b.comment,''), b.created, b.changed,"
 		"       u.username"
-		" FROM bookmarks b"
-		" JOIN users u ON u.id = b.user_id"
+		" FROM client.bookmarks b"
+		" JOIN client.users u ON u.id = b.user_id"
 		" JOIN songs s ON s.id = b.song_id"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -1707,13 +1726,13 @@ std::vector<MediaStore::BookmarkInfo> MediaStore::get_bookmarks(
 bool MediaStore::delete_bookmark(const std::string& username, int song_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement del(db_,
-		"DELETE FROM bookmarks WHERE song_id = ?"
-		" AND user_id = (SELECT id FROM users WHERE username = ?)");
+	SQLite::Statement del(db_music_,
+		"DELETE FROM client.bookmarks WHERE song_id = ?"
+		" AND user_id = (SELECT id FROM client.users WHERE username = ?)");
 	del.bind(1, song_id);
 	del.bind(2, username);
 	del.exec();
-	return db_.getChanges() > 0;
+	return db_music_.getChanges() > 0;
 	}
 
 bool MediaStore::update_playlist(int playlist_id, const std::string& username,
@@ -1726,17 +1745,17 @@ bool MediaStore::update_playlist(int playlist_id, const std::string& username,
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
 	// Verify ownership.
-	SQLite::Statement own(db_,
-		"SELECT p.id FROM playlists p"
-		" JOIN users u ON u.id = p.user_id"
+	SQLite::Statement own(db_music_,
+		"SELECT p.id FROM client.playlists p"
+		" JOIN client.users u ON u.id = p.user_id"
 		" WHERE p.id = ? AND u.username = ?");
 	own.bind(1, playlist_id);
 	own.bind(2, username);
 	if (!own.executeStep()) return false;
 
 	// Read surviving song_ids in position order, then drop requested indices.
-	SQLite::Statement sel(db_,
-		"SELECT song_id FROM playlist_songs WHERE playlist_id = ? ORDER BY position");
+	SQLite::Statement sel(db_music_,
+		"SELECT song_id FROM client.playlist_songs WHERE playlist_id = ? ORDER BY position");
 	sel.bind(1, playlist_id);
 	std::vector<int> kept;
 	while (sel.executeStep())
@@ -1752,33 +1771,33 @@ bool MediaStore::update_playlist(int playlist_id, const std::string& username,
 	for (int id : songs_to_add)
 		kept.push_back(id);
 
-	SQLite::Transaction txn(db_);
+	SQLite::Transaction txn(db_music_);
 
 	// Apply metadata changes.
 	if (name)      {
-		SQLite::Statement q(db_, "UPDATE playlists SET name=? WHERE id=?");
+		SQLite::Statement q(db_music_, "UPDATE client.playlists SET name=? WHERE id=?");
 		q.bind(1, *name); q.bind(2, playlist_id); q.exec();
 		}
 	if (comment)   {
-		SQLite::Statement q(db_, "UPDATE playlists SET comment=? WHERE id=?");
+		SQLite::Statement q(db_music_, "UPDATE client.playlists SET comment=? WHERE id=?");
 		q.bind(1, *comment); q.bind(2, playlist_id); q.exec();
 		}
 	if (is_public) {
-		SQLite::Statement q(db_, "UPDATE playlists SET is_public=? WHERE id=?");
+		SQLite::Statement q(db_music_, "UPDATE client.playlists SET is_public=? WHERE id=?");
 		q.bind(1, *is_public ? 1 : 0); q.bind(2, playlist_id); q.exec();
 		}
 	{
-	SQLite::Statement q(db_, "UPDATE playlists SET updated=CURRENT_TIMESTAMP WHERE id=?");
+	SQLite::Statement q(db_music_, "UPDATE client.playlists SET updated=CURRENT_TIMESTAMP WHERE id=?");
 	q.bind(1, playlist_id); q.exec();
 	}
 
 	// Replace song list.
-	SQLite::Statement del(db_, "DELETE FROM playlist_songs WHERE playlist_id=?");
+	SQLite::Statement del(db_music_, "DELETE FROM client.playlist_songs WHERE playlist_id=?");
 	del.bind(1, playlist_id);
 	del.exec();
 
-	SQLite::Statement ins(db_,
-		"INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?,?,?)");
+	SQLite::Statement ins(db_music_,
+		"INSERT INTO client.playlist_songs (playlist_id, song_id, position) VALUES (?,?,?)");
 	for (int pos = 0; pos < (int)kept.size(); ++pos) {
 		ins.bind(1, playlist_id);
 		ins.bind(2, kept[pos]);
@@ -1796,13 +1815,13 @@ std::vector<MediaStore::PlaylistInfo> MediaStore::get_playlists(const std::strin
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
 	// Song counts and total durations via aggregates; no song rows returned.
-	SQLite::Statement q(db_,
+	SQLite::Statement q(db_music_,
 		"SELECT p.id, p.name, COALESCE(p.comment,''), u.username, p.is_public,"
 		"       COUNT(ps.song_id), COALESCE(SUM(s.duration),0),"
 		"       p.created, p.updated"
-		" FROM playlists p"
-		" JOIN users u ON u.id = p.user_id"
-		" LEFT JOIN playlist_songs ps ON ps.playlist_id = p.id"
+		" FROM client.playlists p"
+		" JOIN client.users u ON u.id = p.user_id"
+		" LEFT JOIN client.playlist_songs ps ON ps.playlist_id = p.id"
 		" LEFT JOIN songs s ON s.id = ps.song_id"
 		" WHERE u.username = ?"
 		" GROUP BY p.id"
@@ -1830,11 +1849,11 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
-	SQLite::Statement pmeta(db_,
+	SQLite::Statement pmeta(db_music_,
 		"SELECT p.name, COALESCE(p.comment,''), u.username, p.is_public,"
 		"       p.created, p.updated"
-		" FROM playlists p"
-		" JOIN users u ON u.id = p.user_id"
+		" FROM client.playlists p"
+		" JOIN client.users u ON u.id = p.user_id"
 		" WHERE p.id = ?");
 	pmeta.bind(1, playlist_id);
 	if (!pmeta.executeStep()) return std::nullopt;
@@ -1848,7 +1867,7 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 	pl.created   = pmeta.getColumn(4).getString();
 	pl.updated   = pmeta.getColumn(5).getString();
 
-	SQLite::Statement sq(db_,
+	SQLite::Statement sq(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
 		"       s.file_size, s.codec, s.folder_id,"
@@ -1856,7 +1875,7 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN s.folder_id ELSE -1 END AS cover_art_id"
-		" FROM playlist_songs ps"
+		" FROM client.playlist_songs ps"
 		" JOIN songs s ON s.id = ps.song_id"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
