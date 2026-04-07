@@ -56,6 +56,7 @@ async function apiCall(endpoint, extra = {}) {
 async function tryLogin(server, user, password) {
    // Normalise server URL: strip trailing slash.
    server = server.replace(/\/+$/, '');
+   console.log('[login] attempting ping', server, user);
 
    const p = new URLSearchParams({
       u: user,
@@ -64,14 +65,22 @@ async function tryLogin(server, user, password) {
       c: 'gaindrive-web',
       f: 'json',
    });
-   const resp = await fetch(`${server}/rest/ping.view?${p}`);
+   const url = `${server}/rest/ping.view?${p}`;
+   console.log('[login] fetch', url);
+   const resp = await fetch(url);
+   console.log('[login] HTTP status', resp.status);
    if (!resp.ok)
       throw new Error(`Server returned HTTP ${resp.status}`);
+
    const data = await resp.json();
+   console.log('[login] response JSON', data);
+
    const sr = data['subsonic-response'];
+   console.log('[login] subsonic-response', sr);
    if (sr.status !== 'ok')
       throw new Error(sr.error?.message ?? 'Authentication failed');
 
+   console.log('[login] success, saving credentials');
    creds.save(server, user, password);
 }
 
@@ -79,6 +88,7 @@ async function tryLogin(server, user, password) {
 
 // Placeholder — individual view modules will fill this out.
 function showView(name) {
+   console.log('[view] showView', name);
    document.querySelectorAll('#sidebar a').forEach(a => {
       a.classList.toggle('active', a.dataset.view === name);
    });
@@ -89,9 +99,11 @@ function showView(name) {
 // ── Shell ───────────────────────────────────────────────────────────────────
 
 function showShell() {
+   console.log('[shell] showing main shell');
    document.getElementById('login-screen').hidden = true;
    const shell = document.getElementById('app-shell');
    shell.hidden = false;
+   console.log('[shell] app-shell hidden=', shell.hidden, 'display=', getComputedStyle(shell).display);
 
    // Wire up sidebar links.
    shell.querySelectorAll('[data-view]').forEach(a => {
@@ -105,6 +117,7 @@ function showShell() {
 }
 
 function showLogin() {
+   console.log('[shell] showing login screen');
    document.getElementById('app-shell').hidden = true;
    document.getElementById('login-screen').hidden = false;
 }
@@ -117,6 +130,7 @@ document.getElementById('login-form').addEventListener('submit', async e => {
    const errEl = document.getElementById('login-error');
    errEl.hidden = true;
    btn.disabled = true;
+   console.log('[boot] form submitted');
 
    try {
       await tryLogin(
@@ -126,6 +140,7 @@ document.getElementById('login-form').addEventListener('submit', async e => {
       );
       showShell();
    } catch (err) {
+      console.error('[boot] login failed', err);
       errEl.textContent = err.message;
       errEl.hidden = false;
    } finally {
@@ -134,14 +149,16 @@ document.getElementById('login-form').addEventListener('submit', async e => {
 });
 
 // On load: if we have saved credentials, verify them and skip the login form.
+console.log('[boot] checking saved credentials');
 (async () => {
    const {server, user, password} = creds.load();
+   console.log('[boot] saved creds present:', !!(server && user && password));
    if (server && user && password) {
       try {
          await tryLogin(server, user, password);
          showShell();
-      } catch {
-         // Credentials stale or server unreachable — show login.
+      } catch (err) {
+         console.warn('[boot] saved credentials failed, clearing', err);
          creds.clear();
          showLogin();
       }
