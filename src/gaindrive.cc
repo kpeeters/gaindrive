@@ -508,6 +508,14 @@ GainDrive::GainDrive(const std::string& db_path,
                      bool flat_multi_disc)
 	: debug_(debug), flat_multi_disc_(flat_multi_disc), store_(db_path, music_root)
 	{
+	// Normalise /rest/foo → /rest/foo.view so clients that omit the suffix still work.
+	server_.set_pre_routing_handler([](const httplib::Request& req, httplib::Response&) {
+		auto& path = const_cast<httplib::Request&>(req).path;
+		if (path.rfind("/rest/", 0) == 0 && path.find('.') == std::string::npos)
+			path += ".view";
+		return httplib::Server::HandlerResponse::Unhandled;
+		});
+
 	server_.set_logger([](const httplib::Request& req, const httplib::Response& res) {
 		std::cout << stamp(req.remote_addr)
 		          << req.method << " " << req.path;
