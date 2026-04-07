@@ -125,6 +125,13 @@ class MediaStore {
 
 		std::optional<ArtistInfo> get_artist(int folder_id);
 
+		struct AlbumInfo {
+			AlbumEntry              album;
+			std::vector<ChildEntry> songs;
+			};
+
+		std::optional<AlbumInfo> get_album(int folder_id, bool flat_multi_disc = true);
+
 		// Returns the filesystem path of the cover image for an album folder,
 		// or empty string if none is stored.
 		std::string get_cover_path(int folder_id);

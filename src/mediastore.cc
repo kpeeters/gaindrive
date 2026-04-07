@@ -1014,6 +1014,99 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id)
 	return info;
 	}
 
+std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
+                                                             bool flat_multi_disc)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	// Fetch album metadata.
+	SQLite::Statement msel(db_,
+		"SELECT f.id, COALESCE(f.parent_id,-1),"
+		"       COALESCE(al.title, f.name),"
+		"       COALESCE(a.name,''),"
+		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+		"            THEN f.id ELSE -1 END,"
+		"       COALESCE(al.song_count,0),"
+		"       CAST(COALESCE(al.duration,0) AS INTEGER),"
+		"       COALESCE(al.year,0),"
+		"       COALESCE(al.genre,''),"
+		"       COALESCE(al.created,'')"
+		" FROM albums al"
+		" JOIN folders f ON f.id = al.folder_id"
+		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
+		" LEFT JOIN artists a ON a.id = aa.artist_id"
+		" WHERE f.id = ?");
+	msel.bind(1, folder_id);
+	if (!msel.executeStep()) return std::nullopt;
+
+	AlbumInfo info;
+	info.album.id           = msel.getColumn(0).getInt();
+	info.album.parent_id    = msel.getColumn(1).getInt();
+	info.album.title        = msel.getColumn(2).getString();
+	info.album.artist       = msel.getColumn(3).getString();
+	info.album.cover_art_id = msel.getColumn(4).getInt();
+	info.album.song_count   = msel.getColumn(5).getInt();
+	info.album.duration     = msel.getColumn(6).getInt();
+	info.album.year         = msel.getColumn(7).getInt();
+	info.album.genre        = msel.getColumn(8).isNull() ? "" : msel.getColumn(8).getString();
+	info.album.created      = msel.getColumn(9).isNull() ? "" : msel.getColumn(9).getString();
+
+	// Fetch songs, flattening disc subfolders when flat_multi_disc is set.
+	const char* song_sql_flat =
+		"SELECT s.id, s.title, s.track_number, s.disc_number,"
+		"       s.year, s.genre, s.duration, s.bitrate,"
+		"       s.file_size, s.codec, s.folder_id,"
+		"       COALESCE(a.name, '') AS artist,"
+		"       COALESCE(al.title, '') AS album"
+		" FROM songs s"
+		" LEFT JOIN albums al ON al.id = s.album_id"
+		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
+		" LEFT JOIN artists a ON a.id = sa.artist_id"
+		" WHERE s.folder_id = ?"
+		"    OR s.folder_id IN (SELECT id FROM folders WHERE parent_id = ?)"
+		" ORDER BY s.disc_number, s.track_number, s.filename";
+
+	const char* song_sql_normal =
+		"SELECT s.id, s.title, s.track_number, s.disc_number,"
+		"       s.year, s.genre, s.duration, s.bitrate,"
+		"       s.file_size, s.codec, s.folder_id,"
+		"       COALESCE(a.name, '') AS artist,"
+		"       COALESCE(al.title, '') AS album"
+		" FROM songs s"
+		" LEFT JOIN albums al ON al.id = s.album_id"
+		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
+		" LEFT JOIN artists a ON a.id = sa.artist_id"
+		" WHERE s.folder_id = ?"
+		" ORDER BY s.disc_number, s.track_number, s.filename";
+
+	SQLite::Statement ssel(db_, flat_multi_disc ? song_sql_flat : song_sql_normal);
+	ssel.bind(1, folder_id);
+	if (flat_multi_disc) ssel.bind(2, folder_id);
+
+	while (ssel.executeStep()) {
+		ChildEntry e;
+		e.id           = ssel.getColumn(0).getInt();
+		e.is_dir       = false;
+		e.title        = ssel.getColumn(1).getString();
+		e.track_number = ssel.getColumn(2).getInt();
+		e.disc_number  = ssel.getColumn(3).getInt();
+		e.year         = ssel.getColumn(4).getInt();
+		e.genre        = ssel.getColumn(5).isNull() ? "" : ssel.getColumn(5).getString();
+		e.duration     = ssel.getColumn(6).getDouble();
+		e.bitrate      = ssel.getColumn(7).getInt();
+		e.file_size    = ssel.getColumn(8).getInt64();
+		e.codec        = ssel.getColumn(9).isNull() ? "" : ssel.getColumn(9).getString();
+		e.parent_id    = ssel.getColumn(10).getInt();
+		e.artist       = ssel.getColumn(11).getString();
+		e.album        = ssel.getColumn(12).getString();
+		if (info.album.cover_art_id >= 0)
+			e.cover_art_id = info.album.cover_art_id;
+		info.songs.push_back(std::move(e));
+		}
+
+	return info;
+	}
+
 // ---- Play queue / bookmarks ------------------------------------------
 
 void MediaStore::save_play_queue(const std::string& username,

@@ -1461,6 +1461,87 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
+	// getAlbum — single album with its track list.
+	server_.Get("/rest/getAlbum.view", [this](const httplib::Request& req,
+	                                          httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			if (use_json)
+				res.set_content(subsonic_error_json(code, msg), "application/json");
+			else
+				res.set_content(subsonic_error(code, msg),      "application/xml");
+			};
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) { err(10, "Required parameter missing: id."); return; }
+
+		auto info = store_.get_album(std::stoi(it->second), flat_multi_disc_);
+		if (!info) { err(70, "Album not found."); return; }
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&info](nlohmann::json& r) {
+				nlohmann::json songs = nlohmann::json::array();
+				for (auto& s : info->songs)
+					songs.push_back(song_entry_json(s));
+				auto& al = info->album;
+				nlohmann::json entry = {
+					{"id",        al.id},
+					{"parent",    al.parent_id},
+					{"name",      al.title},
+					{"artist",    al.artist},
+					{"songCount", al.song_count},
+					{"duration",  al.duration},
+					{"created",   al.created},
+					{"song",      songs}
+					};
+				if (al.cover_art_id >= 0) entry["coverArt"] = al.cover_art_id;
+				if (al.year > 0)          entry["year"]     = al.year;
+				if (!al.genre.empty())    entry["genre"]    = al.genre;
+				r["album"] = std::move(entry);
+				});
+		else
+			body = subsonic_ok([&info](XMLDocument& doc, XMLElement* root) {
+				auto& al = info->album;
+				auto* el = doc.NewElement("album");
+				el->SetAttribute("id",        al.id);
+				el->SetAttribute("parent",    al.parent_id);
+				el->SetAttribute("name",      al.title.c_str());
+				el->SetAttribute("artist",    al.artist.c_str());
+				el->SetAttribute("songCount", al.song_count);
+				el->SetAttribute("duration",  al.duration);
+				if (al.cover_art_id >= 0) el->SetAttribute("coverArt", al.cover_art_id);
+				if (!al.created.empty())  el->SetAttribute("created",  al.created.c_str());
+				if (al.year > 0)          el->SetAttribute("year",     al.year);
+				if (!al.genre.empty())    el->SetAttribute("genre",    al.genre.c_str());
+				for (auto& s : info->songs)
+					el->InsertEndChild(song_entry_xml(doc, s, "song"));
+				root->InsertEndChild(el);
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// getAlbumInfo2 — no biography data available; return empty stub.
+	server_.Get("/rest/getAlbumInfo2.view", [this](const httplib::Request& req,
+	                                               httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([](nlohmann::json& r) {
+				r["albumInfo2"] = nlohmann::json::object();
+				});
+		else
+			body = subsonic_ok([](XMLDocument& doc, XMLElement* root) {
+				root->InsertEndChild(doc.NewElement("albumInfo2"));
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	// getTopSongs — play-count tracking not implemented; return empty list.
 	server_.Get("/rest/getTopSongs.view", [this](const httplib::Request& req,
 	                                             httplib::Response& res) {
