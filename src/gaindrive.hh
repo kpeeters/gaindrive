@@ -5,6 +5,7 @@
 
 #include "mediastore.hh"
 #include "castmanager.hh"
+#include "folderwatcher.hh"
 
 class GainDrive {
 	public:
@@ -20,5 +21,6 @@ class GainDrive {
 		bool            flat_multi_disc_;
 		MediaStore      store_;
 		CastManager     cast_manager_;
+		FolderWatcher   watcher_;
 		httplib::Server server_;
 	};

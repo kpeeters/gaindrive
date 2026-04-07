@@ -83,6 +83,7 @@ add_executable(gaindrive
 	src/streamer.cc
 	src/stamp.cc
 	src/castmanager.cc
+	src/folderwatcher.cc
 )
 
 target_compile_definitions(gaindrive PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)

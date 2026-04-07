@@ -588,7 +588,8 @@ GainDrive::GainDrive(const std::string& db_path,
                      bool no_scan,
                      bool debug,
                      bool flat_multi_disc)
-	: debug_(debug), flat_multi_disc_(flat_multi_disc), store_(db_path, music_root)
+	: debug_(debug), flat_multi_disc_(flat_multi_disc), store_(db_path, music_root),
+	  watcher_(store_, music_root)
 	{
 	// Normalise /rest/foo → /rest/foo.view so clients that omit the suffix still work.
 	server_.set_pre_routing_handler([](const httplib::Request& req, httplib::Response&) {
@@ -1986,8 +1987,10 @@ GainDrive::GainDrive(const std::string& db_path,
 		             "Create one with --add-user <name> --password <pass>."
 		          << std::endl;
 
-	if (!no_scan)
+	if (!no_scan) {
 		std::thread([this]{ store_.scan(); }).detach();
+		watcher_.start();
+		}
 	}
 
 void GainDrive::listen(const std::string& host, int port)
