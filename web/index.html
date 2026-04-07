@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>GainDrive</title>
+   <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="login-screen">
+   <div class="login-card">
+      <h1>GainDrive</h1>
+      <form id="login-form">
+         <label for="server">Server</label>
+         <input type="url" id="server" placeholder="https://music.example.com" required autocomplete="url">
+
+         <label for="username">Username</label>
+         <input type="text" id="username" required autocomplete="username">
+
+         <label for="password">Password</label>
+         <input type="password" id="password" required autocomplete="current-password">
+
+         <button type="submit">Connect</button>
+         <p id="login-error" class="error" hidden></p>
+      </form>
+   </div>
+</div>
+
+<div id="app-shell" hidden>
+   <nav id="sidebar">
+      <div class="nav-title">GainDrive</div>
+      <ul>
+         <li><a href="#" data-view="artists">Artists</a></li>
+         <li><a href="#" data-view="playlists">Playlists</a></li>
+         <li><a href="#" data-view="recents">Recents</a></li>
+      </ul>
+      <ul class="nav-bottom">
+         <li><a href="#" data-view="settings">Settings</a></li>
+         <li><a href="#" data-view="admin">Admin</a></li>
+      </ul>
+   </nav>
+
+   <main id="content">
+      <!-- content area filled by app.js -->
+   </main>
+
+   <footer id="player">
+      <!-- player controls go here -->
+   </footer>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
