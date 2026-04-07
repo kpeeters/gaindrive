@@ -76,6 +76,22 @@ target_include_directories(tag PUBLIC
 	$<BUILD_INTERFACE:${taglib_SOURCE_DIR}/taglib/toolkit>
 )
 
+# Embed web/ client files into the binary at build time.
+set(EMBEDDED_WEB_CC ${CMAKE_CURRENT_BINARY_DIR}/embedded_web.cc)
+add_custom_command(
+	OUTPUT  ${EMBEDDED_WEB_CC}
+	COMMAND ${CMAKE_COMMAND}
+		-DOUTPUT=${EMBEDDED_WEB_CC}
+		-DWEB_DIR=${CMAKE_CURRENT_SOURCE_DIR}/web
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_web.cmake
+	DEPENDS
+		${CMAKE_CURRENT_SOURCE_DIR}/web/index.html
+		${CMAKE_CURRENT_SOURCE_DIR}/web/style.css
+		${CMAKE_CURRENT_SOURCE_DIR}/web/app.js
+		${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_web.cmake
+	COMMENT "Embedding web client files"
+)
+
 add_executable(gaindrive
 	src/main.cc
 	src/gaindrive.cc
@@ -84,9 +100,13 @@ add_executable(gaindrive
 	src/stamp.cc
 	src/castmanager.cc
 	src/folderwatcher.cc
+	${EMBEDDED_WEB_CC}
 )
 
 target_compile_definitions(gaindrive PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
+
+# So #include "embedded_web.hh" resolves from both src/ and the build dir.
+target_include_directories(gaindrive PRIVATE src ${CMAKE_CURRENT_BINARY_DIR})
 
 # mdns.h is header-only; add its source directory to the include path.
 target_include_directories(gaindrive PRIVATE ${mdns_SOURCE_DIR})

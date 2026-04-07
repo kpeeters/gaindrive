@@ -1,6 +1,7 @@
 #include "gaindrive.hh"
 #include "stamp.hh"
 #include "streamer.hh"
+#include "embedded_web.hh"
 
 #include <filesystem>
 #include <fstream>
@@ -612,6 +613,24 @@ GainDrive::GainDrive(const std::string& db_path,
 				}
 			}
 		std::cout << " -> " << res.status << std::endl;
+		});
+
+	// Web client — serve embedded static files.
+	server_.Get("/", [](const httplib::Request&, httplib::Response& res) {
+		res.set_content(embedded::index_html.data(), embedded::index_html.size(),
+		                embedded::index_html_mime.data());
+		});
+	server_.Get("/index.html", [](const httplib::Request&, httplib::Response& res) {
+		res.set_content(embedded::index_html.data(), embedded::index_html.size(),
+		                embedded::index_html_mime.data());
+		});
+	server_.Get("/style.css", [](const httplib::Request&, httplib::Response& res) {
+		res.set_content(embedded::style_css.data(), embedded::style_css.size(),
+		                embedded::style_css_mime.data());
+		});
+	server_.Get("/app.js", [](const httplib::Request&, httplib::Response& res) {
+		res.set_content(embedded::app_js.data(), embedded::app_js.size(),
+		                embedded::app_js_mime.data());
 		});
 
 	// ping
