@@ -25,9 +25,10 @@ static XMLElement* make_root(XMLDocument& doc, const char* status)
 	{
 	doc.InsertEndChild(doc.NewDeclaration());
 	auto* root = doc.NewElement("subsonic-response");
-	root->SetAttribute("xmlns",   SUBSONIC_NS);
-	root->SetAttribute("status",  status);
-	root->SetAttribute("version", SUBSONIC_VER);
+	root->SetAttribute("xmlns",        SUBSONIC_NS);
+	root->SetAttribute("status",       status);
+	root->SetAttribute("version",      SUBSONIC_VER);
+	root->SetAttribute("openSubsonic", "true");
 	doc.InsertEndChild(root);
 	return root;
 	}
@@ -66,8 +67,9 @@ static std::string subsonic_ok_json(
 	std::function<void(nlohmann::json&)> fn = {})
 	{
 	nlohmann::json r;
-	r["status"]  = "ok";
-	r["version"] = SUBSONIC_VER;
+	r["status"]       = "ok";
+	r["version"]      = SUBSONIC_VER;
+	r["openSubsonic"] = true;
 	if (fn) fn(r);
 	nlohmann::json j;
 	j["subsonic-response"] = r;
@@ -79,6 +81,7 @@ static std::string subsonic_error_json(int code, const char* msg)
 	nlohmann::json j;
 	j["subsonic-response"]["status"]           = "failed";
 	j["subsonic-response"]["version"]          = SUBSONIC_VER;
+	j["subsonic-response"]["openSubsonic"]     = true;
 	j["subsonic-response"]["error"]["code"]    = code;
 	j["subsonic-response"]["error"]["message"] = msg;
 	return j.dump();
@@ -537,6 +540,23 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// getOpenSubsonicExtensions — no auth required; clients call this before login.
+	server_.Get("/rest/getOpenSubsonicExtensions.view",
+	            [this](const httplib::Request& req, httplib::Response& res) {
+		bool use_json = (fmt_of(req) == "json");
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([](nlohmann::json& r) {
+				r["openSubsonicExtensions"] = nlohmann::json::array();
+				});
+		else
+			body = subsonic_ok([](XMLDocument& doc, XMLElement* root) {
+				root->InsertEndChild(doc.NewElement("openSubsonicExtensions"));
+				});
 		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
