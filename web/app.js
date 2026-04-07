@@ -130,9 +130,60 @@ async function viewArtists(container) {
 
          row.appendChild(name);
          row.appendChild(count);
+         row.addEventListener('click', () => {
+            viewAlbums(artist.id, artist.name, container.parentElement);
+            });
          frag.appendChild(row);
       }
    }
+   container.appendChild(frag);
+}
+
+async function viewAlbums(artistId, artistName, container) {
+   console.log('[albums] loading artist', artistId, artistName);
+   container.innerHTML = '';
+
+   const sr = await apiCall('getArtist', {id: artistId});
+   const albums = sr.artist?.album ?? [];
+   console.log('[albums] got', albums.length, 'albums');
+
+   const frag = document.createDocumentFragment();
+
+   // Back link + artist heading.
+   const header = document.createElement('div');
+   header.className = 'view-header';
+   const back = document.createElement('span');
+   back.className = 'back-link';
+   back.textContent = '← Artists';
+   back.addEventListener('click', () => showView('artists'));
+   const heading = document.createElement('h1');
+   heading.className = 'view-title';
+   heading.textContent = artistName;
+   header.appendChild(back);
+   header.appendChild(heading);
+   frag.appendChild(header);
+
+   for (const album of albums) {
+      const row = document.createElement('div');
+      row.className = 'album-row';
+      row.dataset.id = album.id;
+
+      const title = document.createElement('span');
+      title.className = 'album-title';
+      title.textContent = album.title;
+
+      const meta = document.createElement('span');
+      meta.className = 'album-meta';
+      const parts = [];
+      if (album.year)      parts.push(album.year);
+      if (album.songCount) parts.push(`${album.songCount} tracks`);
+      meta.textContent = parts.join(' · ');
+
+      row.appendChild(title);
+      row.appendChild(meta);
+      frag.appendChild(row);
+      }
+
    container.appendChild(frag);
 }
 

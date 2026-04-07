@@ -220,3 +220,53 @@ body {
    font-size: 0.75rem;
    color: var(--text-dim);
 }
+
+/* ── Album list ────────────────────────────────────────── */
+
+.view-header {
+   display: flex;
+   align-items: baseline;
+   gap: 1rem;
+   margin-bottom: 1.2rem;
+   padding-bottom: 0.8rem;
+   border-bottom: 1px solid var(--border);
+}
+
+.back-link {
+   font-size: 0.8rem;
+   color: var(--accent);
+   cursor: pointer;
+   white-space: nowrap;
+}
+
+.back-link:hover {
+   text-decoration: underline;
+}
+
+.view-title {
+   font-size: 1.2rem;
+   font-weight: 600;
+}
+
+.album-row {
+   display: flex;
+   align-items: baseline;
+   gap: 0.75rem;
+   padding: 0.3rem 0.4rem;
+   border-radius: 4px;
+   cursor: pointer;
+}
+
+.album-row:hover {
+   background: var(--surface);
+}
+
+.album-title {
+   flex: 1;
+   font-size: 0.95rem;
+}
+
+.album-meta {
+   font-size: 0.75rem;
+   color: var(--text-dim);
+}
