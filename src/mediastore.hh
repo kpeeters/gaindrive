@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <set>
 #include <vector>
 #include <optional>
 #include <filesystem>
@@ -15,6 +16,10 @@ class MediaStore {
 		// Walk music_root_ and upsert everything into the DB.
 		// Safe to call from a background thread.
 		void scan();
+
+		// Rescan only the listed artist-level subdirectories.
+		// If music_root_ appears in dirs, falls back to a full scan().
+		void scan_dirs(const std::set<std::string>& dirs);
 
 		// ---- User management ----
 
@@ -269,6 +274,9 @@ class MediaStore {
 
 		// Quick directory-only walk; opens no files.
 		Counts count_audio_files();
+
+		// Targeted rescan of one artist subtree; called by scan_dirs().
+		void scan_artist_dir(const std::filesystem::path& path);
 
 		// Helpers used by scan(); all called within a single transaction.
 		int  upsert_folder(const std::filesystem::path& path, int parent_id);

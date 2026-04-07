@@ -2,6 +2,7 @@
 
 #include <string>
 #include <atomic>
+#include <set>
 #include <thread>
 #include <unordered_map>
 
@@ -21,6 +22,10 @@ class FolderWatcher {
 		void add_watch(const std::string& path);
 		void remove_watch(int wd);
 		void add_watches_recursive(const std::string& root);
+		// Returns the depth-1 child of music_root_ that contains (or is) the
+		// directory watched by wd.  ev_name is the inotify event's name field
+		// (may be null).  Returns "" if the path cannot be determined.
+		std::string artist_dir_for(int wd, const char* ev_name) const;
 
 		MediaStore&                         store_;
 		std::string                         music_root_;
@@ -30,6 +35,7 @@ class FolderWatcher {
 		std::atomic<bool>                   scan_running_{false};
 		std::thread                         thread_;
 		std::unordered_map<int,std::string> wd_to_path_;
+		std::set<std::string>               changed_artists_;
 #else
 		MediaStore&  store_;
 		std::string  music_root_;

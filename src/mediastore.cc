@@ -5,7 +5,6 @@
 #include <iostream>
 #include <algorithm>
 #include <chrono>
-#include <ctime>
 #include <set>
 
 #include <taglib/fileref.h>
@@ -322,14 +321,6 @@ MediaStore::Counts MediaStore::count_audio_files()
 
 void MediaStore::scan()
 	{
-	// Record start time before the lock so we can prune stale DB entries after
-	// the walk.  SQLite CURRENT_TIMESTAMP is UTC "YYYY-MM-DD HH:MM:SS".
-	std::time_t t = std::time(nullptr);
-	char scan_start_buf[32];
-	std::strftime(scan_start_buf, sizeof(scan_start_buf),
-	              "%Y-%m-%d %H:%M:%S", std::gmtime(&t));
-	std::string scan_start_str = scan_start_buf;
-
 	Counts totals = count_audio_files();
 	std::cout << stamp() << "Scan started: " << music_root_
 	          << "  (" << totals.artists << " artists, "
@@ -341,8 +332,20 @@ void MediaStore::scan()
 	int    song_count = 0;
 	int    processed  = 0;
 
+	std::string root_prefix = music_root_ + "/%";
+
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Transaction txn(db_music_);
+
+	// Mark every subfolder as unvisited.  upsert_folder will stamp each
+	// directory it touches; anything still NULL after the walk no longer
+	// exists on disk and will be pruned below.
+	{
+	SQLite::Statement s(db_music_,
+		"UPDATE folders SET last_scanned = NULL WHERE path LIKE ?");
+	s.bind(1, root_prefix);
+	s.exec();
+	}
 
 	int root_id = upsert_folder(fs::path(music_root_), -1);
 
@@ -441,20 +444,15 @@ void MediaStore::scan()
 		}
 
 	// Prune entries for paths that no longer exist on disk.
-	// upsert_folder always refreshes last_scanned, so any subfolder with an
-	// older timestamp was not visited — meaning it has been removed or moved.
-	// Deleting stale folders cascades to songs via the songs.folder_id column
-	// (handled explicitly below since there is no FK cascade on that path),
-	// and to album_artists / song_artists via albums ON DELETE CASCADE.
-	std::string root_prefix = music_root_ + "/%";
-
+	// Folders not visited during the walk were left with last_scanned = NULL
+	// by the mark step above.  Delete their songs and albums first (no FK
+	// cascade from folders → songs), then the folders themselves.
 	{
 	SQLite::Statement s(db_music_,
 		"DELETE FROM songs WHERE folder_id IN ("
-		"  SELECT id FROM folders WHERE last_scanned < ? AND path LIKE ?"
+		"  SELECT id FROM folders WHERE last_scanned IS NULL AND path LIKE ?"
 		")");
-	s.bind(1, scan_start_str);
-	s.bind(2, root_prefix);
+	s.bind(1, root_prefix);
 	s.exec();
 	int n = db_music_.getChanges();
 	if (n > 0)
@@ -463,10 +461,9 @@ void MediaStore::scan()
 	{
 	SQLite::Statement s(db_music_,
 		"DELETE FROM albums WHERE folder_id IN ("
-		"  SELECT id FROM folders WHERE last_scanned < ? AND path LIKE ?"
+		"  SELECT id FROM folders WHERE last_scanned IS NULL AND path LIKE ?"
 		")");
-	s.bind(1, scan_start_str);
-	s.bind(2, root_prefix);
+	s.bind(1, root_prefix);
 	s.exec();
 	int n = db_music_.getChanges();
 	if (n > 0)
@@ -474,9 +471,8 @@ void MediaStore::scan()
 	}
 	{
 	SQLite::Statement s(db_music_,
-		"DELETE FROM folders WHERE last_scanned < ? AND path LIKE ?");
-	s.bind(1, scan_start_str);
-	s.bind(2, root_prefix);
+		"DELETE FROM folders WHERE last_scanned IS NULL AND path LIKE ?");
+	s.bind(1, root_prefix);
 	s.exec();
 	int n = db_music_.getChanges();
 	if (n > 0)
@@ -495,6 +491,146 @@ void MediaStore::scan()
 
 	txn.commit();
 	std::cout << stamp() << "Scan complete: " << song_count << " songs" << std::endl;
+	}
+
+void MediaStore::scan_dirs(const std::set<std::string>& dirs)
+	{
+	// Queue overflow or other situation where we lost track of what changed.
+	if (dirs.count(music_root_)) {
+		scan();
+		return;
+		}
+	for (auto& d : dirs)
+		scan_artist_dir(fs::path(d));
+	}
+
+// Targeted rescan of one artist directory.  Same mark→walk→prune pattern as
+// scan(), but scoped to a single artist subtree so most of the library is
+// untouched.
+void MediaStore::scan_artist_dir(const fs::path& artist_path)
+	{
+	std::string prefix = artist_path.string() + "/%";
+	bool exists = fs::is_directory(artist_path);
+
+	std::cout << stamp() << "Rescan: " << artist_path.filename().string()
+	          << (exists ? "" : " (removed)") << std::endl;
+
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Transaction txn(db_music_);
+
+	// Mark this artist's subfolders as unvisited.
+	{
+	SQLite::Statement s(db_music_,
+		"UPDATE folders SET last_scanned = NULL WHERE path LIKE ?");
+	s.bind(1, prefix);
+	s.exec();
+	}
+
+	if (exists) {
+		int root_id          = upsert_folder(fs::path(music_root_), -1);
+		int artist_folder_id = upsert_folder(artist_path, root_id);
+		int artist_id        = upsert_artist(artist_path.filename().string());
+
+		for (auto& album_entry : fs::directory_iterator(artist_path)) {
+			if (!album_entry.is_directory()) continue;
+			int album_folder_id = upsert_folder(album_entry.path(), artist_folder_id);
+			std::string album_title = album_entry.path().filename().string();
+			std::replace(album_title.begin(), album_title.end(), '_', ' ');
+			int album_id = upsert_album(album_folder_id, album_title, artist_id, 0, "");
+
+			std::string cover = find_cover(album_entry.path());
+			if (!cover.empty()) {
+				SQLite::Statement upd(db_music_,
+					"UPDATE albums SET cover_path = ? WHERE id = ?");
+				upd.bind(1, cover);
+				upd.bind(2, album_id);
+				upd.exec();
+				}
+
+			std::vector<fs::directory_entry> disc_dirs;
+			std::vector<fs::path>            direct_files;
+			for (auto& e : fs::directory_iterator(album_entry.path())) {
+				if      (e.is_directory())                               disc_dirs.push_back(e);
+				else if (e.is_regular_file() && is_audio_file(e.path())) direct_files.push_back(e.path());
+				}
+			std::sort(disc_dirs.begin(), disc_dirs.end(),
+				[](const fs::directory_entry& a, const fs::directory_entry& b) {
+					return a.path().filename() < b.path().filename();
+					});
+
+			int disc_count = (int)disc_dirs.size();
+			for (int dn = 0; dn < disc_count; ++dn) {
+				int disc_folder_id = upsert_folder(disc_dirs[dn].path(), album_folder_id);
+				for (auto& te : fs::directory_iterator(disc_dirs[dn].path())) {
+					if (!te.is_regular_file() || !is_audio_file(te.path())) continue;
+					upsert_song(te.path(), album_id, disc_folder_id, artist_id, dn + 1);
+					}
+				}
+			for (auto& p : direct_files)
+				upsert_song(p, album_id, album_folder_id, artist_id, 0);
+
+			if (disc_count > 1) {
+				SQLite::Statement upd(db_music_, "UPDATE albums SET disc_count=? WHERE id=?");
+				upd.bind(1, disc_count);
+				upd.bind(2, album_id);
+				upd.exec();
+				}
+			{
+			SQLite::Statement upd(db_music_,
+				"UPDATE albums SET year = ("
+				"  SELECT year FROM songs WHERE album_id = ? AND year > 0"
+				"  ORDER BY disc_number, track_number LIMIT 1"
+				") WHERE id = ?");
+			upd.bind(1, album_id);
+			upd.bind(2, album_id);
+			upd.exec();
+			}
+
+			std::cout << stamp() << "  " << album_entry.path().filename().string() << std::endl;
+			}
+		}
+
+	// Prune stale entries within this artist's subtree.
+	{
+	SQLite::Statement s(db_music_,
+		"DELETE FROM songs WHERE folder_id IN ("
+		"  SELECT id FROM folders WHERE last_scanned IS NULL AND path LIKE ?"
+		")");
+	s.bind(1, prefix);
+	s.exec();
+	int n = db_music_.getChanges();
+	if (n > 0)
+		std::cout << stamp() << "  pruned " << n << " songs" << std::endl;
+	}
+	{
+	SQLite::Statement s(db_music_,
+		"DELETE FROM albums WHERE folder_id IN ("
+		"  SELECT id FROM folders WHERE last_scanned IS NULL AND path LIKE ?"
+		")");
+	s.bind(1, prefix);
+	s.exec();
+	int n = db_music_.getChanges();
+	if (n > 0)
+		std::cout << stamp() << "  pruned " << n << " albums" << std::endl;
+	}
+	{
+	SQLite::Statement s(db_music_,
+		"DELETE FROM folders WHERE last_scanned IS NULL AND path LIKE ?");
+	s.bind(1, prefix);
+	s.exec();
+	int n = db_music_.getChanges();
+	if (n > 0)
+		std::cout << stamp() << "  pruned " << n << " folders" << std::endl;
+	}
+	{
+	SQLite::Statement s(db_music_,
+		"DELETE FROM artists WHERE id NOT IN"
+		" (SELECT DISTINCT artist_id FROM album_artists)");
+	s.exec();
+	}
+
+	txn.commit();
+	std::cout << stamp() << "Rescan complete" << std::endl;
 	}
 
 // ---- upsert helpers ---------------------------------------------------

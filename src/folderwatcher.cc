@@ -61,6 +61,26 @@ void FolderWatcher::remove_watch(int wd)
 	wd_to_path_.erase(wd);
 	}
 
+std::string FolderWatcher::artist_dir_for(int wd, const char* ev_name) const
+	{
+	auto it = wd_to_path_.find(wd);
+	if (it == wd_to_path_.end()) return "";
+
+	fs::path dir(it->second);
+	fs::path root(music_root_);
+
+	// Event is on the root itself: the affected artist is root/ev_name.
+	if (dir == root) {
+		if (ev_name && ev_name[0])
+			return (root / ev_name).string();
+		return "";
+		}
+
+	// Walk up to the depth-1 child of root (the artist dir).
+	auto rel = dir.lexically_relative(root);
+	return (root / *rel.begin()).string();
+	}
+
 void FolderWatcher::add_watches_recursive(const std::string& root)
 	{
 	add_watch(root);
@@ -134,10 +154,13 @@ void FolderWatcher::run()
 			if (remaining <= 0) {
 				// Debounce period expired — start a rescan if none is running.
 				if (!scan_running_.exchange(true)) {
-					std::cout << stamp() << "FolderWatcher: triggering rescan"
-					          << std::endl;
-					std::thread([this]{
-						store_.scan();
+					auto dirs = std::move(changed_artists_);
+					changed_artists_.clear();
+					std::cout << stamp() << "FolderWatcher: rescanning "
+					          << dirs.size() << " artist director"
+					          << (dirs.size() == 1 ? "y" : "ies") << std::endl;
+					std::thread([this, dirs = std::move(dirs)]{
+						store_.scan_dirs(dirs);
 						scan_running_.store(false);
 						}).detach();
 					last_event.reset();
@@ -191,19 +214,33 @@ void FolderWatcher::run()
 				auto* ev = reinterpret_cast<struct inotify_event*>(p);
 				p += sizeof(struct inotify_event) + ev->len;
 
-				if (ev->mask & IN_IGNORED)
-					continue;   // watch auto-removed, nothing to do
+				if (ev->mask & IN_IGNORED) {
+					// Kernel auto-removed this watch (e.g. parent dir was
+					// moved/deleted).  Clean up our map so the descriptor
+					// can be reused without leaving a stale entry.
+					wd_to_path_.erase(ev->wd);
+					continue;
+					}
 
 				if (ev->mask & IN_Q_OVERFLOW) {
 					std::cout << stamp()
 					          << "FolderWatcher: inotify queue overflow; "
-					             "some events may have been missed"
+					             "falling back to full rescan"
 					          << std::endl;
-					// Still arm the debounce so we rescan.
+					// Can't know what changed; mark for full scan.
+					changed_artists_.insert(music_root_);
+					last_event = Clock::now();
+					continue;
 					}
 
-				// Arm / reset the debounce timer.
+				// Arm / reset the debounce timer and record the affected artist dir.
 				last_event = Clock::now();
+				{
+				std::string artist = artist_dir_for(ev->wd,
+				                                    ev->len > 0 ? ev->name : nullptr);
+				if (!artist.empty())
+					changed_artists_.insert(artist);
+				}
 
 				// Log the event.
 				{
@@ -225,12 +262,13 @@ void FolderWatcher::run()
 
 				// When a new subdirectory appears, watch it immediately so
 				// events inside it are captured before the next scan runs.
+				// Use recursive watching in case it has disc subfolders.
 				bool is_dir = ev->mask & IN_ISDIR;
 				bool is_create = ev->mask & (IN_CREATE | IN_MOVED_TO);
 				if (is_dir && is_create && ev->len > 0) {
 					auto it = wd_to_path_.find(ev->wd);
 					if (it != wd_to_path_.end())
-						add_watch(it->second + "/" + ev->name);
+						add_watches_recursive(it->second + "/" + ev->name);
 					}
 
 				// When the watched directory itself disappears, clean up.
