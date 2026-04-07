@@ -15,6 +15,8 @@
 #include <optional>
 #include <iostream>
 
+namespace fs = std::filesystem;
+
 // Events we care about on each watched directory.
 static constexpr uint32_t WATCH_MASK =
 	IN_CREATE      |   // new file or subdirectory
