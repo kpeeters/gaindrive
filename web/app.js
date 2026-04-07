@@ -196,6 +196,129 @@ function fmtDuration(secs) {
    return `${m}:${s}`;
 }
 
+// ── Player ───────────────────────────────────────────────────────────────────
+
+const player = {
+   audio: new Audio(),
+   queue: [],   // song objects from getAlbum
+   index: -1,   // current position in queue
+};
+
+function playerLoad(songs, startIndex) {
+   player.queue = songs;
+   player.index = startIndex;
+   playerPlay();
+}
+
+function playerPlay() {
+   const song = player.queue[player.index];
+   if (!song) return;
+   player.audio.src = apiUrl('stream', {id: song.id});
+   player.audio.play().catch(err => console.warn('[player] play failed', err));
+   playerUpdateUI();
+}
+
+function playerUpdateUI() {
+   const song = player.queue[player.index];
+   if (!song) return;
+
+   document.getElementById('player-title').textContent  = song.title;
+   document.getElementById('player-artist').textContent = song.artist ?? '';
+
+   const cover = document.getElementById('player-cover');
+   cover.src = song.coverArt ? apiUrl('getCoverArt', {id: song.coverArt, size: 64}) : '';
+
+   // Highlight active row in track list if it is currently visible.
+   document.querySelector('.track-row.playing')?.classList.remove('playing');
+   document.querySelector(`.track-row[data-id="${song.id}"]`)?.classList.add('playing');
+
+   if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+         title:   song.title,
+         artist:  song.artist ?? '',
+         artwork: song.coverArt
+            ? [{src: apiUrl('getCoverArt', {id: song.coverArt, size: 256}), sizes: '256x256'}]
+            : [],
+      });
+      }
+}
+
+// Auto-advance to next track.
+player.audio.addEventListener('ended', () => {
+   if (player.index < player.queue.length - 1) {
+      player.index++;
+      playerPlay();
+      }
+   });
+
+// Keep seek bar and time display in sync while playing.
+player.audio.addEventListener('timeupdate', () => {
+   const seek = document.getElementById('player-seek');
+   const time = document.getElementById('player-time');
+   const cur  = player.audio.currentTime;
+   const dur  = player.audio.duration || 0;
+   if (!seek.dataset.seeking) {
+      seek.max   = Math.floor(dur);
+      seek.value = Math.floor(cur);
+      }
+   time.textContent = `${fmtDuration(Math.floor(cur))} / ${fmtDuration(Math.floor(dur))}`;
+   });
+
+player.audio.addEventListener('play',  () => {
+   document.getElementById('player-playpause').textContent = '⏸';
+   });
+player.audio.addEventListener('pause', () => {
+   document.getElementById('player-playpause').textContent = '▶';
+   });
+
+// Wire control buttons and MediaSession handlers. Called once from showShell().
+function setupPlayer() {
+   document.getElementById('player-playpause').addEventListener('click', () => {
+      if (player.audio.paused) player.audio.play();
+      else                     player.audio.pause();
+      });
+
+   // Restart if more than 3 s in, otherwise go to previous track (standard UX).
+   document.getElementById('player-prev').addEventListener('click', () => {
+      if (player.audio.currentTime > 3) {
+         player.audio.currentTime = 0;
+         } else if (player.index > 0) {
+         player.index--;
+         playerPlay();
+         }
+      });
+
+   document.getElementById('player-next').addEventListener('click', () => {
+      if (player.index < player.queue.length - 1) {
+         player.index++;
+         playerPlay();
+         }
+      });
+
+   // Prevent the seek bar from jumping while the user is dragging it.
+   const seek = document.getElementById('player-seek');
+   seek.addEventListener('mousedown',  () => { seek.dataset.seeking = '1'; });
+   seek.addEventListener('touchstart', () => { seek.dataset.seeking = '1'; });
+   seek.addEventListener('change', () => {
+      player.audio.currentTime = Number(seek.value);
+      delete seek.dataset.seeking;
+      });
+
+   if ('mediaSession' in navigator) {
+      navigator.mediaSession.setActionHandler('play',          () => player.audio.play());
+      navigator.mediaSession.setActionHandler('pause',         () => player.audio.pause());
+      navigator.mediaSession.setActionHandler('previoustrack', () => {
+         document.getElementById('player-prev').click();
+         });
+      navigator.mediaSession.setActionHandler('nexttrack',     () => {
+         document.getElementById('player-next').click();
+         });
+      navigator.mediaSession.setActionHandler('seekto', details => {
+         player.audio.currentTime = details.seekTime;
+         });
+      }
+}
+
 async function viewTracks(albumId, albumTitle, artistId, artistName, container) {
    console.log('[tracks] loading album', albumId, albumTitle);
    container.innerHTML = '';
@@ -237,6 +360,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, container) 
       dur.className = 'track-dur';
       dur.textContent = song.duration ? fmtDuration(song.duration) : '';
 
+      row.addEventListener('click', () => playerLoad(songs, songs.indexOf(song)));
       row.appendChild(num);
       row.appendChild(title);
       row.appendChild(dur);
@@ -254,6 +378,8 @@ async function showShell() {
    const shell = document.getElementById('app-shell');
    shell.hidden = false;
    console.log('[shell] app-shell hidden=', shell.hidden, 'display=', getComputedStyle(shell).display);
+
+   setupPlayer();
 
    // Wire up sidebar links.
    shell.querySelectorAll('[data-view]').forEach(a => {

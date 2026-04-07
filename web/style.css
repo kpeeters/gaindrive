@@ -302,3 +302,84 @@ body {
    color: var(--text-dim);
    font-variant-numeric: tabular-nums;
 }
+
+/* ── Player ────────────────────────────────────────── */
+
+#player {
+   gap: 0.75rem;
+}
+
+#player-cover {
+   border-radius: 3px;
+   object-fit: cover;
+   flex-shrink: 0;
+}
+
+/* Prevent broken-image icon before first track is loaded. */
+#player-cover:not([src]),
+#player-cover[src=""] {
+   visibility: hidden;
+}
+
+#player-info {
+   flex: 1;
+   min-width: 0;
+   display: flex;
+   flex-direction: column;
+   overflow: hidden;
+}
+
+#player-title {
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   color: var(--text);
+   font-size: 0.85rem;
+}
+
+#player-artist {
+   font-size: 0.75rem;
+   color: var(--text-dim);
+}
+
+#player-controls {
+   display: flex;
+   gap: 0.25rem;
+   flex-shrink: 0;
+}
+
+#player-controls button {
+   background: none;
+   border: none;
+   color: var(--text-dim);
+   cursor: pointer;
+   font-size: 1.1rem;
+   padding: 0.2rem 0.4rem;
+   border-radius: 3px;
+}
+
+#player-controls button:hover {
+   color: var(--text);
+   background: var(--bg);
+}
+
+#player-seek {
+   flex: 1;
+   min-width: 60px;
+   max-width: 260px;
+   accent-color: var(--accent);
+   cursor: pointer;
+}
+
+#player-time {
+   font-size: 0.75rem;
+   color: var(--text-dim);
+   font-variant-numeric: tabular-nums;
+   white-space: nowrap;
+   flex-shrink: 0;
+}
+
+/* Highlight track number of currently playing row. */
+.track-row.playing .track-num {
+   color: var(--accent);
+}

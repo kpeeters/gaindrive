@@ -46,7 +46,18 @@
    </main>
 
    <footer id="player">
-      <!-- player controls go here -->
+      <img id="player-cover" src="" alt="" width="48" height="48">
+      <div id="player-info">
+         <span id="player-title">—</span>
+         <span id="player-artist"></span>
+      </div>
+      <div id="player-controls">
+         <button id="player-prev"      title="Previous">⏮</button>
+         <button id="player-playpause" title="Play">▶</button>
+         <button id="player-next"      title="Next">⏭</button>
+      </div>
+      <input id="player-seek" type="range" value="0" min="0" step="1">
+      <span id="player-time">0:00 / 0:00</span>
    </footer>
 </div>
 
