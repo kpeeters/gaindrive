@@ -5,6 +5,7 @@
 #include <iostream>
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <set>
 
 #include <taglib/fileref.h>
@@ -321,6 +322,14 @@ MediaStore::Counts MediaStore::count_audio_files()
 
 void MediaStore::scan()
 	{
+	// Record start time before the lock so we can prune stale DB entries after
+	// the walk.  SQLite CURRENT_TIMESTAMP is UTC "YYYY-MM-DD HH:MM:SS".
+	std::time_t t = std::time(nullptr);
+	char scan_start_buf[32];
+	std::strftime(scan_start_buf, sizeof(scan_start_buf),
+	              "%Y-%m-%d %H:%M:%S", std::gmtime(&t));
+	std::string scan_start_str = scan_start_buf;
+
 	Counts totals = count_audio_files();
 	std::cout << stamp() << "Scan started: " << music_root_
 	          << "  (" << totals.artists << " artists, "
@@ -430,6 +439,59 @@ void MediaStore::scan()
 			          << "  [" << progress << "]" << std::endl;
 			}
 		}
+
+	// Prune entries for paths that no longer exist on disk.
+	// upsert_folder always refreshes last_scanned, so any subfolder with an
+	// older timestamp was not visited — meaning it has been removed or moved.
+	// Deleting stale folders cascades to songs via the songs.folder_id column
+	// (handled explicitly below since there is no FK cascade on that path),
+	// and to album_artists / song_artists via albums ON DELETE CASCADE.
+	std::string root_prefix = music_root_ + "/%";
+
+	{
+	SQLite::Statement s(db_music_,
+		"DELETE FROM songs WHERE folder_id IN ("
+		"  SELECT id FROM folders WHERE last_scanned < ? AND path LIKE ?"
+		")");
+	s.bind(1, scan_start_str);
+	s.bind(2, root_prefix);
+	s.exec();
+	int n = db_music_.getChanges();
+	if (n > 0)
+		std::cout << stamp() << "  pruned " << n << " songs" << std::endl;
+	}
+	{
+	SQLite::Statement s(db_music_,
+		"DELETE FROM albums WHERE folder_id IN ("
+		"  SELECT id FROM folders WHERE last_scanned < ? AND path LIKE ?"
+		")");
+	s.bind(1, scan_start_str);
+	s.bind(2, root_prefix);
+	s.exec();
+	int n = db_music_.getChanges();
+	if (n > 0)
+		std::cout << stamp() << "  pruned " << n << " albums" << std::endl;
+	}
+	{
+	SQLite::Statement s(db_music_,
+		"DELETE FROM folders WHERE last_scanned < ? AND path LIKE ?");
+	s.bind(1, scan_start_str);
+	s.bind(2, root_prefix);
+	s.exec();
+	int n = db_music_.getChanges();
+	if (n > 0)
+		std::cout << stamp() << "  pruned " << n << " folders" << std::endl;
+	}
+	{
+	// Artists are identified by name, not folder; prune any that have no albums left.
+	SQLite::Statement s(db_music_,
+		"DELETE FROM artists WHERE id NOT IN"
+		" (SELECT DISTINCT artist_id FROM album_artists)");
+	s.exec();
+	int n = db_music_.getChanges();
+	if (n > 0)
+		std::cout << stamp() << "  pruned " << n << " artists" << std::endl;
+	}
 
 	txn.commit();
 	std::cout << stamp() << "Scan complete: " << song_count << " songs" << std::endl;

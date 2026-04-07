@@ -134,12 +134,22 @@ void FolderWatcher::run()
 			if (remaining <= 0) {
 				// Debounce period expired — start a rescan if none is running.
 				if (!scan_running_.exchange(true)) {
+					std::cout << stamp() << "FolderWatcher: triggering rescan"
+					          << std::endl;
 					std::thread([this]{
 						store_.scan();
 						scan_running_.store(false);
 						}).detach();
+					last_event.reset();
 					}
-				last_event.reset();
+				else {
+					// Scan in progress; reset the timer so we retry after
+					// another debounce period rather than spinning.
+					std::cout << stamp()
+					          << "FolderWatcher: rescan already running, will retry"
+					          << std::endl;
+					last_event = Clock::now();
+					}
 				// Fall through to poll with timeout -1 until next event.
 				}
 			else {
@@ -194,6 +204,24 @@ void FolderWatcher::run()
 
 				// Arm / reset the debounce timer.
 				last_event = Clock::now();
+
+				// Log the event.
+				{
+				auto it = wd_to_path_.find(ev->wd);
+				std::string parent = (it != wd_to_path_.end()) ? it->second : "?";
+				std::string name   = (ev->len > 0) ? ev->name : "";
+				std::string full   = name.empty() ? parent : parent + "/" + name;
+				const char* kind =
+					(ev->mask & IN_CREATE)      ? "created"  :
+					(ev->mask & IN_DELETE)       ? "deleted"  :
+					(ev->mask & IN_CLOSE_WRITE)  ? "modified" :
+					(ev->mask & IN_MOVED_FROM)   ? "moved out" :
+					(ev->mask & IN_MOVED_TO)     ? "moved in"  :
+					(ev->mask & IN_DELETE_SELF)  ? "deleted"  :
+					(ev->mask & IN_MOVE_SELF)    ? "moved out" : "changed";
+				std::cout << stamp() << "FolderWatcher: " << kind
+				          << "  " << full << std::endl;
+				}
 
 				// When a new subdirectory appears, watch it immediately so
 				// events inside it are captured before the next scan runs.
