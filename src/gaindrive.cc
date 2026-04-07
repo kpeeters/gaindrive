@@ -1662,7 +1662,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 
-		auto devices = cast_manager_.discover(2000);
+		auto devices = cast_manager_.discover(4000);
 
 		std::string body;
 		if (use_json) {
