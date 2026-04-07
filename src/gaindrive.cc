@@ -1461,6 +1461,24 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
+	// getTopSongs — play-count tracking not implemented; return empty list.
+	server_.Get("/rest/getTopSongs.view", [this](const httplib::Request& req,
+	                                             httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([](nlohmann::json& r) {
+				r["topSongs"] = {{"song", nlohmann::json::array()}};
+				});
+		else
+			body = subsonic_ok([](XMLDocument& doc, XMLElement* root) {
+				root->InsertEndChild(doc.NewElement("topSongs"));
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	// Catch-all for endpoints not yet implemented.
 	server_.Get("/rest/:endpoint", [](const httplib::Request& req, httplib::Response& res) {
 		std::cout << stamp() << "NOT IMPLEMENTED: " << req.path << std::endl;
