@@ -1000,6 +1000,7 @@ GainDrive::GainDrive(const std::string& db_path,
 						child = {{"id",c.id},{"parent",c.parent_id},{"isDir",true},
 						         {"title",c.title},{"artist",c.artist},{"album",c.album}};
 						if (c.cover_art_id >= 0) child["coverArt"] = c.cover_art_id;
+						if (c.year > 0)          child["year"]     = c.year;
 						} else {
 						child = song_entry_json(c);
 						}
@@ -1035,6 +1036,8 @@ GainDrive::GainDrive(const std::string& db_path,
 						child->SetAttribute("album",  c.album.c_str());
 						if (c.cover_art_id >= 0)
 							child->SetAttribute("coverArt", c.cover_art_id);
+						if (c.year > 0)
+							child->SetAttribute("year", c.year);
 						} else {
 						child = song_entry_xml(doc, c, "child");
 						}

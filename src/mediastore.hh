@@ -72,10 +72,10 @@ class MediaStore {
 			std::string artist;
 			std::string album;
 			int         cover_art_id = -1;  // folder_id for getCoverArt; -1 = none
+			int         year         = 0;  // populated for both songs and album dirs
 			// populated only when !is_dir:
 			int         track_number = 0;
 			int         disc_number  = 1;
-			int         year         = 0;
 			std::string genre;
 			double      duration     = 0;
 			int         bitrate      = 0;

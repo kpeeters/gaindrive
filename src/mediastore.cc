@@ -792,7 +792,8 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 			"       COALESCE(a.name, '') AS artist,"
 			"       COALESCE(al.title, f.name) AS album,"
 			"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-			"            THEN f.id ELSE -1 END AS cover_art_id"
+			"            THEN f.id ELSE -1 END AS cover_art_id,"
+			"       COALESCE(al.year, 0) AS year"
 			" FROM folders f"
 			" LEFT JOIN albums al ON al.folder_id = f.id"
 			" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
@@ -809,6 +810,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 			e.artist       = dsel.getColumn(2).getString();
 			e.album        = dsel.getColumn(3).getString();
 			e.cover_art_id = dsel.getColumn(4).getInt();
+			e.year         = dsel.getColumn(5).getInt();
 			dir.children.push_back(std::move(e));
 			}
 		}
