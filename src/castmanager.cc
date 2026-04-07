@@ -40,7 +40,7 @@ struct DiscState {
 	std::map<std::string, std::string>              srvs;   // service instance → SRV host
 	};
 
-static int mdns_cb(int, const struct sockaddr*,
+static int mdns_cb(int, const struct sockaddr*, size_t,
                     mdns_entry_type_t, uint16_t,
                     uint16_t rtype, uint16_t, uint32_t,
                     const void* data, size_t size,
