@@ -49,9 +49,13 @@ void FolderWatcher::add_watch(const std::string& path)
 			          << ". Raise with: sysctl fs.inotify.max_user_watches=524288"
 			          << std::endl;
 		else
+			// EACCES is common when a directory is first created and its
+			// permissions haven't been fully set yet; the rewatch after the
+			// next rescan will pick it up.
 			std::cout << stamp()
 			          << "FolderWatcher: failed to watch " << path
-			          << ": " << strerror(errno) << std::endl;
+			          << ": " << strerror(errno) << " (will retry after rescan)"
+			          << std::endl;
 		return;
 		}
 	wd_to_path_[wd] = path;
@@ -117,6 +121,15 @@ void FolderWatcher::start()
 		return;
 		}
 
+	if (pipe2(rewatch_pipe_, O_CLOEXEC | O_NONBLOCK) == -1) {
+		std::cout << stamp() << "FolderWatcher: pipe2 (rewatch) failed: "
+		          << strerror(errno) << std::endl;
+		close(inotify_fd_); inotify_fd_ = -1;
+		close(pipe_fd_[0]); close(pipe_fd_[1]);
+		pipe_fd_[0] = pipe_fd_[1] = -1;
+		return;
+		}
+
 	add_watches_recursive(music_root_);
 	std::cout << stamp() << "FolderWatcher: watching " << wd_to_path_.size()
 	          << " directories under " << music_root_ << std::endl;
@@ -133,9 +146,11 @@ void FolderWatcher::stop()
 		}
 	if (thread_.joinable())
 		thread_.join();
-	if (inotify_fd_ != -1) { close(inotify_fd_); inotify_fd_ = -1; }
-	if (pipe_fd_[0] != -1) { close(pipe_fd_[0]); pipe_fd_[0] = -1; }
-	if (pipe_fd_[1] != -1) { close(pipe_fd_[1]); pipe_fd_[1] = -1; }
+	if (inotify_fd_      != -1) { close(inotify_fd_);       inotify_fd_       = -1; }
+	if (pipe_fd_[0]     != -1) { close(pipe_fd_[0]);      pipe_fd_[0]       = -1; }
+	if (pipe_fd_[1]     != -1) { close(pipe_fd_[1]);      pipe_fd_[1]       = -1; }
+	if (rewatch_pipe_[0] != -1) { close(rewatch_pipe_[0]); rewatch_pipe_[0] = -1; }
+	if (rewatch_pipe_[1] != -1) { close(rewatch_pipe_[1]); rewatch_pipe_[1] = -1; }
 	}
 
 void FolderWatcher::run()
@@ -163,6 +178,16 @@ void FolderWatcher::run()
 					          << (dirs.size() == 1 ? "y" : "ies") << std::endl;
 					std::thread([this, dirs = std::move(dirs)]{
 						store_.scan_dirs(dirs);
+						// Signal run() to re-watch the rescanned dirs so that
+						// directories which were inaccessible at creation time
+						// (transient EACCES) get a watch added now.
+						{
+						std::lock_guard<std::mutex> lk(rewatches_mutex_);
+						for (auto& d : dirs)
+							pending_rewatches_.push_back(d);
+						}
+						char b = 0;
+						write(rewatch_pipe_[1], &b, 1);
 						scan_running_.store(false);
 						}).detach();
 					last_event.reset();
@@ -182,11 +207,12 @@ void FolderWatcher::run()
 				}
 			}
 
-		struct pollfd fds[2];
-		fds[0] = { inotify_fd_, POLLIN, 0 };
-		fds[1] = { pipe_fd_[0], POLLIN, 0 };
+		struct pollfd fds[3];
+		fds[0] = { inotify_fd_,       POLLIN, 0 };
+		fds[1] = { pipe_fd_[0],       POLLIN, 0 };
+		fds[2] = { rewatch_pipe_[0],  POLLIN, 0 };
 
-		int r = poll(fds, 2, timeout_ms);
+		int r = poll(fds, 3, timeout_ms);
 		if (r < 0) {
 			if (errno == EINTR) continue;
 			std::cout << stamp() << "FolderWatcher: poll error: "
@@ -194,9 +220,23 @@ void FolderWatcher::run()
 			break;
 			}
 
-		// Stop signal via pipe.
+		// Stop signal.
 		if (fds[1].revents & POLLIN)
 			break;
+
+		// Rewatch signal: a scan just finished; add watches for any directories
+		// that failed earlier due to transient EACCES.
+		if (fds[2].revents & POLLIN) {
+			char b;
+			while (read(rewatch_pipe_[0], &b, 1) == 1) {}  // drain
+			std::vector<std::string> todo;
+			{
+			std::lock_guard<std::mutex> lk(rewatches_mutex_);
+			todo.swap(pending_rewatches_);
+			}
+			for (auto& path : todo)
+				add_watches_recursive(path);
+			}
 
 		if (!(fds[0].revents & POLLIN))
 			continue;   // timeout or spurious wakeup

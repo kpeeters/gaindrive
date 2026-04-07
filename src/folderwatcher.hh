@@ -2,9 +2,11 @@
 
 #include <string>
 #include <atomic>
+#include <mutex>
 #include <set>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 class MediaStore;
 
@@ -31,11 +33,14 @@ class FolderWatcher {
 		std::string                         music_root_;
 		int                                 debounce_ms_;
 		int                                 inotify_fd_ = -1;
-		int                                 pipe_fd_[2] = {-1, -1};
+		int                                 pipe_fd_[2]     = {-1, -1};
+		int                                 rewatch_pipe_[2] = {-1, -1};
 		std::atomic<bool>                   scan_running_{false};
 		std::thread                         thread_;
 		std::unordered_map<int,std::string> wd_to_path_;
 		std::set<std::string>               changed_artists_;
+		std::mutex                          rewatches_mutex_;
+		std::vector<std::string>            pending_rewatches_;
 #else
 		MediaStore&  store_;
 		std::string  music_root_;
