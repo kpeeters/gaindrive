@@ -59,7 +59,7 @@ class MediaStore {
 		std::optional<CachedArtistInfo> get_cached_artist_info(int folder_id);
 		void cache_artist_info(int folder_id, const CachedArtistInfo& info);
 
-		struct ArtistDir { int id; std::string name; };
+		struct ArtistDir { int id; std::string name; int album_count = 0; };
 
 		// All artist-level folders (depth-1 children of root), sorted by name.
 		std::vector<ArtistDir> get_artist_dirs();

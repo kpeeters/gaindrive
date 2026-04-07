@@ -833,6 +833,68 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
+	// getArtists — same artists as getIndexes but with albumCount per artist.
+	server_.Get("/rest/getArtists.view", [this](const httplib::Request& req,
+	                                            httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto artists = store_.get_artist_dirs();
+		std::sort(artists.begin(), artists.end(),
+			[](const MediaStore::ArtistDir& a, const MediaStore::ArtistDir& b) {
+				return sort_key(a.name) < sort_key(b.name);
+				});
+
+		std::map<std::string, std::vector<const MediaStore::ArtistDir*>> buckets;
+		for (auto& a : artists) {
+			std::string key    = sort_key(a.name);
+			std::string letter = key.empty() || !std::isalpha((unsigned char)key[0])
+			                   ? "#"
+			                   : std::string(1, (char)std::toupper((unsigned char)key[0]));
+			buckets[letter].push_back(&a);
+			}
+
+		bool use_json = (fmt_of(req) == "json");
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&buckets](nlohmann::json& r) {
+				nlohmann::json idx_arr = nlohmann::json::array();
+				for (auto& [letter, vec] : buckets) {
+					nlohmann::json artist_arr = nlohmann::json::array();
+					for (auto* a : vec)
+						artist_arr.push_back({{"id", a->id}, {"name", a->name},
+						                      {"albumCount", a->album_count}});
+					idx_arr.push_back({{"name", letter}, {"artist", artist_arr}});
+					}
+				r["artists"] = {
+					{"lastModified",    "0"},
+					{"ignoredArticles", "The El La Los Las Le Les A An Die Das Ein Eine"},
+					{"index",           idx_arr}
+					};
+				});
+		else
+			body = subsonic_ok([&buckets](XMLDocument& doc, XMLElement* root) {
+				auto* artists_el = doc.NewElement("artists");
+				artists_el->SetAttribute("lastModified",    "0");
+				artists_el->SetAttribute("ignoredArticles",
+					"The El La Los Las Le Les A An Die Das Ein Eine");
+				for (auto& [letter, vec] : buckets) {
+					auto* idx = doc.NewElement("index");
+					idx->SetAttribute("name", letter.c_str());
+					for (auto* a : vec) {
+						auto* artist = doc.NewElement("artist");
+						artist->SetAttribute("id",         a->id);
+						artist->SetAttribute("name",       a->name.c_str());
+						artist->SetAttribute("albumCount", a->album_count);
+						idx->InsertEndChild(artist);
+						}
+					artists_el->InsertEndChild(idx);
+					}
+				root->InsertEndChild(artists_el);
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	// getMusicDirectory — contents of a folder (album dirs or song files).
 	server_.Get("/rest/getMusicDirectory.view", [this](const httplib::Request& req,
 	                                                    httplib::Response& res) {

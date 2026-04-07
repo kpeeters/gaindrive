@@ -740,16 +740,21 @@ std::optional<MediaStore::SongInfo> MediaStore::get_song(int song_id)
 std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs()
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
+	// Count albums per artist via the child folders (album folders are one level down).
 	SQLite::Statement sel(db_,
-		"SELECT f.id, f.name"
+		"SELECT f.id, f.name, COUNT(al.id) AS album_count"
 		" FROM folders f"
+		" LEFT JOIN folders af ON af.parent_id = f.id"
+		" LEFT JOIN albums al ON al.folder_id = af.id"
 		" WHERE f.parent_id = (SELECT id FROM folders WHERE parent_id IS NULL)"
+		" GROUP BY f.id"
 		" ORDER BY f.name COLLATE NOCASE");
 
 	std::vector<ArtistDir> result;
 	while (sel.executeStep())
 		result.push_back({sel.getColumn(0).getInt(),
-		                  sel.getColumn(1).getString()});
+		                  sel.getColumn(1).getString(),
+		                  sel.getColumn(2).getInt()});
 	return result;
 	}
 
