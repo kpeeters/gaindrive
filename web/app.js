@@ -131,7 +131,7 @@ async function viewArtists(container) {
          row.appendChild(name);
          row.appendChild(count);
          row.addEventListener('click', () => {
-            viewAlbums(artist.id, artist.name, container.parentElement);
+            viewAlbums(artist.id, artist.name, container);
             });
          frag.appendChild(row);
       }
