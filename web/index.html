@@ -5,6 +5,8 @@
    <meta name="viewport" content="width=device-width, initial-scale=1.0">
    <title>GainDrive</title>
    <link rel="stylesheet" href="style.css">
+   <!-- Apply saved theme before first paint to avoid a flash. -->
+   <script>(function(){var t=localStorage.getItem('gd_theme');if(t)document.documentElement.classList.add(t);})();</script>
 </head>
 <body>
 
@@ -38,6 +40,7 @@
       <ul class="nav-bottom">
          <li><a href="#" data-view="settings">Settings</a></li>
          <li><a href="#" data-view="admin">Admin</a></li>
+         <li><button id="theme-toggle" class="theme-btn" title="Cycle theme: auto / light / dark">Auto</button></li>
       </ul>
    </nav>
 

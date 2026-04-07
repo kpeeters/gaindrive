@@ -22,6 +22,29 @@ const creds = {
    },
 };
 
+// ── Theme ────────────────────────────────────────────────────────────────────
+
+// Cycles: auto (system preference) → light → dark → auto.
+const THEME_CYCLE = ['auto', 'light', 'dark'];
+
+function applyTheme(theme) {
+   document.documentElement.classList.remove('light', 'dark');
+   if (theme !== 'auto')
+      document.documentElement.classList.add(theme);
+
+   if (theme === 'auto') localStorage.removeItem('gd_theme');
+   else                  localStorage.setItem('gd_theme', theme);
+
+   const btn = document.getElementById('theme-toggle');
+   if (btn) btn.textContent = theme.charAt(0).toUpperCase() + theme.slice(1);
+}
+
+function cycleTheme() {
+   const current = localStorage.getItem('gd_theme') ?? 'auto';
+   const next    = THEME_CYCLE[(THEME_CYCLE.indexOf(current) + 1) % THEME_CYCLE.length];
+   applyTheme(next);
+}
+
 // ── Subsonic API wrapper ────────────────────────────────────────────────────
 
 // Build a subsonic API URL. Extra params can be passed as an object.
@@ -380,6 +403,12 @@ async function showShell() {
    console.log('[shell] app-shell hidden=', shell.hidden, 'display=', getComputedStyle(shell).display);
 
    setupPlayer();
+
+   // Sync theme button label with current state and wire it up.
+   const saved = localStorage.getItem('gd_theme') ?? 'auto';
+   const btn   = document.getElementById('theme-toggle');
+   btn.textContent = saved.charAt(0).toUpperCase() + saved.slice(1);
+   btn.addEventListener('click', cycleTheme);
 
    // Wire up sidebar links.
    shell.querySelectorAll('[data-view]').forEach(a => {

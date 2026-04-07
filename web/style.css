@@ -8,6 +8,13 @@
    stylesheet's [hidden]{display:none}, so we restore it here. */
 [hidden] { display: none !important; }
 
+/* ── Colour themes ─────────────────────────────────────────────────────────
+   Dark is the default. Light is applied when:
+     a) the OS prefers light AND no explicit class is set, OR
+     b) <html class="light"> is set explicitly by the theme toggle.
+   <html class="dark"> forces dark regardless of OS preference.
+   ── */
+
 :root {
    --bg:        #1a1a1a;
    --surface:   #242424;
@@ -18,6 +25,32 @@
    --error:     #e05555;
    --sidebar-w: 180px;
    --player-h:  72px;
+}
+
+@media (prefers-color-scheme: light) {
+   :root:not(.dark) {
+      --bg:       #f4f4f4;
+      --surface:  #ffffff;
+      --border:   #ddd;
+      --text:     #1a1a1a;
+      --text-dim: #666;
+   }
+}
+
+:root.light {
+   --bg:       #f4f4f4;
+   --surface:  #ffffff;
+   --border:   #ddd;
+   --text:     #1a1a1a;
+   --text-dim: #666;
+}
+
+:root.dark {
+   --bg:       #1a1a1a;
+   --surface:  #242424;
+   --border:   #333;
+   --text:     #e0e0e0;
+   --text-dim: #888;
 }
 
 body {
@@ -382,4 +415,25 @@ body {
 /* Highlight track number of currently playing row. */
 .track-row.playing .track-num {
    color: var(--accent);
+}
+
+/* ── Theme toggle button ───────────────────────────── */
+
+.theme-btn {
+   display: block;
+   width: calc(100% - 0.8rem);
+   margin: 0 0.4rem;
+   background: none;
+   border: 1px solid var(--border);
+   border-radius: 4px;
+   color: var(--text-dim);
+   cursor: pointer;
+   font-size: 0.8rem;
+   padding: 0.35rem 1rem;
+   text-align: left;
+}
+
+.theme-btn:hover {
+   background: var(--bg);
+   color: var(--text);
 }
