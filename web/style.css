@@ -4,6 +4,10 @@
    padding: 0;
 }
 
+/* Explicit display rules on elements like #login-screen override the UA
+   stylesheet's [hidden]{display:none}, so we restore it here. */
+[hidden] { display: none !important; }
+
 :root {
    --bg:        #1a1a1a;
    --surface:   #242424;
