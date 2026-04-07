@@ -4,6 +4,7 @@
 #include <httplib.h>
 
 #include "mediastore.hh"
+#include "castmanager.hh"
 
 class GainDrive {
 	public:
@@ -18,5 +19,6 @@ class GainDrive {
 		bool            debug_;
 		bool            flat_multi_disc_;
 		MediaStore      store_;
+		CastManager     cast_manager_;
 		httplib::Server server_;
 	};

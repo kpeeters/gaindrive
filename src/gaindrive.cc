@@ -1247,9 +1247,15 @@ GainDrive::GainDrive(const std::string& db_path,
 		});
 
 	// stream — serve audio file directly or transcode via ffmpeg.
+	// In cast mode: redirect playback to the Chromecast and return 204 to the
+	// calling client.  The Chromecast authenticates its own request with a
+	// castToken query parameter instead of normal credentials.
 	server_.Get("/rest/stream.view", [this](const httplib::Request& req,
 	                                        httplib::Response& res) {
-		if (!check_auth(req, res, store_)) return;
+		auto tok_it = req.params.find("castToken");
+		bool cast_authed = tok_it != req.params.end()
+		                && cast_manager_.valid_token(tok_it->second);
+		if (!cast_authed && !check_auth(req, res, store_)) return;
 
 		auto it = req.params.find("id");
 		if (it == req.params.end()) {
@@ -1261,6 +1267,19 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto song = store_.get_song(std::stoi(it->second));
 		if (!song) {
 			res.set_content(subsonic_error(70, "Song not found."), "application/xml");
+			return;
+			}
+
+		// If cast mode is active and the caller is not the Chromecast itself,
+		// instruct the Chromecast to fetch the stream and return 204 here.
+		if (cast_manager_.active() && !cast_authed) {
+			std::string host = req.get_header_value("Host");
+			if (host.empty()) host = "localhost";
+			std::string url = "http://" + host + "/rest/stream.view"
+			                + "?id=" + it->second
+			                + "&castToken=" + cast_manager_.token();
+			cast_manager_.load(url, codec_to_mime(song->codec));
+			res.status = 204;
 			return;
 			}
 
@@ -1635,6 +1654,86 @@ GainDrive::GainDrive(const std::string& db_path,
 				});
 		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// listCastDevices — return Chromecast devices found via mDNS on the LAN.
+	server_.Get("/rest/listCastDevices.view", [this](const httplib::Request& req,
+	                                                  httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+
+		auto devices = cast_manager_.discover(2000);
+
+		std::string body;
+		if (use_json) {
+			body = subsonic_ok_json([&devices](nlohmann::json& r) {
+				nlohmann::json arr = nlohmann::json::array();
+				for (auto& d : devices)
+					arr.push_back({{"id", d.id}, {"name", d.name},
+					               {"address", d.address}, {"port", d.port}});
+				r["castDevices"] = arr;
+				});
+			}
+		else {
+			body = subsonic_ok([&devices](XMLDocument& doc, XMLElement* root) {
+				auto* el = doc.NewElement("castDevices");
+				for (auto& d : devices) {
+					auto* dev = doc.NewElement("castDevice");
+					dev->SetAttribute("id",      d.id.c_str());
+					dev->SetAttribute("name",    d.name.c_str());
+					dev->SetAttribute("address", d.address.c_str());
+					dev->SetAttribute("port",    d.port);
+					el->InsertEndChild(dev);
+					}
+				root->InsertEndChild(el);
+				});
+			}
+
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// startCast — enter cast mode: subsequent stream requests go to the Chromecast.
+	server_.Get("/rest/startCast.view", [this](const httplib::Request& req,
+	                                            httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			res.set_content(
+				use_json ? subsonic_error_json(10, "Required parameter missing: id.")
+				         : subsonic_error(10, "Required parameter missing: id."),
+				use_json ? "application/json" : "application/xml");
+			return;
+			}
+
+		auto devices = cast_manager_.discover(2000);
+		CastManager::CastDevice chosen;
+		bool found = false;
+		for (auto& d : devices)
+			if (d.id == it->second) { chosen = d; found = true; break; }
+
+		if (!found) {
+			res.set_content(
+				use_json ? subsonic_error_json(70, "Cast device not found.")
+				         : subsonic_error(70, "Cast device not found."),
+				use_json ? "application/json" : "application/xml");
+			return;
+			}
+
+		cast_manager_.start(chosen);
+		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
+		                use_json ? "application/json" : "application/xml");
+		});
+
+	// stopCast — stop Chromecast playback and exit cast mode.
+	server_.Get("/rest/stopCast.view", [this](const httplib::Request& req,
+	                                           httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		cast_manager_.stop();
+		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
+		                use_json ? "application/json" : "application/xml");
 		});
 
 	// Catch-all for endpoints not yet implemented.

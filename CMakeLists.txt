@@ -60,7 +60,13 @@ FetchContent_Declare(
 	GIT_TAG        v14.2.5
 )
 
-FetchContent_MakeAvailable(httplib cxxopts nlohmann_json SQLiteCpp taglib tinyxml2 reproc)
+FetchContent_Declare(
+	mdns
+	GIT_REPOSITORY https://github.com/mjansson/mdns.git
+	GIT_TAG        1.4.3
+)
+
+FetchContent_MakeAvailable(httplib cxxopts nlohmann_json SQLiteCpp taglib tinyxml2 reproc mdns)
 
 find_package(OpenSSL REQUIRED)
 
@@ -76,9 +82,13 @@ add_executable(gaindrive
 	src/mediastore.cc
 	src/streamer.cc
 	src/stamp.cc
+	src/castmanager.cc
 )
 
 target_compile_definitions(gaindrive PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
+
+# mdns.h is header-only; add its source directory to the include path.
+target_include_directories(gaindrive PRIVATE ${mdns_SOURCE_DIR})
 
 target_link_libraries(gaindrive PRIVATE
 	httplib::httplib
