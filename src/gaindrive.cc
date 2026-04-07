@@ -1313,9 +1313,9 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getStarred
-	server_.Get("/rest/getStarred.view", [this](const httplib::Request& req,
-	                                             httplib::Response& res) {
+	// getStarred / getStarred2 — identical content, only the response key differs.
+	auto starred_handler = [this](const httplib::Request& req, httplib::Response& res,
+	                               const char* key) {
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 		std::string user = req.params.find("u")->second;
@@ -1323,7 +1323,7 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		std::string body;
 		if (use_json)
-			body = subsonic_ok_json([&sr](nlohmann::json& r) {
+			body = subsonic_ok_json([&sr, key](nlohmann::json& r) {
 				nlohmann::json artists = nlohmann::json::array();
 				for (auto& a : sr.artists)
 					artists.push_back({{"id", a.id}, {"name", a.name}});
@@ -1346,15 +1346,15 @@ GainDrive::GainDrive(const std::string& db_path,
 				for (auto& c : sr.songs)
 					songs.push_back(song_entry_json(c));
 
-				r["starred"] = {
+				r[key] = {
 					{"artist", artists},
 					{"album",  albums},
 					{"song",   songs}
 					};
 				});
 		else
-			body = subsonic_ok([&sr](XMLDocument& doc, XMLElement* root) {
-				auto* starred = doc.NewElement("starred");
+			body = subsonic_ok([&sr, key](XMLDocument& doc, XMLElement* root) {
+				auto* starred = doc.NewElement(key);
 
 				for (auto& a : sr.artists) {
 					auto* el = doc.NewElement("artist");
@@ -1382,6 +1382,14 @@ GainDrive::GainDrive(const std::string& db_path,
 				});
 		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
+		};
+	server_.Get("/rest/getStarred.view",  [starred_handler](const httplib::Request& req,
+	                                                         httplib::Response& res) {
+		starred_handler(req, res, "starred");
+		});
+	server_.Get("/rest/getStarred2.view", [starred_handler](const httplib::Request& req,
+	                                                          httplib::Response& res) {
+		starred_handler(req, res, "starred2");
 		});
 
 	// updatePlaylist
