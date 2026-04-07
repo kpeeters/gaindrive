@@ -373,6 +373,18 @@ void MediaStore::scan()
 				upd.exec();
 				}
 
+			// Derive album year from the first song that has one tagged.
+			{
+			SQLite::Statement upd(db_,
+				"UPDATE albums SET year = ("
+				"  SELECT year FROM songs WHERE album_id = ? AND year > 0"
+				"  ORDER BY disc_number, track_number LIMIT 1"
+				") WHERE id = ?");
+			upd.bind(1, album_id);
+			upd.bind(2, album_id);
+			upd.exec();
+			}
+
 			// Build progress suffix for this album's log line.
 			std::string progress;
 			if (processed == 0) {
