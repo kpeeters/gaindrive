@@ -156,6 +156,21 @@ class MediaStore {
 		                     int current_id, int64_t offset_ms,
 		                     const std::string& client);
 
+		struct PlayQueue {
+			int                     current_id = 0;
+			int64_t                 offset_ms  = 0;
+			std::string             client;
+			std::string             changed;   // ISO timestamp of last save
+			std::vector<ChildEntry> songs;
+			};
+
+		// Returns nullopt if the user has no saved queue.
+		std::optional<PlayQueue> get_play_queue(const std::string& username);
+
+		// Records a play. submission=true increments play_counts; false updates now_playing.
+		void scrobble(const std::string& username, int song_id,
+		              bool submission, const std::string& client);
+
 		// Creates or updates a bookmark for a single song.
 		void create_bookmark(const std::string& username,
 		                     int song_id, int64_t position_ms,

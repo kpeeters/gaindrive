@@ -1148,7 +1148,76 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
+	// getPlayQueue — retrieve the user's saved play queue and position.
+	server_.Get("/rest/getPlayQueue.view", [this](const httplib::Request& req,
+	                                              httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		std::string user = req.params.find("u")->second;
+		auto pq = store_.get_play_queue(user);
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&pq, &user](nlohmann::json& r) {
+				if (!pq) { r["playQueue"] = nlohmann::json::object(); return; }
+				nlohmann::json entries = nlohmann::json::array();
+				for (auto& s : pq->songs)
+					entries.push_back(song_entry_json(s));
+				r["playQueue"] = {
+					{"current",    pq->current_id},
+					{"position",   pq->offset_ms},
+					{"username",   user},
+					{"changed",    pq->changed},
+					{"changedBy",  pq->client},
+					{"entry",      entries}
+					};
+				});
+		else
+			body = subsonic_ok([&pq, &user](XMLDocument& doc, XMLElement* root) {
+				auto* el = doc.NewElement("playQueue");
+				if (pq) {
+					el->SetAttribute("current",   pq->current_id);
+					el->SetAttribute("position",  (int64_t)pq->offset_ms);
+					el->SetAttribute("username",  user.c_str());
+					if (!pq->changed.empty())
+						el->SetAttribute("changed",   pq->changed.c_str());
+					if (!pq->client.empty())
+						el->SetAttribute("changedBy", pq->client.c_str());
+					for (auto& s : pq->songs)
+						el->InsertEndChild(song_entry_xml(doc, s, "entry"));
+					}
+				root->InsertEndChild(el);
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	// createBookmark — mark a playback position within a song.
+	// scrobble — record a play (submission=true) or now-playing event (submission=false).
+	server_.Get("/rest/scrobble.view", [this](const httplib::Request& req,
+	                                          httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto qp = [&](const std::string& k, const std::string& def = "") {
+			auto it = req.params.find(k);
+			return it != req.params.end() ? it->second : def;
+			};
+
+		std::string user = qp("u");
+		std::string client = qp("c");
+		// submission defaults to true per the Subsonic spec.
+		bool submission = (qp("submission", "true") != "false");
+
+		auto range = req.params.equal_range("id");
+		for (auto it = range.first; it != range.second; ++it)
+			store_.scrobble(user, std::stoi(it->second), submission, client);
+
+		bool use_json = (fmt_of(req) == "json");
+		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	server_.Get("/rest/createBookmark.view", [this](const httplib::Request& req,
 	                                                httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;

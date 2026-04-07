@@ -1146,6 +1146,66 @@ void MediaStore::save_play_queue(const std::string& username,
 	txn.commit();
 	}
 
+std::optional<MediaStore::PlayQueue> MediaStore::get_play_queue(
+	const std::string& username)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	SQLite::Statement q(db_,
+		"SELECT s.id, s.title, s.track_number, s.disc_number,"
+		"       s.year, s.genre, s.duration, s.bitrate,"
+		"       s.file_size, s.codec, s.folder_id,"
+		"       COALESCE(a.name,'') AS artist,"
+		"       COALESCE(al.title,'') AS album,"
+		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+		"            THEN s.folder_id ELSE -1 END AS cover_art_id,"
+		"       pq.is_current, pq.offset_ms, pq.client, pq.updated"
+		" FROM play_queue pq"
+		" JOIN users u ON u.id = pq.user_id"
+		" JOIN songs s ON s.id = pq.song_id"
+		" LEFT JOIN albums al ON al.id = s.album_id"
+		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
+		" LEFT JOIN artists a ON a.id = sa.artist_id"
+		" WHERE u.username = ?"
+		" ORDER BY pq.position");
+	q.bind(1, username);
+
+	PlayQueue pq;
+	bool found = false;
+	while (q.executeStep()) {
+		found = true;
+		ChildEntry e;
+		e.id           = q.getColumn(0).getInt();
+		e.is_dir       = false;
+		e.title        = q.getColumn(1).getString();
+		e.track_number = q.getColumn(2).getInt();
+		e.disc_number  = q.getColumn(3).getInt();
+		e.year         = q.getColumn(4).getInt();
+		e.genre        = q.getColumn(5).isNull() ? "" : q.getColumn(5).getString();
+		e.duration     = q.getColumn(6).getDouble();
+		e.bitrate      = q.getColumn(7).getInt();
+		e.file_size    = q.getColumn(8).getInt64();
+		e.codec        = q.getColumn(9).isNull() ? "" : q.getColumn(9).getString();
+		e.parent_id    = q.getColumn(10).getInt();
+		e.artist       = q.getColumn(11).getString();
+		e.album        = q.getColumn(12).getString();
+		e.cover_art_id = q.getColumn(13).getInt();
+
+		bool is_current = q.getColumn(14).getInt() != 0;
+		if (is_current) {
+			pq.current_id = e.id;
+			pq.offset_ms  = q.getColumn(15).getInt64();
+			}
+		if (pq.client.empty())  pq.client  = q.getColumn(16).isNull() ? "" : q.getColumn(16).getString();
+		if (pq.changed.empty()) pq.changed = q.getColumn(17).isNull() ? "" : q.getColumn(17).getString();
+
+		pq.songs.push_back(std::move(e));
+		}
+
+	if (!found) return std::nullopt;
+	return pq;
+	}
+
 void MediaStore::create_bookmark(const std::string& username,
                                   int song_id, int64_t position_ms,
                                   const std::string& comment)
@@ -1169,6 +1229,39 @@ void MediaStore::create_bookmark(const std::string& username,
 	ins.bind(3, position_ms);
 	ins.bind(4, comment);
 	ins.exec();
+	}
+
+void MediaStore::scrobble(const std::string& username, int song_id,
+                           bool submission, const std::string& client)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	SQLite::Statement uid_q(db_, "SELECT id FROM users WHERE username = ?");
+	uid_q.bind(1, username);
+	if (!uid_q.executeStep()) return;
+	int user_id = uid_q.getColumn(0).getInt();
+
+	if (submission) {
+		// Completed play — increment count and record timestamp.
+		SQLite::Statement ins(db_,
+			"INSERT INTO play_counts (user_id, song_id, count, last_played)"
+			" VALUES (?, ?, 1, CURRENT_TIMESTAMP)"
+			" ON CONFLICT(user_id, song_id) DO UPDATE SET"
+			"   count       = count + 1,"
+			"   last_played = CURRENT_TIMESTAMP");
+		ins.bind(1, user_id);
+		ins.bind(2, song_id);
+		ins.exec();
+		} else {
+		// Now-playing notification — update or replace the single row.
+		SQLite::Statement ins(db_,
+			"INSERT OR REPLACE INTO now_playing (user_id, song_id, client, started)"
+			" VALUES (?, ?, ?, CURRENT_TIMESTAMP)");
+		ins.bind(1, user_id);
+		ins.bind(2, song_id);
+		ins.bind(3, client);
+		ins.exec();
+		}
 	}
 
 void MediaStore::add_star(const std::string& username,
