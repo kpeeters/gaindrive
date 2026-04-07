@@ -20,7 +20,8 @@ static const std::set<std::string> AUDIO_EXTENSIONS = {
 
 // Candidate cover art filenames in priority order.  Add more here as needed.
 static const std::vector<std::string> COVER_FILENAMES = {
-	"cover.jpg", "folder.jpg", "front.jpg", "cover.png"
+	"cover.jpg", "cover.jpeg", "folder.jpg", "folder.jpeg",
+	"front.jpg", "front.jpeg", "cover.png"
 	};
 
 static bool iends_with(const std::string& s, const std::string& suffix)
@@ -38,13 +39,14 @@ static std::string find_cover(const fs::path& dir)
 		auto p = dir / name;
 		if (fs::exists(p)) return p.string();
 		}
-	// Pass 2: *front.jpg  Pass 3: *.jpg  (single directory scan for both).
+	// Pass 2: *front.jpg/jpeg  Pass 3: *.jpg/jpeg  (single directory scan for both).
 	std::string jpg_fallback;
 	for (auto& entry : fs::directory_iterator(dir)) {
 		if (!entry.is_regular_file()) continue;
 		std::string fname = entry.path().filename().string();
-		if (iends_with(fname, "front.jpg")) return entry.path().string();
-		if (jpg_fallback.empty() && iends_with(fname, ".jpg"))
+		if (iends_with(fname, "front.jpg") || iends_with(fname, "front.jpeg"))
+			return entry.path().string();
+		if (jpg_fallback.empty() && (iends_with(fname, ".jpg") || iends_with(fname, ".jpeg")))
 			jpg_fallback = entry.path().string();
 		}
 	return jpg_fallback;
@@ -319,8 +321,10 @@ void MediaStore::scan()
 		for (auto& album_entry : fs::directory_iterator(artist_entry.path())) {
 			if (!album_entry.is_directory()) continue;
 			int album_folder_id = upsert_folder(album_entry.path(), artist_folder_id);
+			std::string album_title = album_entry.path().filename().string();
+			std::replace(album_title.begin(), album_title.end(), '_', ' ');
 			int album_id        = upsert_album(album_folder_id,
-			                                   album_entry.path().filename().string(),
+			                                   album_title,
 			                                   artist_id, 0, "");
 
 			// Store cover art path if found; don't clear an existing path on re-scan.
