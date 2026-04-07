@@ -181,6 +181,65 @@ async function viewAlbums(artistId, artistName, container) {
 
       row.appendChild(title);
       row.appendChild(meta);
+      row.addEventListener('click', () => {
+         viewTracks(album.id, album.title, artistId, artistName, container);
+         });
+      frag.appendChild(row);
+      }
+
+   container.appendChild(frag);
+}
+
+function fmtDuration(secs) {
+   const m = Math.floor(secs / 60);
+   const s = String(secs % 60).padStart(2, '0');
+   return `${m}:${s}`;
+}
+
+async function viewTracks(albumId, albumTitle, artistId, artistName, container) {
+   console.log('[tracks] loading album', albumId, albumTitle);
+   container.innerHTML = '';
+
+   const sr = await apiCall('getAlbum', {id: albumId});
+   const songs = sr.album?.song ?? [];
+   console.log('[tracks] got', songs.length, 'tracks');
+
+   const frag = document.createDocumentFragment();
+
+   // Back link + headings.
+   const header = document.createElement('div');
+   header.className = 'view-header';
+   const back = document.createElement('span');
+   back.className = 'back-link';
+   back.textContent = `← ${artistName}`;
+   back.addEventListener('click', () => viewAlbums(artistId, artistName, container));
+   const heading = document.createElement('h1');
+   heading.className = 'view-title';
+   heading.textContent = albumTitle;
+   header.appendChild(back);
+   header.appendChild(heading);
+   frag.appendChild(header);
+
+   for (const song of songs) {
+      const row = document.createElement('div');
+      row.className = 'track-row';
+      row.dataset.id = song.id;
+
+      const num = document.createElement('span');
+      num.className = 'track-num';
+      num.textContent = song.track ?? '';
+
+      const title = document.createElement('span');
+      title.className = 'track-title';
+      title.textContent = song.title;
+
+      const dur = document.createElement('span');
+      dur.className = 'track-dur';
+      dur.textContent = song.duration ? fmtDuration(song.duration) : '';
+
+      row.appendChild(num);
+      row.appendChild(title);
+      row.appendChild(dur);
       frag.appendChild(row);
       }
 

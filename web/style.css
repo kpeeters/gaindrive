@@ -270,3 +270,35 @@ body {
    font-size: 0.75rem;
    color: var(--text-dim);
 }
+
+/* ── Track list ────────────────────────────────────────── */
+
+.track-row {
+   display: grid;
+   grid-template-columns: 2rem 1fr auto;
+   align-items: baseline;
+   gap: 0.5rem;
+   padding: 0.3rem 0.4rem;
+   border-radius: 4px;
+   cursor: pointer;
+}
+
+.track-row:hover {
+   background: var(--surface);
+}
+
+.track-num {
+   font-size: 0.8rem;
+   color: var(--text-dim);
+   text-align: right;
+}
+
+.track-title {
+   font-size: 0.95rem;
+}
+
+.track-dur {
+   font-size: 0.8rem;
+   color: var(--text-dim);
+   font-variant-numeric: tabular-nums;
+}
