@@ -154,6 +154,7 @@ async function viewArtists(container) {
          row.appendChild(name);
          row.appendChild(count);
          row.addEventListener('click', () => {
+            history.pushState({view: 'albums', artistId: artist.id, artistName: artist.name}, '');
             viewAlbums(artist.id, artist.name, container);
             });
          frag.appendChild(row);
@@ -178,7 +179,7 @@ async function viewAlbums(artistId, artistName, container) {
    const back = document.createElement('span');
    back.className = 'back-link';
    back.textContent = '← Artists';
-   back.addEventListener('click', () => showView('artists'));
+   back.addEventListener('click', () => history.back());
    const heading = document.createElement('h1');
    heading.className = 'view-title';
    heading.textContent = artistName;
@@ -218,6 +219,7 @@ async function viewAlbums(artistId, artistName, container) {
       row.appendChild(cover);
       row.appendChild(info);
       row.addEventListener('click', () => {
+         history.pushState({view: 'tracks', albumId: album.id, albumTitle: album.title, artistId, artistName}, '');
          viewTracks(album.id, album.title, artistId, artistName, container);
          });
       frag.appendChild(row);
@@ -371,7 +373,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, container) 
    const back = document.createElement('span');
    back.className = 'back-link';
    back.textContent = `← ${artistName}`;
-   back.addEventListener('click', () => viewAlbums(artistId, artistName, container));
+   back.addEventListener('click', () => history.back());
    const heading = document.createElement('h1');
    heading.className = 'view-title';
    heading.textContent = albumTitle;
@@ -423,14 +425,29 @@ async function showShell() {
    btn.textContent = saved.charAt(0).toUpperCase() + saved.slice(1);
    btn.addEventListener('click', cycleTheme);
 
-   // Wire up sidebar links.
+   // Wire up sidebar links with history entries.
    shell.querySelectorAll('[data-view]').forEach(a => {
       a.addEventListener('click', e => {
          e.preventDefault();
+         history.pushState({view: a.dataset.view}, '');
          showView(a.dataset.view).catch(err => console.error('[view] error', err));
       });
    });
 
+   // Handle browser back/forward: re-render from the popped state.
+   window.addEventListener('popstate', async e => {
+      const s = e.state ?? {view: 'artists'};
+      const content = document.getElementById('content');
+      if (s.view === 'albums')
+         await viewAlbums(s.artistId, s.artistName, content);
+      else if (s.view === 'tracks')
+         await viewTracks(s.albumId, s.albumTitle, s.artistId, s.artistName, content);
+      else
+         await showView('artists');
+      });
+
+   // Record initial state so the browser can pop back to it.
+   history.replaceState({view: 'artists'}, '');
    await showView('artists');
 }
 
