@@ -427,7 +427,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
    pane.innerHTML = '';
 
    const sr = await apiCall('getAlbum', {id: albumId});
-   const songs = sr.album?.song ?? [];
+   const album = sr.album ?? {};
+   const songs = album.song ?? [];
    console.log('[tracks] got', songs.length, 'tracks');
 
    const frag = document.createDocumentFragment();
@@ -445,6 +446,15 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
    header.appendChild(back);
    header.appendChild(heading);
    frag.appendChild(header);
+
+   // Large cover art hero.
+   if (album.coverArt) {
+      const hero = document.createElement('img');
+      hero.className = 'album-hero';
+      hero.src = apiUrl('getCoverArt', {id: album.coverArt, size: 400});
+      hero.alt = albumTitle;
+      frag.appendChild(hero);
+      }
 
    for (const song of songs) {
       const row = document.createElement('div');

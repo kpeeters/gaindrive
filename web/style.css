@@ -385,6 +385,16 @@ body {
 
 /* ── Track list ────────────────────────────────────────── */
 
+.album-hero {
+   display: block;
+   width: min(100%, 320px);
+   aspect-ratio: 1;
+   object-fit: cover;
+   border-radius: 6px;
+   margin: 0.8rem auto 1.4rem;
+   background: var(--border);   /* placeholder colour while loading */
+}
+
 .track-row {
    display: grid;
    grid-template-columns: 2rem 1fr auto;
