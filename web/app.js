@@ -140,6 +140,11 @@ const paneNav = {
       const leftmost = Math.max(0, this.depth - (n - 1));
       strip.style.transform = `translateX(${-leftmost * pw}px)`;
 
+      // Show back-link only in the leftmost pane when it isn't the root pane.
+      document.querySelectorAll('.back-link').forEach(el => {
+         el.hidden = (parseInt(el.dataset.pane) !== leftmost) || (leftmost === 0);
+         });
+
 
       if (!animate)
          requestAnimationFrame(() => { strip.style.transition = ''; });
@@ -247,6 +252,7 @@ async function viewAlbums(artistId, artistName) {
    header.className = 'view-header';
    const back = document.createElement('span');
    back.className = 'back-link';
+   back.dataset.pane = '1';
    back.textContent = '← Artists';
    back.addEventListener('click', () => history.back());
    const heading = document.createElement('h1');
@@ -505,6 +511,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
    header.className = 'view-header';
    const back = document.createElement('span');
    back.className = 'back-link';
+   back.dataset.pane = '2';
    back.textContent = `← ${artistName}`;
    back.addEventListener('click', () => history.back());
    const heading = document.createElement('h1');
