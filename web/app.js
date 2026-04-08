@@ -149,6 +149,14 @@ const paneNav = {
          requestAnimationFrame(() => { strip.style.transition = ''; });
       },
 
+   // Returns true only when navigating to newDepth would move the strip —
+   // i.e. the leftmost visible pane index changes. Used to decide whether
+   // a history entry is worth pushing.
+   willSlide(newDepth) {
+      const n = this._visiblePanes();
+      return Math.max(0, newDepth - (n - 1)) !== Math.max(0, this.depth - (n - 1));
+      },
+
    slideTo(depth) {
       this.depth = depth;
       this._apply(true);
@@ -217,9 +225,7 @@ async function viewArtists() {
             document.querySelectorAll('#pane-artists .artist-row.selected')
                .forEach(r => r.classList.remove('selected'));
             row.classList.add('selected');
-            // Only push a history entry when this navigation will cause a
-            // visible slide (i.e. the albums pane is not already on-screen).
-            if (paneNav.depth >= paneNav._visiblePanes() - 1)
+            if (paneNav.willSlide(1))
                history.pushState({view: 'albums', artistId: artist.id, artistName: artist.name}, '');
             viewAlbums(artist.id, artist.name);
             });
@@ -299,8 +305,7 @@ async function viewAlbums(artistId, artistName) {
          document.querySelectorAll('#pane-albums .album-row.selected')
             .forEach(r => r.classList.remove('selected'));
          row.classList.add('selected');
-         // Same rule: only push history when the tracks pane is not already visible.
-         if (paneNav.depth >= paneNav._visiblePanes() - 1)
+         if (paneNav.willSlide(2))
             history.pushState({view: 'tracks', albumId: album.id, albumTitle: album.title, artistId, artistName}, '');
          viewTracks(album.id, album.title, artistId, artistName);
          });
