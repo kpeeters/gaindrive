@@ -499,8 +499,6 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
    const songs = album.song ?? [];
    console.log('[tracks] got', songs.length, 'tracks');
 
-   const frag = document.createDocumentFragment();
-
    // Back link + headings.
    const header = document.createElement('div');
    header.className = 'view-header';
@@ -513,7 +511,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
    heading.textContent = albumTitle;
    header.appendChild(back);
    header.appendChild(heading);
-   frag.appendChild(header);
+   pane.appendChild(header);
 
    // Large cover art hero.
    if (album.coverArt) {
@@ -521,9 +519,15 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
       hero.className = 'album-hero';
       hero.src = apiUrl('getCoverArt', {id: album.coverArt, size: 400});
       hero.alt = albumTitle;
-      frag.appendChild(hero);
+      pane.appendChild(hero);
       }
 
+   // Placeholder for album notes + Wikipedia link, filled async.
+   const infoSlot = document.createElement('div');
+   infoSlot.className = 'album-notes-loading';
+   pane.appendChild(infoSlot);
+
+   const frag = document.createDocumentFragment();
    const multiDisc = new Set(songs.map(s => s.discNumber ?? 1)).size > 1;
    let currentDisc = null;
 
@@ -562,6 +566,51 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
 
    pane.appendChild(frag);
    paneNav.slideTo(2);
+
+   // Fetch album notes without blocking the track listing.
+   apiCall('getAlbumInfo2', {id: albumId}).then(srInfo => {
+      const info = srInfo?.albumInfo2 ?? {};
+      infoSlot.className = '';   // remove shimmer regardless of outcome
+
+      const notes   = info.notes   ?? '';
+      const wikiUrl = info.wikiUrl ?? '';
+      if (!notes && !wikiUrl) return;
+
+      const block = document.createElement('div');
+      block.className = 'album-notes';
+
+      if (notes) {
+         const p = document.createElement('p');
+         p.className = 'artist-bio-text';   // reuse same clamp style
+         p.textContent = notes;
+         block.appendChild(p);
+
+         const toggle = document.createElement('span');
+         toggle.className = 'bio-toggle';
+         toggle.textContent = 'more';
+         toggle.addEventListener('click', () => {
+            const expanded = p.classList.toggle('expanded');
+            toggle.textContent = expanded ? 'less' : 'more';
+            });
+         block.appendChild(toggle);
+
+         requestAnimationFrame(() => {
+            if (p.scrollHeight <= p.clientHeight) toggle.hidden = true;
+            });
+         }
+
+      if (wikiUrl) {
+         const a = document.createElement('a');
+         a.className = 'wiki-link';
+         a.href = wikiUrl;
+         a.target = '_blank';
+         a.rel = 'noopener';
+         a.textContent = 'Wikipedia';
+         block.appendChild(a);
+         }
+
+      infoSlot.appendChild(block);
+      }).catch(() => { infoSlot.className = ''; });
 }
 
 // ── Shell ───────────────────────────────────────────────────────────────────

@@ -464,6 +464,34 @@ body {
    color: var(--text-dim);
 }
 
+/* ── Album notes (track pane) ───────────────────────────── */
+
+.album-notes-loading {
+   height: 60px;
+   margin-bottom: 1rem;
+   border-radius: 6px;
+   background: var(--surface);
+   animation: bio-pulse 1.4s ease-in-out infinite;
+}
+
+.album-notes {
+   margin-bottom: 1rem;
+}
+
+/* .artist-bio-text and .bio-toggle are reused for the notes text + toggle. */
+
+.wiki-link {
+   display: inline-block;
+   margin-top: 0.4rem;
+   font-size: 0.75rem;
+   color: var(--accent);
+   text-decoration: none;
+}
+
+.wiki-link:hover {
+   text-decoration: underline;
+}
+
 /* ── Track list ────────────────────────────────────────── */
 
 .disc-heading {
