@@ -1361,12 +1361,18 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
+		// Well-known utility files that are not human-readable liner notes.
+		static const std::set<std::string> excluded = {
+			"fingerprints.txt",
+			};
+
 		namespace fs = std::filesystem;
 		nlohmann::json files = nlohmann::json::array();
 		try {
 			for (auto& entry : fs::directory_iterator(folder)) {
-				if (entry.is_regular_file() && entry.path().extension() == ".txt")
-					files.push_back({{"name", entry.path().filename().string()}});
+				if (!entry.is_regular_file() || entry.path().extension() != ".txt") continue;
+				if (excluded.count(entry.path().filename().string())) continue;
+				files.push_back({{"name", entry.path().filename().string()}});
 				}
 			}
 		catch (...) {}
@@ -1578,7 +1584,9 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (cast_manager_.active() && !cast_authed) {
 			std::string host = req.get_header_value("Host");
 			if (host.empty()) host = "localhost";
-			std::string url = "http://" + host + "/rest/stream.view"
+			std::string proto = req.get_header_value("X-Forwarded-Proto");
+			if (proto.empty()) proto = "http";
+			std::string url = proto + "://" + host + "/rest/stream.view"
 			                + "?id=" + it->second
 			                + "&castToken=" + cast_manager_.token();
 			cast_manager_.load(url, codec_to_mime(song->codec));
