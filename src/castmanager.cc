@@ -20,6 +20,7 @@
 #include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <net/if.h>
 #include <unistd.h>
 
 #include <openssl/ssl.h>
@@ -36,7 +37,8 @@ static const char* NS_MEDIA = "urn:x-cast:com.google.cast.media";
 // State accumulated across mDNS response packets within one discover() call.
 struct DiscState {
 	std::map<std::string, CastManager::CastDevice> devs;   // service instance → device
-	std::map<std::string, std::string>              hosts;  // hostname → IP address
+	std::map<std::string, std::string>              hosts;  // hostname → IPv4 address
+	std::map<std::string, std::string>              hosts6; // hostname → IPv6 address (with scope)
 	std::map<std::string, std::string>              srvs;   // service instance → SRV host
 	};
 
@@ -55,14 +57,29 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 	mdns_string_t rname = mdns_string_extract(data, size, &off, buf1, sizeof(buf1));
 	std::string key(rname.str, rname.length);
 
-	// Use the sender's IP directly — more reliable than chasing SRV → A record names.
-	std::string src_ip;
-	if (from && from->sa_family == AF_INET) {
-		char ip[INET_ADDRSTRLEN];
-		inet_ntop(AF_INET, &reinterpret_cast<const struct sockaddr_in*>(from)->sin_addr,
-		          ip, sizeof(ip));
-		src_ip = ip;
+	// Extract sender IP — used as address fallback and for AAAA scope IDs.
+	std::string src_ip4, src_ip6;
+	if (from) {
+		if (from->sa_family == AF_INET) {
+			char ip[INET_ADDRSTRLEN];
+			inet_ntop(AF_INET, &reinterpret_cast<const struct sockaddr_in*>(from)->sin_addr,
+			          ip, sizeof(ip));
+			src_ip4 = ip;
+			}
+		else if (from->sa_family == AF_INET6) {
+			const auto* s6 = reinterpret_cast<const struct sockaddr_in6*>(from);
+			char ip[INET6_ADDRSTRLEN];
+			inet_ntop(AF_INET6, &s6->sin6_addr, ip, sizeof(ip));
+			src_ip6 = ip;
+			if (s6->sin6_scope_id) {
+				char iface[IF_NAMESIZE] = {};
+				if (if_indextoname(s6->sin6_scope_id, iface))
+					src_ip6 += std::string("%") + iface;
+				}
+			}
 		}
+	// Prefer IPv4 as device address; fall back to IPv6.
+	std::string src_ip = src_ip4.empty() ? src_ip6 : src_ip4;
 
 	if (rtype == MDNS_RECORDTYPE_PTR) {
 		std::cout << stamp() << "Cast mDNS: PTR  from=" << src_ip
@@ -107,6 +124,20 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 		std::cout << stamp() << "Cast mDNS: A    from=" << src_ip
 		          << " name=" << key << " addr=" << ip << std::endl;
 		}
+	else if (rtype == MDNS_RECORDTYPE_AAAA) {
+		struct sockaddr_in6 a6 = {};
+		mdns_record_parse_aaaa(data, size, rec_off, rec_len, &a6);
+		char ip[INET6_ADDRSTRLEN];
+		inet_ntop(AF_INET6, &a6.sin6_addr, ip, sizeof(ip));
+		// Attach the scope ID from the sender for link-local addresses.
+		std::string addr6 = ip;
+		size_t scope = src_ip6.find('%');
+		if (scope != std::string::npos)
+			addr6 += src_ip6.substr(scope);
+		st->hosts6[key] = addr6;
+		std::cout << stamp() << "Cast mDNS: AAAA from=" << src_ip
+		          << " name=" << key << " addr=" << addr6 << std::endl;
+		}
 	else {
 		std::cout << stamp() << "Cast mDNS: type=" << rtype
 		          << " from=" << src_ip << " name=" << key << std::endl;
@@ -119,32 +150,47 @@ std::vector<CastManager::CastDevice> CastManager::discover(int timeout_ms)
 	{
 	DiscState state;
 
-	struct sockaddr_in saddr = {};
-	saddr.sin_family      = AF_INET;
-	saddr.sin_addr.s_addr = INADDR_ANY;
-	saddr.sin_port        = htons(MDNS_PORT);
+	struct sockaddr_in saddr4 = {};
+	saddr4.sin_family      = AF_INET;
+	saddr4.sin_addr.s_addr = INADDR_ANY;
+	saddr4.sin_port        = htons(MDNS_PORT);
 
-	int sock = mdns_socket_open_ipv4(&saddr);
-	if (sock < 0) {
-		std::cout << stamp() << "Cast: failed to open mDNS socket (errno "
+	int sock4 = mdns_socket_open_ipv4(&saddr4);
+	if (sock4 < 0)
+		std::cout << stamp() << "Cast: failed to open IPv4 mDNS socket (errno "
 		          << errno << ")" << std::endl;
+
+	// IPv6 is required on many modern networks where devices only respond via
+	// ff02::fb multicast.
+	int sock6 = mdns_socket_open_ipv6(nullptr);
+	if (sock6 < 0)
+		std::cout << stamp() << "Cast: failed to open IPv6 mDNS socket (errno "
+		          << errno << ")" << std::endl;
+
+	if (sock4 < 0 && sock6 < 0)
 		return {};
-		}
-	std::cout << stamp() << "Cast: mDNS socket open, querying for "
-	          << timeout_ms << " ms" << std::endl;
+
+	std::cout << stamp() << "Cast: querying for " << timeout_ms << " ms"
+	          << " (IPv4=" << (sock4 >= 0 ? "ok" : "fail")
+	          << " IPv6=" << (sock6 >= 0 ? "ok" : "fail") << ")" << std::endl;
 
 	std::vector<uint8_t> buf(4096);
 	static const char svc[] = "_googlecast._tcp.local.";
+
 	// mdns_query_send returns int; storing in uint16_t would corrupt -1 → 65535,
 	// which would then cause mdns_query_recv to reject all ID-0 mDNS responses.
-	int send_result = mdns_query_send(sock, MDNS_RECORDTYPE_PTR,
-	                                   svc, strlen(svc),
-	                                   buf.data(), buf.size(), 0);
-	if (send_result < 0)
-		std::cout << stamp() << "Cast: mDNS query send failed (errno "
-		          << errno << ")" << std::endl;
-	else
-		std::cout << stamp() << "Cast: mDNS query sent" << std::endl;
+	if (sock4 >= 0) {
+		int r = mdns_query_send(sock4, MDNS_RECORDTYPE_PTR,
+		                        svc, strlen(svc), buf.data(), buf.size(), 0);
+		std::cout << stamp() << "Cast: IPv4 query "
+		          << (r < 0 ? "failed" : "sent") << std::endl;
+		}
+	if (sock6 >= 0) {
+		int r = mdns_query_send(sock6, MDNS_RECORDTYPE_PTR,
+		                        svc, strlen(svc), buf.data(), buf.size(), 0);
+		std::cout << stamp() << "Cast: IPv6 query "
+		          << (r < 0 ? "failed" : "sent") << std::endl;
+		}
 
 	auto deadline = std::chrono::steady_clock::now()
 	              + std::chrono::milliseconds(timeout_ms);
@@ -156,24 +202,31 @@ std::vector<CastManager::CastDevice> CastManager::discover(int timeout_ms)
 		struct timeval tv = { (long)(us / 1000000), (long)(us % 1000000) };
 		fd_set fds;
 		FD_ZERO(&fds);
-		FD_SET(sock, &fds);
-		int r = select(sock + 1, &fds, nullptr, nullptr, &tv);
-		if (r < 0 && errno == EINTR) continue;  // retry on signal interrupt
+		int maxfd = 0;
+		if (sock4 >= 0) { FD_SET(sock4, &fds); maxfd = std::max(maxfd, sock4); }
+		if (sock6 >= 0) { FD_SET(sock6, &fds); maxfd = std::max(maxfd, sock6); }
+		int r = select(maxfd + 1, &fds, nullptr, nullptr, &tv);
+		if (r < 0 && errno == EINTR) continue;
 		if (r <= 0) break;
-		// Pass 0 as only_query_id: mDNS responses always carry ID 0 per RFC 6762,
-		// so filtering by our sent query ID would reject all valid responses.
-		mdns_query_recv(sock, buf.data(), buf.size(), mdns_cb, &state, 0);
+		// Pass 0 as only_query_id: mDNS responses always carry ID 0 per RFC 6762.
+		if (sock4 >= 0 && FD_ISSET(sock4, &fds))
+			mdns_query_recv(sock4, buf.data(), buf.size(), mdns_cb, &state, 0);
+		if (sock6 >= 0 && FD_ISSET(sock6, &fds))
+			mdns_query_recv(sock6, buf.data(), buf.size(), mdns_cb, &state, 0);
 		}
 
-	mdns_socket_close(sock);
+	if (sock4 >= 0) mdns_socket_close(sock4);
+	if (sock6 >= 0) mdns_socket_close(sock6);
 
-	// Resolve each SRV target hostname to an IP address via collected A records.
+	// Resolve each SRV target hostname → IPv4 A record, then IPv6 AAAA as fallback.
 	for (auto& [inst, dev] : state.devs) {
 		if (!dev.address.empty()) continue;
 		auto ti = state.srvs.find(inst);
 		if (ti == state.srvs.end()) continue;
 		auto hi = state.hosts.find(ti->second);
-		if (hi != state.hosts.end()) dev.address = hi->second;
+		if (hi != state.hosts.end()) { dev.address = hi->second; continue; }
+		auto hi6 = state.hosts6.find(ti->second);
+		if (hi6 != state.hosts6.end()) dev.address = hi6->second;
 		}
 
 	std::cout << stamp() << "Cast: discovery done — "
@@ -277,18 +330,40 @@ static bool tls_connect(Tls& t, const std::string& addr, int port)
 	// Cast token instead.
 	SSL_CTX_set_verify(t.ctx, SSL_VERIFY_NONE, nullptr);
 
-	t.sock = socket(AF_INET, SOCK_STREAM, 0);
-	if (t.sock < 0) return false;
-
 	struct timeval tv = {5, 0};  // 5-second timeout per operation
-	setsockopt(t.sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-	setsockopt(t.sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
-	struct sockaddr_in sa = {};
-	sa.sin_family = AF_INET;
-	sa.sin_port   = htons(port);
-	if (inet_pton(AF_INET, addr.c_str(), &sa.sin_addr) != 1) return false;
-	if (::connect(t.sock, (struct sockaddr*)&sa, sizeof(sa)) != 0) return false;
+	bool is_ipv6 = addr.find(':') != std::string::npos;
+	if (is_ipv6) {
+		t.sock = socket(AF_INET6, SOCK_STREAM, 0);
+		if (t.sock < 0) return false;
+		setsockopt(t.sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+		setsockopt(t.sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+		struct sockaddr_in6 sa = {};
+		sa.sin6_family = AF_INET6;
+		sa.sin6_port   = htons(port);
+		// Strip %iface scope suffix for inet_pton, then apply scope_id.
+		std::string bare = addr;
+		size_t scope = addr.find('%');
+		if (scope != std::string::npos) {
+			bare = addr.substr(0, scope);
+			sa.sin6_scope_id = if_nametoindex(addr.substr(scope + 1).c_str());
+			}
+		if (inet_pton(AF_INET6, bare.c_str(), &sa.sin6_addr) != 1) return false;
+		if (::connect(t.sock, (struct sockaddr*)&sa, sizeof(sa)) != 0) return false;
+		}
+	else {
+		t.sock = socket(AF_INET, SOCK_STREAM, 0);
+		if (t.sock < 0) return false;
+		setsockopt(t.sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+		setsockopt(t.sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+		struct sockaddr_in sa = {};
+		sa.sin_family = AF_INET;
+		sa.sin_port   = htons(port);
+		if (inet_pton(AF_INET, addr.c_str(), &sa.sin_addr) != 1) return false;
+		if (::connect(t.sock, (struct sockaddr*)&sa, sizeof(sa)) != 0) return false;
+		}
 
 	t.ssl = SSL_new(t.ctx);
 	SSL_set_fd(t.ssl, t.sock);
