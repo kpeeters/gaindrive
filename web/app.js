@@ -467,11 +467,11 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
       frag.appendChild(hero);
       }
 
-   const multiDisc = new Set(songs.map(s => s.disc ?? 1)).size > 1;
+   const multiDisc = new Set(songs.map(s => s.discNumber ?? 1)).size > 1;
    let currentDisc = null;
 
    for (const song of songs) {
-      const disc = song.disc ?? 1;
+      const disc = song.discNumber ?? 1;
       if (multiDisc && disc !== currentDisc) {
          currentDisc = disc;
          const dh = document.createElement('div');
