@@ -255,9 +255,12 @@ async function viewAlbums(artistId, artistName) {
    pane.appendChild(header);
 
    // Placeholder filled asynchronously once getArtistInfo2 responds.
-   // Kept as a detached node reference so a stale callback can't corrupt
-   // a pane that has already been reused for a different artist.
+   // The loading class reserves the same height as the collapsed bio block so
+   // the album list does not jump when the bio arrives.
+   // Kept as a detached-node reference so a stale callback can't corrupt a
+   // pane that has already been reused for a different artist.
    const bioSlot = document.createElement('div');
+   bioSlot.className = 'artist-bio-loading';
    pane.appendChild(bioSlot);
 
    const frag = document.createDocumentFragment();
@@ -311,6 +314,9 @@ async function viewAlbums(artistId, artistName) {
       const info   = srInfo?.artistInfo2 ?? {};
       const imgUrl = info.largeImageUrl || info.mediumImageUrl || info.smallImageUrl || '';
       const bio    = info.biography ?? '';
+
+      bioSlot.className = '';   // remove shimmer regardless of outcome
+
       if (!imgUrl && !bio) return;
 
       const block = document.createElement('div');
@@ -325,10 +331,13 @@ async function viewAlbums(artistId, artistName) {
          }
 
       if (bio) {
+         const body = document.createElement('div');
+         body.className = 'artist-bio-body';
+
          const p = document.createElement('p');
          p.className = 'artist-bio-text';
          p.innerHTML = bio;   // Last.fm-supplied HTML
-         block.appendChild(p);
+         body.appendChild(p);
 
          const toggle = document.createElement('span');
          toggle.className = 'bio-toggle';
@@ -337,16 +346,18 @@ async function viewAlbums(artistId, artistName) {
             const expanded = p.classList.toggle('expanded');
             toggle.textContent = expanded ? 'less' : 'more';
             });
-         block.appendChild(toggle);
+         body.appendChild(toggle);
 
          // Hide the toggle if the text fits without clamping.
          requestAnimationFrame(() => {
             if (p.scrollHeight <= p.clientHeight) toggle.hidden = true;
             });
+
+         block.appendChild(body);
          }
 
       bioSlot.appendChild(block);
-      }).catch(() => {});   // server may not support getArtistInfo2
+      }).catch(() => { bioSlot.className = ''; });   // server may not support getArtistInfo2
 }
 
 function fmtDuration(secs) {

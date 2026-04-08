@@ -317,6 +317,20 @@ body {
 
 /* ── Artist bio ────────────────────────────────────────── */
 
+/* Loading shimmer: reserves the same height as the collapsed bio block. */
+.artist-bio-loading {
+   height: 120px;
+   margin-bottom: 1.5rem;
+   border-radius: 6px;
+   background: var(--surface);
+   animation: bio-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes bio-pulse {
+   0%, 100% { opacity: 0.5; }
+   50%       { opacity: 1;   }
+}
+
 .artist-bio {
    display: flex;
    gap: 1rem;
@@ -331,6 +345,13 @@ body {
    border-radius: 50%;
    flex-shrink: 0;
    background: var(--border);
+}
+
+/* Wraps the text + toggle so the toggle can be right-aligned within the
+   text column independently of the image. */
+.artist-bio-body {
+   flex: 1;
+   min-width: 0;
 }
 
 .artist-bio-text {
@@ -358,6 +379,7 @@ body {
    color: var(--accent);
    cursor: pointer;
    margin-top: 0.25rem;
+   text-align: right;
 }
 
 .bio-toggle:hover {
