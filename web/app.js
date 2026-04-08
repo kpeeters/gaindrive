@@ -107,25 +107,85 @@ async function tryLogin(server, user, password) {
    creds.save(server, user, password);
 }
 
+// ── Multi-pane navigation ────────────────────────────────────────────────────
+
+// The content area is divided into three fixed panes (artists / albums / tracks)
+// laid out side by side in a strip. Depending on screen width, 1, 2, or 3 panes
+// are visible at once. Navigating deeper slides the strip left; going back
+// slides right. On resize the layout is recalculated without animation.
+
+const paneNav = {
+   depth: 0,   // 0 = artists, 1 = albums, 2 = tracks
+
+   _visiblePanes() {
+      const w = document.getElementById('pane-viewport').offsetWidth;
+      if (w >= 1100) return 3;
+      if (w >= 650)  return 2;
+      return 1;
+      },
+
+   _apply(animate) {
+      const vp    = document.getElementById('pane-viewport');
+      const strip = document.getElementById('pane-strip');
+      if (!vp || !strip) return;
+
+      const n  = this._visiblePanes();
+      const pw = vp.offsetWidth / n;
+
+      if (!animate) strip.style.transition = 'none';
+
+      document.querySelectorAll('.pane').forEach(p => { p.style.width = pw + 'px'; });
+
+      // Leftmost visible pane index so the current depth is always rightmost.
+      const leftmost = Math.max(0, this.depth - (n - 1));
+      strip.style.transform = `translateX(${-leftmost * pw}px)`;
+
+      // Back links are only needed when the previous pane is off-screen.
+      document.querySelectorAll('.back-link').forEach(el => {
+         el.hidden = (n >= 2);
+         });
+
+      if (!animate)
+         requestAnimationFrame(() => { strip.style.transition = ''; });
+      },
+
+   slideTo(depth) {
+      this.depth = depth;
+      this._apply(true);
+      },
+
+   // Re-layout without animation, e.g. on window resize.
+   relayout() {
+      this._apply(false);
+      },
+};
+
 // ── Views ───────────────────────────────────────────────────────────────────
 
 async function showView(name) {
    console.log('[view] showView', name);
-   document.querySelectorAll('#sidebar a').forEach(a => {
+   document.querySelectorAll('#sidebar a, #bottom-nav a').forEach(a => {
       a.classList.toggle('active', a.dataset.view === name);
-   });
-   const content = document.getElementById('content');
-   content.innerHTML = '';
+      });
 
    if (name === 'artists') {
-      await viewArtists(content);
-   } else {
-      content.innerHTML = `<p style="color:var(--text-dim)">${name}</p>`;
-   }
+      await viewArtists();
+      } else {
+      document.getElementById('pane-artists').innerHTML =
+         `<p style="color:var(--text-dim)">${name}</p>`;
+      document.getElementById('pane-albums').innerHTML = '';
+      document.getElementById('pane-tracks').innerHTML = '';
+      paneNav.slideTo(0);
+      }
 }
 
-async function viewArtists(container) {
+async function viewArtists() {
    console.log('[artists] loading');
+   const pane = document.getElementById('pane-artists');
+   pane.innerHTML = '';
+   document.getElementById('pane-albums').innerHTML = '';
+   document.getElementById('pane-tracks').innerHTML = '';
+
    const sr = await apiCall('getArtists');
    const indexes = sr.artists?.index ?? [];
    console.log('[artists] got', indexes.reduce((n, i) => n + i.artist.length, 0), 'artists');
@@ -155,17 +215,20 @@ async function viewArtists(container) {
          row.appendChild(count);
          row.addEventListener('click', () => {
             history.pushState({view: 'albums', artistId: artist.id, artistName: artist.name}, '');
-            viewAlbums(artist.id, artist.name, container);
+            viewAlbums(artist.id, artist.name);
             });
          frag.appendChild(row);
+         }
       }
-   }
-   container.appendChild(frag);
+   pane.appendChild(frag);
+   paneNav.slideTo(0);
 }
 
-async function viewAlbums(artistId, artistName, container) {
+async function viewAlbums(artistId, artistName) {
    console.log('[albums] loading artist', artistId, artistName);
-   container.innerHTML = '';
+   const pane = document.getElementById('pane-albums');
+   pane.innerHTML = '';
+   document.getElementById('pane-tracks').innerHTML = '';
 
    const sr = await apiCall('getArtist', {id: artistId});
    const albums = sr.artist?.album ?? [];
@@ -220,12 +283,13 @@ async function viewAlbums(artistId, artistName, container) {
       row.appendChild(info);
       row.addEventListener('click', () => {
          history.pushState({view: 'tracks', albumId: album.id, albumTitle: album.title, artistId, artistName}, '');
-         viewTracks(album.id, album.title, artistId, artistName, container);
+         viewTracks(album.id, album.title, artistId, artistName);
          });
       frag.appendChild(row);
       }
 
-   container.appendChild(frag);
+   pane.appendChild(frag);
+   paneNav.slideTo(1);
 }
 
 function fmtDuration(secs) {
@@ -277,7 +341,7 @@ function playerUpdateUI() {
          artwork: song.coverArt
             ? [{src: apiUrl('getCoverArt', {id: song.coverArt, size: 256}), sizes: '256x256'}]
             : [],
-      });
+         });
       }
 }
 
@@ -357,9 +421,10 @@ function setupPlayer() {
       }
 }
 
-async function viewTracks(albumId, albumTitle, artistId, artistName, container) {
+async function viewTracks(albumId, albumTitle, artistId, artistName) {
    console.log('[tracks] loading album', albumId, albumTitle);
-   container.innerHTML = '';
+   const pane = document.getElementById('pane-tracks');
+   pane.innerHTML = '';
 
    const sr = await apiCall('getAlbum', {id: albumId});
    const songs = sr.album?.song ?? [];
@@ -405,7 +470,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, container) 
       frag.appendChild(row);
       }
 
-   container.appendChild(frag);
+   pane.appendChild(frag);
+   paneNav.slideTo(2);
 }
 
 // ── Shell ───────────────────────────────────────────────────────────────────
@@ -425,26 +491,29 @@ async function showShell() {
    btn.textContent = saved.charAt(0).toUpperCase() + saved.slice(1);
    btn.addEventListener('click', cycleTheme);
 
-   // Wire up sidebar links with history entries.
+   // Wire up sidebar and bottom-nav links with history entries.
    shell.querySelectorAll('[data-view]').forEach(a => {
       a.addEventListener('click', e => {
          e.preventDefault();
          history.pushState({view: a.dataset.view}, '');
          showView(a.dataset.view).catch(err => console.error('[view] error', err));
+         });
       });
-   });
 
    // Handle browser back/forward: re-render from the popped state.
    window.addEventListener('popstate', async e => {
       const s = e.state ?? {view: 'artists'};
-      const content = document.getElementById('content');
       if (s.view === 'albums')
-         await viewAlbums(s.artistId, s.artistName, content);
+         await viewAlbums(s.artistId, s.artistName);
       else if (s.view === 'tracks')
-         await viewTracks(s.albumId, s.albumTitle, s.artistId, s.artistName, content);
+         await viewTracks(s.albumId, s.albumTitle, s.artistId, s.artistName);
       else
          await showView('artists');
       });
+
+   // Recalculate pane widths and strip offset on resize without animating.
+   new ResizeObserver(() => paneNav.relayout()).observe(
+      document.getElementById('pane-viewport'));
 
    // Record initial state so the browser can pop back to it.
    history.replaceState({view: 'artists'}, '');

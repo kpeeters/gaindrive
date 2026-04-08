@@ -44,9 +44,20 @@
       </ul>
    </nav>
 
-   <main id="content">
-      <!-- content area filled by app.js -->
-   </main>
+   <div id="pane-viewport">
+      <div id="pane-strip">
+         <div class="pane" id="pane-artists"></div>
+         <div class="pane" id="pane-albums"></div>
+         <div class="pane" id="pane-tracks"></div>
+      </div>
+   </div>
+
+   <nav id="bottom-nav">
+      <a href="#" data-view="artists">Artists</a>
+      <a href="#" data-view="playlists">Playlists</a>
+      <a href="#" data-view="recents">Recents</a>
+      <a href="#" data-view="settings">Settings</a>
+   </nav>
 
    <footer id="player">
       <img id="player-cover" src="" alt="" width="48" height="48">

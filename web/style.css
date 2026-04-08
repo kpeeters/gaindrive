@@ -16,15 +16,16 @@
    ── */
 
 :root {
-   --bg:        #1a1a1a;
-   --surface:   #242424;
-   --border:    #333;
-   --accent:    #4a9eff;
-   --text:      #e0e0e0;
-   --text-dim:  #888;
-   --error:     #e05555;
-   --sidebar-w: 180px;
-   --player-h:  72px;
+   --bg:           #1a1a1a;
+   --surface:      #242424;
+   --border:       #333;
+   --accent:       #4a9eff;
+   --text:         #e0e0e0;
+   --text-dim:     #888;
+   --error:        #e05555;
+   --sidebar-w:    180px;
+   --player-h:     72px;
+   --bottom-nav-h: 52px;
 }
 
 @media (prefers-color-scheme: light) {
@@ -153,6 +154,19 @@ body {
    height: 100vh;
 }
 
+@media (max-width: 649px) {
+   #app-shell {
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr var(--bottom-nav-h) var(--player-h);
+      grid-template-areas:
+         "content"
+         "bottom-nav"
+         "player";
+   }
+   #sidebar     { display: none; }
+   #bottom-nav  { display: flex; }
+}
+
 #sidebar {
    grid-area: sidebar;
    background: var(--surface);
@@ -197,10 +211,51 @@ body {
    color: var(--text);
 }
 
-#content {
+/* ── Pane viewport + sliding strip ─────────────────────── */
+
+#pane-viewport {
    grid-area: content;
+   overflow: hidden;
+   position: relative;
+}
+
+#pane-strip {
+   display: flex;
+   height: 100%;
+   will-change: transform;
+   transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pane {
+   flex: 0 0 auto;   /* width is set by JS */
+   height: 100%;
    overflow-y: auto;
    padding: 1.5rem;
+}
+
+/* ── Bottom nav (narrow screens only) ──────────────────── */
+
+#bottom-nav {
+   display: none;   /* overridden to flex in narrow media query */
+   grid-area: bottom-nav;
+   background: var(--surface);
+   border-top: 1px solid var(--border);
+   justify-content: space-around;
+   align-items: center;
+}
+
+#bottom-nav a {
+   color: var(--text-dim);
+   text-decoration: none;
+   font-size: 0.8rem;
+   padding: 0.4rem 0.75rem;
+   border-radius: 4px;
+}
+
+#bottom-nav a:hover,
+#bottom-nav a.active {
+   color: var(--text);
+   background: var(--bg);
 }
 
 #player {
