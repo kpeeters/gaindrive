@@ -596,9 +596,12 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
 
    const frag = document.createDocumentFragment();
    const multiDisc = new Set(songs.map(s => s.discNumber ?? 1)).size > 1;
+   // If every track number is 0 or 1 the tags are useless; number sequentially.
+   const useSeq = songs.every(s => (s.track ?? 0) <= 1);
    let currentDisc = null;
 
-   for (const song of songs) {
+   for (let i = 0; i < songs.length; i++) {
+      const song = songs[i];
       const disc = song.discNumber ?? 1;
       if (multiDisc && disc !== currentDisc) {
          currentDisc = disc;
@@ -614,7 +617,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
 
       const num = document.createElement('span');
       num.className = 'track-num';
-      num.textContent = song.track ?? '';
+      num.textContent = useSeq ? (i + 1) : (song.track ?? '');
 
       const title = document.createElement('span');
       title.className = 'track-title';
@@ -624,7 +627,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
       dur.className = 'track-dur';
       dur.textContent = song.duration ? fmtDuration(song.duration) : '';
 
-      row.addEventListener('click', () => playerLoad(songs, songs.indexOf(song)));
+      row.addEventListener('click', () => playerLoad(songs, i));
       row.appendChild(num);
       row.appendChild(title);
       row.appendChild(dur);
