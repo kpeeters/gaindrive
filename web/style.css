@@ -157,14 +157,38 @@ body {
 @media (max-width: 649px) {
    #app-shell {
       grid-template-columns: 1fr;
-      grid-template-rows: 1fr var(--bottom-nav-h) var(--player-h);
+      grid-template-rows: 1fr var(--bottom-nav-h) 90px;
       grid-template-areas:
          "content"
          "bottom-nav"
          "player";
+      /* 100dvh tracks actual visible height as browser chrome appears/disappears */
+      height: 100dvh;
+      overflow: hidden;
    }
    #sidebar     { display: none; }
    #bottom-nav  { display: flex; }
+   #bottom-nav a {
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      padding: 0.3rem 0.5rem;
+      font-size: 0.65rem;
+   }
+   #player {
+      flex-wrap: wrap;
+      padding: 0.5rem 0.75rem;
+      gap: 0.4rem;
+      align-content: center;
+   }
+   #player-controls { min-width: 0; }
+   /* Seek bar wraps to its own full-width second row */
+   #player-seek {
+      flex: 0 0 calc(100% - 50px);
+      max-width: none;
+      order: 4;
+   }
+   #player-time { order: 5; }
 }
 
 #sidebar {
@@ -246,6 +270,7 @@ body {
 }
 
 #bottom-nav a {
+   display: flex;
    color: var(--text-dim);
    text-decoration: none;
    font-size: 0.8rem;
