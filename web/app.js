@@ -236,17 +236,9 @@ async function viewAlbums(artistId, artistName) {
    pane.innerHTML = '';
    document.getElementById('pane-tracks').innerHTML = '';
 
-   // Fetch artist albums and info (bio + images) in parallel.
-   // getArtistInfo2 is optional; ignore failures for servers that lack it.
-   const [srArtist, srInfo] = await Promise.all([
-      apiCall('getArtist',      {id: artistId}),
-      apiCall('getArtistInfo2', {id: artistId}).catch(() => null),
-      ]);
-   const albums = srArtist.artist?.album ?? [];
-   const info   = srInfo?.artistInfo2 ?? {};
+   const srArtist = await apiCall('getArtist', {id: artistId});
+   const albums   = srArtist.artist?.album ?? [];
    console.log('[albums] got', albums.length, 'albums');
-
-   const frag = document.createDocumentFragment();
 
    // Back link + artist heading.
    const header = document.createElement('div');
@@ -260,30 +252,15 @@ async function viewAlbums(artistId, artistName) {
    heading.textContent = artistName;
    header.appendChild(back);
    header.appendChild(heading);
-   frag.appendChild(header);
+   pane.appendChild(header);
 
-   // Artist bio block (image + biography), shown when the server provides it.
-   const imgUrl = info.largeImageUrl || info.mediumImageUrl || info.smallImageUrl || '';
-   const bio    = info.biography ?? '';
-   if (imgUrl || bio) {
-      const block = document.createElement('div');
-      block.className = 'artist-bio';
-      if (imgUrl) {
-         const img = document.createElement('img');
-         img.className = 'artist-bio-img';
-         img.src = imgUrl;
-         img.alt = artistName;
-         block.appendChild(img);
-         }
-      if (bio) {
-         const p = document.createElement('p');
-         p.className = 'artist-bio-text';
-         p.innerHTML = bio;   // Last.fm-supplied HTML
-         block.appendChild(p);
-         }
-      frag.appendChild(block);
-      }
+   // Placeholder filled asynchronously once getArtistInfo2 responds.
+   // Kept as a detached node reference so a stale callback can't corrupt
+   // a pane that has already been reused for a different artist.
+   const bioSlot = document.createElement('div');
+   pane.appendChild(bioSlot);
 
+   const frag = document.createDocumentFragment();
    for (const album of albums) {
       const row = document.createElement('div');
       row.className = 'album-row';
@@ -326,9 +303,50 @@ async function viewAlbums(artistId, artistName) {
          });
       frag.appendChild(row);
       }
-
    pane.appendChild(frag);
    paneNav.slideTo(1);
+
+   // Fetch artist info without blocking the album list.
+   apiCall('getArtistInfo2', {id: artistId}).then(srInfo => {
+      const info   = srInfo?.artistInfo2 ?? {};
+      const imgUrl = info.largeImageUrl || info.mediumImageUrl || info.smallImageUrl || '';
+      const bio    = info.biography ?? '';
+      if (!imgUrl && !bio) return;
+
+      const block = document.createElement('div');
+      block.className = 'artist-bio';
+
+      if (imgUrl) {
+         const img = document.createElement('img');
+         img.className = 'artist-bio-img';
+         img.src = imgUrl;
+         img.alt = artistName;
+         block.appendChild(img);
+         }
+
+      if (bio) {
+         const p = document.createElement('p');
+         p.className = 'artist-bio-text';
+         p.innerHTML = bio;   // Last.fm-supplied HTML
+         block.appendChild(p);
+
+         const toggle = document.createElement('span');
+         toggle.className = 'bio-toggle';
+         toggle.textContent = 'more';
+         toggle.addEventListener('click', () => {
+            const expanded = p.classList.toggle('expanded');
+            toggle.textContent = expanded ? 'less' : 'more';
+            });
+         block.appendChild(toggle);
+
+         // Hide the toggle if the text fits without clamping.
+         requestAnimationFrame(() => {
+            if (p.scrollHeight <= p.clientHeight) toggle.hidden = true;
+            });
+         }
+
+      bioSlot.appendChild(block);
+      }).catch(() => {});   // server may not support getArtistInfo2
 }
 
 function fmtDuration(secs) {
