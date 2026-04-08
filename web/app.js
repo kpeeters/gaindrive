@@ -501,14 +501,27 @@ async function showShell() {
       });
 
    // Handle browser back/forward: re-render from the popped state.
+   // On back navigation the target pane still has its previous content, so we
+   // just slide to it. A full fetch is only needed if the pane is empty (e.g.
+   // after a page refresh that landed on a deeper history entry).
    window.addEventListener('popstate', async e => {
       const s = e.state ?? {view: 'artists'};
-      if (s.view === 'albums')
-         await viewAlbums(s.artistId, s.artistName);
-      else if (s.view === 'tracks')
-         await viewTracks(s.albumId, s.albumTitle, s.artistId, s.artistName);
-      else
-         await showView('artists');
+      if (s.view === 'albums') {
+         if (document.getElementById('pane-albums').children.length > 0)
+            paneNav.slideTo(1);
+         else
+            await viewAlbums(s.artistId, s.artistName);
+         } else if (s.view === 'tracks') {
+         if (document.getElementById('pane-tracks').children.length > 0)
+            paneNav.slideTo(2);
+         else
+            await viewTracks(s.albumId, s.albumTitle, s.artistId, s.artistName);
+         } else {
+         if (document.getElementById('pane-artists').children.length > 0)
+            paneNav.slideTo(0);
+         else
+            await showView('artists');
+         }
       });
 
    // Recalculate pane widths and strip offset on resize without animating.
