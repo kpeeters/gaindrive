@@ -296,8 +296,13 @@ body {
    cursor: pointer;
 }
 
-.artist-row:hover {
+.artist-row:hover,
+.artist-row.selected {
    background: var(--surface);
+}
+
+.artist-row.selected .artist-name {
+   color: var(--accent);
 }
 
 .artist-name {
@@ -351,8 +356,13 @@ body {
    cursor: pointer;
 }
 
-.album-row:hover {
+.album-row:hover,
+.album-row.selected {
    background: var(--surface);
+}
+
+.album-row.selected .album-title {
+   color: var(--accent);
 }
 
 .album-cover {

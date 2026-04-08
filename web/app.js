@@ -214,7 +214,13 @@ async function viewArtists() {
          row.appendChild(name);
          row.appendChild(count);
          row.addEventListener('click', () => {
-            history.pushState({view: 'albums', artistId: artist.id, artistName: artist.name}, '');
+            document.querySelectorAll('#pane-artists .artist-row.selected')
+               .forEach(r => r.classList.remove('selected'));
+            row.classList.add('selected');
+            // Only push a history entry when this navigation will cause a
+            // visible slide (i.e. the albums pane is not already on-screen).
+            if (paneNav.depth >= paneNav._visiblePanes() - 1)
+               history.pushState({view: 'albums', artistId: artist.id, artistName: artist.name}, '');
             viewAlbums(artist.id, artist.name);
             });
          frag.appendChild(row);
@@ -282,7 +288,12 @@ async function viewAlbums(artistId, artistName) {
       row.appendChild(cover);
       row.appendChild(info);
       row.addEventListener('click', () => {
-         history.pushState({view: 'tracks', albumId: album.id, albumTitle: album.title, artistId, artistName}, '');
+         document.querySelectorAll('#pane-albums .album-row.selected')
+            .forEach(r => r.classList.remove('selected'));
+         row.classList.add('selected');
+         // Same rule: only push history when the tracks pane is not already visible.
+         if (paneNav.depth >= paneNav._visiblePanes() - 1)
+            history.pushState({view: 'tracks', albumId: album.id, albumTitle: album.title, artistId, artistName}, '');
          viewTracks(album.id, album.title, artistId, artistName);
          });
       frag.appendChild(row);
