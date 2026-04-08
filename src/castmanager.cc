@@ -64,7 +64,11 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 		src_ip = ip;
 		}
 
-	if (rtype == MDNS_RECORDTYPE_TXT) {
+	if (rtype == MDNS_RECORDTYPE_PTR) {
+		std::cout << stamp() << "Cast mDNS: PTR  from=" << src_ip
+		          << " name=" << key << std::endl;
+		}
+	else if (rtype == MDNS_RECORDTYPE_TXT) {
 		mdns_record_txt_t txt[32];
 		size_t n = mdns_record_parse_txt(data, size, rec_off, rec_len, txt, 32);
 		auto& dev = st->devs[key];
@@ -76,10 +80,10 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 			if (k == "id") dev.id   = v;
 			if (k == "fn") dev.name = v;
 			}
-		std::cout << stamp() << "Cast mDNS: TXT " << key
-		          << " id=" << st->devs[key].id
-		          << " fn=" << st->devs[key].name
-		          << " addr=" << src_ip << std::endl;
+		std::cout << stamp() << "Cast mDNS: TXT  from=" << src_ip
+		          << " name=" << key
+		          << " id=" << dev.id
+		          << " fn=" << dev.name << std::endl;
 		}
 	else if (rtype == MDNS_RECORDTYPE_SRV) {
 		mdns_record_srv_t srv = mdns_record_parse_srv(
@@ -89,6 +93,10 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 		if (!src_ip.empty() && dev.address.empty())
 			dev.address = src_ip;
 		st->srvs[key] = std::string(srv.name.str, srv.name.length);
+		std::cout << stamp() << "Cast mDNS: SRV  from=" << src_ip
+		          << " name=" << key
+		          << " target=" << st->srvs[key]
+		          << " port=" << srv.port << std::endl;
 		}
 	else if (rtype == MDNS_RECORDTYPE_A) {
 		struct sockaddr_in a4 = {};
@@ -96,6 +104,12 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 		char ip[INET_ADDRSTRLEN];
 		inet_ntop(AF_INET, &a4.sin_addr, ip, sizeof(ip));
 		st->hosts[key] = ip;
+		std::cout << stamp() << "Cast mDNS: A    from=" << src_ip
+		          << " name=" << key << " addr=" << ip << std::endl;
+		}
+	else {
+		std::cout << stamp() << "Cast mDNS: type=" << rtype
+		          << " from=" << src_ip << " name=" << key << std::endl;
 		}
 
 	return 0;
@@ -112,9 +126,12 @@ std::vector<CastManager::CastDevice> CastManager::discover(int timeout_ms)
 
 	int sock = mdns_socket_open_ipv4(&saddr);
 	if (sock < 0) {
-		std::cout << stamp() << "Cast: failed to open mDNS socket" << std::endl;
+		std::cout << stamp() << "Cast: failed to open mDNS socket (errno "
+		          << errno << ")" << std::endl;
 		return {};
 		}
+	std::cout << stamp() << "Cast: mDNS socket open, querying for "
+	          << timeout_ms << " ms" << std::endl;
 
 	std::vector<uint8_t> buf(4096);
 	static const char svc[] = "_googlecast._tcp.local.";
@@ -124,7 +141,10 @@ std::vector<CastManager::CastDevice> CastManager::discover(int timeout_ms)
 	                                   svc, strlen(svc),
 	                                   buf.data(), buf.size(), 0);
 	if (send_result < 0)
-		std::cout << stamp() << "Cast: mDNS query send failed" << std::endl;
+		std::cout << stamp() << "Cast: mDNS query send failed (errno "
+		          << errno << ")" << std::endl;
+	else
+		std::cout << stamp() << "Cast: mDNS query sent" << std::endl;
 
 	auto deadline = std::chrono::steady_clock::now()
 	              + std::chrono::milliseconds(timeout_ms);
@@ -155,6 +175,15 @@ std::vector<CastManager::CastDevice> CastManager::discover(int timeout_ms)
 		auto hi = state.hosts.find(ti->second);
 		if (hi != state.hosts.end()) dev.address = hi->second;
 		}
+
+	std::cout << stamp() << "Cast: discovery done — "
+	          << state.devs.size() << " instance(s) seen" << std::endl;
+	for (auto& [inst, dev] : state.devs)
+		std::cout << stamp() << "  inst=" << inst
+		          << " id=" << dev.id
+		          << " fn=" << dev.name
+		          << " addr=" << dev.address
+		          << " port=" << dev.port << std::endl;
 
 	std::vector<CastDevice> result;
 	for (auto& [inst, dev] : state.devs)
