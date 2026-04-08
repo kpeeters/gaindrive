@@ -315,6 +315,39 @@ body {
    color: var(--text-dim);
 }
 
+/* ── Artist bio ────────────────────────────────────────── */
+
+.artist-bio {
+   display: flex;
+   gap: 1rem;
+   align-items: flex-start;
+   margin-bottom: 1.5rem;
+}
+
+.artist-bio-img {
+   width: 120px;
+   height: 120px;
+   object-fit: cover;
+   border-radius: 50%;
+   flex-shrink: 0;
+   background: var(--border);
+}
+
+.artist-bio-text {
+   font-size: 0.8rem;
+   color: var(--text-dim);
+   line-height: 1.5;
+   /* Clamp to ~5 lines; full text is readable by scrolling the pane. */
+   display: -webkit-box;
+   -webkit-line-clamp: 5;
+   -webkit-box-orient: vertical;
+   overflow: hidden;
+}
+
+.artist-bio-text a {
+   color: var(--accent);
+}
+
 /* ── Album list ────────────────────────────────────────── */
 
 .view-header {

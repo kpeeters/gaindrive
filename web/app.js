@@ -236,8 +236,14 @@ async function viewAlbums(artistId, artistName) {
    pane.innerHTML = '';
    document.getElementById('pane-tracks').innerHTML = '';
 
-   const sr = await apiCall('getArtist', {id: artistId});
-   const albums = sr.artist?.album ?? [];
+   // Fetch artist albums and info (bio + images) in parallel.
+   // getArtistInfo2 is optional; ignore failures for servers that lack it.
+   const [srArtist, srInfo] = await Promise.all([
+      apiCall('getArtist',      {id: artistId}),
+      apiCall('getArtistInfo2', {id: artistId}).catch(() => null),
+      ]);
+   const albums = srArtist.artist?.album ?? [];
+   const info   = srInfo?.artistInfo2 ?? {};
    console.log('[albums] got', albums.length, 'albums');
 
    const frag = document.createDocumentFragment();
@@ -255,6 +261,28 @@ async function viewAlbums(artistId, artistName) {
    header.appendChild(back);
    header.appendChild(heading);
    frag.appendChild(header);
+
+   // Artist bio block (image + biography), shown when the server provides it.
+   const imgUrl = info.largeImageUrl || info.mediumImageUrl || info.smallImageUrl || '';
+   const bio    = info.biography ?? '';
+   if (imgUrl || bio) {
+      const block = document.createElement('div');
+      block.className = 'artist-bio';
+      if (imgUrl) {
+         const img = document.createElement('img');
+         img.className = 'artist-bio-img';
+         img.src = imgUrl;
+         img.alt = artistName;
+         block.appendChild(img);
+         }
+      if (bio) {
+         const p = document.createElement('p');
+         p.className = 'artist-bio-text';
+         p.innerHTML = bio;   // Last.fm-supplied HTML
+         block.appendChild(p);
+         }
+      frag.appendChild(block);
+      }
 
    for (const album of albums) {
       const row = document.createElement('div');
