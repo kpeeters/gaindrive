@@ -40,7 +40,7 @@ struct DiscState {
 	std::map<std::string, std::string>              srvs;   // service instance → SRV host
 	};
 
-static int mdns_cb(int, const struct sockaddr*, size_t,
+static int mdns_cb(int, const struct sockaddr* from, size_t,
                     mdns_entry_type_t, uint16_t,
                     uint16_t rtype, uint16_t, uint32_t,
                     const void* data, size_t size,
@@ -55,22 +55,40 @@ static int mdns_cb(int, const struct sockaddr*, size_t,
 	mdns_string_t rname = mdns_string_extract(data, size, &off, buf1, sizeof(buf1));
 	std::string key(rname.str, rname.length);
 
+	// Use the sender's IP directly — more reliable than chasing SRV → A record names.
+	std::string src_ip;
+	if (from && from->sa_family == AF_INET) {
+		char ip[INET_ADDRSTRLEN];
+		inet_ntop(AF_INET, &reinterpret_cast<const struct sockaddr_in*>(from)->sin_addr,
+		          ip, sizeof(ip));
+		src_ip = ip;
+		}
+
 	if (rtype == MDNS_RECORDTYPE_TXT) {
 		mdns_record_txt_t txt[32];
 		size_t n = mdns_record_parse_txt(data, size, rec_off, rec_len, txt, 32);
 		auto& dev = st->devs[key];
+		if (!src_ip.empty() && dev.address.empty())
+			dev.address = src_ip;
 		for (size_t i = 0; i < n; i++) {
 			std::string k(txt[i].key.str,   txt[i].key.length);
 			std::string v(txt[i].value.str, txt[i].value.length);
 			if (k == "id") dev.id   = v;
 			if (k == "fn") dev.name = v;
 			}
+		std::cout << stamp() << "Cast mDNS: TXT " << key
+		          << " id=" << st->devs[key].id
+		          << " fn=" << st->devs[key].name
+		          << " addr=" << src_ip << std::endl;
 		}
 	else if (rtype == MDNS_RECORDTYPE_SRV) {
 		mdns_record_srv_t srv = mdns_record_parse_srv(
 			data, size, rec_off, rec_len, buf2, sizeof(buf2));
-		st->devs[key].port = srv.port;
-		st->srvs[key]      = std::string(srv.name.str, srv.name.length);
+		auto& dev = st->devs[key];
+		dev.port = srv.port;
+		if (!src_ip.empty() && dev.address.empty())
+			dev.address = src_ip;
+		st->srvs[key] = std::string(srv.name.str, srv.name.length);
 		}
 	else if (rtype == MDNS_RECORDTYPE_A) {
 		struct sockaddr_in a4 = {};
@@ -100,9 +118,13 @@ std::vector<CastManager::CastDevice> CastManager::discover(int timeout_ms)
 
 	std::vector<uint8_t> buf(4096);
 	static const char svc[] = "_googlecast._tcp.local.";
-	uint16_t qid = mdns_query_send(sock, MDNS_RECORDTYPE_PTR,
-	                                svc, strlen(svc),
-	                                buf.data(), buf.size(), 0);
+	// mdns_query_send returns int; storing in uint16_t would corrupt -1 → 65535,
+	// which would then cause mdns_query_recv to reject all ID-0 mDNS responses.
+	int send_result = mdns_query_send(sock, MDNS_RECORDTYPE_PTR,
+	                                   svc, strlen(svc),
+	                                   buf.data(), buf.size(), 0);
+	if (send_result < 0)
+		std::cout << stamp() << "Cast: mDNS query send failed" << std::endl;
 
 	auto deadline = std::chrono::steady_clock::now()
 	              + std::chrono::milliseconds(timeout_ms);
@@ -115,8 +137,12 @@ std::vector<CastManager::CastDevice> CastManager::discover(int timeout_ms)
 		fd_set fds;
 		FD_ZERO(&fds);
 		FD_SET(sock, &fds);
-		if (select(sock + 1, &fds, nullptr, nullptr, &tv) <= 0) break;
-		mdns_query_recv(sock, buf.data(), buf.size(), mdns_cb, &state, qid);
+		int r = select(sock + 1, &fds, nullptr, nullptr, &tv);
+		if (r < 0 && errno == EINTR) continue;  // retry on signal interrupt
+		if (r <= 0) break;
+		// Pass 0 as only_query_id: mDNS responses always carry ID 0 per RFC 6762,
+		// so filtering by our sent query ID would reject all valid responses.
+		mdns_query_recv(sock, buf.data(), buf.size(), mdns_cb, &state, 0);
 		}
 
 	mdns_socket_close(sock);
