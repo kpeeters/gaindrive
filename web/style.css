@@ -157,11 +157,11 @@ body {
 @media (max-width: 649px) {
    #app-shell {
       grid-template-columns: 1fr;
-      grid-template-rows: 1fr var(--bottom-nav-h) 90px;
+      grid-template-rows: 1fr 90px var(--bottom-nav-h);
       grid-template-areas:
          "content"
-         "bottom-nav"
-         "player";
+         "player"
+         "bottom-nav";
       /* 100dvh tracks actual visible height as browser chrome appears/disappears */
       height: 100dvh;
       overflow: hidden;
