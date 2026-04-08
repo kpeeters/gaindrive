@@ -69,10 +69,22 @@
          <button id="player-prev"      title="Previous">⏮</button>
          <button id="player-playpause" title="Play">▶</button>
          <button id="player-next"      title="Next">⏭</button>
+         <button id="player-cast"      title="Cast"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M1 18v3h3a3 3 0 0 0-3-3zm0-4v2a7 7 0 0 1 7 7h2a9 9 0 0 0-9-9zm0-4v2a11 11 0 0 1 11 11h2A13 13 0 0 0 1 10zm20-6H3C1.9 4 1 4.9 1 6v3h2V6h18v12h-7v2h7c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2z"/></svg></button>
       </div>
       <input id="player-seek" type="range" value="0" min="0" step="1">
       <span id="player-time">0:00 / 0:00</span>
    </footer>
+</div>
+
+<div id="cast-modal" class="modal hidden">
+   <div class="modal-box">
+      <h3>Cast to device</h3>
+      <div id="cast-device-list">Discovering…</div>
+      <div id="cast-stop-row" class="hidden">
+         <button id="cast-stop-btn">Stop casting</button>
+      </div>
+      <button id="cast-close-btn">Close</button>
+   </div>
 </div>
 
 <script src="app.js"></script>

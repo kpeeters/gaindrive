@@ -375,6 +375,59 @@ function fmtDuration(secs) {
 
 // ── Player ───────────────────────────────────────────────────────────────────
 
+// Id of the currently active cast device, or null when not casting.
+let castDeviceId = null;
+
+async function openCastModal() {
+   const modal   = document.getElementById('cast-modal');
+   const list    = document.getElementById('cast-device-list');
+   const stopRow = document.getElementById('cast-stop-row');
+
+   list.textContent = 'Discovering…';
+   stopRow.classList.toggle('hidden', castDeviceId === null);
+   modal.classList.remove('hidden');
+
+   try {
+      const sr      = await apiCall('listCastDevices');
+      const devices = sr.castDevices ?? [];
+      list.textContent = '';
+      if (devices.length === 0) {
+         list.textContent = 'No devices found.';
+         return;
+         }
+      for (const dev of devices) {
+         const btn = document.createElement('button');
+         btn.textContent = dev.name;
+         btn.addEventListener('click', () => selectCastDevice(dev.id, dev.name));
+         list.appendChild(btn);
+         }
+      } catch (err) {
+      list.textContent = `Error: ${err.message}`;
+      }
+   }
+
+async function selectCastDevice(id) {
+   try {
+      await apiCall('startCast', {id});
+      castDeviceId = id;
+      document.getElementById('player-cast').classList.add('active');
+      document.getElementById('cast-modal').classList.add('hidden');
+      } catch (err) {
+      alert(`Cast failed: ${err.message}`);
+      }
+   }
+
+async function stopCast() {
+   try {
+      await apiCall('stopCast');
+      } catch (_) {
+      // best-effort stop
+      }
+   castDeviceId = null;
+   document.getElementById('player-cast').classList.remove('active');
+   document.getElementById('cast-modal').classList.add('hidden');
+   }
+
 const player = {
    audio: new Audio(),
    queue: [],   // song objects from getAlbum
@@ -480,6 +533,12 @@ function setupPlayer() {
       player.audio.currentTime = Number(seek.value);
       delete seek.dataset.seeking;
       });
+
+   document.getElementById('player-cast').addEventListener('click', openCastModal);
+   document.getElementById('cast-close-btn').addEventListener('click', () => {
+      document.getElementById('cast-modal').classList.add('hidden');
+      });
+   document.getElementById('cast-stop-btn').addEventListener('click', stopCast);
 
    if ('mediaSession' in navigator) {
       navigator.mediaSession.setActionHandler('play',          () => player.audio.play());
