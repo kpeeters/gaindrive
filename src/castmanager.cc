@@ -21,6 +21,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <net/if.h>
+#include <ifaddrs.h>
 #include <unistd.h>
 
 #include <openssl/ssl.h>
@@ -33,6 +34,24 @@ static const char* NS_RECV  = "urn:x-cast:com.google.cast.receiver";
 static const char* NS_MEDIA = "urn:x-cast:com.google.cast.media";
 
 // ---- mDNS discovery -----------------------------------------------
+
+// Find the interface index of the first non-loopback, up, IPv6-capable interface.
+// Needed because sending to ff02::fb (link-local multicast) requires a scope.
+static unsigned int find_ipv6_if()
+	{
+	struct ifaddrs* iflist;
+	if (getifaddrs(&iflist) < 0) return 0;
+	unsigned int idx = 0;
+	for (struct ifaddrs* ifa = iflist; ifa && !idx; ifa = ifa->ifa_next) {
+		if (!ifa->ifa_addr) continue;
+		if (ifa->ifa_addr->sa_family != AF_INET6) continue;
+		if (ifa->ifa_flags & IFF_LOOPBACK) continue;
+		if (!(ifa->ifa_flags & IFF_UP)) continue;
+		idx = if_nametoindex(ifa->ifa_name);
+		}
+	freeifaddrs(iflist);
+	return idx;
+	}
 
 // State accumulated across mDNS response packets within one discover() call.
 struct DiscState {
@@ -163,9 +182,32 @@ std::vector<CastManager::CastDevice> CastManager::discover(int timeout_ms)
 	// IPv6 is required on many modern networks where devices only respond via
 	// ff02::fb multicast.
 	int sock6 = mdns_socket_open_ipv6(nullptr);
-	if (sock6 < 0)
+	if (sock6 < 0) {
 		std::cout << stamp() << "Cast: failed to open IPv6 mDNS socket (errno "
 		          << errno << ")" << std::endl;
+		}
+	else {
+		// Sending to ff02::fb (link-local multicast) requires the kernel to know
+		// which interface to use. Set IPV6_MULTICAST_IF and re-join with that
+		// interface so both send and receive work correctly.
+		unsigned int ifidx = find_ipv6_if();
+		if (ifidx == 0) {
+			std::cout << stamp() << "Cast: no suitable IPv6 interface found" << std::endl;
+			}
+		else {
+			setsockopt(sock6, IPPROTO_IPV6, IPV6_MULTICAST_IF,
+			           &ifidx, sizeof(ifidx));
+			struct ipv6_mreq req = {};
+			req.ipv6mr_multiaddr.s6_addr[0]  = 0xFF;
+			req.ipv6mr_multiaddr.s6_addr[1]  = 0x02;
+			req.ipv6mr_multiaddr.s6_addr[15] = 0xFB;
+			req.ipv6mr_interface = ifidx;
+			setsockopt(sock6, IPPROTO_IPV6, IPV6_JOIN_GROUP,
+			           &req, sizeof(req));
+			std::cout << stamp() << "Cast: IPv6 multicast on interface index "
+			          << ifidx << std::endl;
+			}
+		}
 
 	if (sock4 < 0 && sock6 < 0)
 		return {};
