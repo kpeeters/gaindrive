@@ -467,7 +467,19 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
       frag.appendChild(hero);
       }
 
+   const multiDisc = new Set(songs.map(s => s.disc ?? 1)).size > 1;
+   let currentDisc = null;
+
    for (const song of songs) {
+      const disc = song.disc ?? 1;
+      if (multiDisc && disc !== currentDisc) {
+         currentDisc = disc;
+         const dh = document.createElement('div');
+         dh.className = 'disc-heading';
+         dh.textContent = `Disc ${disc}`;
+         frag.appendChild(dh);
+         }
+
       const row = document.createElement('div');
       row.className = 'track-row';
       row.dataset.id = song.id;

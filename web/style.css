@@ -395,6 +395,17 @@ body {
 
 /* ── Track list ────────────────────────────────────────── */
 
+.disc-heading {
+   font-size: 0.7rem;
+   font-weight: 700;
+   letter-spacing: 0.1em;
+   text-transform: uppercase;
+   color: var(--text-dim);
+   padding: 1.2rem 0.4rem 0.3rem;
+   border-bottom: 1px solid var(--border);
+   margin-bottom: 0.2rem;
+}
+
 .album-hero {
    display: block;
    width: min(100%, 320px);
