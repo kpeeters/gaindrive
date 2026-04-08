@@ -913,6 +913,14 @@ std::string MediaStore::get_folder_name(int folder_id)
 	return q.executeStep() ? q.getColumn(0).getString() : "";
 	}
 
+std::string MediaStore::get_folder_path(int folder_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_, "SELECT path FROM folders WHERE id = ?");
+	q.bind(1, folder_id);
+	return q.executeStep() ? q.getColumn(0).getString() : "";
+	}
+
 std::optional<MediaStore::CachedArtistInfo> MediaStore::get_cached_artist_info(int folder_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);

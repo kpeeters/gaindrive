@@ -681,6 +681,69 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
 
       infoSlot.appendChild(block);
       }).catch(() => { infoSlot.className = ''; });
+
+   // Fetch liner-note text files without blocking the track list.
+   apiCall('getAlbumTexts', {id: albumId}).then(srTxt => {
+      const files = srTxt?.albumTexts?.textFile ?? [];
+      if (files.length === 0) return;
+
+      const section = document.createElement('div');
+      section.className = 'liner-notes';
+
+      // Header row: label + prev/next navigation (hidden when only one file).
+      const nav = document.createElement('div');
+      nav.className = 'liner-notes-nav';
+
+      const label = document.createElement('span');
+      label.className = 'liner-notes-label';
+
+      const prev = document.createElement('button');
+      prev.className = 'liner-notes-btn';
+      prev.textContent = '‹';
+      prev.setAttribute('aria-label', 'Previous text file');
+
+      const next = document.createElement('button');
+      next.className = 'liner-notes-btn';
+      next.textContent = '›';
+      next.setAttribute('aria-label', 'Next text file');
+
+      if (files.length > 1) {
+         nav.appendChild(prev);
+         nav.appendChild(label);
+         nav.appendChild(next);
+         }
+      else {
+         nav.appendChild(label);
+         }
+
+      const body = document.createElement('div');
+      body.className = 'liner-notes-body';
+
+      section.appendChild(nav);
+      section.appendChild(body);
+      pane.appendChild(section);
+
+      let current = 0;
+
+      function loadFile(idx) {
+         const name = files[idx].name;
+         label.textContent = name;
+         body.textContent = '';   // clear while loading
+         fetch(apiUrl('getAlbumText', {id: albumId, name}))
+            .then(r => r.ok ? r.text() : Promise.reject(r.status))
+            .then(text => { body.textContent = text; })
+            .catch(() => { body.textContent = '(could not load file)'; });
+         if (files.length > 1) {
+            prev.disabled = idx === 0;
+            next.disabled = idx === files.length - 1;
+            }
+         }
+
+      prev.addEventListener('click', () => { if (current > 0) loadFile(--current); });
+      next.addEventListener('click', () => { if (current < files.length - 1) loadFile(++current); });
+
+      loadFile(0);
+      }).catch(() => {});
 }
 
 // ── Shell ───────────────────────────────────────────────────────────────────

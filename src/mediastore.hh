@@ -60,6 +60,7 @@ class MediaStore {
 
 		// Returns empty string if folder_id not found.
 		std::string get_folder_name(int folder_id);
+		std::string get_folder_path(int folder_id);
 
 		std::optional<CachedArtistInfo> get_cached_artist_info(int folder_id);
 		void cache_artist_info(int folder_id, const CachedArtistInfo& info);

@@ -1343,6 +1343,86 @@ GainDrive::GainDrive(const std::string& db_path,
 				});
 		});
 
+	// getAlbumTexts — list .txt files in an album folder.
+	server_.Get("/rest/getAlbumTexts.view", [this](const httplib::Request& req,
+	                                               httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			res.set_content(subsonic_error_json(10, "Required parameter missing: id."),
+			                "application/json");
+			return;
+			}
+
+		std::string folder = store_.get_folder_path(std::stoi(it->second));
+		if (folder.empty()) {
+			res.status = 404;
+			return;
+			}
+
+		namespace fs = std::filesystem;
+		nlohmann::json files = nlohmann::json::array();
+		try {
+			for (auto& entry : fs::directory_iterator(folder)) {
+				if (entry.is_regular_file() && entry.path().extension() == ".txt")
+					files.push_back({{"name", entry.path().filename().string()}});
+				}
+			}
+		catch (...) {}
+
+		// Sort alphabetically so the order is stable.
+		std::sort(files.begin(), files.end(), [](const nlohmann::json& a, const nlohmann::json& b){
+			return a["name"].get<std::string>() < b["name"].get<std::string>();
+			});
+
+		res.set_content(subsonic_ok_json([&files](nlohmann::json& r) {
+			r["albumTexts"] = {{"textFile", files}};
+			}), "application/json");
+		});
+
+	// getAlbumText — serve a single .txt file from an album folder.
+	server_.Get("/rest/getAlbumText.view", [this](const httplib::Request& req,
+	                                              httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto id_it   = req.params.find("id");
+		auto name_it = req.params.find("name");
+		if (id_it == req.params.end() || name_it == req.params.end()) {
+			res.status = 400;
+			return;
+			}
+
+		// Reject any path traversal attempts.
+		const std::string& name = name_it->second;
+		if (name.find('/') != std::string::npos  ||
+		    name.find('\\') != std::string::npos ||
+		    name.find("..") != std::string::npos ||
+		    name.size() < 5 ||
+		    name.substr(name.size() - 4) != ".txt") {
+			res.status = 400;
+			return;
+			}
+
+		std::string folder = store_.get_folder_path(std::stoi(id_it->second));
+		if (folder.empty()) {
+			res.status = 404;
+			return;
+			}
+
+		namespace fs = std::filesystem;
+		fs::path full = fs::path(folder) / name;
+		std::ifstream f(full);
+		if (!f) {
+			res.status = 404;
+			return;
+			}
+
+		std::string content((std::istreambuf_iterator<char>(f)),
+		                     std::istreambuf_iterator<char>());
+		res.set_content(content, "text/plain; charset=utf-8");
+		});
+
 	// savePlayQueue — persist the client's current queue and playback position.
 	server_.Get("/rest/savePlayQueue.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
