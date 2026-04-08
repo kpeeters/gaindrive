@@ -190,6 +190,14 @@ void MediaStore::create_schema()
 			image_url   TEXT NOT NULL DEFAULT '',
 			fetched_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 		);
+
+		CREATE TABLE IF NOT EXISTS album_info_cache (
+			folder_id  INTEGER PRIMARY KEY REFERENCES folders(id),
+			mbid       TEXT NOT NULL DEFAULT '',
+			notes      TEXT NOT NULL DEFAULT '',
+			wiki_url   TEXT NOT NULL DEFAULT '',
+			fetched_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+		);
 	)");
 
 	// Client/user data tables (gaindrive-client.db, attached as "client" schema).
@@ -933,6 +941,35 @@ void MediaStore::cache_artist_info(int folder_id, const CachedArtistInfo& info)
 	ins.bind(3, info.last_fm_url);
 	ins.bind(4, info.biography);
 	ins.bind(5, info.image_url);
+	ins.exec();
+	}
+
+std::optional<MediaStore::CachedAlbumInfo>
+MediaStore::get_cached_album_info(int folder_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT mbid, notes, wiki_url FROM album_info_cache WHERE folder_id = ?");
+	q.bind(1, folder_id);
+	if (!q.executeStep()) return std::nullopt;
+	CachedAlbumInfo a;
+	a.mbid     = q.getColumn(0).getString();
+	a.notes    = q.getColumn(1).getString();
+	a.wiki_url = q.getColumn(2).getString();
+	return a;
+	}
+
+void MediaStore::cache_album_info(int folder_id, const CachedAlbumInfo& info)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement ins(db_music_,
+		"INSERT OR REPLACE INTO album_info_cache"
+		" (folder_id, mbid, notes, wiki_url, fetched_at)"
+		" VALUES (?, ?, ?, ?, strftime('%s','now'))");
+	ins.bind(1, folder_id);
+	ins.bind(2, info.mbid);
+	ins.bind(3, info.notes);
+	ins.bind(4, info.wiki_url);
 	ins.exec();
 	}
 

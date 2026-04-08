@@ -503,6 +503,206 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 	res.set_content(body, use_json ? "application/json" : "application/xml");
 	}
 
+// ---- Album info helper -----------------------------------------------
+
+// Shared implementation for getAlbumInfo and getAlbumInfo2.
+// Searches MusicBrainz for the release-group, then resolves a Wikipedia
+// article via Wikidata if needed. Results are cached in album_info_cache.
+static void handle_album_info(const httplib::Request& req, httplib::Response& res,
+                               MediaStore& store, bool debug)
+	{
+	bool use_json = (fmt_of(req) == "json");
+	auto err = [&](int code, const char* msg) {
+		if (use_json)
+			res.set_content(subsonic_error_json(code, msg), "application/json");
+		else
+			res.set_content(subsonic_error(code, msg),      "application/xml");
+		};
+
+	auto it = req.params.find("id");
+	if (it == req.params.end()) { err(10, "Required parameter missing: id."); return; }
+
+	int id = std::stoi(it->second);
+	auto album_data = store.get_album(id);
+	if (!album_data) { err(70, "Album not found."); return; }
+
+	const std::string& title  = album_data->album.title;
+	const std::string& artist = album_data->album.artist;
+
+	auto cached = store.get_cached_album_info(id);
+	MediaStore::CachedAlbumInfo info;
+	if (cached) {
+		info = *cached;
+		std::cout << stamp() << "getAlbumInfo [" << title << "] cached"
+		          << " mbid=" << (info.mbid.empty() ? "(none)" : info.mbid)
+		          << std::endl;
+		}
+	else {
+		std::cout << stamp() << "getAlbumInfo [" << title
+		          << "] querying MusicBrainz" << std::endl;
+		httplib::SSLClient mb("musicbrainz.org");
+		mb.set_default_headers({
+			{"User-Agent", "GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+			});
+
+		// Step 1 — search for the release-group by title + artist.
+		httplib::Params p1{
+			{"query", "releasegroup:\"" + title + "\" AND artist:\"" + artist + "\""},
+			{"limit", "1"},
+			{"fmt",   "json"}
+			};
+		auto r1 = mb.Get("/ws/2/release-group", p1, httplib::Headers{});
+		if (!r1) {
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] MusicBrainz request failed (no response)" << std::endl;
+			}
+		else if (r1->status != 200) {
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] MusicBrainz HTTP " << r1->status << std::endl;
+			}
+		else {
+			auto j1 = nlohmann::json::parse(r1->body, nullptr, false);
+			if (!j1.is_discarded() && j1.contains("release-groups")
+			                       && !j1["release-groups"].empty())
+				info.mbid = j1["release-groups"][0].value("id", "");
+			}
+
+		// Step 2 — fetch URL relations for the release-group.
+		if (!info.mbid.empty()) {
+			std::this_thread::sleep_for(std::chrono::seconds(1));
+			auto r2 = mb.Get("/ws/2/release-group/" + info.mbid,
+			                 httplib::Params{{"inc","url-rels"},{"fmt","json"}},
+			                 httplib::Headers{});
+			if (!r2) {
+				std::cout << stamp() << "getAlbumInfo [" << title
+				          << "] MusicBrainz url-rels request failed" << std::endl;
+				}
+			else if (r2->status != 200) {
+				std::cout << stamp() << "getAlbumInfo [" << title
+				          << "] MusicBrainz url-rels HTTP " << r2->status << std::endl;
+				}
+			else {
+				auto j2 = nlohmann::json::parse(r2->body, nullptr, false);
+				auto rels = j2.value("relations", nlohmann::json::array());
+				std::cout << stamp() << "getAlbumInfo [" << title
+				          << "] MusicBrainz url-rels: " << rels.size()
+				          << " relation(s)";
+				for (auto& rel : rels) std::cout << " [" << rel.value("type","?") << "]";
+				std::cout << std::endl;
+
+				// Prefer direct wikipedia relation; fall back to wikidata.
+				std::string wiki_title;
+				for (auto& rel : rels) {
+					std::string type     = rel.value("type","");
+					std::string resource = rel.value("url", nlohmann::json::object())
+					                          .value("resource","");
+					if (type == "wikipedia") {
+						auto pos = resource.find("/wiki/");
+						if (pos != std::string::npos) {
+							wiki_title = resource.substr(pos + 6);
+							std::cout << stamp() << "getAlbumInfo [" << title
+							          << "] Wikipedia (direct): " << wiki_title
+							          << std::endl;
+							break;
+							}
+						}
+					else if (type == "wikidata" && wiki_title.empty()) {
+						auto pos = resource.rfind('/');
+						if (pos == std::string::npos) continue;
+						std::string entity = resource.substr(pos + 1);
+						std::cout << stamp() << "getAlbumInfo [" << title
+						          << "] Wikidata entity: " << entity << std::endl;
+						httplib::SSLClient wd("www.wikidata.org");
+						wd.set_default_headers({
+							{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+							});
+						auto rwd = wd.Get("/w/api.php",
+							httplib::Params{
+								{"action","wbgetentities"},{"ids",entity},
+								{"props","sitelinks"},{"sitefilter","enwiki"},
+								{"format","json"}
+								},
+							httplib::Headers{});
+						if (rwd && rwd->status == 200) {
+							auto jwd = nlohmann::json::parse(rwd->body, nullptr, false);
+							if (!jwd.is_discarded())
+								wiki_title = jwd["entities"][entity]["sitelinks"]["enwiki"]
+								                .value("title","");
+							if (!wiki_title.empty())
+								std::cout << stamp() << "getAlbumInfo [" << title
+								          << "] Wikipedia (via Wikidata): "
+								          << wiki_title << std::endl;
+							}
+						}
+					}
+
+				// Step 3 — Wikipedia REST summary → notes text.
+				if (!wiki_title.empty()) {
+					httplib::SSLClient wp("en.wikipedia.org");
+					wp.set_default_headers({
+						{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+						});
+					std::string path_title = wiki_title;
+					for (char& c : path_title) if (c == ' ') c = '_';
+					auto r3 = wp.Get("/api/rest_v1/page/summary/" + path_title,
+					                 httplib::Params{}, httplib::Headers{});
+					if (!r3) {
+						std::cout << stamp() << "getAlbumInfo [" << title
+						          << "] Wikipedia request failed" << std::endl;
+						}
+					else if (r3->status != 200) {
+						std::cout << stamp() << "getAlbumInfo [" << title
+						          << "] Wikipedia HTTP " << r3->status << std::endl;
+						}
+					else {
+						auto j3 = nlohmann::json::parse(r3->body, nullptr, false);
+						if (!j3.is_discarded()) {
+							info.notes    = j3.value("extract", "");
+							info.wiki_url = "https://en.wikipedia.org/wiki/" + wiki_title;
+							std::cout << stamp() << "getAlbumInfo [" << title
+							          << "] notes=" << info.notes.size()
+							          << " chars" << std::endl;
+							}
+						}
+					}
+				}
+			}
+
+		store.cache_album_info(id, info);
+		std::cout << stamp() << "getAlbumInfo [" << title << "] cached"
+		          << " mbid=" << (info.mbid.empty() ? "(none)" : info.mbid)
+		          << std::endl;
+		}
+
+	std::string body;
+	if (use_json)
+		body = subsonic_ok_json([&info](nlohmann::json& r) {
+			nlohmann::json ai = nlohmann::json::object();
+			if (!info.mbid.empty())     ai["musicBrainzId"] = info.mbid;
+			if (!info.notes.empty())    ai["notes"]         = info.notes;
+			if (!info.wiki_url.empty()) ai["wikiUrl"]       = info.wiki_url;
+			r["albumInfo2"] = ai;
+			});
+	else {
+		auto add_text_el = [](XMLDocument& doc, XMLElement* parent,
+		                       const char* tag, const std::string& val) {
+			if (val.empty()) return;
+			auto* el = doc.NewElement(tag);
+			el->SetText(val.c_str());
+			parent->InsertEndChild(el);
+			};
+		body = subsonic_ok([&info, &add_text_el](XMLDocument& doc, XMLElement* root) {
+			auto* ai = doc.NewElement("albumInfo2");
+			add_text_el(doc, ai, "musicBrainzId", info.mbid);
+			add_text_el(doc, ai, "notes",         info.notes);
+			add_text_el(doc, ai, "wikiUrl",       info.wiki_url);
+			root->InsertEndChild(ai);
+			});
+		}
+	if (debug) std::cout << body << "\n";
+	res.set_content(body, use_json ? "application/json" : "application/xml");
+	}
+
 // ---- Album list helper -----------------------------------------------
 
 // Shared implementation for getAlbumList and getAlbumList2.
@@ -1643,22 +1843,10 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getAlbumInfo2 — no biography data available; return empty stub.
 	server_.Get("/rest/getAlbumInfo2.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		bool use_json = (fmt_of(req) == "json");
-		std::string body;
-		if (use_json)
-			body = subsonic_ok_json([](nlohmann::json& r) {
-				r["albumInfo2"] = nlohmann::json::object();
-				});
-		else
-			body = subsonic_ok([](XMLDocument& doc, XMLElement* root) {
-				root->InsertEndChild(doc.NewElement("albumInfo2"));
-				});
-		if (debug_) std::cout << body << "\n";
-		res.set_content(body, use_json ? "application/json" : "application/xml");
+		handle_album_info(req, res, store_, debug_);
 		});
 
 	// getTopSongs — play-count tracking not implemented; return empty list.
