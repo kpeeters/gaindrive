@@ -140,10 +140,6 @@ const paneNav = {
       const leftmost = Math.max(0, this.depth - (n - 1));
       strip.style.transform = `translateX(${-leftmost * pw}px)`;
 
-      // Back links are only needed when the previous pane is off-screen.
-      document.querySelectorAll('.back-link').forEach(el => {
-         el.hidden = (n >= 2);
-         });
 
       if (!animate)
          requestAnimationFrame(() => { strip.style.transition = ''; });
