@@ -815,6 +815,12 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::cout << " -> " << res.status << std::endl;
 		});
 
+	// Audio streams are consumed at playback speed, so the send buffer can stay
+	// full for a long time while the Chromecast plays through its local buffer.
+	// Increase the write timeout well beyond the longest expected track to prevent
+	// httplib from closing the connection mid-stream.
+	server_.set_write_timeout(3600, 0);   // 1 hour
+
 	// Web client — serve embedded static files.
 	server_.Get("/", [](const httplib::Request&, httplib::Response& res) {
 		res.set_content(embedded::index_html.data(), embedded::index_html.size(),
