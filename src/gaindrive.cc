@@ -1611,7 +1611,7 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		Streamer::SongInfo si{ song->path, song->codec, song->bitrate,
 		                       song->duration, song->file_size };
-		Streamer::serve(req, res, si, max_bitrate, format, time_offset);
+		Streamer::serve(req, res, si, max_bitrate, format, time_offset, cast_authed);
 		});
 
 	// createPlaylist

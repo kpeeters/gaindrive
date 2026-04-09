@@ -16,17 +16,20 @@ class Streamer {
 		// Decides direct-serve vs transcode and sends the audio response.
 		// max_bitrate=0 means no limit.  format="" or "raw" means pass-through.
 		// time_offset is in whole seconds (0 = from the start).
+		// throttle=true limits delivery to ~1.02× audio bitrate (used for Cast streams
+		// so the receiver never buffers far ahead and closes the connection early).
 		static void serve(const httplib::Request& req, httplib::Response& res,
 		                  const SongInfo& song, int max_bitrate,
-		                  const std::string& format, int time_offset);
+		                  const std::string& format, int time_offset,
+		                  bool throttle = false);
 
 	private:
 		// Serve the file directly with Range request support (HTTP 206).
 		static void serve_direct(const httplib::Request& req, httplib::Response& res,
-		                         const SongInfo& song);
+		                         const SongInfo& song, bool throttle);
 
 		// Transcode via ffmpeg pipe using reproc.
 		static void serve_transcoded(httplib::Response& res, const SongInfo& song,
 		                             int target_bitrate, const std::string& target_fmt,
-		                             int time_offset);
+		                             int time_offset, bool throttle);
 	};
