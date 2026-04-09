@@ -829,7 +829,7 @@ GainDrive::GainDrive(const std::string& db_path,
 	// receiver has its TCP window at zero (buffer full, not reading).  Without
 	// this the router drops the idle connection after ~60-90 s.
 	// Accepted sockets inherit SO_KEEPALIVE from the listening socket on Linux.
-	server_.set_socket_options([](httplib::socket_t sock) {
+	server_.set_socket_options([](int sock) {
 		httplib::default_socket_options(sock);
 		int on = 1;
 		setsockopt(sock, SOL_SOCKET,  SO_KEEPALIVE,   &on, sizeof(on));
