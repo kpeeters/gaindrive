@@ -495,11 +495,6 @@ bool CastManager::start(const CastDevice& dev)
 
 void CastManager::load(const std::string& url, const std::string& mime)
 	{
-	// Stop any existing monitor before starting a new one.
-	stop_monitor_ = true;
-	if (monitor_.joinable()) monitor_.join();
-	stop_monitor_ = false;
-
 	// Reset playback status for the new track.
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
@@ -537,77 +532,57 @@ void CastManager::load(const std::string& url, const std::string& mime)
 			}}
 		});
 
-	// Hand the open connection to the monitor thread; steal the raw pointers so
-	// the Tls destructor doesn't close them underneath us.
-	SSL*     ssl  = t.ssl;
-	SSL_CTX* ctx  = t.ctx;
-	int      sock = t.sock;
-	t.ssl  = nullptr;
-	t.ctx  = nullptr;
-	t.sock = -1;
+	// Read the initial MEDIA_STATUS to capture mediaSessionId and duration before
+	// closing.  The Chromecast responds to LOAD almost immediately.
+	for (int i = 0; i < 15; i++) {
+		auto m = cast_recv(t.ssl);
+		if (m.is_null()) break;
+		if (m.value("type", "") == "MEDIA_STATUS") { update_status(m); break; }
+		}
 
-	monitor_ = std::thread([this, ssl, ctx, sock]() {
-		run_monitor(ssl, ctx, sock);
-		});
-
+	// Connection closes here; the Chromecast fetches and plays independently.
+	// No persistent connection is kept — avoiding Cast heartbeat obligations.
 	std::cout << stamp() << "Cast: → " << url << std::endl;
 	}
 
-void CastManager::run_monitor(SSL* ssl, SSL_CTX* ctx, int sock)
+void CastManager::update_status(const nlohmann::json& msg)
 	{
-	std::cout << stamp() << "Cast monitor: started" << std::endl;
-
-	// Use a shorter read timeout than the default 5 s so we can poll for
-	// position updates at roughly the same rate as the JS poll interval.
-	// The Chromecast only pushes MEDIA_STATUS on state changes, not continuously,
-	// so we need to request it ourselves after each quiet period.
-	struct timeval tv = {2, 0};
-	setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-	int consecutive_timeouts = 0;
-
-	while (!stop_monitor_) {
-		auto msg = cast_recv(ssl);
-		if (msg.is_null()) {
-			if (stop_monitor_) break;
-			// A null return with stop not set means a read timeout (SO_RCVTIMEO).
-			// Ask the Chromecast for current position; it will reply with MEDIA_STATUS.
-			// After too many failures in a row the connection is truly dead.
-			if (++consecutive_timeouts > 3) break;
-			cast_send(ssl, NS_MEDIA, "sender-0", transport_id_,
-			          {{"type", "GET_STATUS"}, {"requestId", 3}});
-			continue;
-			}
-		consecutive_timeouts = 0;
-
-		if (msg.value("type", "") == "MEDIA_STATUS") {
-			auto& list = msg["status"];
-			if (list.is_array() && !list.empty()) {
-				auto& s = list[0];
-				CastStatus cs;
-				cs.player_state     = s.value("playerState", "IDLE");
-				cs.current_time     = s.value("currentTime",  0.0f);
-				cs.media_session_id = s.value("mediaSessionId", 0);
-				// duration lives nested under media
-				if (s.contains("media") && s["media"].contains("duration"))
-					cs.duration = s["media"]["duration"].get<float>();
-				std::lock_guard<std::mutex> lk(status_mutex_);
-				status_ = cs;
-				}
-			}
-		}
-
-	SSL_shutdown(ssl);
-	SSL_free(ssl);
-	SSL_CTX_free(ctx);
-	::close(sock);
-	std::cout << stamp() << "Cast monitor: stopped" << std::endl;
+	auto& list = msg["status"];
+	if (!list.is_array() || list.empty()) return;
+	auto& s = list[0];
+	CastStatus cs;
+	cs.player_state     = s.value("playerState",    "IDLE");
+	cs.current_time     = s.value("currentTime",     0.0f);
+	cs.media_session_id = s.value("mediaSessionId",  0);
+	if (s.contains("media") && s["media"].contains("duration"))
+		cs.duration = s["media"]["duration"].get<float>();
+	std::lock_guard<std::mutex> lk(status_mutex_);
+	status_ = cs;
 	}
 
 CastManager::CastStatus CastManager::get_status() const
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
 	return status_;
+	}
+
+CastManager::CastStatus CastManager::fetch_status()
+	{
+	if (transport_id_.empty()) return get_status();
+	std::lock_guard<std::mutex> lk(fetch_mutex_);
+	Tls t;
+	if (!tls_connect(t, device_.address, device_.port)) return get_status();
+	std::string src = "sender-0";
+	cast_send(t.ssl, NS_CONN,  src, "receiver-0",  {{"type", "CONNECT"}});
+	cast_send(t.ssl, NS_CONN,  src, transport_id_,  {{"type", "CONNECT"}});
+	cast_send(t.ssl, NS_MEDIA, src, transport_id_,
+	          {{"type", "GET_STATUS"}, {"requestId", 3}});
+	for (int i = 0; i < 15; i++) {
+		auto m = cast_recv(t.ssl);
+		if (m.is_null()) break;
+		if (m.value("type", "") == "MEDIA_STATUS") { update_status(m); break; }
+		}
+	return get_status();
 	}
 
 void CastManager::send_media_cmd(const nlohmann::json& payload)
@@ -646,22 +621,11 @@ void CastManager::cast_seek(float seconds)
 	std::cout << stamp() << "Cast: SEEK → " << seconds << "s" << std::endl;
 	}
 
-CastManager::~CastManager()
-	{
-	stop_monitor_ = true;
-	if (monitor_.joinable()) monitor_.join();
-	}
-
 void CastManager::stop()
 	{
 	active_ = false;
 	token_.clear();
 	transport_id_.clear();
-
-	// Shut down the monitor first so it releases the socket cleanly.
-	stop_monitor_ = true;
-	if (monitor_.joinable()) monitor_.join();
-	stop_monitor_ = false;
 
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);

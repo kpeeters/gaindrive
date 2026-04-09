@@ -2,11 +2,8 @@
 
 #include <string>
 #include <vector>
-#include <thread>
 #include <mutex>
-#include <atomic>
 
-#include <openssl/ssl.h>
 #include <nlohmann/json.hpp>
 
 class CastManager {
@@ -31,27 +28,29 @@ class CastManager {
 		// Enter cast mode: store device and generate a single-use stream token.
 		bool start(const CastDevice& device);
 
-		// Lazy-connect to the Chromecast and tell it to load url.
-		// Keeps the connection open in a background thread to receive MEDIA_STATUS.
+		// Connect to the Chromecast, send LOAD, capture initial MEDIA_STATUS, then close.
+		// The Chromecast fetches and plays independently; no persistent connection is kept.
 		void load(const std::string& url, const std::string& mime_type);
 
 		// Stop Chromecast playback and exit cast mode.
 		void stop();
 
-		// Playback controls — send commands over a fresh connection.
+		// Playback controls — each opens a fresh connection.
 		void cast_pause();
 		void cast_play();
 		void cast_seek(float seconds);
 
-		// Thread-safe read of the latest MEDIA_STATUS from the monitor thread.
+		// Open a fresh connection, send GET_STATUS, update the cached status, return it.
+		// Serialised by fetch_mutex_ so concurrent getCastStatus calls don't pile up.
+		CastStatus fetch_status();
+
+		// Return the last cached status (used internally for mediaSessionId).
 		CastStatus get_status() const;
 
 		bool        active()     const { return active_; }
 		std::string token()      const { return token_; }
 		bool        valid_token(const std::string& t) const
 			{ return active_ && !token_.empty() && token_ == t; }
-
-		~CastManager();
 
 	private:
 		bool        active_ = false;
@@ -61,11 +60,10 @@ class CastManager {
 
 		mutable std::mutex   status_mutex_;
 		CastStatus           status_;
-		std::thread          monitor_;
-		std::atomic<bool>    stop_monitor_{false};
+		std::mutex           fetch_mutex_;   // one fetch_status() at a time
 
-		// Runs in monitor_; owns ssl/ctx/sock and cleans up on exit.
-		void run_monitor(SSL* ssl, SSL_CTX* ctx, int sock);
+		// Parse a MEDIA_STATUS message and store the result in status_.
+		void update_status(const nlohmann::json& msg);
 
 		// Open a fresh connection and send one media-namespace command.
 		void send_media_cmd(const nlohmann::json& payload);

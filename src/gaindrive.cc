@@ -2280,7 +2280,7 @@ GainDrive::GainDrive(const std::string& db_path,
 	server_.Get("/rest/getCastStatus.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		auto s = cast_manager_.get_status();
+		auto s = cast_manager_.fetch_status();
 		nlohmann::json jr = {
 			{"subsonic-response", {
 				{"status",  "ok"},

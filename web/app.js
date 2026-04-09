@@ -378,8 +378,11 @@ function fmtDuration(secs) {
 // Id of the currently active cast device, or null when not casting.
 let castDeviceId = null;
 let castPollTimer = null;
+let castPolling   = false;   // prevent overlapping polls
 
 async function pollCastStatus() {
+   if (castPolling) return;
+   castPolling = true;
    try {
       const sr = await apiCall('getCastStatus');
       const s  = sr.castStatus;
@@ -396,6 +399,8 @@ async function pollCastStatus() {
          s.playerState === 'PAUSED' ? '▶' : '⏸';
       } catch (_) {
       // best-effort; don't spam the log on transient failures
+      } finally {
+      castPolling = false;
       }
    }
 
@@ -434,7 +439,7 @@ async function selectCastDevice(id) {
       document.getElementById('player-cast').classList.add('active');
       document.getElementById('cast-modal').classList.add('hidden');
       // Poll the Chromecast for playback position and state.
-      castPollTimer = setInterval(pollCastStatus, 2000);
+      castPollTimer = setInterval(pollCastStatus, 500);
       } catch (err) {
       alert(`Cast failed: ${err.message}`);
       }
