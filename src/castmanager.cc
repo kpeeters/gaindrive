@@ -557,9 +557,28 @@ void CastManager::run_monitor(SSL* ssl, SSL_CTX* ctx, int sock)
 	{
 	std::cout << stamp() << "Cast monitor: started" << std::endl;
 
+	// Use a shorter read timeout than the default 5 s so we can poll for
+	// position updates at roughly the same rate as the JS poll interval.
+	// The Chromecast only pushes MEDIA_STATUS on state changes, not continuously,
+	// so we need to request it ourselves after each quiet period.
+	struct timeval tv = {2, 0};
+	setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+	int consecutive_timeouts = 0;
+
 	while (!stop_monitor_) {
 		auto msg = cast_recv(ssl);
-		if (msg.is_null()) break;
+		if (msg.is_null()) {
+			if (stop_monitor_) break;
+			// A null return with stop not set means a read timeout (SO_RCVTIMEO).
+			// Ask the Chromecast for current position; it will reply with MEDIA_STATUS.
+			// After too many failures in a row the connection is truly dead.
+			if (++consecutive_timeouts > 3) break;
+			cast_send(ssl, NS_MEDIA, "sender-0", transport_id_,
+			          {{"type", "GET_STATUS"}, {"requestId", 3}});
+			continue;
+			}
+		consecutive_timeouts = 0;
 
 		if (msg.value("type", "") == "MEDIA_STATUS") {
 			auto& list = msg["status"];

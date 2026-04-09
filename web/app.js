@@ -533,8 +533,14 @@ function setupPlayer() {
    document.getElementById('player-playpause').addEventListener('click', () => {
       if (castDeviceId !== null) {
          const btn = document.getElementById('player-playpause');
-         if (btn.textContent === '▶') apiCall('castControl', {action: 'play'}).catch(() => {});
-         else                         apiCall('castControl', {action: 'pause'}).catch(() => {});
+         // Flip immediately so the UI responds without waiting for the next poll.
+         if (btn.textContent === '▶') {
+            btn.textContent = '⏸';
+            apiCall('castControl', {action: 'play'}).catch(() => {});
+            } else {
+            btn.textContent = '▶';
+            apiCall('castControl', {action: 'pause'}).catch(() => {});
+            }
          return;
          }
       if (player.audio.paused) player.audio.play();
