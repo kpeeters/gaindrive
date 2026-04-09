@@ -9,6 +9,10 @@
 #include <map>
 #include <thread>
 
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
+
 #include <reproc++/reproc.hpp>
 
 #include <tinyxml2.h>
@@ -821,6 +825,22 @@ GainDrive::GainDrive(const std::string& db_path,
 	// httplib from closing the connection mid-stream.
 	server_.set_write_timeout(3600, 0);   // 1 hour
 
+	// Enable TCP keepalives so the NAT table entry stays alive while the Cast
+	// receiver has its TCP window at zero (buffer full, not reading).  Without
+	// this the router drops the idle connection after ~60-90 s.
+	// Accepted sockets inherit SO_KEEPALIVE from the listening socket on Linux.
+	server_.set_socket_options([](httplib::socket_t sock) {
+		httplib::default_socket_options(sock);
+		int on = 1;
+		setsockopt(sock, SOL_SOCKET,  SO_KEEPALIVE,   &on, sizeof(on));
+		int idle  = 10;   // start probing after 10 s of silence
+		int intvl =  5;   // probe every 5 s
+		int cnt   =  3;   // give up after 3 missed probes
+		setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE,   &idle,  sizeof(idle));
+		setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL,  &intvl, sizeof(intvl));
+		setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT,    &cnt,   sizeof(cnt));
+		});
+
 	// Web client — serve embedded static files.
 	server_.Get("/", [](const httplib::Request&, httplib::Response& res) {
 		res.set_content(embedded::index_html.data(), embedded::index_html.size(),
@@ -1608,6 +1628,15 @@ GainDrive::GainDrive(const std::string& db_path,
 		int         max_bitrate = std::stoi(qp("maxBitRate", "0"));
 		std::string format      = qp("format");
 		int         time_offset = std::stoi(qp("timeOffset", "0"));
+
+		if (cast_authed) {
+			// Log Range header so we can see what the Cast receiver is requesting.
+			auto range = req.get_header_value("Range");
+			std::cout << stamp() << "cast stream: id=" << it->second
+			          << " size=" << song->file_size
+			          << " range=[" << (range.empty() ? "none" : range) << "]"
+			          << std::endl;
+			}
 
 		Streamer::SongInfo si{ song->path, song->codec, song->bitrate,
 		                       song->duration, song->file_size };
