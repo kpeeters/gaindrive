@@ -495,6 +495,17 @@ bool CastManager::start(const CastDevice& dev)
 
 void CastManager::load(const std::string& url, const std::string& mime)
 	{
+	// Stop any existing monitor before starting a new one.
+	stop_monitor_ = true;
+	if (monitor_.joinable()) monitor_.join();
+	stop_monitor_ = false;
+
+	// Reset playback status for the new track.
+	{
+	std::lock_guard<std::mutex> lk(status_mutex_);
+	status_ = CastStatus{};
+	}
+
 	Tls t;
 	if (!tls_connect(t, device_.address, device_.port)) {
 		std::cout << stamp() << "Cast: connect failed ("
@@ -513,6 +524,8 @@ void CastManager::load(const std::string& url, const std::string& mime)
 		return;
 		}
 
+	transport_id_ = tid;
+
 	cast_send(t.ssl, NS_CONN,  src, tid, {{"type", "CONNECT"}});
 	cast_send(t.ssl, NS_MEDIA, src, tid, {
 		{"type",      "LOAD"},
@@ -524,14 +537,117 @@ void CastManager::load(const std::string& url, const std::string& mime)
 			}}
 		});
 
-	// Connection closes here; the Chromecast fetches and plays independently.
+	// Hand the open connection to the monitor thread; steal the raw pointers so
+	// the Tls destructor doesn't close them underneath us.
+	SSL*     ssl  = t.ssl;
+	SSL_CTX* ctx  = t.ctx;
+	int      sock = t.sock;
+	t.ssl  = nullptr;
+	t.ctx  = nullptr;
+	t.sock = -1;
+
+	monitor_ = std::thread([this, ssl, ctx, sock]() {
+		run_monitor(ssl, ctx, sock);
+		});
+
 	std::cout << stamp() << "Cast: → " << url << std::endl;
+	}
+
+void CastManager::run_monitor(SSL* ssl, SSL_CTX* ctx, int sock)
+	{
+	std::cout << stamp() << "Cast monitor: started" << std::endl;
+
+	while (!stop_monitor_) {
+		auto msg = cast_recv(ssl);
+		if (msg.is_null()) break;
+
+		if (msg.value("type", "") == "MEDIA_STATUS") {
+			auto& list = msg["status"];
+			if (list.is_array() && !list.empty()) {
+				auto& s = list[0];
+				CastStatus cs;
+				cs.player_state     = s.value("playerState", "IDLE");
+				cs.current_time     = s.value("currentTime",  0.0f);
+				cs.media_session_id = s.value("mediaSessionId", 0);
+				// duration lives nested under media
+				if (s.contains("media") && s["media"].contains("duration"))
+					cs.duration = s["media"]["duration"].get<float>();
+				std::lock_guard<std::mutex> lk(status_mutex_);
+				status_ = cs;
+				}
+			}
+		}
+
+	SSL_shutdown(ssl);
+	SSL_free(ssl);
+	SSL_CTX_free(ctx);
+	::close(sock);
+	std::cout << stamp() << "Cast monitor: stopped" << std::endl;
+	}
+
+CastManager::CastStatus CastManager::get_status() const
+	{
+	std::lock_guard<std::mutex> lk(status_mutex_);
+	return status_;
+	}
+
+void CastManager::send_media_cmd(const nlohmann::json& payload)
+	{
+	if (transport_id_.empty()) return;
+	Tls t;
+	if (!tls_connect(t, device_.address, device_.port)) {
+		std::cout << stamp() << "Cast: connect failed for media command" << std::endl;
+		return;
+		}
+	std::string src = "sender-0";
+	cast_send(t.ssl, NS_CONN,  src, "receiver-0",  {{"type", "CONNECT"}});
+	cast_send(t.ssl, NS_CONN,  src, transport_id_,  {{"type", "CONNECT"}});
+	cast_send(t.ssl, NS_MEDIA, src, transport_id_,  payload);
+	}
+
+void CastManager::cast_pause()
+	{
+	int msid = get_status().media_session_id;
+	send_media_cmd({{"type", "PAUSE"}, {"requestId", 10}, {"mediaSessionId", msid}});
+	std::cout << stamp() << "Cast: PAUSE sent" << std::endl;
+	}
+
+void CastManager::cast_play()
+	{
+	int msid = get_status().media_session_id;
+	send_media_cmd({{"type", "PLAY"},  {"requestId", 11}, {"mediaSessionId", msid}});
+	std::cout << stamp() << "Cast: PLAY sent" << std::endl;
+	}
+
+void CastManager::cast_seek(float seconds)
+	{
+	int msid = get_status().media_session_id;
+	send_media_cmd({{"type", "SEEK"}, {"requestId", 12},
+	                {"mediaSessionId", msid}, {"currentTime", seconds}});
+	std::cout << stamp() << "Cast: SEEK → " << seconds << "s" << std::endl;
+	}
+
+CastManager::~CastManager()
+	{
+	stop_monitor_ = true;
+	if (monitor_.joinable()) monitor_.join();
 	}
 
 void CastManager::stop()
 	{
 	active_ = false;
 	token_.clear();
+	transport_id_.clear();
+
+	// Shut down the monitor first so it releases the socket cleanly.
+	stop_monitor_ = true;
+	if (monitor_.joinable()) monitor_.join();
+	stop_monitor_ = false;
+
+	{
+	std::lock_guard<std::mutex> lk(status_mutex_);
+	status_ = CastStatus{};
+	}
 
 	Tls t;
 	if (!tls_connect(t, device_.address, device_.port)) {

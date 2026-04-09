@@ -377,6 +377,27 @@ function fmtDuration(secs) {
 
 // Id of the currently active cast device, or null when not casting.
 let castDeviceId = null;
+let castPollTimer = null;
+
+async function pollCastStatus() {
+   try {
+      const sr = await apiCall('getCastStatus');
+      const s  = sr.castStatus;
+      if (!s || s.playerState === 'IDLE') return;
+      const seek = document.getElementById('player-seek');
+      const time = document.getElementById('player-time');
+      if (!seek.dataset.seeking) {
+         seek.max   = Math.floor(s.duration);
+         seek.value = Math.floor(s.currentTime);
+         }
+      time.textContent =
+         `${fmtDuration(Math.floor(s.currentTime))} / ${fmtDuration(Math.floor(s.duration))}`;
+      document.getElementById('player-playpause').textContent =
+         s.playerState === 'PAUSED' ? '▶' : '⏸';
+      } catch (_) {
+      // best-effort; don't spam the log on transient failures
+      }
+   }
 
 async function openCastModal() {
    const modal   = document.getElementById('cast-modal');
@@ -412,12 +433,18 @@ async function selectCastDevice(id) {
       castDeviceId = id;
       document.getElementById('player-cast').classList.add('active');
       document.getElementById('cast-modal').classList.add('hidden');
+      // Poll the Chromecast for playback position and state.
+      castPollTimer = setInterval(pollCastStatus, 2000);
       } catch (err) {
       alert(`Cast failed: ${err.message}`);
       }
    }
 
 async function stopCast() {
+   if (castPollTimer !== null) {
+      clearInterval(castPollTimer);
+      castPollTimer = null;
+      }
    try {
       await apiCall('stopCast');
       } catch (_) {
@@ -504,6 +531,12 @@ player.audio.addEventListener('pause', () => {
 // Wire control buttons and MediaSession handlers. Called once from showShell().
 function setupPlayer() {
    document.getElementById('player-playpause').addEventListener('click', () => {
+      if (castDeviceId !== null) {
+         const btn = document.getElementById('player-playpause');
+         if (btn.textContent === '▶') apiCall('castControl', {action: 'play'}).catch(() => {});
+         else                         apiCall('castControl', {action: 'pause'}).catch(() => {});
+         return;
+         }
       if (player.audio.paused) player.audio.play();
       else                     player.audio.pause();
       });
@@ -530,7 +563,11 @@ function setupPlayer() {
    seek.addEventListener('mousedown',  () => { seek.dataset.seeking = '1'; });
    seek.addEventListener('touchstart', () => { seek.dataset.seeking = '1'; });
    seek.addEventListener('change', () => {
-      player.audio.currentTime = Number(seek.value);
+      if (castDeviceId !== null) {
+         apiCall('castControl', {action: 'seek', time: seek.value}).catch(() => {});
+         } else {
+         player.audio.currentTime = Number(seek.value);
+         }
       delete seek.dataset.seeking;
       });
 

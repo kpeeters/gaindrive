@@ -2270,6 +2270,46 @@ GainDrive::GainDrive(const std::string& db_path,
 		                use_json ? "application/json" : "application/xml");
 		});
 
+	// getCastStatus — return latest MEDIA_STATUS received from the Chromecast monitor.
+	server_.Get("/rest/getCastStatus.view", [this](const httplib::Request& req,
+	                                               httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		auto s = cast_manager_.get_status();
+		nlohmann::json jr = {
+			{"subsonic-response", {
+				{"status",  "ok"},
+				{"version", "1.16.1"},
+				{"castStatus", {
+					{"playerState", s.player_state},
+					{"currentTime", s.current_time},
+					{"duration",    s.duration}
+					}}
+				}}
+			};
+		res.set_content(jr.dump(), "application/json");
+		});
+
+	// castControl — send play/pause/seek to the Chromecast.
+	server_.Get("/rest/castControl.view", [this](const httplib::Request& req,
+	                                             httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		std::string action;
+		auto ai = req.params.find("action");
+		if (ai != req.params.end()) action = ai->second;
+
+		if (action == "pause")      cast_manager_.cast_pause();
+		else if (action == "play")  cast_manager_.cast_play();
+		else if (action == "seek") {
+			auto ti = req.params.find("time");
+			if (ti != req.params.end())
+				cast_manager_.cast_seek(std::stof(ti->second));
+			}
+
+		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
+		                use_json ? "application/json" : "application/xml");
+		});
+
 	// Catch-all for endpoints not yet implemented.
 	server_.Get("/rest/:endpoint", [](const httplib::Request& req, httplib::Response& res) {
 		std::cout << stamp() << "NOT IMPLEMENTED: " << req.path << std::endl;
