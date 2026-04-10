@@ -450,6 +450,7 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 						auto j3 = nlohmann::json::parse(r3->body, nullptr, false);
 						if (!j3.is_discarded()) {
 							info.biography = j3.value("extract","");
+							info.wiki_url  = "https://en.wikipedia.org/wiki/" + wiki_title;
 							if (j3.contains("thumbnail"))
 								info.image_url = j3["thumbnail"].value("source","");
 							std::cout << stamp() << "getArtistInfo [" << name
@@ -485,6 +486,7 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 			if (!info.biography.empty())   ai["biography"]     = info.biography;
 			if (!info.mbid.empty())        ai["musicBrainzId"] = info.mbid;
 			if (!info.last_fm_url.empty()) ai["lastFmUrl"]     = info.last_fm_url;
+			if (!info.wiki_url.empty())    ai["wikiUrl"]       = info.wiki_url;
 			if (!info.image_url.empty()) {
 				ai["smallImageUrl"]  = info.image_url;
 				ai["mediumImageUrl"] = info.image_url;
@@ -498,6 +500,7 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 			add_text_el(doc, ai, "biography",     info.biography);
 			add_text_el(doc, ai, "musicBrainzId", info.mbid);
 			add_text_el(doc, ai, "lastFmUrl",     info.last_fm_url);
+			add_text_el(doc, ai, "wikiUrl",       info.wiki_url);
 			add_text_el(doc, ai, "smallImageUrl",  info.image_url);
 			add_text_el(doc, ai, "mediumImageUrl", info.image_url);
 			add_text_el(doc, ai, "largeImageUrl",  info.image_url);

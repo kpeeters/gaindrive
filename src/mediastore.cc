@@ -189,6 +189,7 @@ void MediaStore::create_schema()
 			last_fm_url TEXT NOT NULL DEFAULT '',
 			biography   TEXT NOT NULL DEFAULT '',
 			image_url   TEXT NOT NULL DEFAULT '',
+			wiki_url    TEXT NOT NULL DEFAULT '',
 			fetched_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 		);
 
@@ -284,6 +285,8 @@ void MediaStore::create_schema()
 	try { db_music_.exec("ALTER TABLE artist_info_cache ADD COLUMN biography TEXT NOT NULL DEFAULT ''"); }
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE artist_info_cache ADD COLUMN image_url TEXT NOT NULL DEFAULT ''"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE artist_info_cache ADD COLUMN wiki_url TEXT NOT NULL DEFAULT ''"); }
 	catch (const SQLite::Exception&) {}
 
 	// Backfill song_artists from album_artists for any songs that were scanned
@@ -931,7 +934,7 @@ std::optional<MediaStore::CachedArtistInfo> MediaStore::get_cached_artist_info(i
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement q(db_music_,
-		"SELECT mbid, last_fm_url, biography, image_url"
+		"SELECT mbid, last_fm_url, biography, image_url, wiki_url"
 		" FROM artist_info_cache WHERE folder_id = ?");
 	q.bind(1, folder_id);
 	if (!q.executeStep()) return std::nullopt;
@@ -940,6 +943,7 @@ std::optional<MediaStore::CachedArtistInfo> MediaStore::get_cached_artist_info(i
 	a.last_fm_url= q.getColumn(1).getString();
 	a.biography  = q.getColumn(2).getString();
 	a.image_url  = q.getColumn(3).getString();
+	a.wiki_url   = q.getColumn(4).getString();
 	return a;
 	}
 
@@ -948,13 +952,14 @@ void MediaStore::cache_artist_info(int folder_id, const CachedArtistInfo& info)
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement ins(db_music_,
 		"INSERT OR REPLACE INTO artist_info_cache"
-		" (folder_id, mbid, last_fm_url, biography, image_url)"
-		" VALUES (?, ?, ?, ?, ?)");
+		" (folder_id, mbid, last_fm_url, biography, image_url, wiki_url)"
+		" VALUES (?, ?, ?, ?, ?, ?)");
 	ins.bind(1, folder_id);
 	ins.bind(2, info.mbid);
 	ins.bind(3, info.last_fm_url);
 	ins.bind(4, info.biography);
 	ins.bind(5, info.image_url);
+	ins.bind(6, info.wiki_url);
 	ins.exec();
 	}
 

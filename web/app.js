@@ -318,13 +318,14 @@ async function viewAlbums(artistId, artistName) {
 
    // Fetch artist info without blocking the album list.
    apiCall('getArtistInfo2', {id: artistId}).then(srInfo => {
-      const info   = srInfo?.artistInfo2 ?? {};
-      const imgUrl = info.largeImageUrl || info.mediumImageUrl || info.smallImageUrl || '';
-      const bio    = info.biography ?? '';
+      const info    = srInfo?.artistInfo2 ?? {};
+      const imgUrl  = info.largeImageUrl || info.mediumImageUrl || info.smallImageUrl || '';
+      const bio     = info.biography ?? '';
+      const wikiUrl = info.wikiUrl ?? '';
 
       bioSlot.className = '';   // remove shimmer regardless of outcome
 
-      if (!imgUrl && !bio) return;
+      if (!imgUrl && !bio && !wikiUrl) return;
 
       const block = document.createElement('div');
       block.className = 'artist-bio';
@@ -361,6 +362,16 @@ async function viewAlbums(artistId, artistName) {
             });
 
          block.appendChild(body);
+         }
+
+      if (wikiUrl) {
+         const a = document.createElement('a');
+         a.className = 'wiki-link';
+         a.href = wikiUrl;
+         a.target = '_blank';
+         a.rel = 'noopener';
+         a.textContent = 'Wikipedia';
+         block.appendChild(a);
          }
 
       bioSlot.appendChild(block);
@@ -469,6 +480,7 @@ const player = {
 };
 
 function playerLoad(songs, startIndex) {
+   document.querySelectorAll('.track-row.queued').forEach(r => r.classList.remove('queued'));
    player.queue    = [...songs];
    player.index    = startIndex;
    player.autoFrom = startIndex + 1;   // everything after current track is auto
@@ -503,7 +515,9 @@ function playerUpdateUI() {
 
    // Highlight active row in track list if it is currently visible.
    document.querySelector('.track-row.playing')?.classList.remove('playing');
-   document.querySelector(`.track-row[data-id="${song.id}"]`)?.classList.add('playing');
+   const activeRow = document.querySelector(`.track-row[data-id="${song.id}"]`);
+   activeRow?.classList.remove('queued');
+   activeRow?.classList.add('playing');
 
    if ('mediaSession' in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({
@@ -700,6 +714,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
       icon.addEventListener('click', e => {
          e.stopPropagation();
          playerEnqueue(songs[i]);
+         row.classList.add('queued');
          });
       row.addEventListener('click', () => {
          player.albumCtx = {albumId, albumTitle, artistId, artistName};

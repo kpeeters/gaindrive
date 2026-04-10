@@ -56,6 +56,7 @@ class MediaStore {
 			std::string last_fm_url;
 			std::string biography;   // Wikipedia plain-text extract
 			std::string image_url;   // Wikipedia thumbnail URL
+			std::string wiki_url;    // Full Wikipedia article URL
 			};
 
 		// Returns empty string if folder_id not found.

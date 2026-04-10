@@ -621,6 +621,10 @@ body {
    font-weight: 700;
 }
 
+.track-row.queued .track-icon::before {
+   content: '▷';
+}
+
 .track-row.playing .track-icon::before {
    content: '▶';
    color: var(--accent);
