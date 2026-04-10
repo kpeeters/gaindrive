@@ -681,7 +681,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
    const songs = album.song ?? [];
    console.log('[tracks] got', songs.length, 'tracks');
 
-   // Back link + headings.
+   // Back link + headings + Edit link.
    const header = document.createElement('div');
    header.className = 'view-header';
    const back = document.createElement('span');
@@ -692,18 +692,26 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
    const heading = document.createElement('h1');
    heading.className = 'view-title';
    heading.textContent = albumTitle;
+   const editLink = document.createElement('span');
+   editLink.className = 'edit-link';
+   editLink.textContent = 'Edit';
    header.appendChild(back);
    header.appendChild(heading);
+   header.appendChild(editLink);
    pane.appendChild(header);
 
-   // Large cover art hero.
+   // Large cover art hero — always in the DOM so edit mode can add the pencil.
+   let heroImg = null;
+   const heroWrap = document.createElement('div');
+   heroWrap.className = 'cover-hero-wrap';
    if (album.coverArt) {
-      const hero = document.createElement('img');
-      hero.className = 'album-hero';
-      hero.src = apiUrl('getCoverArt', {id: album.coverArt, size: 400});
-      hero.alt = albumTitle;
-      pane.appendChild(hero);
+      heroImg = document.createElement('img');
+      heroImg.className = 'album-hero';
+      heroImg.src = apiUrl('getCoverArt', {id: album.coverArt, size: 400});
+      heroImg.alt = albumTitle;
+      heroWrap.appendChild(heroImg);
       }
+   pane.appendChild(heroWrap);
 
    // Placeholder for album notes + Wikipedia link, filled async.
    const infoSlot = document.createElement('div');
@@ -752,6 +760,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
          row.classList.add('queued');
          });
       row.addEventListener('click', () => {
+         if (row.classList.contains('editing')) return;
          player.albumCtx = {albumId, albumTitle, artistId, artistName};
          playerLoad(songs, i);
          });
@@ -764,6 +773,175 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
 
    pane.appendChild(frag);
    paneNav.slideTo(2);
+
+   // ── Edit mode ──────────────────────────────────────────────────────────────
+   // Toggled by the "Edit" link in the header.
+   let pendingCoverFile = null;  // File object selected by the picker, or null
+
+   function enterEditMode() {
+      // Swap "Edit" link for Save + Cancel buttons.
+      editLink.textContent = '';
+      const saveBtn   = document.createElement('button');
+      saveBtn.className = 'edit-save-btn';
+      saveBtn.textContent = 'Save';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'edit-cancel-btn';
+      cancelBtn.textContent = 'Cancel';
+      editLink.appendChild(saveBtn);
+      editLink.appendChild(cancelBtn);
+
+      // Add pencil button over the cover art.
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      fileInput.hidden = true;
+      heroWrap.appendChild(fileInput);
+
+      const pencilBtn = document.createElement('button');
+      pencilBtn.className = 'cover-edit-btn';
+      pencilBtn.textContent = '✏';
+      pencilBtn.setAttribute('aria-label', 'Change cover art');
+      pencilBtn.addEventListener('click', () => fileInput.click());
+      heroWrap.appendChild(pencilBtn);
+
+      fileInput.addEventListener('change', () => {
+         const file = fileInput.files[0];
+         if (!file) return;
+         pendingCoverFile = file;
+         // Preview immediately; create img if it didn't exist before.
+         if (!heroImg) {
+            heroImg = document.createElement('img');
+            heroImg.className = 'album-hero';
+            heroImg.alt = albumTitle;
+            heroWrap.insertBefore(heroImg, pencilBtn);
+            }
+         const reader = new FileReader();
+         reader.onload = e => { heroImg.src = e.target.result; };
+         reader.readAsDataURL(file);
+         });
+
+      // Replace track num/title spans with inputs.
+      pane.querySelectorAll('.track-row').forEach(row => {
+         const numSpan   = row.querySelector('.track-num');
+         const titleSpan = row.querySelector('.track-title');
+
+         const numInput = document.createElement('input');
+         numInput.type = 'number';
+         numInput.min  = '0';
+         numInput.className = 'track-num-input';
+         numInput.value = numSpan.textContent;
+         numInput.dataset.orig = numSpan.textContent;
+
+         const titleInput = document.createElement('input');
+         titleInput.type = 'text';
+         titleInput.className = 'track-title-input';
+         titleInput.value = titleSpan.textContent;
+         titleInput.dataset.orig = titleSpan.textContent;
+
+         row.replaceChild(numInput,   numSpan);
+         row.replaceChild(titleInput, titleSpan);
+
+         // Prevent row click (play) while editing.
+         row.classList.add('editing');
+         });
+
+      saveBtn.addEventListener('click', async () => {
+         saveBtn.disabled = true;
+         cancelBtn.disabled = true;
+
+         // Save cover art first, if changed.
+         if (pendingCoverFile) {
+            try {
+               const {server, user, password} = creds.load();
+               const p = new URLSearchParams({u: user, p: password,
+                  v: '1.16.1', c: 'gaindrive-web', f: 'json', id: albumId});
+               const fd = new FormData();
+               fd.append('file', pendingCoverFile);
+               const resp = await fetch(`${server}/rest/setCoverArt.view?${p}`,
+                  {method: 'POST', body: fd});
+               if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+               }
+            catch (e) {
+               console.error('[edit] cover upload failed', e);
+               }
+            }
+
+         // Save changed tracks.
+         for (const row of pane.querySelectorAll('.track-row')) {
+            const songId     = row.dataset.id;
+            const numInput   = row.querySelector('.track-num-input');
+            const titleInput = row.querySelector('.track-title-input');
+            if (!numInput || !titleInput) continue;
+
+            const params = {id: songId};
+            let changed = false;
+            if (numInput.value !== numInput.dataset.orig) {
+               params.track = numInput.value;
+               changed = true;
+               }
+            if (titleInput.value !== titleInput.dataset.orig) {
+               params.title = titleInput.value;
+               changed = true;
+               }
+            if (changed) {
+               try { await apiCall('updateSong', params); }
+               catch (e) { console.error('[edit] updateSong failed', e); }
+               }
+            }
+
+         exitEditMode(true);
+         });
+
+      cancelBtn.addEventListener('click', () => {
+         pendingCoverFile = null;
+         exitEditMode(false);
+         });
+      }
+
+   function exitEditMode(keepValues) {
+      // Restore Edit link.
+      editLink.textContent = 'Edit';
+
+      // Remove pencil button and hidden file input from heroWrap.
+      heroWrap.querySelector('.cover-edit-btn')?.remove();
+      heroWrap.querySelector('input[type=file]')?.remove();
+
+      // If cancelled, restore original cover state.
+      if (!keepValues) {
+         if (album.coverArt && heroImg) {
+            heroImg.src = apiUrl('getCoverArt', {id: album.coverArt, size: 400});
+            }
+         else if (!album.coverArt && heroImg) {
+            // A new image was previewed but the upload was cancelled — remove it.
+            heroImg.remove();
+            heroImg = null;
+            }
+         }
+
+      // Replace inputs back to spans.
+      pane.querySelectorAll('.track-row').forEach(row => {
+         const numInput   = row.querySelector('.track-num-input');
+         const titleInput = row.querySelector('.track-title-input');
+         if (!numInput || !titleInput) return;
+
+         const numSpan = document.createElement('span');
+         numSpan.className = 'track-num';
+         numSpan.textContent = keepValues ? numInput.value : numInput.dataset.orig;
+
+         const titleSpan = document.createElement('span');
+         titleSpan.className = 'track-title';
+         titleSpan.textContent = keepValues ? titleInput.value : titleInput.dataset.orig;
+
+         row.replaceChild(numSpan,   numInput);
+         row.replaceChild(titleSpan, titleInput);
+         row.classList.remove('editing');
+         });
+      }
+
+   editLink.addEventListener('click', e => {
+      // Only fire on the link itself, not the Save/Cancel children.
+      if (e.target === editLink) enterEditMode();
+      });
 
    // Re-apply the playing highlight if a track from this album is active.
    playerUpdateUI();

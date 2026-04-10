@@ -276,6 +276,19 @@ class MediaStore {
 		// Returns false if not found or not owned by username.
 		bool delete_playlist(int playlist_id, const std::string& username);
 
+		// ---- Tag editing ----
+
+		// Update title and/or track_number in the DB for a single song.
+		// Returns the filesystem path of the file on success (so the caller can
+		// write tags), or empty string if song_id is not found.
+		std::string update_song_meta(int song_id,
+		                             const std::optional<std::string>& title,
+		                             const std::optional<int>& track_number);
+
+		// Set the cover art path for the album that owns the given folder_id.
+		// Returns false if no matching album exists.
+		bool set_cover_art_path(int folder_id, const std::string& path);
+
 	private:
 		std::string      music_root_;
 		SQLite::Database db_music_;

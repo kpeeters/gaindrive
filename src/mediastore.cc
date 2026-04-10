@@ -2179,3 +2179,41 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 	pl.duration   = total_duration;
 	return pl;
 	}
+
+std::string MediaStore::update_song_meta(int song_id,
+                                          const std::optional<std::string>& title,
+                                          const std::optional<int>& track_number)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	// Retrieve the path first so we can return it after updating.
+	SQLite::Statement sel(db_music_, "SELECT path FROM songs WHERE id = ?");
+	sel.bind(1, song_id);
+	if (!sel.executeStep()) return "";
+	std::string path = sel.getColumn(0).getString();
+
+	if (title) {
+		SQLite::Statement q(db_music_, "UPDATE songs SET title = ? WHERE id = ?");
+		q.bind(1, *title);
+		q.bind(2, song_id);
+		q.exec();
+		}
+	if (track_number) {
+		SQLite::Statement q(db_music_, "UPDATE songs SET track_number = ? WHERE id = ?");
+		q.bind(1, *track_number);
+		q.bind(2, song_id);
+		q.exec();
+		}
+	return path;
+	}
+
+bool MediaStore::set_cover_art_path(int folder_id, const std::string& path)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"UPDATE albums SET cover_path = ? WHERE folder_id = ?");
+	q.bind(1, path);
+	q.bind(2, folder_id);
+	q.exec();
+	return db_music_.getChanges() > 0;
+	}

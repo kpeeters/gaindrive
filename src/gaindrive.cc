@@ -17,6 +17,8 @@
 
 #include <tinyxml2.h>
 #include <nlohmann/json.hpp>
+#include <taglib/fileref.h>
+#include <taglib/tag.h>
 
 using namespace tinyxml2;
 
@@ -2371,6 +2373,92 @@ GainDrive::GainDrive(const std::string& db_path,
 			if (ti != req.params.end())
 				cast_manager_.cast_seek(std::stof(ti->second));
 			}
+
+		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
+		                use_json ? "application/json" : "application/xml");
+		});
+
+	// updateSong — update title and/or track number for a single song.
+	// Writes the change to the database and back to the audio file tags.
+	server_.Get("/rest/updateSong.view", [this](const httplib::Request& req,
+	                                            httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) { err(10, "Required parameter missing: id."); return; }
+		int song_id = std::stoi(it->second);
+
+		std::optional<std::string> title;
+		std::optional<int> track_number;
+		if (req.params.count("title")) title = req.params.find("title")->second;
+		if (req.params.count("track")) track_number = std::stoi(req.params.find("track")->second);
+
+		std::string path = store_.update_song_meta(song_id, title, track_number);
+		if (path.empty()) { err(70, "Song not found."); return; }
+
+		// Write the updated tags back to the audio file.
+		try {
+			TagLib::FileRef f(path.c_str());
+			if (!f.isNull() && f.tag()) {
+				if (title)        f.tag()->setTitle(TagLib::String(*title, TagLib::String::UTF8));
+				if (track_number) f.tag()->setTrack(*track_number);
+				f.save();
+				}
+			}
+		catch (...) {
+			// Tag write failure is non-fatal; the DB change already succeeded.
+			std::cout << stamp() << "WARNING: could not write tags to " << path << std::endl;
+			}
+
+		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
+		                use_json ? "application/json" : "application/xml");
+		});
+
+	// setCoverArt — upload a cover image for an album (identified by folder_id).
+	// Expects a multipart/form-data POST with a "file" part containing the image.
+	server_.Post("/rest/setCoverArt.view", [this](const httplib::Request& req,
+	                                              httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) { err(10, "Required parameter missing: id."); return; }
+		int folder_id = std::stoi(it->second);
+
+		if (!req.has_file("file")) { err(10, "Required file part missing: file."); return; }
+		const auto& file_part = req.get_file_value("file");
+
+		// Rudimentary content-type validation.
+		if (file_part.content_type.rfind("image/", 0) != 0) {
+			err(0, "Uploaded file must be an image.");
+			return;
+			}
+
+		std::string folder_path = store_.get_folder_path(folder_id);
+		if (folder_path.empty()) { err(70, "Album folder not found."); return; }
+
+		namespace fs = std::filesystem;
+		fs::path cover = fs::path(folder_path) / "cover.jpg";
+		{
+		std::ofstream out(cover, std::ios::binary | std::ios::trunc);
+		if (!out) { err(0, "Failed to write cover art to disk."); return; }
+		out.write(file_part.content.data(), (std::streamsize)file_part.content.size());
+		}
+
+		store_.set_cover_art_path(folder_id, cover.string());
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
