@@ -339,32 +339,20 @@ async function viewAlbums(artistId, artistName) {
          block.appendChild(img);
          }
 
+      let bioP = null;
       if (bio) {
          const body = document.createElement('div');
          body.className = 'artist-bio-body';
-
-         const p = document.createElement('p');
-         p.className = 'artist-bio-text';
-         p.innerHTML = bio;   // Last.fm-supplied HTML
-         body.appendChild(p);
-
-         const toggle = document.createElement('span');
-         toggle.className = 'bio-toggle';
-         toggle.textContent = 'more';
-         toggle.addEventListener('click', () => {
-            const expanded = p.classList.toggle('expanded');
-            toggle.textContent = expanded ? 'less' : 'more';
-            });
-         body.appendChild(toggle);
-
-         // Hide the toggle if the text fits without clamping.
-         requestAnimationFrame(() => {
-            if (p.scrollHeight <= p.clientHeight) toggle.hidden = true;
-            });
-
+         bioP = document.createElement('p');
+         bioP.className = 'artist-bio-text';
+         bioP.innerHTML = bio;   // Last.fm-supplied HTML
+         body.appendChild(bioP);
          block.appendChild(body);
          }
 
+      // Links + 'more' toggle on one line.
+      const linksRow = document.createElement('div');
+      linksRow.className = 'links-row';
       if (wikiUrl) {
          const a = document.createElement('a');
          a.className = 'wiki-link';
@@ -372,9 +360,8 @@ async function viewAlbums(artistId, artistName) {
          a.target = '_blank';
          a.rel = 'noopener';
          a.textContent = 'Wikipedia';
-         block.appendChild(a);
+         linksRow.appendChild(a);
          }
-
       if (allMusicUrl) {
          const a = document.createElement('a');
          a.className = 'wiki-link';
@@ -382,8 +369,23 @@ async function viewAlbums(artistId, artistName) {
          a.target = '_blank';
          a.rel = 'noopener';
          a.textContent = 'AllMusic';
-         block.appendChild(a);
+         linksRow.appendChild(a);
          }
+      if (bioP) {
+         const toggle = document.createElement('span');
+         toggle.className = 'bio-toggle';
+         toggle.textContent = 'more';
+         toggle.addEventListener('click', () => {
+            const expanded = bioP.classList.toggle('expanded');
+            toggle.textContent = expanded ? 'less' : 'more';
+            });
+         linksRow.appendChild(toggle);
+         // Hide the toggle if the text fits without clamping.
+         requestAnimationFrame(() => {
+            if (bioP.scrollHeight <= bioP.clientHeight) toggle.hidden = true;
+            });
+         }
+      if (linksRow.children.length > 0) block.appendChild(linksRow);
 
       bioSlot.appendChild(block);
       }).catch(() => { bioSlot.className = ''; });   // server may not support getArtistInfo2
@@ -757,26 +759,17 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
       const block = document.createElement('div');
       block.className = 'album-notes';
 
+      let notesP = null;
       if (notes) {
-         const p = document.createElement('p');
-         p.className = 'artist-bio-text';   // reuse same clamp style
-         p.textContent = notes;
-         block.appendChild(p);
-
-         const toggle = document.createElement('span');
-         toggle.className = 'bio-toggle';
-         toggle.textContent = 'more';
-         toggle.addEventListener('click', () => {
-            const expanded = p.classList.toggle('expanded');
-            toggle.textContent = expanded ? 'less' : 'more';
-            });
-         block.appendChild(toggle);
-
-         requestAnimationFrame(() => {
-            if (p.scrollHeight <= p.clientHeight) toggle.hidden = true;
-            });
+         notesP = document.createElement('p');
+         notesP.className = 'artist-bio-text';   // reuse same clamp style
+         notesP.textContent = notes;
+         block.appendChild(notesP);
          }
 
+      // Links + 'more' toggle on one line.
+      const linksRow = document.createElement('div');
+      linksRow.className = 'links-row';
       if (wikiUrl) {
          const a = document.createElement('a');
          a.className = 'wiki-link';
@@ -784,9 +777,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
          a.target = '_blank';
          a.rel = 'noopener';
          a.textContent = 'Wikipedia';
-         block.appendChild(a);
+         linksRow.appendChild(a);
          }
-
       if (allMusicUrl) {
          const a = document.createElement('a');
          a.className = 'wiki-link';
@@ -794,8 +786,22 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
          a.target = '_blank';
          a.rel = 'noopener';
          a.textContent = 'AllMusic';
-         block.appendChild(a);
+         linksRow.appendChild(a);
          }
+      if (notesP) {
+         const toggle = document.createElement('span');
+         toggle.className = 'bio-toggle';
+         toggle.textContent = 'more';
+         toggle.addEventListener('click', () => {
+            const expanded = notesP.classList.toggle('expanded');
+            toggle.textContent = expanded ? 'less' : 'more';
+            });
+         linksRow.appendChild(toggle);
+         requestAnimationFrame(() => {
+            if (notesP.scrollHeight <= notesP.clientHeight) toggle.hidden = true;
+            });
+         }
+      if (linksRow.children.length > 0) block.appendChild(linksRow);
 
       infoSlot.appendChild(block);
       }).catch(() => { infoSlot.className = ''; });

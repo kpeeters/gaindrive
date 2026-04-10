@@ -397,12 +397,9 @@ body {
 }
 
 .bio-toggle {
-   display: block;
    font-size: 0.75rem;
    color: var(--accent);
    cursor: pointer;
-   margin-top: 0.25rem;
-   text-align: right;
 }
 
 .bio-toggle:hover {
@@ -504,8 +501,6 @@ body {
 /* .artist-bio-text and .bio-toggle are reused for the notes text + toggle. */
 
 .wiki-link {
-   display: inline-block;
-   margin-top: 0.4rem;
    font-size: 0.75rem;
    color: var(--accent);
    text-decoration: none;
@@ -513,6 +508,13 @@ body {
 
 .wiki-link:hover {
    text-decoration: underline;
+}
+
+.links-row {
+   display: flex;
+   align-items: center;
+   gap: 0.75rem;
+   margin-top: 0.3rem;
 }
 
 /* ── Liner notes ───────────────────────────────────────── */
