@@ -54,9 +54,10 @@ class MediaStore {
 		struct CachedArtistInfo {
 			std::string mbid;
 			std::string last_fm_url;
-			std::string biography;   // Wikipedia plain-text extract
-			std::string image_url;   // Wikipedia thumbnail URL
-			std::string wiki_url;    // Full Wikipedia article URL
+			std::string biography;      // Wikipedia plain-text extract
+			std::string image_url;      // Wikipedia thumbnail URL
+			std::string wiki_url;       // Full Wikipedia article URL
+			std::string allmusic_url;   // AllMusic artist page URL
 			};
 
 		// Returns empty string if folder_id not found.
@@ -67,9 +68,10 @@ class MediaStore {
 		void cache_artist_info(int folder_id, const CachedArtistInfo& info);
 
 		struct CachedAlbumInfo {
-			std::string mbid;      // MusicBrainz release-group ID
-			std::string notes;     // Wikipedia plain-text extract
-			std::string wiki_url;  // Full Wikipedia article URL
+			std::string mbid;           // MusicBrainz release-group ID
+			std::string notes;          // Wikipedia plain-text extract
+			std::string wiki_url;       // Full Wikipedia article URL
+			std::string allmusic_url;   // AllMusic album page URL
 			};
 
 		std::optional<CachedAlbumInfo> get_cached_album_info(int folder_id);

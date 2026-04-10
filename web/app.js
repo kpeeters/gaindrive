@@ -318,14 +318,15 @@ async function viewAlbums(artistId, artistName) {
 
    // Fetch artist info without blocking the album list.
    apiCall('getArtistInfo2', {id: artistId}).then(srInfo => {
-      const info    = srInfo?.artistInfo2 ?? {};
-      const imgUrl  = info.largeImageUrl || info.mediumImageUrl || info.smallImageUrl || '';
-      const bio     = info.biography ?? '';
-      const wikiUrl = info.wikiUrl ?? '';
+      const info        = srInfo?.artistInfo2 ?? {};
+      const imgUrl      = info.largeImageUrl || info.mediumImageUrl || info.smallImageUrl || '';
+      const bio         = info.biography ?? '';
+      const wikiUrl     = info.wikiUrl ?? '';
+      const allMusicUrl = info.allMusicUrl ?? '';
 
       bioSlot.className = '';   // remove shimmer regardless of outcome
 
-      if (!imgUrl && !bio && !wikiUrl) return;
+      if (!imgUrl && !bio && !wikiUrl && !allMusicUrl) return;
 
       const block = document.createElement('div');
       block.className = 'artist-bio';
@@ -371,6 +372,16 @@ async function viewAlbums(artistId, artistName) {
          a.target = '_blank';
          a.rel = 'noopener';
          a.textContent = 'Wikipedia';
+         block.appendChild(a);
+         }
+
+      if (allMusicUrl) {
+         const a = document.createElement('a');
+         a.className = 'wiki-link';
+         a.href = allMusicUrl;
+         a.target = '_blank';
+         a.rel = 'noopener';
+         a.textContent = 'AllMusic';
          block.appendChild(a);
          }
 
@@ -735,12 +746,13 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
 
    // Fetch album notes without blocking the track listing.
    apiCall('getAlbumInfo2', {id: albumId}).then(srInfo => {
-      const info = srInfo?.albumInfo2 ?? {};
+      const info        = srInfo?.albumInfo2 ?? {};
       infoSlot.className = '';   // remove shimmer regardless of outcome
 
-      const notes   = info.notes   ?? '';
-      const wikiUrl = info.wikiUrl ?? '';
-      if (!notes && !wikiUrl) return;
+      const notes       = info.notes       ?? '';
+      const wikiUrl     = info.wikiUrl     ?? '';
+      const allMusicUrl = info.allMusicUrl ?? '';
+      if (!notes && !wikiUrl && !allMusicUrl) return;
 
       const block = document.createElement('div');
       block.className = 'album-notes';
@@ -772,6 +784,16 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
          a.target = '_blank';
          a.rel = 'noopener';
          a.textContent = 'Wikipedia';
+         block.appendChild(a);
+         }
+
+      if (allMusicUrl) {
+         const a = document.createElement('a');
+         a.className = 'wiki-link';
+         a.href = allMusicUrl;
+         a.target = '_blank';
+         a.rel = 'noopener';
+         a.textContent = 'AllMusic';
          block.appendChild(a);
          }
 

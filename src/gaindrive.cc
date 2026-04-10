@@ -389,7 +389,12 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 					std::string type     = rel.value("type","");
 					std::string resource = rel.value("url", nlohmann::json::object())
 					                          .value("resource","");
-					if (type == "wikipedia") {
+					if (type == "allmusic" && info.allmusic_url.empty()) {
+						info.allmusic_url = resource;
+						std::cout << stamp() << "getArtistInfo [" << name
+						          << "] AllMusic: " << resource << std::endl;
+						}
+					else if (type == "wikipedia") {
 						auto pos = resource.find("/wiki/");
 						if (pos != std::string::npos) {
 							wiki_title = resource.substr(pos + 6);
@@ -483,10 +488,11 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 	if (use_json)
 		body = subsonic_ok_json([&info, key](nlohmann::json& r) {
 			nlohmann::json ai = nlohmann::json::object();
-			if (!info.biography.empty())   ai["biography"]     = info.biography;
-			if (!info.mbid.empty())        ai["musicBrainzId"] = info.mbid;
-			if (!info.last_fm_url.empty()) ai["lastFmUrl"]     = info.last_fm_url;
-			if (!info.wiki_url.empty())    ai["wikiUrl"]       = info.wiki_url;
+			if (!info.biography.empty())      ai["biography"]     = info.biography;
+			if (!info.mbid.empty())           ai["musicBrainzId"] = info.mbid;
+			if (!info.last_fm_url.empty())    ai["lastFmUrl"]     = info.last_fm_url;
+			if (!info.wiki_url.empty())       ai["wikiUrl"]       = info.wiki_url;
+			if (!info.allmusic_url.empty())   ai["allMusicUrl"]   = info.allmusic_url;
 			if (!info.image_url.empty()) {
 				ai["smallImageUrl"]  = info.image_url;
 				ai["mediumImageUrl"] = info.image_url;
@@ -501,6 +507,7 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 			add_text_el(doc, ai, "musicBrainzId", info.mbid);
 			add_text_el(doc, ai, "lastFmUrl",     info.last_fm_url);
 			add_text_el(doc, ai, "wikiUrl",       info.wiki_url);
+			add_text_el(doc, ai, "allMusicUrl",   info.allmusic_url);
 			add_text_el(doc, ai, "smallImageUrl",  info.image_url);
 			add_text_el(doc, ai, "mediumImageUrl", info.image_url);
 			add_text_el(doc, ai, "largeImageUrl",  info.image_url);
@@ -603,7 +610,12 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 					std::string type     = rel.value("type","");
 					std::string resource = rel.value("url", nlohmann::json::object())
 					                          .value("resource","");
-					if (type == "wikipedia") {
+					if (type == "allmusic" && info.allmusic_url.empty()) {
+						info.allmusic_url = resource;
+						std::cout << stamp() << "getAlbumInfo [" << title
+						          << "] AllMusic: " << resource << std::endl;
+						}
+					else if (type == "wikipedia") {
 						auto pos = resource.find("/wiki/");
 						if (pos != std::string::npos) {
 							wiki_title = resource.substr(pos + 6);
@@ -685,9 +697,10 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 	if (use_json)
 		body = subsonic_ok_json([&info](nlohmann::json& r) {
 			nlohmann::json ai = nlohmann::json::object();
-			if (!info.mbid.empty())     ai["musicBrainzId"] = info.mbid;
-			if (!info.notes.empty())    ai["notes"]         = info.notes;
-			if (!info.wiki_url.empty()) ai["wikiUrl"]       = info.wiki_url;
+			if (!info.mbid.empty())           ai["musicBrainzId"] = info.mbid;
+			if (!info.notes.empty())          ai["notes"]         = info.notes;
+			if (!info.wiki_url.empty())       ai["wikiUrl"]       = info.wiki_url;
+			if (!info.allmusic_url.empty())   ai["allMusicUrl"]   = info.allmusic_url;
 			r["albumInfo2"] = ai;
 			});
 	else {
@@ -703,6 +716,7 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 			add_text_el(doc, ai, "musicBrainzId", info.mbid);
 			add_text_el(doc, ai, "notes",         info.notes);
 			add_text_el(doc, ai, "wikiUrl",       info.wiki_url);
+			add_text_el(doc, ai, "allMusicUrl",   info.allmusic_url);
 			root->InsertEndChild(ai);
 			});
 		}
