@@ -596,7 +596,7 @@ body {
 
 .track-row {
    display: grid;
-   grid-template-columns: 2rem 1fr auto;
+   grid-template-columns: auto 1fr auto;
    align-items: baseline;
    gap: 0.5rem;
    padding: 0.3rem 0.4rem;
@@ -608,13 +608,12 @@ body {
    background: var(--surface);
 }
 
-/* Show "+" in the track-num cell on hover; clicking it enqueues the track. */
+/* Show "+" before the track number on hover; clicking it enqueues the track. */
 .track-row:hover .track-num {
-   font-size: 0;
    cursor: pointer;
 }
 .track-row:hover .track-num::before {
-   content: "+";
+   content: "+ ";
    font-size: 0.9rem;
    font-weight: 700;
    color: var(--text-dim);
@@ -732,11 +731,9 @@ body {
    color: var(--accent);
 }
 
-.track-row.playing .track-title::before {
-   content: "▶";
+.track-row.playing .track-num::before {
+   content: "▶ ";
    font-size: 0.6rem;
-   color: var(--accent);
-   margin-right: 0.35rem;
    vertical-align: middle;
 }
 

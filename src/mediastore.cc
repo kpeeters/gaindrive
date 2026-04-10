@@ -5,6 +5,7 @@
 #include <iostream>
 #include <algorithm>
 #include <chrono>
+#include <regex>
 #include <set>
 
 #include <taglib/fileref.h>
@@ -778,6 +779,11 @@ void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
 		if (!t->genre().isEmpty())
 			genre = t->genre().toCString(true);
 		}
+	// Strip leading track-number prefixes (e.g. "01 - ", "1. ") from title.
+	// Requires at least one separator char so bare numbers/years are left alone.
+	static const std::regex track_prefix(R"(^\d+[. -]+)");
+	title = std::regex_replace(title, track_prefix, "");
+
 	if (!f.isNull() && f.audioProperties()) {
 		auto* ap = f.audioProperties();
 		duration = ap->lengthInSeconds();
