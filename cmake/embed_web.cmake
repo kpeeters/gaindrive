@@ -27,7 +27,7 @@ foreach(F IN LISTS FILES)
    set(MIME "${MIME_${F}}")
    # Use a delimiter that will never appear in HTML/CSS/JS.
    string(APPEND SRC
-      "const std::string_view ${VAR} = R\"GDWEB(\n${CONTENT})GDWEB\";\n"
+      "const std::string_view ${VAR} = R\"GDWEB(${CONTENT})GDWEB\";\n"
       "const std::string_view ${VAR}_mime = \"${MIME}\";\n"
    )
 endforeach()
