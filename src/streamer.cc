@@ -25,11 +25,17 @@ static const char* codec_to_mime(const std::string& codec)
 	return "application/octet-stream";
 	}
 
+// Seconds of audio to keep buffered ahead of the Cast receiver's playback
+// position.  Large enough to absorb brief network jitter; small enough that
+// any receiver can hold it.
+static constexpr float TARGET_BUF = 15.0f;
+
 // ---- Streamer --------------------------------------------------------
 
 void Streamer::serve(const httplib::Request& req, httplib::Response& res,
                      const SongInfo& song, int max_bitrate,
-                     const std::string& format, int time_offset, bool cast_stream)
+                     const std::string& format, int time_offset,
+                     bool cast_stream, std::function<float()> get_position)
 	{
 	bool needs_transcode = false;
 	if (time_offset > 0)
@@ -54,48 +60,43 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	          << std::endl;
 
 	if (needs_transcode)
-		serve_transcoded(res, song, target_bitrate, target_fmt, time_offset, cast_stream);
+		serve_transcoded(res, song, target_bitrate, target_fmt, time_offset,
+		                 std::move(get_position));
 	else
-		serve_direct(req, res, song, cast_stream);
+		serve_direct(req, res, song, std::move(get_position));
 	}
 
 void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
-                            const SongInfo& song, bool cast_stream)
+                            const SongInfo& song,
+                            std::function<float()> get_position)
 	{
-	// Cast receivers (WiiM) have a ~20 MB download buffer.  Without throttling they
-	// download the entire buffer at LAN speed, close the connection, and stop playing
-	// when the buffer runs out.
-	//
-	// Fix: allow a 30-second pre-buffer at full speed so playback starts immediately,
-	// then throttle to ~1.05× bitrate.  At 1.05× the buffer grows by only 0.05 s per
-	// second of playback, so even a 50-minute track never accumulates more than ~15 MB.
-	//
-	// pre_bps  = 0 means "no limit" (pre-buffer phase, send as fast as possible)
-	// post_bps = 0 means "no throttle" (non-cast streams)
-	const size_t prebuf_bytes = (cast_stream && song.bitrate > 0)
-	    ? static_cast<size_t>(song.bitrate) * 125 * 30   // 30 s at 1× rate
+	// Cast adaptive buffering:
+	// - Send the first 30 s of audio at full LAN speed (pre-buffer) so the
+	//   receiver starts playing immediately.
+	// - After the pre-buffer, check the receiver's actual playback position
+	//   via get_position() and sleep whenever we are more than TARGET_BUF
+	//   seconds ahead.  This keeps the buffer stable without any device-
+	//   specific size constants and handles pause correctly (current_time
+	//   freezes → we stop sending until the user resumes).
+	const float  bytes_per_sec = (get_position && song.bitrate > 0)
+	    ? static_cast<float>(song.bitrate) * 125.0f
+	    : 0.0f;
+	const size_t prebuf_bytes = bytes_per_sec > 0
+	    ? static_cast<size_t>(bytes_per_sec) * 30   // 30 s at 1× rate
 	    : 0;
-	const size_t post_bps = (cast_stream && song.bitrate > 0)
-	    ? static_cast<size_t>(song.bitrate) * 131         // ≈ 1.048× rate
-	    : 0;
-
 	// httplib parses the Range header and calls our provider with the correct
 	// offset/length when a known content-length is supplied.
 	res.set_content_provider(
 		static_cast<size_t>(song.file_size),
 		codec_to_mime(song.codec),
-		[path = song.path, cast_stream, prebuf_bytes, post_bps]
+		[path = song.path, bytes_per_sec, prebuf_bytes,
+		 get_position = std::move(get_position)]
 		(size_t offset, size_t length, httplib::DataSink& sink) {
 			std::ifstream f(path, std::ios::binary);
 			if (!f) return false;
 			f.seekg(static_cast<std::streamoff>(offset));
 			char   buf[65536];
 			size_t remaining = length;
-
-			// Timer and counter for the throttle phase (starts after prebuf_bytes).
-			using Clock = std::chrono::steady_clock;
-			Clock::time_point throttle_t0{};
-			size_t            throttle_sent = 0;
 
 			while (remaining > 0) {
 				auto to_read = static_cast<std::streamsize>(
@@ -104,7 +105,7 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 				auto n = static_cast<size_t>(f.gcount());
 				if (n == 0) break;
 				if (!sink.write(buf, n)) {
-					if (cast_stream)
+					if (get_position)
 						std::cout << stamp()
 						          << "cast stream: write failed at "
 						          << (offset + length - remaining + n)
@@ -113,26 +114,18 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 					}
 				remaining -= n;
 
-				if (post_bps > 0) {
-					// Global file position after this write.
+				// Adaptive throttle: keep the receiver's buffer at ~TARGET_BUF s.
+				if (get_position && bytes_per_sec > 0) {
 					size_t pos = offset + (length - remaining);
 					if (pos > prebuf_bytes) {
-						if (throttle_t0 == Clock::time_point{}) {
-							// First chunk past the pre-buffer — start the throttle clock.
-							throttle_t0   = Clock::now();
-							throttle_sent = pos - prebuf_bytes;
-							}
-						else {
-							throttle_sent += n;
-							}
-						namespace ch = std::chrono;
-						auto want_us = throttle_sent * 1'000'000ULL / post_bps;
-						auto have_us = static_cast<uint64_t>(
-						    ch::duration_cast<ch::microseconds>(
-						        Clock::now() - throttle_t0).count());
-						if (want_us > have_us + 10'000)
+						float audio_sent = static_cast<float>(pos) / bytes_per_sec;
+						float buf_secs   = audio_sent - get_position();
+						if (buf_secs > TARGET_BUF) {
+							auto sleep_ms = static_cast<long>(
+							    (buf_secs - TARGET_BUF) * 1000.0f);
 							std::this_thread::sleep_for(
-							    ch::microseconds(want_us - have_us));
+							    std::chrono::milliseconds(sleep_ms));
+							}
 						}
 					}
 				}
@@ -142,7 +135,8 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 
 void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
                                 int target_bitrate, const std::string& target_fmt,
-                                int time_offset, bool cast_stream)
+                                int time_offset,
+                                std::function<float()> get_position)
 	{
 	std::vector<std::string> args;
 	args.push_back("ffmpeg");
@@ -171,26 +165,22 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 		return;
 		}
 
-	// Same two-phase throttle as serve_direct: 30-second pre-buffer then ~1.05×.
-	const size_t prebuf_bytes = cast_stream
-	    ? static_cast<size_t>(target_bitrate) * 125 * 30
-	    : 0;
-	const size_t post_bps = cast_stream
-	    ? static_cast<size_t>(target_bitrate) * 131
+	// Same adaptive buffering as serve_direct; target_bitrate is always known.
+	const float  bps        = static_cast<float>(target_bitrate) * 125.0f;
+	const size_t prebuf_bytes = get_position
+	    ? static_cast<size_t>(bps) * 30
 	    : 0;
 
-	struct ThrottleState {
-		std::chrono::steady_clock::time_point t0{};
-		size_t total_sent = 0;
-		size_t throttle_sent = 0;
-		};
-	auto ts = std::make_shared<ThrottleState>();
+	// total_sent persists across repeated provider calls (one per chunk).
+	auto total_sent = std::make_shared<size_t>(0);
 
 	// Content-length is unknown for transcoded output.
 	res.set_header("Accept-Ranges", "none");
 	res.set_content_provider(
 		codec_to_mime(target_fmt),
-		[proc, ts, prebuf_bytes, post_bps](size_t /*offset*/, httplib::DataSink& sink) {
+		[proc, bps, prebuf_bytes, total_sent,
+		 get_position = std::move(get_position)]
+		(size_t /*offset*/, httplib::DataSink& sink) {
 			uint8_t buf[65536];
 			auto [n, err] = proc->read(reproc::stream::out, buf, sizeof(buf));
 			if (n == 0) {
@@ -199,22 +189,17 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 				return false;
 				}
 			if (!sink.write(reinterpret_cast<char*>(buf), n)) return false;
-			ts->total_sent += n;
-			if (post_bps > 0 && ts->total_sent > prebuf_bytes) {
-				if (ts->t0 == std::chrono::steady_clock::time_point{}) {
-					ts->t0           = std::chrono::steady_clock::now();
-					ts->throttle_sent = ts->total_sent - prebuf_bytes;
-					}
-				else {
-					ts->throttle_sent += n;
-					}
-				auto want_us = ts->throttle_sent * 1'000'000ULL / post_bps;
-				auto have_us = static_cast<uint64_t>(
-				    std::chrono::duration_cast<std::chrono::microseconds>(
-				        std::chrono::steady_clock::now() - ts->t0).count());
-				if (want_us > have_us + 10'000)
+			*total_sent += n;
+
+			if (get_position && bps > 0 && *total_sent > prebuf_bytes) {
+				float audio_sent = static_cast<float>(*total_sent) / bps;
+				float buf_secs   = audio_sent - get_position();
+				if (buf_secs > TARGET_BUF) {
+					auto sleep_ms = static_cast<long>(
+					    (buf_secs - TARGET_BUF) * 1000.0f);
 					std::this_thread::sleep_for(
-					    std::chrono::microseconds(want_us - have_us));
+					    std::chrono::milliseconds(sleep_ms));
+					}
 				}
 			return true;
 			},

@@ -1640,7 +1640,17 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		Streamer::SongInfo si{ song->path, song->codec, song->bitrate,
 		                       song->duration, song->file_size };
-		Streamer::serve(req, res, si, max_bitrate, format, time_offset, cast_authed);
+
+		// For Cast streams, pass a callback that returns the receiver's current
+		// playback position from the cached status (updated every ~0.5 s by the
+		// web client's poll).  The streamer uses this to keep the buffer at a
+		// stable level without relying on any device-specific buffer size.
+		std::function<float()> get_pos;
+		if (cast_authed)
+			get_pos = [this]{ return cast_manager_.get_status().current_time; };
+
+		Streamer::serve(req, res, si, max_bitrate, format, time_offset,
+		                cast_authed, std::move(get_pos));
 		});
 
 	// createPlaylist
