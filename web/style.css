@@ -649,6 +649,7 @@ body {
    border-radius: 3px;
    object-fit: cover;
    flex-shrink: 0;
+   cursor: pointer;
 }
 
 /* Prevent broken-image icon before first track is loaded. */

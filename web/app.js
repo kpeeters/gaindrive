@@ -515,6 +515,14 @@ function playerUpdateUI() {
       }
 }
 
+// Click cover art in the player bar to navigate to the album's track listing.
+document.getElementById('player-cover').addEventListener('click', () => {
+   const song = player.queue[player.index];
+   if (!song?.albumId) return;
+   history.pushState({view: 'tracks', albumId: song.albumId, albumTitle: song.album, artistId: song.artistId, artistName: song.artist}, '');
+   viewTracks(song.albumId, song.album, song.artistId, song.artist);
+   });
+
 // Auto-advance to next track.
 player.audio.addEventListener('ended', () => {
    if (player.index < player.queue.length - 1) {
