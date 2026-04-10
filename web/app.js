@@ -682,6 +682,9 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
       row.className = 'track-row';
       row.dataset.id = song.id;
 
+      const icon = document.createElement('span');
+      icon.className = 'track-icon';
+
       const num = document.createElement('span');
       num.className = 'track-num';
       num.textContent = useSeq ? (i + 1) : (song.track ?? '');
@@ -694,7 +697,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
       dur.className = 'track-dur';
       dur.textContent = song.duration ? fmtDuration(song.duration) : '';
 
-      num.addEventListener('click', e => {
+      icon.addEventListener('click', e => {
          e.stopPropagation();
          playerEnqueue(songs[i]);
          });
@@ -702,6 +705,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
          player.albumCtx = {albumId, albumTitle, artistId, artistName};
          playerLoad(songs, i);
          });
+      row.appendChild(icon);
       row.appendChild(num);
       row.appendChild(title);
       row.appendChild(dur);

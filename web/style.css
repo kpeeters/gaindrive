@@ -596,7 +596,7 @@ body {
 
 .track-row {
    display: grid;
-   grid-template-columns: auto 1fr auto;
+   grid-template-columns: 1.2rem auto 1fr auto;
    align-items: baseline;
    gap: 0.5rem;
    padding: 0.3rem 0.4rem;
@@ -608,18 +608,24 @@ body {
    background: var(--surface);
 }
 
-/* Show "+" before the track number on hover; clicking it enqueues the track. */
-.track-row:hover .track-num {
+/* Column 1: icon slot — shows "+" on hover, "▶" when playing. */
+.track-icon {
+   font-size: 0.75rem;
+   color: var(--text-dim);
+   text-align: center;
    cursor: pointer;
 }
-.track-row:hover .track-num::before {
-   content: "+ ";
-   font-size: 0.9rem;
+
+.track-row:hover .track-icon::before {
+   content: '+';
    font-weight: 700;
-   color: var(--text-dim);
 }
-.track-row.playing:hover .track-num::before {
+
+.track-row.playing .track-icon::before {
+   content: '▶';
    color: var(--accent);
+   font-size: 0.6rem;
+   vertical-align: middle;
 }
 
 .track-num {
@@ -729,12 +735,6 @@ body {
 
 .track-row.playing .track-num {
    color: var(--accent);
-}
-
-.track-row.playing .track-num::before {
-   content: "▶ ";
-   font-size: 0.6rem;
-   vertical-align: middle;
 }
 
 /* Active (casting) state for the cast button. */
