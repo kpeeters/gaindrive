@@ -19,7 +19,7 @@
    --bg:           #1a1a1a;
    --surface:      #242424;
    --border:       #333;
-   --accent:       #4a9eff;
+   --accent:       #c9202f;   /* brighter on dark bg for contrast */
    --text:         #e0e0e0;
    --text-dim:     #888;
    --error:        #e05555;
@@ -33,6 +33,7 @@
       --bg:       #f4f4f4;
       --surface:  #ffffff;
       --border:   #ddd;
+      --accent:   #a31623;
       --text:     #1a1a1a;
       --text-dim: #666;
    }
@@ -42,6 +43,7 @@
    --bg:       #f4f4f4;
    --surface:  #ffffff;
    --border:   #ddd;
+   --accent:   #a31623;
    --text:     #1a1a1a;
    --text-dim: #666;
 }
@@ -50,6 +52,7 @@
    --bg:       #1a1a1a;
    --surface:  #242424;
    --border:   #333;
+   --accent:   #c9202f;
    --text:     #e0e0e0;
    --text-dim: #888;
 }
@@ -81,10 +84,19 @@ body {
 }
 
 .login-card h1 {
+   display: flex;
+   align-items: center;
+   gap: 0.6rem;
    font-size: 1.4rem;
    font-weight: 600;
    margin-bottom: 1.5rem;
    color: var(--accent);
+}
+
+.login-card h1 img {
+   width: 36px;
+   height: 36px;
+   flex-shrink: 0;
 }
 
 #login-form {
@@ -179,12 +191,21 @@ body {
 }
 
 .nav-title {
+   display: flex;
+   align-items: center;
+   gap: 0.5rem;
    color: var(--accent);
    font-weight: 700;
    font-size: 1rem;
    padding: 0 1rem 1rem;
    border-bottom: 1px solid var(--border);
    margin-bottom: 0.5rem;
+}
+
+.nav-title img {
+   width: 22px;
+   height: 22px;
+   flex-shrink: 0;
 }
 
 #sidebar ul {
