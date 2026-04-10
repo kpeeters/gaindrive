@@ -674,9 +674,15 @@ body {
    border: none;
    color: var(--text-dim);
    cursor: pointer;
-   font-size: 1.1rem;
-   padding: 0.2rem 0.4rem;
+   font-size: 1.8rem;
+   width: 40px;
+   height: 40px;
+   padding: 0;
    border-radius: 3px;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   flex-shrink: 0;
 }
 
 #player-controls button:hover {
@@ -700,7 +706,11 @@ body {
    flex-shrink: 0;
 }
 
-/* Highlight track number of currently playing row. */
+/* Highlight currently playing row. */
+.track-row.playing {
+   background: var(--surface);
+}
+
 .track-row.playing .track-num {
    color: var(--accent);
 }
