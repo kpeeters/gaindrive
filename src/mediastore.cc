@@ -16,7 +16,7 @@
 namespace fs = std::filesystem;
 
 static const std::set<std::string> AUDIO_EXTENSIONS = {
-	".flac", ".mp3", ".ogg", ".m4a", ".aac", ".wav", ".opus", ".wma"
+	".flac", ".mp3", ".ogg", ".oga", ".m4a", ".aac", ".wav", ".opus", ".wma"
 	};
 
 // Candidate cover art filenames in priority order.  Add more here as needed.
