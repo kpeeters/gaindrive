@@ -711,6 +711,9 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
    pane.appendChild(frag);
    paneNav.slideTo(2);
 
+   // Re-apply the playing highlight if a track from this album is active.
+   playerUpdateUI();
+
    // Fetch album notes without blocking the track listing.
    apiCall('getAlbumInfo2', {id: albumId}).then(srInfo => {
       const info = srInfo?.albumInfo2 ?? {};
