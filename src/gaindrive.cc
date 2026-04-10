@@ -858,6 +858,10 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(embedded::app_js.data(), embedded::app_js.size(),
 		                embedded::app_js_mime.data());
 		});
+	server_.Get("/favicon.svg", [](const httplib::Request&, httplib::Response& res) {
+		res.set_content(embedded::favicon_svg.data(), embedded::favicon_svg.size(),
+		                embedded::favicon_svg_mime.data());
+		});
 
 	// ping
 	server_.Get("/rest/ping.view", [this](const httplib::Request& req,

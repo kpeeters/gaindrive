@@ -5,17 +5,19 @@
 #   OUTPUT  — full path to write the generated .cc file
 #   WEB_DIR — directory containing the three web files
 
-set(FILES index.html style.css app.js)
+set(FILES index.html style.css app.js favicon.svg)
 
 # Map filenames to C++ identifier names.
-set(VARNAME_index.html index_html)
-set(VARNAME_style.css  style_css)
-set(VARNAME_app.js     app_js)
+set(VARNAME_index.html  index_html)
+set(VARNAME_style.css   style_css)
+set(VARNAME_app.js      app_js)
+set(VARNAME_favicon.svg favicon_svg)
 
 # Map filenames to MIME types.
-set(MIME_index.html text/html)
-set(MIME_style.css  text/css)
-set(MIME_app.js     application/javascript)
+set(MIME_index.html  text/html)
+set(MIME_style.css   text/css)
+set(MIME_app.js      application/javascript)
+set(MIME_favicon.svg image/svg+xml)
 
 set(SRC "#include \"embedded_web.hh\"\nnamespace embedded {\n")
 

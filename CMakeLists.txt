@@ -88,6 +88,7 @@ add_custom_command(
 		${CMAKE_CURRENT_SOURCE_DIR}/web/index.html
 		${CMAKE_CURRENT_SOURCE_DIR}/web/style.css
 		${CMAKE_CURRENT_SOURCE_DIR}/web/app.js
+		${CMAKE_CURRENT_SOURCE_DIR}/web/favicon.svg
 		${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_web.cmake
 	COMMENT "Embedding web client files"
 )
