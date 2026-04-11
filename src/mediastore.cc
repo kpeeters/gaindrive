@@ -40,8 +40,9 @@ static std::string find_cover(const fs::path& dir)
 		auto p = dir / name;
 		if (fs::exists(p)) return p.string();
 		}
-	// Pass 2: *front.jpg/jpeg  Pass 3: *.jpg/jpeg  (single directory scan for both).
+	// Pass 2: *front.jpg/jpeg  Pass 3: *.jpg/jpeg  Pass 4: any image (single scan for all).
 	std::string jpg_fallback;
+	std::string any_img_fallback;
 	for (auto& entry : fs::directory_iterator(dir)) {
 		if (!entry.is_regular_file()) continue;
 		std::string fname = entry.path().filename().string();
@@ -49,8 +50,19 @@ static std::string find_cover(const fs::path& dir)
 			return entry.path().string();
 		if (jpg_fallback.empty() && (iends_with(fname, ".jpg") || iends_with(fname, ".jpeg")))
 			jpg_fallback = entry.path().string();
+		if (any_img_fallback.empty() && iends_with(fname, ".png"))
+			any_img_fallback = entry.path().string();
 		}
-	return jpg_fallback;
+	if (!jpg_fallback.empty()) return jpg_fallback;
+	if (!any_img_fallback.empty()) return any_img_fallback;
+	// Pass 5: recurse into subdirectories for any image.
+	for (auto& entry : fs::recursive_directory_iterator(dir)) {
+		if (!entry.is_regular_file()) continue;
+		std::string fname = entry.path().filename().string();
+		if (iends_with(fname, ".jpg") || iends_with(fname, ".jpeg") || iends_with(fname, ".png"))
+			return entry.path().string();
+		}
+	return "";
 	}
 
 // Returns sorted list of image paths in dir (recursive), excluding cover_path.
