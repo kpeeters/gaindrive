@@ -2210,6 +2210,19 @@ std::string MediaStore::update_song_meta(int song_id,
 		q.bind(1, *year);
 		q.bind(2, song_id);
 		q.exec();
+
+		// Propagate to the album: use the same strategy as the scanner —
+		// take the year of the first track (disc/track order) with year > 0.
+		SQLite::Statement upd(db_music_,
+			"UPDATE albums SET year = ("
+			"  SELECT s.year FROM songs s"
+			"  WHERE s.album_id = (SELECT album_id FROM songs WHERE id = ?)"
+			"    AND s.year > 0"
+			"  ORDER BY s.disc_number, s.track_number LIMIT 1"
+			") WHERE id = (SELECT album_id FROM songs WHERE id = ?)");
+		upd.bind(1, song_id);
+		upd.bind(2, song_id);
+		upd.exec();
 		}
 	return path;
 	}
