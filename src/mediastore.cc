@@ -1983,15 +1983,17 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		result.albums.push_back(std::move(e));
 		}
 
-	// Songs.
+	// Songs — use al.folder_id as parent so the client can call getAlbum directly.
+	// For multi-disc albums songs live in disc subfolders, so s.folder_id would be
+	// wrong; al.folder_id is always the album root folder that getAlbum expects.
 	SQLite::Statement sq(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
-		"       s.file_size, s.codec, s.folder_id,"
+		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN s.folder_id ELSE -1 END AS cover_art_id"
+		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"

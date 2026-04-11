@@ -276,6 +276,8 @@ body {
 #search-bar-inner {
    overflow: hidden;
    min-height: 0;
+}
+#search-bar-content {
    display: flex;
    align-items: center;
    gap: 0.75rem;
