@@ -1302,7 +1302,7 @@ function renderSearchResults(res) {
          info.appendChild(meta);
          row.appendChild(cover);
          row.appendChild(info);
-         row.addEventListener('click', () => viewTracks(album.id, album.title, album.artistId, album.artist));
+         row.addEventListener('click', () => viewTracks(album.id, album.title, album.parent, album.artist));
          frag.appendChild(row);
          }
       }
@@ -1342,7 +1342,7 @@ function renderSearchResults(res) {
             row.appendChild(dur);
             }
 
-         row.addEventListener('click', () => viewTracks(song.albumId, song.album, song.artistId, song.artist, song.id));
+         row.addEventListener('click', () => viewTracks(song.parent, song.album, null, song.artist, song.id));
          frag.appendChild(row);
          }
       }
