@@ -279,12 +279,11 @@ class MediaStore {
 		// ---- Tag editing ----
 
 		// Update title, track_number, and/or year in the DB for a single song.
-		// Returns the filesystem path of the file on success (so the caller can
-		// write tags), or empty string if song_id is not found.
-		std::string update_song_meta(int song_id,
-		                             const std::optional<std::string>& title,
-		                             const std::optional<int>& track_number,
-		                             const std::optional<int>& year);
+		// Returns false if song_id is not found.
+		bool update_song_meta(int song_id,
+		                      const std::optional<std::string>& title,
+		                      const std::optional<int>& track_number,
+		                      const std::optional<int>& year);
 
 		// Set the cover art path for the album that owns the given folder_id.
 		// Returns false if no matching album exists.

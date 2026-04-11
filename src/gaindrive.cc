@@ -2402,23 +2402,32 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (req.params.count("track")) track_number = std::stoi(req.params.find("track")->second);
 		if (req.params.count("year"))  year         = std::stoi(req.params.find("year")->second);
 
-		std::string path = store_.update_song_meta(song_id, title, track_number, year);
-		if (path.empty()) { err(70, "Song not found."); return; }
+		// Resolve the file path before touching anything.
+		auto song = store_.get_song(song_id);
+		if (!song) { err(70, "Song not found."); return; }
 
-		// Write the updated tags back to the audio file.
+		// Write tags first — if this fails we must not update the database.
 		try {
-			TagLib::FileRef f(path.c_str());
-			if (!f.isNull() && f.tag()) {
-				if (title)        f.tag()->setTitle(TagLib::String(*title, TagLib::String::UTF8));
-				if (track_number) f.tag()->setTrack(*track_number);
-				if (year)         f.tag()->setYear(*year);
-				f.save();
+			TagLib::FileRef f(song->path.c_str());
+			if (f.isNull() || !f.tag()) {
+				err(0, "Could not open file for tag editing.");
+				return;
+				}
+			if (title)        f.tag()->setTitle(TagLib::String(*title, TagLib::String::UTF8));
+			if (track_number) f.tag()->setTrack(*track_number);
+			if (year)         f.tag()->setYear(*year);
+			if (!f.save()) {
+				err(0, "Could not write tags to file.");
+				return;
 				}
 			}
 		catch (...) {
-			// Tag write failure is non-fatal; the DB change already succeeded.
-			std::cout << stamp() << "WARNING: could not write tags to " << path << std::endl;
+			err(0, "Exception while writing tags to file.");
+			return;
 			}
+
+		// Tags written successfully — now mirror the change in the database.
+		store_.update_song_meta(song_id, title, track_number, year);
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
