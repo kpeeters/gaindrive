@@ -1100,6 +1100,20 @@ body {
 
 /* ── Search results ─────────────────────────────────── */
 
+.search-artist-img {
+   width: 36px;
+   height: 36px;
+   border-radius: 50%;
+   object-fit: cover;
+   flex-shrink: 0;
+   background: var(--border);
+}
+/* Hide broken-image icon while the URL is being fetched. */
+.search-artist-img:not([src]),
+.search-artist-img[src=""] {
+   visibility: hidden;
+}
+
 .search-song-row {
    display: flex;
    align-items: center;

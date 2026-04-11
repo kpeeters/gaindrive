@@ -1199,7 +1199,6 @@ function openSearchBar() {
 function closeSearchBar() {
    document.getElementById('search-bar').classList.remove('open');
    document.getElementById('search-input').value = '';
-   viewArtists().catch(err => console.error('[search] close error', err));
 }
 
 let _searchTimer = null;
@@ -1211,10 +1210,7 @@ function scheduleSearch() {
 
 async function runSearch() {
    const q = document.getElementById('search-input').value.trim();
-   if (!q) {
-      await viewArtists();
-      return;
-      }
+   if (!q) return;
    const wantArtists = document.getElementById('sf-artists').checked;
    const wantAlbums  = document.getElementById('sf-albums').checked;
    const wantSongs   = document.getElementById('sf-songs').checked;
@@ -1257,12 +1253,26 @@ function renderSearchResults(res) {
       for (const artist of artists) {
          const row = document.createElement('div');
          row.className = 'artist-row';
+
+         const img = document.createElement('img');
+         img.className = 'search-artist-img';
+         img.alt = '';
+         row.appendChild(img);
+
          const name = document.createElement('span');
          name.className = 'artist-name';
          name.textContent = artist.name;
          row.appendChild(name);
+
          row.addEventListener('click', () => viewAlbums(artist.id, artist.name));
          frag.appendChild(row);
+
+         // Fetch bio image asynchronously; fill in if one is available.
+         apiCall('getArtistInfo2', {id: artist.id}).then(sr => {
+            const info = sr?.artistInfo2 ?? {};
+            const url  = info.largeImageUrl || info.mediumImageUrl || info.smallImageUrl || '';
+            if (url) img.src = url;
+            }).catch(() => {});
          }
       }
 
