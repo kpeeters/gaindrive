@@ -671,7 +671,7 @@ function setupPlayer() {
       }
 }
 
-async function viewTracks(albumId, albumTitle, artistId, artistName) {
+async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId = null) {
    console.log('[tracks] loading album', albumId, albumTitle);
    const pane = document.getElementById('pane-tracks');
    pane.innerHTML = '';
@@ -812,6 +812,14 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
 
    pane.appendChild(frag);
    paneNav.slideTo(2);
+
+   if (autoPlayId !== null) {
+      const idx = songs.findIndex(s => s.id === autoPlayId);
+      if (idx !== -1) {
+         player.albumCtx = {albumId, albumTitle, artistId, artistName};
+         playerLoad(songs, idx);
+         }
+      }
 
    // ── Edit mode ──────────────────────────────────────────────────────────────
    // Toggled by the "Edit" link in the header.
@@ -1334,7 +1342,7 @@ function renderSearchResults(res) {
             row.appendChild(dur);
             }
 
-         row.addEventListener('click', () => playerLoad([song], 0));
+         row.addEventListener('click', () => viewTracks(song.albumId, song.album, song.artistId, song.artist, song.id));
          frag.appendChild(row);
          }
       }
