@@ -202,6 +202,23 @@ body {
    margin-bottom: 0.5rem;
 }
 
+#search-btn {
+   background: none;
+   border: none;
+   color: var(--text-dim);
+   cursor: pointer;
+   display: flex;
+   align-items: center;
+   padding: 0.2rem;
+   border-radius: 3px;
+   flex-shrink: 0;
+   margin-left: auto;
+}
+#search-btn:hover {
+   color: var(--text);
+   background: var(--bg);
+}
+
 .nav-title img {
    width: 22px;
    height: 22px;
@@ -239,11 +256,75 @@ body {
    grid-area: content;
    overflow: hidden;
    position: relative;
+   display: flex;
+   flex-direction: column;
 }
+
+/* ── Search bar ─────────────────────────────────────── */
+
+#search-bar {
+   display: grid;
+   grid-template-rows: 0fr;
+   transition: grid-template-rows 0.22s ease;
+   background: var(--surface);
+   flex-shrink: 0;
+}
+#search-bar.open {
+   grid-template-rows: 1fr;
+   border-bottom: 1px solid var(--border);
+}
+#search-bar-inner {
+   overflow: hidden;
+   min-height: 0;
+   display: flex;
+   align-items: center;
+   gap: 0.75rem;
+   padding: 0.5rem 1rem;
+}
+#search-input {
+   flex: 1;
+   min-width: 0;
+   background: var(--bg);
+   border: 1px solid var(--border);
+   border-radius: 4px;
+   color: var(--text);
+   font-size: 0.9rem;
+   padding: 0.4rem 0.6rem;
+}
+#search-input:focus {
+   border-color: var(--accent);
+   outline: none;
+}
+#search-bar label {
+   display: flex;
+   align-items: center;
+   gap: 0.3rem;
+   color: var(--text-dim);
+   font-size: 0.82rem;
+   white-space: nowrap;
+   cursor: pointer;
+   user-select: none;
+}
+#search-close {
+   background: none;
+   border: none;
+   color: var(--text-dim);
+   cursor: pointer;
+   font-size: 1rem;
+   padding: 0.2rem 0.4rem;
+   border-radius: 3px;
+   flex-shrink: 0;
+}
+#search-close:hover {
+   color: var(--text);
+}
+
+/* ── Pane strip ─────────────────────────────────────── */
 
 #pane-strip {
    display: flex;
-   height: 100%;
+   flex: 1 1 0;
+   min-height: 0;
    will-change: transform;
    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -1013,6 +1094,52 @@ body {
 .theme-btn:hover {
    background: var(--bg);
    color: var(--text);
+}
+
+/* ── Search results ─────────────────────────────────── */
+
+.search-song-row {
+   display: flex;
+   align-items: center;
+   gap: 0.75rem;
+   padding: 0.35rem 0.4rem;
+   border-radius: 4px;
+   cursor: pointer;
+}
+.search-song-row:hover {
+   background: var(--surface);
+}
+.search-song-info {
+   flex: 1;
+   min-width: 0;
+   display: flex;
+   flex-direction: column;
+   gap: 0.1rem;
+}
+.search-song-title {
+   font-size: 0.95rem;
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+}
+.search-song-sub {
+   font-size: 0.75rem;
+   color: var(--text-dim);
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+}
+.search-song-dur {
+   font-size: 0.8rem;
+   color: var(--text-dim);
+   font-variant-numeric: tabular-nums;
+   flex-shrink: 0;
+}
+.search-no-results {
+   color: var(--text-dim);
+   font-size: 0.9rem;
+   padding: 2rem 0.4rem;
+   text-align: center;
 }
 
 /* ── Mobile overrides (must follow base rules to win the cascade) ──── */

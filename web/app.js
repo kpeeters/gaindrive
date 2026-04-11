@@ -1181,6 +1181,196 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
       }).catch(() => {});
 }
 
+// ── Search ──────────────────────────────────────────────────────────────────
+
+function openSearchBar() {
+   document.getElementById('search-bar').classList.add('open');
+   document.getElementById('search-input').focus();
+}
+
+function closeSearchBar() {
+   document.getElementById('search-bar').classList.remove('open');
+   document.getElementById('search-input').value = '';
+   viewArtists().catch(err => console.error('[search] close error', err));
+}
+
+let _searchTimer = null;
+
+function scheduleSearch() {
+   clearTimeout(_searchTimer);
+   _searchTimer = setTimeout(() => runSearch().catch(err => console.error('[search]', err)), 320);
+}
+
+async function runSearch() {
+   const q = document.getElementById('search-input').value.trim();
+   if (!q) {
+      await viewArtists();
+      return;
+      }
+   const wantArtists = document.getElementById('sf-artists').checked;
+   const wantAlbums  = document.getElementById('sf-albums').checked;
+   const wantSongs   = document.getElementById('sf-songs').checked;
+
+   const sr = await apiCall('search3', {
+      query:       q,
+      artistCount: wantArtists ? 20 : 0,
+      albumCount:  wantAlbums  ? 20 : 0,
+      songCount:   wantSongs   ? 20 : 0,
+      });
+   renderSearchResults(sr.searchResult3 ?? {});
+}
+
+function renderSearchResults(res) {
+   const pane = document.getElementById('pane-artists');
+   document.getElementById('pane-albums').innerHTML = '';
+   document.getElementById('pane-tracks').innerHTML = '';
+   paneNav.slideTo(0);
+
+   const artists = res.artist ?? [];
+   const albums  = res.album  ?? [];
+   const songs   = res.song   ?? [];
+
+   const frag = document.createDocumentFragment();
+
+   if (artists.length === 0 && albums.length === 0 && songs.length === 0) {
+      const msg = document.createElement('p');
+      msg.className = 'search-no-results';
+      msg.textContent = 'No results found.';
+      pane.replaceChildren(msg);
+      return;
+      }
+
+   if (artists.length > 0) {
+      const h = document.createElement('h2');
+      h.className = 'index-heading';
+      h.textContent = 'Artists';
+      frag.appendChild(h);
+
+      for (const artist of artists) {
+         const row = document.createElement('div');
+         row.className = 'artist-row';
+         const name = document.createElement('span');
+         name.className = 'artist-name';
+         name.textContent = artist.name;
+         row.appendChild(name);
+         row.addEventListener('click', () => viewAlbums(artist.id, artist.name));
+         frag.appendChild(row);
+         }
+      }
+
+   if (albums.length > 0) {
+      const h = document.createElement('h2');
+      h.className = 'index-heading';
+      h.textContent = 'Albums';
+      frag.appendChild(h);
+
+      for (const album of albums) {
+         const row = document.createElement('div');
+         row.className = 'album-row';
+
+         const cover = document.createElement('img');
+         cover.className = 'album-cover';
+         cover.width  = 80;
+         cover.height = 80;
+         cover.alt    = '';
+         if (album.coverArt)
+            cover.src = apiUrl('getCoverArt', {id: album.coverArt, size: 80});
+
+         const info = document.createElement('div');
+         info.className = 'album-info';
+
+         const title = document.createElement('span');
+         title.className = 'album-title';
+         title.textContent = album.title;
+
+         const meta = document.createElement('span');
+         meta.className = 'album-meta';
+         const parts = [];
+         if (album.artist) parts.push(album.artist);
+         if (album.year)   parts.push(album.year);
+         meta.textContent = parts.join(' · ');
+
+         info.appendChild(title);
+         info.appendChild(meta);
+         row.appendChild(cover);
+         row.appendChild(info);
+         row.addEventListener('click', () => viewTracks(album.id, album.title, album.artistId, album.artist));
+         frag.appendChild(row);
+         }
+      }
+
+   if (songs.length > 0) {
+      const h = document.createElement('h2');
+      h.className = 'index-heading';
+      h.textContent = 'Songs';
+      frag.appendChild(h);
+
+      for (const song of songs) {
+         const row = document.createElement('div');
+         row.className = 'search-song-row';
+
+         const info = document.createElement('div');
+         info.className = 'search-song-info';
+
+         const titleEl = document.createElement('span');
+         titleEl.className = 'search-song-title';
+         titleEl.textContent = song.title;
+
+         const sub = document.createElement('span');
+         sub.className = 'search-song-sub';
+         const subParts = [];
+         if (song.artist) subParts.push(song.artist);
+         if (song.album)  subParts.push(song.album);
+         sub.textContent = subParts.join(' · ');
+
+         info.appendChild(titleEl);
+         info.appendChild(sub);
+         row.appendChild(info);
+
+         if (song.duration) {
+            const dur = document.createElement('span');
+            dur.className = 'search-song-dur';
+            dur.textContent = fmtDuration(song.duration);
+            row.appendChild(dur);
+            }
+
+         row.addEventListener('click', () => playerLoad([song], 0));
+         frag.appendChild(row);
+         }
+      }
+
+   pane.replaceChildren(frag);
+}
+
+function setupSearch() {
+   document.getElementById('search-btn').addEventListener('click', openSearchBar);
+   document.getElementById('search-btn-mobile').addEventListener('click', e => {
+      e.preventDefault();
+      openSearchBar();
+      });
+   document.getElementById('search-close').addEventListener('click', closeSearchBar);
+   document.getElementById('search-input').addEventListener('input', scheduleSearch);
+
+   for (const id of ['sf-artists', 'sf-albums', 'sf-songs'])
+      document.getElementById(id).addEventListener('change', scheduleSearch);
+
+   document.addEventListener('keydown', e => {
+      const tag = document.activeElement?.tagName;
+      const inInput = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT');
+
+      if (e.key === 'Escape') {
+         if (document.getElementById('search-bar').classList.contains('open')) {
+            closeSearchBar();
+            e.preventDefault();
+            }
+         return;
+         }
+
+      if (!inInput && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey)
+         openSearchBar();
+      });
+}
+
 // ── Shell ───────────────────────────────────────────────────────────────────
 
 async function showShell() {
@@ -1191,6 +1381,7 @@ async function showShell() {
    console.log('[shell] app-shell hidden=', shell.hidden, 'display=', getComputedStyle(shell).display);
 
    setupPlayer();
+   setupSearch();
 
    // Sync theme button label with current state and wire it up.
    const saved = localStorage.getItem('gd_theme') ?? 'auto';
