@@ -587,6 +587,12 @@ body {
    margin-bottom: 0.2rem;
 }
 
+.disc-heading.editing {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+}
+
 .album-hero {
    display: block;
    width: min(100%, 320px);
@@ -605,6 +611,11 @@ body {
    padding: 0.3rem 0.4rem;
    border-radius: 4px;
    cursor: pointer;
+}
+
+/* In edit mode the track-number input is wider than 2ch; let the column grow. */
+.track-row.editing {
+   grid-template-columns: 1.2rem max-content 1fr auto;
 }
 
 .track-row:hover {
@@ -770,11 +781,10 @@ body {
    font-variant-numeric: tabular-nums;
 }
 
-/* Header row shown in edit mode: aligns the 'all' button above the year column. */
+/* Header row shown in edit mode for single-disc albums: right-aligns the 'all' button. */
 .track-edit-header {
-   display: grid;
-   grid-template-columns: 1.2rem 2ch 1fr auto;
-   gap: 0.5rem;
+   display: flex;
+   justify-content: flex-end;
    padding: 0 0.4rem 0.2rem;
 }
 
