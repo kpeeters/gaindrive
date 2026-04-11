@@ -700,16 +700,53 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
    header.appendChild(editLink);
    pane.appendChild(header);
 
-   // Large cover art hero — always in the DOM so edit mode can add the pencil.
+   // Large cover art hero with carousel support for extra images.
    let heroImg = null;
+   let carouselIdx = 0;
+   let carouselCount = 1;
    const heroWrap = document.createElement('div');
    heroWrap.className = 'cover-hero-wrap';
    if (album.coverArt) {
+      const prevBtn = document.createElement('button');
+      prevBtn.className = 'carousel-btn carousel-prev';
+      prevBtn.setAttribute('aria-label', 'Previous image');
+      prevBtn.textContent = '\u2039';
+      prevBtn.style.display = 'none';
+
       heroImg = document.createElement('img');
       heroImg.className = 'album-hero';
       heroImg.src = apiUrl('getCoverArt', {id: album.coverArt, size: 400});
       heroImg.alt = albumTitle;
+
+      const nextBtn = document.createElement('button');
+      nextBtn.className = 'carousel-btn carousel-next';
+      nextBtn.setAttribute('aria-label', 'Next image');
+      nextBtn.textContent = '\u203a';
+      nextBtn.style.display = 'none';
+
+      heroWrap.appendChild(prevBtn);
       heroWrap.appendChild(heroImg);
+      heroWrap.appendChild(nextBtn);
+
+      function showCarouselImage(idx) {
+         carouselIdx = idx;
+         heroImg.src = apiUrl('getCoverArt', {id: album.coverArt, size: 400, index: idx});
+         prevBtn.disabled = idx === 0;
+         nextBtn.disabled = idx === carouselCount - 1;
+         }
+
+      prevBtn.addEventListener('click', () => { if (carouselIdx > 0) showCarouselImage(carouselIdx - 1); });
+      nextBtn.addEventListener('click', () => { if (carouselIdx < carouselCount - 1) showCarouselImage(carouselIdx + 1); });
+
+      // Fetch image count; show arrows only when there are multiple images.
+      apiCall('getAlbumImages', {id: album.coverArt}).then(data => {
+         carouselCount = data.albumImages?.count ?? 1;
+         if (carouselCount > 1) {
+            prevBtn.style.display = '';
+            nextBtn.style.display = '';
+            prevBtn.disabled = true;   // start at index 0
+            }
+         });
       }
    pane.appendChild(heroWrap);
 

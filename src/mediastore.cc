@@ -53,6 +53,27 @@ static std::string find_cover(const fs::path& dir)
 	return jpg_fallback;
 	}
 
+// Returns sorted list of image paths in dir (recursive), excluding cover_path.
+static std::vector<std::string> find_extra_images(const fs::path& dir,
+                                                   const std::string& cover_path)
+	{
+	static const std::set<std::string> IMG_EXT = {".jpg", ".jpeg", ".png"};
+	std::vector<std::string> result;
+	try {
+		for (auto& entry : fs::recursive_directory_iterator(dir)) {
+			if (!entry.is_regular_file()) continue;
+			std::string ext = entry.path().extension().string();
+			std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+			if (!IMG_EXT.count(ext)) continue;
+			if (entry.path().string() == cover_path) continue;
+			result.push_back(entry.path().string());
+			}
+		}
+	catch (...) {}
+	std::sort(result.begin(), result.end());
+	return result;
+	}
+
 static bool is_audio_file(const fs::path& p)
 	{
 	std::string ext = p.extension().string();
@@ -1056,6 +1077,23 @@ std::string MediaStore::get_cover_path(int folder_id)
 	q.bind(1, folder_id);
 	if (!q.executeStep() || q.getColumn(0).isNull()) return "";
 	return q.getColumn(0).getString();
+	}
+
+std::vector<std::string> MediaStore::get_extra_image_paths(int folder_id)
+	{
+	std::string cover  = get_cover_path(folder_id);
+	std::string folder = get_folder_path(folder_id);
+	if (cover.empty() || folder.empty()) return {};
+	return find_extra_images(folder, cover);
+	}
+
+int MediaStore::get_image_count(int folder_id)
+	{
+	std::string cover = get_cover_path(folder_id);
+	if (cover.empty()) return 0;
+	std::string folder = get_folder_path(folder_id);
+	if (folder.empty()) return 0;
+	return 1 + static_cast<int>(find_extra_images(folder, cover).size());
 	}
 
 std::optional<MediaStore::SongInfo> MediaStore::get_song(int song_id)

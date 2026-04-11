@@ -716,6 +716,33 @@ body {
    margin: 0;
 }
 
+.carousel-btn {
+   position: absolute;
+   top: 50%;
+   transform: translateY(-50%);
+   background: rgba(0, 0, 0, 0.45);
+   color: #fff;
+   border: none;
+   border-radius: 50%;
+   width: 2rem;
+   height: 2rem;
+   font-size: 1.4rem;
+   line-height: 1;
+   cursor: pointer;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   z-index: 1;
+}
+
+.carousel-btn:disabled {
+   opacity: 0.3;
+   cursor: default;
+}
+
+.carousel-prev { left:  0.3rem; }
+.carousel-next { right: 0.3rem; }
+
 .cover-edit-btn {
    position: absolute;
    bottom: 0.5rem;

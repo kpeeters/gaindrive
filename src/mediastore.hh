@@ -154,6 +154,13 @@ class MediaStore {
 		// or empty string if none is stored.
 		std::string get_cover_path(int folder_id);
 
+		// Returns sorted paths of all image files in the album folder tree,
+		// excluding the main cover. Used to serve carousel images.
+		std::vector<std::string> get_extra_image_paths(int folder_id);
+
+		// Returns total image count for the folder (main cover + extras).
+		int get_image_count(int folder_id);
+
 		struct SongInfo {
 			int         id;
 			std::string path;

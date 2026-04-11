@@ -1356,10 +1356,25 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
-		std::string path = store_.get_cover_path(std::stoi(it->second));
+		int folder_id = std::stoi(it->second);
+		std::string path = store_.get_cover_path(folder_id);
 		if (path.empty()) {
 			res.status = 404;
 			return;
+			}
+
+		// Optional index: 0 (default) = main cover, 1+ = extra images sorted.
+		auto idx_it = req.params.find("index");
+		if (idx_it != req.params.end()) {
+			int idx = std::stoi(idx_it->second);
+			if (idx > 0) {
+				auto extras = store_.get_extra_image_paths(folder_id);
+				if (idx - 1 >= static_cast<int>(extras.size())) {
+					res.status = 404;
+					return;
+					}
+				path = extras[idx - 1];
+				}
 			}
 
 		auto size_it = req.params.find("size");
@@ -1433,6 +1448,24 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		res.set_content(subsonic_ok_json([&files](nlohmann::json& r) {
 			r["albumTexts"] = {{"textFile", files}};
+			}), "application/json");
+		});
+
+	// getAlbumImages — return total image count for an album folder (cover + extras).
+	server_.Get("/rest/getAlbumImages.view", [this](const httplib::Request& req,
+	                                                httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			res.set_content(subsonic_error_json(10, "Required parameter missing: id."),
+			                "application/json");
+			return;
+			}
+
+		int count = store_.get_image_count(std::stoi(it->second));
+		res.set_content(subsonic_ok_json([count](nlohmann::json& r) {
+			r["albumImages"] = {{"count", count}};
 			}), "application/json");
 		});
 
