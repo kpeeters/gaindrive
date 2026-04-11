@@ -200,6 +200,14 @@ async function viewArtists() {
    console.log('[artists] got', indexes.reduce((n, i) => n + i.artist.length, 0), 'artists');
 
    const frag = document.createDocumentFragment();
+   const header = document.createElement('div');
+   header.className = 'view-header';
+   const title = document.createElement('h1');
+   title.className = 'view-title';
+   title.textContent = 'Artists';
+   header.appendChild(title);
+   frag.appendChild(header);
+
    for (const index of indexes) {
       const heading = document.createElement('h2');
       heading.className = 'index-heading';
@@ -1236,11 +1244,20 @@ function renderSearchResults(res) {
 
    const frag = document.createDocumentFragment();
 
+   const srHeader = document.createElement('div');
+   srHeader.className = 'view-header';
+   const srTitle = document.createElement('h1');
+   srTitle.className = 'view-title';
+   srTitle.textContent = 'Search';
+   srHeader.appendChild(srTitle);
+   frag.appendChild(srHeader);
+
    if (artists.length === 0 && albums.length === 0 && songs.length === 0) {
       const msg = document.createElement('p');
       msg.className = 'search-no-results';
       msg.textContent = 'No results found.';
-      pane.replaceChildren(msg);
+      frag.appendChild(msg);
+      pane.replaceChildren(frag);
       return;
       }
 
