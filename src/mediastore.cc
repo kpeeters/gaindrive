@@ -488,6 +488,24 @@ void MediaStore::scan()
 		std::cout << stamp() << "  pruned " << n << " albums" << std::endl;
 	}
 	{
+	// These caches reference folders(id) without ON DELETE CASCADE, so they
+	// must be pruned before the folder rows are deleted.
+	SQLite::Statement s(db_music_,
+		"DELETE FROM album_info_cache WHERE folder_id IN ("
+		"  SELECT id FROM folders WHERE last_scanned IS NULL AND path LIKE ?"
+		")");
+	s.bind(1, root_prefix);
+	s.exec();
+	}
+	{
+	SQLite::Statement s(db_music_,
+		"DELETE FROM artist_info_cache WHERE folder_id IN ("
+		"  SELECT id FROM folders WHERE last_scanned IS NULL AND path LIKE ?"
+		")");
+	s.bind(1, root_prefix);
+	s.exec();
+	}
+	{
 	SQLite::Statement s(db_music_,
 		"DELETE FROM folders WHERE last_scanned IS NULL AND path LIKE ?");
 	s.bind(1, root_prefix);
@@ -630,6 +648,22 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	int n = db_music_.getChanges();
 	if (n > 0)
 		std::cout << stamp() << "  pruned " << n << " albums" << std::endl;
+	}
+	{
+	SQLite::Statement s(db_music_,
+		"DELETE FROM album_info_cache WHERE folder_id IN ("
+		"  SELECT id FROM folders WHERE last_scanned IS NULL AND path LIKE ?"
+		")");
+	s.bind(1, prefix);
+	s.exec();
+	}
+	{
+	SQLite::Statement s(db_music_,
+		"DELETE FROM artist_info_cache WHERE folder_id IN ("
+		"  SELECT id FROM folders WHERE last_scanned IS NULL AND path LIKE ?"
+		")");
+	s.bind(1, prefix);
+	s.exec();
 	}
 	{
 	SQLite::Statement s(db_music_,
