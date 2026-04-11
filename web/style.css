@@ -743,6 +743,18 @@ body {
    font-size: 0.95rem;
 }
 
+.track-year-input {
+   width: 4.5ch;
+   text-align: right;
+   background: var(--surface);
+   color: var(--text-dim);
+   border: 1px solid var(--border);
+   border-radius: 3px;
+   padding: 0.1rem 0.2rem;
+   font-size: 0.8rem;
+   font-variant-numeric: tabular-nums;
+}
+
 /* ── Player ────────────────────────────────────────── */
 
 #player {

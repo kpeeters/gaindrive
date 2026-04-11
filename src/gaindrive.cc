@@ -2397,10 +2397,12 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		std::optional<std::string> title;
 		std::optional<int> track_number;
-		if (req.params.count("title")) title = req.params.find("title")->second;
+		std::optional<int> year;
+		if (req.params.count("title")) title        = req.params.find("title")->second;
 		if (req.params.count("track")) track_number = std::stoi(req.params.find("track")->second);
+		if (req.params.count("year"))  year         = std::stoi(req.params.find("year")->second);
 
-		std::string path = store_.update_song_meta(song_id, title, track_number);
+		std::string path = store_.update_song_meta(song_id, title, track_number, year);
 		if (path.empty()) { err(70, "Song not found."); return; }
 
 		// Write the updated tags back to the audio file.
@@ -2409,6 +2411,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			if (!f.isNull() && f.tag()) {
 				if (title)        f.tag()->setTitle(TagLib::String(*title, TagLib::String::UTF8));
 				if (track_number) f.tag()->setTrack(*track_number);
+				if (year)         f.tag()->setYear(*year);
 				f.save();
 				}
 			}

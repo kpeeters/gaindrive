@@ -737,7 +737,9 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
 
       const row = document.createElement('div');
       row.className = 'track-row';
-      row.dataset.id = song.id;
+      row.dataset.id   = song.id;
+      row.dataset.year = song.year ?? '';
+      row.dataset.dur  = song.duration ? fmtDuration(song.duration) : '';
 
       const icon = document.createElement('span');
       icon.className = 'track-icon';
@@ -752,7 +754,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
 
       const dur = document.createElement('span');
       dur.className = 'track-dur';
-      dur.textContent = song.duration ? fmtDuration(song.duration) : '';
+      dur.textContent = row.dataset.dur;
 
       icon.addEventListener('click', e => {
          e.stopPropagation();
@@ -820,10 +822,11 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
          reader.readAsDataURL(file);
          });
 
-      // Replace track num/title spans with inputs.
+      // Replace track num/title spans with inputs; swap dur span for year input.
       pane.querySelectorAll('.track-row').forEach(row => {
          const numSpan   = row.querySelector('.track-num');
          const titleSpan = row.querySelector('.track-title');
+         const durSpan   = row.querySelector('.track-dur');
 
          const numInput = document.createElement('input');
          numInput.type = 'number';
@@ -838,8 +841,17 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
          titleInput.value = titleSpan.textContent;
          titleInput.dataset.orig = titleSpan.textContent;
 
+         const yearInput = document.createElement('input');
+         yearInput.type = 'number';
+         yearInput.min  = '0';
+         yearInput.max  = '9999';
+         yearInput.className = 'track-year-input';
+         yearInput.value = row.dataset.year;
+         yearInput.dataset.orig = row.dataset.year;
+
          row.replaceChild(numInput,   numSpan);
          row.replaceChild(titleInput, titleSpan);
+         row.replaceChild(yearInput,  durSpan);
 
          // Prevent row click (play) while editing.
          row.classList.add('editing');
@@ -871,7 +883,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
             const songId     = row.dataset.id;
             const numInput   = row.querySelector('.track-num-input');
             const titleInput = row.querySelector('.track-title-input');
-            if (!numInput || !titleInput) continue;
+            const yearInput  = row.querySelector('.track-year-input');
+            if (!numInput || !titleInput || !yearInput) continue;
 
             const params = {id: songId};
             let changed = false;
@@ -881,6 +894,10 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
                }
             if (titleInput.value !== titleInput.dataset.orig) {
                params.title = titleInput.value;
+               changed = true;
+               }
+            if (yearInput.value !== yearInput.dataset.orig) {
+               params.year = yearInput.value;
                changed = true;
                }
             if (changed) {
@@ -918,11 +935,12 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
             }
          }
 
-      // Replace inputs back to spans.
+      // Replace inputs back to spans; restore dur column.
       pane.querySelectorAll('.track-row').forEach(row => {
          const numInput   = row.querySelector('.track-num-input');
          const titleInput = row.querySelector('.track-title-input');
-         if (!numInput || !titleInput) return;
+         const yearInput  = row.querySelector('.track-year-input');
+         if (!numInput || !titleInput || !yearInput) return;
 
          const numSpan = document.createElement('span');
          numSpan.className = 'track-num';
@@ -932,8 +950,16 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
          titleSpan.className = 'track-title';
          titleSpan.textContent = keepValues ? titleInput.value : titleInput.dataset.orig;
 
+         const durSpan = document.createElement('span');
+         durSpan.className = 'track-dur';
+         durSpan.textContent = row.dataset.dur;
+
+         // Update stored year if saved, so re-entering edit mode shows new value.
+         if (keepValues) row.dataset.year = yearInput.value;
+
          row.replaceChild(numSpan,   numInput);
          row.replaceChild(titleSpan, titleInput);
+         row.replaceChild(durSpan,   yearInput);
          row.classList.remove('editing');
          });
       }

@@ -2182,7 +2182,8 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 
 std::string MediaStore::update_song_meta(int song_id,
                                           const std::optional<std::string>& title,
-                                          const std::optional<int>& track_number)
+                                          const std::optional<int>& track_number,
+                                          const std::optional<int>& year)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
@@ -2201,6 +2202,12 @@ std::string MediaStore::update_song_meta(int song_id,
 	if (track_number) {
 		SQLite::Statement q(db_music_, "UPDATE songs SET track_number = ? WHERE id = ?");
 		q.bind(1, *track_number);
+		q.bind(2, song_id);
+		q.exec();
+		}
+	if (year) {
+		SQLite::Statement q(db_music_, "UPDATE songs SET year = ? WHERE id = ?");
+		q.bind(1, *year);
 		q.bind(2, song_id);
 		q.exec();
 		}
