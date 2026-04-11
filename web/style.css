@@ -722,8 +722,22 @@ body {
    justify-content: center;
 }
 
+/* Suppress spinner arrows on numeric edit inputs (all browsers). */
+.track-num-input::-webkit-inner-spin-button,
+.track-num-input::-webkit-outer-spin-button,
+.track-year-input::-webkit-inner-spin-button,
+.track-year-input::-webkit-outer-spin-button {
+   -webkit-appearance: none;
+   margin: 0;
+}
+.track-num-input,
+.track-year-input {
+   -moz-appearance: textfield;
+}
+
 .track-num-input {
-   width: 3.5ch;
+   /* wide enough for 3 digits plus padding */
+   width: calc(3ch + 0.8rem);
    text-align: right;
    background: var(--surface);
    color: var(--text);
@@ -744,7 +758,8 @@ body {
 }
 
 .track-year-input {
-   width: 4.5ch;
+   /* wide enough for a 4-digit year plus padding */
+   width: calc(4ch + 0.8rem);
    text-align: right;
    background: var(--surface);
    color: var(--text-dim);
@@ -753,6 +768,29 @@ body {
    padding: 0.1rem 0.2rem;
    font-size: 0.8rem;
    font-variant-numeric: tabular-nums;
+}
+
+/* Header row shown in edit mode: aligns the 'all' button above the year column. */
+.track-edit-header {
+   display: grid;
+   grid-template-columns: 1.2rem 2ch 1fr auto;
+   gap: 0.5rem;
+   padding: 0 0.4rem 0.2rem;
+}
+
+.year-all-btn {
+   font-size: 0.7rem;
+   padding: 0.05rem 0.35rem;
+   border-radius: 3px;
+   border: 1px solid var(--border);
+   background: var(--surface);
+   color: var(--text-dim);
+   cursor: pointer;
+}
+
+.year-all-btn:hover {
+   color: var(--text);
+   border-color: var(--accent);
 }
 
 /* ── Player ────────────────────────────────────────── */

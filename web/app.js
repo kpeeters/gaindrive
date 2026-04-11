@@ -857,6 +857,33 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
          row.classList.add('editing');
          });
 
+      // Header row with 'all' button aligned above the year column.
+      // When clicked, copies the first track's year to all other tracks
+      // on the same disc (resets at each .disc-heading boundary).
+      const editHeader = document.createElement('div');
+      editHeader.className = 'track-edit-header';
+      for (let i = 0; i < 3; i++) editHeader.appendChild(document.createElement('span'));
+      const allBtn = document.createElement('button');
+      allBtn.className = 'year-all-btn';
+      allBtn.textContent = 'all';
+      allBtn.addEventListener('click', () => {
+         let firstYear = null;
+         for (const el of pane.querySelectorAll('.disc-heading, .track-row')) {
+            if (el.classList.contains('disc-heading')) {
+               firstYear = null;
+               } else {
+               const yi = el.querySelector('.track-year-input');
+               if (!yi) continue;
+               if (firstYear === null) firstYear = yi.value;
+               else yi.value = firstYear;
+               }
+            }
+         });
+      editHeader.appendChild(allBtn);
+      const firstTrackEl = pane.querySelector('.disc-heading, .track-row');
+      if (firstTrackEl) pane.insertBefore(editHeader, firstTrackEl);
+      else pane.appendChild(editHeader);
+
       saveBtn.addEventListener('click', async () => {
          saveBtn.disabled = true;
          cancelBtn.disabled = true;
@@ -934,6 +961,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName) {
             heroImg = null;
             }
          }
+
+      pane.querySelector('.track-edit-header')?.remove();
 
       // Replace inputs back to spans; restore dur column.
       pane.querySelectorAll('.track-row').forEach(row => {
