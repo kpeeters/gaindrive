@@ -1302,7 +1302,7 @@ function renderSearchResults(res) {
          info.appendChild(meta);
          row.appendChild(cover);
          row.appendChild(info);
-         row.addEventListener('click', () => viewTracks(album.id, album.title, album.parent, album.artist));
+         row.addEventListener('click', () => viewTracksFromSearch(album.id, album.title, album.parent, album.artist));
          frag.appendChild(row);
          }
       }
@@ -1342,13 +1342,28 @@ function renderSearchResults(res) {
             row.appendChild(dur);
             }
 
-         row.addEventListener('click', () => viewTracks(song.parent, song.album, null, song.artist, song.id));
+         row.addEventListener('click', () => viewTracksFromSearch(song.parent, song.album, null, song.artist, song.id));
          frag.appendChild(row);
          }
       }
 
    pane.replaceChildren(frag);
 }
+
+// Wrapper around viewTracks for clicks from search results.
+// On a 2-pane layout, viewTracks slides to depth 2, which pushes pane 0
+// (search results) off-screen. Instead we move the rendered content into
+// pane 1 and stay at depth 1, keeping search visible on the left.
+async function viewTracksFromSearch(albumId, albumTitle, artistId, artistName, autoPlayId) {
+   await viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId);
+   if (document.getElementById('search-bar').classList.contains('open')
+         && paneNav._visiblePanes() === 2) {
+      const p1 = document.getElementById('pane-albums');
+      const p2 = document.getElementById('pane-tracks');
+      p1.replaceChildren(...Array.from(p2.childNodes));
+      paneNav.slideTo(1);
+      }
+   }
 
 function setupSearch() {
    document.getElementById('search-btn').addEventListener('click', openSearchBar);
