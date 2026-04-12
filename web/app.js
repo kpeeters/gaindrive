@@ -563,6 +563,7 @@ let castPolling      = false;  // prevent overlapping polls
 let castStartOffset  = 0;      // timeOffset used when cast started (seconds)
 let lastCastPosition = 0;      // castStartOffset + latest currentTime from poll
 let castWasPlaying   = false;  // true once the cast device has been seen playing
+let lastCastDuration = 0;     // last non-zero duration reported by the cast device
 
 async function pollCastStatus() {
    if (castPolling) return;
@@ -576,9 +577,10 @@ async function pollCastStatus() {
          // the next track in the queue. Reset the flag so that the brief IDLE
          // period while the next track loads doesn't trigger another advance.
          if (castWasPlaying && player.index < player.queue.length - 1) {
-            castWasPlaying  = false;
-            castStartOffset = 0;
+            castWasPlaying   = false;
+            castStartOffset  = 0;
             lastCastPosition = 0;
+            lastCastDuration = 0;
             player.index++;
             playerPlay();
             }
@@ -586,14 +588,15 @@ async function pollCastStatus() {
          }
       castWasPlaying = true;
       lastCastPosition = castStartOffset + s.currentTime;
+      if (s.duration > 0) lastCastDuration = s.duration;
       const seek = document.getElementById('player-seek');
       const time = document.getElementById('player-time');
       if (!seek.dataset.seeking) {
-         if (s.duration > 0) seek.max = Math.floor(s.duration);
+         if (lastCastDuration > 0) seek.max = Math.floor(lastCastDuration);
          seek.value = Math.floor(s.currentTime);
          }
       time.textContent =
-         `${fmtDuration(Math.floor(s.currentTime))} / ${fmtDuration(Math.floor(s.duration))}`;
+         `${fmtDuration(Math.floor(s.currentTime))} / ${fmtDuration(Math.floor(lastCastDuration))}`;
       document.getElementById('player-playpause').textContent =
          s.playerState === 'PAUSED' ? '▶' : '⏸';
       } catch (_) {
@@ -641,7 +644,8 @@ async function selectCastDevice(id) {
       // can redirect it to the cast device (the redirect only fires on a
       // new request; if audio was already playing it never re-requested).
       // Capture the current position so the cast device resumes from there.
-      castWasPlaying = false;
+      castWasPlaying   = false;
+      lastCastDuration = 0;
       if (player.index >= 0) {
          const offset = player.audio.currentTime;
          castStartOffset  = offset;
@@ -669,10 +673,11 @@ async function stopCast() {
       } catch (_) {
       // best-effort stop
       }
-   castDeviceId     = null;
-   castStartOffset  = 0;
-   lastCastPosition = 0;
-   castWasPlaying   = false;
+   castDeviceId      = null;
+   castStartOffset   = 0;
+   lastCastPosition  = 0;
+   lastCastDuration  = 0;
+   castWasPlaying    = false;
    document.getElementById('player-cast').classList.remove('active');
    document.getElementById('cast-modal').classList.add('hidden');
    if (player.index >= 0)
