@@ -571,10 +571,11 @@ async function pollCastStatus() {
       const sr = await apiCall('getCastStatus');
       const s  = sr.castStatus;
       if (!s) return;
-      if (s.playerState === 'IDLE') {
-         // The device transitions to IDLE when a track finishes. Advance to
-         // the next track in the queue. Reset the flag so that the brief IDLE
-         // period while the next track loads doesn't trigger another advance.
+      // Advance when IDLE *or* when the device reports it has reached the end
+      // of the stream (Chromecast sometimes never sends a final IDLE if the
+      // media transport closes before we poll it).
+      const streamDone = s.duration > 0 && s.currentTime >= s.duration - 0.5;
+      if (s.playerState === 'IDLE' || streamDone) {
          if (castWasPlaying && player.index < player.queue.length - 1) {
             castWasPlaying   = false;
             castStartOffset  = 0;
@@ -761,6 +762,7 @@ document.getElementById('player-cover').addEventListener('click', () => {
 
 // Auto-advance to next track.
 player.audio.addEventListener('ended', () => {
+   if (castDeviceId !== null) return;  // cast poll loop owns advance
    if (player.index < player.queue.length - 1) {
       player.index++;
       playerPlay();
