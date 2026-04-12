@@ -563,7 +563,6 @@ let castPolling      = false;  // prevent overlapping polls
 let castStartOffset  = 0;      // timeOffset used when cast started (seconds)
 let lastCastPosition = 0;      // castStartOffset + latest currentTime from poll
 let castWasPlaying   = false;  // true once the cast device has been seen playing
-let lastCastDuration = 0;     // last non-zero duration reported by the cast device
 
 async function pollCastStatus() {
    if (castPolling) return;
@@ -580,23 +579,24 @@ async function pollCastStatus() {
             castWasPlaying   = false;
             castStartOffset  = 0;
             lastCastPosition = 0;
-            lastCastDuration = 0;
             player.index++;
             playerPlay();
             }
          return;
          }
       castWasPlaying = true;
-      lastCastPosition = castStartOffset + s.currentTime;
-      if (s.duration > 0) lastCastDuration = s.duration;
+      const absCurrent = castStartOffset + s.currentTime;
+      lastCastPosition = absCurrent;
+      const song = player.queue[player.index];
+      const totalSecs = song?.duration ?? 0;
       const seek = document.getElementById('player-seek');
       const time = document.getElementById('player-time');
       if (!seek.dataset.seeking) {
-         if (lastCastDuration > 0) seek.max = Math.floor(lastCastDuration);
-         seek.value = Math.floor(s.currentTime);
+         if (totalSecs > 0) seek.max = totalSecs;
+         seek.value = Math.floor(absCurrent);
          }
       time.textContent =
-         `${fmtDuration(Math.floor(s.currentTime))} / ${fmtDuration(Math.floor(lastCastDuration))}`;
+         `${fmtDuration(Math.floor(absCurrent))} / ${fmtDuration(totalSecs)}`;
       document.getElementById('player-playpause').textContent =
          s.playerState === 'PAUSED' ? '▶' : '⏸';
       } catch (_) {
@@ -644,8 +644,7 @@ async function selectCastDevice(id) {
       // can redirect it to the cast device (the redirect only fires on a
       // new request; if audio was already playing it never re-requested).
       // Capture the current position so the cast device resumes from there.
-      castWasPlaying   = false;
-      lastCastDuration = 0;
+      castWasPlaying = false;
       if (player.index >= 0) {
          const offset = player.audio.currentTime;
          castStartOffset  = offset;
@@ -673,11 +672,10 @@ async function stopCast() {
       } catch (_) {
       // best-effort stop
       }
-   castDeviceId      = null;
-   castStartOffset   = 0;
-   lastCastPosition  = 0;
-   lastCastDuration  = 0;
-   castWasPlaying    = false;
+   castDeviceId     = null;
+   castStartOffset  = 0;
+   lastCastPosition = 0;
+   castWasPlaying   = false;
    document.getElementById('player-cast').classList.remove('active');
    document.getElementById('cast-modal').classList.add('hidden');
    if (player.index >= 0)
@@ -769,8 +767,10 @@ player.audio.addEventListener('ended', () => {
       }
    });
 
-// Keep seek bar and time display in sync while playing.
+// Keep seek bar and time display in sync while playing locally.
+// In cast mode the poll loop owns the UI; ignore audio element events.
 player.audio.addEventListener('timeupdate', () => {
+   if (castDeviceId !== null) return;
    const seek = document.getElementById('player-seek');
    const time = document.getElementById('player-time');
    const cur  = player.audio.currentTime;
@@ -831,7 +831,9 @@ function setupPlayer() {
    seek.addEventListener('touchstart', () => { seek.dataset.seeking = '1'; });
    seek.addEventListener('change', () => {
       if (castDeviceId !== null) {
-         apiCall('castControl', {action: 'seek', time: seek.value}).catch(() => {});
+         // seek.value is absolute track position; convert to stream-relative
+         const streamPos = Math.max(0, Number(seek.value) - castStartOffset);
+         apiCall('castControl', {action: 'seek', time: streamPos}).catch(() => {});
          } else {
          player.audio.currentTime = Number(seek.value);
          }
