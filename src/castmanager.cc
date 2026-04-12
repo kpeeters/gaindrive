@@ -14,6 +14,7 @@
 #include <iostream>
 #include <map>
 #include <chrono>
+#include <thread>
 
 #include <sys/socket.h>
 #include <sys/select.h>
@@ -285,6 +286,21 @@ std::vector<CastManager::CastDevice> CastManager::discover(int timeout_ms)
 		if (!dev.id.empty() && !dev.address.empty())
 			result.push_back(dev);
 	return result;
+	}
+
+void CastManager::discover_background(int timeout_ms)
+	{
+	std::thread([this, timeout_ms]{
+		auto devs = discover(timeout_ms);
+		std::lock_guard<std::mutex> lk(cache_mutex_);
+		devices_cache_ = std::move(devs);
+		}).detach();
+	}
+
+std::vector<CastManager::CastDevice> CastManager::cached_devices() const
+	{
+	std::lock_guard<std::mutex> lk(cache_mutex_);
+	return devices_cache_;
 	}
 
 // ---- Protobuf helpers (CastMessage encoding / decoding) -----------

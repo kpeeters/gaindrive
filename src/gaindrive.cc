@@ -2297,13 +2297,15 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// listCastDevices — return Chromecast devices found via mDNS on the LAN.
+	// listCastDevices — return the cached device list and kick off a background
+	// refresh so the next call will have up-to-date results.
 	server_.Get("/rest/listCastDevices.view", [this](const httplib::Request& req,
 	                                                  httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 
-		auto devices = cast_manager_.discover(4000);
+		auto devices = cast_manager_.cached_devices();
+		cast_manager_.discover_background();
 
 		std::string body;
 		if (use_json) {
@@ -2348,7 +2350,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
-		auto devices = cast_manager_.discover(2000);
+		auto devices = cast_manager_.cached_devices();
 		CastManager::CastDevice chosen;
 		bool found = false;
 		for (auto& d : devices)
@@ -2529,6 +2531,7 @@ GainDrive::GainDrive(const std::string& db_path,
 
 	if (!no_scan)
 		std::thread([this]{ store_.scan(); }).detach();
+	cast_manager_.discover_background();
 	watcher_.start();
 	}
 

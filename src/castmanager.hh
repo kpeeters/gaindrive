@@ -25,6 +25,13 @@ class CastManager {
 		// Scan for Chromecast devices via mDNS for timeout_ms milliseconds.
 		std::vector<CastDevice> discover(int timeout_ms);
 
+		// Run discover() in a background thread and cache the results.
+		// Returns immediately; call cached_devices() to read the result.
+		void discover_background(int timeout_ms = 4000);
+
+		// Return the last cached device list (populated by discover_background).
+		std::vector<CastDevice> cached_devices() const;
+
 		// Enter cast mode: store device and generate a single-use stream token.
 		bool start(const CastDevice& device);
 
@@ -60,9 +67,12 @@ class CastManager {
 		std::string token_;           // random token the Chromecast uses for stream auth
 		std::string transport_id_;    // set in load(), needed for media commands
 
-		mutable std::mutex   status_mutex_;
-		CastStatus           status_;
-		std::mutex           fetch_mutex_;   // one fetch_status() at a time
+		mutable std::mutex         status_mutex_;
+		CastStatus                 status_;
+		std::mutex                 fetch_mutex_;    // one fetch_status() at a time
+
+		mutable std::mutex         cache_mutex_;
+		std::vector<CastDevice>    devices_cache_;  // last result of discover_background()
 
 		// Parse a MEDIA_STATUS message and store the result in status_.
 		void update_status(const nlohmann::json& msg);
