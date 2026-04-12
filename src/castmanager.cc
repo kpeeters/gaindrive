@@ -708,7 +708,7 @@ void CastManager::poll_loop()
 					std::cout << stamp() << "Cast rx MEDIA_STATUS"
 					          << " state="    << s.value("playerState", "?")
 					          << " t="        << s.value("currentTime",  0.0f)
-					          << " dur="      << (s.contains("media") && s["media"].contains("duration")
+					          << " dur="      << (s.contains("media") && s["media"]["duration"].is_number()
 					                              ? s["media"]["duration"].get<float>() : 0.0f)
 					          << " msid="     << s.value("mediaSessionId", 0)
 					          << std::endl;
