@@ -689,7 +689,12 @@ void CastManager::poll_loop()
 			}
 
 			auto m = cast_recv(t.ssl);
-			if (m.is_null()) break;  // timeout or connection dropped — reconnect
+			if (m.is_null()) {
+				// EAGAIN means SO_RCVTIMEO fired with no data — loop to re-check
+				// poll_active_ and transport_id_ before blocking again.
+				if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
+				break;  // real error or closed connection — reconnect
+				}
 
 			std::string type = m.value("type", "");
 			if (type == "PING")
