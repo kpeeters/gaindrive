@@ -667,8 +667,8 @@ void CastManager::poll_loop()
 			}
 
 		// Short receive timeout so we wake regularly to check poll_active_ and
-		// whether load() has set a new transport_id_.
-		struct timeval tv = {2, 0};
+		// whether load() has set a new transport_id_, and to send GET_STATUS.
+		struct timeval tv = {1, 0};
 		setsockopt(t.sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
 		std::string src = "sender-0";
@@ -692,7 +692,13 @@ void CastManager::poll_loop()
 			if (m.is_null()) {
 				// EAGAIN means SO_RCVTIMEO fired with no data — loop to re-check
 				// poll_active_ and transport_id_ before blocking again.
-				if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
+				if (errno == EAGAIN || errno == EWOULDBLOCK) {
+					// Chromecast only pushes MEDIA_STATUS on state changes, not
+					// during continuous playback — poll for position explicitly.
+					cast_send(t.ssl, NS_MEDIA, src, tid,
+					          {{"type", "GET_STATUS"}, {"requestId", 101}});
+					continue;
+					}
 				break;  // real error or closed connection — reconnect
 				}
 
