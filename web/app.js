@@ -514,6 +514,13 @@ async function stopCast() {
       clearInterval(castPollTimer);
       castPollTimer = null;
       }
+   // Grab the cast position before stopping so we can resume locally.
+   let resumeOffset = 0;
+   try {
+      const sr = await apiCall('getCastStatus');
+      if (sr.castStatus && sr.castStatus.currentTime)
+         resumeOffset = sr.castStatus.currentTime;
+      } catch (_) {}
    try {
       await apiCall('stopCast');
       } catch (_) {
@@ -522,6 +529,8 @@ async function stopCast() {
    castDeviceId = null;
    document.getElementById('player-cast').classList.remove('active');
    document.getElementById('cast-modal').classList.add('hidden');
+   if (player.index >= 0)
+      playerPlay(resumeOffset);
    }
 
 const player = {
