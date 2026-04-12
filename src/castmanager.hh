@@ -30,7 +30,9 @@ class CastManager {
 
 		// Connect to the Chromecast, send LOAD, capture initial MEDIA_STATUS, then close.
 		// The Chromecast fetches and plays independently; no persistent connection is kept.
-		void load(const std::string& url, const std::string& mime_type);
+		// current_time tells the device where to start (seconds into the track).
+		void load(const std::string& url, const std::string& mime_type,
+		          float current_time = 0.0f);
 
 		// Stop Chromecast playback and exit cast mode.
 		void stop();

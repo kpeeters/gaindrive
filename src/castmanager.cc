@@ -493,7 +493,8 @@ bool CastManager::start(const CastDevice& dev)
 	return true;
 	}
 
-void CastManager::load(const std::string& url, const std::string& mime)
+void CastManager::load(const std::string& url, const std::string& mime,
+                        float current_time)
 	{
 	// Reset playback status for the new track.
 	{
@@ -522,15 +523,17 @@ void CastManager::load(const std::string& url, const std::string& mime)
 	transport_id_ = tid;
 
 	cast_send(t.ssl, NS_CONN,  src, tid, {{"type", "CONNECT"}});
-	cast_send(t.ssl, NS_MEDIA, src, tid, {
-		{"type",      "LOAD"},
-		{"requestId", 2},
+	nlohmann::json load_msg = {
+		{"type",        "LOAD"},
+		{"requestId",   2},
+		{"currentTime", current_time},
 		{"media", {
 			{"contentId",   url},
 			{"contentType", mime},
 			{"streamType",  "BUFFERED"}
 			}}
-		});
+		};
+	cast_send(t.ssl, NS_MEDIA, src, tid, load_msg);
 
 	// Read the initial MEDIA_STATUS to capture mediaSessionId and duration before
 	// closing.  The Chromecast responds to LOAD almost immediately.

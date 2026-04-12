@@ -1671,7 +1671,13 @@ GainDrive::GainDrive(const std::string& db_path,
 			std::string url = proto + "://" + host + "/rest/stream.view"
 			                + "?id=" + it->second
 			                + "&castToken=" + cast_manager_.token();
-			cast_manager_.load(url, codec_to_mime(song->codec));
+			auto to_it = req.params.find("timeOffset");
+			float cast_offset = 0.0f;
+			if (to_it != req.params.end() && !to_it->second.empty()) {
+				url += "&timeOffset=" + to_it->second;
+				cast_offset = std::stof(to_it->second);
+				}
+			cast_manager_.load(url, codec_to_mime(song->codec), cast_offset);
 			res.status = 204;
 			return;
 			}

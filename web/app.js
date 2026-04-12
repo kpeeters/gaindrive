@@ -495,10 +495,12 @@ async function selectCastDevice(id) {
       // Stop local playback and re-issue the stream request so the server
       // can redirect it to the cast device (the redirect only fires on a
       // new request; if audio was already playing it never re-requested).
+      // Capture the current position so the cast device resumes from there.
       if (player.index >= 0) {
+         const offset = player.audio.currentTime;
          player.audio.pause();
          player.audio.src = '';
-         playerPlay();
+         playerPlay(offset);
          }
       // Poll the Chromecast for playback position and state.
       castPollTimer = setInterval(pollCastStatus, 500);
@@ -546,10 +548,12 @@ function playerEnqueue(song) {
    player.autoFrom = player.queue.length;   // new entry is manual; no auto tail
 }
 
-function playerPlay() {
+function playerPlay(offset = 0) {
    const song = player.queue[player.index];
    if (!song) return;
-   player.audio.src = apiUrl('stream', {id: song.id});
+   const params = {id: song.id};
+   if (offset > 0) params.timeOffset = Math.floor(offset);
+   player.audio.src = apiUrl('stream', params);
    player.audio.play().catch(err => console.warn('[player] play failed', err));
    playerUpdateUI();
 }
