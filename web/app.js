@@ -492,6 +492,14 @@ async function selectCastDevice(id) {
       castDeviceId = id;
       document.getElementById('player-cast').classList.add('active');
       document.getElementById('cast-modal').classList.add('hidden');
+      // Stop local playback and re-issue the stream request so the server
+      // can redirect it to the cast device (the redirect only fires on a
+      // new request; if audio was already playing it never re-requested).
+      if (player.index >= 0) {
+         player.audio.pause();
+         player.audio.src = '';
+         playerPlay();
+         }
       // Poll the Chromecast for playback position and state.
       castPollTimer = setInterval(pollCastStatus, 500);
       } catch (err) {
