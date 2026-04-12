@@ -697,11 +697,28 @@ void CastManager::poll_loop()
 				}
 
 			std::string type = m.value("type", "");
-			if (type == "PING")
+			if (type == "PING") {
 				cast_send(t.ssl, NS_HEARTBEAT, src, "receiver-0",
 				          {{"type", "PONG"}});
-			else if (type == "MEDIA_STATUS")
+				}
+			else if (type == "MEDIA_STATUS") {
+				auto& list = m["status"];
+				if (list.is_array() && !list.empty()) {
+					auto& s = list[0];
+					std::cout << stamp() << "Cast rx MEDIA_STATUS"
+					          << " state="    << s.value("playerState", "?")
+					          << " t="        << s.value("currentTime",  0.0f)
+					          << " dur="      << (s.contains("media") && s["media"].contains("duration")
+					                              ? s["media"]["duration"].get<float>() : 0.0f)
+					          << " msid="     << s.value("mediaSessionId", 0)
+					          << std::endl;
+					}
 				update_status(m);
+				}
+			else if (type != "PONG") {
+				// Log unexpected messages (skip PONG which we never send to ourselves).
+				std::cout << stamp() << "Cast rx " << type << std::endl;
+				}
 			}
 		}
 	}
