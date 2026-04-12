@@ -2379,23 +2379,26 @@ GainDrive::GainDrive(const std::string& db_path,
 		                use_json ? "application/json" : "application/xml");
 		});
 
-	// getCastStatus — return the latest status cached by the background poll thread.
-	server_.Get("/rest/getCastStatus.view", [this](const httplib::Request& req,
-	                                               httplib::Response& res) {
+	// castEvents — SSE stream that pushes MEDIA_STATUS updates to the browser.
+	// Each event is a JSON object with playerState, currentTime, duration.
+	// The connection is kept alive by the Chromecast heartbeat; a 15-second
+	// keepalive comment is sent if no real update arrives in that window.
+	server_.Get("/rest/castEvents.view", [this](const httplib::Request& req,
+	                                            httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		auto s = cast_manager_.get_status();
-		nlohmann::json jr = {
-			{"subsonic-response", {
-				{"status",  "ok"},
-				{"version", "1.16.1"},
-				{"castStatus", {
+		if (!cast_manager_.active()) { res.status = 204; return; }
+		res.set_header("Cache-Control",    "no-cache");
+		res.set_header("X-Accel-Buffering","no");   // disable nginx/apache buffering
+		res.set_chunked_content_provider("text/event-stream",
+			[this](size_t, httplib::DataSink& sink) -> bool {
+				auto s = cast_manager_.wait_status(15000);
+				if (!cast_manager_.active()) return false;
+				std::string event = "data: " + nlohmann::json({
 					{"playerState", s.player_state},
 					{"currentTime", s.current_time},
-					{"duration",    s.duration}
-					}}
-				}}
-			};
-		res.set_content(jr.dump(), "application/json");
+					{"duration",    s.duration}}).dump() + "\n\n";
+				return sink.write(event.data(), event.size());
+				});
 		});
 
 	// castControl — send play/pause/seek to the Chromecast.

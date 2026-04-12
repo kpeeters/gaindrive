@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <condition_variable>
 #include <atomic>
 
 #include <nlohmann/json.hpp>
@@ -37,7 +38,8 @@ class CastManager {
 		bool start(const CastDevice& device);
 
 		// Connect to the Chromecast, send LOAD, capture initial MEDIA_STATUS, then close.
-		// The Chromecast fetches and plays independently; no persistent connection is kept.
+		// The Chromecast fetches and plays independently; poll_loop maintains a separate
+		// persistent connection that receives pushed status updates.
 		// current_time tells the device where to start (seconds into the track).
 		void load(const std::string& url, const std::string& mime_type,
 		          float current_time = 0.0f);
@@ -50,12 +52,12 @@ class CastManager {
 		void cast_play();
 		void cast_seek(float seconds);
 
-		// Open a fresh connection, send GET_STATUS, update the cached status, return it.
-		// Called by the background poll thread; serialised by fetch_mutex_.
-		CastStatus fetch_status();
-
-		// Return the last cached status (used internally for mediaSessionId).
+		// Return the last cached status.
 		CastStatus get_status() const;
+
+		// Block until the next status push from the Chromecast (or timeout_ms elapses).
+		// Used by the SSE endpoint to stream updates to the browser.
+		CastStatus wait_status(int timeout_ms = 15000);
 
 		bool        active()     const { return active_; }
 		std::string token()      const { return token_; }
@@ -66,11 +68,13 @@ class CastManager {
 		bool        active_ = false;
 		CastDevice  device_;
 		std::string token_;           // random token the Chromecast uses for stream auth
-		std::string transport_id_;    // set in load(), needed for media commands
+
+		mutable std::mutex         tid_mutex_;
+		std::string                transport_id_;    // set in load(), needed for media commands
 
 		mutable std::mutex         status_mutex_;
+		std::condition_variable    status_cv_;       // notified on every status update
 		CastStatus                 status_;
-		std::mutex                 fetch_mutex_;    // one fetch_status() at a time
 
 		mutable std::mutex         cache_mutex_;
 		std::vector<CastDevice>    devices_cache_;  // last result of discover_background()
@@ -83,6 +87,7 @@ class CastManager {
 		// Open a fresh connection and send one media-namespace command.
 		void send_media_cmd(const nlohmann::json& payload);
 
-		// Background thread: polls the Chromecast every second while poll_active_.
+		// Background thread: maintains a persistent TLS connection to the Chromecast,
+		// responds to PING heartbeats, and processes pushed MEDIA_STATUS messages.
 		void poll_loop();
 	};

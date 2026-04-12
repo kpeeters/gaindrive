@@ -30,9 +30,10 @@
 
 #include <nlohmann/json.hpp>
 
-static const char* NS_CONN  = "urn:x-cast:com.google.cast.tp.connection";
-static const char* NS_RECV  = "urn:x-cast:com.google.cast.receiver";
-static const char* NS_MEDIA = "urn:x-cast:com.google.cast.media";
+static const char* NS_CONN      = "urn:x-cast:com.google.cast.tp.connection";
+static const char* NS_RECV      = "urn:x-cast:com.google.cast.receiver";
+static const char* NS_MEDIA     = "urn:x-cast:com.google.cast.media";
+static const char* NS_HEARTBEAT = "urn:x-cast:com.google.cast.tp.heartbeat";
 
 // ---- mDNS discovery -----------------------------------------------
 
@@ -540,7 +541,10 @@ void CastManager::load(const std::string& url, const std::string& mime,
 		return;
 		}
 
+	{
+	std::lock_guard<std::mutex> lk(tid_mutex_);
 	transport_id_ = tid;
+	}
 
 	cast_send(t.ssl, NS_CONN,  src, tid, {{"type", "CONNECT"}});
 	cast_send(t.ssl, NS_MEDIA, src, tid, {
@@ -578,8 +582,11 @@ void CastManager::update_status(const nlohmann::json& msg)
 	if (s.contains("media") && s["media"].contains("duration")
 	                        && s["media"]["duration"].is_number())
 		cs.duration = s["media"]["duration"].get<float>();
+	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
 	status_ = cs;
+	}
+	status_cv_.notify_all();  // wake any SSE handlers waiting for the next push
 	}
 
 CastManager::CastStatus CastManager::get_status() const
@@ -588,37 +595,30 @@ CastManager::CastStatus CastManager::get_status() const
 	return status_;
 	}
 
-CastManager::CastStatus CastManager::fetch_status()
+CastManager::CastStatus CastManager::wait_status(int timeout_ms)
 	{
-	if (transport_id_.empty()) return get_status();
-	std::lock_guard<std::mutex> lk(fetch_mutex_);
-	Tls t;
-	if (!tls_connect(t, device_.address, device_.port)) return get_status();
-	std::string src = "sender-0";
-	cast_send(t.ssl, NS_CONN,  src, "receiver-0",  {{"type", "CONNECT"}});
-	cast_send(t.ssl, NS_CONN,  src, transport_id_,  {{"type", "CONNECT"}});
-	cast_send(t.ssl, NS_MEDIA, src, transport_id_,
-	          {{"type", "GET_STATUS"}, {"requestId", 3}});
-	for (int i = 0; i < 15; i++) {
-		auto m = cast_recv(t.ssl);
-		if (m.is_null()) break;
-		if (m.value("type", "") == "MEDIA_STATUS") { update_status(m); break; }
-		}
-	return get_status();
+	std::unique_lock<std::mutex> lk(status_mutex_);
+	status_cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms));
+	return status_;
 	}
 
 void CastManager::send_media_cmd(const nlohmann::json& payload)
 	{
-	if (transport_id_.empty()) return;
+	std::string tid;
+	{
+	std::lock_guard<std::mutex> lk(tid_mutex_);
+	tid = transport_id_;
+	}
+	if (tid.empty()) return;
 	Tls t;
 	if (!tls_connect(t, device_.address, device_.port)) {
 		std::cout << stamp() << "Cast: connect failed for media command" << std::endl;
 		return;
 		}
 	std::string src = "sender-0";
-	cast_send(t.ssl, NS_CONN,  src, "receiver-0",  {{"type", "CONNECT"}});
-	cast_send(t.ssl, NS_CONN,  src, transport_id_,  {{"type", "CONNECT"}});
-	cast_send(t.ssl, NS_MEDIA, src, transport_id_,  payload);
+	cast_send(t.ssl, NS_CONN,  src, "receiver-0", {{"type", "CONNECT"}});
+	cast_send(t.ssl, NS_CONN,  src, tid,           {{"type", "CONNECT"}});
+	cast_send(t.ssl, NS_MEDIA, src, tid,            payload);
 	}
 
 void CastManager::cast_pause()
@@ -645,11 +645,59 @@ void CastManager::cast_seek(float seconds)
 
 void CastManager::poll_loop()
 	{
+	std::string connected_tid;  // transport_id_ we are currently subscribed to
+
 	while (poll_active_) {
-		std::this_thread::sleep_for(std::chrono::seconds(1));
-		if (!poll_active_) break;
-		if (!transport_id_.empty())
-			fetch_status();
+		std::string tid;
+		{
+		std::lock_guard<std::mutex> lk(tid_mutex_);
+		tid = transport_id_;
+		}
+
+		if (tid.empty()) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			continue;
+			}
+
+		Tls t;
+		if (!tls_connect(t, device_.address, device_.port)) {
+			std::cout << stamp() << "Cast: poll_loop connect failed, retrying" << std::endl;
+			std::this_thread::sleep_for(std::chrono::milliseconds(500));
+			continue;
+			}
+
+		// Short receive timeout so we wake regularly to check poll_active_ and
+		// whether load() has set a new transport_id_.
+		struct timeval tv = {2, 0};
+		setsockopt(t.sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+		std::string src = "sender-0";
+		cast_send(t.ssl, NS_CONN, src, "receiver-0", {{"type", "CONNECT"}});
+		cast_send(t.ssl, NS_CONN, src, tid,           {{"type", "CONNECT"}});
+		// Ask for an immediate snapshot; subsequent updates arrive as pushes.
+		cast_send(t.ssl, NS_MEDIA, src, tid,
+		          {{"type", "GET_STATUS"}, {"requestId", 100}});
+		connected_tid = tid;
+
+		std::cout << stamp() << "Cast: poll_loop connected to transport " << tid << std::endl;
+
+		while (poll_active_) {
+			// If load() has started a new track, reconnect to the new transport.
+			{
+			std::lock_guard<std::mutex> lk(tid_mutex_);
+			if (transport_id_ != connected_tid) break;
+			}
+
+			auto m = cast_recv(t.ssl);
+			if (m.is_null()) break;  // timeout or connection dropped — reconnect
+
+			std::string type = m.value("type", "");
+			if (type == "PING")
+				cast_send(t.ssl, NS_HEARTBEAT, src, "receiver-0",
+				          {{"type", "PONG"}});
+			else if (type == "MEDIA_STATUS")
+				update_status(m);
+			}
 		}
 	}
 
@@ -658,12 +706,18 @@ void CastManager::stop()
 	poll_active_ = false;
 	active_ = false;
 	token_.clear();
+	{
+	std::lock_guard<std::mutex> lk(tid_mutex_);
 	transport_id_.clear();
+	}
 
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
 	status_ = CastStatus{};
 	}
+	// Wake any SSE handlers blocked in wait_status() so they can detect
+	// that cast is no longer active and close their response stream.
+	status_cv_.notify_all();
 
 	Tls t;
 	if (!tls_connect(t, device_.address, device_.port)) {

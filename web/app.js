@@ -558,54 +558,74 @@ function fmtDuration(secs) {
 
 // Id of the currently active cast device, or null when not casting.
 let castDeviceId     = null;
-let castPollTimer    = null;
-let castPolling      = false;  // prevent overlapping polls
+let castEventSrc     = null;   // EventSource receiving pushed status from server
 let castStartOffset  = 0;      // timeOffset used when cast started (seconds)
-let lastCastPosition = 0;      // castStartOffset + latest currentTime from poll
+let lastCastPosition = 0;      // absolute position of last SSE push
 let castWasPlaying   = false;  // true once the cast device has been seen playing
+let castPlayerState  = 'IDLE'; // playerState from last SSE push (for interpolation)
+let castBaseTime     = 0;      // s.currentTime from last SSE push
+let castBaseAt       = 0;      // Date.now() (ms) when castBaseTime was recorded
 
-async function pollCastStatus() {
-   if (castPolling) return;
-   castPolling = true;
-   try {
-      const sr = await apiCall('getCastStatus');
-      const s  = sr.castStatus;
-      if (!s) return;
-      // Advance when IDLE *or* when the device reports it has reached the end
-      // of the stream (Chromecast sometimes never sends a final IDLE if the
-      // media transport closes before we poll it).
-      const streamDone = s.duration > 0 && s.currentTime >= s.duration - 0.5;
-      if (s.playerState === 'IDLE' || streamDone) {
-         if (castWasPlaying && player.index < player.queue.length - 1) {
-            castWasPlaying   = false;
-            castStartOffset  = 0;
-            lastCastPosition = 0;
-            player.index++;
-            playerPlay();
-            }
-         return;
+// Handle one MEDIA_STATUS push from the server SSE stream.
+function onCastStatus(s) {
+   castBaseTime    = s.currentTime;
+   castBaseAt      = Date.now();
+   castPlayerState = s.playerState;
+
+   // Belt-and-suspenders: also catch the rare case where the Chromecast
+   // reaches the very end without sending IDLE.
+   const streamDone = s.duration > 0 && s.currentTime >= s.duration - 0.5;
+   if (s.playerState === 'IDLE' || streamDone) {
+      if (castWasPlaying && player.index < player.queue.length - 1) {
+         castWasPlaying   = false;
+         castStartOffset  = 0;
+         lastCastPosition = 0;
+         player.index++;
+         playerPlay();
          }
-      castWasPlaying = true;
-      const absCurrent = castStartOffset + s.currentTime;
-      lastCastPosition = absCurrent;
-      const song = player.queue[player.index];
-      const totalSecs = song?.duration ?? 0;
-      const seek = document.getElementById('player-seek');
-      const time = document.getElementById('player-time');
-      if (!seek.dataset.seeking) {
-         if (totalSecs > 0) seek.max = totalSecs;
-         seek.value = Math.floor(absCurrent);
-         }
-      time.textContent =
-         `${fmtDuration(Math.floor(absCurrent))} / ${fmtDuration(totalSecs)}`;
-      document.getElementById('player-playpause').textContent =
-         s.playerState === 'PAUSED' ? '▶' : '⏸';
-      } catch (_) {
-      // best-effort; don't spam the log on transient failures
-      } finally {
-      castPolling = false;
+      return;
       }
+
+   castWasPlaying = true;
+   const absCurrent = castStartOffset + s.currentTime;
+   lastCastPosition = absCurrent;
+
+   const song = player.queue[player.index];
+   const totalSecs = song?.duration ?? 0;
+   const seek = document.getElementById('player-seek');
+   if (!seek.dataset.seeking) {
+      if (totalSecs > 0) seek.max = totalSecs;
+      seek.value = Math.floor(absCurrent);
+      }
+   document.getElementById('player-playpause').textContent =
+      s.playerState === 'PAUSED' ? '▶' : '⏸';
    }
+
+// Open (or re-open) the SSE connection for cast status events.
+function startCastEvents() {
+   if (castEventSrc) castEventSrc.close();
+   castEventSrc = new EventSource(apiUrl('castEvents'));
+   castEventSrc.onmessage = (e) => {
+      try { onCastStatus(JSON.parse(e.data)); } catch (_) {}
+      };
+   }
+
+// Local interpolation timer — keeps the progress bar smooth between SSE pushes.
+// Only active while casting; reads local vars, makes no network requests.
+setInterval(() => {
+   if (castDeviceId === null || castBaseAt === 0) return;
+   // Only extrapolate position while actually playing; freeze it when paused.
+   const elapsed = castPlayerState === 'PLAYING'
+      ? (Date.now() - castBaseAt) / 1000
+      : 0;
+   const absCurrent = castStartOffset + castBaseTime + elapsed;
+   const song = player.queue[player.index];
+   const totalSecs = song?.duration ?? 0;
+   const seek = document.getElementById('player-seek');
+   const time = document.getElementById('player-time');
+   if (!seek.dataset.seeking) seek.value = Math.floor(absCurrent);
+   time.textContent = `${fmtDuration(Math.floor(absCurrent))} / ${fmtDuration(totalSecs)}`;
+   }, 100);
 
 async function openCastModal() {
    const modal   = document.getElementById('cast-modal');
@@ -654,20 +674,23 @@ async function selectCastDevice(id) {
          player.audio.src = '';
          playerPlay(offset);
          }
-      // Poll the Chromecast for playback position and state.
-      castPollTimer = setInterval(pollCastStatus, 500);
+      // Open SSE stream to receive pushed Chromecast status updates.
+      startCastEvents();
       } catch (err) {
       alert(`Cast failed: ${err.message}`);
       }
    }
 
 async function stopCast() {
-   if (castPollTimer !== null) {
-      clearInterval(castPollTimer);
-      castPollTimer = null;
+   if (castEventSrc !== null) {
+      castEventSrc.close();
+      castEventSrc = null;
       }
-   // Capture the position tracked by the poll loop before tearing down state.
-   const resumeOffset = lastCastPosition;
+   // Capture the position tracked by the SSE stream before tearing down state.
+   const elapsed = castPlayerState === 'PLAYING'
+      ? (Date.now() - castBaseAt) / 1000
+      : 0;
+   const resumeOffset = lastCastPosition || (castStartOffset + castBaseTime + elapsed);
    try {
       await apiCall('stopCast');
       } catch (_) {
@@ -677,6 +700,9 @@ async function stopCast() {
    castStartOffset  = 0;
    lastCastPosition = 0;
    castWasPlaying   = false;
+   castBaseTime     = 0;
+   castBaseAt       = 0;
+   castPlayerState  = 'IDLE';
    document.getElementById('player-cast').classList.remove('active');
    document.getElementById('cast-modal').classList.add('hidden');
    if (player.index >= 0)
@@ -710,6 +736,15 @@ function playerEnqueue(song) {
 function playerPlay(offset = 0) {
    const song = player.queue[player.index];
    if (!song) return;
+   if (castDeviceId !== null) {
+      // Reset so the IDLE status during Chromecast loading doesn't trigger a
+      // spurious advance, and so interpolation starts fresh for the new track.
+      castWasPlaying  = false;
+      castStartOffset = offset;
+      castBaseTime    = 0;
+      castBaseAt      = 0;
+      castPlayerState = 'IDLE';
+      }
    const params = {id: song.id};
    if (offset > 0 && castDeviceId !== null) {
       // Chromecast fetches the stream independently and can't byte-seek,
