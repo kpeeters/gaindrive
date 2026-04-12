@@ -447,7 +447,7 @@ async function pollCastStatus() {
       const seek = document.getElementById('player-seek');
       const time = document.getElementById('player-time');
       if (!seek.dataset.seeking) {
-         seek.max   = Math.floor(s.duration);
+         if (s.duration > 0) seek.max = Math.floor(s.duration);
          seek.value = Math.floor(s.currentTime);
          }
       time.textContent =
