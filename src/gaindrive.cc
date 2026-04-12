@@ -2379,11 +2379,11 @@ GainDrive::GainDrive(const std::string& db_path,
 		                use_json ? "application/json" : "application/xml");
 		});
 
-	// getCastStatus — return latest MEDIA_STATUS received from the Chromecast monitor.
+	// getCastStatus — return the latest status cached by the background poll thread.
 	server_.Get("/rest/getCastStatus.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		auto s = cast_manager_.fetch_status();
+		auto s = cast_manager_.get_status();
 		nlohmann::json jr = {
 			{"subsonic-response", {
 				{"status",  "ok"},

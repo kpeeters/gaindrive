@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <atomic>
 
 #include <nlohmann/json.hpp>
 
@@ -50,7 +51,7 @@ class CastManager {
 		void cast_seek(float seconds);
 
 		// Open a fresh connection, send GET_STATUS, update the cached status, return it.
-		// Serialised by fetch_mutex_ so concurrent getCastStatus calls don't pile up.
+		// Called by the background poll thread; serialised by fetch_mutex_.
 		CastStatus fetch_status();
 
 		// Return the last cached status (used internally for mediaSessionId).
@@ -74,9 +75,14 @@ class CastManager {
 		mutable std::mutex         cache_mutex_;
 		std::vector<CastDevice>    devices_cache_;  // last result of discover_background()
 
+		std::atomic<bool>          poll_active_{false};
+
 		// Parse a MEDIA_STATUS message and store the result in status_.
 		void update_status(const nlohmann::json& msg);
 
 		// Open a fresh connection and send one media-namespace command.
 		void send_media_cmd(const nlohmann::json& payload);
+
+		// Background thread: polls the Chromecast every second while poll_active_.
+		void poll_loop();
 	};

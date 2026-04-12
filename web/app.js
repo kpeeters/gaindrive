@@ -430,9 +430,11 @@ function fmtDuration(secs) {
 // ── Player ───────────────────────────────────────────────────────────────────
 
 // Id of the currently active cast device, or null when not casting.
-let castDeviceId = null;
-let castPollTimer = null;
-let castPolling   = false;   // prevent overlapping polls
+let castDeviceId     = null;
+let castPollTimer    = null;
+let castPolling      = false;  // prevent overlapping polls
+let castStartOffset  = 0;      // timeOffset used when cast started (seconds)
+let lastCastPosition = 0;      // castStartOffset + latest currentTime from poll
 
 async function pollCastStatus() {
    if (castPolling) return;
@@ -441,6 +443,7 @@ async function pollCastStatus() {
       const sr = await apiCall('getCastStatus');
       const s  = sr.castStatus;
       if (!s || s.playerState === 'IDLE') return;
+      lastCastPosition = castStartOffset + s.currentTime;
       const seek = document.getElementById('player-seek');
       const time = document.getElementById('player-time');
       if (!seek.dataset.seeking) {
@@ -498,6 +501,8 @@ async function selectCastDevice(id) {
       // Capture the current position so the cast device resumes from there.
       if (player.index >= 0) {
          const offset = player.audio.currentTime;
+         castStartOffset  = offset;
+         lastCastPosition = offset;
          player.audio.pause();
          player.audio.src = '';
          playerPlay(offset);
@@ -514,19 +519,16 @@ async function stopCast() {
       clearInterval(castPollTimer);
       castPollTimer = null;
       }
-   // Grab the cast position before stopping so we can resume locally.
-   let resumeOffset = 0;
-   try {
-      const sr = await apiCall('getCastStatus');
-      if (sr.castStatus && sr.castStatus.currentTime)
-         resumeOffset = sr.castStatus.currentTime;
-      } catch (_) {}
+   // Capture the position tracked by the poll loop before tearing down state.
+   const resumeOffset = lastCastPosition;
    try {
       await apiCall('stopCast');
       } catch (_) {
       // best-effort stop
       }
-   castDeviceId = null;
+   castDeviceId     = null;
+   castStartOffset  = 0;
+   lastCastPosition = 0;
    document.getElementById('player-cast').classList.remove('active');
    document.getElementById('cast-modal').classList.add('hidden');
    if (player.index >= 0)

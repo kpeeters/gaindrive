@@ -504,6 +504,10 @@ bool CastManager::start(const CastDevice& dev)
 	for (int i = 0; i < 16; i++) snprintf(hex + 2*i, 3, "%02x", bytes[i]);
 	token_ = hex;
 
+	// Start the background status polling thread.
+	poll_active_ = true;
+	std::thread([this]{ poll_loop(); }).detach();
+
 	std::cout << stamp() << "Cast: enabled → " << dev.name
 	          << " (" << dev.address << ":" << dev.port << ")" << std::endl;
 	return true;
@@ -638,8 +642,19 @@ void CastManager::cast_seek(float seconds)
 	std::cout << stamp() << "Cast: SEEK → " << seconds << "s" << std::endl;
 	}
 
+void CastManager::poll_loop()
+	{
+	while (poll_active_) {
+		std::this_thread::sleep_for(std::chrono::seconds(1));
+		if (!poll_active_) break;
+		if (!transport_id_.empty())
+			fetch_status();
+		}
+	}
+
 void CastManager::stop()
 	{
+	poll_active_ = false;
 	active_ = false;
 	token_.clear();
 	transport_id_.clear();
