@@ -179,6 +179,8 @@ async function showView(name) {
 
    if (name === 'artists') {
       await viewArtists();
+      } else if (name === 'playlists') {
+      await viewPlaylists();
       } else {
       document.getElementById('pane-artists').innerHTML =
          `<p style="color:var(--text-dim)">${name}</p>`;
@@ -243,6 +245,131 @@ async function viewArtists() {
       }
    pane.appendChild(frag);
    paneNav.slideTo(0);
+}
+
+async function viewPlaylists() {
+   console.log('[playlists] loading');
+   const pane = document.getElementById('pane-artists');
+   pane.innerHTML = '';
+   document.getElementById('pane-albums').innerHTML = '';
+   document.getElementById('pane-tracks').innerHTML = '';
+
+   const sr = await apiCall('getPlaylists');
+   const lists = sr.playlists?.playlist ?? [];
+   console.log('[playlists] got', lists.length, 'playlists');
+
+   const frag = document.createDocumentFragment();
+   const header = document.createElement('div');
+   header.className = 'view-header';
+   const title = document.createElement('h1');
+   title.className = 'view-title';
+   title.textContent = 'Playlists';
+   header.appendChild(title);
+   frag.appendChild(header);
+
+   for (const pl of lists) {
+      const row = document.createElement('div');
+      row.className = 'playlist-row';
+      row.dataset.id = pl.id;
+
+      const name = document.createElement('span');
+      name.className = 'playlist-name';
+      name.textContent = pl.name;
+
+      const meta = document.createElement('span');
+      meta.className = 'playlist-meta';
+      const parts = [`${pl.songCount} tracks`];
+      if (pl.duration) parts.push(fmtDuration(pl.duration));
+      meta.textContent = parts.join(' · ');
+
+      row.appendChild(name);
+      row.appendChild(meta);
+      row.addEventListener('click', () => {
+         document.querySelectorAll('#pane-artists .playlist-row.selected')
+            .forEach(r => r.classList.remove('selected'));
+         row.classList.add('selected');
+         if (paneNav.willSlide(1))
+            history.pushState({view: 'playlist-tracks', playlistId: pl.id, playlistName: pl.name}, '');
+         viewPlaylistTracks(pl.id, pl.name);
+         });
+      frag.appendChild(row);
+      }
+   pane.appendChild(frag);
+   paneNav.slideTo(0);
+}
+
+async function viewPlaylistTracks(playlistId, playlistName) {
+   console.log('[playlist-tracks] loading playlist', playlistId, playlistName);
+   const pane = document.getElementById('pane-albums');
+   pane.innerHTML = '';
+   document.getElementById('pane-tracks').innerHTML = '';
+
+   const sr = await apiCall('getPlaylist', {id: playlistId});
+   const pl = sr.playlist;
+   const songs = pl.entry ?? [];
+   console.log('[playlist-tracks] got', songs.length, 'tracks');
+
+   const header = document.createElement('div');
+   header.className = 'view-header';
+   const back = document.createElement('span');
+   back.className = 'back-link';
+   back.dataset.pane = '1';
+   back.textContent = '← Playlists';
+   back.addEventListener('click', () => history.back());
+   const heading = document.createElement('h1');
+   heading.className = 'view-title';
+   heading.textContent = playlistName;
+   header.appendChild(back);
+   header.appendChild(heading);
+   pane.appendChild(header);
+
+   const frag = document.createDocumentFragment();
+   for (let i = 0; i < songs.length; i++) {
+      const song = songs[i];
+      const row = document.createElement('div');
+      row.className = 'track-row';
+      row.dataset.id  = song.id;
+      row.dataset.dur = song.duration ? fmtDuration(song.duration) : '';
+
+      const icon = document.createElement('span');
+      icon.className = 'track-icon';
+
+      const num = document.createElement('span');
+      num.className = 'track-num';
+      num.textContent = i + 1;
+
+      // Title + artist stacked in a single cell.
+      const titleWrap = document.createElement('span');
+      titleWrap.className = 'track-title-wrap';
+      const titleEl = document.createElement('span');
+      titleEl.className = 'track-title';
+      titleEl.textContent = song.title;
+      const artistEl = document.createElement('span');
+      artistEl.className = 'track-artist';
+      artistEl.textContent = song.artist ?? '';
+      titleWrap.appendChild(titleEl);
+      if (song.artist) titleWrap.appendChild(artistEl);
+
+      const dur = document.createElement('span');
+      dur.className = 'track-dur';
+      dur.textContent = row.dataset.dur;
+
+      icon.addEventListener('click', e => {
+         e.stopPropagation();
+         playerEnqueue(songs[i]);
+         row.classList.add('queued');
+         });
+      row.addEventListener('click', () => {
+         playerLoad(songs, i);
+         });
+      row.appendChild(icon);
+      row.appendChild(num);
+      row.appendChild(titleWrap);
+      row.appendChild(dur);
+      frag.appendChild(row);
+      }
+   pane.appendChild(frag);
+   paneNav.slideTo(1);
 }
 
 async function viewAlbums(artistId, artistName) {
@@ -1495,6 +1622,16 @@ async function showShell() {
             paneNav.slideTo(2);
          else
             await viewTracks(s.albumId, s.albumTitle, s.artistId, s.artistName);
+         } else if (s.view === 'playlist-tracks') {
+         if (document.getElementById('pane-albums').children.length > 0)
+            paneNav.slideTo(1);
+         else
+            await viewPlaylistTracks(s.playlistId, s.playlistName);
+         } else if (s.view === 'playlists') {
+         if (document.getElementById('pane-artists').children.length > 0)
+            paneNav.slideTo(0);
+         else
+            await viewPlaylists();
          } else {
          if (document.getElementById('pane-artists').children.length > 0)
             paneNav.slideTo(0);

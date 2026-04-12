@@ -421,6 +421,36 @@ body {
    color: var(--text-dim);
 }
 
+/* ── Playlists ─────────────────────────────────────────── */
+
+.playlist-row {
+   display: flex;
+   align-items: center;
+   gap: 0.75rem;
+   padding: 0.3rem 0.4rem;
+   border-radius: 4px;
+   cursor: pointer;
+}
+
+.playlist-row:hover,
+.playlist-row.selected {
+   background: var(--surface);
+}
+
+.playlist-row.selected .playlist-name {
+   color: var(--accent);
+}
+
+.playlist-name {
+   flex: 1;
+   font-size: 0.95rem;
+}
+
+.playlist-meta {
+   font-size: 0.75rem;
+   color: var(--text-dim);
+}
+
 /* ── Artist bio ────────────────────────────────────────── */
 
 /* Loading shimmer: reserves the same height as the collapsed bio block. */
@@ -735,8 +765,20 @@ body {
    text-align: right;
 }
 
+.track-title-wrap {
+   display: flex;
+   flex-direction: column;
+   min-width: 0;
+}
+
 .track-title {
    font-size: 0.95rem;
+}
+
+/* Shown in playlist track rows where the artist differs per row. */
+.track-artist {
+   font-size: 0.75rem;
+   color: var(--text-dim);
 }
 
 .track-dur {
