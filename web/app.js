@@ -563,8 +563,16 @@ function playerPlay(offset = 0) {
    const song = player.queue[player.index];
    if (!song) return;
    const params = {id: song.id};
-   if (offset > 0) params.timeOffset = Math.floor(offset);
+   if (offset > 0 && castDeviceId !== null) {
+      // Chromecast fetches the stream independently and can't byte-seek,
+      // so we ask the server to start ffmpeg at the right position.
+      params.timeOffset = Math.floor(offset);
+      }
    player.audio.src = apiUrl('stream', params);
+   if (offset > 0 && castDeviceId === null) {
+      // For local playback the browser seeks natively via Range requests.
+      player.audio.currentTime = offset;
+      }
    player.audio.play().catch(err => console.warn('[player] play failed', err));
    playerUpdateUI();
 }
