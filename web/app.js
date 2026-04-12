@@ -572,10 +572,7 @@ function onCastStatus(s) {
    castBaseAt      = Date.now();
    castPlayerState = s.playerState;
 
-   // Belt-and-suspenders: also catch the rare case where the Chromecast
-   // reaches the very end without sending IDLE.
-   const streamDone = s.duration > 0 && s.currentTime >= s.duration - 0.5;
-   if (s.playerState === 'IDLE' || streamDone) {
+   if (s.playerState === 'IDLE') {
       if (castWasPlaying && player.index < player.queue.length - 1) {
          castWasPlaying   = false;
          castStartOffset  = 0;
