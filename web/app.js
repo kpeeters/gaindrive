@@ -562,6 +562,7 @@ let castPollTimer    = null;
 let castPolling      = false;  // prevent overlapping polls
 let castStartOffset  = 0;      // timeOffset used when cast started (seconds)
 let lastCastPosition = 0;      // castStartOffset + latest currentTime from poll
+let castWasPlaying   = false;  // true once the cast device has been seen playing
 
 async function pollCastStatus() {
    if (castPolling) return;
@@ -569,7 +570,21 @@ async function pollCastStatus() {
    try {
       const sr = await apiCall('getCastStatus');
       const s  = sr.castStatus;
-      if (!s || s.playerState === 'IDLE') return;
+      if (!s) return;
+      if (s.playerState === 'IDLE') {
+         // The device transitions to IDLE when a track finishes. Advance to
+         // the next track in the queue. Reset the flag so that the brief IDLE
+         // period while the next track loads doesn't trigger another advance.
+         if (castWasPlaying && player.index < player.queue.length - 1) {
+            castWasPlaying  = false;
+            castStartOffset = 0;
+            lastCastPosition = 0;
+            player.index++;
+            playerPlay();
+            }
+         return;
+         }
+      castWasPlaying = true;
       lastCastPosition = castStartOffset + s.currentTime;
       const seek = document.getElementById('player-seek');
       const time = document.getElementById('player-time');
@@ -626,6 +641,7 @@ async function selectCastDevice(id) {
       // can redirect it to the cast device (the redirect only fires on a
       // new request; if audio was already playing it never re-requested).
       // Capture the current position so the cast device resumes from there.
+      castWasPlaying = false;
       if (player.index >= 0) {
          const offset = player.audio.currentTime;
          castStartOffset  = offset;
@@ -656,6 +672,7 @@ async function stopCast() {
    castDeviceId     = null;
    castStartOffset  = 0;
    lastCastPosition = 0;
+   castWasPlaying   = false;
    document.getElementById('player-cast').classList.remove('active');
    document.getElementById('cast-modal').classList.add('hidden');
    if (player.index >= 0)
