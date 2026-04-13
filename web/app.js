@@ -360,6 +360,12 @@ async function viewPlaylistTracks(playlistId, playlistName) {
          row.classList.add('queued');
          });
       row.addEventListener('click', () => {
+         player.albumCtx = {
+            albumId:    song.parent,
+            albumTitle: song.album ?? '',
+            artistId:   null,
+            artistName: song.artist ?? '',
+            };
          playerLoad(songs, i);
          });
       const [starBtn, listBtn] = makeTrackActions(song);
