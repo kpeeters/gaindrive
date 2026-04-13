@@ -100,6 +100,7 @@ class MediaStore {
 			int64_t     file_size    = 0;
 			std::string codec;
 			std::string path;
+			bool        starred      = false;
 			};
 
 		struct DirInfo {
@@ -148,7 +149,8 @@ class MediaStore {
 			std::vector<ChildEntry> songs;
 			};
 
-		std::optional<AlbumInfo> get_album(int folder_id, bool flat_multi_disc = true);
+		std::optional<AlbumInfo> get_album(int folder_id, bool flat_multi_disc = true,
+		                                    const std::string& username = "");
 
 		// Returns the filesystem path of the cover image for an album folder,
 		// or empty string if none is stored.
@@ -268,7 +270,8 @@ class MediaStore {
 		std::vector<PlaylistInfo> get_playlists(const std::string& username);
 
 		// Returns a single playlist with all songs populated, or nullopt if not found.
-		std::optional<PlaylistInfo> get_playlist(int playlist_id);
+		std::optional<PlaylistInfo> get_playlist(int playlist_id,
+		                                          const std::string& username = "");
 
 		// Updates an existing playlist. Returns false if not found or not owned by username.
 		// Only supplied optionals are applied. songs_to_add are appended after survivors;

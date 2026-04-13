@@ -718,7 +718,7 @@ body {
 
 .track-row {
    display: grid;
-   grid-template-columns: 1.2rem 2ch 1fr auto;
+   grid-template-columns: 1.2rem 2ch 1fr auto auto auto;
    align-items: baseline;
    gap: 0.5rem;
    padding: 0.3rem 0.4rem;
@@ -728,7 +728,7 @@ body {
 
 /* In edit mode the track-number input is wider than 2ch; let the column grow. */
 .track-row.editing {
-   grid-template-columns: 1.2rem max-content 1fr auto;
+   grid-template-columns: 1.2rem max-content 1fr auto auto auto;
 }
 
 .track-row:hover {
@@ -785,6 +785,26 @@ body {
    font-size: 0.8rem;
    color: var(--text-dim);
    font-variant-numeric: tabular-nums;
+}
+
+/* Action icons — hidden until row is hovered */
+.track-action {
+   font-size: 0.85rem;
+   color: var(--text-dim);
+   text-align: center;
+   cursor: pointer;
+   opacity: 0;
+   transition: opacity 0.1s;
+   line-height: 1;
+   user-select: none;
+}
+
+.track-row:hover .track-action {
+   opacity: 1;
+}
+
+.track-action.starred {
+   color: var(--accent);
 }
 
 /* ── Edit mode ─────────────────────────────────────── */
@@ -1101,6 +1121,43 @@ body {
 
 #cast-device-list button:hover {
    background: var(--bg);
+}
+
+#playlist-modal-list {
+   display: flex;
+   flex-direction: column;
+   gap: 0.4rem;
+   max-height: 260px;
+   overflow-y: auto;
+}
+
+#playlist-modal-list button {
+   background: none;
+   border: 1px solid var(--border);
+   color: var(--text);
+   padding: 0.4rem 0.75rem;
+   border-radius: 4px;
+   cursor: pointer;
+   text-align: left;
+}
+
+#playlist-modal-list button:hover {
+   background: var(--bg);
+}
+
+#playlist-new-row {
+   display: flex;
+   gap: 0.4rem;
+}
+
+#playlist-new-row input {
+   flex: 1;
+   background: var(--bg);
+   border: 1px solid var(--border);
+   color: var(--text);
+   padding: 0.35rem 0.5rem;
+   border-radius: 4px;
+   font-size: 0.9rem;
 }
 
 #cast-stop-row button,

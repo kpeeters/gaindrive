@@ -362,9 +362,12 @@ async function viewPlaylistTracks(playlistId, playlistName) {
       row.addEventListener('click', () => {
          playerLoad(songs, i);
          });
+      const [starBtn, listBtn] = makeTrackActions(song);
       row.appendChild(icon);
       row.appendChild(num);
       row.appendChild(titleWrap);
+      row.appendChild(starBtn);
+      row.appendChild(listBtn);
       row.appendChild(dur);
       frag.appendChild(row);
       }
@@ -706,6 +709,63 @@ async function stopCast() {
       playerPlay(resumeOffset);
    }
 
+// ── Track action icons (star / add-to-playlist) ────────────────────────────
+
+function makeTrackActions(song) {
+   const starBtn = document.createElement('span');
+   starBtn.className = 'track-action' + (song.starred ? ' starred' : '');
+   starBtn.title = song.starred ? 'Unstar' : 'Star';
+   starBtn.textContent = '★';
+
+   starBtn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const isStarred = starBtn.classList.contains('starred');
+      await apiCall(isStarred ? 'unstar' : 'star', {id: song.id});
+      starBtn.classList.toggle('starred');
+      starBtn.title = starBtn.classList.contains('starred') ? 'Unstar' : 'Star';
+      });
+
+   const listBtn = document.createElement('span');
+   listBtn.className = 'track-action';
+   listBtn.title = 'Add to playlist';
+   listBtn.textContent = '☰';
+
+   listBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      openPlaylistModal(song.id);
+      });
+
+   return [starBtn, listBtn];
+   }
+
+let playlistTargetId = null;
+
+function openPlaylistModal(songId) {
+   playlistTargetId = songId;
+   const list = document.getElementById('playlist-modal-list');
+   list.textContent = 'Loading…';
+   document.getElementById('playlist-modal').classList.remove('hidden');
+   document.getElementById('playlist-new-name').value = '';
+
+   apiCall('getPlaylists').then(sr => {
+      const playlists = sr.playlists?.playlist ?? [];
+      list.textContent = '';
+      if (playlists.length === 0) {
+         list.textContent = 'No playlists yet.';
+         return;
+         }
+      for (const pl of playlists) {
+         const btn = document.createElement('button');
+         btn.textContent = pl.name;
+         btn.addEventListener('click', async () => {
+            await apiCall('updatePlaylist', {playlistId: pl.id, songIdToAdd: playlistTargetId});
+            document.getElementById('playlist-modal').classList.add('hidden');
+            });
+         list.appendChild(btn);
+         }
+      });
+   }
+
 const player = {
    audio: new Audio(),
    queue: [],   // song objects from getAlbum
@@ -880,6 +940,19 @@ function setupPlayer() {
       });
    document.getElementById('cast-stop-btn').addEventListener('click', stopCast);
 
+   document.getElementById('playlist-close-btn').addEventListener('click', () => {
+      document.getElementById('playlist-modal').classList.add('hidden');
+      });
+   document.getElementById('playlist-new-btn').addEventListener('click', async () => {
+      const name = document.getElementById('playlist-new-name').value.trim();
+      if (!name) return;
+      const sr = await apiCall('createPlaylist', {name});
+      const newId = sr.playlist?.id;
+      if (newId && playlistTargetId)
+         await apiCall('updatePlaylist', {playlistId: newId, songIdToAdd: playlistTargetId});
+      document.getElementById('playlist-modal').classList.add('hidden');
+      });
+
    if ('mediaSession' in navigator) {
       navigator.mediaSession.setActionHandler('play',          () => player.audio.play());
       navigator.mediaSession.setActionHandler('pause',         () => player.audio.pause());
@@ -1027,9 +1100,12 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
          player.albumCtx = {albumId, albumTitle, artistId, artistName};
          playerLoad(songs, i);
          });
+      const [starBtn, listBtn] = makeTrackActions(song);
       row.appendChild(icon);
       row.appendChild(num);
       row.appendChild(title);
+      row.appendChild(starBtn);
+      row.appendChild(listBtn);
       row.appendChild(dur);
       frag.appendChild(row);
       }

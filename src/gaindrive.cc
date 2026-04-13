@@ -151,6 +151,7 @@ static nlohmann::json song_entry_json(const MediaStore::ChildEntry& c)
 		{"bitRate",     c.bitrate}
 		};
 	if (c.cover_art_id >= 0) s["coverArt"] = c.cover_art_id;
+	if (c.starred) s["starred"] = true;
 	return s;
 	}
 
@@ -176,6 +177,7 @@ static XMLElement* song_entry_xml(XMLDocument& doc,
 	el->SetAttribute("suffix",      c.codec.c_str());
 	el->SetAttribute("duration",    (int)c.duration);
 	el->SetAttribute("bitRate",     c.bitrate);
+	if (c.starred) el->SetAttribute("starred", "true");
 	return el;
 	}
 
@@ -1763,7 +1765,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto it = req.params.find("id");
 		if (it == req.params.end()) { err(10, "Required parameter missing: id."); return; }
 
-		auto pl = store_.get_playlist(std::stoi(it->second));
+		std::string user = req.params.find("u")->second;
+		auto pl = store_.get_playlist(std::stoi(it->second), user);
 		if (!pl) { err(70, "Playlist not found."); return; }
 
 		std::string body = playlist_body(*pl, use_json);
@@ -1991,7 +1994,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto it = req.params.find("id");
 		if (it == req.params.end()) { err(10, "Required parameter missing: id."); return; }
 
-		auto info = store_.get_album(std::stoi(it->second), flat_multi_disc_);
+		std::string user = req.params.find("u")->second;
+		auto info = store_.get_album(std::stoi(it->second), flat_multi_disc_, user);
 		if (!info) { err(70, "Album not found."); return; }
 
 		std::string body;
