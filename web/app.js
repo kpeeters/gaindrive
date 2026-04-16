@@ -217,7 +217,7 @@ async function viewSettings() {
       btn.textContent = t.charAt(0).toUpperCase() + t.slice(1);
       btn.className   = 'theme-option-btn';
       btn.id          = `theme-opt-${t}`;
-      btn.addEventListener('click', () => applyTheme(t));
+      btn.addEventListener('click', () => { applyTheme(t); markActiveTheme(); });
       themeRow.appendChild(btn);
       }
 
@@ -2057,7 +2057,7 @@ async function viewTracksFromSearch(albumId, albumTitle, artistId, artistName, a
    }
 
 function setupSearch() {
-   document.getElementById('search-btn').addEventListener('click', openSearchBar);
+   document.getElementById('search-btn').addEventListener('click', e => { e.preventDefault(); openSearchBar(); });
    document.getElementById('search-btn-mobile').addEventListener('click', e => {
       e.preventDefault();
       openSearchBar();

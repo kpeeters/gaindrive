@@ -229,19 +229,20 @@ body {
    list-style: none;
 }
 
-#sidebar ul.nav-bottom {
-   margin-top: auto;
-   border-top: 1px solid var(--border);
-   padding-top: 0.5rem;
-}
 
 #sidebar a {
-   display: block;
+   display: flex;
+   align-items: center;
+   gap: 0.6rem;
    color: var(--text-dim);
    text-decoration: none;
    padding: 0.45rem 1rem;
    border-radius: 4px;
    margin: 0 0.4rem;
+}
+
+#sidebar a svg {
+   flex-shrink: 0;
 }
 
 #sidebar a:hover,
@@ -1346,7 +1347,7 @@ body {
    display: flex;
    flex-direction: column;
    gap: 0.75rem;
-   border-top: 1px solid var(--border);
+   border-top: 1px solid var(--text-dim);
    }
 
 .admin-section-title {
