@@ -661,6 +661,46 @@ async function viewPlaylists() {
       frag.appendChild(row);
       }
    pane.appendChild(frag);
+
+   // ── Starred tracks ──────────────────────────────────────────────────────
+   try {
+      const starSr  = await apiCall('getStarred');
+      const starred = starSr.starred?.song ?? [];
+      const songs   = Array.isArray(starred) ? starred : [starred];
+
+      if (songs.length > 0) {
+         const starHeading = document.createElement('h2');
+         starHeading.className = 'playlist-section-heading';
+         starHeading.textContent = 'Starred tracks';
+         pane.appendChild(starHeading);
+
+         for (const song of songs) {
+            const row = document.createElement('div');
+            row.className = 'playlist-row';
+
+            const name = document.createElement('span');
+            name.className = 'playlist-name';
+            name.textContent = song.title;
+
+            const meta = document.createElement('span');
+            meta.className = 'playlist-meta';
+            const parts = [];
+            if (song.artist) parts.push(song.artist);
+            if (song.duration) parts.push(fmtDuration(song.duration));
+            meta.textContent = parts.join(' · ');
+
+            row.appendChild(name);
+            row.appendChild(meta);
+            row.addEventListener('click', () =>
+               viewTracksFromSearch(song.parent, song.album, null, song.artist, song.id));
+            pane.appendChild(row);
+            }
+         }
+      }
+   catch (e) {
+      console.warn('[playlists] could not load starred tracks:', e);
+      }
+
    paneNav.slideTo(0);
 }
 

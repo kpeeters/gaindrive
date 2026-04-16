@@ -456,6 +456,17 @@ body {
    color: var(--text-dim);
 }
 
+.playlist-section-heading {
+   font-size: 0.7rem;
+   font-weight: 700;
+   letter-spacing: 0.1em;
+   text-transform: uppercase;
+   color: var(--text-dim);
+   padding: 1.2rem 0 0.3rem;
+   border-bottom: 1px solid var(--divider);
+   margin-bottom: 0.2rem;
+}
+
 /* ── Artist bio ────────────────────────────────────────── */
 
 /* Loading shimmer: reserves the same height as the collapsed bio block. */
