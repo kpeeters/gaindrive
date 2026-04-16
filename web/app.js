@@ -35,14 +35,6 @@ function applyTheme(theme) {
    if (theme === 'auto') localStorage.removeItem('gd_theme');
    else                  localStorage.setItem('gd_theme', theme);
 
-   const btn = document.getElementById('theme-toggle');
-   if (btn) btn.textContent = theme.charAt(0).toUpperCase() + theme.slice(1);
-}
-
-function cycleTheme() {
-   const current = localStorage.getItem('gd_theme') ?? 'auto';
-   const next    = THEME_CYCLE[(THEME_CYCLE.indexOf(current) + 1) % THEME_CYCLE.length];
-   applyTheme(next);
 }
 
 // ── Subsonic API wrapper ────────────────────────────────────────────────────
@@ -181,8 +173,8 @@ async function showView(name) {
       await viewArtists();
       } else if (name === 'playlists') {
       await viewPlaylists();
-      } else if (name === 'admin') {
-      await viewAdmin();
+      } else if (name === 'settings') {
+      await viewSettings();
       } else {
       document.getElementById('pane-artists').innerHTML =
          `<p style="color:var(--text-dim)">${name}</p>`;
@@ -192,7 +184,7 @@ async function showView(name) {
       }
 }
 
-async function viewAdmin() {
+async function viewSettings() {
    const pane = document.getElementById('pane-artists');
    document.getElementById('pane-albums').innerHTML = '';
    document.getElementById('pane-tracks').innerHTML = '';
@@ -203,14 +195,64 @@ async function viewAdmin() {
    hdr.className = 'view-header';
    const h1 = document.createElement('h1');
    h1.className = 'view-title';
-   h1.textContent = 'Admin';
+   h1.textContent = 'Settings';
    hdr.appendChild(h1);
    pane.appendChild(hdr);
 
-   // ── Upload section ──────────────────────────────────────────────────────
+   // ── Theme section — visible to all users ────────────────────────────────
+
+   const themeSection = document.createElement('div');
+   themeSection.className = 'admin-section';
+
+   const themeHeading = document.createElement('h2');
+   themeHeading.className = 'admin-section-title';
+   themeHeading.textContent = 'Appearance';
+   themeSection.appendChild(themeHeading);
+
+   const themeRow = document.createElement('div');
+   themeRow.className = 'theme-btn-row';
+
+   for (const t of THEME_CYCLE) {
+      const btn = document.createElement('button');
+      btn.textContent = t.charAt(0).toUpperCase() + t.slice(1);
+      btn.className   = 'theme-option-btn';
+      btn.id          = `theme-opt-${t}`;
+      btn.addEventListener('click', () => applyTheme(t));
+      themeRow.appendChild(btn);
+      }
+
+   themeSection.appendChild(themeRow);
+   pane.appendChild(themeSection);
+
+   // Mark the currently active theme button.
+   function markActiveTheme() {
+      const current = localStorage.getItem('gd_theme') ?? 'auto';
+      THEME_CYCLE.forEach(t => {
+         const b = document.getElementById(`theme-opt-${t}`);
+         if (b) b.classList.toggle('active', t === current);
+         });
+      }
+   markActiveTheme();
+
+   // Fetch current user's roles to decide what sections to show.
+   let userInfo = null;
+   try {
+      const sr = await apiCall('getUser', {username: creds.load().user});
+      userInfo = sr.user;
+      }
+   catch { /* non-fatal — degrade gracefully */ }
+
+   // ── Upload section — visible if uploadRole or adminRole ────────────────
+
+   if (userInfo?.uploadRole || userInfo?.adminRole) {
 
    const uploadSection = document.createElement('div');
-   uploadSection.className = 'upload-section';
+   uploadSection.className = 'admin-section';
+
+   const uploadHeading = document.createElement('h2');
+   uploadHeading.className = 'admin-section-title';
+   uploadHeading.textContent = 'Upload';
+   uploadSection.appendChild(uploadHeading);
 
    const uploadLabel = document.createElement('p');
    uploadLabel.textContent = 'Upload a music archive (zip, tar, tar.gz):';
@@ -285,7 +327,11 @@ async function viewAdmin() {
       xhr.send(fd);
       });
 
-   // ── Users section ───────────────────────────────────────────────────────
+   } // end upload section
+
+   // ── Users section — visible to admins only ──────────────────────────────
+
+   if (userInfo?.adminRole) {
 
    const userSection = document.createElement('div');
    userSection.className = 'admin-section';
@@ -345,6 +391,8 @@ async function viewAdmin() {
 
    // Expose so viewUserEdit can trigger a refresh after save.
    pane._refreshUsers = refreshUsers;
+
+   } // end users section
    }
 
 function makeBadge(text, cls) {
@@ -356,7 +404,7 @@ function makeBadge(text, cls) {
 
 async function viewUserEdit(user, refreshFn) {
    // refreshFn is a callback to reload the user list; if not provided, look for it
-   // on the pane element (set by viewAdmin).
+   // on the pane element (set by viewSettings).
    const adminPane = document.getElementById('pane-artists');
    const refresh = refreshFn ?? adminPane._refreshUsers;
 
@@ -2048,12 +2096,6 @@ async function showShell() {
 
    setupPlayer();
    setupSearch();
-
-   // Sync theme button label with current state and wire it up.
-   const saved = localStorage.getItem('gd_theme') ?? 'auto';
-   const btn   = document.getElementById('theme-toggle');
-   btn.textContent = saved.charAt(0).toUpperCase() + saved.slice(1);
-   btn.addEventListener('click', cycleTheme);
 
    // Wire up sidebar and bottom-nav links with history entries.
    shell.querySelectorAll('[data-view]').forEach(a => {

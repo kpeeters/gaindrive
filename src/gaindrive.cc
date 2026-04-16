@@ -1168,6 +1168,10 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string email   = qp("email").empty()       ? existing->email          : qp("email");
 		std::string pw      = qp("password");
 
+		// An admin cannot disable their own account.
+		if (username == qp("u") && disabled)
+			{ err(0, "You cannot disable your own account."); return; }
+
 		store_.update_user(username, pw, email, is_admin, max_bitrate, upload_allowed, disabled);
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
@@ -2734,6 +2738,16 @@ GainDrive::GainDrive(const std::string& db_path,
 			res.status = 400;
 			res.set_content(j.dump(), "application/json");
 			};
+
+		// Require upload_allowed (or admin).
+		{
+		auto it = req.params.find("u");
+		auto ui = (it != req.params.end()) ? store_.get_user(it->second) : std::nullopt;
+		if (!ui || (!ui->upload_allowed && !ui->is_admin)) {
+			json_err("User is not authorized to upload.");
+			return;
+			}
+		}
 
 		if (!req.has_file("file")) { json_err("Missing file part."); return; }
 		const auto& fp = req.get_file_value("file");
