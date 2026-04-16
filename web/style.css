@@ -19,6 +19,7 @@
    --bg:           #1a1a1a;
    --surface:      #242424;
    --border:       #333;
+   --divider:      #505050;   /* horizontal rules, section separators */
    --accent:       #c9202f;   /* brighter on dark bg for contrast */
    --text:         #e0e0e0;
    --text-dim:     #888;
@@ -33,6 +34,7 @@
       --bg:       #f4f4f4;
       --surface:  #ffffff;
       --border:   #ddd;
+      --divider:  #bbb;
       --accent:   #a31623;
       --text:     #1a1a1a;
       --text-dim: #666;
@@ -43,6 +45,7 @@
    --bg:       #f4f4f4;
    --surface:  #ffffff;
    --border:   #ddd;
+   --divider:  #bbb;
    --accent:   #a31623;
    --text:     #1a1a1a;
    --text-dim: #666;
@@ -52,6 +55,7 @@
    --bg:       #1a1a1a;
    --surface:  #242424;
    --border:   #333;
+   --divider:  #505050;
    --accent:   #c9202f;
    --text:     #e0e0e0;
    --text-dim: #888;
@@ -183,7 +187,7 @@ body {
 #sidebar {
    grid-area: sidebar;
    background: var(--surface);
-   border-right: 1px solid var(--border);
+   border-right: 1px solid var(--divider);
    display: flex;
    flex-direction: column;
    padding: 1rem 0;
@@ -198,7 +202,7 @@ body {
    font-weight: 700;
    font-size: 1rem;
    padding: 0 1rem 1rem;
-   border-bottom: 1px solid var(--border);
+   border-bottom: 1px solid var(--divider);
    margin-bottom: 0.5rem;
 }
 
@@ -272,7 +276,7 @@ body {
 }
 #search-bar.open {
    grid-template-rows: 1fr;
-   border-bottom: 1px solid var(--border);
+   border-bottom: 1px solid var(--divider);
 }
 #search-bar-inner {
    overflow: hidden;
@@ -346,7 +350,7 @@ body {
    display: none;   /* overridden to flex in narrow media query */
    grid-area: bottom-nav;
    background: var(--surface);
-   border-top: 1px solid var(--border);
+   border-top: 1px solid var(--divider);
    justify-content: space-around;
    align-items: center;
 }
@@ -369,7 +373,7 @@ body {
 #player {
    grid-area: player;
    background: var(--surface);
-   border-top: 1px solid var(--border);
+   border-top: 1px solid var(--divider);
    display: flex;
    align-items: center;
    padding: 0 1rem;
@@ -386,7 +390,7 @@ body {
    text-transform: uppercase;
    color: var(--text-dim);
    padding: 1.2rem 0 0.3rem;
-   border-bottom: 1px solid var(--border);
+   border-bottom: 1px solid var(--divider);
    margin-bottom: 0.2rem;
 }
 
@@ -530,7 +534,7 @@ body {
    margin-bottom: 1.2rem;
    padding-top: 0.8rem;
    padding-bottom: 0.8rem;
-   border-bottom: 1px solid var(--border);
+   border-bottom: 1px solid var(--divider);
    position: sticky;
    top: 0;
    background: var(--bg);
@@ -697,7 +701,7 @@ body {
    text-transform: uppercase;
    color: var(--text-dim);
    padding: 1.2rem 0.4rem 0.3rem;
-   border-bottom: 1px solid var(--border);
+   border-bottom: 1px solid var(--divider);
    margin-bottom: 0.2rem;
 }
 
@@ -1347,7 +1351,7 @@ body {
    display: flex;
    flex-direction: column;
    gap: 0.75rem;
-   border-top: 1px solid var(--text-dim);
+   border-top: 1px solid var(--divider);
    }
 
 .admin-section-title {
