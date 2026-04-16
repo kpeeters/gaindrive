@@ -426,7 +426,12 @@ async function viewUserEdit(user, refreshFn) {
    const fEmail      = addField('Email',          textInput(user?.email,     ''));
    const fAdmin      = addField('Admin',          checkInput(user?.adminRole));
    const fUpload     = addField('Upload allowed', checkInput(user?.uploadRole));
+   const isSelf = !isNew && user.username === creds.load().user;
    const fDisabled   = addField('Disabled',       checkInput(user?.disabled));
+   if (isSelf) {
+      fDisabled.disabled = true;
+      fDisabled.title    = 'You cannot disable your own account.';
+      }
    const fMaxBitrate = addField('Max bitrate (0 = unlimited)', numInput(user?.maxBitRate ?? 0));
 
    const actions = document.createElement('div');
