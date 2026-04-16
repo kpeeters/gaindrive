@@ -66,6 +66,13 @@ async function apiCall(endpoint, extra = {}) {
    return sr;
 }
 
+// ── Error dialog ─────────────────────────────────────────────────────────────
+
+function showError(msg) {
+   document.getElementById('error-modal-msg').textContent = msg;
+   document.getElementById('error-modal').classList.remove('hidden');
+   }
+
 // ── Login ───────────────────────────────────────────────────────────────────
 
 async function tryLogin(server, user, password) {
@@ -548,6 +555,7 @@ async function viewUserEdit(user, refreshFn) {
          h1.textContent = fUsername.value.trim();
          }
       catch (e) {
+         showError('The action could not be completed. Please check your connection.');
          formStatus.textContent = `Error: ${e.message}`;
          }
       finally {
@@ -563,7 +571,15 @@ async function viewArtists() {
    document.getElementById('pane-albums').innerHTML = '';
    document.getElementById('pane-tracks').innerHTML = '';
 
-   const sr = await apiCall('getArtists');
+   let sr;
+   try {
+      sr = await apiCall('getArtists');
+      }
+   catch {
+      showError('Could not reach the server. Please check your connection.');
+      return;
+      }
+
    const indexes = sr.artists?.index ?? [];
    console.log('[artists] got', indexes.reduce((n, i) => n + i.artist.length, 0), 'artists');
 
@@ -620,7 +636,14 @@ async function viewPlaylists() {
    document.getElementById('pane-albums').innerHTML = '';
    document.getElementById('pane-tracks').innerHTML = '';
 
-   const sr = await apiCall('getPlaylists');
+   let sr;
+   try {
+      sr = await apiCall('getPlaylists');
+      }
+   catch {
+      showError('Could not reach the server. Please check your connection.');
+      return;
+      }
    const lists = sr.playlists?.playlist ?? [];
    console.log('[playlists] got', lists.length, 'playlists');
 
@@ -710,7 +733,14 @@ async function viewPlaylistTracks(playlistId, playlistName) {
    pane.innerHTML = '';
    document.getElementById('pane-tracks').innerHTML = '';
 
-   const sr = await apiCall('getPlaylist', {id: playlistId});
+   let sr;
+   try {
+      sr = await apiCall('getPlaylist', {id: playlistId});
+      }
+   catch {
+      showError('Could not reach the server. Please check your connection.');
+      return;
+      }
    const pl = sr.playlist;
    const songs = pl.entry ?? [];
    console.log('[playlist-tracks] got', songs.length, 'tracks');
@@ -793,7 +823,14 @@ async function viewAlbums(artistId, artistName) {
    pane.innerHTML = '';
    document.getElementById('pane-tracks').innerHTML = '';
 
-   const srArtist = await apiCall('getArtist', {id: artistId});
+   let srArtist;
+   try {
+      srArtist = await apiCall('getArtist', {id: artistId});
+      }
+   catch {
+      showError('Could not reach the server. Please check your connection.');
+      return;
+      }
    const albums   = srArtist.artist?.album ?? [];
    console.log('[albums] got', albums.length, 'albums');
 
@@ -1132,9 +1169,14 @@ function makeTrackActions(song) {
    starBtn.addEventListener('click', async e => {
       e.stopPropagation();
       const isStarred = starBtn.classList.contains('starred');
-      await apiCall(isStarred ? 'unstar' : 'star', {id: song.id});
-      starBtn.classList.toggle('starred');
-      starBtn.title = starBtn.classList.contains('starred') ? 'Unstar' : 'Star';
+      try {
+         await apiCall(isStarred ? 'unstar' : 'star', {id: song.id});
+         starBtn.classList.toggle('starred');
+         starBtn.title = starBtn.classList.contains('starred') ? 'Unstar' : 'Star';
+         }
+      catch {
+         showError('The action could not be completed. Please check your connection.');
+         }
       });
 
    const listBtn = document.createElement('span');
@@ -1355,6 +1397,9 @@ function setupPlayer() {
    document.getElementById('playlist-close-btn').addEventListener('click', () => {
       document.getElementById('playlist-modal').classList.add('hidden');
       });
+   document.getElementById('error-close-btn').addEventListener('click', () => {
+      document.getElementById('error-modal').classList.add('hidden');
+      });
    document.getElementById('playlist-new-btn').addEventListener('click', async () => {
       const name = document.getElementById('playlist-new-name').value.trim();
       if (!name) return;
@@ -1385,7 +1430,14 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
    const pane = document.getElementById('pane-tracks');
    pane.innerHTML = '';
 
-   const sr = await apiCall('getAlbum', {id: albumId});
+   let sr;
+   try {
+      sr = await apiCall('getAlbum', {id: albumId});
+      }
+   catch {
+      showError('Could not reach the server. Please check your connection.');
+      return;
+      }
    const album = sr.album ?? {};
    const songs = album.song ?? [];
    console.log('[tracks] got', songs.length, 'tracks');
@@ -1917,7 +1969,7 @@ let _searchTimer = null;
 
 function scheduleSearch() {
    clearTimeout(_searchTimer);
-   _searchTimer = setTimeout(() => runSearch().catch(err => console.error('[search]', err)), 320);
+   _searchTimer = setTimeout(() => runSearch().catch(() => {}), 320);
 }
 
 async function runSearch() {
@@ -1927,12 +1979,19 @@ async function runSearch() {
    const wantAlbums  = document.getElementById('sf-albums').checked;
    const wantSongs   = document.getElementById('sf-songs').checked;
 
-   const sr = await apiCall('search3', {
-      query:       q,
-      artistCount: wantArtists ? 20 : 0,
-      albumCount:  wantAlbums  ? 20 : 0,
-      songCount:   wantSongs   ? 20 : 0,
-      });
+   let sr;
+   try {
+      sr = await apiCall('search3', {
+         query:       q,
+         artistCount: wantArtists ? 20 : 0,
+         albumCount:  wantAlbums  ? 20 : 0,
+         songCount:   wantSongs   ? 20 : 0,
+         });
+      }
+   catch {
+      showError('Could not reach the server. Please check your connection.');
+      return;
+      }
    renderSearchResults(sr.searchResult3 ?? {});
 }
 
