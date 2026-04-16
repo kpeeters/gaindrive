@@ -181,6 +181,8 @@ async function showView(name) {
       await viewArtists();
       } else if (name === 'playlists') {
       await viewPlaylists();
+      } else if (name === 'admin') {
+      await viewAdmin();
       } else {
       document.getElementById('pane-artists').innerHTML =
          `<p style="color:var(--text-dim)">${name}</p>`;
@@ -189,6 +191,98 @@ async function showView(name) {
       paneNav.slideTo(0);
       }
 }
+
+async function viewAdmin() {
+   const pane = document.getElementById('pane-artists');
+   document.getElementById('pane-albums').innerHTML = '';
+   document.getElementById('pane-tracks').innerHTML = '';
+   pane.innerHTML = '';
+   paneNav.slideTo(0);
+
+   const hdr = document.createElement('div');
+   hdr.className = 'view-header';
+   const h1 = document.createElement('h1');
+   h1.className = 'view-title';
+   h1.textContent = 'Admin';
+   hdr.appendChild(h1);
+   pane.appendChild(hdr);
+
+   const section = document.createElement('div');
+   section.className = 'upload-section';
+
+   const label = document.createElement('p');
+   label.textContent = 'Upload a music archive (zip, tar, tar.gz):';
+   section.appendChild(label);
+
+   const fileInput = document.createElement('input');
+   fileInput.type   = 'file';
+   fileInput.accept = '.zip,.tar,.tar.gz,.tgz';
+   section.appendChild(fileInput);
+
+   const uploadBtn = document.createElement('button');
+   uploadBtn.textContent = 'Upload';
+   uploadBtn.className   = 'upload-btn';
+   section.appendChild(uploadBtn);
+
+   const progress = document.createElement('progress');
+   progress.value  = 0;
+   progress.max    = 100;
+   progress.hidden = true;
+   section.appendChild(progress);
+
+   const status = document.createElement('p');
+   status.className = 'upload-status';
+   section.appendChild(status);
+
+   pane.appendChild(section);
+
+   uploadBtn.addEventListener('click', () => {
+      const file = fileInput.files[0];
+      if (!file) { status.textContent = 'No file selected.'; return; }
+
+      const {server, user, password} = creds.load();
+      const p = new URLSearchParams({
+         u: user, p: password, v: '1.16.1', c: 'gaindrive-web', f: 'json'
+         });
+      const url = `${server}/upload?${p}`;
+
+      const fd = new FormData();
+      fd.append('file', file);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', url);
+
+      progress.hidden = false;
+      progress.value  = 0;
+      status.textContent = '';
+
+      xhr.upload.onprogress = e => {
+         if (e.lengthComputable)
+            progress.value = Math.round(e.loaded / e.total * 100);
+         };
+
+      xhr.onload = () => {
+         progress.hidden = true;
+         try {
+            const j = JSON.parse(xhr.responseText);
+            if (j.status === 'ok')
+               status.textContent = `Uploaded: ${j.filename}`;
+            else
+               status.textContent = `Error: ${j.message}`;
+            }
+         catch {
+            status.textContent = `Unexpected response (HTTP ${xhr.status}).`;
+            }
+         };
+
+      xhr.onerror = () => {
+         progress.hidden = true;
+         status.textContent = 'Network error during upload.';
+         };
+
+      xhr.send(fd);
+      });
+   }
 
 async function viewArtists() {
    console.log('[artists] loading');

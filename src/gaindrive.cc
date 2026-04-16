@@ -3,6 +3,8 @@
 #include "streamer.hh"
 #include "embedded_web.hh"
 
+#include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -811,12 +813,17 @@ static void handle_album_list(const httplib::Request& req, httplib::Response& re
 
 GainDrive::GainDrive(const std::string& db_path,
                      const std::string& music_root,
+                     const std::string& upload_dir,
                      bool no_scan,
                      bool debug,
                      bool flat_multi_disc)
-	: debug_(debug), flat_multi_disc_(flat_multi_disc), store_(db_path, music_root),
-	  watcher_(store_, music_root)
+	: debug_(debug), flat_multi_disc_(flat_multi_disc), upload_dir_(upload_dir),
+	  store_(db_path, music_root), watcher_(store_, music_root)
 	{
+	namespace fs = std::filesystem;
+	if (!fs::exists(upload_dir_))
+		fs::create_directories(upload_dir_);
+
 	// Normalise /rest/foo → /rest/foo.view so clients that omit the suffix still work.
 	server_.set_pre_routing_handler([](const httplib::Request& req, httplib::Response&) {
 		auto& path = const_cast<httplib::Request&>(req).path;
@@ -2522,6 +2529,57 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
+		});
+
+	// Upload a music archive (zip / tar / tar.gz / tgz) to the staging directory.
+	server_.Post("/upload", [this](const httplib::Request& req, httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto json_err = [&](const std::string& msg) {
+			nlohmann::json j;
+			j["status"]  = "error";
+			j["message"] = msg;
+			res.status = 400;
+			res.set_content(j.dump(), "application/json");
+			};
+
+		if (!req.has_file("file")) { json_err("Missing file part."); return; }
+		const auto& fp = req.get_file_value("file");
+
+		// Validate extension.
+		std::string name = fp.filename;
+		bool ok = name.ends_with(".zip")
+		       || name.ends_with(".tar")
+		       || name.ends_with(".tar.gz")
+		       || name.ends_with(".tgz");
+		if (!ok) { json_err("Unsupported file type. Use zip, tar, tar.gz, or tgz."); return; }
+
+		// Build a timestamped, filesystem-safe destination name.
+		std::string safe;
+		for (char c : name)
+			safe += (std::isalnum(c) || c == '.' || c == '-' || c == '_') ? c : '_';
+
+		auto now = std::chrono::system_clock::now();
+		auto tt  = std::chrono::system_clock::to_time_t(now);
+		char ts[32];
+		std::strftime(ts, sizeof(ts), "%Y%m%dT%H%M%S", std::gmtime(&tt));
+		std::string dest_name = std::string(ts) + "_" + safe;
+
+		namespace fs = std::filesystem;
+		fs::path dest = fs::path(upload_dir_) / dest_name;
+		{
+		std::ofstream out(dest, std::ios::binary | std::ios::trunc);
+		if (!out) { json_err("Failed to write file to upload directory."); return; }
+		out.write(fp.content.data(), (std::streamsize)fp.content.size());
+		}
+
+		std::cout << stamp() << "Upload received: " << dest_name
+		          << " (" << fp.content.size() << " bytes)" << std::endl;
+
+		nlohmann::json j;
+		j["status"]   = "ok";
+		j["filename"] = dest_name;
+		res.set_content(j.dump(), "application/json");
 		});
 
 	// Catch-all for endpoints not yet implemented.

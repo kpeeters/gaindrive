@@ -11,6 +11,7 @@ class GainDrive {
 	public:
 		GainDrive(const std::string& db_path,
 		          const std::string& music_root,
+		          const std::string& upload_dir,
 		          bool no_scan,
 		          bool debug = false,
 		          bool flat_multi_disc = true);
@@ -19,6 +20,7 @@ class GainDrive {
 	private:
 		bool            debug_;
 		bool            flat_multi_disc_;
+		std::string     upload_dir_;
 		MediaStore      store_;
 		CastManager     cast_manager_;
 		FolderWatcher   watcher_;

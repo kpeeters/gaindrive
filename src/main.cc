@@ -17,6 +17,7 @@ int main(int argc, char* argv[])
 		("config",     "Path to config file",         cxxopts::value<std::string>()->default_value("/etc/gaindrive.conf"))
 		("db",         "Path to database file",       cxxopts::value<std::string>()->default_value("/var/lib/gaindrive/gaindrive.db"))
 		("music-root", "Root music directory",        cxxopts::value<std::string>()->default_value("/music"))
+		("upload-dir", "Directory for uploaded archives", cxxopts::value<std::string>()->default_value("/tmp/gaindrive-uploads"))
 		("no-scan",    "Skip startup filesystem scan")
 		("debug",      "Print all API responses to stdout")
 		("add-user",   "Create a user and exit",      cxxopts::value<std::string>())
@@ -33,7 +34,8 @@ int main(int argc, char* argv[])
 	std::string host       = args["host"].as<std::string>();
 	int         port       = args["port"].as<int>();
 	std::string db_path    = args["db"].as<std::string>();
-	std::string music_root = args["music-root"].as<std::string>();
+	std::string music_root  = args["music-root"].as<std::string>();
+	std::string upload_dir  = args["upload-dir"].as<std::string>();
 	bool        no_scan          = args.count("no-scan") > 0;
 	bool        debug            = args.count("debug")   > 0;
 	bool        flat_multi_disc  = true;
@@ -46,7 +48,8 @@ int main(int argc, char* argv[])
 			nlohmann::json cfg = nlohmann::json::parse(cfg_file);
 			if (cfg.contains("host"))       host       = cfg["host"];
 			if (cfg.contains("db_path"))    db_path    = cfg["db_path"];
-			if (cfg.contains("music_root")) music_root = cfg["music_root"];
+			if (cfg.contains("music_root"))  music_root  = cfg["music_root"];
+			if (cfg.contains("upload_dir"))  upload_dir  = cfg["upload_dir"];
 			// CLI flags take precedence over config for port.
 			if (cfg.contains("port") && !args.count("port")) port = cfg["port"];
 			if (cfg.contains("flat_multi_disc")) flat_multi_disc = cfg["flat_multi_disc"].get<bool>();
@@ -71,7 +74,7 @@ int main(int argc, char* argv[])
 		return ok ? 0 : 1;
 		}
 
-	GainDrive gd(db_path, music_root, no_scan, debug, flat_multi_disc);
+	GainDrive gd(db_path, music_root, upload_dir, no_scan, debug, flat_multi_disc);
 	gd.listen(host, port);
 
 	return 0;
