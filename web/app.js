@@ -247,7 +247,9 @@ async function viewSettings() {
       const sr = await apiCall('getUser', {username: creds.load().user});
       userInfo = sr.user;
       }
-   catch { /* non-fatal — degrade gracefully */ }
+   catch {
+      showError('Could not reach the server. Please check your connection.');
+      }
 
    // ── Upload section — visible if uploadRole or adminRole ────────────────
 
@@ -387,6 +389,7 @@ async function viewSettings() {
             }
          }
       catch (e) {
+         showError('Could not reach the server. Please check your connection.');
          userList.textContent = `Error loading users: ${e.message}`;
          }
       }
