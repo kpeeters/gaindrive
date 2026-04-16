@@ -207,38 +207,40 @@ async function viewAdmin() {
    hdr.appendChild(h1);
    pane.appendChild(hdr);
 
-   const section = document.createElement('div');
-   section.className = 'upload-section';
+   // ── Upload section ──────────────────────────────────────────────────────
 
-   const label = document.createElement('p');
-   label.textContent = 'Upload a music archive (zip, tar, tar.gz):';
-   section.appendChild(label);
+   const uploadSection = document.createElement('div');
+   uploadSection.className = 'upload-section';
+
+   const uploadLabel = document.createElement('p');
+   uploadLabel.textContent = 'Upload a music archive (zip, tar, tar.gz):';
+   uploadSection.appendChild(uploadLabel);
 
    const fileInput = document.createElement('input');
    fileInput.type   = 'file';
    fileInput.accept = '.zip,.tar,.tar.gz,.tgz';
-   section.appendChild(fileInput);
+   uploadSection.appendChild(fileInput);
 
    const uploadBtn = document.createElement('button');
    uploadBtn.textContent = 'Upload';
    uploadBtn.className   = 'upload-btn';
-   section.appendChild(uploadBtn);
+   uploadSection.appendChild(uploadBtn);
 
    const progress = document.createElement('progress');
    progress.value  = 0;
    progress.max    = 100;
    progress.hidden = true;
-   section.appendChild(progress);
+   uploadSection.appendChild(progress);
 
-   const status = document.createElement('p');
-   status.className = 'upload-status';
-   section.appendChild(status);
+   const uploadStatus = document.createElement('p');
+   uploadStatus.className = 'upload-status';
+   uploadSection.appendChild(uploadStatus);
 
-   pane.appendChild(section);
+   pane.appendChild(uploadSection);
 
    uploadBtn.addEventListener('click', () => {
       const file = fileInput.files[0];
-      if (!file) { status.textContent = 'No file selected.'; return; }
+      if (!file) { uploadStatus.textContent = 'No file selected.'; return; }
 
       const {server, user, password} = creds.load();
       const p = new URLSearchParams({
@@ -254,7 +256,7 @@ async function viewAdmin() {
 
       progress.hidden = false;
       progress.value  = 0;
-      status.textContent = '';
+      uploadStatus.textContent = '';
 
       xhr.upload.onprogress = e => {
          if (e.lengthComputable)
@@ -266,21 +268,238 @@ async function viewAdmin() {
          try {
             const j = JSON.parse(xhr.responseText);
             if (j.status === 'ok')
-               status.textContent = `Uploaded: ${j.filename}`;
+               uploadStatus.textContent = `Uploaded: ${j.filename}`;
             else
-               status.textContent = `Error: ${j.message}`;
+               uploadStatus.textContent = `Error: ${j.message}`;
             }
          catch {
-            status.textContent = `Unexpected response (HTTP ${xhr.status}).`;
+            uploadStatus.textContent = `Unexpected response (HTTP ${xhr.status}).`;
             }
          };
 
       xhr.onerror = () => {
          progress.hidden = true;
-         status.textContent = 'Network error during upload.';
+         uploadStatus.textContent = 'Network error during upload.';
          };
 
       xhr.send(fd);
+      });
+
+   // ── Users section ───────────────────────────────────────────────────────
+
+   const userSection = document.createElement('div');
+   userSection.className = 'admin-section';
+
+   const userHeading = document.createElement('h2');
+   userHeading.className = 'admin-section-title';
+   userHeading.textContent = 'Users';
+   userSection.appendChild(userHeading);
+
+   const userList = document.createElement('div');
+   userList.className = 'user-list';
+   userSection.appendChild(userList);
+
+   const addBtn = document.createElement('button');
+   addBtn.textContent = 'Add user';
+   addBtn.className   = 'upload-btn';
+   userSection.appendChild(addBtn);
+
+   pane.appendChild(userSection);
+
+   async function refreshUsers() {
+      userList.innerHTML = '';
+      try {
+         const sr = await apiCall('getUsers');
+         // getUsers returns {users: {user: [...]}} — user may be absent if empty.
+         const users = sr.users?.user ?? [];
+         const arr = Array.isArray(users) ? users : [users];
+         for (const u of arr) {
+            const row = document.createElement('div');
+            row.className = 'user-row';
+
+            const name = document.createElement('span');
+            name.className   = 'user-row-name';
+            name.textContent = u.username;
+            row.appendChild(name);
+
+            const badges = document.createElement('span');
+            badges.className = 'user-badges';
+            if (u.adminRole)  badges.appendChild(makeBadge('Admin',    'badge-admin'));
+            if (u.uploadRole) badges.appendChild(makeBadge('Upload',   'badge-upload'));
+            if (u.disabled)   badges.appendChild(makeBadge('Disabled', 'badge-disabled'));
+            row.appendChild(badges);
+
+            row.addEventListener('click', () => viewUserEdit(u));
+            userList.appendChild(row);
+            }
+         }
+      catch (e) {
+         userList.textContent = `Error loading users: ${e.message}`;
+         }
+      }
+
+   addBtn.addEventListener('click', () => viewUserEdit(null, refreshUsers));
+
+   // Attach refreshUsers so viewUserEdit can call it back.
+   await refreshUsers();
+
+   // Expose so viewUserEdit can trigger a refresh after save.
+   pane._refreshUsers = refreshUsers;
+   }
+
+function makeBadge(text, cls) {
+   const b = document.createElement('span');
+   b.className   = `user-badge ${cls}`;
+   b.textContent = text;
+   return b;
+   }
+
+async function viewUserEdit(user, refreshFn) {
+   // refreshFn is a callback to reload the user list; if not provided, look for it
+   // on the pane element (set by viewAdmin).
+   const adminPane = document.getElementById('pane-artists');
+   const refresh = refreshFn ?? adminPane._refreshUsers;
+
+   const pane = document.getElementById('pane-albums');
+   document.getElementById('pane-tracks').innerHTML = '';
+   pane.innerHTML = '';
+   paneNav.slideTo(1);
+
+   const isNew = (user === null);
+
+   const hdr = document.createElement('div');
+   hdr.className = 'view-header';
+   const h1 = document.createElement('h1');
+   h1.className = 'view-title';
+   h1.textContent = isNew ? 'New user' : user.username;
+   hdr.appendChild(h1);
+   pane.appendChild(hdr);
+
+   const form = document.createElement('div');
+   form.className = 'user-edit-form';
+
+   function addField(labelText, inputEl) {
+      const row = document.createElement('div');
+      row.className = 'form-row';
+      const lbl = document.createElement('label');
+      lbl.textContent = labelText;
+      lbl.appendChild(inputEl);
+      row.appendChild(lbl);
+      form.appendChild(row);
+      return inputEl;
+      }
+
+   function textInput(value, placeholder, readonly) {
+      const el = document.createElement('input');
+      el.type        = 'text';
+      el.value       = value ?? '';
+      el.placeholder = placeholder ?? '';
+      if (readonly) el.readOnly = true;
+      return el;
+      }
+
+   function pwInput(placeholder) {
+      const el = document.createElement('input');
+      el.type        = 'password';
+      el.placeholder = placeholder ?? '';
+      el.autocomplete = 'new-password';
+      return el;
+      }
+
+   function checkInput(checked) {
+      const el = document.createElement('input');
+      el.type    = 'checkbox';
+      el.checked = !!checked;
+      return el;
+      }
+
+   function numInput(value) {
+      const el = document.createElement('input');
+      el.type  = 'number';
+      el.min   = '0';
+      el.value = value ?? 0;
+      return el;
+      }
+
+   const fUsername   = addField('Username',       textInput(user?.username,  '',                   !isNew));
+   const fPassword   = addField('Password',       pwInput(isNew ? '' : 'Leave blank to keep current'));
+   const fEmail      = addField('Email',          textInput(user?.email,     ''));
+   const fAdmin      = addField('Admin',          checkInput(user?.adminRole));
+   const fUpload     = addField('Upload allowed', checkInput(user?.uploadRole));
+   const fDisabled   = addField('Disabled',       checkInput(user?.disabled));
+   const fMaxBitrate = addField('Max bitrate (0 = unlimited)', numInput(user?.maxBitRate ?? 0));
+
+   const actions = document.createElement('div');
+   actions.className = 'form-actions';
+
+   const saveBtn = document.createElement('button');
+   saveBtn.textContent = 'Save';
+   saveBtn.className   = 'upload-btn';
+   actions.appendChild(saveBtn);
+
+   const cancelBtn = document.createElement('button');
+   cancelBtn.textContent = 'Cancel';
+   cancelBtn.className   = 'form-cancel-btn';
+   actions.appendChild(cancelBtn);
+
+   const formStatus = document.createElement('p');
+   formStatus.className = 'upload-status';
+   actions.appendChild(formStatus);
+
+   form.appendChild(actions);
+   pane.appendChild(form);
+
+   cancelBtn.addEventListener('click', () => {
+      pane.innerHTML = '';
+      paneNav.slideTo(0);
+      });
+
+   saveBtn.addEventListener('click', async () => {
+      formStatus.textContent = '';
+      saveBtn.disabled = true;
+
+      const {server, user: authUser, password: authPass} = creds.load();
+      const base = new URLSearchParams({
+         u: authUser, p: authPass, v: '1.16.1', c: 'gaindrive-web', f: 'json'
+         });
+
+      try {
+         const params = new URLSearchParams(base);
+         params.set('username',    fUsername.value.trim());
+         params.set('email',       fEmail.value.trim());
+         params.set('adminRole',   fAdmin.checked   ? 'true' : 'false');
+         params.set('uploadRole',  fUpload.checked  ? 'true' : 'false');
+         params.set('disabled',    fDisabled.checked ? 'true' : 'false');
+         params.set('maxBitRate',  fMaxBitrate.value);
+
+         if (isNew) {
+            if (!fUsername.value.trim()) { formStatus.textContent = 'Username is required.'; saveBtn.disabled = false; return; }
+            if (!fPassword.value)        { formStatus.textContent = 'Password is required for new users.'; saveBtn.disabled = false; return; }
+            params.set('password', fPassword.value);
+            const r = await fetch(`${server}/rest/createUser.view?${params}`);
+            const d = await r.json();
+            if (d['subsonic-response'].status !== 'ok')
+               throw new Error(d['subsonic-response'].error?.message ?? 'Unknown error');
+            }
+         else {
+            if (fPassword.value) params.set('password', fPassword.value);
+            const r = await fetch(`${server}/rest/updateUser.view?${params}`);
+            const d = await r.json();
+            if (d['subsonic-response'].status !== 'ok')
+               throw new Error(d['subsonic-response'].error?.message ?? 'Unknown error');
+            }
+
+         formStatus.textContent = 'Saved.';
+         if (refresh) await refresh();
+         // Update panel title if we just renamed (new user).
+         h1.textContent = fUsername.value.trim();
+         }
+      catch (e) {
+         formStatus.textContent = `Error: ${e.message}`;
+         }
+      finally {
+         saveBtn.disabled = false;
+         }
       });
    }
 

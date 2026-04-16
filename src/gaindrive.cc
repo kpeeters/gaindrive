@@ -908,11 +908,16 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string body;
 		if (use_json)
 			body = subsonic_ok_json([](nlohmann::json& r) {
-				r["openSubsonicExtensions"] = nlohmann::json::array();
+				r["openSubsonicExtensions"] = {{{"name", "gaindrive"}, {"versions", {1}}}};
 				});
 		else
 			body = subsonic_ok([](XMLDocument& doc, XMLElement* root) {
-				root->InsertEndChild(doc.NewElement("openSubsonicExtensions"));
+				auto* exts = doc.NewElement("openSubsonicExtensions");
+				auto* ext  = doc.NewElement("extension");
+				ext->SetAttribute("name", "gaindrive");
+				ext->SetAttribute("versions", "1");
+				exts->InsertEndChild(ext);
+				root->InsertEndChild(exts);
 				});
 		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
@@ -987,14 +992,16 @@ GainDrive::GainDrive(const std::string& db_path,
 					{"adminRole",         ui->is_admin},
 					{"settingsRole",      ui->is_admin},
 					{"downloadRole",      true},
-					{"uploadRole",        false},
+					{"uploadRole",        ui->upload_allowed},
 					{"playlistRole",      true},
 					{"coverArtRole",      true},
 					{"commentRole",       false},
 					{"podcastRole",       false},
 					{"streamRole",        true},
 					{"jukeboxRole",       false},
-					{"shareRole",         false}
+					{"shareRole",         false},
+					{"maxBitRate",        ui->max_bitrate},
+					{"disabled",          ui->disabled}
 					};
 				});
 		else
@@ -1006,7 +1013,7 @@ GainDrive::GainDrive(const std::string& db_path,
 				u->SetAttribute("adminRole",         ui->is_admin);
 				u->SetAttribute("settingsRole",      ui->is_admin);
 				u->SetAttribute("downloadRole",      true);
-				u->SetAttribute("uploadRole",        false);
+				u->SetAttribute("uploadRole",        ui->upload_allowed);
 				u->SetAttribute("playlistRole",      true);
 				u->SetAttribute("coverArtRole",      true);
 				u->SetAttribute("commentRole",       false);
@@ -1014,8 +1021,193 @@ GainDrive::GainDrive(const std::string& db_path,
 				u->SetAttribute("streamRole",        true);
 				u->SetAttribute("jukeboxRole",       false);
 				u->SetAttribute("shareRole",         false);
+				u->SetAttribute("maxBitRate",        ui->max_bitrate);
+				u->SetAttribute("disabled",          ui->disabled);
 				root->InsertEndChild(u);
 				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// getUsers — returns all users; admin only.
+	server_.Get("/rest/getUsers.view", [this](const httplib::Request& req,
+	                                           httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+
+		auto ri = store_.get_user(req.params.find("u")->second);
+		if (!ri || !ri->is_admin) { err(50, "User is not authorized for this operation."); return; }
+
+		auto users = store_.list_users();
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&users](nlohmann::json& r) {
+				nlohmann::json arr = nlohmann::json::array();
+				for (const auto& u : users)
+					arr.push_back({
+						{"username",          u.username},
+						{"email",             u.email},
+						{"scrobblingEnabled", false},
+						{"adminRole",         u.is_admin},
+						{"settingsRole",      u.is_admin},
+						{"downloadRole",      true},
+						{"uploadRole",        u.upload_allowed},
+						{"playlistRole",      true},
+						{"coverArtRole",      true},
+						{"commentRole",       false},
+						{"podcastRole",       false},
+						{"streamRole",        true},
+						{"jukeboxRole",       false},
+						{"shareRole",         false},
+						{"maxBitRate",        u.max_bitrate},
+						{"disabled",          u.disabled}
+						});
+				r["users"] = {{"user", arr}};
+				});
+		else
+			body = subsonic_ok([&users](XMLDocument& doc, XMLElement* root) {
+				auto* us = doc.NewElement("users");
+				for (const auto& u : users) {
+					auto* ue = doc.NewElement("user");
+					ue->SetAttribute("username",          u.username.c_str());
+					ue->SetAttribute("email",             u.email.c_str());
+					ue->SetAttribute("scrobblingEnabled", false);
+					ue->SetAttribute("adminRole",         u.is_admin);
+					ue->SetAttribute("settingsRole",      u.is_admin);
+					ue->SetAttribute("downloadRole",      true);
+					ue->SetAttribute("uploadRole",        u.upload_allowed);
+					ue->SetAttribute("playlistRole",      true);
+					ue->SetAttribute("coverArtRole",      true);
+					ue->SetAttribute("commentRole",       false);
+					ue->SetAttribute("podcastRole",       false);
+					ue->SetAttribute("streamRole",        true);
+					ue->SetAttribute("jukeboxRole",       false);
+					ue->SetAttribute("shareRole",         false);
+					ue->SetAttribute("maxBitRate",        u.max_bitrate);
+					ue->SetAttribute("disabled",          u.disabled);
+					us->InsertEndChild(ue);
+					}
+				root->InsertEndChild(us);
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// createUser — creates a new user; admin only.
+	server_.Get("/rest/createUser.view", [this](const httplib::Request& req,
+	                                             httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+		auto qp = [&](const std::string& k) -> std::string {
+			auto it = req.params.find(k); return it != req.params.end() ? it->second : "";
+			};
+
+		auto ri = store_.get_user(qp("u"));
+		if (!ri || !ri->is_admin) { err(50, "User is not authorized for this operation."); return; }
+
+		std::string username = qp("username");
+		std::string password = qp("password");
+		if (username.empty()) { err(10, "Required parameter missing: username."); return; }
+		if (password.empty()) { err(10, "Required parameter missing: password."); return; }
+
+		bool is_admin       = (qp("adminRole")  == "true");
+		bool upload_allowed = (qp("uploadRole") == "true");
+		bool disabled       = (qp("disabled")   == "true");
+		int  max_bitrate    = 0;
+		if (!qp("maxBitRate").empty()) max_bitrate = std::stoi(qp("maxBitRate"));
+
+		if (!store_.add_user(username, password, is_admin)) {
+			err(0, "User already exists.");
+			return;
+			}
+		store_.update_user(username, "", qp("email"), is_admin, max_bitrate, upload_allowed, disabled);
+
+		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// updateUser — updates an existing user; admin only.
+	server_.Get("/rest/updateUser.view", [this](const httplib::Request& req,
+	                                             httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+		auto qp = [&](const std::string& k) -> std::string {
+			auto it = req.params.find(k); return it != req.params.end() ? it->second : "";
+			};
+
+		auto ri = store_.get_user(qp("u"));
+		if (!ri || !ri->is_admin) { err(50, "User is not authorized for this operation."); return; }
+
+		std::string username = qp("username");
+		if (username.empty()) { err(10, "Required parameter missing: username."); return; }
+
+		// Fetch current values so unspecified params keep their existing value.
+		auto existing = store_.get_user(username);
+		if (!existing) { err(70, "User not found."); return; }
+
+		bool is_admin       = qp("adminRole").empty()  ? existing->is_admin       : (qp("adminRole")  == "true");
+		bool upload_allowed = qp("uploadRole").empty() ? existing->upload_allowed : (qp("uploadRole") == "true");
+		bool disabled       = qp("disabled").empty()   ? existing->disabled       : (qp("disabled")   == "true");
+		int  max_bitrate    = qp("maxBitRate").empty()  ? existing->max_bitrate    : std::stoi(qp("maxBitRate"));
+		std::string email   = qp("email").empty()       ? existing->email          : qp("email");
+		std::string pw      = qp("password");
+
+		store_.update_user(username, pw, email, is_admin, max_bitrate, upload_allowed, disabled);
+
+		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// changePassword — change a user's password; admins can change any user's,
+	// regular users can only change their own.
+	server_.Get("/rest/changePassword.view", [this](const httplib::Request& req,
+	                                                 httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+		auto qp = [&](const std::string& k) -> std::string {
+			auto it = req.params.find(k); return it != req.params.end() ? it->second : "";
+			};
+
+		std::string requester = qp("u");
+		std::string target    = qp("username");
+		std::string password  = qp("password");
+		if (target.empty())   { err(10, "Required parameter missing: username."); return; }
+		if (password.empty()) { err(10, "Required parameter missing: password."); return; }
+
+		if (target != requester) {
+			auto ri = store_.get_user(requester);
+			if (!ri || !ri->is_admin) { err(50, "User is not authorized for this operation."); return; }
+			}
+
+		auto existing = store_.get_user(target);
+		if (!existing) { err(70, "User not found."); return; }
+
+		store_.update_user(target, password, existing->email, existing->is_admin,
+		                   existing->max_bitrate, existing->upload_allowed, existing->disabled);
+
+		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});

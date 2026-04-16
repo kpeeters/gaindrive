@@ -240,14 +240,16 @@ void MediaStore::create_schema()
 	// Client/user data tables (gaindrive-client.db, attached as "client" schema).
 	db_music_.exec(R"(
 		CREATE TABLE IF NOT EXISTS client.users (
-			id           INTEGER PRIMARY KEY,
-			username     TEXT NOT NULL UNIQUE,
-			password_enc TEXT NOT NULL,
-			email        TEXT,
-			is_admin     INTEGER DEFAULT 0,
-			max_bitrate  INTEGER DEFAULT 0,
-			created      DATETIME DEFAULT CURRENT_TIMESTAMP,
-			last_access  DATETIME
+			id             INTEGER PRIMARY KEY,
+			username       TEXT NOT NULL UNIQUE,
+			password_enc   TEXT NOT NULL,
+			email          TEXT,
+			is_admin       INTEGER DEFAULT 0,
+			max_bitrate    INTEGER DEFAULT 0,
+			created        DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_access    DATETIME,
+			upload_allowed INTEGER DEFAULT 0,
+			disabled       INTEGER DEFAULT 0
 		);
 
 		CREATE TABLE IF NOT EXISTS client.stars (
@@ -326,6 +328,10 @@ void MediaStore::create_schema()
 	try { db_music_.exec("ALTER TABLE artist_info_cache ADD COLUMN allmusic_url TEXT NOT NULL DEFAULT ''"); }
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE album_info_cache ADD COLUMN allmusic_url TEXT NOT NULL DEFAULT ''"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE client.users ADD COLUMN upload_allowed INTEGER DEFAULT 0"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE client.users ADD COLUMN disabled INTEGER DEFAULT 0"); }
 	catch (const SQLite::Exception&) {}
 
 	// Backfill song_artists from album_artists for any songs that were scanned
@@ -933,14 +939,77 @@ std::optional<MediaStore::UserInfo> MediaStore::get_user(const std::string& user
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement sel(db_music_,
-		"SELECT username, email, is_admin FROM client.users WHERE username = ?");
+		"SELECT username, email, is_admin, max_bitrate, upload_allowed, disabled"
+		" FROM client.users WHERE username = ?");
 	sel.bind(1, username);
 	if (!sel.executeStep()) return std::nullopt;
 	UserInfo u;
-	u.username = sel.getColumn(0).getString();
-	u.email    = sel.getColumn(1).isNull() ? "" : sel.getColumn(1).getString();
-	u.is_admin = sel.getColumn(2).getInt() != 0;
+	u.username       = sel.getColumn(0).getString();
+	u.email          = sel.getColumn(1).isNull() ? "" : sel.getColumn(1).getString();
+	u.is_admin       = sel.getColumn(2).getInt() != 0;
+	u.max_bitrate    = sel.getColumn(3).getInt();
+	u.upload_allowed = sel.getColumn(4).getInt() != 0;
+	u.disabled       = sel.getColumn(5).getInt() != 0;
 	return u;
+	}
+
+std::vector<MediaStore::UserInfo> MediaStore::list_users()
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement sel(db_music_,
+		"SELECT username, email, is_admin, max_bitrate, upload_allowed, disabled"
+		" FROM client.users ORDER BY username");
+	std::vector<UserInfo> result;
+	while (sel.executeStep()) {
+		UserInfo u;
+		u.username       = sel.getColumn(0).getString();
+		u.email          = sel.getColumn(1).isNull() ? "" : sel.getColumn(1).getString();
+		u.is_admin       = sel.getColumn(2).getInt() != 0;
+		u.max_bitrate    = sel.getColumn(3).getInt();
+		u.upload_allowed = sel.getColumn(4).getInt() != 0;
+		u.disabled       = sel.getColumn(5).getInt() != 0;
+		result.push_back(u);
+		}
+	return result;
+	}
+
+bool MediaStore::update_user(const std::string& username,
+                              const std::string& new_password,
+                              const std::string& email,
+                              bool is_admin,
+                              int  max_bitrate,
+                              bool upload_allowed,
+                              bool disabled)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	if (new_password.empty()) {
+		SQLite::Statement upd(db_music_,
+			"UPDATE client.users"
+			" SET email=?, is_admin=?, max_bitrate=?, upload_allowed=?, disabled=?"
+			" WHERE username=?");
+		upd.bind(1, email);
+		upd.bind(2, is_admin       ? 1 : 0);
+		upd.bind(3, max_bitrate);
+		upd.bind(4, upload_allowed ? 1 : 0);
+		upd.bind(5, disabled       ? 1 : 0);
+		upd.bind(6, username);
+		upd.exec();
+		}
+	else {
+		SQLite::Statement upd(db_music_,
+			"UPDATE client.users"
+			" SET password_enc=?, email=?, is_admin=?, max_bitrate=?, upload_allowed=?, disabled=?"
+			" WHERE username=?");
+		upd.bind(1, new_password);
+		upd.bind(2, email);
+		upd.bind(3, is_admin       ? 1 : 0);
+		upd.bind(4, max_bitrate);
+		upd.bind(5, upload_allowed ? 1 : 0);
+		upd.bind(6, disabled       ? 1 : 0);
+		upd.bind(7, username);
+		upd.exec();
+		}
+	return db_music_.getChanges() > 0;
 	}
 
 bool MediaStore::validate_auth(const std::string& username,
@@ -950,10 +1019,12 @@ bool MediaStore::validate_auth(const std::string& username,
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement sel(db_music_,
-		"SELECT password_enc FROM client.users WHERE username = ?");
+		"SELECT password_enc, disabled FROM client.users WHERE username = ?");
 	sel.bind(1, username);
 	if (!sel.executeStep()) return false;
-	std::string stored = sel.getColumn(0).getString();
+	std::string stored   = sel.getColumn(0).getString();
+	bool        disabled = sel.getColumn(1).getInt() != 0;
+	if (disabled) return false;
 
 	bool ok = false;
 

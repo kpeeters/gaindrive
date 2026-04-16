@@ -1318,3 +1318,122 @@ body {
    font-size: 0.85rem;
    color: var(--text-dim);
    }
+
+/* ── Admin — users ──────────────────────────────────── */
+
+.admin-section {
+   padding: 1rem 1.5rem;
+   display: flex;
+   flex-direction: column;
+   gap: 0.75rem;
+   border-top: 1px solid var(--border);
+   }
+
+.admin-section-title {
+   font-size: 1rem;
+   font-weight: 600;
+   margin: 0;
+   color: var(--text);
+   }
+
+.user-list {
+   display: flex;
+   flex-direction: column;
+   gap: 0.25rem;
+   }
+
+.user-row {
+   display: flex;
+   align-items: center;
+   gap: 0.6rem;
+   padding: 0.45rem 0.6rem;
+   border-radius: 4px;
+   cursor: pointer;
+   }
+
+.user-row:hover { background: var(--surface); }
+
+.user-row-name {
+   flex: 1;
+   font-size: 0.95rem;
+   }
+
+.user-badges {
+   display: flex;
+   gap: 0.3rem;
+   flex-shrink: 0;
+   }
+
+.user-badge {
+   font-size: 0.7rem;
+   padding: 0.15rem 0.45rem;
+   border-radius: 999px;
+   font-weight: 600;
+   background: var(--accent);
+   color: var(--bg);
+   }
+
+.badge-admin    { background: var(--accent); }
+.badge-upload   { background: color-mix(in srgb, var(--accent) 60%, #4caf50); }
+.badge-disabled { background: var(--text-dim); }
+
+/* ── User edit form ─────────────────────────────────── */
+
+.user-edit-form {
+   padding: 1rem 1.5rem;
+   display: flex;
+   flex-direction: column;
+   gap: 0.75rem;
+   }
+
+.form-row label {
+   display: flex;
+   flex-direction: column;
+   gap: 0.3rem;
+   font-size: 0.85rem;
+   color: var(--text-dim);
+   }
+
+/* Checkboxes sit beside their label text rather than below. */
+.form-row label:has(input[type="checkbox"]) {
+   flex-direction: row;
+   align-items: center;
+   gap: 0.5rem;
+   color: var(--text);
+   }
+
+.form-row input[type="text"],
+.form-row input[type="password"],
+.form-row input[type="number"] {
+   padding: 0.35rem 0.6rem;
+   border: 1px solid var(--border);
+   border-radius: 4px;
+   background: var(--bg);
+   color: var(--text);
+   font-size: 0.9rem;
+   }
+
+.form-row input[readonly] {
+   opacity: 0.6;
+   cursor: not-allowed;
+   }
+
+.form-actions {
+   display: flex;
+   align-items: center;
+   gap: 0.75rem;
+   flex-wrap: wrap;
+   margin-top: 0.25rem;
+   }
+
+.form-cancel-btn {
+   padding: 0.4rem 1rem;
+   border-radius: 4px;
+   background: transparent;
+   color: var(--text);
+   border: 1px solid var(--border);
+   cursor: pointer;
+   font-size: 0.9rem;
+   }
+
+.form-cancel-btn:hover { background: var(--surface); }

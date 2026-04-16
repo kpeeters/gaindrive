@@ -33,9 +33,26 @@ class MediaStore {
 			std::string username;
 			std::string email;
 			bool        is_admin;
+			int         max_bitrate;
+			bool        upload_allowed;
+			bool        disabled;
 			};
 
 		std::optional<UserInfo> get_user(const std::string& username);
+
+		// Returns all users ordered by username.
+		std::vector<UserInfo> list_users();
+
+		// Update mutable fields of an existing user.
+		// Pass empty string for new_password to leave it unchanged.
+		// Returns false if username is not found.
+		bool update_user(const std::string& username,
+		                 const std::string& new_password,
+		                 const std::string& email,
+		                 bool is_admin,
+		                 int  max_bitrate,
+		                 bool upload_allowed,
+		                 bool disabled);
 
 		// Validates Subsonic auth params. Supply either password (from p=,
 		// possibly with "enc:" prefix) or token+salt (from t= and s=).
