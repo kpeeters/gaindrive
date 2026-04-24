@@ -277,12 +277,49 @@ body {
 }
 
 #sidebar-queue-list li {
-   padding: 0.3rem 1rem;
+   display: flex;
+   align-items: center;
+   padding: 0.3rem 0.5rem 0.3rem 1rem;
    font-size: 0.8rem;
    color: var(--text-dim);
+   cursor: pointer;
+   border-radius: 3px;
+   margin: 0 0.4rem;
+}
+
+#sidebar-queue-list li:hover {
+   color: var(--text);
+   background: var(--bg);
+}
+
+.sq-title {
+   flex: 1;
    white-space: nowrap;
    overflow: hidden;
    text-overflow: ellipsis;
+   min-width: 0;
+}
+
+.sq-remove {
+   flex-shrink: 0;
+   opacity: 0;
+   background: none;
+   border: none;
+   color: var(--text-dim);
+   cursor: pointer;
+   padding: 0 0.1rem;
+   margin-left: 0.3rem;
+   display: flex;
+   align-items: center;
+   border-radius: 3px;
+}
+
+#sidebar-queue-list li:hover .sq-remove {
+   opacity: 1;
+}
+
+.sq-remove:hover {
+   color: var(--error);
 }
 
 /* ── Pane viewport + sliding strip ─────────────────────── */

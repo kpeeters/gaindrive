@@ -1313,13 +1313,48 @@ function sidebarQueueUpdate() {
       }
    section.hidden = false;
    list.innerHTML = '';
-   upcoming.forEach(song => {
-      const li = document.createElement('li');
-      li.textContent = song.title;
-      li.title = song.artist ? `${song.artist} — ${song.title}` : song.title;
+   upcoming.forEach((song, i) => {
+      const qIdx = player.index + 1 + i;
+
+      const li  = document.createElement('li');
+      li.dataset.queueIndex = qIdx;
+
+      const title = document.createElement('span');
+      title.className   = 'sq-title';
+      title.textContent = song.title;
+      title.title       = song.artist ? `${song.artist} — ${song.title}` : song.title;
+
+      const btn = document.createElement('button');
+      btn.className = 'sq-remove';
+      btn.title     = 'Remove from queue';
+      btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+
+      li.appendChild(title);
+      li.appendChild(btn);
       list.appendChild(li);
       });
    }
+
+// Jump to a queued track (skipping over anything before it) or remove it.
+document.getElementById('sidebar-queue-list').addEventListener('click', e => {
+   const li = e.target.closest('li[data-queue-index]');
+   if (!li) return;
+   const qIdx = parseInt(li.dataset.queueIndex, 10);
+
+   if (e.target.closest('.sq-remove')) {
+      // Remove this entry from the queue.
+      player.queue.splice(qIdx, 1);
+      // Keep autoFrom consistent: if the removed slot was before the auto
+      // boundary, the boundary shifts down by one.
+      if (qIdx < player.autoFrom) player.autoFrom--;
+      sidebarQueueUpdate();
+      }
+   else {
+      // Jump to this track; everything before it is simply skipped.
+      player.index = qIdx;
+      playerPlay();
+      }
+   });
 
 // Click cover art in the player bar to navigate to the album's track listing.
 document.getElementById('player-cover').addEventListener('click', () => {
