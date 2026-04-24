@@ -24,7 +24,7 @@
    --text:         #e0e0e0;
    --text-dim:     #888;
    --error:        #e05555;
-   --sidebar-w:    180px;
+   --sidebar-w:    220px;
    --player-h:     72px;
    --bottom-nav-h: 52px;
 }
@@ -253,6 +253,36 @@ body {
 #sidebar a.active {
    background: var(--bg);
    color: var(--text);
+}
+
+/* ── Sidebar queue ──────────────────────────────────────── */
+
+#sidebar-queue {
+   margin-top: 1rem;
+   border-top: 1px solid var(--divider);
+   padding-top: 0.5rem;
+}
+
+.sidebar-queue-heading {
+   font-size: 0.7rem;
+   font-weight: 600;
+   letter-spacing: 0.06em;
+   text-transform: uppercase;
+   color: var(--text-dim);
+   padding: 0 1rem 0.4rem;
+}
+
+#sidebar-queue-list {
+   list-style: none;
+}
+
+#sidebar-queue-list li {
+   padding: 0.3rem 1rem;
+   font-size: 0.8rem;
+   color: var(--text-dim);
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
 }
 
 /* ── Pane viewport + sliding strip ─────────────────────── */

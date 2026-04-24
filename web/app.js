@@ -1245,6 +1245,7 @@ function playerEnqueue(song) {
       player.queue.splice(player.autoFrom);
    player.queue.push(song);
    player.autoFrom = player.queue.length;   // new entry is manual; no auto tail
+   sidebarQueueUpdate();
 }
 
 function playerPlay(offset = 0) {
@@ -1299,7 +1300,26 @@ function playerUpdateUI() {
             : [],
          });
       }
+   sidebarQueueUpdate();
 }
+
+function sidebarQueueUpdate() {
+   const section  = document.getElementById('sidebar-queue');
+   const list     = document.getElementById('sidebar-queue-list');
+   const upcoming = player.queue.slice(player.index + 1);
+   if (upcoming.length === 0) {
+      section.hidden = true;
+      return;
+      }
+   section.hidden = false;
+   list.innerHTML = '';
+   upcoming.forEach(song => {
+      const li = document.createElement('li');
+      li.textContent = song.title;
+      li.title = song.artist ? `${song.artist} — ${song.title}` : song.title;
+      list.appendChild(li);
+      });
+   }
 
 // Click cover art in the player bar to navigate to the album's track listing.
 document.getElementById('player-cover').addEventListener('click', () => {
