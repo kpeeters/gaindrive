@@ -861,6 +861,15 @@ void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
 		if (!t->genre().isEmpty())
 			genre = t->genre().toCString(true);
 		}
+	// Fall back to DISCNUMBER file tag when folder structure gives no disc info.
+	if (disc_number == 0 && !f.isNull()) {
+		auto props = f.file()->properties();
+		auto it = props.find("DISCNUMBER");
+		if (it != props.end() && !it->second.isEmpty()) {
+			try { disc_number = it->second.front().toInt(); }
+			catch (...) {}
+			}
+		}
 	// Strip leading track-number prefixes (e.g. "01 - ", "1. ") from title.
 	// Requires at least one separator char so bare numbers/years are left alone.
 	static const std::regex track_prefix(R"(^\d+[. -]+)");
@@ -2373,7 +2382,8 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 bool MediaStore::update_song_meta(int song_id,
                                    const std::optional<std::string>& title,
                                    const std::optional<int>& track_number,
-                                   const std::optional<int>& year)
+                                   const std::optional<int>& year,
+                                   const std::optional<int>& disc_number)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
@@ -2412,6 +2422,13 @@ bool MediaStore::update_song_meta(int song_id,
 		upd.bind(1, song_id);
 		upd.bind(2, song_id);
 		upd.exec();
+		}
+	if (disc_number) {
+		SQLite::Statement q(db_music_,
+			"UPDATE songs SET disc_number = ? WHERE id = ?");
+		q.bind(1, *disc_number);
+		q.bind(2, song_id);
+		q.exec();
 		}
 	return true;
 	}

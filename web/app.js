@@ -1594,6 +1594,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       const row = document.createElement('div');
       row.className = 'track-row';
       row.dataset.id   = song.id;
+      row.dataset.disc = song.discNumber ?? 1;
       row.dataset.year = song.year ?? '';
       row.dataset.dur  = song.duration ? fmtDuration(song.duration) : '';
 
@@ -1708,6 +1709,13 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
          titleInput.value = titleSpan.textContent;
          titleInput.dataset.orig = titleSpan.textContent;
 
+         const discInput = document.createElement('input');
+         discInput.type = 'number';
+         discInput.min  = '1';
+         discInput.className = 'track-disc-input';
+         discInput.value = row.dataset.disc;
+         discInput.dataset.orig = row.dataset.disc;
+
          const yearInput = document.createElement('input');
          yearInput.type = 'number';
          yearInput.min  = '0';
@@ -1719,18 +1727,19 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
          row.replaceChild(numInput,   numSpan);
          row.replaceChild(titleInput, titleSpan);
          row.replaceChild(yearInput,  durSpan);
+         row.insertBefore(discInput, yearInput);
 
          // Prevent row click (play) while editing.
          row.classList.add('editing');
          });
 
       // 'all' button: copies the first track's year to all others on the same disc.
-      function makeAllBtn(discHeading) {
+      // 'all' for year: copies first year within the same disc section.
+      function makeYearAllBtn(discHeading) {
          const btn = document.createElement('button');
          btn.className = 'year-all-btn';
          btn.textContent = 'all';
          btn.addEventListener('click', () => {
-            // Walk forward from discHeading (or start of list) until the next disc.
             let el = discHeading ? discHeading.nextElementSibling
                                  : pane.querySelector('.track-row');
             let firstYear = null;
@@ -1748,23 +1757,46 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
          return btn;
          }
 
+      // 'all' for CD: copies first disc value to every track in the album.
+      function makeCdAllBtn() {
+         const btn = document.createElement('button');
+         btn.className = 'year-all-btn';
+         btn.textContent = 'all';
+         btn.addEventListener('click', () => {
+            let firstDisc = null;
+            pane.querySelectorAll('.track-row').forEach(r => {
+               const di = r.querySelector('.track-disc-input');
+               if (!di) return;
+               if (firstDisc === null) firstDisc = di.value;
+               else di.value = firstDisc;
+               });
+            });
+         return btn;
+         }
+
+      // Always create a header row: CD 'all' button always lives here.
+      // Year 'all' button also lives here for single-disc albums; for multi-disc
+      // it goes into each disc heading instead.
+      const editHeader = document.createElement('div');
+      editHeader.className = 'track-edit-header';
+      editHeader.appendChild(makeCdAllBtn());
+
       const discHeadings = [...pane.querySelectorAll('.disc-heading')];
       if (discHeadings.length > 0) {
-         // Multi-disc: add one 'all' button into each disc heading line.
+         // Multi-disc: year 'all' in each disc heading.
          discHeadings.forEach(dh => {
             dh.classList.add('editing');
-            dh.appendChild(makeAllBtn(dh));
+            dh.appendChild(makeYearAllBtn(dh));
             });
          }
       else {
-         // Single disc: small header row above the track list.
-         const editHeader = document.createElement('div');
-         editHeader.className = 'track-edit-header';
-         editHeader.appendChild(makeAllBtn(null));
-         const firstTrackEl = pane.querySelector('.track-row');
-         if (firstTrackEl) pane.insertBefore(editHeader, firstTrackEl);
-         else pane.appendChild(editHeader);
+         // Single disc: year 'all' also in the header.
+         editHeader.appendChild(makeYearAllBtn(null));
          }
+
+      const firstTrackEl = pane.querySelector('.track-row');
+      if (firstTrackEl) pane.insertBefore(editHeader, firstTrackEl);
+      else pane.appendChild(editHeader);
 
       saveBtn.addEventListener('click', async () => {
          saveBtn.disabled = true;
@@ -1792,8 +1824,9 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
             const songId     = row.dataset.id;
             const numInput   = row.querySelector('.track-num-input');
             const titleInput = row.querySelector('.track-title-input');
+            const discInput  = row.querySelector('.track-disc-input');
             const yearInput  = row.querySelector('.track-year-input');
-            if (!numInput || !titleInput || !yearInput) continue;
+            if (!numInput || !titleInput || !discInput || !yearInput) continue;
 
             const params = {id: songId};
             let changed = false;
@@ -1803,6 +1836,10 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
                }
             if (titleInput.value !== titleInput.dataset.orig) {
                params.title = titleInput.value;
+               changed = true;
+               }
+            if (discInput.value !== discInput.dataset.orig) {
+               params.disc = discInput.value;
                changed = true;
                }
             if (yearInput.value !== yearInput.dataset.orig) {
@@ -1854,6 +1891,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       pane.querySelectorAll('.track-row').forEach(row => {
          const numInput   = row.querySelector('.track-num-input');
          const titleInput = row.querySelector('.track-title-input');
+         const discInput  = row.querySelector('.track-disc-input');
          const yearInput  = row.querySelector('.track-year-input');
          if (!numInput || !titleInput || !yearInput) return;
 
@@ -1869,9 +1907,11 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
          durSpan.className = 'track-dur';
          durSpan.textContent = row.dataset.dur;
 
-         // Update stored year if saved, so re-entering edit mode shows new value.
+         // Update stored disc/year if saved, so re-entering edit mode shows new values.
+         if (keepValues && discInput) row.dataset.disc = discInput.value;
          if (keepValues) row.dataset.year = yearInput.value;
 
+         discInput?.remove();
          row.replaceChild(numSpan,   numInput);
          row.replaceChild(titleSpan, titleInput);
          row.replaceChild(durSpan,   yearInput);

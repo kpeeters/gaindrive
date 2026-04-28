@@ -2649,9 +2649,11 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::optional<std::string> title;
 		std::optional<int> track_number;
 		std::optional<int> year;
+		std::optional<int> disc_number;
 		if (req.params.count("title")) title        = req.params.find("title")->second;
 		if (req.params.count("track")) track_number = std::stoi(req.params.find("track")->second);
 		if (req.params.count("year"))  year         = std::stoi(req.params.find("year")->second);
+		if (req.params.count("disc"))  disc_number  = std::stoi(req.params.find("disc")->second);
 
 		// Resolve the file path before touching anything.
 		auto song = store_.get_song(song_id);
@@ -2667,6 +2669,13 @@ GainDrive::GainDrive(const std::string& db_path,
 			if (title)        f.tag()->setTitle(TagLib::String(*title, TagLib::String::UTF8));
 			if (track_number) f.tag()->setTrack(*track_number);
 			if (year)         f.tag()->setYear(*year);
+			if (disc_number) {
+				// PropertyMap gives portable access to DISCNUMBER across all formats.
+				TagLib::PropertyMap props = f.file()->properties();
+				props.replace("DISCNUMBER",
+					TagLib::StringList(TagLib::String(std::to_string(*disc_number))));
+				f.file()->setProperties(props);
+				}
 			if (!f.save()) {
 				err(0, "Could not write tags to file.");
 				return;
@@ -2678,7 +2687,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 
 		// Tags written successfully — now mirror the change in the database.
-		store_.update_song_meta(song_id, title, track_number, year);
+		store_.update_song_meta(song_id, title, track_number, year, disc_number);
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");

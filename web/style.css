@@ -809,9 +809,10 @@ body {
    cursor: pointer;
 }
 
-/* In edit mode the track-number input is wider than 2ch; let the column grow. */
+/* In edit mode the track-number input is wider than 2ch; let the column grow.
+   Two extra auto cols accommodate the new disc and year inputs. */
 .track-row.editing {
-   grid-template-columns: 1.2rem max-content 1fr auto auto auto;
+   grid-template-columns: 1.2rem max-content 1fr auto auto auto auto;
 }
 
 .track-row:hover {
@@ -1023,6 +1024,18 @@ body {
    font-size: 0.95rem;
 }
 
+.track-disc-input {
+   width: calc(2ch + 0.8rem);
+   text-align: right;
+   background: var(--surface);
+   color: var(--text-dim);
+   border: 1px solid var(--border);
+   border-radius: 3px;
+   padding: 0.1rem 0.2rem;
+   font-size: 0.8rem;
+   font-variant-numeric: tabular-nums;
+}
+
 .track-year-input {
    /* wide enough for a 4-digit year plus padding */
    width: calc(4ch + 0.8rem);
@@ -1036,10 +1049,11 @@ body {
    font-variant-numeric: tabular-nums;
 }
 
-/* Header row shown in edit mode for single-disc albums: right-aligns the 'all' button. */
+/* Header row shown in edit mode above the track list: right-aligns 'all' buttons. */
 .track-edit-header {
    display: flex;
    justify-content: flex-end;
+   gap: 0.5rem;
    padding: 0 0.4rem 0.2rem;
 }
 
