@@ -1760,7 +1760,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       // 'all' for CD: copies first disc value to every track in the album.
       function makeCdAllBtn() {
          const btn = document.createElement('button');
-         btn.className = 'year-all-btn';
+         btn.className = 'cd-all-btn';
          btn.textContent = 'all';
          btn.addEventListener('click', () => {
             let firstDisc = null;

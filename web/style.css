@@ -809,10 +809,9 @@ body {
    cursor: pointer;
 }
 
-/* In edit mode the track-number input is wider than 2ch; let the column grow.
-   Two extra auto cols accommodate the new disc and year inputs. */
+/* In edit mode: explicit column widths so the header row can mirror them exactly. */
 .track-row.editing {
-   grid-template-columns: 1.2rem max-content 1fr auto auto auto auto;
+   grid-template-columns: 1.2rem calc(3ch + 0.8rem) 1fr 1rem 1rem calc(2ch + 0.8rem) calc(4ch + 0.8rem);
 }
 
 .track-row:hover {
@@ -873,6 +872,7 @@ body {
 
 /* Action icons — hidden until row is hovered */
 .track-action {
+   width: 1rem;
    font-size: 0.85rem;
    color: var(--text-dim);
    text-align: center;
@@ -992,12 +992,15 @@ body {
 /* Suppress spinner arrows on numeric edit inputs (all browsers). */
 .track-num-input::-webkit-inner-spin-button,
 .track-num-input::-webkit-outer-spin-button,
+.track-disc-input::-webkit-inner-spin-button,
+.track-disc-input::-webkit-outer-spin-button,
 .track-year-input::-webkit-inner-spin-button,
 .track-year-input::-webkit-outer-spin-button {
    -webkit-appearance: none;
    margin: 0;
 }
 .track-num-input,
+.track-disc-input,
 .track-year-input {
    -moz-appearance: textfield;
 }
@@ -1049,15 +1052,20 @@ body {
    font-variant-numeric: tabular-nums;
 }
 
-/* Header row shown in edit mode above the track list: right-aligns 'all' buttons. */
+/* Header row shown in edit mode: mirrors the editing track-row grid so the
+   'all' buttons land precisely above their respective input columns. */
 .track-edit-header {
-   display: flex;
-   justify-content: flex-end;
+   display: grid;
+   grid-template-columns: 1.2rem calc(3ch + 0.8rem) 1fr 1rem 1rem calc(2ch + 0.8rem) calc(4ch + 0.8rem);
    gap: 0.5rem;
    padding: 0 0.4rem 0.2rem;
 }
 
-.year-all-btn {
+.track-edit-header .cd-all-btn  { grid-column: 6; }
+.track-edit-header .year-all-btn { grid-column: 7; }
+
+.year-all-btn,
+.cd-all-btn {
    font-size: 0.7rem;
    padding: 0.05rem 0.35rem;
    border-radius: 3px;
@@ -1067,7 +1075,8 @@ body {
    cursor: pointer;
 }
 
-.year-all-btn:hover {
+.year-all-btn:hover,
+.cd-all-btn:hover {
    color: var(--text);
    border-color: var(--accent);
 }
