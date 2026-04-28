@@ -12,6 +12,7 @@
 #include <tfilestream.h>
 #include <taglib/tag.h>
 #include <taglib/audioproperties.h>
+#include <taglib/tpropertymap.h>
 
 namespace fs = std::filesystem;
 

@@ -21,6 +21,7 @@
 #include <nlohmann/json.hpp>
 #include <taglib/fileref.h>
 #include <taglib/tag.h>
+#include <taglib/tpropertymap.h>
 
 using namespace tinyxml2;
 
