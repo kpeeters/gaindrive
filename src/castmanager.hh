@@ -65,10 +65,16 @@ class CastManager {
 		bool        valid_token(const std::string& t) const
 			{ return active_ && !token_.empty() && token_ == t; }
 
+		// Incremented at the start of every load() call so content-provider
+		// threads can detect that a new stream has started and exit promptly.
+		int load_generation() const { return load_gen_.load(); }
+
 	private:
 		bool        active_ = false;
 		CastDevice  device_;
 		std::string token_;           // random token the Chromecast uses for stream auth
+
+		std::atomic<int> load_gen_{0};
 
 		mutable std::mutex         tid_mutex_;
 		std::string                transport_id_;    // set in load(), needed for media commands

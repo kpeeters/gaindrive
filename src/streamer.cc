@@ -139,18 +139,26 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 				// Guard uses bytes sent within THIS range request (not offset+sent) so
 				// that Range requests starting near the end of the file (e.g. metadata
 				// fetches for OGG/FLAC seeking) are not immediately throttled.
+				// A position of -2 is a stop sentinel: a new stream has started and
+				// this thread should exit so its httplib slot is freed immediately.
 				if (get_position && bytes_per_sec > 0) {
 					size_t bytes_sent = length - remaining;
 					if (bytes_sent > prebuf_bytes) {
 						float receiver_pos = get_position();
+						if (receiver_pos < -1.5f) return false;
 						if (receiver_pos >= 0.0f) {
 							float audio_sent = static_cast<float>(offset + bytes_sent) / bytes_per_sec;
 							float buf_secs   = audio_sent - receiver_pos;
 							if (buf_secs > TARGET_BUF) {
 								auto sleep_ms = static_cast<long>(
 								    (buf_secs - TARGET_BUF) * 1000.0f);
-								std::this_thread::sleep_for(
-								    std::chrono::milliseconds(sleep_ms));
+								auto deadline = std::chrono::steady_clock::now()
+								              + std::chrono::milliseconds(sleep_ms);
+								while (std::chrono::steady_clock::now() < deadline) {
+									std::this_thread::sleep_for(
+									    std::chrono::milliseconds(100));
+									if (get_position() < -1.5f) return false;
+									}
 								}
 							}
 						}
@@ -229,14 +237,20 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 
 			if (get_position && bps > 0 && *total_sent > prebuf_bytes) {
 				float receiver_pos = get_position();
+				if (receiver_pos < -1.5f) return false;
 				if (receiver_pos >= 0.0f) {
 					float audio_sent = static_cast<float>(*total_sent) / bps;
 					float buf_secs   = audio_sent - receiver_pos;
 					if (buf_secs > TARGET_BUF) {
 						auto sleep_ms = static_cast<long>(
 						    (buf_secs - TARGET_BUF) * 1000.0f);
-						std::this_thread::sleep_for(
-						    std::chrono::milliseconds(sleep_ms));
+						auto deadline = std::chrono::steady_clock::now()
+						              + std::chrono::milliseconds(sleep_ms);
+						while (std::chrono::steady_clock::now() < deadline) {
+							std::this_thread::sleep_for(
+							    std::chrono::milliseconds(100));
+							if (get_position() < -1.5f) return false;
+							}
 						}
 					}
 				}

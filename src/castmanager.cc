@@ -517,6 +517,10 @@ bool CastManager::start(const CastDevice& dev)
 void CastManager::load(const std::string& url, const std::string& mime,
                         float /*current_time*/)
 	{
+	// Signal any running content-provider thread to stop — it checks
+	// load_gen_ periodically and exits when the value changes.
+	++load_gen_;
+
 	// Reset playback status for the new track.
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
