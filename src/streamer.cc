@@ -117,12 +117,15 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 				// Adaptive throttle: keep the receiver's buffer at ~TARGET_BUF s.
 				// A negative position signals BUFFERING (seeking) — skip throttle so
 				// data flows freely until the receiver transitions to PLAYING.
+				// Guard uses bytes sent within THIS range request (not offset+sent) so
+				// that Range requests starting near the end of the file (e.g. metadata
+				// fetches for OGG/FLAC seeking) are not immediately throttled.
 				if (get_position && bytes_per_sec > 0) {
-					size_t pos = offset + (length - remaining);
-					if (pos > prebuf_bytes) {
+					size_t bytes_sent = length - remaining;
+					if (bytes_sent > prebuf_bytes) {
 						float receiver_pos = get_position();
 						if (receiver_pos >= 0.0f) {
-							float audio_sent = static_cast<float>(pos) / bytes_per_sec;
+							float audio_sent = static_cast<float>(offset + bytes_sent) / bytes_per_sec;
 							float buf_secs   = audio_sent - receiver_pos;
 							if (buf_secs > TARGET_BUF) {
 								auto sleep_ms = static_cast<long>(
