@@ -346,13 +346,6 @@ void MediaStore::create_schema()
 	}
 
 // Returns a human-readable ETA string, e.g. "~3m20s" or "~45s".
-static std::string format_eta(double remaining_sec)
-	{
-	int s = static_cast<int>(remaining_sec);
-	if (s < 60) return "~" + std::to_string(s) + "s";
-	return "~" + std::to_string(s / 60) + "m" + std::to_string(s % 60) + "s";
-	}
-
 MediaStore::Counts MediaStore::count_audio_files()
 	{
 	Counts c{};
@@ -385,188 +378,39 @@ void MediaStore::scan()
 	          << totals.albums << " albums, "
 	          << totals.files  << " files)" << std::endl;
 
-	using Clock = std::chrono::steady_clock;
-	auto   start_time = Clock::now();
-	int    song_count = 0;
-	int    processed  = 0;
-
-	std::string root_prefix = music_root_ + "/%";
-
+	// Ensure the root folder row exists before per-artist work begins.
+	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Transaction txn(db_music_);
-
-	// Mark every subfolder as unvisited.  upsert_folder will stamp each
-	// directory it touches; anything still NULL after the walk no longer
-	// exists on disk and will be pruned below.
-	{
-	SQLite::Statement s(db_music_,
-		"UPDATE folders SET last_scanned = NULL WHERE path LIKE ?");
-	s.bind(1, root_prefix);
-	s.exec();
-	}
-
-	int root_id = upsert_folder(fs::path(music_root_), -1);
-
-	for (auto& artist_entry : fs::directory_iterator(music_root_)) {
-		if (!artist_entry.is_directory()) continue;
-		int artist_folder_id = upsert_folder(artist_entry.path(), root_id);
-		int artist_id        = upsert_artist(artist_entry.path().filename().string());
-		std::cout << stamp() << artist_entry.path().filename().string() << std::endl;
-
-		for (auto& album_entry : fs::directory_iterator(artist_entry.path())) {
-			if (!album_entry.is_directory()) continue;
-			int album_folder_id = upsert_folder(album_entry.path(), artist_folder_id);
-			std::string album_title = album_entry.path().filename().string();
-			std::replace(album_title.begin(), album_title.end(), '_', ' ');
-			int album_id        = upsert_album(album_folder_id,
-			                                   album_title,
-			                                   artist_id, 0, "");
-
-			// Store cover art path if found; don't clear an existing path on re-scan.
-			std::string cover = find_cover(album_entry.path());
-			std::cout << stamp() << "    cover: "
-			          << (cover.empty() ? "(none)" : cover) << std::endl;
-			if (!cover.empty()) {
-				SQLite::Statement upd(db_music_,
-					"UPDATE albums SET cover_path = ? WHERE id = ?");
-				upd.bind(1, cover);
-				upd.bind(2, album_id);
-				upd.exec();
-				}
-
-			// Separate disc subdirs from audio files directly in the album dir.
-			std::vector<fs::directory_entry> disc_dirs;
-			std::vector<fs::path>            direct_files;
-			for (auto& e : fs::directory_iterator(album_entry.path())) {
-				if      (e.is_directory())                             disc_dirs.push_back(e);
-				else if (e.is_regular_file() && is_audio_file(e.path())) direct_files.push_back(e.path());
-				}
-			std::sort(disc_dirs.begin(), disc_dirs.end(),
-				[](const fs::directory_entry& a, const fs::directory_entry& b) {
-					return a.path().filename() < b.path().filename();
-					});
-
-			// Disc subfolders: alphabetical order → disc numbers 1..N.
-			int disc_count = (int)disc_dirs.size();
-			for (int dn = 0; dn < disc_count; ++dn) {
-				int disc_folder_id = upsert_folder(disc_dirs[dn].path(), album_folder_id);
-				for (auto& te : fs::directory_iterator(disc_dirs[dn].path())) {
-					if (!te.is_regular_file() || !is_audio_file(te.path())) continue;
-					upsert_song(te.path(), album_id, disc_folder_id, artist_id, dn + 1);
-					++song_count;
-					++processed;
-					}
-				}
-
-			// Audio files directly in the album dir (flat layout, or mixed).
-			for (auto& p : direct_files) {
-				upsert_song(p, album_id, album_folder_id, artist_id, 0);
-				++song_count;
-				++processed;
-				}
-
-			if (disc_count > 1) {
-				SQLite::Statement upd(db_music_, "UPDATE albums SET disc_count=? WHERE id=?");
-				upd.bind(1, disc_count);
-				upd.bind(2, album_id);
-				upd.exec();
-				}
-
-			// Derive album year from the first song that has one tagged.
-			{
-			SQLite::Statement upd(db_music_,
-				"UPDATE albums SET year = ("
-				"  SELECT year FROM songs WHERE album_id = ? AND year > 0"
-				"  ORDER BY disc_number, track_number LIMIT 1"
-				") WHERE id = ?");
-			upd.bind(1, album_id);
-			upd.bind(2, album_id);
-			upd.exec();
-			}
-
-			// Build progress suffix for this album's log line.
-			std::string progress;
-			if (processed == 0) {
-				progress = "counting...";
-				}
-			else {
-				double elapsed = std::chrono::duration<double>(Clock::now() - start_time).count();
-				double rate    = processed / elapsed;
-				double eta_sec = (totals.files - processed) / rate;
-				progress = std::to_string(processed) + "/" + std::to_string(totals.files)
-				         + " — ETA " + format_eta(eta_sec);
-				}
-			std::cout << stamp() << "  " << album_entry.path().filename().string()
-			          << "  [" << progress << "]" << std::endl;
-			}
-		}
-
-	// Prune entries for paths that no longer exist on disk.
-	// Folders not visited during the walk were left with last_scanned = NULL
-	// by the mark step above.  Delete their songs and albums first (no FK
-	// cascade from folders → songs), then the folders themselves.
-	{
-	SQLite::Statement s(db_music_,
-		"DELETE FROM songs WHERE folder_id IN ("
-		"  SELECT id FROM folders WHERE last_scanned IS NULL AND path LIKE ?"
-		")");
-	s.bind(1, root_prefix);
-	s.exec();
-	int n = db_music_.getChanges();
-	if (n > 0)
-		std::cout << stamp() << "  pruned " << n << " songs" << std::endl;
-	}
-	{
-	SQLite::Statement s(db_music_,
-		"DELETE FROM albums WHERE folder_id IN ("
-		"  SELECT id FROM folders WHERE last_scanned IS NULL AND path LIKE ?"
-		")");
-	s.bind(1, root_prefix);
-	s.exec();
-	int n = db_music_.getChanges();
-	if (n > 0)
-		std::cout << stamp() << "  pruned " << n << " albums" << std::endl;
-	}
-	{
-	// These caches reference folders(id) without ON DELETE CASCADE, so they
-	// must be pruned before the folder rows are deleted.
-	SQLite::Statement s(db_music_,
-		"DELETE FROM album_info_cache WHERE folder_id IN ("
-		"  SELECT id FROM folders WHERE last_scanned IS NULL AND path LIKE ?"
-		")");
-	s.bind(1, root_prefix);
-	s.exec();
-	}
-	{
-	SQLite::Statement s(db_music_,
-		"DELETE FROM artist_info_cache WHERE folder_id IN ("
-		"  SELECT id FROM folders WHERE last_scanned IS NULL AND path LIKE ?"
-		")");
-	s.bind(1, root_prefix);
-	s.exec();
-	}
-	{
-	SQLite::Statement s(db_music_,
-		"DELETE FROM folders WHERE last_scanned IS NULL AND path LIKE ?");
-	s.bind(1, root_prefix);
-	s.exec();
-	int n = db_music_.getChanges();
-	if (n > 0)
-		std::cout << stamp() << "  pruned " << n << " folders" << std::endl;
-	}
-	{
-	// Artists are identified by name, not folder; prune any that have no albums left.
-	SQLite::Statement s(db_music_,
-		"DELETE FROM artists WHERE id NOT IN"
-		" (SELECT DISTINCT artist_id FROM album_artists)");
-	s.exec();
-	int n = db_music_.getChanges();
-	if (n > 0)
-		std::cout << stamp() << "  pruned " << n << " artists" << std::endl;
-	}
-
+	upsert_folder(fs::path(music_root_), -1);
 	txn.commit();
-	std::cout << stamp() << "Scan complete: " << song_count << " songs" << std::endl;
+	}
+
+	// Collect paths to scan: artist dirs present on disk, plus any still in
+	// the DB (so deleted artist directories get pruned).
+	std::set<fs::path> to_scan;
+	for (auto& e : fs::directory_iterator(music_root_)) {
+		if (e.is_directory())
+			to_scan.insert(e.path());
+		}
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement s(db_music_,
+		"SELECT path FROM folders"
+		" WHERE parent_id = (SELECT id FROM folders WHERE path = ?)"
+		"   AND path != ?");
+	s.bind(1, music_root_);
+	s.bind(2, music_root_);
+	while (s.executeStep())
+		to_scan.insert(fs::path(s.getColumn(0).getString()));
+	}
+
+	// Process each artist in its own transaction so db_mutex_ is released
+	// between artists and API handlers can run during the scan.
+	for (auto& artist_path : to_scan)
+		scan_artist_dir(artist_path);
+
+	std::cout << stamp() << "Scan complete" << std::endl;
 	}
 
 void MediaStore::scan_dirs(const std::set<std::string>& dirs)
