@@ -820,10 +820,11 @@ body {
 
 /* Column 1: icon slot — shows "+" on hover, "▶" when playing. */
 .track-icon {
-   font-size: 0.75rem;
+   font-size: 1rem;
    color: var(--text-dim);
    text-align: center;
    cursor: pointer;
+   display: flex;
 }
 
 .track-row:hover .track-icon::before {

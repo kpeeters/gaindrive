@@ -7,6 +7,7 @@
 #include <chrono>
 #include <regex>
 #include <set>
+#include <unordered_map>
 
 #include <taglib/fileref.h>
 #include <tfilestream.h>
@@ -395,9 +396,96 @@ void MediaStore::scan_dirs(const std::set<std::string>& dirs)
 		scan_artist_dir(fs::path(d));
 	}
 
+// Per-song data collected in Phases 1–3, consumed in Phase 4.
+struct SongReadData {
+	std::string path;
+	std::string folder_path;   // disc dir or album dir
+	int64_t     mtime       = 0;
+	int64_t     file_size   = 0;
+	std::string codec;
+	int         disc_number = 0;
+	bool        changed     = false;
+	// populated in Phase 3 only when changed == true:
+	std::string title;
+	int         track_nr    = 0;
+	int         year        = 0;
+	std::string genre;
+	double      duration    = 0.0;
+	int         bitrate     = 0;
+	int         sr          = 0;
+	int         channels    = 0;
+	};
+
+struct AlbumReadData {
+	std::string               path;
+	std::string               title;
+	std::string               cover;
+	std::vector<std::string>  disc_paths;  // sorted; index+1 = disc number
+	std::vector<SongReadData> songs;
+	};
+
+// DB-only counterpart of upsert_song(); all slow I/O has already happened.
+// Caller must hold db_mutex_ and an open transaction.
+static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat,
+                                   int album_id, int folder_id, int artist_id)
+	{
+	if (!sdat.changed) {
+		if (sdat.disc_number > 0) {
+			SQLite::Statement upd(db,
+				"UPDATE songs SET disc_number=? WHERE path=? AND disc_number!=?");
+			upd.bind(1, sdat.disc_number);
+			upd.bind(2, sdat.path);
+			upd.bind(3, sdat.disc_number);
+			upd.exec();
+			}
+		return;
+		}
+
+	static const std::regex track_prefix(R"(^\d+[. -]+)");
+	std::string title = std::regex_replace(sdat.title, track_prefix, "");
+
+	SQLite::Statement ins(db,
+		"INSERT OR REPLACE INTO songs"
+		" (album_id, folder_id, path, filename, title, track_number, disc_number,"
+		"  year, genre, duration, bitrate, sample_rate, channels, codec,"
+		"  file_size, file_modified, last_scanned)"
+		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
+	ins.bind(1,  album_id);
+	ins.bind(2,  folder_id);
+	ins.bind(3,  sdat.path);
+	ins.bind(4,  fs::path(sdat.path).filename().string());
+	ins.bind(5,  title);
+	ins.bind(6,  sdat.track_nr);
+	ins.bind(7,  sdat.disc_number > 0 ? sdat.disc_number : 1);
+	ins.bind(8,  sdat.year);
+	ins.bind(9,  sdat.genre);
+	ins.bind(10, sdat.duration);
+	ins.bind(11, sdat.bitrate);
+	ins.bind(12, sdat.sr);
+	ins.bind(13, sdat.channels);
+	ins.bind(14, sdat.codec);
+	ins.bind(15, sdat.file_size);
+	ins.bind(16, sdat.mtime);
+	ins.exec();
+
+	int song_id = static_cast<int>(db.getLastInsertRowid());
+	SQLite::Statement lnk(db,
+		"INSERT OR IGNORE INTO song_artists (song_id, artist_id, role)"
+		" VALUES (?, ?, 'artist')");
+	lnk.bind(1, song_id);
+	lnk.bind(2, artist_id);
+	lnk.exec();
+	}
+
 // Targeted rescan of one artist directory.  Same mark→walk→prune pattern as
 // scan(), but scoped to a single artist subtree so most of the library is
 // untouched.
+//
+// Structured in four phases so slow filesystem I/O never holds db_mutex_:
+//   1. Walk disk — collect album/song paths, mtimes, file sizes (no lock)
+//   2. Brief read lock — fetch known mtimes to identify changed files
+//   3. TagLib reads for changed files only (no lock)
+//   4. Write lock + transaction — all DB upserts and pruning (pure SQL)
 void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	{
 	std::string prefix = artist_path.string() + "/%";
@@ -406,6 +494,120 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	std::cout << stamp() << "Rescan: " << artist_path.filename().string()
 	          << (exists ? "" : " (removed)") << std::endl;
 
+	// ---- Phase 1: walk disk (no lock) ----
+	std::vector<AlbumReadData> albums;
+	if (exists) {
+		for (auto& album_entry : fs::directory_iterator(artist_path)) {
+			if (!album_entry.is_directory()) continue;
+
+			AlbumReadData adat;
+			adat.path  = album_entry.path().string();
+			adat.title = album_entry.path().filename().string();
+			std::replace(adat.title.begin(), adat.title.end(), '_', ' ');
+			adat.cover = find_cover(album_entry.path());
+
+			std::vector<fs::directory_entry> disc_dirs;
+			std::vector<fs::path>            direct_files;
+			for (auto& e : fs::directory_iterator(album_entry.path())) {
+				if      (e.is_directory())                               disc_dirs.push_back(e);
+				else if (e.is_regular_file() && is_audio_file(e.path())) direct_files.push_back(e.path());
+				}
+			std::sort(disc_dirs.begin(), disc_dirs.end(),
+				[](const fs::directory_entry& a, const fs::directory_entry& b) {
+					return a.path().filename() < b.path().filename();
+					});
+
+			for (auto& de : disc_dirs)
+				adat.disc_paths.push_back(de.path().string());
+
+			int disc_count = (int)disc_dirs.size();
+			for (int dn = 0; dn < disc_count; ++dn) {
+				for (auto& te : fs::directory_iterator(disc_dirs[dn].path())) {
+					if (!te.is_regular_file() || !is_audio_file(te.path())) continue;
+					SongReadData sdat;
+					sdat.path        = te.path().string();
+					sdat.folder_path = disc_dirs[dn].path().string();
+					sdat.mtime       = mtime_of(te.path());
+					sdat.file_size   = static_cast<int64_t>(fs::file_size(te.path()));
+					sdat.codec       = te.path().extension().string().substr(1);
+					std::transform(sdat.codec.begin(), sdat.codec.end(),
+					               sdat.codec.begin(), ::tolower);
+					sdat.disc_number = dn + 1;
+					adat.songs.push_back(std::move(sdat));
+					}
+				}
+			for (auto& p : direct_files) {
+				SongReadData sdat;
+				sdat.path        = p.string();
+				sdat.folder_path = adat.path;
+				sdat.mtime       = mtime_of(p);
+				sdat.file_size   = static_cast<int64_t>(fs::file_size(p));
+				sdat.codec       = p.extension().string().substr(1);
+				std::transform(sdat.codec.begin(), sdat.codec.end(),
+				               sdat.codec.begin(), ::tolower);
+				sdat.disc_number = 0;
+				adat.songs.push_back(std::move(sdat));
+				}
+
+			albums.push_back(std::move(adat));
+			}
+		}
+
+	// ---- Phase 2: brief read lock — identify changed files ----
+	std::unordered_map<std::string, int64_t> known_mtimes;
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT path, file_modified FROM songs WHERE path LIKE ?");
+	q.bind(1, prefix);
+	while (q.executeStep())
+		known_mtimes[q.getColumn(0).getString()] = q.getColumn(1).getInt64();
+	}
+
+	for (auto& adat : albums)
+		for (auto& sdat : adat.songs) {
+			auto it = known_mtimes.find(sdat.path);
+			sdat.changed = (it == known_mtimes.end() || it->second != sdat.mtime);
+			}
+
+	// ---- Phase 3: TagLib reads for changed files only (no lock) ----
+	for (auto& adat : albums) {
+		for (auto& sdat : adat.songs) {
+			if (!sdat.changed) continue;
+
+			TagLib::FileStream stream(sdat.path.c_str(), true /* readOnly */);
+			TagLib::FileRef    f(&stream);
+			sdat.title = fs::path(sdat.path).stem().string();
+
+			if (!f.isNull() && f.tag()) {
+				auto* t = f.tag();
+				if (!t->title().isEmpty())
+					sdat.title = t->title().toCString(true);
+				sdat.track_nr = static_cast<int>(t->track());
+				sdat.year     = static_cast<int>(t->year());
+				if (!t->genre().isEmpty())
+					sdat.genre = t->genre().toCString(true);
+				}
+			if (sdat.disc_number == 0 && !f.isNull()) {
+				auto props = f.file()->properties();
+				auto it    = props.find("DISCNUMBER");
+				if (it != props.end() && !it->second.isEmpty()) {
+					try { sdat.disc_number = it->second.front().toInt(); }
+					catch (...) {}
+					}
+				}
+			if (!f.isNull() && f.audioProperties()) {
+				auto* ap      = f.audioProperties();
+				sdat.duration = ap->lengthInSeconds();
+				sdat.bitrate  = ap->bitrate();
+				sdat.sr       = ap->sampleRate();
+				sdat.channels = ap->channels();
+				}
+			}
+		}
+
+	// ---- Phase 4: write lock + transaction — all DB upserts and pruning ----
+	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Transaction txn(db_music_);
 
@@ -422,43 +624,32 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		int artist_folder_id = upsert_folder(artist_path, root_id);
 		int artist_id        = upsert_artist(artist_path.filename().string());
 
-		for (auto& album_entry : fs::directory_iterator(artist_path)) {
-			if (!album_entry.is_directory()) continue;
-			int album_folder_id = upsert_folder(album_entry.path(), artist_folder_id);
-			std::string album_title = album_entry.path().filename().string();
-			std::replace(album_title.begin(), album_title.end(), '_', ' ');
-			int album_id = upsert_album(album_folder_id, album_title, artist_id, 0, "");
+		for (auto& adat : albums) {
+			int album_folder_id = upsert_folder(fs::path(adat.path), artist_folder_id);
+			int album_id        = upsert_album(album_folder_id, adat.title, artist_id, 0, "");
 
-			std::string cover = find_cover(album_entry.path());
-			if (!cover.empty()) {
+			if (!adat.cover.empty()) {
 				SQLite::Statement upd(db_music_,
 					"UPDATE albums SET cover_path = ? WHERE id = ?");
-				upd.bind(1, cover);
+				upd.bind(1, adat.cover);
 				upd.bind(2, album_id);
 				upd.exec();
 				}
 
-			std::vector<fs::directory_entry> disc_dirs;
-			std::vector<fs::path>            direct_files;
-			for (auto& e : fs::directory_iterator(album_entry.path())) {
-				if      (e.is_directory())                               disc_dirs.push_back(e);
-				else if (e.is_regular_file() && is_audio_file(e.path())) direct_files.push_back(e.path());
-				}
-			std::sort(disc_dirs.begin(), disc_dirs.end(),
-				[](const fs::directory_entry& a, const fs::directory_entry& b) {
-					return a.path().filename() < b.path().filename();
-					});
-
-			int disc_count = (int)disc_dirs.size();
+			// Build path→folder_id map for this album's disc dirs.
+			std::unordered_map<std::string, int> fid_map;
+			fid_map[adat.path] = album_folder_id;
+			int disc_count = (int)adat.disc_paths.size();
 			for (int dn = 0; dn < disc_count; ++dn) {
-				int disc_folder_id = upsert_folder(disc_dirs[dn].path(), album_folder_id);
-				for (auto& te : fs::directory_iterator(disc_dirs[dn].path())) {
-					if (!te.is_regular_file() || !is_audio_file(te.path())) continue;
-					upsert_song(te.path(), album_id, disc_folder_id, artist_id, dn + 1);
-					}
+				int disc_fid = upsert_folder(fs::path(adat.disc_paths[dn]), album_folder_id);
+				fid_map[adat.disc_paths[dn]] = disc_fid;
 				}
-			for (auto& p : direct_files)
-				upsert_song(p, album_id, album_folder_id, artist_id, 0);
+
+			for (auto& sdat : adat.songs) {
+				auto fit = fid_map.find(sdat.folder_path);
+				int  fid = (fit != fid_map.end()) ? fit->second : album_folder_id;
+				upsert_song_with_data(db_music_, sdat, album_id, fid, artist_id);
+				}
 
 			if (disc_count > 1) {
 				SQLite::Statement upd(db_music_, "UPDATE albums SET disc_count=? WHERE id=?");
@@ -477,7 +668,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			upd.exec();
 			}
 
-			std::cout << stamp() << "  " << album_entry.path().filename().string() << std::endl;
+			std::cout << stamp() << "  " << fs::path(adat.path).filename().string() << std::endl;
 			}
 		}
 
@@ -537,6 +728,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	}
 
 	txn.commit();
+	}
 	std::cout << stamp() << "Rescan complete" << std::endl;
 	}
 
