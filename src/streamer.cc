@@ -45,9 +45,28 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	if (max_bitrate > 0 && song.bitrate > 0 && song.bitrate > max_bitrate)
 		needs_transcode = true;
 
-	// Default transcode target: mp3 (universally supported).
-	std::string target_fmt     = (!format.empty() && format != "raw") ? format : "mp3";
-	int         target_bitrate = (max_bitrate > 0) ? max_bitrate : 128;
+	// Determine transcode target.  When only a time-offset seek is needed
+	// (no format conversion, no bitrate limit) preserve the original codec via
+	// ffmpeg -c:a copy so there is no quality loss.  target_bitrate == 0
+	// signals copy mode to serve_transcoded.
+	bool format_change = !format.empty() && format != "raw" && format != song.codec;
+	bool bitrate_limit = max_bitrate > 0 && song.bitrate > 0 && song.bitrate > max_bitrate;
+
+	std::string target_fmt;
+	int         target_bitrate;
+	if (format_change) {
+		target_fmt     = format;
+		target_bitrate = (max_bitrate > 0) ? max_bitrate : 128;
+		}
+	else if (bitrate_limit) {
+		target_fmt     = "mp3";
+		target_bitrate = max_bitrate;
+		}
+	else {
+		// Seek only: no re-encode.
+		target_fmt     = song.codec;
+		target_bitrate = 0;
+		}
 
 	std::cout << stamp() << "stream ["
 	          << song.path << "] codec=" << song.codec
@@ -157,8 +176,15 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 	args.push_back(song.path);
 	args.push_back("-f");
 	args.push_back(target_fmt);
-	args.push_back("-b:a");
-	args.push_back(std::to_string(target_bitrate) + "k");
+	if (target_bitrate > 0) {
+		args.push_back("-b:a");
+		args.push_back(std::to_string(target_bitrate) + "k");
+		}
+	else {
+		// Seek only — copy audio without re-encoding.
+		args.push_back("-c:a");
+		args.push_back("copy");
+		}
 	args.push_back("pipe:1");
 
 	auto proc = std::make_shared<reproc::process>();
@@ -173,8 +199,10 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 		return;
 		}
 
-	// Same adaptive buffering as serve_direct; target_bitrate is always known.
-	const float  bps        = static_cast<float>(target_bitrate) * 125.0f;
+	// For copy mode use the source bitrate for throttling; otherwise the target.
+	const float  bps        = target_bitrate > 0
+	    ? static_cast<float>(target_bitrate) * 125.0f
+	    : static_cast<float>(song.bitrate)   * 125.0f;
 	const size_t prebuf_bytes = get_position
 	    ? static_cast<size_t>(bps) * 30
 	    : 0;

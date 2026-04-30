@@ -1437,14 +1437,12 @@ function setupPlayer() {
    seek.addEventListener('touchstart', () => { seek.dataset.seeking = '1'; });
    seek.addEventListener('change', () => {
       if (castDeviceId !== null) {
-         // seek.value is absolute track position; convert to stream-relative
-         const streamPos = Math.max(0, Number(seek.value) - castStartOffset);
-         // Optimistically update local state so the interpolation loop holds the
-         // new position instead of snapping back to the old one while the
-         // Chromecast buffers and sends its next MEDIA_STATUS.
-         castBaseTime = streamPos;
-         castBaseAt   = Date.now();
-         apiCall('castControl', {action: 'seek', time: streamPos}).catch(() => {});
+         // Re-LOAD with a server-side timeOffset rather than sending a Chromecast
+         // SEEK command.  SEEK relies on the device seeking within its buffered
+         // byte stream, which fails silently for formats without clean seek points
+         // (FLAC without a seektable, etc.).  playerPlay resets cast state and
+         // triggers a fresh transcoded stream from the right position.
+         playerPlay(Number(seek.value));
          } else {
          player.audio.currentTime = Number(seek.value);
          }
