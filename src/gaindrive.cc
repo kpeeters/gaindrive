@@ -2610,7 +2610,8 @@ GainDrive::GainDrive(const std::string& db_path,
 				std::string event = "data: " + nlohmann::json({
 					{"playerState", s.player_state},
 					{"currentTime", s.current_time},
-					{"duration",    s.duration}}).dump() + "\n\n";
+					{"duration",    s.duration},
+					{"idleReason",  s.idle_reason}}).dump() + "\n\n";
 				return sink.write(event.data(), event.size());
 				});
 		});

@@ -22,6 +22,7 @@ class CastManager {
 			float       current_time = 0;
 			float       duration     = 0;
 			int         media_session_id = 0;
+			std::string idle_reason;            // FINISHED | INTERRUPTED | ERROR (when IDLE)
 			};
 
 		// Scan for Chromecast devices via mDNS for timeout_ms milliseconds.

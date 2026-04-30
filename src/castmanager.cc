@@ -579,6 +579,7 @@ void CastManager::update_status(const nlohmann::json& msg)
 	cs.player_state     = s.value("playerState",    "IDLE");
 	cs.current_time     = s.value("currentTime",     0.0f);
 	cs.media_session_id = s.value("mediaSessionId",  0);
+	cs.idle_reason      = s.value("idleReason",     "");
 	if (s.contains("media") && s["media"].contains("duration")
 	                        && s["media"]["duration"].is_number())
 		cs.duration = s["media"]["duration"].get<float>();

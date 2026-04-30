@@ -1028,7 +1028,11 @@ function onCastStatus(s) {
    castPlayerState = s.playerState;
 
    if (s.playerState === 'IDLE') {
-      if (castWasPlaying && player.index < player.queue.length - 1) {
+      // Only advance on a genuine end-of-track (idleReason === 'FINISHED').
+      // Any other IDLE — including the transient state while a new LOAD is
+      // being processed — must not trigger an advance.
+      if (s.idleReason === 'FINISHED' &&
+          castWasPlaying && player.index < player.queue.length - 1) {
          castWasPlaying   = false;
          castStartOffset  = 0;
          lastCastPosition = 0;
