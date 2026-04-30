@@ -1439,6 +1439,11 @@ function setupPlayer() {
       if (castDeviceId !== null) {
          // seek.value is absolute track position; convert to stream-relative
          const streamPos = Math.max(0, Number(seek.value) - castStartOffset);
+         // Optimistically update local state so the interpolation loop holds the
+         // new position instead of snapping back to the old one while the
+         // Chromecast buffers and sends its next MEDIA_STATUS.
+         castBaseTime = streamPos;
+         castBaseAt   = Date.now();
          apiCall('castControl', {action: 'seek', time: streamPos}).catch(() => {});
          } else {
          player.audio.currentTime = Number(seek.value);
