@@ -345,38 +345,9 @@ void MediaStore::create_schema()
 		);
 	}
 
-// Returns a human-readable ETA string, e.g. "~3m20s" or "~45s".
-MediaStore::Counts MediaStore::count_audio_files()
-	{
-	Counts c{};
-	for (auto& a : fs::directory_iterator(music_root_)) {
-		if (!a.is_directory()) continue;
-		++c.artists;
-		std::cout << stamp() << "(counting) " << a.path().filename().string() << std::endl;
-		for (auto& b : fs::directory_iterator(a.path())) {
-			if (!b.is_directory()) continue;
-			++c.albums;
-			for (auto& f : fs::directory_iterator(b.path())) {
-				if (f.is_regular_file() && is_audio_file(f.path()))
-					++c.files;
-				else if (f.is_directory()) {
-					// Disc subdirectory — count one level deeper, same as scan().
-					for (auto& g : fs::directory_iterator(f.path()))
-						if (g.is_regular_file() && is_audio_file(g.path())) ++c.files;
-					}
-				}
-			}
-		}
-	return c;
-	}
-
 void MediaStore::scan()
 	{
-	Counts totals = count_audio_files();
-	std::cout << stamp() << "Scan started: " << music_root_
-	          << "  (" << totals.artists << " artists, "
-	          << totals.albums << " albums, "
-	          << totals.files  << " files)" << std::endl;
+	std::cout << stamp() << "Scan started: " << music_root_ << std::endl;
 
 	// Ensure the root folder row exists before per-artist work begins.
 	{

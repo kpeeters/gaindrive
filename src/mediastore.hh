@@ -324,11 +324,6 @@ class MediaStore {
 
 		void create_schema();
 
-		struct Counts { int artists = 0; int albums = 0; int files = 0; };
-
-		// Quick directory-only walk; opens no files.
-		Counts count_audio_files();
-
 		// Targeted rescan of one artist subtree; called by scan_dirs().
 		void scan_artist_dir(const std::filesystem::path& path);
 
