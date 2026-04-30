@@ -527,6 +527,56 @@ void CastManager::load(const std::string& url, const std::string& mime,
 	status_ = CastStatus{};
 	}
 
+	std::string src = "sender-0";
+
+	// Snapshot the cached transport id.  If non-empty the Default Media
+	// Receiver app is already running and we can skip the LAUNCH +
+	// wait_transport round-trip — that is the slow part (1-2 s).
+	std::string tid;
+	{
+	std::lock_guard<std::mutex> lk(tid_mutex_);
+	tid = transport_id_;
+	}
+
+	if (!tid.empty()) {
+		// Fast path: the app is running — LOAD directly into the existing session.
+		Tls t;
+		if (!tls_connect(t, device_.address, device_.port)) {
+			std::cout << stamp() << "Cast: connect failed" << std::endl;
+			return;
+			}
+		cast_send(t.ssl, NS_CONN,  src, "receiver-0", {{"type", "CONNECT"}});
+		cast_send(t.ssl, NS_CONN,  src, tid,           {{"type", "CONNECT"}});
+		cast_send(t.ssl, NS_MEDIA, src, tid, {
+			{"type",      "LOAD"},
+			{"requestId", 2},
+			{"media", {
+				{"contentId",   url},
+				{"contentType", mime},
+				{"streamType",  "BUFFERED"}
+				}}
+			});
+		for (int i = 0; i < 15; i++) {
+			auto m = cast_recv(t.ssl);
+			if (m.is_null()) break;
+			if (m.value("type", "") == "MEDIA_STATUS") {
+				update_status(m);
+				std::cout << stamp() << "Cast: → " << url << std::endl;
+				return;
+				}
+			}
+		// No MEDIA_STATUS — transport is stale (Chromecast restarted?).
+		// Fall through to the full LAUNCH path.
+		std::cout << stamp() << "Cast: stale transport, retrying with LAUNCH"
+		          << std::endl;
+		{
+		std::lock_guard<std::mutex> lk(tid_mutex_);
+		transport_id_.clear();
+		}
+		}
+
+	// Full path: launch the app and discover the transport.  Runs on the very
+	// first load and as a fallback when the cached transport is no longer valid.
 	Tls t;
 	if (!tls_connect(t, device_.address, device_.port)) {
 		std::cout << stamp() << "Cast: connect failed ("
@@ -534,12 +584,11 @@ void CastManager::load(const std::string& url, const std::string& mime,
 		return;
 		}
 
-	std::string src = "sender-0", dst = "receiver-0";
-	cast_send(t.ssl, NS_CONN, src, dst, {{"type", "CONNECT"}});
-	cast_send(t.ssl, NS_RECV, src, dst,
+	cast_send(t.ssl, NS_CONN, src, "receiver-0", {{"type", "CONNECT"}});
+	cast_send(t.ssl, NS_RECV, src, "receiver-0",
 	          {{"type", "LAUNCH"}, {"appId", "CC1AD845"}, {"requestId", 1}});
 
-	std::string tid = wait_transport(t.ssl);
+	tid = wait_transport(t.ssl);
 	if (tid.empty()) {
 		std::cout << stamp() << "Cast: no transportId from receiver" << std::endl;
 		return;
@@ -561,8 +610,7 @@ void CastManager::load(const std::string& url, const std::string& mime,
 			}}
 		});
 
-	// Read the initial MEDIA_STATUS to capture mediaSessionId and duration before
-	// closing.  The Chromecast responds to LOAD almost immediately.
+	// Read the initial MEDIA_STATUS to capture mediaSessionId and duration.
 	for (int i = 0; i < 15; i++) {
 		auto m = cast_recv(t.ssl);
 		if (m.is_null()) break;
@@ -570,7 +618,6 @@ void CastManager::load(const std::string& url, const std::string& mime,
 		}
 
 	// Connection closes here; the Chromecast fetches and plays independently.
-	// No persistent connection is kept — avoiding Cast heartbeat obligations.
 	std::cout << stamp() << "Cast: → " << url << std::endl;
 	}
 
