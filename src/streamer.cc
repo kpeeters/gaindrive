@@ -115,16 +115,21 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 				remaining -= n;
 
 				// Adaptive throttle: keep the receiver's buffer at ~TARGET_BUF s.
+				// A negative position signals BUFFERING (seeking) — skip throttle so
+				// data flows freely until the receiver transitions to PLAYING.
 				if (get_position && bytes_per_sec > 0) {
 					size_t pos = offset + (length - remaining);
 					if (pos > prebuf_bytes) {
-						float audio_sent = static_cast<float>(pos) / bytes_per_sec;
-						float buf_secs   = audio_sent - get_position();
-						if (buf_secs > TARGET_BUF) {
-							auto sleep_ms = static_cast<long>(
-							    (buf_secs - TARGET_BUF) * 1000.0f);
-							std::this_thread::sleep_for(
-							    std::chrono::milliseconds(sleep_ms));
+						float receiver_pos = get_position();
+						if (receiver_pos >= 0.0f) {
+							float audio_sent = static_cast<float>(pos) / bytes_per_sec;
+							float buf_secs   = audio_sent - receiver_pos;
+							if (buf_secs > TARGET_BUF) {
+								auto sleep_ms = static_cast<long>(
+								    (buf_secs - TARGET_BUF) * 1000.0f);
+								std::this_thread::sleep_for(
+								    std::chrono::milliseconds(sleep_ms));
+								}
 							}
 						}
 					}
@@ -192,13 +197,16 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 			*total_sent += n;
 
 			if (get_position && bps > 0 && *total_sent > prebuf_bytes) {
-				float audio_sent = static_cast<float>(*total_sent) / bps;
-				float buf_secs   = audio_sent - get_position();
-				if (buf_secs > TARGET_BUF) {
-					auto sleep_ms = static_cast<long>(
-					    (buf_secs - TARGET_BUF) * 1000.0f);
-					std::this_thread::sleep_for(
-					    std::chrono::milliseconds(sleep_ms));
+				float receiver_pos = get_position();
+				if (receiver_pos >= 0.0f) {
+					float audio_sent = static_cast<float>(*total_sent) / bps;
+					float buf_secs   = audio_sent - receiver_pos;
+					if (buf_secs > TARGET_BUF) {
+						auto sleep_ms = static_cast<long>(
+						    (buf_secs - TARGET_BUF) * 1000.0f);
+						std::this_thread::sleep_for(
+						    std::chrono::milliseconds(sleep_ms));
+						}
 					}
 				}
 			return true;

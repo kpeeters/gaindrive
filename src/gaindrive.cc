@@ -1915,7 +1915,13 @@ GainDrive::GainDrive(const std::string& db_path,
 		// stable level without relying on any device-specific buffer size.
 		std::function<float()> get_pos;
 		if (cast_authed)
-			get_pos = [this]{ return cast_manager_.get_status().current_time; };
+			get_pos = [this]{
+				auto s = cast_manager_.get_status();
+				// BUFFERING means "seeking to this position", not "played up to here".
+				// Return -1 to suppress adaptive throttle until playback actually starts.
+				if (s.player_state == "BUFFERING") return -1.0f;
+				return s.current_time;
+				};
 
 		Streamer::serve(req, res, si, max_bitrate, format, time_offset,
 		                cast_authed, std::move(get_pos));
