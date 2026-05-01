@@ -263,8 +263,16 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 			return true;
 			},
 		[proc](bool success) {
-			// On client disconnect (success=false) stop ffmpeg; always wait.
-			if (!success) proc->terminate();
+			if (!success) {
+				proc->terminate();
+				// Drain the pipe so ffmpeg can flush its output buffer and exit.
+				// Without this, ffmpeg blocks trying to write to a full pipe after
+				// SIGTERM, proc->wait() never returns, and the httplib thread leaks.
+				uint8_t drain[4096];
+				size_t n; reproc::error e;
+				do { std::tie(n, e) = proc->read(reproc::stream::out, drain, sizeof(drain)); }
+				while (n > 0);
+				}
 			proc->wait(reproc::infinite);
 			});
 	}
