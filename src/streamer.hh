@@ -4,6 +4,11 @@
 #include <string>
 #include <httplib.h>
 
+// Sentinel values returned by the get_position() callback during Cast streaming.
+// The producer (gaindrive.cc) and consumer (streamer.cc) must use the same values.
+inline constexpr float CAST_POS_STOP      = -2.0f;  // new stream started → exit immediately
+inline constexpr float CAST_POS_BUFFERING = -1.0f;  // receiver seeking → suppress throttle
+
 class Streamer {
 	public:
 		struct SongInfo {

@@ -1919,11 +1919,11 @@ GainDrive::GainDrive(const std::string& db_path,
 			get_pos = [this, gen]{
 				// Return -2 when a newer stream has started — the streamer treats
 				// this as a stop signal so the old thread exits promptly.
-				if (cast_manager_.load_generation() != gen) return -2.0f;
+				if (cast_manager_.load_generation() != gen) return CAST_POS_STOP;
 				auto s = cast_manager_.get_status();
 				// BUFFERING means "seeking to this position", not "played up to here".
-				// Return -1 to suppress adaptive throttle until playback actually starts.
-				if (s.player_state == "BUFFERING") return -1.0f;
+				// Return CAST_POS_BUFFERING to suppress throttle until playback starts.
+				if (s.player_state == "BUFFERING") return CAST_POS_BUFFERING;
 				return s.current_time;
 				};
 			}

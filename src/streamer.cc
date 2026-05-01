@@ -28,7 +28,8 @@ static const char* codec_to_mime(const std::string& codec)
 // Seconds of audio to keep buffered ahead of the Cast receiver's playback
 // position.  Large enough to absorb brief network jitter; small enough that
 // any receiver can hold it.
-static constexpr float TARGET_BUF = 15.0f;
+static constexpr float  TARGET_BUF  = 15.0f;
+static constexpr size_t WRITE_CHUNK = 4096;
 
 // ---- Streamer --------------------------------------------------------
 
@@ -118,47 +119,47 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 			size_t remaining = length;
 
 			while (remaining > 0) {
+				if (get_position && get_position() < CAST_POS_BUFFERING) return false;
 				auto to_read = static_cast<std::streamsize>(
 				    std::min(remaining, sizeof(buf)));
 				f.read(buf, to_read);
 				auto n = static_cast<size_t>(f.gcount());
 				if (n == 0) break;
-				if (!sink.write(buf, n)) {
-					if (get_position)
-						std::cout << stamp()
-						          << "cast stream: write failed at "
-						          << (offset + length - remaining + n)
-						          << " bytes" << std::endl;
-					return false;
+
+				for (size_t woff = 0; woff < n; ) {
+					if (get_position && get_position() < CAST_POS_BUFFERING) return false;
+					size_t piece = std::min(WRITE_CHUNK, n - woff);
+					if (!sink.write(buf + woff, piece)) {
+						if (get_position)
+							std::cout << stamp()
+							          << "cast stream: write failed at "
+							          << (offset + length - remaining + woff + piece)
+							          << " bytes" << std::endl;
+						return false;
+						}
+					woff += piece;
 					}
 				remaining -= n;
 
-				// Adaptive throttle: keep the receiver's buffer at ~TARGET_BUF s.
-				// A negative position signals BUFFERING (seeking) — skip throttle so
-				// data flows freely until the receiver transitions to PLAYING.
 				// Guard uses bytes sent within THIS range request (not offset+sent) so
 				// that Range requests starting near the end of the file (e.g. metadata
 				// fetches for OGG/FLAC seeking) are not immediately throttled.
-				// A position of -2 is a stop sentinel: a new stream has started and
-				// this thread should exit so its httplib slot is freed immediately.
-				if (get_position && bytes_per_sec > 0) {
+				if (get_position) {
 					size_t bytes_sent = length - remaining;
-					if (bytes_sent > prebuf_bytes) {
-						float receiver_pos = get_position();
-						if (receiver_pos < -1.5f) return false;
-						if (receiver_pos >= 0.0f) {
-							float audio_sent = static_cast<float>(offset + bytes_sent) / bytes_per_sec;
-							float buf_secs   = audio_sent - receiver_pos;
-							if (buf_secs > TARGET_BUF) {
-								auto sleep_ms = static_cast<long>(
-								    (buf_secs - TARGET_BUF) * 1000.0f);
-								auto deadline = std::chrono::steady_clock::now()
-								              + std::chrono::milliseconds(sleep_ms);
-								while (std::chrono::steady_clock::now() < deadline) {
-									std::this_thread::sleep_for(
-									    std::chrono::milliseconds(100));
-									if (get_position() < -1.5f) return false;
-									}
+					float pos = get_position();
+					if (pos < CAST_POS_BUFFERING) return false;
+					if (bytes_per_sec > 0 && bytes_sent > prebuf_bytes && pos >= 0.0f) {
+						float audio_sent = static_cast<float>(offset + bytes_sent) / bytes_per_sec;
+						float buf_secs   = audio_sent - pos;
+						if (buf_secs > TARGET_BUF) {
+							auto sleep_ms = static_cast<long>(
+							    (buf_secs - TARGET_BUF) * 1000.0f);
+							auto deadline = std::chrono::steady_clock::now()
+							              + std::chrono::milliseconds(sleep_ms);
+							while (std::chrono::steady_clock::now() < deadline) {
+								std::this_thread::sleep_for(
+								    std::chrono::milliseconds(100));
+								if (get_position() < CAST_POS_BUFFERING) return false;
 								}
 							}
 						}
@@ -225,6 +226,7 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 		[proc, bps, prebuf_bytes, total_sent,
 		 get_position = std::move(get_position)]
 		(size_t /*offset*/, httplib::DataSink& sink) {
+			if (get_position && get_position() < CAST_POS_BUFFERING) return false;
 			uint8_t buf[65536];
 			auto [n, err] = proc->read(reproc::stream::out, buf, sizeof(buf));
 			if (n == 0) {
@@ -232,15 +234,19 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 				sink.done();
 				return false;
 				}
-			if (!sink.write(reinterpret_cast<char*>(buf), n)) return false;
-			*total_sent += n;
-
-			if (get_position && bps > 0 && *total_sent > prebuf_bytes) {
-				float receiver_pos = get_position();
-				if (receiver_pos < -1.5f) return false;
-				if (receiver_pos >= 0.0f) {
+			for (size_t off = 0; off < n; ) {
+				if (get_position && get_position() < CAST_POS_BUFFERING) return false;
+				size_t piece = std::min(WRITE_CHUNK, n - off);
+				if (!sink.write(reinterpret_cast<char*>(buf + off), piece)) return false;
+				off         += piece;
+				*total_sent += piece;
+				}
+			if (get_position) {
+				float pos = get_position();
+				if (pos < CAST_POS_BUFFERING) return false;
+				if (bps > 0 && *total_sent > prebuf_bytes && pos >= 0.0f) {
 					float audio_sent = static_cast<float>(*total_sent) / bps;
-					float buf_secs   = audio_sent - receiver_pos;
+					float buf_secs   = audio_sent - pos;
 					if (buf_secs > TARGET_BUF) {
 						auto sleep_ms = static_cast<long>(
 						    (buf_secs - TARGET_BUF) * 1000.0f);
@@ -249,7 +255,7 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 						while (std::chrono::steady_clock::now() < deadline) {
 							std::this_thread::sleep_for(
 							    std::chrono::milliseconds(100));
-							if (get_position() < -1.5f) return false;
+							if (get_position() < CAST_POS_BUFFERING) return false;
 							}
 						}
 					}
