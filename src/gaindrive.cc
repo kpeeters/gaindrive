@@ -1923,7 +1923,7 @@ GainDrive::GainDrive(const std::string& db_path,
 				auto s = cast_manager_.get_status();
 				// BUFFERING means "seeking to this position", not "played up to here".
 				// Return CAST_POS_BUFFERING to suppress throttle until playback starts.
-				if (s.player_state == "BUFFERING") return CAST_POS_BUFFERING;
+				if (s.player_state != "PLAYING") return CAST_POS_BUFFERING;
 				return s.current_time;
 				};
 			}
