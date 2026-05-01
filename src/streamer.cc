@@ -269,8 +269,8 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 				// Without this, ffmpeg blocks trying to write to a full pipe after
 				// SIGTERM, proc->wait() never returns, and the httplib thread leaks.
 				uint8_t drain[4096];
-				size_t n; reproc::error e;
-				do { std::tie(n, e) = proc->read(reproc::stream::out, drain, sizeof(drain)); }
+				size_t n;
+				do { auto [bytes, e] = proc->read(reproc::stream::out, drain, sizeof(drain)); n = bytes; }
 				while (n > 0);
 				}
 			proc->wait(reproc::infinite);
