@@ -776,8 +776,10 @@ void CastManager::poll_loop()
 					}
 				update_status(m);
 				}
+			else if (type == "ERROR") {
+				std::cout << stamp() << "Cast rx ERROR: " << m.dump() << std::endl;
+				}
 			else if (type != "PONG") {
-				// Log unexpected messages (skip PONG which we never send to ourselves).
 				std::cout << stamp() << "Cast rx " << type << std::endl;
 				}
 			}
