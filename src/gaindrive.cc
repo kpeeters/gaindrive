@@ -2642,6 +2642,49 @@ GainDrive::GainDrive(const std::string& db_path,
 		                use_json ? "application/json" : "application/xml");
 		});
 
+	// castLoad — instruct the Chromecast to fetch and play a song.
+	// Separate from stream.view so the browser triggers the cast load without
+	// making a Range request that httplib would reject (stream.view returns 204,
+	// but httplib overrides 204+Range to 416 when content_length is 0).
+	server_.Get("/rest/castLoad.view", [this](const httplib::Request& req,
+	                                          httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+
+		if (!cast_manager_.active()) { err(0, "Cast not active."); return; }
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			err(10, "Required parameter missing: id."); return;
+			}
+
+		auto song = store_.get_song(std::stoi(it->second));
+		if (!song) { err(70, "Song not found."); return; }
+
+		std::string host  = req.get_header_value("Host");
+		if (host.empty()) host = "localhost";
+		std::string proto = req.get_header_value("X-Forwarded-Proto");
+		if (proto.empty()) proto = "http";
+		std::string url = proto + "://" + host + "/rest/stream.view"
+		                + "?id=" + it->second
+		                + "&castToken=" + cast_manager_.token();
+		auto to_it = req.params.find("timeOffset");
+		float cast_offset = 0.0f;
+		if (to_it != req.params.end() && !to_it->second.empty()) {
+			url       += "&timeOffset=" + to_it->second;
+			cast_offset = std::stof(to_it->second);
+			}
+		cast_manager_.load(url, codec_to_mime(song->codec), cast_offset);
+		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
+		                use_json ? "application/json" : "application/xml");
+		});
+
 	// updateSong — update title and/or track number for a single song.
 	// Writes the change to the database and back to the audio file tags.
 	server_.Get("/rest/updateSong.view", [this](const httplib::Request& req,

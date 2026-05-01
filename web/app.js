@@ -1263,15 +1263,17 @@ function playerPlay(offset = 0) {
       castBaseTime    = 0;
       castBaseAt      = 0;
       castPlayerState = 'IDLE';
+      const params = {id: song.id};
+      if (offset > 0) params.timeOffset = Math.floor(offset);
+      // Use the dedicated castLoad endpoint rather than setting player.audio.src.
+      // Setting audio.src would cause the browser to send a Range request, which
+      // httplib converts to 416 because the stream endpoint returns 204 (no body).
+      apiCall('castLoad', params).catch(err => console.warn('[cast] load failed', err));
+      playerUpdateUI();
+      return;
       }
-   const params = {id: song.id};
-   if (offset > 0 && castDeviceId !== null) {
-      // Chromecast fetches the stream independently and can't byte-seek,
-      // so we ask the server to start ffmpeg at the right position.
-      params.timeOffset = Math.floor(offset);
-      }
-   player.audio.src = apiUrl('stream', params);
-   if (offset > 0 && castDeviceId === null) {
+   player.audio.src = apiUrl('stream', {id: song.id});
+   if (offset > 0) {
       // For local playback the browser seeks natively via Range requests.
       player.audio.currentTime = offset;
       }
