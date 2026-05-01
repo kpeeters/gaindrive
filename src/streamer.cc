@@ -230,14 +230,20 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 			uint8_t buf[65536];
 			auto [n, err] = proc->read(reproc::stream::out, buf, sizeof(buf));
 			if (n == 0) {
-				// EOF or error — ffmpeg is done.
+				if (err && err.value() != (int)reproc::error::stream_closed)
+					std::cout << stamp() << "stream: ffmpeg pipe error: "
+					          << err.message() << std::endl;
 				sink.done();
 				return false;
 				}
 			for (size_t off = 0; off < n; ) {
 				if (get_position && get_position() < CAST_POS_BUFFERING) return false;
 				size_t piece = std::min(WRITE_CHUNK, n - off);
-				if (!sink.write(reinterpret_cast<char*>(buf + off), piece)) return false;
+				if (!sink.write(reinterpret_cast<char*>(buf + off), piece)) {
+					std::cout << stamp() << "stream: transcoded write failed at "
+					          << *total_sent << " bytes" << std::endl;
+					return false;
+					}
 				off         += piece;
 				*total_sent += piece;
 				}
@@ -264,6 +270,9 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 			},
 		[proc](bool success) {
 			if (!success) proc->kill();
-			proc->wait(reproc::infinite);
+			auto [status, ec] = proc->wait(reproc::infinite);
+			if (!success || status != 0)
+				std::cout << stamp() << "stream: ffmpeg exit status=" << status
+				          << (ec ? " (" + ec.message() + ")" : "") << std::endl;
 			});
 	}
