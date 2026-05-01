@@ -97,4 +97,9 @@ class CastManager {
 		// Background thread: maintains a persistent TLS connection to the Chromecast,
 		// responds to PING heartbeats, and processes pushed MEDIA_STATUS messages.
 		void poll_loop();
+
+		// Worker spawned by load() — does the actual TLS connect + LOAD.
+		// Checks load_gen_ against gen at each blocking step and aborts early if
+		// a newer load() has been called.
+		void load_worker(std::string url, std::string mime, int gen);
 	};

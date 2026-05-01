@@ -517,9 +517,8 @@ bool CastManager::start(const CastDevice& dev)
 void CastManager::load(const std::string& url, const std::string& mime,
                         float /*current_time*/)
 	{
-	// Signal any running content-provider thread to stop — it checks
-	// load_gen_ periodically and exits when the value changes.
-	++load_gen_;
+	// Signal any running content-provider thread to stop immediately.
+	int gen = ++load_gen_;
 
 	// Reset playback status for the new track.
 	{
@@ -527,11 +526,18 @@ void CastManager::load(const std::string& url, const std::string& mime,
 	status_ = CastStatus{};
 	}
 
+	// All TLS/blocking work happens in a detached thread so that the
+	// castLoad.view handler (and the httplib thread it runs on) returns
+	// immediately.  load_gen_ acts as a cancellation token: if a newer
+	// load() fires before this worker reaches a blocking call, the worker
+	// detects the stale generation and exits without doing any work.
+	std::thread([this, url, mime, gen]{ load_worker(url, mime, gen); }).detach();
+	}
+
+void CastManager::load_worker(std::string url, std::string mime, int gen)
+	{
 	std::string src = "sender-0";
 
-	// Snapshot the cached transport id.  If non-empty the Default Media
-	// Receiver app is already running and we can skip the LAUNCH +
-	// wait_transport round-trip — that is the slow part (1-2 s).
 	std::string tid;
 	{
 	std::lock_guard<std::mutex> lk(tid_mutex_);
@@ -539,44 +545,39 @@ void CastManager::load(const std::string& url, const std::string& mime,
 	}
 
 	if (!tid.empty()) {
-		// Fast path: the app is running — LOAD directly into the existing session.
+		// Fast path: app already running — LOAD into the existing session.
+		if (load_gen_.load() != gen) return;
 		Tls t;
 		if (!tls_connect(t, device_.address, device_.port)) {
 			std::cout << stamp() << "Cast: connect failed" << std::endl;
+			// Treat as stale transport; fall through to LAUNCH.
+			{
+			std::lock_guard<std::mutex> lk(tid_mutex_);
+			transport_id_.clear();
+			}
+			}
+		else {
+			if (load_gen_.load() != gen) return;
+			cast_send(t.ssl, NS_CONN,  src, "receiver-0", {{"type", "CONNECT"}});
+			cast_send(t.ssl, NS_CONN,  src, tid,           {{"type", "CONNECT"}});
+			cast_send(t.ssl, NS_MEDIA, src, tid, {
+				{"type",      "LOAD"},
+				{"requestId", 2},
+				{"media", {
+					{"contentId",   url},
+					{"contentType", mime},
+					{"streamType",  "BUFFERED"}
+					}}
+				});
+			// poll_loop() receives the MEDIA_STATUS response and updates status_.
+			// No need to wait here — that would block an httplib thread.
+			std::cout << stamp() << "Cast: → " << url << std::endl;
 			return;
 			}
-		cast_send(t.ssl, NS_CONN,  src, "receiver-0", {{"type", "CONNECT"}});
-		cast_send(t.ssl, NS_CONN,  src, tid,           {{"type", "CONNECT"}});
-		cast_send(t.ssl, NS_MEDIA, src, tid, {
-			{"type",      "LOAD"},
-			{"requestId", 2},
-			{"media", {
-				{"contentId",   url},
-				{"contentType", mime},
-				{"streamType",  "BUFFERED"}
-				}}
-			});
-		for (int i = 0; i < 15; i++) {
-			auto m = cast_recv(t.ssl);
-			if (m.is_null()) break;
-			if (m.value("type", "") == "MEDIA_STATUS") {
-				update_status(m);
-				std::cout << stamp() << "Cast: → " << url << std::endl;
-				return;
-				}
-			}
-		// No MEDIA_STATUS — transport is stale (Chromecast restarted?).
-		// Fall through to the full LAUNCH path.
-		std::cout << stamp() << "Cast: stale transport, retrying with LAUNCH"
-		          << std::endl;
-		{
-		std::lock_guard<std::mutex> lk(tid_mutex_);
-		transport_id_.clear();
-		}
 		}
 
-	// Full path: launch the app and discover the transport.  Runs on the very
-	// first load and as a fallback when the cached transport is no longer valid.
+	// Slow path: launch the Default Media Receiver app first.
+	if (load_gen_.load() != gen) return;
 	Tls t;
 	if (!tls_connect(t, device_.address, device_.port)) {
 		std::cout << stamp() << "Cast: connect failed ("
@@ -594,6 +595,8 @@ void CastManager::load(const std::string& url, const std::string& mime,
 		return;
 		}
 
+	// Only store the new transport_id if this is still the current load.
+	if (load_gen_.load() != gen) return;
 	{
 	std::lock_guard<std::mutex> lk(tid_mutex_);
 	transport_id_ = tid;
@@ -610,14 +613,6 @@ void CastManager::load(const std::string& url, const std::string& mime,
 			}}
 		});
 
-	// Read the initial MEDIA_STATUS to capture mediaSessionId and duration.
-	for (int i = 0; i < 15; i++) {
-		auto m = cast_recv(t.ssl);
-		if (m.is_null()) break;
-		if (m.value("type", "") == "MEDIA_STATUS") { update_status(m); break; }
-		}
-
-	// Connection closes here; the Chromecast fetches and plays independently.
 	std::cout << stamp() << "Cast: → " << url << std::endl;
 	}
 
