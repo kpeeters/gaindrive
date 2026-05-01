@@ -23,6 +23,8 @@ class GainDrive {
 		std::string     upload_dir_;
 		MediaStore      store_;
 		CastManager     cast_manager_;
+		std::string     last_cast_song_id_;
+		float           last_cast_offset_ = 0.0f;
 		FolderWatcher   watcher_;
 		httplib::Server server_;
 	};

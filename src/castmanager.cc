@@ -631,9 +631,17 @@ void CastManager::update_status(const nlohmann::json& msg)
 		cs.duration = s["media"]["duration"].get<float>();
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
+	if (cs.player_state != "IDLE")
+		last_known_time_ = cs.current_time;
 	status_ = cs;
 	}
 	status_cv_.notify_all();  // wake any SSE handlers waiting for the next push
+	}
+
+float CastManager::last_known_time() const
+	{
+	std::lock_guard<std::mutex> lk(status_mutex_);
+	return last_known_time_;
 	}
 
 CastManager::CastStatus CastManager::get_status() const

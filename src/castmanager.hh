@@ -62,6 +62,7 @@ class CastManager {
 
 		bool        active()     const { return active_; }
 		std::string token()      const { return token_; }
+		float       last_known_time() const;
 		bool        valid_token(const std::string& t) const
 			{ return active_ && !token_.empty() && token_ == t; }
 
@@ -82,6 +83,7 @@ class CastManager {
 		mutable std::mutex         status_mutex_;
 		std::condition_variable    status_cv_;       // notified on every status update
 		CastStatus                 status_;
+		float                      last_known_time_ = 0.0f; // current_time from last non-IDLE status
 
 		mutable std::mutex         cache_mutex_;
 		std::vector<CastDevice>    devices_cache_;  // last result of discover_background()

@@ -2631,7 +2631,30 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (ai != req.params.end()) action = ai->second;
 
 		if (action == "pause")      cast_manager_.cast_pause();
-		else if (action == "play")  cast_manager_.cast_play();
+		else if (action == "play") {
+			auto st = cast_manager_.get_status();
+			if (st.player_state == "PAUSED") {
+				cast_manager_.cast_play();
+				} else if (st.player_state == "IDLE" && !last_cast_song_id_.empty()) {
+				// Session timed out during a long pause — re-issue a full load from
+				// the saved position so the Chromecast can restart the stream.
+				auto song = store_.get_song(std::stoi(last_cast_song_id_));
+				if (song) {
+					std::string host  = req.get_header_value("Host");
+					if (host.empty()) host = "localhost";
+					std::string proto = req.get_header_value("X-Forwarded-Proto");
+					if (proto.empty()) proto = "http";
+					float pos = last_cast_offset_ + cast_manager_.last_known_time();
+					std::string url = proto + "://" + host + "/rest/stream.view"
+					                + "?id=" + last_cast_song_id_
+					                + "&castToken=" + cast_manager_.token();
+					if (pos > 0.5f)
+						url += "&timeOffset=" + std::to_string(static_cast<int>(pos));
+					cast_manager_.load(url, codec_to_mime(song->codec),
+					                   pos > 0.5f ? pos : 0.0f);
+					}
+				}
+			}
 		else if (action == "seek") {
 			auto ti = req.params.find("time");
 			if (ti != req.params.end())
@@ -2680,6 +2703,8 @@ GainDrive::GainDrive(const std::string& db_path,
 			url       += "&timeOffset=" + to_it->second;
 			cast_offset = std::stof(to_it->second);
 			}
+		last_cast_song_id_ = it->second;
+		last_cast_offset_  = cast_offset;
 		cast_manager_.load(url, codec_to_mime(song->codec), cast_offset);
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
