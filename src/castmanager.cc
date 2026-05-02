@@ -798,6 +798,13 @@ void CastManager::poll_loop()
 					          << (idle_reason.empty() ? std::string{}
 					                                  : " idleReason=" + idle_reason)
 					          << std::endl;
+					// Dump the full payload whenever idleReason is set — that is
+					// where the receiver hides the actual cause (extendedStatusCode,
+					// nested error, loadingItemId, …) for diagnosing stuck-IDLE
+					// sessions.
+					if (!idle_reason.empty())
+						std::cout << stamp() << "Cast rx MEDIA_STATUS payload: "
+						          << m.dump() << std::endl;
 					}
 				update_status(m);
 				}
