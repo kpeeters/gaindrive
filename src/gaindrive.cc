@@ -1933,18 +1933,22 @@ GainDrive::GainDrive(const std::string& db_path,
 			time_offset = 0;
 
 		// Seeked-stream probe: the Chromecast strips timeOffset from its probe
-		// request.  Responding with a full transcoded stream blasts megabytes at
-		// LAN speed (throttle is suppressed while the receiver is BUFFERING),
-		// overflows the Cast receiver's buffer, and kills the connection before
-		// the real request (with timeOffset) can deliver audio.  Return an empty
-		// 200 so the receiver only sees "URL is valid" and uses the real request.
+		// request.  We must not return a full transcoded stream (blasts megabytes
+		// at LAN speed while throttle is suppressed during BUFFERING), but we also
+		// must not return an empty body (Content-Length: 0 makes the receiver treat
+		// the track as finished and abort the real seeked request).  Serve a small
+		// slice of the raw file from t=0 — enough for the receiver to validate the
+		// URL, well within the pre-buffer window (prebuf ≈ 30 s of audio).
 		if (cast_authed
 		        && req.params.find("timeOffset") == req.params.end()
 		        && last_cast_offset_ > 0.0f
 		        && req.get_header_value("Range").empty()) {
 			std::cout << stamp() << "cast probe: id=" << it->second
-			          << " offset=" << last_cast_offset_ << " (no stream)" << std::endl;
-			res.set_content("", codec_to_mime(song->codec));
+			          << " offset=" << last_cast_offset_ << std::endl;
+			Streamer::SongInfo probe_si{ song->path, song->codec, song->bitrate,
+			                             song->duration,
+			                             std::min(song->file_size, (int64_t)32768) };
+			Streamer::serve(req, res, probe_si, 0, "", 0, true, {});
 			return;
 			}
 
