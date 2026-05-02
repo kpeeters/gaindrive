@@ -1924,6 +1924,14 @@ GainDrive::GainDrive(const std::string& db_path,
 		    ? static_cast<int>(last_cast_offset_)
 		    : std::stoi(qp("timeOffset", "0"));
 
+		// Chromecast metadata probes arrive as Range requests against the stream URL.
+		// For seeked streams (time_offset > 0) these would otherwise hit serve_transcoded
+		// which returns chunked output with no Content-Length, making it impossible for
+		// the receiver to read the format's duration/seek tables.  Force time_offset=0
+		// so these Range requests are served directly from the raw file.
+		if (cast_authed && !req.get_header_value("Range").empty() && time_offset > 0)
+			time_offset = 0;
+
 		if (cast_authed) {
 			// Log Range header so we can see what the Cast receiver is requesting.
 			auto range = req.get_header_value("Range");
