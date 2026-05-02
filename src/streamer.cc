@@ -153,18 +153,20 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 						float range_start_time = static_cast<float>(offset) / bytes_per_sec;
 						float audio_sent_abs   = static_cast<float>(offset + bytes_sent)
 						                       / bytes_per_sec;
-						// If the receiver is far ahead of what this connection is
-						// serving, it has moved on to a different Range request (the
-						// cast-seek pattern is: original no-Range request from byte 0,
-						// then the receiver issues a Range request at the seek byte and
-						// stops reading the first connection).  Exit so we don't blast
-						// bytes that won't be consumed.
-						if (pos > audio_sent_abs + TARGET_BUF * 2.0f) return false;
 						// BUFFERING (pos < 0) and transient pos < range_start_time both
 						// get pinned to range_start_time: the receiver is about to play
 						// from there, so the throttle should treat audio sent past that
 						// point as buffer ahead.
 						float effective_pos = std::max(range_start_time, pos);
+						// If the receiver is far ahead of what this connection is
+						// serving, it has moved on to a different Range request (cast
+						// seek pattern: original no-Range from byte 0, then receiver
+						// issues a Range at the seek byte and stops reading the first).
+						// Exit so we don't blast bytes that won't be consumed.
+						auto abandoned = [&](float eff) {
+							return eff > audio_sent_abs + TARGET_BUF * 2.0f;
+							};
+						if (abandoned(effective_pos)) return false;
 						float buf_secs   = audio_sent_abs - effective_pos;
 						if (buf_secs > TARGET_BUF) {
 							auto sleep_ms = static_cast<long>(
@@ -174,7 +176,14 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 							while (std::chrono::steady_clock::now() < deadline) {
 								std::this_thread::sleep_for(
 								    std::chrono::milliseconds(100));
-								if (get_position() < CAST_POS_BUFFERING) return false;
+								float pos_now = get_position();
+								if (pos_now < CAST_POS_BUFFERING) return false;
+								// Re-check abandonment during the sleep so we exit
+								// promptly when the receiver moves to a different
+								// Range request — otherwise we'd hold this socket
+								// open for the full sleep with the receiver gone.
+								float eff_now = std::max(range_start_time, pos_now);
+								if (abandoned(eff_now)) return false;
 								}
 							}
 						}

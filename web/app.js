@@ -1018,24 +1018,32 @@ function fmtDuration(secs) {
 let currentUser = null;
 
 // Id of the currently active cast device, or null when not casting.
-let castDeviceId     = null;
-let castEventSrc     = null;   // EventSource receiving pushed status from server
-let castStartOffset  = 0;      // timeOffset used when cast started (seconds)
-let lastCastPosition = 0;      // absolute position of last SSE push
-let castWasPlaying   = false;  // true once the cast device has been seen playing
-let castPlayerState  = 'IDLE'; // playerState from last SSE push (for interpolation)
-let castBaseTime     = 0;      // s.currentTime from last SSE push
-let castBaseAt       = 0;      // Date.now() (ms) when castBaseTime was recorded
-let castSongDuration = 0;      // total song duration; fallback when queue is not loaded
+let castDeviceId        = null;
+let castEventSrc        = null;   // EventSource receiving pushed status from server
+let castStartOffset     = 0;      // timeOffset used when cast started (seconds)
+let lastCastPosition    = 0;      // absolute position of last SSE push
+let castWasPlaying      = false;  // true once the cast device has been seen playing
+let castPlayerState     = 'IDLE'; // playerState from last SSE push (for interpolation)
+let castBaseTime        = 0;      // s.currentTime from last SSE push
+let castBaseAt          = 0;      // Date.now() (ms) when castBaseTime was recorded
+let castSongDuration    = 0;      // total song duration; fallback when queue is not loaded
+let castExpectedPosition = null;  // absolute position we asked the receiver to
+                                  // seek to via the most recent LOAD; cleared
+                                  // once the receiver reports playback near it
 
 // Handle one MEDIA_STATUS push from the server SSE stream.
 function onCastStatus(s) {
-   // After every LOAD the receiver emits a transient BUFFERING / PLAYING with
-   // currentTime=0 before it starts decoding at the requested seek position.
-   // Discard those so the seek bar doesn't briefly snap back to 0 between the
-   // user's seek and the receiver's first real position report.
-   if (s.currentTime === 0 && lastCastPosition > 0 && s.playerState !== 'IDLE')
-      return;
+   // After every LOAD the receiver emits a transient sequence (BUFFERING t=0,
+   // sometimes briefly PLAYING with a small t) before it actually starts
+   // decoding at the requested seek position.  When castExpectedPosition is
+   // set, ignore anything more than a few seconds away from it — the seek
+   // bar would otherwise snap to 0 (or a small value) and back.  IDLE goes
+   // through unfiltered so the FINISHED auto-advance still fires.
+   if (castExpectedPosition !== null && s.playerState !== 'IDLE') {
+      const absCurrent = castStartOffset + s.currentTime;
+      if (Math.abs(absCurrent - castExpectedPosition) > 3) return;
+      castExpectedPosition = null;
+      }
 
    castBaseTime    = s.currentTime;
    castBaseAt      = Date.now();
@@ -1166,12 +1174,13 @@ async function stopCast() {
       } catch (_) {
       // best-effort stop
       }
-   castDeviceId     = null;
-   castStartOffset  = 0;
-   lastCastPosition = 0;
-   castWasPlaying   = false;
-   castBaseTime     = 0;
-   castBaseAt       = 0;
+   castDeviceId         = null;
+   castStartOffset      = 0;
+   lastCastPosition     = 0;
+   castWasPlaying       = false;
+   castBaseTime         = 0;
+   castBaseAt           = 0;
+   castExpectedPosition = null;
    castPlayerState  = 'IDLE';
    castSongDuration = 0;
    document.getElementById('player-cast').classList.remove('active');
@@ -1275,12 +1284,17 @@ function playerPlay(offset = 0) {
       // spurious advance, and so interpolation starts fresh for the new track.
       // Native seek: the Chromecast reports absolute time (it seeks within
       // the full file itself), so castStartOffset is always 0.
-      castWasPlaying   = false;
-      castStartOffset  = 0;
-      castBaseTime     = 0;
-      castBaseAt       = 0;
-      castPlayerState  = 'IDLE';
-      castSongDuration = 0;
+      castWasPlaying      = false;
+      castStartOffset     = 0;
+      castBaseTime        = 0;
+      castBaseAt          = 0;
+      castPlayerState     = 'IDLE';
+      castSongDuration    = 0;
+      // After a LOAD the receiver emits a transient sequence (BUFFERING t=0,
+      // briefly PLAYING with a tiny t, then PLAYING at the real seek time).
+      // Track the position we asked it to seek to so onCastStatus can
+      // discard reports that aren't yet near that position.
+      castExpectedPosition = offset;
       const params = {id: song.id};
       if (offset > 0) params.timeOffset = Math.floor(offset);
       // Use the dedicated castLoad endpoint rather than setting player.audio.src.
