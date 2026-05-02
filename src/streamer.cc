@@ -148,9 +148,15 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 					size_t bytes_sent = length - remaining;
 					float pos = get_position();
 					if (pos < CAST_POS_BUFFERING) return false;
-					if (bytes_per_sec > 0 && bytes_sent > prebuf_bytes && pos >= 0.0f) {
+					// During BUFFERING (pos == -1) treat the receiver position as 0 so
+					// the throttle still engages — otherwise, on a cast seek with native
+					// seek (URL has no timeOffset), the server would blast the entire
+					// file from byte 0 before the receiver issues its Range request,
+					// which the receiver eventually aborts with a closed connection.
+					float effective_pos = (pos >= 0.0f) ? pos : 0.0f;
+					if (bytes_per_sec > 0 && bytes_sent > prebuf_bytes) {
 						float audio_sent = static_cast<float>(bytes_sent) / bytes_per_sec;
-						float buf_secs   = audio_sent - pos;
+						float buf_secs   = audio_sent - effective_pos;
 						if (buf_secs > TARGET_BUF) {
 							auto sleep_ms = static_cast<long>(
 							    (buf_secs - TARGET_BUF) * 1000.0f);
