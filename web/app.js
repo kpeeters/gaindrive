@@ -2335,6 +2335,15 @@ async function showShell() {
             const seek = document.getElementById('player-seek');
             if (sess.songDuration > 0) seek.max = sess.songDuration;
             document.getElementById('player-cast').classList.add('active');
+            // Populate player queue so title/thumbnail are visible in the bar.
+            try {
+               const songSr = await apiCall('getSong', {id: sess.songId});
+               if (songSr.song) {
+                  player.queue = [songSr.song];
+                  player.index = 0;
+                  playerUpdateUI();
+                  }
+               } catch (_) {}
             startCastEvents();
             }
          } catch (_) {}
