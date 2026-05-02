@@ -2650,6 +2650,40 @@ GainDrive::GainDrive(const std::string& db_path,
 				});
 		});
 
+	// castSession — non-blocking snapshot of current cast session state.
+	// Used by the browser on page load to restore the cast UI after a reload.
+	server_.Get("/rest/castSession.view", [this](const httplib::Request& req,
+	                                             httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		if (!check_cast_perm(req, res, store_, use_json)) return;
+
+		if (!cast_manager_.active()) {
+			res.set_content(subsonic_ok_json([](nlohmann::json& r) {
+				r["castSession"]["active"] = false;
+				}), "application/json");
+			return;
+			}
+
+		auto st = cast_manager_.get_status();
+		double song_duration = 0.0;
+		if (!last_cast_song_id_.empty()) {
+			auto song = store_.get_song(std::stoi(last_cast_song_id_));
+			if (song) song_duration = song->duration;
+			}
+		res.set_content(subsonic_ok_json([&](nlohmann::json& r) {
+			r["castSession"]["active"]       = true;
+			r["castSession"]["deviceId"]     = cast_manager_.get_device_id();
+			r["castSession"]["deviceName"]   = cast_manager_.get_device_name();
+			r["castSession"]["songId"]       = last_cast_song_id_;
+			r["castSession"]["startOffset"]  = last_cast_offset_;
+			r["castSession"]["playerState"]  = st.player_state;
+			r["castSession"]["currentTime"]  = st.current_time;
+			r["castSession"]["duration"]     = st.duration;
+			r["castSession"]["songDuration"] = song_duration;
+			}), "application/json");
+		});
+
 	// castControl — send play/pause/seek to the Chromecast.
 	server_.Get("/rest/castControl.view", [this](const httplib::Request& req,
 	                                             httplib::Response& res) {

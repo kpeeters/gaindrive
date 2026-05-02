@@ -1026,6 +1026,7 @@ let castWasPlaying   = false;  // true once the cast device has been seen playin
 let castPlayerState  = 'IDLE'; // playerState from last SSE push (for interpolation)
 let castBaseTime     = 0;      // s.currentTime from last SSE push
 let castBaseAt       = 0;      // Date.now() (ms) when castBaseTime was recorded
+let castSongDuration = 0;      // total song duration; fallback when queue is not loaded
 
 // Handle one MEDIA_STATUS push from the server SSE stream.
 function onCastStatus(s) {
@@ -1053,7 +1054,7 @@ function onCastStatus(s) {
    lastCastPosition = absCurrent;
 
    const song = player.queue[player.index];
-   const totalSecs = song?.duration ?? 0;
+   const totalSecs = (song?.duration ?? 0) || castSongDuration;
    const seek = document.getElementById('player-seek');
    if (!seek.dataset.seeking) {
       if (totalSecs > 0) seek.max = totalSecs;
@@ -1082,7 +1083,7 @@ setInterval(() => {
       : 0;
    const absCurrent = castStartOffset + castBaseTime + elapsed;
    const song = player.queue[player.index];
-   const totalSecs = song?.duration ?? 0;
+   const totalSecs = (song?.duration ?? 0) || castSongDuration;
    const seek = document.getElementById('player-seek');
    const time = document.getElementById('player-time');
    if (!seek.dataset.seeking) seek.value = Math.floor(absCurrent);
@@ -1165,6 +1166,7 @@ async function stopCast() {
    castBaseTime     = 0;
    castBaseAt       = 0;
    castPlayerState  = 'IDLE';
+   castSongDuration = 0;
    document.getElementById('player-cast').classList.remove('active');
    document.getElementById('cast-modal').classList.add('hidden');
    if (player.index >= 0)
@@ -1264,11 +1266,12 @@ function playerPlay(offset = 0) {
    if (castDeviceId !== null) {
       // Reset so the IDLE status during Chromecast loading doesn't trigger a
       // spurious advance, and so interpolation starts fresh for the new track.
-      castWasPlaying  = false;
-      castStartOffset = offset;
-      castBaseTime    = 0;
-      castBaseAt      = 0;
-      castPlayerState = 'IDLE';
+      castWasPlaying   = false;
+      castStartOffset  = offset;
+      castBaseTime     = 0;
+      castBaseAt       = 0;
+      castPlayerState  = 'IDLE';
+      castSongDuration = 0;
       const params = {id: song.id};
       if (offset > 0) params.timeOffset = Math.floor(offset);
       // Use the dedicated castLoad endpoint rather than setting player.audio.src.
@@ -2315,6 +2318,27 @@ async function showShell() {
       currentUser = sr.user;
    } catch {}
    document.getElementById('player-cast').hidden = !currentUser?.castRole;
+
+   // If a cast session is already active on the server (e.g. after a page
+   // reload), restore local state so the icon and progress bar reflect it.
+   if (currentUser?.castRole) {
+      try {
+         const sr = await apiCall('castSession');
+         if (sr.castSession?.active) {
+            const sess = sr.castSession;
+            castDeviceId     = sess.deviceId;
+            castStartOffset  = sess.startOffset;
+            castBaseTime     = sess.currentTime;
+            castBaseAt       = Date.now();
+            castPlayerState  = sess.playerState;
+            castSongDuration = sess.songDuration;
+            const seek = document.getElementById('player-seek');
+            if (sess.songDuration > 0) seek.max = sess.songDuration;
+            document.getElementById('player-cast').classList.add('active');
+            startCastEvents();
+            }
+         } catch (_) {}
+      }
 
    // Wire up sidebar and bottom-nav links with history entries.
    shell.querySelectorAll('[data-view]').forEach(a => {

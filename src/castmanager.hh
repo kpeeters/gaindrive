@@ -60,8 +60,10 @@ class CastManager {
 		// Used by the SSE endpoint to stream updates to the browser.
 		CastStatus wait_status(int timeout_ms = 15000);
 
-		bool        active()     const { return active_; }
-		std::string token()      const { return token_; }
+		bool        active()          const { return active_; }
+		std::string token()           const { return token_; }
+		std::string get_device_id()   const { return device_.id; }
+		std::string get_device_name() const { return device_.name; }
 		float       last_known_time() const;
 		bool        valid_token(const std::string& t) const
 			{ return active_ && !token_.empty() && token_ == t; }
