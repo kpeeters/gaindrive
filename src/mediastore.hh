@@ -36,6 +36,7 @@ class MediaStore {
 			int         max_bitrate;
 			bool        upload_allowed;
 			bool        disabled;
+			bool        cast_allowed;
 			};
 
 		std::optional<UserInfo> get_user(const std::string& username);
@@ -52,7 +53,8 @@ class MediaStore {
 		                 bool is_admin,
 		                 int  max_bitrate,
 		                 bool upload_allowed,
-		                 bool disabled);
+		                 bool disabled,
+		                 bool cast_allowed);
 
 		// Validates Subsonic auth params. Supply either password (from p=,
 		// possibly with "enc:" prefix) or token+salt (from t= and s=).

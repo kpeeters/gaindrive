@@ -251,7 +251,8 @@ void MediaStore::create_schema()
 			created        DATETIME DEFAULT CURRENT_TIMESTAMP,
 			last_access    DATETIME,
 			upload_allowed INTEGER DEFAULT 0,
-			disabled       INTEGER DEFAULT 0
+			disabled       INTEGER DEFAULT 0,
+			cast_allowed   INTEGER DEFAULT 0
 		);
 
 		CREATE TABLE IF NOT EXISTS client.stars (
@@ -334,6 +335,8 @@ void MediaStore::create_schema()
 	try { db_music_.exec("ALTER TABLE client.users ADD COLUMN upload_allowed INTEGER DEFAULT 0"); }
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE client.users ADD COLUMN disabled INTEGER DEFAULT 0"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE client.users ADD COLUMN cast_allowed INTEGER DEFAULT 0"); }
 	catch (const SQLite::Exception&) {}
 
 	// Backfill song_artists from album_artists for any songs that were scanned
@@ -956,7 +959,7 @@ std::optional<MediaStore::UserInfo> MediaStore::get_user(const std::string& user
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement sel(db_music_,
-		"SELECT username, email, is_admin, max_bitrate, upload_allowed, disabled"
+		"SELECT username, email, is_admin, max_bitrate, upload_allowed, disabled, cast_allowed"
 		" FROM client.users WHERE username = ?");
 	sel.bind(1, username);
 	if (!sel.executeStep()) return std::nullopt;
@@ -967,6 +970,7 @@ std::optional<MediaStore::UserInfo> MediaStore::get_user(const std::string& user
 	u.max_bitrate    = sel.getColumn(3).getInt();
 	u.upload_allowed = sel.getColumn(4).getInt() != 0;
 	u.disabled       = sel.getColumn(5).getInt() != 0;
+	u.cast_allowed   = sel.getColumn(6).getInt() != 0;
 	return u;
 	}
 
@@ -974,7 +978,7 @@ std::vector<MediaStore::UserInfo> MediaStore::list_users()
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement sel(db_music_,
-		"SELECT username, email, is_admin, max_bitrate, upload_allowed, disabled"
+		"SELECT username, email, is_admin, max_bitrate, upload_allowed, disabled, cast_allowed"
 		" FROM client.users ORDER BY username");
 	std::vector<UserInfo> result;
 	while (sel.executeStep()) {
@@ -985,6 +989,7 @@ std::vector<MediaStore::UserInfo> MediaStore::list_users()
 		u.max_bitrate    = sel.getColumn(3).getInt();
 		u.upload_allowed = sel.getColumn(4).getInt() != 0;
 		u.disabled       = sel.getColumn(5).getInt() != 0;
+		u.cast_allowed   = sel.getColumn(6).getInt() != 0;
 		result.push_back(u);
 		}
 	return result;
@@ -996,26 +1001,28 @@ bool MediaStore::update_user(const std::string& username,
                               bool is_admin,
                               int  max_bitrate,
                               bool upload_allowed,
-                              bool disabled)
+                              bool disabled,
+                              bool cast_allowed)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	if (new_password.empty()) {
 		SQLite::Statement upd(db_music_,
 			"UPDATE client.users"
-			" SET email=?, is_admin=?, max_bitrate=?, upload_allowed=?, disabled=?"
+			" SET email=?, is_admin=?, max_bitrate=?, upload_allowed=?, disabled=?, cast_allowed=?"
 			" WHERE username=?");
 		upd.bind(1, email);
 		upd.bind(2, is_admin       ? 1 : 0);
 		upd.bind(3, max_bitrate);
 		upd.bind(4, upload_allowed ? 1 : 0);
 		upd.bind(5, disabled       ? 1 : 0);
-		upd.bind(6, username);
+		upd.bind(6, cast_allowed   ? 1 : 0);
+		upd.bind(7, username);
 		upd.exec();
 		}
 	else {
 		SQLite::Statement upd(db_music_,
 			"UPDATE client.users"
-			" SET password_enc=?, email=?, is_admin=?, max_bitrate=?, upload_allowed=?, disabled=?"
+			" SET password_enc=?, email=?, is_admin=?, max_bitrate=?, upload_allowed=?, disabled=?, cast_allowed=?"
 			" WHERE username=?");
 		upd.bind(1, new_password);
 		upd.bind(2, email);
@@ -1023,7 +1030,8 @@ bool MediaStore::update_user(const std::string& username,
 		upd.bind(4, max_bitrate);
 		upd.bind(5, upload_allowed ? 1 : 0);
 		upd.bind(6, disabled       ? 1 : 0);
-		upd.bind(7, username);
+		upd.bind(7, cast_allowed   ? 1 : 0);
+		upd.bind(8, username);
 		upd.exec();
 		}
 	return db_music_.getChanges() > 0;

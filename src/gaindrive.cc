@@ -1002,7 +1002,8 @@ GainDrive::GainDrive(const std::string& db_path,
 					{"jukeboxRole",       false},
 					{"shareRole",         false},
 					{"maxBitRate",        ui->max_bitrate},
-					{"disabled",          ui->disabled}
+					{"disabled",          ui->disabled},
+					{"castRole",          ui->cast_allowed}
 					};
 				});
 		else
@@ -1024,6 +1025,7 @@ GainDrive::GainDrive(const std::string& db_path,
 				u->SetAttribute("shareRole",         false);
 				u->SetAttribute("maxBitRate",        ui->max_bitrate);
 				u->SetAttribute("disabled",          ui->disabled);
+				u->SetAttribute("castRole",          ui->cast_allowed);
 				root->InsertEndChild(u);
 				});
 		if (debug_) std::cout << body << "\n";
@@ -1066,7 +1068,8 @@ GainDrive::GainDrive(const std::string& db_path,
 						{"jukeboxRole",       false},
 						{"shareRole",         false},
 						{"maxBitRate",        u.max_bitrate},
-						{"disabled",          u.disabled}
+						{"disabled",          u.disabled},
+				{"castRole",          u.cast_allowed}
 						});
 				r["users"] = {{"user", arr}};
 				});
@@ -1091,6 +1094,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					ue->SetAttribute("shareRole",         false);
 					ue->SetAttribute("maxBitRate",        u.max_bitrate);
 					ue->SetAttribute("disabled",          u.disabled);
+					ue->SetAttribute("castRole",          u.cast_allowed);
 					us->InsertEndChild(ue);
 					}
 				root->InsertEndChild(us);
@@ -1124,6 +1128,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		bool is_admin       = (qp("adminRole")  == "true");
 		bool upload_allowed = (qp("uploadRole") == "true");
 		bool disabled       = (qp("disabled")   == "true");
+		bool cast_allowed   = (qp("castRole")   == "true");
 		int  max_bitrate    = 0;
 		if (!qp("maxBitRate").empty()) max_bitrate = std::stoi(qp("maxBitRate"));
 
@@ -1131,7 +1136,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			err(0, "User already exists.");
 			return;
 			}
-		store_.update_user(username, "", qp("email"), is_admin, max_bitrate, upload_allowed, disabled);
+		store_.update_user(username, "", qp("email"), is_admin, max_bitrate, upload_allowed, disabled, cast_allowed);
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		if (debug_) std::cout << body << "\n";
@@ -1165,6 +1170,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		bool is_admin       = qp("adminRole").empty()  ? existing->is_admin       : (qp("adminRole")  == "true");
 		bool upload_allowed = qp("uploadRole").empty() ? existing->upload_allowed : (qp("uploadRole") == "true");
 		bool disabled       = qp("disabled").empty()   ? existing->disabled       : (qp("disabled")   == "true");
+		bool cast_allowed   = qp("castRole").empty()   ? existing->cast_allowed   : (qp("castRole")   == "true");
 		int  max_bitrate    = qp("maxBitRate").empty()  ? existing->max_bitrate    : std::stoi(qp("maxBitRate"));
 		std::string email   = qp("email").empty()       ? existing->email          : qp("email");
 		std::string pw      = qp("password");
@@ -1173,7 +1179,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (username == qp("u") && disabled)
 			{ err(0, "You cannot disable your own account."); return; }
 
-		store_.update_user(username, pw, email, is_admin, max_bitrate, upload_allowed, disabled);
+		store_.update_user(username, pw, email, is_admin, max_bitrate, upload_allowed, disabled, cast_allowed);
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		if (debug_) std::cout << body << "\n";
@@ -2522,6 +2528,7 @@ GainDrive::GainDrive(const std::string& db_path,
 	                                                  httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
+		if (!check_cast_perm(req, res, store_, use_json)) return;
 
 		auto devices = cast_manager_.cached_devices();
 		cast_manager_.discover_background();
@@ -2559,6 +2566,7 @@ GainDrive::GainDrive(const std::string& db_path,
 	                                            httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
+		if (!check_cast_perm(req, res, store_, use_json)) return;
 
 		auto it = req.params.find("id");
 		if (it == req.params.end()) {
@@ -2593,6 +2601,7 @@ GainDrive::GainDrive(const std::string& db_path,
 	                                           httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
+		if (!check_cast_perm(req, res, store_, use_json)) return;
 		cast_manager_.stop();
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
@@ -2605,6 +2614,10 @@ GainDrive::GainDrive(const std::string& db_path,
 	server_.Get("/rest/castEvents.view", [this](const httplib::Request& req,
 	                                            httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
+		{
+		bool use_json = (fmt_of(req) == "json");
+		if (!check_cast_perm(req, res, store_, use_json)) return;
+		}
 		if (!cast_manager_.active()) { res.status = 204; return; }
 		res.set_header("Cache-Control",    "no-cache");
 		res.set_header("X-Accel-Buffering","no");   // disable nginx/apache buffering
@@ -2626,6 +2639,7 @@ GainDrive::GainDrive(const std::string& db_path,
 	                                             httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
+		if (!check_cast_perm(req, res, store_, use_json)) return;
 		std::string action;
 		auto ai = req.params.find("action");
 		if (ai != req.params.end()) action = ai->second;
@@ -2673,6 +2687,7 @@ GainDrive::GainDrive(const std::string& db_path,
 	                                          httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
+		if (!check_cast_perm(req, res, store_, use_json)) return;
 
 		auto err = [&](int code, const char* msg) {
 			res.set_content(use_json ? subsonic_error_json(code, msg)

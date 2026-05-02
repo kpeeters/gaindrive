@@ -381,6 +381,7 @@ async function viewSettings() {
             badges.className = 'user-badges';
             if (u.adminRole)  badges.appendChild(makeBadge('Admin',    'badge-admin'));
             if (u.uploadRole) badges.appendChild(makeBadge('Upload',   'badge-upload'));
+            if (u.castRole)   badges.appendChild(makeBadge('Cast',     'badge-cast'));
             if (u.disabled)   badges.appendChild(makeBadge('Disabled', 'badge-disabled'));
             row.appendChild(badges);
 
@@ -484,6 +485,7 @@ async function viewUserEdit(user, refreshFn) {
    const fEmail      = addField('Email',          textInput(user?.email,     ''));
    const fAdmin      = addField('Admin',          checkInput(user?.adminRole));
    const fUpload     = addField('Upload allowed', checkInput(user?.uploadRole));
+   const fCast      = addField('Cast allowed',   checkInput(user?.castRole));
    const isSelf = !isNew && user.username === creds.load().user;
    const fDisabled   = addField('Disabled',       checkInput(user?.disabled));
    if (isSelf) {
@@ -532,6 +534,7 @@ async function viewUserEdit(user, refreshFn) {
          params.set('email',       fEmail.value.trim());
          params.set('adminRole',   fAdmin.checked   ? 'true' : 'false');
          params.set('uploadRole',  fUpload.checked  ? 'true' : 'false');
+         params.set('castRole',    fCast.checked    ? 'true' : 'false');
          params.set('disabled',    fDisabled.checked ? 'true' : 'false');
          params.set('maxBitRate',  fMaxBitrate.value);
 
@@ -1010,6 +1013,9 @@ function fmtDuration(secs) {
 }
 
 // ── Player ───────────────────────────────────────────────────────────────────
+
+// Info for the currently logged-in user (populated in showShell).
+let currentUser = null;
 
 // Id of the currently active cast device, or null when not casting.
 let castDeviceId     = null;
@@ -2302,6 +2308,13 @@ async function showShell() {
 
    setupPlayer();
    setupSearch();
+
+   // Fetch the logged-in user's roles so we can show/hide the cast button.
+   try {
+      const sr = await apiCall('getUser', {username: creds.load().user});
+      currentUser = sr.user;
+   } catch {}
+   document.getElementById('player-cast').hidden = !currentUser?.castRole;
 
    // Wire up sidebar and bottom-nav links with history entries.
    shell.querySelectorAll('[data-view]').forEach(a => {

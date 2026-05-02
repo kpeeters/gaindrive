@@ -1502,6 +1502,7 @@ body {
 
 .badge-admin    { background: var(--accent); }
 .badge-upload   { background: color-mix(in srgb, var(--accent) 60%, #4caf50); }
+.badge-cast     { background: color-mix(in srgb, var(--accent) 60%, #2196f3); }
 .badge-disabled { background: var(--text-dim); }
 
 /* ── User edit form ─────────────────────────────────── */
