@@ -145,29 +145,26 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 					size_t bytes_sent = length - remaining;
 					float pos = get_position();
 					if (pos < CAST_POS_BUFFERING) return false;
-					if (bytes_per_sec > 0 && bytes_sent > prebuf_bytes) {
+					// Throttling only runs while the receiver is actually PLAYING.
+					// During IDLE/BUFFERING (pos < 0) we send freely — TCP
+					// backpressure paces us once the receiver's buffer fills, but
+					// any explicit throttle here causes the receiver to time out
+					// while we sleep, which manifests as "track click → never
+					// starts playing" or "seek → playback stops altogether".
+					if (pos >= 0.0f && bytes_per_sec > 0 && bytes_sent > prebuf_bytes) {
 						// Throttle in **absolute** audio time so that Range requests
 						// (cast native seek issues these against the same URL) compare
 						// correctly: bytes_sent is local to this request, but pos is the
 						// receiver's absolute position in the track.
-						float range_start_time = static_cast<float>(offset) / bytes_per_sec;
-						float audio_sent_abs   = static_cast<float>(offset + bytes_sent)
-						                       / bytes_per_sec;
-						// BUFFERING (pos < 0) and transient pos < range_start_time both
-						// get pinned to range_start_time: the receiver is about to play
-						// from there, so the throttle should treat audio sent past that
-						// point as buffer ahead.
-						float effective_pos = std::max(range_start_time, pos);
+						float audio_sent_abs = static_cast<float>(offset + bytes_sent)
+						                     / bytes_per_sec;
 						// If the receiver is far ahead of what this connection is
 						// serving, it has moved on to a different Range request (cast
 						// seek pattern: original no-Range from byte 0, then receiver
 						// issues a Range at the seek byte and stops reading the first).
 						// Exit so we don't blast bytes that won't be consumed.
-						auto abandoned = [&](float eff) {
-							return eff > audio_sent_abs + TARGET_BUF * 2.0f;
-							};
-						if (abandoned(effective_pos)) return false;
-						float buf_secs   = audio_sent_abs - effective_pos;
+						if (pos > audio_sent_abs + TARGET_BUF * 2.0f) return false;
+						float buf_secs = audio_sent_abs - pos;
 						if (buf_secs > TARGET_BUF) {
 							auto sleep_ms = static_cast<long>(
 							    (buf_secs - TARGET_BUF) * 1000.0f);
@@ -178,12 +175,8 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 								    std::chrono::milliseconds(100));
 								float pos_now = get_position();
 								if (pos_now < CAST_POS_BUFFERING) return false;
-								// Re-check abandonment during the sleep so we exit
-								// promptly when the receiver moves to a different
-								// Range request — otherwise we'd hold this socket
-								// open for the full sleep with the receiver gone.
-								float eff_now = std::max(range_start_time, pos_now);
-								if (abandoned(eff_now)) return false;
+								if (pos_now > audio_sent_abs + TARGET_BUF * 2.0f)
+									return false;
 								}
 							}
 						}
