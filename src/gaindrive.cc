@@ -306,6 +306,21 @@ static bool check_auth(const httplib::Request& req, httplib::Response& res,
 
 	return true;
 	}
+// Returns true if the authenticated user has cast permission.
+static bool check_cast_perm(const httplib::Request& req, httplib::Response& res,
+                             MediaStore& store, bool use_json)
+	{
+	auto u    = req.get_param_value("u");
+	auto info = store.get_user(u);
+	if (!info || !info->cast_allowed) {
+		const char* msg = "User is not authorized for the given operation.";
+		res.set_content(use_json ? subsonic_error_json(50, msg)
+		                        : subsonic_error(50, msg),
+		                use_json ? "application/json" : "text/xml");
+		return false;
+		}
+	return true;
+	}
 
 // ---- Artist info helper -----------------------------------------------
 
@@ -1216,7 +1231,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!existing) { err(70, "User not found."); return; }
 
 		store_.update_user(target, password, existing->email, existing->is_admin,
-		                   existing->max_bitrate, existing->upload_allowed, existing->disabled);
+		                   existing->max_bitrate, existing->upload_allowed, existing->disabled,
+		                   existing->cast_allowed);
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		if (debug_) std::cout << body << "\n";
