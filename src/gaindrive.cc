@@ -1899,12 +1899,12 @@ GainDrive::GainDrive(const std::string& db_path,
 			std::string url = proto + "://" + host + "/rest/stream.view"
 			                + "?id=" + it->second
 			                + "&castToken=" + cast_manager_.token();
+			// Native seek: the URL serves the full file, and the LOAD message
+			// tells the receiver where to seek.  No timeOffset in the URL.
 			auto to_it = req.params.find("timeOffset");
 			float cast_offset = 0.0f;
-			if (to_it != req.params.end() && !to_it->second.empty()) {
-				url += "&timeOffset=" + to_it->second;
+			if (to_it != req.params.end() && !to_it->second.empty())
 				cast_offset = std::stof(to_it->second);
-				}
 			cast_manager_.load(url, codec_to_mime(song->codec), cast_offset, song->duration);
 			res.status = 204;
 			return;
@@ -2741,14 +2741,15 @@ GainDrive::GainDrive(const std::string& db_path,
 					if (host.empty()) host = "localhost";
 					std::string proto = req.get_header_value("X-Forwarded-Proto");
 					if (proto.empty()) proto = "http";
+					// last_known_time is already absolute under native seek
+					// (Chromecast reports absolute time; last_cast_offset_ stays 0).
 					float pos = last_cast_offset_ + cast_manager_.last_known_time();
 					std::string url = proto + "://" + host + "/rest/stream.view"
 					                + "?id=" + last_cast_song_id_
 					                + "&castToken=" + cast_manager_.token();
-					if (pos > 0.5f)
-						url += "&timeOffset=" + std::to_string(static_cast<int>(pos));
 					cast_manager_.load(url, codec_to_mime(song->codec),
 					                   pos > 0.5f ? pos : 0.0f, song->duration);
+					last_cast_offset_ = 0.0f;
 					}
 				}
 			}
@@ -2795,14 +2796,16 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string url = proto + "://" + host + "/rest/stream.view"
 		                + "?id=" + it->second
 		                + "&castToken=" + cast_manager_.token();
+		// Native seek: the URL always serves the full file (no timeOffset),
+		// and the LOAD message's currentTime tells the receiver where to start.
+		// The receiver uses the file's XING/seek tables to find the right byte
+		// range, so it can determine the stream duration normally.
 		auto to_it = req.params.find("timeOffset");
 		float cast_offset = 0.0f;
-		if (to_it != req.params.end() && !to_it->second.empty()) {
-			url       += "&timeOffset=" + to_it->second;
+		if (to_it != req.params.end() && !to_it->second.empty())
 			cast_offset = std::stof(to_it->second);
-			}
 		last_cast_song_id_ = it->second;
-		last_cast_offset_  = cast_offset;
+		last_cast_offset_  = 0.0f;
 		cast_manager_.load(url, codec_to_mime(song->codec), cast_offset, song->duration);
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");

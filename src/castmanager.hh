@@ -105,5 +105,6 @@ class CastManager {
 		// Worker spawned by load() — does the actual TLS connect + LOAD.
 		// Checks load_gen_ against gen at each blocking step and aborts early if
 		// a newer load() has been called.
-		void load_worker(std::string url, std::string mime, int gen, double duration);
+		void load_worker(std::string url, std::string mime, int gen,
+		                 float current_time, double duration);
 	};

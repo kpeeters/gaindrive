@@ -515,11 +515,12 @@ bool CastManager::start(const CastDevice& dev)
 	}
 
 void CastManager::load(const std::string& url, const std::string& mime,
-                        float /*current_time*/, double duration)
+                        float current_time, double duration)
 	{
 	// Signal any running content-provider thread to stop immediately.
 	int gen = ++load_gen_;
-	std::cout << stamp() << "Cast: load gen=" << gen << " url=" << url << std::endl;
+	std::cout << stamp() << "Cast: load gen=" << gen << " url=" << url
+	          << " currentTime=" << current_time << std::endl;
 
 	// Reset playback status for the new track.
 	{
@@ -533,10 +534,13 @@ void CastManager::load(const std::string& url, const std::string& mime,
 	// immediately.  load_gen_ acts as a cancellation token: if a newer
 	// load() fires before this worker reaches a blocking call, the worker
 	// detects the stale generation and exits without doing any work.
-	std::thread([this, url, mime, gen, duration]{ load_worker(url, mime, gen, duration); }).detach();
+	std::thread([this, url, mime, gen, current_time, duration]{
+		load_worker(url, mime, gen, current_time, duration);
+		}).detach();
 	}
 
-void CastManager::load_worker(std::string url, std::string mime, int gen, double duration)
+void CastManager::load_worker(std::string url, std::string mime, int gen,
+                               float current_time, double duration)
 	{
 	std::string src = "sender-0";
 
@@ -562,7 +566,7 @@ void CastManager::load_worker(std::string url, std::string mime, int gen, double
 			if (load_gen_.load() != gen) return;
 			cast_send(t.ssl, NS_CONN,  src, "receiver-0", {{"type", "CONNECT"}});
 			cast_send(t.ssl, NS_CONN,  src, tid,           {{"type", "CONNECT"}});
-			cast_send(t.ssl, NS_MEDIA, src, tid, {
+			nlohmann::json msg = {
 				{"type",      "LOAD"},
 				{"requestId", 2},
 				{"media", {
@@ -571,7 +575,14 @@ void CastManager::load_worker(std::string url, std::string mime, int gen, double
 					{"streamType",  "BUFFERED"},
 					{"duration",    duration}
 					}}
-				});
+				};
+			// currentTime tells the receiver to start playback at this offset
+			// within the loaded media — the receiver handles the seek itself
+			// using the file's XING/seek tables.  This avoids server-side
+			// transcoding and gives the receiver real duration metadata.
+			if (current_time > 0.0f)
+				msg["currentTime"] = current_time;
+			cast_send(t.ssl, NS_MEDIA, src, tid, msg);
 			// poll_loop() receives the MEDIA_STATUS response and updates status_.
 			// No need to wait here — that would block an httplib thread.
 			std::cout << stamp() << "Cast: → " << url << std::endl;
@@ -606,7 +617,8 @@ void CastManager::load_worker(std::string url, std::string mime, int gen, double
 	}
 
 	cast_send(t.ssl, NS_CONN,  src, tid, {{"type", "CONNECT"}});
-	cast_send(t.ssl, NS_MEDIA, src, tid, {
+	{
+	nlohmann::json msg = {
 		{"type",      "LOAD"},
 		{"requestId", 2},
 		{"media", {
@@ -615,7 +627,11 @@ void CastManager::load_worker(std::string url, std::string mime, int gen, double
 			{"streamType",  "BUFFERED"},
 			{"duration",    duration}
 			}}
-		});
+		};
+	if (current_time > 0.0f)
+		msg["currentTime"] = current_time;
+	cast_send(t.ssl, NS_MEDIA, src, tid, msg);
+	}
 
 	std::cout << stamp() << "Cast: → " << url << std::endl;
 	}

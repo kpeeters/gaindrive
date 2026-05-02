@@ -1266,8 +1266,10 @@ function playerPlay(offset = 0) {
    if (castDeviceId !== null) {
       // Reset so the IDLE status during Chromecast loading doesn't trigger a
       // spurious advance, and so interpolation starts fresh for the new track.
+      // Native seek: the Chromecast reports absolute time (it seeks within
+      // the full file itself), so castStartOffset is always 0.
       castWasPlaying   = false;
-      castStartOffset  = offset;
+      castStartOffset  = 0;
       castBaseTime     = 0;
       castBaseAt       = 0;
       castPlayerState  = 'IDLE';

@@ -194,19 +194,6 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 		args.push_back("-c:a");
 		args.push_back("copy");
 		}
-	// For MP3 output, inject a TLEN ID3v2 tag with the remaining stream duration.
-	// ffmpeg piped output has no XING header (can't seek back to fill frame count),
-	// so Chrome reports duration=0 from stream analysis.  Chrome does read TLEN when
-	// XING is absent, so this is the only reliable way to carry duration information.
-	if (target_fmt == "mp3" && song.duration > 0) {
-		long tlen_ms = static_cast<long>((song.duration - time_offset) * 1000.0);
-		if (tlen_ms > 0) {
-			args.push_back("-id3v2_version");
-			args.push_back("3");
-			args.push_back("-metadata");
-			args.push_back("TLEN=" + std::to_string(tlen_ms));
-			}
-		}
 	args.push_back("pipe:1");
 
 	auto proc = std::make_shared<reproc::process>();
