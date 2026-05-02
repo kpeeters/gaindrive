@@ -1905,7 +1905,7 @@ GainDrive::GainDrive(const std::string& db_path,
 				url += "&timeOffset=" + to_it->second;
 				cast_offset = std::stof(to_it->second);
 				}
-			cast_manager_.load(url, codec_to_mime(song->codec), cast_offset);
+			cast_manager_.load(url, codec_to_mime(song->codec), cast_offset, song->duration);
 			res.status = 204;
 			return;
 			}
@@ -2720,7 +2720,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					if (pos > 0.5f)
 						url += "&timeOffset=" + std::to_string(static_cast<int>(pos));
 					cast_manager_.load(url, codec_to_mime(song->codec),
-					                   pos > 0.5f ? pos : 0.0f);
+					                   pos > 0.5f ? pos : 0.0f, song->duration);
 					}
 				}
 			}
@@ -2775,7 +2775,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 		last_cast_song_id_ = it->second;
 		last_cast_offset_  = cast_offset;
-		cast_manager_.load(url, codec_to_mime(song->codec), cast_offset);
+		cast_manager_.load(url, codec_to_mime(song->codec), cast_offset, song->duration);
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
 		});

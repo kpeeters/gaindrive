@@ -515,7 +515,7 @@ bool CastManager::start(const CastDevice& dev)
 	}
 
 void CastManager::load(const std::string& url, const std::string& mime,
-                        float /*current_time*/)
+                        float /*current_time*/, double duration)
 	{
 	// Signal any running content-provider thread to stop immediately.
 	int gen = ++load_gen_;
@@ -531,10 +531,10 @@ void CastManager::load(const std::string& url, const std::string& mime,
 	// immediately.  load_gen_ acts as a cancellation token: if a newer
 	// load() fires before this worker reaches a blocking call, the worker
 	// detects the stale generation and exits without doing any work.
-	std::thread([this, url, mime, gen]{ load_worker(url, mime, gen); }).detach();
+	std::thread([this, url, mime, gen, duration]{ load_worker(url, mime, gen, duration); }).detach();
 	}
 
-void CastManager::load_worker(std::string url, std::string mime, int gen)
+void CastManager::load_worker(std::string url, std::string mime, int gen, double duration)
 	{
 	std::string src = "sender-0";
 
@@ -566,7 +566,8 @@ void CastManager::load_worker(std::string url, std::string mime, int gen)
 				{"media", {
 					{"contentId",   url},
 					{"contentType", mime},
-					{"streamType",  "BUFFERED"}
+					{"streamType",  "BUFFERED"},
+					{"duration",    duration}
 					}}
 				});
 			// poll_loop() receives the MEDIA_STATUS response and updates status_.
@@ -609,7 +610,8 @@ void CastManager::load_worker(std::string url, std::string mime, int gen)
 		{"media", {
 			{"contentId",   url},
 			{"contentType", mime},
-			{"streamType",  "BUFFERED"}
+			{"streamType",  "BUFFERED"},
+			{"duration",    duration}
 			}}
 		});
 

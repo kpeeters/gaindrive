@@ -229,7 +229,9 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 			if (get_position && get_position() < CAST_POS_BUFFERING) return false;
 			uint8_t buf[65536];
 			auto [n, err] = proc->read(reproc::stream::out, buf, sizeof(buf));
-			if (n == 0) {
+			if (n == 0 || err) {
+				// Check err before n: reproc wraps negative C return values into
+				// size_t, so err is the reliable EOF/error indicator.
 				if (err && err != std::make_error_code(std::errc::broken_pipe))
 					std::cout << stamp() << "stream: ffmpeg pipe error: "
 					          << err.message() << std::endl;

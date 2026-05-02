@@ -43,7 +43,7 @@ class CastManager {
 		// persistent connection that receives pushed status updates.
 		// current_time tells the device where to start (seconds into the track).
 		void load(const std::string& url, const std::string& mime_type,
-		          float current_time = 0.0f);
+		          float current_time = 0.0f, double duration = 0.0);
 
 		// Stop Chromecast playback and exit cast mode.
 		void stop();
@@ -105,5 +105,5 @@ class CastManager {
 		// Worker spawned by load() — does the actual TLS connect + LOAD.
 		// Checks load_gen_ against gen at each blocking step and aborts early if
 		// a newer load() has been called.
-		void load_worker(std::string url, std::string mime, int gen);
+		void load_worker(std::string url, std::string mime, int gen, double duration);
 	};
