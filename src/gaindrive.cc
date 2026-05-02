@@ -1917,7 +1917,12 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		int         max_bitrate = std::stoi(qp("maxBitRate", "0"));
 		std::string format      = qp("format");
-		int         time_offset = std::stoi(qp("timeOffset", "0"));
+		// The Chromecast sometimes probes the stream URL with timeOffset stripped.
+		// Always use the authoritative offset stored at castLoad time for cast
+		// requests so the probe and the real request both start at the right position.
+		int         time_offset = cast_authed
+		    ? static_cast<int>(last_cast_offset_)
+		    : std::stoi(qp("timeOffset", "0"));
 
 		if (cast_authed) {
 			// Log Range header so we can see what the Cast receiver is requesting.
