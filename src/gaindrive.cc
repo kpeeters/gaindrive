@@ -1932,6 +1932,22 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (cast_authed && !req.get_header_value("Range").empty() && time_offset > 0)
 			time_offset = 0;
 
+		// Seeked-stream probe: the Chromecast strips timeOffset from its probe
+		// request.  Responding with a full transcoded stream blasts megabytes at
+		// LAN speed (throttle is suppressed while the receiver is BUFFERING),
+		// overflows the Cast receiver's buffer, and kills the connection before
+		// the real request (with timeOffset) can deliver audio.  Return an empty
+		// 200 so the receiver only sees "URL is valid" and uses the real request.
+		if (cast_authed
+		        && req.params.find("timeOffset") == req.params.end()
+		        && last_cast_offset_ > 0.0f
+		        && req.get_header_value("Range").empty()) {
+			std::cout << stamp() << "cast probe: id=" << it->second
+			          << " offset=" << last_cast_offset_ << " (no stream)" << std::endl;
+			res.set_content("", codec_to_mime(song->codec));
+			return;
+			}
+
 		if (cast_authed) {
 			// Log Range header so we can see what the Cast receiver is requesting.
 			auto range = req.get_header_value("Range");
