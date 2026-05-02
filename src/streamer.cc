@@ -149,7 +149,7 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 					float pos = get_position();
 					if (pos < CAST_POS_BUFFERING) return false;
 					if (bytes_per_sec > 0 && bytes_sent > prebuf_bytes && pos >= 0.0f) {
-						float audio_sent = static_cast<float>(offset + bytes_sent) / bytes_per_sec;
+						float audio_sent = static_cast<float>(bytes_sent) / bytes_per_sec;
 						float buf_secs   = audio_sent - pos;
 						if (buf_secs > TARGET_BUF) {
 							auto sleep_ms = static_cast<long>(
