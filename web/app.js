@@ -1030,6 +1030,13 @@ let castSongDuration = 0;      // total song duration; fallback when queue is no
 
 // Handle one MEDIA_STATUS push from the server SSE stream.
 function onCastStatus(s) {
+   // After every LOAD the receiver emits a transient BUFFERING / PLAYING with
+   // currentTime=0 before it starts decoding at the requested seek position.
+   // Discard those so the seek bar doesn't briefly snap back to 0 between the
+   // user's seek and the receiver's first real position report.
+   if (s.currentTime === 0 && lastCastPosition > 0 && s.playerState !== 'IDLE')
+      return;
+
    castBaseTime    = s.currentTime;
    castBaseAt      = Date.now();
    castPlayerState = s.playerState;

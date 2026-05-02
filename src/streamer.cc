@@ -141,22 +141,31 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 					}
 				remaining -= n;
 
-				// Guard uses bytes sent within THIS range request (not offset+sent) so
-				// that Range requests starting near the end of the file (e.g. metadata
-				// fetches for OGG/FLAC seeking) are not immediately throttled.
 				if (get_position) {
 					size_t bytes_sent = length - remaining;
 					float pos = get_position();
 					if (pos < CAST_POS_BUFFERING) return false;
-					// During BUFFERING (pos == -1) treat the receiver position as 0 so
-					// the throttle still engages — otherwise, on a cast seek with native
-					// seek (URL has no timeOffset), the server would blast the entire
-					// file from byte 0 before the receiver issues its Range request,
-					// which the receiver eventually aborts with a closed connection.
-					float effective_pos = (pos >= 0.0f) ? pos : 0.0f;
 					if (bytes_per_sec > 0 && bytes_sent > prebuf_bytes) {
-						float audio_sent = static_cast<float>(bytes_sent) / bytes_per_sec;
-						float buf_secs   = audio_sent - effective_pos;
+						// Throttle in **absolute** audio time so that Range requests
+						// (cast native seek issues these against the same URL) compare
+						// correctly: bytes_sent is local to this request, but pos is the
+						// receiver's absolute position in the track.
+						float range_start_time = static_cast<float>(offset) / bytes_per_sec;
+						float audio_sent_abs   = static_cast<float>(offset + bytes_sent)
+						                       / bytes_per_sec;
+						// If the receiver is far ahead of what this connection is
+						// serving, it has moved on to a different Range request (the
+						// cast-seek pattern is: original no-Range request from byte 0,
+						// then the receiver issues a Range request at the seek byte and
+						// stops reading the first connection).  Exit so we don't blast
+						// bytes that won't be consumed.
+						if (pos > audio_sent_abs + TARGET_BUF * 2.0f) return false;
+						// BUFFERING (pos < 0) and transient pos < range_start_time both
+						// get pinned to range_start_time: the receiver is about to play
+						// from there, so the throttle should treat audio sent past that
+						// point as buffer ahead.
+						float effective_pos = std::max(range_start_time, pos);
+						float buf_secs   = audio_sent_abs - effective_pos;
 						if (buf_secs > TARGET_BUF) {
 							auto sleep_ms = static_cast<long>(
 							    (buf_secs - TARGET_BUF) * 1000.0f);
