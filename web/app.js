@@ -2363,6 +2363,12 @@ async function showShell() {
    new ResizeObserver(() => paneNav.relayout()).observe(
       document.getElementById('pane-viewport'));
 
+   document.getElementById('logout-btn').addEventListener('click', e => {
+      e.preventDefault();
+      creds.clear();
+      showLogin();
+      });
+
    // Record initial state so the browser can pop back to it.
    history.replaceState({view: 'artists'}, '');
    await showView('artists');
