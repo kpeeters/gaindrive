@@ -524,6 +524,7 @@ void CastManager::load(const std::string& url, const std::string& mime,
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
 	status_ = CastStatus{};
+	status_.duration = static_cast<float>(duration);
 	}
 
 	// All TLS/blocking work happens in a detached thread so that the
@@ -635,6 +636,8 @@ void CastManager::update_status(const nlohmann::json& msg)
 	std::lock_guard<std::mutex> lk(status_mutex_);
 	if (cs.player_state != "IDLE")
 		last_known_time_ = cs.current_time;
+	if (cs.duration == 0.0f)
+		cs.duration = status_.duration;
 	status_ = cs;
 	}
 	status_cv_.notify_all();  // wake any SSE handlers waiting for the next push
