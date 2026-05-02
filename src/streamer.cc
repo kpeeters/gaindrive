@@ -226,7 +226,10 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 		[proc, bps, prebuf_bytes, total_sent,
 		 get_position = std::move(get_position)]
 		(size_t /*offset*/, httplib::DataSink& sink) {
-			if (get_position && get_position() < CAST_POS_BUFFERING) return false;
+			if (get_position && get_position() < CAST_POS_BUFFERING) {
+				std::cout << stamp() << "stream: transcoded abort (gen mismatch or stop)" << std::endl;
+				return false;
+				}
 			uint8_t buf[65536];
 			auto [n, err] = proc->read(reproc::stream::out, buf, sizeof(buf));
 			if (n == 0 || err) {

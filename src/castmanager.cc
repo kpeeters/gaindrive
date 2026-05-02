@@ -519,6 +519,7 @@ void CastManager::load(const std::string& url, const std::string& mime,
 	{
 	// Signal any running content-provider thread to stop immediately.
 	int gen = ++load_gen_;
+	std::cout << stamp() << "Cast: load gen=" << gen << " url=" << url << std::endl;
 
 	// Reset playback status for the new track.
 	{
