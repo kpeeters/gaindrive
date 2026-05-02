@@ -212,10 +212,6 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 	const float  bps        = target_bitrate > 0
 	    ? static_cast<float>(target_bitrate) * 125.0f
 	    : static_cast<float>(song.bitrate)   * 125.0f;
-	const size_t prebuf_bytes = get_position
-	    ? static_cast<size_t>(bps) * 30
-	    : 0;
-
 	// total_sent persists across repeated provider calls (one per chunk).
 	auto total_sent = std::make_shared<size_t>(0);
 
@@ -223,7 +219,7 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 	res.set_header("Accept-Ranges", "none");
 	res.set_content_provider(
 		codec_to_mime(target_fmt),
-		[proc, bps, prebuf_bytes, total_sent,
+		[proc, bps, total_sent,
 		 get_position = std::move(get_position)]
 		(size_t /*offset*/, httplib::DataSink& sink) {
 			if (get_position && get_position() < CAST_POS_BUFFERING) {
@@ -255,9 +251,13 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 			if (get_position) {
 				float pos = get_position();
 				if (pos < CAST_POS_BUFFERING) return false;
-				if (bps > 0 && *total_sent > prebuf_bytes && pos >= 0.0f) {
+				if (bps > 0) {
 					float audio_sent = static_cast<float>(*total_sent) / bps;
-					float buf_secs   = audio_sent - pos;
+					// During BUFFERING (pos=-1), treat effective position as 0 so
+					// the throttle applies immediately and the receiver's buffer
+					// can't be flooded before playback begins.
+					float effective_pos = (pos >= 0.0f) ? pos : 0.0f;
+					float buf_secs   = audio_sent - effective_pos;
 					if (buf_secs > TARGET_BUF) {
 						auto sleep_ms = static_cast<long>(
 						    (buf_secs - TARGET_BUF) * 1000.0f);
