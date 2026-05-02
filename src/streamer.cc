@@ -230,7 +230,7 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 			uint8_t buf[65536];
 			auto [n, err] = proc->read(reproc::stream::out, buf, sizeof(buf));
 			if (n == 0) {
-				if (err && err.value() != (int)reproc::error::stream_closed)
+				if (err && err != std::make_error_code(std::errc::broken_pipe))
 					std::cout << stamp() << "stream: ffmpeg pipe error: "
 					          << err.message() << std::endl;
 				sink.done();
