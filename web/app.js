@@ -2341,6 +2341,12 @@ async function showShell() {
                if (songSr.song) {
                   player.queue = [songSr.song];
                   player.index = 0;
+                  player.albumCtx = {
+                     albumId:    songSr.song.parent,
+                     albumTitle: songSr.song.album ?? '',
+                     artistId:   null,
+                     artistName: songSr.song.artist ?? '',
+                     };
                   playerUpdateUI();
                   }
                } catch (_) {}
