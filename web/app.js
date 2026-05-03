@@ -1033,16 +1033,22 @@ let castExpectedPosition = null;  // absolute position we asked the receiver to
 
 // Handle one MEDIA_STATUS push from the server SSE stream.
 function onCastStatus(s) {
-   // After every LOAD the receiver emits a transient sequence (BUFFERING t=0,
-   // sometimes briefly PLAYING with a small t) before it actually starts
-   // decoding at the requested seek position.  When castExpectedPosition is
-   // set, ignore anything more than a few seconds away from it — the seek
-   // bar would otherwise snap to 0 (or a small value) and back.  IDLE goes
-   // through unfiltered so the FINISHED auto-advance still fires.
-   if (castExpectedPosition !== null && s.playerState !== 'IDLE') {
-      const absCurrent = castStartOffset + s.currentTime;
-      if (Math.abs(absCurrent - castExpectedPosition) > 3) return;
-      castExpectedPosition = null;
+   // After every LOAD the receiver emits a transient sequence: an
+   // IDLE/INTERRUPTED for the OLD media session (currentTime=0), then
+   // BUFFERING/PLAYING with a small t for the NEW session, then finally
+   // PLAYING at the real seek position.  Any of those would reset
+   // castBaseTime and make the seek bar flash back to 0 (or near 0).
+   // While castExpectedPosition is set we ignore anything more than a few
+   // seconds away from it.  IDLE/FINISHED is the one IDLE we must NOT
+   // drop — it drives the end-of-track auto-advance below.
+   if (castExpectedPosition !== null) {
+      if (s.playerState === 'IDLE') {
+         if (s.idleReason !== 'FINISHED') return;
+         } else {
+         const absCurrent = castStartOffset + s.currentTime;
+         if (Math.abs(absCurrent - castExpectedPosition) > 3) return;
+         castExpectedPosition = null;
+         }
       }
 
    castBaseTime    = s.currentTime;
