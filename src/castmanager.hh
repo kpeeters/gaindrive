@@ -97,6 +97,7 @@ class CastManager {
 		// firing a single retry from update_status().  All four fields are
 		// guarded by status_mutex_.
 		bool        retry_pending_      = false;
+		int         last_load_old_msid_ = 0;   // msid active when load() was called
 		std::string last_load_url_;
 		std::string last_load_mime_;
 		float       last_load_time_     = 0.0f;

@@ -526,8 +526,14 @@ void CastManager::load(const std::string& url, const std::string& mime,
 	// watcher.  The retry covers the receiver-side bug where a LOAD that
 	// interrupts an active session produces an IDLE/ERROR new session;
 	// see the comment in castmanager.hh next to retry_pending_.
+	// last_load_old_msid_ remembers the session being replaced so that
+	// stale status pushes for it (e.g. a PLAYING position update arriving
+	// as the receiver's response to poll_loop's GET_STATUS that fired
+	// just before LOAD reached the receiver) don't fool the retry watcher
+	// into thinking the new LOAD succeeded.
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
+	last_load_old_msid_ = status_.media_session_id;
 	status_ = CastStatus{};
 	status_.duration    = static_cast<float>(duration);
 	last_load_url_      = url;
@@ -674,15 +680,15 @@ void CastManager::update_status(const nlohmann::json& msg)
 		cs.duration = status_.duration;
 	status_ = cs;
 
-	// Auto-retry decision: if the receiver landed in IDLE/ERROR while a
-	// LOAD attempt is still pending, it's the interrupt-and-replace bug;
-	// fire one retry with the stored parameters.  Any other transition
-	// out of the initial IDLE state (PLAYING/BUFFERING/LOADING) means the
-	// LOAD is healthy and no retry is needed.  IDLE/INTERRUPTED is the
-	// transient state the receiver emits while it's tearing down the
-	// previous session — leave retry_pending_ set and wait for the next
-	// push to tell us whether the new session ends up PLAYING or ERROR.
-	if (retry_pending_) {
+	// Auto-retry decision: only consider pushes for the NEW media session
+	// (msid != last_load_old_msid_).  Otherwise a stale PLAYING update for
+	// the old session — typically poll_loop's GET_STATUS reply that
+	// crosses our LOAD on the wire — would clear the flag prematurely and
+	// the real IDLE/ERROR for the new msid would arrive too late to
+	// trigger a retry.  IDLE/INTERRUPTED also carries the old msid, so it
+	// is skipped here as well; that's fine — the next push (the new msid
+	// going to PLAYING or ERROR) is the one we actually need.
+	if (retry_pending_ && cs.media_session_id != last_load_old_msid_) {
 		if (cs.player_state == "IDLE" && cs.idle_reason == "ERROR") {
 			retry_pending_ = false;
 			do_retry       = true;
