@@ -166,8 +166,16 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 						if (pos > audio_sent_abs + TARGET_BUF * 2.0f) return false;
 						float buf_secs = audio_sent_abs - pos;
 						if (buf_secs > TARGET_BUF) {
-							auto sleep_ms = static_cast<long>(
-							    (buf_secs - TARGET_BUF) * 1000.0f);
+							// Cap to 2 s: bytes_sent overcounts what the receiver
+							// actually has (the local kernel send buffer can hold
+							// many seconds beyond what reached the device).  A
+							// longer single sleep silences the server past the
+							// Chromecast's no-data network timeout (~60 s, manifests
+							// as error 103).  A short cap forces the outer loop to
+							// wake, write a chunk, and re-evaluate; TCP backpressure
+							// then paces the rest naturally.
+							auto sleep_ms = std::min(static_cast<long>(
+							    (buf_secs - TARGET_BUF) * 1000.0f), 2000L);
 							auto deadline = std::chrono::steady_clock::now()
 							              + std::chrono::milliseconds(sleep_ms);
 							while (std::chrono::steady_clock::now() < deadline) {
@@ -276,8 +284,10 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 					float effective_pos = (pos >= 0.0f) ? pos : 0.0f;
 					float buf_secs   = audio_sent - effective_pos;
 					if (buf_secs > TARGET_BUF) {
-						auto sleep_ms = static_cast<long>(
-						    (buf_secs - TARGET_BUF) * 1000.0f);
+						// See serve_direct: cap single-sleep at 2 s so we never
+						// silence the server past the receiver's network timeout.
+						auto sleep_ms = std::min(static_cast<long>(
+						    (buf_secs - TARGET_BUF) * 1000.0f), 2000L);
 						auto deadline = std::chrono::steady_clock::now()
 						              + std::chrono::milliseconds(sleep_ms);
 						while (std::chrono::steady_clock::now() < deadline) {
