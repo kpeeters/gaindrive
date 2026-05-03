@@ -522,18 +522,9 @@ void CastManager::load(const std::string& url, const std::string& mime,
 	std::cout << stamp() << "Cast: load gen=" << gen << " url=" << url
 	          << " currentTime=" << current_time << std::endl;
 
-	// Capture the previous session's msid/state before resetting status_.
-	// load_worker will use this to send a STOP for the old media session on
-	// the same TLS connection that issues the new LOAD.  Without that, a
-	// fresh LOAD arriving while the receiver is still mid-fetch on the
-	// previous stream sometimes ends in playerState=IDLE / idleReason=ERROR
-	// (detailedErrorCode 103) with the new media field dropped entirely.
-	int         prev_msid = 0;
-	std::string prev_state;
+	// Reset playback status for the new track.
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
-	prev_msid  = status_.media_session_id;
-	prev_state = status_.player_state;
 	status_ = CastStatus{};
 	status_.duration = static_cast<float>(duration);
 	}
@@ -543,16 +534,13 @@ void CastManager::load(const std::string& url, const std::string& mime,
 	// immediately.  load_gen_ acts as a cancellation token: if a newer
 	// load() fires before this worker reaches a blocking call, the worker
 	// detects the stale generation and exits without doing any work.
-	std::thread([this, url, mime, gen, current_time, duration,
-	             prev_msid, prev_state]{
-		load_worker(url, mime, gen, current_time, duration,
-		            prev_msid, prev_state);
+	std::thread([this, url, mime, gen, current_time, duration]{
+		load_worker(url, mime, gen, current_time, duration);
 		}).detach();
 	}
 
 void CastManager::load_worker(std::string url, std::string mime, int gen,
-                               float current_time, double duration,
-                               int prev_msid, std::string prev_state)
+                               float current_time, double duration)
 	{
 	std::string src = "sender-0";
 
@@ -578,57 +566,9 @@ void CastManager::load_worker(std::string url, std::string mime, int gen,
 			if (load_gen_.load() != gen) return;
 			cast_send(t.ssl, NS_CONN,  src, "receiver-0", {{"type", "CONNECT"}});
 			cast_send(t.ssl, NS_CONN,  src, tid,           {{"type", "CONNECT"}});
-			// If a previous media session is still active on the receiver,
-			// pipeline a STOP for it on this same TLS connection before the
-			// LOAD.  This gives the receiver a clean tear-down (current media
-			// → IDLE → fresh LOAD) rather than asking it to interrupt-and-
-			// replace in one shot, which empirically can leave the new
-			// session stuck in LOADING → IDLE/ERROR with detailedErrorCode
-			// 103 and the media field dropped from the status payload.
-			if (prev_msid != 0 && !prev_state.empty() && prev_state != "IDLE") {
-				cast_send(t.ssl, NS_MEDIA, src, tid,
-				          {{"type", "STOP"}, {"requestId", 3},
-				           {"mediaSessionId", prev_msid}});
-				std::cout << stamp() << "Cast: STOP sent  prev_msid="
-				          << prev_msid << " prev_state=" << prev_state
-				          << std::endl;
-
-				// Wait for poll_loop to observe the CANCELLED ack on the
-				// status channel before sending LOAD.  Pipelining STOP+LOAD
-				// on the same TLS connection lands the new LOAD while the
-				// receiver's media element is still being torn down — the
-				// new session ends up registered in IDLE with extendedStatus
-				// LOADING, but never autoplays and shortly errors.  Waiting
-				// here forces the receiver to fully reach the IDLE/CANCELLED
-				// state before it sees our new LOAD.
-				auto deadline = std::chrono::steady_clock::now()
-				              + std::chrono::milliseconds(500);
-				bool got_cancel;
-				{
-				std::unique_lock<std::mutex> lk(status_mutex_);
-				got_cancel = status_cv_.wait_until(lk, deadline, [&]{
-					return status_.media_session_id == prev_msid
-					    && status_.idle_reason     == "CANCELLED";
-					});
-				}
-				std::cout << stamp() << "Cast: STOP cancel ack "
-				          << (got_cancel ? "received" : "TIMEOUT")
-				          << std::endl;
-				}
-			else {
-				std::cout << stamp() << "Cast: STOP skipped prev_msid="
-				          << prev_msid << " prev_state="
-				          << (prev_state.empty() ? "(empty)" : prev_state)
-				          << std::endl;
-				}
 			nlohmann::json msg = {
 				{"type",      "LOAD"},
 				{"requestId", 2},
-				// autoplay defaults to true per the Cast spec, but after a
-				// preceding STOP the Default Media Receiver appears to suppress
-				// the implicit default — the new media session registers in
-				// IDLE state and never transitions to PLAYING.  Specify it
-				// explicitly so the receiver always autoplays the new media.
 				{"autoplay",  true},
 				{"media", {
 					{"contentId",   url},
