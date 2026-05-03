@@ -130,10 +130,6 @@ void FolderWatcher::start()
 		return;
 		}
 
-	add_watches_recursive(music_root_);
-	std::cout << stamp() << "FolderWatcher: watching " << wd_to_path_.size()
-	          << " directories under " << music_root_ << std::endl;
-
 	thread_ = std::thread(&FolderWatcher::run, this);
 	}
 
@@ -155,6 +151,13 @@ void FolderWatcher::stop()
 
 void FolderWatcher::run()
 	{
+	// Build the inotify watch set on this thread rather than in start(), so
+	// the GainDrive constructor — and therefore listen() — isn't blocked by
+	// a multi-second recursive walk on large libraries.
+	add_watches_recursive(music_root_);
+	std::cout << stamp() << "FolderWatcher: watching " << wd_to_path_.size()
+	          << " directories under " << music_root_ << std::endl;
+
 	using Clock = std::chrono::steady_clock;
 	std::optional<Clock::time_point> last_event;
 
