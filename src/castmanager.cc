@@ -589,8 +589,15 @@ void CastManager::load_worker(std::string url, std::string mime, int gen,
 				cast_send(t.ssl, NS_MEDIA, src, tid,
 				          {{"type", "STOP"}, {"requestId", 3},
 				           {"mediaSessionId", prev_msid}});
-				std::cout << stamp() << "Cast: STOP prev msid=" << prev_msid
-				          << " state=" << prev_state << std::endl;
+				std::cout << stamp() << "Cast: STOP sent  prev_msid="
+				          << prev_msid << " prev_state=" << prev_state
+				          << std::endl;
+				}
+			else {
+				std::cout << stamp() << "Cast: STOP skipped prev_msid="
+				          << prev_msid << " prev_state="
+				          << (prev_state.empty() ? "(empty)" : prev_state)
+				          << std::endl;
 				}
 			nlohmann::json msg = {
 				{"type",      "LOAD"},
@@ -614,6 +621,7 @@ void CastManager::load_worker(std::string url, std::string mime, int gen,
 			// transcoding and gives the receiver real duration metadata.
 			if (current_time > 0.0f)
 				msg["currentTime"] = current_time;
+			std::cout << stamp() << "Cast: LOAD " << msg.dump() << std::endl;
 			cast_send(t.ssl, NS_MEDIA, src, tid, msg);
 			// poll_loop() receives the MEDIA_STATUS response and updates status_.
 			// No need to wait here — that would block an httplib thread.
@@ -663,6 +671,7 @@ void CastManager::load_worker(std::string url, std::string mime, int gen,
 		};
 	if (current_time > 0.0f)
 		msg["currentTime"] = current_time;
+	std::cout << stamp() << "Cast: LOAD " << msg.dump() << std::endl;
 	cast_send(t.ssl, NS_MEDIA, src, tid, msg);
 	}
 
@@ -831,13 +840,12 @@ void CastManager::poll_loop()
 					          << (idle_reason.empty() ? std::string{}
 					                                  : " idleReason=" + idle_reason)
 					          << std::endl;
-					// Dump the full payload whenever idleReason is set — that is
-					// where the receiver hides the actual cause (extendedStatusCode,
-					// nested error, loadingItemId, …) for diagnosing stuck-IDLE
-					// sessions.
-					if (!idle_reason.empty())
-						std::cout << stamp() << "Cast rx MEDIA_STATUS payload: "
-						          << m.dump() << std::endl;
+					// Dump the full payload for every push — fields like autoplay,
+					// loadingItemId, extendedStatus, supportedMediaCommands and
+					// preloadedItemId reveal what the receiver thinks it's doing
+					// and are essential for diagnosing stuck-IDLE sessions.
+					std::cout << stamp() << "Cast rx MEDIA_STATUS payload: "
+					          << m.dump() << std::endl;
 					}
 				update_status(m);
 				}
