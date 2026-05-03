@@ -592,6 +592,28 @@ void CastManager::load_worker(std::string url, std::string mime, int gen,
 				std::cout << stamp() << "Cast: STOP sent  prev_msid="
 				          << prev_msid << " prev_state=" << prev_state
 				          << std::endl;
+
+				// Wait for poll_loop to observe the CANCELLED ack on the
+				// status channel before sending LOAD.  Pipelining STOP+LOAD
+				// on the same TLS connection lands the new LOAD while the
+				// receiver's media element is still being torn down — the
+				// new session ends up registered in IDLE with extendedStatus
+				// LOADING, but never autoplays and shortly errors.  Waiting
+				// here forces the receiver to fully reach the IDLE/CANCELLED
+				// state before it sees our new LOAD.
+				auto deadline = std::chrono::steady_clock::now()
+				              + std::chrono::milliseconds(500);
+				bool got_cancel;
+				{
+				std::unique_lock<std::mutex> lk(status_mutex_);
+				got_cancel = status_cv_.wait_until(lk, deadline, [&]{
+					return status_.media_session_id == prev_msid
+					    && status_.idle_reason     == "CANCELLED";
+					});
+				}
+				std::cout << stamp() << "Cast: STOP cancel ack "
+				          << (got_cancel ? "received" : "TIMEOUT")
+				          << std::endl;
 				}
 			else {
 				std::cout << stamp() << "Cast: STOP skipped prev_msid="
