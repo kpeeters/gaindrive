@@ -488,7 +488,9 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 //   1. Walk disk — collect album/song paths, mtimes, file sizes (no lock)
 //   2. Brief read lock — fetch known mtimes to identify changed files
 //   3. TagLib reads for changed files only (no lock)
-//   4. Write lock + transaction — all DB upserts and pruning (pure SQL)
+//   4. Short write txns: one per album, plus the unvisited-mark and the
+//      artist-level prune.  Per-album commits keep the mutex hold time
+//      bounded so REST handlers stay responsive during the scan.
 void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	{
 	std::string prefix = artist_path.string() + "/%";
@@ -609,25 +611,35 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			}
 		}
 
-	// ---- Phase 4: write lock + transaction — all DB upserts and pruning ----
+	// ---- Phase 4: short write txns ----
+	// Mark this artist's subfolders as unvisited.  Folders not re-stamped
+	// by an album commit below are pruned at the end of the artist.
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Transaction txn(db_music_);
-
-	// Mark this artist's subfolders as unvisited.
-	{
 	SQLite::Statement s(db_music_,
 		"UPDATE folders SET last_scanned = NULL WHERE path LIKE ?");
 	s.bind(1, prefix);
 	s.exec();
+	txn.commit();
 	}
 
 	if (exists) {
-		int root_id          = upsert_folder(fs::path(music_root_), -1);
-		int artist_folder_id = upsert_folder(artist_path, root_id);
-		int artist_id        = upsert_artist(artist_path.filename().string());
+		int root_id, artist_folder_id, artist_id;
+		{
+		std::lock_guard<std::mutex> lock(db_mutex_);
+		SQLite::Transaction txn(db_music_);
+		root_id          = upsert_folder(fs::path(music_root_), -1);
+		artist_folder_id = upsert_folder(artist_path, root_id);
+		artist_id        = upsert_artist(artist_path.filename().string());
+		txn.commit();
+		}
 
 		for (auto& adat : albums) {
+			{
+			std::lock_guard<std::mutex> lock(db_mutex_);
+			SQLite::Transaction txn(db_music_);
+
 			int album_folder_id = upsert_folder(fs::path(adat.path), artist_folder_id);
 			int album_id        = upsert_album(album_folder_id, adat.title, artist_id, 0, "");
 
@@ -671,11 +683,17 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			upd.exec();
 			}
 
+			txn.commit();
+			}
 			std::cout << stamp() << "  " << fs::path(adat.path).filename().string() << std::endl;
 			}
 		}
 
-	// Prune stale entries within this artist's subtree.
+	// Prune stale entries within this artist's subtree.  Anything still
+	// last_scanned IS NULL after the album commits above is genuinely gone.
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Transaction txn(db_music_);
 	{
 	SQLite::Statement s(db_music_,
 		"DELETE FROM songs WHERE folder_id IN ("
@@ -729,7 +747,6 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		" (SELECT DISTINCT artist_id FROM album_artists)");
 	s.exec();
 	}
-
 	txn.commit();
 	}
 	std::cout << stamp() << "Rescan complete" << std::endl;
