@@ -105,6 +105,10 @@ class CastManager {
 		// Worker spawned by load() — does the actual TLS connect + LOAD.
 		// Checks load_gen_ against gen at each blocking step and aborts early if
 		// a newer load() has been called.
+		// prev_msid/prev_state describe the receiver's media session at the moment
+		// load() was called; used to send STOP-before-LOAD when replacing an
+		// active session, which avoids detailedErrorCode 103 race conditions.
 		void load_worker(std::string url, std::string mime, int gen,
-		                 float current_time, double duration);
+		                 float current_time, double duration,
+		                 int prev_msid, std::string prev_state);
 	};
