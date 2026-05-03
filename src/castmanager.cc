@@ -522,11 +522,19 @@ void CastManager::load(const std::string& url, const std::string& mime,
 	std::cout << stamp() << "Cast: load gen=" << gen << " url=" << url
 	          << " currentTime=" << current_time << std::endl;
 
-	// Reset playback status for the new track.
+	// Reset playback status for the new track and arm the auto-retry
+	// watcher.  The retry covers the receiver-side bug where a LOAD that
+	// interrupts an active session produces an IDLE/ERROR new session;
+	// see the comment in castmanager.hh next to retry_pending_.
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
 	status_ = CastStatus{};
-	status_.duration = static_cast<float>(duration);
+	status_.duration    = static_cast<float>(duration);
+	last_load_url_      = url;
+	last_load_mime_     = mime;
+	last_load_time_     = current_time;
+	last_load_duration_ = duration;
+	retry_pending_      = true;
 	}
 
 	// All TLS/blocking work happens in a detached thread so that the
@@ -653,6 +661,11 @@ void CastManager::update_status(const nlohmann::json& msg)
 	if (s.contains("media") && s["media"].contains("duration")
 	                        && s["media"]["duration"].is_number())
 		cs.duration = s["media"]["duration"].get<float>();
+
+	bool        do_retry = false;
+	std::string retry_url, retry_mime;
+	float       retry_time = 0.0f;
+	double      retry_dur  = 0.0;
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
 	if (cs.player_state != "IDLE")
@@ -660,8 +673,48 @@ void CastManager::update_status(const nlohmann::json& msg)
 	if (cs.duration == 0.0f)
 		cs.duration = status_.duration;
 	status_ = cs;
+
+	// Auto-retry decision: if the receiver landed in IDLE/ERROR while a
+	// LOAD attempt is still pending, it's the interrupt-and-replace bug;
+	// fire one retry with the stored parameters.  Any other transition
+	// out of the initial IDLE state (PLAYING/BUFFERING/LOADING) means the
+	// LOAD is healthy and no retry is needed.  IDLE/INTERRUPTED is the
+	// transient state the receiver emits while it's tearing down the
+	// previous session — leave retry_pending_ set and wait for the next
+	// push to tell us whether the new session ends up PLAYING or ERROR.
+	if (retry_pending_) {
+		if (cs.player_state == "IDLE" && cs.idle_reason == "ERROR") {
+			retry_pending_ = false;
+			do_retry       = true;
+			retry_url      = last_load_url_;
+			retry_mime     = last_load_mime_;
+			retry_time     = last_load_time_;
+			retry_dur      = last_load_duration_;
+			}
+		else if (cs.player_state == "PLAYING"
+		      || cs.player_state == "BUFFERING"
+		      || cs.player_state == "LOADING") {
+			retry_pending_ = false;
+			}
+		}
 	}
 	status_cv_.notify_all();  // wake any SSE handlers waiting for the next push
+
+	if (do_retry) {
+		// Spawn a detached load_worker with the same gen we're already on.
+		// load_worker will self-abort if a fresh user-driven load() has
+		// bumped load_gen_ in the meantime, so an unwanted retry can never
+		// race with a newer LOAD the user just clicked.
+		int gen = load_gen_.load();
+		std::cout << stamp() << "Cast: auto-retry LOAD (gen=" << gen
+		          << ") — receiver went IDLE/ERROR after first attempt"
+		          << std::endl;
+		std::thread([this, retry_url, retry_mime, gen,
+		             retry_time, retry_dur]{
+			if (load_gen_.load() != gen) return;
+			load_worker(retry_url, retry_mime, gen, retry_time, retry_dur);
+			}).detach();
+		}
 	}
 
 float CastManager::last_known_time() const

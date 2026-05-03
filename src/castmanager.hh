@@ -87,6 +87,21 @@ class CastManager {
 		CastStatus                 status_;
 		float                      last_known_time_ = 0.0f; // current_time from last non-IDLE status
 
+		// Auto-retry state.  The Default Media Receiver sometimes fails the
+		// first LOAD that interrupts a currently-PLAYING media session: the
+		// new media session goes straight from IDLE/INTERRUPTED to IDLE/ERROR
+		// without ever reaching PLAYING.  Re-sending the same LOAD into the
+		// now-quiet receiver works, which mirrors the user's manual fix of
+		// clicking the same track twice.  retry_pending_ is set in load() and
+		// either cleared on a non-failure state transition or consumed by
+		// firing a single retry from update_status().  All four fields are
+		// guarded by status_mutex_.
+		bool        retry_pending_      = false;
+		std::string last_load_url_;
+		std::string last_load_mime_;
+		float       last_load_time_     = 0.0f;
+		double      last_load_duration_ = 0.0;
+
 		mutable std::mutex         cache_mutex_;
 		std::vector<CastDevice>    devices_cache_;  // last result of discover_background()
 
