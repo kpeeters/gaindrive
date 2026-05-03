@@ -106,19 +106,10 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 	    : 0;
 	// httplib parses the Range header and calls our provider with the correct
 	// offset/length when a known content-length is supplied.
-	// Track whether the receiver explicitly issued a Range request: that
-	// distinguishes the "deliberately requested this byte range" case (FLAC
-	// native seek with no usable seektable — receiver fast-forwards through
-	// frames) from the "original no-Range connection the receiver may
-	// abandon" case (MP3 native seek — receiver parses XING from byte 0 then
-	// opens a new Range at the seek byte).  Only the latter should be
-	// proactively aborted when the receiver's reported position runs ahead of
-	// what we've sent.
-	const bool has_range = req.has_header("Range");
 	res.set_content_provider(
 		static_cast<size_t>(song.file_size),
 		codec_to_mime(song.codec),
-		[path = song.path, bytes_per_sec, prebuf_bytes, has_range,
+		[path = song.path, bytes_per_sec, prebuf_bytes,
 		 get_position = std::move(get_position)]
 		(size_t offset, size_t length, httplib::DataSink& sink) {
 			std::ifstream f(path, std::ios::binary);
@@ -165,20 +156,23 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 						// (cast native seek issues these against the same URL) compare
 						// correctly: bytes_sent is local to this request, but pos is the
 						// receiver's absolute position in the track.
+						// No "receiver moved on" early-exit: there is no reliable signal
+						// to distinguish (a) MP3 native seek where the receiver opens a
+						// new Range at the seek byte and abandons this connection, from
+						// (b) FLAC native seek where the receiver opens one Range request
+						// near the start of the audio data and fast-forwards through
+						// frames to reach the seek time.  Both report pos far ahead of
+						// what we've sent on this connection — the first via "receiver
+						// is playing on the other connection," the second via the
+						// receiver reporting its target seek time as currentTime even
+						// before any decoded audio reaches it.  Aborting case (b)
+						// silences the server, leaves the receiver with no audio at its
+						// target time, and ends in BUFFERING → error 103.  Trust TCP
+						// backpressure plus the receiver's own connection-close to clean
+						// up case (a); a lingering blocked sink.write costs at worst the
+						// 1-hour httplib write timeout.
 						float audio_sent_abs = static_cast<float>(offset + bytes_sent)
 						                     / bytes_per_sec;
-						// "Receiver moved on" abort: only safe to apply on the original
-						// no-Range connection (MP3 native seek pattern).  When the
-						// receiver issued an explicit Range it is deliberately reading
-						// this byte range — for FLAC native seek without a usable
-						// seektable the receiver opens one Range request near the start
-						// of the audio data and fast-forwards through frames to reach
-						// the seek time, so its reported pos runs far ahead of what
-						// we've sent yet it still wants every byte.  Aborting that
-						// connection silences the server, leaves the receiver with no
-						// audio at its target time, and ends in BUFFERING → error 103.
-						if (!has_range && pos > audio_sent_abs + TARGET_BUF * 2.0f)
-							return false;
 						float buf_secs = audio_sent_abs - pos;
 						if (buf_secs > TARGET_BUF) {
 							// Cap to 2 s: bytes_sent overcounts what the receiver
@@ -198,11 +192,6 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 								    std::chrono::milliseconds(100));
 								float pos_now = get_position();
 								if (pos_now < CAST_POS_BUFFERING) return false;
-								// Same gating as above: only abort the original no-Range
-								// connection when pos races ahead, never an explicit
-								// Range request the receiver is actively reading.
-								if (!has_range && pos_now > audio_sent_abs + TARGET_BUF * 2.0f)
-									return false;
 								}
 							}
 						}
