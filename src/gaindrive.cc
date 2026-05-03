@@ -2678,7 +2678,8 @@ GainDrive::GainDrive(const std::string& db_path,
 					{"playerState", s.player_state},
 					{"currentTime", s.current_time},
 					{"duration",    s.duration},
-					{"idleReason",  s.idle_reason}}).dump() + "\n\n";
+					{"idleReason",  s.idle_reason},
+					{"startOffset", last_cast_offset_}}).dump() + "\n\n";
 				return sink.write(event.data(), event.size());
 				});
 		});
@@ -2741,15 +2742,27 @@ GainDrive::GainDrive(const std::string& db_path,
 					if (host.empty()) host = "localhost";
 					std::string proto = req.get_header_value("X-Forwarded-Proto");
 					if (proto.empty()) proto = "http";
-					// last_known_time is already absolute under native seek
-					// (Chromecast reports absolute time; last_cast_offset_ stays 0).
+					// last_known_time is relative for non-MP3 (server-side seek)
+					// and absolute for MP3 (native seek); adding last_cast_offset_
+					// always yields the absolute song position.
 					float pos = last_cast_offset_ + cast_manager_.last_known_time();
 					std::string url = proto + "://" + host + "/rest/stream.view"
 					                + "?id=" + last_cast_song_id_
 					                + "&castToken=" + cast_manager_.token();
-					cast_manager_.load(url, codec_to_mime(song->codec),
-					                   pos > 0.5f ? pos : 0.0f, song->duration);
-					last_cast_offset_ = 0.0f;
+					// Same MP3-vs-other split as castLoad.view.
+					if (pos > 0.5f && song->codec != "mp3") {
+						url += "&timeOffset="
+						     + std::to_string(static_cast<int>(pos));
+						last_cast_offset_ = pos;
+						cast_manager_.load(url, codec_to_mime(song->codec),
+						                   0.0f, song->duration);
+						}
+					else {
+						last_cast_offset_ = 0.0f;
+						cast_manager_.load(url, codec_to_mime(song->codec),
+						                   pos > 0.5f ? pos : 0.0f,
+						                   song->duration);
+						}
 					}
 				}
 			}
@@ -2796,17 +2809,28 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string url = proto + "://" + host + "/rest/stream.view"
 		                + "?id=" + it->second
 		                + "&castToken=" + cast_manager_.token();
-		// Native seek: the URL always serves the full file (no timeOffset),
-		// and the LOAD message's currentTime tells the receiver where to start.
-		// The receiver uses the file's XING/seek tables to find the right byte
-		// range, so it can determine the stream duration normally.
 		auto to_it = req.params.find("timeOffset");
 		float cast_offset = 0.0f;
 		if (to_it != req.params.end() && !to_it->second.empty())
 			cast_offset = std::stof(to_it->second);
 		last_cast_song_id_ = it->second;
-		last_cast_offset_  = 0.0f;
-		cast_manager_.load(url, codec_to_mime(song->codec), cast_offset, song->duration);
+		// Native seek (currentTime in LOAD, full file at the URL) only works
+		// for MP3.  For FLAC the Default Media Receiver echoes the requested
+		// currentTime in MEDIA_STATUS but actually plays from byte 0; other
+		// non-MP3 formats are presumed to have the same problem.  Fall back
+		// to server-side seek for those: encode the seek into the URL and
+		// tell the receiver currentTime=0 so it doesn't try to seek further.
+		if (cast_offset > 0.0f && song->codec != "mp3") {
+			url += "&timeOffset=" + std::to_string(static_cast<int>(cast_offset));
+			last_cast_offset_ = cast_offset;
+			cast_manager_.load(url, codec_to_mime(song->codec),
+			                   0.0f, song->duration);
+			}
+		else {
+			last_cast_offset_ = 0.0f;
+			cast_manager_.load(url, codec_to_mime(song->codec),
+			                   cast_offset, song->duration);
+			}
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
 		});

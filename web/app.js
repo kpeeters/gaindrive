@@ -1033,6 +1033,11 @@ let castExpectedPosition = null;  // absolute position we asked the receiver to
 
 // Handle one MEDIA_STATUS push from the server SSE stream.
 function onCastStatus(s) {
+   // Server tells us where the served stream begins in the song.  Native
+   // seek (MP3) keeps this at 0; server-side seek (FLAC/other) sets it to
+   // the seek point so the absolute song position is startOffset + the
+   // receiver's reported currentTime.
+   if (typeof s.startOffset === 'number') castStartOffset = s.startOffset;
    // After every LOAD the receiver emits a transient sequence: an
    // IDLE/INTERRUPTED for the OLD media session (currentTime=0), then
    // BUFFERING/PLAYING with a small t for the NEW session, then finally
@@ -1288,8 +1293,10 @@ function playerPlay(offset = 0) {
    if (castDeviceId !== null) {
       // Reset so the IDLE status during Chromecast loading doesn't trigger a
       // spurious advance, and so interpolation starts fresh for the new track.
-      // Native seek: the Chromecast reports absolute time (it seeks within
-      // the full file itself), so castStartOffset is always 0.
+      // castStartOffset is the offset where the served stream begins in the
+      // song — 0 for MP3 (native seek) or the seek point for FLAC/other
+      // (server-side seek).  Initialise to 0; the next SSE push from
+      // castEvents.view will overwrite it with the authoritative value.
       castWasPlaying      = false;
       castStartOffset     = 0;
       castBaseTime        = 0;

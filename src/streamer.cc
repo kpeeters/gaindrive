@@ -153,24 +153,17 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 					// starts playing" or "seek → playback stops altogether".
 					if (pos >= 0.0f && bytes_per_sec > 0 && bytes_sent > prebuf_bytes) {
 						// Throttle in **absolute** audio time so that Range requests
-						// (cast native seek issues these against the same URL) compare
+						// (MP3 native seek issues these against the same URL) compare
 						// correctly: bytes_sent is local to this request, but pos is the
-						// receiver's absolute position in the track.
-						// No "receiver moved on" early-exit: there is no reliable signal
-						// to distinguish (a) MP3 native seek where the receiver opens a
-						// new Range at the seek byte and abandons this connection, from
-						// (b) FLAC native seek where the receiver opens one Range request
-						// near the start of the audio data and fast-forwards through
-						// frames to reach the seek time.  Both report pos far ahead of
-						// what we've sent on this connection — the first via "receiver
-						// is playing on the other connection," the second via the
-						// receiver reporting its target seek time as currentTime even
-						// before any decoded audio reaches it.  Aborting case (b)
-						// silences the server, leaves the receiver with no audio at its
-						// target time, and ends in BUFFERING → error 103.  Trust TCP
-						// backpressure plus the receiver's own connection-close to clean
-						// up case (a); a lingering blocked sink.write costs at worst the
-						// 1-hour httplib write timeout.
+						// receiver's absolute position in the track.  Non-MP3 codecs go
+						// through serve_transcoded for any seek, so this path only sees
+						// MP3 native seek among the cast cases.
+						// No "receiver moved on" early-exit: when MP3 native seek opens
+						// a new Range at the seek byte it abandons this connection
+						// without a reliable signal here, and pos jumps ahead of what
+						// we've sent.  Trust TCP backpressure plus the receiver's own
+						// connection-close to clean it up; a lingering blocked
+						// sink.write costs at worst the 1-hour httplib write timeout.
 						float audio_sent_abs = static_cast<float>(offset + bytes_sent)
 						                     / bytes_per_sec;
 						float buf_secs = audio_sent_abs - pos;
