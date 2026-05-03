@@ -595,6 +595,12 @@ void CastManager::load_worker(std::string url, std::string mime, int gen,
 			nlohmann::json msg = {
 				{"type",      "LOAD"},
 				{"requestId", 2},
+				// autoplay defaults to true per the Cast spec, but after a
+				// preceding STOP the Default Media Receiver appears to suppress
+				// the implicit default — the new media session registers in
+				// IDLE state and never transitions to PLAYING.  Specify it
+				// explicitly so the receiver always autoplays the new media.
+				{"autoplay",  true},
 				{"media", {
 					{"contentId",   url},
 					{"contentType", mime},
@@ -647,6 +653,7 @@ void CastManager::load_worker(std::string url, std::string mime, int gen,
 	nlohmann::json msg = {
 		{"type",      "LOAD"},
 		{"requestId", 2},
+		{"autoplay",  true},
 		{"media", {
 			{"contentId",   url},
 			{"contentType", mime},
