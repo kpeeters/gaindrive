@@ -874,6 +874,14 @@ void CastManager::poll_loop()
 			else if (type == "ERROR") {
 				std::cout << stamp() << "Cast rx ERROR: " << m.dump() << std::endl;
 				}
+			else if (type == "RECEIVER_STATUS") {
+				// Dump the full payload so we can see whether the Default
+				// Media Receiver app is still running and what transportId
+				// it's advertising — STOP can trigger an idle-app teardown
+				// that invalidates our cached transport_id.
+				std::cout << stamp() << "Cast rx RECEIVER_STATUS: "
+				          << m.dump() << std::endl;
+				}
 			else if (type != "PONG") {
 				std::cout << stamp() << "Cast rx " << type << std::endl;
 				}
