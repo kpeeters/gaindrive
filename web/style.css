@@ -971,7 +971,8 @@ body {
 }
 
 .album-star.starred {
-   color: var(--accent);
+    color: var(--accent);
+    opacity: 1.0;
 }
 
 /* In an album-list row, hide the star until hover unless the album is
