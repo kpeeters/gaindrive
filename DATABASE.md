@@ -174,15 +174,21 @@ CREATE TABLE users (
 );
 
 -- All references to music-library rows are by
--- durable text key (filesystem path or artist
--- name), never by integer rowid. SQLite forbids
--- foreign keys across attached databases anyway,
--- and using paths means the user-state DB
--- survives both:
+-- filesystem path, RELATIVE to the music root,
+-- never by integer rowid. SQLite forbids foreign
+-- keys across attached databases anyway, and
+-- using relative paths means the user-state DB
+-- survives:
 --   * a music-DB rebuild (fresh rowids)
 --   * the rowid churn from the song scanner's
 --     INSERT OR REPLACE on path conflict
--- Cross-DB JOINs are by path/name instead of id.
+--   * moving the whole library to a different
+--     on-disk location
+--
+-- Cross-DB JOINs prepend the music root to the
+-- stored relative path:
+--   JOIN songs s ON s.path = ? || st.song_path
+-- where ? is the music root with a trailing '/'.
 CREATE TABLE stars (
     user_id            INTEGER NOT NULL
                          REFERENCES users(id)

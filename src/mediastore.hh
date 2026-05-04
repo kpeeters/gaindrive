@@ -337,7 +337,10 @@ class MediaStore {
 		bool set_cover_art_path(int folder_id, const std::string& path);
 
 	private:
-		std::string      music_root_;
+		std::string      music_root_;        // never ends in '/'
+		std::string      music_root_slash_;  // music_root_ + '/'; used as SQL-bound
+		                                     // prefix for converting client-DB
+		                                     // relative paths to absolute and back.
 		SQLite::Database db_music_;
 		std::mutex       db_mutex_;  // guards db_music_ across scan thread + API threads
 
