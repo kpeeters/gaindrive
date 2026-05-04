@@ -843,6 +843,7 @@ static void handle_album_list(const httplib::Request& req, httplib::Response& re
 				if (al.cover_art_id >= 0) entry["coverArt"] = al.cover_art_id;
 				if (al.year > 0)          entry["year"]     = al.year;
 				if (!al.genre.empty())    entry["genre"]    = al.genre;
+				if (al.starred)           entry["starred"]  = true;
 				arr.push_back(std::move(entry));
 				}
 			r[key] = {{"album", arr}};
@@ -865,6 +866,7 @@ static void handle_album_list(const httplib::Request& req, httplib::Response& re
 				if (!al.created.empty()) el->SetAttribute("created", al.created.c_str());
 				if (al.year > 0)         el->SetAttribute("year",    al.year);
 				if (!al.genre.empty())   el->SetAttribute("genre",   al.genre.c_str());
+				if (al.starred)          el->SetAttribute("starred", "true");
 				list->InsertEndChild(el);
 				}
 			root->InsertEndChild(list);
@@ -1456,7 +1458,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto it = req.params.find("id");
 		if (it == req.params.end()) { err(10, "Required parameter missing: id."); return; }
 
-		auto info = store_.get_artist(std::stoi(it->second));
+		std::string user = req.params.find("u")->second;
+		auto info = store_.get_artist(std::stoi(it->second), user);
 		if (!info) { err(70, "Artist not found."); return; }
 
 		std::string body;
@@ -1478,6 +1481,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					if (al.cover_art_id >= 0) entry["coverArt"] = al.cover_art_id;
 					if (al.year > 0)          entry["year"]     = al.year;
 					if (!al.genre.empty())    entry["genre"]    = al.genre;
+					if (al.starred)           entry["starred"]  = true;
 					arr.push_back(std::move(entry));
 					}
 				r["artist"] = {
@@ -1508,6 +1512,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					if (!al.created.empty()) el->SetAttribute("created", al.created.c_str());
 					if (al.year > 0)         el->SetAttribute("year",    al.year);
 					if (!al.genre.empty())   el->SetAttribute("genre",   al.genre.c_str());
+					if (al.starred)          el->SetAttribute("starred", "true");
 					artist_el->InsertEndChild(el);
 					}
 				root->InsertEndChild(artist_el);
@@ -2340,6 +2345,7 @@ GainDrive::GainDrive(const std::string& db_path,
 				if (al.cover_art_id >= 0) entry["coverArt"] = al.cover_art_id;
 				if (al.year > 0)          entry["year"]     = al.year;
 				if (!al.genre.empty())    entry["genre"]    = al.genre;
+				if (al.starred)           entry["starred"]  = true;
 				r["album"] = std::move(entry);
 				});
 		else
@@ -2356,6 +2362,7 @@ GainDrive::GainDrive(const std::string& db_path,
 				if (!al.created.empty())  el->SetAttribute("created",  al.created.c_str());
 				if (al.year > 0)          el->SetAttribute("year",     al.year);
 				if (!al.genre.empty())    el->SetAttribute("genre",    al.genre.c_str());
+				if (al.starred)           el->SetAttribute("starred",  "true");
 				for (auto& s : info->songs)
 					el->InsertEndChild(song_entry_xml(doc, s, "song", mbr));
 				root->InsertEndChild(el);

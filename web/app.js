@@ -701,11 +701,39 @@ async function viewPlaylists() {
       }
    pane.appendChild(frag);
 
-   // ── Starred tracks ──────────────────────────────────────────────────────
+   // ── Starred albums and tracks ───────────────────────────────────────────
    try {
-      const starSr  = await apiCall('getStarred');
-      const starred = starSr.starred?.song ?? [];
-      const songs   = Array.isArray(starred) ? starred : [starred];
+      const starSr     = await apiCall('getStarred');
+      const albumsRaw  = starSr.starred?.album ?? [];
+      const songsRaw   = starSr.starred?.song ?? [];
+      const albums     = Array.isArray(albumsRaw) ? albumsRaw : [albumsRaw];
+      const songs      = Array.isArray(songsRaw)  ? songsRaw  : [songsRaw];
+
+      if (albums.length > 0) {
+         const albHeading = document.createElement('h2');
+         albHeading.className = 'playlist-section-heading';
+         albHeading.textContent = 'Starred albums';
+         pane.appendChild(albHeading);
+
+         for (const album of albums) {
+            const row = document.createElement('div');
+            row.className = 'playlist-row';
+
+            const name = document.createElement('span');
+            name.className = 'playlist-name';
+            name.textContent = album.title;
+
+            const meta = document.createElement('span');
+            meta.className = 'playlist-meta';
+            if (album.artist) meta.textContent = album.artist;
+
+            row.appendChild(name);
+            row.appendChild(meta);
+            row.addEventListener('click', () =>
+               viewTracksFromSearch(album.id, album.title, album.parent, album.artist));
+            pane.appendChild(row);
+            }
+         }
 
       if (songs.length > 0) {
          const starHeading = document.createElement('h2');
@@ -737,7 +765,7 @@ async function viewPlaylists() {
          }
       }
    catch (e) {
-      console.warn('[playlists] could not load starred tracks:', e);
+      console.warn('[playlists] could not load starred items:', e);
       }
 
    paneNav.slideTo(0);
@@ -906,6 +934,7 @@ async function viewAlbums(artistId, artistName) {
       info.appendChild(meta);
       row.appendChild(cover);
       row.appendChild(info);
+      row.appendChild(makeAlbumStar(album));
       row.addEventListener('click', () => {
          document.querySelectorAll('#pane-albums .album-row.selected')
             .forEach(r => r.classList.remove('selected'));
@@ -1251,6 +1280,31 @@ async function stopCast() {
    document.getElementById('cast-modal').classList.add('hidden');
    if (player.index >= 0)
       playerPlay(resumeOffset);
+   }
+
+// ── Album star toggle ──────────────────────────────────────────────────────
+
+function makeAlbumStar(album) {
+   const btn = document.createElement('span');
+   btn.className = 'album-star' + (album.starred ? ' starred' : '');
+   btn.title = album.starred ? 'Unstar album' : 'Star album';
+   btn.textContent = '★';
+
+   btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const isStarred = btn.classList.contains('starred');
+      try {
+         await apiCall(isStarred ? 'unstar' : 'star', {albumId: album.id});
+         album.starred = !isStarred;
+         btn.classList.toggle('starred');
+         btn.title = btn.classList.contains('starred') ? 'Unstar album' : 'Star album';
+         }
+      catch {
+         showError('The action could not be completed. Please check your connection.');
+         }
+      });
+
+   return btn;
    }
 
 // ── Track action icons (star / add-to-playlist) ────────────────────────────
@@ -1661,11 +1715,14 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
    const heading = document.createElement('h1');
    heading.className = 'view-title';
    heading.textContent = albumTitle;
+   const albumStar = makeAlbumStar(album);
+   albumStar.classList.add('album-star-header');
    const editLink = document.createElement('span');
    editLink.className = 'edit-link';
    editLink.textContent = 'Edit';
    header.appendChild(back);
    header.appendChild(heading);
+   header.appendChild(albumStar);
    header.appendChild(editLink);
    pane.appendChild(header);
 

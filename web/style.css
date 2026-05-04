@@ -896,6 +896,41 @@ body {
    color: var(--error);
 }
 
+/* ── Album star ─────────────────────────────────────────────────────────── */
+
+.album-star {
+   font-size: 1rem;
+   line-height: 1;
+   color: var(--text-dim);
+   cursor: pointer;
+   user-select: none;
+   flex-shrink: 0;
+}
+
+.album-star.starred {
+   color: var(--accent);
+}
+
+/* In an album-list row, hide the star until hover unless the album is
+   already starred. */
+.album-row .album-star {
+   margin-left: auto;
+   padding: 0 0.4rem;
+   opacity: 0;
+   transition: opacity 0.1s;
+}
+
+.album-row:hover .album-star,
+.album-row .album-star.starred {
+   opacity: 1;
+}
+
+/* In the album detail header the star sits next to the title — always
+   visible regardless of starred state. */
+.album-star-header {
+   font-size: 1.2rem;
+}
+
 /* ── Edit mode ─────────────────────────────────────── */
 
 .edit-link {

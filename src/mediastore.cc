@@ -1386,7 +1386,8 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
-	// Base SELECT — common to all types.
+	// Base SELECT — common to all types. The trailing column is a per-user
+	// album-star flag, populated from a LEFT JOIN on client.stars.
 	std::string sql =
 		"SELECT f.id, COALESCE(f.parent_id,-1),"
 		"       COALESCE(al.title, f.name),"
@@ -1397,11 +1398,14 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 		"       CAST(COALESCE(al.duration,0) AS INTEGER),"
 		"       COALESCE(al.year,0),"
 		"       COALESCE(al.genre,''),"
-		"       COALESCE(al.created,'')"
+		"       COALESCE(al.created,''),"
+		"       CASE WHEN sa.album_id IS NOT NULL THEN 1 ELSE 0 END AS starred"
 		" FROM albums al"
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
-		" LEFT JOIN artists a ON a.id = aa.artist_id";
+		" LEFT JOIN artists a ON a.id = aa.artist_id"
+		" LEFT JOIN client.stars sa ON sa.album_id = f.id"
+		"      AND sa.user_id = (SELECT id FROM client.users WHERE username = ?)";
 
 	// Extra joins for play-count-based types.
 	bool play_count_join = (type == "frequent" || type == "recent");
@@ -1410,14 +1414,16 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 		       " LEFT JOIN client.play_counts pc ON pc.song_id = s.id"
 		       " AND pc.user_id = (SELECT id FROM client.users WHERE username = ?)";
 
-	// Join for starred.
-	if (type == "starred")
-		sql += " JOIN client.stars st ON st.album_id = f.id"
-		       " JOIN client.users u ON u.id = st.user_id AND u.username = ?";
-
 	// WHERE clause.
-	if      (type == "byYear")  sql += " WHERE al.year BETWEEN ? AND ?";
-	else if (type == "byGenre") sql += " WHERE LOWER(COALESCE(al.genre,'')) = LOWER(?)";
+	bool has_where = false;
+	auto add_where = [&](const char* clause) {
+		sql += has_where ? " AND " : " WHERE ";
+		sql += clause;
+		has_where = true;
+		};
+	if      (type == "byYear")  add_where("al.year BETWEEN ? AND ?");
+	else if (type == "byGenre") add_where("LOWER(COALESCE(al.genre,'')) = LOWER(?)");
+	else if (type == "starred") add_where("sa.album_id IS NOT NULL");
 
 	// GROUP BY needed when aggregating play counts.
 	if (play_count_join) sql += " GROUP BY al.id";
@@ -1430,7 +1436,7 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 		sql += " ORDER BY COALESCE(a.name,'') COLLATE NOCASE, al.title COLLATE NOCASE";
 	else if (type == "frequent")            sql += " ORDER BY SUM(COALESCE(pc.count,0)) DESC";
 	else if (type == "recent")              sql += " ORDER BY MAX(COALESCE(pc.last_played,'')) DESC";
-	else if (type == "starred")             sql += " ORDER BY st.created DESC";
+	else if (type == "starred")             sql += " ORDER BY sa.created DESC";
 	else if (type == "byYear")              sql += " ORDER BY al.year";
 	else if (type == "byGenre")             sql += " ORDER BY al.title COLLATE NOCASE";
 	else                                    sql += " ORDER BY al.created DESC"; // fallback
@@ -1440,8 +1446,8 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 	SQLite::Statement q(db_music_, sql);
 	int idx = 1;
 
-	if (play_count_join)  q.bind(idx++, username);
-	if (type == "starred") q.bind(idx++, username);
+	q.bind(idx++, username);                                // album-star LEFT JOIN
+	if (play_count_join) q.bind(idx++, username);
 	if (type == "byYear") { q.bind(idx++, from_year); q.bind(idx++, to_year); }
 	if (type == "byGenre")  q.bind(idx++, genre);
 	q.bind(idx++, size);
@@ -1460,12 +1466,14 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 		e.year         = q.getColumn(7).getInt();
 		e.genre        = q.getColumn(8).isNull() ? "" : q.getColumn(8).getString();
 		e.created      = q.getColumn(9).isNull() ? "" : q.getColumn(9).getString();
+		e.starred      = q.getColumn(10).getInt() != 0;
 		result.push_back(std::move(e));
 		}
 	return result;
 	}
 
-std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id)
+std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id,
+                                                              const std::string& username)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
@@ -1480,6 +1488,7 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id)
 	info.artist.name = fsel.getColumn(1).getString();
 
 	// Fetch albums whose folder is a direct child of this artist folder.
+	// Trailing column is the per-user album-star flag.
 	SQLite::Statement asel(db_music_,
 		"SELECT f.id, COALESCE(f.parent_id,-1),"
 		"       COALESCE(al.title, f.name),"
@@ -1490,14 +1499,18 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id)
 		"       CAST(COALESCE(al.duration,0) AS INTEGER),"
 		"       COALESCE(al.year,0),"
 		"       COALESCE(al.genre,''),"
-		"       COALESCE(al.created,'')"
+		"       COALESCE(al.created,''),"
+		"       CASE WHEN sa.album_id IS NOT NULL THEN 1 ELSE 0 END AS starred"
 		" FROM albums al"
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
 		" LEFT JOIN artists a ON a.id = aa.artist_id"
+		" LEFT JOIN client.stars sa ON sa.album_id = f.id"
+		"      AND sa.user_id = (SELECT id FROM client.users WHERE username = ?)"
 		" WHERE f.parent_id = ?"
 		" ORDER BY al.year, al.title COLLATE NOCASE");
-	asel.bind(1, folder_id);
+	asel.bind(1, username);
+	asel.bind(2, folder_id);
 
 	while (asel.executeStep()) {
 		AlbumEntry e;
@@ -1511,6 +1524,7 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id)
 		e.year         = asel.getColumn(7).getInt();
 		e.genre        = asel.getColumn(8).isNull() ? "" : asel.getColumn(8).getString();
 		e.created      = asel.getColumn(9).isNull() ? "" : asel.getColumn(9).getString();
+		e.starred      = asel.getColumn(10).getInt() != 0;
 		info.albums.push_back(std::move(e));
 		}
 
@@ -1524,7 +1538,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
-	// Fetch album metadata.
+	// Fetch album metadata. Trailing column is the per-user album-star flag.
 	SQLite::Statement msel(db_music_,
 		"SELECT f.id, COALESCE(f.parent_id,-1),"
 		"       COALESCE(al.title, f.name),"
@@ -1535,13 +1549,17 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		"       CAST(COALESCE(al.duration,0) AS INTEGER),"
 		"       COALESCE(al.year,0),"
 		"       COALESCE(al.genre,''),"
-		"       COALESCE(al.created,'')"
+		"       COALESCE(al.created,''),"
+		"       CASE WHEN sa.album_id IS NOT NULL THEN 1 ELSE 0 END AS starred"
 		" FROM albums al"
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
 		" LEFT JOIN artists a ON a.id = aa.artist_id"
+		" LEFT JOIN client.stars sa ON sa.album_id = f.id"
+		"      AND sa.user_id = (SELECT id FROM client.users WHERE username = ?)"
 		" WHERE f.id = ?");
-	msel.bind(1, folder_id);
+	msel.bind(1, username);
+	msel.bind(2, folder_id);
 	if (!msel.executeStep()) return std::nullopt;
 
 	AlbumInfo info;
@@ -1555,6 +1573,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 	info.album.year         = msel.getColumn(7).getInt();
 	info.album.genre        = msel.getColumn(8).isNull() ? "" : msel.getColumn(8).getString();
 	info.album.created      = msel.getColumn(9).isNull() ? "" : msel.getColumn(9).getString();
+	info.album.starred      = msel.getColumn(10).getInt() != 0;
 
 	// Fetch songs, flattening disc subfolders when flat_multi_disc is set.
 	// The starred LEFT JOIN is added only when a username is provided.

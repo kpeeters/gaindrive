@@ -143,6 +143,7 @@ class MediaStore {
 			int         year         = 0;
 			std::string genre;
 			std::string created;
+			bool        starred      = false;  // per-user (album-level star)
 			};
 
 		// type: newest | random | alphabeticalByName | alphabeticalByArtist |
@@ -161,7 +162,8 @@ class MediaStore {
 			std::vector<AlbumEntry> albums;
 			};
 
-		std::optional<ArtistInfo> get_artist(int folder_id);
+		std::optional<ArtistInfo> get_artist(int folder_id,
+		                                      const std::string& username = "");
 
 		struct AlbumInfo {
 			AlbumEntry              album;
