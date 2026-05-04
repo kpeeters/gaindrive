@@ -1116,6 +1116,49 @@ setInterval(() => {
    time.textContent = `${fmtDuration(Math.floor(absCurrent))} / ${fmtDuration(totalSecs)}`;
    }, 100);
 
+async function openInfoModal() {
+   const cur = player.queue[player.index];
+   if (!cur) return;
+   const list  = document.getElementById('info-modal-list');
+   const modal = document.getElementById('info-modal');
+   list.innerHTML = '';
+   modal.classList.remove('hidden');
+
+   // Re-fetch via getSong so transcoded* fields reflect the user's current
+   // max_bitrate setting, not whatever was true when the queue was loaded.
+   let song = cur;
+   try {
+      const sr = await apiCall('getSong', {id: cur.id});
+      if (sr.song) song = sr.song;
+      } catch { /* keep cached song */ }
+
+   const sentSuffix  = song.transcodedSuffix  ?? song.suffix;
+   const sentBitRate = song.transcodedBitRate ?? song.bitRate;
+
+   const rows = [
+      ['Title',              song.title],
+      ['Artist',             song.artist],
+      ['Album',              song.album],
+      ['Track',              song.track],
+      ['Year',               song.year],
+      ['Server file format', song.suffix],
+      ['Server bitrate',     song.bitRate ? `${song.bitRate} kbps` : null],
+      ['Sent file format',   sentSuffix],
+      ['Sent bitrate',       sentBitRate ? `${sentBitRate} kbps` : null],
+      ['Length',             song.duration ? fmtDuration(song.duration) : null],
+      ['Starred',            song.starred ? 'Yes' : 'No'],
+      ];
+   for (const [label, value] of rows) {
+      if (value === null || value === undefined || value === '') continue;
+      const dt = document.createElement('dt');
+      dt.textContent = label;
+      const dd = document.createElement('dd');
+      dd.textContent = value;
+      list.appendChild(dt);
+      list.appendChild(dd);
+      }
+   }
+
 async function openCastModal() {
    const modal   = document.getElementById('cast-modal');
    const list    = document.getElementById('cast-device-list');
@@ -1332,6 +1375,7 @@ function playerUpdateUI() {
 
    document.getElementById('player-title').textContent  = song.title;
    document.getElementById('player-artist').textContent = song.artist ?? '';
+   document.getElementById('player-info').disabled      = false;
 
    const cover = document.getElementById('player-cover');
    cover.src = song.coverArt ? apiUrl('getCoverArt', {id: song.coverArt, size: 64}) : '';
@@ -1505,6 +1549,11 @@ function setupPlayer() {
       document.getElementById('cast-modal').classList.add('hidden');
       });
    document.getElementById('cast-stop-btn').addEventListener('click', stopCast);
+
+   document.getElementById('player-info').addEventListener('click', openInfoModal);
+   document.getElementById('info-close-btn').addEventListener('click', () => {
+      document.getElementById('info-modal').classList.add('hidden');
+      });
 
    document.getElementById('playlist-close-btn').addEventListener('click', () => {
       document.getElementById('playlist-modal').classList.add('hidden');
