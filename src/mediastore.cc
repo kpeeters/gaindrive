@@ -595,10 +595,22 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 				}
 			if (sdat.disc_number == 0 && !f.isNull()) {
 				auto props = f.file()->properties();
+				std::cout << stamp() << "DEBUG disc-fallback: " << sdat.path
+				          << " | props.size=" << props.size()
+				          << " | has_DISCNUMBER=" << props.contains("DISCNUMBER")
+				          << std::endl;
 				auto it    = props.find("DISCNUMBER");
 				if (it != props.end() && !it->second.isEmpty()) {
+					std::cout << stamp() << "DEBUG disc-fallback: raw='"
+					          << it->second.front().toCString(true)
+					          << "' parsed=" << it->second.front().toInt() << std::endl;
 					try { sdat.disc_number = it->second.front().toInt(); }
 					catch (...) {}
+					}
+				else {
+					std::cout << stamp() << "DEBUG disc-fallback: key NOT in map; keys=";
+					for (auto& kv : props) std::cout << kv.first.toCString(true) << ",";
+					std::cout << std::endl;
 					}
 				}
 			if (!f.isNull() && f.audioProperties()) {
