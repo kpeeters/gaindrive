@@ -737,10 +737,28 @@ async function viewPlaylistTracks(playlistId, playlistName) {
    back.addEventListener('click', () => history.back());
    const heading = document.createElement('h1');
    heading.className = 'view-title';
-   heading.textContent = playlistName;
+   heading.textContent = pl.name;
+   const publicBadge = document.createElement('span');
+   publicBadge.className = 'playlist-public-badge';
+   publicBadge.textContent = 'Public';
+   if (pl.public !== true) publicBadge.hidden = true;
+   const isOwner = pl.owner && currentUser && pl.owner === currentUser.username;
+   const editLink = isOwner ? document.createElement('span') : null;
+   if (editLink) {
+      editLink.className = 'edit-link';
+      editLink.textContent = 'Edit';
+      }
    header.appendChild(back);
    header.appendChild(heading);
+   header.appendChild(publicBadge);
+   if (editLink) header.appendChild(editLink);
    pane.appendChild(header);
+
+   const commentP = document.createElement('p');
+   commentP.className = 'playlist-comment';
+   commentP.textContent = pl.comment ?? '';
+   if (!pl.comment) commentP.hidden = true;
+   pane.appendChild(commentP);
 
    const frag = document.createDocumentFragment();
    for (let i = 0; i < songs.length; i++) {
@@ -798,6 +816,118 @@ async function viewPlaylistTracks(playlistId, playlistName) {
       }
    pane.appendChild(frag);
    paneNav.slideTo(1);
+
+   // ── Edit mode ──────────────────────────────────────────────────────────────
+   // Only the playlist's owner sees the Edit link; the server enforces the
+   // same rule, so non-owners never get a working button.
+   if (!editLink) return;
+
+   function enterEditMode() {
+      editLink.textContent = '';
+      const saveBtn = document.createElement('button');
+      saveBtn.className = 'edit-save-btn';
+      saveBtn.textContent = 'Save';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'edit-cancel-btn';
+      cancelBtn.textContent = 'Cancel';
+      editLink.appendChild(saveBtn);
+      editLink.appendChild(cancelBtn);
+
+      // Title → input.
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'playlist-name-input';
+      nameInput.value = heading.textContent;
+      nameInput.dataset.orig = heading.textContent;
+      heading.replaceWith(nameInput);
+
+      // Public badge → checkbox toggle.
+      const toggleLabel = document.createElement('label');
+      toggleLabel.className = 'playlist-public-toggle';
+      const toggle = document.createElement('input');
+      toggle.type = 'checkbox';
+      toggle.className = 'playlist-public-input';
+      toggle.checked = pl.public === true;
+      toggle.dataset.orig = toggle.checked ? 'true' : 'false';
+      toggleLabel.appendChild(toggle);
+      toggleLabel.appendChild(document.createTextNode('Public'));
+      publicBadge.replaceWith(toggleLabel);
+
+      // Comment → textarea (always shown in edit mode).
+      const commentInput = document.createElement('textarea');
+      commentInput.className = 'playlist-comment-input';
+      commentInput.value = pl.comment ?? '';
+      commentInput.dataset.orig = pl.comment ?? '';
+      commentInput.placeholder = 'Comment';
+      commentP.replaceWith(commentInput);
+
+      saveBtn.addEventListener('click', async () => {
+         saveBtn.disabled = true;
+         cancelBtn.disabled = true;
+
+         const params = {playlistId};
+         if (nameInput.value !== nameInput.dataset.orig)
+            params.name = nameInput.value;
+         if (commentInput.value !== commentInput.dataset.orig)
+            params.comment = commentInput.value;
+         const newPublic = toggle.checked ? 'true' : 'false';
+         if (newPublic !== toggle.dataset.orig)
+            params.public = newPublic;
+
+         try {
+            if (Object.keys(params).length > 1)
+               await apiCall('updatePlaylist', params);
+            }
+         catch (e) {
+            console.error('[playlist-edit] updatePlaylist failed', e);
+            saveBtn.disabled = false;
+            cancelBtn.disabled = false;
+            showError('Could not save playlist changes.');
+            return;
+            }
+
+         // Update local cached playlist so re-entering edit mode sees the new
+         // values, and propagate the rename to the playlists list row.
+         pl.name    = nameInput.value;
+         pl.comment = commentInput.value;
+         pl.public  = toggle.checked;
+         const listRow = document.querySelector(
+            `#pane-artists .playlist-row[data-id="${playlistId}"] .playlist-name`);
+         if (listRow) listRow.textContent = pl.name;
+
+         exitEditMode(true, nameInput, toggleLabel, commentInput);
+         });
+
+      cancelBtn.addEventListener('click', () => {
+         exitEditMode(false, nameInput, toggleLabel, commentInput);
+         });
+      }
+
+   function exitEditMode(keepValues, nameInput, toggleLabel, commentInput) {
+      editLink.textContent = 'Edit';
+
+      const newName = keepValues ? nameInput.value : nameInput.dataset.orig;
+      heading.textContent = newName;
+      nameInput.replaceWith(heading);
+
+      const toggle = toggleLabel.querySelector('.playlist-public-input');
+      const isPublic = keepValues
+         ? toggle.checked
+         : (toggle.dataset.orig === 'true');
+      publicBadge.hidden = !isPublic;
+      toggleLabel.replaceWith(publicBadge);
+
+      const newComment = keepValues
+         ? commentInput.value
+         : commentInput.dataset.orig;
+      commentP.textContent = newComment;
+      commentP.hidden = !newComment;
+      commentInput.replaceWith(commentP);
+      }
+
+   editLink.addEventListener('click', e => {
+      if (e.target === editLink) enterEditMode();
+      });
 }
 
 async function viewAlbums(artistId, artistName) {

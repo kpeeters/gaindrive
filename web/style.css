@@ -523,6 +523,68 @@ body {
    color: var(--text-dim);
 }
 
+/* ── Playlist detail header ──────────────────────────── */
+
+/* Small pill next to the playlist title indicating a public playlist. */
+.playlist-public-badge {
+   font-size: 0.7rem;
+   font-weight: 600;
+   text-transform: uppercase;
+   letter-spacing: 0.05em;
+   padding: 0.05rem 0.4rem;
+   border-radius: 3px;
+   background: var(--surface);
+   color: var(--text-dim);
+   border: 1px solid var(--border);
+}
+
+/* Free-form description block under the playlist header. */
+.playlist-comment {
+   color: var(--text-dim);
+   font-size: 0.9rem;
+   white-space: pre-wrap;
+   max-width: 60ch;
+   margin: -0.4rem 0 1rem;
+}
+
+/* Edit-mode replacements. */
+.playlist-name-input {
+   flex: 1;
+   font-size: 1.2rem;
+   font-weight: 600;
+   background: var(--surface);
+   color: var(--text);
+   border: 1px solid var(--border);
+   border-radius: 3px;
+   padding: 0.1rem 0.3rem;
+}
+
+.playlist-comment-input {
+   display: block;
+   width: 100%;
+   max-width: 60ch;
+   min-height: 4.5rem;
+   resize: vertical;
+   font: inherit;
+   font-size: 0.9rem;
+   background: var(--surface);
+   color: var(--text);
+   border: 1px solid var(--border);
+   border-radius: 3px;
+   padding: 0.3rem 0.4rem;
+   margin: -0.4rem 0 1rem;
+}
+
+.playlist-public-toggle {
+   display: inline-flex;
+   align-items: center;
+   gap: 0.3rem;
+   font-size: 0.8rem;
+   color: var(--text-dim);
+   cursor: pointer;
+   user-select: none;
+}
+
 .playlist-section-heading {
    font-size: 0.7rem;
    font-weight: 700;
