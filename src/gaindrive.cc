@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <thread>
 
 #include <netinet/in.h>
@@ -876,6 +877,12 @@ static void handle_album_list(const httplib::Request& req, httplib::Response& re
 	}
 
 // ---- GainDrive --------------------------------------------------------
+
+// Grace period before the SSE-as-heartbeat watchdog tears down a cast
+// session whose listener has gone away. Long enough to ride out a page
+// reload or a brief network blip; short enough that closing the tab
+// actually stops the cast.
+static constexpr int CAST_IDLE_GRACE_S = 30;
 
 GainDrive::GainDrive(const std::string& db_path,
                      const std::string& music_root,
@@ -2713,7 +2720,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 		if (!check_cast_perm(req, res, store_, use_json)) return;
-		cast_manager_.stop();
+		cast_teardown();
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
 		});
@@ -2722,6 +2729,11 @@ GainDrive::GainDrive(const std::string& db_path,
 	// Each event is a JSON object with playerState, currentTime, duration.
 	// The connection is kept alive by the Chromecast heartbeat; a 15-second
 	// keepalive comment is sent if no real update arrives in that window.
+	//
+	// This connection also acts as the cast session's heartbeat: when the
+	// browser disconnects (tab closed, network drop, OS sleep) and no new
+	// listener reconnects within CAST_IDLE_GRACE_S seconds, the watchdog
+	// armed in the RAII guard's destructor tears the cast session down.
 	server_.Get("/rest/castEvents.view", [this](const httplib::Request& req,
 	                                            httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -2732,8 +2744,48 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!cast_manager_.active()) { res.status = 204; return; }
 		res.set_header("Cache-Control",    "no-cache");
 		res.set_header("X-Accel-Buffering","no");   // disable nginx/apache buffering
+
+		// RAII helper: increments the listener counter on construction and
+		// arms the auto-stop watchdog on destruction.  Captured via
+		// shared_ptr because httplib stores the content provider in a
+		// std::function (which requires copyable callables); the guard's
+		// destructor still fires exactly once, when the last copy of the
+		// lambda is dropped — i.e. when the connection ends, regardless of
+		// whether it ended via sink.write returning false (client gone),
+		// wait_status seeing !active(), or normal completion.
+		struct ListenerGuard {
+			GainDrive* self;
+			ListenerGuard(GainDrive* s) : self(s) {
+				int n = ++self->cast_sse_listeners_;
+				++self->cast_wd_gen_;
+				if (self->debug_)
+					std::cout << stamp() << "Cast: SSE listener attached, count="
+					          << n << std::endl;
+				}
+			~ListenerGuard() {
+				int n = --self->cast_sse_listeners_;
+				int g = ++self->cast_wd_gen_;
+				if (self->debug_)
+					std::cout << stamp() << "Cast: SSE listener detached, count="
+					          << n << std::endl;
+				if (n != 0 || !self->cast_manager_.active()) return;
+				GainDrive* gd = self;
+				std::thread([gd, g] {
+					std::this_thread::sleep_for(std::chrono::seconds(CAST_IDLE_GRACE_S));
+					if (gd->cast_wd_gen_.load() != g)        return; // newer event
+					if (gd->cast_sse_listeners_.load() != 0) return; // listener back
+					if (!gd->cast_manager_.active())         return; // already stopped
+					std::cout << stamp() << "Cast: no SSE listener for "
+					          << CAST_IDLE_GRACE_S << "s, auto-stopping"
+					          << std::endl;
+					gd->cast_teardown();
+					}).detach();
+				}
+			};
+		auto guard = std::make_shared<ListenerGuard>(this);
+
 		res.set_chunked_content_provider("text/event-stream",
-			[this](size_t, httplib::DataSink& sink) -> bool {
+			[this, guard](size_t, httplib::DataSink& sink) -> bool {
 				auto s = cast_manager_.wait_status(15000);
 				if (!cast_manager_.active()) return false;
 				std::string event = "data: " + nlohmann::json({
@@ -3081,6 +3133,13 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::thread([this]{ store_.scan(); }).detach();
 	cast_manager_.discover_background();
 	watcher_.start();
+	}
+
+void GainDrive::cast_teardown()
+	{
+	cast_manager_.stop();
+	last_cast_song_id_.clear();
+	last_cast_offset_ = 0.0f;
 	}
 
 void GainDrive::listen(const std::string& host, int port)

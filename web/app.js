@@ -1321,7 +1321,7 @@ async function selectCastDevice(id) {
       }
    }
 
-async function stopCast() {
+async function stopCast({resumeLocal = true} = {}) {
    if (castEventSrc !== null) {
       castEventSrc.close();
       castEventSrc = null;
@@ -1347,7 +1347,7 @@ async function stopCast() {
    castSongDuration = 0;
    document.getElementById('player-cast').classList.remove('active');
    document.getElementById('cast-modal').classList.add('hidden');
-   if (player.index >= 0)
+   if (resumeLocal && player.index >= 0)
       playerPlay(resumeOffset);
    }
 
@@ -2762,8 +2762,11 @@ async function showShell() {
    new ResizeObserver(() => paneNav.relayout()).observe(
       document.getElementById('pane-viewport'));
 
-   document.getElementById('logout-btn').addEventListener('click', e => {
+   document.getElementById('logout-btn').addEventListener('click', async e => {
       e.preventDefault();
+      // Tear down any active cast session before dropping creds — otherwise
+      // the Chromecast keeps playing and the SSE listener stays open server-side.
+      if (castDeviceId !== null) await stopCast({resumeLocal: false});
       creds.clear();
       showLogin();
       });
