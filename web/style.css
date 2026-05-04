@@ -892,6 +892,10 @@ body {
    color: var(--accent);
 }
 
+.track-action-remove:hover {
+   color: var(--error);
+}
+
 /* ── Edit mode ─────────────────────────────────────── */
 
 .edit-link {

@@ -73,6 +73,16 @@ function showError(msg) {
    document.getElementById('error-modal').classList.remove('hidden');
    }
 
+let _confirmYes = null;
+function showConfirm(msg, onYes, {title='Confirm', yes='OK', no='Cancel'} = {}) {
+   document.getElementById('confirm-modal-title').textContent = title;
+   document.getElementById('confirm-modal-msg').textContent = msg;
+   document.getElementById('confirm-yes-btn').textContent = yes;
+   document.getElementById('confirm-no-btn').textContent = no;
+   _confirmYes = onYes;
+   document.getElementById('confirm-modal').classList.remove('hidden');
+   }
+
 // ── Login ───────────────────────────────────────────────────────────────────
 
 async function tryLogin(server, user, password) {
@@ -810,7 +820,7 @@ async function viewPlaylistTracks(playlistId, playlistName) {
             };
          playerLoad(songs, i);
          });
-      const [starBtn, listBtn] = makeTrackActions(song);
+      const [starBtn, listBtn] = makeTrackActions(song, {playlistId, playlistName, index: i});
       row.appendChild(icon);
       row.appendChild(num);
       row.appendChild(titleWrap);
@@ -1245,7 +1255,7 @@ async function stopCast() {
 
 // ── Track action icons (star / add-to-playlist) ────────────────────────────
 
-function makeTrackActions(song) {
+function makeTrackActions(song, ctx) {
    const starBtn = document.createElement('span');
    starBtn.className = 'track-action' + (song.starred ? ' starred' : '');
    starBtn.title = song.starred ? 'Unstar' : 'Star';
@@ -1263,6 +1273,29 @@ function makeTrackActions(song) {
          showError('The action could not be completed. Please check your connection.');
          }
       });
+
+   if (ctx?.playlistId != null) {
+      const removeBtn = document.createElement('span');
+      removeBtn.className = 'track-action track-action-remove';
+      removeBtn.title = 'Remove from playlist';
+      removeBtn.textContent = '✕';
+
+      removeBtn.addEventListener('click', e => {
+         e.stopPropagation();
+         showConfirm('Remove this track from the playlist?', async () => {
+            removeBtn.style.pointerEvents = 'none';
+            try {
+               await apiCall('updatePlaylist', {playlistId: ctx.playlistId, songIndexToRemove: ctx.index});
+               await viewPlaylistTracks(ctx.playlistId, ctx.playlistName);
+               }
+            catch {
+               showError('The action could not be completed. Please check your connection.');
+               }
+            }, {title: 'Remove track', yes: 'Remove'});
+         });
+
+      return [starBtn, removeBtn];
+      }
 
    const listBtn = document.createElement('span');
    listBtn.className = 'track-action';
@@ -1560,6 +1593,16 @@ function setupPlayer() {
       });
    document.getElementById('error-close-btn').addEventListener('click', () => {
       document.getElementById('error-modal').classList.add('hidden');
+      });
+   document.getElementById('confirm-no-btn').addEventListener('click', () => {
+      document.getElementById('confirm-modal').classList.add('hidden');
+      _confirmYes = null;
+      });
+   document.getElementById('confirm-yes-btn').addEventListener('click', () => {
+      document.getElementById('confirm-modal').classList.add('hidden');
+      const cb = _confirmYes;
+      _confirmYes = null;
+      if (cb) cb();
       });
    document.getElementById('playlist-new-btn').addEventListener('click', async () => {
       const name = document.getElementById('playlist-new-name').value.trim();
