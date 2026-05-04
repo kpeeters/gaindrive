@@ -1375,7 +1375,7 @@ function playerUpdateUI() {
 
    document.getElementById('player-title').textContent  = song.title;
    document.getElementById('player-artist').textContent = song.artist ?? '';
-   document.getElementById('player-info').disabled      = false;
+   document.getElementById('player-info-btn').disabled  = false;
 
    const cover = document.getElementById('player-cover');
    cover.src = song.coverArt ? apiUrl('getCoverArt', {id: song.coverArt, size: 64}) : '';
@@ -1550,7 +1550,7 @@ function setupPlayer() {
       });
    document.getElementById('cast-stop-btn').addEventListener('click', stopCast);
 
-   document.getElementById('player-info').addEventListener('click', openInfoModal);
+   document.getElementById('player-info-btn').addEventListener('click', openInfoModal);
    document.getElementById('info-close-btn').addEventListener('click', () => {
       document.getElementById('info-modal').classList.add('hidden');
       });
