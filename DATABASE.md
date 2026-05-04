@@ -173,31 +173,38 @@ CREATE TABLE users (
     last_access   DATETIME
 );
 
+-- All references to music-library rows are by
+-- durable text key (filesystem path or artist
+-- name), never by integer rowid. SQLite forbids
+-- foreign keys across attached databases anyway,
+-- and using paths means the user-state DB
+-- survives both:
+--   * a music-DB rebuild (fresh rowids)
+--   * the rowid churn from the song scanner's
+--     INSERT OR REPLACE on path conflict
+-- Cross-DB JOINs are by path/name instead of id.
 CREATE TABLE stars (
-    user_id     INTEGER NOT NULL
-                  REFERENCES users(id)
-                  ON DELETE CASCADE,
-    -- exactly one of these is set
-    song_id     INTEGER REFERENCES songs(id)
-                  ON DELETE CASCADE,
-    album_id    INTEGER REFERENCES albums(id)
-                  ON DELETE CASCADE,
-    artist_id   INTEGER REFERENCES artists(id)
-                  ON DELETE CASCADE,
-    created     DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, song_id, album_id, artist_id)
+    user_id            INTEGER NOT NULL
+                         REFERENCES users(id)
+                         ON DELETE CASCADE,
+    -- exactly one of these three is non-NULL
+    song_path          TEXT,
+    album_folder_path  TEXT,
+    artist_folder_path TEXT,
+    created            DATETIME
+                         DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, song_path,
+           album_folder_path, artist_folder_path)
 );
 
 CREATE TABLE play_counts (
     user_id     INTEGER NOT NULL
                   REFERENCES users(id)
                   ON DELETE CASCADE,
-    song_id     INTEGER NOT NULL
-                  REFERENCES songs(id)
-                  ON DELETE CASCADE,
+    song_path   TEXT NOT NULL,
     count       INTEGER DEFAULT 0,
     last_played DATETIME,
-    PRIMARY KEY (user_id, song_id)
+    PRIMARY KEY (user_id, song_path)
 );
 
 CREATE TABLE playlists (
@@ -216,9 +223,7 @@ CREATE TABLE playlist_songs (
     playlist_id INTEGER NOT NULL
                   REFERENCES playlists(id)
                   ON DELETE CASCADE,
-    song_id     INTEGER NOT NULL
-                  REFERENCES songs(id)
-                  ON DELETE CASCADE,
+    song_path   TEXT NOT NULL,
     position    INTEGER NOT NULL,
     PRIMARY KEY (playlist_id, position)
 );
@@ -227,9 +232,7 @@ CREATE TABLE play_queue (
     user_id     INTEGER NOT NULL
                   REFERENCES users(id)
                   ON DELETE CASCADE,
-    song_id     INTEGER NOT NULL
-                  REFERENCES songs(id)
-                  ON DELETE CASCADE,
+    song_path   TEXT NOT NULL,
     position    INTEGER NOT NULL,
     is_current  INTEGER DEFAULT 0,
     offset_ms   INTEGER DEFAULT 0,
@@ -243,10 +246,21 @@ CREATE TABLE now_playing (
     user_id     INTEGER NOT NULL
                   REFERENCES users(id)
                   ON DELETE CASCADE,
-    song_id     INTEGER NOT NULL
-                  REFERENCES songs(id),
+    song_path   TEXT NOT NULL,
     client      TEXT,
     started     DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id)
+);
+
+CREATE TABLE bookmarks (
+    user_id     INTEGER NOT NULL
+                  REFERENCES users(id)
+                  ON DELETE CASCADE,
+    song_path   TEXT NOT NULL,
+    position    INTEGER NOT NULL DEFAULT 0,
+    comment     TEXT,
+    created     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    changed     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, song_path)
 );
 ```

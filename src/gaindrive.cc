@@ -1810,18 +1810,26 @@ GainDrive::GainDrive(const std::string& db_path,
 			return it != req.params.end() ? it->second : def;
 			};
 
-		// Collect all song IDs — the parameter may be repeated.
-		std::vector<int> ids;
+		// Collect all song IDs — the parameter may be repeated. Resolve
+		// each to its filesystem path (the durable key the user-state DB
+		// stores). Unresolvable ids are dropped silently.
+		std::vector<std::string> paths;
 		auto range = req.params.equal_range("id");
-		for (auto it = range.first; it != range.second; ++it)
-			ids.push_back(std::stoi(it->second));
+		for (auto it = range.first; it != range.second; ++it) {
+			if (auto p = store_.song_path_by_id(std::stoi(it->second)))
+				paths.push_back(*p);
+			}
 
-		int     current_id = ids.empty() ? 0 : std::stoi(qp("current", "0"));
+		int         current_id   = std::stoi(qp("current", "0"));
+		std::string current_path = "";
+		if (current_id != 0) {
+			if (auto p = store_.song_path_by_id(current_id)) current_path = *p;
+			}
 		int64_t offset_ms  = std::stoll(qp("position", "0"));
 		std::string client = qp("c");
 		std::string user   = qp("u");
 
-		store_.save_play_queue(user, ids, current_id, offset_ms, client);
+		store_.save_play_queue(user, paths, current_path, offset_ms, client);
 		bool use_json = (fmt_of(req) == "json");
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		if (debug_) std::cout << body << "\n";
@@ -1890,8 +1898,10 @@ GainDrive::GainDrive(const std::string& db_path,
 		bool submission = (qp("submission", "true") != "false");
 
 		auto range = req.params.equal_range("id");
-		for (auto it = range.first; it != range.second; ++it)
-			store_.scrobble(user, std::stoi(it->second), submission, client);
+		for (auto it = range.first; it != range.second; ++it) {
+			if (auto p = store_.song_path_by_id(std::stoi(it->second)))
+				store_.scrobble(user, *p, submission, client);
+			}
 
 		bool use_json = (fmt_of(req) == "json");
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
@@ -1920,7 +1930,12 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string comment = qp("comment");
 		std::string user    = qp("u");
 
-		store_.create_bookmark(user, song_id, position_ms, comment);
+		auto song_path = store_.song_path_by_id(song_id);
+		if (!song_path) {
+			res.set_content(subsonic_error(70, "Song not found."), "application/xml");
+			return;
+			}
+		store_.create_bookmark(user, *song_path, position_ms, comment);
 		bool use_json = (fmt_of(req) == "json");
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		if (debug_) std::cout << body << "\n";
@@ -2070,12 +2085,14 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string name = it->second;
 		std::string user = req.params.find("u")->second;
 
-		std::vector<int> song_ids;
+		std::vector<std::string> song_paths;
 		auto range = req.params.equal_range("songId");
-		for (auto i = range.first; i != range.second; ++i)
-			song_ids.push_back(std::stoi(i->second));
+		for (auto i = range.first; i != range.second; ++i) {
+			if (auto p = store_.song_path_by_id(std::stoi(i->second)))
+				song_paths.push_back(*p);
+			}
 
-		auto pl = store_.create_playlist(user, name, song_ids);
+		auto pl = store_.create_playlist(user, name, song_paths);
 		std::string body = playlist_body(pl, use_json, request_max_bitrate(req, store_));
 		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
@@ -2258,14 +2275,18 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (req.params.count("comment")) comment   = req.params.find("comment")->second;
 		if (req.params.count("public"))  is_public = (req.params.find("public")->second == "true");
 
-		std::vector<int> to_add, to_remove;
+		std::vector<std::string> paths_to_add;
+		std::vector<int> to_remove;
 		for (auto& [k, v] : req.params) {
-			if      (k == "songIdToAdd")        to_add.push_back(std::stoi(v));
-			else if (k == "songIndexToRemove")  to_remove.push_back(std::stoi(v));
+			if (k == "songIdToAdd") {
+				if (auto p = store_.song_path_by_id(std::stoi(v)))
+					paths_to_add.push_back(*p);
+				}
+			else if (k == "songIndexToRemove") to_remove.push_back(std::stoi(v));
 			}
 
 		if (!store_.update_playlist(playlist_id, user, name, comment, is_public,
-		                             to_add, to_remove)) {
+		                             paths_to_add, to_remove)) {
 			err(70, "Playlist not found.");
 			return;
 			}
@@ -2283,9 +2304,18 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string user = req.params.find("u")->second;
 
 		for (auto& [k, v] : req.params) {
-			if      (k == "id")       store_.add_star(user, std::stoi(v), 0, 0);
-			else if (k == "albumId")  store_.add_star(user, 0, std::stoi(v), 0);
-			else if (k == "artistId") store_.add_star(user, 0, 0, std::stoi(v));
+			if (k == "id") {
+				if (auto p = store_.song_path_by_id(std::stoi(v)))
+					store_.add_star(user, *p, "", "");
+				}
+			else if (k == "albumId") {
+				if (auto p = store_.album_folder_path_by_id(std::stoi(v)))
+					store_.add_star(user, "", *p, "");
+				}
+			else if (k == "artistId") {
+				if (auto p = store_.artist_folder_path_by_id(std::stoi(v)))
+					store_.add_star(user, "", "", *p);
+				}
 			}
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
@@ -2301,9 +2331,18 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string user = req.params.find("u")->second;
 
 		for (auto& [k, v] : req.params) {
-			if      (k == "id")       store_.remove_star(user, std::stoi(v), 0, 0);
-			else if (k == "albumId")  store_.remove_star(user, 0, std::stoi(v), 0);
-			else if (k == "artistId") store_.remove_star(user, 0, 0, std::stoi(v));
+			if (k == "id") {
+				if (auto p = store_.song_path_by_id(std::stoi(v)))
+					store_.remove_star(user, *p, "", "");
+				}
+			else if (k == "albumId") {
+				if (auto p = store_.album_folder_path_by_id(std::stoi(v)))
+					store_.remove_star(user, "", *p, "");
+				}
+			else if (k == "artistId") {
+				if (auto p = store_.artist_folder_path_by_id(std::stoi(v)))
+					store_.remove_star(user, "", "", *p);
+				}
 			}
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
@@ -2598,7 +2637,8 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
-		if (!store_.delete_bookmark(user, std::stoi(it->second))) {
+		auto song_path = store_.song_path_by_id(std::stoi(it->second));
+		if (!song_path || !store_.delete_bookmark(user, *song_path)) {
 			auto msg = "Bookmark not found.";
 			res.set_content(use_json ? subsonic_error_json(70, msg)
 			                         : subsonic_error(70, msg),

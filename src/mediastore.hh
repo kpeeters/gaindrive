@@ -198,6 +198,15 @@ class MediaStore {
 		// Full song metadata suitable for an API response.
 		std::optional<ChildEntry> get_song_entry(int song_id);
 
+		// ---- Music-DB id → durable path/name resolvers ----
+		// Used at the REST-handler boundary to translate Subsonic-style
+		// integer ids (which may change across rescans) into the durable
+		// text keys used by the client-state DB (which must not). Returns
+		// nullopt if the id doesn't resolve.
+		std::optional<std::string> song_path_by_id(int song_id);
+		std::optional<std::string> album_folder_path_by_id(int album_folder_id);
+		std::optional<std::string> artist_folder_path_by_id(int artist_folder_id);
+
 		// ---- Search ----
 
 		struct SearchResult {
@@ -214,10 +223,10 @@ class MediaStore {
 		// ---- Play queue / bookmarks ----
 
 		// Atomically replaces the user's play queue.
-		// current_id is the song currently playing; offset_ms is its position.
+		// current_path is the path of the song currently playing; offset_ms is its position.
 		void save_play_queue(const std::string& username,
-		                     const std::vector<int>& song_ids,
-		                     int current_id, int64_t offset_ms,
+		                     const std::vector<std::string>& song_paths,
+		                     const std::string& current_path, int64_t offset_ms,
 		                     const std::string& client);
 
 		struct PlayQueue {
@@ -232,12 +241,12 @@ class MediaStore {
 		std::optional<PlayQueue> get_play_queue(const std::string& username);
 
 		// Records a play. submission=true increments play_counts; false updates now_playing.
-		void scrobble(const std::string& username, int song_id,
+		void scrobble(const std::string& username, const std::string& song_path,
 		              bool submission, const std::string& client);
 
 		// Creates or updates a bookmark for a single song.
 		void create_bookmark(const std::string& username,
-		                     int song_id, int64_t position_ms,
+		                     const std::string& song_path, int64_t position_ms,
 		                     const std::string& comment);
 
 		struct BookmarkInfo {
@@ -252,12 +261,18 @@ class MediaStore {
 		std::vector<BookmarkInfo> get_bookmarks(const std::string& username);
 
 		// Returns false if no bookmark existed.
-		bool delete_bookmark(const std::string& username, int song_id);
+		bool delete_bookmark(const std::string& username, const std::string& song_path);
 
 		// Add/remove a star for the authenticated user.
-		// Exactly one of song_id, album_id, artist_id should be non-zero.
-		void add_star   (const std::string& username, int song_id, int album_id, int artist_id);
-		void remove_star(const std::string& username, int song_id, int album_id, int artist_id);
+		// Exactly one of song_path, album_folder_path, artist_folder_path should be non-empty.
+		void add_star   (const std::string& username,
+		                 const std::string& song_path,
+		                 const std::string& album_folder_path,
+		                 const std::string& artist_folder_path);
+		void remove_star(const std::string& username,
+		                 const std::string& song_path,
+		                 const std::string& album_folder_path,
+		                 const std::string& artist_folder_path);
 
 		struct StarredResult {
 			std::vector<ArtistDir>  artists;
@@ -285,7 +300,7 @@ class MediaStore {
 		// Creates a new playlist for the user and returns it fully populated.
 		PlaylistInfo create_playlist(const std::string& username,
 		                             const std::string& name,
-		                             const std::vector<int>& song_ids);
+		                             const std::vector<std::string>& song_paths);
 
 		// Returns all playlists owned by the user (songs vector is empty).
 		std::vector<PlaylistInfo> get_playlists(const std::string& username);
@@ -301,7 +316,7 @@ class MediaStore {
 		                     const std::optional<std::string>& name,
 		                     const std::optional<std::string>& comment,
 		                     const std::optional<bool>& is_public,
-		                     const std::vector<int>& songs_to_add,
+		                     const std::vector<std::string>& song_paths_to_add,
 		                     const std::vector<int>& indices_to_remove);
 
 		// Returns false if not found or not owned by username.
