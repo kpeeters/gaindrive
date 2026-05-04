@@ -899,9 +899,10 @@ body {
 /* ── Album star ─────────────────────────────────────────────────────────── */
 
 .album-star {
-   font-size: 1rem;
+   font-size: 1.5rem;
    line-height: 1;
    color: var(--text-dim);
+   opacity: 0.5;
    cursor: pointer;
    user-select: none;
    flex-shrink: 0;
@@ -928,7 +929,7 @@ body {
 /* In the album detail header the star sits next to the title — always
    visible regardless of starred state. */
 .album-star-header {
-   font-size: 1.2rem;
+   font-size: 1.5rem;
 }
 
 /* ── Edit mode ─────────────────────────────────────── */
