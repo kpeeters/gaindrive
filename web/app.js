@@ -702,71 +702,10 @@ async function viewPlaylists() {
    pane.appendChild(frag);
 
    // ── Starred albums and tracks ───────────────────────────────────────────
-   try {
-      const starSr     = await apiCall('getStarred');
-      const albumsRaw  = starSr.starred?.album ?? [];
-      const songsRaw   = starSr.starred?.song ?? [];
-      const albums     = Array.isArray(albumsRaw) ? albumsRaw : [albumsRaw];
-      const songs      = Array.isArray(songsRaw)  ? songsRaw  : [songsRaw];
-
-      if (albums.length > 0) {
-         const albHeading = document.createElement('h2');
-         albHeading.className = 'playlist-section-heading';
-         albHeading.textContent = 'Starred albums';
-         pane.appendChild(albHeading);
-
-         for (const album of albums) {
-            const row = document.createElement('div');
-            row.className = 'playlist-row';
-
-            const name = document.createElement('span');
-            name.className = 'playlist-name';
-            name.textContent = album.title;
-
-            const meta = document.createElement('span');
-            meta.className = 'playlist-meta';
-            if (album.artist) meta.textContent = album.artist;
-
-            row.appendChild(name);
-            row.appendChild(meta);
-            row.addEventListener('click', () =>
-               viewTracksFromSearch(album.id, album.title, album.parent, album.artist));
-            pane.appendChild(row);
-            }
-         }
-
-      if (songs.length > 0) {
-         const starHeading = document.createElement('h2');
-         starHeading.className = 'playlist-section-heading';
-         starHeading.textContent = 'Starred tracks';
-         pane.appendChild(starHeading);
-
-         for (const song of songs) {
-            const row = document.createElement('div');
-            row.className = 'playlist-row';
-
-            const name = document.createElement('span');
-            name.className = 'playlist-name';
-            name.textContent = song.title;
-
-            const meta = document.createElement('span');
-            meta.className = 'playlist-meta';
-            const parts = [];
-            if (song.artist) parts.push(song.artist);
-            if (song.duration) parts.push(fmtDuration(song.duration));
-            meta.textContent = parts.join(' · ');
-
-            row.appendChild(name);
-            row.appendChild(meta);
-            row.addEventListener('click', () =>
-               viewTracksFromSearch(song.parent, song.album, null, song.artist, song.id));
-            pane.appendChild(row);
-            }
-         }
-      }
-   catch (e) {
-      console.warn('[playlists] could not load starred items:', e);
-      }
+   const starredContainer = document.createElement('div');
+   starredContainer.id = 'starred-sections';
+   pane.appendChild(starredContainer);
+   await refreshStarredSections(starredContainer);
 
    paneNav.slideTo(0);
 }
@@ -1282,6 +1221,103 @@ async function stopCast() {
       playerPlay(resumeOffset);
    }
 
+// ── Star synchronisation across panes ─────────────────────────────────────
+// Each star toggle tags itself with data-star-kind / data-star-id and emits
+// a 'star-changed' event after a successful API call. A single document
+// listener then brings every other matching toggle in any pane into sync,
+// and rebuilds the Starred sections in the playlists pane so rows appear
+// or disappear in step. Avoids ad-hoc per-pane wiring.
+
+function dispatchStarChanged(kind, id, starred) {
+   document.dispatchEvent(new CustomEvent('star-changed', {
+      detail: {kind, id, starred}
+      }));
+   }
+
+document.addEventListener('star-changed', e => {
+   const {kind, id, starred} = e.detail;
+   const sel = `[data-star-kind="${kind}"][data-star-id="${id}"]`;
+   for (const el of document.querySelectorAll(sel)) {
+      el.classList.toggle('starred', starred);
+      const on  = el.dataset.titleStarred;
+      const off = el.dataset.titleUnstarred;
+      if (on && off) el.title = starred ? on : off;
+      }
+   const starredContainer = document.getElementById('starred-sections');
+   if (starredContainer) refreshStarredSections(starredContainer);
+   });
+
+async function refreshStarredSections(container) {
+   container.innerHTML = '';
+   let starSr;
+   try {
+      starSr = await apiCall('getStarred');
+      }
+   catch (e) {
+      console.warn('[playlists] could not load starred items:', e);
+      return;
+      }
+   const albumsRaw = starSr.starred?.album ?? [];
+   const songsRaw  = starSr.starred?.song  ?? [];
+   const albums    = Array.isArray(albumsRaw) ? albumsRaw : [albumsRaw];
+   const songs     = Array.isArray(songsRaw)  ? songsRaw  : [songsRaw];
+
+   if (albums.length > 0) {
+      const heading = document.createElement('h2');
+      heading.className = 'playlist-section-heading';
+      heading.textContent = 'Starred albums';
+      container.appendChild(heading);
+
+      for (const album of albums) {
+         const row = document.createElement('div');
+         row.className = 'playlist-row';
+
+         const name = document.createElement('span');
+         name.className = 'playlist-name';
+         name.textContent = album.title;
+
+         const meta = document.createElement('span');
+         meta.className = 'playlist-meta';
+         if (album.artist) meta.textContent = album.artist;
+
+         row.appendChild(name);
+         row.appendChild(meta);
+         row.addEventListener('click', () =>
+            viewTracksFromSearch(album.id, album.title, album.parent, album.artist));
+         container.appendChild(row);
+         }
+      }
+
+   if (songs.length > 0) {
+      const heading = document.createElement('h2');
+      heading.className = 'playlist-section-heading';
+      heading.textContent = 'Starred tracks';
+      container.appendChild(heading);
+
+      for (const song of songs) {
+         const row = document.createElement('div');
+         row.className = 'playlist-row';
+
+         const name = document.createElement('span');
+         name.className = 'playlist-name';
+         name.textContent = song.title;
+
+         const meta = document.createElement('span');
+         meta.className = 'playlist-meta';
+         const parts = [];
+         if (song.artist) parts.push(song.artist);
+         if (song.duration) parts.push(fmtDuration(song.duration));
+         meta.textContent = parts.join(' · ');
+
+         row.appendChild(name);
+         row.appendChild(meta);
+         row.addEventListener('click', () =>
+            viewTracksFromSearch(song.parent, song.album, null, song.artist, song.id));
+         container.appendChild(row);
+         }
+      }
+   }
+
 // ── Album star toggle ──────────────────────────────────────────────────────
 
 function makeAlbumStar(album) {
@@ -1289,15 +1325,17 @@ function makeAlbumStar(album) {
    btn.className = 'album-star' + (album.starred ? ' starred' : '');
    btn.title = album.starred ? 'Unstar album' : 'Star album';
    btn.textContent = '★';
+   btn.dataset.starKind       = 'album';
+   btn.dataset.starId         = album.id;
+   btn.dataset.titleStarred   = 'Unstar album';
+   btn.dataset.titleUnstarred = 'Star album';
 
    btn.addEventListener('click', async e => {
       e.stopPropagation();
       const isStarred = btn.classList.contains('starred');
       try {
          await apiCall(isStarred ? 'unstar' : 'star', {albumId: album.id});
-         album.starred = !isStarred;
-         btn.classList.toggle('starred');
-         btn.title = btn.classList.contains('starred') ? 'Unstar album' : 'Star album';
+         dispatchStarChanged('album', album.id, !isStarred);
          }
       catch {
          showError('The action could not be completed. Please check your connection.');
@@ -1314,14 +1352,17 @@ function makeTrackActions(song, ctx) {
    starBtn.className = 'track-action' + (song.starred ? ' starred' : '');
    starBtn.title = song.starred ? 'Unstar' : 'Star';
    starBtn.textContent = '★';
+   starBtn.dataset.starKind       = 'track';
+   starBtn.dataset.starId         = song.id;
+   starBtn.dataset.titleStarred   = 'Unstar';
+   starBtn.dataset.titleUnstarred = 'Star';
 
    starBtn.addEventListener('click', async e => {
       e.stopPropagation();
       const isStarred = starBtn.classList.contains('starred');
       try {
          await apiCall(isStarred ? 'unstar' : 'star', {id: song.id});
-         starBtn.classList.toggle('starred');
-         starBtn.title = starBtn.classList.contains('starred') ? 'Unstar' : 'Star';
+         dispatchStarChanged('track', song.id, !isStarred);
          }
       catch {
          showError('The action could not be completed. Please check your connection.');
