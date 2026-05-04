@@ -1282,7 +1282,11 @@ function makeTrackActions(song, ctx) {
 
       removeBtn.addEventListener('click', e => {
          e.stopPropagation();
-         showConfirm('Remove this track from the playlist?', async () => {
+         const album = song.album ?? '';
+         const msg = album
+            ? `Remove "${song.title}" (from album "${album}") from this playlist?`
+            : `Remove "${song.title}" from this playlist?`;
+         showConfirm(msg, async () => {
             removeBtn.style.pointerEvents = 'none';
             try {
                await apiCall('updatePlaylist', {playlistId: ctx.playlistId, songIndexToRemove: ctx.index});
