@@ -993,13 +993,7 @@ async function viewAlbums(artistId, artistName) {
       row.className = 'album-row';
       row.dataset.id = album.id;
 
-      const cover = document.createElement('img');
-      cover.className = 'album-cover';
-      cover.width  = 80;
-      cover.height = 80;
-      cover.alt    = '';
-      if (album.coverArt)
-         cover.src = apiUrl('getCoverArt', {id: album.coverArt, size: 80});
+      const cover = makeAlbumCover(album.coverArt);
 
       const info = document.createElement('div');
       info.className = 'album-info';
@@ -1465,6 +1459,22 @@ async function refreshStarredSections(container) {
    }
 
 // ── Album star toggle ──────────────────────────────────────────────────────
+
+function makeAlbumCover(coverArtId) {
+   if (coverArtId) {
+      const img = document.createElement('img');
+      img.className = 'album-cover';
+      img.width  = 80;
+      img.height = 80;
+      img.alt    = '';
+      img.src = apiUrl('getCoverArt', {id: coverArtId, size: 80});
+      return img;
+      }
+   const div = document.createElement('div');
+   div.className = 'album-cover album-cover-placeholder';
+   div.textContent = '♫';
+   return div;
+   }
 
 function makeAlbumStar(album) {
    const btn = document.createElement('span');
@@ -2604,13 +2614,7 @@ function renderSearchResults(res) {
          const row = document.createElement('div');
          row.className = 'album-row';
 
-         const cover = document.createElement('img');
-         cover.className = 'album-cover';
-         cover.width  = 80;
-         cover.height = 80;
-         cover.alt    = '';
-         if (album.coverArt)
-            cover.src = apiUrl('getCoverArt', {id: album.coverArt, size: 80});
+         const cover = makeAlbumCover(album.coverArt);
 
          const info = document.createElement('div');
          info.className = 'album-info';
