@@ -79,9 +79,17 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	          << " cast=" << (cast_stream ? "yes" : "no")
 	          << std::endl;
 
-	if (needs_transcode)
+	if (needs_transcode) {
+		// httplib's post-handler range_error() rejects any Range request whose
+		// last byte exceeds the response's known length.  Our transcoded output
+		// uses a chunked content provider with unknown length (= 0 in the
+		// check), so a browser's automatic "Range: bytes=0-" lands as 416.
+		// Drop the parsed ranges before the check runs — the transcoded stream
+		// is sequential anyway and there is nothing to seek into byte-wise.
+		const_cast<httplib::Request&>(req).ranges.clear();
 		serve_transcoded(res, song, target_bitrate, target_fmt, time_offset,
 		                 std::move(get_position));
+		}
 	else
 		serve_direct(req, res, song, std::move(get_position));
 	}
