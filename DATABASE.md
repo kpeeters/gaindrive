@@ -11,6 +11,7 @@
 CREATE TABLE folders (
     id          INTEGER PRIMARY KEY,
     parent_id   INTEGER REFERENCES folders(id),
+    -- relative to music_root; the root row stores ""
     path        TEXT NOT NULL UNIQUE,
     name        TEXT NOT NULL,
     -- updated during scan
@@ -50,7 +51,8 @@ CREATE TABLE albums (
     disc_count    INTEGER DEFAULT 1,
     duration      REAL DEFAULT 0,
     song_count    INTEGER DEFAULT 0,
-    cover_path    TEXT,  -- folder/cover.jpg etc.
+    -- relative to music_root, e.g. "Artist/Album/cover.jpg"
+    cover_path    TEXT,
     musicbrainz_id TEXT,
     created       DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_scanned  DATETIME
@@ -91,7 +93,7 @@ CREATE TABLE songs (
                     ON DELETE CASCADE,
     folder_id     INTEGER NOT NULL
                     REFERENCES folders(id),
-    -- filesystem
+    -- filesystem path, relative to music_root
     path          TEXT NOT NULL UNIQUE,
     filename      TEXT NOT NULL,
     -- metadata (from tags or inferred)
@@ -185,10 +187,9 @@ CREATE TABLE users (
 --   * moving the whole library to a different
 --     on-disk location
 --
--- Cross-DB JOINs prepend the music root to the
--- stored relative path:
---   JOIN songs s ON s.path = ? || st.song_path
--- where ? is the music root with a trailing '/'.
+-- The music DB stores paths in the same relative
+-- form, so cross-DB JOINs are direct equality:
+--   JOIN songs s ON s.path = st.song_path
 CREATE TABLE stars (
     user_id            INTEGER NOT NULL
                          REFERENCES users(id)

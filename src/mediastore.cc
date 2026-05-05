@@ -120,9 +120,10 @@ MediaStore::MediaStore(const std::string& db_path, const std::string& music_root
 	  db_music_(derive_path(db_path, "-music"), SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)
 	{
 	// Normalise music_root_: strip a trailing '/' so it never has one, and
-	// derive music_root_slash_ as the form that always does. Used to convert
-	// between absolute paths (stored in songs.path / folders.path) and
-	// relative paths (stored in client.*).
+	// derive music_root_slash_ as the form that always does. Used as the
+	// hinge between music-root-relative paths (stored in folders.path /
+	// songs.path / albums.cover_path / client.*) and absolute filesystem
+	// paths (used by std::filesystem / TagLib / ffmpeg).
 	while (music_root_.size() > 1 && music_root_.back() == '/')
 		music_root_.pop_back();
 	music_root_slash_ = music_root_ + "/";
@@ -145,7 +146,7 @@ void MediaStore::create_schema()
 		CREATE TABLE IF NOT EXISTS folders (
 			id           INTEGER PRIMARY KEY,
 			parent_id    INTEGER REFERENCES folders(id),
-			path         TEXT NOT NULL UNIQUE,
+			path         TEXT NOT NULL UNIQUE,    -- relative to music_root; root row stores ""
 			name         TEXT NOT NULL,
 			last_scanned DATETIME
 		);
@@ -171,7 +172,7 @@ void MediaStore::create_schema()
 			disc_count     INTEGER DEFAULT 1,
 			duration       REAL DEFAULT 0,
 			song_count     INTEGER DEFAULT 0,
-			cover_path     TEXT,
+			cover_path     TEXT,                  -- relative to music_root
 			musicbrainz_id TEXT,
 			created        DATETIME DEFAULT CURRENT_TIMESTAMP,
 			last_scanned   DATETIME
@@ -192,7 +193,7 @@ void MediaStore::create_schema()
 			id                  INTEGER PRIMARY KEY,
 			album_id            INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
 			folder_id           INTEGER NOT NULL REFERENCES folders(id),
-			path                TEXT NOT NULL UNIQUE,
+			path                TEXT NOT NULL UNIQUE, -- relative to music_root
 			filename            TEXT NOT NULL,
 			title               TEXT NOT NULL,
 			sort_title          TEXT,
@@ -269,10 +270,9 @@ void MediaStore::create_schema()
 		--   * a music-DB rebuild (rowids reset)
 		--   * the rowid churn from upsert_song_with_data's INSERT OR REPLACE
 		--   * moving the whole library to a different on-disk location
-		-- Cross-DB JOINs prepend music_root to the stored relative path
-		-- via SQL string concat, e.g.
-		--   JOIN songs s ON s.path = ? || st.song_path
-		-- where ? is bound to MediaStore::music_root_slash_.
+		-- The music DB stores paths in the same relative form, so cross-DB
+		-- JOINs are direct equality, e.g.
+		--   JOIN songs s ON s.path = st.song_path
 
 		CREATE TABLE IF NOT EXISTS client.stars (
 			user_id              INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -380,8 +380,10 @@ void MediaStore::scan()
 	txn.commit();
 	}
 
-	// Collect paths to scan: artist dirs present on disk, plus any still in
-	// the DB (so deleted artist directories get pruned).
+	// Collect paths to scan (absolute, since scan_artist_dir needs absolute for
+	// fs ops): artist dirs present on disk, plus any still in the DB (so
+	// deleted artist directories get pruned).  The root folder is stored
+	// with path = "" in the relative-path scheme.
 	std::set<fs::path> to_scan;
 	for (auto& e : fs::directory_iterator(music_root_)) {
 		if (e.is_directory())
@@ -393,10 +395,10 @@ void MediaStore::scan()
 		"SELECT path FROM folders"
 		" WHERE parent_id = (SELECT id FROM folders WHERE path = ?)"
 		"   AND path != ?");
-	s.bind(1, music_root_);
-	s.bind(2, music_root_);
+	s.bind(1, std::string(""));
+	s.bind(2, std::string(""));
 	while (s.executeStep())
-		to_scan.insert(fs::path(s.getColumn(0).getString()));
+		to_scan.insert(fs::path(music_root_slash_ + s.getColumn(0).getString()));
 	}
 
 	// Process each artist in its own transaction so db_mutex_ is released
@@ -409,13 +411,14 @@ void MediaStore::scan()
 
 void MediaStore::scan_dirs(const std::set<std::string>& dirs)
 	{
-	// Queue overflow or other situation where we lost track of what changed.
-	if (dirs.count(music_root_)) {
+	// dirs are paths relative to music_root_; "" means the root itself
+	// (queue overflow or other situation where we lost track of what changed).
+	if (dirs.count("")) {
 		scan();
 		return;
 		}
 	for (auto& d : dirs)
-		scan_artist_dir(fs::path(d));
+		scan_artist_dir(fs::path(music_root_slash_ + d));
 	}
 
 // Per-song data collected in Phases 1–3, consumed in Phase 4.
@@ -447,16 +450,21 @@ struct AlbumReadData {
 	};
 
 // DB-only counterpart of upsert_song(); all slow I/O has already happened.
-// Caller must hold db_mutex_ and an open transaction.
+// Caller must hold db_mutex_ and an open transaction. sdat.path is absolute
+// (Phase 1/3 use it for TagLib I/O); this function strips to music-root-
+// relative for all DB binds.
 static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat,
-                                   int album_id, int folder_id, int artist_id)
+                                   int album_id, int folder_id, int artist_id,
+                                   const std::string& music_root_slash)
 	{
+	std::string rel_path = strip_root(sdat.path, music_root_slash);
+
 	if (!sdat.changed) {
 		if (sdat.disc_number > 0) {
 			SQLite::Statement upd(db,
 				"UPDATE songs SET disc_number=? WHERE path=? AND disc_number!=?");
 			upd.bind(1, sdat.disc_number);
-			upd.bind(2, sdat.path);
+			upd.bind(2, rel_path);
 			upd.bind(3, sdat.disc_number);
 			upd.exec();
 			}
@@ -474,7 +482,7 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
 	ins.bind(1,  album_id);
 	ins.bind(2,  folder_id);
-	ins.bind(3,  sdat.path);
+	ins.bind(3,  rel_path);
 	ins.bind(4,  fs::path(sdat.path).filename().string());
 	ins.bind(5,  title);
 	ins.bind(6,  sdat.track_nr);
@@ -512,7 +520,10 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 //      bounded so REST handlers stay responsive during the scan.
 void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	{
-	std::string prefix = artist_path.string() + "/%";
+	// SQL `path LIKE ?` queries below compare against the relative-form column,
+	// so the prefix must also be relative (e.g. "Artist Name/%").
+	std::string prefix =
+		strip_root(artist_path.string(), music_root_slash_) + "/%";
 	bool exists = fs::is_directory(artist_path);
 
 	std::cout << stamp() << "Rescan: " << artist_path.filename().string()
@@ -578,6 +589,9 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		}
 
 	// ---- Phase 2: brief read lock — identify changed files ----
+	// known_mtimes is keyed by the same absolute-path form as sdat.path so the
+	// per-song lookup below stays a direct comparison. The DB column is
+	// relative; compose absolute via music_root_slash_ on the way in.
 	std::unordered_map<std::string, int64_t> known_mtimes;
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
@@ -585,7 +599,8 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		"SELECT path, file_modified FROM songs WHERE path LIKE ?");
 	q.bind(1, prefix);
 	while (q.executeStep())
-		known_mtimes[q.getColumn(0).getString()] = q.getColumn(1).getInt64();
+		known_mtimes[music_root_slash_ + q.getColumn(0).getString()]
+			= q.getColumn(1).getInt64();
 	}
 
 	for (auto& adat : albums)
@@ -665,7 +680,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			if (!adat.cover.empty()) {
 				SQLite::Statement upd(db_music_,
 					"UPDATE albums SET cover_path = ? WHERE id = ?");
-				upd.bind(1, adat.cover);
+				upd.bind(1, strip_root(adat.cover, music_root_slash_));
 				upd.bind(2, album_id);
 				upd.exec();
 				}
@@ -682,7 +697,8 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			for (auto& sdat : adat.songs) {
 				auto fit = fid_map.find(sdat.folder_path);
 				int  fid = (fit != fid_map.end()) ? fit->second : album_folder_id;
-				upsert_song_with_data(db_music_, sdat, album_id, fid, artist_id);
+				upsert_song_with_data(db_music_, sdat, album_id, fid, artist_id,
+				                       music_root_slash_);
 				}
 
 			if (disc_count > 1) {
@@ -775,9 +791,11 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 
 int MediaStore::upsert_folder(const fs::path& path, int parent_id)
 	{
-	std::string path_str = path.string();
+	// Caller passes an absolute path (from fs walks); strip to music-root-
+	// relative form for storage. The root folder ends up stored as "".
+	std::string path_str = strip_root(path.string(), music_root_slash_);
 	std::string name     = path.filename().string();
-	if (name.empty()) name = path_str;  // for the root itself
+	if (name.empty()) name = path.string();  // for the root itself
 
 	if (parent_id < 0) {
 		SQLite::Statement ins(db_music_,
@@ -868,10 +886,13 @@ void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
 	{
 	int64_t mtime = mtime_of(path);
 
+	// path arrives absolute (from fs walk); the DB stores it relative.
+	std::string rel_path = strip_root(path.string(), music_root_slash_);
+
 	// Skip if the file hasn't changed since last scan.
 	SQLite::Statement chk(db_music_,
 		"SELECT file_modified FROM songs WHERE path = ?");
-	chk.bind(1, path.string());
+	chk.bind(1, rel_path);
 	if (chk.executeStep()) {
 		if (chk.getColumn(0).getInt64() == mtime) {
 			// Still update disc_number if it was folder-derived — folders may be reordered.
@@ -879,7 +900,7 @@ void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
 				SQLite::Statement upd(db_music_,
 					"UPDATE songs SET disc_number=? WHERE path=? AND disc_number!=?");
 				upd.bind(1, disc_number);
-				upd.bind(2, path.string());
+				upd.bind(2, rel_path);
 				upd.bind(3, disc_number);
 				upd.exec();
 				}
@@ -942,7 +963,7 @@ void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
 		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
 	ins.bind(1,  album_id);
 	ins.bind(2,  folder_id);
-	ins.bind(3,  path.string());
+	ins.bind(3,  rel_path);
 	ins.bind(4,  path.filename().string());
 	ins.bind(5,  title);
 	ins.bind(6,  track_nr);
@@ -1228,7 +1249,14 @@ std::vector<std::string> MediaStore::get_extra_image_paths(int folder_id)
 	std::string cover  = get_cover_path(folder_id);
 	std::string folder = get_folder_path(folder_id);
 	if (cover.empty() || folder.empty()) return {};
-	return find_extra_images(folder, cover);
+	// find_extra_images works in absolute paths (it walks the filesystem);
+	// we strip back to relative on return so the public API stays uniform.
+	auto abs_results = find_extra_images(abs_path(folder), abs_path(cover));
+	std::vector<std::string> result;
+	result.reserve(abs_results.size());
+	for (auto& p : abs_results)
+		result.push_back(strip_root(p, music_root_slash_));
+	return result;
 	}
 
 int MediaStore::get_image_count(int folder_id)
@@ -1237,7 +1265,8 @@ int MediaStore::get_image_count(int folder_id)
 	if (cover.empty()) return 0;
 	std::string folder = get_folder_path(folder_id);
 	if (folder.empty()) return 0;
-	return 1 + static_cast<int>(find_extra_images(folder, cover).size());
+	return 1 + static_cast<int>(
+		find_extra_images(abs_path(folder), abs_path(cover)).size());
 	}
 
 std::optional<MediaStore::SongInfo> MediaStore::get_song(int song_id)
@@ -1423,14 +1452,14 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
 		" LEFT JOIN artists a ON a.id = aa.artist_id"
-		" LEFT JOIN client.stars sa ON sa.album_folder_path = SUBSTR(f.path, LENGTH(?)+1)"
+		" LEFT JOIN client.stars sa ON sa.album_folder_path = f.path"
 		"      AND sa.user_id = (SELECT id FROM client.users WHERE username = ?)";
 
 	// Extra joins for play-count-based types.
 	bool play_count_join = (type == "frequent" || type == "recent");
 	if (play_count_join)
 		sql += " LEFT JOIN songs s ON s.album_id = al.id"
-		       " LEFT JOIN client.play_counts pc ON pc.song_path = SUBSTR(s.path, LENGTH(?)+1)"
+		       " LEFT JOIN client.play_counts pc ON pc.song_path = s.path"
 		       " AND pc.user_id = (SELECT id FROM client.users WHERE username = ?)";
 
 	// WHERE clause.
@@ -1465,12 +1494,9 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 	SQLite::Statement q(db_music_, sql);
 	int idx = 1;
 
-	q.bind(idx++, music_root_slash_);                       // album-star SUBSTR
 	q.bind(idx++, username);                                // album-star LEFT JOIN
-	if (play_count_join) {
-		q.bind(idx++, music_root_slash_);                   // play-count SUBSTR
+	if (play_count_join)
 		q.bind(idx++, username);                            // play-count LEFT JOIN
-		}
 	if (type == "byYear") { q.bind(idx++, from_year); q.bind(idx++, to_year); }
 	if (type == "byGenre")  q.bind(idx++, genre);
 	q.bind(idx++, size);
@@ -1528,13 +1554,12 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id,
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
 		" LEFT JOIN artists a ON a.id = aa.artist_id"
-		" LEFT JOIN client.stars sa ON sa.album_folder_path = SUBSTR(f.path, LENGTH(?)+1)"
+		" LEFT JOIN client.stars sa ON sa.album_folder_path = f.path"
 		"      AND sa.user_id = (SELECT id FROM client.users WHERE username = ?)"
 		" WHERE f.parent_id = ?"
 		" ORDER BY al.year, al.title COLLATE NOCASE");
-	asel.bind(1, music_root_slash_);
-	asel.bind(2, username);
-	asel.bind(3, folder_id);
+	asel.bind(1, username);
+	asel.bind(2, folder_id);
 
 	while (asel.executeStep()) {
 		AlbumEntry e;
@@ -1579,12 +1604,11 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
 		" LEFT JOIN artists a ON a.id = aa.artist_id"
-		" LEFT JOIN client.stars sa ON sa.album_folder_path = SUBSTR(f.path, LENGTH(?)+1)"
+		" LEFT JOIN client.stars sa ON sa.album_folder_path = f.path"
 		"      AND sa.user_id = (SELECT id FROM client.users WHERE username = ?)"
 		" WHERE f.id = ?");
-	msel.bind(1, music_root_slash_);
-	msel.bind(2, username);
-	msel.bind(3, folder_id);
+	msel.bind(1, username);
+	msel.bind(2, folder_id);
 	if (!msel.executeStep()) return std::nullopt;
 
 	AlbumInfo info;
@@ -1607,7 +1631,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		: ", CASE WHEN st.song_path IS NOT NULL THEN 1 ELSE 0 END AS starred";
 	const std::string star_join = username.empty()
 		? ""
-		: " LEFT JOIN client.stars st ON st.song_path = SUBSTR(s.path, LENGTH(?)+1)"
+		: " LEFT JOIN client.stars st ON st.song_path = s.path"
 		  " AND st.user_id = (SELECT id FROM client.users WHERE username = ?)";
 
 	std::string song_sql_flat =
@@ -1643,10 +1667,8 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 
 	SQLite::Statement ssel(db_music_, flat_multi_disc ? song_sql_flat : song_sql_normal);
 	int idx = 1;
-	if (!username.empty()) {
-		ssel.bind(idx++, music_root_slash_);
+	if (!username.empty())
 		ssel.bind(idx++, username);
-		}
 	ssel.bind(idx++, folder_id);
 	if (flat_multi_disc) ssel.bind(idx, folder_id);
 
@@ -1730,14 +1752,13 @@ std::optional<MediaStore::PlayQueue> MediaStore::get_play_queue(
 		"       pq.is_current, pq.offset_ms, pq.client, pq.updated"
 		" FROM client.play_queue pq"
 		" JOIN client.users u ON u.id = pq.user_id"
-		" JOIN songs s ON s.path = ? || pq.song_path"
+		" JOIN songs s ON s.path = pq.song_path"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
 		" WHERE u.username = ?"
 		" ORDER BY pq.position");
-	q.bind(1, music_root_slash_);
-	q.bind(2, username);
+	q.bind(1, username);
 
 	PlayQueue pq;
 	bool found = false;
@@ -1906,14 +1927,13 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 		"            THEN s.folder_id ELSE -1 END AS cover_art_id"
 		" FROM client.stars st"
 		" JOIN client.users u ON u.id = st.user_id"
-		" JOIN songs s ON s.path = ? || st.song_path"
+		" JOIN songs s ON s.path = st.song_path"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
 		" WHERE u.username = ? AND st.song_path IS NOT NULL"
 		" ORDER BY st.created DESC");
-	sq.bind(1, music_root_slash_);
-	sq.bind(2, username);
+	sq.bind(1, username);
 	while (sq.executeStep()) {
 		ChildEntry e;
 		e.id           = sq.getColumn(0).getInt();
@@ -1943,14 +1963,13 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 		"            THEN f.id ELSE -1 END AS cover_art_id"
 		" FROM client.stars st"
 		" JOIN client.users u ON u.id = st.user_id"
-		" JOIN folders f ON f.path = ? || st.album_folder_path"
+		" JOIN folders f ON f.path = st.album_folder_path"
 		" LEFT JOIN albums al ON al.folder_id = f.id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
 		" LEFT JOIN artists a ON a.id = aa.artist_id"
 		" WHERE u.username = ? AND st.album_folder_path IS NOT NULL"
 		" ORDER BY st.created DESC");
-	aq.bind(1, music_root_slash_);
-	aq.bind(2, username);
+	aq.bind(1, username);
 	while (aq.executeStep()) {
 		ChildEntry e;
 		e.id           = aq.getColumn(0).getInt();
@@ -1968,11 +1987,10 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 		"SELECT f.id, f.name"
 		" FROM client.stars st"
 		" JOIN client.users u ON u.id = st.user_id"
-		" JOIN folders f ON f.path = ? || st.artist_folder_path"
+		" JOIN folders f ON f.path = st.artist_folder_path"
 		" WHERE u.username = ? AND st.artist_folder_path IS NOT NULL"
 		" ORDER BY st.created DESC");
-	arq.bind(1, music_root_slash_);
-	arq.bind(2, username);
+	arq.bind(1, username);
 	while (arq.executeStep())
 		result.artists.push_back({arq.getColumn(0).getInt(),
 		                          arq.getColumn(1).getString()});
@@ -2038,14 +2056,13 @@ MediaStore::PlaylistInfo MediaStore::create_playlist(const std::string& username
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN s.folder_id ELSE -1 END AS cover_art_id"
 		" FROM client.playlist_songs ps"
-		" JOIN songs s ON s.path = ? || ps.song_path"
+		" JOIN songs s ON s.path = ps.song_path"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
 		" WHERE ps.playlist_id = ?"
 		" ORDER BY ps.position");
-	sq.bind(1, music_root_slash_);
-	sq.bind(2, playlist_id);
+	sq.bind(1, playlist_id);
 	int total_duration = 0;
 	while (sq.executeStep()) {
 		ChildEntry e;
@@ -2085,10 +2102,11 @@ bool MediaStore::delete_playlist(int playlist_id, const std::string& username)
 	return db_music_.getChanges() > 0;
 	}
 
-// All three resolvers return paths RELATIVE to music_root_, so callers can
-// store them in the client DB without baking the music root location in.
-// Absolute paths in songs.path / folders.path always start with
-// music_root_slash_ by construction, so a simple prefix strip suffices.
+// Helpers for the music-root-relative path convention. All paths persisted in
+// the music DB (folders.path, songs.path, albums.cover_path) and the client DB
+// (client.*) are stored as paths relative to music_root_; strip_root() trims
+// an absolute path to that form on write, and join_root() composes the
+// absolute form when a filesystem call needs it.
 
 static std::string strip_root(const std::string& abs, const std::string& root_slash)
 	{
@@ -2098,13 +2116,28 @@ static std::string strip_root(const std::string& abs, const std::string& root_sl
 	return abs;  // outside music_root — shouldn't happen, but pass through
 	}
 
+static std::string join_root(const std::string& rel, const std::string& root_slash)
+	{
+	if (rel.empty()) return rel;
+	// Defensive: if the caller already passed an absolute path, leave it.
+	if (rel.size() >= root_slash.size()
+	    && rel.compare(0, root_slash.size(), root_slash) == 0)
+		return rel;
+	return root_slash + rel;
+	}
+
+std::string MediaStore::abs_path(const std::string& rel) const
+	{
+	return join_root(rel, music_root_slash_);
+	}
+
 std::optional<std::string> MediaStore::song_path_by_id(int song_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement q(db_music_, "SELECT path FROM songs WHERE id = ?");
 	q.bind(1, song_id);
 	if (!q.executeStep()) return std::nullopt;
-	return strip_root(q.getColumn(0).getString(), music_root_slash_);
+	return q.getColumn(0).getString();
 	}
 
 std::optional<std::string> MediaStore::album_folder_path_by_id(int album_folder_id)
@@ -2114,7 +2147,7 @@ std::optional<std::string> MediaStore::album_folder_path_by_id(int album_folder_
 	SQLite::Statement q(db_music_, "SELECT path FROM folders WHERE id = ?");
 	q.bind(1, album_folder_id);
 	if (!q.executeStep()) return std::nullopt;
-	return strip_root(q.getColumn(0).getString(), music_root_slash_);
+	return q.getColumn(0).getString();
 	}
 
 std::optional<std::string> MediaStore::artist_folder_path_by_id(int artist_folder_id)
@@ -2124,7 +2157,7 @@ std::optional<std::string> MediaStore::artist_folder_path_by_id(int artist_folde
 	SQLite::Statement q(db_music_, "SELECT path FROM folders WHERE id = ?");
 	q.bind(1, artist_folder_id);
 	if (!q.executeStep()) return std::nullopt;
-	return strip_root(q.getColumn(0).getString(), music_root_slash_);
+	return q.getColumn(0).getString();
 	}
 
 std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
@@ -2284,14 +2317,13 @@ std::vector<MediaStore::BookmarkInfo> MediaStore::get_bookmarks(
 		"       u.username"
 		" FROM client.bookmarks b"
 		" JOIN client.users u ON u.id = b.user_id"
-		" JOIN songs s ON s.path = ? || b.song_path"
+		" JOIN songs s ON s.path = b.song_path"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
 		" WHERE u.username = ?"
 		" ORDER BY b.created");
-	q.bind(1, music_root_slash_);
-	q.bind(2, username);
+	q.bind(1, username);
 
 	std::vector<BookmarkInfo> result;
 	while (q.executeStep()) {
@@ -2420,12 +2452,11 @@ std::vector<MediaStore::PlaylistInfo> MediaStore::get_playlists(const std::strin
 		" FROM client.playlists p"
 		" JOIN client.users u ON u.id = p.user_id"
 		" LEFT JOIN client.playlist_songs ps ON ps.playlist_id = p.id"
-		" LEFT JOIN songs s ON s.path = ? || ps.song_path"
+		" LEFT JOIN songs s ON s.path = ps.song_path"
 		" WHERE u.username = ?"
 		" GROUP BY p.id"
 		" ORDER BY p.name COLLATE NOCASE");
-	q.bind(1, music_root_slash_);
-	q.bind(2, username);
+	q.bind(1, username);
 
 	std::vector<PlaylistInfo> result;
 	while (q.executeStep()) {
@@ -2472,7 +2503,7 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 		: ", CASE WHEN st.song_path IS NOT NULL THEN 1 ELSE 0 END AS starred";
 	const std::string star_join = username.empty()
 		? ""
-		: " LEFT JOIN client.stars st ON st.song_path = SUBSTR(s.path, LENGTH(?)+1)"
+		: " LEFT JOIN client.stars st ON st.song_path = s.path"
 		  " AND st.user_id = (SELECT id FROM client.users WHERE username = ?)";
 
 	std::string pl_sql =
@@ -2485,7 +2516,7 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 		"            THEN s.folder_id ELSE -1 END AS cover_art_id"
 		+ star_col +
 		" FROM client.playlist_songs ps"
-		" JOIN songs s ON s.path = ? || ps.song_path"
+		" JOIN songs s ON s.path = ps.song_path"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
@@ -2495,11 +2526,8 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 
 	SQLite::Statement sq(db_music_, pl_sql);
 	int idx = 1;
-	sq.bind(idx++, music_root_slash_);   // ps.song_path JOIN
-	if (!username.empty()) {
-		sq.bind(idx++, music_root_slash_);   // star_join SUBSTR
+	if (!username.empty())
 		sq.bind(idx++, username);            // star_join user_id subquery
-		}
 	sq.bind(idx, playlist_id);
 	int total_duration = 0;
 	while (sq.executeStep()) {

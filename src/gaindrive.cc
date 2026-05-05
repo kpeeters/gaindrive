@@ -1646,8 +1646,8 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 
 		int folder_id = std::stoi(it->second);
-		std::string path = store_.get_cover_path(folder_id);
-		if (path.empty()) {
+		std::string rel_path = store_.get_cover_path(folder_id);
+		if (rel_path.empty()) {
 			res.status = 404;
 			return;
 			}
@@ -1662,9 +1662,12 @@ GainDrive::GainDrive(const std::string& db_path,
 					res.status = 404;
 					return;
 					}
-				path = extras[idx - 1];
+				rel_path = extras[idx - 1];
 				}
 			}
+
+		// Compose absolute filesystem path for the actual file open.
+		std::string path = store_.abs_path(rel_path);
 
 		auto size_it = req.params.find("size");
 		if (size_it != req.params.end()) {
@@ -1708,11 +1711,12 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
-		std::string folder = store_.get_folder_path(std::stoi(it->second));
-		if (folder.empty()) {
+		std::string folder_rel = store_.get_folder_path(std::stoi(it->second));
+		if (folder_rel.empty()) {
 			res.status = 404;
 			return;
 			}
+		std::string folder = store_.abs_path(folder_rel);
 
 		// Well-known utility files that are not human-readable liner notes.
 		static const std::set<std::string> excluded = {
@@ -1781,14 +1785,14 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
-		std::string folder = store_.get_folder_path(std::stoi(id_it->second));
-		if (folder.empty()) {
+		std::string folder_rel = store_.get_folder_path(std::stoi(id_it->second));
+		if (folder_rel.empty()) {
 			res.status = 404;
 			return;
 			}
 
 		namespace fs = std::filesystem;
-		fs::path full = fs::path(folder) / name;
+		fs::path full = fs::path(store_.abs_path(folder_rel)) / name;
 		std::ifstream f(full);
 		if (!f) {
 			res.status = 404;
@@ -2022,8 +2026,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		        && req.get_header_value("Range").empty()) {
 			std::cout << stamp() << "cast probe: id=" << it->second
 			          << " offset=" << last_cast_offset_ << std::endl;
-			Streamer::SongInfo probe_si{ song->path, song->codec, song->bitrate,
-			                             song->duration,
+			Streamer::SongInfo probe_si{ store_.abs_path(song->path), song->codec,
+			                             song->bitrate, song->duration,
 			                             std::min(song->file_size, (int64_t)32768) };
 			Streamer::serve(req, res, probe_si, 0, "", 0, true, {});
 			return;
@@ -2038,8 +2042,8 @@ GainDrive::GainDrive(const std::string& db_path,
 			          << std::endl;
 			}
 
-		Streamer::SongInfo si{ song->path, song->codec, song->bitrate,
-		                       song->duration, song->file_size };
+		Streamer::SongInfo si{ store_.abs_path(song->path), song->codec,
+		                       song->bitrate, song->duration, song->file_size };
 
 		// For Cast streams, pass a callback that returns the receiver's current
 		// playback position from the cached status (updated every ~0.5 s by the
@@ -3021,7 +3025,8 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		// Write tags first — if this fails we must not update the database.
 		try {
-			TagLib::FileRef f(song->path.c_str());
+			std::string song_abs = store_.abs_path(song->path);
+			TagLib::FileRef f(song_abs.c_str());
 			if (f.isNull() || !f.tag()) {
 				err(0, "Could not open file for tag editing.");
 				return;
@@ -3115,18 +3120,19 @@ GainDrive::GainDrive(const std::string& db_path,
 			err(10, "Required parameter missing: file or url."); return;
 			}
 
-		std::string folder_path = store_.get_folder_path(folder_id);
-		if (folder_path.empty()) { err(70, "Album folder not found."); return; }
+		std::string folder_rel = store_.get_folder_path(folder_id);
+		if (folder_rel.empty()) { err(70, "Album folder not found."); return; }
 
 		namespace fs = std::filesystem;
-		fs::path cover = fs::path(folder_path) / "cover.jpg";
+		fs::path cover_rel = fs::path(folder_rel) / "cover.jpg";
+		fs::path cover_abs = fs::path(store_.abs_path(cover_rel.string()));
 		{
-		std::ofstream out(cover, std::ios::binary | std::ios::trunc);
+		std::ofstream out(cover_abs, std::ios::binary | std::ios::trunc);
 		if (!out) { err(0, "Failed to write cover art to disk."); return; }
 		out.write(bytes.data(), (std::streamsize)bytes.size());
 		}
 
-		store_.set_cover_art_path(folder_id, cover.string());
+		store_.set_cover_art_path(folder_id, cover_rel.string());
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");

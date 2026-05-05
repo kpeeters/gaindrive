@@ -18,7 +18,8 @@ class MediaStore {
 		void scan();
 
 		// Rescan only the listed artist-level subdirectories.
-		// If music_root_ appears in dirs, falls back to a full scan().
+		// dirs are paths relative to music_root_. An empty entry means the
+		// root itself; if present, falls back to a full scan().
 		void scan_dirs(const std::set<std::string>& dirs);
 
 		// ---- User management ----
@@ -81,6 +82,7 @@ class MediaStore {
 
 		// Returns empty string if folder_id not found.
 		std::string get_folder_name(int folder_id);
+		// Returns the folder path RELATIVE to music_root, or "" if not found.
 		std::string get_folder_path(int folder_id);
 
 		std::optional<CachedArtistInfo> get_cached_artist_info(int folder_id);
@@ -173,12 +175,12 @@ class MediaStore {
 		std::optional<AlbumInfo> get_album(int folder_id, bool flat_multi_disc = true,
 		                                    const std::string& username = "");
 
-		// Returns the filesystem path of the cover image for an album folder,
-		// or empty string if none is stored.
+		// Returns the cover image path RELATIVE to music_root, or "" if none.
 		std::string get_cover_path(int folder_id);
 
-		// Returns sorted paths of all image files in the album folder tree,
-		// excluding the main cover. Used to serve carousel images.
+		// Returns sorted paths (RELATIVE to music_root) of all image files in
+		// the album folder tree, excluding the main cover. Used to serve
+		// carousel images.
 		std::vector<std::string> get_extra_image_paths(int folder_id);
 
 		// Returns total image count for the folder (main cover + extras).
@@ -186,7 +188,7 @@ class MediaStore {
 
 		struct SongInfo {
 			int         id;
-			std::string path;
+			std::string path;     // relative to music_root_
 			std::string codec;    // e.g. "flac", "mp3"
 			int         bitrate;  // kbps (from tags; 0 if unknown)
 			double      duration; // seconds
@@ -333,14 +335,21 @@ class MediaStore {
 		                      const std::optional<int>& disc_number);
 
 		// Set the cover art path for the album that owns the given folder_id.
-		// Returns false if no matching album exists.
+		// path is relative to music_root. Returns false if no matching album exists.
 		bool set_cover_art_path(int folder_id, const std::string& path);
+
+		// Compose an absolute filesystem path from a music-root-relative path.
+		// All path-typed return values from MediaStore are music-root-relative;
+		// callers that need to perform filesystem I/O on them go through this.
+		std::string abs_path(const std::string& rel) const;
 
 	private:
 		std::string      music_root_;        // never ends in '/'
-		std::string      music_root_slash_;  // music_root_ + '/'; used as SQL-bound
-		                                     // prefix for converting client-DB
-		                                     // relative paths to absolute and back.
+		std::string      music_root_slash_;  // music_root_ + '/'; used to compose
+		                                     // absolute filesystem paths from the
+		                                     // music-root-relative paths stored
+		                                     // in folders.path / songs.path /
+		                                     // albums.cover_path / client.*.
 		SQLite::Database db_music_;
 		std::mutex       db_mutex_;  // guards db_music_ across scan thread + API threads
 

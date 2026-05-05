@@ -174,19 +174,36 @@ void FolderWatcher::run()
 			if (remaining <= 0) {
 				// Debounce period expired — start a rescan if none is running.
 				if (!scan_running_.exchange(true)) {
-					auto dirs = std::move(changed_artists_);
+					auto abs_dirs = std::move(changed_artists_);
 					changed_artists_.clear();
 					std::cout << stamp() << "FolderWatcher: rescanning "
-					          << dirs.size() << " artist director"
-					          << (dirs.size() == 1 ? "y" : "ies") << std::endl;
-					std::thread([this, dirs = std::move(dirs)]{
-						store_.scan_dirs(dirs);
+					          << abs_dirs.size() << " artist director"
+					          << (abs_dirs.size() == 1 ? "y" : "ies") << std::endl;
+					// scan_dirs() expects music-root-relative paths; the
+					// rewatch helper still needs absolute paths for
+					// inotify_add_watch().
+					std::string root_slash = music_root_;
+					if (root_slash.empty() || root_slash.back() != '/')
+						root_slash += '/';
+					std::set<std::string> rel_dirs;
+					for (auto& d : abs_dirs) {
+						if (d == music_root_)
+							rel_dirs.insert("");
+						else if (d.size() > root_slash.size()
+						         && d.compare(0, root_slash.size(), root_slash) == 0)
+							rel_dirs.insert(d.substr(root_slash.size()));
+						else
+							rel_dirs.insert(d);   // outside music_root — shouldn't happen
+						}
+					std::thread([this, rel_dirs = std::move(rel_dirs),
+					             abs_dirs = std::move(abs_dirs)]{
+						store_.scan_dirs(rel_dirs);
 						// Signal run() to re-watch the rescanned dirs so that
 						// directories which were inaccessible at creation time
 						// (transient EACCES) get a watch added now.
 						{
 						std::lock_guard<std::mutex> lk(rewatches_mutex_);
-						for (auto& d : dirs)
+						for (auto& d : abs_dirs)
 							pending_rewatches_.push_back(d);
 						}
 						char b = 0;
