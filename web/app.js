@@ -993,7 +993,7 @@ async function viewAlbums(artistId, artistName) {
       row.className = 'album-row';
       row.dataset.id = album.id;
 
-      const cover = makeAlbumCover(album.coverArt);
+      const cover = makeAlbumCover(album);
 
       const info = document.createElement('div');
       info.className = 'album-info';
@@ -1374,6 +1374,44 @@ function dispatchStarChanged(kind, id, starred) {
       }));
    }
 
+// After a successful cover-art update, refresh every cover element on the
+// page that points at this album. Cover elements (img and placeholder div)
+// tag themselves with data-album-id; the listener rebuilds their src with a
+// cache-busting timestamp, and replaces placeholders with real images.
+function dispatchCoverArtChanged(albumId) {
+   document.dispatchEvent(new CustomEvent('cover-art-changed', {
+      detail: {albumId}
+      }));
+   }
+
+document.addEventListener('cover-art-changed', e => {
+   const {albumId} = e.detail;
+   if (albumId === undefined || albumId === null || albumId === '') return;
+   const v = Date.now();
+   const sel = `[data-album-id="${albumId}"]`;
+   for (const el of document.querySelectorAll(sel)) {
+      const size = el.dataset.coverSize;
+      const src  = apiUrl('getCoverArt', {id: albumId, size, _v: v});
+      if (el.tagName === 'IMG') {
+         el.src = src;
+         continue;
+         }
+      // Placeholder div — replace with a real image, preserving size class.
+      const isHero = el.classList.contains('album-hero');
+      const img = document.createElement('img');
+      img.className = isHero ? 'album-hero' : 'album-cover';
+      img.dataset.albumId   = albumId;
+      img.dataset.coverSize = size;
+      if (!isHero) {
+         img.width  = parseInt(size, 10);
+         img.height = parseInt(size, 10);
+         }
+      img.alt = '';
+      img.src = src;
+      el.replaceWith(img);
+      }
+   });
+
 document.addEventListener('star-changed', e => {
    const {kind, id, starred} = e.detail;
    const sel = `[data-star-kind="${kind}"][data-star-id="${id}"]`;
@@ -1460,18 +1498,22 @@ async function refreshStarredSections(container) {
 
 // ── Album star toggle ──────────────────────────────────────────────────────
 
-function makeAlbumCover(coverArtId) {
-   if (coverArtId) {
+function makeAlbumCover(album) {
+   if (album.coverArt) {
       const img = document.createElement('img');
       img.className = 'album-cover';
+      img.dataset.albumId   = album.id;
+      img.dataset.coverSize = 80;
       img.width  = 80;
       img.height = 80;
       img.alt    = '';
-      img.src = apiUrl('getCoverArt', {id: coverArtId, size: 80});
+      img.src = apiUrl('getCoverArt', {id: album.coverArt, size: 80});
       return img;
       }
    const div = document.createElement('div');
    div.className = 'album-cover album-cover-placeholder';
+   div.dataset.albumId   = album.id;
+   div.dataset.coverSize = 80;
    div.textContent = '♫';
    return div;
    }
@@ -1666,6 +1708,8 @@ function playerUpdateUI() {
    document.getElementById('player-info-btn').disabled  = false;
 
    const cover = document.getElementById('player-cover');
+   cover.dataset.albumId   = song.albumId ?? song.coverArt ?? '';
+   cover.dataset.coverSize = 64;
    cover.src = song.coverArt ? apiUrl('getCoverArt', {id: song.coverArt, size: 64}) : '';
 
    // Highlight active row in track list if it is currently visible.
@@ -1975,6 +2019,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
 
       heroImg = document.createElement('img');
       heroImg.className = 'album-hero';
+      heroImg.dataset.albumId   = album.id;
+      heroImg.dataset.coverSize = 400;
       heroImg.src = apiUrl('getCoverArt', {id: album.coverArt, size: 400});
       heroImg.alt = albumTitle;
 
@@ -2106,6 +2152,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       if (!heroImg) {
          placeholder = document.createElement('div');
          placeholder.className = 'album-hero album-hero-placeholder';
+         placeholder.dataset.albumId   = album.id;
+         placeholder.dataset.coverSize = 400;
          placeholder.textContent = '♫';
          heroWrap.appendChild(placeholder);
          }
@@ -2120,6 +2168,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
             if (!heroImg) {
                heroImg = document.createElement('img');
                heroImg.className = 'album-hero';
+               heroImg.dataset.albumId   = album.id;
+               heroImg.dataset.coverSize = 400;
                heroImg.alt = albumTitle;
                heroWrap.insertBefore(heroImg, pencilBtn);
                placeholder?.remove();
@@ -2267,6 +2317,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
                const sr = data['subsonic-response'];
                if (sr.status !== 'ok')
                   throw new Error(sr.error?.message ?? 'Unknown error');
+               dispatchCoverArtChanged(albumId);
                }
             catch (e) {
                console.error('[edit] cover upload failed', e);
@@ -2630,7 +2681,7 @@ function renderSearchResults(res) {
          const row = document.createElement('div');
          row.className = 'album-row';
 
-         const cover = makeAlbumCover(album.coverArt);
+         const cover = makeAlbumCover(album);
 
          const info = document.createElement('div');
          info.className = 'album-info';
