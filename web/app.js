@@ -1276,8 +1276,26 @@ async function openInfoModal() {
       if (sr.song) song = sr.song;
       } catch { /* keep cached song */ }
 
-   const sentSuffix  = song.transcodedSuffix  ?? song.suffix;
-   const sentBitRate = song.transcodedBitRate ?? song.bitRate;
+   // Compute the format/bitrate the server is actually sending.  Two
+   // independent transcode triggers exist: (a) the server caps bitrate per
+   // user — reflected in song.transcodedSuffix/transcodedBitRate from the
+   // server; (b) the browser asked for format=mp3 because it can't decode
+   // the source codec (or fell back after a decode error) — only the client
+   // knows about that.  player.streamFormat is the format the player asked
+   // the server for on the most recent local playerPlay() call (null when
+   // the source is served as-is, or while casting).
+   let sentSuffix, sentBitRate;
+   if (player.streamFormat) {
+      // Streamer's format_change branch: target bitrate is max_bitrate when
+      // the user has one set, else 128 kbps (ffmpeg default for our pipe).
+      sentSuffix  = player.streamFormat;
+      const cap   = currentUser?.maxBitRate || 0;
+      sentBitRate = cap > 0 ? cap : 128;
+      }
+   else {
+      sentSuffix  = song.transcodedSuffix  ?? song.suffix;
+      sentBitRate = song.transcodedBitRate ?? song.bitRate;
+      }
 
    const rows = [
       ['Title',              song.title],
@@ -1675,6 +1693,10 @@ const player = {
    streamIsTranscoded: false,
    localOffset: 0,
    streamFallbackTried: false,
+   // Format actually requested from the server for the current track, or null
+   // if the source is being served as-is.  Used by the info dialog to show
+   // the format the user is actually hearing rather than the on-disk format.
+   streamFormat: null,
 };
 
 function playerLoad(songs, startIndex) {
@@ -1718,6 +1740,10 @@ function playerPlay(offset = 0, forceMp3 = false) {
       // Track the position we asked it to seek to so onCastStatus can
       // discard reports that aren't yet near that position.
       castExpectedPosition = offset;
+      // Cast endpoint never receives a format param; receiver plays the
+      // source codec.  Clear so the info dialog falls back to server's
+      // bitrate-cap fields (transcodedSuffix/transcodedBitRate).
+      player.streamFormat = null;
       const params = {id: song.id};
       if (offset > 0) params.timeOffset = Math.floor(offset);
       // Use the dedicated castLoad endpoint rather than setting player.audio.src.
@@ -1735,6 +1761,7 @@ function playerPlay(offset = 0, forceMp3 = false) {
    // seek point instead — the served stream is already the slice we want.
    if (fmt && offset > 0) streamParams.timeOffset = Math.floor(offset);
    player.streamIsTranscoded = !!fmt;
+   player.streamFormat       = fmt ?? null;
    player.localOffset        = (fmt && offset > 0) ? offset : 0;
    player.audio.src = apiUrl('stream', streamParams);
    if (offset > 0 && !fmt) {
