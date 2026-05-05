@@ -104,6 +104,30 @@ static int64_t mtime_of(const fs::path& p)
 		sys.time_since_epoch()).count();
 	}
 
+// Helpers for the music-root-relative path convention. All paths persisted in
+// the music DB (folders.path, songs.path, albums.cover_path) and the client DB
+// (client.*) are stored as paths relative to music_root_; strip_root() trims
+// an absolute path to that form on write, and join_root() composes the
+// absolute form when a filesystem call needs it.
+
+static std::string strip_root(const std::string& abs, const std::string& root_slash)
+	{
+	if (abs.size() >= root_slash.size()
+	    && abs.compare(0, root_slash.size(), root_slash) == 0)
+		return abs.substr(root_slash.size());
+	return abs;  // outside music_root — shouldn't happen, but pass through
+	}
+
+static std::string join_root(const std::string& rel, const std::string& root_slash)
+	{
+	if (rel.empty()) return rel;
+	// Defensive: if the caller already passed an absolute path, leave it.
+	if (rel.size() >= root_slash.size()
+	    && rel.compare(0, root_slash.size(), root_slash) == 0)
+		return rel;
+	return root_slash + rel;
+	}
+
 // ---- MediaStore -------------------------------------------------------
 
 // Insert suffix before ".db" extension, or append if no extension.
@@ -2100,30 +2124,6 @@ bool MediaStore::delete_playlist(int playlist_id, const std::string& username)
 	del.bind(2, username);
 	del.exec();
 	return db_music_.getChanges() > 0;
-	}
-
-// Helpers for the music-root-relative path convention. All paths persisted in
-// the music DB (folders.path, songs.path, albums.cover_path) and the client DB
-// (client.*) are stored as paths relative to music_root_; strip_root() trims
-// an absolute path to that form on write, and join_root() composes the
-// absolute form when a filesystem call needs it.
-
-static std::string strip_root(const std::string& abs, const std::string& root_slash)
-	{
-	if (abs.size() >= root_slash.size()
-	    && abs.compare(0, root_slash.size(), root_slash) == 0)
-		return abs.substr(root_slash.size());
-	return abs;  // outside music_root — shouldn't happen, but pass through
-	}
-
-static std::string join_root(const std::string& rel, const std::string& root_slash)
-	{
-	if (rel.empty()) return rel;
-	// Defensive: if the caller already passed an absolute path, leave it.
-	if (rel.size() >= root_slash.size()
-	    && rel.compare(0, root_slash.size(), root_slash) == 0)
-		return rel;
-	return root_slash + rel;
 	}
 
 std::string MediaStore::abs_path(const std::string& rel) const
