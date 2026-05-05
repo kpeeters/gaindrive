@@ -2848,6 +2848,7 @@ function renderSearchResults(res) {
 // (search results) off-screen. Instead we move the rendered content into
 // pane 1 and stay at depth 1, keeping search visible on the left.
 async function viewTracksFromSearch(albumId, albumTitle, artistId, artistName, autoPlayId) {
+   if (artistId) await viewAlbums(artistId, artistName);
    await viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId);
    if (document.getElementById('search-bar').classList.contains('open')
          && paneNav._visiblePanes() === 2) {
