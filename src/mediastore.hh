@@ -343,6 +343,13 @@ class MediaStore {
 		// callers that need to perform filesystem I/O on them go through this.
 		std::string abs_path(const std::string& rel) const;
 
+		// Defence-in-depth check that callers MUST run on any path before
+		// opening a file: returns true iff the canonicalised candidate sits
+		// within the canonicalised music_root_. Resolves symlinks, so
+		// configurations where music_root_ itself is symlinked still work, but
+		// a symlink inside the tree pointing outside is detected.
+		bool path_is_within_root(const std::filesystem::path& candidate) const;
+
 	private:
 		std::string      music_root_;        // never ends in '/'
 		std::string      music_root_slash_;  // music_root_ + '/'; used to compose
@@ -350,6 +357,8 @@ class MediaStore {
 		                                     // music-root-relative paths stored
 		                                     // in folders.path / songs.path /
 		                                     // albums.cover_path / client.*.
+		std::filesystem::path music_root_canonical_;  // weakly_canonical of music_root_,
+		                                              // computed once at ctor.
 		SQLite::Database db_music_;
 		std::mutex       db_mutex_;  // guards db_music_ across scan thread + API threads
 

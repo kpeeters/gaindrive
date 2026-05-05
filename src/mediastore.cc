@@ -128,6 +128,21 @@ static std::string join_root(const std::string& rel, const std::string& root_sla
 	return root_slash + rel;
 	}
 
+// Defence-in-depth: returns true iff the canonicalised candidate sits within
+// the (already-canonicalised) base. Used to refuse any filesystem operation on
+// a path that — after symlink resolution — escapes music_root_. The base is
+// canonicalised once at MediaStore ctor; the candidate is canonicalised every
+// call.
+static bool is_within(const fs::path& candidate, const fs::path& canonical_base)
+	{
+	std::error_code ec;
+	auto c = fs::weakly_canonical(candidate, ec);
+	if (ec) return false;
+	auto [it_b, it_c] = std::mismatch(canonical_base.begin(), canonical_base.end(),
+	                                   c.begin(), c.end());
+	return it_b == canonical_base.end();
+	}
+
 // ---- MediaStore -------------------------------------------------------
 
 // Insert suffix before ".db" extension, or append if no extension.
@@ -151,6 +166,13 @@ MediaStore::MediaStore(const std::string& db_path, const std::string& music_root
 	while (music_root_.size() > 1 && music_root_.back() == '/')
 		music_root_.pop_back();
 	music_root_slash_ = music_root_ + "/";
+
+	// Compute the canonical music_root once. path_is_within_root() compares
+	// against this, so symlinks within the tree are checked at every file open.
+	std::error_code ec;
+	music_root_canonical_ = fs::weakly_canonical(fs::path(music_root_), ec);
+	if (ec)
+		music_root_canonical_ = fs::path(music_root_);
 
 	std::string client_path = derive_path(db_path, "-client");
 	db_music_.exec("PRAGMA journal_mode=WAL");
@@ -638,6 +660,14 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		for (auto& sdat : adat.songs) {
 			if (!sdat.changed) continue;
 
+			// Defence-in-depth: refuse to open any file that — after symlink
+			// resolution — sits outside music_root_.
+			if (!is_within(sdat.path, music_root_canonical_)) {
+				std::cout << stamp() << "scan: skipping file outside music_root: "
+				          << sdat.path << std::endl;
+				continue;
+				}
+
 			TagLib::FileStream stream(sdat.path.c_str(), true /* readOnly */);
 			TagLib::FileRef    f(&stream);
 			sdat.title = fs::path(sdat.path).stem().string();
@@ -930,6 +960,14 @@ void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
 				}
 			return;
 			}
+		}
+
+	// Defence-in-depth: refuse to open any file that — after symlink
+	// resolution — sits outside music_root_.
+	if (!is_within(path, music_root_canonical_)) {
+		std::cout << stamp() << "scan: skipping file outside music_root: "
+		          << path.string() << std::endl;
+		return;
 		}
 
 	// Read tags with taglib — open read-only so we never mutate media files.
@@ -2129,6 +2167,11 @@ bool MediaStore::delete_playlist(int playlist_id, const std::string& username)
 std::string MediaStore::abs_path(const std::string& rel) const
 	{
 	return join_root(rel, music_root_slash_);
+	}
+
+bool MediaStore::path_is_within_root(const fs::path& candidate) const
+	{
+	return is_within(candidate, music_root_canonical_);
 	}
 
 std::optional<std::string> MediaStore::song_path_by_id(int song_id)

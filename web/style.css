@@ -959,7 +959,8 @@ body {
    user-select: none;
 }
 
-.track-row:hover .track-action {
+.track-row:hover .track-action,
+.track-action.starred {
    opacity: 1;
 }
 

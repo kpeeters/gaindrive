@@ -1668,6 +1668,12 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		// Compose absolute filesystem path for the actual file open.
 		std::string path = store_.abs_path(rel_path);
+		if (!store_.path_is_within_root(path)) {
+			std::cout << stamp() << "getCoverArt: refusing path outside music_root: "
+			          << path << std::endl;
+			res.status = 403;
+			return;
+			}
 
 		auto size_it = req.params.find("size");
 		if (size_it != req.params.end()) {
@@ -1717,6 +1723,12 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 		std::string folder = store_.abs_path(folder_rel);
+		if (!store_.path_is_within_root(folder)) {
+			std::cout << stamp() << "getAlbumTexts: refusing path outside music_root: "
+			          << folder << std::endl;
+			res.status = 403;
+			return;
+			}
 
 		// Well-known utility files that are not human-readable liner notes.
 		static const std::set<std::string> excluded = {
@@ -1793,6 +1805,12 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		namespace fs = std::filesystem;
 		fs::path full = fs::path(store_.abs_path(folder_rel)) / name;
+		if (!store_.path_is_within_root(full)) {
+			std::cout << stamp() << "getAlbumText: refusing path outside music_root: "
+			          << full.string() << std::endl;
+			res.status = 403;
+			return;
+			}
 		std::ifstream f(full);
 		if (!f) {
 			res.status = 404;
@@ -1970,6 +1988,17 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
+		// Compose-and-validate the absolute song path once. Streamer reads from
+		// it (via std::ifstream and ffmpeg argv) — refuse anything outside
+		// music_root before handing it off.
+		std::string song_abs = store_.abs_path(song->path);
+		if (!store_.path_is_within_root(song_abs)) {
+			std::cout << stamp() << "stream: refusing path outside music_root: "
+			          << song_abs << std::endl;
+			res.status = 403;
+			return;
+			}
+
 		// If cast mode is active and the caller is not the Chromecast itself,
 		// instruct the Chromecast to fetch the stream and return 204 here.
 		if (cast_manager_.active() && !cast_authed) {
@@ -2026,7 +2055,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		        && req.get_header_value("Range").empty()) {
 			std::cout << stamp() << "cast probe: id=" << it->second
 			          << " offset=" << last_cast_offset_ << std::endl;
-			Streamer::SongInfo probe_si{ store_.abs_path(song->path), song->codec,
+			Streamer::SongInfo probe_si{ song_abs, song->codec,
 			                             song->bitrate, song->duration,
 			                             std::min(song->file_size, (int64_t)32768) };
 			Streamer::serve(req, res, probe_si, 0, "", 0, true, {});
@@ -2042,7 +2071,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			          << std::endl;
 			}
 
-		Streamer::SongInfo si{ store_.abs_path(song->path), song->codec,
+		Streamer::SongInfo si{ song_abs, song->codec,
 		                       song->bitrate, song->duration, song->file_size };
 
 		// For Cast streams, pass a callback that returns the receiver's current
@@ -3026,6 +3055,12 @@ GainDrive::GainDrive(const std::string& db_path,
 		// Write tags first — if this fails we must not update the database.
 		try {
 			std::string song_abs = store_.abs_path(song->path);
+			if (!store_.path_is_within_root(song_abs)) {
+				std::cout << stamp() << "updateSong: refusing path outside music_root: "
+				          << song_abs << std::endl;
+				err(0, "Refusing to write outside music_root.");
+				return;
+				}
 			TagLib::FileRef f(song_abs.c_str());
 			if (f.isNull() || !f.tag()) {
 				err(0, "Could not open file for tag editing.");
@@ -3126,6 +3161,12 @@ GainDrive::GainDrive(const std::string& db_path,
 		namespace fs = std::filesystem;
 		fs::path cover_rel = fs::path(folder_rel) / "cover.jpg";
 		fs::path cover_abs = fs::path(store_.abs_path(cover_rel.string()));
+		if (!store_.path_is_within_root(cover_abs)) {
+			std::cout << stamp() << "setCoverArt: refusing path outside music_root: "
+			          << cover_abs.string() << std::endl;
+			err(0, "Refusing to write outside music_root.");
+			return;
+			}
 		{
 		std::ofstream out(cover_abs, std::ios::binary | std::ios::trunc);
 		if (!out) { err(0, "Failed to write cover art to disk."); return; }
