@@ -248,9 +248,16 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 	// total_sent persists across repeated provider calls (one per chunk).
 	auto total_sent = std::make_shared<size_t>(0);
 
-	// Content-length is unknown for transcoded output.
+	// Content-length is unknown for transcoded output.  Use the *chunked*
+	// content-provider variant, not the plain unknown-length one — the
+	// latter sets neither Content-Length nor Transfer-Encoding, leaving
+	// the response close-delimited (HTTP/1.0-style framing).  Firefox
+	// waits for connection close before starting playback in that mode,
+	// so the user hears nothing until ffmpeg finishes the whole transcode.
+	// Transfer-Encoding: chunked frames each write so the browser starts
+	// decoding as bytes arrive.
 	res.set_header("Accept-Ranges", "none");
-	res.set_content_provider(
+	res.set_chunked_content_provider(
 		codec_to_mime(target_fmt),
 		[proc, bps, total_sent,
 		 get_position = std::move(get_position)]
