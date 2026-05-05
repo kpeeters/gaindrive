@@ -216,6 +216,14 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 		}
 	args.push_back("-i");
 	args.push_back(song.path);
+	// Drop attached pictures (m4a album art is exposed as a video stream)
+	// and source metadata.  Without -vn, ffmpeg copies embedded JPEG/PNG
+	// art into the mp3's ID3v2 tag at the *start* of the stream — Firefox
+	// must download the whole tag before reaching the first audio frame,
+	// which delays playback by seconds for tracks with large art.
+	args.push_back("-vn");
+	args.push_back("-map_metadata");
+	args.push_back("-1");
 	args.push_back("-f");
 	args.push_back(target_fmt);
 	if (target_bitrate > 0) {
