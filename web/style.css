@@ -902,6 +902,15 @@ body {
    display: flex;
 }
 
+/* Always generate ::before with a non-breaking space so the flex container
+   has a stable text baseline. Without this, the cell has no flex items in
+   the default state and its baseline falls at the bottom edge; the moment
+   hover/queued/playing inserts a real glyph, the row's baseline shifts and
+   the whole row jumps vertically. */
+.track-icon::before {
+   content: '\00a0';
+}
+
 .track-row:hover .track-icon::before {
    content: '+';
    font-weight: 700;
