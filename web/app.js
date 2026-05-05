@@ -83,6 +83,22 @@ function showConfirm(msg, onYes, {title='Confirm', yes='OK', no='Cancel'} = {}) 
    document.getElementById('confirm-modal').classList.remove('hidden');
    }
 
+let _coverArtCb = null;
+function showCoverArtDialog(onPicked) {
+   _coverArtCb = onPicked;
+   document.getElementById('cover-art-file-name').textContent = '';
+   document.getElementById('cover-art-url').value = '';
+   const prev = document.getElementById('cover-art-url-preview');
+   prev.removeAttribute('src');
+   prev.classList.add('hidden');
+   document.getElementById('cover-art-modal').classList.remove('hidden');
+   }
+
+function _closeCoverArtDialog() {
+   document.getElementById('cover-art-modal').classList.add('hidden');
+   _coverArtCb = null;
+   }
+
 // ── Login ───────────────────────────────────────────────────────────────────
 
 async function tryLogin(server, user, password) {
@@ -1843,6 +1859,42 @@ function setupPlayer() {
       document.getElementById('playlist-modal').classList.add('hidden');
       });
 
+   {
+      const fileInput = document.getElementById('cover-art-file-input');
+      const fileName  = document.getElementById('cover-art-file-name');
+      const urlInput  = document.getElementById('cover-art-url');
+      const urlPrev   = document.getElementById('cover-art-url-preview');
+
+      document.getElementById('cover-art-file-btn')
+         .addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', () => {
+         const f = fileInput.files[0];
+         if (!f) return;
+         fileName.textContent = f.name;
+         const cb = _coverArtCb;
+         _closeCoverArtDialog();
+         fileInput.value = '';
+         if (cb) cb({kind: 'file', file: f});
+         });
+
+      urlInput.addEventListener('input', () => {
+         const v = urlInput.value.trim();
+         if (v) { urlPrev.src = v; urlPrev.classList.remove('hidden'); }
+         else   { urlPrev.removeAttribute('src'); urlPrev.classList.add('hidden'); }
+         });
+      urlPrev.addEventListener('error', () => urlPrev.classList.add('hidden'));
+
+      document.getElementById('cover-art-url-btn').addEventListener('click', () => {
+         const url = urlInput.value.trim();
+         if (!url) return;
+         const cb = _coverArtCb;
+         _closeCoverArtDialog();
+         if (cb) cb({kind: 'url', url});
+         });
+      document.getElementById('cover-art-cancel-btn')
+         .addEventListener('click', _closeCoverArtDialog);
+      }
+
    if ('mediaSession' in navigator) {
       navigator.mediaSession.setActionHandler('play',          () => player.audio.play());
       navigator.mediaSession.setActionHandler('pause',         () => player.audio.pause());
@@ -1899,6 +1951,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
 
    // Large cover art hero with carousel support for extra images.
    let heroImg = null;
+   let placeholder = null;
    let carouselIdx = 0;
    let carouselCount = 1;
    const heroWrap = document.createElement('div');
@@ -2024,7 +2077,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
 
    // ── Edit mode ──────────────────────────────────────────────────────────────
    // Toggled by the "Edit" link in the header.
-   let pendingCoverFile = null;  // File object selected by the picker, or null
+   let pendingCover = null;  // {kind:'file', file} | {kind:'url', url} | null
 
    function enterEditMode() {
       // Swap "Edit" link for Save + Cancel buttons.
@@ -2038,35 +2091,41 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       editLink.appendChild(saveBtn);
       editLink.appendChild(cancelBtn);
 
-      // Add pencil button over the cover art.
-      const fileInput = document.createElement('input');
-      fileInput.type = 'file';
-      fileInput.accept = 'image/*';
-      fileInput.hidden = true;
-      heroWrap.appendChild(fileInput);
+      // Show a placeholder tile so the pencil has somewhere to sit when there
+      // is no cover yet.
+      if (!heroImg) {
+         placeholder = document.createElement('div');
+         placeholder.className = 'album-hero album-hero-placeholder';
+         placeholder.textContent = '♫';
+         heroWrap.appendChild(placeholder);
+         }
 
       const pencilBtn = document.createElement('button');
       pencilBtn.className = 'cover-edit-btn';
       pencilBtn.textContent = '✏';
       pencilBtn.setAttribute('aria-label', 'Change cover art');
-      pencilBtn.addEventListener('click', () => fileInput.click());
-      heroWrap.appendChild(pencilBtn);
-
-      fileInput.addEventListener('change', () => {
-         const file = fileInput.files[0];
-         if (!file) return;
-         pendingCoverFile = file;
-         // Preview immediately; create img if it didn't exist before.
-         if (!heroImg) {
-            heroImg = document.createElement('img');
-            heroImg.className = 'album-hero';
-            heroImg.alt = albumTitle;
-            heroWrap.insertBefore(heroImg, pencilBtn);
-            }
-         const reader = new FileReader();
-         reader.onload = e => { heroImg.src = e.target.result; };
-         reader.readAsDataURL(file);
+      pencilBtn.addEventListener('click', () => {
+         showCoverArtDialog(picked => {
+            pendingCover = picked;
+            if (!heroImg) {
+               heroImg = document.createElement('img');
+               heroImg.className = 'album-hero';
+               heroImg.alt = albumTitle;
+               heroWrap.insertBefore(heroImg, pencilBtn);
+               placeholder?.remove();
+               placeholder = null;
+               }
+            if (picked.kind === 'file') {
+               const reader = new FileReader();
+               reader.onload = e => { heroImg.src = e.target.result; };
+               reader.readAsDataURL(picked.file);
+               }
+            else {
+               heroImg.src = picked.url;
+               }
+            });
          });
+      heroWrap.appendChild(pencilBtn);
 
       // Replace track num/title spans with inputs; swap dur span for year input.
       pane.querySelectorAll('.track-row').forEach(row => {
@@ -2181,19 +2240,21 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
          cancelBtn.disabled = true;
 
          // Save cover art first, if changed.
-         if (pendingCoverFile) {
+         if (pendingCover) {
             try {
                const {server, user, password} = creds.load();
                const p = new URLSearchParams({u: user, p: password,
                   v: '1.16.1', c: 'gaindrive-web', f: 'json', id: albumId});
                const fd = new FormData();
-               fd.append('file', pendingCoverFile);
+               if (pendingCover.kind === 'file') fd.append('file', pendingCover.file);
+               else                              fd.append('url',  pendingCover.url);
                const resp = await fetch(`${server}/rest/setCoverArt.view?${p}`,
                   {method: 'POST', body: fd});
                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                }
             catch (e) {
                console.error('[edit] cover upload failed', e);
+               showError('Failed to update cover art.');
                }
             }
 
@@ -2234,7 +2295,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
          });
 
       cancelBtn.addEventListener('click', () => {
-         pendingCoverFile = null;
+         pendingCover = null;
          exitEditMode(false);
          });
       }
@@ -2243,9 +2304,10 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       // Restore Edit link.
       editLink.textContent = 'Edit';
 
-      // Remove pencil button and hidden file input from heroWrap.
+      // Remove pencil button and edit-mode placeholder from heroWrap.
       heroWrap.querySelector('.cover-edit-btn')?.remove();
-      heroWrap.querySelector('input[type=file]')?.remove();
+      placeholder?.remove();
+      placeholder = null;
 
       // If cancelled, restore original cover state.
       if (!keepValues) {

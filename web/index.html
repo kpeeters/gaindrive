@@ -140,6 +140,21 @@
    </div>
 </div>
 
+<div id="cover-art-modal" class="modal hidden">
+   <div class="modal-box">
+      <h3>Change cover art</h3>
+      <button id="cover-art-file-btn">Upload from device…</button>
+      <span id="cover-art-file-name" class="cover-art-filename"></span>
+      <hr class="cover-art-divider">
+      <label for="cover-art-url">Or paste an image URL:</label>
+      <input id="cover-art-url" type="url" placeholder="https://…">
+      <img id="cover-art-url-preview" class="hidden" alt="">
+      <button id="cover-art-url-btn">Apply URL</button>
+      <button id="cover-art-cancel-btn">Cancel</button>
+   </div>
+</div>
+<input id="cover-art-file-input" type="file" accept="image/*" hidden>
+
 <script src="app.js"></script>
 </body>
 </html>

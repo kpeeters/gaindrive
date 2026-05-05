@@ -3053,8 +3053,9 @@ GainDrive::GainDrive(const std::string& db_path,
 		                use_json ? "application/json" : "application/xml");
 		});
 
-	// setCoverArt — upload a cover image for an album (identified by folder_id).
-	// Expects a multipart/form-data POST with a "file" part containing the image.
+	// setCoverArt — set a cover image for an album (identified by folder_id).
+	// Accepts either a multipart "file" part or a "url" form field; for the
+	// latter the server fetches the URL and validates it returned an image.
 	server_.Post("/rest/setCoverArt.view", [this](const httplib::Request& req,
 	                                              httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -3070,13 +3071,45 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (it == req.params.end()) { err(10, "Required parameter missing: id."); return; }
 		int folder_id = std::stoi(it->second);
 
-		if (!req.has_file("file")) { err(10, "Required file part missing: file."); return; }
-		const auto& file_part = req.get_file_value("file");
+		std::string bytes;
+		if (req.has_file("file")) {
+			const auto& fp = req.get_file_value("file");
+			if (fp.content_type.rfind("image/", 0) != 0) {
+				err(0, "Uploaded file must be an image."); return;
+				}
+			bytes = fp.content;
+			}
+		else if (req.has_param("url")) {
+			std::string url = req.get_param_value("url");
+			bool https = url.rfind("https://", 0) == 0;
+			bool http  = url.rfind("http://",  0) == 0;
+			if (!https && !http) { err(0, "URL must be http(s)."); return; }
+			size_t scheme_end = https ? 8 : 7;
+			size_t slash = url.find('/', scheme_end);
+			std::string host = url.substr(scheme_end, slash == std::string::npos
+			                              ? std::string::npos : slash - scheme_end);
+			std::string path = (slash == std::string::npos) ? "/" : url.substr(slash);
 
-		// Rudimentary content-type validation.
-		if (file_part.content_type.rfind("image/", 0) != 0) {
-			err(0, "Uploaded file must be an image.");
-			return;
+			auto fetch = [&](auto& cli) {
+				cli.set_follow_location(true);
+				cli.set_default_headers({
+					{"User-Agent",
+					 "GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+					});
+				return cli.Get(path.c_str());
+				};
+			httplib::Result r;
+			if (https) { httplib::SSLClient cli(host); r = fetch(cli); }
+			else       { httplib::Client    cli(host); r = fetch(cli); }
+			if (!r || r->status != 200) { err(0, "Failed to fetch URL."); return; }
+			auto ct = r->get_header_value("Content-Type");
+			if (ct.rfind("image/", 0) != 0) {
+				err(0, "URL did not return an image."); return;
+				}
+			bytes = std::move(r->body);
+			}
+		else {
+			err(10, "Required parameter missing: file or url."); return;
 			}
 
 		std::string folder_path = store_.get_folder_path(folder_id);
@@ -3087,7 +3120,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		{
 		std::ofstream out(cover, std::ios::binary | std::ios::trunc);
 		if (!out) { err(0, "Failed to write cover art to disk."); return; }
-		out.write(file_part.content.data(), (std::streamsize)file_part.content.size());
+		out.write(bytes.data(), (std::streamsize)bytes.size());
 		}
 
 		store_.set_cover_art_path(folder_id, cover.string());
