@@ -46,12 +46,19 @@ const _canPlayProbe = document.createElement('audio');
 // If the browser cannot play the format the server would otherwise send,
 // return 'mp3' so the caller appends ?format=mp3 to the stream URL and the
 // server transcodes. Returns null when direct serve is fine. mp3 is the
-// universal fallback: HTMLAudioElement.canPlayType('audio/mpeg') is non-empty
-// in every modern browser.
+// universal fallback: HTMLAudioElement.canPlayType('audio/mpeg') is
+// 'probably' in every modern browser.
+//
+// Only 'probably' bypasses transcode. 'maybe' is unreliable in practice —
+// notably Firefox on Linux returns 'maybe' for audio/mp4 then fails on the
+// AAC payload with a scary "could not be decoded" console message. Treating
+// 'maybe' as a no preempts the error before Firefox emits it. The decode-
+// error event listener below is still kept as a defensive safety net for
+// 'probably' surprises (rare, but possible across browser/codec updates).
 function pickStreamFormat(song) {
    const mime = song.transcodedContentType ?? song.contentType;
    if (!mime) return null;
-   if (_canPlayProbe.canPlayType(mime) !== '') return null;
+   if (_canPlayProbe.canPlayType(mime) === 'probably') return null;
    return 'mp3';
 }
 
