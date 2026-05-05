@@ -1859,8 +1859,13 @@ player.audio.addEventListener('error', () => {
    if (err.code !== 3 && err.code !== 4) return;
    if (player.streamFallbackTried) return;
    const offset = player.audio.currentTime || 0;
-   console.warn('[player] decode failed, retrying with format=mp3');
-   playerPlay(offset, true);
+   console.warn('[player] decode failed (code', err.code,
+                '), retrying with format=mp3');
+   // Defer one microtask: setting audio.src synchronously inside an
+   // 'error' handler races with Firefox's error-state cleanup and the new
+   // src is occasionally ignored.  A microtask gap lets the element settle
+   // before the resource-selection algorithm runs again.
+   queueMicrotask(() => playerPlay(offset, true));
    });
 
 // Wire control buttons and MediaSession handlers. Called once from showShell().
