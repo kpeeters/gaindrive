@@ -1676,9 +1676,12 @@ function playerEnqueue(song) {
    sidebarQueueUpdate();
 }
 
-function playerPlay(offset = 0) {
+function playerPlay(offset = 0, forceMp3 = false) {
    const song = player.queue[player.index];
    if (!song) return;
+   // Track whether this attempt is the mp3 fallback. The 'error' listener
+   // below uses this to retry exactly once before giving up.
+   player.streamFallbackTried = forceMp3;
    if (castDeviceId !== null) {
       // Reset so the IDLE status during Chromecast loading doesn't trigger a
       // spurious advance, and so interpolation starts fresh for the new track.
@@ -1707,7 +1710,7 @@ function playerPlay(offset = 0) {
       return;
       }
    const streamParams = {id: song.id};
-   const fmt = pickStreamFormat(song);
+   const fmt = forceMp3 ? 'mp3' : pickStreamFormat(song);
    if (fmt) streamParams.format = fmt;
    player.audio.src = apiUrl('stream', streamParams);
    if (offset > 0) {
@@ -1839,6 +1842,25 @@ player.audio.addEventListener('play',  () => {
    });
 player.audio.addEventListener('pause', () => {
    document.getElementById('player-playpause').textContent = '▶';
+   });
+
+// canPlayType() lies in some browser/codec pairings — Firefox claims it can
+// play audio/mp4 ('maybe') but then fails on the AAC payload with
+// NS_ERROR_DOM_MEDIA_METADATA_ERR.  When the optimistic direct stream fails
+// to decode, retry once asking the server to transcode to mp3.  We don't
+// know up-front which (browser, container, codec) triples are bad — letting
+// the actual decoder be the source of truth keeps this format-list free.
+player.audio.addEventListener('error', () => {
+   if (castDeviceId !== null) return;
+   const err = player.audio.error;
+   const song = player.queue[player.index];
+   if (!err || !song) return;
+   // 3 = MEDIA_ERR_DECODE, 4 = MEDIA_ERR_SRC_NOT_SUPPORTED.
+   if (err.code !== 3 && err.code !== 4) return;
+   if (player.streamFallbackTried) return;
+   const offset = player.audio.currentTime || 0;
+   console.warn('[player] decode failed, retrying with format=mp3');
+   playerPlay(offset, true);
    });
 
 // Wire control buttons and MediaSession handlers. Called once from showShell().
