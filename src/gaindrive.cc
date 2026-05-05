@@ -3072,6 +3072,10 @@ GainDrive::GainDrive(const std::string& db_path,
 		int folder_id = std::stoi(it->second);
 
 		std::string bytes;
+		std::string url;
+		if (req.has_file("url")) url = req.get_file_value("url").content;
+		else if (req.has_param("url")) url = req.get_param_value("url");
+
 		if (req.has_file("file")) {
 			const auto& fp = req.get_file_value("file");
 			if (fp.content_type.rfind("image/", 0) != 0) {
@@ -3079,8 +3083,7 @@ GainDrive::GainDrive(const std::string& db_path,
 				}
 			bytes = fp.content;
 			}
-		else if (req.has_param("url")) {
-			std::string url = req.get_param_value("url");
+		else if (!url.empty()) {
 			bool https = url.rfind("https://", 0) == 0;
 			bool http  = url.rfind("http://",  0) == 0;
 			if (!https && !http) { err(0, "URL must be http(s)."); return; }
