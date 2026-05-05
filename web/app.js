@@ -39,6 +39,22 @@ function applyTheme(theme) {
 
 // ── Subsonic API wrapper ────────────────────────────────────────────────────
 
+// Probe element used to ask the browser which MIME types it can decode.
+// Reused across calls so we don't spin up an HTMLAudioElement per track.
+const _canPlayProbe = document.createElement('audio');
+
+// If the browser cannot play the format the server would otherwise send,
+// return 'mp3' so the caller appends ?format=mp3 to the stream URL and the
+// server transcodes. Returns null when direct serve is fine. mp3 is the
+// universal fallback: HTMLAudioElement.canPlayType('audio/mpeg') is non-empty
+// in every modern browser.
+function pickStreamFormat(song) {
+   const mime = song.transcodedContentType ?? song.contentType;
+   if (!mime) return null;
+   if (_canPlayProbe.canPlayType(mime) !== '') return null;
+   return 'mp3';
+}
+
 // Build a subsonic API URL. Extra params can be passed as an object.
 function apiUrl(endpoint, extra = {}) {
    const {server, user, password} = creds.load();
@@ -1690,7 +1706,10 @@ function playerPlay(offset = 0) {
       playerUpdateUI();
       return;
       }
-   player.audio.src = apiUrl('stream', {id: song.id});
+   const streamParams = {id: song.id};
+   const fmt = pickStreamFormat(song);
+   if (fmt) streamParams.format = fmt;
+   player.audio.src = apiUrl('stream', streamParams);
    if (offset > 0) {
       // For local playback the browser seeks natively via Range requests.
       player.audio.currentTime = offset;
