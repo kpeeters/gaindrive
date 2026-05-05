@@ -1048,6 +1048,9 @@ async function viewAlbums(artistId, artistName) {
       frag.appendChild(row);
       }
    pane.appendChild(frag);
+   // Marker so viewTracks() can tell whether pane 1 already shows this artist
+   // and skip a redundant re-render when navigating artists → albums → tracks.
+   pane.dataset.artistId = String(artistId);
    paneNav.slideTo(1);
 
    // Fetch artist info without blocking the album list.
@@ -2075,6 +2078,21 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
    const songs = album.song ?? [];
    console.log('[tracks] got', songs.length, 'tracks');
 
+   // Make sure pane 1 (artist's albums) is in sync with what's in pane 2.
+   // Entry paths like starred-album, starred-track, search-result, and the
+   // player-cover thumbnail land here without first walking through
+   // viewAlbums(), so pane 1 would otherwise stay empty or hold stale
+   // content (e.g. playlist tracks). We use album.parent (artist id from
+   // getAlbum) so this also works when the caller passed a null artistId.
+   // Pane 1 is considered fresh only when its dataset marker matches AND it
+   // still actually contains album rows — playlist track listings, search
+   // result lists, etc. all leave the marker irrelevant.
+   const albumsPane = document.getElementById('pane-albums');
+   const pane1Fresh = albumsPane.dataset.artistId === String(album.parent)
+                      && albumsPane.querySelector('.album-row');
+   if (album.parent !== undefined && !pane1Fresh)
+      await viewAlbums(album.parent, album.artist ?? artistName ?? '');
+
    // Back link + headings + Edit link.
    const header = document.createElement('div');
    header.className = 'view-header';
@@ -2848,7 +2866,6 @@ function renderSearchResults(res) {
 // (search results) off-screen. Instead we move the rendered content into
 // pane 1 and stay at depth 1, keeping search visible on the left.
 async function viewTracksFromSearch(albumId, albumTitle, artistId, artistName, autoPlayId) {
-   if (artistId) await viewAlbums(artistId, artistName);
    await viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId);
    if (document.getElementById('search-bar').classList.contains('open')
          && paneNav._visiblePanes() === 2) {
