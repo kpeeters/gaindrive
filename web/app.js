@@ -2249,6 +2249,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
          saveBtn.disabled = true;
          cancelBtn.disabled = true;
 
+         const errors = [];
+
          // Save cover art first, if changed.
          if (pendingCover) {
             try {
@@ -2261,10 +2263,14 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
                const resp = await fetch(`${server}/rest/setCoverArt.view?${p}`,
                   {method: 'POST', body: fd});
                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+               const data = await resp.json();
+               const sr = data['subsonic-response'];
+               if (sr.status !== 'ok')
+                  throw new Error(sr.error?.message ?? 'Unknown error');
                }
             catch (e) {
                console.error('[edit] cover upload failed', e);
-               showError('Failed to update cover art.');
+               errors.push(`Cover art: ${e.message}`);
                }
             }
 
@@ -2297,8 +2303,18 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
                }
             if (changed) {
                try { await apiCall('updateSong', params); }
-               catch (e) { console.error('[edit] updateSong failed', e); }
+               catch (e) {
+                  console.error('[edit] updateSong failed', e);
+                  errors.push(`Track "${titleInput.value}": ${e.message}`);
+                  }
                }
+            }
+
+         if (errors.length > 0) {
+            showError('Some changes could not be saved:\n\n' + errors.join('\n'));
+            saveBtn.disabled = false;
+            cancelBtn.disabled = false;
+            return;
             }
 
          exitEditMode(true);

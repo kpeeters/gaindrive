@@ -1373,6 +1373,11 @@ body {
    font-size: 1rem;
 }
 
+#error-modal-msg {
+   white-space: pre-line;
+   margin: 0;
+}
+
 #cast-device-list {
    display: flex;
    flex-direction: column;
