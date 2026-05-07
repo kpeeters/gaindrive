@@ -98,15 +98,18 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
                             const SongInfo& song,
                             std::function<float()> get_position)
 	{
-	// Cast adaptive buffering:
-	// - Send the first 30 s of audio at full LAN speed (pre-buffer) so the
-	//   receiver starts playing immediately.
-	// - After the pre-buffer, check the receiver's actual playback position
-	//   via get_position() and sleep whenever we are more than TARGET_BUF
-	//   seconds ahead.  This keeps the buffer stable without any device-
-	//   specific size constants and handles pause correctly (current_time
-	//   freezes → we stop sending until the user resumes).
-	const float  bytes_per_sec = (get_position && song.bitrate > 0)
+	// Adaptive buffering for both cast and non-cast:
+	// - Send the first 30 s of audio at full speed (pre-buffer) so playback
+	//   starts without a noticeable pause.
+	// - After the pre-buffer, throttle to stay at most TARGET_BUF seconds
+	//   ahead of the playback position.
+	//   Cast: real position from the receiver via get_position().
+	//   Non-cast: wall-clock elapsed time since the request started, used as
+	//   a proxy for playback position.  This keeps the HTTP connection alive
+	//   for the full track duration so the browser never needs to evict and
+	//   re-fetch buffered content — which was the root cause of intermittent
+	//   MEDIA_ERR_NETWORK errors on the audio element.
+	const float  bytes_per_sec = (song.bitrate > 0)
 	    ? static_cast<float>(song.bitrate) * 125.0f
 	    : 0.0f;
 	const size_t prebuf_bytes = bytes_per_sec > 0
@@ -125,6 +128,7 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 			f.seekg(static_cast<std::streamoff>(offset));
 			char   buf[65536];
 			size_t remaining = length;
+			auto   t_start   = std::chrono::steady_clock::now();
 
 			while (remaining > 0) {
 				if (get_position && get_position() < CAST_POS_BUFFERING) return false;
@@ -148,51 +152,73 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 					}
 				remaining -= n;
 
-				if (get_position) {
+				if (bytes_per_sec > 0) {
 					size_t bytes_sent = length - remaining;
-					float pos = get_position();
-					if (pos < CAST_POS_BUFFERING) return false;
-					// Throttling only runs while the receiver is actually PLAYING.
-					// During IDLE/BUFFERING (pos < 0) we send freely — TCP
-					// backpressure paces us once the receiver's buffer fills, but
-					// any explicit throttle here causes the receiver to time out
-					// while we sleep, which manifests as "track click → never
-					// starts playing" or "seek → playback stops altogether".
-					if (pos >= 0.0f && bytes_per_sec > 0 && bytes_sent > prebuf_bytes) {
-						// Throttle in **absolute** audio time so that Range requests
-						// (MP3 native seek issues these against the same URL) compare
-						// correctly: bytes_sent is local to this request, but pos is the
-						// receiver's absolute position in the track.  Non-MP3 codecs go
-						// through serve_transcoded for any seek, so this path only sees
-						// MP3 native seek among the cast cases.
-						// No "receiver moved on" early-exit: when MP3 native seek opens
-						// a new Range at the seek byte it abandons this connection
-						// without a reliable signal here, and pos jumps ahead of what
-						// we've sent.  Trust TCP backpressure plus the receiver's own
-						// connection-close to clean it up; a lingering blocked
-						// sink.write costs at worst the 1-hour httplib write timeout.
+					if (get_position) {
+						float pos = get_position();
+						if (pos < CAST_POS_BUFFERING) return false;
+						// Throttling only runs while the receiver is actually PLAYING.
+						// During IDLE/BUFFERING (pos < 0) we send freely — TCP
+						// backpressure paces us once the receiver's buffer fills, but
+						// any explicit throttle here causes the receiver to time out
+						// while we sleep, which manifests as "track click → never
+						// starts playing" or "seek → playback stops altogether".
+						if (pos >= 0.0f && bytes_sent > prebuf_bytes) {
+							// Throttle in **absolute** audio time so that Range requests
+							// (MP3 native seek issues these against the same URL) compare
+							// correctly: bytes_sent is local to this request, but pos is the
+							// receiver's absolute position in the track.  Non-MP3 codecs go
+							// through serve_transcoded for any seek, so this path only sees
+							// MP3 native seek among the cast cases.
+							// No "receiver moved on" early-exit: when MP3 native seek opens
+							// a new Range at the seek byte it abandons this connection
+							// without a reliable signal here, and pos jumps ahead of what
+							// we've sent.  Trust TCP backpressure plus the receiver's own
+							// connection-close to clean it up; a lingering blocked
+							// sink.write costs at worst the 1-hour httplib write timeout.
+							float audio_sent_abs = static_cast<float>(offset + bytes_sent)
+							                     / bytes_per_sec;
+							float buf_secs = audio_sent_abs - pos;
+							if (buf_secs > TARGET_BUF) {
+								// Cap to 2 s: bytes_sent overcounts what the receiver
+								// actually has (the local kernel send buffer can hold
+								// many seconds beyond what reached the device).  A
+								// longer single sleep silences the server past the
+								// Chromecast's no-data network timeout (~60 s, manifests
+								// as error 103).  A short cap forces the outer loop to
+								// wake, write a chunk, and re-evaluate; TCP backpressure
+								// then paces the rest naturally.
+								auto sleep_ms = std::min(static_cast<long>(
+								    (buf_secs - TARGET_BUF) * 1000.0f), 2000L);
+								auto deadline = std::chrono::steady_clock::now()
+								              + std::chrono::milliseconds(sleep_ms);
+								while (std::chrono::steady_clock::now() < deadline) {
+									std::this_thread::sleep_for(
+									    std::chrono::milliseconds(100));
+									float pos_now = get_position();
+									if (pos_now < CAST_POS_BUFFERING) return false;
+									}
+								}
+							}
+						} else if (bytes_sent > prebuf_bytes) {
+						// Non-cast: use wall-clock elapsed time since this request
+						// started as a proxy for the browser's playback position.
+						// For a Range request starting at byte `offset`, the estimated
+						// absolute position is offset/bps + elapsed.  No cancellation
+						// check is needed (no get_position); the 2 s sleep cap keeps
+						// the server responsive to any next Range request.
+						float elapsed = std::chrono::duration<float>(
+						    std::chrono::steady_clock::now() - t_start).count();
+						float estimated_pos  = static_cast<float>(offset) / bytes_per_sec
+						                     + elapsed;
 						float audio_sent_abs = static_cast<float>(offset + bytes_sent)
 						                     / bytes_per_sec;
-						float buf_secs = audio_sent_abs - pos;
+						float buf_secs       = audio_sent_abs - estimated_pos;
 						if (buf_secs > TARGET_BUF) {
-							// Cap to 2 s: bytes_sent overcounts what the receiver
-							// actually has (the local kernel send buffer can hold
-							// many seconds beyond what reached the device).  A
-							// longer single sleep silences the server past the
-							// Chromecast's no-data network timeout (~60 s, manifests
-							// as error 103).  A short cap forces the outer loop to
-							// wake, write a chunk, and re-evaluate; TCP backpressure
-							// then paces the rest naturally.
 							auto sleep_ms = std::min(static_cast<long>(
 							    (buf_secs - TARGET_BUF) * 1000.0f), 2000L);
-							auto deadline = std::chrono::steady_clock::now()
-							              + std::chrono::milliseconds(sleep_ms);
-							while (std::chrono::steady_clock::now() < deadline) {
-								std::this_thread::sleep_for(
-								    std::chrono::milliseconds(100));
-								float pos_now = get_position();
-								if (pos_now < CAST_POS_BUFFERING) return false;
-								}
+							std::this_thread::sleep_for(
+							    std::chrono::milliseconds(sleep_ms));
 							}
 						}
 					}
