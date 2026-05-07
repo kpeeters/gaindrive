@@ -1785,6 +1785,13 @@ function playerUpdateUI() {
    cover.dataset.coverSize = 64;
    cover.src = song.coverArt ? apiUrl('getCoverArt', {id: song.coverArt, size: 64}) : '';
 
+   player.albumCtx = {
+      albumId:    song.parent ?? '',
+      albumTitle: song.album  ?? '',
+      artistId:   null,
+      artistName: song.artist ?? '',
+      };
+
    // Highlight active row in track list if it is currently visible.
    document.querySelector('.track-row.playing')?.classList.remove('playing');
    const activeRow = document.querySelector(`.track-row[data-id="${song.id}"]`);
