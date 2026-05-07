@@ -290,9 +290,12 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 	// Transfer-Encoding: chunked frames each write so the browser starts
 	// decoding as bytes arrive.
 	res.set_header("Accept-Ranges", "none");
+	// t_start is the wall-clock moment the first byte is sent to the browser.
+	// The non-cast throttle branch uses it as a proxy for playback position.
+	auto t_start = std::chrono::steady_clock::now();
 	res.set_chunked_content_provider(
 		codec_to_mime(target_fmt),
-		[proc, bps, total_sent,
+		[proc, bps, total_sent, t_start,
 		 get_position = std::move(get_position)]
 		(size_t /*offset*/, httplib::DataSink& sink) {
 			if (get_position && get_position() < CAST_POS_BUFFERING) {
@@ -345,14 +348,27 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 							}
 						}
 					}
+				} else if (bps > 0) {
+				// Non-cast: use wall-clock elapsed time as a proxy for playback
+				// position, same approach as serve_direct.
+				float elapsed    = std::chrono::duration<float>(
+				    std::chrono::steady_clock::now() - t_start).count();
+				float audio_sent = static_cast<float>(*total_sent) / bps;
+				float buf_secs   = audio_sent - elapsed;
+				if (buf_secs > TARGET_BUF) {
+					auto sleep_ms = std::min(static_cast<long>(
+					    (buf_secs - TARGET_BUF) * 1000.0f), 2000L);
+					std::this_thread::sleep_for(
+					    std::chrono::milliseconds(sleep_ms));
+					}
 				}
 			return true;
 			},
-		[proc](bool success) {
+		[proc, total_sent](bool success) {
 			if (!success) proc->kill();
 			auto [status, ec] = proc->wait(reproc::infinite);
-			if (!success || status != 0)
-				std::cout << stamp() << "stream: ffmpeg exit status=" << status
-				          << (ec ? " (" + ec.message() + ")" : "") << std::endl;
+			std::cout << stamp() << "stream: ffmpeg exit status=" << status
+			          << " total=" << *total_sent << " bytes"
+			          << (ec ? " (" + ec.message() + ")" : "") << std::endl;
 			});
 	}
