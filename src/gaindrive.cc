@@ -2093,6 +2093,14 @@ GainDrive::GainDrive(const std::string& db_path,
 				};
 			}
 
+		if (!cast_authed)
+			std::cout << stamp() << "stream: id=" << it->second
+			          << " codec=" << song->codec
+			          << " size=" << song->file_size
+			          << " duration=" << song->duration
+			          << (time_offset > 0 ? " offset=" + std::to_string(time_offset) : "")
+			          << (!format.empty() ? " fmt=" + format : "")
+			          << std::endl;
 		Streamer::serve(req, res, si, max_bitrate, format, time_offset,
 		                cast_authed, std::move(get_pos));
 		});

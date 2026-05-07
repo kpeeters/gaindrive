@@ -138,11 +138,10 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 					if (get_position && get_position() < CAST_POS_BUFFERING) return false;
 					size_t piece = std::min(WRITE_CHUNK, n - woff);
 					if (!sink.write(buf + woff, piece)) {
-						if (get_position)
-							std::cout << stamp()
-							          << "cast stream: write failed at "
-							          << (offset + length - remaining + woff + piece)
-							          << " bytes" << std::endl;
+						std::cout << stamp()
+						          << (get_position ? "cast " : "") << "stream: write failed at "
+						          << (offset + length - remaining + woff + piece)
+						          << " bytes (range offset=" << offset << ")" << std::endl;
 						return false;
 						}
 					woff += piece;

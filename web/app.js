@@ -1783,7 +1783,10 @@ function playerUpdateUI() {
    const cover = document.getElementById('player-cover');
    cover.dataset.albumId   = song.albumId ?? song.coverArt ?? '';
    cover.dataset.coverSize = 64;
-   cover.src = song.coverArt ? apiUrl('getCoverArt', {id: song.coverArt, size: 64}) : '';
+   if (song.coverArt)
+      cover.src = apiUrl('getCoverArt', {id: song.coverArt, size: 64});
+   else
+      cover.removeAttribute('src');   // '' resolves to GET / and must never be assigned
 
    player.albumCtx = {
       albumId:    song.parent ?? '',
@@ -1924,7 +1927,9 @@ player.audio.addEventListener('error', () => {
    if (!err || !song) return;
    // 3 = MEDIA_ERR_DECODE, 4 = MEDIA_ERR_SRC_NOT_SUPPORTED.
    if (err.code !== 3 && err.code !== 4) {
-      console.warn('[player] audio error (code', err.code, '):', err.message);
+      console.warn('[player] audio error (code', err.code, ') at',
+                   Math.floor(player.audio.currentTime + (player.localOffset || 0)), 's,',
+                   'song', song.id, ':', err.message);
       return;
       }
    if (player.streamFallbackTried) return;
