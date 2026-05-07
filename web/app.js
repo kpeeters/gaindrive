@@ -1923,7 +1923,10 @@ player.audio.addEventListener('error', () => {
    const song = player.queue[player.index];
    if (!err || !song) return;
    // 3 = MEDIA_ERR_DECODE, 4 = MEDIA_ERR_SRC_NOT_SUPPORTED.
-   if (err.code !== 3 && err.code !== 4) return;
+   if (err.code !== 3 && err.code !== 4) {
+      console.warn('[player] audio error (code', err.code, '):', err.message);
+      return;
+      }
    if (player.streamFallbackTried) return;
    const offset = player.audio.currentTime || 0;
    console.warn('[player] decode failed (code', err.code,
@@ -2093,6 +2096,13 @@ function setupPlayer() {
          player.audio.currentTime = details.seekTime;
          });
       }
+
+   // Prompt before leaving the page while a track is playing, so an accidental
+   // browser refresh or back-navigation doesn't silently kill playback.
+   window.addEventListener('beforeunload', e => {
+      if (castDeviceId !== null || !player.audio.paused)
+         e.returnValue = '';
+      });
 }
 
 async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId = null) {
