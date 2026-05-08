@@ -2026,6 +2026,13 @@ function setupPlayer() {
       document.getElementById('info-modal').classList.add('hidden');
       });
 
+   document.querySelector('.nav-title').addEventListener('click', () => {
+      document.getElementById('about-modal').classList.remove('hidden');
+      });
+   document.getElementById('about-close-btn').addEventListener('click', () => {
+      document.getElementById('about-modal').classList.add('hidden');
+      });
+
    document.getElementById('playlist-close-btn').addEventListener('click', () => {
       document.getElementById('playlist-modal').classList.add('hidden');
       });

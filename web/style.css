@@ -204,6 +204,7 @@ body {
    padding: 0 1rem 1rem;
    border-bottom: 1px solid var(--divider);
    margin-bottom: 0.5rem;
+   cursor: pointer;
 }
 
 #search-btn {
