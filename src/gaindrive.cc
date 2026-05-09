@@ -1620,6 +1620,51 @@ GainDrive::GainDrive(const std::string& db_path,
 		handle_album_list(req, res, store_, debug_, "albumList2");
 		});
 
+	// getRecentSongs — gaindrive extension; not in the OpenSubsonic spec.
+	// Returns songs ordered by most recently played (per-user play_counts).
+	server_.Get("/rest/getRecentSongs.view", [this](const httplib::Request& req,
+	                                                httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto qp = [&](const std::string& k, const std::string& def = "") {
+			auto it = req.params.find(k);
+			return it != req.params.end() ? it->second : def;
+			};
+
+		std::string user = qp("u");
+		int size   = std::min(500, std::max(1, std::stoi(qp("size",   "50"))));
+		int offset = std::max(0,               std::stoi(qp("offset", "0")));
+
+		auto entries = store_.get_recent_songs(user, size, offset);
+		int max_br   = user_max_bitrate(store_, user);
+
+		bool use_json = (fmt_of(req) == "json");
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&entries, max_br](nlohmann::json& r) {
+				nlohmann::json arr = nlohmann::json::array();
+				for (const auto& e : entries) {
+					auto s = song_entry_json(e.song, max_br);
+					if (!e.last_played.empty()) s["lastPlayed"] = e.last_played;
+					arr.push_back(std::move(s));
+					}
+				r["recentSongs"] = {{"song", arr}};
+				});
+		else
+			body = subsonic_ok([&entries, max_br](XMLDocument& doc, XMLElement* root) {
+				auto* rs = doc.NewElement("recentSongs");
+				for (const auto& e : entries) {
+					auto* el = song_entry_xml(doc, e.song, "song", max_br);
+					if (!e.last_played.empty())
+						el->SetAttribute("lastPlayed", e.last_played.c_str());
+					rs->InsertEndChild(el);
+					}
+				root->InsertEndChild(rs);
+				});
+		if (debug_) std::cout << body << "\n";
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	// getArtistInfo / getArtistInfo2 — MusicBrainz lookup, result cached in DB.
 	// Both endpoints share identical logic; only the response key name differs.
 	server_.Get("/rest/getArtistInfo.view", [this](const httplib::Request& req,

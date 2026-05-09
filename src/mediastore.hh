@@ -124,6 +124,16 @@ class MediaStore {
 			bool        starred      = false;
 			};
 
+		struct RecentSongEntry {
+			ChildEntry  song;
+			std::string last_played;  // ISO timestamp from play_counts
+			};
+
+		std::vector<RecentSongEntry> get_recent_songs(
+			const std::string& username,
+			int size   = 50,
+			int offset = 0);
+
 		struct DirInfo {
 			int         id;
 			std::string name;

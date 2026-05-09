@@ -231,6 +231,8 @@ async function showView(name) {
       await viewPlaylists();
       } else if (name === 'settings') {
       await viewSettings();
+      } else if (name === 'recents') {
+      await viewRecents();
       } else {
       document.getElementById('pane-artists').innerHTML =
          `<p style="color:var(--text-dim)">${name}</p>`;
@@ -749,6 +751,84 @@ async function viewPlaylists() {
    paneNav.slideTo(0);
 }
 
+async function viewRecents() {
+   console.log('[recents] loading');
+   const pane = document.getElementById('pane-artists');
+   pane.innerHTML = '';
+   document.getElementById('pane-albums').innerHTML = '';
+   document.getElementById('pane-tracks').innerHTML = '';
+
+   let sr;
+   try {
+      sr = await apiCall('getRecentSongs', {size: 50});
+      }
+   catch {
+      showError('Could not reach the server. Please check your connection.');
+      return;
+      }
+
+   const songs = sr.recentSongs?.song ?? [];
+   console.log('[recents] got', songs.length, 'songs');
+
+   const frag = document.createDocumentFragment();
+   const hdr = document.createElement('div');
+   hdr.className = 'view-header';
+   const h1 = document.createElement('h1');
+   h1.className = 'view-title';
+   h1.textContent = 'Recents';
+   hdr.appendChild(h1);
+   frag.appendChild(hdr);
+
+   if (songs.length === 0) {
+      const msg = document.createElement('p');
+      msg.style.color = 'var(--text-dim)';
+      msg.style.padding = '1rem';
+      msg.textContent = 'No recently played songs.';
+      frag.appendChild(msg);
+      } else {
+      for (const song of songs) {
+         const row = document.createElement('div');
+         row.className = 'search-song-row';
+
+         const cover = makeAlbumCover({id: song.parent, coverArt: song.coverArt});
+         cover.classList.add('recent-cover');
+         row.appendChild(cover);
+
+         const info = document.createElement('div');
+         info.className = 'search-song-info';
+
+         const titleEl = document.createElement('span');
+         titleEl.className = 'search-song-title';
+         titleEl.textContent = song.title;
+
+         const sub = document.createElement('span');
+         sub.className = 'search-song-sub';
+         const parts = [];
+         if (song.artist) parts.push(song.artist);
+         if (song.album)  parts.push(song.album);
+         sub.textContent = parts.join(' · ');
+
+         info.appendChild(titleEl);
+         info.appendChild(sub);
+         row.appendChild(info);
+
+         if (song.lastPlayed) {
+            const ago = document.createElement('span');
+            ago.className = 'search-song-dur';
+            ago.textContent = timeAgo(song.lastPlayed);
+            row.appendChild(ago);
+            }
+
+         row.addEventListener('click', () =>
+            viewTracksFromSearch(song.parent, song.album, null, song.artist, song.id));
+         frag.appendChild(row);
+         }
+      }
+
+   pane.appendChild(frag);
+   paneNav.slideTo(0);
+}
+
 async function viewPlaylistTracks(playlistId, playlistName) {
    console.log('[playlist-tracks] loading playlist', playlistId, playlistName);
    const pane = document.getElementById('pane-albums');
@@ -1154,6 +1234,14 @@ function fmtDuration(secs) {
    const m = Math.floor(secs / 60);
    const s = String(secs % 60).padStart(2, '0');
    return `${m}:${s}`;
+}
+
+function timeAgo(isoStr) {
+   const mins = Math.floor((Date.now() - new Date(isoStr).getTime()) / 60000);
+   if (mins < 60)  return `${mins}m ago`;
+   const hrs = Math.floor(mins / 60);
+   if (hrs  < 24)  return `${hrs}h ago`;
+   return `${Math.floor(hrs / 24)}d ago`;
 }
 
 // ── Player ───────────────────────────────────────────────────────────────────

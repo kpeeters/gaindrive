@@ -1586,6 +1586,11 @@ body {
    padding: 2rem 0.4rem;
    text-align: center;
 }
+.recent-cover {
+   width: 40px;
+   height: 40px;
+   font-size: 1rem;
+}
 
 /* ── Mobile overrides (must follow base rules to win the cascade) ──── */
 

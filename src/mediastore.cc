@@ -1583,6 +1583,64 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 	return result;
 	}
 
+// ---- Recent songs -----------------------------------------------------------
+
+std::vector<MediaStore::RecentSongEntry> MediaStore::get_recent_songs(
+	const std::string& username,
+	int size,
+	int offset)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	SQLite::Statement q(db_music_,
+		"SELECT s.id, s.title, s.track_number, s.disc_number,"
+		"       s.year, s.genre, s.duration, s.bitrate, s.file_size, s.codec,"
+		"       al.folder_id,"
+		"       COALESCE(a.name,'') AS artist,"
+		"       COALESCE(al.title, f.name) AS album,"
+		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+		"            THEN al.folder_id ELSE -1 END AS cover_art_id,"
+		"       f.parent_id,"
+		"       pc.last_played"
+		" FROM client.play_counts pc"
+		" JOIN client.users u ON u.id = pc.user_id"
+		" JOIN songs s ON s.path = pc.song_path"
+		" JOIN albums al ON al.id = s.album_id"
+		" JOIN folders f ON f.id = al.folder_id"
+		" LEFT JOIN song_artists sas ON sas.song_id = s.id AND sas.role = 'artist'"
+		" LEFT JOIN artists a ON a.id = sas.artist_id"
+		" WHERE u.username = ?"
+		" ORDER BY pc.last_played DESC"
+		" LIMIT ? OFFSET ?");
+	q.bind(1, username);
+	q.bind(2, size);
+	q.bind(3, offset);
+
+	std::vector<RecentSongEntry> result;
+	while (q.executeStep()) {
+		RecentSongEntry e;
+		e.song.id           = q.getColumn(0).getInt();
+		e.song.is_dir       = false;
+		e.song.title        = q.getColumn(1).getString();
+		e.song.track_number = q.getColumn(2).getInt();
+		e.song.disc_number  = q.getColumn(3).getInt();
+		e.song.year         = q.getColumn(4).getInt();
+		e.song.genre        = q.getColumn(5).isNull() ? "" : q.getColumn(5).getString();
+		e.song.duration     = q.getColumn(6).getDouble();
+		e.song.bitrate      = q.getColumn(7).getInt();
+		e.song.file_size    = q.getColumn(8).getInt64();
+		e.song.codec        = q.getColumn(9).isNull() ? "" : q.getColumn(9).getString();
+		e.song.parent_id    = q.getColumn(10).getInt();
+		e.song.artist       = q.getColumn(11).getString();
+		e.song.album        = q.getColumn(12).getString();
+		e.song.cover_art_id = q.getColumn(13).getInt();
+		// column 14 (f.parent_id) unused — parent_id is already the album folder
+		e.last_played       = q.getColumn(15).isNull() ? "" : q.getColumn(15).getString();
+		result.push_back(std::move(e));
+		}
+	return result;
+	}
+
 std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id,
                                                               const std::string& username)
 	{
