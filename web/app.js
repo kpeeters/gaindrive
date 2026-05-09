@@ -1308,6 +1308,7 @@ function onCastStatus(s) {
          castWasPlaying   = false;
          castStartOffset  = 0;
          lastCastPosition = 0;
+         scrobbleCurrentSong();
          player.index++;
          playerPlay();
          }
@@ -1323,6 +1324,7 @@ function onCastStatus(s) {
    // IDLE/FINISHED.  After 5 s of this, treat it as end-of-track.
    const song = player.queue[player.index];
    const totalSecs = (song?.duration ?? 0) || castSongDuration;
+   if (totalSecs > 0 && absCurrent / totalSecs >= 0.5) scrobbleCurrentSong();
    if (s.playerState === 'BUFFERING' && totalSecs > 0 &&
        absCurrent >= totalSecs - 2) {
       if (castEndStallTime === null)
@@ -1334,6 +1336,7 @@ function onCastStatus(s) {
          castWasPlaying   = false;
          castStartOffset  = 0;
          lastCastPosition = 0;
+         scrobbleCurrentSong();
          player.index++;
          playerPlay();
          return;
