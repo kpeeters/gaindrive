@@ -1259,6 +1259,7 @@ let castPlayerState     = 'IDLE'; // playerState from last SSE push (for interpo
 let castBaseTime        = 0;      // s.currentTime from last SSE push
 let castBaseAt          = 0;      // Date.now() (ms) when castBaseTime was recorded
 let castSongDuration    = 0;      // total song duration; fallback when queue is not loaded
+let castEndStallTime    = null;   // Date.now() when BUFFERING-at-end stall started
 let castExpectedPosition = null;  // absolute position we asked the receiver to
                                   // seek to via the most recent LOAD; cleared
                                   // once the receiver reports playback near it
@@ -1293,10 +1294,16 @@ function onCastStatus(s) {
    castPlayerState = s.playerState;
 
    if (s.playerState === 'IDLE') {
-      // Only advance on a genuine end-of-track (idleReason === 'FINISHED').
-      // Any other IDLE — including the transient state while a new LOAD is
-      // being processed — must not trigger an advance.
-      if (s.idleReason === 'FINISHED' &&
+      castEndStallTime = null;
+      // Advance on a clean end-of-track (FINISHED) or on ERROR when the
+      // last known position was within 10 s of the end — the Chromecast
+      // sometimes raises IDLE/ERROR instead of IDLE/FINISHED for OGG/FLAC
+      // streams whose HTTP connection closes without a recognised EOS frame.
+      const song      = player.queue[player.index];
+      const totalSecs = (song?.duration ?? 0) || castSongDuration;
+      const nearEnd   = totalSecs > 0 && lastCastPosition >= totalSecs - 10;
+      if ((s.idleReason === 'FINISHED' ||
+           (s.idleReason === 'ERROR' && nearEnd)) &&
           castWasPlaying && player.index < player.queue.length - 1) {
          castWasPlaying   = false;
          castStartOffset  = 0;
@@ -1311,8 +1318,29 @@ function onCastStatus(s) {
    const absCurrent = castStartOffset + s.currentTime;
    lastCastPosition = absCurrent;
 
+   // Detect the "stuck BUFFERING at t≈dur" Chromecast quirk: the receiver
+   // parks in BUFFERING with currentTime==duration instead of going to
+   // IDLE/FINISHED.  After 5 s of this, treat it as end-of-track.
    const song = player.queue[player.index];
    const totalSecs = (song?.duration ?? 0) || castSongDuration;
+   if (s.playerState === 'BUFFERING' && totalSecs > 0 &&
+       absCurrent >= totalSecs - 2) {
+      if (castEndStallTime === null)
+         castEndStallTime = Date.now();
+      else if (Date.now() - castEndStallTime >= 5000 &&
+               castWasPlaying &&
+               player.index < player.queue.length - 1) {
+         castEndStallTime = null;
+         castWasPlaying   = false;
+         castStartOffset  = 0;
+         lastCastPosition = 0;
+         player.index++;
+         playerPlay();
+         return;
+         }
+      } else {
+      castEndStallTime = null;
+      }
    const seek = document.getElementById('player-seek');
    if (!seek.dataset.seeking) {
       if (totalSecs > 0) seek.max = totalSecs;
