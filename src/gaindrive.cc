@@ -1636,7 +1636,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		int offset = std::max(0,               std::stoi(qp("offset", "0")));
 
 		auto entries = store_.get_recent_songs(user, size, offset);
-		int max_br   = user_max_bitrate(store_, user);
+		int max_br   = request_max_bitrate(store_, req);
 
 		bool use_json = (fmt_of(req) == "json");
 		std::string body;
