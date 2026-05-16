@@ -259,6 +259,14 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 		// Seek only — copy audio without re-encoding.
 		args.push_back("-c:a");
 		args.push_back("copy");
+		// The FLAC SEEKTABLE from the input has byte offsets for the
+		// original file.  After -ss seek those offsets no longer match
+		// the piped stream, so the Cast receiver navigates to wrong
+		// positions → MEDIA_DECODE (error 102).  Suppress it.
+		if (target_fmt == "flac") {
+			args.push_back("-write_seektable");
+			args.push_back("0");
+			}
 		}
 	args.push_back("pipe:1");
 
