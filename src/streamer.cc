@@ -255,12 +255,29 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 		args.push_back("-b:a");
 		args.push_back(std::to_string(target_bitrate) + "k");
 		}
+	else if (target_fmt == "flac") {
+		// Re-encode rather than copy: the copy muxer preserves the input
+		// SEEKTABLE whose byte offsets reference the original file, not the
+		// piped stream.  The Cast receiver uses the SEEKTABLE for internal
+		// frame navigation; wrong offsets produce a mid-stream decode error
+		// (detailedErrorCode 102).  The FLAC encoder omits the SEEKTABLE for
+		// non-seekable (pipe) output, producing a clean stream.  FLAC is
+		// lossless so re-encoding is bit-identical at the PCM level.
+		args.push_back("-c:a");
+		args.push_back("flac");
+		}
 	else {
 		// Seek only — copy audio without re-encoding.
 		args.push_back("-c:a");
 		args.push_back("copy");
 		}
 	args.push_back("pipe:1");
+
+	{
+	std::string cmd;
+	for (const auto& a : args) { cmd += ' '; cmd += a; }
+	std::cout << stamp() << "stream: ffmpeg:" << cmd << std::endl;
+	}
 
 	auto proc = std::make_shared<reproc::process>();
 	reproc::options opts;
@@ -327,16 +344,15 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 			if (get_position) {
 				float pos = get_position();
 				if (pos < CAST_POS_BUFFERING) return false;
-				if (bps > 0) {
+				// Only throttle during PLAYING (pos >= 0); suppress entirely during
+				// BUFFERING so the receiver can fill its buffer before playback
+				// begins — matching serve_direct's behaviour and the documented
+				// BUFFERING bypass.  TCP backpressure paces the actual send rate.
+				if (bps > 0 && pos >= 0.0f) {
 					float audio_sent = static_cast<float>(*total_sent) / bps;
-					// During BUFFERING (pos=-1), treat effective position as 0 so
-					// the throttle applies immediately and the receiver's buffer
-					// can't be flooded before playback begins.
-					float effective_pos = (pos >= 0.0f) ? pos : 0.0f;
-					float buf_secs   = audio_sent - effective_pos;
+					float buf_secs   = audio_sent - pos;
 					if (buf_secs > TARGET_BUF) {
-						// See serve_direct: cap single-sleep at 2 s so we never
-						// silence the server past the receiver's network timeout.
+						// Cap single-sleep at 2 s — see serve_direct comment.
 						auto sleep_ms = std::min(static_cast<long>(
 						    (buf_secs - TARGET_BUF) * 1000.0f), 2000L);
 						auto deadline = std::chrono::steady_clock::now()
