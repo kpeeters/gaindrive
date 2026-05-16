@@ -1478,9 +1478,12 @@ async function selectCastDevice(id) {
       // can redirect it to the cast device (the redirect only fires on a
       // new request; if audio was already playing it never re-requested).
       // Capture the current position so the cast device resumes from there.
+      // For transcoded streams (FLAC played in-browser) audio.currentTime is
+      // relative to the start of the current stream chunk; localOffset holds
+      // the absolute track position where that chunk begins.
       castWasPlaying = false;
       if (player.index >= 0) {
-         const offset = player.audio.currentTime;
+         const offset = (player.localOffset || 0) + player.audio.currentTime;
          castStartOffset  = offset;
          lastCastPosition = offset;
          player.audio.pause();
