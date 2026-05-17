@@ -31,53 +31,6 @@ static const char* codec_to_mime(const std::string& codec)
 static constexpr float  TARGET_BUF  = 15.0f;
 static constexpr size_t WRITE_CHUNK = 4096;
 
-// Patches the SEEKTABLE out of a piped FLAC stream by replacing it with
-// PADDING of the same length.  ffmpeg -c:a copy -f flac copies the input
-// SEEKTABLE verbatim; its byte offsets reference the original file, so after
-// an -ss seek they point to wrong positions in the piped output → Cast
-// receiver raises MEDIA_DECODE (error 102).
-struct FlacSeektablePatcher {
-	std::vector<uint8_t> head;       // all bytes buffered until metadata ends
-	bool done        = false;        // true once is_last metadata block is seen
-	bool passthrough = false;        // true if output is not a FLAC stream
-
-	// Feed n bytes.  Returns true when head is ready to drain.
-	bool feed(const uint8_t* data, size_t n)
-		{
-		if (done || passthrough) return true;
-		head.insert(head.end(), data, data + n);
-		return scan();
-		}
-
-private:
-	bool scan()
-		{
-		if (head.size() < 4) return false;
-		if (head[0] != 'f' || head[1] != 'L' ||
-		    head[2] != 'a' || head[3] != 'C') {
-			passthrough = true; return true;
-			}
-		size_t pos = 4;
-		while (true) {
-			if (pos + 4 > head.size()) return false;
-			uint8_t  hdr     = head[pos];
-			bool     is_last = (hdr >> 7) & 1;
-			uint8_t  btype   = hdr & 0x7fu;
-			uint32_t blen    = (static_cast<uint32_t>(head[pos+1]) << 16)
-			                 | (static_cast<uint32_t>(head[pos+2]) <<  8)
-			                 |  static_cast<uint32_t>(head[pos+3]);
-			if (pos + 4 + blen > head.size()) return false;
-			if (btype == 3) {  // SEEKTABLE → PADDING
-				head[pos] = static_cast<uint8_t>((hdr & 0x80u) | 1u);
-				std::fill(head.begin() + pos + 4,
-				          head.begin() + pos + 4 + blen, uint8_t(0));
-				}
-			pos += 4 + blen;
-			if (is_last) { done = true; return true; }
-			}
-		}
-	};
-
 // ---- Streamer --------------------------------------------------------
 
 void Streamer::serve(const httplib::Request& req, httplib::Response& res,
@@ -339,10 +292,6 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 	          << " (src_bitrate=" << song.bitrate << ")" << std::endl;
 	// total_sent persists across repeated provider calls (one per chunk).
 	auto total_sent = std::make_shared<size_t>(0);
-	// Patch out the SEEKTABLE for piped FLAC (see FlacSeektablePatcher).
-	auto patcher = (target_fmt == "flac" && target_bitrate == 0)
-	    ? std::make_shared<FlacSeektablePatcher>()
-	    : std::shared_ptr<FlacSeektablePatcher>{};
 
 	// Content-length is unknown for transcoded output.  Use the *chunked*
 	// content-provider variant, not the plain unknown-length one — the
@@ -358,48 +307,28 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 	auto t_start = std::chrono::steady_clock::now();
 	res.set_chunked_content_provider(
 		codec_to_mime(target_fmt),
-		[proc, bps, total_sent, t_start, patcher,
+		[proc, bps, total_sent, t_start,
 		 get_position = std::move(get_position)]
 		(size_t /*offset*/, httplib::DataSink& sink) {
 			if (get_position && get_position() < CAST_POS_BUFFERING) {
 				std::cout << stamp() << "stream: transcoded abort (gen mismatch or stop)" << std::endl;
 				return false;
 				}
-			uint8_t        direct_buf[65536];
-			const uint8_t* write_ptr;
-			size_t         write_n;
-			if (patcher && !patcher->done && !patcher->passthrough) {
-				// Buffer FLAC metadata blocks, patch SEEKTABLE → PADDING,
-				// then drain once we've seen the is_last block header.
-				auto [n, err] = proc->read(reproc::stream::out, direct_buf, sizeof(direct_buf));
-				if (n == 0 || err) {
-					if (err && err != std::make_error_code(std::errc::broken_pipe))
-						std::cout << stamp() << "stream: ffmpeg pipe error: "
-						          << err.message() << std::endl;
-					sink.done();
-					return false;
-					}
-				if (!patcher->feed(direct_buf, n)) return true; // still accumulating
-				write_ptr = patcher->head.data();
-				write_n   = patcher->head.size();
-				} else {
-				auto [n, err] = proc->read(reproc::stream::out, direct_buf, sizeof(direct_buf));
-				if (n == 0 || err) {
-					// Check err before n: reproc wraps negative C return values into
-					// size_t, so err is the reliable EOF/error indicator.
-					if (err && err != std::make_error_code(std::errc::broken_pipe))
-						std::cout << stamp() << "stream: ffmpeg pipe error: "
-						          << err.message() << std::endl;
-					sink.done();
-					return false;
-					}
-				write_ptr = direct_buf;
-				write_n   = n;
+			uint8_t buf[65536];
+			auto [n, err] = proc->read(reproc::stream::out, buf, sizeof(buf));
+			if (n == 0 || err) {
+				// Check err before n: reproc wraps negative C return values into
+				// size_t, so err is the reliable EOF/error indicator.
+				if (err && err != std::make_error_code(std::errc::broken_pipe))
+					std::cout << stamp() << "stream: ffmpeg pipe error: "
+					          << err.message() << std::endl;
+				sink.done();
+				return false;
 				}
-			for (size_t off = 0; off < write_n; ) {
+			for (size_t off = 0; off < n; ) {
 				if (get_position && get_position() < CAST_POS_BUFFERING) return false;
-				size_t piece = std::min(WRITE_CHUNK, write_n - off);
-				if (!sink.write(reinterpret_cast<const char*>(write_ptr + off), piece)) {
+				size_t piece = std::min(WRITE_CHUNK, n - off);
+				if (!sink.write(reinterpret_cast<char*>(buf + off), piece)) {
 					std::cout << stamp() << "stream: transcoded write failed at "
 					          << *total_sent << " bytes" << std::endl;
 					return false;

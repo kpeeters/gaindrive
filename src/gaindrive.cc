@@ -2982,27 +2982,14 @@ GainDrive::GainDrive(const std::string& db_path,
 					if (host.empty()) host = "localhost";
 					std::string proto = req.get_header_value("X-Forwarded-Proto");
 					if (proto.empty()) proto = "http";
-					// last_known_time is relative for non-MP3 (server-side seek)
-					// and absolute for MP3 (native seek); adding last_cast_offset_
-					// always yields the absolute song position.
-					float pos = last_cast_offset_ + cast_manager_.last_known_time();
+					float pos = cast_manager_.last_known_time();
 					std::string url = proto + "://" + host + "/rest/stream.view"
 					                + "?id=" + last_cast_song_id_
 					                + "&castToken=" + cast_manager_.token();
-					// Same MP3-vs-other split as castLoad.view.
-					if (pos > 0.5f && song->codec != "mp3") {
-						url += "&timeOffset="
-						     + std::to_string(static_cast<int>(pos));
-						last_cast_offset_ = pos;
-						cast_manager_.load(url, codec_to_mime(song->codec),
-						                   0.0f, song->duration);
-						}
-					else {
-						last_cast_offset_ = 0.0f;
-						cast_manager_.load(url, codec_to_mime(song->codec),
-						                   pos > 0.5f ? pos : 0.0f,
-						                   song->duration);
-						}
+					last_cast_offset_ = 0.0f;
+					cast_manager_.load(url, codec_to_mime(song->codec),
+					                   pos > 0.5f ? pos : 0.0f,
+					                   song->duration);
 					}
 				}
 			}
@@ -3054,23 +3041,9 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (to_it != req.params.end() && !to_it->second.empty())
 			cast_offset = std::stof(to_it->second);
 		last_cast_song_id_ = it->second;
-		// Native seek (currentTime in LOAD, full file at the URL) only works
-		// for MP3.  For FLAC the Default Media Receiver echoes the requested
-		// currentTime in MEDIA_STATUS but actually plays from byte 0; other
-		// non-MP3 formats are presumed to have the same problem.  Fall back
-		// to server-side seek for those: encode the seek into the URL and
-		// tell the receiver currentTime=0 so it doesn't try to seek further.
-		if (cast_offset > 0.0f && song->codec != "mp3") {
-			url += "&timeOffset=" + std::to_string(static_cast<int>(cast_offset));
-			last_cast_offset_ = cast_offset;
-			cast_manager_.load(url, codec_to_mime(song->codec),
-			                   0.0f, song->duration);
-			}
-		else {
-			last_cast_offset_ = 0.0f;
-			cast_manager_.load(url, codec_to_mime(song->codec),
-			                   cast_offset, song->duration);
-			}
+		last_cast_offset_ = 0.0f;
+		cast_manager_.load(url, codec_to_mime(song->codec),
+		                   cast_offset, song->duration);
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
 		});
