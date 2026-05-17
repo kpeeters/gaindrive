@@ -1071,6 +1071,26 @@ body {
    display: block;
    width: 100%;
    margin: 0;
+   cursor: zoom-in;
+}
+
+/* Edit mode: remove zoom cursor while pencil button is active. */
+.cover-hero-wrap.editing .album-hero {
+   cursor: default;
+}
+
+/* ── Cover lightbox ─────────────────────────────────────────────────────── */
+
+#cover-lightbox {
+   cursor: zoom-out;
+}
+
+#cover-lightbox-img {
+   max-width: 90vw;
+   max-height: 90vh;
+   object-fit: contain;
+   display: block;
+   border-radius: 4px;
 }
 
 .carousel-btn {

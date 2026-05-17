@@ -122,6 +122,11 @@ function _closeCoverArtDialog() {
    _coverArtCb = null;
    }
 
+function showLightbox(src) {
+   document.getElementById('cover-lightbox-img').src = src;
+   document.getElementById('cover-lightbox').classList.remove('hidden');
+   }
+
 // ── Login ───────────────────────────────────────────────────────────────────
 
 async function tryLogin(server, user, password) {
@@ -2150,6 +2155,12 @@ function setupPlayer() {
       });
 
    document.getElementById('player-cast').addEventListener('click', openCastModal);
+   document.getElementById('cover-lightbox').addEventListener('click', () => {
+      const el = document.getElementById('cover-lightbox');
+      el.classList.add('hidden');
+      document.getElementById('cover-lightbox-img').src = '';
+      });
+
    document.getElementById('cast-close-btn').addEventListener('click', () => {
       document.getElementById('cast-modal').classList.add('hidden');
       });
@@ -2325,6 +2336,12 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       heroImg.dataset.coverSize = 400;
       heroImg.src = apiUrl('getCoverArt', {id: album.coverArt, size: 400});
       heroImg.alt = albumTitle;
+      heroImg.addEventListener('click', () => {
+         if (heroWrap.classList.contains('editing')) return;
+         const params = {id: album.coverArt};
+         if (carouselIdx > 0) params.index = carouselIdx;
+         showLightbox(apiUrl('getCoverArt', params));
+         });
 
       const nextBtn = document.createElement('button');
       nextBtn.className = 'carousel-btn carousel-next';
@@ -2488,6 +2505,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
             });
          });
       heroWrap.appendChild(pencilBtn);
+      heroWrap.classList.add('editing');
 
       // Replace track num/title spans with inputs; swap dur span for year input.
       pane.querySelectorAll('.track-row').forEach(row => {
@@ -2685,6 +2703,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
 
       // Remove pencil button and edit-mode placeholder from heroWrap.
       heroWrap.querySelector('.cover-edit-btn')?.remove();
+      heroWrap.classList.remove('editing');
       placeholder?.remove();
       placeholder = null;
 
