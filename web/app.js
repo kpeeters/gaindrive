@@ -1411,10 +1411,10 @@ async function openInfoModal() {
    let sentSuffix, sentBitRate;
    if (player.streamFormat) {
       // Streamer's format_change branch: target bitrate is max_bitrate when
-      // the user has one set, else 128 kbps (ffmpeg default for our pipe).
+      // the user has one set and it's below 320, else 320 kbps.
       sentSuffix  = player.streamFormat;
       const cap   = currentUser?.maxBitRate || 0;
-      sentBitRate = cap > 0 ? cap : 128;
+      sentBitRate = (cap > 0 && cap < 320) ? cap : 320;
       }
    else {
       sentSuffix  = song.transcodedSuffix  ?? song.suffix;
