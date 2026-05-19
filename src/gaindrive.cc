@@ -2071,6 +2071,13 @@ GainDrive::GainDrive(const std::string& db_path,
 			};
 
 		int         max_bitrate = std::stoi(qp("maxBitRate", "0"));
+		// Enforce the user account's max_bitrate as a ceiling (0 = unlimited).
+		// Cast requests authenticate via token and have no 'u' param; skip for those.
+		if (!cast_authed) {
+			int acct_max = request_max_bitrate(req, store_);
+			if (acct_max > 0 && (max_bitrate == 0 || max_bitrate > acct_max))
+				max_bitrate = acct_max;
+			}
 		std::string format      = qp("format");
 		// The Chromecast sometimes probes the stream URL with timeOffset stripped.
 		// Always use the authoritative offset stored at castLoad time for cast

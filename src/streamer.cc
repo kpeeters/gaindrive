@@ -57,7 +57,7 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	int         target_bitrate;
 	if (format_change) {
 		target_fmt     = format;
-		target_bitrate = (max_bitrate > 0) ? max_bitrate : 128;
+		target_bitrate = (max_bitrate > 0 && max_bitrate < 320) ? max_bitrate : 320;
 		}
 	else if (bitrate_limit) {
 		target_fmt     = "mp3";
