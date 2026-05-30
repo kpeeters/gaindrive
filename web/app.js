@@ -160,6 +160,18 @@ async function tryLogin(server, user, password) {
    creds.save(server, user, password);
 }
 
+async function detectSubsonicOrigin() {
+   if (window.location.protocol === 'file:') return false;
+   try {
+      const resp = await fetch('/rest/ping.view?v=1.16.1&c=gaindrive-web&f=json');
+      if (!resp.ok) return false;
+      const data = await resp.json();
+      return 'subsonic-response' in data;
+   } catch {
+      return false;
+   }
+}
+
 // ── Multi-pane navigation ────────────────────────────────────────────────────
 
 // The content area is divided into three fixed panes (artists / albums / tracks)
@@ -3271,10 +3283,18 @@ console.log('[boot] checking saved credentials');
       try {
          await tryLogin(server, user, password);
          showShell();
+         return;
       } catch (err) {
          console.warn('[boot] saved credentials failed, clearing', err);
          creds.clear();
          showLogin();
       }
+   }
+   if (await detectSubsonicOrigin()) {
+      console.log('[boot] self-hosted: hiding server field');
+      const serverInput = document.getElementById('server');
+      serverInput.value = window.location.origin;
+      serverInput.hidden = true;
+      document.querySelector('label[for="server"]').hidden = true;
    }
 })();
