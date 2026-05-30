@@ -373,6 +373,164 @@ static bool check_cast_perm(const httplib::Request& req, httplib::Response& res,
 
 // ---- Artist info helper -----------------------------------------------
 
+// Performs MusicBrainz/Wikipedia lookup for an artist, caching the result.
+// Returns cached data immediately when available; triggers a fresh fetch otherwise.
+static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::string& name,
+                                                         MediaStore& store)
+	{
+	auto cached = store.get_cached_artist_info(id);
+	if (cached) {
+		std::cout << stamp() << "getArtistInfo [" << name << "] cached"
+		          << " mbid=" << (cached->mbid.empty() ? "(none)" : cached->mbid)
+		          << std::endl;
+		return *cached;
+		}
+
+	std::cout << stamp() << "getArtistInfo [" << name << "] querying MusicBrainz"
+	          << std::endl;
+	MediaStore::CachedArtistInfo info;
+	httplib::SSLClient mb("musicbrainz.org");
+	mb.set_default_headers({
+		{"User-Agent", "GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+		});
+	httplib::Params params{
+		{"query", "artist:\"" + name + "\""},
+		{"limit", "1"},
+		{"fmt",   "json"}
+		};
+	auto r = mb.Get("/ws/2/artist", params, httplib::Headers{});
+	if (!r) {
+		std::cout << stamp() << "getArtistInfo [" << name
+		          << "] MusicBrainz request failed (no response)" << std::endl;
+		}
+	else if (r->status != 200) {
+		std::cout << stamp() << "getArtistInfo [" << name
+		          << "] MusicBrainz HTTP " << r->status << std::endl;
+		}
+	else {
+		auto j = nlohmann::json::parse(r->body, nullptr, false);
+		if (!j.is_discarded() && j.contains("artists") && !j["artists"].empty()) {
+			info.mbid = j["artists"][0].value("id", "");
+			if (!info.mbid.empty())
+				info.last_fm_url = "https://www.last.fm/music/" + url_encode(name);
+			}
+		}
+
+	// Step 2 — MusicBrainz URL relations → Wikipedia article URL.
+	if (!info.mbid.empty()) {
+		std::this_thread::sleep_for(std::chrono::seconds(1));
+		httplib::Params p2{{"inc","url-rels"},{"fmt","json"}};
+		auto r2 = mb.Get("/ws/2/artist/" + info.mbid, p2, httplib::Headers{});
+		if (!r2) {
+			std::cout << stamp() << "getArtistInfo [" << name
+			          << "] MusicBrainz url-rels request failed" << std::endl;
+			}
+		else if (r2->status != 200) {
+			std::cout << stamp() << "getArtistInfo [" << name
+			          << "] MusicBrainz url-rels HTTP " << r2->status << std::endl;
+			}
+		else {
+			auto j2 = nlohmann::json::parse(r2->body, nullptr, false);
+			auto rels = j2.value("relations", nlohmann::json::array());
+			std::cout << stamp() << "getArtistInfo [" << name
+			          << "] MusicBrainz url-rels: " << rels.size() << " relation(s)";
+			for (auto& rel : rels)
+				std::cout << " [" << rel.value("type","?") << "]";
+			std::cout << std::endl;
+
+			// Prefer direct wikipedia relation; fall back to wikidata.
+			std::string wiki_title;
+			for (auto& rel : rels) {
+				std::string type     = rel.value("type","");
+				std::string resource = rel.value("url", nlohmann::json::object())
+				                          .value("resource","");
+				if (type == "allmusic" && info.allmusic_url.empty()) {
+					info.allmusic_url = resource;
+					std::cout << stamp() << "getArtistInfo [" << name
+					          << "] AllMusic: " << resource << std::endl;
+					}
+				else if (type == "wikipedia") {
+					auto pos = resource.find("/wiki/");
+					if (pos != std::string::npos) {
+						wiki_title = resource.substr(pos + 6);
+						std::cout << stamp() << "getArtistInfo [" << name
+						          << "] Wikipedia (direct): " << wiki_title << std::endl;
+						break;
+						}
+					}
+				else if (type == "wikidata" && wiki_title.empty()) {
+					auto pos = resource.rfind('/');
+					if (pos == std::string::npos) continue;
+					std::string entity = resource.substr(pos + 1);
+					std::cout << stamp() << "getArtistInfo [" << name
+					          << "] Wikidata entity: " << entity << std::endl;
+					httplib::SSLClient wd("www.wikidata.org");
+					wd.set_default_headers({
+						{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+						});
+					auto rwd = wd.Get("/w/api.php",
+						httplib::Params{
+							{"action","wbgetentities"},{"ids",entity},
+							{"props","sitelinks"},{"sitefilter","enwiki"},
+							{"format","json"}
+							},
+						httplib::Headers{});
+					if (rwd && rwd->status == 200) {
+						auto jwd = nlohmann::json::parse(rwd->body, nullptr, false);
+						if (!jwd.is_discarded())
+							wiki_title = jwd["entities"][entity]["sitelinks"]["enwiki"]
+							                .value("title","");
+						if (!wiki_title.empty())
+							std::cout << stamp() << "getArtistInfo [" << name
+							          << "] Wikipedia (via Wikidata): "
+							          << wiki_title << std::endl;
+						}
+					}
+				}
+
+			// Step 3 — Wikipedia REST summary → bio + thumbnail.
+			if (!wiki_title.empty()) {
+				httplib::SSLClient wp("en.wikipedia.org");
+				wp.set_default_headers({
+					{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+					});
+				std::string path_title = wiki_title;
+				for (char& c : path_title) if (c == ' ') c = '_';
+				auto r3 = wp.Get("/api/rest_v1/page/summary/" + path_title,
+				                 httplib::Params{}, httplib::Headers{});
+				if (!r3) {
+					std::cout << stamp() << "getArtistInfo [" << name
+					          << "] Wikipedia request failed" << std::endl;
+					}
+				else if (r3->status != 200) {
+					std::cout << stamp() << "getArtistInfo [" << name
+					          << "] Wikipedia HTTP " << r3->status << std::endl;
+					}
+				else {
+					auto j3 = nlohmann::json::parse(r3->body, nullptr, false);
+					if (!j3.is_discarded()) {
+						info.biography = j3.value("extract","");
+						info.wiki_url  = "https://en.wikipedia.org/wiki/" + wiki_title;
+						if (j3.contains("thumbnail"))
+							info.image_url = j3["thumbnail"].value("source","");
+						std::cout << stamp() << "getArtistInfo [" << name
+						          << "] bio=" << info.biography.size()
+						          << " chars, image="
+						          << (info.image_url.empty() ? "(none)" : info.image_url)
+						          << std::endl;
+						}
+					}
+				}
+			}
+		}
+
+	store.cache_artist_info(id, info);
+	std::cout << stamp() << "getArtistInfo [" << name << "] cached"
+	          << " mbid=" << (info.mbid.empty() ? "(none)" : info.mbid)
+	          << std::endl;
+	return info;
+	}
+
 // Shared implementation for getArtistInfo and getArtistInfo2.
 // key is "artistInfo" or "artistInfo2" — controls the XML element / JSON key.
 static void handle_artist_info(const httplib::Request& req, httplib::Response& res,
@@ -393,158 +551,7 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 	std::string name = store.get_folder_name(id);
 	if (name.empty()) { err(70, "Artist not found."); return; }
 
-	auto cached = store.get_cached_artist_info(id);
-	MediaStore::CachedArtistInfo info;
-	if (cached) {
-		info = *cached;
-		std::cout << stamp() << "getArtistInfo [" << name << "] cached"
-		          << " mbid=" << (info.mbid.empty() ? "(none)" : info.mbid)
-		          << std::endl;
-		}
-	else {
-		// Query MusicBrainz; cache result (even if empty) to avoid repeat lookups.
-		std::cout << stamp() << "getArtistInfo [" << name << "] querying MusicBrainz"
-		          << std::endl;
-		httplib::SSLClient mb("musicbrainz.org");
-		mb.set_default_headers({
-			{"User-Agent", "GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
-			});
-		httplib::Params params{
-			{"query", "artist:\"" + name + "\""},
-			{"limit", "1"},
-			{"fmt",   "json"}
-			};
-		auto r = mb.Get("/ws/2/artist", params, httplib::Headers{});
-		if (!r) {
-			std::cout << stamp() << "getArtistInfo [" << name
-			          << "] MusicBrainz request failed (no response)" << std::endl;
-			}
-		else if (r->status != 200) {
-			std::cout << stamp() << "getArtistInfo [" << name
-			          << "] MusicBrainz HTTP " << r->status << std::endl;
-			}
-		else {
-			auto j = nlohmann::json::parse(r->body, nullptr, false);
-			if (!j.is_discarded() && j.contains("artists") && !j["artists"].empty()) {
-				info.mbid = j["artists"][0].value("id", "");
-				if (!info.mbid.empty())
-					info.last_fm_url = "https://www.last.fm/music/" + url_encode(name);
-				}
-			}
-
-		// Step 2 — MusicBrainz URL relations → Wikipedia article URL.
-		if (!info.mbid.empty()) {
-			std::this_thread::sleep_for(std::chrono::seconds(1));
-			httplib::Params p2{{"inc","url-rels"},{"fmt","json"}};
-			auto r2 = mb.Get("/ws/2/artist/" + info.mbid, p2, httplib::Headers{});
-			if (!r2) {
-				std::cout << stamp() << "getArtistInfo [" << name
-				          << "] MusicBrainz url-rels request failed" << std::endl;
-				}
-			else if (r2->status != 200) {
-				std::cout << stamp() << "getArtistInfo [" << name
-				          << "] MusicBrainz url-rels HTTP " << r2->status << std::endl;
-				}
-			else {
-				auto j2 = nlohmann::json::parse(r2->body, nullptr, false);
-				auto rels = j2.value("relations", nlohmann::json::array());
-				std::cout << stamp() << "getArtistInfo [" << name
-				          << "] MusicBrainz url-rels: " << rels.size() << " relation(s)";
-				for (auto& rel : rels)
-					std::cout << " [" << rel.value("type","?") << "]";
-				std::cout << std::endl;
-
-				// Prefer direct wikipedia relation; fall back to wikidata.
-				std::string wiki_title;
-				for (auto& rel : rels) {
-					std::string type     = rel.value("type","");
-					std::string resource = rel.value("url", nlohmann::json::object())
-					                          .value("resource","");
-					if (type == "allmusic" && info.allmusic_url.empty()) {
-						info.allmusic_url = resource;
-						std::cout << stamp() << "getArtistInfo [" << name
-						          << "] AllMusic: " << resource << std::endl;
-						}
-					else if (type == "wikipedia") {
-						auto pos = resource.find("/wiki/");
-						if (pos != std::string::npos) {
-							wiki_title = resource.substr(pos + 6);
-							std::cout << stamp() << "getArtistInfo [" << name
-							          << "] Wikipedia (direct): " << wiki_title << std::endl;
-							break;
-							}
-						}
-					else if (type == "wikidata" && wiki_title.empty()) {
-						auto pos = resource.rfind('/');
-						if (pos == std::string::npos) continue;
-						std::string entity = resource.substr(pos + 1);
-						std::cout << stamp() << "getArtistInfo [" << name
-						          << "] Wikidata entity: " << entity << std::endl;
-						httplib::SSLClient wd("www.wikidata.org");
-						wd.set_default_headers({
-							{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
-							});
-						auto rwd = wd.Get("/w/api.php",
-							httplib::Params{
-								{"action","wbgetentities"},{"ids",entity},
-								{"props","sitelinks"},{"sitefilter","enwiki"},
-								{"format","json"}
-								},
-							httplib::Headers{});
-						if (rwd && rwd->status == 200) {
-							auto jwd = nlohmann::json::parse(rwd->body, nullptr, false);
-							if (!jwd.is_discarded())
-								wiki_title = jwd["entities"][entity]["sitelinks"]["enwiki"]
-								                .value("title","");
-							if (!wiki_title.empty())
-								std::cout << stamp() << "getArtistInfo [" << name
-								          << "] Wikipedia (via Wikidata): "
-								          << wiki_title << std::endl;
-							}
-						}
-					}
-
-				// Step 3 — Wikipedia REST summary → bio + thumbnail.
-				if (!wiki_title.empty()) {
-					httplib::SSLClient wp("en.wikipedia.org");
-					wp.set_default_headers({
-						{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
-						});
-					std::string path_title = wiki_title;
-					for (char& c : path_title) if (c == ' ') c = '_';
-					auto r3 = wp.Get("/api/rest_v1/page/summary/" + path_title,
-					                 httplib::Params{}, httplib::Headers{});
-					if (!r3) {
-						std::cout << stamp() << "getArtistInfo [" << name
-						          << "] Wikipedia request failed" << std::endl;
-						}
-					else if (r3->status != 200) {
-						std::cout << stamp() << "getArtistInfo [" << name
-						          << "] Wikipedia HTTP " << r3->status << std::endl;
-						}
-					else {
-						auto j3 = nlohmann::json::parse(r3->body, nullptr, false);
-						if (!j3.is_discarded()) {
-							info.biography = j3.value("extract","");
-							info.wiki_url  = "https://en.wikipedia.org/wiki/" + wiki_title;
-							if (j3.contains("thumbnail"))
-								info.image_url = j3["thumbnail"].value("source","");
-							std::cout << stamp() << "getArtistInfo [" << name
-							          << "] bio=" << info.biography.size()
-							          << " chars, image="
-							          << (info.image_url.empty() ? "(none)" : info.image_url)
-							          << std::endl;
-							}
-						}
-					}
-				}
-			}
-
-		store.cache_artist_info(id, info);
-		std::cout << stamp() << "getArtistInfo [" << name << "] cached"
-		          << " mbid=" << (info.mbid.empty() ? "(none)" : info.mbid)
-		          << std::endl;
-		}
+	auto info = resolve_artist_info(id, name, store);
 
 	// Build response. All fields are child elements per the Subsonic spec.
 	auto add_text_el = [](XMLDocument& doc, XMLElement* parent,
@@ -1696,9 +1703,17 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		int folder_id = std::stoi(it->second);
 		std::string rel_path = store_.get_cover_path(folder_id);
-		if (rel_path.empty())
-			rel_path = store_.get_artist_cover_path(folder_id);
 		if (rel_path.empty()) {
+			// For artist folder IDs: trigger MusicBrainz/Wikipedia lookup if needed
+			// and serve the portrait. Never fall back to album cover art.
+			std::string name = store_.get_folder_name(folder_id);
+			if (!name.empty()) {
+				auto artist_info = resolve_artist_info(folder_id, name, store_);
+				if (!artist_info.image_url.empty()) {
+					serve_artist_portrait(res, artist_info.image_url, folder_id);
+					return;
+					}
+				}
 			res.status = 404;
 			return;
 			}
@@ -3295,6 +3310,46 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::thread([this]{ store_.scan(); }).detach();
 	cast_manager_.discover_background();
 	watcher_.start();
+	}
+
+void GainDrive::serve_artist_portrait(httplib::Response& res,
+                                      const std::string& image_url,
+                                      int folder_id)
+	{
+	{
+	std::lock_guard<std::mutex> lk(artist_img_cache_mu_);
+	auto it = artist_img_cache_.find(folder_id);
+	if (it != artist_img_cache_.end()) {
+		auto& [ct, body] = it->second;
+		res.set_content(body.c_str(), body.size(), ct.c_str());
+		return;
+		}
+	}
+
+	// Parse https://host/path
+	const std::string prefix = "https://";
+	if (image_url.rfind(prefix, 0) != 0) { res.status = 404; return; }
+	auto rest     = image_url.substr(prefix.size());
+	auto slash    = rest.find('/');
+	if (slash == std::string::npos) { res.status = 404; return; }
+	std::string host = rest.substr(0, slash);
+	std::string path = rest.substr(slash);
+
+	httplib::SSLClient cli(host);
+	cli.set_default_headers({
+		{"User-Agent", "GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+		});
+	auto r = cli.Get(path.c_str());
+	if (!r || r->status != 200) { res.status = 404; return; }
+
+	std::string ct = r->get_header_value("Content-Type");
+	if (ct.empty()) ct = "image/jpeg";
+
+	{
+	std::lock_guard<std::mutex> lk(artist_img_cache_mu_);
+	artist_img_cache_.emplace(folder_id, std::make_pair(ct, r->body));
+	}
+	res.set_content(r->body.c_str(), r->body.size(), ct.c_str());
 	}
 
 void GainDrive::cast_teardown()

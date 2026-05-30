@@ -188,11 +188,6 @@ class MediaStore {
 		// Returns the cover image path RELATIVE to music_root, or "" if none.
 		std::string get_cover_path(int folder_id);
 
-		// Like get_cover_path but for artist folders: finds the first child
-		// album folder (by name) that has a cover. Needed because artist
-		// folder IDs have no direct albums row.
-		std::string get_artist_cover_path(int artist_folder_id);
-
 		// Returns sorted paths (RELATIVE to music_root) of all image files in
 		// the album folder tree, excluding the main cover. Used to serve
 		// carousel images.

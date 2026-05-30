@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <httplib.h>
 
 #include "mediastore.hh"
@@ -41,6 +43,14 @@ class GainDrive {
 		// (last_cast_song_id_, last_cast_offset_). Called both from the
 		// stopCast endpoint and from the SSE watchdog thread.
 		void cast_teardown();
+
+		// Proxies an external artist portrait URL, caching the result in memory.
+		void serve_artist_portrait(httplib::Response& res,
+		                           const std::string& image_url, int folder_id);
+
+		// folder_id -> { Content-Type, body } for artist portrait images.
+		std::mutex                                        artist_img_cache_mu_;
+		std::unordered_map<int, std::pair<std::string, std::string>> artist_img_cache_;
 
 		FolderWatcher   watcher_;
 		httplib::Server server_;
