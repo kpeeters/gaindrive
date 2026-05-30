@@ -910,7 +910,11 @@ GainDrive::GainDrive(const std::string& db_path,
 		});
 
 	server_.set_logger([this](const httplib::Request& req, const httplib::Response& res) {
-		if (debug_ && !res.body.empty()) std::cout << res.body << "\n";
+		if (debug_ && !res.body.empty()) {
+			auto& ct = res.get_header_value("Content-Type");
+			if (ct.find("json") != std::string::npos || ct.find("xml") != std::string::npos)
+				std::cout << res.body << "\n";
+			}
 		std::cout << stamp(req.remote_addr)
 		          << req.method << " " << req.path;
 		if (!req.params.empty()) {
