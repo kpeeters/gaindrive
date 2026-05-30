@@ -69,6 +69,9 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 		target_bitrate = 0;
 		}
 
+	bool is_browser = req.get_header_value("User-Agent").find("Mozilla/")
+	                  != std::string::npos;
+
 	std::cout << stamp() << "stream ["
 	          << song.path << "] codec=" << song.codec
 	          << " src_bitrate=" << song.bitrate
@@ -77,6 +80,7 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	          << " time_offset=" << time_offset
 	          << " transcode=" << (needs_transcode ? "yes" : "no")
 	          << " cast=" << (cast_stream ? "yes" : "no")
+	          << " browser=" << (is_browser ? "yes" : "no")
 	          << std::endl;
 
 	if (needs_transcode) {
@@ -88,27 +92,26 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 		// is sequential anyway and there is nothing to seek into byte-wise.
 		const_cast<httplib::Request&>(req).ranges.clear();
 		serve_transcoded(res, song, target_bitrate, target_fmt, time_offset,
-		                 std::move(get_position));
+		                 is_browser, std::move(get_position));
 		}
 	else
-		serve_direct(req, res, song, std::move(get_position));
+		serve_direct(req, res, song, is_browser, std::move(get_position));
 	}
 
 void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
-                            const SongInfo& song,
+                            const SongInfo& song, bool is_browser,
                             std::function<float()> get_position)
 	{
-	// Adaptive buffering for both cast and non-cast:
-	// - Send the first 30 s of audio at full speed (pre-buffer) so playback
-	//   starts without a noticeable pause.
-	// - After the pre-buffer, throttle to stay at most TARGET_BUF seconds
-	//   ahead of the playback position.
-	//   Cast: real position from the receiver via get_position().
-	//   Non-cast: wall-clock elapsed time since the request started, used as
-	//   a proxy for playback position.  This keeps the HTTP connection alive
-	//   for the full track duration so the browser never needs to evict and
-	//   re-fetch buffered content — which was the root cause of intermittent
+	// Adaptive buffering:
+	// - Cast: send the first 30 s at full speed, then throttle to stay at most
+	//   TARGET_BUF seconds ahead of the receiver's reported playback position.
+	// - Browser (non-cast): same throttle using wall-clock elapsed time as a
+	//   proxy for playback position.  Keeps the HTTP connection alive for the
+	//   full track duration so the browser never needs to evict and re-fetch
+	//   buffered content — which was the root cause of intermittent
 	//   MEDIA_ERR_NETWORK errors on the audio element.
+	// - Other clients (Subsonic apps, etc.): no throttle; TCP backpressure
+	//   paces the send rate naturally.
 	const float  bytes_per_sec = (song.bitrate > 0)
 	    ? static_cast<float>(song.bitrate) * 125.0f
 	    : 0.0f;
@@ -120,7 +123,7 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 	res.set_content_provider(
 		static_cast<size_t>(song.file_size),
 		codec_to_mime(song.codec),
-		[path = song.path, bytes_per_sec, prebuf_bytes,
+		[path = song.path, bytes_per_sec, prebuf_bytes, is_browser,
 		 get_position = std::move(get_position)]
 		(size_t offset, size_t length, httplib::DataSink& sink) {
 			std::ifstream f(path, std::ios::binary);
@@ -200,9 +203,9 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 									}
 								}
 							}
-						} else if (bytes_sent > prebuf_bytes) {
-						// Non-cast: use wall-clock elapsed time since this request
-						// started as a proxy for the browser's playback position.
+						} else if (is_browser && bytes_sent > prebuf_bytes) {
+						// Browser (non-cast): use wall-clock elapsed time since this
+						// request started as a proxy for the browser's playback position.
 						// For a Range request starting at byte `offset`, the estimated
 						// absolute position is offset/bps + elapsed.  No cancellation
 						// check is needed (no get_position); the 2 s sleep cap keeps
@@ -229,7 +232,7 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 
 void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
                                 int target_bitrate, const std::string& target_fmt,
-                                int time_offset,
+                                int time_offset, bool is_browser,
                                 std::function<float()> get_position)
 	{
 	std::vector<std::string> args;
@@ -307,7 +310,7 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 	auto t_start = std::chrono::steady_clock::now();
 	res.set_chunked_content_provider(
 		codec_to_mime(target_fmt),
-		[proc, bps, total_sent, t_start,
+		[proc, bps, total_sent, t_start, is_browser,
 		 get_position = std::move(get_position)]
 		(size_t /*offset*/, httplib::DataSink& sink) {
 			if (get_position && get_position() < CAST_POS_BUFFERING) {
@@ -361,9 +364,9 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 							}
 						}
 					}
-				} else if (bps > 0) {
-				// Non-cast: use wall-clock elapsed time as a proxy for playback
-				// position, same approach as serve_direct.
+				} else if (is_browser && bps > 0) {
+				// Browser (non-cast): use wall-clock elapsed time as a proxy for
+				// playback position, same approach as serve_direct.
 				float elapsed    = std::chrono::duration<float>(
 				    std::chrono::steady_clock::now() - t_start).count();
 				float audio_sent = static_cast<float>(*total_sent) / bps;

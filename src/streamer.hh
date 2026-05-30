@@ -33,11 +33,11 @@ class Streamer {
 
 	private:
 		static void serve_direct(const httplib::Request& req, httplib::Response& res,
-		                         const SongInfo& song,
+		                         const SongInfo& song, bool is_browser,
 		                         std::function<float()> get_position);
 
 		static void serve_transcoded(httplib::Response& res, const SongInfo& song,
 		                             int target_bitrate, const std::string& target_fmt,
-		                             int time_offset,
+		                             int time_offset, bool is_browser,
 		                             std::function<float()> get_position);
 	};
