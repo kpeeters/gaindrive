@@ -910,11 +910,6 @@ GainDrive::GainDrive(const std::string& db_path,
 		});
 
 	server_.set_logger([this](const httplib::Request& req, const httplib::Response& res) {
-		if (debug_ && !res.body.empty()) {
-			auto ct = res.get_header_value("Content-Type");
-			if (ct == "application/json" || ct == "application/xml")
-				std::cout << res.body << "\n";
-			}
 		std::cout << stamp(req.remote_addr)
 		          << req.method << " " << req.path;
 		if (!req.params.empty()) {
@@ -927,6 +922,10 @@ GainDrive::GainDrive(const std::string& db_path,
 				}
 			}
 		std::cout << " -> " << res.status << std::endl;
+		if (debug_ && !res.body.empty() &&
+		    (res.content_type == "application/json" ||
+		     res.content_type == "application/xml"))
+			std::cout << res.body << "\n";
 		});
 
 	// Audio streams are consumed at playback speed, so the send buffer can stay
