@@ -534,7 +534,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 // Shared implementation for getArtistInfo and getArtistInfo2.
 // key is "artistInfo" or "artistInfo2" — controls the XML element / JSON key.
 static void handle_artist_info(const httplib::Request& req, httplib::Response& res,
-                                MediaStore& store, bool debug, const char* key)
+                                MediaStore& store, const char* key)
 	{
 	bool use_json = (fmt_of(req) == "json");
 	auto err = [&](int code, const char* msg) {
@@ -591,7 +591,6 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 			add_text_el(doc, ai, "largeImageUrl",  info.image_url);
 			root->InsertEndChild(ai);
 			});
-	if (debug) std::cout << body << "\n";
 	res.set_content(body, use_json ? "application/json" : "application/xml");
 	}
 
@@ -601,7 +600,7 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 // Searches MusicBrainz for the release-group, then resolves a Wikipedia
 // article via Wikidata if needed. Results are cached in album_info_cache.
 static void handle_album_info(const httplib::Request& req, httplib::Response& res,
-                               MediaStore& store, bool debug)
+                               MediaStore& store)
 	{
 	bool use_json = (fmt_of(req) == "json");
 	auto err = [&](int code, const char* msg) {
@@ -798,7 +797,6 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 			root->InsertEndChild(ai);
 			});
 		}
-	if (debug) std::cout << body << "\n";
 	res.set_content(body, use_json ? "application/json" : "application/xml");
 	}
 
@@ -807,7 +805,7 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 // Shared implementation for getAlbumList and getAlbumList2.
 // key is "albumList" or "albumList2".
 static void handle_album_list(const httplib::Request& req, httplib::Response& res,
-                               MediaStore& store, bool debug, const char* key)
+                               MediaStore& store, const char* key)
 	{
 	bool use_json = (fmt_of(req) == "json");
 
@@ -879,7 +877,6 @@ static void handle_album_list(const httplib::Request& req, httplib::Response& re
 				}
 			root->InsertEndChild(list);
 			});
-	if (debug) std::cout << body << "\n";
 	res.set_content(body, use_json ? "application/json" : "application/xml");
 	}
 
@@ -912,7 +909,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		return httplib::Server::HandlerResponse::Unhandled;
 		});
 
-	server_.set_logger([](const httplib::Request& req, const httplib::Response& res) {
+	server_.set_logger([this](const httplib::Request& req, const httplib::Response& res) {
+		if (debug_ && !res.body.empty()) std::cout << res.body << "\n";
 		std::cout << stamp(req.remote_addr)
 		          << req.method << " " << req.path;
 		if (!req.params.empty()) {
@@ -977,7 +975,6 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -999,7 +996,6 @@ GainDrive::GainDrive(const std::string& db_path,
 				exts->InsertEndChild(ext);
 				root->InsertEndChild(exts);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -1025,7 +1021,6 @@ GainDrive::GainDrive(const std::string& db_path,
 				lic->SetAttribute("licenseExpires", "2099-01-01T00:00:00");
 				root->InsertEndChild(lic);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -1107,7 +1102,6 @@ GainDrive::GainDrive(const std::string& db_path,
 				u->SetAttribute("castRole",          ui->cast_allowed);
 				root->InsertEndChild(u);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -1178,7 +1172,6 @@ GainDrive::GainDrive(const std::string& db_path,
 					}
 				root->InsertEndChild(us);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -1218,7 +1211,6 @@ GainDrive::GainDrive(const std::string& db_path,
 		store_.update_user(username, "", qp("email"), is_admin, max_bitrate, upload_allowed, disabled, cast_allowed);
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -1261,7 +1253,6 @@ GainDrive::GainDrive(const std::string& db_path,
 		store_.update_user(username, pw, email, is_admin, max_bitrate, upload_allowed, disabled, cast_allowed);
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -1299,7 +1290,6 @@ GainDrive::GainDrive(const std::string& db_path,
 		                   existing->cast_allowed);
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -1328,7 +1318,6 @@ GainDrive::GainDrive(const std::string& db_path,
 					}
 				root->InsertEndChild(mf);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -1392,7 +1381,6 @@ GainDrive::GainDrive(const std::string& db_path,
 					}
 				root->InsertEndChild(indexes);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -1456,7 +1444,6 @@ GainDrive::GainDrive(const std::string& db_path,
 					}
 				root->InsertEndChild(artists_el);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -1535,7 +1522,6 @@ GainDrive::GainDrive(const std::string& db_path,
 					}
 				root->InsertEndChild(artist_el);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -1615,7 +1601,6 @@ GainDrive::GainDrive(const std::string& db_path,
 
 				root->InsertEndChild(directory);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -1623,12 +1608,12 @@ GainDrive::GainDrive(const std::string& db_path,
 	server_.Get("/rest/getAlbumList.view", [this](const httplib::Request& req,
 	                                              httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		handle_album_list(req, res, store_, debug_, "albumList");
+		handle_album_list(req, res, store_, "albumList");
 		});
 	server_.Get("/rest/getAlbumList2.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		handle_album_list(req, res, store_, debug_, "albumList2");
+		handle_album_list(req, res, store_, "albumList2");
 		});
 
 	// getRecentSongs — gaindrive extension; not in the OpenSubsonic spec.
@@ -1672,7 +1657,6 @@ GainDrive::GainDrive(const std::string& db_path,
 					}
 				root->InsertEndChild(rs);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -1681,12 +1665,12 @@ GainDrive::GainDrive(const std::string& db_path,
 	server_.Get("/rest/getArtistInfo.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		handle_artist_info(req, res, store_, debug_, "artistInfo");
+		handle_artist_info(req, res, store_, "artistInfo");
 		});
 	server_.Get("/rest/getArtistInfo2.view", [this](const httplib::Request& req,
 	                                                httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		handle_artist_info(req, res, store_, debug_, "artistInfo2");
+		handle_artist_info(req, res, store_, "artistInfo2");
 		});
 
 	// getCoverArt — serve a cover image, optionally scaled.
@@ -1920,7 +1904,6 @@ GainDrive::GainDrive(const std::string& db_path,
 		store_.save_play_queue(user, paths, current_path, offset_ms, client);
 		bool use_json = (fmt_of(req) == "json");
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -1965,7 +1948,6 @@ GainDrive::GainDrive(const std::string& db_path,
 					}
 				root->InsertEndChild(el);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -1993,7 +1975,6 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		bool use_json = (fmt_of(req) == "json");
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -2026,7 +2007,6 @@ GainDrive::GainDrive(const std::string& db_path,
 		store_.create_bookmark(user, *song_path, position_ms, comment);
 		bool use_json = (fmt_of(req) == "json");
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -2208,7 +2188,6 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		auto pl = store_.create_playlist(user, name, song_paths);
 		std::string body = playlist_body(pl, use_json, request_max_bitrate(req, store_));
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -2233,7 +2212,6 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!pl) { err(70, "Playlist not found."); return; }
 
 		std::string body = playlist_body(*pl, use_json, request_max_bitrate(req, store_));
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -2281,7 +2259,6 @@ GainDrive::GainDrive(const std::string& db_path,
 					}
 				root->InsertEndChild(playlists);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -2353,7 +2330,6 @@ GainDrive::GainDrive(const std::string& db_path,
 
 				root->InsertEndChild(starred);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		};
 	server_.Get("/rest/getStarred.view",  [starred_handler](const httplib::Request& req,
@@ -2406,7 +2382,6 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -2433,7 +2408,6 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -2460,7 +2434,6 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -2527,14 +2500,13 @@ GainDrive::GainDrive(const std::string& db_path,
 					el->InsertEndChild(song_entry_xml(doc, s, "song", mbr));
 				root->InsertEndChild(el);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
 	server_.Get("/rest/getAlbumInfo2.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		handle_album_info(req, res, store_, debug_);
+		handle_album_info(req, res, store_);
 		});
 
 	// getTopSongs — play-count tracking not implemented; return empty list.
@@ -2551,7 +2523,6 @@ GainDrive::GainDrive(const std::string& db_path,
 			body = subsonic_ok([](XMLDocument& doc, XMLElement* root) {
 				root->InsertEndChild(doc.NewElement("topSongs"));
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -2584,7 +2555,6 @@ GainDrive::GainDrive(const std::string& db_path,
 			body = subsonic_ok([&song, mbr](XMLDocument& doc, XMLElement* root) {
 				root->InsertEndChild(song_entry_xml(doc, *song, "song", mbr));
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -2678,7 +2648,6 @@ GainDrive::GainDrive(const std::string& db_path,
 
 				root->InsertEndChild(result);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		};
 	server_.Get("/rest/search2.view", [search_handler](const httplib::Request& req,
@@ -2731,7 +2700,6 @@ GainDrive::GainDrive(const std::string& db_path,
 					}
 				root->InsertEndChild(bookmarks);
 				});
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -2761,7 +2729,6 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -2790,7 +2757,6 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
-		if (debug_) std::cout << body << "\n";
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
