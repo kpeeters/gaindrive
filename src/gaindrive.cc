@@ -1355,7 +1355,8 @@ GainDrive::GainDrive(const std::string& db_path,
 				for (auto& [letter, vec] : buckets) {
 					nlohmann::json artist_arr = nlohmann::json::array();
 					for (auto* a : vec)
-						artist_arr.push_back({{"id", a->id}, {"name", a->name}});
+						artist_arr.push_back({{"id", a->id}, {"name", a->name},
+						                      {"coverArt", a->id}});
 					idx_arr.push_back({{"name", letter}, {"artist", artist_arr}});
 					}
 				r["indexes"] = {
@@ -1375,8 +1376,9 @@ GainDrive::GainDrive(const std::string& db_path,
 					idx->SetAttribute("name", letter.c_str());
 					for (auto* a : vec) {
 						auto* artist = doc.NewElement("artist");
-						artist->SetAttribute("id",   a->id);
-						artist->SetAttribute("name", a->name.c_str());
+						artist->SetAttribute("id",       a->id);
+						artist->SetAttribute("name",     a->name.c_str());
+						artist->SetAttribute("coverArt", a->id);
 						idx->InsertEndChild(artist);
 						}
 					indexes->InsertEndChild(idx);
@@ -1416,7 +1418,8 @@ GainDrive::GainDrive(const std::string& db_path,
 					nlohmann::json artist_arr = nlohmann::json::array();
 					for (auto* a : vec)
 						artist_arr.push_back({{"id", a->id}, {"name", a->name},
-						                      {"albumCount", a->album_count}});
+						                      {"albumCount", a->album_count},
+						                      {"coverArt",   a->id}});
 					idx_arr.push_back({{"name", letter}, {"artist", artist_arr}});
 					}
 				r["artists"] = {
@@ -1439,6 +1442,7 @@ GainDrive::GainDrive(const std::string& db_path,
 						artist->SetAttribute("id",         a->id);
 						artist->SetAttribute("name",       a->name.c_str());
 						artist->SetAttribute("albumCount", a->album_count);
+						artist->SetAttribute("coverArt",   a->id);
 						idx->InsertEndChild(artist);
 						}
 					artists_el->InsertEndChild(idx);
@@ -1692,6 +1696,8 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		int folder_id = std::stoi(it->second);
 		std::string rel_path = store_.get_cover_path(folder_id);
+		if (rel_path.empty())
+			rel_path = store_.get_artist_cover_path(folder_id);
 		if (rel_path.empty()) {
 			res.status = 404;
 			return;

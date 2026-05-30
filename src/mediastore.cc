@@ -1306,6 +1306,19 @@ std::string MediaStore::get_cover_path(int folder_id)
 	return q.getColumn(0).getString();
 	}
 
+std::string MediaStore::get_artist_cover_path(int artist_folder_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT al.cover_path FROM albums al"
+		" JOIN folders f ON f.id = al.folder_id"
+		" WHERE f.parent_id = ? AND al.cover_path IS NOT NULL AND al.cover_path != ''"
+		" ORDER BY f.name COLLATE NOCASE LIMIT 1");
+	q.bind(1, artist_folder_id);
+	if (!q.executeStep()) return "";
+	return q.getColumn(0).getString();
+	}
+
 std::vector<std::string> MediaStore::get_extra_image_paths(int folder_id)
 	{
 	std::string cover  = get_cover_path(folder_id);
