@@ -927,7 +927,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			std::cout << ct << "\n";
 //			if (ct == "application/json" || ct == "application/xml")
 //				std::cout << res.body << "\n";
-//			}
+			}
 		});
 
 	// Audio streams are consumed at playback speed, so the send buffer can stay
