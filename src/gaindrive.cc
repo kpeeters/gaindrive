@@ -902,10 +902,14 @@ GainDrive::GainDrive(const std::string& db_path,
 		fs::create_directories(upload_dir_);
 
 	// Normalise /rest/foo → /rest/foo.view so clients that omit the suffix still work.
-	server_.set_pre_routing_handler([](const httplib::Request& req, httplib::Response&) {
-		auto& path = const_cast<httplib::Request&>(req).path;
-		if (path.rfind("/rest/", 0) == 0 && path.find('.') == std::string::npos)
-			path += ".view";
+	// In debug mode also strip Accept-Encoding: httplib swaps compressed bytes into
+	// res.body before firing the logger, making it unreadable (cpp-httplib#1656).
+	server_.set_pre_routing_handler([this](const httplib::Request& req, httplib::Response&) {
+		auto& r = const_cast<httplib::Request&>(req);
+		if (r.path.rfind("/rest/", 0) == 0 && r.path.find('.') == std::string::npos)
+			r.path += ".view";
+		if (debug_)
+			r.headers.erase("Accept-Encoding");
 		return httplib::Server::HandlerResponse::Unhandled;
 		});
 
@@ -929,16 +933,6 @@ GainDrive::GainDrive(const std::string& db_path,
 //				std::cout << res.body << "\n";
 			}
 		});
-
-	// In debug mode, suppress gzip compression so res.body is readable in the
-	// logger (httplib swaps compressed bytes into res.body before firing it).
-	// See https://github.com/yhirose/cpp-httplib/issues/1656
-	if (debug_) {
-		server_.set_pre_routing_handler([](const httplib::Request& req, httplib::Response&) {
-			const_cast<httplib::Request&>(req).headers.erase("Accept-Encoding");
-			return httplib::Server::HandlerResponse::Unhandled;
-			});
-		}
 
 	// Audio streams are consumed at playback speed, so the send buffer can stay
 	// full for a long time while the Chromecast plays through its local buffer.
