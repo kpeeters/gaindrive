@@ -836,6 +836,24 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		" (SELECT DISTINCT artist_id FROM album_artists)");
 	s.exec();
 	}
+	if (!exists) {
+		std::string artist_rel = strip_root(artist_path.string(), music_root_slash_);
+		{
+		SQLite::Statement s(db_music_,
+			"DELETE FROM artist_info_cache"
+			" WHERE folder_id = (SELECT id FROM folders WHERE path = ?)");
+		s.bind(1, artist_rel);
+		s.exec();
+		}
+		{
+		SQLite::Statement s(db_music_,
+			"DELETE FROM folders WHERE path = ?");
+		s.bind(1, artist_rel);
+		s.exec();
+		if (db_music_.getChanges() > 0)
+			std::cout << stamp() << "  pruned artist folder" << std::endl;
+		}
+		}
 	txn.commit();
 	}
 	std::cout << stamp() << "Rescan complete" << std::endl;

@@ -376,14 +376,16 @@ static bool check_cast_perm(const httplib::Request& req, httplib::Response& res,
 // Performs MusicBrainz/Wikipedia lookup for an artist, caching the result.
 // Returns cached data immediately when available; triggers a fresh fetch otherwise.
 static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::string& name,
-                                                         MediaStore& store)
+                                                         MediaStore& store, bool force = false)
 	{
-	auto cached = store.get_cached_artist_info(id);
-	if (cached) {
-		std::cout << stamp() << "getArtistInfo [" << name << "] cached"
-		          << " mbid=" << (cached->mbid.empty() ? "(none)" : cached->mbid)
-		          << std::endl;
-		return *cached;
+	if (!force) {
+		auto cached = store.get_cached_artist_info(id);
+		if (cached) {
+			std::cout << stamp() << "getArtistInfo [" << name << "] cached"
+			          << " mbid=" << (cached->mbid.empty() ? "(none)" : cached->mbid)
+			          << std::endl;
+			return *cached;
+			}
 		}
 
 	std::cout << stamp() << "getArtistInfo [" << name << "] querying MusicBrainz"
@@ -440,6 +442,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 
 			// Prefer direct wikipedia relation; fall back to wikidata.
 			std::string wiki_title;
+			std::string wd_image_url;
 			for (auto& rel : rels) {
 				std::string type     = rel.value("type","");
 				std::string resource = rel.value("url", nlohmann::json::object())
@@ -471,19 +474,35 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 					auto rwd = wd.Get("/w/api.php",
 						httplib::Params{
 							{"action","wbgetentities"},{"ids",entity},
-							{"props","sitelinks"},{"sitefilter","enwiki"},
+							{"props","sitelinks|claims"},{"sitefilter","enwiki"},
 							{"format","json"}
 							},
 						httplib::Headers{});
 					if (rwd && rwd->status == 200) {
 						auto jwd = nlohmann::json::parse(rwd->body, nullptr, false);
-						if (!jwd.is_discarded())
+						if (!jwd.is_discarded()) {
 							wiki_title = jwd["entities"][entity]["sitelinks"]["enwiki"]
 							                .value("title","");
-						if (!wiki_title.empty())
-							std::cout << stamp() << "getArtistInfo [" << name
-							          << "] Wikipedia (via Wikidata): "
-							          << wiki_title << std::endl;
+							if (!wiki_title.empty())
+								std::cout << stamp() << "getArtistInfo [" << name
+								          << "] Wikipedia (via Wikidata): "
+								          << wiki_title << std::endl;
+							// Wikidata P18 (image) as fallback when no Wikipedia article.
+							auto& ents = jwd["entities"];
+							if (ents.contains(entity) && ents[entity].contains("claims")) {
+								auto& claims = ents[entity]["claims"];
+								if (claims.contains("P18") && !claims["P18"].empty()) {
+									std::string fn = claims["P18"][0]["mainsnak"]["datavalue"]
+									                    .value("value","");
+									if (!fn.empty()) {
+										for (char& c : fn) if (c == ' ') c = '_';
+										wd_image_url =
+											"https://commons.wikimedia.org/wiki/Special:FilePath/"
+											+ url_encode(fn);
+										}
+									}
+								}
+							}
 						}
 					}
 				}
@@ -521,6 +540,11 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 						}
 					}
 				}
+			if (info.image_url.empty() && !wd_image_url.empty()) {
+				info.image_url = wd_image_url;
+				std::cout << stamp() << "getArtistInfo [" << name
+				          << "] image from Wikidata P18: " << wd_image_url << std::endl;
+				}
 			}
 		}
 
@@ -551,7 +575,9 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 	std::string name = store.get_folder_name(id);
 	if (name.empty()) { err(70, "Artist not found."); return; }
 
-	auto info = resolve_artist_info(id, name, store);
+	bool force = req.params.count("force") > 0
+	          && req.params.find("force")->second != "0";
+	auto info = resolve_artist_info(id, name, store, force);
 
 	// Build response. All fields are child elements per the Subsonic spec.
 	auto add_text_el = [](XMLDocument& doc, XMLElement* parent,
