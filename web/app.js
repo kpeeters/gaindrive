@@ -2283,8 +2283,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
    try {
       sr = await apiCall('getAlbum', {id: albumId});
       }
-   catch {
-      showError('Could not reach the server. Please check your connection.');
+   catch (e) {
+      showError(e?.message ?? 'Could not reach the server. Please check your connection.');
       return;
       }
    const album = sr.album ?? {};

@@ -1824,7 +1824,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		e.bitrate      = ssel.getColumn(7).getInt();
 		e.file_size    = ssel.getColumn(8).getInt64();
 		e.codec        = ssel.getColumn(9).isNull() ? "" : ssel.getColumn(9).getString();
-		e.parent_id    = ssel.getColumn(10).getInt();
+		e.parent_id    = folder_id;
 		e.artist       = ssel.getColumn(11).getString();
 		e.album        = ssel.getColumn(12).getString();
 		e.starred      = ssel.getColumn(13).getInt() != 0;
