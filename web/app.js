@@ -3121,6 +3121,12 @@ function setupSearch() {
          return;
          }
 
+      if (!inInput && e.key === ' ') {
+         e.preventDefault();
+         document.getElementById('player-playpause').click();
+         return;
+         }
+
       if (!inInput && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey)
          openSearchBar();
       });
