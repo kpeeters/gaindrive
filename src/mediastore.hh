@@ -78,6 +78,7 @@ class MediaStore {
 			std::string image_url;      // Wikipedia thumbnail URL
 			std::string wiki_url;       // Full Wikipedia article URL
 			std::string allmusic_url;   // AllMusic artist page URL
+			std::string discogs_url;    // Discogs artist page URL
 			};
 
 		// Returns empty string if folder_id not found.

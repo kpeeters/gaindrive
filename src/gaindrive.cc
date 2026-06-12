@@ -452,6 +452,11 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 					std::cout << stamp() << "getArtistInfo [" << name
 					          << "] AllMusic: " << resource << std::endl;
 					}
+				else if (type == "discogs" && info.discogs_url.empty()) {
+					info.discogs_url = resource;
+					std::cout << stamp() << "getArtistInfo [" << name
+					          << "] Discogs: " << resource << std::endl;
+					}
 				else if (type == "wikipedia") {
 					auto pos = resource.find("/wiki/");
 					if (pos != std::string::npos) {
@@ -545,6 +550,46 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 				std::cout << stamp() << "getArtistInfo [" << name
 				          << "] image from Wikidata P18: " << wd_image_url << std::endl;
 				}
+
+			if (info.image_url.empty() && !info.discogs_url.empty()) {
+				auto dpos = info.discogs_url.find("www.discogs.com");
+				if (dpos != std::string::npos) {
+					std::string dpath = info.discogs_url.substr(dpos + 15);
+					std::this_thread::sleep_for(std::chrono::seconds(1));
+					httplib::SSLClient dc("www.discogs.com");
+					dc.set_default_headers({
+						{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+						});
+					auto rd = dc.Get(dpath, httplib::Params{}, httplib::Headers{});
+					if (rd && rd->status == 200) {
+						auto& rbody = rd->body;
+						auto tag_pos = rbody.find("property=\"og:image\"");
+						if (tag_pos != std::string::npos) {
+							auto cnt_pos = rbody.find("content=\"", tag_pos);
+							if (cnt_pos != std::string::npos) {
+								cnt_pos += 9;
+								auto end_pos = rbody.find('"', cnt_pos);
+								if (end_pos != std::string::npos)
+									info.image_url = rbody.substr(cnt_pos, end_pos - cnt_pos);
+								}
+							}
+						if (!info.image_url.empty())
+							std::cout << stamp() << "getArtistInfo [" << name
+							          << "] image from Discogs og:image: "
+							          << info.image_url << std::endl;
+						else
+							std::cout << stamp() << "getArtistInfo [" << name
+							          << "] Discogs page had no og:image" << std::endl;
+						}
+					else {
+						std::cout << stamp() << "getArtistInfo [" << name
+						          << "] Discogs page fetch failed"
+						          << (rd ? " HTTP " + std::to_string(rd->status)
+						                : " (no response)")
+						          << std::endl;
+						}
+					}
+				}
 			}
 		}
 
@@ -597,6 +642,7 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 			if (!info.last_fm_url.empty())    ai["lastFmUrl"]     = info.last_fm_url;
 			if (!info.wiki_url.empty())       ai["wikiUrl"]       = info.wiki_url;
 			if (!info.allmusic_url.empty())   ai["allMusicUrl"]   = info.allmusic_url;
+			if (!info.discogs_url.empty())    ai["discogsUrl"]    = info.discogs_url;
 			if (!info.image_url.empty()) {
 				ai["smallImageUrl"]  = info.image_url;
 				ai["mediumImageUrl"] = info.image_url;
@@ -612,6 +658,7 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 			add_text_el(doc, ai, "lastFmUrl",     info.last_fm_url);
 			add_text_el(doc, ai, "wikiUrl",       info.wiki_url);
 			add_text_el(doc, ai, "allMusicUrl",   info.allmusic_url);
+			add_text_el(doc, ai, "discogsUrl",    info.discogs_url);
 			add_text_el(doc, ai, "smallImageUrl",  info.image_url);
 			add_text_el(doc, ai, "mediumImageUrl", info.image_url);
 			add_text_el(doc, ai, "largeImageUrl",  info.image_url);

@@ -281,6 +281,7 @@ void MediaStore::create_schema()
 			image_url    TEXT NOT NULL DEFAULT '',
 			wiki_url     TEXT NOT NULL DEFAULT '',
 			allmusic_url TEXT NOT NULL DEFAULT '',
+			discogs_url  TEXT NOT NULL DEFAULT '',
 			fetched_at   INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 		);
 
@@ -396,6 +397,8 @@ void MediaStore::create_schema()
 	try { db_music_.exec("ALTER TABLE artist_info_cache ADD COLUMN allmusic_url TEXT NOT NULL DEFAULT ''"); }
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE album_info_cache ADD COLUMN allmusic_url TEXT NOT NULL DEFAULT ''"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE artist_info_cache ADD COLUMN discogs_url TEXT NOT NULL DEFAULT ''"); }
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE client.users ADD COLUMN upload_allowed INTEGER DEFAULT 0"); }
 	catch (const SQLite::Exception&) {}
@@ -1240,7 +1243,7 @@ std::optional<MediaStore::CachedArtistInfo> MediaStore::get_cached_artist_info(i
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement q(db_music_,
-		"SELECT mbid, last_fm_url, biography, image_url, wiki_url, allmusic_url"
+		"SELECT mbid, last_fm_url, biography, image_url, wiki_url, allmusic_url, discogs_url"
 		" FROM artist_info_cache WHERE folder_id = ?");
 	q.bind(1, folder_id);
 	if (!q.executeStep()) return std::nullopt;
@@ -1251,6 +1254,7 @@ std::optional<MediaStore::CachedArtistInfo> MediaStore::get_cached_artist_info(i
 	a.image_url    = q.getColumn(3).getString();
 	a.wiki_url     = q.getColumn(4).getString();
 	a.allmusic_url = q.getColumn(5).getString();
+	a.discogs_url  = q.getColumn(6).getString();
 	return a;
 	}
 
@@ -1259,8 +1263,8 @@ void MediaStore::cache_artist_info(int folder_id, const CachedArtistInfo& info)
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement ins(db_music_,
 		"INSERT OR REPLACE INTO artist_info_cache"
-		" (folder_id, mbid, last_fm_url, biography, image_url, wiki_url, allmusic_url)"
-		" VALUES (?, ?, ?, ?, ?, ?, ?)");
+		" (folder_id, mbid, last_fm_url, biography, image_url, wiki_url, allmusic_url, discogs_url)"
+		" VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
 	ins.bind(1, folder_id);
 	ins.bind(2, info.mbid);
 	ins.bind(3, info.last_fm_url);
@@ -1268,6 +1272,7 @@ void MediaStore::cache_artist_info(int folder_id, const CachedArtistInfo& info)
 	ins.bind(5, info.image_url);
 	ins.bind(6, info.wiki_url);
 	ins.bind(7, info.allmusic_url);
+	ins.bind(8, info.discogs_url);
 	ins.exec();
 	}
 
