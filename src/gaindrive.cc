@@ -486,14 +486,18 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 					if (rwd && rwd->status == 200) {
 						auto jwd = nlohmann::json::parse(rwd->body, nullptr, false);
 						if (!jwd.is_discarded()) {
-							wiki_title = jwd["entities"][entity]["sitelinks"]["enwiki"]
-							                .value("title","");
-							if (!wiki_title.empty())
-								std::cout << stamp() << "getArtistInfo [" << name
-								          << "] Wikipedia (via Wikidata): "
-								          << wiki_title << std::endl;
-							// Wikidata P18 (image) as fallback when no Wikipedia article.
 							auto& ents = jwd["entities"];
+							if (ents.contains(entity)
+							        && ents[entity].contains("sitelinks")
+							        && ents[entity]["sitelinks"].contains("enwiki")) {
+								wiki_title = ents[entity]["sitelinks"]["enwiki"]
+								                .value("title","");
+								if (!wiki_title.empty())
+									std::cout << stamp() << "getArtistInfo [" << name
+									          << "] Wikipedia (via Wikidata): "
+									          << wiki_title << std::endl;
+								}
+							// Wikidata P18 (image) as fallback when no Wikipedia article.
 							if (ents.contains(entity) && ents[entity].contains("claims")) {
 								auto& claims = ents[entity]["claims"];
 								if (claims.contains("P18") && !claims["P18"].empty()) {
