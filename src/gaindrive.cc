@@ -551,44 +551,29 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 				          << "] image from Wikidata P18: " << wd_image_url << std::endl;
 				}
 
-			if (info.image_url.empty() && !info.discogs_url.empty()) {
-				auto dpos = info.discogs_url.find("www.discogs.com");
-				if (dpos != std::string::npos) {
-					std::string dpath = info.discogs_url.substr(dpos + 15);
-					std::this_thread::sleep_for(std::chrono::seconds(1));
-					httplib::SSLClient dc("www.discogs.com");
-					dc.set_default_headers({
-						{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
-						});
-					auto rd = dc.Get(dpath, httplib::Params{}, httplib::Headers{});
-					if (rd && rd->status == 200) {
-						auto& rbody = rd->body;
-						auto tag_pos = rbody.find("property=\"og:image\"");
-						if (tag_pos != std::string::npos) {
-							auto cnt_pos = rbody.find("content=\"", tag_pos);
-							if (cnt_pos != std::string::npos) {
-								cnt_pos += 9;
-								auto end_pos = rbody.find('"', cnt_pos);
-								if (end_pos != std::string::npos)
-									info.image_url = rbody.substr(cnt_pos, end_pos - cnt_pos);
-								}
-							}
+			if (info.image_url.empty()) {
+				std::this_thread::sleep_for(std::chrono::seconds(1));
+				httplib::SSLClient tadb("www.theaudiodb.com");
+				tadb.set_default_headers({
+					{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+					});
+				auto rt = tadb.Get("/api/v1/json/2/artist-mb.php",
+				                   httplib::Params{{"i", info.mbid}},
+				                   httplib::Headers{});
+				if (rt && rt->status == 200) {
+					auto jt = nlohmann::json::parse(rt->body, nullptr, false);
+					if (!jt.is_discarded() && !jt["artists"].is_null()
+					        && !jt["artists"].empty()) {
+						info.image_url = jt["artists"][0].value("strArtistThumb","");
 						if (!info.image_url.empty())
 							std::cout << stamp() << "getArtistInfo [" << name
-							          << "] image from Discogs og:image: "
+							          << "] image from TheAudioDB: "
 							          << info.image_url << std::endl;
-						else
-							std::cout << stamp() << "getArtistInfo [" << name
-							          << "] Discogs page had no og:image" << std::endl;
-						}
-					else {
-						std::cout << stamp() << "getArtistInfo [" << name
-						          << "] Discogs page fetch failed"
-						          << (rd ? " HTTP " + std::to_string(rd->status)
-						                : " (no response)")
-						          << std::endl;
 						}
 					}
+				if (info.image_url.empty())
+					std::cout << stamp() << "getArtistInfo [" << name
+					          << "] no image found" << std::endl;
 				}
 			}
 		}
