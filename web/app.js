@@ -472,6 +472,63 @@ async function viewSettings() {
    pane._refreshUsers = refreshUsers;
 
    } // end users section
+
+   // ── Server section — admin only ────────────────────────────────────────────
+
+   if (userInfo?.adminRole) {
+
+   const serverSection = document.createElement('div');
+   serverSection.className = 'admin-section';
+
+   const serverHeading = document.createElement('h2');
+   serverHeading.className = 'admin-section-title';
+   serverHeading.textContent = 'Server';
+   serverSection.appendChild(serverHeading);
+
+   const tokenLabel = document.createElement('p');
+   tokenLabel.textContent = 'Discogs Personal Access Token:';
+   serverSection.appendChild(tokenLabel);
+
+   const tokenRow = document.createElement('div');
+   tokenRow.className = 'token-row';
+
+   const tokenInput = document.createElement('input');
+   tokenInput.type        = 'password';
+   tokenInput.className   = 'token-input';
+   tokenInput.placeholder = '(not set)';
+   tokenRow.appendChild(tokenInput);
+
+   const tokenSave = document.createElement('button');
+   tokenSave.textContent = 'Save';
+   tokenSave.className   = 'upload-btn';
+   tokenRow.appendChild(tokenSave);
+
+   serverSection.appendChild(tokenRow);
+
+   const tokenStatus = document.createElement('p');
+   tokenStatus.className = 'upload-status';
+   serverSection.appendChild(tokenStatus);
+
+   pane.appendChild(serverSection);
+
+   try {
+      const sr = await apiCall('getServerSettings');
+      tokenInput.value = sr.serverSettings?.discogsToken ?? '';
+      }
+   catch { /* server may not yet have this endpoint */ }
+
+   tokenSave.addEventListener('click', async () => {
+      tokenStatus.textContent = '';
+      try {
+         await apiCall('saveServerSettings', {discogsToken: tokenInput.value});
+         tokenStatus.textContent = 'Saved.';
+         }
+      catch (e) {
+         tokenStatus.textContent = `Error: ${e.message}`;
+         }
+      });
+
+   } // end server section
    }
 
 function makeBadge(text, cls) {

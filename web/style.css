@@ -1696,6 +1696,23 @@ body {
 
 .upload-btn:hover { filter: brightness(1.15); }
 
+.token-row {
+   display: flex;
+   gap: 0.6rem;
+   align-items: center;
+   margin: 0.4rem 0;
+   }
+
+.token-input {
+   flex: 1;
+   padding: 0.3rem 0.5rem;
+   border: 1px solid var(--divider);
+   border-radius: 4px;
+   background: var(--bg);
+   color: var(--text);
+   font-size: 0.9rem;
+   }
+
 .upload-section progress {
    width: 100%;
    height: 6px;

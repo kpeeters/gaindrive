@@ -577,10 +577,64 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 							          << info.image_url << std::endl;
 						}
 					}
-				if (info.image_url.empty())
-					std::cout << stamp() << "getArtistInfo [" << name
-					          << "] no image found" << std::endl;
 				}
+
+			if (info.image_url.empty() && !info.discogs_url.empty()) {
+				std::string token = store.get_setting("discogs_token");
+				if (token.empty()) {
+					std::cout << stamp() << "getArtistInfo [" << name
+					          << "] Discogs URL available but no token configured"
+					          << std::endl;
+					}
+				else {
+					auto apos = info.discogs_url.find("/artist/");
+					if (apos != std::string::npos) {
+						std::string id_str;
+						for (char c : info.discogs_url.substr(apos + 8))
+							{ if (!std::isdigit(c)) break; id_str += c; }
+						if (!id_str.empty()) {
+							std::this_thread::sleep_for(std::chrono::seconds(1));
+							httplib::SSLClient disc("api.discogs.com");
+							disc.set_default_headers({
+								{"User-Agent",
+								 "GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"},
+								{"Authorization", "Discogs token=" + token}
+								});
+							auto rd = disc.Get("/artists/" + id_str,
+							                   httplib::Params{}, httplib::Headers{});
+							if (rd && rd->status == 200) {
+								auto jd = nlohmann::json::parse(rd->body, nullptr, false);
+								if (!jd.is_discarded() && jd.contains("images")
+								        && !jd["images"].empty()) {
+									std::string uri;
+									for (auto& img : jd["images"])
+										if (img.value("type","") == "primary")
+											{ uri = img.value("uri",""); break; }
+									if (uri.empty())
+										uri = jd["images"][0].value("uri","");
+									if (!uri.empty()) {
+										info.image_url = uri;
+										std::cout << stamp() << "getArtistInfo [" << name
+										          << "] image from Discogs API: "
+										          << uri << std::endl;
+										}
+									}
+								}
+							else {
+								std::cout << stamp() << "getArtistInfo [" << name
+								          << "] Discogs API failed"
+								          << (rd ? " HTTP " + std::to_string(rd->status)
+								                : " (no response)")
+								          << std::endl;
+								}
+							}
+						}
+					}
+				}
+
+			if (info.image_url.empty())
+				std::cout << stamp() << "getArtistInfo [" << name
+				          << "] no image found" << std::endl;
 			}
 		}
 
@@ -1368,6 +1422,49 @@ GainDrive::GainDrive(const std::string& db_path,
 		                   existing->max_bitrate, existing->upload_allowed, existing->disabled,
 		                   existing->cast_allowed);
 
+		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// getServerSettings / saveServerSettings — admin-only server configuration.
+	server_.Get("/rest/getServerSettings.view", [this](const httplib::Request& req,
+	                                                    httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+		auto qp = [&](const std::string& k) -> std::string {
+			auto it = req.params.find(k); return it != req.params.end() ? it->second : "";
+			};
+		auto ri = store_.get_user(qp("u"));
+		if (!ri || !ri->is_admin) { err(50, "User is not authorized for this operation."); return; }
+
+		std::string token = store_.get_setting("discogs_token");
+		std::string body = subsonic_ok_json([&token](nlohmann::json& r) {
+			r["serverSettings"]["discogsToken"] = token;
+			});
+		res.set_content(body, "application/json");
+		});
+
+	server_.Get("/rest/saveServerSettings.view", [this](const httplib::Request& req,
+	                                                     httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+		auto qp = [&](const std::string& k) -> std::string {
+			auto it = req.params.find(k); return it != req.params.end() ? it->second : "";
+			};
+		auto ri = store_.get_user(qp("u"));
+		if (!ri || !ri->is_admin) { err(50, "User is not authorized for this operation."); return; }
+
+		store_.set_setting("discogs_token", qp("discogsToken"));
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});

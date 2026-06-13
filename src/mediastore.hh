@@ -89,6 +89,10 @@ class MediaStore {
 		std::optional<CachedArtistInfo> get_cached_artist_info(int folder_id);
 		void cache_artist_info(int folder_id, const CachedArtistInfo& info);
 
+		std::string get_setting(const std::string& key,
+		                        const std::string& default_val = "");
+		void set_setting(const std::string& key, const std::string& value);
+
 		struct CachedAlbumInfo {
 			std::string mbid;           // MusicBrainz release-group ID
 			std::string notes;          // Wikipedia plain-text extract

@@ -383,6 +383,11 @@ void MediaStore::create_schema()
 			changed   DATETIME DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (user_id, song_path)
 		);
+
+		CREATE TABLE IF NOT EXISTS client.settings (
+			key   TEXT PRIMARY KEY,
+			value TEXT NOT NULL DEFAULT ''
+		);
 	)");
 
 	txn.commit();
@@ -2746,3 +2751,25 @@ bool MediaStore::set_cover_art_path(int folder_id, const std::string& path)
 	q.exec();
 	return db_music_.getChanges() > 0;
 	}
+
+std::string MediaStore::get_setting(const std::string& key,
+                                    const std::string& default_val)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT value FROM client.settings WHERE key = ?");
+	q.bind(1, key);
+	if (!q.executeStep()) return default_val;
+	return q.getColumn(0).getString();
+	}
+
+void MediaStore::set_setting(const std::string& key, const std::string& value)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement s(db_music_,
+		"INSERT OR REPLACE INTO client.settings (key, value) VALUES (?, ?)");
+	s.bind(1, key);
+	s.bind(2, value);
+	s.exec();
+	}
+
