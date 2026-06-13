@@ -400,6 +400,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 		{"limit", "1"},
 		{"fmt",   "json"}
 		};
+	bool mb_ok = false;
 	auto r = mb.Get("/ws/2/artist", params, httplib::Headers{});
 	if (!r) {
 		std::cout << stamp() << "getArtistInfo [" << name
@@ -410,6 +411,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 		          << "] MusicBrainz HTTP " << r->status << std::endl;
 		}
 	else {
+		mb_ok = true;
 		auto j = nlohmann::json::parse(r->body, nullptr, false);
 		if (!j.is_discarded() && j.contains("artists") && !j["artists"].empty()) {
 			info.mbid = j["artists"][0].value("id", "");
@@ -582,10 +584,16 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 			}
 		}
 
-	store.cache_artist_info(id, info);
-	std::cout << stamp() << "getArtistInfo [" << name << "] cached"
-	          << " mbid=" << (info.mbid.empty() ? "(none)" : info.mbid)
-	          << std::endl;
+	if (mb_ok) {
+		store.cache_artist_info(id, info);
+		std::cout << stamp() << "getArtistInfo [" << name << "] cached"
+		          << " mbid=" << (info.mbid.empty() ? "(none)" : info.mbid)
+		          << std::endl;
+		}
+	else {
+		std::cout << stamp() << "getArtistInfo [" << name
+		          << "] not cached (MusicBrainz unavailable)" << std::endl;
+		}
 	return info;
 	}
 
