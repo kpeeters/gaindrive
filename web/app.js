@@ -1094,8 +1094,13 @@ async function viewAlbums(artistId, artistName) {
    const heading = document.createElement('h1');
    heading.className = 'view-title';
    heading.textContent = artistName;
+   const refreshBtn = document.createElement('button');
+   refreshBtn.className = 'refresh-btn';
+   refreshBtn.title = 'Reload artist info from MusicBrainz';
+   refreshBtn.textContent = '↻';
    header.appendChild(back);
    header.appendChild(heading);
+   header.appendChild(refreshBtn);
    pane.appendChild(header);
 
    // Placeholder filled asynchronously once getArtistInfo2 responds.
@@ -1151,100 +1156,114 @@ async function viewAlbums(artistId, artistName) {
    paneNav.slideTo(1);
 
    // Fetch artist info without blocking the album list.
-   apiCall('getArtistInfo2', {id: artistId}).then(srInfo => {
-      const info        = srInfo?.artistInfo2 ?? {};
-      const imgUrl      = info.largeImageUrl || info.mediumImageUrl || info.smallImageUrl || '';
-      const bio         = info.biography ?? '';
-      const wikiUrl     = info.wikiUrl ?? '';
-      const allMusicUrl = info.allMusicUrl ?? '';
+   // Extracted into loadBio() so the refresh button can re-invoke with force=1.
+   function loadBio(force) {
+      bioSlot.className = 'artist-bio-loading';
+      bioSlot.innerHTML = '';
+      refreshBtn.disabled = true;
+      const params = {id: artistId};
+      if (force) params.force = '1';
+      apiCall('getArtistInfo2', params).then(srInfo => {
+         const info        = srInfo?.artistInfo2 ?? {};
+         const imgUrl      = info.largeImageUrl || info.mediumImageUrl || info.smallImageUrl || '';
+         const bio         = info.biography ?? '';
+         const wikiUrl     = info.wikiUrl ?? '';
+         const allMusicUrl = info.allMusicUrl ?? '';
 
-      bioSlot.className = '';   // remove shimmer regardless of outcome
+         bioSlot.className = '';   // remove shimmer regardless of outcome
+         refreshBtn.disabled = false;
 
-      if (!imgUrl && !bio && !wikiUrl && !allMusicUrl) return;
+         if (!imgUrl && !bio && !wikiUrl && !allMusicUrl) return;
 
-      const block = document.createElement('div');
-      block.className = 'artist-bio';
+         const block = document.createElement('div');
+         block.className = 'artist-bio';
 
-      if (imgUrl) {
-         const img = document.createElement('img');
-         img.className = 'artist-bio-img';
-         img.src = imgUrl;
-         img.alt = artistName;
-         block.appendChild(img);
-         }
-
-      let bioP = null;
-      if (bio) {
-         const body = document.createElement('div');
-         body.className = 'artist-bio-body';
-         bioP = document.createElement('p');
-         bioP.className = 'artist-bio-text';
-         bioP.innerHTML = bio;   // Last.fm-supplied HTML
-         body.appendChild(bioP);
-
-         // Links + 'more' toggle below the description, inside the text column.
-         const linksRow = document.createElement('div');
-         linksRow.className = 'links-row';
-         if (wikiUrl) {
-            const a = document.createElement('a');
-            a.className = 'wiki-link';
-            a.href = wikiUrl;
-            a.target = '_blank';
-            a.rel = 'noopener';
-            a.textContent = 'Wikipedia';
-            linksRow.appendChild(a);
+         if (imgUrl) {
+            const img = document.createElement('img');
+            img.className = 'artist-bio-img';
+            img.src = imgUrl;
+            img.alt = artistName;
+            block.appendChild(img);
             }
-         if (allMusicUrl) {
-            const a = document.createElement('a');
-            a.className = 'wiki-link';
-            a.href = allMusicUrl;
-            a.target = '_blank';
-            a.rel = 'noopener';
-            a.textContent = 'AllMusic';
-            linksRow.appendChild(a);
-            }
-         const toggle = document.createElement('span');
-         toggle.className = 'bio-toggle';
-         toggle.textContent = 'more';
-         toggle.addEventListener('click', () => {
-            const expanded = bioP.classList.toggle('expanded');
-            toggle.textContent = expanded ? 'less' : 'more';
-            });
-         linksRow.appendChild(toggle);
-         // Hide the toggle if the text fits without clamping.
-         requestAnimationFrame(() => {
-            if (bioP.scrollHeight <= bioP.clientHeight) toggle.hidden = true;
-            });
-         body.appendChild(linksRow);
-         block.appendChild(body);
-         }
-      else if (wikiUrl || allMusicUrl) {
-         // No bio text — just show the links directly on the block.
-         const linksRow = document.createElement('div');
-         linksRow.className = 'links-row';
-         if (wikiUrl) {
-            const a = document.createElement('a');
-            a.className = 'wiki-link';
-            a.href = wikiUrl;
-            a.target = '_blank';
-            a.rel = 'noopener';
-            a.textContent = 'Wikipedia';
-            linksRow.appendChild(a);
-            }
-         if (allMusicUrl) {
-            const a = document.createElement('a');
-            a.className = 'wiki-link';
-            a.href = allMusicUrl;
-            a.target = '_blank';
-            a.rel = 'noopener';
-            a.textContent = 'AllMusic';
-            linksRow.appendChild(a);
-            }
-         block.appendChild(linksRow);
-         }
 
-      bioSlot.appendChild(block);
-      }).catch(() => { bioSlot.className = ''; });   // server may not support getArtistInfo2
+         let bioP = null;
+         if (bio) {
+            const body = document.createElement('div');
+            body.className = 'artist-bio-body';
+            bioP = document.createElement('p');
+            bioP.className = 'artist-bio-text';
+            bioP.innerHTML = bio;   // Last.fm-supplied HTML
+            body.appendChild(bioP);
+
+            // Links + 'more' toggle below the description, inside the text column.
+            const linksRow = document.createElement('div');
+            linksRow.className = 'links-row';
+            if (wikiUrl) {
+               const a = document.createElement('a');
+               a.className = 'wiki-link';
+               a.href = wikiUrl;
+               a.target = '_blank';
+               a.rel = 'noopener';
+               a.textContent = 'Wikipedia';
+               linksRow.appendChild(a);
+               }
+            if (allMusicUrl) {
+               const a = document.createElement('a');
+               a.className = 'wiki-link';
+               a.href = allMusicUrl;
+               a.target = '_blank';
+               a.rel = 'noopener';
+               a.textContent = 'AllMusic';
+               linksRow.appendChild(a);
+               }
+            const toggle = document.createElement('span');
+            toggle.className = 'bio-toggle';
+            toggle.textContent = 'more';
+            toggle.addEventListener('click', () => {
+               const expanded = bioP.classList.toggle('expanded');
+               toggle.textContent = expanded ? 'less' : 'more';
+               });
+            linksRow.appendChild(toggle);
+            // Hide the toggle if the text fits without clamping.
+            requestAnimationFrame(() => {
+               if (bioP.scrollHeight <= bioP.clientHeight) toggle.hidden = true;
+               });
+            body.appendChild(linksRow);
+            block.appendChild(body);
+            }
+         else if (wikiUrl || allMusicUrl) {
+            // No bio text — just show the links directly on the block.
+            const linksRow = document.createElement('div');
+            linksRow.className = 'links-row';
+            if (wikiUrl) {
+               const a = document.createElement('a');
+               a.className = 'wiki-link';
+               a.href = wikiUrl;
+               a.target = '_blank';
+               a.rel = 'noopener';
+               a.textContent = 'Wikipedia';
+               linksRow.appendChild(a);
+               }
+            if (allMusicUrl) {
+               const a = document.createElement('a');
+               a.className = 'wiki-link';
+               a.href = allMusicUrl;
+               a.target = '_blank';
+               a.rel = 'noopener';
+               a.textContent = 'AllMusic';
+               linksRow.appendChild(a);
+               }
+            block.appendChild(linksRow);
+            }
+
+         bioSlot.appendChild(block);
+         }).catch(() => {
+            bioSlot.className = '';
+            refreshBtn.disabled = false;
+            });   // server may not support getArtistInfo2
+      }
+   refreshBtn.addEventListener('click', () => loadBio(true));
+   loadBio(false);
 }
 
 function fmtDuration(secs) {
