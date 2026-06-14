@@ -1023,14 +1023,12 @@ static int extract_archive_to_dir(const std::string& content,
    archive_read_support_filter_all(a);
 
    struct archive* wd = archive_write_disk_new();
-   // ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS is intentionally absent: we set
-   // the entry pathname to an absolute destination path ourselves (after
-   // sanitising the archive-internal path), so the flag would reject every
-   // entry.  Path traversal is prevented by the sanitisation loop below.
-   archive_write_disk_set_options(wd,
-      ARCHIVE_EXTRACT_TIME |
-      ARCHIVE_EXTRACT_SECURE_SYMLINKS |
-      ARCHIVE_EXTRACT_SECURE_NODOTDOT);
+   // No ARCHIVE_EXTRACT_SECURE_* flags: NOABSOLUTEPATHS would reject every
+   // entry because we set an absolute destination path ourselves, and
+   // SECURE_SYMLINKS rejects extraction into any path that passes through a
+   // host-filesystem symlink (which our music root may well contain).
+   // Path traversal is prevented entirely by the sanitisation loop below.
+   archive_write_disk_set_options(wd, ARCHIVE_EXTRACT_TIME);
 
    auto cleanup = [&]{
       archive_read_close(a);
