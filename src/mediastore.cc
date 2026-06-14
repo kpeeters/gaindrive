@@ -1379,18 +1379,26 @@ std::optional<MediaStore::SongInfo> MediaStore::get_song(int song_id)
 	return s;
 	}
 
-std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs()
+std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
+	const std::string& personal_user)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	// Count albums per artist via the child folders (album folders are one level down).
-	SQLite::Statement sel(db_music_,
+	std::string sql =
 		"SELECT f.id, f.name, COUNT(al.id) AS album_count"
 		" FROM folders f"
 		" LEFT JOIN folders af ON af.parent_id = f.id"
 		" LEFT JOIN albums al ON al.folder_id = af.id"
-		" WHERE f.parent_id = (SELECT id FROM folders WHERE parent_id IS NULL)"
-		" GROUP BY f.id"
-		" ORDER BY f.name COLLATE NOCASE");
+		" WHERE f.parent_id = (SELECT id FROM folders WHERE parent_id IS NULL)";
+	if (personal_user.empty())
+		sql += " AND f.path NOT LIKE '.users/%'";
+	else
+		sql += " AND f.path LIKE ?";
+	sql += " GROUP BY f.id ORDER BY f.name COLLATE NOCASE";
+
+	SQLite::Statement sel(db_music_, sql);
+	if (!personal_user.empty())
+		sel.bind(1, ".users/" + personal_user + "/%");
 
 	std::vector<ArtistDir> result;
 	while (sel.executeStep())
@@ -1522,7 +1530,8 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 	int size, int offset,
 	int from_year, int to_year,
 	const std::string& genre,
-	const std::string& username)
+	const std::string& username,
+	const std::string& personal_user)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
@@ -1565,6 +1574,11 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 	else if (type == "byGenre") add_where("LOWER(COALESCE(al.genre,'')) = LOWER(?)");
 	else if (type == "starred") add_where("sa.album_folder_path IS NOT NULL");
 
+	if (personal_user.empty())
+		add_where("f.path NOT LIKE '.users/%'");
+	else
+		add_where("f.path LIKE ?");
+
 	// GROUP BY needed when aggregating play counts.
 	if (play_count_join) sql += " GROUP BY al.id";
 
@@ -1591,6 +1605,8 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 		q.bind(idx++, username);                            // play-count LEFT JOIN
 	if (type == "byYear") { q.bind(idx++, from_year); q.bind(idx++, to_year); }
 	if (type == "byGenre")  q.bind(idx++, genre);
+	if (!personal_user.empty())
+		q.bind(idx++, ".users/" + personal_user + "/%");
 	q.bind(idx++, size);
 	q.bind(idx++, offset);
 
@@ -2332,23 +2348,36 @@ std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
 MediaStore::SearchResult MediaStore::search(const std::string& query,
                                              int artist_count, int artist_offset,
                                              int album_count,  int album_offset,
-                                             int song_count,   int song_offset)
+                                             int song_count,   int song_offset,
+                                             const std::string& personal_user)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SearchResult result;
 	std::string pattern = "%" + query + "%";
+	std::string path_filter = personal_user.empty()
+		? " AND f.path NOT LIKE '.users/%'"
+		: " AND f.path LIKE ?";
+	std::string path_bind = personal_user.empty()
+		? ""
+		: ".users/" + personal_user + "/%";
+	std::string song_filter = personal_user.empty()
+		? " AND s.path NOT LIKE '.users/%'"
+		: " AND s.path LIKE ?";
 
 	// Artists — folder-level, depth-1 children of the root.
-	SQLite::Statement aq(db_music_,
+	std::string aq_sql =
 		"SELECT f.id, f.name"
 		" FROM folders f"
 		" WHERE f.parent_id = (SELECT id FROM folders WHERE parent_id IS NULL)"
-		"   AND LOWER(f.name) LIKE LOWER(?)"
-		" ORDER BY f.name COLLATE NOCASE"
-		" LIMIT ? OFFSET ?");
-	aq.bind(1, pattern);
-	aq.bind(2, artist_count);
-	aq.bind(3, artist_offset);
+		"   AND LOWER(f.name) LIKE LOWER(?)";
+	aq_sql += path_filter;
+	aq_sql += " ORDER BY f.name COLLATE NOCASE LIMIT ? OFFSET ?";
+	SQLite::Statement aq(db_music_, aq_sql);
+	int aq_i = 1;
+	aq.bind(aq_i++, pattern);
+	if (!path_bind.empty()) aq.bind(aq_i++, path_bind);
+	aq.bind(aq_i++, artist_count);
+	aq.bind(aq_i++, artist_offset);
 	while (aq.executeStep()) {
 		ChildEntry e;
 		e.id        = aq.getColumn(0).getInt();
@@ -2360,7 +2389,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		}
 
 	// Albums.
-	SQLite::Statement alq(db_music_,
+	std::string alq_sql =
 		"SELECT f.id, COALESCE(f.parent_id,-1),"
 		"       COALESCE(al.title, f.name),"
 		"       COALESCE(a.name,''),"
@@ -2370,12 +2399,15 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
 		" LEFT JOIN artists a ON a.id = aa.artist_id"
-		" WHERE LOWER(COALESCE(al.title, f.name)) LIKE LOWER(?)"
-		" ORDER BY al.title COLLATE NOCASE"
-		" LIMIT ? OFFSET ?");
-	alq.bind(1, pattern);
-	alq.bind(2, album_count);
-	alq.bind(3, album_offset);
+		" WHERE LOWER(COALESCE(al.title, f.name)) LIKE LOWER(?)";
+	alq_sql += path_filter;
+	alq_sql += " ORDER BY al.title COLLATE NOCASE LIMIT ? OFFSET ?";
+	SQLite::Statement alq(db_music_, alq_sql);
+	int alq_i = 1;
+	alq.bind(alq_i++, pattern);
+	if (!path_bind.empty()) alq.bind(alq_i++, path_bind);
+	alq.bind(alq_i++, album_count);
+	alq.bind(alq_i++, album_offset);
 	while (alq.executeStep()) {
 		ChildEntry e;
 		e.id           = alq.getColumn(0).getInt();
@@ -2391,7 +2423,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 	// Songs — use al.folder_id as parent so the client can call getAlbum directly.
 	// For multi-disc albums songs live in disc subfolders, so s.folder_id would be
 	// wrong; al.folder_id is always the album root folder that getAlbum expects.
-	SQLite::Statement sq(db_music_,
+	std::string sq_sql =
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
 		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
@@ -2403,12 +2435,15 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
-		" WHERE LOWER(s.title) LIKE LOWER(?)"
-		" ORDER BY s.title COLLATE NOCASE"
-		" LIMIT ? OFFSET ?");
-	sq.bind(1, pattern);
-	sq.bind(2, song_count);
-	sq.bind(3, song_offset);
+		" WHERE LOWER(s.title) LIKE LOWER(?)";
+	sq_sql += song_filter;
+	sq_sql += " ORDER BY s.title COLLATE NOCASE LIMIT ? OFFSET ?";
+	SQLite::Statement sq(db_music_, sq_sql);
+	int sq_i = 1;
+	sq.bind(sq_i++, pattern);
+	if (!path_bind.empty()) sq.bind(sq_i++, path_bind);
+	sq.bind(sq_i++, song_count);
+	sq.bind(sq_i++, song_offset);
 	while (sq.executeStep()) {
 		ChildEntry e;
 		e.id           = sq.getColumn(0).getInt();

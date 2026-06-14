@@ -696,7 +696,7 @@ async function viewUserEdit(user, refreshFn) {
    }
 
 async function viewArtists() {
-   console.log('[artists] loading');
+   console.log('[artists] loading, personal=', personalMode);
    const pane = document.getElementById('pane-artists');
    pane.innerHTML = '';
    document.getElementById('pane-albums').innerHTML = '';
@@ -704,7 +704,7 @@ async function viewArtists() {
 
    let sr;
    try {
-      sr = await apiCall('getArtists');
+      sr = await apiCall('getArtists', personalMode ? {personal: 'true'} : {});
       }
    catch {
       showError('Could not reach the server. Please check your connection.');
@@ -719,8 +719,21 @@ async function viewArtists() {
    header.className = 'view-header';
    const title = document.createElement('h1');
    title.className = 'view-title';
-   title.textContent = 'Artists';
+   title.textContent = personalMode ? 'My Uploads' : 'Artists';
    header.appendChild(title);
+
+   // Toggle between shared library and personal uploads (upload/admin users only).
+   if (currentUser?.uploadRole || currentUser?.adminRole) {
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className = 'personal-toggle-btn';
+      toggleBtn.textContent = personalMode ? 'Library' : 'My Uploads';
+      toggleBtn.addEventListener('click', () => {
+         personalMode = !personalMode;
+         viewArtists();
+         });
+      header.appendChild(toggleBtn);
+      }
+
    frag.appendChild(header);
 
    for (const index of indexes) {
@@ -1196,6 +1209,30 @@ async function viewAlbums(artistId, artistName) {
       row.appendChild(cover);
       row.appendChild(info);
       row.appendChild(makeAlbumStar(album));
+
+      // Promote-to-library button (admin only, personal mode only).
+      if (personalMode && currentUser?.adminRole) {
+         const promoteBtn = document.createElement('button');
+         promoteBtn.className = 'promote-btn';
+         promoteBtn.title = 'Move to shared library';
+         promoteBtn.textContent = '→ Library';
+         promoteBtn.addEventListener('click', async e => {
+            e.stopPropagation();
+            promoteBtn.disabled = true;
+            promoteBtn.textContent = '…';
+            try {
+               await apiCall('promoteAlbum', {id: album.id});
+               viewArtists();
+               }
+            catch {
+               promoteBtn.disabled = false;
+               promoteBtn.textContent = '→ Library';
+               showError('Promote failed.');
+               }
+            });
+         row.appendChild(promoteBtn);
+         }
+
       row.addEventListener('click', () => {
          document.querySelectorAll('#pane-albums .album-row.selected')
             .forEach(r => r.classList.remove('selected'));
@@ -1341,6 +1378,10 @@ function timeAgo(isoStr) {
 
 // Info for the currently logged-in user (populated in showShell).
 let currentUser = null;
+
+// When true, browse views show the current user's personal upload folder
+// instead of the shared library.
+let personalMode = false;
 
 // Id of the currently active cast device, or null when not casting.
 let castDeviceId        = null;

@@ -712,6 +712,33 @@ body {
 .refresh-btn:hover    { opacity: 1; }
 .refresh-btn:disabled { opacity: 0.2; cursor: default; }
 
+.personal-toggle-btn {
+   margin-left: auto;
+   background: none;
+   border: 1px solid var(--text-muted, #888);
+   border-radius: 4px;
+   cursor: pointer;
+   color: var(--text-muted, #888);
+   font-size: 0.8rem;
+   padding: 0.2rem 0.6rem;
+}
+.personal-toggle-btn:hover { color: var(--text, #eee); border-color: var(--text, #eee); }
+
+.promote-btn {
+   margin-left: auto;
+   background: none;
+   border: 1px solid var(--text-muted, #888);
+   border-radius: 4px;
+   cursor: pointer;
+   color: var(--text-muted, #888);
+   font-size: 0.75rem;
+   padding: 0.15rem 0.5rem;
+   white-space: nowrap;
+   flex-shrink: 0;
+}
+.promote-btn:hover    { color: var(--text, #eee); border-color: var(--text, #eee); }
+.promote-btn:disabled { opacity: 0.4; cursor: default; }
+
 .album-row {
    display: flex;
    align-items: center;

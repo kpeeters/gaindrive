@@ -953,9 +953,11 @@ static void handle_album_list(const httplib::Request& req, httplib::Response& re
 	int to_year          = param_int("toYear",   0);
 	std::string genre    = param_str("genre");
 	std::string username = param_str("u");
+	bool personal        = param_str("personal") == "true";
+	std::string pu       = personal ? username : "";
 
 	auto albums = store.get_album_list(type, size, offset,
-	                                   from_year, to_year, genre, username);
+	                                   from_year, to_year, genre, username, pu);
 
 	std::string body;
 	if (use_json)
@@ -1601,7 +1603,9 @@ GainDrive::GainDrive(const std::string& db_path,
 	                                             httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 
-		auto artists = store_.get_artist_dirs();
+		bool personal = req.get_param_value("personal") == "true";
+		std::string pu = personal ? req.get_param_value("u") : "";
+		auto artists = store_.get_artist_dirs(pu);
 
 		std::sort(artists.begin(), artists.end(),
 			[](const MediaStore::ArtistDir& a, const MediaStore::ArtistDir& b) {
@@ -1664,7 +1668,9 @@ GainDrive::GainDrive(const std::string& db_path,
 	                                            httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 
-		auto artists = store_.get_artist_dirs();
+		bool personal = req.get_param_value("personal") == "true";
+		std::string pu = personal ? req.get_param_value("u") : "";
+		auto artists = store_.get_artist_dirs(pu);
 		std::sort(artists.begin(), artists.end(),
 			[](const MediaStore::ArtistDir& a, const MediaStore::ArtistDir& b) {
 				return sort_key(a.name) < sort_key(b.name);
@@ -2862,10 +2868,13 @@ GainDrive::GainDrive(const std::string& db_path,
 		int song_count    = std::stoi(qp("songCount",    "20"));
 		int song_offset   = std::stoi(qp("songOffset",   "0"));
 
+		bool personal = qp("personal") == "true";
+		std::string pu = personal ? qp("u") : "";
 		auto sr = store_.search(query,
 		                        artist_count, artist_offset,
 		                        album_count,  album_offset,
-		                        song_count,   song_offset);
+		                        song_count,   song_offset,
+		                        pu);
 		int mbr = request_max_bitrate(req, store_);
 
 		std::string body;
@@ -3524,10 +3533,97 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		std::cout << stamp() << "Upload: extracted " << n << " file(s) to " << dest << std::endl;
 
+		// Scan the artist-level directories that now exist under the user's
+		// personal folder so the files appear in the DB immediately.
+		std::set<std::string> to_scan;
+		for (auto& e : fs::directory_iterator(dest))
+			if (e.is_directory())
+				to_scan.insert(".users/" + uname + "/" + e.path().filename().string());
+		if (!to_scan.empty())
+			std::thread([this, to_scan]{ store_.scan_dirs(to_scan); }).detach();
+
 		nlohmann::json j;
 		j["status"] = "ok";
 		j["files"]  = n;
 		res.set_content(j.dump(), "application/json");
+		});
+
+	// promoteAlbum — move a personal album into the shared library (admin only).
+	// Param: id (album folder_id). The album must live under .users/<username>/.
+	server_.Get("/rest/promoteAlbum.view", [this](const httplib::Request& req,
+	                                               httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+
+		// Admin only.
+		{
+		auto it = req.params.find("u");
+		auto ui = (it != req.params.end()) ? store_.get_user(it->second) : std::nullopt;
+		if (!ui || !ui->is_admin) { err(50, "Promote requires admin role."); return; }
+		}
+
+		auto id_it = req.params.find("id");
+		if (id_it == req.params.end()) { err(10, "Missing parameter: id."); return; }
+		int folder_id = std::stoi(id_it->second);
+
+		auto rel_opt = store_.album_folder_path_by_id(folder_id);
+		if (!rel_opt) { err(70, "Album not found."); return; }
+		const std::string& album_rel = *rel_opt;
+
+		// Expect exactly ".users/<username>/<artist>/<album>".
+		namespace fs = std::filesystem;
+		fs::path rel_p(album_rel);
+		std::vector<std::string> parts;
+		for (auto& c : rel_p) parts.push_back(c.string());
+		if (parts.size() != 4 || parts[0] != ".users") {
+			err(0, "Album is not in a personal library folder.");
+			return;
+			}
+		const std::string& uname_from_path = parts[1];
+		const std::string& artist_name     = parts[2];
+		const std::string& album_name      = parts[3];
+
+		std::string target_rel         = artist_name + "/" + album_name;
+		std::string personal_artist_rel = ".users/" + uname_from_path + "/" + artist_name;
+
+		fs::path abs_src    = store_.abs_path(album_rel);
+		fs::path abs_target = store_.abs_path(target_rel);
+
+		if (fs::exists(abs_target)) {
+			err(0, "An album with that name already exists in the main library.");
+			return;
+			}
+
+		std::error_code ec;
+		fs::create_directories(abs_target.parent_path(), ec);
+		if (ec) { err(0, ("Failed to create artist directory: " + ec.message()).c_str()); return; }
+
+		fs::rename(abs_src, abs_target, ec);
+		if (ec) {
+			// Cross-device: fall back to recursive copy then remove.
+			fs::copy(abs_src, abs_target, fs::copy_options::recursive, ec);
+			if (ec) { err(0, ("Failed to move album: " + ec.message()).c_str()); return; }
+			fs::remove_all(abs_src, ec);
+			}
+
+		std::cout << stamp() << "Promote: moved " << album_rel
+		          << " → " << target_rel << std::endl;
+
+		// Rescan both the new main-library artist dir and the personal artist dir
+		// (which may now be empty; scan_artist_dir will prune its gone entries).
+		std::thread([this, target_rel, personal_artist_rel]{
+			store_.scan_dirs({target_rel.substr(0, target_rel.rfind('/')),
+			                  personal_artist_rel});
+			}).detach();
+
+		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
+		                use_json ? "application/json" : "application/xml");
 		});
 
 	// Catch-all for endpoints not yet implemented.

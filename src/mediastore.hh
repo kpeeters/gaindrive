@@ -106,7 +106,10 @@ class MediaStore {
 		struct ArtistDir { int id; std::string name; int album_count = 0; };
 
 		// All artist-level folders (depth-1 children of root), sorted by name.
-		std::vector<ArtistDir> get_artist_dirs();
+		// personal_user non-empty → restrict to .users/<personal_user>/; else
+		// main library (excludes .users/ entirely).
+		std::vector<ArtistDir> get_artist_dirs(
+			const std::string& personal_user = "");
 
 		struct ChildEntry {
 			int         id;
@@ -172,7 +175,8 @@ class MediaStore {
 			int size, int offset,
 			int from_year = 0, int to_year = 0,
 			const std::string& genre = "",
-			const std::string& username = "");
+			const std::string& username = "",
+			const std::string& personal_user = "");
 
 		struct ArtistInfo {
 			ArtistDir               artist;
@@ -235,7 +239,8 @@ class MediaStore {
 		SearchResult search(const std::string& query,
 		                    int artist_count, int artist_offset,
 		                    int album_count,  int album_offset,
-		                    int song_count,   int song_offset);
+		                    int song_count,   int song_offset,
+		                    const std::string& personal_user = "");
 
 		// ---- Play queue / bookmarks ----
 
