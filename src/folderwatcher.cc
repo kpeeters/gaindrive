@@ -77,23 +77,39 @@ std::string FolderWatcher::artist_dir_for(int wd, const char* ev_name) const
 
 	// Event is on the root itself: the affected artist is root/ev_name.
 	if (dir == root) {
-		if (ev_name && ev_name[0])
+		if (ev_name && ev_name[0] && std::string(ev_name) != ".users")
 			return (root / ev_name).string();
 		return "";
 		}
 
 	// Walk up to the depth-1 child of root (the artist dir).
 	auto rel = dir.lexically_relative(root);
+	auto depth1 = rel.begin()->string();
+	// The personal-upload area is managed exclusively via explicit scan_dirs()
+	// calls from the upload handler; treating .users as an artist dir would
+	// re-parent the UUID batch folders and break personal-library browsing.
+	if (depth1 == ".users") return "";
 	return (root / *rel.begin()).string();
 	}
 
 void FolderWatcher::add_watches_recursive(const std::string& root)
 	{
+	// Never watch the personal-upload area; artist_dir_for() ignores events
+	// there, and the scan_dirs() calls from the upload handler are authoritative.
+	// Skipping also avoids exhausting inotify watch slots on large uploads.
+	std::string users_abs = music_root_ + "/.users";
+	if (root == users_abs
+	    || root.compare(0, users_abs.size() + 1, users_abs + '/') == 0)
+		return;
+
 	add_watch(root);
 	std::error_code ec;
 	for (auto& entry : std::filesystem::recursive_directory_iterator(root,
 	                       std::filesystem::directory_options::skip_permission_denied, ec)) {
-		if (entry.is_directory(ec))
+		if (entry.is_directory(ec)
+		    && entry.path().string() != users_abs
+		    && entry.path().string().compare(0, users_abs.size() + 1,
+		                                     users_abs + '/') != 0)
 			add_watch(entry.path().string());
 		}
 	if (ec)
