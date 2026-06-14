@@ -3,13 +3,18 @@
 #include "streamer.hh"
 #include "embedded_web.hh"
 
+#include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <random>
+#include <set>
+#include <sstream>
 #include <thread>
 
 #include <netinet/in.h>
@@ -1011,6 +1016,25 @@ static void handle_album_list(const httplib::Request& req, httplib::Response& re
 
 // ---- GainDrive --------------------------------------------------------
 
+static std::string make_uuid()
+   {
+   std::random_device rd;
+   std::mt19937_64 gen(rd());
+   std::uniform_int_distribution<uint64_t> dis;
+   uint64_t a = dis(gen), b = dis(gen);
+   // Set UUID v4 version and variant bits.
+   a = (a & 0xFFFFFFFFFFFF0FFFull) | 0x0000000000004000ull;
+   b = (b & 0x3FFFFFFFFFFFFFFFull) | 0x8000000000000000ull;
+   std::ostringstream ss;
+   ss << std::hex << std::setfill('0')
+      << std::setw(8)  << (uint32_t)(a >> 32)        << '-'
+      << std::setw(4)  << (uint32_t)((a >> 16) & 0xFFFF) << '-'
+      << std::setw(4)  << (uint32_t)(a & 0xFFFF)     << '-'
+      << std::setw(4)  << (uint32_t)(b >> 48)         << '-'
+      << std::setw(12) << (b & 0x0000FFFFFFFFFFFFull);
+   return ss.str();
+   }
+
 // Extract a zip/tar/tar.gz/tgz archive from memory into dest_dir.
 // Entry paths are sanitised: absolute components and ".." are stripped so
 // no file can escape dest_dir. Returns the number of regular files written,
@@ -1103,6 +1127,93 @@ static int extract_archive_to_dir(const std::string& content,
              << " skipped=" << skipped << std::endl;
    cleanup();
    return count;
+   }
+
+// Reorganise all audio files under batch_root into <artist>/<album>/ subdirs
+// using embedded tag metadata. Non-audio siblings follow their audio files when
+// all audio in a source dir maps to the same (artist, album) target. Empty
+// directories left behind are pruned. Falls back to "Unknown Artist" /
+// "Unknown Album" for files with no usable tags.
+static void reorganise_by_tags(const std::filesystem::path& batch_root)
+   {
+   namespace fs = std::filesystem;
+
+   static const std::set<std::string> AUDIO_EXT = {
+      ".flac", ".mp3", ".ogg", ".oga", ".m4a", ".aac", ".wav", ".opus", ".wma"};
+   auto is_audio = [](const fs::path& p) {
+      std::string ext = p.extension().string();
+      std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+      return AUDIO_EXT.count(ext) > 0;
+      };
+   auto sanitise = [](const std::string& s) -> std::string {
+      std::string r;
+      for (char c : s)
+         if (c != '/' && c != '\\' && c != '\0' && c != ':' &&
+             c != '*'  && c != '?' && c != '"'  && c != '<' && c != '>')
+            r += c;
+      while (!r.empty() && (r.front() == ' ' || r.front() == '.'))
+         r.erase(r.begin());
+      while (!r.empty() && (r.back()  == ' ' || r.back()  == '.'))
+         r.pop_back();
+      return r.empty() ? "Unknown" : r;
+      };
+
+   // Collect every audio file and read artist / album from its tags.
+   struct AudioFile { fs::path path; std::string artist; std::string album; };
+   std::vector<AudioFile> audio_files;
+   std::error_code ec;
+   for (auto& e : fs::recursive_directory_iterator(batch_root, ec)) {
+      if (!e.is_regular_file() || !is_audio(e.path())) continue;
+      std::string artist = "Unknown Artist", album = "Unknown Album";
+      TagLib::FileRef ref(e.path().c_str());
+      if (!ref.isNull() && ref.tag()) {
+         auto a = ref.tag()->artist().to8Bit(true);
+         auto b = ref.tag()->album().to8Bit(true);
+         if (!a.empty()) artist = a;
+         if (!b.empty()) album  = b;
+         }
+      audio_files.push_back({e.path(), sanitise(artist), sanitise(album)});
+      }
+
+   if (audio_files.empty()) return;
+
+   // Move each audio file into batch_root/<artist>/<album>/.
+   // Track which source directories contributed to which (artist, album) targets
+   // so sibling non-audio files (covers, .m3u, etc.) can follow.
+   std::map<fs::path, std::set<std::pair<std::string, std::string>>> dir_targets;
+   for (auto& af : audio_files) {
+      fs::path target = batch_root / af.artist / af.album;
+      fs::create_directories(target, ec);
+      fs::rename(af.path, target / af.path.filename(), ec);
+      if (ec)
+         std::cout << stamp() << "reorganise: rename failed for "
+                   << af.path << ": " << ec.message() << std::endl;
+      else
+         dir_targets[af.path.parent_path()].insert({af.artist, af.album});
+      }
+
+   // For source dirs that fed exactly one (artist, album) target, relocate
+   // any remaining files (covers, lyrics, etc.) to the same destination.
+   for (auto& [src, targets] : dir_targets) {
+      if (targets.size() != 1) continue;
+      auto& [artist, album] = *targets.begin();
+      fs::path target = batch_root / artist / album;
+      for (auto& e : fs::directory_iterator(src, ec))
+         if (e.is_regular_file())
+            fs::rename(e.path(), target / e.path().filename(), ec);
+      }
+
+   // Prune empty directories — collect them all first, then sort deepest-first
+   // so children are removed before parents.
+   std::vector<fs::path> dirs;
+   for (auto& e : fs::recursive_directory_iterator(batch_root, ec))
+      if (e.is_directory()) dirs.push_back(e.path());
+   std::sort(dirs.begin(), dirs.end(),
+             [](const fs::path& a, const fs::path& b){
+                return b.string().size() < a.string().size();
+                });
+   for (auto& d : dirs)
+      if (fs::is_empty(d, ec)) fs::remove(d, ec);
    }
 
 // Grace period before the SSE-as-heartbeat watchdog tears down a cast
@@ -3520,7 +3631,12 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!ok) { json_err("Unsupported file type. Use zip, tar, tar.gz, or tgz."); return; }
 
 		namespace fs = std::filesystem;
-		fs::path dest = fs::path(users_dir_) / uname;
+
+		// Each upload lands in its own UUID subdirectory so that messy zip
+		// structures (missing artist/album dirs) are always isolated and the
+		// scanner has a stable "artist-level" root to work from.
+		std::string uuid = make_uuid();
+		fs::path dest = fs::path(users_dir_) / uname / uuid;
 		fs::create_directories(dest);
 
 		std::cout << stamp() << "Upload: extracting " << name
@@ -3533,18 +3649,19 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		std::cout << stamp() << "Upload: extracted " << n << " file(s) to " << dest << std::endl;
 
-		// Scan the artist-level directories that now exist under the user's
-		// personal folder so the files appear in the DB immediately.
-		std::set<std::string> to_scan;
-		for (auto& e : fs::directory_iterator(dest))
-			if (e.is_directory())
-				to_scan.insert(".users/" + uname + "/" + e.path().filename().string());
-		if (!to_scan.empty())
-			std::thread([this, to_scan]{ store_.scan_dirs(to_scan); }).detach();
+		// Reorganise extracted files into <artist>/<album>/ dirs based on tags.
+		reorganise_by_tags(dest);
+		std::cout << stamp() << "Upload: reorganised by tags under " << dest << std::endl;
+
+		// Scan the UUID dir as an artist-level directory so all files appear in
+		// the DB immediately (detached so the HTTP response is not delayed).
+		std::string rel_batch = ".users/" + uname + "/" + uuid;
+		std::thread([this, rel_batch]{ store_.scan_dirs({rel_batch}); }).detach();
 
 		nlohmann::json j;
 		j["status"] = "ok";
 		j["files"]  = n;
+		j["batch"]  = rel_batch;
 		res.set_content(j.dump(), "application/json");
 		});
 
@@ -3573,53 +3690,51 @@ GainDrive::GainDrive(const std::string& db_path,
 		int folder_id = std::stoi(id_it->second);
 
 		auto rel_opt = store_.album_folder_path_by_id(folder_id);
-		if (!rel_opt) { err(70, "Album not found."); return; }
-		const std::string& album_rel = *rel_opt;
+		if (!rel_opt) { err(70, "Item not found."); return; }
+		const std::string& item_rel = *rel_opt;
 
-		// Expect exactly ".users/<username>/<artist>/<album>".
+		// Expect exactly ".users/<username>/<uuid>/<item>" — the item is what
+		// gets dropped at the music-root level as a new artist directory.
 		namespace fs = std::filesystem;
-		fs::path rel_p(album_rel);
+		fs::path rel_p(item_rel);
 		std::vector<std::string> parts;
 		for (auto& c : rel_p) parts.push_back(c.string());
 		if (parts.size() != 4 || parts[0] != ".users") {
-			err(0, "Album is not in a personal library folder.");
+			err(0, "Item is not in a personal library folder.");
 			return;
 			}
 		const std::string& uname_from_path = parts[1];
-		const std::string& artist_name     = parts[2];
-		const std::string& album_name      = parts[3];
+		const std::string& batch_uuid      = parts[2];
+		const std::string& item_name       = parts[3];
 
-		std::string target_rel         = artist_name + "/" + album_name;
-		std::string personal_artist_rel = ".users/" + uname_from_path + "/" + artist_name;
+		// The item becomes an artist-level directory in the main library.
+		std::string target_rel      = item_name;
+		std::string personal_batch  = ".users/" + uname_from_path + "/" + batch_uuid;
 
-		fs::path abs_src    = store_.abs_path(album_rel);
+		fs::path abs_src    = store_.abs_path(item_rel);
 		fs::path abs_target = store_.abs_path(target_rel);
 
 		if (fs::exists(abs_target)) {
-			err(0, "An album with that name already exists in the main library.");
+			err(0, "A directory with that name already exists in the main library.");
 			return;
 			}
 
 		std::error_code ec;
-		fs::create_directories(abs_target.parent_path(), ec);
-		if (ec) { err(0, ("Failed to create artist directory: " + ec.message()).c_str()); return; }
-
 		fs::rename(abs_src, abs_target, ec);
 		if (ec) {
 			// Cross-device: fall back to recursive copy then remove.
 			fs::copy(abs_src, abs_target, fs::copy_options::recursive, ec);
-			if (ec) { err(0, ("Failed to move album: " + ec.message()).c_str()); return; }
+			if (ec) { err(0, ("Failed to move item: " + ec.message()).c_str()); return; }
 			fs::remove_all(abs_src, ec);
 			}
 
-		std::cout << stamp() << "Promote: moved " << album_rel
+		std::cout << stamp() << "Promote: moved " << item_rel
 		          << " → " << target_rel << std::endl;
 
-		// Rescan both the new main-library artist dir and the personal artist dir
-		// (which may now be empty; scan_artist_dir will prune its gone entries).
-		std::thread([this, target_rel, personal_artist_rel]{
-			store_.scan_dirs({target_rel.substr(0, target_rel.rfind('/')),
-			                  personal_artist_rel});
+		// Rescan the new main-library artist dir and the personal batch dir
+		// (which may now be empty; scan_artist_dir prunes gone entries).
+		std::thread([this, target_rel, personal_batch]{
+			store_.scan_dirs({target_rel, personal_batch});
 			}).detach();
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
