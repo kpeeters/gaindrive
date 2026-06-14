@@ -1391,7 +1391,7 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
 		" LEFT JOIN albums al ON al.folder_id = af.id"
 		" WHERE f.parent_id = (SELECT id FROM folders WHERE parent_id IS NULL)";
 	if (personal_user.empty())
-		sql += " AND f.path NOT LIKE '.users/%'";
+		sql += " AND f.path NOT LIKE '.users%'";
 	else
 		sql += " AND f.path LIKE ?";
 	sql += " GROUP BY f.id ORDER BY f.name COLLATE NOCASE";
@@ -1575,7 +1575,7 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 	else if (type == "starred") add_where("sa.album_folder_path IS NOT NULL");
 
 	if (personal_user.empty())
-		add_where("f.path NOT LIKE '.users/%'");
+		add_where("f.path NOT LIKE '.users%'");
 	else
 		add_where("f.path LIKE ?");
 
@@ -2355,13 +2355,13 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 	SearchResult result;
 	std::string pattern = "%" + query + "%";
 	std::string path_filter = personal_user.empty()
-		? " AND f.path NOT LIKE '.users/%'"
+		? " AND f.path NOT LIKE '.users%'"
 		: " AND f.path LIKE ?";
 	std::string path_bind = personal_user.empty()
 		? ""
 		: ".users/" + personal_user + "/%";
 	std::string song_filter = personal_user.empty()
-		? " AND s.path NOT LIKE '.users/%'"
+		? " AND s.path NOT LIKE '.users%'"
 		: " AND s.path LIKE ?";
 
 	// Artists — folder-level, depth-1 children of the root.
