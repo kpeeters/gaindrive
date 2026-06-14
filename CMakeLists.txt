@@ -66,7 +66,16 @@ FetchContent_Declare(
 	GIT_TAG        1.4.3
 )
 
-FetchContent_MakeAvailable(httplib cxxopts nlohmann_json SQLiteCpp taglib tinyxml2 reproc mdns)
+# libarchive for extracting user-uploaded zip/tar archives.
+set(ENABLE_TEST    OFF CACHE BOOL "" FORCE)
+set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+	libarchive
+	GIT_REPOSITORY https://github.com/libarchive/libarchive.git
+	GIT_TAG        v3.7.4
+)
+
+FetchContent_MakeAvailable(httplib cxxopts nlohmann_json SQLiteCpp taglib tinyxml2 reproc mdns libarchive)
 
 find_package(OpenSSL REQUIRED)
 
@@ -112,6 +121,9 @@ target_include_directories(gaindrive PRIVATE src ${CMAKE_CURRENT_BINARY_DIR})
 # mdns.h is header-only; add its source directory to the include path.
 target_include_directories(gaindrive PRIVATE ${mdns_SOURCE_DIR})
 
+# libarchive: headers live in the source tree's libarchive/ subdirectory.
+target_include_directories(gaindrive PRIVATE ${libarchive_SOURCE_DIR}/libarchive)
+
 target_link_libraries(gaindrive PRIVATE
 	httplib::httplib
 	cxxopts::cxxopts
@@ -122,4 +134,5 @@ target_link_libraries(gaindrive PRIVATE
 	OpenSSL::SSL
 	OpenSSL::Crypto
 	reproc++
+	archive_static
 )

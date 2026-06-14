@@ -440,7 +440,7 @@ void MediaStore::scan()
 	// with path = "" in the relative-path scheme.
 	std::set<fs::path> to_scan;
 	for (auto& e : fs::directory_iterator(music_root_)) {
-		if (e.is_directory())
+		if (e.is_directory() && e.path().filename() != ".users")
 			to_scan.insert(e.path());
 		}
 	{
@@ -448,7 +448,8 @@ void MediaStore::scan()
 	SQLite::Statement s(db_music_,
 		"SELECT path FROM folders"
 		" WHERE parent_id = (SELECT id FROM folders WHERE path = ?)"
-		"   AND path != ?");
+		"   AND path != ?"
+		"   AND path NOT LIKE '.users%'");
 	s.bind(1, std::string(""));
 	s.bind(2, std::string(""));
 	while (s.executeStep())

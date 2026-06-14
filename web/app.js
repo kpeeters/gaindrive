@@ -387,7 +387,7 @@ async function viewSettings() {
          try {
             const j = JSON.parse(xhr.responseText);
             if (j.status === 'ok')
-               uploadStatus.textContent = `Uploaded: ${j.filename}`;
+               uploadStatus.textContent = `Extracted ${j.files} file(s) to your personal library.`;
             else
                uploadStatus.textContent = `Error: ${j.message}`;
             }

@@ -24,6 +24,7 @@ class GainDrive {
 		bool            debug_;
 		bool            flat_multi_disc_;
 		std::string     upload_dir_;
+		std::string     users_dir_;
 		MediaStore      store_;
 		CastManager     cast_manager_;
 		std::string     last_cast_song_id_;

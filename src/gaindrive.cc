@@ -18,6 +18,9 @@
 
 #include <reproc++/reproc.hpp>
 
+#include <archive.h>
+#include <archive_entry.h>
+
 #include <tinyxml2.h>
 #include <nlohmann/json.hpp>
 #include <taglib/fileref.h>
@@ -1006,6 +1009,69 @@ static void handle_album_list(const httplib::Request& req, httplib::Response& re
 
 // ---- GainDrive --------------------------------------------------------
 
+// Extract a zip/tar/tar.gz/tgz archive from memory into dest_dir.
+// Entry paths are sanitised: absolute components and ".." are stripped so
+// no file can escape dest_dir. Returns the number of regular files written,
+// or -1 if the archive could not be opened.
+static int extract_archive_to_dir(const std::string& content,
+                                   const std::filesystem::path& dest_dir)
+   {
+   namespace fs = std::filesystem;
+
+   struct archive* a = archive_read_new();
+   archive_read_support_format_all(a);
+   archive_read_support_filter_all(a);
+
+   struct archive* wd = archive_write_disk_new();
+   archive_write_disk_set_options(wd,
+      ARCHIVE_EXTRACT_TIME |
+      ARCHIVE_EXTRACT_SECURE_SYMLINKS |
+      ARCHIVE_EXTRACT_SECURE_NODOTDOT |
+      ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS);
+
+   auto cleanup = [&]{
+      archive_read_close(a);
+      archive_read_free(a);
+      archive_write_close(wd);
+      archive_write_free(wd);
+      };
+
+   if (archive_read_open_memory(a, content.data(), content.size()) != ARCHIVE_OK) {
+      cleanup();
+      return -1;
+      }
+
+   int count = 0;
+   struct archive_entry* entry;
+   while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+      const char* raw = archive_entry_pathname(entry);
+      if (!raw) continue;
+
+      // Build a sanitised relative path by dropping any "..", ".", and "/" components.
+      fs::path safe;
+      for (const auto& part : fs::path(raw)) {
+         auto s = part.string();
+         if (s == ".." || s == "." || s == "/") continue;
+         safe /= part;
+         }
+      if (safe.empty()) continue;
+
+      archive_entry_set_pathname(entry, (dest_dir / safe).c_str());
+
+      if (archive_write_header(wd, entry) == ARCHIVE_OK) {
+         const void* buf; size_t sz; la_int64_t off;
+         while (archive_read_data_block(a, &buf, &sz, &off) == ARCHIVE_OK)
+            archive_write_data_block(wd, buf, sz, off);
+         if (archive_entry_filetype(entry) == AE_IFREG)
+            count++;
+         archive_write_finish_entry(wd);
+         }
+      }
+
+   cleanup();
+   return count;
+   }
+
 // Grace period before the SSE-as-heartbeat watchdog tears down a cast
 // session whose listener has gone away. Long enough to ride out a page
 // reload or a brief network blip; short enough that closing the tab
@@ -1024,6 +1090,8 @@ GainDrive::GainDrive(const std::string& db_path,
 	namespace fs = std::filesystem;
 	if (!fs::exists(upload_dir_))
 		fs::create_directories(upload_dir_);
+	users_dir_ = (fs::path(music_root) / ".users").string();
+	fs::create_directories(users_dir_);
 
 	// Normalise /rest/foo → /rest/foo.view so clients that omit the suffix still work.
 	// In debug mode also strip Accept-Encoding: httplib swaps compressed bytes into
@@ -3375,7 +3443,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		                use_json ? "application/json" : "application/xml");
 		});
 
-	// Upload a music archive (zip / tar / tar.gz / tgz) to the staging directory.
+	// Upload a music archive (zip / tar / tar.gz / tgz) and extract it into
+	// the calling user's personal folder under music_root/.users/<username>/.
 	server_.Post("/upload", [this](const httplib::Request& req, httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 
@@ -3387,10 +3456,12 @@ GainDrive::GainDrive(const std::string& db_path,
 			res.set_content(j.dump(), "application/json");
 			};
 
-		// Require upload_allowed (or admin).
+		// Require upload_allowed (or admin); capture the username for the dest path.
+		std::string uname;
 		{
 		auto it = req.params.find("u");
-		auto ui = (it != req.params.end()) ? store_.get_user(it->second) : std::nullopt;
+		uname = (it != req.params.end()) ? it->second : std::string{};
+		auto ui = store_.get_user(uname);
 		if (!ui || (!ui->upload_allowed && !ui->is_admin)) {
 			json_err("User is not authorized to upload.");
 			return;
@@ -3401,38 +3472,29 @@ GainDrive::GainDrive(const std::string& db_path,
 		const auto& fp = req.get_file_value("file");
 
 		// Validate extension.
-		std::string name = fp.filename;
+		const std::string& name = fp.filename;
 		bool ok = name.ends_with(".zip")
 		       || name.ends_with(".tar")
 		       || name.ends_with(".tar.gz")
 		       || name.ends_with(".tgz");
 		if (!ok) { json_err("Unsupported file type. Use zip, tar, tar.gz, or tgz."); return; }
 
-		// Build a timestamped, filesystem-safe destination name.
-		std::string safe;
-		for (char c : name)
-			safe += (std::isalnum(c) || c == '.' || c == '-' || c == '_') ? c : '_';
-
-		auto now = std::chrono::system_clock::now();
-		auto tt  = std::chrono::system_clock::to_time_t(now);
-		char ts[32];
-		std::strftime(ts, sizeof(ts), "%Y%m%dT%H%M%S", std::gmtime(&tt));
-		std::string dest_name = std::string(ts) + "_" + safe;
-
 		namespace fs = std::filesystem;
-		fs::path dest = fs::path(upload_dir_) / dest_name;
-		{
-		std::ofstream out(dest, std::ios::binary | std::ios::trunc);
-		if (!out) { json_err("Failed to write file to upload directory."); return; }
-		out.write(fp.content.data(), (std::streamsize)fp.content.size());
-		}
+		fs::path dest = fs::path(users_dir_) / uname;
+		fs::create_directories(dest);
 
-		std::cout << stamp() << "Upload received: " << dest_name
-		          << " (" << fp.content.size() << " bytes)" << std::endl;
+		std::cout << stamp() << "Upload: extracting " << name
+		          << " (" << fp.content.size() << " bytes)"
+		          << " for user " << uname << std::endl;
+
+		int n = extract_archive_to_dir(fp.content, dest);
+		if (n < 0) { json_err("Failed to open archive."); return; }
+
+		std::cout << stamp() << "Upload: extracted " << n << " file(s) to " << dest << std::endl;
 
 		nlohmann::json j;
-		j["status"]   = "ok";
-		j["filename"] = dest_name;
+		j["status"] = "ok";
+		j["files"]  = n;
 		res.set_content(j.dump(), "application/json");
 		});
 
