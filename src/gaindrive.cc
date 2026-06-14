@@ -1158,12 +1158,17 @@ static void reorganise_by_tags(const std::filesystem::path& batch_root)
       return r.empty() ? "Unknown" : r;
       };
 
-   // Collect every audio file and read artist / album from its tags.
+   // Collect audio files that are NOT already in an Artist/Album subdir
+   // (depth >= 2 from batch_root). Those are left in place; only flat or
+   // single-level files need reorganising.
    struct AudioFile { fs::path path; std::string artist; std::string album; };
    std::vector<AudioFile> audio_files;
    std::error_code ec;
    for (auto& e : fs::recursive_directory_iterator(batch_root, ec)) {
       if (!e.is_regular_file() || !is_audio(e.path())) continue;
+      auto rel   = e.path().lexically_relative(batch_root);
+      int  depth = (int)std::distance(rel.begin(), rel.end()) - 1; // -1 for filename
+      if (depth >= 2) continue;  // already in Artist/Album structure
       std::string artist = "Unknown Artist", album = "Unknown Album";
       TagLib::FileRef ref(e.path().c_str());
       if (!ref.isNull() && ref.tag()) {
