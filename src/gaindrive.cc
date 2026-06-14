@@ -1023,11 +1023,14 @@ static int extract_archive_to_dir(const std::string& content,
    archive_read_support_filter_all(a);
 
    struct archive* wd = archive_write_disk_new();
+   // ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS is intentionally absent: we set
+   // the entry pathname to an absolute destination path ourselves (after
+   // sanitising the archive-internal path), so the flag would reject every
+   // entry.  Path traversal is prevented by the sanitisation loop below.
    archive_write_disk_set_options(wd,
       ARCHIVE_EXTRACT_TIME |
       ARCHIVE_EXTRACT_SECURE_SYMLINKS |
-      ARCHIVE_EXTRACT_SECURE_NODOTDOT |
-      ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS);
+      ARCHIVE_EXTRACT_SECURE_NODOTDOT);
 
    auto cleanup = [&]{
       archive_read_close(a);
@@ -1058,7 +1061,8 @@ static int extract_archive_to_dir(const std::string& content,
 
       archive_entry_set_pathname(entry, (dest_dir / safe).c_str());
 
-      if (archive_write_header(wd, entry) == ARCHIVE_OK) {
+      // ARCHIVE_WARN (-20) means partial success; still write the data.
+      if (archive_write_header(wd, entry) >= ARCHIVE_WARN) {
          const void* buf; size_t sz; la_int64_t off;
          while (archive_read_data_block(a, &buf, &sz, &off) == ARCHIVE_OK)
             archive_write_data_block(wd, buf, sz, off);
