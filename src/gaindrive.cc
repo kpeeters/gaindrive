@@ -1039,16 +1039,25 @@ static int extract_archive_to_dir(const std::string& content,
       archive_write_free(wd);
       };
 
-   if (archive_read_open_memory(a, content.data(), content.size()) != ARCHIVE_OK) {
+   int r = archive_read_open_memory(a, content.data(), content.size());
+   if (r != ARCHIVE_OK) {
+      std::cout << stamp() << "extract: open failed (" << r << "): "
+                << archive_error_string(a) << std::endl;
       cleanup();
       return -1;
       }
 
-   int count = 0;
+   int count = 0, skipped = 0;
    struct archive_entry* entry;
-   while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+   int hr;
+   while ((hr = archive_read_next_header(a, &entry)) == ARCHIVE_OK
+          || hr == ARCHIVE_WARN) {
+      if (hr == ARCHIVE_WARN)
+         std::cout << stamp() << "extract: header warn: "
+                   << archive_error_string(a) << std::endl;
+
       const char* raw = archive_entry_pathname(entry);
-      if (!raw) continue;
+      if (!raw) { skipped++; continue; }
 
       // Build a sanitised relative path by dropping any "..", ".", and "/" components.
       fs::path safe;
@@ -1057,21 +1066,41 @@ static int extract_archive_to_dir(const std::string& content,
          if (s == ".." || s == "." || s == "/") continue;
          safe /= part;
          }
-      if (safe.empty()) continue;
+      if (safe.empty()) {
+         std::cout << stamp() << "extract: skip (empty after sanitise): " << raw << std::endl;
+         skipped++;
+         continue;
+         }
 
-      archive_entry_set_pathname(entry, (dest_dir / safe).c_str());
+      fs::path target = dest_dir / safe;
+      archive_entry_set_pathname(entry, target.c_str());
 
       // ARCHIVE_WARN (-20) means partial success; still write the data.
-      if (archive_write_header(wd, entry) >= ARCHIVE_WARN) {
-         const void* buf; size_t sz; la_int64_t off;
-         while (archive_read_data_block(a, &buf, &sz, &off) == ARCHIVE_OK)
-            archive_write_data_block(wd, buf, sz, off);
-         if (archive_entry_filetype(entry) == AE_IFREG)
-            count++;
-         archive_write_finish_entry(wd);
+      int wr = archive_write_header(wd, entry);
+      if (wr < ARCHIVE_WARN) {
+         std::cout << stamp() << "extract: write_header failed (" << wr << ") for "
+                   << target << ": " << archive_error_string(wd) << std::endl;
+         skipped++;
+         continue;
          }
+      if (wr == ARCHIVE_WARN)
+         std::cout << stamp() << "extract: write_header warn for "
+                   << target << ": " << archive_error_string(wd) << std::endl;
+
+      const void* buf; size_t sz; la_int64_t off;
+      while (archive_read_data_block(a, &buf, &sz, &off) == ARCHIVE_OK)
+         archive_write_data_block(wd, buf, sz, off);
+      if (archive_entry_filetype(entry) == AE_IFREG)
+         count++;
+      archive_write_finish_entry(wd);
       }
 
+   if (hr != ARCHIVE_EOF)
+      std::cout << stamp() << "extract: read_next_header stopped (r=" << hr << "): "
+                << archive_error_string(a) << std::endl;
+
+   std::cout << stamp() << "extract: done, files=" << count
+             << " skipped=" << skipped << std::endl;
    cleanup();
    return count;
    }
@@ -3489,7 +3518,8 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		std::cout << stamp() << "Upload: extracting " << name
 		          << " (" << fp.content.size() << " bytes)"
-		          << " for user " << uname << std::endl;
+		          << " for user " << uname
+		          << " into " << dest << std::endl;
 
 		int n = extract_archive_to_dir(fp.content, dest);
 		if (n < 0) { json_err("Failed to open archive."); return; }
