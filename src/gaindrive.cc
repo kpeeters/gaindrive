@@ -3658,10 +3658,18 @@ GainDrive::GainDrive(const std::string& db_path,
 		reorganise_by_tags(dest);
 		std::cout << stamp() << "Upload: reorganised by tags under " << dest << std::endl;
 
-		// Scan the UUID dir as an artist-level directory so all files appear in
-		// the DB immediately (detached so the HTTP response is not delayed).
+		// Scan each artist dir inside the batch individually so that artist names
+		// (not the UUID) appear as the top-level entries in personal mode.
 		std::string rel_batch = ".users/" + uname + "/" + uuid;
-		std::thread([this, rel_batch]{ store_.scan_dirs({rel_batch}); }).detach();
+		{
+		std::set<std::string> to_scan;
+		std::error_code ec;
+		for (auto& e : fs::directory_iterator(dest, ec))
+			if (e.is_directory())
+				to_scan.insert(rel_batch + "/" + e.path().filename().string());
+		if (!to_scan.empty())
+			std::thread([this, to_scan]{ store_.scan_dirs(to_scan); }).detach();
+		}
 
 		nlohmann::json j;
 		j["status"] = "ok";
@@ -3698,33 +3706,35 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!rel_opt) { err(70, "Item not found."); return; }
 		const std::string& item_rel = *rel_opt;
 
-		// Expect exactly ".users/<username>/<uuid>/<item>" — the item is what
-		// gets dropped at the music-root level as a new artist directory.
+		// Expect ".users/<username>/<uuid>/<artist>/<album>" — five parts.
 		namespace fs = std::filesystem;
 		fs::path rel_p(item_rel);
 		std::vector<std::string> parts;
 		for (auto& c : rel_p) parts.push_back(c.string());
-		if (parts.size() != 4 || parts[0] != ".users") {
+		if (parts.size() != 5 || parts[0] != ".users") {
 			err(0, "Item is not in a personal library folder.");
 			return;
 			}
 		const std::string& uname_from_path = parts[1];
 		const std::string& batch_uuid      = parts[2];
-		const std::string& item_name       = parts[3];
+		const std::string& artist_name     = parts[3];
+		const std::string& album_name      = parts[4];
 
-		// The item becomes an artist-level directory in the main library.
-		std::string target_rel      = item_name;
-		std::string personal_batch  = ".users/" + uname_from_path + "/" + batch_uuid;
+		// Album lands under the artist dir in the main library.
+		std::string target_rel = artist_name + "/" + album_name;
 
 		fs::path abs_src    = store_.abs_path(item_rel);
 		fs::path abs_target = store_.abs_path(target_rel);
 
+		std::error_code ec;
+		// Create the artist dir in the main library if it doesn't exist yet.
+		fs::create_directories(store_.abs_path(artist_name), ec);
+
 		if (fs::exists(abs_target)) {
-			err(0, "A directory with that name already exists in the main library.");
+			err(0, "An album with that name already exists for that artist.");
 			return;
 			}
 
-		std::error_code ec;
 		fs::rename(abs_src, abs_target, ec);
 		if (ec) {
 			// Cross-device: fall back to recursive copy then remove.
@@ -3736,10 +3746,17 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::cout << stamp() << "Promote: moved " << item_rel
 		          << " → " << target_rel << std::endl;
 
-		// Rescan the new main-library artist dir and the personal batch dir
-		// (which may now be empty; scan_artist_dir prunes gone entries).
-		std::thread([this, target_rel, personal_batch]{
-			store_.scan_dirs({target_rel, personal_batch});
+		// If the personal artist dir is now empty, remove it so that
+		// scan_artist_dir treats it as gone and prunes its folder row.
+		std::string personal_artist_rel =
+			".users/" + uname_from_path + "/" + batch_uuid + "/" + artist_name;
+		fs::path personal_artist_abs = store_.abs_path(personal_artist_rel);
+		if (fs::is_directory(personal_artist_abs, ec) && fs::is_empty(personal_artist_abs, ec))
+			fs::remove(personal_artist_abs, ec);
+
+		// Rescan the main-library artist dir and the personal artist dir.
+		std::thread([this, artist_name, personal_artist_rel]{
+			store_.scan_dirs({artist_name, personal_artist_rel});
 			}).detach();
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
