@@ -11,7 +11,11 @@
 class MediaStore {
 	public:
 		// Opens (or creates) the database and ensures the schema exists.
-		MediaStore(const std::string& db_path, const std::string& music_root);
+		// The music DB path is always derived from db_path as "<base>-music.db".
+		// The user/state ("client") DB path defaults to "<base>-client.db" but
+		// can be overridden by passing a non-empty user_db_path.
+		MediaStore(const std::string& db_path, const std::string& music_root,
+		           const std::string& user_db_path = "");
 
 		// Walk music_root_ and upsert everything into the DB.
 		// Safe to call from a background thread.

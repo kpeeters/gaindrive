@@ -1,4 +1,21 @@
 
+# Database files
+
+GainDrive uses two SQLite files, both derived from the `--db` / `db_path`
+base path (default `/var/lib/gaindrive/gaindrive.db`):
+
+  * the music library DB at `<base>-music.db`
+    (e.g. `gaindrive-music.db`),
+  * the user/state DB at `<base>-client.db`
+    (e.g. `gaindrive-client.db`), attached as the `client` schema.
+
+The user/state DB path can be set independently with `--user-db` (CLI) or
+`user_db_path` (config). When given, it overrides the `<base>-client.db`
+derivation while the music DB still follows `<base>-music.db`. This is
+useful for placing the small, frequently written user state on different
+storage from the larger music DB that is rebuilt by library scans.
+
+
 # Music database tables
 
 ```

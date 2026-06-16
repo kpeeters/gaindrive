@@ -1232,9 +1232,10 @@ GainDrive::GainDrive(const std::string& db_path,
                      const std::string& upload_dir,
                      bool no_scan,
                      bool debug,
-                     bool flat_multi_disc)
+                     bool flat_multi_disc,
+                     const std::string& user_db_path)
 	: debug_(debug), flat_multi_disc_(flat_multi_disc), upload_dir_(upload_dir),
-	  store_(db_path, music_root), watcher_(store_, music_root)
+	  store_(db_path, music_root, user_db_path), watcher_(store_, music_root)
 	{
 	namespace fs = std::filesystem;
 	if (!fs::exists(upload_dir_))

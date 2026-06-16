@@ -154,7 +154,8 @@ static std::string derive_path(const std::string& base, const std::string& suffi
 	return base + suffix;
 	}
 
-MediaStore::MediaStore(const std::string& db_path, const std::string& music_root)
+MediaStore::MediaStore(const std::string& db_path, const std::string& music_root,
+                       const std::string& user_db_path)
 	: music_root_(music_root),
 	  db_music_(derive_path(db_path, "-music"), SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)
 	{
@@ -174,7 +175,9 @@ MediaStore::MediaStore(const std::string& db_path, const std::string& music_root
 	if (ec)
 		music_root_canonical_ = fs::path(music_root_);
 
-	std::string client_path = derive_path(db_path, "-client");
+	// User/state DB: explicit override if given, else derived from db_path.
+	std::string client_path = user_db_path.empty()
+	                          ? derive_path(db_path, "-client") : user_db_path;
 	db_music_.exec("PRAGMA journal_mode=WAL");
 	db_music_.exec("PRAGMA foreign_keys=ON");
 	db_music_.exec("ATTACH DATABASE '" + client_path + "' AS client");

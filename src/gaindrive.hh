@@ -17,7 +17,8 @@ class GainDrive {
 		          const std::string& upload_dir,
 		          bool no_scan,
 		          bool debug = false,
-		          bool flat_multi_disc = true);
+		          bool flat_multi_disc = true,
+		          const std::string& user_db_path = "");
 		void listen(const std::string& host, int port);
 
 	private:

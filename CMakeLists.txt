@@ -185,3 +185,48 @@ target_link_libraries(gaindrive PRIVATE
 if(GAINDRIVE_STATIC)
 	target_link_options(gaindrive PRIVATE -static-libstdc++ -static-libgcc)
 endif()
+
+# ---- Install ---------------------------------------------------------------
+
+include(GNUInstallDirs)
+
+install(TARGETS gaindrive RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# systemd integration: unit file + declarative user creation. Gated so non-Linux
+# builds and minimal setups can opt out.
+option(GAINDRIVE_INSTALL_SYSTEMD "Install systemd unit and sysusers.d file" ON)
+
+if(GAINDRIVE_INSTALL_SYSTEMD)
+	# Resolve systemd's real directories from its pkg-config file. These live
+	# OUTSIDE CMAKE_INSTALL_PREFIX on purpose: systemd does not search
+	# /usr/local/lib/systemd, so units installed under a /usr/local prefix would
+	# never be found. The cache variables let packagers override (e.g. for
+	# DESTDIR staging).
+	find_package(PkgConfig)
+	if(PkgConfig_FOUND)
+		pkg_get_variable(_sd_unit_dir    systemd systemdsystemunitdir)
+		pkg_get_variable(_sd_sysusers_dir systemd sysusersdir)
+	endif()
+	if(NOT _sd_unit_dir)
+		set(_sd_unit_dir "/lib/systemd/system")
+	endif()
+	if(NOT _sd_sysusers_dir)
+		set(_sd_sysusers_dir "/usr/lib/sysusers.d")
+	endif()
+	set(SYSTEMD_UNIT_DIR "${_sd_unit_dir}" CACHE PATH "systemd system unit directory")
+	set(SYSTEMD_SYSUSERS_DIR "${_sd_sysusers_dir}" CACHE PATH "systemd sysusers.d directory")
+
+	# Substitute the installed binary path into ExecStart.
+	configure_file(dist/gaindrive.service.in
+	               ${CMAKE_CURRENT_BINARY_DIR}/gaindrive.service @ONLY)
+
+	install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gaindrive.service
+	        DESTINATION ${SYSTEMD_UNIT_DIR})
+	install(FILES dist/gaindrive.sysusers
+	        DESTINATION ${SYSTEMD_SYSUSERS_DIR} RENAME gaindrive.conf)
+endif()
+
+# Example config installs to /etc (not CMAKE_INSTALL_SYSCONFDIR): gaindrive
+# always reads /etc/gaindrive.conf regardless of prefix. Installed with an
+# .example suffix so it never clobbers an admin's live config.
+install(FILES dist/gaindrive.conf.example DESTINATION /etc)
