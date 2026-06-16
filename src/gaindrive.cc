@@ -3754,10 +3754,9 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (fs::is_directory(personal_artist_abs, ec) && fs::is_empty(personal_artist_abs, ec))
 			fs::remove(personal_artist_abs, ec);
 
-		// Rescan the main-library artist dir and the personal artist dir.
-		std::thread([this, artist_name, personal_artist_rel]{
-			store_.scan_dirs({artist_name, personal_artist_rel});
-			}).detach();
+		// Rescan synchronously: only two artist dirs, so it's fast, and doing it
+		// before the response ensures the client sees a consistent DB immediately.
+		store_.scan_dirs({artist_name, personal_artist_rel});
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
