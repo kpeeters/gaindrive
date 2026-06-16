@@ -93,6 +93,28 @@ FetchContent_Declare(
 if(GAINDRIVE_STATIC)
 	set(OPENSSL_USE_STATIC_LIBS ON)
 	set(ZLIB_USE_STATIC_LIBS    ON)   # FindZLIB: needs CMake >= 3.24
+
+	# Make every find_library/find_package resolve to a .a archive so the
+	# remaining codec backends link statically (or auto-disable when no static
+	# lib is installed) instead of pulling .so files into the binary. Requires
+	# the static dev libs to be present (on Debian/Ubuntu the -dev packages
+	# ship the .a, e.g. zlib1g-dev, liblzma-dev, libbz2-dev, libzstd-dev).
+	set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+
+	# Trim optional backends gaindrive never uses but which otherwise drag in
+	# heavy shared libraries. The worst offender is libarchive's xar reader:
+	# its libxml2 pulls in ICU (libicuuc/libicudata), and because ICU is C++ it
+	# drags libstdc++/libgcc_s back in even with -static-libstdc++. httplib's
+	# Brotli/Zstd HTTP content-encoding is likewise unused. zlib/bz2/lzma/zstd
+	# stay enabled so zip and the common compressed-tar uploads still extract.
+	set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+	set(HTTPLIB_USE_ZSTD_IF_AVAILABLE   OFF CACHE BOOL "" FORCE)
+	set(ENABLE_LIBXML2 OFF CACHE BOOL "" FORCE)   # xar -> libxml2 -> ICU
+	set(ENABLE_EXPAT   OFF CACHE BOOL "" FORCE)
+	set(ENABLE_ICONV   OFF CACHE BOOL "" FORCE)
+	set(ENABLE_LZO     OFF CACHE BOOL "" FORCE)
+	set(ENABLE_NETTLE  OFF CACHE BOOL "" FORCE)
+	set(ENABLE_LIBB2   OFF CACHE BOOL "" FORCE)
 endif()
 
 FetchContent_MakeAvailable(httplib cxxopts nlohmann_json SQLiteCpp taglib tinyxml2 reproc mdns libarchive)
