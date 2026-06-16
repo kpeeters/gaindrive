@@ -5,6 +5,15 @@ project(gaindrive CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Optional mostly-static link for easy distribution: OpenSSL, zlib, libstdc++
+# and libgcc are linked statically while glibc stays dynamic (a fully static
+# glibc would warn about getaddrinfo/NSS and break NSS name resolution). The
+# default OFF build is byte-for-byte the same dynamic link as before. Use a
+# separate build dir, e.g. cmake -B build-static -DGAINDRIVE_STATIC=ON.
+option(GAINDRIVE_STATIC
+	"Link gaindrive mostly-statically (static OpenSSL/zlib/libstdc++/libgcc; glibc stays dynamic) for easier distribution"
+	OFF)
+
 include(FetchContent)
 
 FetchContent_Declare(
@@ -75,6 +84,17 @@ FetchContent_Declare(
 	GIT_TAG        v3.7.4
 )
 
+# Must be set before MakeAvailable: httplib (and libarchive/taglib) run their
+# own find_package(OpenSSL)/find_package(ZLIB) during configuration, and
+# FindOpenSSL/FindZLIB pick shared-vs-static for the imported targets the first
+# time they run. Setting these here makes OpenSSL::SSL/Crypto and ZLIB::ZLIB
+# resolve to the .a archives for every consumer, including httplib's transitive
+# link.
+if(GAINDRIVE_STATIC)
+	set(OPENSSL_USE_STATIC_LIBS ON)
+	set(ZLIB_USE_STATIC_LIBS    ON)   # FindZLIB: needs CMake >= 3.24
+endif()
+
 FetchContent_MakeAvailable(httplib cxxopts nlohmann_json SQLiteCpp taglib tinyxml2 reproc mdns libarchive)
 
 find_package(OpenSSL REQUIRED)
@@ -136,3 +156,10 @@ target_link_libraries(gaindrive PRIVATE
 	reproc++
 	archive_static
 )
+
+# OpenSSL/zlib are made static by the USE_STATIC_LIBS vars set before
+# MakeAvailable; the C++ runtime is made static here. glibc and the satellites
+# static OpenSSL pulls in (libdl/libpthread/libm) stay dynamic, by design.
+if(GAINDRIVE_STATIC)
+	target_link_options(gaindrive PRIVATE -static-libstdc++ -static-libgcc)
+endif()
