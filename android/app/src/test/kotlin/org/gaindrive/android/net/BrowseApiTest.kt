@@ -61,7 +61,7 @@ class BrowseApiTest {
 			     {"name":"#","artist":[
 			       {"id":"31","name":"10cc","albumCount":2,"coverArt":"31"}]}]}}}"""
 		)
-		val index = api.getArtists().requireOk().artists!!.index
+		val index = api.getArtists(null).requireOk().artists!!.index
 		assertEquals(2, index.size)
 		assertEquals("S", index[0].name)
 		assertEquals("Steely Dan", index[0].artist[0].name)
@@ -209,6 +209,6 @@ class BrowseApiTest {
 	@Test
 	fun `star returns a bare ok`() = runTest {
 		respond("""{"subsonic-response":{"status":"ok"}}""")
-		assertEquals("ok", api.star(songId = "501").requireOk().status)
+		assertEquals("ok", api.star("501", null, null).requireOk().status)
 	}
 }
