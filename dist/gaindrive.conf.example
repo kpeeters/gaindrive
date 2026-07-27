@@ -1,0 +1,9 @@
+{
+	"host": "127.0.0.1",
+	"port": 4040,
+	"db_path": "/var/lib/gaindrive/gaindrive.db",
+	"user_db_path": "/var/lib/gaindrive/gaindrive-client.db",
+	"music_root": "/srv/music",
+	"upload_dir": "/tmp/gaindrive-uploads",
+	"flat_multi_disc": true
+}

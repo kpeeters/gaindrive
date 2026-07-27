@@ -1,0 +1,33 @@
+[Unit]
+Description=GainDrive music server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gaindrive
+Group=gaindrive
+# No arguments: gaindrive reads /etc/gaindrive.conf by default.
+ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/gaindrive
+Restart=on-failure
+RestartSec=5
+
+# Creates /var/lib/gaindrive (0750, gaindrive:gaindrive) before start;
+# matches the default db_path /var/lib/gaindrive/gaindrive.db.
+StateDirectory=gaindrive
+
+# Hardening. ProtectSystem=full (not strict) keeps /usr, /boot and /etc
+# read-only while leaving the music tree writable. PrivateTmp gives the
+# default upload_dir (/tmp/gaindrive-uploads) a private, writable /tmp.
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictSUIDSGID=yes
+PrivateTmp=yes
+# NOTE: do NOT add ProtectHome if your music lives under /home -- it must
+# stay writable. Tighten with `systemctl edit gaindrive` if desired.
+
+[Install]
+WantedBy=multi-user.target
