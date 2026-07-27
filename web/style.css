@@ -173,7 +173,9 @@ body {
 @media (max-width: 649px) {
    #app-shell {
       grid-template-columns: 1fr;
-      grid-template-rows: 1fr 90px var(--bottom-nav-h);
+      /* The player row is auto-sized: a fixed height clips the wrapped seek
+         row whenever the cover, controls or type metrics change. */
+      grid-template-rows: 1fr auto var(--bottom-nav-h);
       grid-template-areas:
          "content"
          "player"
@@ -1692,9 +1694,12 @@ body {
       align-content: center;
    }
    #player-controls { min-width: 0; }
-   /* Seek bar wraps to its own full-width second row */
+   /* Seek bar and elapsed/total share a second row. The 75% basis is what
+      forces the wrap: it never fits beside the controls at any phone width,
+      so the bar always starts a new line, and flex-grow then stretches it
+      across everything the time readout does not need. */
    #player-seek {
-      flex: 0 0 calc(100% - 50px);
+      flex: 1 1 75%;
       max-width: none;
       order: 4;
    }
