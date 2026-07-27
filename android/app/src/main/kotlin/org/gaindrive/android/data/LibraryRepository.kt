@@ -153,6 +153,14 @@ class LibraryRepository @Inject constructor(
 	suspend fun enabledServers(): List<ServerConfig> = registry.enabledServers.first()
 
 	/**
+	 * A URL builder covering every enabled server. Resolve once per screen
+	 * load and reuse for the whole list — see [CoverUrls] on why not per item.
+	 */
+	suspend fun coverUrls(): CoverUrls = withContext(Dispatchers.IO) {
+		CoverUrls(enabledServers().associate { it.id to clients.clientFor(it) })
+	}
+
+	/**
 	 * Resolves the client for a server and runs [block] off the main thread.
 	 * Throws if the server is not configured, which is a programming error
 	 * rather than a condition to handle: refs are only produced from servers

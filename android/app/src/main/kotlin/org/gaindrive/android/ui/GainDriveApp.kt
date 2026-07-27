@@ -3,15 +3,11 @@ package org.gaindrive.android.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -19,9 +15,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavDestination.Companion.hasRoute
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import org.gaindrive.android.data.model.ServerId
+import org.gaindrive.android.ui.browse.AlbumDetailScreen
+import org.gaindrive.android.ui.browse.AlbumsScreen
+import org.gaindrive.android.ui.browse.ArtistsScreen
+import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.settings.ServerEditScreen
 import org.gaindrive.android.ui.settings.SettingsScreen
 import org.gaindrive.android.ui.settings.SettingsViewModel
@@ -31,67 +36,119 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 	val settings by settingsViewModel.state.collectAsStateWithLifecycle()
 	val navController = rememberNavController()
 
-	// Hold the first frame until the server list has actually loaded.
-	// Rendering the library and then jumping to Settings would look like a
-	// glitch, and rendering Settings and jumping away would look worse.
+	// Hold the first frame until the server list has loaded. Rendering the
+	// library and then jumping to Settings would look like a glitch, and the
+	// reverse would look worse.
 	if (!settings.loaded) {
 		Box(modifier = Modifier.fillMaxSize())
 		return
 	}
 
-	// Decided once, then held. NavHost rebuilds its graph when startDestination
-	// changes, so recomputing this would reset the back stack the moment the
-	// first server is saved — throwing the user out of Settings just as they
-	// finish adding it.
+	// Decided once, then held: NavHost rebuilds its graph when startDestination
+	// changes, which would reset the back stack the moment the first server is
+	// saved — throwing the user out of Settings just as they finish adding it.
 	val startDestination: Route = remember {
-		if (settings.servers.isEmpty()) Route.Settings else Route.Library
+		if (settings.servers.isEmpty()) Route.Settings else Route.Artists
 	}
 
-	NavHost(
-		navController = navController,
-		// No servers configured means there is nothing to browse, so Settings
-		// is where the app starts rather than somewhere we bounce to.
-		startDestination = startDestination,
-	) {
-		composable<Route.Library> {
-			LibraryPlaceholder(onOpenSettings = { navController.navigate(Route.Settings) })
-		}
+	val backStackEntry by navController.currentBackStackEntryAsState()
+	val destination = backStackEntry?.destination
 
-		composable<Route.Settings> {
-			SettingsScreen(
-				onEditServer = { id -> navController.navigate(Route.ServerEdit(id?.value)) },
-			)
-		}
+	// The bar is for switching top-level sections; it has no meaning on a
+	// form that the user is expected to finish or cancel.
+	val showBottomBar = destination?.hasRoute(Route.ServerEdit::class) != true
 
-		composable<Route.ServerEdit> {
-			// The route's serverId reaches ServerEditViewModel through its
-			// SavedStateHandle, so nothing needs passing down by hand here.
-			ServerEditScreen(onDone = { navController.popBackStack() })
+	Scaffold(
+		bottomBar = {
+			if (showBottomBar) {
+				NavigationBar {
+					TopLevel.entries.forEach { item ->
+						NavigationBarItem(
+							selected = destination.isIn(item),
+							onClick = { navController.switchTo(item.route) },
+							icon = { Icon(item.icon, contentDescription = item.label) },
+							label = { Text(item.label) },
+						)
+					}
+				}
+			}
+		},
+	) { insets ->
+		NavHost(
+			navController = navController,
+			startDestination = startDestination,
+			modifier = Modifier.padding(insets),
+		) {
+			composable<Route.Artists> {
+				ArtistsScreen(
+					onOpenArtist = { ref, name ->
+						navController.navigate(Route.Albums(ref.encode(), name))
+					},
+				)
+			}
+
+			composable<Route.Albums> {
+				AlbumsScreen(
+					onBack = { navController.popBackStack() },
+					onOpenAlbum = { ref, title ->
+						navController.navigate(Route.Album(ref.encode(), title))
+					},
+				)
+			}
+
+			composable<Route.Album> {
+				AlbumDetailScreen(onBack = { navController.popBackStack() })
+			}
+
+			// Filled in by sub-phase 2d.
+			composable<Route.Playlists> { EmptyMessage("Playlists arrive in 2d.") }
+			composable<Route.Recents> { EmptyMessage("Recents arrive in 2d.") }
+			composable<Route.Search> { EmptyMessage("Search arrives in 2d.") }
+
+			composable<Route.Settings> {
+				SettingsScreen(
+					onEditServer = { id: ServerId? ->
+						navController.navigate(Route.ServerEdit(id?.value))
+					},
+				)
+			}
+
+			composable<Route.ServerEdit> {
+				ServerEditScreen(onDone = { navController.popBackStack() })
+			}
 		}
 	}
 }
 
-/** Phase 2 replaces this with the browsing destinations and bottom navigation. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun LibraryPlaceholder(onOpenSettings: () -> Unit) {
-	Scaffold(
-		topBar = {
-			TopAppBar(
-				title = { Text("GainDrive") },
-				actions = {
-					IconButton(onClick = onOpenSettings) {
-						Icon(Icons.Default.Settings, contentDescription = "Settings")
-					}
-				},
-			)
-		},
-	) { insets ->
-		Box(
-			modifier = Modifier.fillMaxSize().padding(insets),
-			contentAlignment = Alignment.Center,
-		) {
-			Text("Library — Phase 2", style = MaterialTheme.typography.headlineSmall)
-		}
+/**
+ * Whether [item]'s section contains the current destination, so that pushing
+ * Albums or Album keeps the Artists tab lit rather than clearing the bar.
+ */
+private fun androidx.navigation.NavDestination?.isIn(item: TopLevel): Boolean {
+	if (this == null) return false
+	// Spelled out rather than looped over a list of KClass: the list would be
+	// KClass<out Route>, which does not fit hasRoute's invariant parameter.
+	return when (item) {
+		TopLevel.ARTISTS ->
+			hasRoute(Route.Artists::class) ||
+				hasRoute(Route.Albums::class) ||
+				hasRoute(Route.Album::class)
+		TopLevel.PLAYLISTS -> hasRoute(Route.Playlists::class)
+		TopLevel.RECENTS -> hasRoute(Route.Recents::class)
+		TopLevel.SEARCH -> hasRoute(Route.Search::class)
+		TopLevel.SETTINGS ->
+			hasRoute(Route.Settings::class) || hasRoute(Route.ServerEdit::class)
+	}
+}
+
+/**
+ * Standard tab switch: one entry per tab on the back stack, and each tab's
+ * scroll position and state preserved while the user is away from it.
+ */
+private fun NavHostController.switchTo(route: Route) {
+	navigate(route) {
+		popUpTo(graph.findStartDestination().id) { saveState = true }
+		launchSingleTop = true
+		restoreState = true
 	}
 }
