@@ -1,0 +1,28 @@
+package org.gaindrive.android.data
+
+import org.gaindrive.android.data.model.ServerId
+
+/** A server that did not answer, and why, in words the UI can show. */
+data class ServerFailure(
+	val server: ServerId,
+	val serverName: String,
+	val message: String,
+)
+
+/**
+ * The result of a query that may have spanned several servers.
+ *
+ * Partial failure is representable from the start rather than bolted on: with
+ * several servers, one being unreachable has to degrade the view instead of
+ * emptying it. A screen must never be blank because the least important of
+ * three servers is down.
+ */
+data class MergedResult<T>(
+	val items: T,
+	val failures: List<ServerFailure> = emptyList(),
+) {
+	val isPartial: Boolean get() = failures.isNotEmpty()
+
+	fun <R> map(transform: (T) -> R): MergedResult<R> =
+		MergedResult(transform(items), failures)
+}
