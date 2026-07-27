@@ -1,0 +1,23 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Tabs, to match the rest of the GainDrive tree. Three columns wide is how the
+# C++ sources are read; keep the same setting here so mixed diffs line up.
+[*.{kt,kts}]
+indent_style = tab
+tab_width = 3
+ij_kotlin_allow_trailing_comma = true
+ij_kotlin_allow_trailing_comma_on_call_site = true
+
+[*.{xml,toml,md}]
+indent_style = tab
+tab_width = 3
+
+[*.{yml,yaml,json}]
+indent_style = space
+indent_size = 2

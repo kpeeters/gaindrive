@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A self-hosted GainDrive is very often reached over plain HTTP on a LAN, or
+     over HTTPS with a self-signed certificate behind a reverse proxy. Blanket
+     cleartext is the pragmatic setting; if the deployment is always HTTPS this
+     can be tightened to a domain allowlist. -->
+<network-security-config>
+	<base-config cleartextTrafficPermitted="true">
+		<trust-anchors>
+			<certificates src="system" />
+			<certificates src="user" />
+		</trust-anchors>
+	</base-config>
+</network-security-config>

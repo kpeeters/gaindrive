@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Compose supplies the real theming; this only has to get the window from
+     launch to first frame without a flash of the platform default. -->
+<resources>
+	<style name="Theme.GainDrive" parent="android:Theme.Material.Light.NoActionBar">
+		<item name="android:windowBackground">@color/gd_sand</item>
+	</style>
+</resources>

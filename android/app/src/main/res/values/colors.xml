@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The two brand colours taken from web/favicon.svg. The Compose colour
+     scheme is derived from these; these entries exist for the launcher icon
+     and the pre-Compose window background. -->
+<resources>
+	<color name="gd_red">#A31623</color>
+	<color name="gd_sand">#F4D58D</color>
+</resources>

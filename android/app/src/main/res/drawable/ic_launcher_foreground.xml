@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder launcher icon: a plain note glyph on the brand red. Replace
+     with a proper rendering of web/favicon.svg before release; that artwork
+     has too much fine detail to survive at launcher sizes unedited. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+	android:width="108dp"
+	android:height="108dp"
+	android:viewportWidth="108"
+	android:viewportHeight="108">
+	<group android:translateX="30" android:translateY="30">
+		<path
+			android:fillColor="#F4D58D"
+			android:pathData="M24,6v22.6c-1.2,-0.7 -2.5,-1.1 -4,-1.1c-4.4,0 -8,3.6 -8,8s3.6,8 8,8s8,-3.6 8,-8V14h12V6H24z" />
+	</group>
+</vector>
