@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Background is the brand red so that the artwork, which is scaled to the
+     72dp safe zone, sits on red out to the mask edge whatever shape the
+     launcher applies.
+
+     No <monochrome>: themed icons are tinted flat, which would collapse the
+     foreground's stacked rectangles into a solid square. A themed variant
+     needs a purpose-drawn silhouette, not this artwork. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
 	<background android:drawable="@color/gd_red" />
 	<foreground android:drawable="@drawable/ic_launcher_foreground" />
-	<monochrome android:drawable="@drawable/ic_launcher_foreground" />
 </adaptive-icon>
