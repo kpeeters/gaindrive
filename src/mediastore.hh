@@ -133,7 +133,9 @@ class MediaStore {
 			int64_t     file_size    = 0;
 			std::string codec;
 			std::string path;
-			bool        starred      = false;
+			// Empty when not starred; otherwise the SQLite timestamp at which
+			// it was starred. The API reports the time, not a flag.
+			std::string starred;
 			};
 
 		struct RecentSongEntry {
@@ -167,7 +169,8 @@ class MediaStore {
 			int         year         = 0;
 			std::string genre;
 			std::string created;
-			bool        starred      = false;  // per-user (album-level star)
+			// Empty when not starred; otherwise the timestamp of the star.
+			std::string starred;             // per-user (album-level star)
 			};
 
 		// type: newest | random | alphabeticalByName | alphabeticalByArtist |

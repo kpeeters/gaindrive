@@ -39,15 +39,43 @@ using namespace tinyxml2;
 static const char* SUBSONIC_NS  = "http://subsonic.org/restapi";
 static const char* SUBSONIC_VER = "1.16.1";
 
+// OpenSubsonic requires a server that sets openSubsonic=true to also identify
+// itself: `type` is the implementation, `serverVersion` is our own version as
+// distinct from the API version above.
+static const char* SERVER_TYPE    = "gaindrive";
+static const char* SERVER_VERSION = "0.1";
+
+// Subsonic ids are strings in the API even though they are row ids here. Every
+// id crossing the wire in JSON goes through this — the XML path renders
+// attributes as text anyway, so it needs no equivalent.
+static std::string sid(int id)
+	{
+	return std::to_string(id);
+	}
+
+// SQLite CURRENT_TIMESTAMP formats as "YYYY-MM-DD HH:MM:SS" in UTC, but the
+// API wants ISO 8601. Same instant, different spelling. Empty in, empty out,
+// so callers can keep using emptiness to mean "absent".
+static std::string iso8601(const std::string& ts)
+	{
+	if (ts.empty()) return ts;
+	std::string s = ts;
+	if (s.size() > 10 && s[10] == ' ') s[10] = 'T';
+	if (s.back() != 'Z') s += 'Z';
+	return s;
+	}
+
 // Creates a <subsonic-response> root element inside doc and returns it.
 static XMLElement* make_root(XMLDocument& doc, const char* status)
 	{
 	doc.InsertEndChild(doc.NewDeclaration());
 	auto* root = doc.NewElement("subsonic-response");
 	root->SetAttribute("xmlns",        SUBSONIC_NS);
-	root->SetAttribute("status",       status);
-	root->SetAttribute("version",      SUBSONIC_VER);
-	root->SetAttribute("openSubsonic", "true");
+	root->SetAttribute("status",        status);
+	root->SetAttribute("version",       SUBSONIC_VER);
+	root->SetAttribute("type",          SERVER_TYPE);
+	root->SetAttribute("serverVersion", SERVER_VERSION);
+	root->SetAttribute("openSubsonic",  "true");
 	doc.InsertEndChild(root);
 	return root;
 	}
@@ -86,9 +114,11 @@ static std::string subsonic_ok_json(
 	std::function<void(nlohmann::json&)> fn = {})
 	{
 	nlohmann::json r;
-	r["status"]       = "ok";
-	r["version"]      = SUBSONIC_VER;
-	r["openSubsonic"] = true;
+	r["status"]        = "ok";
+	r["version"]       = SUBSONIC_VER;
+	r["type"]          = SERVER_TYPE;
+	r["serverVersion"] = SERVER_VERSION;
+	r["openSubsonic"]  = true;
 	if (fn) fn(r);
 	nlohmann::json j;
 	j["subsonic-response"] = r;
@@ -100,6 +130,8 @@ static std::string subsonic_error_json(int code, const char* msg)
 	nlohmann::json j;
 	j["subsonic-response"]["status"]           = "failed";
 	j["subsonic-response"]["version"]          = SUBSONIC_VER;
+	j["subsonic-response"]["type"]             = SERVER_TYPE;
+	j["subsonic-response"]["serverVersion"]    = SERVER_VERSION;
 	j["subsonic-response"]["openSubsonic"]     = true;
 	j["subsonic-response"]["error"]["code"]    = code;
 	j["subsonic-response"]["error"]["message"] = msg;
@@ -169,9 +201,14 @@ static nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
                                        int max_bitrate = 0)
 	{
 	nlohmann::json s = {
-		{"id",          c.id},
-		{"parent",      c.parent_id},
+		{"id",          sid(c.id)},
+		{"parent",      sid(c.parent_id)},
+		// The album folder is the song's album in ID3 terms; clients asking
+		// for tag-based data expect albumId rather than parent.
+		{"albumId",     sid(c.parent_id)},
 		{"isDir",       false},
+		{"type",        "music"},
+		{"isVideo",     false},
 		{"title",       c.title},
 		{"artist",      c.artist},
 		{"album",       c.album},
@@ -185,8 +222,8 @@ static nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
 		{"duration",    (int)c.duration},
 		{"bitRate",     c.bitrate}
 		};
-	if (c.cover_art_id >= 0) s["coverArt"] = c.cover_art_id;
-	if (c.starred) s["starred"] = true;
+	if (c.cover_art_id >= 0) s["coverArt"] = sid(c.cover_art_id);
+	if (!c.starred.empty()) s["starred"] = iso8601(c.starred);
 	const char* tmime; const char* tsuffix; int tbitrate;
 	if (transcode_target(c, max_bitrate, tmime, tsuffix, tbitrate)) {
 		s["transcodedContentType"] = tmime;
@@ -219,7 +256,11 @@ static XMLElement* song_entry_xml(XMLDocument& doc,
 	el->SetAttribute("suffix",      c.codec.c_str());
 	el->SetAttribute("duration",    (int)c.duration);
 	el->SetAttribute("bitRate",     c.bitrate);
-	if (c.starred) el->SetAttribute("starred", "true");
+	el->SetAttribute("type",        "music");
+	el->SetAttribute("isVideo",     false);
+	el->SetAttribute("albumId",     c.parent_id);
+	if (!c.starred.empty())
+		el->SetAttribute("starred", iso8601(c.starred).c_str());
 	const char* tmime; const char* tsuffix; int tbitrate;
 	if (transcode_target(c, max_bitrate, tmime, tsuffix, tbitrate)) {
 		el->SetAttribute("transcodedContentType", tmime);
@@ -250,15 +291,15 @@ static std::string playlist_body(const MediaStore::PlaylistInfo& pl, bool use_js
 			for (auto& c : pl.songs)
 				entries.push_back(song_entry_json(c, max_bitrate));
 			r["playlist"] = {
-				{"id",        pl.id},
+				{"id",        sid(pl.id)},
 				{"name",      pl.name},
 				{"comment",   pl.comment},
 				{"owner",     pl.owner},
 				{"public",    pl.is_public},
 				{"songCount", pl.song_count},
 				{"duration",  pl.duration},
-				{"created",   pl.created},
-				{"changed",   pl.updated},
+				{"created",   iso8601(pl.created)},
+				{"changed",   iso8601(pl.updated)},
 				{"entry",     entries}
 				};
 			});
@@ -271,8 +312,8 @@ static std::string playlist_body(const MediaStore::PlaylistInfo& pl, bool use_js
 		playlist->SetAttribute("public",    pl.is_public);
 		playlist->SetAttribute("songCount", pl.song_count);
 		playlist->SetAttribute("duration",  pl.duration);
-		playlist->SetAttribute("created",   pl.created.c_str());
-		playlist->SetAttribute("changed",   pl.updated.c_str());
+		playlist->SetAttribute("created",   iso8601(pl.created).c_str());
+		playlist->SetAttribute("changed",   iso8601(pl.updated).c_str());
 		for (auto& c : pl.songs)
 			playlist->InsertEndChild(song_entry_xml(doc, c, "entry", max_bitrate));
 		root->InsertEndChild(playlist);
@@ -970,20 +1011,21 @@ static void handle_album_list(const httplib::Request& req, httplib::Response& re
 			nlohmann::json arr = nlohmann::json::array();
 			for (auto& al : albums) {
 				nlohmann::json entry = {
-					{"id",        al.id},
-					{"parent",    al.parent_id},
+					{"id",        sid(al.id)},
+					{"parent",    sid(al.parent_id)},
+					{"artistId",  sid(al.parent_id)},
 					{"isDir",     true},
 					{"title",     al.title},
 					{"name",      al.title},
 					{"artist",    al.artist},
 					{"songCount", al.song_count},
-					{"duration",  al.duration},
-					{"created",   al.created}
+					{"duration",  al.duration}
 					};
-				if (al.cover_art_id >= 0) entry["coverArt"] = al.cover_art_id;
+				if (!al.created.empty()) entry["created"] = iso8601(al.created);
+				if (al.cover_art_id >= 0) entry["coverArt"] = sid(al.cover_art_id);
 				if (al.year > 0)          entry["year"]     = al.year;
 				if (!al.genre.empty())    entry["genre"]    = al.genre;
-				if (al.starred)           entry["starred"]  = true;
+				if (!al.starred.empty())  entry["starred"]  = iso8601(al.starred);
 				arr.push_back(std::move(entry));
 				}
 			r[key] = {{"album", arr}};
@@ -1003,10 +1045,11 @@ static void handle_album_list(const httplib::Request& req, httplib::Response& re
 					el->SetAttribute("coverArt", al.cover_art_id);
 				el->SetAttribute("songCount", al.song_count);
 				el->SetAttribute("duration",  al.duration);
-				if (!al.created.empty()) el->SetAttribute("created", al.created.c_str());
+				if (!al.created.empty()) el->SetAttribute("created", iso8601(al.created).c_str());
 				if (al.year > 0)         el->SetAttribute("year",    al.year);
 				if (!al.genre.empty())   el->SetAttribute("genre",   al.genre.c_str());
-				if (al.starred)          el->SetAttribute("starred", "true");
+				if (!al.starred.empty())
+					el->SetAttribute("starred", iso8601(al.starred).c_str());
 				list->InsertEndChild(el);
 				}
 			root->InsertEndChild(list);
@@ -1698,7 +1741,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			body = subsonic_ok_json([&folders](nlohmann::json& r) {
 				nlohmann::json arr = nlohmann::json::array();
 				for (auto& f : folders)
-					arr.push_back({{"id", f.id}, {"name", f.name}});
+					arr.push_back({{"id", sid(f.id)}, {"name", f.name}});
 				r["musicFolders"]["musicFolder"] = arr;
 				});
 		else
@@ -1747,12 +1790,12 @@ GainDrive::GainDrive(const std::string& db_path,
 				for (auto& [letter, vec] : buckets) {
 					nlohmann::json artist_arr = nlohmann::json::array();
 					for (auto* a : vec)
-						artist_arr.push_back({{"id", a->id}, {"name", a->name},
-						                      {"coverArt", a->id}});
+						artist_arr.push_back({{"id", sid(a->id)}, {"name", a->name},
+						                      {"coverArt", sid(a->id)}});
 					idx_arr.push_back({{"name", letter}, {"artist", artist_arr}});
 					}
 				r["indexes"] = {
-					{"lastModified",    "0"},
+					{"lastModified",    0},
 					{"ignoredArticles", "The El La Los Las Le Les A An Die Das Ein Eine"},
 					{"index",           idx_arr}
 					};
@@ -1810,13 +1853,13 @@ GainDrive::GainDrive(const std::string& db_path,
 				for (auto& [letter, vec] : buckets) {
 					nlohmann::json artist_arr = nlohmann::json::array();
 					for (auto* a : vec)
-						artist_arr.push_back({{"id", a->id}, {"name", a->name},
+						artist_arr.push_back({{"id", sid(a->id)}, {"name", a->name},
 						                      {"albumCount", a->album_count},
-						                      {"coverArt",   a->id}});
+						                      {"coverArt",   sid(a->id)}});
 					idx_arr.push_back({{"name", letter}, {"artist", artist_arr}});
 					}
 				r["artists"] = {
-					{"lastModified",    "0"},
+					{"lastModified",    0},
 					{"ignoredArticles", "The El La Los Las Le Les A An Die Das Ein Eine"},
 					{"index",           idx_arr}
 					};
@@ -1871,24 +1914,25 @@ GainDrive::GainDrive(const std::string& db_path,
 				nlohmann::json arr = nlohmann::json::array();
 				for (auto& al : info->albums) {
 					nlohmann::json entry = {
-						{"id",        al.id},
-						{"parent",    al.parent_id},
+						{"id",        sid(al.id)},
+						{"parent",    sid(al.parent_id)},
+						{"artistId",  sid(al.parent_id)},
 						{"isDir",     true},
 						{"title",     al.title},
 						{"name",      al.title},
 						{"artist",    al.artist},
 						{"songCount", al.song_count},
-						{"duration",  al.duration},
-						{"created",   al.created}
+						{"duration",  al.duration}
 						};
-					if (al.cover_art_id >= 0) entry["coverArt"] = al.cover_art_id;
+					if (!al.created.empty()) entry["created"] = iso8601(al.created);
+					if (al.cover_art_id >= 0) entry["coverArt"] = sid(al.cover_art_id);
 					if (al.year > 0)          entry["year"]     = al.year;
 					if (!al.genre.empty())    entry["genre"]    = al.genre;
-					if (al.starred)           entry["starred"]  = true;
+					if (!al.starred.empty())  entry["starred"]  = iso8601(al.starred);
 					arr.push_back(std::move(entry));
 					}
 				r["artist"] = {
-					{"id",         info->artist.id},
+					{"id",         sid(info->artist.id)},
 					{"name",       info->artist.name},
 					{"albumCount", info->artist.album_count},
 					{"album",      arr}
@@ -1912,10 +1956,11 @@ GainDrive::GainDrive(const std::string& db_path,
 						el->SetAttribute("coverArt", al.cover_art_id);
 					el->SetAttribute("songCount", al.song_count);
 					el->SetAttribute("duration",  al.duration);
-					if (!al.created.empty()) el->SetAttribute("created", al.created.c_str());
+					if (!al.created.empty()) el->SetAttribute("created", iso8601(al.created).c_str());
 					if (al.year > 0)         el->SetAttribute("year",    al.year);
 					if (!al.genre.empty())   el->SetAttribute("genre",   al.genre.c_str());
-					if (al.starred)          el->SetAttribute("starred", "true");
+					if (!al.starred.empty())
+					el->SetAttribute("starred", iso8601(al.starred).c_str());
 					artist_el->InsertEndChild(el);
 					}
 				root->InsertEndChild(artist_el);
@@ -1950,9 +1995,10 @@ GainDrive::GainDrive(const std::string& db_path,
 				for (auto& c : dir->children) {
 					nlohmann::json child;
 					if (c.is_dir) {
-						child = {{"id",c.id},{"parent",c.parent_id},{"isDir",true},
+						child = {{"id",sid(c.id)},{"parent",sid(c.parent_id)},
+						         {"isDir",true},
 						         {"title",c.title},{"artist",c.artist},{"album",c.album}};
-						if (c.cover_art_id >= 0) child["coverArt"] = c.cover_art_id;
+						if (c.cover_art_id >= 0) child["coverArt"] = sid(c.cover_art_id);
 						if (c.year > 0)          child["year"]     = c.year;
 						} else {
 						child = song_entry_json(c, mbr);
@@ -1960,12 +2006,12 @@ GainDrive::GainDrive(const std::string& db_path,
 					children.push_back(child);
 					}
 				r["directory"] = {
-					{"id",    dir->id},
+					{"id",    sid(dir->id)},
 					{"name",  dir->name},
 					{"child", children}
 					};
-				if (dir->parent_id >= 0)    r["directory"]["parent"]   = dir->parent_id;
-				if (dir->cover_art_id >= 0) r["directory"]["coverArt"] = dir->cover_art_id;
+				if (dir->parent_id >= 0)    r["directory"]["parent"]   = sid(dir->parent_id);
+				if (dir->cover_art_id >= 0) r["directory"]["coverArt"] = sid(dir->cover_art_id);
 				});
 		else
 			body = subsonic_ok([&dir, mbr](XMLDocument& doc, XMLElement* root) {
@@ -2325,7 +2371,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					{"current",    pq->current_id},
 					{"position",   pq->offset_ms},
 					{"username",   user},
-					{"changed",    pq->changed},
+					{"changed",    iso8601(pq->changed)},
 					{"changedBy",  pq->client},
 					{"entry",      entries}
 					};
@@ -2338,7 +2384,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					el->SetAttribute("position",  (int64_t)pq->offset_ms);
 					el->SetAttribute("username",  user.c_str());
 					if (!pq->changed.empty())
-						el->SetAttribute("changed",   pq->changed.c_str());
+						el->SetAttribute("changed",   iso8601(pq->changed).c_str());
 					if (!pq->client.empty())
 						el->SetAttribute("changedBy", pq->client.c_str());
 					for (auto& s : pq->songs)
@@ -2627,15 +2673,15 @@ GainDrive::GainDrive(const std::string& db_path,
 				nlohmann::json arr = nlohmann::json::array();
 				for (auto& pl : pls)
 					arr.push_back({
-						{"id",        pl.id},
+						{"id",        sid(pl.id)},
 						{"name",      pl.name},
 						{"comment",   pl.comment},
 						{"owner",     pl.owner},
 						{"public",    pl.is_public},
 						{"songCount", pl.song_count},
 						{"duration",  pl.duration},
-						{"created",   pl.created},
-						{"changed",   pl.updated}
+						{"created",   iso8601(pl.created)},
+						{"changed",   iso8601(pl.updated)}
 						});
 				r["playlists"] = {{"playlist", arr}};
 				});
@@ -2651,8 +2697,8 @@ GainDrive::GainDrive(const std::string& db_path,
 					el->SetAttribute("public",    pl.is_public);
 					el->SetAttribute("songCount", pl.song_count);
 					el->SetAttribute("duration",  pl.duration);
-					el->SetAttribute("created",   pl.created.c_str());
-					el->SetAttribute("changed",   pl.updated.c_str());
+					el->SetAttribute("created",   iso8601(pl.created).c_str());
+					el->SetAttribute("changed",   iso8601(pl.updated).c_str());
 					playlists->InsertEndChild(el);
 					}
 				root->InsertEndChild(playlists);
@@ -2674,19 +2720,19 @@ GainDrive::GainDrive(const std::string& db_path,
 			body = subsonic_ok_json([&sr, key, mbr](nlohmann::json& r) {
 				nlohmann::json artists = nlohmann::json::array();
 				for (auto& a : sr.artists)
-					artists.push_back({{"id", a.id}, {"name", a.name}});
+					artists.push_back({{"id", sid(a.id)}, {"name", a.name}});
 
 				nlohmann::json albums = nlohmann::json::array();
 				for (auto& c : sr.albums) {
 					nlohmann::json al = {
-						{"id",     c.id},
-						{"parent", c.parent_id},
+						{"id",     sid(c.id)},
+						{"parent", sid(c.parent_id)},
 						{"isDir",  true},
 						{"title",  c.title},
 						{"artist", c.artist},
 						{"album",  c.album}
 						};
-					if (c.cover_art_id >= 0) al["coverArt"] = c.cover_art_id;
+					if (c.cover_art_id >= 0) al["coverArt"] = sid(c.cover_art_id);
 					albums.push_back(al);
 					}
 
@@ -2864,19 +2910,20 @@ GainDrive::GainDrive(const std::string& db_path,
 					songs.push_back(song_entry_json(s, mbr));
 				auto& al = info->album;
 				nlohmann::json entry = {
-					{"id",        al.id},
-					{"parent",    al.parent_id},
+					{"id",        sid(al.id)},
+					{"parent",    sid(al.parent_id)},
+					{"artistId",  sid(al.parent_id)},
 					{"name",      al.title},
 					{"artist",    al.artist},
 					{"songCount", al.song_count},
 					{"duration",  al.duration},
-					{"created",   al.created},
 					{"song",      songs}
 					};
-				if (al.cover_art_id >= 0) entry["coverArt"] = al.cover_art_id;
+				if (!al.created.empty()) entry["created"] = iso8601(al.created);
+				if (al.cover_art_id >= 0) entry["coverArt"] = sid(al.cover_art_id);
 				if (al.year > 0)          entry["year"]     = al.year;
 				if (!al.genre.empty())    entry["genre"]    = al.genre;
-				if (al.starred)           entry["starred"]  = true;
+				if (!al.starred.empty())  entry["starred"]  = iso8601(al.starred);
 				r["album"] = std::move(entry);
 				});
 		else
@@ -2890,10 +2937,11 @@ GainDrive::GainDrive(const std::string& db_path,
 				el->SetAttribute("songCount", al.song_count);
 				el->SetAttribute("duration",  al.duration);
 				if (al.cover_art_id >= 0) el->SetAttribute("coverArt", al.cover_art_id);
-				if (!al.created.empty())  el->SetAttribute("created",  al.created.c_str());
+				if (!al.created.empty())  el->SetAttribute("created",  iso8601(al.created).c_str());
 				if (al.year > 0)          el->SetAttribute("year",     al.year);
 				if (!al.genre.empty())    el->SetAttribute("genre",    al.genre.c_str());
-				if (al.starred)           el->SetAttribute("starred",  "true");
+				if (!al.starred.empty())
+					el->SetAttribute("starred", iso8601(al.starred).c_str());
 				for (auto& s : info->songs)
 					el->InsertEndChild(song_entry_xml(doc, s, "song", mbr));
 				root->InsertEndChild(el);
@@ -2999,19 +3047,19 @@ GainDrive::GainDrive(const std::string& db_path,
 			body = subsonic_ok_json([&sr, key, mbr](nlohmann::json& r) {
 				nlohmann::json artists = nlohmann::json::array();
 				for (auto& a : sr.artists)
-					artists.push_back({{"id", a.id}, {"name", a.title}});
+					artists.push_back({{"id", sid(a.id)}, {"name", a.title}});
 
 				nlohmann::json albums = nlohmann::json::array();
 				for (auto& c : sr.albums) {
 					nlohmann::json al = {
-						{"id",     c.id},
-						{"parent", c.parent_id},
+						{"id",     sid(c.id)},
+						{"parent", sid(c.parent_id)},
 						{"isDir",  true},
 						{"title",  c.title},
 						{"artist", c.artist},
 						{"album",  c.title}
 						};
-					if (c.cover_art_id >= 0) al["coverArt"] = c.cover_art_id;
+					if (c.cover_art_id >= 0) al["coverArt"] = sid(c.cover_art_id);
 					albums.push_back(al);
 					}
 
@@ -3078,8 +3126,8 @@ GainDrive::GainDrive(const std::string& db_path,
 						{"position", bm.position},
 						{"username", bm.username},
 						{"comment",  bm.comment},
-						{"created",  bm.created},
-						{"changed",  bm.changed},
+						{"created",  iso8601(bm.created)},
+						{"changed",  iso8601(bm.changed)},
 						{"entry",    song_entry_json(bm.entry, mbr)}
 						};
 					arr.push_back(b);
@@ -3094,8 +3142,8 @@ GainDrive::GainDrive(const std::string& db_path,
 					b->SetAttribute("position", bm.position);
 					b->SetAttribute("username", bm.username.c_str());
 					b->SetAttribute("comment",  bm.comment.c_str());
-					b->SetAttribute("created",  bm.created.c_str());
-					b->SetAttribute("changed",  bm.changed.c_str());
+					b->SetAttribute("created",  iso8601(bm.created).c_str());
+					b->SetAttribute("changed",  iso8601(bm.changed).c_str());
 					b->InsertEndChild(song_entry_xml(doc, bm.entry, "entry", mbr));
 					bookmarks->InsertEndChild(b);
 					}

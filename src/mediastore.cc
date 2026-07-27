@@ -1551,7 +1551,7 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 		"       COALESCE(al.year,0),"
 		"       COALESCE(al.genre,''),"
 		"       COALESCE(al.created,''),"
-		"       CASE WHEN sa.album_folder_path IS NOT NULL THEN 1 ELSE 0 END AS starred"
+		"       COALESCE(sa.created, '') AS starred"
 		" FROM albums al"
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
@@ -1626,7 +1626,7 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 		e.year         = q.getColumn(7).getInt();
 		e.genre        = q.getColumn(8).isNull() ? "" : q.getColumn(8).getString();
 		e.created      = q.getColumn(9).isNull() ? "" : q.getColumn(9).getString();
-		e.starred      = q.getColumn(10).getInt() != 0;
+		e.starred      = q.getColumn(10).getString();
 		result.push_back(std::move(e));
 		}
 	return result;
@@ -1718,7 +1718,7 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id,
 		"       COALESCE(al.year,0),"
 		"       COALESCE(al.genre,''),"
 		"       COALESCE(al.created,''),"
-		"       CASE WHEN sa.album_folder_path IS NOT NULL THEN 1 ELSE 0 END AS starred"
+		"       COALESCE(sa.created, '') AS starred"
 		" FROM albums al"
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
@@ -1742,7 +1742,7 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id,
 		e.year         = asel.getColumn(7).getInt();
 		e.genre        = asel.getColumn(8).isNull() ? "" : asel.getColumn(8).getString();
 		e.created      = asel.getColumn(9).isNull() ? "" : asel.getColumn(9).getString();
-		e.starred      = asel.getColumn(10).getInt() != 0;
+		e.starred      = asel.getColumn(10).getString();
 		info.albums.push_back(std::move(e));
 		}
 
@@ -1768,7 +1768,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		"       COALESCE(al.year,0),"
 		"       COALESCE(al.genre,''),"
 		"       COALESCE(al.created,''),"
-		"       CASE WHEN sa.album_folder_path IS NOT NULL THEN 1 ELSE 0 END AS starred"
+		"       COALESCE(sa.created, '') AS starred"
 		" FROM albums al"
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
@@ -1791,13 +1791,13 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 	info.album.year         = msel.getColumn(7).getInt();
 	info.album.genre        = msel.getColumn(8).isNull() ? "" : msel.getColumn(8).getString();
 	info.album.created      = msel.getColumn(9).isNull() ? "" : msel.getColumn(9).getString();
-	info.album.starred      = msel.getColumn(10).getInt() != 0;
+	info.album.starred      = msel.getColumn(10).getString();
 
 	// Fetch songs, flattening disc subfolders when flat_multi_disc is set.
 	// The starred LEFT JOIN is added only when a username is provided.
 	const std::string star_col  = username.empty()
-		? ", 0 AS starred"
-		: ", CASE WHEN st.song_path IS NOT NULL THEN 1 ELSE 0 END AS starred";
+		? ", '' AS starred"
+		: ", COALESCE(st.created, '') AS starred";
 	const std::string star_join = username.empty()
 		? ""
 		: " LEFT JOIN client.stars st ON st.song_path = s.path"
@@ -1857,7 +1857,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		e.parent_id    = folder_id;
 		e.artist       = ssel.getColumn(11).getString();
 		e.album        = ssel.getColumn(12).getString();
-		e.starred      = ssel.getColumn(13).getInt() != 0;
+		e.starred      = ssel.getColumn(13).getString();
 		if (info.album.cover_art_id >= 0)
 			e.cover_art_id = info.album.cover_art_id;
 		info.songs.push_back(std::move(e));
@@ -2668,8 +2668,8 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 	pl.updated   = pmeta.getColumn(5).getString();
 
 	const std::string star_col  = username.empty()
-		? ", 0 AS starred"
-		: ", CASE WHEN st.song_path IS NOT NULL THEN 1 ELSE 0 END AS starred";
+		? ", '' AS starred"
+		: ", COALESCE(st.created, '') AS starred";
 	const std::string star_join = username.empty()
 		? ""
 		: " LEFT JOIN client.stars st ON st.song_path = s.path"
@@ -2716,7 +2716,7 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 		e.artist       = sq.getColumn(11).getString();
 		e.album        = sq.getColumn(12).getString();
 		e.cover_art_id = sq.getColumn(13).getInt();
-		e.starred      = sq.getColumn(14).getInt() != 0;
+		e.starred      = sq.getColumn(14).getString();
 		total_duration += (int)e.duration;
 		pl.songs.push_back(std::move(e));
 		}
