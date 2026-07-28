@@ -2,6 +2,7 @@ package org.gaindrive.android.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
@@ -97,7 +98,14 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 		NavHost(
 			navController = navController,
 			startDestination = startDestination,
-			modifier = Modifier.padding(insets),
+			// padding() positions the content; consumeWindowInsets() tells the
+			// screens' own Scaffolds and TopAppBars that these insets are
+			// already accounted for. Without the second call each screen adds
+			// the status bar and navigation bar a second time — a doubled gap
+			// under the status bar, and a dead strip above the mini-player.
+			modifier = Modifier
+				.padding(insets)
+				.consumeWindowInsets(insets),
 		) {
 			composable<Route.Artists> {
 				ArtistsScreen(
