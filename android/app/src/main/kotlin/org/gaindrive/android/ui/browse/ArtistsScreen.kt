@@ -29,6 +29,7 @@ import org.gaindrive.android.ui.components.AlphabetRail
 import org.gaindrive.android.ui.components.ArtistRow
 import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.components.LoadStateBox
+import org.gaindrive.android.ui.components.ServerSelector
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -37,8 +38,23 @@ fun ArtistsScreen(
 	viewModel: ArtistsViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
+	val servers by viewModel.servers.collectAsStateWithLifecycle()
+	val currentServer by viewModel.currentServer.collectAsStateWithLifecycle()
 
-	Scaffold(topBar = { TopAppBar(title = { Text("Artists") }) }) { insets ->
+	Scaffold(
+		topBar = {
+			TopAppBar(
+				title = { Text("Artists") },
+				actions = {
+					ServerSelector(
+						servers = servers,
+						current = currentServer,
+						onSelect = viewModel::selectServer,
+					)
+				},
+			)
+		},
+	) { insets ->
 		LoadStateBox(
 			state = state,
 			onRetry = viewModel::load,

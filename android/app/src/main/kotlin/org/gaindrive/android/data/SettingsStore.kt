@@ -27,7 +27,19 @@ class SettingsStore @Inject constructor(
 		dataStore.edit { it[THEME] = mode.name }
 	}
 
+	/**
+	 * Which server the library screens are showing. Null until the user has
+	 * chosen; resolving that to an actual server is [ServerSelection]'s job,
+	 * since the stored choice may since have been disabled or removed.
+	 */
+	val selectedServerId: Flow<String?> = dataStore.data.map { it[SELECTED_SERVER] }
+
+	suspend fun setSelectedServerId(id: String) {
+		dataStore.edit { it[SELECTED_SERVER] = id }
+	}
+
 	private companion object {
 		val THEME = stringPreferencesKey("theme_mode")
+		val SELECTED_SERVER = stringPreferencesKey("selected_server")
 	}
 }
