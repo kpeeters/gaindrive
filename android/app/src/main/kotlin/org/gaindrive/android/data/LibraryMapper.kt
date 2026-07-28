@@ -3,6 +3,7 @@ package org.gaindrive.android.data
 import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.AlbumNotes
 import org.gaindrive.android.data.model.Artist
+import org.gaindrive.android.data.model.ArtistInfo
 import org.gaindrive.android.data.model.ArtistIndex
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.LibrarySelection
@@ -12,6 +13,7 @@ import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.net.AlbumDto
 import org.gaindrive.android.net.AlbumInfoDto
 import org.gaindrive.android.net.ArtistDto
+import org.gaindrive.android.net.ArtistInfoDto
 import org.gaindrive.android.net.ArtistWithAlbums
 import org.gaindrive.android.net.IndexDto
 import org.gaindrive.android.net.PlaylistDto
@@ -97,6 +99,14 @@ fun PlaylistDto.toDomain(server: ServerId) = Playlist(
 	songCount = if (songCount > 0) songCount else entry.size,
 	duration = duration,
 	songs = entry.map { it.toDomain(server) },
+)
+
+fun ArtistInfoDto.toDomain() = ArtistInfo(
+	biography = biography?.takeIf { it.isNotBlank() },
+	wikiUrl = wikiUrl?.takeIf { it.isNotBlank() },
+	allMusicUrl = allMusicUrl?.takeIf { it.isNotBlank() },
+	lastFmUrl = lastFmUrl?.takeIf { it.isNotBlank() },
+	discogsUrl = discogsUrl?.takeIf { it.isNotBlank() },
 )
 
 fun AlbumInfoDto.toDomain() = AlbumNotes(

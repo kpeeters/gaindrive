@@ -144,6 +144,29 @@ data class GetAlbumInfoBody(
 	val albumInfo2: AlbumInfoDto? = null,
 ) : SubsonicBody
 
+/**
+ * Portrait URLs here point at MusicBrainz/Wikipedia, not at the server. The
+ * app ignores them and asks `getCoverArt` for the artist folder instead, which
+ * keeps the fetch on one authenticated path the server can cache — and working
+ * when the phone reaches the server over a VPN the image host is not on.
+ */
+@Serializable
+data class ArtistInfoDto(
+	val biography: String? = null,
+	val musicBrainzId: String? = null,
+	val lastFmUrl: String? = null,
+	val wikiUrl: String? = null,
+	val allMusicUrl: String? = null,
+	val discogsUrl: String? = null,
+)
+
+@Serializable
+data class GetArtistInfoBody(
+	override val status: String = "failed",
+	override val error: SubsonicError? = null,
+	val artistInfo2: ArtistInfoDto? = null,
+) : SubsonicBody
+
 @Serializable
 data class SearchResultDto(
 	val artist: List<ArtistDto> = emptyList(),

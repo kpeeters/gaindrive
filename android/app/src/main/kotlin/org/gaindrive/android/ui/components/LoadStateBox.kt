@@ -19,6 +19,10 @@ import org.gaindrive.android.ui.Load
 /**
  * Renders the loading and failure arms of a [Load] so no screen has to repeat
  * them, and so they look the same everywhere.
+ *
+ * The [modifier] wraps *all three* arms. An earlier version applied it only to
+ * loading and failure, which silently dropped the caller's inset padding once
+ * content arrived — every list then scrolled up underneath the app bar.
  */
 @Composable
 fun <T> LoadStateBox(
@@ -27,19 +31,16 @@ fun <T> LoadStateBox(
 	modifier: Modifier = Modifier,
 	content: @Composable (T) -> Unit,
 ) {
-	when (state) {
-		is Load.Loading -> Box(
-			modifier = modifier.fillMaxSize(),
-			contentAlignment = Alignment.Center,
-		) {
-			CircularProgressIndicator()
-		}
+	Box(modifier = modifier.fillMaxSize()) {
+		when (state) {
+			is Load.Loading -> CircularProgressIndicator(
+				modifier = Modifier.align(Alignment.Center)
+			)
 
-		is Load.Failed -> Box(
-			modifier = modifier.fillMaxSize().padding(24.dp),
-			contentAlignment = Alignment.Center,
-		) {
-			Column(
+			is Load.Failed -> Column(
+				modifier = Modifier
+					.align(Alignment.Center)
+					.padding(24.dp),
 				horizontalAlignment = Alignment.CenterHorizontally,
 				verticalArrangement = Arrangement.spacedBy(12.dp),
 			) {
@@ -53,9 +54,9 @@ fun <T> LoadStateBox(
 					OutlinedButton(onClick = onRetry) { Text("Try again") }
 				}
 			}
-		}
 
-		is Load.Ready -> content(state.value)
+			is Load.Ready -> content(state.value)
+		}
 	}
 }
 

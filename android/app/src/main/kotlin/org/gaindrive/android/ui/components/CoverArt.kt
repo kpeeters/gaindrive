@@ -4,9 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -66,6 +68,40 @@ fun CoverThumb(url: String?, contentDescription: String?, size: Dp = 48.dp) {
 		contentDescription = contentDescription,
 		modifier = Modifier.size(size),
 	)
+}
+
+/**
+ * Circular artist portrait.
+ *
+ * The placeholder sits *behind* the image rather than being chosen instead of
+ * it: `getCoverArt` answers 404 for an artist with no portrait, and Coil then
+ * draws nothing, so a placeholder picked only on a null URL would leave a blank
+ * circle. Layering means a failed load falls back for free.
+ */
+@Composable
+fun ArtistAvatar(url: String?, contentDescription: String?, size: Dp = 96.dp) {
+	Box(
+		modifier = Modifier
+			.size(size)
+			.clip(CircleShape)
+			.background(MaterialTheme.colorScheme.surfaceVariant),
+		contentAlignment = Alignment.Center,
+	) {
+		Icon(
+			imageVector = Icons.Default.Person,
+			contentDescription = null,
+			tint = MaterialTheme.colorScheme.onSurfaceVariant,
+			modifier = Modifier.size(size / 2),
+		)
+		if (url != null) {
+			AsyncImage(
+				model = url,
+				contentDescription = contentDescription,
+				contentScale = ContentScale.Crop,
+				modifier = Modifier.fillMaxSize(),
+			)
+		}
+	}
 }
 
 /** Fills its parent, for the album detail hero. */

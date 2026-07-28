@@ -8,6 +8,7 @@ import org.gaindrive.android.data.model.AlbumDetail
 import org.gaindrive.android.data.model.AlbumNotes
 import org.gaindrive.android.data.model.Artist
 import org.gaindrive.android.data.model.ArtistIndex
+import org.gaindrive.android.data.model.ArtistInfo
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.LibrarySelection
 import org.gaindrive.android.data.model.Playlist
@@ -54,6 +55,19 @@ class LibraryRepository @Inject constructor(
 	suspend fun artist(ref: ItemRef): Artist? =
 		onServer(ref.server) { client ->
 			client.getArtist(ref.id).requireOk().artist?.toDomain(ref.server)
+		}
+
+	/**
+	 * Biography and links for an artist.
+	 *
+	 * The server may go out to MusicBrainz and Wikipedia to answer this the
+	 * first time, so it can be slow or fail outright. Callers must fetch it
+	 * separately from the album list and never let it hold that list up.
+	 */
+	suspend fun artistInfo(ref: ItemRef): ArtistInfo? =
+		onServer(ref.server) { client ->
+			client.getArtistInfo2(ref.id).requireOk().artistInfo2?.toDomain()
+				?.takeIf { !it.isEmpty }
 		}
 
 	/**

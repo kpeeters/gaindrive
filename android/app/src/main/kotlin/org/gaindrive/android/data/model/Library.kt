@@ -79,6 +79,20 @@ data class Playlist(
 	val songs: List<Song> = emptyList(),
 )
 
+/** Biography and outbound links for an artist, from `getArtistInfo2`. */
+data class ArtistInfo(
+	val biography: String?,
+	val wikiUrl: String?,
+	val allMusicUrl: String?,
+	val lastFmUrl: String?,
+	val discogsUrl: String?,
+) {
+	val isEmpty: Boolean
+		get() = biography.isNullOrBlank() && wikiUrl.isNullOrBlank() &&
+			allMusicUrl.isNullOrBlank() && lastFmUrl.isNullOrBlank() &&
+			discogsUrl.isNullOrBlank()
+}
+
 /** Notes and outbound links for an album, from `getAlbumInfo2`. */
 data class AlbumNotes(
 	val notes: String?,
