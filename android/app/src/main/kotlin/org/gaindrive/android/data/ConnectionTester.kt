@@ -7,7 +7,7 @@ import org.gaindrive.android.net.ConnectionTest
 import org.gaindrive.android.net.SubsonicClientFactory
 import org.gaindrive.android.net.SubsonicException
 import org.gaindrive.android.net.requireOk
-import java.io.IOException
+import org.gaindrive.android.net.userMessage
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,18 +28,20 @@ class ConnectionTester @Inject constructor(
 			try {
 				clients.transientClient(url, username, password).ping().requireOk()
 				ConnectionTest.Reachable
-			} catch (e: SubsonicException) {
-				ConnectionTest.Rejected(e.message)
 			} catch (e: CancellationException) {
 				throw e
-			} catch (e: IOException) {
-				ConnectionTest.Unreachable(e.message ?: "Could not reach the server")
-			} catch (e: IllegalStateException) {
-				// Thrown by SubsonicClient when the URL is not parseable at all.
-				ConnectionTest.Unreachable(e.message ?: "That does not look like a URL")
-			} catch (e: IllegalArgumentException) {
-				// Retrofit rejects a base URL it cannot parse.
-				ConnectionTest.Unreachable("That does not look like a URL")
+			} catch (e: SubsonicException) {
+				// The server answered and refused: bad password, disabled
+				// account, and so on.
+				ConnectionTest.Rejected(e.message)
+			} catch (e: Exception) {
+				// Everything else is "we could not have a conversation with a
+				// GainDrive server at that address". Catching Exception rather
+				// than IOException is deliberate: Retrofit's HttpException is a
+				// RuntimeException, and a bad URL throws IllegalArgumentException
+				// out of Retrofit's builder. Neither may reach the user as a
+				// crash — this dialog exists precisely to report them.
+				ConnectionTest.Unreachable(e.userMessage())
 			}
 		}
 }

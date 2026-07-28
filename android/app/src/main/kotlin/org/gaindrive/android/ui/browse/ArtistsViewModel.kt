@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.model.ArtistIndex
+import org.gaindrive.android.net.runCatchingCancellable
+import org.gaindrive.android.net.userMessage
 import org.gaindrive.android.ui.Load
 import javax.inject.Inject
 
@@ -34,10 +36,10 @@ class ArtistsViewModel @Inject constructor(
 				_state.value = Load.Failed("No server configured. Add one in Settings.")
 				return@launch
 			}
-			_state.value = runCatching { library.artistIndexes(server.id) }
+			_state.value = runCatchingCancellable { library.artistIndexes(server.id) }
 				.fold(
 					onSuccess = { Load.Ready(it) },
-					onFailure = { Load.Failed(it.message ?: "Could not reach the server") },
+					onFailure = { Load.Failed(it.userMessage()) },
 				)
 		}
 	}

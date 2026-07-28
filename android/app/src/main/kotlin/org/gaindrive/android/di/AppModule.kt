@@ -13,6 +13,8 @@ import dagger.hilt.components.SingletonComponent
 import kotlinx.serialization.json.Json
 import okhttp3.Cache
 import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
+import org.gaindrive.android.BuildConfig
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
@@ -39,6 +41,15 @@ object AppModule {
 		.cache(Cache(context.cacheDir.resolve("http"), HTTP_CACHE_BYTES))
 		.connectTimeout(15, TimeUnit.SECONDS)
 		.readTimeout(30, TimeUnit.SECONDS)
+		.apply {
+			// Debug builds only: these URLs carry the auth token, so this must
+			// never be enabled in a release build.
+			if (BuildConfig.DEBUG) {
+				addInterceptor(
+					HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY)
+				)
+			}
+		}
 		.build()
 
 	@Provides

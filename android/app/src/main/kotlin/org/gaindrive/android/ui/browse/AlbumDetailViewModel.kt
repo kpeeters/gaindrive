@@ -12,6 +12,8 @@ import kotlinx.coroutines.launch
 import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.model.AlbumDetail
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.net.runCatchingCancellable
+import org.gaindrive.android.net.userMessage
 import org.gaindrive.android.ui.Load
 import org.gaindrive.android.ui.Route
 import javax.inject.Inject
@@ -44,17 +46,17 @@ class AlbumDetailViewModel @Inject constructor(
 	fun load() {
 		_state.value = Load.Loading
 		viewModelScope.launch {
-			_state.value = runCatching {
+			_state.value = runCatchingCancellable {
 				val covers = library.coverUrls()
 				val detail = library.albumDetail(albumRef)
-					?: return@runCatching null
+					?: return@runCatchingCancellable null
 				AlbumDetailUi(detail, covers.url(detail.album.coverArt, HERO_PX))
 			}.fold(
 				onSuccess = { ui ->
 					if (ui == null) Load.Failed("That album is no longer on the server.")
 					else Load.Ready(ui)
 				},
-				onFailure = { Load.Failed(it.message ?: "Could not reach the server") },
+				onFailure = { Load.Failed(it.userMessage()) },
 			)
 		}
 	}

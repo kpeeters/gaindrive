@@ -13,6 +13,8 @@ import org.gaindrive.android.data.CoverUrls
 import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.net.runCatchingCancellable
+import org.gaindrive.android.net.userMessage
 import org.gaindrive.android.ui.Load
 import org.gaindrive.android.ui.Route
 import javax.inject.Inject
@@ -41,14 +43,14 @@ class AlbumsViewModel @Inject constructor(
 	fun load() {
 		_state.value = Load.Loading
 		viewModelScope.launch {
-			_state.value = runCatching {
+			_state.value = runCatchingCancellable {
 				// Resolved once for the whole list, not per row.
 				val covers: CoverUrls = library.coverUrls()
 				library.albumsOfArtist(artistRef)
 					.map { AlbumUi(it, covers.url(it.coverArt, COVER_PX)) }
 			}.fold(
 				onSuccess = { Load.Ready(it) },
-				onFailure = { Load.Failed(it.message ?: "Could not reach the server") },
+				onFailure = { Load.Failed(it.userMessage()) },
 			)
 		}
 	}
