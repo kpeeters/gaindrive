@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
@@ -25,8 +26,13 @@ fun ArtistRow(artist: Artist, onClick: () -> Unit) {
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
+			// heightIn rather than generous padding: it holds the 48dp minimum
+			// touch target even at large font scales, while letting the rows sit
+			// close together. There is no divider between them — with rows this
+			// dense, one line per artist reads better than a ruled list.
+			.heightIn(min = 48.dp)
 			.clickable(onClick = onClick)
-			.padding(horizontal = 16.dp, vertical = 14.dp),
+			.padding(horizontal = 16.dp, vertical = 4.dp),
 		verticalAlignment = Alignment.CenterVertically,
 	) {
 		Text(
