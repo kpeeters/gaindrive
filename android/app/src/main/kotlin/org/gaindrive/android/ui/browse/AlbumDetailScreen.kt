@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -28,12 +28,14 @@ import org.gaindrive.android.ui.components.ExternalLink
 import org.gaindrive.android.ui.components.LoadStateBox
 import org.gaindrive.android.ui.components.NotesSection
 import org.gaindrive.android.ui.components.TrackRow
+import org.gaindrive.android.ui.player.PlayerViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumDetailScreen(
 	onBack: () -> Unit,
 	viewModel: AlbumDetailViewModel = hiltViewModel(),
+	player: PlayerViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -99,12 +101,15 @@ fun AlbumDetailScreen(
 					}
 				}
 
-				items(ui.detail.songs, key = { it.ref.encode() }) { song ->
+				itemsIndexed(
+					items = ui.detail.songs,
+					key = { _, song -> song.ref.encode() },
+				) { index, song ->
 					TrackRow(
 						song = song,
-						// Playback arrives in Phase 3; until then a tap on a
-						// track has nothing meaningful to do.
-						onClick = {},
+						// Queues the whole album and starts here, which is what
+						// tapping a track in an album listing should mean.
+						onClick = { player.play(ui.detail.songs, index) },
 					)
 				}
 			}

@@ -1,6 +1,7 @@
 package org.gaindrive.android.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
@@ -10,7 +11,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -26,6 +29,9 @@ import org.gaindrive.android.ui.browse.AlbumDetailScreen
 import org.gaindrive.android.ui.browse.AlbumsScreen
 import org.gaindrive.android.ui.browse.ArtistsScreen
 import org.gaindrive.android.ui.components.EmptyMessage
+import org.gaindrive.android.ui.player.MiniPlayer
+import org.gaindrive.android.ui.player.NowPlayingSheet
+import org.gaindrive.android.ui.player.PlayerViewModel
 import org.gaindrive.android.ui.settings.ServerEditScreen
 import org.gaindrive.android.ui.settings.SettingsScreen
 import org.gaindrive.android.ui.settings.SettingsViewModel
@@ -50,6 +56,10 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 		if (settings.servers.isEmpty()) Route.Settings else Route.Artists
 	}
 
+	val playerViewModel: PlayerViewModel = hiltViewModel()
+	val playerState by playerViewModel.state.collectAsStateWithLifecycle()
+	var nowPlayingOpen by remember { mutableStateOf(false) }
+
 	val backStackEntry by navController.currentBackStackEntryAsState()
 	val destination = backStackEntry?.destination
 
@@ -60,14 +70,25 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 	Scaffold(
 		bottomBar = {
 			if (showBottomBar) {
-				NavigationBar {
-					TopLevel.entries.forEach { item ->
-						NavigationBarItem(
-							selected = destination.isIn(item),
-							onClick = { navController.switchTo(item.route) },
-							icon = { Icon(item.icon, contentDescription = item.label) },
-							label = { Text(item.label) },
-						)
+				Column {
+					// Above the navigation bar, and outside the NavHost, so it
+					// persists across navigation the way the web client's fixed
+					// footer does.
+					MiniPlayer(
+						state = playerState,
+						onExpand = { nowPlayingOpen = true },
+						onTogglePlay = playerViewModel::togglePlayPause,
+						onNext = playerViewModel::next,
+					)
+					NavigationBar {
+						TopLevel.entries.forEach { item ->
+							NavigationBarItem(
+								selected = destination.isIn(item),
+								onClick = { navController.switchTo(item.route) },
+								icon = { Icon(item.icon, contentDescription = item.label) },
+								label = { Text(item.label) },
+							)
+						}
 					}
 				}
 			}
@@ -116,6 +137,18 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 				ServerEditScreen(onDone = { navController.popBackStack() })
 			}
 		}
+	}
+
+	if (nowPlayingOpen && playerState.isActive) {
+		NowPlayingSheet(
+			state = playerState,
+			onDismiss = { nowPlayingOpen = false },
+			onTogglePlay = playerViewModel::togglePlayPause,
+			onNext = playerViewModel::next,
+			onPrevious = playerViewModel::previous,
+			onSeek = playerViewModel::seekTo,
+			onJumpTo = playerViewModel::jumpTo,
+		)
 	}
 }
 

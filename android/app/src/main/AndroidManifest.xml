@@ -35,17 +35,17 @@
 			</intent-filter>
 		</activity>
 
-		<!-- Phase 3. Declared now so the manifest shape is settled; the class
-		     does not exist yet and this block stays commented until it does.
+		<!-- Exported so the system media controls, Bluetooth and any other
+		     media browser can bind to the session. -->
 		<service
 			android:name=".playback.PlaybackService"
 			android:exported="true"
 			android:foregroundServiceType="mediaPlayback">
 			<intent-filter>
-				<action android:name="androidx.media3.session.MediaSessionService" />
+				<action android:name="androidx.media3.session.MediaLibraryService" />
+				<action android:name="android.media.browse.MediaBrowserService" />
 			</intent-filter>
 		</service>
-		-->
 
 	</application>
 

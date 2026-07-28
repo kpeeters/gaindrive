@@ -10,6 +10,9 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.json.Json
 import okhttp3.Cache
 import okhttp3.OkHttpClient
@@ -58,6 +61,18 @@ object AppModule {
 		PreferenceDataStoreFactory.create {
 			context.preferencesDataStoreFile("gaindrive")
 		}
+
+	/**
+	 * Application-lifetime scope for work that outlives any screen — the player
+	 * connection in particular, which must survive navigation.
+	 *
+	 * `Main.immediate` because most of it drives a [androidx.media3.session.MediaController],
+	 * whose methods must be called on the main thread.
+	 */
+	@Provides
+	@Singleton
+	fun applicationScope(): CoroutineScope =
+		CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
 	private const val HTTP_CACHE_BYTES = 32L * 1024 * 1024
 }
