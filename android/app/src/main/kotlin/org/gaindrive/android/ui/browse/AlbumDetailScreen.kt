@@ -43,6 +43,7 @@ fun AlbumDetailScreen(
 	player: PlayerViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
+	val playerState by player.state.collectAsStateWithLifecycle()
 	var actionsFor by remember { mutableStateOf<Song?>(null) }
 
 	actionsFor?.let { song ->
@@ -126,6 +127,7 @@ fun AlbumDetailScreen(
 						// tapping a track in an album listing should mean.
 						onClick = { player.play(ui.detail.songs, index) },
 						onLongClick = { actionsFor = song },
+						playback = playerState.trackStateOf(song.ref),
 					)
 				}
 			}

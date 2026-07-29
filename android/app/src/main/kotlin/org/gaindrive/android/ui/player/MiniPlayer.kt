@@ -40,10 +40,16 @@ fun MiniPlayer(
 
 	Surface(tonalElevation = 3.dp) {
 		Column {
-			LinearProgressIndicator(
-				progress = { progressOf(state) },
-				modifier = Modifier.fillMaxWidth(),
-			)
+			// Indeterminate while filling the buffer: a progress bar frozen at
+			// zero looks like a stall rather than like work in progress.
+			if (state.isBuffering) {
+				LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+			} else {
+				LinearProgressIndicator(
+					progress = { progressOf(state) },
+					modifier = Modifier.fillMaxWidth(),
+				)
+			}
 			Row(
 				modifier = Modifier
 					.fillMaxWidth()

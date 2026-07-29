@@ -39,6 +39,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
+import org.gaindrive.android.playback.TrackState
 import org.gaindrive.android.ui.components.AlbumRow
 import org.gaindrive.android.ui.components.ArtistRow
 import org.gaindrive.android.ui.components.EmptyMessage
@@ -56,6 +57,7 @@ fun SearchScreen(
 	val query by viewModel.query.collectAsStateWithLifecycle()
 	val filters by viewModel.filters.collectAsStateWithLifecycle()
 	val phase by viewModel.phase.collectAsStateWithLifecycle()
+	val playerState by player.state.collectAsStateWithLifecycle()
 
 	var actionsFor by remember { mutableStateOf<Song?>(null) }
 
@@ -107,6 +109,7 @@ fun SearchScreen(
 						onOpenAlbum = onOpenAlbum,
 						onPlaySong = { song -> player.play(listOf(song), 0) },
 						onSongActions = { song -> actionsFor = song },
+						playbackOf = playerState::trackStateOf,
 					)
 				}
 			}
@@ -189,6 +192,7 @@ private fun Results(
 	onOpenAlbum: (ItemRef, String) -> Unit,
 	onPlaySong: (Song) -> Unit,
 	onSongActions: (Song) -> Unit,
+	playbackOf: (ItemRef) -> TrackState,
 ) {
 	LazyColumn(modifier = Modifier.fillMaxSize()) {
 		if (results.artists.isNotEmpty()) {
@@ -215,6 +219,7 @@ private fun Results(
 					coverUrl = row.coverUrl,
 					onClick = { onPlaySong(row.song) },
 					onLongClick = { onSongActions(row.song) },
+					playback = playbackOf(row.song.ref),
 				)
 			}
 		}
