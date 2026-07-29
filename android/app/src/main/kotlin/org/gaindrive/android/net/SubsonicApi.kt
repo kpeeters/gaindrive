@@ -102,6 +102,19 @@ interface SubsonicApi {
 	@GET("rest/getStarred2.view")
 	suspend fun getStarred2(): SubsonicEnvelope<Starred2Body>
 
+	// ── Play reporting ──────────────────────────────────────────────────
+
+	/**
+	 * `submission=false` is a now-playing notification; `submission=true`
+	 * records a completed play, which is what increments the play count and
+	 * sets `last_played` — and therefore what makes getRecentSongs non-empty.
+	 */
+	@GET("rest/scrobble.view")
+	suspend fun scrobble(
+		@Query("id") id: String,
+		@Query("submission") submission: Boolean,
+	): SubsonicEnvelope<EmptyBody>
+
 	// ── gaindrive extensions ────────────────────────────────────────────
 
 	@GET("rest/getRecentSongs.view")

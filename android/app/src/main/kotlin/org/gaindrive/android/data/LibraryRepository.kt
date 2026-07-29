@@ -19,6 +19,7 @@ import org.gaindrive.android.data.model.StarKind
 import org.gaindrive.android.net.SubsonicClient
 import org.gaindrive.android.net.SubsonicClientFactory
 import org.gaindrive.android.net.requireOk
+import org.gaindrive.android.net.runCatchingCancellable
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -131,6 +132,17 @@ class LibraryRepository @Inject constructor(
 					.map { it.toDomain(server) }
 			}
 		}.getOrDefault(emptyList())
+
+	/**
+	 * Reports a play. Failures are swallowed: a lost scrobble costs a play
+	 * count, whereas letting it propagate would interrupt playback — a bad
+	 * trade in a music player.
+	 */
+	suspend fun scrobble(ref: ItemRef, submission: Boolean) {
+		runCatchingCancellable {
+			onServer(ref.server) { client -> client.scrobble(ref.id, submission).requireOk() }
+		}
+	}
 
 	suspend fun setStarred(ref: ItemRef, kind: StarKind, starred: Boolean) {
 		onServer(ref.server) { client ->

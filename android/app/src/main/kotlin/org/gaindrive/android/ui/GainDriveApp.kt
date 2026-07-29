@@ -156,6 +156,7 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 			onPrevious = playerViewModel::previous,
 			onSeek = playerViewModel::seekTo,
 			onJumpTo = playerViewModel::jumpTo,
+			onRemoveFromQueue = playerViewModel::removeFromQueue,
 		)
 	}
 }

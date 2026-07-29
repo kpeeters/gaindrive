@@ -34,6 +34,12 @@ class PlayerViewModel @Inject constructor(
 		player.addToQueue(song)
 	}
 
+	fun playNext(song: Song) {
+		player.playNext(song)
+	}
+
+	fun removeFromQueue(index: Int) = player.removeFromQueue(index)
+
 	fun togglePlayPause() = player.togglePlayPause()
 	fun next() { player.next() }
 	fun previous() { player.previous() }

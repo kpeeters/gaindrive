@@ -1,6 +1,8 @@
 package org.gaindrive.android.ui.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -93,18 +95,20 @@ private fun albumSubtitle(album: Album): String {
  * A track inside an album, where the number column keeps titles aligned.
  * [trailing] carries the per-track actions that arrive in sub-phase 2d.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TrackRow(
 	song: Song,
 	onClick: () -> Unit,
 	modifier: Modifier = Modifier,
+	onLongClick: (() -> Unit)? = null,
 	showNumber: Boolean = true,
 	trailing: @Composable (() -> Unit)? = null,
 ) {
 	Row(
 		modifier = modifier
 			.fillMaxWidth()
-			.clickable(onClick = onClick)
+			.combinedClickable(onClick = onClick, onLongClick = onLongClick)
 			.padding(horizontal = 16.dp, vertical = 12.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(12.dp),

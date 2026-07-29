@@ -50,6 +50,7 @@ fun NowPlayingSheet(
 	onPrevious: () -> Unit,
 	onSeek: (Long) -> Unit,
 	onJumpTo: (Int) -> Unit,
+	onRemoveFromQueue: (Int) -> Unit,
 ) {
 	val current = state.current ?: return
 	val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -169,6 +170,17 @@ fun NowPlayingSheet(
 								maxLines = 1,
 								overflow = TextOverflow.Ellipsis,
 							)
+						}
+						// The track playing cannot be removed: dropping it would
+						// mean deciding what plays instead, which is what skip is
+						// for.
+						if (index != state.queueIndex) {
+							IconButton(onClick = { onRemoveFromQueue(index) }) {
+								Icon(
+									Icons.Default.Close,
+									contentDescription = "Remove from queue",
+								)
+							}
 						}
 					}
 				}

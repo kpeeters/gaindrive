@@ -2,6 +2,7 @@ package org.gaindrive.android.playback
 
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -16,9 +17,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.guava.future
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.gaindrive.android.data.LibraryRepository
+import org.gaindrive.android.data.model.ItemRef
 import javax.inject.Inject
 
 /**
@@ -58,7 +62,53 @@ class PlaybackService : MediaLibraryService() {
 			.setHandleAudioBecomingNoisy(true)
 			.build()
 
+		player.addListener(scrobbler)
+		startScrobbleWatcher(player)
+
 		session = MediaLibrarySession.Builder(this, player, LibraryCallback()).build()
+	}
+
+	// ── Scrobbling ──────────────────────────────────────────────────────────
+	//
+	// Lives in the service, not the UI: a play must be reported whether or not
+	// anything is on screen, and the service is what survives backgrounding.
+
+	private var currentRef: ItemRef? = null
+	private var submitted = false
+
+	private val scrobbler = object : Player.Listener {
+		override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+			val ref = mediaItem?.itemRef()
+			currentRef = ref
+			submitted = false
+			if (ref != null) {
+				scope.launch { library.scrobble(ref, submission = false) }
+			}
+		}
+	}
+
+	/**
+	 * Submits a completed play once the track has been listened to.
+	 *
+	 * Half the track, or four minutes, whichever comes first — the convention
+	 * scrobbling services have used for years, and it stops a long track
+	 * needing to finish before it counts.
+	 */
+	private fun startScrobbleWatcher(player: Player) = scope.launch {
+		while (true) {
+			delay(SCROBBLE_POLL_MS)
+			val ref = currentRef ?: continue
+			if (submitted || !player.isPlaying) continue
+
+			val duration = player.duration
+			val position = player.currentPosition
+			if (duration <= 0) continue
+
+			if (position >= duration / 2 || position >= SUBMIT_AFTER_MS) {
+				submitted = true
+				library.scrobble(ref, submission = true)
+			}
+		}
 	}
 
 	override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
@@ -83,6 +133,11 @@ class PlaybackService : MediaLibraryService() {
 		session = null
 		scope.cancel()
 		super.onDestroy()
+	}
+
+	private companion object {
+		const val SCROBBLE_POLL_MS = 5_000L
+		const val SUBMIT_AFTER_MS = 4 * 60 * 1000L
 	}
 
 	private inner class LibraryCallback : MediaLibrarySession.Callback {

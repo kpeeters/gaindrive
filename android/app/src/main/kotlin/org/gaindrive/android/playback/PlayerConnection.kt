@@ -56,6 +56,16 @@ class PlayerConnection @Inject constructor(
 	private var controller: MediaController? = null
 	private var ticker: Job? = null
 
+	/**
+	 * Boundary between hand-picked queue entries and the automatic tail. The
+	 * rules live in [QueueBoundary]; this just holds the current value.
+	 *
+	 * Held here rather than in the service because every queue mutation goes
+	 * through this class. The system's media notification only skips and seeks,
+	 * so it cannot move the boundary behind our back.
+	 */
+	private var autoFrom = QueueBoundary.EMPTY
+
 	private val listener = object : Player.Listener {
 		override fun onEvents(player: Player, events: Player.Events) {
 			publish()
@@ -75,6 +85,10 @@ class PlayerConnection @Inject constructor(
 			{
 				controller = runCatching { future.get() }.getOrNull()?.also {
 					it.addListener(listener)
+					// A queue that outlived this process is treated as entirely
+					// hand-picked. Assuming the opposite would let the next
+					// enqueue silently delete a queue the user still wanted.
+					autoFrom = QueueBoundary.adoptingExisting(it.mediaItemCount)
 					publish()
 					if (it.isPlaying) startTicker()
 				}
@@ -89,15 +103,39 @@ class PlayerConnection @Inject constructor(
 		val covers: CoverUrls = library.coverUrls()
 		val items = songs.map { it.toMediaItem(covers.url(it.coverArt, ARTWORK_PX)) }
 		controller.setMediaItems(items, startIndex, 0L)
+		autoFrom = autoFrom.afterPlay(startIndex)
 		controller.prepare()
 		controller.play()
 	}
 
-	/** Appends one track to the end of the queue. */
+	/**
+	 * Appends a hand-picked track, discarding the automatic tail first.
+	 *
+	 * That truncation is the web client's rule and it is deliberate: without
+	 * it, queueing a track behind a 15-track album buries it, which is never
+	 * what "add to queue" is asked to mean.
+	 */
 	fun addToQueue(song: Song) = scope.launch {
 		val controller = awaitController() ?: return@launch
 		val covers = library.coverUrls()
+		autoFrom.tailToDrop(controller.mediaItemCount)?.let { tail ->
+			controller.removeMediaItems(tail.first, tail.last + 1)
+		}
 		controller.addMediaItem(song.toMediaItem(covers.url(song.coverArt, ARTWORK_PX)))
+		autoFrom = autoFrom.afterAppend(controller.mediaItemCount)
+		if (controller.mediaItemCount == 1) {
+			controller.prepare()
+			controller.play()
+		}
+	}
+
+	/** Inserts a hand-picked track directly after the one playing. */
+	fun playNext(song: Song) = scope.launch {
+		val controller = awaitController() ?: return@launch
+		val covers = library.coverUrls()
+		val at = (controller.currentMediaItemIndex + 1).coerceIn(0, controller.mediaItemCount)
+		controller.addMediaItem(at, song.toMediaItem(covers.url(song.coverArt, ARTWORK_PX)))
+		autoFrom = autoFrom.afterInsert(at)
 		if (controller.mediaItemCount == 1) {
 			controller.prepare()
 			controller.play()
@@ -122,6 +160,7 @@ class PlayerConnection @Inject constructor(
 		val controller = controller ?: return
 		if (queueIndex in 0 until controller.mediaItemCount) {
 			controller.removeMediaItem(queueIndex)
+			autoFrom = autoFrom.afterRemove(queueIndex)
 		}
 	}
 
@@ -130,6 +169,7 @@ class PlayerConnection @Inject constructor(
 			clearMediaItems()
 			stop()
 		}
+		autoFrom = QueueBoundary.EMPTY
 		_state.value = PlayerState()
 	}
 

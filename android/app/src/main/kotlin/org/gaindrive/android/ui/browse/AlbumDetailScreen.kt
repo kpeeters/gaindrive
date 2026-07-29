@@ -18,17 +18,22 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.ui.components.CoverHero
 import org.gaindrive.android.ui.components.ExternalLink
 import org.gaindrive.android.ui.components.LoadStateBox
 import org.gaindrive.android.ui.components.NotesSection
 import org.gaindrive.android.ui.components.TrackRow
 import org.gaindrive.android.ui.player.PlayerViewModel
+import org.gaindrive.android.ui.player.TrackActionsSheet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,6 +43,16 @@ fun AlbumDetailScreen(
 	player: PlayerViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
+	var actionsFor by remember { mutableStateOf<Song?>(null) }
+
+	actionsFor?.let { song ->
+		TrackActionsSheet(
+			song = song,
+			onDismiss = { actionsFor = null },
+			onPlayNext = { player.playNext(song) },
+			onAddToQueue = { player.addToQueue(song) },
+		)
+	}
 
 	Scaffold(
 		topBar = {
@@ -110,6 +125,7 @@ fun AlbumDetailScreen(
 						// Queues the whole album and starts here, which is what
 						// tapping a track in an album listing should mean.
 						onClick = { player.play(ui.detail.songs, index) },
+						onLongClick = { actionsFor = song },
 					)
 				}
 			}
