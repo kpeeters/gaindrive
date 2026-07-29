@@ -1,9 +1,10 @@
 package org.gaindrive.android.ui
 
-import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -120,16 +121,24 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 			// Artists → Albums → Album hierarchy visible the way the web
 			// client's sliding panes do. Switching tabs is a lateral move, not
 			// a descent, so it cross-fades instead.
+			// slideInHorizontally rather than slideIntoContainer: the latter
+			// derives its distance from the difference in container sizes, which
+			// between two full-screen destinations is nearly nothing — hence a
+			// slide you can barely see. These offsets are explicit multiples of
+			// the screen width.
 			enterTransition = {
 				if (targetState.destination.isDetail()) {
-					slideIntoContainer(SlideDirection.Left, tween(TRANSITION_MS))
+					slideInHorizontally(tween(TRANSITION_MS)) { width -> width }
 				} else {
 					fadeIn(tween(TRANSITION_MS))
 				}
 			},
 			exitTransition = {
 				if (targetState.destination.isDetail()) {
-					slideOutOfContainer(SlideDirection.Left, tween(TRANSITION_MS))
+					// The outgoing screen travels a third of the way. That reads
+					// as depth, and moves far fewer pixels than sliding both
+					// screens the full width would.
+					slideOutHorizontally(tween(TRANSITION_MS)) { width -> -width / 3 }
 				} else {
 					fadeOut(tween(TRANSITION_MS))
 				}
@@ -138,14 +147,14 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 			// screen being left was a detail, not the one being returned to.
 			popEnterTransition = {
 				if (initialState.destination.isDetail()) {
-					slideIntoContainer(SlideDirection.Right, tween(TRANSITION_MS))
+					slideInHorizontally(tween(TRANSITION_MS)) { width -> -width / 3 }
 				} else {
 					fadeIn(tween(TRANSITION_MS))
 				}
 			},
 			popExitTransition = {
 				if (initialState.destination.isDetail()) {
-					slideOutOfContainer(SlideDirection.Right, tween(TRANSITION_MS))
+					slideOutHorizontally(tween(TRANSITION_MS)) { width -> width }
 				} else {
 					fadeOut(tween(TRANSITION_MS))
 				}

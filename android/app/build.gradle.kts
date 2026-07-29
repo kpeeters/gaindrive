@@ -30,6 +30,13 @@ android {
 			isMinifyEnabled = true
 			isShrinkResources = true
 			proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+
+			// Signed with the debug key so `installRelease` works without any
+			// keystore ceremony. This exists to make performance measurable:
+			// judging Compose animation smoothness from a debug build is
+			// misleading, because debug builds skip R8 and run Compose's
+			// unoptimised paths. Replace this before distributing anything.
+			signingConfig = signingConfigs.getByName("debug")
 		}
 	}
 
