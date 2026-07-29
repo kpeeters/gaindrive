@@ -1,5 +1,9 @@
 package org.gaindrive.android.ui
 
+import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -19,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -111,6 +116,40 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 		NavHost(
 			navController = navController,
 			startDestination = startDestination,
+			// Drilling in slides left, going back slides right, which makes the
+			// Artists → Albums → Album hierarchy visible the way the web
+			// client's sliding panes do. Switching tabs is a lateral move, not
+			// a descent, so it cross-fades instead.
+			enterTransition = {
+				if (targetState.destination.isDetail()) {
+					slideIntoContainer(SlideDirection.Left, tween(TRANSITION_MS))
+				} else {
+					fadeIn(tween(TRANSITION_MS))
+				}
+			},
+			exitTransition = {
+				if (targetState.destination.isDetail()) {
+					slideOutOfContainer(SlideDirection.Left, tween(TRANSITION_MS))
+				} else {
+					fadeOut(tween(TRANSITION_MS))
+				}
+			},
+			// On the way back the roles reverse: what matters is whether the
+			// screen being left was a detail, not the one being returned to.
+			popEnterTransition = {
+				if (initialState.destination.isDetail()) {
+					slideIntoContainer(SlideDirection.Right, tween(TRANSITION_MS))
+				} else {
+					fadeIn(tween(TRANSITION_MS))
+				}
+			},
+			popExitTransition = {
+				if (initialState.destination.isDetail()) {
+					slideOutOfContainer(SlideDirection.Right, tween(TRANSITION_MS))
+				} else {
+					fadeOut(tween(TRANSITION_MS))
+				}
+			},
 			// padding() positions the content; consumeWindowInsets() tells the
 			// screens' own Scaffolds and TopAppBars that these insets are
 			// already accounted for. Without the second call each screen adds
@@ -182,6 +221,20 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 		)
 	}
 }
+
+/**
+ * Destinations reached by drilling down rather than by picking a tab. Only
+ * these get the sliding push; a tab switch is a lateral move.
+ */
+private fun NavDestination?.isDetail(): Boolean =
+	this != null && (
+		hasRoute(Route.Albums::class) ||
+			hasRoute(Route.Album::class) ||
+			hasRoute(Route.ServerEdit::class)
+		)
+
+/** Long enough to read as a direction, short enough not to be in the way. */
+private const val TRANSITION_MS = 280
 
 /**
  * Standard tab switch: one entry per tab on the back stack, and each tab's
