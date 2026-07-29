@@ -138,17 +138,19 @@ fun TrackRow(
 }
 
 /** A song shown outside its album, so it needs artist and album for context. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SongRow(
 	song: Song,
 	coverUrl: String?,
 	onClick: () -> Unit,
+	onLongClick: (() -> Unit)? = null,
 	trailingText: String? = null,
 ) {
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
-			.clickable(onClick = onClick)
+			.combinedClickable(onClick = onClick, onLongClick = onLongClick)
 			.padding(horizontal = 16.dp, vertical = 8.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(12.dp),

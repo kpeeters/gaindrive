@@ -12,17 +12,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.gaindrive.android.data.CoverUrls
 import org.gaindrive.android.data.LibraryRepository
-import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.ArtistInfo
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.net.runCatchingCancellable
 import org.gaindrive.android.net.userMessage
+import org.gaindrive.android.ui.AlbumUi
 import org.gaindrive.android.ui.Load
 import org.gaindrive.android.ui.Route
 import javax.inject.Inject
-
-/** An album plus the cover URL already resolved, so the row stays dumb. */
-data class AlbumUi(val album: Album, val coverUrl: String?)
 
 /**
  * The artist header. Held separately from the album list because the server

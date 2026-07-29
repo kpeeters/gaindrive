@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -33,6 +34,7 @@ import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.player.MiniPlayer
 import org.gaindrive.android.ui.player.NowPlayingSheet
 import org.gaindrive.android.ui.player.PlayerViewModel
+import org.gaindrive.android.ui.search.SearchScreen
 import org.gaindrive.android.ui.settings.ServerEditScreen
 import org.gaindrive.android.ui.settings.SettingsScreen
 import org.gaindrive.android.ui.settings.SettingsViewModel
@@ -64,6 +66,14 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 	val backStackEntry by navController.currentBackStackEntryAsState()
 	val destination = backStackEntry?.destination
 
+	// Which tab is lit. Tracked rather than derived from the current route,
+	// because Albums and Album can be reached from either Artists or Search —
+	// matching on route class would jump the highlight to Artists when you open
+	// an album from a search result.
+	var selectedTab by rememberSaveable {
+		mutableStateOf(if (settings.servers.isEmpty()) TopLevel.SETTINGS else TopLevel.ARTISTS)
+	}
+
 	// The bar is for switching top-level sections; it has no meaning on a
 	// form that the user is expected to finish or cancel.
 	val showBottomBar = destination?.hasRoute(Route.ServerEdit::class) != true
@@ -84,8 +94,11 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 					NavigationBar {
 						TopLevel.entries.forEach { item ->
 							NavigationBarItem(
-								selected = destination.isIn(item),
-								onClick = { navController.switchTo(item.route) },
+								selected = item == selectedTab,
+								onClick = {
+									selectedTab = item
+									navController.switchTo(item.route)
+								},
 								icon = { Icon(item.icon, contentDescription = item.label) },
 								label = { Text(item.label) },
 							)
@@ -131,7 +144,16 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 			// Filled in by sub-phase 2d.
 			composable<Route.Playlists> { EmptyMessage("Playlists arrive in 2d.") }
 			composable<Route.Recents> { EmptyMessage("Recents arrive in 2d.") }
-			composable<Route.Search> { EmptyMessage("Search arrives in 2d.") }
+			composable<Route.Search> {
+				SearchScreen(
+					onOpenArtist = { ref, name ->
+						navController.navigate(Route.Albums(ref.encode(), name))
+					},
+					onOpenAlbum = { ref, title ->
+						navController.navigate(Route.Album(ref.encode(), title))
+					},
+				)
+			}
 
 			composable<Route.Settings> {
 				SettingsScreen(
@@ -158,27 +180,6 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 			onJumpTo = playerViewModel::jumpTo,
 			onRemoveFromQueue = playerViewModel::removeFromQueue,
 		)
-	}
-}
-
-/**
- * Whether [item]'s section contains the current destination, so that pushing
- * Albums or Album keeps the Artists tab lit rather than clearing the bar.
- */
-private fun androidx.navigation.NavDestination?.isIn(item: TopLevel): Boolean {
-	if (this == null) return false
-	// Spelled out rather than looped over a list of KClass: the list would be
-	// KClass<out Route>, which does not fit hasRoute's invariant parameter.
-	return when (item) {
-		TopLevel.ARTISTS ->
-			hasRoute(Route.Artists::class) ||
-				hasRoute(Route.Albums::class) ||
-				hasRoute(Route.Album::class)
-		TopLevel.PLAYLISTS -> hasRoute(Route.Playlists::class)
-		TopLevel.RECENTS -> hasRoute(Route.Recents::class)
-		TopLevel.SEARCH -> hasRoute(Route.Search::class)
-		TopLevel.SETTINGS ->
-			hasRoute(Route.Settings::class) || hasRoute(Route.ServerEdit::class)
 	}
 }
 
