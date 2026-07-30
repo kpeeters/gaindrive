@@ -13,8 +13,13 @@ import org.gaindrive.android.data.model.Song
 data class AlbumUi(
 	val album: Album,
 	val coverUrl: String?,
-	/** The owning server's name in merged scope; null when it would be noise. */
-	val badge: String? = null,
+	/**
+	 * The owning servers' names in merged scope, empty when they would be
+	 * noise. Plural because a row whose duplicates were collapsed stands for
+	 * every server that has the album, and hiding that would make the missing
+	 * second row look like a bug.
+	 */
+	val badges: List<String> = emptyList(),
 )
 
 data class SongUi(

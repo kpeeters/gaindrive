@@ -81,7 +81,7 @@ fun AlbumRow(
 	album: Album,
 	coverUrl: String?,
 	onClick: () -> Unit,
-	badge: String? = null,
+	badges: List<String> = emptyList(),
 ) {
 	Row(
 		modifier = Modifier
@@ -107,7 +107,7 @@ fun AlbumRow(
 				overflow = TextOverflow.Ellipsis,
 			)
 		}
-		ServerBadge(badge)
+		ServerBadges(badges)
 	}
 }
 

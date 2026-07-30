@@ -278,7 +278,7 @@ private fun Results(
 					album = row.album,
 					coverUrl = row.coverUrl,
 					onClick = { onOpenAlbum(row.album.ref, row.album.title) },
-					badge = badgeNames[row.album.ref.server],
+					badges = row.album.sources.mapNotNull { badgeNames[it] },
 				)
 			}
 		}

@@ -49,8 +49,18 @@ data class Album(
 	val genre: String?,
 	val coverArt: ItemRef?,
 	val starredAt: String?,
+	/**
+	 * Every server holding this album. One entry unless duplicates have been
+	 * collapsed, in which case [ref] is the copy that won — the one highest in
+	 * registry order — and the rest are kept so the row can still say who else
+	 * has it.
+	 */
+	val refs: List<ItemRef> = listOf(ref),
 ) {
 	val isStarred: Boolean get() = starredAt != null
+
+	/** The servers holding this album, for the badges. */
+	val sources: List<ServerId> get() = refs.map { it.server }
 }
 
 data class Song(

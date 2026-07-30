@@ -1,5 +1,6 @@
 package org.gaindrive.android.data
 
+import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.Artist
 import org.gaindrive.android.data.model.ArtistIndex
 
@@ -9,9 +10,9 @@ import org.gaindrive.android.data.model.ArtistIndex
  *
  * * Artists collapse when their names match after case-folding and trimming.
  *   The merged row sums the album counts and remembers every contributing ref.
- * * Albums do not merge. An album held on two servers is two rows, each badged.
- *   Merging them would mean reconciling differing track lists, editions and
- *   encodings, and silently hiding one of them.
+ * * Albums collapse on artist and title, but only when [mergeDuplicateAlbums]
+ *   is on — it is off by default, because the collapse hides one server's copy
+ *   of an album behind another's on nothing more than a title match.
  * * Songs never merge; a track list always comes from one album on one server.
  *
  * Every `perServer` argument must arrive in registry order — it is the tie-break
@@ -50,6 +51,45 @@ fun mergeArtistIndexes(perServer: List<List<ArtistIndex>>): List<ArtistIndex> {
 			)
 		}
 		.sortedWith(compareBy(LABEL_ORDER) { it.label })
+}
+
+/**
+ * Collapses copies of the same album held on more than one server, keeping the
+ * copy from the server highest in registry order. That order is the user's
+ * stated preference — it is what the Settings list reorders — so "my own server
+ * before Bandcamp" is expressed by putting it first rather than by a separate
+ * favourite-server setting that could disagree with it.
+ *
+ * Matched on artist and title, case-folded and trimmed. Deliberately *not* on
+ * year: a remaster or a re-release disagrees about it between servers, which
+ * would split exactly the pairs worth collapsing. The cost is that two genuinely
+ * different albums sharing a title under one artist collapse into one — hence
+ * the setting that turns this off, and the badges that keep the survivors
+ * honest about who else has a copy.
+ *
+ * [albums] must arrive in registry order.
+ */
+fun mergeAlbums(albums: List<Album>): List<Album> {
+	// Across servers only. Two same-titled albums on one server are two albums
+	// — separately filed editions — and collapsing them would delete a row the
+	// user's own library deliberately has twice.
+	if (albums.distinctBy { it.ref.server }.size < 2) return albums
+
+	val merged = LinkedHashMap<Pair<String, String>, Album>()
+	albums.forEach { album ->
+		val key = album.artistName.trim().lowercase() to album.title.trim().lowercase()
+		val existing = merged[key]
+		merged[key] = if (existing == null) {
+			album
+		} else {
+			existing.copy(
+				refs = existing.refs + album.refs,
+				// Starred anywhere is starred, as for artists.
+				starredAt = existing.starredAt ?: album.starredAt,
+			)
+		}
+	}
+	return merged.values.toList()
 }
 
 /**

@@ -2,6 +2,7 @@ package org.gaindrive.android.data
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
@@ -39,8 +40,24 @@ class SettingsStore @Inject constructor(
 		dataStore.edit { it[SELECTED_SERVER] = value }
 	}
 
+	/**
+	 * Whether an album held on several servers collapses to one row.
+	 *
+	 * Off by default: the collapse hides one copy behind another on nothing
+	 * more than an artist-and-title match, and a library that quietly omits
+	 * something is worse than one that shows it twice. Users who have
+	 * deliberately downloaded their streaming collection locally turn it on.
+	 */
+	val mergeDuplicateAlbums: Flow<Boolean> =
+		dataStore.data.map { it[MERGE_ALBUMS] ?: false }
+
+	suspend fun setMergeDuplicateAlbums(enabled: Boolean) {
+		dataStore.edit { it[MERGE_ALBUMS] = enabled }
+	}
+
 	private companion object {
 		val THEME = stringPreferencesKey("theme_mode")
 		val SELECTED_SERVER = stringPreferencesKey("selected_server")
+		val MERGE_ALBUMS = booleanPreferencesKey("merge_duplicate_albums")
 	}
 }

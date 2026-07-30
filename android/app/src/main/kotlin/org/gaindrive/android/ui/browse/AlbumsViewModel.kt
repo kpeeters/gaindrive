@@ -107,7 +107,7 @@ class AlbumsViewModel @Inject constructor(
 					AlbumUi(
 						album = album,
 						coverUrl = covers.url(album.coverArt, COVER_PX),
-						badge = names[album.ref.server],
+						badges = album.sources.mapNotNull { names[it] },
 					)
 				}
 			}

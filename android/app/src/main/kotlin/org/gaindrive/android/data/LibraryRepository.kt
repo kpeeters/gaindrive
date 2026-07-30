@@ -48,6 +48,7 @@ import javax.inject.Singleton
 @Singleton
 class LibraryRepository @Inject constructor(
 	private val registry: ServerRegistry,
+	private val settings: SettingsStore,
 	private val clients: SubsonicClientFactory,
 ) {
 
@@ -72,11 +73,18 @@ class LibraryRepository @Inject constructor(
 	 * artists at once. Albums are not deduplicated — the same album on two
 	 * servers is two rows, each badged.
 	 */
-	suspend fun albumsOfArtist(refs: List<ItemRef>): MergedResult<List<Album>> =
-		fanOutRefs(refs) { client, ref ->
+	suspend fun albumsOfArtist(refs: List<ItemRef>): MergedResult<List<Album>> {
+		// Read once per query rather than once per row, and before the fan-out
+		// so the transform below stays non-suspending.
+		val collapse = collapseDuplicates()
+		return fanOutRefs(refs) { client, ref ->
 			client.getArtist(ref.id).requireOk().artist?.album.orEmpty()
 				.map { it.toDomain(ref.server) }
-		}.map { it.flatten() }
+		}.map { perServer ->
+			val all = perServer.flatten()
+			if (collapse) mergeAlbums(all) else all
+		}
+	}
 
 	suspend fun artist(ref: ItemRef): Artist? =
 		onServer(ref.server) { client ->
@@ -181,6 +189,7 @@ class LibraryRepository @Inject constructor(
 			send(MergedResult(LibrarySelection()))
 			return@channelFlow
 		}
+		val collapse = collapseDuplicates()
 
 		val answers = arrayOfNulls<LibrarySelection>(servers.size)
 		val failures = arrayOfNulls<ServerFailure>(servers.size)
@@ -203,7 +212,8 @@ class LibraryRepository @Inject constructor(
 								// Merged by name like the artist list; albums
 								// and songs are concatenated, never merged.
 								artists = mergeArtists(arrived.map { it.artists }),
-								albums = arrived.flatMap { it.albums },
+								albums = arrived.flatMap { it.albums }
+									.let { if (collapse) mergeAlbums(it) else it },
 								songs = arrived.flatMap { it.songs },
 							),
 							failures = failures.filterNotNull(),
@@ -311,6 +321,10 @@ class LibraryRepository @Inject constructor(
 			?: error("No such server configured: $server")
 		block(clients.clientFor(config))
 	}
+
+	/** The user's answer to "is the same album on two servers one row or two?" */
+	private suspend fun collapseDuplicates(): Boolean =
+		settings.mergeDuplicateAlbums.first()
 
 	/** The servers [scope] covers, in registry order. */
 	private suspend fun serversIn(scope: BrowseScope): List<ServerConfig> {

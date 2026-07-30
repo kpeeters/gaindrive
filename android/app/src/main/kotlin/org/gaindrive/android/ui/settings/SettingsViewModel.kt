@@ -18,6 +18,7 @@ import javax.inject.Inject
 data class SettingsUiState(
 	val servers: List<ServerConfig> = emptyList(),
 	val themeMode: ThemeMode = ThemeMode.AUTO,
+	val mergeDuplicateAlbums: Boolean = false,
 	/** Distinguishes "no servers yet" from "not loaded yet" for routing. */
 	val loaded: Boolean = false,
 )
@@ -29,8 +30,17 @@ class SettingsViewModel @Inject constructor(
 ) : ViewModel() {
 
 	val state: StateFlow<SettingsUiState> =
-		combine(registry.servers, settings.themeMode) { servers, theme ->
-			SettingsUiState(servers = servers, themeMode = theme, loaded = true)
+		combine(
+			registry.servers,
+			settings.themeMode,
+			settings.mergeDuplicateAlbums,
+		) { servers, theme, merge ->
+			SettingsUiState(
+				servers = servers,
+				themeMode = theme,
+				mergeDuplicateAlbums = merge,
+				loaded = true,
+			)
 		}.stateIn(
 			scope = viewModelScope,
 			started = SharingStarted.WhileSubscribed(5_000),
@@ -44,5 +54,11 @@ class SettingsViewModel @Inject constructor(
 
 	fun remove(id: ServerId) = viewModelScope.launch { registry.remove(id) }
 
-	fun move(from: Int, to: Int) = viewModelScope.launch { registry.move(from, to) }
+	/** Returns Unit, not the Job: it is passed around as a `() -> Unit` callback. */
+	fun move(from: Int, to: Int) {
+		viewModelScope.launch { registry.move(from, to) }
+	}
+
+	fun setMergeDuplicateAlbums(enabled: Boolean) =
+		viewModelScope.launch { settings.setMergeDuplicateAlbums(enabled) }
 }

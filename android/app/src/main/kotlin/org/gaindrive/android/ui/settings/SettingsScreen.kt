@@ -12,10 +12,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
@@ -27,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -78,13 +81,60 @@ fun SettingsScreen(
 				}
 			}
 
-			items(state.servers, key = { it.id.value }) { server ->
+			if (state.servers.size > 1) {
+				item {
+					Text(
+						text = "Order sets preference: when the same album is on " +
+							"several servers, the one highest here wins.",
+						style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.onSurfaceVariant,
+					)
+				}
+			}
+
+			itemsIndexed(state.servers, key = { _, it -> it.id.value }) { index, server ->
 				ServerRow(
 					server = server,
 					onEdit = { onEditServer(server.id) },
 					onToggle = { viewModel.setEnabled(server.id, !server.enabled) },
 					onRemove = { viewModel.remove(server.id) },
+					onMoveUp =
+						if (index > 0) ({ viewModel.move(index, index - 1) }) else null,
+					onMoveDown =
+						if (index < state.servers.lastIndex) {
+							({ viewModel.move(index, index + 1) })
+						} else {
+							null
+						},
 				)
+			}
+
+			item { SectionTitle("Library") }
+			item {
+				Row(
+					modifier = Modifier.fillMaxWidth(),
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(12.dp),
+				) {
+					Column(modifier = Modifier.weight(1f)) {
+						Text(
+							text = "Merge duplicate albums",
+							style = MaterialTheme.typography.bodyLarge,
+						)
+						Text(
+							// Says what it matches on, because that is what
+							// decides whether it does the right thing.
+							text = "Show one row when the same artist and album " +
+								"title appear on several servers.",
+							style = MaterialTheme.typography.bodySmall,
+							color = MaterialTheme.colorScheme.onSurfaceVariant,
+						)
+					}
+					Switch(
+						checked = state.mergeDuplicateAlbums,
+						onCheckedChange = viewModel::setMergeDuplicateAlbums,
+					)
+				}
 			}
 
 			item { SectionTitle("Appearance") }
@@ -129,6 +179,9 @@ private fun ServerRow(
 	onEdit: () -> Unit,
 	onToggle: () -> Unit,
 	onRemove: () -> Unit,
+	/** Null at the ends of the list, where the move has nowhere to go. */
+	onMoveUp: (() -> Unit)? = null,
+	onMoveDown: (() -> Unit)? = null,
 ) {
 	var menuOpen by remember { mutableStateOf(false) }
 
@@ -164,6 +217,34 @@ private fun ServerRow(
 					Icon(Icons.Default.MoreVert, contentDescription = "More")
 				}
 				DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+					// Move up/down rather than drag-and-drop. SCREENS.md asks
+					// for drag; a hand-rolled reorderable LazyColumn is a lot of
+					// fiddly surface for a list that is two or three rows long,
+					// and these are also the accessible version of the gesture.
+					onMoveUp?.let { move ->
+						DropdownMenuItem(
+							text = { Text("Move up") },
+							leadingIcon = {
+								Icon(Icons.Default.KeyboardArrowUp, contentDescription = null)
+							},
+							onClick = {
+								menuOpen = false
+								move()
+							},
+						)
+					}
+					onMoveDown?.let { move ->
+						DropdownMenuItem(
+							text = { Text("Move down") },
+							leadingIcon = {
+								Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+							},
+							onClick = {
+								menuOpen = false
+								move()
+							},
+						)
+					}
 					DropdownMenuItem(
 						text = { Text(if (server.enabled) "Disable" else "Enable") },
 						onClick = {
