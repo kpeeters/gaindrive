@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -18,7 +19,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -39,12 +40,18 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.gaindrive.android.data.model.BrowseScope
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.data.model.ServerConfig
+import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.playback.TrackState
 import org.gaindrive.android.ui.components.AlbumRow
 import org.gaindrive.android.ui.components.ArtistRow
 import org.gaindrive.android.ui.components.EmptyMessage
+import org.gaindrive.android.ui.components.PartialFailureNote
+import org.gaindrive.android.ui.components.SectionHeading
+import org.gaindrive.android.ui.components.ServerSelector
 import org.gaindrive.android.ui.components.SongRow
 import org.gaindrive.android.ui.player.PlayerViewModel
 import org.gaindrive.android.ui.player.TrackActionsSheet
@@ -52,7 +59,7 @@ import org.gaindrive.android.ui.player.TrackActionsSheet
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
-	onOpenArtist: (ItemRef, String) -> Unit,
+	onOpenArtist: (List<ItemRef>, String) -> Unit,
 	onOpenAlbum: (ItemRef, String) -> Unit,
 	viewModel: SearchViewModel = hiltViewModel(),
 	player: PlayerViewModel = hiltViewModel(),
@@ -62,8 +69,16 @@ fun SearchScreen(
 	val phase by viewModel.phase.collectAsStateWithLifecycle()
 	val playerState by player.state.collectAsStateWithLifecycle()
 	val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
+	val servers by viewModel.servers.collectAsStateWithLifecycle()
+	val browseScope by viewModel.browseScope.collectAsStateWithLifecycle()
+	val badgeNames by viewModel.badgeNames.collectAsStateWithLifecycle()
 
 	var actionsFor by remember { mutableStateOf<Song?>(null) }
+
+	// Held here rather than in the view model: dismissing a note must not cost
+	// a second fan-out across every server.
+	var notesDismissed by remember { mutableStateOf(false) }
+	LaunchedEffect(query) { notesDismissed = false }
 
 	actionsFor?.let { song ->
 		TrackActionsSheet(
@@ -78,11 +93,15 @@ fun SearchScreen(
 		SearchHeader(
 			query = query,
 			filters = filters,
+			servers = servers,
+			scope = browseScope,
 			onQueryChange = viewModel::onQueryChange,
 			onClear = viewModel::clearQuery,
 			onToggleArtists = viewModel::toggleArtists,
 			onToggleAlbums = viewModel::toggleAlbums,
 			onToggleSongs = viewModel::toggleSongs,
+			onSelectAll = viewModel::selectAllServers,
+			onSelectServer = viewModel::selectServer,
 		)
 
 		when (val current = phase) {
@@ -103,21 +122,43 @@ fun SearchScreen(
 
 			is SearchPhase.Failed -> EmptyMessage(current.message)
 
-			is SearchPhase.Ready -> PullToRefreshBox(
-				isRefreshing = isRefreshing,
-				onRefresh = viewModel::refresh,
-			) {
-				if (current.results.isEmpty) {
-					EmptyMessage("Nothing matched “$query”.")
-				} else {
-					Results(
-						results = current.results,
-						onOpenArtist = onOpenArtist,
-						onOpenAlbum = onOpenAlbum,
-						onPlaySong = { song -> player.play(listOf(song), 0) },
-						onSongActions = { song -> actionsFor = song },
-						playbackOf = playerState::trackStateOf,
+			is SearchPhase.Ready -> Column {
+				if (!notesDismissed) {
+					PartialFailureNote(
+						failures = current.failures,
+						onRetry = viewModel::refresh,
+						onDismiss = { notesDismissed = true },
 					)
+				}
+				// Quiet, and above the results rather than in place of them:
+				// what has arrived is already usable.
+				if (current.outstanding) {
+					LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+				}
+
+				PullToRefreshBox(
+					isRefreshing = isRefreshing,
+					onRefresh = viewModel::refresh,
+				) {
+					if (current.results.isEmpty) {
+						// Not "nothing matched" while servers are still
+						// answering — that would be a claim we cannot make yet.
+						if (current.outstanding) {
+							EmptyMessage("Searching…")
+						} else {
+							EmptyMessage("Nothing matched “$query”.")
+						}
+					} else {
+						Results(
+							results = current.results,
+							badgeNames = badgeNames,
+							onOpenArtist = onOpenArtist,
+							onOpenAlbum = onOpenAlbum,
+							onPlaySong = { song -> player.play(listOf(song), 0) },
+							onSongActions = { song -> actionsFor = song },
+							playbackOf = playerState::trackStateOf,
+						)
+					}
 				}
 			}
 		}
@@ -128,11 +169,15 @@ fun SearchScreen(
 private fun SearchHeader(
 	query: String,
 	filters: SearchFilters,
+	servers: List<ServerConfig>,
+	scope: BrowseScope,
 	onQueryChange: (String) -> Unit,
 	onClear: () -> Unit,
 	onToggleArtists: () -> Unit,
 	onToggleAlbums: () -> Unit,
 	onToggleSongs: () -> Unit,
+	onSelectAll: () -> Unit,
+	onSelectServer: (ServerId) -> Unit,
 ) {
 	val focusRequester = remember { FocusRequester() }
 	val keyboard = LocalSoftwareKeyboardController.current
@@ -171,7 +216,10 @@ private fun SearchHeader(
 					.focusRequester(focusRequester),
 			)
 
-			Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+			Row(
+				horizontalArrangement = Arrangement.spacedBy(8.dp),
+				verticalAlignment = Alignment.CenterVertically,
+			) {
 				FilterChip(
 					selected = filters.artists,
 					onClick = onToggleArtists,
@@ -187,6 +235,15 @@ private fun SearchHeader(
 					onClick = onToggleSongs,
 					label = { Text("Tracks") },
 				)
+				Spacer(modifier = Modifier.weight(1f))
+				// Search has no app bar of its own, so the scope lives with the
+				// filters — it is one more thing narrowing what comes back.
+				ServerSelector(
+					servers = servers,
+					scope = scope,
+					onSelectAll = onSelectAll,
+					onSelect = onSelectServer,
+				)
 			}
 		}
 	}
@@ -195,7 +252,8 @@ private fun SearchHeader(
 @Composable
 private fun Results(
 	results: SearchResults,
-	onOpenArtist: (ItemRef, String) -> Unit,
+	badgeNames: Map<ServerId, String>,
+	onOpenArtist: (List<ItemRef>, String) -> Unit,
 	onOpenAlbum: (ItemRef, String) -> Unit,
 	onPlaySong: (Song) -> Unit,
 	onSongActions: (Song) -> Unit,
@@ -205,16 +263,23 @@ private fun Results(
 		if (results.artists.isNotEmpty()) {
 			item(key = "h-artists") { SectionHeading("Artists") }
 			items(results.artists, key = { "a-${it.ref.encode()}" }) { artist ->
-				ArtistRow(artist) { onOpenArtist(artist.ref, artist.name) }
+				ArtistRow(
+					artist = artist,
+					onClick = { onOpenArtist(artist.refs, artist.name) },
+					badges = artist.sources.mapNotNull { badgeNames[it] },
+				)
 			}
 		}
 
 		if (results.albums.isNotEmpty()) {
 			item(key = "h-albums") { SectionHeading("Albums") }
 			items(results.albums, key = { "al-${it.album.ref.encode()}" }) { row ->
-				AlbumRow(row.album, row.coverUrl) {
-					onOpenAlbum(row.album.ref, row.album.title)
-				}
+				AlbumRow(
+					album = row.album,
+					coverUrl = row.coverUrl,
+					onClick = { onOpenAlbum(row.album.ref, row.album.title) },
+					badge = badgeNames[row.album.ref.server],
+				)
 			}
 		}
 
@@ -227,18 +292,9 @@ private fun Results(
 					onClick = { onPlaySong(row.song) },
 					onLongClick = { onSongActions(row.song) },
 					playback = playbackOf(row.song.ref),
+					badge = badgeNames[row.song.ref.server],
 				)
 			}
 		}
 	}
-}
-
-@Composable
-private fun SectionHeading(text: String) {
-	Text(
-		text = text,
-		style = MaterialTheme.typography.titleSmall,
-		color = MaterialTheme.colorScheme.primary,
-		modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
-	)
 }

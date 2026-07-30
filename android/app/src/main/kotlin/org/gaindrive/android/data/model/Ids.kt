@@ -33,6 +33,17 @@ data class ItemRef(val server: ServerId, val id: String) {
 	fun encode(): String = "${server.value}/$id"
 
 	companion object {
+		/**
+		 * Several refs in one navigation argument, for a row that stands for the
+		 * same artist on more than one server. Neither half of a ref can contain
+		 * a comma, so the split is unambiguous.
+		 */
+		fun encodeAll(refs: List<ItemRef>): String = refs.joinToString(",") { it.encode() }
+
+		/** Inverse of [encodeAll]; malformed entries are dropped, not fatal. */
+		fun decodeAll(encoded: String): List<ItemRef> =
+			encoded.split(',').mapNotNull { decode(it) }
+
 		/** Inverse of [encode]; null when the string is not a valid ref. */
 		fun decode(encoded: String): ItemRef? {
 			// Server ids are UUIDs and Subsonic ids are integers, so neither

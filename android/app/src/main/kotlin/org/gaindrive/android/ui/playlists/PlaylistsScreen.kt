@@ -1,5 +1,6 @@
 package org.gaindrive.android.ui.playlists
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -31,8 +32,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Playlist
 import org.gaindrive.android.ui.components.EmptyMessage
+import org.gaindrive.android.ui.components.PartialFailureNote
 import org.gaindrive.android.ui.components.PlaylistRow
 import org.gaindrive.android.ui.components.RefreshableLoadBox
+import org.gaindrive.android.ui.components.SectionHeading
 import org.gaindrive.android.ui.components.ServerSelector
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,7 +47,9 @@ fun PlaylistsScreen(
 	val state by viewModel.state.collectAsStateWithLifecycle()
 	val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 	val servers by viewModel.servers.collectAsStateWithLifecycle()
-	val currentServer by viewModel.currentServer.collectAsStateWithLifecycle()
+	val browseScope by viewModel.browseScope.collectAsStateWithLifecycle()
+	val badgeNames by viewModel.badgeNames.collectAsStateWithLifecycle()
+	val failures by viewModel.failures.collectAsStateWithLifecycle()
 	val error by viewModel.error.collectAsStateWithLifecycle()
 
 	val snackbar = remember { SnackbarHostState() }
@@ -83,7 +88,8 @@ fun PlaylistsScreen(
 				actions = {
 					ServerSelector(
 						servers = servers,
-						current = currentServer,
+						scope = browseScope,
+						onSelectAll = viewModel::selectAllServers,
 						onSelect = viewModel::selectServer,
 					)
 				},
@@ -91,30 +97,47 @@ fun PlaylistsScreen(
 		},
 		snackbarHost = { SnackbarHost(snackbar) },
 	) { insets ->
-		RefreshableLoadBox(
-			state = state,
-			isRefreshing = isRefreshing,
-			onRefresh = viewModel::refresh,
-			onRetry = viewModel::load,
-			modifier = Modifier.padding(insets),
-		) { playlists ->
-			if (playlists.isEmpty()) {
-				EmptyMessage(
-					"No playlists yet. Long-press a track and choose " +
-						"“Add to playlist” to make one."
-				)
-				return@RefreshableLoadBox
-			}
+		Column(modifier = Modifier.padding(insets)) {
+			PartialFailureNote(
+				failures = failures,
+				onRetry = viewModel::refresh,
+				onDismiss = viewModel::dismissFailures,
+			)
 
-			LazyColumn(modifier = Modifier.fillMaxSize()) {
-				items(playlists, key = { it.ref.encode() }) { playlist ->
-					PlaylistRow(
-						playlist = playlist,
-						onClick = { onOpenPlaylist(playlist.ref, playlist.name) },
-						trailing = {
-							PlaylistMenu(onDelete = { confirming = playlist })
-						},
+			RefreshableLoadBox(
+				state = state,
+				isRefreshing = isRefreshing,
+				onRefresh = viewModel::refresh,
+				onRetry = viewModel::load,
+			) { sections ->
+				if (sections.all { it.items.isEmpty() }) {
+					EmptyMessage(
+						"No playlists yet. Long-press a track and choose " +
+							"“Add to playlist” to make one."
 					)
+					return@RefreshableLoadBox
+				}
+
+				LazyColumn(modifier = Modifier.fillMaxSize()) {
+					sections.forEach { section ->
+						// Named only when there is more than one server in
+						// play; otherwise the heading is a label on the
+						// obvious.
+						badgeNames[section.server.id]?.let { name ->
+							item(key = "hdr-${section.server.id.value}") {
+								SectionHeading(name)
+							}
+						}
+						items(section.items, key = { it.ref.encode() }) { playlist ->
+							PlaylistRow(
+								playlist = playlist,
+								onClick = { onOpenPlaylist(playlist.ref, playlist.name) },
+								trailing = {
+									PlaylistMenu(onDelete = { confirming = playlist })
+								},
+							)
+						}
+					}
 				}
 			}
 		}

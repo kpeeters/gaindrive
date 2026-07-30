@@ -32,8 +32,19 @@ import org.gaindrive.android.playback.TrackState
 
 /** Shared row composables. Every browse screen is built from these. */
 
+/** Groups rows under a category or a server name. */
 @Composable
-fun ArtistRow(artist: Artist, onClick: () -> Unit) {
+fun SectionHeading(text: String) {
+	Text(
+		text = text,
+		style = MaterialTheme.typography.titleSmall,
+		color = MaterialTheme.colorScheme.primary,
+		modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+	)
+}
+
+@Composable
+fun ArtistRow(artist: Artist, onClick: () -> Unit, badges: List<String> = emptyList()) {
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
@@ -45,6 +56,7 @@ fun ArtistRow(artist: Artist, onClick: () -> Unit) {
 			.clickable(onClick = onClick)
 			.padding(horizontal = 16.dp, vertical = 4.dp),
 		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(8.dp),
 	) {
 		Text(
 			text = artist.name,
@@ -53,6 +65,9 @@ fun ArtistRow(artist: Artist, onClick: () -> Unit) {
 			overflow = TextOverflow.Ellipsis,
 			modifier = Modifier.weight(1f),
 		)
+		// Several badges mean this one row is several servers' artists, which
+		// is worth seeing before tapping into a merged album list.
+		ServerBadges(badges)
 		Text(
 			text = if (artist.albumCount == 1) "1 album" else "${artist.albumCount} albums",
 			style = MaterialTheme.typography.bodySmall,
@@ -62,7 +77,12 @@ fun ArtistRow(artist: Artist, onClick: () -> Unit) {
 }
 
 @Composable
-fun AlbumRow(album: Album, coverUrl: String?, onClick: () -> Unit) {
+fun AlbumRow(
+	album: Album,
+	coverUrl: String?,
+	onClick: () -> Unit,
+	badge: String? = null,
+) {
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
@@ -87,6 +107,7 @@ fun AlbumRow(album: Album, coverUrl: String?, onClick: () -> Unit) {
 				overflow = TextOverflow.Ellipsis,
 			)
 		}
+		ServerBadge(badge)
 	}
 }
 
@@ -222,6 +243,7 @@ fun SongRow(
 	onLongClick: (() -> Unit)? = null,
 	playback: TrackState = TrackState.IDLE,
 	trailingText: String? = null,
+	badge: String? = null,
 	trailing: @Composable (() -> Unit)? = null,
 ) {
 	Row(
@@ -270,6 +292,7 @@ fun SongRow(
 				overflow = TextOverflow.Ellipsis,
 			)
 		}
+		ServerBadge(badge)
 		if (trailingText != null) {
 			Text(
 				text = trailingText,

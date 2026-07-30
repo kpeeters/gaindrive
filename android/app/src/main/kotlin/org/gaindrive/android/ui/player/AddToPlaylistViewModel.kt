@@ -50,7 +50,7 @@ class AddToPlaylistViewModel @Inject constructor(
 		loadedFor = server
 		_state.value = Load.Loading
 		viewModelScope.launch {
-			_state.value = runCatchingCancellable { library.playlists(server) }.fold(
+			_state.value = runCatchingCancellable { library.playlistsOf(server) }.fold(
 				onSuccess = { Load.Ready(it) },
 				onFailure = { Load.Failed(it.userMessage()) },
 			)

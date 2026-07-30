@@ -22,8 +22,13 @@ sealed interface Route {
 	@Serializable
 	data object Artists : Route
 
+	/**
+	 * [artistRefs] is comma-separated: a merged artist row stands for the same
+	 * artist on several servers, each with its own id, and the albums screen
+	 * has to ask all of them.
+	 */
 	@Serializable
-	data class Albums(val artistRef: String, val artistName: String) : Route
+	data class Albums(val artistRefs: String, val artistName: String) : Route
 
 	@Serializable
 	data class Album(val albumRef: String, val albumTitle: String) : Route

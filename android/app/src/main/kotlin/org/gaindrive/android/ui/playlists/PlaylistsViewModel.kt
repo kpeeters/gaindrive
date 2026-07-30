@@ -13,7 +13,10 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.gaindrive.android.data.LibraryRepository
+import org.gaindrive.android.data.ServerFailure
+import org.gaindrive.android.data.ServerSection
 import org.gaindrive.android.data.ServerSelection
+import org.gaindrive.android.data.model.BrowseScope
 import org.gaindrive.android.data.model.Playlist
 import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
@@ -28,8 +31,17 @@ class PlaylistsViewModel @Inject constructor(
 	private val selection: ServerSelection,
 ) : ViewModel() {
 
-	private val _state = MutableStateFlow<Load<List<Playlist>>>(Load.Loading)
-	val state: StateFlow<Load<List<Playlist>>> = _state.asStateFlow()
+	/**
+	 * Sections rather than one list: a playlist belongs to one server, so in
+	 * merged scope they sit under per-server headings instead of interleaved.
+	 * With one server in scope there is a single section and the screen draws
+	 * no heading at all.
+	 */
+	private val _state = MutableStateFlow<Load<List<ServerSection<Playlist>>>>(Load.Loading)
+	val state: StateFlow<Load<List<ServerSection<Playlist>>>> = _state.asStateFlow()
+
+	private val _failures = MutableStateFlow<List<ServerFailure>>(emptyList())
+	val failures: StateFlow<List<ServerFailure>> = _failures.asStateFlow()
 
 	/** True only for a user-initiated pull, which drives the pull indicator. */
 	private val _isRefreshing = MutableStateFlow(false)
@@ -39,21 +51,21 @@ class PlaylistsViewModel @Inject constructor(
 	private val _error = MutableStateFlow<String?>(null)
 	val error: StateFlow<String?> = _error.asStateFlow()
 
-	private var server: ServerConfig? = null
+	private var scope: BrowseScope = BrowseScope.AllServers
 	private var loadJob: Job? = null
 
 	init {
 		viewModelScope.launch {
 			combine(
-				selection.current.distinctUntilChanged(),
+				selection.scope.distinctUntilChanged(),
 				// Re-reads after a create or delete anywhere in the app.
 				library.playlistRevision,
 			) { selected, _ -> selected }.collect { selected ->
-				// A different server is a different set of playlists, so the old
+				// A different scope is a different set of playlists, so the old
 				// list must go. A revision bump is the same list changed, and
 				// blanking it there would flash the whole screen on every edit.
-				val switched = selected?.id != server?.id
-				server = selected
+				val switched = selected != scope
+				scope = selected
 				startLoad(clearFirst = switched)
 			}
 		}
@@ -81,22 +93,34 @@ class PlaylistsViewModel @Inject constructor(
 		_error.value = null
 	}
 
+	fun dismissFailures() {
+		_failures.value = emptyList()
+	}
+
 	private fun startLoad(clearFirst: Boolean) {
 		loadJob?.cancel()
 		loadJob = viewModelScope.launch {
-			val current = server
-			if (current == null) {
+			if (clearFirst) _state.value = Load.Loading
+			if (selection.hasNoServers()) {
 				_state.value = Load.Failed("No server configured. Add one in Settings.")
 				_isRefreshing.value = false
 				return@launch
 			}
-			if (clearFirst) _state.value = Load.Loading
 
-			_state.value = runCatchingCancellable { library.playlists(current.id) }
-				.fold(
-					onSuccess = { Load.Ready(it) },
-					onFailure = { Load.Failed(it.userMessage()) },
-				)
+			runCatchingCancellable { library.playlists(scope) }.fold(
+				onSuccess = { merged ->
+					if (merged.items.isEmpty() && merged.isPartial) {
+						_state.value = Load.Failed(merged.failures.first().message)
+					} else {
+						_state.value = Load.Ready(merged.items)
+					}
+					_failures.value = merged.failures
+				},
+				onFailure = {
+					_state.value = Load.Failed(it.userMessage())
+					_failures.value = emptyList()
+				},
+			)
 			_isRefreshing.value = false
 		}
 	}
@@ -104,8 +128,14 @@ class PlaylistsViewModel @Inject constructor(
 	val servers: StateFlow<List<ServerConfig>> = selection.available
 		.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-	val currentServer: StateFlow<ServerConfig?> = selection.current
-		.stateIn(viewModelScope, SharingStarted.Lazily, null)
+	val browseScope: StateFlow<BrowseScope> = selection.scope
+		.stateIn(viewModelScope, SharingStarted.Lazily, BrowseScope.AllServers)
+
+	/** Non-empty only when the sections need naming. */
+	val badgeNames: StateFlow<Map<ServerId, String>> = selection.badgeNames
+		.stateIn(viewModelScope, SharingStarted.Lazily, emptyMap())
 
 	fun selectServer(id: ServerId) = viewModelScope.launch { selection.select(id) }
+
+	fun selectAllServers() = viewModelScope.launch { selection.selectAllServers() }
 }

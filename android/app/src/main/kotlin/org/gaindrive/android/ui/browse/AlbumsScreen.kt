@@ -31,6 +31,7 @@ import org.gaindrive.android.ui.components.AlbumRow
 import org.gaindrive.android.ui.components.ArtistAvatar
 import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.components.ExternalLink
+import org.gaindrive.android.ui.components.PartialFailureNote
 import org.gaindrive.android.ui.components.RefreshableLoadBox
 import org.gaindrive.android.ui.components.NotesSection
 
@@ -44,6 +45,7 @@ fun AlbumsScreen(
 	val state by viewModel.state.collectAsStateWithLifecycle()
 	val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 	val header by viewModel.header.collectAsStateWithLifecycle()
+	val failures by viewModel.failures.collectAsStateWithLifecycle()
 
 	Scaffold(
 		topBar = {
@@ -63,31 +65,41 @@ fun AlbumsScreen(
 			)
 		},
 	) { insets ->
-		RefreshableLoadBox(
-			state = state,
-			isRefreshing = isRefreshing,
-			onRefresh = viewModel::refresh,
-			onRetry = viewModel::load,
-			modifier = Modifier.padding(insets),
-		) { albums ->
-			LazyColumn(modifier = Modifier.fillMaxSize()) {
-				item(key = "header") {
-					ArtistHeader(
-						name = viewModel.artistName,
-						header = header,
-						albumCount = albums.size,
-					)
-				}
+		Column(modifier = Modifier.padding(insets)) {
+			PartialFailureNote(
+				failures = failures,
+				onRetry = viewModel::refresh,
+				onDismiss = viewModel::dismissFailures,
+			)
 
-				if (albums.isEmpty()) {
-					item(key = "empty") {
-						EmptyMessage("No albums for this artist.")
+			RefreshableLoadBox(
+				state = state,
+				isRefreshing = isRefreshing,
+				onRefresh = viewModel::refresh,
+				onRetry = viewModel::load,
+			) { albums ->
+				LazyColumn(modifier = Modifier.fillMaxSize()) {
+					item(key = "header") {
+						ArtistHeader(
+							name = viewModel.artistName,
+							header = header,
+							albumCount = albums.size,
+						)
 					}
-				}
 
-				items(albums, key = { it.album.ref.encode() }) { row ->
-					AlbumRow(row.album, row.coverUrl) {
-						onOpenAlbum(row.album.ref, row.album.title)
+					if (albums.isEmpty()) {
+						item(key = "empty") {
+							EmptyMessage("No albums for this artist.")
+						}
+					}
+
+					items(albums, key = { it.album.ref.encode() }) { row ->
+						AlbumRow(
+							album = row.album,
+							coverUrl = row.coverUrl,
+							onClick = { onOpenAlbum(row.album.ref, row.album.title) },
+							badge = row.badge,
+						)
 					}
 				}
 			}

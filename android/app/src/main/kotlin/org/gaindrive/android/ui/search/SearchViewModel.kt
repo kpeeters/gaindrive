@@ -5,20 +5,28 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import org.gaindrive.android.data.LibraryRepository
+import org.gaindrive.android.data.ServerFailure
 import org.gaindrive.android.data.ServerSelection
 import org.gaindrive.android.data.model.Artist
-import org.gaindrive.android.net.runCatchingCancellable
+import org.gaindrive.android.data.model.BrowseScope
+import org.gaindrive.android.data.model.ServerConfig
+import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.net.userMessage
 import org.gaindrive.android.ui.AlbumUi
 import org.gaindrive.android.ui.SongUi
@@ -51,7 +59,17 @@ sealed interface SearchPhase {
 	data object Idle : SearchPhase
 	data object Searching : SearchPhase
 	data class Failed(val message: String) : SearchPhase
-	data class Ready(val results: SearchResults) : SearchPhase
+
+	/**
+	 * [outstanding] is true while some servers have answered and others have
+	 * not — the results are usable but not yet complete, which the screen shows
+	 * as a quiet indicator rather than by withholding what it has.
+	 */
+	data class Ready(
+		val results: SearchResults,
+		val failures: List<ServerFailure> = emptyList(),
+		val outstanding: Boolean = false,
+	) : SearchPhase
 }
 
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
@@ -79,52 +97,75 @@ class SearchViewModel @Inject constructor(
 		// and should re-run immediately, not after a pause.
 		_query.debounce(DEBOUNCE_MS),
 		_filters,
-		selection.current,
+		selection.scope,
+		selection.scoped,
 		reruns,
-	) { query, filters, server, _ -> Triple(query.trim(), filters, server) }
-		.flatMapLatest { (query, filters, server) ->
-			flow {
-				if (query.length < MIN_QUERY || server == null || filters.noneSelected) {
-					_isRefreshing.value = false
-					emit(SearchPhase.Idle)
-					return@flow
-				}
-				// A pull keeps the results on screen; only a new query blanks
-				// them for a spinner.
-				if (!_isRefreshing.value) emit(SearchPhase.Searching)
-				emit(
-					runCatchingCancellable {
-						val covers = library.coverUrls()
-						val found = library.search(
-							server = server.id,
-							query = query,
-							// Zero counts mean the server does no work for a
-							// category the user has switched off.
-							artistCount = if (filters.artists) ARTIST_LIMIT else 0,
-							albumCount = if (filters.albums) ALBUM_LIMIT else 0,
-							songCount = if (filters.songs) SONG_LIMIT else 0,
-						)
-						SearchResults(
-							artists = found.artists,
-							albums = found.albums.map {
-								AlbumUi(it, covers.url(it.coverArt, COVER_PX))
-							},
-							songs = found.songs.map {
-								SongUi(it, covers.url(it.coverArt, COVER_PX))
-							},
-						)
-					}.fold(
-						onSuccess = { SearchPhase.Ready(it) },
-						onFailure = { SearchPhase.Failed(it.userMessage()) },
-					)
-				)
+	) { query, filters, scope, servers, _ -> Search(query.trim(), filters, scope, servers.size) }
+		.flatMapLatest { search ->
+			if (search.query.length < MIN_QUERY || search.filters.noneSelected) {
 				_isRefreshing.value = false
+				return@flatMapLatest flowOf(SearchPhase.Idle)
 			}
+			results(search)
 		}
 		// Lazily, not WhileSubscribed: leaving the tab dropped the last
 		// subscriber, and returning restarted the upstream — silently re-running
 		// the query and rebuilding results the user already had.
 		.stateIn(viewModelScope, SharingStarted.Lazily, SearchPhase.Idle)
+
+	/**
+	 * One emission per server that answers, each carrying everything received
+	 * so far. The fastest server's hits are on screen while the slowest is
+	 * still thinking, which with several servers configured is usually the
+	 * answer the user wanted.
+	 */
+	// The return type is written out: without it the builder infers
+	// Flow<SearchPhase.Ready> from its emits, and onStart could not emit
+	// Searching into it.
+	private fun results(search: Search): Flow<SearchPhase> = flow {
+		val covers = library.coverUrls()
+		var answered = 0
+
+		library.searchProgressively(
+			scope = search.scope,
+			query = search.query,
+			// Zero counts mean the server does no work for a category the
+			// user has switched off.
+			artistCount = if (search.filters.artists) ARTIST_LIMIT else 0,
+			albumCount = if (search.filters.albums) ALBUM_LIMIT else 0,
+			songCount = if (search.filters.songs) SONG_LIMIT else 0,
+		).collect { merged ->
+			answered++
+			_isRefreshing.value = false
+			emit(
+				SearchPhase.Ready(
+					results = SearchResults(
+						artists = merged.items.artists,
+						albums = merged.items.albums.map {
+							AlbumUi(it, covers.url(it.coverArt, COVER_PX))
+						},
+						songs = merged.items.songs.map {
+							SongUi(it, covers.url(it.coverArt, COVER_PX))
+						},
+					),
+					failures = merged.failures,
+					outstanding = answered < search.serverCount,
+				)
+			)
+		}
+	}
+		// A pull keeps the results on screen; only a new query blanks them.
+		.onStart { if (!_isRefreshing.value) emit(SearchPhase.Searching) }
+		// The fan-out reports per-server problems as failures; anything that
+		// escapes it failed for all of them.
+		.catch { emit(SearchPhase.Failed(it.userMessage())) }
+
+	private data class Search(
+		val query: String,
+		val filters: SearchFilters,
+		val scope: BrowseScope,
+		val serverCount: Int,
+	)
 
 	fun onQueryChange(value: String) {
 		_query.value = value
@@ -142,6 +183,19 @@ class SearchViewModel @Inject constructor(
 	fun toggleArtists() = _filters.update { it.copy(artists = !it.artists) }
 	fun toggleAlbums() = _filters.update { it.copy(albums = !it.albums) }
 	fun toggleSongs() = _filters.update { it.copy(songs = !it.songs) }
+
+	val servers: StateFlow<List<ServerConfig>> = selection.available
+		.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+	val browseScope: StateFlow<BrowseScope> = selection.scope
+		.stateIn(viewModelScope, SharingStarted.Lazily, BrowseScope.AllServers)
+
+	val badgeNames: StateFlow<Map<ServerId, String>> = selection.badgeNames
+		.stateIn(viewModelScope, SharingStarted.Lazily, emptyMap())
+
+	fun selectServer(id: ServerId) = viewModelScope.launch { selection.select(id) }
+
+	fun selectAllServers() = viewModelScope.launch { selection.selectAllServers() }
 
 	private companion object {
 		const val DEBOUNCE_MS = 300L

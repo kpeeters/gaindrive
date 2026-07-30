@@ -12,7 +12,10 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.gaindrive.android.data.LibraryRepository
+import org.gaindrive.android.data.ServerFailure
+import org.gaindrive.android.data.ServerSection
 import org.gaindrive.android.data.ServerSelection
+import org.gaindrive.android.data.model.BrowseScope
 import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.data.model.Song
@@ -30,20 +33,28 @@ class RecentsViewModel @Inject constructor(
 	private val selection: ServerSelection,
 ) : ViewModel() {
 
-	private val _state = MutableStateFlow<Load<List<SongUi>>>(Load.Loading)
-	val state: StateFlow<Load<List<SongUi>>> = _state.asStateFlow()
+	/**
+	 * Grouped by server, never interleaved. Each server only knows what was
+	 * played against it, so ordering them together by timestamp would imply a
+	 * completeness that does not exist.
+	 */
+	private val _state = MutableStateFlow<Load<List<ServerSection<SongUi>>>>(Load.Loading)
+	val state: StateFlow<Load<List<ServerSection<SongUi>>>> = _state.asStateFlow()
+
+	private val _failures = MutableStateFlow<List<ServerFailure>>(emptyList())
+	val failures: StateFlow<List<ServerFailure>> = _failures.asStateFlow()
 
 	/** True only for a user-initiated pull, which drives the pull indicator. */
 	private val _isRefreshing = MutableStateFlow(false)
 	val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
-	private var server: ServerConfig? = null
+	private var scope: BrowseScope = BrowseScope.AllServers
 	private var loadJob: Job? = null
 
 	init {
 		viewModelScope.launch {
-			selection.current.distinctUntilChanged().collect { selected ->
-				server = selected
+			selection.scope.distinctUntilChanged().collect { selected ->
+				scope = selected
 				startLoad(clearFirst = true)
 			}
 		}
@@ -55,6 +66,10 @@ class RecentsViewModel @Inject constructor(
 	fun refresh() {
 		_isRefreshing.value = true
 		startLoad(clearFirst = false)
+	}
+
+	fun dismissFailures() {
+		_failures.value = emptyList()
 	}
 
 	/**
@@ -84,21 +99,38 @@ class RecentsViewModel @Inject constructor(
 	private fun startLoad(clearFirst: Boolean) {
 		loadJob?.cancel()
 		loadJob = viewModelScope.launch {
-			val current = server
-			if (current == null) {
+			if (clearFirst) _state.value = Load.Loading
+			if (selection.hasNoServers()) {
 				_state.value = Load.Failed("No server configured. Add one in Settings.")
 				_isRefreshing.value = false
 				return@launch
 			}
-			if (clearFirst) _state.value = Load.Loading
 
-			_state.value = runCatchingCancellable {
+			runCatchingCancellable {
 				val covers = library.coverUrls()
-				library.recentSongs(current.id, RECENT_SIZE)
-					.map { SongUi(it, covers.url(it.coverArt, COVER_PX)) }
+				library.recentSongs(scope, RECENT_SIZE).map { sections ->
+					sections.map { section ->
+						ServerSection(
+							server = section.server,
+							items = section.items.map {
+								SongUi(it, covers.url(it.coverArt, COVER_PX))
+							},
+						)
+					}
+				}
 			}.fold(
-				onSuccess = { Load.Ready(it) },
-				onFailure = { Load.Failed(it.userMessage()) },
+				onSuccess = { merged ->
+					if (merged.items.isEmpty() && merged.isPartial) {
+						_state.value = Load.Failed(merged.failures.first().message)
+					} else {
+						_state.value = Load.Ready(merged.items)
+					}
+					_failures.value = merged.failures
+				},
+				onFailure = {
+					_state.value = Load.Failed(it.userMessage())
+					_failures.value = emptyList()
+				},
 			)
 			_isRefreshing.value = false
 		}
@@ -107,10 +139,15 @@ class RecentsViewModel @Inject constructor(
 	val servers: StateFlow<List<ServerConfig>> = selection.available
 		.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-	val currentServer: StateFlow<ServerConfig?> = selection.current
-		.stateIn(viewModelScope, SharingStarted.Lazily, null)
+	val browseScope: StateFlow<BrowseScope> = selection.scope
+		.stateIn(viewModelScope, SharingStarted.Lazily, BrowseScope.AllServers)
+
+	val badgeNames: StateFlow<Map<ServerId, String>> = selection.badgeNames
+		.stateIn(viewModelScope, SharingStarted.Lazily, emptyMap())
 
 	fun selectServer(id: ServerId) = viewModelScope.launch { selection.select(id) }
+
+	fun selectAllServers() = viewModelScope.launch { selection.selectAllServers() }
 
 	private companion object {
 		const val RECENT_SIZE = 50

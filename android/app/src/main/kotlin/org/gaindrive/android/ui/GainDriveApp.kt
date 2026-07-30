@@ -32,6 +32,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.ui.browse.AlbumDetailScreen
 import org.gaindrive.android.ui.browse.AlbumsScreen
@@ -181,8 +182,8 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 		) {
 			composable<Route.Artists> {
 				ArtistsScreen(
-					onOpenArtist = { ref, name ->
-						navController.navigate(Route.Albums(ref.encode(), name))
+					onOpenArtist = { refs, name ->
+						navController.navigate(Route.Albums(ItemRef.encodeAll(refs), name))
 					},
 				)
 			}
@@ -222,8 +223,8 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 
 			composable<Route.Search> {
 				SearchScreen(
-					onOpenArtist = { ref, name ->
-						navController.navigate(Route.Albums(ref.encode(), name))
+					onOpenArtist = { refs, name ->
+						navController.navigate(Route.Albums(ItemRef.encodeAll(refs), name))
 					},
 					onOpenAlbum = { ref, title ->
 						navController.navigate(Route.Album(ref.encode(), title))

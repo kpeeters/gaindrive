@@ -17,12 +17,19 @@ data class Artist(
 	val coverArt: ItemRef?,
 	val starredAt: String?,
 	/**
-	 * The servers contributing to this row. One entry normally; several when
-	 * artists of the same name have been merged across servers.
+	 * Every (server, id) pair this row stands for. One entry normally; several
+	 * when artists of the same name have been merged across servers, in which
+	 * case [ref] is the first contributor in registry order.
+	 *
+	 * Ids, not just server ids: opening a merged artist has to ask each server
+	 * for *its* artist, and the ids differ.
 	 */
-	val sources: List<ServerId> = listOf(ref.server),
+	val refs: List<ItemRef> = listOf(ref),
 ) {
 	val isStarred: Boolean get() = starredAt != null
+
+	/** The servers contributing to this row, for the badges. */
+	val sources: List<ServerId> get() = refs.map { it.server }
 }
 
 /** One index bucket from `getArtists`, e.g. "S" or "#". */

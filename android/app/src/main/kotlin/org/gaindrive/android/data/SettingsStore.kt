@@ -28,14 +28,15 @@ class SettingsStore @Inject constructor(
 	}
 
 	/**
-	 * Which server the library screens are showing. Null until the user has
-	 * chosen; resolving that to an actual server is [ServerSelection]'s job,
-	 * since the stored choice may since have been disabled or removed.
+	 * What the library screens are showing: a server id, or
+	 * [org.gaindrive.android.data.model.BrowseScope.ALL_STORED]. Null until the
+	 * user has chosen; resolving it is [ServerSelection]'s job, since the stored
+	 * choice may since have been disabled or removed.
 	 */
-	val selectedServerId: Flow<String?> = dataStore.data.map { it[SELECTED_SERVER] }
+	val browseScope: Flow<String?> = dataStore.data.map { it[SELECTED_SERVER] }
 
-	suspend fun setSelectedServerId(id: String) {
-		dataStore.edit { it[SELECTED_SERVER] = id }
+	suspend fun setBrowseScope(value: String) {
+		dataStore.edit { it[SELECTED_SERVER] = value }
 	}
 
 	private companion object {

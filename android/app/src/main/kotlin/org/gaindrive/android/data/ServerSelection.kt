@@ -2,19 +2,21 @@ package org.gaindrive.android.data
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import org.gaindrive.android.data.model.BrowseScope
 import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Which server the library screens are currently showing.
+ * What the library screens are currently showing: one named server, or all of
+ * them merged.
  *
- * Deliberately narrower than the browse scope sub-phase 2c will introduce: this
- * only ever names one server, with no merged "all servers" option. It exists so
- * the browse screens stop reaching for "the first enabled server" — a
- * placeholder that would otherwise be copied into every screen added from here
- * on, and then have to be unpicked from all of them.
+ * The choice is remembered, and a stored choice that no longer resolves — the
+ * server was disabled or removed — falls back to all servers rather than
+ * leaving the library permanently empty with no hint as to why.
  */
 @Singleton
 class ServerSelection @Inject constructor(
@@ -22,21 +24,45 @@ class ServerSelection @Inject constructor(
 	registry: ServerRegistry,
 ) {
 
-	/**
-	 * The effective server: the stored choice when it is still enabled,
-	 * otherwise the first enabled one, otherwise null.
-	 *
-	 * Falling back matters — the stored id survives the server being disabled
-	 * or removed, and a dangling choice would leave the library permanently
-	 * empty with no hint as to why.
-	 */
-	val current: Flow<ServerConfig?> =
-		combine(registry.enabledServers, settings.selectedServerId) { servers, selectedId ->
-			servers.firstOrNull { it.id.value == selectedId } ?: servers.firstOrNull()
-		}
-
-	/** Every server that could be selected, in registry order. */
+	/** Every server that could be browsed, in registry order. */
 	val available: Flow<List<ServerConfig>> = registry.enabledServers
 
-	suspend fun select(id: ServerId) = settings.setSelectedServerId(id.value)
+	val scope: Flow<BrowseScope> =
+		combine(registry.enabledServers, settings.browseScope) { servers, stored ->
+			val chosen = servers.firstOrNull { it.id.value == stored }
+			if (chosen != null) BrowseScope.OneServer(chosen.id) else BrowseScope.AllServers
+		}
+
+	/**
+	 * The servers the current scope covers, in registry order — which is what
+	 * every fan-out iterates and what breaks ties when rows merge.
+	 */
+	val scoped: Flow<List<ServerConfig>> =
+		combine(registry.enabledServers, scope) { servers, current ->
+			when (current) {
+				is BrowseScope.AllServers -> servers
+				is BrowseScope.OneServer -> servers.filter { it.id == current.id }
+			}
+		}
+
+	/**
+	 * Server names by id, for the row badges — empty unless several servers are
+	 * genuinely in play, since a single-server library must look like one.
+	 * Badges are therefore suppressed both in single-server scope and when only
+	 * one server is configured, without any screen having to know that rule.
+	 */
+	val badgeNames: Flow<Map<ServerId, String>> = scoped.map { list ->
+		if (list.size < 2) emptyMap() else list.associate { it.id to it.name }
+	}
+
+	/**
+	 * Nothing to browse at all, which a fan-out cannot distinguish from a
+	 * library that is simply empty — both come back with no rows and no
+	 * failures.
+	 */
+	suspend fun hasNoServers(): Boolean = available.first().isEmpty()
+
+	suspend fun select(id: ServerId) = settings.setBrowseScope(id.value)
+
+	suspend fun selectAllServers() = settings.setBrowseScope(BrowseScope.ALL_STORED)
 }
