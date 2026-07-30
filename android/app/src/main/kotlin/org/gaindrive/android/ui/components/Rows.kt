@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.Artist
+import org.gaindrive.android.data.model.Playlist
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.playback.TrackState
 
@@ -99,9 +100,59 @@ private fun albumSubtitle(album: Album): String {
 	return parts.joinToString(" · ")
 }
 
+/** [trailing] carries per-row actions, e.g. "remove from playlist". */
+@Composable
+fun PlaylistRow(
+	playlist: Playlist,
+	onClick: () -> Unit,
+	trailing: @Composable (() -> Unit)? = null,
+) {
+	Row(
+		modifier = Modifier
+			.fillMaxWidth()
+			.heightIn(min = 56.dp)
+			.clickable(onClick = onClick)
+			.padding(start = 16.dp, top = 8.dp, bottom = 8.dp),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(12.dp),
+	) {
+		Column(modifier = Modifier.weight(1f)) {
+			Text(
+				text = playlist.name,
+				style = MaterialTheme.typography.bodyLarge,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
+			Text(
+				text = playlistSubtitle(playlist),
+				style = MaterialTheme.typography.bodySmall,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
+		}
+		trailing?.invoke()
+	}
+}
+
 /**
- * A track inside an album, where the number column keeps titles aligned.
- * [trailing] carries the per-track actions that arrive in sub-phase 2d.
+ * Hours and minutes rather than [formatDuration]'s mm:ss — a playlist runs for
+ * hours, and "184:07" is not a length anyone reads.
+ */
+private fun playlistSubtitle(playlist: Playlist): String {
+	val tracks =
+		if (playlist.songCount == 1) "1 track" else "${playlist.songCount} tracks"
+	val minutes = playlist.duration / 60
+	return when {
+		minutes <= 0 -> tracks
+		minutes < 60 -> "$tracks · $minutes min"
+		else -> "$tracks · ${minutes / 60} h ${minutes % 60} min"
+	}
+}
+
+/**
+ * A track inside an album or playlist, where the number column keeps titles
+ * aligned. [trailing] carries the per-track actions.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -171,6 +222,7 @@ fun SongRow(
 	onLongClick: (() -> Unit)? = null,
 	playback: TrackState = TrackState.IDLE,
 	trailingText: String? = null,
+	trailing: @Composable (() -> Unit)? = null,
 ) {
 	Row(
 		modifier = Modifier
@@ -225,6 +277,7 @@ fun SongRow(
 				color = MaterialTheme.colorScheme.onSurfaceVariant,
 			)
 		}
+		trailing?.invoke()
 	}
 }
 

@@ -1,7 +1,11 @@
 package org.gaindrive.android.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.AlbumDetail
@@ -91,6 +95,15 @@ class LibraryRepository @Inject constructor(
 			client.getAlbumInfo2(album.id).requireOk().albumInfo2?.toDomain()
 		}
 
+	/**
+	 * Bumped whenever a playlist is created, changed or deleted. The playlists
+	 * screen watches it, so a playlist made from a track's action sheet three
+	 * screens away is there when the user arrives rather than waiting for a
+	 * pull to refresh.
+	 */
+	private val _playlistRevision = MutableStateFlow(0)
+	val playlistRevision: StateFlow<Int> = _playlistRevision.asStateFlow()
+
 	suspend fun playlists(server: ServerId): List<Playlist> =
 		onServer(server) { client ->
 			client.getPlaylists().requireOk().playlists?.playlist.orEmpty()
@@ -154,12 +167,14 @@ class LibraryRepository @Inject constructor(
 
 	suspend fun createPlaylist(server: ServerId, name: String, songIds: List<String>) {
 		onServer(server) { client -> client.createPlaylist(name, songIds).requireOk() }
+		bumpPlaylists()
 	}
 
 	suspend fun addToPlaylist(playlist: ItemRef, songId: String) {
 		onServer(playlist.server) { client ->
 			client.updatePlaylist(playlist.id, listOf(songId), emptyList()).requireOk()
 		}
+		bumpPlaylists()
 	}
 
 	/** Removes by position; the caller must not let indices shift under it. */
@@ -167,11 +182,16 @@ class LibraryRepository @Inject constructor(
 		onServer(playlist.server) { client ->
 			client.updatePlaylist(playlist.id, emptyList(), listOf(index)).requireOk()
 		}
+		bumpPlaylists()
 	}
 
 	suspend fun deletePlaylist(playlist: ItemRef) {
 		onServer(playlist.server) { client -> client.deletePlaylist(playlist.id).requireOk() }
+		bumpPlaylists()
 	}
+
+	/** Only after the call succeeds: a failed edit changed nothing. */
+	private fun bumpPlaylists() = _playlistRevision.update { it + 1 }
 
 	/** The configured servers, in registry order — which is the merge tie-break. */
 	suspend fun enabledServers(): List<ServerConfig> = registry.enabledServers.first()

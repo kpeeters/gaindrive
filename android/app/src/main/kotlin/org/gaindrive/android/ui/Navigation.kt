@@ -32,6 +32,9 @@ sealed interface Route {
 	data object Playlists : Route
 
 	@Serializable
+	data class Playlist(val playlistRef: String, val playlistName: String) : Route
+
+	@Serializable
 	data object Recents : Route
 
 	@Serializable

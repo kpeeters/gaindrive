@@ -36,10 +36,12 @@ import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.ui.browse.AlbumDetailScreen
 import org.gaindrive.android.ui.browse.AlbumsScreen
 import org.gaindrive.android.ui.browse.ArtistsScreen
-import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.player.MiniPlayer
 import org.gaindrive.android.ui.player.NowPlayingSheet
 import org.gaindrive.android.ui.player.PlayerViewModel
+import org.gaindrive.android.ui.playlists.PlaylistDetailScreen
+import org.gaindrive.android.ui.playlists.PlaylistsScreen
+import org.gaindrive.android.ui.recents.RecentsScreen
 import org.gaindrive.android.ui.search.SearchScreen
 import org.gaindrive.android.ui.settings.ServerEditScreen
 import org.gaindrive.android.ui.settings.SettingsScreen
@@ -189,9 +191,26 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 				AlbumDetailScreen(onBack = { navController.popBackStack() })
 			}
 
-			// Filled in by sub-phase 2d.
-			composable<Route.Playlists> { EmptyMessage("Playlists arrive in 2d.") }
-			composable<Route.Recents> { EmptyMessage("Recents arrive in 2d.") }
+			composable<Route.Playlists> {
+				PlaylistsScreen(
+					onOpenPlaylist = { ref, name ->
+						navController.navigate(Route.Playlist(ref.encode(), name))
+					},
+				)
+			}
+
+			composable<Route.Playlist> {
+				PlaylistDetailScreen(onBack = { navController.popBackStack() })
+			}
+
+			composable<Route.Recents> {
+				RecentsScreen(
+					onOpenAlbum = { ref, title ->
+						navController.navigate(Route.Album(ref.encode(), title))
+					},
+				)
+			}
+
 			composable<Route.Search> {
 				SearchScreen(
 					onOpenArtist = { ref, name ->
@@ -248,6 +267,7 @@ private fun NavDestination?.isDetail(): Boolean =
 	this != null && (
 		hasRoute(Route.Albums::class) ||
 			hasRoute(Route.Album::class) ||
+			hasRoute(Route.Playlist::class) ||
 			hasRoute(Route.ServerEdit::class)
 		)
 
