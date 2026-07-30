@@ -86,7 +86,7 @@ class ServerEditViewModel @Inject constructor(
 			val result = tester.test(
 				s.url,
 				ServerConfig.normaliseUsername(s.username),
-				s.password,
+				ServerConfig.normalisePassword(s.password),
 			)
 			_state.update { it.copy(testing = false, testResult = result) }
 		}

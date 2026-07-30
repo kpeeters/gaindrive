@@ -29,6 +29,20 @@ data class ServerConfig(
 		fun normaliseUsername(raw: String): String = raw.trim()
 
 		/**
+		 * Same treatment, same reason: selecting the generated credential on
+		 * Bandcamp's settings page picks up a leading space, and it is pasted
+		 * into both fields.
+		 *
+		 * A password *can* legitimately carry edge whitespace, so this does
+		 * throw away a theoretically valid one. That is the accepted trade:
+		 * nobody types a password that begins with a space on purpose, whereas
+		 * pasting one is a mistake that costs an afternoon — as this did. The
+		 * damage is bounded either way, since a wrong password is reported
+		 * cleanly as error 40.
+		 */
+		fun normalisePassword(raw: String): String = raw.trim()
+
+		/**
 		 * Falls back to the URL's host so a server always has something to
 		 * show in a list, even if the user never types a name.
 		 */

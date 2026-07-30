@@ -44,7 +44,7 @@ class ServerRegistry @Inject constructor(
 			name = name.ifBlank { ServerConfig.defaultName(normalised) },
 			url = normalised,
 			username = ServerConfig.normaliseUsername(username),
-			password = cipher.encrypt(password),
+			password = cipher.encrypt(ServerConfig.normalisePassword(password)),
 		)
 		store.save(store.servers.first() + entry)
 		return id
@@ -66,12 +66,16 @@ class ServerRegistry @Inject constructor(
 				if (entry.id != id.value) entry
 				else {
 					val normalised = ServerConfig.normaliseUrl(url)
+					// Trimmed before the blank check, so a field holding
+					// nothing but pasted whitespace keeps the stored password
+					// rather than replacing it with empty.
+					val newPassword = ServerConfig.normalisePassword(password)
 					entry.copy(
 						name = name.ifBlank { ServerConfig.defaultName(normalised) },
 						url = normalised,
 						username = ServerConfig.normaliseUsername(username),
-						password = if (password.isBlank()) entry.password
-						else cipher.encrypt(password),
+						password = if (newPassword.isEmpty()) entry.password
+						else cipher.encrypt(newPassword),
 					)
 				}
 			}
