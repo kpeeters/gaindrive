@@ -119,10 +119,10 @@ class SearchViewModel @Inject constructor(
 	 * still thinking, which with several servers configured is usually the
 	 * answer the user wanted.
 	 */
-	// The return type is written out: without it the builder infers
-	// Flow<SearchPhase.Ready> from its emits, and onStart could not emit
-	// Searching into it.
-	private fun results(search: Search): Flow<SearchPhase> = flow {
+	// flow<SearchPhase>, not flow: the builder is typed from its own emits
+	// before the declared return type reaches it, so it would infer
+	// Flow<SearchPhase.Ready> and refuse onStart's Searching.
+	private fun results(search: Search): Flow<SearchPhase> = flow<SearchPhase> {
 		val covers = library.coverUrls()
 		var answered = 0
 
