@@ -19,6 +19,16 @@ data class ServerConfig(
 		fun normaliseUrl(raw: String): String = raw.trim().trimEnd('/')
 
 		/**
+		 * No Subsonic username meaningfully starts or ends with a space, and
+		 * long opaque ones — Bandcamp issues a 32-character token as the
+		 * username — are pasted, which is exactly how a stray space gets in.
+		 * It then travels into `u=` on every request as `%20`, and a server
+		 * whose `ping` does not authenticate will accept the account and then
+		 * fail on the first endpoint that looks the user up.
+		 */
+		fun normaliseUsername(raw: String): String = raw.trim()
+
+		/**
 		 * Falls back to the URL's host so a server always has something to
 		 * show in a list, even if the user never types a name.
 		 */

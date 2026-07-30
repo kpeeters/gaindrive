@@ -43,7 +43,7 @@ class ServerRegistry @Inject constructor(
 			id = id.value,
 			name = name.ifBlank { ServerConfig.defaultName(normalised) },
 			url = normalised,
-			username = username,
+			username = ServerConfig.normaliseUsername(username),
 			password = cipher.encrypt(password),
 		)
 		store.save(store.servers.first() + entry)
@@ -69,7 +69,7 @@ class ServerRegistry @Inject constructor(
 					entry.copy(
 						name = name.ifBlank { ServerConfig.defaultName(normalised) },
 						url = normalised,
-						username = username,
+						username = ServerConfig.normaliseUsername(username),
 						password = if (password.isBlank()) entry.password
 						else cipher.encrypt(password),
 					)

@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import org.gaindrive.android.data.ConnectionTester
 import org.gaindrive.android.ui.Route
 import org.gaindrive.android.data.ServerRegistry
+import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.net.ConnectionTest
 import javax.inject.Inject
@@ -80,7 +81,13 @@ class ServerEditViewModel @Inject constructor(
 		val s = _state.value
 		_state.update { it.copy(testing = true, testResult = null) }
 		viewModelScope.launch {
-			val result = tester.test(s.url, s.username, s.password)
+			// Normalised the same way saving does, or the test would pass on
+			// credentials the app will never actually send.
+			val result = tester.test(
+				s.url,
+				ServerConfig.normaliseUsername(s.username),
+				s.password,
+			)
 			_state.update { it.copy(testing = false, testResult = result) }
 		}
 	}
