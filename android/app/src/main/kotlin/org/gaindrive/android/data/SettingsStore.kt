@@ -43,13 +43,13 @@ class SettingsStore @Inject constructor(
 	/**
 	 * Whether an album held on several servers collapses to one row.
 	 *
-	 * Off by default: the collapse hides one copy behind another on nothing
-	 * more than an artist-and-title match, and a library that quietly omits
-	 * something is worse than one that shows it twice. Users who have
-	 * deliberately downloaded their streaming collection locally turn it on.
+	 * On by default. Anyone running two servers at once is likely to have the
+	 * same album on both — a streaming collection beside locally downloaded
+	 * copies of it — and seeing every one of them twice is the worse default.
+	 * The badges on a collapsed row keep it honest about what was folded away.
 	 */
 	val mergeDuplicateAlbums: Flow<Boolean> =
-		dataStore.data.map { it[MERGE_ALBUMS] ?: false }
+		dataStore.data.map { it[MERGE_ALBUMS] ?: true }
 
 	suspend fun setMergeDuplicateAlbums(enabled: Boolean) {
 		dataStore.edit { it[MERGE_ALBUMS] = enabled }

@@ -60,12 +60,13 @@ fun mergeArtistIndexes(perServer: List<List<ArtistIndex>>): List<ArtistIndex> {
  * before Bandcamp" is expressed by putting it first rather than by a separate
  * favourite-server setting that could disagree with it.
  *
- * Matched on artist and title, case-folded and trimmed. Deliberately *not* on
- * year: a remaster or a re-release disagrees about it between servers, which
- * would split exactly the pairs worth collapsing. The cost is that two genuinely
- * different albums sharing a title under one artist collapse into one — hence
- * the setting that turns this off, and the badges that keep the survivors
- * honest about who else has a copy.
+ * Matched on artist and title through [matchKey], which throws away case,
+ * whitespace and punctuation. Deliberately *not* on year: a remaster or a
+ * re-release disagrees about it between servers, which would split exactly the
+ * pairs worth collapsing. The cost is that two genuinely different albums
+ * sharing a title under one artist collapse into one — hence the setting that
+ * turns this off, and the badges that keep the survivors honest about who else
+ * has a copy.
  *
  * [albums] must arrive in registry order.
  */
@@ -77,7 +78,7 @@ fun mergeAlbums(albums: List<Album>): List<Album> {
 
 	val merged = LinkedHashMap<Pair<String, String>, Album>()
 	albums.forEach { album ->
-		val key = album.artistName.trim().lowercase() to album.title.trim().lowercase()
+		val key = matchKey(album.artistName) to matchKey(album.title)
 		val existing = merged[key]
 		merged[key] = if (existing == null) {
 			album
@@ -90,6 +91,26 @@ fun mergeAlbums(albums: List<Album>): List<Album> {
 		}
 	}
 	return merged.values.toList()
+}
+
+/**
+ * Letters and digits only, lower-cased: everything else is thrown away.
+ *
+ * Two servers describing the same record rarely punctuate it the same way —
+ * "Vol. 2" against "Vol 2", an ellipsis against three dots, a stray trailing
+ * space, straight quotes against curly ones. Keeping only letters and digits
+ * catches that whole class at once and needs no list of the punctuation anyone
+ * might use. It does not touch accents, and it will not bridge "&" and "and",
+ * since those change the letters rather than surround them.
+ *
+ * A title made entirely of punctuation would otherwise normalise to nothing and
+ * collapse with every other such title, so those keep their raw form.
+ */
+private fun matchKey(raw: String): String {
+	val stripped = buildString {
+		raw.forEach { c -> if (c.isLetterOrDigit()) append(c.lowercaseChar()) }
+	}
+	return stripped.ifEmpty { raw.trim().lowercase() }
 }
 
 /**

@@ -125,7 +125,8 @@ fun SettingsScreen(
 							// Says what it matches on, because that is what
 							// decides whether it does the right thing.
 							text = "Show one row when the same artist and album " +
-								"title appear on several servers.",
+								"title appear on several servers. Case, spacing " +
+							"and punctuation are ignored.",
 							style = MaterialTheme.typography.bodySmall,
 							color = MaterialTheme.colorScheme.onSurfaceVariant,
 						)
