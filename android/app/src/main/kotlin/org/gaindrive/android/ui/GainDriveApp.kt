@@ -104,8 +104,17 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 							NavigationBarItem(
 								selected = item == selectedTab,
 								onClick = {
-									selectedTab = item
-									navController.switchTo(item.route)
+									// Tapping the tab you are already in sheds
+									// its drill-down. Without it, a tab that
+									// restored to an album screen has no way
+									// back to its own list except walking the
+									// back gesture up the hierarchy.
+									if (item == selectedTab) {
+										navController.popToTabRoot()
+									} else {
+										selectedTab = item
+										navController.switchTo(item.route)
+									}
 								},
 								icon = { Icon(item.icon, contentDescription = item.label) },
 								label = { Text(item.label) },
@@ -273,6 +282,22 @@ private fun NavDestination?.isDetail(): Boolean =
 
 /** Long enough to read as a direction, short enough not to be in the way. */
 private const val TRANSITION_MS = 280
+
+/**
+ * Sheds every drill-down on the current tab, leaving its own list on screen.
+ *
+ * Popped one at a time rather than with a `popUpTo` of the tab's root: the
+ * graph is flat, so a tab root is an ordinary destination with no id to pop
+ * back to that holds for every tab, and [isDetail] is already this file's
+ * definition of "reached by drilling down". Both pops land in the same frame,
+ * so the user sees one transition, not one per level.
+ */
+private fun NavHostController.popToTabRoot() {
+	while (currentBackStackEntry?.destination.isDetail()) {
+		// A pop that fails would otherwise spin here forever.
+		if (!popBackStack()) return
+	}
+}
 
 /**
  * Standard tab switch: one entry per tab on the back stack, and each tab's
