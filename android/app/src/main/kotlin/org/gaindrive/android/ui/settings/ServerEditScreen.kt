@@ -162,6 +162,12 @@ private fun TestResult(result: ConnectionTest) {
 			"The server rejected that: ${result.message}" to MaterialTheme.colorScheme.error
 		is ConnectionTest.Unreachable ->
 			"Could not reach the server: ${result.message}" to MaterialTheme.colorScheme.error
+		is ConnectionTest.Unverified ->
+			// Deliberately not the success colour: nothing was disproved, but
+			// nothing was proved either.
+			"The server answered, but did not send its library in time. " +
+				"Saving is fine; the artist list may just be slow." to
+				MaterialTheme.colorScheme.onSurfaceVariant
 	}
 	Text(text = text, color = colour, style = MaterialTheme.typography.bodyMedium)
 }

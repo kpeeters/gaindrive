@@ -38,4 +38,12 @@ sealed interface ConnectionTest {
 	data object Reachable : ConnectionTest
 	data class Rejected(val message: String) : ConnectionTest
 	data class Unreachable(val message: String) : ConnectionTest
+
+	/**
+	 * The server is there and answered `ping`, but the call that would have
+	 * proved the credentials took too long to wait for. Not a failure — a large
+	 * library can legitimately be slow — but not the reassurance the button
+	 * exists to give either, so it says so rather than claiming success.
+	 */
+	data object Unverified : ConnectionTest
 }

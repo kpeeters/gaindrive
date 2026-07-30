@@ -3,7 +3,9 @@ package org.gaindrive.android.data
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.gaindrive.android.net.ConnectionTest
+import org.gaindrive.android.net.SubsonicClient
 import org.gaindrive.android.net.SubsonicClientFactory
 import org.gaindrive.android.net.SubsonicException
 import org.gaindrive.android.net.requireOk
@@ -26,8 +28,9 @@ class ConnectionTester @Inject constructor(
 	suspend fun test(url: String, username: String, password: String): ConnectionTest =
 		withContext(Dispatchers.IO) {
 			try {
-				clients.transientClient(url, username, password).ping().requireOk()
-				ConnectionTest.Reachable
+				val client = clients.transientClient(url, username, password)
+				client.ping().requireOk()
+				verify(client)
 			} catch (e: CancellationException) {
 				throw e
 			} catch (e: SubsonicException) {
@@ -44,4 +47,44 @@ class ConnectionTester @Inject constructor(
 				ConnectionTest.Unreachable(e.userMessage())
 			}
 		}
+
+	/**
+	 * Asks for the artist list, because a successful `ping` is not evidence
+	 * that the credentials are any good.
+	 *
+	 * Bandcamp's implementation answers `ping` with `ok` for any username and
+	 * password at all, and then fails every endpoint that actually looks the
+	 * user up. A test that only pinged went green on credentials the app could
+	 * not use — which is the one thing this button exists to catch.
+	 *
+	 * `getArtists` specifically: it is the first thing the app really does, so
+	 * a server that passes here cannot fail on the first screen.
+	 */
+	private suspend fun verify(client: SubsonicClient): ConnectionTest {
+		val outcome = withTimeoutOrNull(VERIFY_TIMEOUT_MS) {
+			try {
+				client.getArtists(null).requireOk()
+				ConnectionTest.Reachable
+			} catch (e: CancellationException) {
+				throw e
+			} catch (e: Exception) {
+				// Reported as a rejection, not as unreachable: ping has just
+				// proved there is a server at that address, so whatever went
+				// wrong here is about this request, not the address.
+				ConnectionTest.Rejected(e.userMessage())
+			}
+		}
+		// Slowness is not refusal. Bandcamp warns that a large collection is
+		// slow to list in their beta, and holding the dialog open for the full
+		// read would make the button useless on exactly those accounts.
+		return outcome ?: ConnectionTest.Unverified
+	}
+
+	private companion object {
+		/**
+		 * Long enough for a slow library to answer, short enough that the user
+		 * is not left watching a spinner wondering whether it hung.
+		 */
+		const val VERIFY_TIMEOUT_MS = 8_000L
+	}
 }

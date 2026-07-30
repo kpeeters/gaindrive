@@ -35,8 +35,14 @@ inline fun <T> runCatchingCancellable(block: () -> T): Result<T> =
  */
 fun Throwable.userMessage(): String = when (this) {
 	is SubsonicException -> message
-	is HttpException -> "The server answered HTTP ${code()}. " +
-		"Check that the URL points at the server's root."
+	// The URL hint only fits a 404. Offering it for every status sent the
+	// connection test's users to check an address that ping had just proved
+	// correct, while the real cause — credentials the server choked on — went
+	// unmentioned.
+	is HttpException -> when (code()) {
+		404 -> "Not found there. Check that the URL points at the server's root."
+		else -> "The server answered HTTP ${code()}."
+	}
 	is UnknownHostException -> "Cannot find that host."
 	is ConnectException -> "Nothing is listening at that address."
 	is SocketTimeoutException -> "The server did not answer in time."
