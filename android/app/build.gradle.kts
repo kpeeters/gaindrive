@@ -23,7 +23,9 @@ android {
 
 	buildTypes {
 		debug {
-			applicationIdSuffix = ".debug"
+			// No applicationIdSuffix: both variants install under the same id, so
+			// switching between them replaces the app in place and keeps the
+			// configured servers rather than presenting a second, empty install.
 			versionNameSuffix = "-debug"
 		}
 		release {
