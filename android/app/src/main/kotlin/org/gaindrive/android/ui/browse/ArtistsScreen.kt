@@ -28,7 +28,7 @@ import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.ui.components.AlphabetRail
 import org.gaindrive.android.ui.components.ArtistRow
 import org.gaindrive.android.ui.components.EmptyMessage
-import org.gaindrive.android.ui.components.LoadStateBox
+import org.gaindrive.android.ui.components.RefreshableLoadBox
 import org.gaindrive.android.ui.components.ServerSelector
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -38,6 +38,7 @@ fun ArtistsScreen(
 	viewModel: ArtistsViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
+	val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 	val servers by viewModel.servers.collectAsStateWithLifecycle()
 	val currentServer by viewModel.currentServer.collectAsStateWithLifecycle()
 
@@ -55,14 +56,16 @@ fun ArtistsScreen(
 			)
 		},
 	) { insets ->
-		LoadStateBox(
+		RefreshableLoadBox(
 			state = state,
+			isRefreshing = isRefreshing,
+			onRefresh = viewModel::refresh,
 			onRetry = viewModel::load,
 			modifier = Modifier.padding(insets),
 		) { indexes ->
 			if (indexes.isEmpty()) {
 				EmptyMessage("This library has no artists yet.")
-				return@LoadStateBox
+				return@RefreshableLoadBox
 			}
 
 			val listState = rememberLazyListState()

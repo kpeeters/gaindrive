@@ -67,20 +67,31 @@ class SearchViewModel @Inject constructor(
 	private val _filters = MutableStateFlow(SearchFilters())
 	val filters: StateFlow<SearchFilters> = _filters.asStateFlow()
 
+	/** Bumped to re-run the same query, e.g. from a pull. */
+	private val reruns = MutableStateFlow(0)
+
+	/** True only for a user-initiated pull, which drives the pull indicator. */
+	private val _isRefreshing = MutableStateFlow(false)
+	val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
 	val phase: StateFlow<SearchPhase> = combine(
 		// Only the query is debounced. Toggling a filter is a deliberate act
 		// and should re-run immediately, not after a pause.
 		_query.debounce(DEBOUNCE_MS),
 		_filters,
 		selection.current,
-	) { query, filters, server -> Triple(query.trim(), filters, server) }
+		reruns,
+	) { query, filters, server, _ -> Triple(query.trim(), filters, server) }
 		.flatMapLatest { (query, filters, server) ->
 			flow {
 				if (query.length < MIN_QUERY || server == null || filters.noneSelected) {
+					_isRefreshing.value = false
 					emit(SearchPhase.Idle)
 					return@flow
 				}
-				emit(SearchPhase.Searching)
+				// A pull keeps the results on screen; only a new query blanks
+				// them for a spinner.
+				if (!_isRefreshing.value) emit(SearchPhase.Searching)
 				emit(
 					runCatchingCancellable {
 						val covers = library.coverUrls()
@@ -107,9 +118,13 @@ class SearchViewModel @Inject constructor(
 						onFailure = { SearchPhase.Failed(it.userMessage()) },
 					)
 				)
+				_isRefreshing.value = false
 			}
 		}
-		.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SearchPhase.Idle)
+		// Lazily, not WhileSubscribed: leaving the tab dropped the last
+		// subscriber, and returning restarted the upstream — silently re-running
+		// the query and rebuilding results the user already had.
+		.stateIn(viewModelScope, SharingStarted.Lazily, SearchPhase.Idle)
 
 	fun onQueryChange(value: String) {
 		_query.value = value
@@ -117,6 +132,11 @@ class SearchViewModel @Inject constructor(
 
 	fun clearQuery() {
 		_query.value = ""
+	}
+
+	fun refresh() {
+		_isRefreshing.value = true
+		reruns.update { it + 1 }
 	}
 
 	fun toggleArtists() = _filters.update { it.copy(artists = !it.artists) }

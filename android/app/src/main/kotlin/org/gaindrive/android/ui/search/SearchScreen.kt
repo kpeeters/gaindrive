@@ -19,7 +19,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,6 +49,7 @@ import org.gaindrive.android.ui.components.SongRow
 import org.gaindrive.android.ui.player.PlayerViewModel
 import org.gaindrive.android.ui.player.TrackActionsSheet
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
 	onOpenArtist: (ItemRef, String) -> Unit,
@@ -58,6 +61,7 @@ fun SearchScreen(
 	val filters by viewModel.filters.collectAsStateWithLifecycle()
 	val phase by viewModel.phase.collectAsStateWithLifecycle()
 	val playerState by player.state.collectAsStateWithLifecycle()
+	val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 
 	var actionsFor by remember { mutableStateOf<Song?>(null) }
 
@@ -99,7 +103,10 @@ fun SearchScreen(
 
 			is SearchPhase.Failed -> EmptyMessage(current.message)
 
-			is SearchPhase.Ready -> {
+			is SearchPhase.Ready -> PullToRefreshBox(
+				isRefreshing = isRefreshing,
+				onRefresh = viewModel::refresh,
+			) {
 				if (current.results.isEmpty) {
 					EmptyMessage("Nothing matched “$query”.")
 				} else {

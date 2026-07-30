@@ -29,7 +29,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.ui.components.CoverHero
 import org.gaindrive.android.ui.components.ExternalLink
-import org.gaindrive.android.ui.components.LoadStateBox
+import org.gaindrive.android.ui.components.RefreshableLoadBox
 import org.gaindrive.android.ui.components.NotesSection
 import org.gaindrive.android.ui.components.TrackRow
 import org.gaindrive.android.ui.player.PlayerViewModel
@@ -43,6 +43,7 @@ fun AlbumDetailScreen(
 	player: PlayerViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
+	val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 	val playerState by player.state.collectAsStateWithLifecycle()
 	var actionsFor by remember { mutableStateOf<Song?>(null) }
 
@@ -69,8 +70,10 @@ fun AlbumDetailScreen(
 			)
 		},
 	) { insets ->
-		LoadStateBox(
+		RefreshableLoadBox(
 			state = state,
+			isRefreshing = isRefreshing,
+			onRefresh = viewModel::refresh,
 			onRetry = viewModel::load,
 			modifier = Modifier.padding(insets),
 		) { ui ->

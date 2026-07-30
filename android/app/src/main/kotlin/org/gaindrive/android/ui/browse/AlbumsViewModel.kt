@@ -48,12 +48,24 @@ class AlbumsViewModel @Inject constructor(
 	private val _header = MutableStateFlow(ArtistHeaderUi())
 	val header: StateFlow<ArtistHeaderUi> = _header.asStateFlow()
 
+	/** True only for a user-initiated pull, which drives the pull indicator. */
+	private val _isRefreshing = MutableStateFlow(false)
+	val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
 	init {
 		load()
 	}
 
+	/** Initial load and retry: there is nothing worth keeping on screen. */
 	fun load() {
 		_state.value = Load.Loading
+		loadAlbums()
+		loadHeader()
+	}
+
+	/** Pull to refresh: keep the albums visible while they are re-read. */
+	fun refresh() {
+		_isRefreshing.value = true
 		loadAlbums()
 		loadHeader()
 	}
@@ -68,6 +80,7 @@ class AlbumsViewModel @Inject constructor(
 			onSuccess = { Load.Ready(it) },
 			onFailure = { Load.Failed(it.userMessage()) },
 		)
+		_isRefreshing.value = false
 	}
 
 	/**

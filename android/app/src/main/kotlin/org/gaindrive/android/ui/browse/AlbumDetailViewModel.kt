@@ -39,12 +39,27 @@ class AlbumDetailViewModel @Inject constructor(
 	private val _state = MutableStateFlow<Load<AlbumDetailUi>>(Load.Loading)
 	val state: StateFlow<Load<AlbumDetailUi>> = _state.asStateFlow()
 
+	/** True only for a user-initiated pull, which drives the pull indicator. */
+	private val _isRefreshing = MutableStateFlow(false)
+	val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
 	init {
 		load()
 	}
 
+	/** Initial load and retry. */
 	fun load() {
 		_state.value = Load.Loading
+		fetch()
+	}
+
+	/** Pull to refresh: keep the tracks visible while they are re-read. */
+	fun refresh() {
+		_isRefreshing.value = true
+		fetch()
+	}
+
+	private fun fetch() {
 		viewModelScope.launch {
 			_state.value = runCatchingCancellable {
 				val covers = library.coverUrls()
@@ -58,6 +73,7 @@ class AlbumDetailViewModel @Inject constructor(
 				},
 				onFailure = { Load.Failed(it.userMessage()) },
 			)
+			_isRefreshing.value = false
 		}
 	}
 

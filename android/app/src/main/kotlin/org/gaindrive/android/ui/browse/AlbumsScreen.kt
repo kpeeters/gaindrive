@@ -31,7 +31,7 @@ import org.gaindrive.android.ui.components.AlbumRow
 import org.gaindrive.android.ui.components.ArtistAvatar
 import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.components.ExternalLink
-import org.gaindrive.android.ui.components.LoadStateBox
+import org.gaindrive.android.ui.components.RefreshableLoadBox
 import org.gaindrive.android.ui.components.NotesSection
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,6 +42,7 @@ fun AlbumsScreen(
 	viewModel: AlbumsViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
+	val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 	val header by viewModel.header.collectAsStateWithLifecycle()
 
 	Scaffold(
@@ -62,8 +63,10 @@ fun AlbumsScreen(
 			)
 		},
 	) { insets ->
-		LoadStateBox(
+		RefreshableLoadBox(
 			state = state,
+			isRefreshing = isRefreshing,
+			onRefresh = viewModel::refresh,
 			onRetry = viewModel::load,
 			modifier = Modifier.padding(insets),
 		) { albums ->
