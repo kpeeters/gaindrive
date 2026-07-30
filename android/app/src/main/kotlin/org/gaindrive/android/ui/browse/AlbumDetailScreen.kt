@@ -43,6 +43,7 @@ fun AlbumDetailScreen(
 	player: PlayerViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
+	val extras by viewModel.extras.collectAsStateWithLifecycle()
 	val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 	val playerState by player.state.collectAsStateWithLifecycle()
 	var actionsFor by remember { mutableStateOf<Song?>(null) }
@@ -76,12 +77,14 @@ fun AlbumDetailScreen(
 			onRefresh = viewModel::refresh,
 			onRetry = viewModel::load,
 			modifier = Modifier.padding(insets),
-		) { ui ->
+		) { detail ->
 			LazyColumn(modifier = Modifier.fillMaxSize()) {
+				// The placeholder already occupies the full square, so the
+				// artwork arriving later does not move anything below it.
 				item(key = "hero") {
 					CoverHero(
-						url = ui.heroUrl,
-						contentDescription = ui.detail.album.title,
+						url = extras.heroUrl,
+						contentDescription = detail.album.title,
 						modifier = Modifier
 							.fillMaxWidth()
 							.aspectRatio(1f)
@@ -92,43 +95,45 @@ fun AlbumDetailScreen(
 				item(key = "heading") {
 					Column(modifier = Modifier.padding(horizontal = 16.dp)) {
 						Text(
-							text = ui.detail.album.title,
+							text = detail.album.title,
 							style = MaterialTheme.typography.headlineSmall,
 						)
 						Text(
 							text = listOfNotNull(
-								ui.detail.album.artistName.takeIf { it.isNotBlank() },
-								ui.detail.album.year?.toString(),
-								ui.detail.album.genre,
+								detail.album.artistName.takeIf { it.isNotBlank() },
+								detail.album.year?.toString(),
+								detail.album.genre,
 							).joinToString(" · "),
 							style = MaterialTheme.typography.bodyMedium,
 							color = MaterialTheme.colorScheme.onSurfaceVariant,
 						)
-					}
-				}
 
-				ui.detail.notes?.let { notes ->
-					item(key = "notes") {
-						NotesSection(
-							text = notes.notes,
-							links = buildList {
-								notes.wikiUrl?.let { add(ExternalLink("Wikipedia", it)) }
-								notes.allMusicUrl?.let { add(ExternalLink("AllMusic", it)) }
-							},
-							modifier = Modifier.padding(16.dp),
-						)
+						// Inside the heading rather than an item of its own:
+						// the notes arrive after the tracks are on screen, and
+						// a new item above the list would shift the rows out
+						// from under the user's finger.
+						extras.notes?.let { notes ->
+							NotesSection(
+								text = notes.notes,
+								links = buildList {
+									notes.wikiUrl?.let { add(ExternalLink("Wikipedia", it)) }
+									notes.allMusicUrl?.let { add(ExternalLink("AllMusic", it)) }
+								},
+								modifier = Modifier.padding(vertical = 12.dp),
+							)
+						}
 					}
 				}
 
 				itemsIndexed(
-					items = ui.detail.songs,
+					items = detail.songs,
 					key = { _, song -> song.ref.encode() },
 				) { index, song ->
 					TrackRow(
 						song = song,
 						// Queues the whole album and starts here, which is what
 						// tapping a track in an album listing should mean.
-						onClick = { player.play(ui.detail.songs, index) },
+						onClick = { player.play(detail.songs, index) },
 						onLongClick = { actionsFor = song },
 						playback = playerState.trackStateOf(song.ref),
 					)

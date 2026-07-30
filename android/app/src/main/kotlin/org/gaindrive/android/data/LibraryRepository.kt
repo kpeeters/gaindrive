@@ -72,9 +72,10 @@ class LibraryRepository @Inject constructor(
 		}
 
 	/**
-	 * Album with its tracks and, when available, its notes. The notes call is
-	 * a separate request and is allowed to fail on its own: a missing
-	 * biography must not cost the user their track list.
+	 * Album with its tracks — one request, so the detail screen has something
+	 * to show as soon as possible. The notes live in [albumNotes] and must be
+	 * fetched separately: a lookup that may never succeed cannot be allowed to
+	 * cost the user their track list.
 	 */
 	suspend fun albumDetail(album: ItemRef): AlbumDetail? =
 		onServer(album.server) { client ->
@@ -82,9 +83,6 @@ class LibraryRepository @Inject constructor(
 			AlbumDetail(
 				album = dto.toDomain(album.server),
 				songs = dto.song.map { it.toDomain(album.server) },
-				notes = runCatching {
-					client.getAlbumInfo2(album.id).requireOk().albumInfo2?.toDomain()
-				}.getOrNull()?.takeIf { !it.isEmpty },
 			)
 		}
 

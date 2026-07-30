@@ -103,11 +103,14 @@ data class AlbumNotes(
 		get() = notes.isNullOrBlank() && wikiUrl.isNullOrBlank() && allMusicUrl.isNullOrBlank()
 }
 
-/** An album with everything the detail screen shows. */
+/**
+ * An album and its tracks — the part of the detail screen that is worth
+ * blocking on. The notes are fetched separately (see [AlbumNotes]) because
+ * they can be slow and are never essential.
+ */
 data class AlbumDetail(
 	val album: Album,
 	val songs: List<Song>,
-	val notes: AlbumNotes?,
 )
 
 /** Grouped results from a search or from the starred list. */
