@@ -1,6 +1,7 @@
 package org.gaindrive.android.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
@@ -34,13 +35,18 @@ fun CoverArt(
 	contentDescription: String?,
 	modifier: Modifier = Modifier,
 	cornerRadius: Dp = 4.dp,
+	onClick: (() -> Unit)? = null,
 ) {
 	val shape = RoundedCornerShape(cornerRadius)
+	// Last in the chain and after the clip, so the ripple lands on top of the
+	// artwork and follows its corners instead of a square.
+	val clicks = if (onClick == null) Modifier else Modifier.clickable(onClick = onClick)
 	if (url == null) {
 		Box(
 			modifier = modifier
 				.clip(shape)
-				.background(MaterialTheme.colorScheme.surfaceVariant),
+				.background(MaterialTheme.colorScheme.surfaceVariant)
+				.then(clicks),
 			contentAlignment = Alignment.Center,
 		) {
 			Icon(
@@ -55,7 +61,7 @@ fun CoverArt(
 			model = url,
 			contentDescription = contentDescription,
 			contentScale = ContentScale.Crop,
-			modifier = modifier.clip(shape),
+			modifier = modifier.clip(shape).then(clicks),
 		)
 	}
 }
@@ -104,13 +110,19 @@ fun ArtistAvatar(url: String?, contentDescription: String?, size: Dp = 96.dp) {
 	}
 }
 
-/** Fills its parent, for the album detail hero. */
+/** Fills its parent, for the album detail hero and the now-playing sheet. */
 @Composable
-fun CoverHero(url: String?, contentDescription: String?, modifier: Modifier = Modifier) {
+fun CoverHero(
+	url: String?,
+	contentDescription: String?,
+	modifier: Modifier = Modifier,
+	onClick: (() -> Unit)? = null,
+) {
 	CoverArt(
 		url = url,
 		contentDescription = contentDescription,
 		modifier = modifier.fillMaxSize(),
 		cornerRadius = 8.dp,
+		onClick = onClick,
 	)
 }

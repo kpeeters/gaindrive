@@ -221,6 +221,15 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 		NowPlayingSheet(
 			state = playerState,
 			onDismiss = { nowPlayingOpen = false },
+			onOpenAlbum = { ref, title ->
+				// Closed first: the sheet sits on top of the screen it is
+				// sending the user to.
+				nowPlayingOpen = false
+				// Pushed onto whichever tab's stack is current, so Back returns
+				// to the search results the track was found in. selectedTab is
+				// deliberately left alone for the same reason.
+				navController.navigate(Route.Album(ref.encode(), title))
+			},
 			onTogglePlay = playerViewModel::togglePlayPause,
 			onNext = playerViewModel::next,
 			onPrevious = playerViewModel::previous,

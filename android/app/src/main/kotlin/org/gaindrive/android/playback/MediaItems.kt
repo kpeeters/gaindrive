@@ -1,10 +1,18 @@
 package org.gaindrive.android.playback
 
 import android.net.Uri
+import androidx.core.os.bundleOf
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
+
+/**
+ * The song's album, carried in the metadata extras so the player can offer
+ * "go to album" without a lookup. Media3 has an album *title* field but no
+ * album id, hence the extra.
+ */
+private const val KEY_ALBUM_REF = "org.gaindrive.albumRef"
 
 /**
  * Song ↔ MediaItem. The `mediaId` carries the encoded [ItemRef], because it is
@@ -24,6 +32,7 @@ fun Song.toMediaItem(artworkUrl: String?): MediaItem {
 		.setIsBrowsable(false)
 		.setIsPlayable(true)
 		.apply { artworkUrl?.let { setArtworkUri(Uri.parse(it)) } }
+		.apply { albumRef?.let { setExtras(bundleOf(KEY_ALBUM_REF to it.encode())) } }
 		.build()
 
 	return MediaItem.Builder()
@@ -41,6 +50,12 @@ data class NowPlaying(
 	val title: String,
 	val artist: String,
 	val album: String,
+	/**
+	 * Null when the server gave the song no album id, or for a queue the system
+	 * restored from a bare media id after process death — the player then simply
+	 * offers no way through to the album.
+	 */
+	val albumRef: ItemRef?,
 	val artworkUrl: String?,
 )
 
@@ -49,5 +64,6 @@ fun MediaItem.toNowPlaying(): NowPlaying = NowPlaying(
 	title = mediaMetadata.title?.toString().orEmpty(),
 	artist = mediaMetadata.artist?.toString().orEmpty(),
 	album = mediaMetadata.albumTitle?.toString().orEmpty(),
+	albumRef = mediaMetadata.extras?.getString(KEY_ALBUM_REF)?.let { ItemRef.decode(it) },
 	artworkUrl = mediaMetadata.artworkUri?.toString(),
 )

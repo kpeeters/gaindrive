@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.playback.PlayerState
 import org.gaindrive.android.ui.components.CoverHero
 import org.gaindrive.android.ui.components.CoverThumb
@@ -45,6 +46,7 @@ import org.gaindrive.android.ui.components.formatDuration
 fun NowPlayingSheet(
 	state: PlayerState,
 	onDismiss: () -> Unit,
+	onOpenAlbum: (ItemRef, String) -> Unit,
 	onTogglePlay: () -> Unit,
 	onNext: () -> Unit,
 	onPrevious: () -> Unit,
@@ -55,16 +57,26 @@ fun NowPlayingSheet(
 	val current = state.current ?: return
 	val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+	// The way out of a single search hit and into the rest of the record. Both
+	// the sleeve and the artist · album line under the title lead here; null
+	// when the queue entry has no album ref, which leaves both inert.
+	val openAlbum: (() -> Unit)? = current.albumRef?.let { ref ->
+		{ onOpenAlbum(ref, current.album) }
+	}
+
 	ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
 		LazyColumn(modifier = Modifier.fillMaxWidth()) {
 			item(key = "art") {
 				CoverHero(
 					url = current.artworkUrl,
-					contentDescription = current.album,
+					contentDescription =
+						if (openAlbum == null) current.album
+						else "Open album ${current.album}",
 					modifier = Modifier
 						.fillMaxWidth()
 						.aspectRatio(1f)
 						.padding(horizontal = 32.dp),
+					onClick = openAlbum,
 				)
 			}
 
@@ -82,16 +94,38 @@ fun NowPlayingSheet(
 						textAlign = TextAlign.Center,
 						modifier = Modifier.fillMaxWidth(),
 					)
+					// Tinted primary when it leads somewhere: the sleeve alone is
+					// not a discoverable way through to the album.
 					Text(
 						text = listOf(current.artist, current.album)
 							.filter { it.isNotBlank() }
 							.joinToString(" · "),
 						style = MaterialTheme.typography.bodyMedium,
-						color = MaterialTheme.colorScheme.onSurfaceVariant,
+						color = if (openAlbum == null) {
+							MaterialTheme.colorScheme.onSurfaceVariant
+						} else {
+							MaterialTheme.colorScheme.primary
+						},
 						maxLines = 1,
 						overflow = TextOverflow.Ellipsis,
 						textAlign = TextAlign.Center,
-						modifier = Modifier.fillMaxWidth(),
+						modifier = Modifier
+							.fillMaxWidth()
+							.then(
+								if (openAlbum == null) {
+									Modifier
+								} else {
+									Modifier.clickable(
+										onClickLabel = "Open album",
+										onClick = openAlbum,
+									)
+								}
+							)
+							// Inside the ripple, so a single line of body text is
+							// still a usable target. Applied either way, so the
+							// layout does not shift when there is no album to
+							// open.
+							.padding(vertical = 8.dp),
 					)
 				}
 			}
