@@ -48,6 +48,9 @@ fun StorageSettingsScreen(
 	val pinStatuses by viewModel.pinStatuses.collectAsStateWithLifecycle()
 	val storage = state.storage
 	var confirmFlush by remember { mutableStateOf(false) }
+	// The item awaiting confirmation, not a boolean: the dialog names what it is
+	// about to delete, and the row it came from may scroll away underneath it.
+	var confirmRemove by remember { mutableStateOf<PinnedItem?>(null) }
 	val evictable = (storage.usedBytes - storage.pinnedBytes).coerceAtLeast(0)
 
 	SettingsScaffold(title = "Storage & offline", onBack = onBack) {
@@ -139,7 +142,7 @@ fun StorageSettingsScreen(
 				PinnedRow(
 					item = item,
 					status = pinStatuses[item.pin.ref.encode()],
-					onRemove = { viewModel.unpin(item.pin.ref) },
+					onRemove = { confirmRemove = item },
 				)
 			}
 		}
@@ -165,6 +168,32 @@ fun StorageSettingsScreen(
 			},
 			dismissButton = {
 				TextButton(onClick = { confirmFlush = false }) { Text("Cancel") }
+			},
+		)
+	}
+
+	confirmRemove?.let { item ->
+		AlertDialog(
+			onDismissRequest = { confirmRemove = null },
+			title = { Text("Remove download?") },
+			text = {
+				Text(
+					// Says both halves: the audio goes, the music does not.
+					// Without the second half this reads like deleting the album.
+					"“${item.label}” will be deleted from this device. It will " +
+						"still play from the server."
+				)
+			},
+			confirmButton = {
+				TextButton(
+					onClick = {
+						viewModel.unpin(item.pin.ref)
+						confirmRemove = null
+					}
+				) { Text("Remove") }
+			},
+			dismissButton = {
+				TextButton(onClick = { confirmRemove = null }) { Text("Cancel") }
 			},
 		)
 	}
