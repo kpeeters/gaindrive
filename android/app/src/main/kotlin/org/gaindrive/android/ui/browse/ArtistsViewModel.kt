@@ -57,10 +57,11 @@ class ArtistsViewModel @Inject constructor(
 			// distinctUntilChanged because the registry re-emits whenever
 			// anything in DataStore changes, and an unchanged scope is not a
 			// reason to re-read the library.
-			selection.scope.distinctUntilChanged().collect { selected ->
-				scope = selected
-				// A different scope is a different library, so the old list
-				// must go rather than linger under a spinner.
+			selection.browse.distinctUntilChanged().collect { selected ->
+				scope = selected.scope
+				// A different scope is a different library, and going offline
+				// is the same library from a different source — either way the
+				// old list must go rather than linger under a spinner.
 				startLoad(clearFirst = true)
 			}
 		}
@@ -121,4 +122,9 @@ class ArtistsViewModel @Inject constructor(
 	fun selectServer(id: ServerId) = viewModelScope.launch { selection.select(id) }
 
 	fun selectAllServers() = viewModelScope.launch { selection.selectAllServers() }
+
+	val offline: StateFlow<Boolean> = selection.offline
+		.stateIn(viewModelScope, SharingStarted.Lazily, false)
+
+	fun setOffline(enabled: Boolean) = viewModelScope.launch { selection.setOffline(enabled) }
 }

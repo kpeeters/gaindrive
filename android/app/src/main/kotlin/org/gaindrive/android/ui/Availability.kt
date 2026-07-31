@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import org.gaindrive.android.data.NetworkMonitor
+import org.gaindrive.android.data.Connectivity
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.cache.PinRepository
 import org.gaindrive.android.data.model.ItemRef
@@ -30,6 +30,11 @@ data class AvailabilityState(
 	val online: Boolean = true,
 	val storedKeys: Set<String> = emptySet(),
 	val pinnedKeys: Set<String> = emptySet(),
+	/**
+	 * Offline because the user said so, rather than because there is no signal.
+	 * Only the banner cares — everything else treats the two the same.
+	 */
+	val offlineByChoice: Boolean = false,
 ) {
 	fun of(ref: ItemRef): Availability {
 		val key = ref.encode()
@@ -60,14 +65,15 @@ val LocalAvailability = compositionLocalOf { AvailabilityState() }
 class AvailabilityViewModel @Inject constructor(
 	audioCache: AudioCache,
 	pins: PinRepository,
-	network: NetworkMonitor,
+	connectivity: Connectivity,
 ) : ViewModel() {
 
 	val state: StateFlow<AvailabilityState> =
 		combine(
-			network.online,
+			connectivity.online,
 			audioCache.cachedKeys,
 			pins.protectedKeys,
+			connectivity.offlineByChoice,
 			::AvailabilityState,
 		).stateIn(
 			scope = viewModelScope,

@@ -30,6 +30,7 @@ import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.data.model.StarKind
+import org.gaindrive.android.net.OfflineException
 import org.gaindrive.android.net.SubsonicClient
 import org.gaindrive.android.net.SubsonicClientFactory
 import org.gaindrive.android.net.requireOk
@@ -52,7 +53,17 @@ class LibraryRepository @Inject constructor(
 	private val settings: SettingsStore,
 	private val clients: SubsonicClientFactory,
 	private val local: LocalLibrary,
+	private val connectivity: Connectivity,
 ) {
+
+	/**
+	 * Whether to skip the network entirely.
+	 *
+	 * Read per query rather than collected: a query already knows what it is
+	 * doing at the moment it runs, and a flow here would mean every caller
+	 * dealing with a value that could change under it mid-fan-out.
+	 */
+	private val offline: Boolean get() = !connectivity.online.value
 
 	suspend fun artistIndexes(
 		scope: BrowseScope,
@@ -114,11 +125,16 @@ class LibraryRepository @Inject constructor(
 	 * first time, so it can be slow or fail outright. Callers must fetch it
 	 * separately from the album list and never let it hold that list up.
 	 */
-	suspend fun artistInfo(ref: ItemRef): ArtistInfo? =
-		onServer(ref.server) { client ->
+	suspend fun artistInfo(ref: ItemRef): ArtistInfo? {
+		// Not mirrored, and never essential. Offline it is simply absent, which
+		// is a state the screen already renders — the biography section just
+		// does not appear.
+		if (offline) return null
+		return onServer(ref.server) { client ->
 			client.getArtistInfo2(ref.id).requireOk().artistInfo2?.toDomain()
 				?.takeIf { !it.isEmpty }
 		}
+	}
 
 	/**
 	 * Album with its tracks — one request, so the detail screen has something
@@ -137,10 +153,13 @@ class LibraryRepository @Inject constructor(
 			}?.also { local.saveAlbumDetail(album.server, it) }
 		}
 
-	suspend fun albumNotes(album: ItemRef): AlbumNotes? =
-		onServer(album.server) { client ->
+	/** Not mirrored either; see [artistInfo]. */
+	suspend fun albumNotes(album: ItemRef): AlbumNotes? {
+		if (offline) return null
+		return onServer(album.server) { client ->
 			client.getAlbumInfo2(album.id).requireOk().albumInfo2?.toDomain()
 		}
+	}
 
 	/**
 	 * Bumped whenever a playlist is created, changed or deleted. The playlists
@@ -162,8 +181,13 @@ class LibraryRepository @Inject constructor(
 	 * One server's playlists, for the "add to playlist" picker — it can only
 	 * offer the playlists of the server that owns the track.
 	 */
-	suspend fun playlistsOf(server: ServerId): List<Playlist> =
-		onServer(server) { client -> playlistsFrom(client, server) }
+	suspend fun playlistsOf(server: ServerId): List<Playlist> {
+		// Not backed by the mirror the way [playlists] is: this picker exists to
+		// add a track, and adding is a write that offline cannot do. Failing
+		// here says so once instead of after the user has picked one.
+		requireOnline()
+		return onServer(server) { client -> playlistsFrom(client, server) }
+	}
 
 	private suspend fun playlistsFrom(client: SubsonicClient, server: ServerId): List<Playlist> =
 		client.getPlaylists().requireOk().playlists?.playlist.orEmpty()
@@ -222,8 +246,16 @@ class LibraryRepository @Inject constructor(
 
 		servers.forEachIndexed { index, config ->
 			launch {
-				val result = runCatchingCancellable {
-					search(config.id, query, artistCount, albumCount, songCount)
+				// Offline: the stored index is the only index there is, and it
+				// answers fast enough that emitting progressively is moot.
+				val result = if (offline) {
+					Result.success(
+						local.search(config.id, query, artistCount, albumCount, songCount)
+					)
+				} else {
+					runCatchingCancellable {
+						search(config.id, query, artistCount, albumCount, songCount)
+					}
 				}
 				// Resolved before taking the lock: this reads a database, and
 				// holding up the servers that did answer to do it would defeat
@@ -288,12 +320,14 @@ class LibraryRepository @Inject constructor(
 	 * trade in a music player.
 	 */
 	suspend fun scrobble(ref: ItemRef, submission: Boolean) {
+		if (offline) return
 		runCatchingCancellable {
 			onServer(ref.server) { client -> client.scrobble(ref.id, submission).requireOk() }
 		}
 	}
 
 	suspend fun setStarred(ref: ItemRef, kind: StarKind, starred: Boolean) {
+		requireOnline()
 		onServer(ref.server) { client ->
 			val song = ref.id.takeIf { kind == StarKind.SONG }
 			val album = ref.id.takeIf { kind == StarKind.ALBUM }
@@ -304,11 +338,13 @@ class LibraryRepository @Inject constructor(
 	}
 
 	suspend fun createPlaylist(server: ServerId, name: String, songIds: List<String>) {
+		requireOnline()
 		onServer(server) { client -> client.createPlaylist(name, songIds).requireOk() }
 		bumpPlaylists()
 	}
 
 	suspend fun addToPlaylist(playlist: ItemRef, songId: String) {
+		requireOnline()
 		onServer(playlist.server) { client ->
 			client.updatePlaylist(playlist.id, listOf(songId), emptyList()).requireOk()
 		}
@@ -317,6 +353,7 @@ class LibraryRepository @Inject constructor(
 
 	/** Removes by position; the caller must not let indices shift under it. */
 	suspend fun removeFromPlaylist(playlist: ItemRef, index: Int) {
+		requireOnline()
 		onServer(playlist.server) { client ->
 			client.updatePlaylist(playlist.id, emptyList(), listOf(index)).requireOk()
 		}
@@ -324,6 +361,7 @@ class LibraryRepository @Inject constructor(
 	}
 
 	suspend fun deletePlaylist(playlist: ItemRef) {
+		requireOnline()
 		onServer(playlist.server) { client -> client.deletePlaylist(playlist.id).requireOk() }
 		bumpPlaylists()
 	}
@@ -405,6 +443,14 @@ class LibraryRepository @Inject constructor(
 		block: suspend (SubsonicClient, ItemRef) -> T,
 	): MergedResult<List<T>> = coroutineScope {
 		val configs = registry.enabledServers.first()
+
+		if (offline) {
+			return@coroutineScope MergedResult(
+				refs.filter { ref -> configs.any { it.id == ref.server } }
+					.mapNotNull { fallback?.invoke(it) }
+			)
+		}
+
 		val answers = refs.mapNotNull { ref ->
 			// A ref whose server has since been removed is skipped rather than
 			// reported: it is stale navigation state, not a server that failed.
@@ -446,6 +492,19 @@ class LibraryRepository @Inject constructor(
 		fallback: (suspend (ServerConfig) -> T?)?,
 		block: suspend (SubsonicClient, ServerConfig) -> T,
 	): Gathered<T> = coroutineScope {
+		// Offline: no request, and no failure note either. A per-server
+		// "unreachable" banner on every screen would be noise when being
+		// offline is the state the user asked for — the one banner above the
+		// player has already said it.
+		if (offline) {
+			return@coroutineScope Gathered(
+				answers = servers.mapNotNull { config ->
+					fallback?.invoke(config)?.let { config to it }
+				},
+				failures = emptyList(),
+			)
+		}
+
 		val answers = servers.map { config ->
 			async(Dispatchers.IO) {
 				config to runCatchingCancellable { block(clients.clientFor(config), config) }
@@ -483,8 +542,22 @@ class LibraryRepository @Inject constructor(
 	private suspend fun <T : Any> networkFirst(
 		stored: suspend () -> T?,
 		block: suspend () -> T?,
-	): T? = runCatchingCancellable { block() }
-		.getOrElse { error -> stored() ?: throw error }
+	): T? {
+		if (offline) {
+			// Not null: "nothing stored" and "no such album" are different
+			// answers, and only the first one is worth an explanation.
+			return stored() ?: throw OfflineException(
+				"You are offline, and this is not stored on the device."
+			)
+		}
+		return runCatchingCancellable { block() }
+			.getOrElse { error -> stored() ?: throw error }
+	}
+
+	/** Guards a write. Nothing can be queued, so failing at once is the honest answer. */
+	private fun requireOnline() {
+		if (offline) throw OfflineException("You are offline, so this cannot be saved.")
+	}
 
 	/**
 	 * [storedShown] changes the wording rather than being suppressed by it: the

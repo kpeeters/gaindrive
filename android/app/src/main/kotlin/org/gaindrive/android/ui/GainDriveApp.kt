@@ -45,9 +45,13 @@ import org.gaindrive.android.ui.playlists.PlaylistDetailScreen
 import org.gaindrive.android.ui.playlists.PlaylistsScreen
 import org.gaindrive.android.ui.recents.RecentsScreen
 import org.gaindrive.android.ui.search.SearchScreen
+import org.gaindrive.android.ui.settings.AppearanceSettingsScreen
+import org.gaindrive.android.ui.settings.LibrarySettingsScreen
 import org.gaindrive.android.ui.settings.ServerEditScreen
+import org.gaindrive.android.ui.settings.ServersSettingsScreen
 import org.gaindrive.android.ui.settings.SettingsScreen
 import org.gaindrive.android.ui.settings.SettingsViewModel
+import org.gaindrive.android.ui.settings.StorageSettingsScreen
 
 @Composable
 fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
@@ -66,7 +70,10 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 	// changes, which would reset the back stack the moment the first server is
 	// saved — throwing the user out of Settings just as they finish adding it.
 	val startDestination: Route = remember {
-		if (settings.servers.isEmpty()) Route.Settings else Route.Artists
+		// Straight to Servers, not the Settings list: with nothing configured
+		// there is exactly one useful thing to do and this is where its button
+		// lives.
+		if (settings.servers.isEmpty()) Route.SettingsServers else Route.Artists
 	}
 
 	val playerViewModel: PlayerViewModel = hiltViewModel()
@@ -95,7 +102,10 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 					// Sits with the player rather than in each screen's app bar:
 					// having no network is a fact about the whole app, and one
 					// banner is better than five that have to agree.
-					OfflineNote(online = LocalAvailability.current.online)
+					OfflineNote(
+						online = LocalAvailability.current.online,
+						byChoice = LocalAvailability.current.offlineByChoice,
+					)
 					// Above the navigation bar, and outside the NavHost, so it
 					// persists across navigation the way the web client's fixed
 					// footer does.
@@ -239,10 +249,32 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 
 			composable<Route.Settings> {
 				SettingsScreen(
+					onOpenServers = { navController.navigate(Route.SettingsServers) },
+					onOpenLibrary = { navController.navigate(Route.SettingsLibrary) },
+					onOpenStorage = { navController.navigate(Route.SettingsStorage) },
+					onOpenAppearance = { navController.navigate(Route.SettingsAppearance) },
+				)
+			}
+
+			composable<Route.SettingsServers> {
+				ServersSettingsScreen(
+					onBack = { navController.popBackStack() },
 					onEditServer = { id: ServerId? ->
 						navController.navigate(Route.ServerEdit(id?.value))
 					},
 				)
+			}
+
+			composable<Route.SettingsLibrary> {
+				LibrarySettingsScreen(onBack = { navController.popBackStack() })
+			}
+
+			composable<Route.SettingsStorage> {
+				StorageSettingsScreen(onBack = { navController.popBackStack() })
+			}
+
+			composable<Route.SettingsAppearance> {
+				AppearanceSettingsScreen(onBack = { navController.popBackStack() })
 			}
 
 			composable<Route.ServerEdit> {
@@ -283,7 +315,13 @@ private fun NavDestination?.isDetail(): Boolean =
 		hasRoute(Route.Albums::class) ||
 			hasRoute(Route.Album::class) ||
 			hasRoute(Route.Playlist::class) ||
-			hasRoute(Route.ServerEdit::class)
+			hasRoute(Route.ServerEdit::class) ||
+			// The settings categories drill down like anything else, and being
+			// listed here is also what makes tapping the Settings tab shed them.
+			hasRoute(Route.SettingsServers::class) ||
+			hasRoute(Route.SettingsLibrary::class) ||
+			hasRoute(Route.SettingsStorage::class) ||
+			hasRoute(Route.SettingsAppearance::class)
 		)
 
 /** Long enough to read as a direction, short enough not to be in the way. */

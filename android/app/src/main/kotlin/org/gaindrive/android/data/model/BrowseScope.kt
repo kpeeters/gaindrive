@@ -19,3 +19,15 @@ sealed interface BrowseScope {
 		const val ALL_STORED = "all"
 	}
 }
+
+/**
+ * Everything that decides what a browse screen shows.
+ *
+ * The two travel together because a screen has to reload for either: picking a
+ * different server is a different library, and going offline is the same
+ * library from a different source.
+ */
+data class BrowseState(
+	val scope: BrowseScope,
+	val offline: Boolean,
+)

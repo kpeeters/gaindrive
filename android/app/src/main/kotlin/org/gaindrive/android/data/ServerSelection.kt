@@ -34,6 +34,15 @@ class ServerSelection @Inject constructor(
 		}
 
 	/**
+	 * Scope and offline mode together, because both change what a browse screen
+	 * should be showing and both therefore have to trigger the same reload.
+	 * Screens watch this rather than [scope] so neither can be honoured while
+	 * the other is quietly ignored.
+	 */
+	val browse: Flow<BrowseState> =
+		combine(scope, settings.offlineMode) { current, offline -> BrowseState(current, offline) }
+
+	/**
 	 * The servers the current scope covers, in registry order — which is what
 	 * every fan-out iterates and what breaks ties when rows merge.
 	 */
@@ -65,4 +74,9 @@ class ServerSelection @Inject constructor(
 	suspend fun select(id: ServerId) = settings.setBrowseScope(id.value)
 
 	suspend fun selectAllServers() = settings.setBrowseScope(BrowseScope.ALL_STORED)
+
+	/** The same state Settings shows, so the two controls cannot disagree. */
+	val offline: Flow<Boolean> = settings.offlineMode
+
+	suspend fun setOffline(enabled: Boolean) = settings.setOfflineMode(enabled)
 }

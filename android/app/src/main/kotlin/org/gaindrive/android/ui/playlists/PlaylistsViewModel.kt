@@ -52,20 +52,26 @@ class PlaylistsViewModel @Inject constructor(
 	val error: StateFlow<String?> = _error.asStateFlow()
 
 	private var scope: BrowseScope = BrowseScope.AllServers
+
+	/** Named apart from the exposed `offline` flow, which is the same value. */
+	private var wasOffline: Boolean = false
 	private var loadJob: Job? = null
 
 	init {
 		viewModelScope.launch {
 			combine(
-				selection.scope.distinctUntilChanged(),
+				selection.browse.distinctUntilChanged(),
 				// Re-reads after a create or delete anywhere in the app.
 				library.playlistRevision,
 			) { selected, _ -> selected }.collect { selected ->
 				// A different scope is a different set of playlists, so the old
 				// list must go. A revision bump is the same list changed, and
 				// blanking it there would flash the whole screen on every edit.
-				val switched = selected != scope
-				scope = selected
+				// Going offline counts as switching: the source changed even
+				// though the scope did not.
+				val switched = selected.scope != scope || selected.offline != wasOffline
+				scope = selected.scope
+				wasOffline = selected.offline
 				startLoad(clearFirst = switched)
 			}
 		}
@@ -138,4 +144,9 @@ class PlaylistsViewModel @Inject constructor(
 	fun selectServer(id: ServerId) = viewModelScope.launch { selection.select(id) }
 
 	fun selectAllServers() = viewModelScope.launch { selection.selectAllServers() }
+
+	val offline: StateFlow<Boolean> = selection.offline
+		.stateIn(viewModelScope, SharingStarted.Lazily, false)
+
+	fun setOffline(enabled: Boolean) = viewModelScope.launch { selection.setOffline(enabled) }
 }

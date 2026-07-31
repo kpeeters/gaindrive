@@ -36,7 +36,7 @@ import org.gaindrive.android.ui.components.PartialFailureNote
 import org.gaindrive.android.ui.components.PlaylistRow
 import org.gaindrive.android.ui.components.RefreshableLoadBox
 import org.gaindrive.android.ui.components.SectionHeading
-import org.gaindrive.android.ui.components.ServerSelector
+import org.gaindrive.android.ui.components.LibrarySelector
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,6 +49,7 @@ fun PlaylistsScreen(
 	val servers by viewModel.servers.collectAsStateWithLifecycle()
 	val browseScope by viewModel.browseScope.collectAsStateWithLifecycle()
 	val badgeNames by viewModel.badgeNames.collectAsStateWithLifecycle()
+	val offline by viewModel.offline.collectAsStateWithLifecycle()
 	val failures by viewModel.failures.collectAsStateWithLifecycle()
 	val error by viewModel.error.collectAsStateWithLifecycle()
 
@@ -86,11 +87,13 @@ fun PlaylistsScreen(
 			TopAppBar(
 				title = { Text("Playlists") },
 				actions = {
-					ServerSelector(
+					LibrarySelector(
 						servers = servers,
 						scope = browseScope,
+						offline = offline,
 						onSelectAll = viewModel::selectAllServers,
 						onSelect = viewModel::selectServer,
+						onSetOffline = viewModel::setOffline,
 					)
 				},
 			)

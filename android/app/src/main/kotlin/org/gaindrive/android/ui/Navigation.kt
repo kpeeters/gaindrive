@@ -48,6 +48,23 @@ sealed interface Route {
 	@Serializable
 	data object Settings : Route
 
+	/**
+	 * Settings categories. Nested rather than one flat screen: the list was
+	 * already long before casting, metadata editing, user administration and
+	 * upload arrive, and this is what Android's own Settings does.
+	 */
+	@Serializable
+	data object SettingsServers : Route
+
+	@Serializable
+	data object SettingsLibrary : Route
+
+	@Serializable
+	data object SettingsStorage : Route
+
+	@Serializable
+	data object SettingsAppearance : Route
+
 	/** Null [serverId] means "add a server" — the same screen serves both. */
 	@Serializable
 	data class ServerEdit(val serverId: String? = null) : Route

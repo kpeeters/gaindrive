@@ -51,7 +51,7 @@ import org.gaindrive.android.ui.components.ArtistRow
 import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.components.PartialFailureNote
 import org.gaindrive.android.ui.components.SectionHeading
-import org.gaindrive.android.ui.components.ServerSelector
+import org.gaindrive.android.ui.components.LibrarySelector
 import org.gaindrive.android.ui.components.SongRow
 import org.gaindrive.android.ui.player.PlayerViewModel
 import org.gaindrive.android.ui.player.TrackActionsSheet
@@ -72,6 +72,7 @@ fun SearchScreen(
 	val servers by viewModel.servers.collectAsStateWithLifecycle()
 	val browseScope by viewModel.browseScope.collectAsStateWithLifecycle()
 	val badgeNames by viewModel.badgeNames.collectAsStateWithLifecycle()
+	val offline by viewModel.offline.collectAsStateWithLifecycle()
 
 	var actionsFor by remember { mutableStateOf<Song?>(null) }
 
@@ -95,6 +96,7 @@ fun SearchScreen(
 			filters = filters,
 			servers = servers,
 			scope = browseScope,
+			offline = offline,
 			onQueryChange = viewModel::onQueryChange,
 			onClear = viewModel::clearQuery,
 			onToggleArtists = viewModel::toggleArtists,
@@ -102,6 +104,7 @@ fun SearchScreen(
 			onToggleSongs = viewModel::toggleSongs,
 			onSelectAll = viewModel::selectAllServers,
 			onSelectServer = viewModel::selectServer,
+			onSetOffline = viewModel::setOffline,
 		)
 
 		when (val current = phase) {
@@ -171,6 +174,7 @@ private fun SearchHeader(
 	filters: SearchFilters,
 	servers: List<ServerConfig>,
 	scope: BrowseScope,
+	offline: Boolean,
 	onQueryChange: (String) -> Unit,
 	onClear: () -> Unit,
 	onToggleArtists: () -> Unit,
@@ -178,6 +182,7 @@ private fun SearchHeader(
 	onToggleSongs: () -> Unit,
 	onSelectAll: () -> Unit,
 	onSelectServer: (ServerId) -> Unit,
+	onSetOffline: (Boolean) -> Unit,
 ) {
 	val focusRequester = remember { FocusRequester() }
 	val keyboard = LocalSoftwareKeyboardController.current
@@ -238,11 +243,13 @@ private fun SearchHeader(
 				Spacer(modifier = Modifier.weight(1f))
 				// Search has no app bar of its own, so the scope lives with the
 				// filters — it is one more thing narrowing what comes back.
-				ServerSelector(
+				LibrarySelector(
 					servers = servers,
 					scope = scope,
+					offline = offline,
 					onSelectAll = onSelectAll,
 					onSelect = onSelectServer,
+					onSetOffline = onSetOffline,
 				)
 			}
 		}

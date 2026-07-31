@@ -53,8 +53,8 @@ class RecentsViewModel @Inject constructor(
 
 	init {
 		viewModelScope.launch {
-			selection.scope.distinctUntilChanged().collect { selected ->
-				scope = selected
+			selection.browse.distinctUntilChanged().collect { selected ->
+				scope = selected.scope
 				startLoad(clearFirst = true)
 			}
 		}
@@ -148,6 +148,11 @@ class RecentsViewModel @Inject constructor(
 	fun selectServer(id: ServerId) = viewModelScope.launch { selection.select(id) }
 
 	fun selectAllServers() = viewModelScope.launch { selection.selectAllServers() }
+
+	val offline: StateFlow<Boolean> = selection.offline
+		.stateIn(viewModelScope, SharingStarted.Lazily, false)
+
+	fun setOffline(enabled: Boolean) = viewModelScope.launch { selection.setOffline(enabled) }
 
 	private companion object {
 		const val RECENT_SIZE = 50

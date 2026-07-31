@@ -23,7 +23,7 @@ import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.components.PartialFailureNote
 import org.gaindrive.android.ui.components.RefreshableLoadBox
 import org.gaindrive.android.ui.components.SectionHeading
-import org.gaindrive.android.ui.components.ServerSelector
+import org.gaindrive.android.ui.components.LibrarySelector
 import org.gaindrive.android.ui.components.SongRow
 import org.gaindrive.android.ui.components.relativeTime
 import org.gaindrive.android.ui.player.PlayerViewModel
@@ -41,6 +41,7 @@ fun RecentsScreen(
 	val servers by viewModel.servers.collectAsStateWithLifecycle()
 	val browseScope by viewModel.browseScope.collectAsStateWithLifecycle()
 	val badgeNames by viewModel.badgeNames.collectAsStateWithLifecycle()
+	val offline by viewModel.offline.collectAsStateWithLifecycle()
 	val failures by viewModel.failures.collectAsStateWithLifecycle()
 	val playerState by player.state.collectAsStateWithLifecycle()
 
@@ -60,11 +61,13 @@ fun RecentsScreen(
 			TopAppBar(
 				title = { Text("Recents") },
 				actions = {
-					ServerSelector(
+					LibrarySelector(
 						servers = servers,
 						scope = browseScope,
+						offline = offline,
 						onSelectAll = viewModel::selectAllServers,
 						onSelect = viewModel::selectServer,
+						onSetOffline = viewModel::setOffline,
 					)
 				},
 			)

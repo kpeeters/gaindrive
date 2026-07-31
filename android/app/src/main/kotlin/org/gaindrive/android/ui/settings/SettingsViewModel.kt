@@ -36,8 +36,17 @@ data class StorageUiState(
 	val maxBytes: Long = SettingsStore.DEFAULT_CACHE_BYTES,
 	val cacheOnPlay: Boolean = true,
 	val unmeteredOnly: Boolean = true,
+	val offlineMode: Boolean = false,
 	val usedBytes: Long = 0,
 	val pinnedBytes: Long = 0,
+)
+
+/** The stored half of [StorageUiState]; the measured half comes from the cache. */
+private data class StoragePrefs(
+	val maxBytes: Long,
+	val cacheOnPlay: Boolean,
+	val unmeteredOnly: Boolean,
+	val offlineMode: Boolean,
 )
 
 @HiltViewModel
@@ -49,14 +58,30 @@ class SettingsViewModel @Inject constructor(
 	private val player: PlayerConnection,
 ) : ViewModel() {
 
-	private val storage = combine(
+	// Two stages, because `combine` is only typed up to five flows and this
+	// needs six.
+	private val storagePrefs = combine(
 		settings.cacheMaxBytes,
 		settings.cacheOnPlay,
 		settings.downloadUnmeteredOnly,
+		settings.offlineMode,
+		::StoragePrefs,
+	)
+
+	private val storage = combine(
+		storagePrefs,
 		audioCache.usedBytes,
 		audioCache.pinnedBytes,
-		::StorageUiState,
-	)
+	) { prefs, used, pinned ->
+		StorageUiState(
+			maxBytes = prefs.maxBytes,
+			cacheOnPlay = prefs.cacheOnPlay,
+			unmeteredOnly = prefs.unmeteredOnly,
+			offlineMode = prefs.offlineMode,
+			usedBytes = used,
+			pinnedBytes = pinned,
+		)
+	}
 
 	private val pinnedItems = pins.pins.map { pins.describe(it) }
 
@@ -105,6 +130,9 @@ class SettingsViewModel @Inject constructor(
 
 	fun setDownloadUnmeteredOnly(enabled: Boolean) =
 		viewModelScope.launch { settings.setDownloadUnmeteredOnly(enabled) }
+
+	fun setOfflineMode(enabled: Boolean) =
+		viewModelScope.launch { settings.setOfflineMode(enabled) }
 
 	fun unpin(ref: ItemRef) = viewModelScope.launch { pins.unpin(ref) }
 

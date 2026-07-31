@@ -81,6 +81,19 @@ class SettingsStore @Inject constructor(
 	}
 
 	/**
+	 * Behave as though there were no network, whatever the network says.
+	 *
+	 * A mode, not a display preference: it stops requests being made at all, so
+	 * a slow or expensive connection costs nothing and no screen waits out a
+	 * timeout before showing what is stored.
+	 */
+	val offlineMode: Flow<Boolean> = dataStore.data.map { it[OFFLINE_MODE] ?: false }
+
+	suspend fun setOfflineMode(enabled: Boolean) {
+		dataStore.edit { it[OFFLINE_MODE] = enabled }
+	}
+
+	/**
 	 * Whether pinned downloads wait for an unmetered connection.
 	 *
 	 * On by default, and only applies to downloads: caching what you are
@@ -104,5 +117,6 @@ class SettingsStore @Inject constructor(
 		private val CACHE_MAX_BYTES = longPreferencesKey("cache_max_bytes")
 		private val CACHE_ON_PLAY = booleanPreferencesKey("cache_on_play")
 		private val DOWNLOAD_UNMETERED_ONLY = booleanPreferencesKey("download_unmetered_only")
+		private val OFFLINE_MODE = booleanPreferencesKey("offline_mode")
 	}
 }

@@ -11,14 +11,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
 /**
- * Says the device has no network, and what that means here.
+ * Says the app is not talking to any server, and what that means here.
  *
- * Not dismissible: unlike a server that did not answer, this is not a condition
- * the user can retry past, and it explains every dimmed row on screen for as
- * long as it lasts.
+ * Not dismissible: it explains every dimmed row on screen for as long as it
+ * lasts, and unlike a server that did not answer there is nothing to retry.
+ *
+ * [byChoice] changes the wording rather than the presence, because the two
+ * cases call for different reactions: one is something to fix, the other is
+ * something the user switched on and may have forgotten.
  */
 @Composable
-fun OfflineNote(online: Boolean) {
+fun OfflineNote(online: Boolean, byChoice: Boolean) {
 	if (online) return
 
 	Surface(
@@ -27,7 +30,8 @@ fun OfflineNote(online: Boolean) {
 		modifier = Modifier.fillMaxWidth(),
 	) {
 		Text(
-			text = "Offline — only downloaded music can play",
+			text = if (byChoice) "Offline mode — only stored music can play"
+			else "No network — only stored music can play",
 			style = MaterialTheme.typography.bodySmall,
 			textAlign = TextAlign.Center,
 			modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),

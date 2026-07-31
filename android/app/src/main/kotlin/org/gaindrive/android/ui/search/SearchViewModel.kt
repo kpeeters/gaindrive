@@ -97,10 +97,14 @@ class SearchViewModel @Inject constructor(
 		// and should re-run immediately, not after a pause.
 		_query.debounce(DEBOUNCE_MS),
 		_filters,
-		selection.scope,
+		// browse rather than scope: going offline has to re-run the search, or
+		// the results on screen are still the server's.
+		selection.browse,
 		selection.scoped,
 		reruns,
-	) { query, filters, scope, servers, _ -> Search(query.trim(), filters, scope, servers.size) }
+	) { query, filters, browse, servers, _ ->
+		Search(query.trim(), filters, browse.scope, servers.size)
+	}
 		.flatMapLatest { search ->
 			if (search.query.length < MIN_QUERY || search.filters.noneSelected) {
 				_isRefreshing.value = false
@@ -196,6 +200,11 @@ class SearchViewModel @Inject constructor(
 	fun selectServer(id: ServerId) = viewModelScope.launch { selection.select(id) }
 
 	fun selectAllServers() = viewModelScope.launch { selection.selectAllServers() }
+
+	val offline: StateFlow<Boolean> = selection.offline
+		.stateIn(viewModelScope, SharingStarted.Lazily, false)
+
+	fun setOffline(enabled: Boolean) = viewModelScope.launch { selection.setOffline(enabled) }
 
 	private companion object {
 		const val DEBOUNCE_MS = 300L
