@@ -15,7 +15,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.local.LocalLibrary
+import org.gaindrive.android.data.local.StoredFilter
 import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.AlbumDetail
 import org.gaindrive.android.data.model.AlbumNotes
@@ -54,6 +56,7 @@ class LibraryRepository @Inject constructor(
 	private val clients: SubsonicClientFactory,
 	private val local: LocalLibrary,
 	private val connectivity: Connectivity,
+	private val audioCache: AudioCache,
 ) {
 
 	/**
@@ -65,16 +68,32 @@ class LibraryRepository @Inject constructor(
 	 */
 	private val offline: Boolean get() = !connectivity.online.value
 
+	/**
+	 * What to hide from browse listings, or null when there is nothing to hide.
+	 *
+	 * Null whenever the app is online, including when a server has just failed:
+	 * a stored copy shown because one request timed out should still be the
+	 * whole library, since the connection may come straight back. Only a
+	 * genuinely offline app trims itself to what it can play.
+	 */
+	private suspend fun storedOnly(): StoredFilter? =
+		if (offline) local.storedFilter(audioCache.cachedKeys.value) else null
+
 	suspend fun artistIndexes(
 		scope: BrowseScope,
 		personalOnly: Boolean = false,
-	): MergedResult<List<ArtistIndex>> =
-		fanOut(
+	): MergedResult<List<ArtistIndex>> {
+		val stored = storedOnly()
+		return fanOut(
 			scope,
 			// The mirror does not model the personal-only filter — it is a view
 			// of the same artists — so an unreachable server contributes
 			// everything stored for it rather than nothing at all.
-			fallback = { config -> local.artistIndexes(config.id).takeIf { it.isNotEmpty() } },
+			fallback = { config ->
+				local.artistIndexes(config.id)
+					.let { stored?.apply(it) ?: it }
+					.takeIf { it.isNotEmpty() }
+			},
 		) { client, config ->
 			// Positional: SubsonicClient reaches the API through interface
 			// delegation, so named arguments lean on generated parameter names.
@@ -85,6 +104,7 @@ class LibraryRepository @Inject constructor(
 				.filter { it.artists.isNotEmpty() }
 				.also { local.saveArtistIndexes(config.id, it) }
 		}.map { mergeArtistIndexes(it) }
+	}
 
 	/**
 	 * The union of one artist's albums across every server that has them.
@@ -97,9 +117,14 @@ class LibraryRepository @Inject constructor(
 		// Read once per query rather than once per row, and before the fan-out
 		// so the transform below stays non-suspending.
 		val collapse = collapseDuplicates()
+		val stored = storedOnly()
 		return fanOutRefs(
 			refs,
-			fallback = { ref -> local.albumsOfArtist(ref).takeIf { it.isNotEmpty() } },
+			fallback = { ref ->
+				local.albumsOfArtist(ref)
+					.let { stored?.apply(it) ?: it }
+					.takeIf { it.isNotEmpty() }
+			},
 		) { client, ref ->
 			client.getArtist(ref.id).requireOk().artist?.album.orEmpty()
 				.map { it.toDomain(ref.server) }
@@ -171,11 +196,17 @@ class LibraryRepository @Inject constructor(
 	val playlistRevision: StateFlow<Int> = _playlistRevision.asStateFlow()
 
 	/** Grouped by server: a playlist belongs to one and cannot be merged. */
-	suspend fun playlists(scope: BrowseScope): MergedResult<List<ServerSection<Playlist>>> =
-		fanOutSections(
+	suspend fun playlists(scope: BrowseScope): MergedResult<List<ServerSection<Playlist>>> {
+		val stored = storedOnly()
+		return fanOutSections(
 			scope,
-			fallback = { config -> local.playlists(config.id).takeIf { it.isNotEmpty() } },
+			fallback = { config ->
+				local.playlists(config.id)
+					.let { stored?.apply(it) ?: it }
+					.takeIf { it.isNotEmpty() }
+			},
 		) { client, config -> playlistsFrom(client, config.id) }
+	}
 
 	/**
 	 * One server's playlists, for the "add to playlist" picker — it can only
@@ -239,6 +270,7 @@ class LibraryRepository @Inject constructor(
 			return@channelFlow
 		}
 		val collapse = collapseDuplicates()
+		val stored = storedOnly()
 
 		val answers = arrayOfNulls<LibrarySelection>(servers.size)
 		val failures = arrayOfNulls<ServerFailure>(servers.size)
@@ -251,6 +283,7 @@ class LibraryRepository @Inject constructor(
 				val result = if (offline) {
 					Result.success(
 						local.search(config.id, query, artistCount, albumCount, songCount)
+							.let { stored?.apply(it) ?: it }
 					)
 				} else {
 					runCatchingCancellable {

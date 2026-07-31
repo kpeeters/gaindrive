@@ -31,6 +31,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Playlist
+import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.components.PartialFailureNote
 import org.gaindrive.android.ui.components.PlaylistRow
@@ -115,8 +116,13 @@ fun PlaylistsScreen(
 			) { sections ->
 				if (sections.all { it.items.isEmpty() }) {
 					EmptyMessage(
-						"No playlists yet. Long-press a track and choose " +
-							"“Add to playlist” to make one."
+						if (LocalAvailability.current.online) {
+							"No playlists yet. Long-press a track and choose " +
+								"“Add to playlist” to make one."
+						} else {
+							"No playlist has any of its tracks stored on this " +
+								"device."
+						}
 					)
 					return@RefreshableLoadBox
 				}

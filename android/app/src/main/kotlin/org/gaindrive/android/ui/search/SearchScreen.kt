@@ -46,6 +46,7 @@ import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.playback.TrackState
+import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.components.AlbumRow
 import org.gaindrive.android.ui.components.ArtistRow
 import org.gaindrive.android.ui.components.EmptyMessage
@@ -148,8 +149,10 @@ fun SearchScreen(
 						// answering — that would be a claim we cannot make yet.
 						if (current.outstanding) {
 							EmptyMessage("Searching…")
-						} else {
+						} else if (LocalAvailability.current.online) {
 							EmptyMessage("Nothing matched “$query”.")
+						} else {
+							EmptyMessage("Nothing stored matched “$query”.")
 						}
 					} else {
 						Results(

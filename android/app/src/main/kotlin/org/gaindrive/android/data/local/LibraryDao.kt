@@ -11,6 +11,11 @@ import androidx.room.Upsert
  * repository's job and its rules must not differ between the network path and
  * the stored one.
  */
+/** A `(server, id)` pair from a projection, before it becomes an `ItemRef`. */
+data class RefRow(val serverId: String, val refId: String)
+
+data class ArtistAlbumRow(val serverId: String, val artistId: String, val albumId: String)
+
 @Dao
 interface LibraryDao {
 
@@ -97,6 +102,39 @@ interface LibraryDao {
 			"ORDER BY title COLLATE NOCASE LIMIT :limit"
 	)
 	suspend fun searchSongs(server: String, pattern: String, limit: Int): List<SongEntity>
+
+	// ── What is reachable offline ───────────────────────────────────────────
+	//
+	// The audio cache knows nothing but encoded song refs, so these compare
+	// against `serverId || '/' || id` — the exact string `ItemRef.encode()`
+	// produces. Keeping the join in SQL avoids pulling the whole songs table
+	// into memory to intersect it.
+	//
+	// The key list is bounded by the cache's own size cap, so it is short
+	// enough to pass as parameters; callers still chunk it against SQLite's
+	// variable limit.
+
+	@Query(
+		"SELECT DISTINCT serverId, albumId AS refId FROM songs " +
+			"WHERE albumId IS NOT NULL AND serverId || '/' || id IN (:keys)"
+	)
+	suspend fun albumsWithStoredSongs(keys: List<String>): List<RefRow>
+
+	@Query(
+		"SELECT DISTINCT serverId, playlistId AS refId FROM playlist_songs " +
+			"WHERE serverId || '/' || songId IN (:keys)"
+	)
+	suspend fun playlistsWithStoredSongs(keys: List<String>): List<RefRow>
+
+	/**
+	 * One row per album, not distinct: the caller counts them to say how many
+	 * albums an artist actually has on the device.
+	 */
+	@Query(
+		"SELECT serverId, artistId, id AS albumId FROM albums " +
+			"WHERE artistId IS NOT NULL AND serverId || '/' || id IN (:keys)"
+	)
+	suspend fun artistAlbumsOf(keys: List<String>): List<ArtistAlbumRow>
 
 	// ── Removing a server ───────────────────────────────────────────────────
 

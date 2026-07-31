@@ -26,6 +26,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import org.gaindrive.android.data.model.ArtistIndex
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.components.AlphabetRail
 import org.gaindrive.android.ui.components.ArtistRow
 import org.gaindrive.android.ui.components.EmptyMessage
@@ -79,7 +80,18 @@ fun ArtistsScreen(
 				onRetry = viewModel::load,
 			) { indexes ->
 				if (indexes.isEmpty()) {
-					EmptyMessage("This library has no artists yet.")
+					// Offline the list is trimmed to what has stored audio, so
+					// empty means "nothing downloaded", not "empty library" —
+					// and saying the latter would send the user hunting for a
+					// problem with their server.
+					EmptyMessage(
+						if (LocalAvailability.current.online) {
+							"This library has no artists yet."
+						} else {
+							"Nothing is stored on this device yet. Play or " +
+								"download something while online first."
+						}
+					)
 					return@RefreshableLoadBox
 				}
 

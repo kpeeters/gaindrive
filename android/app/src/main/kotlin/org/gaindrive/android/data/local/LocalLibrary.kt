@@ -183,6 +183,46 @@ class LocalLibrary @Inject constructor(
 		dao.upsertSongs(selection.songs.map { it.toEntity(server) })
 	}
 
+	// ── Offline reachability ────────────────────────────────────────────────
+
+	/**
+	 * Which artists, albums and playlists have stored audio behind them.
+	 *
+	 * Takes the cache's keys as a parameter rather than reading the cache, so
+	 * the mirror stays ignorant of how bytes are stored — the one direction
+	 * that dependency must not run.
+	 */
+	suspend fun storedFilter(storedSongKeys: Set<String>): StoredFilter = io {
+		if (storedSongKeys.isEmpty()) return@io StoredFilter.EMPTY
+
+		val albums = mutableSetOf<String>()
+		val playlists = mutableSetOf<String>()
+		storedSongKeys.chunked(SQL_CHUNK).forEach { chunk ->
+			dao.albumsWithStoredSongs(chunk).forEach { albums += "${it.serverId}/${it.refId}" }
+			dao.playlistsWithStoredSongs(chunk).forEach {
+				playlists += "${it.serverId}/${it.refId}"
+			}
+		}
+
+		val artists = mutableSetOf<String>()
+		val counts = mutableMapOf<String, Int>()
+		albums.chunked(SQL_CHUNK).forEach { chunk ->
+			dao.artistAlbumsOf(chunk).forEach { row ->
+				val artist = "${row.serverId}/${row.artistId}"
+				artists += artist
+				counts[artist] = (counts[artist] ?: 0) + 1
+			}
+		}
+
+		StoredFilter(
+			songs = storedSongKeys,
+			albums = albums,
+			artists = artists,
+			playlists = playlists,
+			albumCounts = counts,
+		)
+	}
+
 	// ── Housekeeping ────────────────────────────────────────────────────────
 
 	suspend fun forgetServer(server: ServerId) = write {
@@ -202,6 +242,12 @@ class LocalLibrary @Inject constructor(
 		_revision.update { it + 1 }
 	}
 }
+
+/**
+ * Well under SQLite's variable limit, which is 999 on older Android releases
+ * and only larger on newer ones.
+ */
+private const val SQL_CHUNK = 500
 
 private fun indexLabelFor(name: String): String {
 	val first = name.trimStart().firstOrNull()?.uppercaseChar() ?: '#'

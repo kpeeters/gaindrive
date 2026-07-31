@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.components.AlbumRow
 import org.gaindrive.android.ui.components.ArtistAvatar
 import org.gaindrive.android.ui.components.EmptyMessage
@@ -89,7 +90,14 @@ fun AlbumsScreen(
 
 					if (albums.isEmpty()) {
 						item(key = "empty") {
-							EmptyMessage("No albums for this artist.")
+							EmptyMessage(
+								if (LocalAvailability.current.online) {
+									"No albums for this artist."
+								} else {
+									"None of this artist's albums are stored " +
+										"on this device."
+								}
+							)
 						}
 					}
 
