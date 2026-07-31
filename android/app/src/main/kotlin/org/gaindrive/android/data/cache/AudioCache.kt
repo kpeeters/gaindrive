@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.gaindrive.android.data.SettingsStore
+import org.gaindrive.android.data.local.LocalLibrary
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -31,6 +32,7 @@ class AudioCache @Inject constructor(
 	private val cache: SimpleCache,
 	private val evictor: PinAwareEvictor,
 	private val pinned: PinnedKeys,
+	private val local: LocalLibrary,
 	settings: SettingsStore,
 	scope: CoroutineScope,
 ) {
@@ -106,15 +108,27 @@ class AudioCache @Inject constructor(
 				.createDataSource()
 		}
 
-	fun isFullyCached(key: String): Boolean {
-		val length = ContentMetadata.getContentLength(cache.getContentMetadata(key))
-		// Length comes from the cache's own record of the response rather than
-		// from the server's reported song size: the two differ as soon as a
-		// bitrate cap transcodes the stream, and only the former is comparable
-		// with what was actually stored.
-		if (length == C.LENGTH_UNSET.toLong()) return false
+	/**
+	 * Whether [key] is held in full.
+	 *
+	 * The cache's own record of the response length is preferred, because it is
+	 * the only figure guaranteed to describe what was actually stored — the
+	 * server's song size disagrees the moment a bitrate cap transcodes the
+	 * stream. [fallbackLength] is used only when the cache has no length at all,
+	 * which for this server is the common case rather than the exception.
+	 *
+	 * When stream transcoding arrives, this fallback becomes wrong for capped
+	 * streams and will need the cap folded into the comparison.
+	 */
+	fun isFullyCached(key: String, fallbackLength: Long? = null): Boolean {
+		val recorded = contentLengthOf(key)
+		val length = if (recorded != C.LENGTH_UNSET.toLong()) recorded else fallbackLength
+		if (length == null || length <= 0) return false
 		return cache.getCachedBytes(key, 0, length) >= length
 	}
+
+	private fun contentLengthOf(key: String): Long =
+		ContentMetadata.getContentLength(cache.getContentMetadata(key))
 
 	/**
 	 * Removes everything unpinned.
@@ -135,12 +149,22 @@ class AudioCache @Inject constructor(
 	}
 
 	private suspend fun refresh() {
+		val keys = withContext(Dispatchers.IO) { cache.keys }
+
+		// gaindrive answers stream.view through a content provider, so
+		// cpp-httplib sends it chunked with no Content-Length and the cache
+		// records no length to compare against. Without this fallback a track
+		// cached by playing it never counted as stored: no mark on its row, and
+		// offline it would have been dimmed as unavailable while sitting on the
+		// device. The mirror's own byte size stands in.
+		val needSize = keys.filter { contentLengthOf(it) == C.LENGTH_UNSET.toLong() }
+		val sizes = local.songSizes(needSize)
+
 		val snapshot = withContext(Dispatchers.IO) {
-			val keys = cache.keys
 			Snapshot(
 				used = cache.cacheSpace,
 				pinnedBytes = keys.filter { pinned.isPinned(it) }.sumOf { cachedBytesOf(it) },
-				complete = keys.filterTo(mutableSetOf()) { isFullyCached(it) },
+				complete = keys.filterTo(mutableSetOf()) { isFullyCached(it, sizes[it]) },
 			)
 		}
 		_usedBytes.value = snapshot.used

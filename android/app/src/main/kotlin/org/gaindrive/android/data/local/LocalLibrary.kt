@@ -223,6 +223,19 @@ class LocalLibrary @Inject constructor(
 		)
 	}
 
+	/**
+	 * Server-reported byte sizes for the given cache keys, where the mirror
+	 * knows them. Keys never browsed are simply absent.
+	 */
+	suspend fun songSizes(keys: Collection<String>): Map<String, Long> = io {
+		if (keys.isEmpty()) return@io emptyMap()
+		buildMap {
+			keys.chunked(SQL_CHUNK).forEach { chunk ->
+				dao.songSizes(chunk).forEach { put(it.refKey, it.sizeBytes) }
+			}
+		}
+	}
+
 	// ── Housekeeping ────────────────────────────────────────────────────────
 
 	suspend fun forgetServer(server: ServerId) = write {

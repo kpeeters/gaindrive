@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -338,10 +339,13 @@ fun SongRow(
  * Where a track stands with respect to being downloaded: waiting its turn, being
  * fetched, or here.
  *
- * All three occupy the same 16dp so a row never reflows as an album downloads,
- * and nothing shows at all for a track that merely happens to be cached from
- * playing it — otherwise the mark would appear on everything recently played
- * and mean nothing.
+ * Two kinds of "here", deliberately distinct. A tick means downloaded — asked
+ * for, and safe from eviction. A small dot means merely cached from having been
+ * played, which will still play offline but may be reclaimed when the cache
+ * fills. Collapsing them would promise permanence the second kind does not have.
+ *
+ * Everything occupies at most 16dp so a row never reflows as an album
+ * downloads.
  */
 @Composable
 private fun TrackDownloadMark(ref: ItemRef) {
@@ -354,6 +358,16 @@ private fun TrackDownloadMark(ref: ItemRef) {
 			contentDescription = "Downloaded",
 			tint = MaterialTheme.colorScheme.onSurfaceVariant,
 			modifier = Modifier.size(16.dp),
+		)
+
+		// Cached by being played rather than downloaded on purpose. A smaller,
+		// quieter mark: it says the track will play offline, without claiming
+		// the permanence a download has — eviction may take it back.
+		download == null && availability.isCachedOnly(ref) -> Icon(
+			imageVector = Icons.Default.Circle,
+			contentDescription = "Stored, but not downloaded",
+			tint = MaterialTheme.colorScheme.onSurfaceVariant,
+			modifier = Modifier.size(8.dp),
 		)
 
 		download == null -> Unit

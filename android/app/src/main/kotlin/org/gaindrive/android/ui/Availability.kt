@@ -52,10 +52,24 @@ data class AvailabilityState(
 		}
 	}
 
-	/** Kept on purpose, as opposed to merely happening to be cached. */
+	/** Kept on purpose: pinned, and the audio has arrived. */
 	fun isDownloaded(ref: ItemRef): Boolean {
 		val key = ref.encode()
 		return key in pinnedKeys && key in storedKeys
+	}
+
+	/**
+	 * Here because it was played, not because it was asked for.
+	 *
+	 * Worth its own mark rather than none at all: it is the difference between
+	 * a track that will play offline and one that will not, which is exactly
+	 * what someone about to lose signal wants to see. It is a weaker promise
+	 * than [isDownloaded] though — eviction may reclaim it — so the two do not
+	 * share a symbol.
+	 */
+	fun isCachedOnly(ref: ItemRef): Boolean {
+		val key = ref.encode()
+		return key in storedKeys && key !in pinnedKeys
 	}
 }
 

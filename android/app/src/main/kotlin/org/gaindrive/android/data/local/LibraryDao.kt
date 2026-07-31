@@ -16,6 +16,9 @@ data class RefRow(val serverId: String, val refId: String)
 
 data class ArtistAlbumRow(val serverId: String, val artistId: String, val albumId: String)
 
+/** [refKey] is already an encoded `ItemRef`, so it matches a cache key directly. */
+data class SongSizeRow(val refKey: String, val sizeBytes: Long)
+
 @Dao
 interface LibraryDao {
 
@@ -125,6 +128,18 @@ interface LibraryDao {
 			"WHERE serverId || '/' || songId IN (:keys)"
 	)
 	suspend fun playlistsWithStoredSongs(keys: List<String>): List<RefRow>
+
+	/**
+	 * The server's byte size for songs the cache is holding.
+	 *
+	 * The fallback for judging whether a cached track is complete when the cache
+	 * itself cannot say — see `AudioCache.refresh`.
+	 */
+	@Query(
+		"SELECT serverId || '/' || id AS refKey, sizeBytes FROM songs " +
+			"WHERE serverId || '/' || id IN (:keys)"
+	)
+	suspend fun songSizes(keys: List<String>): List<SongSizeRow>
 
 	/**
 	 * One row per album, not distinct: the caller counts them to say how many
