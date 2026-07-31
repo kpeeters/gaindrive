@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -55,9 +56,53 @@ class SettingsStore @Inject constructor(
 		dataStore.edit { it[MERGE_ALBUMS] = enabled }
 	}
 
-	private companion object {
-		val THEME = stringPreferencesKey("theme_mode")
-		val SELECTED_SERVER = stringPreferencesKey("selected_server")
-		val MERGE_ALBUMS = booleanPreferencesKey("merge_duplicate_albums")
+	/**
+	 * How much audio the cache may hold. Pinned downloads can push it past this
+	 * — see `PinAwareEvictor` — but nothing else may.
+	 */
+	val cacheMaxBytes: Flow<Long> =
+		dataStore.data.map { it[CACHE_MAX_BYTES] ?: DEFAULT_CACHE_BYTES }
+
+	suspend fun setCacheMaxBytes(bytes: Long) {
+		dataStore.edit { it[CACHE_MAX_BYTES] = bytes }
+	}
+
+	/**
+	 * Whether playing a track also stores it.
+	 *
+	 * On by default: replaying an album is the common case, and the cap plus
+	 * automatic eviction means it cannot run away. Turning it off still leaves
+	 * the cache readable, so pinned downloads keep working.
+	 */
+	val cacheOnPlay: Flow<Boolean> = dataStore.data.map { it[CACHE_ON_PLAY] ?: true }
+
+	suspend fun setCacheOnPlay(enabled: Boolean) {
+		dataStore.edit { it[CACHE_ON_PLAY] = enabled }
+	}
+
+	/**
+	 * Whether pinned downloads wait for an unmetered connection.
+	 *
+	 * On by default, and only applies to downloads: caching what you are
+	 * already streaming costs no extra data, so gating that on Wi-Fi would
+	 * penalise the mobile listener for nothing.
+	 */
+	val downloadUnmeteredOnly: Flow<Boolean> =
+		dataStore.data.map { it[DOWNLOAD_UNMETERED_ONLY] ?: true }
+
+	suspend fun setDownloadUnmeteredOnly(enabled: Boolean) {
+		dataStore.edit { it[DOWNLOAD_UNMETERED_ONLY] = enabled }
+	}
+
+	companion object {
+		/** Big enough to be useful, small enough not to surprise anyone. */
+		const val DEFAULT_CACHE_BYTES = 4L * 1024 * 1024 * 1024
+
+		private val THEME = stringPreferencesKey("theme_mode")
+		private val SELECTED_SERVER = stringPreferencesKey("selected_server")
+		private val MERGE_ALBUMS = booleanPreferencesKey("merge_duplicate_albums")
+		private val CACHE_MAX_BYTES = longPreferencesKey("cache_max_bytes")
+		private val CACHE_ON_PLAY = booleanPreferencesKey("cache_on_play")
+		private val DOWNLOAD_UNMETERED_ONLY = booleanPreferencesKey("download_unmetered_only")
 	}
 }

@@ -14,12 +14,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
@@ -29,6 +33,8 @@ import org.gaindrive.android.data.model.Artist
 import org.gaindrive.android.data.model.Playlist
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.playback.TrackState
+import org.gaindrive.android.ui.Availability
+import org.gaindrive.android.ui.LocalAvailability
 
 /** Shared row composables. Every browse screen is built from these. */
 
@@ -186,10 +192,21 @@ fun TrackRow(
 	showNumber: Boolean = true,
 	trailing: @Composable (() -> Unit)? = null,
 ) {
+	val availability = LocalAvailability.current
+	val playable = availability.of(song.ref) != Availability.UNAVAILABLE
+
 	Row(
 		modifier = modifier
 			.fillMaxWidth()
-			.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+			// Dimmed and inert rather than hidden: offline, seeing that a track
+			// exists but is not here beats an album that has lost half its
+			// tracks with no explanation.
+			.alpha(if (playable) 1f else UNAVAILABLE_ALPHA)
+			.combinedClickable(
+				enabled = playable,
+				onClick = onClick,
+				onLongClick = onLongClick,
+			)
 			.padding(horizontal = 16.dp, vertical = 12.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -224,6 +241,7 @@ fun TrackRow(
 			overflow = TextOverflow.Ellipsis,
 			modifier = Modifier.weight(1f),
 		)
+		DownloadedMark(availability.isDownloaded(song.ref))
 		Text(
 			text = formatDuration(song.duration),
 			style = MaterialTheme.typography.bodySmall,
@@ -246,10 +264,18 @@ fun SongRow(
 	badge: String? = null,
 	trailing: @Composable (() -> Unit)? = null,
 ) {
+	val availability = LocalAvailability.current
+	val playable = availability.of(song.ref) != Availability.UNAVAILABLE
+
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
-			.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+			.alpha(if (playable) 1f else UNAVAILABLE_ALPHA)
+			.combinedClickable(
+				enabled = playable,
+				onClick = onClick,
+				onLongClick = onLongClick,
+			)
 			.padding(horizontal = 16.dp, vertical = 8.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -292,6 +318,7 @@ fun SongRow(
 				overflow = TextOverflow.Ellipsis,
 			)
 		}
+		DownloadedMark(availability.isDownloaded(song.ref))
 		ServerBadge(badge)
 		if (trailingText != null) {
 			Text(
@@ -304,6 +331,25 @@ fun SongRow(
 	}
 }
 
+/**
+ * Marks a track that was downloaded on purpose, not one that merely happens to
+ * be cached — otherwise the mark would appear on everything recently played and
+ * mean nothing.
+ */
+@Composable
+private fun DownloadedMark(downloaded: Boolean) {
+	if (!downloaded) return
+	Icon(
+		imageVector = Icons.Default.DownloadDone,
+		contentDescription = "Downloaded",
+		tint = MaterialTheme.colorScheme.onSurfaceVariant,
+		modifier = Modifier.size(16.dp),
+	)
+}
+
+/** Legible, but plainly not something you can tap. */
+private const val UNAVAILABLE_ALPHA = 0.38f
+
 /** Small enough to sit in a track number's place. */
 @Composable
 private fun TrackSpinner(tint: Color = MaterialTheme.colorScheme.primary) {
@@ -312,6 +358,21 @@ private fun TrackSpinner(tint: Color = MaterialTheme.colorScheme.primary) {
 		strokeWidth = 2.dp,
 		color = tint,
 	)
+}
+
+/** Whole numbers where they are exact, one decimal where they are not. */
+fun formatBytes(bytes: Long): String {
+	val gb = 1024.0 * 1024 * 1024
+	val mb = 1024.0 * 1024
+	return when {
+		bytes >= gb -> {
+			val value = bytes / gb
+			if (value == value.toLong().toDouble()) "${value.toLong()} GB"
+			else "%.1f GB".format(value)
+		}
+		bytes >= mb -> "%.0f MB".format(bytes / mb)
+		else -> "${bytes / 1024} kB"
+	}
 }
 
 fun formatDuration(seconds: Int): String {

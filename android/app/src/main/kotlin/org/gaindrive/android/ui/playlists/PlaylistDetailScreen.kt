@@ -25,8 +25,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.gaindrive.android.data.cache.PinKind
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.ui.components.EmptyMessage
+import org.gaindrive.android.ui.components.PinAction
 import org.gaindrive.android.ui.components.RefreshableLoadBox
 import org.gaindrive.android.ui.components.SongRow
 import org.gaindrive.android.ui.player.PlayerViewModel
@@ -75,6 +77,7 @@ fun PlaylistDetailScreen(
 						Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
 					}
 				},
+				actions = { PinAction(ref = viewModel.playlistRef, kind = PinKind.PLAYLIST) },
 			)
 		},
 		snackbarHost = { SnackbarHost(snackbar) },

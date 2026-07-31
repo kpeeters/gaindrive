@@ -1,0 +1,117 @@
+package org.gaindrive.android.data.local
+
+import androidx.room.Dao
+import androidx.room.Query
+import androidx.room.Upsert
+
+/**
+ * Reads and writes of the mirrored library.
+ *
+ * Every read is scoped to one server, because merging across servers is the
+ * repository's job and its rules must not differ between the network path and
+ * the stored one.
+ */
+@Dao
+interface LibraryDao {
+
+	@Upsert
+	suspend fun upsertArtists(rows: List<ArtistEntity>)
+
+	@Upsert
+	suspend fun upsertAlbums(rows: List<AlbumEntity>)
+
+	@Upsert
+	suspend fun upsertSongs(rows: List<SongEntity>)
+
+	@Upsert
+	suspend fun upsertPlaylists(rows: List<PlaylistEntity>)
+
+	@Upsert
+	suspend fun upsertPlaylistSongs(rows: List<PlaylistSongEntity>)
+
+	@Query(
+		"SELECT * FROM artists WHERE serverId = :server " +
+			"ORDER BY indexLabel, name COLLATE NOCASE"
+	)
+	suspend fun artists(server: String): List<ArtistEntity>
+
+	@Query("SELECT * FROM artists WHERE serverId = :server AND id = :id")
+	suspend fun artist(server: String, id: String): ArtistEntity?
+
+	@Query(
+		"SELECT * FROM albums WHERE serverId = :server AND artistId = :artistId " +
+			"ORDER BY year, title COLLATE NOCASE"
+	)
+	suspend fun albumsOfArtist(server: String, artistId: String): List<AlbumEntity>
+
+	@Query("SELECT * FROM albums WHERE serverId = :server AND id = :id")
+	suspend fun album(server: String, id: String): AlbumEntity?
+
+	@Query("SELECT * FROM songs WHERE serverId = :server AND id = :id")
+	suspend fun song(server: String, id: String): SongEntity?
+
+	@Query(
+		"SELECT * FROM songs WHERE serverId = :server AND albumId = :albumId " +
+			"ORDER BY discNumber, track, title COLLATE NOCASE"
+	)
+	suspend fun songsOfAlbum(server: String, albumId: String): List<SongEntity>
+
+	@Query("SELECT * FROM playlists WHERE serverId = :server ORDER BY name COLLATE NOCASE")
+	suspend fun playlists(server: String): List<PlaylistEntity>
+
+	@Query("SELECT * FROM playlists WHERE serverId = :server AND id = :id")
+	suspend fun playlist(server: String, id: String): PlaylistEntity?
+
+	@Query(
+		"SELECT s.* FROM playlist_songs ps " +
+			"JOIN songs s ON s.serverId = ps.serverId AND s.id = ps.songId " +
+			"WHERE ps.serverId = :server AND ps.playlistId = :playlistId " +
+			"ORDER BY ps.position"
+	)
+	suspend fun songsOfPlaylist(server: String, playlistId: String): List<SongEntity>
+
+	/**
+	 * Membership is replaced wholesale rather than diffed: positions shift when
+	 * anything is inserted or removed, so a partial update would leave the
+	 * stored order disagreeing with the server's.
+	 */
+	@Query("DELETE FROM playlist_songs WHERE serverId = :server AND playlistId = :playlistId")
+	suspend fun clearPlaylistSongs(server: String, playlistId: String)
+
+	@Query(
+		"SELECT * FROM artists WHERE serverId = :server AND name LIKE :pattern " +
+			"ORDER BY name COLLATE NOCASE LIMIT :limit"
+	)
+	suspend fun searchArtists(server: String, pattern: String, limit: Int): List<ArtistEntity>
+
+	@Query(
+		"SELECT * FROM albums WHERE serverId = :server " +
+			"AND (title LIKE :pattern OR artistName LIKE :pattern) " +
+			"ORDER BY title COLLATE NOCASE LIMIT :limit"
+	)
+	suspend fun searchAlbums(server: String, pattern: String, limit: Int): List<AlbumEntity>
+
+	@Query(
+		"SELECT * FROM songs WHERE serverId = :server " +
+			"AND (title LIKE :pattern OR artistName LIKE :pattern) " +
+			"ORDER BY title COLLATE NOCASE LIMIT :limit"
+	)
+	suspend fun searchSongs(server: String, pattern: String, limit: Int): List<SongEntity>
+
+	// ── Removing a server ───────────────────────────────────────────────────
+
+	@Query("DELETE FROM artists WHERE serverId = :server")
+	suspend fun deleteArtists(server: String)
+
+	@Query("DELETE FROM albums WHERE serverId = :server")
+	suspend fun deleteAlbums(server: String)
+
+	@Query("DELETE FROM songs WHERE serverId = :server")
+	suspend fun deleteSongs(server: String)
+
+	@Query("DELETE FROM playlists WHERE serverId = :server")
+	suspend fun deletePlaylists(server: String)
+
+	@Query("DELETE FROM playlist_songs WHERE serverId = :server")
+	suspend fun deletePlaylistSongs(server: String)
+}

@@ -12,13 +12,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -27,10 +30,13 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -44,9 +50,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.gaindrive.android.data.cache.PinnedItem
 import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.data.model.ThemeMode
+import org.gaindrive.android.ui.components.formatBytes
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -111,30 +119,36 @@ fun SettingsScreen(
 
 			item { SectionTitle("Library") }
 			item {
-				Row(
-					modifier = Modifier.fillMaxWidth(),
-					verticalAlignment = Alignment.CenterVertically,
-					horizontalArrangement = Arrangement.spacedBy(12.dp),
-				) {
-					Column(modifier = Modifier.weight(1f)) {
-						Text(
-							text = "Merge duplicate albums",
-							style = MaterialTheme.typography.bodyLarge,
-						)
-						Text(
-							// Says what it matches on, because that is what
-							// decides whether it does the right thing.
-							text = "Show one row when the same artist and album " +
-								"title appear on several servers. Case, spacing " +
-							"and punctuation are ignored.",
-							style = MaterialTheme.typography.bodySmall,
-							color = MaterialTheme.colorScheme.onSurfaceVariant,
-						)
-					}
-					Switch(
-						checked = state.mergeDuplicateAlbums,
-						onCheckedChange = viewModel::setMergeDuplicateAlbums,
-					)
+				SwitchRow(
+					title = "Merge duplicate albums",
+					// Says what it matches on, because that is what decides
+					// whether it does the right thing.
+					subtitle = "Show one row when the same artist and album title " +
+						"appear on several servers. Case, spacing and punctuation " +
+						"are ignored.",
+					checked = state.mergeDuplicateAlbums,
+					onCheckedChange = viewModel::setMergeDuplicateAlbums,
+				)
+			}
+
+			item { SectionTitle("Storage") }
+			item {
+				StorageSection(
+					storage = state.storage,
+					onSetMaxBytes = viewModel::setCacheMaxBytes,
+					onSetCacheOnPlay = viewModel::setCacheOnPlay,
+					onSetUnmeteredOnly = viewModel::setDownloadUnmeteredOnly,
+					onFlush = { viewModel.flushCache() },
+				)
+			}
+
+			// Listed only when there are some. Pins are placed deep in the
+			// library, so without this the only way to find one again is to
+			// remember where it was.
+			if (state.pins.isNotEmpty()) {
+				item { SectionTitle("Downloads") }
+				items(state.pins, key = { it.pin.ref.encode() }) { item ->
+					PinnedRow(item = item, onRemove = { viewModel.unpin(item.pin.ref) })
 				}
 			}
 
@@ -161,6 +175,168 @@ fun SettingsScreen(
 				)
 			}
 		}
+	}
+}
+
+/**
+ * Cache usage, the cap, and the flush.
+ *
+ * No per-item list: eviction handles the ordinary case and pinning covers the
+ * "keep this" case, so browsing individual cached files would be a screen
+ * nobody has a reason to open.
+ */
+@Composable
+private fun StorageSection(
+	storage: StorageUiState,
+	onSetMaxBytes: (Long) -> Unit,
+	onSetCacheOnPlay: (Boolean) -> Unit,
+	onSetUnmeteredOnly: (Boolean) -> Unit,
+	onFlush: () -> Unit,
+) {
+	var confirmFlush by remember { mutableStateOf(false) }
+	val evictable = (storage.usedBytes - storage.pinnedBytes).coerceAtLeast(0)
+
+	Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+		Text(
+			text = buildString {
+				append("${formatBytes(storage.usedBytes)} of ${formatBytes(storage.maxBytes)} used")
+				// Only worth saying once something is actually protected.
+				if (storage.pinnedBytes > 0) {
+					append(", ${formatBytes(storage.pinnedBytes)} of it downloaded")
+				}
+			},
+			style = MaterialTheme.typography.bodyMedium,
+		)
+		LinearProgressIndicator(
+			progress = {
+				if (storage.maxBytes <= 0) 0f
+				else (storage.usedBytes.toFloat() / storage.maxBytes).coerceIn(0f, 1f)
+			},
+			modifier = Modifier.fillMaxWidth(),
+		)
+
+		Text(
+			text = "Maximum size",
+			style = MaterialTheme.typography.bodyLarge,
+		)
+		Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+			CACHE_SIZES.forEach { bytes ->
+				FilterChip(
+					selected = storage.maxBytes == bytes,
+					onClick = { onSetMaxBytes(bytes) },
+					label = { Text(formatBytes(bytes)) },
+				)
+			}
+		}
+
+		SwitchRow(
+			title = "Store music as it plays",
+			subtitle = "Anything you play is kept until the cache is full, then " +
+				"the least recently played goes first. Downloads are never " +
+				"removed automatically.",
+			checked = storage.cacheOnPlay,
+			onCheckedChange = onSetCacheOnPlay,
+		)
+
+		SwitchRow(
+			title = "Download on Wi-Fi only",
+			// Says why it does not cover the other switch, which is the
+			// question this one invites.
+			subtitle = "Applies to downloads. Storing what you are already " +
+				"streaming costs no extra data, so it is never held back.",
+			checked = storage.unmeteredOnly,
+			onCheckedChange = onSetUnmeteredOnly,
+		)
+
+		OutlinedButton(
+			onClick = { confirmFlush = true },
+			enabled = evictable > 0,
+		) {
+			Text("Free ${formatBytes(evictable)}")
+		}
+	}
+
+	if (confirmFlush) {
+		AlertDialog(
+			onDismissRequest = { confirmFlush = false },
+			title = { Text("Empty the cache?") },
+			text = {
+				Text(
+					"Removes ${formatBytes(evictable)} of stored music. Downloads " +
+						"and anything currently queued are kept."
+				)
+			},
+			confirmButton = {
+				TextButton(
+					onClick = {
+						confirmFlush = false
+						onFlush()
+					}
+				) { Text("Empty") }
+			},
+			dismissButton = {
+				TextButton(onClick = { confirmFlush = false }) { Text("Cancel") }
+			},
+		)
+	}
+}
+
+/** The caps offered. A slider would imply a precision nobody wants here. */
+private val CACHE_SIZES = listOf(
+	1L * 1024 * 1024 * 1024,
+	2L * 1024 * 1024 * 1024,
+	4L * 1024 * 1024 * 1024,
+	8L * 1024 * 1024 * 1024,
+	16L * 1024 * 1024 * 1024,
+)
+
+@Composable
+private fun PinnedRow(item: PinnedItem, onRemove: () -> Unit) {
+	Row(
+		modifier = Modifier.fillMaxWidth(),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(12.dp),
+	) {
+		Column(modifier = Modifier.weight(1f)) {
+			Text(
+				text = item.label,
+				style = MaterialTheme.typography.bodyLarge,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
+			Text(
+				text = item.pin.kind.name.lowercase().replaceFirstChar { it.uppercase() },
+				style = MaterialTheme.typography.bodySmall,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+			)
+		}
+		IconButton(onClick = onRemove) {
+			Icon(Icons.Default.Delete, contentDescription = "Remove download")
+		}
+	}
+}
+
+@Composable
+private fun SwitchRow(
+	title: String,
+	subtitle: String,
+	checked: Boolean,
+	onCheckedChange: (Boolean) -> Unit,
+) {
+	Row(
+		modifier = Modifier.fillMaxWidth(),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(12.dp),
+	) {
+		Column(modifier = Modifier.weight(1f)) {
+			Text(text = title, style = MaterialTheme.typography.bodyLarge)
+			Text(
+				text = subtitle,
+				style = MaterialTheme.typography.bodySmall,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+			)
+		}
+		Switch(checked = checked, onCheckedChange = onCheckedChange)
 	}
 }
 

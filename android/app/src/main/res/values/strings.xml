@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 	<string name="app_name">GainDrive</string>
+	<!-- Names the notification channel in Android's own settings, so it says
+	     what it is rather than repeating the app name. -->
+	<string name="download_channel_name">Downloads</string>
 </resources>

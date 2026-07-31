@@ -26,9 +26,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.gaindrive.android.data.cache.PinKind
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.ui.components.CoverHero
 import org.gaindrive.android.ui.components.ExternalLink
+import org.gaindrive.android.ui.components.PinAction
 import org.gaindrive.android.ui.components.RefreshableLoadBox
 import org.gaindrive.android.ui.components.NotesSection
 import org.gaindrive.android.ui.components.TrackRow
@@ -68,6 +70,7 @@ fun AlbumDetailScreen(
 						Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
 					}
 				},
+				actions = { PinAction(ref = viewModel.albumRef, kind = PinKind.ALBUM) },
 			)
 		},
 	) { insets ->

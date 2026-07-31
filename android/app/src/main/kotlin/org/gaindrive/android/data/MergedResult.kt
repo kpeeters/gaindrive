@@ -3,7 +3,14 @@ package org.gaindrive.android.data
 import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
 
-/** A server that did not answer, and why, in words the UI can show. */
+/**
+ * A server that did not answer, and why, in words the UI can show.
+ *
+ * [message] also says whether a stored copy was put on screen in its place.
+ * Carrying that in the message rather than as a flag on [MergedResult] means
+ * every screen that already shows these gets it without any of them having to
+ * learn what a mirror is.
+ */
 data class ServerFailure(
 	val server: ServerId,
 	val serverName: String,

@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import org.gaindrive.android.data.crypto.CredentialCipher
+import org.gaindrive.android.data.local.LocalLibrary
 import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.net.SubsonicClientFactory
@@ -23,6 +24,7 @@ class ServerRegistry @Inject constructor(
 	private val store: ServerStore,
 	private val cipher: CredentialCipher,
 	private val clients: SubsonicClientFactory,
+	private val local: LocalLibrary,
 ) {
 
 	val servers: Flow<List<ServerConfig>> = store.servers.map { stored ->
@@ -91,6 +93,9 @@ class ServerRegistry @Inject constructor(
 	suspend fun remove(id: ServerId) {
 		mutate { list -> list.filterNot { it.id == id.value } }
 		clients.forget(id)
+		// Its mirrored library would otherwise sit there forever, unreachable
+		// and unremovable — nothing else knows the server ever existed.
+		local.forgetServer(id)
 	}
 
 	suspend fun move(from: Int, to: Int) = mutate { list ->

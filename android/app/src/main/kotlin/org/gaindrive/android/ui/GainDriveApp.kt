@@ -37,6 +37,7 @@ import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.ui.browse.AlbumDetailScreen
 import org.gaindrive.android.ui.browse.AlbumsScreen
 import org.gaindrive.android.ui.browse.ArtistsScreen
+import org.gaindrive.android.ui.components.OfflineNote
 import org.gaindrive.android.ui.player.MiniPlayer
 import org.gaindrive.android.ui.player.NowPlayingSheet
 import org.gaindrive.android.ui.player.PlayerViewModel
@@ -91,6 +92,10 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 		bottomBar = {
 			if (showBottomBar) {
 				Column {
+					// Sits with the player rather than in each screen's app bar:
+					// having no network is a fact about the whole app, and one
+					// banner is better than five that have to agree.
+					OfflineNote(online = LocalAvailability.current.online)
 					// Above the navigation bar, and outside the NavHost, so it
 					// persists across navigation the way the web client's fixed
 					// footer does.

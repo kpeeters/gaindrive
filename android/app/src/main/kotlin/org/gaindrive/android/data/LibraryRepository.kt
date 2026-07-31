@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.gaindrive.android.data.local.LocalLibrary
 import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.AlbumDetail
 import org.gaindrive.android.data.model.AlbumNotes
@@ -50,13 +51,20 @@ class LibraryRepository @Inject constructor(
 	private val registry: ServerRegistry,
 	private val settings: SettingsStore,
 	private val clients: SubsonicClientFactory,
+	private val local: LocalLibrary,
 ) {
 
 	suspend fun artistIndexes(
 		scope: BrowseScope,
 		personalOnly: Boolean = false,
 	): MergedResult<List<ArtistIndex>> =
-		fanOut(scope) { client, config ->
+		fanOut(
+			scope,
+			// The mirror does not model the personal-only filter — it is a view
+			// of the same artists — so an unreachable server contributes
+			// everything stored for it rather than nothing at all.
+			fallback = { config -> local.artistIndexes(config.id).takeIf { it.isNotEmpty() } },
+		) { client, config ->
 			// Positional: SubsonicClient reaches the API through interface
 			// delegation, so named arguments lean on generated parameter names.
 			client.getArtists(if (personalOnly) "true" else null)
@@ -64,6 +72,7 @@ class LibraryRepository @Inject constructor(
 				.map { it.toDomain(config.id) }
 				// Buckets with no artists are noise in a sticky-header list.
 				.filter { it.artists.isNotEmpty() }
+				.also { local.saveArtistIndexes(config.id, it) }
 		}.map { mergeArtistIndexes(it) }
 
 	/**
@@ -77,19 +86,26 @@ class LibraryRepository @Inject constructor(
 		// Read once per query rather than once per row, and before the fan-out
 		// so the transform below stays non-suspending.
 		val collapse = collapseDuplicates()
-		return fanOutRefs(refs) { client, ref ->
+		return fanOutRefs(
+			refs,
+			fallback = { ref -> local.albumsOfArtist(ref).takeIf { it.isNotEmpty() } },
+		) { client, ref ->
 			client.getArtist(ref.id).requireOk().artist?.album.orEmpty()
 				.map { it.toDomain(ref.server) }
+				// Stored before merging: the merge collapses the same album on
+				// two servers into one row, and the mirror has to keep both.
+				.also { local.saveAlbums(ref.server, it) }
 		}.map { perServer ->
 			val all = perServer.flatten()
 			if (collapse) mergeAlbums(all) else all
 		}
 	}
 
-	suspend fun artist(ref: ItemRef): Artist? =
+	suspend fun artist(ref: ItemRef): Artist? = networkFirst({ local.artist(ref) }) {
 		onServer(ref.server) { client ->
 			client.getArtist(ref.id).requireOk().artist?.toDomain(ref.server)
-		}
+		}?.also { local.saveArtist(ref.server, it) }
+	}
 
 	/**
 	 * Biography and links for an artist.
@@ -111,12 +127,14 @@ class LibraryRepository @Inject constructor(
 	 * cost the user their track list.
 	 */
 	suspend fun albumDetail(album: ItemRef): AlbumDetail? =
-		onServer(album.server) { client ->
-			val dto = client.getAlbum(album.id).requireOk().album ?: return@onServer null
-			AlbumDetail(
-				album = dto.toDomain(album.server),
-				songs = dto.song.map { it.toDomain(album.server) },
-			)
+		networkFirst({ local.albumDetail(album) }) {
+			onServer(album.server) { client ->
+				val dto = client.getAlbum(album.id).requireOk().album ?: return@onServer null
+				AlbumDetail(
+					album = dto.toDomain(album.server),
+					songs = dto.song.map { it.toDomain(album.server) },
+				)
+			}?.also { local.saveAlbumDetail(album.server, it) }
 		}
 
 	suspend fun albumNotes(album: ItemRef): AlbumNotes? =
@@ -135,7 +153,10 @@ class LibraryRepository @Inject constructor(
 
 	/** Grouped by server: a playlist belongs to one and cannot be merged. */
 	suspend fun playlists(scope: BrowseScope): MergedResult<List<ServerSection<Playlist>>> =
-		fanOutSections(scope) { client, config -> playlistsFrom(client, config.id) }
+		fanOutSections(
+			scope,
+			fallback = { config -> local.playlists(config.id).takeIf { it.isNotEmpty() } },
+		) { client, config -> playlistsFrom(client, config.id) }
 
 	/**
 	 * One server's playlists, for the "add to playlist" picker — it can only
@@ -147,11 +168,13 @@ class LibraryRepository @Inject constructor(
 	private suspend fun playlistsFrom(client: SubsonicClient, server: ServerId): List<Playlist> =
 		client.getPlaylists().requireOk().playlists?.playlist.orEmpty()
 			.map { it.toDomain(server) }
+			.also { local.savePlaylists(server, it) }
 
-	suspend fun playlist(ref: ItemRef): Playlist? =
+	suspend fun playlist(ref: ItemRef): Playlist? = networkFirst({ local.playlist(ref) }) {
 		onServer(ref.server) { client ->
 			client.getPlaylist(ref.id).requireOk().playlist?.toDomain(ref.server)
-		}
+		}?.also { local.savePlaylist(ref.server, it) }
+	}
 
 	/**
 	 * One server's results. Search fans out through [searchProgressively],
@@ -164,8 +187,10 @@ class LibraryRepository @Inject constructor(
 		albumCount: Int,
 		songCount: Int,
 	): LibrarySelection = onServer(server) { client ->
-		client.search3(query, artistCount, albumCount, songCount)
+		val found = client.search3(query, artistCount, albumCount, songCount)
 			.requireOk().searchResult3?.toDomain(server) ?: LibrarySelection()
+		local.saveSelection(server, found)
+		found
 	}
 
 	/**
@@ -200,10 +225,20 @@ class LibraryRepository @Inject constructor(
 				val result = runCatchingCancellable {
 					search(config.id, query, artistCount, albumCount, songCount)
 				}
+				// Resolved before taking the lock: this reads a database, and
+				// holding up the servers that did answer to do it would defeat
+				// the point of emitting progressively.
+				val fallback = result.exceptionOrNull()?.let {
+					local.search(config.id, query, artistCount, albumCount, songCount)
+						.takeIf { found -> !found.isEmpty }
+				}
 				guard.withLock {
 					result.fold(
 						onSuccess = { answers[index] = it },
-						onFailure = { failures[index] = config.failure(it) },
+						onFailure = {
+							failures[index] = config.failure(it, storedShown = fallback != null)
+							if (fallback != null) answers[index] = fallback
+						},
 					)
 					val arrived = answers.filterNotNull()
 					send(
@@ -335,34 +370,28 @@ class LibraryRepository @Inject constructor(
 		}
 	}
 
-	/**
-	 * Runs [block] against every server in [scope] at once, keeping whatever
-	 * answered and turning the rest into [ServerFailure]s.
-	 *
-	 * In parallel, not in sequence: three servers queried one after another
-	 * would make every browse screen as slow as the sum of them, and one that
-	 * has gone away would hold up the two that are fine until it times out.
-	 */
 	private suspend fun <T> fanOut(
 		scope: BrowseScope,
+		fallback: (suspend (ServerConfig) -> T?)? = null,
 		block: suspend (SubsonicClient, ServerConfig) -> T,
 	): MergedResult<List<T>> {
-		val (answers, failures) = gather(serversIn(scope), block)
-		return MergedResult(answers.map { it.second }, failures)
+		val gathered = gather(serversIn(scope), fallback, block)
+		return MergedResult(gathered.answers.map { it.second }, gathered.failures)
 	}
 
 	/** As [fanOut], but keeping each server's items in their own section. */
 	private suspend fun <T> fanOutSections(
 		scope: BrowseScope,
+		fallback: (suspend (ServerConfig) -> List<T>?)? = null,
 		block: suspend (SubsonicClient, ServerConfig) -> List<T>,
 	): MergedResult<List<ServerSection<T>>> {
-		val (answers, failures) = gather(serversIn(scope), block)
+		val gathered = gather(serversIn(scope), fallback, block)
 		return MergedResult(
 			// A heading over nothing is noise; a server with no playlists just
 			// does not appear.
-			items = answers.map { (config, items) -> ServerSection(config, items) }
+			items = gathered.answers.map { (config, items) -> ServerSection(config, items) }
 				.filter { it.items.isNotEmpty() },
-			failures = failures,
+			failures = gathered.failures,
 		)
 	}
 
@@ -372,6 +401,7 @@ class LibraryRepository @Inject constructor(
 	 */
 	private suspend fun <T> fanOutRefs(
 		refs: List<ItemRef>,
+		fallback: (suspend (ItemRef) -> T?)? = null,
 		block: suspend (SubsonicClient, ItemRef) -> T,
 	): MergedResult<List<T>> = coroutineScope {
 		val configs = registry.enabledServers.first()
@@ -380,25 +410,42 @@ class LibraryRepository @Inject constructor(
 			// reported: it is stale navigation state, not a server that failed.
 			val config = configs.firstOrNull { it.id == ref.server } ?: return@mapNotNull null
 			async(Dispatchers.IO) {
-				config to runCatchingCancellable { block(clients.clientFor(config), ref) }
+				Triple(config, ref, runCatchingCancellable { block(clients.clientFor(config), ref) })
 			}
 		}.awaitAll()
 
 		val items = mutableListOf<T>()
 		val failures = mutableListOf<ServerFailure>()
-		answers.forEach { (config, result) ->
+		answers.forEach { (config, ref, result) ->
 			result.fold(
 				onSuccess = { items += it },
-				onFailure = { failures += config.failure(it) },
+				onFailure = { error ->
+					val stored = fallback?.invoke(ref)
+					stored?.let { items += it }
+					failures += config.failure(error, storedShown = stored != null)
+				},
 			)
 		}
 		MergedResult(items, failures)
 	}
 
+	/**
+	 * Queries every server at once, and falls back to what was stored for any
+	 * that did not answer.
+	 *
+	 * The failure is recorded either way. A stored answer is not the same as a
+	 * live one, and a screen that quietly showed yesterday's library as though
+	 * it were current would be worse than one that admits a server is down.
+	 *
+	 * In parallel, not in sequence: three servers queried one after another
+	 * would make every browse screen as slow as the sum of them, and one that
+	 * has gone away would hold up the two that are fine until it times out.
+	 */
 	private suspend fun <T> gather(
 		servers: List<ServerConfig>,
+		fallback: (suspend (ServerConfig) -> T?)?,
 		block: suspend (SubsonicClient, ServerConfig) -> T,
-	): Pair<List<Pair<ServerConfig, T>>, List<ServerFailure>> = coroutineScope {
+	): Gathered<T> = coroutineScope {
 		val answers = servers.map { config ->
 			async(Dispatchers.IO) {
 				config to runCatchingCancellable { block(clients.clientFor(config), config) }
@@ -410,12 +457,45 @@ class LibraryRepository @Inject constructor(
 		answers.forEach { (config, result) ->
 			result.fold(
 				onSuccess = { items += config to it },
-				onFailure = { failures += config.failure(it) },
+				onFailure = { error ->
+					val stored = fallback?.invoke(config)
+					stored?.let { items += config to it }
+					failures += config.failure(error, storedShown = stored != null)
+				},
 			)
 		}
-		items to failures
+		Gathered(items, failures)
 	}
 
-	private fun ServerConfig.failure(cause: Throwable) =
-		ServerFailure(id, name, cause.userMessage())
+	private data class Gathered<T>(
+		val answers: List<Pair<ServerConfig, T>>,
+		val failures: List<ServerFailure>,
+	)
+
+	/**
+	 * The server first, the mirror only if it fails — and the original error if
+	 * the mirror has nothing either.
+	 *
+	 * Rethrowing matters: "the server is unreachable" and "there is no such
+	 * album" want different screens, and swallowing the error would turn the
+	 * first into the second.
+	 */
+	private suspend fun <T : Any> networkFirst(
+		stored: suspend () -> T?,
+		block: suspend () -> T?,
+	): T? = runCatchingCancellable { block() }
+		.getOrElse { error -> stored() ?: throw error }
+
+	/**
+	 * [storedShown] changes the wording rather than being suppressed by it: the
+	 * server really did fail, and the rows on screen really are not current.
+	 * Saying only one of those would mislead in one direction or the other.
+	 */
+	private fun ServerConfig.failure(cause: Throwable, storedShown: Boolean = false) =
+		ServerFailure(
+			id,
+			name,
+			if (storedShown) "${cause.userMessage()} Showing what was stored."
+			else cause.userMessage(),
+		)
 }

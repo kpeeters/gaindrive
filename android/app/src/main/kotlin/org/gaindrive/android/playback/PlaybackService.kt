@@ -22,6 +22,7 @@ import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.gaindrive.android.data.LibraryRepository
+import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.model.ItemRef
 import javax.inject.Inject
 
@@ -42,6 +43,9 @@ class PlaybackService : MediaLibraryService() {
 	@Inject
 	lateinit var httpClient: OkHttpClient
 
+	@Inject
+	lateinit var audioCache: AudioCache
+
 	private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
 	private var session: MediaLibrarySession? = null
@@ -51,10 +55,11 @@ class PlaybackService : MediaLibraryService() {
 
 		val player = ExoPlayer.Builder(this)
 			// Streams go through the same OkHttp as everything else, so the
-			// connection pool and any future caching are shared.
+			// connection pool is shared; AudioCache then wraps it so playing a
+			// track also stores it, and a stored track plays with no network.
 			.setMediaSourceFactory(
 				DefaultMediaSourceFactory(
-					OkHttpDataSource.Factory(httpClient)
+					audioCache.dataSourceFactory(OkHttpDataSource.Factory(httpClient))
 				)
 			)
 			// Media3 then handles audio focus and ducking for us.
@@ -147,6 +152,11 @@ class PlaybackService : MediaLibraryService() {
 		 * Doing it here rather than in the UI means the stream policy has one
 		 * home, and that items restored by the system — from a notification
 		 * action, or after process death — get resolved too.
+		 *
+		 * The cache key is set here too, and it is the encoded [ItemRef] rather
+		 * than the URL. Stream URLs carry a per-client-instance auth salt (see
+		 * `API-CLIENT.md`), so the default URL-derived key would miss after
+		 * every process restart — and would not match what a download stored.
 		 */
 		override fun onAddMediaItems(
 			mediaSession: MediaSession,
@@ -157,7 +167,7 @@ class PlaybackService : MediaLibraryService() {
 			mediaItems.mapNotNull { item ->
 				val ref = item.itemRef() ?: return@mapNotNull null
 				val url = streams.streamUrl(ref) ?: return@mapNotNull null
-				item.buildUpon().setUri(url).build()
+				item.buildUpon().setUri(url).setCustomCacheKey(ref.encode()).build()
 			}.toMutableList()
 		}
 

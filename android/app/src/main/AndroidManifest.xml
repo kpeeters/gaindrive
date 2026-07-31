@@ -9,6 +9,12 @@
 	<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
+	<!-- Pinned downloads run as a foreground service so they are not deferred
+	     while the user is waiting for them, and hold a wake lock so a screen
+	     that goes off does not stall an album mid-download. -->
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+	<uses-permission android:name="android.permission.WAKE_LOCK" />
+
 	<!-- Only exists from API 33; on older releases the notification is posted
 	     without asking. -->
 	<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -44,6 +50,18 @@
 			<intent-filter>
 				<action android:name="androidx.media3.session.MediaLibraryService" />
 				<action android:name="android.media.browse.MediaBrowserService" />
+			</intent-filter>
+		</service>
+
+		<!-- Not exported: only this app ever enqueues a download. The intent
+		     filter is the one Media3's DownloadService sends to itself. -->
+		<service
+			android:name=".playback.MediaDownloadService"
+			android:exported="false"
+			android:foregroundServiceType="dataSync">
+			<intent-filter>
+				<action android:name="androidx.media3.exoplayer.downloadService.action.RESTART" />
+				<category android:name="android.intent.category.DEFAULT" />
 			</intent-filter>
 		</service>
 

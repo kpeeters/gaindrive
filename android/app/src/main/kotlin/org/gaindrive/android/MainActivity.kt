@@ -8,12 +8,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
+import org.gaindrive.android.ui.AvailabilityViewModel
 import org.gaindrive.android.ui.GainDriveApp
+import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.settings.SettingsViewModel
 import org.gaindrive.android.ui.theme.GainDriveTheme
 
@@ -30,8 +33,16 @@ class MainActivity : ComponentActivity() {
 
 			RequestNotificationPermission()
 
+			// Collected once, at the root, and made ambient: every track row
+			// wants to know whether its audio is stored and whether there is a
+			// network, and nothing in between has anything to say about it.
+			val availability: AvailabilityViewModel = hiltViewModel()
+			val availabilityState by availability.state.collectAsStateWithLifecycle()
+
 			GainDriveTheme(mode = state.themeMode) {
-				GainDriveApp(settingsViewModel = viewModel)
+				CompositionLocalProvider(LocalAvailability provides availabilityState) {
+					GainDriveApp(settingsViewModel = viewModel)
+				}
 			}
 		}
 	}
