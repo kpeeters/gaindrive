@@ -78,13 +78,13 @@ class PinRepository @Inject constructor(
 	val statuses: StateFlow<Map<String, PinStatus>> = combine(
 		_coverage,
 		audioCache.cachedKeys,
-		downloads.inProgress,
-	) { coverage, stored, running ->
+		downloads.states,
+	) { coverage, stored, downloadStates ->
 		coverage.byPin.mapValues { (_, keys) ->
 			PinStatus(
 				stored = keys.count { it in stored },
 				total = keys.size,
-				active = keys.any { it in running },
+				phase = pinPhaseOf(keys, stored, downloadStates),
 			)
 		}
 	}.stateIn(scope, SharingStarted.Eagerly, emptyMap())
@@ -159,6 +159,19 @@ class PinRepository @Inject constructor(
 		// Only what nothing else still covers: a track pinned on its own and
 		// also part of a pinned album must survive the album being unpinned.
 		(before - _protectedKeys.value).forEach { downloads.remove(it) }
+	}
+
+	/**
+	 * Re-enqueues what a pin covers, for a download that failed.
+	 *
+	 * Already-stored tracks cost nothing to re-request: the download manager
+	 * finds them complete in the cache and reports them done. Removal is not
+	 * offered here — the pin list in Settings is where a download you have
+	 * given up on gets deleted.
+	 */
+	suspend fun retry(ref: ItemRef) {
+		val pin = _pins.value.firstOrNull { it.ref == ref } ?: return
+		enqueue(songsFor(pin))
 	}
 
 	suspend fun refresh() = applyProtection(_pins.value)

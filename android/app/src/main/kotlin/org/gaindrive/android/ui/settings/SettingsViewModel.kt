@@ -13,6 +13,7 @@ import org.gaindrive.android.data.ServerRegistry
 import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.cache.PinRepository
+import org.gaindrive.android.data.cache.PinStatus
 import org.gaindrive.android.data.cache.PinnedItem
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerConfig
@@ -84,6 +85,12 @@ class SettingsViewModel @Inject constructor(
 	}
 
 	private val pinnedItems = pins.pins.map { pins.describe(it) }
+
+	/**
+	 * Kept beside [state] rather than inside it: the combine there is already at
+	 * five flows, and this changes on its own schedule as downloads progress.
+	 */
+	val pinStatuses: StateFlow<Map<String, PinStatus>> = pins.statuses
 
 	val state: StateFlow<SettingsUiState> =
 		combine(

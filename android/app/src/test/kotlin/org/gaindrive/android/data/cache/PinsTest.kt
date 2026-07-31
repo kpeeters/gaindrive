@@ -3,7 +3,6 @@ package org.gaindrive.android.data.cache
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerId
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -87,9 +86,16 @@ class PinsTest {
 
 	@Test
 	fun `a pin is only complete once every track it covers is stored`() {
-		assertTrue(PinStatus(stored = 2, total = 2, active = false).complete)
-		assertFalse(PinStatus(stored = 1, total = 2, active = true).complete)
-		assertEquals(0.5f, PinStatus(stored = 1, total = 2, active = true).fraction)
+		val two = listOf("a/1", "a/2")
+		assertEquals(
+			PinPhase.COMPLETE,
+			pinPhaseOf(two, setOf("a/1", "a/2"), DownloadStates()),
+		)
+		assertEquals(
+			PinPhase.RUNNING,
+			pinPhaseOf(two, setOf("a/1"), DownloadStates(active = mapOf("a/2" to 2))),
+		)
+		assertEquals(0.5f, PinStatus(1, 2, PinPhase.RUNNING).fraction)
 	}
 
 	/**
@@ -98,7 +104,77 @@ class PinsTest {
 	 */
 	@Test
 	fun `a pin covering nothing counts as done`() {
-		assertTrue(PinStatus(stored = 0, total = 0, active = false).complete)
+		assertEquals(PinPhase.COMPLETE, pinPhaseOf(emptyList(), emptySet(), DownloadStates()))
+	}
+
+	/**
+	 * The symptom that prompted all of this: Media3 drops failed downloads out
+	 * of its current-downloads set, so a failure used to be indistinguishable
+	 * from nothing having happened.
+	 */
+	@Test
+	fun `a failure with nothing still trying reports as failed`() {
+		assertEquals(
+			PinPhase.FAILED,
+			pinPhaseOf(
+				coveredKeys = listOf("a/1", "a/2"),
+				storedKeys = setOf("a/1"),
+				downloads = DownloadStates(failed = setOf("a/2")),
+			),
+		)
+	}
+
+	/** One track failing must not stop the rest of an album reporting progress. */
+	@Test
+	fun `a failure alongside a live download still reports as running`() {
+		assertEquals(
+			PinPhase.RUNNING,
+			pinPhaseOf(
+				coveredKeys = listOf("a/1", "a/2", "a/3"),
+				storedKeys = emptySet(),
+				downloads = DownloadStates(active = mapOf("a/1" to 2), failed = setOf("a/3")),
+			),
+		)
+	}
+
+	@Test
+	fun `queued behind an unmet requirement reports as waiting`() {
+		assertEquals(
+			PinPhase.WAITING,
+			pinPhaseOf(
+				coveredKeys = listOf("a/1"),
+				storedKeys = emptySet(),
+				downloads = DownloadStates(active = mapOf("a/1" to 0), notMetRequirements = 1),
+			),
+		)
+	}
+
+	/**
+	 * Nothing queued means nothing is being held back, so a metered connection
+	 * must not make a finished album claim to be waiting.
+	 */
+	@Test
+	fun `an unmet requirement with nothing queued does not report as waiting`() {
+		assertEquals(
+			PinPhase.COMPLETE,
+			pinPhaseOf(
+				coveredKeys = listOf("a/1"),
+				storedKeys = setOf("a/1"),
+				downloads = DownloadStates(notMetRequirements = 1),
+			),
+		)
+	}
+
+	/**
+	 * The instant after a tap, before the download manager has reported
+	 * anything. Showing failure here would flash an error on every pin.
+	 */
+	@Test
+	fun `a pin nothing has reported on yet reports as running`() {
+		assertEquals(
+			PinPhase.RUNNING,
+			pinPhaseOf(listOf("a/1"), emptySet(), DownloadStates()),
+		)
 	}
 
 	/** The whole reason keys are composite: id 1 on two servers is two tracks. */

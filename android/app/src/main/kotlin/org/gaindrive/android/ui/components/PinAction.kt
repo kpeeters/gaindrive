@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -19,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.cache.PinKind
+import org.gaindrive.android.data.cache.PinPhase
 import org.gaindrive.android.data.cache.PinStatus
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.ui.PinViewModel
@@ -64,20 +67,41 @@ fun PinAction(
  */
 @Composable
 fun DownloadIndicator(status: PinStatus?, modifier: Modifier = Modifier) {
-	when {
-		status == null -> Icon(
+	if (status == null) {
+		Icon(
 			imageVector = Icons.Default.Download,
 			contentDescription = "Download",
 			modifier = modifier,
 		)
+		return
+	}
 
-		status.complete -> Icon(
+	when (status.phase) {
+		PinPhase.COMPLETE -> Icon(
 			imageVector = Icons.Default.DownloadDone,
 			contentDescription = "Downloaded — tap to remove",
 			modifier = modifier,
 		)
 
-		else -> {
+		// Distinct from running, because the fix is the user's: they are on a
+		// metered connection with "download on Wi-Fi only" set, and a ring
+		// sitting at zero would look like a broken download rather than an
+		// obedient one.
+		PinPhase.WAITING -> Icon(
+			imageVector = Icons.Default.Schedule,
+			contentDescription = "Waiting for Wi-Fi — tap to remove",
+			tint = MaterialTheme.colorScheme.onSurfaceVariant,
+			modifier = modifier,
+		)
+
+		PinPhase.FAILED -> Icon(
+			imageVector = Icons.Default.ErrorOutline,
+			contentDescription = "Download failed — tap to try again",
+			tint = MaterialTheme.colorScheme.error,
+			modifier = modifier,
+		)
+
+		PinPhase.RUNNING -> {
 			// Animated, because progress arrives a whole track at a time and a
 			// ring that jumps in twelfths reads as broken rather than busy.
 			val fraction by animateFloatAsState(
@@ -97,10 +121,12 @@ fun DownloadIndicator(status: PinStatus?, modifier: Modifier = Modifier) {
 }
 
 /** What to call the action, given the same status the indicator draws. */
-fun downloadActionLabel(status: PinStatus?): String = when {
-	status == null -> "Download"
-	status.complete -> "Remove download"
+fun downloadActionLabel(status: PinStatus?): String = when (status?.phase) {
+	null -> "Download"
+	PinPhase.COMPLETE -> "Remove download"
+	PinPhase.WAITING -> "Waiting for Wi-Fi — remove"
+	PinPhase.FAILED -> "Download failed — try again"
 	// Says what tapping does, not what is happening — the ring already says
 	// that, and "Downloading…" as a menu item invites a tap that then cancels.
-	else -> "Cancel download (${status.stored} of ${status.total})"
+	PinPhase.RUNNING -> "Cancel download (${status.stored} of ${status.total})"
 }

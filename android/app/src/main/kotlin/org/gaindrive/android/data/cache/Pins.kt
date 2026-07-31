@@ -49,15 +49,56 @@ fun expandPins(
 	}
 )
 
-/** How far a pin has got, for the icon that reports it. */
-data class PinStatus(val stored: Int, val total: Int, val active: Boolean) {
+/** What a pin is doing, as far as the icon reporting it is concerned. */
+enum class PinPhase {
+	/** Every track it covers is stored. */
+	COMPLETE,
 
-	/**
-	 * A pin covering nothing counts as done rather than forever in progress: a
-	 * permanent spinner over an album whose track list has since been dropped
-	 * would be a bug the user could do nothing about.
-	 */
-	val complete: Boolean get() = stored >= total
+	/** Downloading, or just asked for and not yet reported on. */
+	RUNNING,
+
+	/** Queued, but a requirement is unmet — in practice, waiting for Wi-Fi. */
+	WAITING,
+
+	/** At least one track failed and nothing is retrying it. */
+	FAILED,
+}
+
+/** How far a pin has got, for the icon that reports it. */
+data class PinStatus(
+	val stored: Int,
+	val total: Int,
+	val phase: PinPhase,
+) {
+	val complete: Boolean get() = phase == PinPhase.COMPLETE
 
 	val fraction: Float get() = if (total <= 0) 1f else stored.toFloat() / total
+}
+
+/**
+ * Which of the four a pin is in.
+ *
+ * Order matters. Completion wins outright. A failure only shows once nothing is
+ * still trying, so one track failing part-way through an album does not stop the
+ * rest reporting progress. "Waiting" needs something actually queued behind it,
+ * or an album that finished would report itself as waiting the moment the
+ * connection went metered.
+ *
+ * Anything else is [PinPhase.RUNNING], including the moment just after a tap
+ * when the download manager has not reported anything yet — showing failure
+ * there would flash an error on every single pin.
+ */
+fun pinPhaseOf(
+	coveredKeys: List<String>,
+	storedKeys: Set<String>,
+	downloads: DownloadStates,
+): PinPhase {
+	val stored = coveredKeys.count { it in storedKeys }
+	val queued = coveredKeys.count { it in downloads.active }
+	return when {
+		stored >= coveredKeys.size -> PinPhase.COMPLETE
+		queued == 0 && coveredKeys.any { it in downloads.failed } -> PinPhase.FAILED
+		queued > 0 && downloads.notMetRequirements != 0 -> PinPhase.WAITING
+		else -> PinPhase.RUNNING
+	}
 }

@@ -27,6 +27,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.gaindrive.android.data.cache.PinPhase
+import org.gaindrive.android.data.cache.PinStatus
 import org.gaindrive.android.data.cache.PinnedItem
 import org.gaindrive.android.ui.components.formatBytes
 
@@ -43,6 +45,7 @@ fun StorageSettingsScreen(
 	viewModel: SettingsViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
+	val pinStatuses by viewModel.pinStatuses.collectAsStateWithLifecycle()
 	val storage = state.storage
 	var confirmFlush by remember { mutableStateOf(false) }
 	val evictable = (storage.usedBytes - storage.pinnedBytes).coerceAtLeast(0)
@@ -133,7 +136,11 @@ fun StorageSettingsScreen(
 		if (state.pins.isNotEmpty()) {
 			item { SectionTitle("Downloads") }
 			items(state.pins, key = { it.pin.ref.encode() }) { item ->
-				PinnedRow(item = item, onRemove = { viewModel.unpin(item.pin.ref) })
+				PinnedRow(
+					item = item,
+					status = pinStatuses[item.pin.ref.encode()],
+					onRemove = { viewModel.unpin(item.pin.ref) },
+				)
 			}
 		}
 	}
@@ -173,7 +180,7 @@ private val CACHE_SIZES = listOf(
 )
 
 @Composable
-private fun PinnedRow(item: PinnedItem, onRemove: () -> Unit) {
+private fun PinnedRow(item: PinnedItem, status: PinStatus?, onRemove: () -> Unit) {
 	Row(
 		modifier = Modifier.fillMaxWidth(),
 		verticalAlignment = Alignment.CenterVertically,
@@ -187,13 +194,32 @@ private fun PinnedRow(item: PinnedItem, onRemove: () -> Unit) {
 				overflow = TextOverflow.Ellipsis,
 			)
 			Text(
-				text = item.pin.kind.name.lowercase().replaceFirstChar { it.uppercase() },
+				text = pinSubtitle(item, status),
 				style = MaterialTheme.typography.bodySmall,
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
+				color = if (status?.phase == PinPhase.FAILED) {
+					MaterialTheme.colorScheme.error
+				} else {
+					MaterialTheme.colorScheme.onSurfaceVariant
+				},
 			)
 		}
 		IconButton(onClick = onRemove) {
 			Icon(Icons.Default.Delete, contentDescription = "Remove download")
 		}
+	}
+}
+
+/**
+ * Kind alone was enough when a pin was just an intent. Now that a download can
+ * be waiting or broken, this is the one screen that can say so in words — and
+ * the one place a download you have given up on can be deleted.
+ */
+private fun pinSubtitle(item: PinnedItem, status: PinStatus?): String {
+	val kind = item.pin.kind.name.lowercase().replaceFirstChar { it.uppercase() }
+	return when (status?.phase) {
+		null, PinPhase.COMPLETE -> kind
+		PinPhase.WAITING -> "$kind · waiting for Wi-Fi"
+		PinPhase.FAILED -> "$kind · download failed"
+		PinPhase.RUNNING -> "$kind · ${status.stored} of ${status.total} downloaded"
 	}
 }

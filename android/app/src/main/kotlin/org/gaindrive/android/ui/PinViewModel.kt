@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.gaindrive.android.data.cache.PinKind
+import org.gaindrive.android.data.cache.PinPhase
 import org.gaindrive.android.data.cache.PinRepository
 import org.gaindrive.android.data.cache.PinResult
 import org.gaindrive.android.data.cache.PinStatus
@@ -43,6 +44,14 @@ class PinViewModel @Inject constructor(
 	}
 
 	fun toggle(ref: ItemRef, kind: PinKind) = viewModelScope.launch {
+		// A failed download is the one case where tapping should not undo the
+		// pin: the user asked for this and it did not arrive, so the useful
+		// action is another go. Settings lists the pins for giving up on one.
+		if (statuses.value[ref.encode()]?.phase == PinPhase.FAILED) {
+			pins.retry(ref)
+			_message.value = "Trying that download again."
+			return@launch
+		}
 		if (pins.isPinned(ref)) {
 			pins.unpin(ref)
 			return@launch
