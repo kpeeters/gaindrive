@@ -166,6 +166,23 @@ class PinsTest {
 	}
 
 	/**
+	 * The bug that made an album sit at "0 of 9" for ever: the downloads had
+	 * finished, but gaindrive answers `stream.view` chunked with no
+	 * `Content-Length`, so the cache never recorded a length to check against
+	 * and could not vouch for a single track. Callers union the manager's own
+	 * completed set in before asking for a phase.
+	 */
+	@Test
+	fun `completed downloads count as stored even when the cache cannot say`() {
+		val keys = listOf("a/1", "a/2")
+		val states = DownloadStates(completed = setOf("a/1", "a/2"))
+		assertEquals(
+			PinPhase.COMPLETE,
+			pinPhaseOf(keys, storedKeys = emptySet<String>() + states.completed, downloads = states),
+		)
+	}
+
+	/**
 	 * The instant after a tap, before the download manager has reported
 	 * anything. Showing failure here would flash an error on every pin.
 	 */

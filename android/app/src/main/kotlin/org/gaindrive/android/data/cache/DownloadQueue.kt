@@ -35,6 +35,18 @@ import javax.inject.Singleton
 data class DownloadStates(
 	/** Cache key to `Download.STATE_*`, for downloads not in a terminal state. */
 	val active: Map<String, Int> = emptyMap(),
+	/**
+	 * Keys the download manager considers fully downloaded.
+	 *
+	 * Load-bearing, not a convenience. `AudioCache.isFullyCached` can only judge
+	 * a track when the cache recorded a content length, and gaindrive's
+	 * `stream.view` answers through a content provider — so cpp-httplib sends it
+	 * chunked, with no `Content-Length`, and the length stays unset for ever.
+	 * Without this, a download that finished perfectly well never counted as
+	 * stored: the progress ring sat at "0 of 9" and offline dimming would have
+	 * greyed out music that was right there on the device.
+	 */
+	val completed: Set<String> = emptySet(),
 	val failed: Set<String> = emptySet(),
 	/**
 	 * Requirement flags that are *not* currently met — non-zero means every
@@ -71,8 +83,10 @@ class DownloadQueue @Inject constructor(
 			 */
 			override fun onInitialized(downloadManager: DownloadManager) {
 				scope.launch {
-					val previouslyFailed = scanFailed()
-					_states.update { it.copy(failed = it.failed + previouslyFailed) }
+					val (done, failed) = scanTerminal()
+					_states.update {
+						it.copy(completed = it.completed + done, failed = it.failed + failed)
+					}
 					publish()
 				}
 			}
@@ -84,12 +98,16 @@ class DownloadQueue @Inject constructor(
 			) {
 				val key = download.request.id
 				_states.update {
-					if (download.state == Download.STATE_FAILED) {
-						it.copy(failed = it.failed + key)
-					} else {
+					when (download.state) {
+						Download.STATE_COMPLETED ->
+							it.copy(completed = it.completed + key, failed = it.failed - key)
+
+						Download.STATE_FAILED ->
+							it.copy(completed = it.completed - key, failed = it.failed + key)
+
 						// A retry, or a fresh request for the same track, clears
 						// the old verdict rather than leaving it to stick.
-						it.copy(failed = it.failed - key)
+						else -> it.copy(failed = it.failed - key)
 					}
 				}
 				if (download.state == Download.STATE_FAILED) {
@@ -97,6 +115,8 @@ class DownloadQueue @Inject constructor(
 					// failed download is silent, and every cause looks the same
 					// from the UI.
 					Log.w(TAG, "Download failed: $key", finalException)
+				} else if (BuildConfig.DEBUG) {
+					Log.i(TAG, "Download ${stateName(download.state)}: $key")
 				}
 				publish()
 			}
@@ -105,7 +125,10 @@ class DownloadQueue @Inject constructor(
 				downloadManager: DownloadManager,
 				download: Download,
 			) {
-				_states.update { it.copy(failed = it.failed - download.request.id) }
+				val key = download.request.id
+				_states.update {
+					it.copy(completed = it.completed - key, failed = it.failed - key)
+				}
 				publish()
 			}
 
@@ -169,14 +192,28 @@ class DownloadQueue @Inject constructor(
 		)
 	}
 
-	/** Failures from before this process started; the listener never replays them. */
-	private suspend fun scanFailed(): Set<String> = withContext(Dispatchers.IO) {
-		runCatching {
-			downloads.downloadIndex.getDownloads(Download.STATE_FAILED).use { cursor ->
-				buildSet { while (cursor.moveToNext()) add(cursor.download.request.id) }
-			}
-		}.getOrDefault(emptySet())
-	}
+	/**
+	 * Terminal states from before this process started, which the listener never
+	 * replays. Returns completed then failed.
+	 */
+	private suspend fun scanTerminal(): Pair<Set<String>, Set<String>> =
+		withContext(Dispatchers.IO) {
+			runCatching {
+				val done = mutableSetOf<String>()
+				val failed = mutableSetOf<String>()
+				downloads.downloadIndex
+					.getDownloads(Download.STATE_COMPLETED, Download.STATE_FAILED)
+					.use { cursor ->
+						while (cursor.moveToNext()) {
+							val download = cursor.download
+							val target =
+								if (download.state == Download.STATE_FAILED) failed else done
+							target += download.request.id
+						}
+					}
+				Pair<Set<String>, Set<String>>(done, failed)
+			}.getOrDefault(Pair(emptySet(), emptySet()))
+		}
 
 	private fun publish() {
 		_states.update {
@@ -185,9 +222,28 @@ class DownloadQueue @Inject constructor(
 				notMetRequirements = downloads.notMetRequirements,
 			)
 		}
+		if (BuildConfig.DEBUG) {
+			val state = _states.value
+			Log.i(
+				TAG,
+				"active=${state.active.size} completed=${state.completed.size} " +
+					"failed=${state.failed.size} notMet=${state.notMetRequirements}",
+			)
+		}
 	}
 
 	private companion object {
 		const val TAG = "GainDriveDownloads"
+
+		fun stateName(state: Int): String = when (state) {
+			Download.STATE_QUEUED -> "queued"
+			Download.STATE_STOPPED -> "stopped"
+			Download.STATE_DOWNLOADING -> "downloading"
+			Download.STATE_COMPLETED -> "completed"
+			Download.STATE_FAILED -> "failed"
+			Download.STATE_REMOVING -> "removing"
+			Download.STATE_RESTARTING -> "restarting"
+			else -> "state $state"
+		}
 	}
 }

@@ -80,11 +80,14 @@ class PinRepository @Inject constructor(
 		audioCache.cachedKeys,
 		downloads.states,
 	) { coverage, stored, downloadStates ->
+		// A finished download counts even when the cache cannot vouch for it —
+		// see DownloadStates.completed on why it often cannot.
+		val here = stored + downloadStates.completed
 		coverage.byPin.mapValues { (_, keys) ->
 			PinStatus(
-				stored = keys.count { it in stored },
+				stored = keys.count { it in here },
 				total = keys.size,
-				phase = pinPhaseOf(keys, stored, downloadStates),
+				phase = pinPhaseOf(keys, here, downloadStates),
 			)
 		}
 	}.stateIn(scope, SharingStarted.Eagerly, emptyMap())

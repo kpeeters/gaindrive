@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import org.gaindrive.android.data.Connectivity
 import org.gaindrive.android.data.cache.AudioCache
+import org.gaindrive.android.data.cache.DownloadQueue
 import org.gaindrive.android.data.cache.PinRepository
 import org.gaindrive.android.data.model.ItemRef
 import javax.inject.Inject
@@ -65,13 +66,19 @@ val LocalAvailability = compositionLocalOf { AvailabilityState() }
 class AvailabilityViewModel @Inject constructor(
 	audioCache: AudioCache,
 	pins: PinRepository,
+	downloads: DownloadQueue,
 	connectivity: Connectivity,
 ) : ViewModel() {
 
 	val state: StateFlow<AvailabilityState> =
 		combine(
 			connectivity.online,
-			audioCache.cachedKeys,
+			// Union, not just the cache: a completed download is on the device
+			// whether or not the cache recorded a length it can check against,
+			// and gaindrive's chunked responses mean it often did not.
+			combine(audioCache.cachedKeys, downloads.states) { cached, states ->
+				cached + states.completed
+			},
 			pins.protectedKeys,
 			connectivity.offlineByChoice,
 			::AvailabilityState,
