@@ -3,6 +3,7 @@ package org.gaindrive.android.data.cache
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -25,7 +26,7 @@ class PinsTest {
 			pins = listOf(Pin(song, PinKind.SONG)),
 			albumSongs = emptyMap(),
 			playlistSongs = emptyMap(),
-		)
+		).allKeys
 		assertEquals(setOf(song.encode()), keys)
 	}
 
@@ -37,7 +38,7 @@ class PinsTest {
 			pins = listOf(Pin(album, PinKind.ALBUM)),
 			albumSongs = mapOf(album to tracks),
 			playlistSongs = emptyMap(),
-		)
+		).allKeys
 		assertEquals(tracks.map { it.encode() }.toSet(), keys)
 	}
 
@@ -48,7 +49,7 @@ class PinsTest {
 			pins = listOf(Pin(ref(serverA, "10"), PinKind.ALBUM)),
 			albumSongs = emptyMap(),
 			playlistSongs = emptyMap(),
-		)
+		).allKeys
 		assertTrue(keys.isEmpty())
 	}
 
@@ -60,8 +61,44 @@ class PinsTest {
 			pins = listOf(Pin(song, PinKind.SONG), Pin(album, PinKind.ALBUM)),
 			albumSongs = mapOf(album to listOf(song, ref(serverA, "2"))),
 			playlistSongs = emptyMap(),
-		)
+		).allKeys
 		assertEquals(setOf(song.encode(), ref(serverA, "2").encode()), keys)
+	}
+
+	/**
+	 * The union is what eviction needs; the breakdown is what the download
+	 * indicator needs, and an album pin has to keep its own tracks together for
+	 * "3 of 12" to mean anything.
+	 */
+	@Test
+	fun `coverage stays broken down per pin`() {
+		val album = ref(serverA, "10")
+		val song = ref(serverA, "99")
+		val coverage = expandPins(
+			pins = listOf(Pin(album, PinKind.ALBUM), Pin(song, PinKind.SONG)),
+			albumSongs = mapOf(album to listOf(ref(serverA, "1"), ref(serverA, "2"))),
+			playlistSongs = emptyMap(),
+		)
+
+		assertEquals(2, coverage.byPin[album.encode()]?.size)
+		assertEquals(listOf(song.encode()), coverage.byPin[song.encode()])
+		assertEquals(3, coverage.allKeys.size)
+	}
+
+	@Test
+	fun `a pin is only complete once every track it covers is stored`() {
+		assertTrue(PinStatus(stored = 2, total = 2, active = false).complete)
+		assertFalse(PinStatus(stored = 1, total = 2, active = true).complete)
+		assertEquals(0.5f, PinStatus(stored = 1, total = 2, active = true).fraction)
+	}
+
+	/**
+	 * A pin whose track list has since been dropped would otherwise spin for
+	 * ever, over something the user cannot act on.
+	 */
+	@Test
+	fun `a pin covering nothing counts as done`() {
+		assertTrue(PinStatus(stored = 0, total = 0, active = false).complete)
 	}
 
 	/** The whole reason keys are composite: id 1 on two servers is two tracks. */
@@ -74,7 +111,7 @@ class PinsTest {
 			),
 			albumSongs = emptyMap(),
 			playlistSongs = emptyMap(),
-		)
+		).allKeys
 		assertEquals(2, keys.size)
 	}
 
@@ -88,12 +125,12 @@ class PinsTest {
 			pins = listOf(Pin(playlist, PinKind.PLAYLIST)),
 			albumSongs = emptyMap(),
 			playlistSongs = mapOf(playlist to first),
-		)
+		).allKeys
 		val after = expandPins(
 			pins = listOf(Pin(playlist, PinKind.PLAYLIST)),
 			albumSongs = emptyMap(),
 			playlistSongs = mapOf(playlist to later),
-		)
+		).allKeys
 
 		assertEquals(1, before.size)
 		assertTrue(ref(serverA, "9").encode() in after)

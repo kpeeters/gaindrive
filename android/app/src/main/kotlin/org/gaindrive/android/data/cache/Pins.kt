@@ -11,7 +11,19 @@ data class Pin(val ref: ItemRef, val kind: PinKind)
 data class PinnedItem(val pin: Pin, val label: String)
 
 /**
- * The audio cache keys a set of pins protects.
+ * What each pin covers: its own encoded ref, to the song cache keys under it.
+ *
+ * Kept per pin rather than flattened, because the two questions want different
+ * shapes — eviction needs the union ([allKeys]), while the download indicator
+ * needs to know how much of *this* album has arrived.
+ */
+@JvmInline
+value class PinCoverage(val byPin: Map<String, List<String>>) {
+	val allKeys: Set<String> get() = byPin.values.flatMapTo(mutableSetOf()) { it }
+}
+
+/**
+ * The audio cache keys a set of pins covers.
  *
  * Pure, and takes membership already resolved, so the rule that decides what
  * survives eviction can be tested without a database or a cache. Membership is
@@ -26,12 +38,26 @@ fun expandPins(
 	pins: List<Pin>,
 	albumSongs: Map<ItemRef, List<ItemRef>>,
 	playlistSongs: Map<ItemRef, List<ItemRef>>,
-): Set<String> = buildSet {
-	pins.forEach { pin ->
-		when (pin.kind) {
-			PinKind.SONG -> add(pin.ref.encode())
-			PinKind.ALBUM -> albumSongs[pin.ref]?.forEach { add(it.encode()) }
-			PinKind.PLAYLIST -> playlistSongs[pin.ref]?.forEach { add(it.encode()) }
+): PinCoverage = PinCoverage(
+	pins.associate { pin ->
+		val songs = when (pin.kind) {
+			PinKind.SONG -> listOf(pin.ref)
+			PinKind.ALBUM -> albumSongs[pin.ref].orEmpty()
+			PinKind.PLAYLIST -> playlistSongs[pin.ref].orEmpty()
 		}
+		pin.ref.encode() to songs.map { it.encode() }
 	}
+)
+
+/** How far a pin has got, for the icon that reports it. */
+data class PinStatus(val stored: Int, val total: Int, val active: Boolean) {
+
+	/**
+	 * A pin covering nothing counts as done rather than forever in progress: a
+	 * permanent spinner over an album whose track list has since been dropped
+	 * would be a bug the user could do nothing about.
+	 */
+	val complete: Boolean get() = stored >= total
+
+	val fraction: Float get() = if (total <= 0) 1f else stored.toFloat() / total
 }

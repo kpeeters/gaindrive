@@ -16,8 +16,6 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -37,7 +35,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -47,6 +44,8 @@ import org.gaindrive.android.data.cache.PinKind
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.ui.Load
 import org.gaindrive.android.ui.PinViewModel
+import org.gaindrive.android.ui.components.DownloadIndicator
+import org.gaindrive.android.ui.components.downloadActionLabel
 
 /**
  * What a long press on a track offers. Kept separate from the album screen so
@@ -77,7 +76,7 @@ fun TrackActionsSheet(
 		}
 	}
 
-	val pinnedRefs by pins.pinnedRefs.collectAsStateWithLifecycle()
+	val pinStatuses by pins.statuses.collectAsStateWithLifecycle()
 	val pinMessage by pins.message.collectAsStateWithLifecycle()
 	val context = LocalContext.current
 	// The sheet is dismissed the moment the action is tapped, so a refusal has
@@ -115,29 +114,29 @@ fun TrackActionsSheet(
 				PlaylistPicker(song = song, playlists = playlists)
 			} else {
 				SheetAction(
-					icon = Icons.AutoMirrored.Filled.PlaylistAdd,
+					leading = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null) },
 					label = "Play next",
 				) {
 					onPlayNext()
 					onDismiss()
 				}
 				SheetAction(
-					icon = Icons.AutoMirrored.Filled.QueueMusic,
+					leading = { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null) },
 					label = "Add to queue",
 				) {
 					onAddToQueue()
 					onDismiss()
 				}
 				SheetAction(
-					icon = Icons.Default.Add,
+					leading = { Icon(Icons.Default.Add, contentDescription = null) },
 					label = "Add to playlist",
 				) {
 					picking = true
 				}
-				val isPinned = song.ref.encode() in pinnedRefs
+				val status = pinStatuses[song.ref.encode()]
 				SheetAction(
-					icon = if (isPinned) Icons.Default.DownloadDone else Icons.Default.Download,
-					label = if (isPinned) "Remove download" else "Download",
+					leading = { DownloadIndicator(status) },
+					label = downloadActionLabel(status),
 				) {
 					pins.toggle(song.ref, PinKind.SONG)
 					onDismiss()
@@ -244,7 +243,12 @@ private fun PlaylistPicker(song: Song, playlists: AddToPlaylistViewModel) {
 }
 
 @Composable
-private fun SheetAction(icon: ImageVector, label: String, onClick: () -> Unit) {
+private fun SheetAction(
+	/** A slot, not an icon: the download action draws a progress ring here. */
+	leading: @Composable () -> Unit,
+	label: String,
+	onClick: () -> Unit,
+) {
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
@@ -253,7 +257,7 @@ private fun SheetAction(icon: ImageVector, label: String, onClick: () -> Unit) {
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(16.dp),
 	) {
-		Icon(icon, contentDescription = null)
+		leading()
 		Text(text = label, style = MaterialTheme.typography.bodyLarge)
 	}
 }

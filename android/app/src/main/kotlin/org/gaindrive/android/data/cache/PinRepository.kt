@@ -5,10 +5,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.gaindrive.android.data.ServerRegistry
@@ -56,10 +59,35 @@ class PinRepository @Inject constructor(
 	/** The pins themselves, as placed — an album pin stays one entry. */
 	val pins: StateFlow<List<Pin>> = _pins.asStateFlow()
 
+	private val _coverage = MutableStateFlow(PinCoverage(emptyMap()))
+
 	private val _protectedKeys = MutableStateFlow<Set<String>>(emptySet())
 
 	/** The songs those pins expand to, for the "downloaded" markers. */
 	val protectedKeys: StateFlow<Set<String>> = _protectedKeys.asStateFlow()
+
+	/**
+	 * How far each pin has got, keyed by its encoded ref.
+	 *
+	 * Progress is counted in whole tracks, not bytes: Media3 pushes download
+	 * state changes but not continuous progress, and the cache's own notion of
+	 * "stored" is per track anyway. For an album that reads naturally — three of
+	 * twelve — and for a single track it is the difference between a spinner and
+	 * a tick, which is all that was missing.
+	 */
+	val statuses: StateFlow<Map<String, PinStatus>> = combine(
+		_coverage,
+		audioCache.cachedKeys,
+		downloads.inProgress,
+	) { coverage, stored, running ->
+		coverage.byPin.mapValues { (_, keys) ->
+			PinStatus(
+				stored = keys.count { it in stored },
+				total = keys.size,
+				active = keys.any { it in running },
+			)
+		}
+	}.stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
 	@OptIn(FlowPreview::class)
 	private fun start(scope: CoroutineScope) {
@@ -127,8 +155,7 @@ class PinRepository @Inject constructor(
 		pinDao.remove(ref.encode())
 
 		val before = _protectedKeys.value
-		val remaining = _pins.value - pin
-		applyProtection(remaining)
+		applyProtection(_pins.value - pin)
 		// Only what nothing else still covers: a track pinned on its own and
 		// also part of a pinned album must survive the album being unpinned.
 		(before - _protectedKeys.value).forEach { downloads.remove(it) }
@@ -154,15 +181,17 @@ class PinRepository @Inject constructor(
 	}
 
 	private suspend fun applyProtection(pins: List<Pin>) {
-		val keys = computeProtected(pins)
+		val coverage = computeCoverage(pins)
+		val keys = coverage.allKeys
 		// Set before publishing: the evictor reads this, and a download racing
 		// ahead of it would be evictable for the length of the race.
 		pinnedKeys.keys = keys
 		_pins.value = pins
+		_coverage.value = coverage
 		_protectedKeys.value = keys
 	}
 
-	private suspend fun computeProtected(pins: List<Pin>): Set<String> = expandPins(
+	private suspend fun computeCoverage(pins: List<Pin>): PinCoverage = expandPins(
 		pins = pins,
 		albumSongs = pins.filter { it.kind == PinKind.ALBUM }
 			.associate { it.ref to local.songsOfAlbum(it.ref).map(Song::ref) },
