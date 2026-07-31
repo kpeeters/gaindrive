@@ -1,5 +1,6 @@
 package org.gaindrive.android.ui.components
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -30,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.Artist
+import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Playlist
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.playback.TrackState
@@ -241,7 +244,7 @@ fun TrackRow(
 			overflow = TextOverflow.Ellipsis,
 			modifier = Modifier.weight(1f),
 		)
-		DownloadedMark(availability.isDownloaded(song.ref))
+		TrackDownloadMark(song.ref)
 		Text(
 			text = formatDuration(song.duration),
 			style = MaterialTheme.typography.bodySmall,
@@ -318,7 +321,7 @@ fun SongRow(
 				overflow = TextOverflow.Ellipsis,
 			)
 		}
-		DownloadedMark(availability.isDownloaded(song.ref))
+		TrackDownloadMark(song.ref)
 		ServerBadge(badge)
 		if (trailingText != null) {
 			Text(
@@ -332,19 +335,46 @@ fun SongRow(
 }
 
 /**
- * Marks a track that was downloaded on purpose, not one that merely happens to
- * be cached — otherwise the mark would appear on everything recently played and
- * mean nothing.
+ * Where a track stands with respect to being downloaded: waiting its turn, being
+ * fetched, or here.
+ *
+ * All three occupy the same 16dp so a row never reflows as an album downloads,
+ * and nothing shows at all for a track that merely happens to be cached from
+ * playing it — otherwise the mark would appear on everything recently played
+ * and mean nothing.
  */
 @Composable
-private fun DownloadedMark(downloaded: Boolean) {
-	if (!downloaded) return
-	Icon(
-		imageVector = Icons.Default.DownloadDone,
-		contentDescription = "Downloaded",
-		tint = MaterialTheme.colorScheme.onSurfaceVariant,
-		modifier = Modifier.size(16.dp),
-	)
+private fun TrackDownloadMark(ref: ItemRef) {
+	val availability = LocalAvailability.current
+	val download = availability.downloadOf(ref)
+
+	when {
+		availability.isDownloaded(ref) -> Icon(
+			imageVector = Icons.Default.DownloadDone,
+			contentDescription = "Downloaded",
+			tint = MaterialTheme.colorScheme.onSurfaceVariant,
+			modifier = Modifier.size(16.dp),
+		)
+
+		download == null -> Unit
+
+		// Queued, or fetching with no figure reported yet. An indeterminate
+		// spinner is the honest picture: something is happening, and this track
+		// is not the one it is happening to yet.
+		download.knownFraction == null -> TrackSpinner()
+
+		else -> {
+			val fraction by animateFloatAsState(
+				targetValue = download.knownFraction ?: 0f,
+				label = "trackDownload",
+			)
+			CircularProgressIndicator(
+				progress = { fraction },
+				modifier = Modifier.size(16.dp),
+				strokeWidth = 2.dp,
+			)
+		}
+	}
 }
 
 /** Legible, but plainly not something you can tap. */

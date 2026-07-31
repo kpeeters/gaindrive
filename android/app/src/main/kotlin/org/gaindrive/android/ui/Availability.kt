@@ -12,6 +12,7 @@ import org.gaindrive.android.data.Connectivity
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.cache.DownloadQueue
 import org.gaindrive.android.data.cache.PinRepository
+import org.gaindrive.android.data.cache.TrackDownload
 import org.gaindrive.android.data.model.ItemRef
 import javax.inject.Inject
 
@@ -36,7 +37,12 @@ data class AvailabilityState(
 	 * Only the banner cares — everything else treats the two the same.
 	 */
 	val offlineByChoice: Boolean = false,
+	/** Tracks being fetched right now, keyed by encoded ref. */
+	val downloads: Map<String, TrackDownload> = emptyMap(),
 ) {
+
+	/** What, if anything, this track's row should show about a download. */
+	fun downloadOf(ref: ItemRef): TrackDownload? = downloads[ref.encode()]
 	fun of(ref: ItemRef): Availability {
 		val key = ref.encode()
 		return when {
@@ -73,16 +79,23 @@ class AvailabilityViewModel @Inject constructor(
 	val state: StateFlow<AvailabilityState> =
 		combine(
 			connectivity.online,
-			// Union, not just the cache: a completed download is on the device
-			// whether or not the cache recorded a length it can check against,
-			// and gaindrive's chunked responses mean it often did not.
-			combine(audioCache.cachedKeys, downloads.states) { cached, states ->
-				cached + states.completed
-			},
+			audioCache.cachedKeys,
 			pins.protectedKeys,
 			connectivity.offlineByChoice,
-			::AvailabilityState,
-		).stateIn(
+			downloads.states,
+		) { online, cached, pinned, byChoice, downloadStates ->
+			AvailabilityState(
+				online = online,
+				// Union, not just the cache: a completed download is on the
+				// device whether or not the cache recorded a length it can check
+				// against, and gaindrive's chunked responses mean it often did
+				// not.
+				storedKeys = cached + downloadStates.completed,
+				pinnedKeys = pinned,
+				offlineByChoice = byChoice,
+				downloads = downloadStates.active,
+			)
+		}.stateIn(
 			scope = viewModelScope,
 			started = SharingStarted.WhileSubscribed(5_000),
 			initialValue = AvailabilityState(),

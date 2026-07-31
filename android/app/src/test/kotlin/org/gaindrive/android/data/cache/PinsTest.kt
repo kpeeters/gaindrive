@@ -3,6 +3,7 @@ package org.gaindrive.android.data.cache
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -17,6 +18,11 @@ class PinsTest {
 	private val serverB = ServerId("b")
 
 	private fun ref(server: ServerId, id: String) = ItemRef(server, id)
+
+	private val fetching = TrackDownload(TrackDownloadState.DOWNLOADING, percent = 40f)
+
+	/** Queued tracks have no figure yet, which is what -1 means here. */
+	private val waiting = TrackDownload(TrackDownloadState.QUEUED, percent = -1f)
 
 	@Test
 	fun `a song pin protects exactly itself`() {
@@ -93,7 +99,7 @@ class PinsTest {
 		)
 		assertEquals(
 			PinPhase.RUNNING,
-			pinPhaseOf(two, setOf("a/1"), DownloadStates(active = mapOf("a/2" to 2))),
+			pinPhaseOf(two, setOf("a/1"), DownloadStates(active = mapOf("a/2" to fetching))),
 		)
 		assertEquals(0.5f, PinStatus(1, 2, PinPhase.RUNNING).fraction)
 	}
@@ -132,7 +138,10 @@ class PinsTest {
 			pinPhaseOf(
 				coveredKeys = listOf("a/1", "a/2", "a/3"),
 				storedKeys = emptySet(),
-				downloads = DownloadStates(active = mapOf("a/1" to 2), failed = setOf("a/3")),
+				downloads = DownloadStates(
+					active = mapOf("a/1" to fetching),
+					failed = setOf("a/3"),
+				),
 			),
 		)
 	}
@@ -144,7 +153,10 @@ class PinsTest {
 			pinPhaseOf(
 				coveredKeys = listOf("a/1"),
 				storedKeys = emptySet(),
-				downloads = DownloadStates(active = mapOf("a/1" to 0), notMetRequirements = 1),
+				downloads = DownloadStates(
+					active = mapOf("a/1" to waiting),
+					notMetRequirements = 1,
+				),
 			),
 		)
 	}
@@ -192,6 +204,18 @@ class PinsTest {
 			PinPhase.RUNNING,
 			pinPhaseOf(listOf("a/1"), emptySet(), DownloadStates()),
 		)
+	}
+
+	/**
+	 * A queued track has no figure to draw, and a determinate ring pinned at
+	 * zero looks stalled rather than starting — so the row falls back to a
+	 * spinner until there is something real to show.
+	 */
+	@Test
+	fun `only a track actually being fetched reports a fraction`() {
+		assertNull(waiting.knownFraction)
+		assertNull(TrackDownload(TrackDownloadState.DOWNLOADING, percent = -1f).knownFraction)
+		assertEquals(0.4f, fetching.knownFraction)
 	}
 
 	/** The whole reason keys are composite: id 1 on two servers is two tracks. */

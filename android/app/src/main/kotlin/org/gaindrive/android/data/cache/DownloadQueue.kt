@@ -11,9 +11,13 @@ import androidx.media3.exoplayer.scheduler.Requirements
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -23,38 +27,6 @@ import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.playback.MediaDownloadService
 import javax.inject.Inject
 import javax.inject.Singleton
-
-/**
- * What the download manager is doing, as far as anything outside needs to know.
- *
- * [failed] is tracked separately because Media3 drops failed downloads out of
- * `currentDownloads` entirely. Reading only that set made a failure
- * indistinguishable from "nothing has happened yet" — a progress ring stuck at
- * zero with no way to find out why.
- */
-data class DownloadStates(
-	/** Cache key to `Download.STATE_*`, for downloads not in a terminal state. */
-	val active: Map<String, Int> = emptyMap(),
-	/**
-	 * Keys the download manager considers fully downloaded.
-	 *
-	 * Load-bearing, not a convenience. `AudioCache.isFullyCached` can only judge
-	 * a track when the cache recorded a content length, and gaindrive's
-	 * `stream.view` answers through a content provider — so cpp-httplib sends it
-	 * chunked, with no `Content-Length`, and the length stays unset for ever.
-	 * Without this, a download that finished perfectly well never counted as
-	 * stored: the progress ring sat at "0 of 9" and offline dimming would have
-	 * greyed out music that was right there on the device.
-	 */
-	val completed: Set<String> = emptySet(),
-	val failed: Set<String> = emptySet(),
-	/**
-	 * Requirement flags that are *not* currently met — non-zero means every
-	 * queued download is waiting rather than progressing. Usually the Wi-Fi-only
-	 * setting on a metered connection.
-	 */
-	val notMetRequirements: Int = 0,
-)
 
 /**
  * Pinned downloads, on top of Media3's [DownloadManager].
@@ -153,6 +125,21 @@ class DownloadQueue @Inject constructor(
 				publish()
 			}
 		}
+
+		// Media3 pushes state changes but never progress, so a track being
+		// fetched would otherwise sit at whatever percentage it held when it
+		// started. Polled only while something is actually moving: a ticker
+		// that runs regardless is a battery cost for nothing.
+		scope.launch {
+			_states.map { it.active.isNotEmpty() }
+				.distinctUntilChanged()
+				.collectLatest { busy ->
+					while (busy) {
+						delay(PROGRESS_POLL_MS)
+						publish()
+					}
+				}
+		}
 	}
 
 	/**
@@ -218,7 +205,7 @@ class DownloadQueue @Inject constructor(
 	private fun publish() {
 		_states.update {
 			it.copy(
-				active = downloads.currentDownloads.associate { d -> d.request.id to d.state },
+				active = downloads.currentDownloads.associate { d -> d.request.id to d.progress() },
 				notMetRequirements = downloads.notMetRequirements,
 			)
 		}
@@ -232,8 +219,25 @@ class DownloadQueue @Inject constructor(
 		}
 	}
 
+	/**
+	 * The one place Media3's seven states collapse to the two a row can show.
+	 * Anything not actively fetching is waiting its turn as far as the UI is
+	 * concerned, including the stopped and restarting states.
+	 */
+	private fun Download.progress() = TrackDownload(
+		state = if (state == Download.STATE_DOWNLOADING) {
+			TrackDownloadState.DOWNLOADING
+		} else {
+			TrackDownloadState.QUEUED
+		},
+		percent = percentDownloaded,
+	)
+
 	private companion object {
 		const val TAG = "GainDriveDownloads"
+
+		/** Matches the cadence Media3 uses for its own download notification. */
+		const val PROGRESS_POLL_MS = 1_000L
 
 		fun stateName(state: Int): String = when (state) {
 			Download.STATE_QUEUED -> "queued"
