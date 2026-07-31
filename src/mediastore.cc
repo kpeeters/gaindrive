@@ -1469,11 +1469,13 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		}
 
 	// Child songs. In flat mode for album folders, also include songs from disc
-	// subfolders (one level down), ordered by disc then track.
+	// subfolders (one level down), ordered by disc then track. Those songs report
+	// the album folder as parent, not the disc subfolder they physically sit in —
+	// the listing claims to be the album's, and parent is emitted as albumId.
 	const char* song_sql_flat =
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
-		"       s.file_size, s.codec, s.folder_id,"
+		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name, '') AS artist,"
 		"       COALESCE(al.title, '') AS album"
 		" FROM songs s"
@@ -1514,7 +1516,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		e.bitrate      = ssel.getColumn(7).getInt();
 		e.file_size    = ssel.getColumn(8).getInt64();
 		e.codec        = ssel.getColumn(9).isNull() ? "" : ssel.getColumn(9).getString();
-		e.parent_id    = ssel.getColumn(10).getInt();  // actual folder (may be disc subfolder)
+		e.parent_id    = ssel.getColumn(10).getInt();  // album folder in flat mode
 		e.artist       = ssel.getColumn(11).getString();
 		e.album        = ssel.getColumn(12).getString();
 		// Songs inherit cover art from their parent album folder.
@@ -1803,10 +1805,12 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		: " LEFT JOIN client.stars st ON st.song_path = s.path"
 		  " AND st.user_id = (SELECT id FROM client.users WHERE username = ?)";
 
+	// Flat mode absorbs disc-subfolder songs into the album listing, so they report
+	// the album folder as parent rather than the disc folder (see get_directory).
 	std::string song_sql_flat =
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
-		"       s.file_size, s.codec, s.folder_id,"
+		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name, '') AS artist,"
 		"       COALESCE(al.title, '') AS album"
 		+ star_col +
@@ -1910,14 +1914,16 @@ std::optional<MediaStore::PlayQueue> MediaStore::get_play_queue(
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
+	// al.folder_id, not s.folder_id — songs on a multi-disc album live in disc
+	// subfolders, which have no albums row to resolve cover art or getAlbum against.
 	SQLite::Statement q(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
-		"       s.file_size, s.codec, s.folder_id,"
+		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN s.folder_id ELSE -1 END AS cover_art_id,"
+		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
 		"       pq.is_current, pq.offset_ms, pq.client, pq.updated"
 		" FROM client.play_queue pq"
 		" JOIN client.users u ON u.id = pq.user_id"
@@ -2086,14 +2092,16 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 	StarredResult result;
 
 	// Starred songs — cover art inherited from album folder if present.
+	// al.folder_id, not s.folder_id — songs on a multi-disc album live in disc
+	// subfolders, which have no albums row to resolve cover art or getAlbum against.
 	SQLite::Statement sq(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
-		"       s.file_size, s.codec, s.folder_id,"
+		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN s.folder_id ELSE -1 END AS cover_art_id"
+		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id"
 		" FROM client.stars st"
 		" JOIN client.users u ON u.id = st.user_id"
 		" JOIN songs s ON s.path = st.song_path"
@@ -2216,14 +2224,16 @@ MediaStore::PlaylistInfo MediaStore::create_playlist(const std::string& username
 		}
 
 	// Fetch songs with full metadata, same joins as get_directory.
+	// al.folder_id, not s.folder_id — songs on a multi-disc album live in disc
+	// subfolders, which have no albums row to resolve cover art or getAlbum against.
 	SQLite::Statement sq(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
-		"       s.file_size, s.codec, s.folder_id,"
+		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN s.folder_id ELSE -1 END AS cover_art_id"
+		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id"
 		" FROM client.playlist_songs ps"
 		" JOIN songs s ON s.path = ps.song_path"
 		" LEFT JOIN albums al ON al.id = s.album_id"
@@ -2313,14 +2323,16 @@ std::optional<std::string> MediaStore::artist_folder_path_by_id(int artist_folde
 std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
+	// al.folder_id, not s.folder_id — songs on a multi-disc album live in disc
+	// subfolders, which have no albums row to resolve cover art or getAlbum against.
 	SQLite::Statement q(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
-		"       s.file_size, s.codec, s.folder_id,"
+		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN s.folder_id ELSE -1 END AS cover_art_id"
+		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -2474,14 +2486,16 @@ std::vector<MediaStore::BookmarkInfo> MediaStore::get_bookmarks(
 	const std::string& username)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
+	// al.folder_id, not s.folder_id — songs on a multi-disc album live in disc
+	// subfolders, which have no albums row to resolve cover art or getAlbum against.
 	SQLite::Statement q(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
-		"       s.file_size, s.codec, s.folder_id,"
+		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN s.folder_id ELSE -1 END AS cover_art_id,"
+		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
 		"       b.position, COALESCE(b.comment,''), b.created, b.changed,"
 		"       u.username"
 		" FROM client.bookmarks b"
@@ -2675,14 +2689,16 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 		: " LEFT JOIN client.stars st ON st.song_path = s.path"
 		  " AND st.user_id = (SELECT id FROM client.users WHERE username = ?)";
 
+	// al.folder_id, not s.folder_id — songs on a multi-disc album live in disc
+	// subfolders, which have no albums row to resolve cover art or getAlbum against.
 	std::string pl_sql =
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
-		"       s.file_size, s.codec, s.folder_id,"
+		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN s.folder_id ELSE -1 END AS cover_art_id"
+		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id"
 		+ star_col +
 		" FROM client.playlist_songs ps"
 		" JOIN songs s ON s.path = ps.song_path"
