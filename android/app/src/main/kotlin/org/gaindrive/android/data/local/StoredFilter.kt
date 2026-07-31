@@ -32,7 +32,9 @@ data class StoredFilter(
 	val albumCounts: Map<String, Int>,
 ) {
 
-	fun apply(indexes: List<ArtistIndex>): List<ArtistIndex> = indexes
+	// Named apart rather than overloaded: generic erasure gives every
+	// `List<…> -> List<…>` the same JVM signature.
+	fun filterIndexes(indexes: List<ArtistIndex>): List<ArtistIndex> = indexes
 		.map { index -> ArtistIndex(index.label, index.artists.mapNotNull(::keep)) }
 		// A bucket letter with nothing under it is a header over empty space.
 		.filter { it.artists.isNotEmpty() }
@@ -45,16 +47,15 @@ data class StoredFilter(
 		return artist.copy(albumCount = albumCounts[key] ?: artist.albumCount)
 	}
 
-	fun apply(albums: List<Album>): List<Album> =
+	fun filterAlbums(albums: List<Album>): List<Album> =
 		albums.filter { it.ref.encode() in this.albums }
 
-	@JvmName("applyPlaylists")
-	fun apply(playlists: List<Playlist>): List<Playlist> =
+	fun filterPlaylists(playlists: List<Playlist>): List<Playlist> =
 		playlists.filter { it.ref.encode() in this.playlists }
 
-	fun apply(selection: LibrarySelection): LibrarySelection = LibrarySelection(
+	fun filterSelection(selection: LibrarySelection): LibrarySelection = LibrarySelection(
 		artists = selection.artists.mapNotNull(::keep),
-		albums = apply(selection.albums),
+		albums = filterAlbums(selection.albums),
 		// Songs are filtered here, unlike inside an album: a search result that
 		// cannot play is not telling you anything you asked to know.
 		songs = selection.songs.filter { it.ref.encode() in songs },

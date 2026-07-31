@@ -91,7 +91,7 @@ class LibraryRepository @Inject constructor(
 			// everything stored for it rather than nothing at all.
 			fallback = { config ->
 				local.artistIndexes(config.id)
-					.let { stored?.apply(it) ?: it }
+					.let { stored?.filterIndexes(it) ?: it }
 					.takeIf { it.isNotEmpty() }
 			},
 		) { client, config ->
@@ -122,7 +122,7 @@ class LibraryRepository @Inject constructor(
 			refs,
 			fallback = { ref ->
 				local.albumsOfArtist(ref)
-					.let { stored?.apply(it) ?: it }
+					.let { stored?.filterAlbums(it) ?: it }
 					.takeIf { it.isNotEmpty() }
 			},
 		) { client, ref ->
@@ -202,7 +202,7 @@ class LibraryRepository @Inject constructor(
 			scope,
 			fallback = { config ->
 				local.playlists(config.id)
-					.let { stored?.apply(it) ?: it }
+					.let { stored?.filterPlaylists(it) ?: it }
 					.takeIf { it.isNotEmpty() }
 			},
 		) { client, config -> playlistsFrom(client, config.id) }
@@ -283,7 +283,7 @@ class LibraryRepository @Inject constructor(
 				val result = if (offline) {
 					Result.success(
 						local.search(config.id, query, artistCount, albumCount, songCount)
-							.let { stored?.apply(it) ?: it }
+							.let { stored?.filterSelection(it) ?: it }
 					)
 				} else {
 					runCatchingCancellable {
