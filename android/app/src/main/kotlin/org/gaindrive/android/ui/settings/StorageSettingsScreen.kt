@@ -137,7 +137,18 @@ fun StorageSettingsScreen(
 		// so without this the only way to find one again is to remember where
 		// it was.
 		if (state.pins.isNotEmpty()) {
-			item { SectionTitle("Downloads") }
+			// "Pinned", not just "Downloads": the cache is full of downloaded
+			// music that comes and goes on its own, and the one thing worth
+			// knowing about this list is that none of it does.
+			item { SectionTitle("Pinned downloads") }
+			item {
+				Text(
+					text = "Kept until you remove them. Everything else in the " +
+						"cache makes way for new music when the space runs out.",
+					style = MaterialTheme.typography.bodySmall,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+				)
+			}
 			items(state.pins, key = { it.pin.ref.encode() }) { item ->
 				PinnedRow(
 					item = item,
