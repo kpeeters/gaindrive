@@ -33,6 +33,7 @@ import org.gaindrive.android.ui.components.ExternalLink
 import org.gaindrive.android.ui.components.PinAction
 import org.gaindrive.android.ui.components.RefreshableLoadBox
 import org.gaindrive.android.ui.components.NotesSection
+import org.gaindrive.android.ui.components.SectionHeading
 import org.gaindrive.android.ui.components.TrackRow
 import org.gaindrive.android.ui.player.PlayerViewModel
 import org.gaindrive.android.ui.player.TrackActionsSheet
@@ -128,18 +129,37 @@ fun AlbumDetailScreen(
 					}
 				}
 
+				// A "Disc 1" banner on an album that has only one disc says
+				// nothing, so the headings appear only where they separate
+				// something. The songs already arrive ordered by disc.
+				val multiDisc =
+					detail.songs.mapTo(mutableSetOf()) { it.discNumber ?: 1 }.size > 1
+
 				itemsIndexed(
 					items = detail.songs,
 					key = { _, song -> song.ref.encode() },
 				) { index, song ->
-					TrackRow(
-						song = song,
-						// Queues the whole album and starts here, which is what
-						// tapping a track in an album listing should mean.
-						onClick = { player.play(detail.songs, index) },
-						onLongClick = { actionsFor = song },
-						playback = playerState.trackStateOf(song.ref),
-					)
+					// The heading rides along with the first track of its disc
+					// rather than being an item of its own, so the list keys
+					// stay one per song.
+					Column {
+						if (multiDisc) {
+							val disc = song.discNumber ?: 1
+							val previous = detail.songs.getOrNull(index - 1)
+							if (previous == null || (previous.discNumber ?: 1) != disc) {
+								SectionHeading("Disc $disc")
+							}
+						}
+						TrackRow(
+							song = song,
+							// Queues the whole album and starts here, which is
+							// what tapping a track in an album listing should
+							// mean.
+							onClick = { player.play(detail.songs, index) },
+							onLongClick = { actionsFor = song },
+							playback = playerState.trackStateOf(song.ref),
+						)
+					}
 				}
 			}
 		}
