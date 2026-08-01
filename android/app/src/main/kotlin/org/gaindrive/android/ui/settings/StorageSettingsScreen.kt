@@ -2,8 +2,6 @@ package org.gaindrive.android.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.items
@@ -34,6 +32,7 @@ import org.gaindrive.android.data.cache.PinStatus
 import org.gaindrive.android.data.cache.PinnedItem
 import org.gaindrive.android.data.model.AudioFormat
 import org.gaindrive.android.data.model.AudioQuality
+import org.gaindrive.android.ui.components.ChipRow
 import org.gaindrive.android.ui.components.formatBytes
 
 /**
@@ -43,7 +42,6 @@ import org.gaindrive.android.ui.components.formatBytes
  * is where it gets flipped in practice; this is where someone looks when they
  * are wondering why nothing is loading. Both read the one stored value.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StorageSettingsScreen(
 	onBack: () -> Unit,
@@ -82,10 +80,10 @@ fun StorageSettingsScreen(
 			)
 		}
 		item {
-			// FlowRow, not Row: six chips do not fit across a phone, and a Row
-			// squashes the overflow into an unreadable sliver rather than
-			// wrapping it.
-			FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+			ChipRow(
+				selectedIndex = QUALITIES.indexOf(storage.quality),
+				chipCount = QUALITIES.size,
+			) {
 				QUALITIES.forEach { quality ->
 					FilterChip(
 						selected = storage.quality == quality,
@@ -131,7 +129,10 @@ fun StorageSettingsScreen(
 
 		item { Text(text = "Maximum size", style = MaterialTheme.typography.bodyLarge) }
 		item {
-			FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+			ChipRow(
+				selectedIndex = CACHE_SIZES.indexOf(storage.maxBytes),
+				chipCount = CACHE_SIZES.size,
+			) {
 				CACHE_SIZES.forEach { bytes ->
 					FilterChip(
 						selected = storage.maxBytes == bytes,
