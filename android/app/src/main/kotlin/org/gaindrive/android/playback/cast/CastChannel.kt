@@ -9,6 +9,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import java.io.Closeable
 import java.net.InetSocketAddress
+import java.net.Socket
 import java.net.SocketTimeoutException
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
@@ -154,14 +155,40 @@ internal class CastChannel private constructor(
 		 */
 		const val READ_TIMEOUT_MS = 1_000
 
-		suspend fun open(device: CastDevice, json: Json): CastChannel? =
+		/**
+		 * Opens the control channel **on the Wi-Fi network**, not on whichever
+		 * network holds the default route.
+		 *
+		 * This is the whole difference between casting working and not working
+		 * with a full-tunnel VPN up: a Chromecast lives on the LAN, and packets
+		 * addressed to it over the default route go into the tunnel and die.
+		 * The socket is created by the Wi-Fi network's factory and TLS is layered
+		 * over it afterwards, because `SSLSocketFactory` has no notion of a
+		 * network to bind to.
+		 *
+		 * Note the asymmetry, which is deliberate and matches [CastBridge]: this
+		 * channel and the reachability probe are Wi-Fi-bound, while fetches from
+		 * the music server stay on the default route — that is how the phone
+		 * reaches a server over the VPN and a receiver over the LAN at once.
+		 */
+		suspend fun open(device: CastDevice, json: Json, wifi: WifiNetworks): CastChannel? =
 			withContext(Dispatchers.IO) {
 				runCatching {
-					val socket = context().socketFactory.createSocket() as SSLSocket
-					socket.connect(
-						InetSocketAddress(device.address, device.port),
-						CONNECT_TIMEOUT_MS,
-					)
+					val address = InetSocketAddress(device.address, device.port)
+					val network = wifi.network.value
+
+					// No Wi-Fi is no reason to fail outright: without a VPN the
+					// default route reaches the LAN perfectly well, and a phone
+					// with no Wi-Fi at all cannot see a Chromecast either way.
+					val plain = network?.socketFactory?.createSocket() ?: Socket()
+					plain.connect(address, CONNECT_TIMEOUT_MS)
+
+					val socket = context().socketFactory.createSocket(
+						plain,
+						device.address,
+						device.port,
+						/* autoClose = */ true,
+					) as SSLSocket
 					socket.soTimeout = READ_TIMEOUT_MS
 					socket.startHandshake()
 					CastChannel(socket, json)

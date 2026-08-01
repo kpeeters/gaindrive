@@ -63,6 +63,7 @@ data class CastMedia(
 @Singleton
 class CastSession @Inject constructor(
 	private val json: Json,
+	private val wifi: WifiNetworks,
 	private val scope: CoroutineScope,
 ) {
 
@@ -195,7 +196,7 @@ class CastSession @Inject constructor(
 
 	private suspend fun runLoop(target: CastDevice) {
 		while (currentCoroutineContext().isActive) {
-			val open = CastChannel.open(target, json)
+			val open = CastChannel.open(target, json, wifi)
 			if (open == null) {
 				Log.w(TAG, "connect failed, retrying")
 				delay(RECONNECT_DELAY_MS)

@@ -139,32 +139,47 @@ class CastBridge @Inject constructor(
 	}
 
 	private fun serve(client: Socket) {
+		val from = client.inetAddress?.hostAddress ?: "?"
 		client.use {
 			runCatching { handle(client) }.onFailure {
-				// A receiver closing mid-track is ordinary, not an error.
-				if (it !is IOException) Log.w(TAG, "bridge request failed: ${it.message}")
+				// A receiver closing mid-track is ordinary rather than an error —
+				// it does that on every seek — but an upstream failure arrives as
+				// an IOException too, so both are reported and the message tells
+				// them apart.
+				val level = if (it is IOException) Log.INFO else Log.WARN
+				Log.println(level, TAG, "bridge $from: ended — ${it.message}")
 			}
 		}
 	}
 
 	private fun handle(client: Socket) {
 		val output = BufferedOutputStream(client.getOutputStream())
+		val from = client.inetAddress?.hostAddress ?: "?"
 
 		if (!wifi.isOnLocalSubnet(client.inetAddress)) {
-			Log.w(TAG, "refused ${client.inetAddress}: not on the local subnet")
+			Log.w(TAG, "bridge refused $from: not on the local subnet")
 			output.respondEmpty(403, "Forbidden")
 			return
 		}
 
 		val request = readRequest(client) ?: run {
+			Log.w(TAG, "bridge $from: unparseable request")
 			output.respondEmpty(400, "Bad Request")
 			return
 		}
 
 		val upstream = resolve(request.path) ?: run {
+			// Logged without the path, which carries the session token.
+			Log.w(TAG, "bridge $from: ${request.method} for an unpublished key")
 			output.respondEmpty(404, "Not Found")
 			return
 		}
+
+		// One line per request, and the reason this exists: whether a receiver
+		// ever reaches the bridge is the difference between a routing problem
+		// and a relaying problem, and nothing else in the system can tell them
+		// apart. The token is deliberately not logged.
+		Log.i(TAG, "bridge $from: ${request.method}${request.range?.let { " $it" }.orEmpty()}")
 
 		val builder = Request.Builder().url(upstream)
 		// Passed through unchanged, and not optional: receivers issue ranged
@@ -174,6 +189,12 @@ class CastBridge @Inject constructor(
 		if (request.method == "HEAD") builder.head()
 
 		httpClient.newCall(builder.build()).execute().use { response ->
+			Log.i(
+				TAG,
+				"bridge $from: upstream ${response.code}" +
+					" len=${response.header("Content-Length") ?: "?"}" +
+					(response.header("Content-Range")?.let { " range=$it" } ?: ""),
+			)
 			output.write("HTTP/1.1 ${response.code} ${response.message}\r\n".toByteArray())
 			for (header in RELAYED_HEADERS) {
 				response.header(header)?.let {
