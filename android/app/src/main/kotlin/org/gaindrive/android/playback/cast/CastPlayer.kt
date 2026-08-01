@@ -160,11 +160,11 @@ class CastPlayer(
 	// ── Commands ────────────────────────────────────────────────────────────
 
 	override fun handleSetMediaItems(
-		mediaItems: List<MediaItemData>,
+		mediaItems: List<MediaItem>,
 		startIndex: Int,
 		startPositionMs: Long,
 	): ListenableFuture<*> {
-		entries = mediaItems.map { Entry(nextUid++, it.mediaItem) }
+		entries = mediaItems.map { Entry(nextUid++, it) }
 		index = if (startIndex == C.INDEX_UNSET) 0 else startIndex.coerceIn(0, maxOf(0, entries.size - 1))
 		ended = false
 		loadCurrent(if (startPositionMs == C.TIME_UNSET) 0 else startPositionMs)
@@ -173,9 +173,9 @@ class CastPlayer(
 
 	override fun handleAddMediaItems(
 		index: Int,
-		mediaItems: List<MediaItemData>,
+		mediaItems: List<MediaItem>,
 	): ListenableFuture<*> {
-		val added = mediaItems.map { Entry(nextUid++, it.mediaItem) }
+		val added = mediaItems.map { Entry(nextUid++, it) }
 		val at = index.coerceIn(0, entries.size)
 		entries = entries.subList(0, at) + added + entries.subList(at, entries.size)
 		// An insert before the current track shifts it along; the receiver is
