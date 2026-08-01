@@ -2,6 +2,7 @@ package org.gaindrive.android.ui.player
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -11,6 +12,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -45,6 +48,7 @@ import org.gaindrive.android.ui.components.formatDuration
 @Composable
 fun NowPlayingSheet(
 	state: PlayerState,
+	casting: Boolean,
 	onDismiss: () -> Unit,
 	onOpenAlbum: (ItemRef, String) -> Unit,
 	onTogglePlay: () -> Unit,
@@ -52,6 +56,7 @@ fun NowPlayingSheet(
 	onPrevious: () -> Unit,
 	onSeek: (Long) -> Unit,
 	onJumpTo: (Int) -> Unit,
+	onCast: () -> Unit,
 	onRemoveFromQueue: (Int) -> Unit,
 ) {
 	val current = state.current ?: return
@@ -133,34 +138,59 @@ fun NowPlayingSheet(
 			item(key = "seek") { SeekBar(state, onSeek) }
 
 			item(key = "controls") {
-				Row(
-					modifier = Modifier.fillMaxWidth(),
-					horizontalArrangement = Arrangement.Center,
-					verticalAlignment = Alignment.CenterVertically,
-				) {
-					IconButton(onClick = onPrevious, enabled = state.hasPrevious) {
-						Icon(
-							Icons.Default.SkipPrevious,
-							contentDescription = "Previous",
-							modifier = Modifier.size(36.dp),
-						)
+				// A Box rather than one Row: the transport stays centred on the
+				// screen whether or not the cast button is beside it, which a
+				// trailing item in a centred Row would quietly break.
+				Box(modifier = Modifier.fillMaxWidth()) {
+					Row(
+						modifier = Modifier.align(Alignment.Center),
+						horizontalArrangement = Arrangement.Center,
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						IconButton(onClick = onPrevious, enabled = state.hasPrevious) {
+							Icon(
+								Icons.Default.SkipPrevious,
+								contentDescription = "Previous",
+								modifier = Modifier.size(36.dp),
+							)
+						}
+						IconButton(onClick = onTogglePlay) {
+							Icon(
+								imageVector = if (state.isPlaying) {
+									Icons.Default.Pause
+								} else {
+									Icons.Default.PlayArrow
+								},
+								contentDescription = if (state.isPlaying) "Pause" else "Play",
+								modifier = Modifier.size(48.dp),
+							)
+						}
+						IconButton(onClick = onNext, enabled = state.hasNext) {
+							Icon(
+								Icons.Default.SkipNext,
+								contentDescription = "Next",
+								modifier = Modifier.size(36.dp),
+							)
+						}
 					}
-					IconButton(onClick = onTogglePlay) {
+					IconButton(
+						onClick = onCast,
+						modifier = Modifier
+							.align(Alignment.CenterEnd)
+							.padding(end = 12.dp),
+					) {
 						Icon(
-							imageVector = if (state.isPlaying) {
-								Icons.Default.Pause
+							imageVector = if (casting) {
+								Icons.Default.CastConnected
 							} else {
-								Icons.Default.PlayArrow
+								Icons.Default.Cast
 							},
-							contentDescription = if (state.isPlaying) "Pause" else "Play",
-							modifier = Modifier.size(48.dp),
-						)
-					}
-					IconButton(onClick = onNext, enabled = state.hasNext) {
-						Icon(
-							Icons.Default.SkipNext,
-							contentDescription = "Next",
-							modifier = Modifier.size(36.dp),
+							contentDescription = if (casting) "Casting" else "Cast",
+							tint = if (casting) {
+								MaterialTheme.colorScheme.primary
+							} else {
+								MaterialTheme.colorScheme.onSurfaceVariant
+							},
 						)
 					}
 				}

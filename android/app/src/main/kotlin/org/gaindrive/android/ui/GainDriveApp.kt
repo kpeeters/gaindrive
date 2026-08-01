@@ -38,6 +38,8 @@ import org.gaindrive.android.ui.browse.AlbumDetailScreen
 import org.gaindrive.android.ui.browse.AlbumsScreen
 import org.gaindrive.android.ui.browse.ArtistsScreen
 import org.gaindrive.android.ui.components.OfflineNote
+import org.gaindrive.android.ui.player.CastDeviceSheet
+import org.gaindrive.android.ui.player.CastViewModel
 import org.gaindrive.android.ui.player.MiniPlayer
 import org.gaindrive.android.ui.player.NowPlayingSheet
 import org.gaindrive.android.ui.player.PlayerViewModel
@@ -79,6 +81,13 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 	val playerViewModel: PlayerViewModel = hiltViewModel()
 	val playerState by playerViewModel.state.collectAsStateWithLifecycle()
 	var nowPlayingOpen by remember { mutableStateOf(false) }
+
+	// Held here rather than inside the picker so the Now Playing sheet can show
+	// whether a device is connected without opening anything. Same view model
+	// instance the picker resolves, both being activity-scoped.
+	val castViewModel: CastViewModel = hiltViewModel()
+	val castDevice by castViewModel.connected.collectAsStateWithLifecycle()
+	var castPickerOpen by remember { mutableStateOf(false) }
 
 	val backStackEntry by navController.currentBackStackEntryAsState()
 	val destination = backStackEntry?.destination
@@ -286,6 +295,7 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 	if (nowPlayingOpen && playerState.isActive) {
 		NowPlayingSheet(
 			state = playerState,
+			casting = castDevice != null,
 			onDismiss = { nowPlayingOpen = false },
 			onOpenAlbum = { ref, title ->
 				// Closed first: the sheet sits on top of the screen it is
@@ -301,8 +311,15 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 			onPrevious = playerViewModel::previous,
 			onSeek = playerViewModel::seekTo,
 			onJumpTo = playerViewModel::jumpTo,
+			onCast = { castPickerOpen = true },
 			onRemoveFromQueue = playerViewModel::removeFromQueue,
 		)
+	}
+
+	// Outside the Now Playing sheet's own condition: picking a device must stay
+	// possible once that sheet has closed itself behind the tap.
+	if (castPickerOpen) {
+		CastDeviceSheet(onDismiss = { castPickerOpen = false })
 	}
 }
 
