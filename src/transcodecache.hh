@@ -49,6 +49,17 @@ class TranscodeCache
 				bool                  hit_;
 			};
 
+		// Token a caller puts in argv where the output path belongs;
+		// get_or_build() substitutes the real cache path for it.  The \x01
+		// sentinels make a collision with a real filename impossible.
+		//
+		// Written as two adjacent literals deliberately: in "\x01cache-out"
+		// the hex escape consumes *every* following hex digit, and c and a
+		// qualify — so it reads as \x01cac followed by "he-out", which is out
+		// of range for a char and not the string it appears to be.  Splitting
+		// the literal terminates the escape at the quote.
+		static constexpr const char* OUT_PLACEHOLDER = "\x01" "cache-out\x01";
+
 		// cap_bytes <= 0 or an unusable directory disables the cache: every
 		// get_or_build() then returns nothing and callers fall back to
 		// streaming.  There is deliberately no separate "enabled" flag to test.

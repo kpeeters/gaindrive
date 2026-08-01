@@ -148,7 +148,7 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 		                + std::to_string(song.file_modified) + "-"
 		                + std::string(target->name)
 		                + std::to_string(target_bitrate);
-		static const std::string OUT = "\x01cache-out\x01";
+		static const std::string OUT = TranscodeCache::OUT_PLACEHOLDER;
 		auto argv = ffmpeg_argv(song, target_bitrate, *target, 0, OUT);
 		if (auto entry = cache.get_or_build(key, std::string(target->ext),
 		                                    argv, OUT)) {
@@ -560,7 +560,7 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 		// Content-Length that answers Range requests.
 		std::string key = std::to_string(song.id) + "-"
 		                + std::to_string(song.file_modified) + "-remux";
-		static const std::string OUT = "\x01cache-out\x01";
+		static const std::string OUT = TranscodeCache::OUT_PLACEHOLDER;
 		auto argv = video_ffmpeg_argv(song, true, 0, "", 0, 0, false, OUT);
 		if (auto entry = cache.get_or_build(key, ".mp4", argv, OUT)) {
 			SongInfo cached{ entry->path().string(), "mp4", song.bitrate,

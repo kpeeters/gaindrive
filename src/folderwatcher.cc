@@ -17,6 +17,17 @@
 
 namespace fs = std::filesystem;
 
+// Self-pipe wakeup.  A one-byte write to a pipe with room cannot fail for any
+// reason worth handling except EINTR, but the result must still be consumed —
+// write() is warn_unused_result, and a lost wakeup here would hang the join in
+// stop() rather than fail visibly.
+static void poke(int fd)
+	{
+	char b = 0;
+	ssize_t n;
+	do { n = write(fd, &b, 1); } while (n < 0 && errno == EINTR);
+	}
+
 // Events we care about on each watched directory.
 static constexpr uint32_t WATCH_MASK =
 	IN_CREATE      |   // new file or subdirectory
@@ -153,8 +164,7 @@ void FolderWatcher::stop()
 	{
 	if (pipe_fd_[1] != -1) {
 		// Wake the poll() in run() so the thread exits cleanly.
-		char b = 0;
-		write(pipe_fd_[1], &b, 1);
+		poke(pipe_fd_[1]);
 		}
 	if (thread_.joinable())
 		thread_.join();
@@ -222,8 +232,7 @@ void FolderWatcher::run()
 						for (auto& d : abs_dirs)
 							pending_rewatches_.push_back(d);
 						}
-						char b = 0;
-						write(rewatch_pipe_[1], &b, 1);
+						poke(rewatch_pipe_[1]);
 						scan_running_.store(false);
 						}).detach();
 					last_event.reset();
