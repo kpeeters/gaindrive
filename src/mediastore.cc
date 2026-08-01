@@ -15,10 +15,21 @@
 #include <taglib/audioproperties.h>
 #include <tpropertymap.h>
 
+#include <nlohmann/json.hpp>
+#include <reproc++/reproc.hpp>
+#include <reproc++/drain.hpp>
+
 namespace fs = std::filesystem;
 
 static const std::set<std::string> AUDIO_EXTENSIONS = {
 	".flac", ".mp3", ".ogg", ".oga", ".m4a", ".aac", ".wav", ".opus", ".wma"
+	};
+
+// Video sources.  Kept in sync with VIDEO_TARGETS in codecs.hh, which maps the
+// same extensions to MIME types; this set is the scanner's admission test and
+// that table is the serving side.
+static const std::set<std::string> VIDEO_EXTENSIONS = {
+	".mkv", ".mp4", ".m4v", ".avi", ".mpg", ".mpeg", ".mov", ".webm", ".wmv"
 	};
 
 // Candidate cover art filenames in priority order.  Add more here as needed.
@@ -88,11 +99,134 @@ static std::vector<std::string> find_extra_images(const fs::path& dir,
 	return result;
 	}
 
-static bool is_audio_file(const fs::path& p)
+static std::string lower_ext(const fs::path& p)
 	{
 	std::string ext = p.extension().string();
 	std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-	return AUDIO_EXTENSIONS.count(ext) > 0;
+	return ext;
+	}
+
+static bool is_video_file(const fs::path& p)
+	{
+	return VIDEO_EXTENSIONS.count(lower_ext(p)) > 0;
+	}
+
+// Admission test for the scanner.  Audio and video share the songs table and
+// therefore share this gate; is_video_file() decides which metadata reader
+// runs later.
+static bool is_media_file(const fs::path& p)
+	{
+	std::string ext = lower_ext(p);
+	return AUDIO_EXTENSIONS.count(ext) > 0 || VIDEO_EXTENSIONS.count(ext) > 0;
+	}
+
+// ffprobe reports every numeric field as a JSON *string*, but not every field
+// is present in every container.  Returns 0 for missing, null or unparseable.
+static double probe_num(const nlohmann::json& j, const char* key)
+	{
+	auto it = j.find(key);
+	if (it == j.end() || it->is_null()) return 0;
+	if (it->is_number()) return it->get<double>();
+	if (it->is_string()) {
+		try { return std::stod(it->get<std::string>()); }
+		catch (...) { return 0; }
+		}
+	return 0;
+	}
+
+// Everything the streamer and the video endpoints need to know about a video
+// file.  TagLib cannot open these containers at all, so unlike the audio path
+// there is no fallback reader: without ffprobe a video row has no duration, no
+// bitrate and no dimensions.
+struct VideoProbe
+	{
+	double      duration = 0;
+	int         bitrate  = 0;   // kbps, the same unit the audio path stores
+	int         width    = 0;
+	int         height   = 0;
+	std::string video_codec;
+	std::string audio_codec;
+	};
+
+// A probe failure is deliberately not fatal.  The caller still creates the
+// row: a video that plays but reports duration 0 is a better outcome than a
+// file silently missing from the library, and the next scan retries.
+static std::optional<VideoProbe> probe_video(const std::string& path)
+	{
+	std::vector<std::string> args = {
+		"ffprobe", "-v", "quiet", "-print_format", "json",
+		"-show_format", "-show_streams", path
+		};
+
+	reproc::process proc;
+	reproc::options opts;
+	opts.redirect.err.type = reproc::redirect::type::discard;
+	if (proc.start(args, opts)) return std::nullopt;
+
+	std::string          out;
+	reproc::sink::string sink(out);
+	auto ec            = reproc::drain(proc, sink, reproc::sink::null);
+	auto [status, wec] = proc.wait(reproc::infinite);
+	if (ec || wec || status != 0) return std::nullopt;
+
+	VideoProbe vp;
+	try {
+		auto j = nlohmann::json::parse(out);
+
+		if (auto f = j.find("format"); f != j.end()) {
+			vp.duration = probe_num(*f, "duration");
+			vp.bitrate  = static_cast<int>(probe_num(*f, "bit_rate") / 1000.0);
+			}
+
+		auto streams = j.find("streams");
+		if (streams != j.end() && streams->is_array())
+			for (const auto& s : *streams) {
+				auto type = s.value("codec_type", std::string());
+				// An embedded cover image is carried as a video stream with
+				// attached_pic set.  Taking it as *the* video stream would
+				// describe an m4a-style cover as a 600x600 mjpeg "movie".
+				int attached = 0;
+				if (auto d = s.find("disposition"); d != s.end())
+					attached = d->value("attached_pic", 0);
+				if (type == "video" && vp.video_codec.empty() && attached == 0) {
+					vp.video_codec = s.value("codec_name", std::string());
+					vp.width       = static_cast<int>(probe_num(s, "width"));
+					vp.height      = static_cast<int>(probe_num(s, "height"));
+					}
+				else if (type == "audio" && vp.audio_codec.empty())
+					vp.audio_codec = s.value("codec_name", std::string());
+				}
+		}
+	catch (const std::exception&) { return std::nullopt; }
+
+	// Containers that omit format.bit_rate (some MKVs) still have a size and a
+	// duration, and the throttle needs a non-zero figure to pace with.
+	if (vp.bitrate <= 0 && vp.duration > 0) {
+		std::error_code fec;
+		auto size = fs::file_size(path, fec);
+		if (!fec && size > 0)
+			vp.bitrate = static_cast<int>(
+				static_cast<double>(size) * 8.0 / vp.duration / 1000.0);
+		}
+
+	return vp;
+	}
+
+// Video files carry no tag to take a track number from, so the filename is the
+// only source.  Three shapes cover essentially everything in practice: SxxEyy,
+// 1x05, and a leading number.  Returns 0 when none match, which leaves the
+// ordering to the query's tiebreaker.
+static int episode_number(const std::string& stem)
+	{
+	static const std::regex sxxeyy (R"([Ss](\d{1,3})[Ee](\d{1,3}))");
+	static const std::regex season_x(R"((\d{1,3})[Xx](\d{1,3}))");
+	static const std::regex leading (R"(^(\d{1,3})[ ._-])");
+	std::smatch m;
+	// \d{1,3} bounds every capture well inside int, so stoi cannot throw.
+	if (std::regex_search(stem, m, sxxeyy))   return std::stoi(m[2]);
+	if (std::regex_search(stem, m, season_x)) return std::stoi(m[2]);
+	if (std::regex_search(stem, m, leading))  return std::stoi(m[1]);
+	return 0;
 	}
 
 // Returns file modification time as Unix seconds.
@@ -256,6 +390,15 @@ void MediaStore::create_schema()
 			channels            INTEGER,
 			codec               TEXT,
 			file_size           INTEGER,
+			-- Video rows live in this table too: every piece of client state
+			-- (stars, play counts, playlists, queue, bookmarks) joins on
+			-- songs.path, so a separate videos table would mean duplicating
+			-- all of it.  Subsonic makes the same choice.
+			is_video            INTEGER DEFAULT 0,
+			width               INTEGER DEFAULT 0,
+			height              INTEGER DEFAULT 0,
+			video_codec         TEXT,
+			audio_codec         TEXT,
 			has_embedded_cover  INTEGER DEFAULT 0,
 			musicbrainz_id      TEXT,
 			file_modified       INTEGER,
@@ -414,6 +557,16 @@ void MediaStore::create_schema()
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE client.users ADD COLUMN cast_allowed INTEGER DEFAULT 0"); }
 	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE songs ADD COLUMN is_video INTEGER DEFAULT 0"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE songs ADD COLUMN width INTEGER DEFAULT 0"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE songs ADD COLUMN height INTEGER DEFAULT 0"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE songs ADD COLUMN video_codec TEXT"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE songs ADD COLUMN audio_codec TEXT"); }
+	catch (const SQLite::Exception&) {}
 
 	// Backfill song_artists from album_artists for any songs that were scanned
 	// before this link was introduced.
@@ -488,6 +641,7 @@ struct SongReadData {
 	std::string codec;
 	int         disc_number = 0;
 	bool        changed     = false;
+	bool        is_video    = false;
 	// populated in Phase 3 only when changed == true:
 	std::string title;
 	int         track_nr    = 0;
@@ -497,6 +651,11 @@ struct SongReadData {
 	int         bitrate     = 0;
 	int         sr          = 0;
 	int         channels    = 0;
+	// video only; all zero/empty for audio rows:
+	int         width       = 0;
+	int         height      = 0;
+	std::string video_codec;
+	std::string audio_codec;
 	};
 
 struct AlbumReadData {
@@ -536,8 +695,9 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 		"INSERT OR REPLACE INTO songs"
 		" (album_id, folder_id, path, filename, title, track_number, disc_number,"
 		"  year, genre, duration, bitrate, sample_rate, channels, codec,"
-		"  file_size, file_modified, last_scanned)"
-		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
+		"  file_size, file_modified, is_video, width, height, video_codec,"
+		"  audio_codec, last_scanned)"
+		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
 	ins.bind(1,  album_id);
 	ins.bind(2,  folder_id);
 	ins.bind(3,  rel_path);
@@ -554,6 +714,11 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 	ins.bind(14, sdat.codec);
 	ins.bind(15, sdat.file_size);
 	ins.bind(16, sdat.mtime);
+	ins.bind(17, sdat.is_video ? 1 : 0);
+	ins.bind(18, sdat.width);
+	ins.bind(19, sdat.height);
+	ins.bind(20, sdat.video_codec);
+	ins.bind(21, sdat.audio_codec);
 	ins.exec();
 
 	int song_id = static_cast<int>(db.getLastInsertRowid());
@@ -572,7 +737,7 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 // Structured in four phases so slow filesystem I/O never holds db_mutex_:
 //   1. Walk disk — collect album/song paths, mtimes, file sizes (no lock)
 //   2. Brief read lock — fetch known mtimes to identify changed files
-//   3. TagLib reads for changed files only (no lock)
+//   3. TagLib (audio) or ffprobe (video) reads for changed files only (no lock)
 //   4. Short write txns: one per album, plus the unvisited-mark and the
 //      artist-level prune.  Per-album commits keep the mutex hold time
 //      bounded so REST handlers stay responsive during the scan.
@@ -603,7 +768,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			std::vector<fs::path>            direct_files;
 			for (auto& e : fs::directory_iterator(album_entry.path())) {
 				if      (e.is_directory())                               disc_dirs.push_back(e);
-				else if (e.is_regular_file() && is_audio_file(e.path())) direct_files.push_back(e.path());
+				else if (e.is_regular_file() && is_media_file(e.path())) direct_files.push_back(e.path());
 				}
 			std::sort(disc_dirs.begin(), disc_dirs.end(),
 				[](const fs::directory_entry& a, const fs::directory_entry& b) {
@@ -616,7 +781,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			int disc_count = (int)disc_dirs.size();
 			for (int dn = 0; dn < disc_count; ++dn) {
 				for (auto& te : fs::directory_iterator(disc_dirs[dn].path())) {
-					if (!te.is_regular_file() || !is_audio_file(te.path())) continue;
+					if (!te.is_regular_file() || !is_media_file(te.path())) continue;
 					SongReadData sdat;
 					sdat.path        = te.path().string();
 					sdat.folder_path = disc_dirs[dn].path().string();
@@ -625,6 +790,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 					sdat.codec       = te.path().extension().string().substr(1);
 					std::transform(sdat.codec.begin(), sdat.codec.end(),
 					               sdat.codec.begin(), ::tolower);
+					sdat.is_video    = is_video_file(te.path());
 					sdat.disc_number = dn + 1;
 					adat.songs.push_back(std::move(sdat));
 					}
@@ -638,6 +804,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 				sdat.codec       = p.extension().string().substr(1);
 				std::transform(sdat.codec.begin(), sdat.codec.end(),
 				               sdat.codec.begin(), ::tolower);
+				sdat.is_video    = is_video_file(p);
 				sdat.disc_number = 0;
 				adat.songs.push_back(std::move(sdat));
 				}
@@ -677,6 +844,27 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			if (!is_within(sdat.path, music_root_canonical_)) {
 				std::cout << stamp() << "scan: skipping file outside music_root: "
 				          << sdat.path << std::endl;
+				continue;
+				}
+
+			// Video takes a different reader entirely: TagLib cannot open
+			// these containers, so ffprobe supplies duration, bitrate and
+			// dimensions, and the filename supplies the title and episode
+			// number.  A probe failure still leaves a usable row.
+			if (sdat.is_video) {
+				sdat.title    = fs::path(sdat.path).stem().string();
+				sdat.track_nr = episode_number(sdat.title);
+				if (auto vp = probe_video(sdat.path)) {
+					sdat.duration    = vp->duration;
+					sdat.bitrate     = vp->bitrate;
+					sdat.width       = vp->width;
+					sdat.height      = vp->height;
+					sdat.video_codec = vp->video_codec;
+					sdat.audio_codec = vp->audio_codec;
+					}
+				else
+					std::cout << stamp() << "scan: ffprobe failed for "
+					          << sdat.path << std::endl;
 				continue;
 				}
 
@@ -1368,7 +1556,8 @@ std::optional<MediaStore::SongInfo> MediaStore::get_song(int song_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement q(db_music_,
-		"SELECT id, path, codec, bitrate, duration, file_size, file_modified"
+		"SELECT id, path, codec, bitrate, duration, file_size, file_modified,"
+		"       is_video, width, height, video_codec, audio_codec"
 		" FROM songs WHERE id = ?");
 	q.bind(1, song_id);
 	if (!q.executeStep()) return std::nullopt;
@@ -1380,7 +1569,156 @@ std::optional<MediaStore::SongInfo> MediaStore::get_song(int song_id)
 	s.duration      = q.getColumn(4).getDouble();
 	s.file_size     = q.getColumn(5).isNull() ? 0  : q.getColumn(5).getInt64();
 	s.file_modified = q.getColumn(6).isNull() ? 0  : q.getColumn(6).getInt64();
+	s.is_video      = q.getColumn(7).getInt() != 0;
+	s.width         = q.getColumn(8).isNull()  ? 0  : q.getColumn(8).getInt();
+	s.height        = q.getColumn(9).isNull()  ? 0  : q.getColumn(9).getInt();
+	s.video_codec   = q.getColumn(10).isNull() ? "" : q.getColumn(10).getString();
+	s.audio_codec   = q.getColumn(11).isNull() ? "" : q.getColumn(11).getString();
 	return s;
+	}
+
+std::vector<MediaStore::ChildEntry> MediaStore::get_videos()
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	// Same shape as the other ChildEntry queries, with the two video columns
+	// appended.  COALESCE on the album folder for parent and cover art for the
+	// same reason documented in ISSUES.md: a song's own folder_id is the disc
+	// (or season) subdirectory, which has no albums row to resolve a cover on.
+	SQLite::Statement q(db_music_,
+		"SELECT s.id, s.title, s.track_number, s.disc_number,"
+		"       s.year, s.genre, s.duration, s.bitrate,"
+		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
+		"       COALESCE(a.name,'') AS artist,"
+		"       COALESCE(al.title,'') AS album,"
+		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
+		"       s.path, s.width, s.height"
+		" FROM songs s"
+		" LEFT JOIN albums al ON al.id = s.album_id"
+		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
+		" LEFT JOIN artists a ON a.id = sa.artist_id"
+		" WHERE s.is_video = 1 AND s.path NOT LIKE '.users%'"
+		" ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE,"
+		"          s.disc_number, s.track_number, s.title COLLATE NOCASE");
+	std::vector<ChildEntry> result;
+	while (q.executeStep()) {
+		ChildEntry e;
+		e.id           = q.getColumn(0).getInt();
+		e.is_dir       = false;
+		e.title        = q.getColumn(1).getString();
+		e.track_number = q.getColumn(2).getInt();
+		e.disc_number  = q.getColumn(3).getInt();
+		e.year         = q.getColumn(4).getInt();
+		e.genre        = q.getColumn(5).isNull() ? "" : q.getColumn(5).getString();
+		e.duration     = q.getColumn(6).getDouble();
+		e.bitrate      = q.getColumn(7).getInt();
+		e.file_size    = q.getColumn(8).getInt64();
+		e.codec        = q.getColumn(9).isNull() ? "" : q.getColumn(9).getString();
+		e.parent_id    = q.getColumn(10).getInt();
+		e.artist       = q.getColumn(11).getString();
+		e.album        = q.getColumn(12).getString();
+		e.cover_art_id = q.getColumn(13).getInt();
+		e.path         = q.getColumn(14).getString();
+		e.width        = q.getColumn(15).isNull() ? 0 : q.getColumn(15).getInt();
+		e.height       = q.getColumn(16).isNull() ? 0 : q.getColumn(16).getInt();
+		result.push_back(std::move(e));
+		}
+	return result;
+	}
+
+std::string MediaStore::get_captions_vtt(int song_id, int stream_index)
+	{
+	auto song = get_song(song_id);
+	if (!song || !song->is_video) return {};
+
+	std::string abs = abs_path(song->path);
+	if (!path_is_within_root(abs)) return {};
+
+	std::string source = abs;
+	if (stream_index < 0) {
+		// Sidecar, in preference order.  A .vtt still goes through ffmpeg so
+		// the response is normalised (and so a mislabelled file cannot be
+		// served verbatim).
+		fs::path base = fs::path(abs);
+		bool     found = false;
+		for (const char* ext : { ".vtt", ".srt", ".ass", ".ssa" }) {
+			fs::path cand = base;
+			cand.replace_extension(ext);
+			std::error_code fec;
+			if (fs::exists(cand, fec) && path_is_within_root(cand)) {
+				source = cand.string();
+				found  = true;
+				break;
+				}
+			}
+		if (!found) return {};
+		}
+
+	std::vector<std::string> args = { "ffmpeg", "-v", "quiet", "-i", source };
+	if (stream_index >= 0) {
+		args.push_back("-map");
+		args.push_back("0:" + std::to_string(stream_index));
+		}
+	args.push_back("-f");
+	args.push_back("webvtt");
+	args.push_back("pipe:1");
+
+	reproc::process proc;
+	reproc::options opts;
+	opts.redirect.err.type = reproc::redirect::type::discard;
+	if (proc.start(args, opts)) return {};
+
+	std::string          out;
+	reproc::sink::string sink(out);
+	auto ec            = reproc::drain(proc, sink, reproc::sink::null);
+	auto [status, wec] = proc.wait(reproc::infinite);
+	if (ec || wec || status != 0) return {};
+	return out;
+	}
+
+MediaStore::VideoStreams MediaStore::get_video_streams(int song_id)
+	{
+	VideoStreams vs;
+	auto song = get_song(song_id);   // takes db_mutex_ itself; don't hold it here
+	if (!song || !song->is_video) return vs;
+
+	std::string abs = abs_path(song->path);
+	if (!path_is_within_root(abs)) return vs;
+
+	std::vector<std::string> args = {
+		"ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", abs
+		};
+	reproc::process proc;
+	reproc::options opts;
+	opts.redirect.err.type = reproc::redirect::type::discard;
+	if (proc.start(args, opts)) return vs;
+
+	std::string          out;
+	reproc::sink::string sink(out);
+	auto ec            = reproc::drain(proc, sink, reproc::sink::null);
+	auto [status, wec] = proc.wait(reproc::infinite);
+	if (ec || wec || status != 0) return vs;
+
+	try {
+		auto j       = nlohmann::json::parse(out);
+		auto streams = j.find("streams");
+		if (streams == j.end() || !streams->is_array()) return vs;
+		for (const auto& s : *streams) {
+			auto type = s.value("codec_type", std::string());
+			if (type != "subtitle" && type != "audio") continue;
+			CaptionTrack t;
+			t.index = static_cast<int>(probe_num(s, "index"));
+			if (auto tags = s.find("tags"); tags != s.end()) {
+				t.language = tags->value("language", std::string());
+				t.title    = tags->value("title",    std::string());
+				}
+			if (t.title.empty()) t.title = s.value("codec_name", std::string());
+			(type == "subtitle" ? vs.captions : vs.audio_tracks)
+				.push_back(std::move(t));
+			}
+		}
+	catch (const std::exception&) {}
+	return vs;
 	}
 
 std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
@@ -1478,7 +1816,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		"       s.year, s.genre, s.duration, s.bitrate,"
 		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name, '') AS artist,"
-		"       COALESCE(al.title, '') AS album"
+		"       COALESCE(al.title, '') AS album, s.width, s.height"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -1492,7 +1830,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		"       s.year, s.genre, s.duration, s.bitrate,"
 		"       s.file_size, s.codec, s.folder_id,"
 		"       COALESCE(a.name, '') AS artist,"
-		"       COALESCE(al.title, '') AS album"
+		"       COALESCE(al.title, '') AS album, s.width, s.height"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -1520,6 +1858,8 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		e.parent_id    = ssel.getColumn(10).getInt();  // album folder in flat mode
 		e.artist       = ssel.getColumn(11).getString();
 		e.album        = ssel.getColumn(12).getString();
+		e.width        = ssel.getColumn(13).isNull() ? 0 : ssel.getColumn(13).getInt();
+		e.height       = ssel.getColumn(14).isNull() ? 0 : ssel.getColumn(14).getInt();
 		// Songs inherit cover art from their parent album folder.
 		if (dir.cover_art_id >= 0)
 			e.cover_art_id = dir.cover_art_id;
@@ -1815,6 +2155,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		"       COALESCE(a.name, '') AS artist,"
 		"       COALESCE(al.title, '') AS album"
 		+ star_col +
+		", s.width, s.height"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -1831,6 +2172,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		"       COALESCE(a.name, '') AS artist,"
 		"       COALESCE(al.title, '') AS album"
 		+ star_col +
+		", s.width, s.height"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -1863,6 +2205,8 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		e.artist       = ssel.getColumn(11).getString();
 		e.album        = ssel.getColumn(12).getString();
 		e.starred      = ssel.getColumn(13).getString();
+		e.width        = ssel.getColumn(14).isNull() ? 0 : ssel.getColumn(14).getInt();
+		e.height       = ssel.getColumn(15).isNull() ? 0 : ssel.getColumn(15).getInt();
 		if (info.album.cover_art_id >= 0)
 			e.cover_art_id = info.album.cover_art_id;
 		info.songs.push_back(std::move(e));
@@ -2333,7 +2677,8 @@ std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id"
+		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
+		"       s.width, s.height"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -2358,6 +2703,8 @@ std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
 	e.artist       = q.getColumn(11).getString();
 	e.album        = q.getColumn(12).getString();
 	e.cover_art_id = q.getColumn(13).getInt();
+	e.width        = q.getColumn(14).isNull() ? 0 : q.getColumn(14).getInt();
+	e.height       = q.getColumn(15).isNull() ? 0 : q.getColumn(15).getInt();
 	return e;
 	}
 

@@ -136,6 +136,15 @@ class MediaStore {
 			// Empty when not starred; otherwise the SQLite timestamp at which
 			// it was starred. The API reports the time, not a flag.
 			std::string starred;
+			// Video only, and populated only by the paths where a client can
+			// act on them: get_videos(), get_song_entry() and the browse
+			// queries. Zero elsewhere, which is why the API emits
+			// originalWidth/originalHeight conditionally. Whether an entry
+			// *is* video is not stored here — it is derived from `codec` via
+			// is_video_ext() in codecs.hh, so every existing query that
+			// already selects the codec answers it for free.
+			int         width  = 0;
+			int         height = 0;
 			};
 
 		struct RecentSongEntry {
@@ -223,9 +232,45 @@ class MediaStore {
 			// re-tagged or replaced file invalidates its cached transcodes
 			// without anyone having to remember to purge them.
 			int64_t     file_modified;
+			// Video only. The streamer needs the codec pair to choose between
+			// serving the file directly, remuxing it, or re-encoding it, and
+			// it must be able to do that without a second DB round trip.
+			bool        is_video = false;
+			int         width    = 0;
+			int         height   = 0;
+			std::string video_codec;
+			std::string audio_codec;
 			};
 
 		std::optional<SongInfo> get_song(int song_id);
+
+		// All video rows, ordered by folder then disc/track, for getVideos.
+		std::vector<ChildEntry> get_videos();
+
+		// Subtitle streams embedded in a video file, in ffprobe stream order.
+		// index is the absolute stream index for `ffmpeg -map 0:<index>`.
+		struct CaptionTrack {
+			int         index;
+			std::string language;   // ISO 639 code, empty if untagged
+			std::string title;
+			};
+
+		// Audio and subtitle tracks of one video, for getVideoInfo and
+		// getCaptions. Runs ffprobe; returns empty vectors for a non-video id
+		// or an unreadable file.
+		struct VideoStreams {
+			std::vector<CaptionTrack> captions;
+			std::vector<CaptionTrack> audio_tracks;
+			};
+
+		VideoStreams get_video_streams(int song_id);
+
+		// WebVTT for one caption source. stream_index < 0 means "the sidecar
+		// subtitle file next to the video"; otherwise it is the absolute
+		// ffprobe stream index of an embedded subtitle track. Conversion goes
+		// through ffmpeg's webvtt muxer rather than a hand-written SRT parser.
+		// Empty when there is nothing to serve.
+		std::string get_captions_vtt(int song_id, int stream_index);
 
 		// Full song metadata suitable for an API response.
 		std::optional<ChildEntry> get_song_entry(int song_id);

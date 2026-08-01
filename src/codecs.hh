@@ -56,8 +56,54 @@ inline std::optional<Target> target_for(std::string_view name)
 	return std::nullopt;
 	}
 
+// Video source containers.  Deliberately a *separate* table rather than more
+// rows in TARGETS: target_for() is what validates the `format` parameter of
+// stream.view, and a video extension must never resolve there as an audio
+// encode target.  These entries describe what a file *is*, not what ffmpeg can
+// be asked to produce — the two video output formats (fragmented MP4 for
+// progressive playback, MPEG-TS for HLS segments) are chosen by the streamer,
+// never by the client naming an extension.
+struct VideoTarget
+	{
+	std::string_view name;   // file extension
+	std::string_view mime;
+	};
+
+inline constexpr std::array<VideoTarget, 9> VIDEO_TARGETS = {{
+	{ "mkv",  "video/x-matroska" },
+	{ "mp4",  "video/mp4"        },
+	{ "m4v",  "video/mp4"        },
+	{ "avi",  "video/x-msvideo"  },
+	{ "mpg",  "video/mpeg"       },
+	{ "mpeg", "video/mpeg"       },
+	{ "mov",  "video/quicktime"  },
+	{ "webm", "video/webm"       },
+	{ "wmv",  "video/x-ms-asf"   },
+	}};
+
+inline std::optional<VideoTarget> video_target_for(std::string_view ext)
+	{
+	for (const auto& t : VIDEO_TARGETS)
+		if (t.name == ext) return t;
+	return std::nullopt;
+	}
+
+inline bool is_video_ext(std::string_view ext)
+	{
+	return video_target_for(ext).has_value();
+	}
+
+// songs.codec holds a lowercased extension for video rows too, so every
+// existing caller of this function keeps working once the video table is
+// consulted as a fallback.  Audio wins on a tie; there is no overlap today.
 inline std::string_view codec_to_mime(std::string_view codec)
 	{
-	auto t = target_for(codec);
-	return t ? t->mime : std::string_view("application/octet-stream");
+	if (auto t = target_for(codec))       return t->mime;
+	if (auto v = video_target_for(codec)) return v->mime;
+	return std::string_view("application/octet-stream");
 	}
+
+// What a video transcode produces.  Tier 1 (remux) and Tier 2 (re-encode)
+// share the fragmented-MP4 form; HLS segments use MPEG-TS.
+inline constexpr std::string_view VIDEO_MP4_MIME = "video/mp4";
+inline constexpr std::string_view VIDEO_TS_MIME  = "video/mp2t";

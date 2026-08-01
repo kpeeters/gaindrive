@@ -125,8 +125,19 @@ CREATE TABLE songs (
     bitrate       INTEGER,   -- kbps
     sample_rate   INTEGER,   -- Hz
     channels      INTEGER,
-    codec         TEXT,      -- "flac","mp3", etc.
+    codec         TEXT,      -- "flac","mp3","mkv", etc. (the extension)
     file_size     INTEGER,   -- bytes
+    -- video; see VIDEO.md.  Videos share this table with audio because every
+    -- piece of client state joins on songs.path, so a separate table would
+    -- mean duplicating stars, play counts, playlists, queue and bookmarks.
+    -- For video rows, bitrate/duration come from ffprobe rather than TagLib,
+    -- and video_codec/audio_codec are what the streamer's tier ladder reads
+    -- to decide between serving directly, remuxing, and re-encoding.
+    is_video      INTEGER DEFAULT 0,
+    width         INTEGER DEFAULT 0,   -- 0 when unprobed
+    height        INTEGER DEFAULT 0,
+    video_codec   TEXT,      -- "h264","mpeg2video", etc. (ffprobe codec_name)
+    audio_codec   TEXT,      -- "aac","ac3", etc.
     -- cover art embedded in file
     has_embedded_cover INTEGER DEFAULT 0,
     -- timestamps

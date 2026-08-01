@@ -1,6 +1,7 @@
 #include "streamer.hh"
 #include "stamp.hh"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -53,8 +54,22 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
                      int max_bitrate,
                      const std::string& format, int time_offset,
                      bool cast_stream, std::function<float()> get_position,
-                     bool estimate_length)
+                     bool estimate_length,
+                     const std::string& video_size, int segment_duration)
 	{
+	bool is_browser = req.get_header_value("User-Agent").find("Mozilla/")
+	                  != std::string::npos;
+
+	// Video takes a different ladder entirely — see VIDEO.md.  None of the
+	// negotiation below applies to it: TARGETS has no entry for a video
+	// container, and format/maxBitRate here are about audio muxers.
+	if (song.is_video) {
+		serve_video(req, res, song, cache, max_bitrate, format, time_offset,
+		            video_size, segment_duration, is_browser,
+		            std::move(get_position));
+		return;
+		}
+
 	auto source = target_for(song.codec);
 
 	// A format request that resolves to the same muxer and encoder as the
@@ -98,9 +113,6 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 		          << "', serving raw" << std::endl;
 		needs_transcode = false;
 		}
-
-	bool is_browser = req.get_header_value("User-Agent").find("Mozilla/")
-	                  != std::string::npos;
 
 	std::cout << stamp() << "stream ["
 	          << song.path << "] codec=" << song.codec
@@ -174,7 +186,17 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 			est_length = static_cast<int64_t>(secs * kbps * 125.0);
 		}
 
-	serve_transcoded(res, song, target_bitrate, *target, time_offset,
+	// For copy mode use the source bitrate for throttling; otherwise the target.
+	// Fall back to 1000 kbps when the database has no bitrate (e.g. FLAC files
+	// stored without a bitrate tag) so the throttle always fires.
+	const float bps = target_bitrate > 0
+	    ? static_cast<float>(target_bitrate) * 125.0f
+	    : (song.bitrate > 0 ? static_cast<float>(song.bitrate) : 1000.0f)
+	      * 125.0f;
+
+	serve_transcoded(res, ffmpeg_argv(song, target_bitrate, *target,
+	                                  time_offset, "pipe:1"),
+	                 std::string(target->mime), bps,
 	                 is_browser, std::move(get_position), est_length);
 	}
 
@@ -374,14 +396,214 @@ std::vector<std::string> Streamer::ffmpeg_argv(const SongInfo& song,
 	return args;
 	}
 
-void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
-                                int target_bitrate, const Target& target,
-                                int time_offset, bool is_browser,
+// ---- Video -----------------------------------------------------------
+
+// Codecs a browser can be expected to decode without help, and containers it
+// will accept them in.  The lists are deliberately conservative: being wrong
+// in the permissive direction means a black player and a support question,
+// while being wrong in the strict direction only costs a remux.
+static bool browser_video_codec(std::string_view c)
+	{
+	return c == "h264" || c == "vp8" || c == "vp9" || c == "av1";
+	}
+
+static bool browser_audio_codec(std::string_view c)
+	{
+	return c == "aac" || c == "mp3" || c == "opus" || c == "vorbis"
+	    || c == "flac";
+	}
+
+static bool browser_container(std::string_view ext)
+	{
+	return ext == "mp4" || ext == "m4v" || ext == "webm";
+	}
+
+std::vector<std::string> Streamer::video_ffmpeg_argv(
+	const SongInfo& song, bool copy, int max_bitrate,
+	const std::string& size, int time_offset, int segment_duration,
+	bool mpegts, const std::string& out)
+	{
+	std::vector<std::string> a;
+	a.push_back("ffmpeg");
+	if (time_offset > 0) {
+		// -ss before -i is the fast input seek, and lands on a keyframe.  That
+		// makes HLS segment boundaries drift slightly; Subsonic lives with the
+		// same thing rather than pay for output-accurate seeking.
+		a.push_back("-ss");
+		a.push_back(std::to_string(time_offset));
+		}
+	a.push_back("-i");
+	a.push_back(song.path);
+	if (segment_duration > 0) {
+		a.push_back("-t");
+		a.push_back(std::to_string(segment_duration));
+		}
+	// First video and first audio stream only.  The trailing '?' makes the
+	// audio mapping optional so a silent video still produces output instead
+	// of ffmpeg exiting with "Stream map matches no streams".  Subtitles are
+	// dropped; they are served separately through getCaptions.
+	a.push_back("-map");
+	a.push_back("0:v:0");
+	a.push_back("-map");
+	a.push_back("0:a:0?");
+	a.push_back("-map_metadata");
+	a.push_back("-1");
+
+	if (copy) {
+		a.push_back("-c");
+		a.push_back("copy");
+		}
+	else {
+		a.push_back("-c:v");
+		a.push_back("libx264");
+		a.push_back("-preset");
+		a.push_back("veryfast");
+		a.push_back("-crf");
+		a.push_back("23");
+		// yadif=deint=interlaced only touches frames the decoder flagged as
+		// interlaced, so this can be unconditional — no stored per-file flag,
+		// and progressive material passes through untouched.
+		std::string vf = "yadif=deint=interlaced";
+		if (!size.empty()) {
+			auto x = size.find('x');
+			if (x != std::string::npos)
+				vf += ",scale=" + size.substr(0, x) + ":" + size.substr(x + 1)
+				    + ":force_original_aspect_ratio=decrease";
+			}
+		a.push_back("-vf");
+		a.push_back(vf);
+		if (max_bitrate > 0) {
+			// Leave room for the audio track inside the requested ceiling; a
+			// client that asked for 2000 kbps means the whole stream.
+			int vkbps = std::max(200, max_bitrate - 128);
+			a.push_back("-maxrate");
+			a.push_back(std::to_string(vkbps) + "k");
+			a.push_back("-bufsize");
+			a.push_back(std::to_string(vkbps * 2) + "k");
+			}
+		a.push_back("-c:a");
+		a.push_back("aac");
+		a.push_back("-b:a");
+		a.push_back("128k");
+		a.push_back("-ac");
+		a.push_back("2");
+		// Keeps audio aligned with video after a keyframe seek, which is the
+		// same reason Subsonic passes it.
+		a.push_back("-async");
+		a.push_back("1");
+		}
+
+	a.push_back("-f");
+	if (mpegts)
+		a.push_back("mpegts");
+	else {
+		a.push_back("mp4");
+		// A normal moov atom is written after the media and needs a seek back
+		// to the start of the output.  A pipe cannot do that and ffmpeg aborts
+		// rather than emit a headerless file, so the fragmented layout is the
+		// only form that streams.  Harmless on the cache path too.
+		a.push_back("-movflags");
+		a.push_back("frag_keyframe+empty_moov+default_base_is_moof");
+		}
+	a.push_back(out);
+	return a;
+	}
+
+void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
+                           const SongInfo& song, TranscodeCache& cache,
+                           int max_bitrate, const std::string& format,
+                           int time_offset, const std::string& video_size,
+                           int segment_duration, bool is_browser,
+                           std::function<float()> get_position)
+	{
+	bool codecs_ok = browser_video_codec(song.video_codec)
+	              && (song.audio_codec.empty()
+	                  || browser_audio_codec(song.audio_codec));
+	// Anything that changes the picture or bounds the output forces a real
+	// encode; a seek or a segment forces the pipe because neither a raw file
+	// nor a whole-file remux can start partway in.
+	bool constrained = !video_size.empty() || max_bitrate > 0
+	                || (!format.empty() && format != "raw");
+	bool partial     = time_offset > 0 || segment_duration > 0;
+
+	enum class Tier { Direct, Remux, Encode };
+	Tier tier = Tier::Encode;
+	if (codecs_ok && !constrained && !partial)
+		tier = browser_container(song.codec) ? Tier::Direct : Tier::Remux;
+	const char* tier_name = tier == Tier::Direct ? "direct"
+	                      : tier == Tier::Remux  ? "remux" : "encode";
+
+	std::cout << stamp() << "video [" << song.path << "]"
+	          << " v=" << (song.video_codec.empty() ? "?" : song.video_codec)
+	          << " a=" << (song.audio_codec.empty() ? "?" : song.audio_codec)
+	          << " " << song.width << "x" << song.height
+	          << " tier=" << tier_name
+	          << (video_size.empty() ? "" : " size=" + video_size)
+	          << (max_bitrate > 0 ? " max=" + std::to_string(max_bitrate) : "")
+	          << (time_offset > 0 ? " offset=" + std::to_string(time_offset) : "")
+	          << (segment_duration > 0
+	              ? " seg=" + std::to_string(segment_duration) : "")
+	          << " browser=" << (is_browser ? "yes" : "no")
+	          << std::endl;
+
+	if (tier == Tier::Direct) {
+		// The raw file, byte ranges and all.  is_browser is passed as false:
+		// the wall-clock throttle is sized for audio and would cap a 6 Mbps
+		// video at 15 s of buffer on a link that could do better.
+		serve_direct(req, res, song, false, std::move(get_position));
+		return;
+		}
+
+	if (tier == Tier::Remux) {
+		// Worth materialising, unlike an encode: -c copy runs at disk speed,
+		// the key is still id+mtime, and the result is a real MP4 with a
+		// Content-Length that answers Range requests.
+		std::string key = std::to_string(song.id) + "-"
+		                + std::to_string(song.file_modified) + "-remux";
+		static const std::string OUT = "\x01cache-out\x01";
+		auto argv = video_ffmpeg_argv(song, true, 0, "", 0, 0, false, OUT);
+		if (auto entry = cache.get_or_build(key, ".mp4", argv, OUT)) {
+			SongInfo cached{ entry->path().string(), "mp4", song.bitrate,
+			                 song.duration, entry->size(), song.id,
+			                 song.file_modified };
+			res.set_header("X-Gaindrive-Transcode",
+			               entry->hit() ? "hit" : "miss");
+			serve_direct(req, res, cached, false, std::move(get_position),
+			             entry);
+			return;
+			}
+		// Cache disabled, disk full or ffmpeg unhappy — fall through and pipe
+		// it instead.  The user still sees the video.
+		std::cout << stamp() << "video: remux cache unavailable, piping"
+		          << std::endl;
+		}
+
+	// Chunked output has no length to range into, and a browser's automatic
+	// "Range: bytes=0-" would otherwise be rejected as 416 by httplib's
+	// post-handler range check.  Same reasoning as the audio path.
+	const_cast<httplib::Request&>(req).ranges.clear();
+
+	bool  copy = (tier == Tier::Remux);
+	float bps  = (song.bitrate > 0 ? static_cast<float>(song.bitrate)
+	                               : 2000.0f) * 125.0f;
+	auto  argv = video_ffmpeg_argv(song, copy, max_bitrate, video_size,
+	                               time_offset, segment_duration,
+	                               segment_duration > 0, "pipe:1");
+	std::string mime(segment_duration > 0 ? VIDEO_TS_MIME : VIDEO_MP4_MIME);
+
+	// is_browser=false for the same reason as Tier 0: pacing a video at the
+	// audio throttle's 15 s window starves a player that wants to buffer.
+	serve_transcoded(res, std::move(argv), mime, bps, false,
+	                 std::move(get_position));
+	}
+
+void Streamer::serve_transcoded(httplib::Response& res,
+                                std::vector<std::string> args,
+                                const std::string& mime, float bps,
+                                bool is_browser,
                                 std::function<float()> get_position,
                                 int64_t est_length)
 	{
-	auto args = ffmpeg_argv(song, target_bitrate, target, time_offset, "pipe:1");
-
 	{
 	std::string cmd;
 	for (const auto& a : args) { cmd += ' '; cmd += a; }
@@ -412,16 +634,7 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 		return;
 		}
 
-	// For copy mode use the source bitrate for throttling; otherwise the target.
-	// Fall back to 1000 kbps when the database has no bitrate (e.g. FLAC files
-	// stored without a bitrate tag) so the throttle always fires.
-	const float  bps        = target_bitrate > 0
-	    ? static_cast<float>(target_bitrate) * 125.0f
-	    : (song.bitrate > 0
-	           ? static_cast<float>(song.bitrate)
-	           : 1000.0f) * 125.0f;
-	std::cout << stamp() << "stream: bps=" << bps
-	          << " (src_bitrate=" << song.bitrate << ")" << std::endl;
+	std::cout << stamp() << "stream: bps=" << bps << std::endl;
 	// total_sent persists across repeated provider calls (one per chunk).
 	auto total_sent = std::make_shared<size_t>(0);
 
@@ -434,7 +647,6 @@ void Streamer::serve_transcoded(httplib::Response& res, const SongInfo& song,
 	// Transfer-Encoding: chunked frames each write so the browser starts
 	// decoding as bytes arrive.
 	res.set_header("Accept-Ranges", "none");
-	std::string mime(target.mime);
 	// t_start is the wall-clock moment the first byte is sent to the browser.
 	// The non-cast throttle branch uses it as a proxy for playback position.
 	auto t_start = std::chrono::steady_clock::now();

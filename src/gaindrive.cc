@@ -195,6 +195,13 @@ static std::optional<TranscodeInfo> transcode_target(
 	const MediaStore::ChildEntry& c, int max_bitrate,
 	const std::string& format = "")
 	{
+	// Video advertises nothing.  Which tier a video takes — direct, remux or
+	// re-encode — depends on its video/audio codec pair, which a ChildEntry
+	// does not carry, and the transcoded* fields are optional.  Staying silent
+	// is correct; guessing would hand the client a content type the stream
+	// then contradicts, with no way to tell which of the two lied.
+	if (is_video_ext(c.codec)) return std::nullopt;
+
 	auto source = target_for(c.codec);
 	std::optional<Target> wanted;
 	if (!format.empty() && format != "raw")
@@ -221,6 +228,10 @@ static nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
                                        int max_bitrate = 0,
                                        const std::string& format = "")
 	{
+	// Video rows live in the same table and come back through the same
+	// queries; the extension is what distinguishes them, so codecs.hh answers
+	// this without a dedicated column travelling through every query.
+	bool is_video = is_video_ext(c.codec);
 	nlohmann::json s = {
 		{"id",          sid(c.id)},
 		{"parent",      sid(c.parent_id)},
@@ -228,8 +239,8 @@ static nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
 		// for tag-based data expect albumId rather than parent.
 		{"albumId",     sid(c.parent_id)},
 		{"isDir",       false},
-		{"type",        "music"},
-		{"isVideo",     false},
+		{"type",        is_video ? "video" : "music"},
+		{"isVideo",     is_video},
 		{"title",       c.title},
 		{"artist",      c.artist},
 		{"album",       c.album},
@@ -245,6 +256,10 @@ static nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
 		};
 	if (c.cover_art_id >= 0) s["coverArt"] = sid(c.cover_art_id);
 	if (!c.starred.empty()) s["starred"] = iso8601(c.starred);
+	// Omitted rather than sent as 0 when the scan could not probe the file, or
+	// when the query that produced this entry does not select the dimensions.
+	if (c.width  > 0) s["originalWidth"]  = c.width;
+	if (c.height > 0) s["originalHeight"] = c.height;
 	if (auto t = transcode_target(c, max_bitrate, format)) {
 		s["transcodedContentType"] = std::string(t->mime);
 		s["transcodedSuffix"]      = std::string(t->suffix);
@@ -260,6 +275,7 @@ static XMLElement* song_entry_xml(XMLDocument& doc,
                                    int max_bitrate = 0,
                                    const std::string& format = "")
 	{
+	bool  is_video = is_video_ext(c.codec);
 	auto* el = doc.NewElement(tag);
 	el->SetAttribute("id",          c.id);
 	el->SetAttribute("parent",      c.parent_id);
@@ -277,9 +293,11 @@ static XMLElement* song_entry_xml(XMLDocument& doc,
 	el->SetAttribute("suffix",      c.codec.c_str());
 	el->SetAttribute("duration",    (int)c.duration);
 	el->SetAttribute("bitRate",     c.bitrate);
-	el->SetAttribute("type",        "music");
-	el->SetAttribute("isVideo",     false);
+	el->SetAttribute("type",        is_video ? "video" : "music");
+	el->SetAttribute("isVideo",     is_video);
 	el->SetAttribute("albumId",     c.parent_id);
+	if (c.width  > 0) el->SetAttribute("originalWidth",  c.width);
+	if (c.height > 0) el->SetAttribute("originalHeight", c.height);
 	if (!c.starred.empty())
 		el->SetAttribute("starred", iso8601(c.starred).c_str());
 	if (auto t = transcode_target(c, max_bitrate, format)) {
@@ -288,6 +306,26 @@ static XMLElement* song_entry_xml(XMLDocument& doc,
 		el->SetAttribute("transcodedBitRate",     t->bitrate);
 		}
 	return el;
+	}
+
+// Bridges MediaStore's song record to the streamer's.  Written once because
+// the video fields are easy to forget in an aggregate initialiser — and a
+// dropped is_video sends a video down the audio ladder, where TARGETS has no
+// entry for its container and the whole tier decision is skipped.
+// size_override exists for the Cast probe, which deliberately serves a slice.
+static Streamer::SongInfo streamer_song(const MediaStore::SongInfo& s,
+                                         const std::string& abs,
+                                         int64_t size_override = 0)
+	{
+	Streamer::SongInfo si{ abs, s.codec, s.bitrate, s.duration,
+	                       size_override > 0 ? size_override : s.file_size,
+	                       s.id, s.file_modified };
+	si.is_video    = s.is_video;
+	si.width       = s.width;
+	si.height      = s.height;
+	si.video_codec = s.video_codec;
+	si.audio_codec = s.audio_codec;
+	return si;
 	}
 
 // Looks up the authenticated user's max_bitrate so song entries can advertise
@@ -2614,10 +2652,9 @@ GainDrive::GainDrive(const std::string& db_path,
 		        && req.get_header_value("Range").empty()) {
 			std::cout << stamp() << "cast probe: id=" << it->second
 			          << " offset=" << last_cast_offset_ << std::endl;
-			Streamer::SongInfo probe_si{ song_abs, song->codec,
-			                             song->bitrate, song->duration,
-			                             std::min(song->file_size, (int64_t)32768),
-			                             song->id, song->file_modified };
+			auto probe_si = streamer_song(*song, song_abs,
+			                              std::min(song->file_size,
+			                                       (int64_t)32768));
 			Streamer::serve(req, res, probe_si, transcode_cache_, 0, "", 0, true, {});
 			return;
 			}
@@ -2631,9 +2668,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			          << std::endl;
 			}
 
-		Streamer::SongInfo si{ song_abs, song->codec,
-		                       song->bitrate, song->duration, song->file_size,
-		                       song->id, song->file_modified };
+		auto si = streamer_song(*song, song_abs);
 
 		// For Cast streams, pass a callback that returns the receiver's current
 		// playback position from the cached status (updated every ~0.5 s by the
@@ -2663,9 +2698,14 @@ GainDrive::GainDrive(const std::string& db_path,
 			          << (!format.empty() ? " fmt=" + format : "")
 			          << std::endl;
 		bool estimate_length = qp("estimateContentLength") == "true";
+		// Video-only per the spec, and ignored for audio by Streamer::serve().
+		// `duration` is what makes an HLS segment a segment: hls.m3u8 points
+		// every segment back here with a timeOffset and a length.
+		std::string video_size = qp("size");
+		int         seg_dur    = to_int(qp("duration"), 0);
 		Streamer::serve(req, res, si, transcode_cache_, max_bitrate, format,
 		                time_offset, cast_authed, std::move(get_pos),
-		                estimate_length);
+		                estimate_length, video_size, seg_dur);
 		});
 
 	// download — the original file, never transcoded and never bitrate-capped.
@@ -2723,9 +2763,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		          << " path=" << song->path
 		          << " size=" << song->file_size << std::endl;
 
-		Streamer::SongInfo si{ song_abs, song->codec, song->bitrate,
-		                       song->duration, song->file_size,
-		                       song->id, song->file_modified };
+		auto si = streamer_song(*song, song_abs);
 		Streamer::serve_raw(req, res, si);
 		});
 
@@ -3129,6 +3167,214 @@ GainDrive::GainDrive(const std::string& db_path,
 				root->InsertEndChild(song_entry_xml(doc, *song, "song", mbr));
 				});
 		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// getVideos — every video in the library, as Child entries.  Videos share
+	// the songs table with audio, so this is the ordinary song serialiser with
+	// a different envelope key; isVideo and type are derived from the codec.
+	server_.Get("/rest/getVideos.view", [this](const httplib::Request& req,
+	                                            httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto videos   = store_.get_videos();
+		int  mbr      = request_max_bitrate(req, store_);
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&videos, mbr](nlohmann::json& r) {
+				nlohmann::json entries = nlohmann::json::array();
+				for (auto& v : videos)
+					entries.push_back(song_entry_json(v, mbr));
+				r["videos"] = {{ "video", entries }};
+				});
+		else
+			body = subsonic_ok([&videos, mbr](XMLDocument& doc, XMLElement* root) {
+				auto* el = doc.NewElement("videos");
+				for (auto& v : videos)
+					el->InsertEndChild(song_entry_xml(doc, v, "video", mbr));
+				root->InsertEndChild(el);
+				});
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// getVideoInfo — the subtitle and audio tracks inside one video file.
+	// Runs ffprobe per call rather than caching: it is a per-playback lookup,
+	// not a browse path, and a stale track list is worse than a slow one.
+	// No <conversion> child is emitted — nothing pre-transcodes today, and
+	// advertising a conversion that does not exist is worse than silence.
+	server_.Get("/rest/getVideoInfo.view", [this](const httplib::Request& req,
+	                                               httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			err(10, "Required parameter missing: id."); return;
+			}
+		int  song_id = to_int(it->second, -1);
+		auto song    = store_.get_song(song_id);
+		if (!song || !song->is_video) { err(70, "Video not found."); return; }
+
+		auto streams = store_.get_video_streams(song_id);
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&](nlohmann::json& r) {
+				nlohmann::json caps = nlohmann::json::array();
+				for (auto& c : streams.captions)
+					caps.push_back({ {"id",   sid(c.index)},
+					                 {"name", c.title.empty() ? c.language
+					                                          : c.title} });
+				nlohmann::json tracks = nlohmann::json::array();
+				for (auto& a : streams.audio_tracks)
+					tracks.push_back({ {"id",           sid(a.index)},
+					                   {"name",         a.title},
+					                   {"languageCode", a.language} });
+				r["videoInfo"] = {
+					{"id",         sid(song_id)},
+					{"captions",   caps},
+					{"audioTrack", tracks}
+					};
+				});
+		else
+			body = subsonic_ok([&](XMLDocument& doc, XMLElement* root) {
+				auto* vi = doc.NewElement("videoInfo");
+				vi->SetAttribute("id", song_id);
+				for (auto& c : streams.captions) {
+					auto* el = doc.NewElement("captions");
+					el->SetAttribute("id",   c.index);
+					el->SetAttribute("name",
+						(c.title.empty() ? c.language : c.title).c_str());
+					vi->InsertEndChild(el);
+					}
+				for (auto& a : streams.audio_tracks) {
+					auto* el = doc.NewElement("audioTrack");
+					el->SetAttribute("id",           a.index);
+					el->SetAttribute("name",         a.title.c_str());
+					el->SetAttribute("languageCode", a.language.c_str());
+					vi->InsertEndChild(el);
+					}
+				root->InsertEndChild(vi);
+				});
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// getCaptions — WebVTT for one subtitle track.  Returns the file itself,
+	// not a Subsonic envelope, which is what the spec asks for.  `format` is
+	// accepted and ignored: WebVTT is what a <track> element can consume, and
+	// handing back SRT would only push the conversion onto the client.
+	server_.Get("/rest/getCaptions.view", [this](const httplib::Request& req,
+	                                              httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			res.set_content(use_json
+			                ? subsonic_error_json(10, "Required parameter missing: id.")
+			                : subsonic_error(10, "Required parameter missing: id."),
+			                use_json ? "application/json" : "application/xml");
+			return;
+			}
+		// captionId selects an embedded stream; absent means the sidecar file.
+		auto cid_it = req.params.find("captionId");
+		int  index  = cid_it != req.params.end()
+		    ? to_int(cid_it->second, -1) : -1;
+
+		auto vtt = store_.get_captions_vtt(to_int(it->second, -1), index);
+		if (vtt.empty()) {
+			std::cout << stamp() << "getCaptions: nothing for id=" << it->second
+			          << " captionId=" << index << std::endl;
+			res.status = 404;
+			return;
+			}
+		res.set_content(vtt, "text/vtt");
+		});
+
+	// hls.m3u8 — a playlist computed from the stored duration.  Deliberately
+	// stateless: no segment directory, no session, no temp files.  Every
+	// segment URL is an ordinary stream.view transcode bounded by timeOffset
+	// and duration, which is exactly how Subsonic does it.  Nothing here needs
+	// cleaning up if a client walks away mid-playlist.
+	server_.Get("/rest/hls.m3u8", [this](const httplib::Request& req,
+	                                      httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			res.set_content(subsonic_error(10, "Required parameter missing: id."),
+			                "application/xml");
+			return;
+			}
+		auto song = store_.get_song(to_int(it->second, -1));
+		if (!song || !song->is_video) {
+			res.set_content(subsonic_error(70, "Video not found."),
+			                "application/xml");
+			return;
+			}
+
+		auto qp = [&](const std::string& k, const std::string& def = "") {
+			auto it2 = req.params.find(k);
+			return it2 != req.params.end() ? it2->second : def;
+			};
+		// bitRate is the spec's spelling here; it may carry an "@WxH" suffix
+		// (e.g. "1000@640x480") naming the frame size for that variant.
+		std::string bitrate = qp("bitRate");
+		std::string size;
+		if (auto at = bitrate.find('@'); at != std::string::npos) {
+			size    = bitrate.substr(at + 1);
+			bitrate = bitrate.substr(0, at);
+			}
+
+		const int SEGMENT = 10;
+		int total = static_cast<int>(song->duration);
+		if (total <= 0) {
+			res.set_content(subsonic_error(70, "Video has no known duration."),
+			                "application/xml");
+			return;
+			}
+
+		// Credentials ride along on every segment URL: the player fetches the
+		// segments itself and carries none of this request's context.  Only
+		// the parameters actually present are echoed — an empty p= alongside
+		// t=/s= would send check_auth down the password branch with a blank
+		// password and fail every segment.
+		std::string auth;
+		for (const char* k : { "u", "p", "t", "s", "c" }) {
+			auto v = qp(k);
+			if (!v.empty())
+				auth += "&" + std::string(k) + "=" + url_encode(v);
+			}
+		auth += "&v=" + std::string(SUBSONIC_VER);
+
+		std::ostringstream m3u;
+		m3u << "#EXTM3U\n"
+		    << "#EXT-X-VERSION:3\n"
+		    << "#EXT-X-TARGETDURATION:" << SEGMENT << "\n"
+		    << "#EXT-X-MEDIA-SEQUENCE:0\n"
+		    << "#EXT-X-PLAYLIST-TYPE:VOD\n";
+		for (int off = 0; off < total; off += SEGMENT) {
+			int len = std::min(SEGMENT, total - off);
+			m3u << "#EXTINF:" << len << ".0,\n"
+			    << "stream.view?id=" << it->second
+			    << "&timeOffset=" << off
+			    << "&duration="   << len;
+			if (!bitrate.empty()) m3u << "&maxBitRate=" << bitrate;
+			if (!size.empty())    m3u << "&size=" << size;
+			m3u << auth << "\n";
+			}
+		m3u << "#EXT-X-ENDLIST\n";
+
+		std::cout << stamp() << "hls: id=" << it->second
+		          << " duration=" << total
+		          << " segments=" << ((total + SEGMENT - 1) / SEGMENT)
+		          << std::endl;
+		res.set_content(m3u.str(), "application/vnd.apple.mpegurl");
 		});
 
 	// search2 / search3 — title/name substring search across artists, albums, songs.
