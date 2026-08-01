@@ -26,6 +26,8 @@ import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.StreamUrls
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.playback.cast.CastPlayer
+import org.gaindrive.android.playback.cast.CastSession
 import javax.inject.Inject
 
 /**
@@ -54,9 +56,22 @@ class PlaybackService : MediaLibraryService() {
 	@Inject
 	lateinit var prewarm: TranscodePrewarmer
 
+	@Inject
+	lateinit var castSession: CastSession
+
 	private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
 	private var session: MediaLibrarySession? = null
+
+	private var localPlayer: ExoPlayer? = null
+	private var castPlayer: CastPlayer? = null
+
+	/**
+	 * Whichever player the session is driving. Everything that observes playback
+	 * asks the session rather than holding a player, because the session is the
+	 * thing that survives a swap to the Chromecast and back.
+	 */
+	private val activePlayer: Player? get() = session?.player
 
 	override fun onCreate() {
 		super.onCreate()
@@ -75,11 +90,81 @@ class PlaybackService : MediaLibraryService() {
 			.setHandleAudioBecomingNoisy(true)
 			.build()
 
-		player.addListener(scrobbler)
-		player.addListener(prewarmWatcher(player))
-		startScrobbleWatcher(player)
+		localPlayer = player
+		attachListeners(player)
+		startScrobbleWatcher()
 
 		session = MediaLibrarySession.Builder(this, player, LibraryCallback()).build()
+		watchCastDevice()
+	}
+
+	private fun attachListeners(player: Player) {
+		player.addListener(scrobbler)
+		player.addListener(prewarmWatcher)
+	}
+
+	// ── Handing playback to the Chromecast and back ─────────────────────────
+
+	/**
+	 * Follows the cast session, swapping the session's player as a device is
+	 * selected or dropped.
+	 *
+	 * The queue and position travel with the swap, which is the whole reason the
+	 * app owns the queue rather than letting either player be its home.
+	 */
+	private fun watchCastDevice() = scope.launch {
+		castSession.device.collect { device ->
+			if (device != null) goRemote() else goLocal()
+		}
+	}
+
+	private fun goRemote() {
+		val session = session ?: return
+		val local = localPlayer ?: return
+		if (session.player === castPlayer && castPlayer != null) return
+
+		val remote = castPlayer ?: CastPlayer(castSession, streamUrls, scope)
+			.also {
+				castPlayer = it
+				attachListeners(it)
+			}
+
+		val items = (0 until local.mediaItemCount).map { local.getMediaItemAt(it) }
+		val startIndex = local.currentMediaItemIndex
+		val startPosition = local.currentPosition.coerceAtLeast(0)
+		val wasPlaying = local.isPlaying
+
+		// Pause rather than stop: the local player keeps the queue it had, and
+		// leaving it running would play the track twice, once in each room.
+		local.pause()
+
+		session.player = remote
+		if (items.isNotEmpty()) {
+			remote.setMediaItems(items, startIndex, startPosition)
+			remote.prepare()
+			if (wasPlaying) remote.play()
+		}
+	}
+
+	private fun goLocal() {
+		val session = session ?: return
+		val remote = castPlayer ?: return
+		val local = localPlayer ?: return
+		if (session.player === local) return
+
+		val items = (0 until remote.mediaItemCount).map { remote.getMediaItemAt(it) }
+		val startIndex = remote.currentMediaItemIndex
+		val startPosition = remote.currentPosition.coerceAtLeast(0)
+
+		remote.stop()
+		session.player = local
+		if (items.isNotEmpty()) {
+			local.setMediaItems(items, startIndex, startPosition)
+			local.prepare()
+		}
+		// Deliberately not resumed. Stopping a cast is the user leaving the
+		// speakers they were listening on, and having the phone take over out
+		// loud is rarely what they meant.
 	}
 
 	// ── Scrobbling ──────────────────────────────────────────────────────────
@@ -110,13 +195,18 @@ class PlaybackService : MediaLibraryService() {
 	/**
 	 * On every track change, asks the server to prepare the one after it.
 	 *
-	 * The listener closes over the player because the queue is what it needs
-	 * and [Player.Listener] is handed only the item that just started. The
-	 * first transition fires when playback begins, so the second track of a
-	 * queue is being prepared while the first plays — the case that matters.
+	 * It asks the session for the queue rather than closing over a player,
+	 * because [Player.Listener] is handed only the item that just started and
+	 * the player underneath may since have become the Chromecast. The first
+	 * transition fires when playback begins, so the second track of a queue is
+	 * being prepared while the first plays — the case that matters.
+	 *
+	 * Worth doing while casting too: the receiver fetches from the same server,
+	 * so a transcode warmed now is one it will not wait for.
 	 */
-	private fun prewarmWatcher(player: Player) = object : Player.Listener {
+	private val prewarmWatcher = object : Player.Listener {
 		override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+			val player = activePlayer ?: return
 			val index = player.nextMediaItemIndex
 			if (index == C.INDEX_UNSET) return
 			val next = player.getMediaItemAt(index).itemRef() ?: return
@@ -131,9 +221,10 @@ class PlaybackService : MediaLibraryService() {
 	 * scrobbling services have used for years, and it stops a long track
 	 * needing to finish before it counts.
 	 */
-	private fun startScrobbleWatcher(player: Player) = scope.launch {
+	private fun startScrobbleWatcher() = scope.launch {
 		while (true) {
 			delay(SCROBBLE_POLL_MS)
+			val player = activePlayer ?: continue
 			val ref = currentRef ?: continue
 			if (submitted || !player.isPlaying) continue
 
@@ -163,11 +254,14 @@ class PlaybackService : MediaLibraryService() {
 	}
 
 	override fun onDestroy() {
-		session?.run {
-			player.release()
-			release()
-		}
+		session?.release()
 		session = null
+		// Both, and by name: the session only holds whichever one was active,
+		// and the other would leak its listener and its coroutine.
+		castPlayer?.release()
+		castPlayer = null
+		localPlayer?.release()
+		localPlayer = null
 		scope.cancel()
 		super.onDestroy()
 	}

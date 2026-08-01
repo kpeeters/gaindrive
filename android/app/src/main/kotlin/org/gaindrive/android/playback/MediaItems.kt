@@ -15,6 +15,16 @@ import org.gaindrive.android.data.model.Song
 private const val KEY_ALBUM_REF = "org.gaindrive.albumRef"
 
 /**
+ * The source file's own MIME type, as the server reported it.
+ *
+ * Only casting reads it, and only when the chosen quality is the original file:
+ * a Cast receiver picks its decode pipeline from `contentType`, and a wrong
+ * guess surfaces as a decode error minutes into playback rather than as a
+ * refusal to start. Every transcoded quality knows its own MIME already.
+ */
+private const val KEY_CONTENT_TYPE = "org.gaindrive.contentType"
+
+/**
  * Song ↔ MediaItem. The `mediaId` carries the encoded [ItemRef], because it is
  * the only context Media3 hands back on notification actions and session
  * restore — a bare song id there would be ambiguous the moment a second server
@@ -29,10 +39,19 @@ fun Song.toMediaItem(artworkUrl: String?): MediaItem {
 		.setTitle(title)
 		.setArtist(artistName)
 		.setAlbumTitle(albumTitle)
+		// The server's own figure. ExoPlayer discovers duration for itself, but a
+		// Cast receiver benefits from being told before it has fetched a byte,
+		// and it is what the queue shows for tracks that have not played yet.
+		.setDurationMs(duration.toLong() * 1000)
 		.setIsBrowsable(false)
 		.setIsPlayable(true)
 		.apply { artworkUrl?.let { setArtworkUri(Uri.parse(it)) } }
-		.apply { albumRef?.let { setExtras(bundleOf(KEY_ALBUM_REF to it.encode())) } }
+		.setExtras(
+			bundleOf(
+				KEY_ALBUM_REF to albumRef?.encode(),
+				KEY_CONTENT_TYPE to contentType,
+			)
+		)
 		.build()
 
 	return MediaItem.Builder()
@@ -43,6 +62,14 @@ fun Song.toMediaItem(artworkUrl: String?): MediaItem {
 
 /** The reference a [MediaItem] was built from, or null if its id is malformed. */
 fun MediaItem.itemRef(): ItemRef? = ItemRef.decode(mediaId)
+
+/**
+ * The source file's MIME type, if this item still carries it. Null for a queue
+ * the system restored from bare media ids after process death, where casting
+ * falls back to letting the receiver sniff.
+ */
+fun MediaItem.sourceContentType(): String? =
+	mediaMetadata.extras?.getString(KEY_CONTENT_TYPE)
 
 /** What the player UI needs to render one queue entry. */
 data class NowPlaying(

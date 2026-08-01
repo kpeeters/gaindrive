@@ -31,7 +31,8 @@ data class CastMedia(
 	 * wrong guess surfaces as a decode error minutes later.
 	 */
 	val mimeType: String?,
-	val durationSeconds: Double,
+	/** Omitted from the LOAD when unknown; a stated zero would be a lie. */
+	val durationSeconds: Double?,
 	/** Where to start. The receiver seeks using the file's own index. */
 	val startSeconds: Float = 0f,
 	val title: String? = null,
@@ -161,7 +162,7 @@ class CastSession @Inject constructor(
 		// were told so the UI has one before the receiver reports its own, and
 		// arm the retry against the session this LOAD is about to replace.
 		retry.arm(_status.value.mediaSessionId)
-		_status.value = CastStatus(duration = media.durationSeconds.toFloat())
+		_status.value = CastStatus(duration = media.durationSeconds?.toFloat() ?: 0f)
 		lastLoad = media
 
 		scope.launch(Dispatchers.IO) { sendLoad(media, gen) }
@@ -208,6 +209,12 @@ class CastSession @Inject constructor(
 				open.send(CastNs.CONNECTION, CastNs.RECEIVER_ID, connectPayload())
 				open.send(CastNs.RECEIVER, CastNs.RECEIVER_ID, request("GET_STATUS"))
 				pump(open)
+				// Reached only when the receiver closed on us. Logged because an
+				// idle connection and one that is silently reconnecting every few
+				// seconds otherwise look identical from outside — and the app
+				// sends nothing at all between sessions, which is when a receiver
+				// is most likely to hang up.
+				Log.i(TAG, "connection closed by receiver, reconnecting")
 			} finally {
 				open.close()
 				channel.value = null
@@ -311,7 +318,7 @@ class CastSession @Inject constructor(
 				put("streamType", "BUFFERED")
 				// Redundant against the receiver's own parsing, but it gives an
 				// early hint before any byte-range request is made.
-				put("duration", media.durationSeconds)
+				media.durationSeconds?.let { put("duration", it) }
 				media.metadata()?.let { put("metadata", it) }
 			})
 		}
