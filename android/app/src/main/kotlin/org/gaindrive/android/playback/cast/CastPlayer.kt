@@ -11,7 +11,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import org.gaindrive.android.data.StreamUrls
 import org.gaindrive.android.playback.itemRef
 import org.gaindrive.android.playback.sourceContentType
 
@@ -34,7 +33,7 @@ import org.gaindrive.android.playback.sourceContentType
  */
 class CastPlayer(
 	private val session: CastSession,
-	private val streamUrls: StreamUrls,
+	private val castUrls: CastUrls,
 	private val scope: CoroutineScope,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
 
@@ -259,9 +258,9 @@ class CastPlayer(
 	/**
 	 * Resolves the current entry's stream URL and hands it to the receiver.
 	 *
-	 * The URL comes from [StreamUrls] exactly as it does for local playback, so
-	 * a cast track is the same quality, under the same per-server bitrate cap,
-	 * as one played on the phone.
+	 * [CastUrls] builds it the same way local playback would — same quality,
+	 * same per-server bitrate cap — and then decides whether the receiver
+	 * fetches from the server or through the bridge.
 	 */
 	private fun loadCurrent(positionMs: Long) {
 		val entry = entries.getOrNull(index) ?: return
@@ -269,7 +268,7 @@ class CastPlayer(
 		ended = false
 		loadJob?.cancel()
 		loadJob = scope.launch {
-			val target = streamUrls.forPlayback(ref) ?: return@launch
+			val target = castUrls.forCast(ref) ?: return@launch
 			val metadata = entry.item.mediaMetadata
 			session.load(
 				CastMedia(
@@ -284,7 +283,10 @@ class CastPlayer(
 					title = metadata.title?.toString(),
 					artist = metadata.artist?.toString(),
 					album = metadata.albumTitle?.toString(),
-					artworkUrl = metadata.artworkUri?.toString(),
+					artworkUrl = castUrls.artworkFor(
+						metadata.artworkUri?.toString(),
+						bridged = target.bridged,
+					),
 				)
 			)
 		}

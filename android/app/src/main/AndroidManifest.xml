@@ -19,6 +19,11 @@
 	     without asking. -->
 	<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+	<!-- For the cast bridge's WifiLock, which stops Wi-Fi power saving stalling
+	     the relay once the screen goes off. Discovery needs nothing: NsdManager
+	     works off ACCESS_NETWORK_STATE, declared above. -->
+	<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
 	<!-- Self-hosted servers are commonly plain HTTP on a LAN, so cleartext is
 	     permitted. See network_security_config.xml. -->
 	<application

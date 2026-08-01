@@ -26,8 +26,10 @@ import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.StreamUrls
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.playback.cast.CastBridge
 import org.gaindrive.android.playback.cast.CastPlayer
 import org.gaindrive.android.playback.cast.CastSession
+import org.gaindrive.android.playback.cast.CastUrls
 import javax.inject.Inject
 
 /**
@@ -58,6 +60,12 @@ class PlaybackService : MediaLibraryService() {
 
 	@Inject
 	lateinit var castSession: CastSession
+
+	@Inject
+	lateinit var castUrls: CastUrls
+
+	@Inject
+	lateinit var castBridge: CastBridge
 
 	private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -123,7 +131,7 @@ class PlaybackService : MediaLibraryService() {
 		val local = localPlayer ?: return
 		if (session.player === castPlayer && castPlayer != null) return
 
-		val remote = castPlayer ?: CastPlayer(castSession, streamUrls, scope)
+		val remote = castPlayer ?: CastPlayer(castSession, castUrls, scope)
 			.also {
 				castPlayer = it
 				attachListeners(it)
@@ -158,6 +166,8 @@ class PlaybackService : MediaLibraryService() {
 
 		remote.stop()
 		session.player = local
+		// Nothing is pulling from it any more, and it holds a Wi-Fi lock.
+		castBridge.stop()
 		if (items.isNotEmpty()) {
 			local.setMediaItems(items, startIndex, startPosition)
 			local.prepare()
