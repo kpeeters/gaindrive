@@ -16,6 +16,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.local.LocalLibrary
+import org.gaindrive.android.data.model.AudioQuality
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -131,6 +132,26 @@ class AudioCache @Inject constructor(
 		ContentMetadata.getContentLength(cache.getContentMetadata(key))
 
 	/**
+	 * The quality tag of a copy of [refKey] that is held in full, preferring
+	 * [preferred] when that one is present.
+	 *
+	 * Playing whatever is already stored is the point: after a quality change,
+	 * a library downloaded at the old setting is still a library, and re-fetching
+	 * it over mobile data to "upgrade" tracks the user can already hear would be
+	 * a poor trade. Only an explicit pin refresh re-downloads.
+	 *
+	 * Null when nothing complete is stored, in which case the caller uses the
+	 * current setting and fetches.
+	 */
+	fun heldTagOf(refKey: String, preferred: AudioQuality): String? {
+		val preferredKey = CacheKeys.of(refKey, preferred)
+		if (isFullyCached(preferredKey)) return preferred.tag
+		return cache.keys
+			.firstOrNull { CacheKeys.refKeyOf(it) == refKey && isFullyCached(it) }
+			?.let { CacheKeys.tagOf(it) }
+	}
+
+	/**
 	 * Removes everything unpinned.
 	 *
 	 * [keepKeys] spares tracks the player is holding — removing a resource that
@@ -140,7 +161,10 @@ class AudioCache @Inject constructor(
 	suspend fun flush(keepKeys: Set<String> = emptySet()) {
 		withContext(Dispatchers.IO) {
 			cache.keys.forEach { key ->
-				if (pinned.isPinned(key) || key in keepKeys) return@forEach
+				// keepKeys arrives as bare refs from the player's queue, while
+				// cache keys carry a quality — spare every quality of a track
+				// that is in use, not just the one currently set.
+				if (pinned.isPinned(key) || CacheKeys.refKeyOf(key) in keepKeys) return@forEach
 				// One locked or vanished key must not abort the whole flush.
 				runCatching { cache.removeResource(key) }
 			}
@@ -151,13 +175,18 @@ class AudioCache @Inject constructor(
 	private suspend fun refresh() {
 		val keys = withContext(Dispatchers.IO) { cache.keys }
 
-		// gaindrive answers stream.view through a content provider, so
-		// cpp-httplib sends it chunked with no Content-Length and the cache
-		// records no length to compare against. Without this fallback a track
-		// cached by playing it never counted as stored: no mark on its row, and
-		// offline it would have been dimmed as unavailable while sitting on the
-		// device. The mirror's own byte size stands in.
-		val needSize = keys.filter { contentLengthOf(it) == C.LENGTH_UNSET.toLong() }
+		// Fallback for a track the cache recorded no length for: the mirror's
+		// own byte size stands in, so a track cached by playing it still counts
+		// as stored rather than being dimmed as unavailable while sitting on
+		// the device.
+		//
+		// Only valid for untranscoded bytes. The mirror records the size of the
+		// file on the server, which says nothing about the size of an Opus
+		// re-encode of it, so anything carrying a quality tag is judged by the
+		// cache's own record or not at all.
+		val needSize = keys.filter {
+			CacheKeys.tagOf(it) == null && contentLengthOf(it) == C.LENGTH_UNSET.toLong()
+		}
 		val sizes = local.songSizes(needSize)
 
 		val snapshot = withContext(Dispatchers.IO) {
@@ -169,7 +198,12 @@ class AudioCache @Inject constructor(
 		}
 		_usedBytes.value = snapshot.used
 		_pinnedBytes.value = snapshot.pinnedBytes
+		// Published as bare refs: what the rest of the app asks is "is this
+		// track here", not "is it here at this quality". The DAO queries that
+		// consume this match `serverId || '/' || id` and would silently return
+		// nothing if a quality suffix reached them.
 		_cachedKeys.value = snapshot.complete
+			.mapTo(mutableSetOf()) { CacheKeys.refKeyOf(it) }
 	}
 
 	private fun cachedBytesOf(key: String): Long =

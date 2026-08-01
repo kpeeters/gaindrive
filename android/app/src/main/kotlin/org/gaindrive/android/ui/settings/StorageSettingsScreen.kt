@@ -30,6 +30,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.cache.PinPhase
 import org.gaindrive.android.data.cache.PinStatus
 import org.gaindrive.android.data.cache.PinnedItem
+import org.gaindrive.android.data.model.AudioFormat
+import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.ui.components.formatBytes
 
 /**
@@ -51,6 +53,9 @@ fun StorageSettingsScreen(
 	// The item awaiting confirmation, not a boolean: the dialog names what it is
 	// about to delete, and the row it came from may scroll away underneath it.
 	var confirmRemove by remember { mutableStateOf<PinnedItem?>(null) }
+	// The quality awaiting confirmation. Only set when there are pins to
+	// re-download; otherwise the change applies immediately.
+	var confirmQuality by remember { mutableStateOf<AudioQuality?>(null) }
 	val evictable = (storage.usedBytes - storage.pinnedBytes).coerceAtLeast(0)
 
 	SettingsScaffold(title = "Storage & offline", onBack = onBack) {
@@ -62,6 +67,37 @@ fun StorageSettingsScreen(
 				checked = storage.offlineMode,
 				onCheckedChange = viewModel::setOfflineMode,
 			)
+		}
+
+		item { SectionTitle("Audio quality") }
+
+		item {
+			Text(
+				text = "What to fetch, for downloads and for streaming alike — " +
+					"everything you play is stored, so there is no useful " +
+					"difference between the two. Opus at these rates is hard to " +
+					"tell from the original on headphones, at a fraction of the " +
+					"size.",
+				style = MaterialTheme.typography.bodySmall,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+			)
+		}
+		item {
+			Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+				QUALITIES.forEach { quality ->
+					FilterChip(
+						selected = storage.quality == quality,
+						onClick = {
+							if (storage.quality == quality) return@FilterChip
+							// Nothing downloaded means nothing to re-fetch, so
+							// there is nothing to warn about.
+							if (state.pins.isEmpty()) viewModel.setAudioQuality(quality)
+							else confirmQuality = quality
+						},
+						label = { Text(quality.chipLabel) },
+					)
+				}
+			}
 		}
 
 		item { SectionTitle("Cache") }
@@ -183,6 +219,35 @@ fun StorageSettingsScreen(
 		)
 	}
 
+	confirmQuality?.let { quality ->
+		AlertDialog(
+			onDismissRequest = { confirmQuality = null },
+			title = { Text("Change quality?") },
+			text = {
+				Text(
+					// Both halves matter: something large is about to happen,
+					// and nothing is about to be lost.
+					"Your ${state.pins.size} download" +
+						(if (state.pins.size == 1) "" else "s") +
+						" will be fetched again at ${quality.phrase}. " +
+						"The copies already on the device keep playing until the " +
+						"cache needs the space."
+				)
+			},
+			confirmButton = {
+				TextButton(
+					onClick = {
+						viewModel.setAudioQuality(quality)
+						confirmQuality = null
+					}
+				) { Text("Change") }
+			},
+			dismissButton = {
+				TextButton(onClick = { confirmQuality = null }) { Text("Cancel") }
+			},
+		)
+	}
+
 	confirmRemove?.let { item ->
 		AlertDialog(
 			onDismissRequest = { confirmRemove = null },
@@ -209,6 +274,24 @@ fun StorageSettingsScreen(
 		)
 	}
 }
+
+/**
+ * Original plus the Opus rates worth offering. Below 96 the artefacts start to
+ * be audible on anything but speech; above 256 the saving over the original
+ * stops being the point.
+ */
+private val QUALITIES: List<AudioQuality> =
+	listOf(AudioQuality.ORIGINAL) +
+		AudioQuality.BITRATES.map { AudioQuality(AudioFormat.OPUS, it) }
+
+/** Chips are narrow: "160" reads fine under a heading that already says Opus. */
+private val AudioQuality.chipLabel: String
+	get() = if (format == AudioFormat.ORIGINAL) "Original" else bitRate.toString()
+
+/** Reads as part of a sentence, where the bare label does not. */
+private val AudioQuality.phrase: String
+	get() = if (format == AudioFormat.ORIGINAL) "the original quality"
+	else "$label kbps"
 
 /** The caps offered. A slider would imply a precision nobody wants here. */
 private val CACHE_SIZES = listOf(

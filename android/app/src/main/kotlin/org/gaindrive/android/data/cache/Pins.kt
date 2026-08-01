@@ -11,7 +11,13 @@ data class Pin(val ref: ItemRef, val kind: PinKind)
 data class PinnedItem(val pin: Pin, val label: String)
 
 /**
- * What each pin covers: its own encoded ref, to the song cache keys under it.
+ * What each pin covers: its own encoded ref, to the encoded refs of the songs
+ * under it.
+ *
+ * Bare refs on both sides, not cache keys — quality belongs to the bytes, not
+ * to what a pin covers, and the same pin protects whichever quality is set at
+ * the time. `PinRepository.applyProtection` is where the union is turned into
+ * cache keys for the evictor. See `CacheKeys` for why the distinction matters.
  *
  * Kept per pin rather than flattened, because the two questions want different
  * shapes — eviction needs the union ([allKeys]), while the download indicator

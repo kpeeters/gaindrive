@@ -22,6 +22,7 @@ import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.gaindrive.android.data.LibraryRepository
+import org.gaindrive.android.data.StreamUrls
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.model.ItemRef
 import javax.inject.Inject
@@ -45,6 +46,9 @@ class PlaybackService : MediaLibraryService() {
 
 	@Inject
 	lateinit var audioCache: AudioCache
+
+	@Inject
+	lateinit var streamUrls: StreamUrls
 
 	private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -153,21 +157,32 @@ class PlaybackService : MediaLibraryService() {
 		 * home, and that items restored by the system — from a notification
 		 * action, or after process death — get resolved too.
 		 *
-		 * The cache key is set here too, and it is the encoded [ItemRef] rather
-		 * than the URL. Stream URLs carry a per-client-instance auth salt (see
-		 * `API-CLIENT.md`), so the default URL-derived key would miss after
-		 * every process restart — and would not match what a download stored.
+		 * The cache key is set here too, and it is derived from the [ItemRef]
+		 * and the quality rather than from the URL. Stream URLs carry a
+		 * per-client-instance auth salt (see `API-CLIENT.md`), so the default
+		 * URL-derived key would miss after every process restart — and would
+		 * not match what a download stored.
+		 *
+		 * [StreamUrls.forPlayback] pairs the URL, the key and the MIME type, so
+		 * playback and downloads cannot end up disagreeing about what quality
+		 * the stored bytes are.
 		 */
 		override fun onAddMediaItems(
 			mediaSession: MediaSession,
 			controller: MediaSession.ControllerInfo,
 			mediaItems: MutableList<MediaItem>,
 		): ListenableFuture<MutableList<MediaItem>> = scope.future {
-			val streams = library.coverUrls()
 			mediaItems.mapNotNull { item ->
 				val ref = item.itemRef() ?: return@mapNotNull null
-				val url = streams.streamUrl(ref) ?: return@mapNotNull null
-				item.buildUpon().setUri(url).setCustomCacheKey(ref.encode()).build()
+				val target = streamUrls.forPlayback(ref) ?: return@mapNotNull null
+				item.buildUpon()
+					.setUri(target.url)
+					.setCustomCacheKey(target.cacheKey)
+					// Set after the URI: it applies to the LocalConfiguration,
+					// which only exists once there is one. Null for the
+					// original, where sniffing is the only honest answer.
+					.setMimeType(target.mimeType)
+					.build()
 			}.toMutableList()
 		}
 

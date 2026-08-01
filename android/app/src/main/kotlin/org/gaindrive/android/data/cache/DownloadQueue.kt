@@ -23,6 +23,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.gaindrive.android.BuildConfig
 import org.gaindrive.android.data.SettingsStore
+import org.gaindrive.android.data.StreamTarget
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.playback.MediaDownloadService
 import javax.inject.Inject
@@ -143,13 +144,20 @@ class DownloadQueue @Inject constructor(
 	}
 
 	/**
-	 * The download id is the cache key, which is the encoded [ItemRef]. One
-	 * identity for the request, the stored bytes and the media item means a
-	 * download and a play can never end up as two copies of the same track.
+	 * The download **id** is the bare encoded [ItemRef], while the **cache key**
+	 * carries the quality as well.
+	 *
+	 * Keeping the id free of quality is what lets a quality change re-point an
+	 * existing download rather than create a second one: Media3's
+	 * `copyWithMergedRequest` keeps the new request's URI and custom cache key
+	 * when the ids match, so re-adding replaces the target in place. Everything
+	 * keyed by download id — `DownloadStates`, `pinPhaseOf`, the progress UI —
+	 * therefore needs no knowledge of quality at all.
 	 */
-	fun add(ref: ItemRef, url: String) {
-		val request = DownloadRequest.Builder(ref.encode(), Uri.parse(url))
-			.setCustomCacheKey(ref.encode())
+	fun add(ref: ItemRef, target: StreamTarget) {
+		val request = DownloadRequest.Builder(ref.encode(), Uri.parse(target.url))
+			.setCustomCacheKey(target.cacheKey)
+			.setMimeType(target.mimeType)
 			.build()
 		// Cleared optimistically: the request is going in, so a previous verdict
 		// on this key is already out of date.

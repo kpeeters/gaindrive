@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.ThemeMode
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -107,6 +108,36 @@ class SettingsStore @Inject constructor(
 		dataStore.edit { it[DOWNLOAD_UNMETERED_ONLY] = enabled }
 	}
 
+	/**
+	 * What quality to fetch audio at — downloads, cache-on-play and plain
+	 * streaming alike.
+	 *
+	 * One setting rather than one per connection type: everything played is
+	 * cached, so a separate streaming quality would only mean storing something
+	 * different from what a download of the same track produces, and then
+	 * holding both.
+	 *
+	 * Stored as [AudioQuality.tag] so it is a single value — a format and a
+	 * bitrate written separately could be observed half-applied.
+	 */
+	val audioQuality: Flow<AudioQuality> = dataStore.data.map { prefs ->
+		prefs[AUDIO_QUALITY]?.let(AudioQuality::parse) ?: AudioQuality.DEFAULT
+	}
+
+	suspend fun setAudioQuality(quality: AudioQuality) {
+		dataStore.edit { it[AUDIO_QUALITY] = quality.tag }
+	}
+
+	/**
+	 * Whether the user has ever chosen a quality.
+	 *
+	 * Used once, at startup: someone upgrading with pins already downloaded
+	 * should not silently have all of them re-fetched because the new default
+	 * differs from what those bytes are. See `QualityMigration`.
+	 */
+	val audioQualityChosen: Flow<Boolean> =
+		dataStore.data.map { it[AUDIO_QUALITY] != null }
+
 	companion object {
 		/** Big enough to be useful, small enough not to surprise anyone. */
 		const val DEFAULT_CACHE_BYTES = 4L * 1024 * 1024 * 1024
@@ -118,5 +149,6 @@ class SettingsStore @Inject constructor(
 		private val CACHE_ON_PLAY = booleanPreferencesKey("cache_on_play")
 		private val DOWNLOAD_UNMETERED_ONLY = booleanPreferencesKey("download_unmetered_only")
 		private val OFFLINE_MODE = booleanPreferencesKey("offline_mode")
+		private val AUDIO_QUALITY = stringPreferencesKey("audio_quality")
 	}
 }

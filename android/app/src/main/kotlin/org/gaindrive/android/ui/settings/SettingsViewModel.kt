@@ -15,6 +15,7 @@ import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.cache.PinRepository
 import org.gaindrive.android.data.cache.PinStatus
 import org.gaindrive.android.data.cache.PinnedItem
+import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
@@ -38,6 +39,7 @@ data class StorageUiState(
 	val cacheOnPlay: Boolean = true,
 	val unmeteredOnly: Boolean = true,
 	val offlineMode: Boolean = false,
+	val quality: AudioQuality = AudioQuality.DEFAULT,
 	val usedBytes: Long = 0,
 	val pinnedBytes: Long = 0,
 )
@@ -48,6 +50,7 @@ private data class StoragePrefs(
 	val cacheOnPlay: Boolean,
 	val unmeteredOnly: Boolean,
 	val offlineMode: Boolean,
+	val quality: AudioQuality,
 )
 
 @HiltViewModel
@@ -66,6 +69,7 @@ class SettingsViewModel @Inject constructor(
 		settings.cacheOnPlay,
 		settings.downloadUnmeteredOnly,
 		settings.offlineMode,
+		settings.audioQuality,
 		::StoragePrefs,
 	)
 
@@ -79,6 +83,7 @@ class SettingsViewModel @Inject constructor(
 			cacheOnPlay = prefs.cacheOnPlay,
 			unmeteredOnly = prefs.unmeteredOnly,
 			offlineMode = prefs.offlineMode,
+			quality = prefs.quality,
 			usedBytes = used,
 			pinnedBytes = pinned,
 		)
@@ -140,6 +145,18 @@ class SettingsViewModel @Inject constructor(
 
 	fun setOfflineMode(enabled: Boolean) =
 		viewModelScope.launch { settings.setOfflineMode(enabled) }
+
+	/**
+	 * Existing downloads are re-fetched at the new quality, since the bytes on
+	 * the device are the old one and a pin means "keep this, at the quality I
+	 * asked for". The old copies are not deleted — they stop being protected,
+	 * so eviction reclaims them when the space is next needed, and until then
+	 * they keep playing.
+	 */
+	fun setAudioQuality(quality: AudioQuality) = viewModelScope.launch {
+		settings.setAudioQuality(quality)
+		pins.refreshDownloads()
+	}
 
 	fun unpin(ref: ItemRef) = viewModelScope.launch { pins.unpin(ref) }
 

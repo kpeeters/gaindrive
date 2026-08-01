@@ -27,10 +27,4 @@ class CoverUrls internal constructor(
 		val client = clients[ref?.server] ?: return null
 		return client.url("getCoverArt", mapOf("id" to ref!!.id, "size" to size.toString()))
 	}
-
-	/** URL for streaming a song, used from Phase 3 onwards. */
-	fun streamUrl(ref: ItemRef, params: Map<String, String> = emptyMap()): String? {
-		val client = clients[ref.server] ?: return null
-		return client.url("stream", mapOf("id" to ref.id) + params)
-	}
 }

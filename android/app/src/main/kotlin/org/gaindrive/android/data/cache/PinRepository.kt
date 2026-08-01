@@ -1,7 +1,6 @@
 package org.gaindrive.android.data.cache
 
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -13,15 +12,16 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.gaindrive.android.data.ServerRegistry
 import org.gaindrive.android.data.SettingsStore
+import org.gaindrive.android.data.StreamUrls
 import org.gaindrive.android.data.local.LocalLibrary
 import org.gaindrive.android.data.local.PinDao
 import org.gaindrive.android.data.local.PinEntity
+import org.gaindrive.android.data.model.AudioFormat
+import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
-import org.gaindrive.android.net.SubsonicClientFactory
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -50,7 +50,7 @@ class PinRepository @Inject constructor(
 	private val audioCache: AudioCache,
 	private val settings: SettingsStore,
 	private val registry: ServerRegistry,
-	private val clients: SubsonicClientFactory,
+	private val streamUrls: StreamUrls,
 	scope: CoroutineScope,
 ) {
 
@@ -92,9 +92,28 @@ class PinRepository @Inject constructor(
 		}
 	}.stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
+	/**
+	 * Keeps an existing download library from being re-fetched on upgrade.
+	 *
+	 * Before quality was a setting, everything downloaded was the original file.
+	 * Letting the new default apply to an install that already has pins would
+	 * quietly re-download all of them at Opus, over whatever connection happens
+	 * to be there. Recording what those bytes actually are instead leaves the
+	 * choice to the user, who can change it in Settings and get the dialog.
+	 *
+	 * Runs before the pin collector below, so protection is never applied under
+	 * the wrong quality even briefly.
+	 */
+	private suspend fun adoptExistingDownloadQuality() {
+		if (settings.audioQualityChosen.first()) return
+		if (pinDao.all().isEmpty()) return
+		settings.setAudioQuality(AudioQuality.ORIGINAL)
+	}
+
 	@OptIn(FlowPreview::class)
 	private fun start(scope: CoroutineScope) {
 		scope.launch {
+			adoptExistingDownloadQuality()
 			pinDao.observeAll().collect { rows ->
 				// A pin for a server that has since been removed protects a key
 				// nothing will ever play. Dropped here rather than from the
@@ -138,8 +157,11 @@ class PinRepository @Inject constructor(
 		if (songs.isEmpty()) return PinResult.NotKnownYet
 
 		val cap = settings.cacheMaxBytes.first()
+		val quality = settings.audioQuality.first()
 		val alreadyPinned = audioCache.pinnedBytes.value
-		val adding = songs.filterNot { pinnedKeys.isPinned(it.ref.encode()) }.sumOf { it.sizeBytes }
+		val adding = songs
+			.filterNot { pinnedKeys.isPinned(CacheKeys.of(it.ref, quality)) }
+			.sumOf { it.storedSizeAt(quality) }
 		if (alreadyPinned + adding > cap) {
 			return PinResult.TooLarge(alreadyPinned + adding, cap)
 		}
@@ -199,12 +221,35 @@ class PinRepository @Inject constructor(
 	private suspend fun applyProtection(pins: List<Pin>) {
 		val coverage = computeCoverage(pins)
 		val keys = coverage.allKeys
+		// Two forms of the same set, and they are no longer interchangeable.
+		//
+		// The evictor works in *cache* keys, which carry the quality, because
+		// that is what the stored bytes are filed under. Everything above —
+		// availability marks, pin coverage, the UI — works in bare refs, which
+		// is what the library mirror and the DAO understand.
+		//
+		// Only the quality currently set is protected: a copy left behind by an
+		// earlier setting stays playable but becomes ordinary evictable cache,
+		// which is what makes a quality change reclaim its own space.
+		val quality = settings.audioQuality.first()
 		// Set before publishing: the evictor reads this, and a download racing
 		// ahead of it would be evictable for the length of the race.
-		pinnedKeys.keys = keys
+		pinnedKeys.keys = keys.mapTo(mutableSetOf()) { CacheKeys.of(it, quality) }
 		_pins.value = pins
 		_coverage.value = coverage
 		_protectedKeys.value = keys
+	}
+
+	/**
+	 * Re-fetches everything pinned, at whatever quality is now set.
+	 *
+	 * Protection is re-applied first so `PinnedKeys` holds the new keys before
+	 * any download starts writing under them — the same ordering [pin] relies
+	 * on, for the same reason.
+	 */
+	suspend fun refreshDownloads() {
+		applyProtection(_pins.value)
+		_pins.value.forEach { enqueue(songsFor(it)) }
 	}
 
 	private suspend fun computeCoverage(pins: List<Pin>): PinCoverage = expandPins(
@@ -223,20 +268,22 @@ class PinRepository @Inject constructor(
 
 	private suspend fun enqueue(songs: List<Song>) {
 		songs.forEach { song ->
-			val url = streamUrl(song.ref) ?: return@forEach
-			downloads.add(song.ref, url)
+			val target = streamUrls.forDownload(song.ref) ?: return@forEach
+			downloads.add(song.ref, target)
 		}
 	}
 
 	/**
-	 * Built here rather than through `CoverUrls`, which would mean depending on
-	 * `LibraryRepository`. Kept apart deliberately: that class writes the mirror
-	 * this one reads, and a dependency back would close the loop.
+	 * Roughly what this song will occupy once stored.
+	 *
+	 * [Song.sizeBytes] is the size of the file on the server, which is the wrong
+	 * number as soon as anything is transcoded — an album of FLACs would be
+	 * refused for a pin that actually fits several times over at Opus. Bitrate
+	 * times duration is close enough for a capacity check.
 	 */
-	private suspend fun streamUrl(ref: ItemRef): String? = withContext(Dispatchers.IO) {
-		val config = registry.get(ref.server) ?: return@withContext null
-		clients.clientFor(config).url("stream", mapOf("id" to ref.id))
-	}
+	private fun Song.storedSizeAt(quality: AudioQuality): Long =
+		if (quality.format == AudioFormat.ORIGINAL) sizeBytes
+		else (duration * quality.bitRate * 125L)
 
 	private fun PinEntity.toPin(): Pin? {
 		val ref = ItemRef.decode(refKey) ?: return null
