@@ -2,6 +2,8 @@ package org.gaindrive.android.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.items
@@ -41,6 +43,7 @@ import org.gaindrive.android.ui.components.formatBytes
  * is where it gets flipped in practice; this is where someone looks when they
  * are wondering why nothing is loading. Both read the one stored value.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StorageSettingsScreen(
 	onBack: () -> Unit,
@@ -73,17 +76,16 @@ fun StorageSettingsScreen(
 
 		item {
 			Text(
-				text = "What to fetch, for downloads and for streaming alike — " +
-					"everything you play is stored, so there is no useful " +
-					"difference between the two. Opus at these rates is hard to " +
-					"tell from the original on headphones, at a fraction of the " +
-					"size.",
+				text = "Set the Opus bitrate for playback, caching and download.",
 				style = MaterialTheme.typography.bodySmall,
 				color = MaterialTheme.colorScheme.onSurfaceVariant,
 			)
 		}
 		item {
-			Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+			// FlowRow, not Row: six chips do not fit across a phone, and a Row
+			// squashes the overflow into an unreadable sliver rather than
+			// wrapping it.
+			FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
 				QUALITIES.forEach { quality ->
 					FilterChip(
 						selected = storage.quality == quality,
@@ -94,7 +96,7 @@ fun StorageSettingsScreen(
 							if (state.pins.isEmpty()) viewModel.setAudioQuality(quality)
 							else confirmQuality = quality
 						},
-						label = { Text(quality.chipLabel) },
+						label = { Text(quality.chipLabel, maxLines = 1) },
 					)
 				}
 			}
@@ -129,12 +131,12 @@ fun StorageSettingsScreen(
 
 		item { Text(text = "Maximum size", style = MaterialTheme.typography.bodyLarge) }
 		item {
-			Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+			FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
 				CACHE_SIZES.forEach { bytes ->
 					FilterChip(
 						selected = storage.maxBytes == bytes,
 						onClick = { viewModel.setCacheMaxBytes(bytes) },
-						label = { Text(formatBytes(bytes)) },
+						label = { Text(formatBytes(bytes), maxLines = 1) },
 					)
 				}
 			}
@@ -189,6 +191,7 @@ fun StorageSettingsScreen(
 				PinnedRow(
 					item = item,
 					status = pinStatuses[item.pin.ref.encode()],
+					quality = storage.quality,
 					onRemove = { confirmRemove = item },
 				)
 			}
@@ -303,7 +306,12 @@ private val CACHE_SIZES = listOf(
 )
 
 @Composable
-private fun PinnedRow(item: PinnedItem, status: PinStatus?, onRemove: () -> Unit) {
+private fun PinnedRow(
+	item: PinnedItem,
+	status: PinStatus?,
+	quality: AudioQuality,
+	onRemove: () -> Unit,
+) {
 	Row(
 		modifier = Modifier.fillMaxWidth(),
 		verticalAlignment = Alignment.CenterVertically,
@@ -317,7 +325,7 @@ private fun PinnedRow(item: PinnedItem, status: PinStatus?, onRemove: () -> Unit
 				overflow = TextOverflow.Ellipsis,
 			)
 			Text(
-				text = pinSubtitle(item, status),
+				text = pinSubtitle(item, status, quality),
 				style = MaterialTheme.typography.bodySmall,
 				color = if (status?.phase == PinPhase.FAILED) {
 					MaterialTheme.colorScheme.error
@@ -336,13 +344,23 @@ private fun PinnedRow(item: PinnedItem, status: PinStatus?, onRemove: () -> Unit
  * Kind alone was enough when a pin was just an intent. Now that a download can
  * be waiting or broken, this is the one screen that can say so in words — and
  * the one place a download you have given up on can be deleted.
+ *
+ * [quality] is the current setting, which is what a pin is kept at: changing it
+ * re-fetches every pin. While that is in flight the phase says so, so the two
+ * halves never quietly disagree.
  */
-private fun pinSubtitle(item: PinnedItem, status: PinStatus?): String {
+private fun pinSubtitle(
+	item: PinnedItem,
+	status: PinStatus?,
+	quality: AudioQuality,
+): String {
 	val kind = item.pin.kind.name.lowercase().replaceFirstChar { it.uppercase() }
-	return when (status?.phase) {
-		null, PinPhase.COMPLETE -> kind
-		PinPhase.WAITING -> "$kind · waiting for Wi-Fi"
-		PinPhase.FAILED -> "$kind · download failed"
-		PinPhase.RUNNING -> "$kind · ${status.stored} of ${status.total} downloaded"
+	val parts = mutableListOf(kind, quality.label)
+	when (status?.phase) {
+		null, PinPhase.COMPLETE -> Unit
+		PinPhase.WAITING -> parts += "waiting for Wi-Fi"
+		PinPhase.FAILED -> parts += "download failed"
+		PinPhase.RUNNING -> parts += "${status.stored} of ${status.total} downloaded"
 	}
+	return parts.joinToString(" · ")
 }

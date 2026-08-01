@@ -4,7 +4,8 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -28,6 +29,7 @@ data class ExternalLink(val label: String, val url: String)
  * Shared between the artist header and album detail so the two cannot drift
  * apart in behaviour or spacing.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun NotesSection(
 	text: String?,
@@ -64,11 +66,22 @@ fun NotesSection(
 		}
 
 		if (links.isNotEmpty()) {
-			Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+			// FlowRow, not Row: four links do not fit across a phone, and a Row
+			// keeps squeezing the last chip until its label wraps mid-word
+			// rather than moving it to the next line.
+			FlowRow(
+				horizontalArrangement = Arrangement.spacedBy(8.dp),
+				verticalArrangement = Arrangement.spacedBy(8.dp),
+			) {
 				links.forEach { link ->
 					AssistChip(
 						onClick = { uriHandler.openUri(link.url) },
-						label = { Text(link.label) },
+						label = {
+							// A chip label is a proper noun — breaking it across
+							// two lines is never the right answer, so if one is
+							// ever narrow enough to need it, ellipsise instead.
+							Text(link.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+						},
 					)
 				}
 			}
