@@ -18,6 +18,7 @@ import okhttp3.Cache
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import org.gaindrive.android.BuildConfig
+import org.gaindrive.android.net.AuthInterceptor
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
@@ -44,6 +45,22 @@ object AppModule {
 		.cache(Cache(context.cacheDir.resolve("http"), HTTP_CACHE_BYTES))
 		.connectTimeout(15, TimeUnit.SECONDS)
 		.readTimeout(30, TimeUnit.SECONDS)
+		// Says who is calling, in the one place that covers every caller: each
+		// server's Retrofit, Coil's cover art, ExoPlayer's stream reads, the
+		// download manager and the transcode pre-warm. OkHttp's default names
+		// only the HTTP stack, which makes a server log unreadable the moment
+		// more than one client is involved.
+		//
+		// `header`, not `addHeader`: this replaces rather than appends, and an
+		// application interceptor runs before OkHttp's BridgeInterceptor, which
+		// only supplies its own default when the header is absent.
+		.addInterceptor { chain ->
+			chain.proceed(
+				chain.request().newBuilder()
+					.header("User-Agent", USER_AGENT)
+					.build()
+			)
+		}
 		.apply {
 			// Debug builds only: these URLs carry the auth token, so this must
 			// never be enabled in a release build.
@@ -75,4 +92,16 @@ object AppModule {
 		CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
 	private const val HTTP_CACHE_BYTES = 32L * 1024 * 1024
+
+	/**
+	 * Built from [AuthInterceptor.CLIENT_NAME] rather than repeating the name,
+	 * so the `c=` query parameter and the User-Agent cannot drift apart — a
+	 * server reading one or the other should see the same client.
+	 *
+	 * Must not contain "Mozilla/": gaindrive tests the User-Agent for that
+	 * substring to decide whether to pace a stream at playback rate, which is
+	 * right for a browser's audio element and wrong for this app.
+	 */
+	private val USER_AGENT =
+		"${AuthInterceptor.CLIENT_NAME}/${BuildConfig.VERSION_NAME} (okhttp)"
 }

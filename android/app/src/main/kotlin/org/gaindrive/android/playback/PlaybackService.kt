@@ -1,6 +1,7 @@
 package org.gaindrive.android.playback
 
 import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.datasource.okhttp.OkHttpDataSource
@@ -50,6 +51,9 @@ class PlaybackService : MediaLibraryService() {
 	@Inject
 	lateinit var streamUrls: StreamUrls
 
+	@Inject
+	lateinit var prewarm: TranscodePrewarmer
+
 	private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
 	private var session: MediaLibrarySession? = null
@@ -72,6 +76,7 @@ class PlaybackService : MediaLibraryService() {
 			.build()
 
 		player.addListener(scrobbler)
+		player.addListener(prewarmWatcher(player))
 		startScrobbleWatcher(player)
 
 		session = MediaLibrarySession.Builder(this, player, LibraryCallback()).build()
@@ -93,6 +98,29 @@ class PlaybackService : MediaLibraryService() {
 			if (ref != null) {
 				scope.launch { library.scrobble(ref, submission = false) }
 			}
+		}
+	}
+
+	// ── Pre-warming ─────────────────────────────────────────────────────────
+	//
+	// Its own listener rather than more code inside the scrobbler: the two
+	// answer different questions, and the scrobbler deliberately knows nothing
+	// about the queue.
+
+	/**
+	 * On every track change, asks the server to prepare the one after it.
+	 *
+	 * The listener closes over the player because the queue is what it needs
+	 * and [Player.Listener] is handed only the item that just started. The
+	 * first transition fires when playback begins, so the second track of a
+	 * queue is being prepared while the first plays — the case that matters.
+	 */
+	private fun prewarmWatcher(player: Player) = object : Player.Listener {
+		override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+			val index = player.nextMediaItemIndex
+			if (index == C.INDEX_UNSET) return
+			val next = player.getMediaItemAt(index).itemRef() ?: return
+			scope.launch { prewarm.warm(next) }
 		}
 	}
 
