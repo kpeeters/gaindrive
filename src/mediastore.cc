@@ -1368,17 +1368,18 @@ std::optional<MediaStore::SongInfo> MediaStore::get_song(int song_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement q(db_music_,
-		"SELECT id, path, codec, bitrate, duration, file_size"
+		"SELECT id, path, codec, bitrate, duration, file_size, file_modified"
 		" FROM songs WHERE id = ?");
 	q.bind(1, song_id);
 	if (!q.executeStep()) return std::nullopt;
 	SongInfo s;
-	s.id        = q.getColumn(0).getInt();
-	s.path      = q.getColumn(1).getString();
-	s.codec     = q.getColumn(2).isNull() ? "" : q.getColumn(2).getString();
-	s.bitrate   = q.getColumn(3).isNull() ? 0  : q.getColumn(3).getInt();
-	s.duration  = q.getColumn(4).getDouble();
-	s.file_size = q.getColumn(5).isNull() ? 0  : q.getColumn(5).getInt64();
+	s.id            = q.getColumn(0).getInt();
+	s.path          = q.getColumn(1).getString();
+	s.codec         = q.getColumn(2).isNull() ? "" : q.getColumn(2).getString();
+	s.bitrate       = q.getColumn(3).isNull() ? 0  : q.getColumn(3).getInt();
+	s.duration      = q.getColumn(4).getDouble();
+	s.file_size     = q.getColumn(5).isNull() ? 0  : q.getColumn(5).getInt64();
+	s.file_modified = q.getColumn(6).isNull() ? 0  : q.getColumn(6).getInt64();
 	return s;
 	}
 

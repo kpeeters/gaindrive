@@ -149,6 +149,7 @@ add_executable(gaindrive
 	src/gaindrive.cc
 	src/mediastore.cc
 	src/streamer.cc
+	src/transcodecache.cc
 	src/stamp.cc
 	src/castmanager.cc
 	src/folderwatcher.cc

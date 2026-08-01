@@ -1,10 +1,13 @@
 #include "gaindrive.hh"
 #include "stamp.hh"
 #include "streamer.hh"
+#include "codecs.hh"
 #include "embedded_web.hh"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -51,6 +54,22 @@ static const char* SERVER_VERSION = "0.1";
 static std::string sid(int id)
 	{
 	return std::to_string(id);
+	}
+
+// Numeric query params, without letting a malformed one escape the handler.
+// std::stoi throws on garbage and on overflow; httplib turns that into a bare
+// HTTP 500, which no Subsonic client can interpret — they expect a 200 with an
+// <error> body.  See ISSUES.md for the sites still unguarded.
+static int to_int(const std::string& s, int def)
+	{
+	if (s.empty()) return def;
+	try { return std::stoi(s); } catch (...) { return def; }
+	}
+
+static float to_float(const std::string& s, float def)
+	{
+	if (s.empty()) return def;
+	try { return std::stof(s); } catch (...) { return def; }
 	}
 
 // SQLite CURRENT_TIMESTAMP formats as "YYYY-MM-DD HH:MM:SS" in UTC, but the
@@ -161,36 +180,37 @@ static std::string sort_key(const std::string& name)
 	return name;
 	}
 
-static const char* codec_to_mime(const std::string& codec)
+// What stream.view would actually send for this song, when that differs from
+// the stored file.  Mirrors the branch order in Streamer::serve() — a format
+// override wins over the per-user bitrate cap, and the cap alone means mp3.
+// Empty when the source is served as-is.
+struct TranscodeInfo
 	{
-	if (codec == "flac")            return "audio/flac";
-	if (codec == "mp3")             return "audio/mpeg";
-	if (codec == "ogg")             return "audio/ogg";
-	if (codec == "opus")            return "audio/ogg";
-	if (codec == "m4a")             return "audio/mp4";
-	if (codec == "aac")             return "audio/aac";
-	if (codec == "wav")             return "audio/wav";
-	if (codec == "wma")             return "audio/x-ms-wma";
-	return "application/octet-stream";
-	}
+	std::string_view mime;
+	std::string_view suffix;
+	int              bitrate;
+	};
 
-// Mirrors the bitrate-cap branch of Streamer::serve(): when the source bitrate
-// exceeds the user's max_bitrate, stream.view transcodes to mp3 at max_bitrate.
-// Returns true and fills the out-params when a transcode would happen, false
-// when the source is served as-is.  Format-override (the `format` query param
-// on stream) is not modelled here — the gaindrive web client does not pass it,
-// and the transcoded* fields are conventionally a per-user property in
-// Subsonic, not per-request.
-static bool transcode_target(const MediaStore::ChildEntry& c, int max_bitrate,
-                              const char*& mime, const char*& suffix,
-                              int& bitrate)
+static std::optional<TranscodeInfo> transcode_target(
+	const MediaStore::ChildEntry& c, int max_bitrate,
+	const std::string& format = "")
 	{
+	auto source = target_for(c.codec);
+	std::optional<Target> wanted;
+	if (!format.empty() && format != "raw")
+		wanted = target_for(format);
+	// Same muxer and encoder is the same audio, whatever the caller spelled it.
+	if (wanted && (!source || source->muxer   != wanted->muxer
+	                       || source->encoder != wanted->encoder)) {
+		// Keep this rule identical to the one in Streamer::serve(); a client
+		// that trusts transcodedBitRate and then receives something else has
+		// no way to tell which of the two lied.
+		int bitrate = (max_bitrate > 0 && max_bitrate < 320) ? max_bitrate : 320;
+		return TranscodeInfo{ wanted->mime, wanted->name, bitrate };
+		}
 	if (max_bitrate <= 0 || c.bitrate <= 0 || c.bitrate <= max_bitrate)
-		return false;
-	mime    = "audio/mpeg";
-	suffix  = "mp3";
-	bitrate = max_bitrate;
-	return true;
+		return std::nullopt;
+	return TranscodeInfo{ "audio/mpeg", "mp3", max_bitrate };
 	}
 
 // Serialises a song ChildEntry into a JSON object.  When max_bitrate causes a
@@ -198,7 +218,8 @@ static bool transcode_target(const MediaStore::ChildEntry& c, int max_bitrate,
 // Subsonic) and transcodedBitRate (gaindrive extension; ignored by clients
 // that don't know it) so the client knows the actual stream format.
 static nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
-                                       int max_bitrate = 0)
+                                       int max_bitrate = 0,
+                                       const std::string& format = "")
 	{
 	nlohmann::json s = {
 		{"id",          sid(c.id)},
@@ -217,18 +238,17 @@ static nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
 		{"year",        c.year},
 		{"genre",       c.genre},
 		{"size",        c.file_size},
-		{"contentType", codec_to_mime(c.codec)},
+		{"contentType", std::string(codec_to_mime(c.codec))},
 		{"suffix",      c.codec},
 		{"duration",    (int)c.duration},
 		{"bitRate",     c.bitrate}
 		};
 	if (c.cover_art_id >= 0) s["coverArt"] = sid(c.cover_art_id);
 	if (!c.starred.empty()) s["starred"] = iso8601(c.starred);
-	const char* tmime; const char* tsuffix; int tbitrate;
-	if (transcode_target(c, max_bitrate, tmime, tsuffix, tbitrate)) {
-		s["transcodedContentType"] = tmime;
-		s["transcodedSuffix"]      = tsuffix;
-		s["transcodedBitRate"]     = tbitrate;
+	if (auto t = transcode_target(c, max_bitrate, format)) {
+		s["transcodedContentType"] = std::string(t->mime);
+		s["transcodedSuffix"]      = std::string(t->suffix);
+		s["transcodedBitRate"]     = t->bitrate;
 		}
 	return s;
 	}
@@ -237,7 +257,8 @@ static nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
 static XMLElement* song_entry_xml(XMLDocument& doc,
                                    const MediaStore::ChildEntry& c,
                                    const char* tag,
-                                   int max_bitrate = 0)
+                                   int max_bitrate = 0,
+                                   const std::string& format = "")
 	{
 	auto* el = doc.NewElement(tag);
 	el->SetAttribute("id",          c.id);
@@ -252,7 +273,7 @@ static XMLElement* song_entry_xml(XMLDocument& doc,
 	el->SetAttribute("year",        c.year);
 	el->SetAttribute("genre",       c.genre.c_str());
 	el->SetAttribute("size",        (int64_t)c.file_size);
-	el->SetAttribute("contentType", codec_to_mime(c.codec));
+	el->SetAttribute("contentType", std::string(codec_to_mime(c.codec)).c_str());
 	el->SetAttribute("suffix",      c.codec.c_str());
 	el->SetAttribute("duration",    (int)c.duration);
 	el->SetAttribute("bitRate",     c.bitrate);
@@ -261,11 +282,10 @@ static XMLElement* song_entry_xml(XMLDocument& doc,
 	el->SetAttribute("albumId",     c.parent_id);
 	if (!c.starred.empty())
 		el->SetAttribute("starred", iso8601(c.starred).c_str());
-	const char* tmime; const char* tsuffix; int tbitrate;
-	if (transcode_target(c, max_bitrate, tmime, tsuffix, tbitrate)) {
-		el->SetAttribute("transcodedContentType", tmime);
-		el->SetAttribute("transcodedSuffix",      tsuffix);
-		el->SetAttribute("transcodedBitRate",     tbitrate);
+	if (auto t = transcode_target(c, max_bitrate, format)) {
+		el->SetAttribute("transcodedContentType", std::string(t->mime).c_str());
+		el->SetAttribute("transcodedSuffix",      std::string(t->suffix).c_str());
+		el->SetAttribute("transcodedBitRate",     t->bitrate);
 		}
 	return el;
 	}
@@ -1276,11 +1296,39 @@ GainDrive::GainDrive(const std::string& db_path,
                      bool no_scan,
                      bool debug,
                      bool flat_multi_disc,
-                     const std::string& user_db_path)
+                     const std::string& user_db_path,
+                     const std::string& transcode_cache_dir,
+                     int transcode_cache_mb,
+                     int transcode_jobs)
 	: debug_(debug), flat_multi_disc_(flat_multi_disc), upload_dir_(upload_dir),
-	  store_(db_path, music_root, user_db_path), watcher_(store_, music_root)
+	  store_(db_path, music_root, user_db_path),
+	  transcode_cache_(
+	      transcode_cache_dir.empty()
+	          ? std::filesystem::path(db_path).parent_path() / "transcodes"
+	          : std::filesystem::path(transcode_cache_dir),
+	      static_cast<int64_t>(transcode_cache_mb) * 1024 * 1024,
+	      transcode_jobs > 0 ? transcode_jobs
+	          : std::max(2u, std::thread::hardware_concurrency() / 2)),
+	  watcher_(store_, music_root)
 	{
 	namespace fs = std::filesystem;
+	// A cache inside music_root would be rescanned and indexed as music, and
+	// the transcodes would then appear in the library as tracks of their own.
+	if (store_.path_is_within_root(
+	        fs::absolute(transcode_cache_dir.empty()
+	            ? fs::path(db_path).parent_path() / "transcodes"
+	            : fs::path(transcode_cache_dir)).string())) {
+		std::cerr << stamp()
+		          << "Error: the transcode cache must not live inside "
+		          << "music_root." << std::endl;
+		std::exit(1);
+		}
+	// A cache miss now blocks its request thread for the whole transcode
+	// (seconds, not milliseconds), so the default pool of 8 is too small to
+	// absorb a client that pins an album and fans out downloads.  The ffmpeg
+	// count is bounded separately by --transcode-jobs; this only bounds waiting.
+	server_.new_task_queue = []{ return new httplib::ThreadPool(32); };
+
 	if (!fs::exists(upload_dir_))
 		fs::create_directories(upload_dir_);
 	users_dir_ = (fs::path(music_root) / ".users").string();
@@ -2472,7 +2520,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
-		auto song = store_.get_song(std::stoi(it->second));
+		auto song = store_.get_song(to_int(it->second, -1));
 		if (!song) {
 			res.set_content(subsonic_error(70, "Song not found."), "application/xml");
 			return;
@@ -2502,10 +2550,9 @@ GainDrive::GainDrive(const std::string& db_path,
 			// Native seek: the URL serves the full file, and the LOAD message
 			// tells the receiver where to seek.  No timeOffset in the URL.
 			auto to_it = req.params.find("timeOffset");
-			float cast_offset = 0.0f;
-			if (to_it != req.params.end() && !to_it->second.empty())
-				cast_offset = std::stof(to_it->second);
-			cast_manager_.load(url, codec_to_mime(song->codec), cast_offset, song->duration);
+			float cast_offset = to_it != req.params.end()
+			    ? to_float(to_it->second, 0.0f) : 0.0f;
+			cast_manager_.load(url, std::string(codec_to_mime(song->codec)), cast_offset, song->duration);
 			res.status = 204;
 			return;
 			}
@@ -2515,7 +2562,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			return it2 != req.params.end() ? it2->second : def;
 			};
 
-		int         max_bitrate = std::stoi(qp("maxBitRate", "0"));
+		int         max_bitrate = to_int(qp("maxBitRate"), 0);
 		// Enforce the user account's max_bitrate as a ceiling (0 = unlimited).
 		// Cast requests authenticate via token and have no 'u' param; skip for those.
 		if (!cast_authed) {
@@ -2524,12 +2571,27 @@ GainDrive::GainDrive(const std::string& db_path,
 				max_bitrate = acct_max;
 			}
 		std::string format      = qp("format");
+		// Reject a format we have no encoder for here, where the Subsonic error
+		// helpers live.  Letting it reach ffmpeg produced a 200 with an empty
+		// body, which every client reports as a corrupt file rather than as a
+		// bad request.
+		if (!format.empty() && format != "raw") {
+			auto t = target_for(format);
+			if (!t || t->encoder.empty()) {
+				bool as_json = fmt_of(req) == "json";
+				std::string msg = "Unsupported format: " + format + ".";
+				res.set_content(as_json ? subsonic_error_json(10, msg.c_str())
+				                        : subsonic_error(10, msg.c_str()),
+				                as_json ? "application/json" : "application/xml");
+				return;
+				}
+			}
 		// The Chromecast sometimes probes the stream URL with timeOffset stripped.
 		// Always use the authoritative offset stored at castLoad time for cast
 		// requests so the probe and the real request both start at the right position.
 		int         time_offset = cast_authed
 		    ? static_cast<int>(last_cast_offset_)
-		    : std::stoi(qp("timeOffset", "0"));
+		    : to_int(qp("timeOffset"), 0);
 
 		// Chromecast metadata probes arrive as Range requests against the stream URL.
 		// For seeked streams (time_offset > 0) these would otherwise hit serve_transcoded
@@ -2554,8 +2616,9 @@ GainDrive::GainDrive(const std::string& db_path,
 			          << " offset=" << last_cast_offset_ << std::endl;
 			Streamer::SongInfo probe_si{ song_abs, song->codec,
 			                             song->bitrate, song->duration,
-			                             std::min(song->file_size, (int64_t)32768) };
-			Streamer::serve(req, res, probe_si, 0, "", 0, true, {});
+			                             std::min(song->file_size, (int64_t)32768),
+			                             song->id, song->file_modified };
+			Streamer::serve(req, res, probe_si, transcode_cache_, 0, "", 0, true, {});
 			return;
 			}
 
@@ -2569,7 +2632,8 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 
 		Streamer::SongInfo si{ song_abs, song->codec,
-		                       song->bitrate, song->duration, song->file_size };
+		                       song->bitrate, song->duration, song->file_size,
+		                       song->id, song->file_modified };
 
 		// For Cast streams, pass a callback that returns the receiver's current
 		// playback position from the cached status (updated every ~0.5 s by the
@@ -2598,8 +2662,71 @@ GainDrive::GainDrive(const std::string& db_path,
 			          << (time_offset > 0 ? " offset=" + std::to_string(time_offset) : "")
 			          << (!format.empty() ? " fmt=" + format : "")
 			          << std::endl;
-		Streamer::serve(req, res, si, max_bitrate, format, time_offset,
-		                cast_authed, std::move(get_pos));
+		bool estimate_length = qp("estimateContentLength") == "true";
+		Streamer::serve(req, res, si, transcode_cache_, max_bitrate, format,
+		                time_offset, cast_authed, std::move(get_pos),
+		                estimate_length);
+		});
+
+	// download — the original file, never transcoded and never bitrate-capped.
+	// The per-user max_bitrate is deliberately not consulted: "download" is
+	// defined by the API as the original media data, and a capped download
+	// would silently hand the user a different file than the one they asked
+	// for.  Only song ids are supported; zipping a folder is out of scope.
+	server_.Get("/rest/download.view", [this](const httplib::Request& req,
+	                                           httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			err(10, "Required parameter missing: id."); return;
+			}
+		auto song = store_.get_song(to_int(it->second, -1));
+		if (!song) { err(70, "Song not found."); return; }
+
+		std::string song_abs = store_.abs_path(song->path);
+		if (!store_.path_is_within_root(song_abs)) {
+			std::cout << stamp() << "download: refusing path outside music_root: "
+			          << song_abs << std::endl;
+			res.status = 403;
+			return;
+			}
+
+		std::string name = std::filesystem::path(song->path).filename().string();
+		// Two spellings of the filename: a sanitised ASCII one for clients that
+		// only read the bare parameter, and the RFC 5987 form for the rest.
+		// A quote or newline left in the ASCII form would let a filename break
+		// out of the header.
+		std::string ascii;
+		for (unsigned char c : name)
+			ascii += (c < 0x20 || c == 0x7f || c == '"' || c == '\\'
+			          || c >= 0x80) ? '_' : static_cast<char>(c);
+		std::ostringstream enc;
+		enc << std::hex << std::uppercase << std::setfill('0');
+		for (unsigned char c : name) {
+			if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+				enc << static_cast<char>(c);
+			else
+				enc << '%' << std::setw(2) << static_cast<int>(c);
+			}
+		res.set_header("Content-Disposition",
+		               "attachment; filename=\"" + ascii + "\"; "
+		               "filename*=UTF-8''" + enc.str());
+
+		std::cout << stamp() << "download: id=" << it->second
+		          << " path=" << song->path
+		          << " size=" << song->file_size << std::endl;
+
+		Streamer::SongInfo si{ song_abs, song->codec, song->bitrate,
+		                       song->duration, song->file_size,
+		                       song->id, song->file_modified };
+		Streamer::serve_raw(req, res, si);
 		});
 
 	// createPlaylist
@@ -3430,7 +3557,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					                + "?id=" + last_cast_song_id_
 					                + "&castToken=" + cast_manager_.token();
 					last_cast_offset_ = 0.0f;
-					cast_manager_.load(url, codec_to_mime(song->codec),
+					cast_manager_.load(url, std::string(codec_to_mime(song->codec)),
 					                   pos > 0.5f ? pos : 0.0f,
 					                   song->duration);
 					}
@@ -3439,7 +3566,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		else if (action == "seek") {
 			auto ti = req.params.find("time");
 			if (ti != req.params.end())
-				cast_manager_.cast_seek(std::stof(ti->second));
+				cast_manager_.cast_seek(to_float(ti->second, 0.0f));
 			}
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
@@ -3469,7 +3596,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			err(10, "Required parameter missing: id."); return;
 			}
 
-		auto song = store_.get_song(std::stoi(it->second));
+		auto song = store_.get_song(to_int(it->second, -1));
 		if (!song) { err(70, "Song not found."); return; }
 
 		std::string host  = req.get_header_value("Host");
@@ -3480,12 +3607,11 @@ GainDrive::GainDrive(const std::string& db_path,
 		                + "?id=" + it->second
 		                + "&castToken=" + cast_manager_.token();
 		auto to_it = req.params.find("timeOffset");
-		float cast_offset = 0.0f;
-		if (to_it != req.params.end() && !to_it->second.empty())
-			cast_offset = std::stof(to_it->second);
+		float cast_offset = to_it != req.params.end()
+		    ? to_float(to_it->second, 0.0f) : 0.0f;
 		last_cast_song_id_ = it->second;
 		last_cast_offset_ = 0.0f;
-		cast_manager_.load(url, codec_to_mime(song->codec),
+		cast_manager_.load(url, std::string(codec_to_mime(song->codec)),
 		                   cast_offset, song->duration);
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");

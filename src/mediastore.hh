@@ -219,6 +219,10 @@ class MediaStore {
 			int         bitrate;  // kbps (from tags; 0 if unknown)
 			double      duration; // seconds
 			int64_t     file_size;
+			// mtime as of the last scan. Part of the transcode cache key, so a
+			// re-tagged or replaced file invalidates its cached transcodes
+			// without anyone having to remember to purge them.
+			int64_t     file_modified;
 			};
 
 		std::optional<SongInfo> get_song(int song_id);

@@ -19,6 +19,9 @@ int main(int argc, char* argv[])
 		("user-db",    "Path to the user/state database (default: derived from --db)", cxxopts::value<std::string>())
 		("music-root", "Root music directory",        cxxopts::value<std::string>()->default_value("/music"))
 		("upload-dir", "Directory for uploaded archives", cxxopts::value<std::string>()->default_value("/tmp/gaindrive-uploads"))
+		("transcode-cache",    "Directory for cached transcodes (default: alongside --db)", cxxopts::value<std::string>())
+		("transcode-cache-mb", "Transcode cache size in MB (0 disables)", cxxopts::value<int>()->default_value("1024"))
+		("transcode-jobs",     "Max concurrent ffmpeg transcodes (0 = half the cores)", cxxopts::value<int>()->default_value("0"))
 		("no-scan",    "Skip startup filesystem scan")
 		("debug",      "Print all API responses to stdout")
 		("add-user",   "Create a user and exit",      cxxopts::value<std::string>())
@@ -41,6 +44,10 @@ int main(int argc, char* argv[])
 	bool        no_scan          = args.count("no-scan") > 0;
 	bool        debug            = args.count("debug")   > 0;
 	bool        flat_multi_disc  = true;
+	std::string transcode_cache_dir = args.count("transcode-cache")
+	    ? args["transcode-cache"].as<std::string>() : "";
+	int         transcode_cache_mb  = args["transcode-cache-mb"].as<int>();
+	int         transcode_jobs      = args["transcode-jobs"].as<int>();
 
 	// Read config file; missing file is not fatal, just use defaults.
 	std::string config_path = args["config"].as<std::string>();
@@ -57,6 +64,13 @@ int main(int argc, char* argv[])
 			// CLI flags take precedence over config for port.
 			if (cfg.contains("port") && !args.count("port")) port = cfg["port"];
 			if (cfg.contains("flat_multi_disc")) flat_multi_disc = cfg["flat_multi_disc"].get<bool>();
+			// CLI wins over config, same rule as --user-db and --port above.
+			if (cfg.contains("transcode_cache_dir") && !args.count("transcode-cache"))
+				transcode_cache_dir = cfg["transcode_cache_dir"];
+			if (cfg.contains("transcode_cache_mb") && !args.count("transcode-cache-mb"))
+				transcode_cache_mb = cfg["transcode_cache_mb"].get<int>();
+			if (cfg.contains("transcode_jobs") && !args.count("transcode-jobs"))
+				transcode_jobs = cfg["transcode_jobs"].get<int>();
 			}
 		catch (const std::exception& e) {
 			std::cerr << "Warning: failed to parse " << config_path << ": " << e.what() << "\n";
@@ -78,7 +92,9 @@ int main(int argc, char* argv[])
 		return ok ? 0 : 1;
 		}
 
-	GainDrive gd(db_path, music_root, upload_dir, no_scan, debug, flat_multi_disc, user_db_path);
+	GainDrive gd(db_path, music_root, upload_dir, no_scan, debug, flat_multi_disc,
+	             user_db_path, transcode_cache_dir, transcode_cache_mb,
+	             transcode_jobs);
 	gd.listen(host, port);
 
 	return 0;

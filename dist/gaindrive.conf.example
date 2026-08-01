@@ -5,5 +5,8 @@
 	"user_db_path": "/var/lib/gaindrive/gaindrive-client.db",
 	"music_root": "/srv/music",
 	"upload_dir": "/tmp/gaindrive-uploads",
-	"flat_multi_disc": true
+	"flat_multi_disc": true,
+	"transcode_cache_dir": "/var/lib/gaindrive/transcodes",
+	"transcode_cache_mb": 1024,
+	"transcode_jobs": 0
 }

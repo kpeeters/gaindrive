@@ -9,16 +9,22 @@
 #include "mediastore.hh"
 #include "castmanager.hh"
 #include "folderwatcher.hh"
+#include "transcodecache.hh"
 
 class GainDrive {
 	public:
+		// transcode_cache_dir empty = derived from db_path.
+		// transcode_cache_mb 0 = cache disabled.
 		GainDrive(const std::string& db_path,
 		          const std::string& music_root,
 		          const std::string& upload_dir,
 		          bool no_scan,
 		          bool debug = false,
 		          bool flat_multi_disc = true,
-		          const std::string& user_db_path = "");
+		          const std::string& user_db_path = "",
+		          const std::string& transcode_cache_dir = "",
+		          int transcode_cache_mb = 1024,
+		          int transcode_jobs = 0);
 		void listen(const std::string& host, int port);
 
 	private:
@@ -27,6 +33,7 @@ class GainDrive {
 		std::string     upload_dir_;
 		std::string     users_dir_;
 		MediaStore      store_;
+		TranscodeCache  transcode_cache_;
 		CastManager     cast_manager_;
 		std::string     last_cast_song_id_;
 		float           last_cast_offset_ = 0.0f;
