@@ -53,8 +53,16 @@ def _raw(endpoint, extra=None, headers=None):
 def _json(endpoint, extra=None):
     extra = dict(extra or {})
     extra["f"] = "json"
-    _, _, body = _raw(endpoint, extra)
-    return json.loads(body)["subsonic-response"]
+    status, _, body = _raw(endpoint, extra)
+    try:
+        return json.loads(body)["subsonic-response"]
+    except (json.JSONDecodeError, KeyError):
+        # An XML body here almost always means the endpoint fell through to
+        # the catch-all, which ignores f=json — i.e. the running server
+        # predates the build. Look for "NOT IMPLEMENTED" in its log.
+        raise AssertionError(
+            f"{endpoint} returned HTTP {status} with a non-JSON body: "
+            f"{body[:200]!r}") from None
 
 
 def _xml(endpoint, extra=None):
@@ -64,45 +72,55 @@ def _xml(endpoint, extra=None):
     return ET.fromstring(body)
 
 
+# Queried once on first use rather than at import: a server that is down, or
+# running an older binary, should fail one test with a readable message
+# instead of aborting the whole script with a traceback.
+_CACHE = {}
+
+
 def _videos():
-    r = _json("getVideos.view")
-    return r.get("videos", {}).get("video", [])
+    if "videos" not in _CACHE:
+        r = _json("getVideos.view")
+        _CACHE["videos"] = r.get("videos", {}).get("video", [])
+    return _CACHE["videos"]
 
 
-VIDEOS = _videos()
-VIDEO  = VIDEOS[0] if VIDEOS else None
+def _video():
+    vs = _videos()
+    return vs[0] if vs else None
 
 
 def _need_video():
-    assert VIDEO, "no videos in the library — scan a collection with video first"
+    assert _video(), \
+        "no videos in the library — scan a collection with video first"
 
 
 # ---- getVideos --------------------------------------------------------
 
 def test_get_videos_marks_entries_as_video():
     _need_video()
-    for v in VIDEOS:
+    for v in _videos():
         assert v.get("isVideo") is True, f"{v.get('title')}: isVideo={v.get('isVideo')}"
         assert v.get("type") == "video", f"{v.get('title')}: type={v.get('type')}"
         assert isinstance(v.get("id"), str), "ids must be strings"
-    print(f"PASS  getVideos returned {len(VIDEOS)} entries, all marked as video")
+    print(f"PASS  getVideos returned {len(_videos())} entries, all marked as video")
 
 
 def test_get_videos_reports_dimensions():
     _need_video()
-    sized = [v for v in VIDEOS
+    sized = [v for v in _videos()
              if v.get("originalWidth") and v.get("originalHeight")]
     assert sized, "no video reported originalWidth/originalHeight — ffprobe " \
                   "did not run during the scan, or ffprobe is missing"
-    print(f"PASS  {len(sized)}/{len(VIDEOS)} videos report their dimensions")
+    print(f"PASS  {len(sized)}/{len(_videos())} videos report their dimensions")
 
 
 def test_get_videos_xml_agrees():
     _need_video()
     root = _xml("getVideos.view")
     entries = list(root.iter(f"{{{NS}}}video"))
-    assert len(entries) == len(VIDEOS), \
-        f"xml has {len(entries)} videos, json has {len(VIDEOS)}"
+    assert len(entries) == len(_videos()), \
+        f"xml has {len(entries)} videos, json has {len(_videos())}"
     assert entries[0].get("isVideo") == "true", entries[0].get("isVideo")
     print("PASS  the XML and JSON representations agree")
 
@@ -125,7 +143,7 @@ def test_audio_is_not_marked_as_video():
 
 def test_direct_tier_honours_ranges():
     """Tier 0: an already-playable container is served as the raw file."""
-    direct = [v for v in VIDEOS if v.get("suffix") in DIRECT_SUFFIXES]
+    direct = [v for v in _videos() if v.get("suffix") in DIRECT_SUFFIXES]
     if not direct:
         print("SKIP  no mp4/m4v/webm video in the library (tier 0 untested)")
         return
@@ -143,7 +161,7 @@ def test_transcoded_tier_returns_video():
     """A size constraint forces an encode, which must still be video/mp4."""
     _need_video()
     status, hdrs, body = _raw("stream.view",
-                              {"id": VIDEO["id"], "size": "320x240"})
+                              {"id": _video()["id"], "size": "320x240"})
     assert status == 200, status
     assert hdrs.get("Content-Type") == "video/mp4", hdrs.get("Content-Type")
     assert len(body) > 0, "empty body — ffmpeg produced nothing"
@@ -154,7 +172,7 @@ def test_segment_request_returns_mpegts():
     """A duration bound is what makes a request an HLS segment."""
     _need_video()
     status, hdrs, body = _raw("stream.view",
-                              {"id": VIDEO["id"], "timeOffset": "0",
+                              {"id": _video()["id"], "timeOffset": "0",
                                "duration": "10"})
     assert status == 200, status
     assert hdrs.get("Content-Type") == "video/mp2t", hdrs.get("Content-Type")
@@ -167,22 +185,22 @@ def test_segment_request_returns_mpegts():
 
 def test_hls_playlist_is_well_formed():
     _need_video()
-    status, hdrs, body = _raw("hls.m3u8", {"id": VIDEO["id"]})
+    status, hdrs, body = _raw("hls.m3u8", {"id": _video()["id"]})
     assert status == 200, status
     text = body.decode()
     assert text.startswith("#EXTM3U"), text[:40]
     assert "#EXT-X-ENDLIST" in text, "playlist is not terminated"
     segs = [l for l in text.splitlines() if l.startswith("stream.view")]
-    expected = (int(VIDEO["duration"]) + 9) // 10
+    expected = (int(_video()["duration"]) + 9) // 10
     assert len(segs) == expected, f"{len(segs)} segments, expected {expected}"
     print(f"PASS  hls.m3u8 lists {len(segs)} segments for a "
-          f"{VIDEO['duration']}s video")
+          f"{_video()['duration']}s video")
 
 
 def test_hls_segments_resolve():
     """Nothing pre-materialises these, so each one has to transcode on demand."""
     _need_video()
-    _, _, body = _raw("hls.m3u8", {"id": VIDEO["id"]})
+    _, _, body = _raw("hls.m3u8", {"id": _video()["id"]})
     segs = [l for l in body.decode().splitlines()
             if l.startswith("stream.view")]
     assert segs, "playlist had no segments"
@@ -213,10 +231,10 @@ def test_hls_rejects_audio():
 
 def test_video_info_lists_tracks():
     _need_video()
-    r = _json("getVideoInfo.view", {"id": VIDEO["id"]})
+    r = _json("getVideoInfo.view", {"id": _video()["id"]})
     assert "videoInfo" in r, r
     info = r["videoInfo"]
-    assert info["id"] == VIDEO["id"], info["id"]
+    assert info["id"] == _video()["id"], info["id"]
     assert isinstance(info.get("audioTrack"), list), info
     assert isinstance(info.get("captions"), list), info
     print(f"PASS  getVideoInfo: {len(info['audioTrack'])} audio track(s), "
@@ -238,9 +256,9 @@ def test_video_info_rejects_audio():
 
 def test_captions_are_webvtt_or_absent():
     _need_video()
-    r = _json("getVideoInfo.view", {"id": VIDEO["id"]})
+    r = _json("getVideoInfo.view", {"id": _video()["id"]})
     caps = r.get("videoInfo", {}).get("captions", [])
-    extra = {"id": VIDEO["id"]}
+    extra = {"id": _video()["id"]}
     if caps:
         extra["captionId"] = caps[0]["id"]
     status, hdrs, body = _raw("getCaptions.view", extra)
