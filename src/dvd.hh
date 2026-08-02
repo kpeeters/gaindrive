@@ -1,0 +1,126 @@
+#pragma once
+
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
+#include <map>
+#include <string>
+#include <vector>
+
+// DVD-rip support: a folder holding a VIDEO_TS directory of .VOB files.
+//
+// The one fact that shapes everything here is that VOBs are MPEG-2 program
+// streams **split at 1 GB boundaries**.  VTS_01_1.VOB, VTS_01_2.VOB and so on
+// are contiguous pieces of a single stream, not separate videos, so they have
+// to be handed to ffmpeg together via the concat: protocol.  Playing one part
+// alone gives a film that stops after twenty minutes.
+//
+// Naming, for reference:
+//   VIDEO_TS.IFO / .BUP    disc-level metadata
+//   VIDEO_TS.VOB           first-play / disc menu
+//   VTS_nn_0.VOB           titleset nn's *menu* — never content
+//   VTS_nn_m.VOB (m >= 1)  titleset nn's programme, part m
+//
+// Both the scanner and the streamer need the same ordered part lists, so the
+// logic lives here rather than being derived twice and drifting.
+
+// Titleset and part numbers parsed from a VOB filename. part == 0 marks a
+// menu, which is never programme content.
+struct DvdVobName
+	{
+	int titleset = 0;
+	int part     = 0;
+	};
+
+// Parses "VTS_03_2.VOB" into {3, 2}. Returns false for VIDEO_TS.VOB, for any
+// other filename, and for names that merely look similar.
+//
+// The DVD spec fixes this name exactly: VTS_ + two digits + _ + one digit +
+// .VOB, twelve characters, which caps a titleset at nine content parts.
+// Compared case-insensitively because rips off case-insensitive filesystems
+// routinely arrive lower-cased.
+inline bool dvd_parse_vob(const std::string& filename, DvdVobName& out)
+	{
+	// Hand-parsed rather than regex: this runs once per file in a directory
+	// walk, and the shape is rigid enough that a regex would add nothing.
+	if (filename.size() != 12) return false;                  // VTS_nn_m.VOB
+	std::string f = filename;
+	std::transform(f.begin(), f.end(), f.begin(), ::toupper);
+	if (f.compare(0, 4, "VTS_") != 0) return false;
+	if (f[6] != '_')                  return false;
+	if (f.compare(8, 4, ".VOB") != 0) return false;
+	for (int i : {4, 5, 7})
+		if (!std::isdigit(static_cast<unsigned char>(f[i]))) return false;
+	out.titleset = std::stoi(f.substr(4, 2));
+	out.part     = f[7] - '0';
+	return true;
+	}
+
+// The VIDEO_TS directory inside `folder`, or an empty path if there is none.
+// The name is upper-case by the DVD spec, but rips off case-insensitive
+// filesystems turn up lower-cased often enough to be worth accepting.
+inline std::filesystem::path dvd_video_ts_dir(
+	const std::filesystem::path& folder)
+	{
+	std::error_code ec;
+	for (const char* name : { "VIDEO_TS", "video_ts" }) {
+		auto cand = folder / name;
+		if (std::filesystem::is_directory(cand, ec)) return cand;
+		}
+	return {};
+	}
+
+// Content VOBs grouped by titleset number, each list ordered by part. Menus
+// (part 0) and every non-VOB file are excluded, so a titleset that appears
+// here always has something playable in it.
+inline std::map<int, std::vector<std::filesystem::path>> dvd_titlesets(
+	const std::filesystem::path& video_ts)
+	{
+	std::map<int, std::vector<std::pair<int, std::filesystem::path>>> byset;
+	std::error_code ec;
+	for (const auto& e : std::filesystem::directory_iterator(video_ts, ec)) {
+		if (!e.is_regular_file(ec)) continue;
+		DvdVobName n;
+		if (!dvd_parse_vob(e.path().filename().string(), n)) continue;
+		if (n.part == 0) continue;   // titleset menu, not programme
+		byset[n.titleset].push_back({ n.part, e.path() });
+		}
+
+	std::map<int, std::vector<std::filesystem::path>> out;
+	for (auto& [ts, parts] : byset) {
+		std::sort(parts.begin(), parts.end(),
+		          [](const auto& a, const auto& b) { return a.first < b.first; });
+		for (auto& [part, path] : parts) out[ts].push_back(path);
+		}
+	return out;
+	}
+
+// The ordered parts of the titleset that `first_vob` belongs to. Returns just
+// the file itself when it is not a DVD titleset VOB, which is what makes a
+// stray .vob elsewhere in the library play normally.
+inline std::vector<std::filesystem::path> dvd_parts_for(
+	const std::filesystem::path& first_vob)
+	{
+	DvdVobName n;
+	if (!dvd_parse_vob(first_vob.filename().string(), n) || n.part == 0)
+		return { first_vob };
+	auto sets = dvd_titlesets(first_vob.parent_path());
+	auto it   = sets.find(n.titleset);
+	if (it == sets.end() || it->second.empty()) return { first_vob };
+	return it->second;
+	}
+
+// The ffmpeg input specifier for a VOB: "concat:a|b|c" when the titleset is
+// split across parts, the plain path otherwise. ffmpeg's concat protocol
+// implements seeking across the joined files, so -ss keeps working.
+inline std::string dvd_input(const std::filesystem::path& first_vob)
+	{
+	auto parts = dvd_parts_for(first_vob);
+	if (parts.size() < 2) return first_vob.string();
+	std::string s = "concat:";
+	for (size_t i = 0; i < parts.size(); ++i) {
+		if (i) s += '|';
+		s += parts[i].string();
+		}
+	return s;
+	}
