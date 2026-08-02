@@ -197,7 +197,7 @@ int main(int argc, char* argv[])
 	GainDrive gd(db_path, roots, upload_dir, no_scan, debug, flat_multi_disc,
 	             user_db_path, transcode_cache_dir, transcode_cache_mb,
 	             transcode_jobs);
-	gd.listen(host, port);
-
-	return 0;
+	// Non-zero on a failed bind, so a supervisor restarts rather than
+	// recording a clean shutdown for a server that never served anything.
+	return gd.listen(host, port) ? 0 : 1;
 	}

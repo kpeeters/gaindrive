@@ -25,7 +25,10 @@ class GainDrive {
 		          const std::string& transcode_cache_dir = "",
 		          int transcode_cache_mb = 1024,
 		          int transcode_jobs = 0);
-		void listen(const std::string& host, int port);
+		// Binds and serves. Returns false without serving if the port could
+		// not be acquired, so the caller can exit non-zero rather than treat a
+		// doomed start as a clean shutdown.
+		bool listen(const std::string& host, int port);
 
 	private:
 		bool            debug_;

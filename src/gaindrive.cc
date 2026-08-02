@@ -1411,6 +1411,11 @@ GainDrive::GainDrive(const std::string& db_path,
 		          << "a library root." << std::endl;
 		std::exit(1);
 		}
+	// Socket options, including the deliberate SO_REUSEADDR-not-SO_REUSEPORT
+	// choice that stops a second gaindrive silently sharing this port, are set
+	// further down alongside the TCP keepalive settings — set_socket_options()
+	// takes a single callback, so they have to live together.
+
 	// A cache miss now blocks its request thread for the whole transcode
 	// (seconds, not milliseconds), so the default pool of 8 is too small to
 	// absorb a client that pins an album and fans out downloads.  The ffmpeg
@@ -1476,7 +1481,12 @@ GainDrive::GainDrive(const std::string& db_path,
 	// this the router drops the idle connection after ~60-90 s.
 	// Accepted sockets inherit SO_KEEPALIVE from the listening socket on Linux.
 	server_.set_socket_options([](int sock) {
-		httplib::default_socket_options(sock);
+		// SO_REUSEADDR rather than httplib::default_socket_options(), which
+		// sets SO_REUSEPORT on Linux — see the note above and in CLAUDE.md.
+		// SO_REUSEPORT would let a second gaindrive bind this same port
+		// successfully and have the kernel split traffic between the two.
+		int reuse = 1;
+		setsockopt(sock, SOL_SOCKET,  SO_REUSEADDR,   &reuse, sizeof(reuse));
 		int on = 1;
 		setsockopt(sock, SOL_SOCKET,  SO_KEEPALIVE,   &on, sizeof(on));
 		int idle  = 10;   // start probing after 10 s of silence
@@ -4366,8 +4376,21 @@ void GainDrive::cast_teardown()
 	last_cast_offset_ = 0.0f;
 	}
 
-void GainDrive::listen(const std::string& host, int port)
+bool GainDrive::listen(const std::string& host, int port)
 	{
+	// Bind first and announce afterwards.  The message used to print before
+	// the attempt, so a start that never acquired the port still looked like
+	// a healthy one in the log.
+	if (!server_.bind_to_port(host, port)) {
+		std::cerr << stamp() << "Error: cannot bind to " << host << ":" << port
+		          << " - is another gaindrive already running?" << std::endl;
+		return false;
+		}
 	std::cout << stamp() << "Listening on " << host << ":" << port << std::endl;
-	server_.listen(host, port);
+	if (!server_.listen_after_bind()) {
+		std::cerr << stamp() << "Error: server loop exited unexpectedly."
+		          << std::endl;
+		return false;
+		}
+	return true;
 	}
