@@ -10,19 +10,44 @@
 
 class MediaStore {
 	public:
+		// One configured library root. `name` is the identifier the user chose
+		// and is also the first component of every path stored for this root —
+		// that is what lets songs.path stay a single string, so the cross-DB
+		// joins against client.* (which are direct string equality) never
+		// needed to become two-column joins.
+		//
+		// Because the name is embedded in stored paths it is a durable
+		// identifier: renaming a root orphans its whole subtree. It is never
+		// derived from the directory basename for exactly that reason.
+		struct Root {
+			std::string name;   // "music", "video"; no '/', unique
+			std::string type;   // "artists" | "categories" | "uploads"
+			std::string path;   // absolute; normalised to have no trailing '/'
+			};
+
 		// Opens (or creates) the database and ensures the schema exists.
 		// The music DB path is always derived from db_path as "<base>-music.db".
 		// The user/state ("client") DB path defaults to "<base>-client.db" but
 		// can be overridden by passing a non-empty user_db_path.
-		MediaStore(const std::string& db_path, const std::string& music_root,
+		// Callers must have validated `roots` (see main.cc); this constructor
+		// only normalises them.
+		MediaStore(const std::string& db_path, const std::vector<Root>& roots,
 		           const std::string& user_db_path = "");
 
-		// Walk music_root_ and upsert everything into the DB.
+		// The configured roots, in the order given.
+		const std::vector<Root>& roots() const;
+
+		// The uploads root, or nullptr when none is configured. Personal
+		// uploads live at <uploads root>/<username>/; with no uploads root the
+		// upload endpoints refuse rather than writing into a library.
+		const Root* uploads_root() const;
+
+		// Walk every library root and upsert everything into the DB.
 		// Safe to call from a background thread.
 		void scan();
 
 		// Rescan only the listed artist-level subdirectories.
-		// dirs are paths relative to music_root_. An empty entry means the
+		// dirs are stored-form paths "<root>/<dir>". A bare root name means the
 		// root itself; if present, falls back to a full scan().
 		void scan_dirs(const std::set<std::string>& dirs);
 
@@ -70,9 +95,10 @@ class MediaStore {
 
 		// ---- Library browsing ----
 
-		struct MusicFolder { int id; std::string name; };
+		// type is "artists" or "categories"; the uploads root never appears.
+		struct MusicFolder { int id; std::string name; std::string type; };
 
-		// The configured music root(s) — currently always one entry.
+		// One entry per configured library root.
 		std::vector<MusicFolder> get_music_folders();
 
 		struct CachedArtistInfo {
@@ -85,9 +111,15 @@ class MediaStore {
 			std::string discogs_url;    // Discogs artist page URL
 			};
 
+		// True when folder_id is a level-1 entry of a "categories" root, i.e.
+		// a section like Film or Series rather than a musician. Such a folder
+		// must never be looked up as an artist — the visible symptom of that
+		// bug was a MusicBrainz query for a thing called "Movies".
+		bool is_category_folder(int folder_id);
+
 		// Returns empty string if folder_id not found.
 		std::string get_folder_name(int folder_id);
-		// Returns the folder path RELATIVE to music_root, or "" if not found.
+		// Returns the stored-form folder path, or "" if not found.
 		std::string get_folder_path(int folder_id);
 
 		std::optional<CachedArtistInfo> get_cached_artist_info(int folder_id);
@@ -109,11 +141,18 @@ class MediaStore {
 
 		struct ArtistDir { int id; std::string name; int album_count = 0; };
 
-		// All artist-level folders (depth-1 children of root), sorted by name.
-		// personal_user non-empty → restrict to .users/<personal_user>/; else
-		// main library (excludes .users/ entirely).
+		// All level-1 folders across every library root, sorted by name. For an
+		// artists root these are musicians; for a categories root they are
+		// sections such as Film or Series. Root folders themselves never
+		// appear.
+		// personal_user non-empty → restrict to that user's subtree of the
+		// uploads root; else the shared library, excluding uploads entirely.
+		// music_folder_id > 0 restricts to one root (the Subsonic
+		// musicFolderId filter); <= 0 spans every root, which is what an
+		// unfiltered request means.
 		std::vector<ArtistDir> get_artist_dirs(
-			const std::string& personal_user = "");
+			const std::string& personal_user = "",
+			int music_folder_id = 0);
 
 		struct ChildEntry {
 			int         id;
@@ -214,10 +253,10 @@ class MediaStore {
 		std::optional<AlbumInfo> get_album(int folder_id, bool flat_multi_disc = true,
 		                                    const std::string& username = "");
 
-		// Returns the cover image path RELATIVE to music_root, or "" if none.
+		// Returns the stored-form cover image path, or "" if none.
 		std::string get_cover_path(int folder_id);
 
-		// Returns sorted paths (RELATIVE to music_root) of all image files in
+		// Returns sorted stored-form paths of all image files in
 		// the album folder tree, excluding the main cover. Used to serve
 		// carousel images.
 		std::vector<std::string> get_extra_image_paths(int folder_id);
@@ -227,7 +266,7 @@ class MediaStore {
 
 		struct SongInfo {
 			int         id;
-			std::string path;     // relative to music_root_
+			std::string path;     // stored form: "<root>/<rest>"
 			std::string codec;    // e.g. "flac", "mp3"
 			int         bitrate;  // kbps (from tags; 0 if unknown)
 			double      duration; // seconds
@@ -415,7 +454,7 @@ class MediaStore {
 		                      const std::optional<int>& disc_number);
 
 		// Set the cover art path for the album that owns the given folder_id.
-		// path is relative to music_root. Returns false if no matching album exists.
+		// path is stored-form. Returns false if no matching album exists.
 		bool set_cover_art_path(int folder_id, const std::string& path);
 
 		// Compose an absolute filesystem path from a music-root-relative path.
@@ -423,26 +462,66 @@ class MediaStore {
 		// callers that need to perform filesystem I/O on them go through this.
 		std::string abs_path(const std::string& rel) const;
 
+		// The inverse: an absolute filesystem path to the stored form
+		// "<root name>/<rest>". Returns the input unchanged if it lies outside
+		// every root. Used by FolderWatcher, which learns about changes as
+		// absolute paths but must hand scan_dirs() stored-form ones.
+		std::string rel_path(const std::string& abs) const;
+
 		// Defence-in-depth check that callers MUST run on any path before
 		// opening a file: returns true iff the canonicalised candidate sits
-		// within the canonicalised music_root_. Resolves symlinks, so
-		// configurations where music_root_ itself is symlinked still work, but
+		// within the canonicalised path of ANY configured root. Resolves
+		// symlinks, so a root that is itself a symlink still works, but
 		// a symlink inside the tree pointing outside is detected.
 		bool path_is_within_root(const std::filesystem::path& candidate) const;
 
 	private:
-		std::string      music_root_;        // never ends in '/'
-		std::string      music_root_slash_;  // music_root_ + '/'; used to compose
-		                                     // absolute filesystem paths from the
-		                                     // music-root-relative paths stored
-		                                     // in folders.path / songs.path /
-		                                     // albums.cover_path / client.*.
-		std::filesystem::path music_root_canonical_;  // weakly_canonical of music_root_,
-		                                              // computed once at ctor.
+		// Everything the root model needs, derived once at construction.
+		// `path_slash` is the form used to compose and strip absolute paths;
+		// `canonical` is what path_is_within_root() compares against, so
+		// symlinks are resolved at every file open.
+		struct RootRec {
+			Root                  cfg;
+			std::string           path_slash;   // cfg.path + '/'
+			std::filesystem::path canonical;
+			};
+		std::vector<RootRec> roots_;
+		std::vector<Root>    roots_public_;   // cfg copies, for roots()
+
+		// Personal uploads live under the uploads root and must not surface in
+		// the shared library. These are the two forms the queries need:
+		// uploads_like_ is the LIKE pattern for "inside the uploads root",
+		// uploads_prefix_ is the path prefix for one user's subtree. Both are
+		// empty when no uploads root is configured, in which case the filters
+		// are skipped entirely rather than matching everything.
+		std::string uploads_like_;     // e.g. "personal/%"
+		std::string uploads_prefix_;   // e.g. "personal/"
+
+		// SQL fragment excluding the uploads root, or "" when there is none.
+		// col is the qualified path column, e.g. "f.path".
+		std::string not_uploads(const char* col) const;
+
+		// Root whose filesystem path contains `abs`, or nullptr. Used on the
+		// way in, when the scanner has an absolute path and needs the stored
+		// form.
+		const RootRec* root_for_abs(const std::string& abs) const;
+		// Root named by the first component of a stored path, or nullptr.
+		const RootRec* root_for_rel(const std::string& rel) const;
+
+		// The two functions that straddle the absolute/stored boundary. Every
+		// path persisted anywhere is "<root name>/<path within that root>";
+		// these are the only places that know it.
+		std::string strip_root(const std::string& abs) const;
+		std::string join_root (const std::string& rel) const;
+
 		SQLite::Database db_music_;
 		std::mutex       db_mutex_;  // guards db_music_ across scan thread + API threads
 
 		void create_schema();
+
+		// Reconciles the folders table's root rows with the configuration.
+		// Called once from the constructor.
+		void sync_roots();
 
 		// Targeted rescan of one artist subtree; called by scan_dirs().
 		void scan_artist_dir(const std::filesystem::path& path);

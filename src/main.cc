@@ -1,12 +1,72 @@
+#include <cctype>
+#include <filesystem>
 #include <iostream>
 #include <fstream>
+#include <set>
 #include <string>
+#include <vector>
 
 #include <cxxopts.hpp>
 #include <nlohmann/json.hpp>
 
 #include "gaindrive.hh"
 #include "mediastore.hh"
+
+// Parses one "name=path" root argument. Splits on the FIRST '=' so a path
+// containing '=' still works; a name never can, since it is restricted below.
+static bool parse_root(const std::string& arg, const std::string& type,
+                       std::vector<MediaStore::Root>& out, std::string& err)
+	{
+	auto eq = arg.find('=');
+	if (eq == std::string::npos || eq == 0 || eq + 1 >= arg.size()) {
+		err = "expected name=path, got '" + arg + "'";
+		return false;
+		}
+	out.push_back({ arg.substr(0, eq), type, arg.substr(eq + 1) });
+	return true;
+	}
+
+// Rejects anything that would make the library unreadable later rather than
+// starting up degraded. A root's name is embedded in every path stored for it,
+// so a bad or duplicated name is not a cosmetic problem: it silently detaches
+// content from the rows that reference it.
+static bool validate_roots(const std::vector<MediaStore::Root>& roots,
+                           bool need_library, std::string& err)
+	{
+	int uploads = 0, library = 0;
+	std::set<std::string> names;
+	for (const auto& r : roots) {
+		if (r.name.empty()) { err = "a root has an empty name"; return false; }
+		for (char c : r.name)
+			if (!std::isalnum(static_cast<unsigned char>(c))
+			        && c != '_' && c != '-') {
+				err = "root name '" + r.name
+				    + "' may contain only letters, digits, '_' and '-'";
+				return false;
+				}
+		if (!names.insert(r.name).second) {
+			err = "duplicate root name '" + r.name
+			    + "'; names must be unique across all roots";
+			return false;
+			}
+		std::error_code ec;
+		if (!std::filesystem::is_directory(r.path, ec)) {
+			err = "root '" + r.name + "' path is not a directory: " + r.path;
+			return false;
+			}
+		if (r.type == "uploads") ++uploads; else ++library;
+		}
+	if (uploads > 1) {
+		err = "at most one uploads root may be configured";
+		return false;
+		}
+	if (need_library && library == 0) {
+		err = "no library root configured; pass at least one --artist-root "
+		      "or --category-root";
+		return false;
+		}
+	return true;
+	}
 
 int main(int argc, char* argv[])
 	{
@@ -17,7 +77,9 @@ int main(int argc, char* argv[])
 		("config",     "Path to config file",         cxxopts::value<std::string>()->default_value("/etc/gaindrive.conf"))
 		("db",         "Path to database file",       cxxopts::value<std::string>()->default_value("/var/lib/gaindrive/gaindrive.db"))
 		("user-db",    "Path to the user/state database (default: derived from --db)", cxxopts::value<std::string>())
-		("music-root", "Root music directory",        cxxopts::value<std::string>()->default_value("/music"))
+		("artist-root",   "Library root whose subdirectories are artists, as name=path (repeatable)", cxxopts::value<std::vector<std::string>>())
+		("category-root", "Library root whose subdirectories are categories, as name=path (repeatable)", cxxopts::value<std::vector<std::string>>())
+		("upload-root",   "Root holding per-user personal uploads, as name=path", cxxopts::value<std::string>())
 		("upload-dir", "Directory for uploaded archives", cxxopts::value<std::string>()->default_value("/tmp/gaindrive-uploads"))
 		("transcode-cache",    "Directory for cached transcodes (default: alongside --db)", cxxopts::value<std::string>())
 		("transcode-cache-mb", "Transcode cache size in MB (0 disables)", cxxopts::value<int>()->default_value("1024"))
@@ -39,8 +101,29 @@ int main(int argc, char* argv[])
 	int         port       = args["port"].as<int>();
 	std::string db_path    = args["db"].as<std::string>();
 	std::string user_db_path = args.count("user-db") ? args["user-db"].as<std::string>() : "";
-	std::string music_root  = args["music-root"].as<std::string>();
 	std::string upload_dir  = args["upload-dir"].as<std::string>();
+
+	std::vector<MediaStore::Root> roots;
+	{
+	std::string err;
+	auto collect = [&](const char* opt, const char* type) {
+		if (!args.count(opt)) return true;
+		for (const auto& v : args[opt].as<std::vector<std::string>>())
+			if (!parse_root(v, type, roots, err)) {
+				std::cerr << "Error: --" << opt << ": " << err << "\n";
+				return false;
+				}
+		return true;
+		};
+	if (!collect("artist-root", "artists"))      return 1;
+	if (!collect("category-root", "categories")) return 1;
+	if (args.count("upload-root")
+	        && !parse_root(args["upload-root"].as<std::string>(), "uploads",
+	                       roots, err)) {
+		std::cerr << "Error: --upload-root: " << err << "\n";
+		return 1;
+		}
+	}
 	bool        no_scan          = args.count("no-scan") > 0;
 	bool        debug            = args.count("debug")   > 0;
 	bool        flat_multi_disc  = true;
@@ -59,7 +142,16 @@ int main(int argc, char* argv[])
 			if (cfg.contains("db_path"))    db_path    = cfg["db_path"];
 			// CLI --user-db takes precedence over config user_db_path.
 			if (cfg.contains("user_db_path") && !args.count("user-db")) user_db_path = cfg["user_db_path"];
-			if (cfg.contains("music_root"))  music_root  = cfg["music_root"];
+			// Roots from the config only when none were given on the command
+			// line, matching the precedence used for port and user-db below.
+			// The systemd unit runs with no arguments, so this is the normal
+			// path for a service install.
+			if (cfg.contains("roots") && roots.empty()) {
+				for (const auto& r : cfg["roots"])
+					roots.push_back({ r.value("name", std::string()),
+					                  r.value("type", std::string("artists")),
+					                  r.value("path", std::string()) });
+				}
 			if (cfg.contains("upload_dir"))  upload_dir  = cfg["upload_dir"];
 			// CLI flags take precedence over config for port.
 			if (cfg.contains("port") && !args.count("port")) port = cfg["port"];
@@ -77,6 +169,16 @@ int main(int argc, char* argv[])
 			}
 		}
 
+	// --add-user touches no library, so it is the one mode that may run with
+	// no roots configured.
+	{
+	std::string err;
+	if (!validate_roots(roots, !args.count("add-user"), err)) {
+		std::cerr << "Error: " << err << "\n";
+		return 1;
+		}
+	}
+
 	// --add-user: create a user in the DB and exit without starting the server.
 	if (args.count("add-user")) {
 		if (!args.count("password")) {
@@ -85,14 +187,14 @@ int main(int argc, char* argv[])
 			}
 		std::string username = args["add-user"].as<std::string>();
 		std::string password = args["password"].as<std::string>();
-		MediaStore store(db_path, music_root, user_db_path);
+		MediaStore store(db_path, roots, user_db_path);
 		bool ok = store.add_user(username, password, true /* is_admin */);
 		std::cout << (ok ? "User '" + username + "' created."
 		               : "User '" + username + "' already exists.") << "\n";
 		return ok ? 0 : 1;
 		}
 
-	GainDrive gd(db_path, music_root, upload_dir, no_scan, debug, flat_multi_disc,
+	GainDrive gd(db_path, roots, upload_dir, no_scan, debug, flat_multi_disc,
 	             user_db_path, transcode_cache_dir, transcode_cache_mb,
 	             transcode_jobs);
 	gd.listen(host, port);

@@ -3,7 +3,12 @@
 	"port": 4040,
 	"db_path": "/var/lib/gaindrive/gaindrive.db",
 	"user_db_path": "/var/lib/gaindrive/gaindrive-client.db",
-	"music_root": "/srv/music",
+	"//roots": "One entry per library root. 'name' is stored as the first component of every path in the database, so it is permanent: renaming a root detaches everything under it. Type is artists, categories or uploads (at most one uploads root; omit it to disable personal uploads).",
+	"roots": [
+		{ "name": "music",    "type": "artists",    "path": "/srv/music" },
+		{ "name": "movies",   "type": "categories", "path": "/srv/movies" },
+		{ "name": "personal", "type": "uploads",    "path": "/var/lib/gaindrive/uploads" }
+	],
 	"upload_dir": "/tmp/gaindrive-uploads",
 	"flat_multi_disc": true,
 	"transcode_cache_dir": "/var/lib/gaindrive/transcodes",

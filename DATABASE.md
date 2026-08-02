@@ -21,16 +21,23 @@ storage from the larger music DB that is rebuilt by library scans.
 ```
 -- The filesystem directory tree, cached.
 -- Each row is one directory.
--- For Artist/Album/track.flac:
---   root folder  -> parent_id = NULL
+-- For music/Artist/Album/track.flac:
+--   root "music" -> parent_id = NULL
 --   artist dir   -> parent_id = root
 --   album dir    -> parent_id = artist dir
+-- There is one root row per configured library
+-- root; content_type is set only on those.
 CREATE TABLE folders (
     id          INTEGER PRIMARY KEY,
     parent_id   INTEGER REFERENCES folders(id),
-    -- relative to music_root; the root row stores ""
+    -- stored form: "<root name>/<rest>";
+    -- a root row stores just its name
     path        TEXT NOT NULL UNIQUE,
     name        TEXT NOT NULL,
+    -- root rows only: 'artists' or 'categories'.
+    -- Refreshed from config at every start, so
+    -- this is a cache rather than a source of truth.
+    content_type TEXT,
     -- updated during scan
     last_scanned DATETIME
 );
@@ -68,7 +75,7 @@ CREATE TABLE albums (
     disc_count    INTEGER DEFAULT 1,
     duration      REAL DEFAULT 0,
     song_count    INTEGER DEFAULT 0,
-    -- relative to music_root, e.g. "Artist/Album/cover.jpg"
+    -- stored form, e.g. "music/Artist/Album/cover.jpg"
     cover_path    TEXT,
     musicbrainz_id TEXT,
     created       DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -110,7 +117,7 @@ CREATE TABLE songs (
                     ON DELETE CASCADE,
     folder_id     INTEGER NOT NULL
                     REFERENCES folders(id),
-    -- filesystem path, relative to music_root
+    -- stored form: "<root name>/<path within that root>"
     path          TEXT NOT NULL UNIQUE,
     filename      TEXT NOT NULL,
     -- metadata (from tags or inferred)
@@ -204,18 +211,19 @@ CREATE TABLE users (
 );
 
 -- All references to music-library rows are by
--- filesystem path, RELATIVE to the music root,
+-- stored-form path "<root name>/<rest>",
 -- never by integer rowid. SQLite forbids foreign
 -- keys across attached databases anyway, and
--- using relative paths means the user-state DB
+-- using stored-form paths means the user-state DB
 -- survives:
 --   * a music-DB rebuild (fresh rowids)
 --   * the rowid churn from the song scanner's
 --     INSERT OR REPLACE on path conflict
---   * moving the whole library to a different
---     on-disk location
+--   * moving a root to a different on-disk
+--     location (its NAME must not change:
+--     that is what these paths are keyed on)
 --
--- The music DB stores paths in the same relative
+-- The music DB stores paths in the same stored
 -- form, so cross-DB JOINs are direct equality:
 --   JOIN songs s ON s.path = st.song_path
 CREATE TABLE stars (

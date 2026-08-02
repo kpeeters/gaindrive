@@ -38,11 +38,11 @@ static constexpr uint32_t WATCH_MASK =
 	IN_DELETE_SELF |   // the watched directory itself was deleted
 	IN_MOVE_SELF   ;   // the watched directory itself was moved
 
-FolderWatcher::FolderWatcher(MediaStore& store,
-                              const std::string& music_root,
-                              int debounce_ms)
-	: store_(store), music_root_(music_root), debounce_ms_(debounce_ms)
+FolderWatcher::FolderWatcher(MediaStore& store, int debounce_ms)
+	: store_(store), debounce_ms_(debounce_ms)
 	{
+	for (const auto& r : store_.roots())
+		if (r.type != "uploads") roots_.push_back(r.path);
 	}
 
 FolderWatcher::~FolderWatcher()
@@ -78,49 +78,52 @@ void FolderWatcher::remove_watch(int wd)
 	wd_to_path_.erase(wd);
 	}
 
+std::string FolderWatcher::root_of(const std::string& path) const
+	{
+	for (const auto& r : roots_) {
+		if (path == r) return r;
+		if (path.size() > r.size() && path.compare(0, r.size(), r) == 0
+		        && path[r.size()] == '/')
+			return r;
+		}
+	return "";
+	}
+
 std::string FolderWatcher::artist_dir_for(int wd, const char* ev_name) const
 	{
 	auto it = wd_to_path_.find(wd);
 	if (it == wd_to_path_.end()) return "";
 
-	fs::path dir(it->second);
-	fs::path root(music_root_);
+	std::string owner = root_of(it->second);
+	if (owner.empty()) return "";   // not under any library root
 
-	// Event is on the root itself: the affected artist is root/ev_name.
+	fs::path dir(it->second);
+	fs::path root(owner);
+
+	// Event is on a root itself: the affected level-1 dir is root/ev_name.
 	if (dir == root) {
-		if (ev_name && ev_name[0] && std::string(ev_name) != ".users")
-			return (root / ev_name).string();
+		if (ev_name && ev_name[0]) return (root / ev_name).string();
 		return "";
 		}
 
-	// Walk up to the depth-1 child of root (the artist dir).
+	// Walk up to the depth-1 child of the owning root.
 	auto rel = dir.lexically_relative(root);
-	auto depth1 = rel.begin()->string();
-	// The personal-upload area is managed exclusively via explicit scan_dirs()
-	// calls from the upload handler; treating .users as an artist dir would
-	// re-parent the UUID batch folders and break personal-library browsing.
-	if (depth1 == ".users") return "";
+	if (rel.empty()) return "";
 	return (root / *rel.begin()).string();
 	}
 
 void FolderWatcher::add_watches_recursive(const std::string& root)
 	{
-	// Never watch the personal-upload area; artist_dir_for() ignores events
-	// there, and the scan_dirs() calls from the upload handler are authoritative.
-	// Skipping also avoids exhausting inotify watch slots on large uploads.
-	std::string users_abs = music_root_ + "/.users";
-	if (root == users_abs
-	    || root.compare(0, users_abs.size() + 1, users_abs + '/') == 0)
-		return;
-
 	add_watch(root);
 	std::error_code ec;
+	// follow_directory_symlink so a root that is itself a symlink, or that
+	// contains symlinked subtrees, still gets watched. Without it such a
+	// library would silently never live-rescan.
 	for (auto& entry : std::filesystem::recursive_directory_iterator(root,
-	                       std::filesystem::directory_options::skip_permission_denied, ec)) {
-		if (entry.is_directory(ec)
-		    && entry.path().string() != users_abs
-		    && entry.path().string().compare(0, users_abs.size() + 1,
-		                                     users_abs + '/') != 0)
+	                       std::filesystem::directory_options::skip_permission_denied
+	                     | std::filesystem::directory_options::follow_directory_symlink,
+	                       ec)) {
+		if (entry.is_directory(ec))
 			add_watch(entry.path().string());
 		}
 	if (ec)
@@ -180,9 +183,11 @@ void FolderWatcher::run()
 	// Build the inotify watch set on this thread rather than in start(), so
 	// the GainDrive constructor — and therefore listen() — isn't blocked by
 	// a multi-second recursive walk on large libraries.
-	add_watches_recursive(music_root_);
+	for (const auto& r : roots_)
+		add_watches_recursive(r);
 	std::cout << stamp() << "FolderWatcher: watching " << wd_to_path_.size()
-	          << " directories under " << music_root_ << std::endl;
+	          << " directories across " << roots_.size() << " root"
+	          << (roots_.size() == 1 ? "" : "s") << std::endl;
 
 	using Clock = std::chrono::steady_clock;
 	std::optional<Clock::time_point> last_event;
@@ -205,22 +210,14 @@ void FolderWatcher::run()
 					std::cout << stamp() << "FolderWatcher: rescanning "
 					          << abs_dirs.size() << " artist director"
 					          << (abs_dirs.size() == 1 ? "y" : "ies") << std::endl;
-					// scan_dirs() expects music-root-relative paths; the
-					// rewatch helper still needs absolute paths for
-					// inotify_add_watch().
-					std::string root_slash = music_root_;
-					if (root_slash.empty() || root_slash.back() != '/')
-						root_slash += '/';
+					// scan_dirs() expects stored-form paths
+					// ("<root>/<dir>"); the rewatch helper still needs
+					// absolute ones for inotify_add_watch().  MediaStore owns
+					// the mapping, so ask it rather than reimplementing the
+					// prefix arithmetic here.
 					std::set<std::string> rel_dirs;
-					for (auto& d : abs_dirs) {
-						if (d == music_root_)
-							rel_dirs.insert("");
-						else if (d.size() > root_slash.size()
-						         && d.compare(0, root_slash.size(), root_slash) == 0)
-							rel_dirs.insert(d.substr(root_slash.size()));
-						else
-							rel_dirs.insert(d);   // outside music_root — shouldn't happen
-						}
+					for (auto& d : abs_dirs)
+						rel_dirs.insert(store_.rel_path(d));
 					std::thread([this, rel_dirs = std::move(rel_dirs),
 					             abs_dirs = std::move(abs_dirs)]{
 						store_.scan_dirs(rel_dirs);
@@ -314,8 +311,11 @@ void FolderWatcher::run()
 					          << "FolderWatcher: inotify queue overflow; "
 					             "falling back to full rescan"
 					          << std::endl;
-					// Can't know what changed; mark for full scan.
-					changed_artists_.insert(music_root_);
+					// Can't know what changed; mark for full scan.  A bare root
+					// path maps to a bare root name, which scan_dirs() treats
+					// as "lost track" and escalates to a full scan.
+					for (const auto& r : roots_)
+						changed_artists_.insert(r);
 					last_event = Clock::now();
 					continue;
 					}
@@ -368,10 +368,8 @@ void FolderWatcher::run()
 
 #else  // non-Linux stubs
 
-FolderWatcher::FolderWatcher(MediaStore& store,
-                              const std::string& music_root,
-                              int debounce_ms)
-	: store_(store), music_root_(music_root), debounce_ms_(debounce_ms)
+FolderWatcher::FolderWatcher(MediaStore& store, int debounce_ms)
+	: store_(store), debounce_ms_(debounce_ms)
 	{
 	}
 

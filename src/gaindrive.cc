@@ -503,6 +503,17 @@ static bool check_cast_perm(const httplib::Request& req, httplib::Response& res,
 static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::string& name,
                                                          MediaStore& store, bool force = false)
 	{
+	// A level-1 folder of a categories root is a section — Film, Series,
+	// Documentary — not a performer.  Looking it up would query MusicBrainz
+	// for "Film" and cache whatever came back as that section's biography.
+	// Same failure shape as the CD1 lookup recorded in ISSUES.md.
+	if (store.is_category_folder(id)) {
+		std::cout << stamp() << "getArtistInfo [" << name
+		          << "] is a category, not an artist; skipping lookup"
+		          << std::endl;
+		return {};
+		}
+
 	if (!force) {
 		auto cached = store.get_cached_artist_info(id);
 		if (cached) {
@@ -1347,7 +1358,7 @@ static void reorganise_by_tags(const std::filesystem::path& batch_root)
 static constexpr int CAST_IDLE_GRACE_S = 30;
 
 GainDrive::GainDrive(const std::string& db_path,
-                     const std::string& music_root,
+                     const std::vector<MediaStore::Root>& roots,
                      const std::string& upload_dir,
                      bool no_scan,
                      bool debug,
@@ -1357,7 +1368,7 @@ GainDrive::GainDrive(const std::string& db_path,
                      int transcode_cache_mb,
                      int transcode_jobs)
 	: debug_(debug), flat_multi_disc_(flat_multi_disc), upload_dir_(upload_dir),
-	  store_(db_path, music_root, user_db_path),
+	  store_(db_path, roots, user_db_path),
 	  transcode_cache_(
 	      transcode_cache_dir.empty()
 	          ? std::filesystem::path(db_path).parent_path() / "transcodes"
@@ -1365,18 +1376,18 @@ GainDrive::GainDrive(const std::string& db_path,
 	      static_cast<int64_t>(transcode_cache_mb) * 1024 * 1024,
 	      transcode_jobs > 0 ? transcode_jobs
 	          : std::max(2u, std::thread::hardware_concurrency() / 2)),
-	  watcher_(store_, music_root)
+	  watcher_(store_)
 	{
 	namespace fs = std::filesystem;
-	// A cache inside music_root would be rescanned and indexed as music, and
-	// the transcodes would then appear in the library as tracks of their own.
+	// A cache inside any root would be rescanned and indexed, and the
+	// transcodes would then appear in the library as tracks of their own.
 	if (store_.path_is_within_root(
 	        fs::absolute(transcode_cache_dir.empty()
 	            ? fs::path(db_path).parent_path() / "transcodes"
 	            : fs::path(transcode_cache_dir)).string())) {
 		std::cerr << stamp()
 		          << "Error: the transcode cache must not live inside "
-		          << "music_root." << std::endl;
+		          << "a library root." << std::endl;
 		std::exit(1);
 		}
 	// A cache miss now blocks its request thread for the whole transcode
@@ -1387,8 +1398,18 @@ GainDrive::GainDrive(const std::string& db_path,
 
 	if (!fs::exists(upload_dir_))
 		fs::create_directories(upload_dir_);
-	users_dir_ = (fs::path(music_root) / ".users").string();
-	fs::create_directories(users_dir_);
+	// Personal uploads live in their own root rather than a hidden directory
+	// inside a library, so nothing there can be mistaken for someone's album.
+	// With no uploads root configured both stay empty and the upload endpoints
+	// refuse — better than silently writing into a library root.
+	if (const auto* up = store_.uploads_root()) {
+		users_dir_         = up->path;
+		uploads_root_name_ = up->name;
+		fs::create_directories(users_dir_);
+		}
+	else
+		std::cout << stamp() << "No uploads root configured; personal uploads "
+		          << "are disabled." << std::endl;
 
 	// Normalise /rest/foo → /rest/foo.view so clients that omit the suffix still work.
 	// In debug mode also strip Accept-Encoding: httplib swaps compressed bytes into
@@ -1845,7 +1866,9 @@ GainDrive::GainDrive(const std::string& db_path,
 			body = subsonic_ok_json([&folders](nlohmann::json& r) {
 				nlohmann::json arr = nlohmann::json::array();
 				for (auto& f : folders)
-					arr.push_back({{"id", sid(f.id)}, {"name", f.name}});
+					// contentType is a gaindrive extension: "artists" or "categories".
+					arr.push_back({{"id", sid(f.id)}, {"name", f.name},
+					               {"contentType", f.type}});
 				r["musicFolders"]["musicFolder"] = arr;
 				});
 		else
@@ -1855,6 +1878,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					auto* el = doc.NewElement("musicFolder");
 					el->SetAttribute("id",   f.id);
 					el->SetAttribute("name", f.name.c_str());
+				el->SetAttribute("contentType", f.type.c_str());
 					mf->InsertEndChild(el);
 					}
 				root->InsertEndChild(mf);
@@ -1869,7 +1893,10 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		bool personal = req.get_param_value("personal") == "true";
 		std::string pu = personal ? req.get_param_value("u") : "";
-		auto artists = store_.get_artist_dirs(pu);
+		// musicFolderId restricts to one root; absent means all of them,
+		// which is what every existing client sends.
+		auto artists = store_.get_artist_dirs(
+			pu, to_int(req.get_param_value("musicFolderId"), 0));
 
 		std::sort(artists.begin(), artists.end(),
 			[](const MediaStore::ArtistDir& a, const MediaStore::ArtistDir& b) {
@@ -1934,7 +1961,10 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		bool personal = req.get_param_value("personal") == "true";
 		std::string pu = personal ? req.get_param_value("u") : "";
-		auto artists = store_.get_artist_dirs(pu);
+		// musicFolderId restricts to one root; absent means all of them,
+		// which is what every existing client sends.
+		auto artists = store_.get_artist_dirs(
+			pu, to_int(req.get_param_value("musicFolderId"), 0));
 		std::sort(artists.begin(), artists.end(),
 			[](const MediaStore::ArtistDir& a, const MediaStore::ArtistDir& b) {
 				return sort_key(a.name) < sort_key(b.name);
@@ -2267,7 +2297,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		// Compose absolute filesystem path for the actual file open.
 		std::string path = store_.abs_path(rel_path);
 		if (!store_.path_is_within_root(path)) {
-			std::cout << stamp() << "getCoverArt: refusing path outside music_root: "
+			std::cout << stamp() << "getCoverArt: refusing path outside every root: "
 			          << path << std::endl;
 			res.status = 403;
 			return;
@@ -2322,7 +2352,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 		std::string folder = store_.abs_path(folder_rel);
 		if (!store_.path_is_within_root(folder)) {
-			std::cout << stamp() << "getAlbumTexts: refusing path outside music_root: "
+			std::cout << stamp() << "getAlbumTexts: refusing path outside every root: "
 			          << folder << std::endl;
 			res.status = 403;
 			return;
@@ -2404,7 +2434,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		namespace fs = std::filesystem;
 		fs::path full = fs::path(store_.abs_path(folder_rel)) / name;
 		if (!store_.path_is_within_root(full)) {
-			std::cout << stamp() << "getAlbumText: refusing path outside music_root: "
+			std::cout << stamp() << "getAlbumText: refusing path outside every root: "
 			          << full.string() << std::endl;
 			res.status = 403;
 			return;
@@ -2584,10 +2614,10 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		// Compose-and-validate the absolute song path once. Streamer reads from
 		// it (via std::ifstream and ffmpeg argv) — refuse anything outside
-		// music_root before handing it off.
+		// the configured roots before handing it off.
 		std::string song_abs = store_.abs_path(song->path);
 		if (!store_.path_is_within_root(song_abs)) {
-			std::cout << stamp() << "stream: refusing path outside music_root: "
+			std::cout << stamp() << "stream: refusing path outside every root: "
 			          << song_abs << std::endl;
 			res.status = 403;
 			return;
@@ -2750,7 +2780,7 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		std::string song_abs = store_.abs_path(song->path);
 		if (!store_.path_is_within_root(song_abs)) {
-			std::cout << stamp() << "download: refusing path outside music_root: "
+			std::cout << stamp() << "download: refusing path outside every root: "
 			          << song_abs << std::endl;
 			res.status = 403;
 			return;
@@ -3915,9 +3945,9 @@ GainDrive::GainDrive(const std::string& db_path,
 		try {
 			std::string song_abs = store_.abs_path(song->path);
 			if (!store_.path_is_within_root(song_abs)) {
-				std::cout << stamp() << "updateSong: refusing path outside music_root: "
+				std::cout << stamp() << "updateSong: refusing path outside every root: "
 				          << song_abs << std::endl;
-				err(0, "Refusing to write outside music_root.");
+				err(0, "Refusing to write outside the configured roots.");
 				return;
 				}
 			TagLib::FileRef f(song_abs.c_str());
@@ -4021,9 +4051,9 @@ GainDrive::GainDrive(const std::string& db_path,
 		fs::path cover_rel = fs::path(folder_rel) / "cover.jpg";
 		fs::path cover_abs = fs::path(store_.abs_path(cover_rel.string()));
 		if (!store_.path_is_within_root(cover_abs)) {
-			std::cout << stamp() << "setCoverArt: refusing path outside music_root: "
+			std::cout << stamp() << "setCoverArt: refusing path outside every root: "
 			          << cover_abs.string() << std::endl;
-			err(0, "Refusing to write outside music_root.");
+			err(0, "Refusing to write outside the configured roots.");
 			return;
 			}
 		{
@@ -4039,7 +4069,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		});
 
 	// Upload a music archive (zip / tar / tar.gz / tgz) and extract it into
-	// the calling user's personal folder under music_root/.users/<username>/.
+	// the calling user's personal folder under <uploads root>/<username>/.
 	server_.Post("/upload", [this](const httplib::Request& req, httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 
@@ -4050,6 +4080,13 @@ GainDrive::GainDrive(const std::string& db_path,
 			res.status = 400;
 			res.set_content(j.dump(), "application/json");
 			};
+
+		// Refuse rather than fall back to a library root: an upload landing in
+		// a shared library would be scanned as somebody's album.
+		if (users_dir_.empty()) {
+			json_err("No uploads root is configured on this server.");
+			return;
+			}
 
 		// Require upload_allowed (or admin); capture the username for the dest path.
 		std::string uname;
@@ -4099,7 +4136,7 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		// Scan each artist dir inside the batch individually so that artist names
 		// (not the UUID) appear as the top-level entries in personal mode.
-		std::string rel_batch = ".users/" + uname + "/" + uuid;
+		std::string rel_batch = uploads_root_name_ + "/" + uname + "/" + uuid;
 		{
 		std::set<std::string> to_scan;
 		std::error_code ec;
@@ -4145,12 +4182,13 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!rel_opt) { err(70, "Item not found."); return; }
 		const std::string& item_rel = *rel_opt;
 
-		// Expect ".users/<username>/<uuid>/<artist>/<album>" — five parts.
+		// Expect "<uploads root>/<username>/<uuid>/<artist>/<album>" — five parts.
 		namespace fs = std::filesystem;
 		fs::path rel_p(item_rel);
 		std::vector<std::string> parts;
 		for (auto& c : rel_p) parts.push_back(c.string());
-		if (parts.size() != 5 || parts[0] != ".users") {
+		if (parts.size() != 5 || uploads_root_name_.empty()
+		        || parts[0] != uploads_root_name_) {
 			err(0, "Item is not in a personal library folder.");
 			return;
 			}
@@ -4159,15 +4197,26 @@ GainDrive::GainDrive(const std::string& db_path,
 		const std::string& artist_name     = parts[3];
 		const std::string& album_name      = parts[4];
 
-		// Album lands under the artist dir in the main library.
-		std::string target_rel = artist_name + "/" + album_name;
+		// Album lands under the artist dir in the main library.  With several
+		// artist roots configured there is nothing in a personal upload that
+		// says which one it belongs in, so it goes to the first one declared —
+		// the order the operator wrote them in is the only signal available.
+		std::string lib_root;
+		for (const auto& r : store_.roots())
+			if (r.type == "artists") { lib_root = r.name; break; }
+		if (lib_root.empty()) {
+			err(0, "No artist library root is configured to promote into.");
+			return;
+			}
+		std::string artist_rel = lib_root + "/" + artist_name;
+		std::string target_rel = artist_rel + "/" + album_name;
 
 		fs::path abs_src    = store_.abs_path(item_rel);
 		fs::path abs_target = store_.abs_path(target_rel);
 
 		std::error_code ec;
 		// Create the artist dir in the main library if it doesn't exist yet.
-		fs::create_directories(store_.abs_path(artist_name), ec);
+		fs::create_directories(store_.abs_path(artist_rel), ec);
 
 		if (fs::exists(abs_target)) {
 			err(0, "An album with that name already exists for that artist.");
@@ -4188,14 +4237,15 @@ GainDrive::GainDrive(const std::string& db_path,
 		// If the personal artist dir is now empty, remove it so that
 		// scan_artist_dir treats it as gone and prunes its folder row.
 		std::string personal_artist_rel =
-			".users/" + uname_from_path + "/" + batch_uuid + "/" + artist_name;
+			uploads_root_name_ + "/" + uname_from_path + "/" + batch_uuid
+			+ "/" + artist_name;
 		fs::path personal_artist_abs = store_.abs_path(personal_artist_rel);
 		if (fs::is_directory(personal_artist_abs, ec) && fs::is_empty(personal_artist_abs, ec))
 			fs::remove(personal_artist_abs, ec);
 
 		// Rescan synchronously: only two artist dirs, so it's fast, and doing it
 		// before the response ensures the client sees a consistent DB immediately.
-		store_.scan_dirs({artist_name, personal_artist_rel});
+		store_.scan_dirs({artist_rel, personal_artist_rel});
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");

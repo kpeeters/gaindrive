@@ -16,7 +16,7 @@ class GainDrive {
 		// transcode_cache_dir empty = derived from db_path.
 		// transcode_cache_mb 0 = cache disabled.
 		GainDrive(const std::string& db_path,
-		          const std::string& music_root,
+		          const std::vector<MediaStore::Root>& roots,
 		          const std::string& upload_dir,
 		          bool no_scan,
 		          bool debug = false,
@@ -31,7 +31,13 @@ class GainDrive {
 		bool            debug_;
 		bool            flat_multi_disc_;
 		std::string     upload_dir_;
+		// Absolute path of the uploads root, or empty when none is configured
+		// — in which case the upload endpoints refuse rather than writing into
+		// a library root. Personal files live at <users_dir_>/<username>/.
 		std::string     users_dir_;
+		// Name of the uploads root, i.e. the first component of the stored
+		// paths for anything under it. Empty when there is no uploads root.
+		std::string     uploads_root_name_;
 		MediaStore      store_;
 		TranscodeCache  transcode_cache_;
 		CastManager     cast_manager_;

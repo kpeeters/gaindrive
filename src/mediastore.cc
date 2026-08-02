@@ -240,31 +240,55 @@ static int64_t mtime_of(const fs::path& p)
 
 // Helpers for the music-root-relative path convention. All paths persisted in
 // the music DB (folders.path, songs.path, albums.cover_path) and the client DB
-// (client.*) are stored as paths relative to music_root_; strip_root() trims
-// an absolute path to that form on write, and join_root() composes the
+// (client.*) are stored as "<root name>/<path within that root>"; strip_root()
+// converts an absolute path to that form on write, and join_root() composes the
 // absolute form when a filesystem call needs it.
 
-static std::string strip_root(const std::string& abs, const std::string& root_slash)
+const MediaStore::RootRec* MediaStore::root_for_abs(const std::string& abs) const
 	{
-	if (abs.size() >= root_slash.size()
-	    && abs.compare(0, root_slash.size(), root_slash) == 0)
-		return abs.substr(root_slash.size());
-	return abs;  // outside music_root — shouldn't happen, but pass through
+	for (const auto& r : roots_) {
+		if (abs == r.cfg.path) return &r;
+		if (abs.size() > r.path_slash.size()
+		    && abs.compare(0, r.path_slash.size(), r.path_slash) == 0)
+			return &r;
+		}
+	return nullptr;
 	}
 
-static std::string join_root(const std::string& rel, const std::string& root_slash)
+const MediaStore::RootRec* MediaStore::root_for_rel(const std::string& rel) const
+	{
+	auto slash = rel.find('/');
+	std::string name = (slash == std::string::npos) ? rel : rel.substr(0, slash);
+	for (const auto& r : roots_)
+		if (r.cfg.name == name) return &r;
+	return nullptr;
+	}
+
+// Absolute path -> "<root name>/<path within that root>".
+std::string MediaStore::strip_root(const std::string& abs) const
+	{
+	const RootRec* r = root_for_abs(abs);
+	if (!r) return abs;   // outside every root — shouldn't happen; pass through
+	if (abs == r->cfg.path) return r->cfg.name;
+	return r->cfg.name + "/" + abs.substr(r->path_slash.size());
+	}
+
+// "<root name>/<rest>" -> absolute path.  An unknown root name yields an empty
+// string rather than a path built from a guess: every caller feeds the result
+// to the filesystem, and a plausible-but-wrong path is worse than a failure.
+std::string MediaStore::join_root(const std::string& rel) const
 	{
 	if (rel.empty()) return rel;
-	// Defensive: if the caller already passed an absolute path, leave it.
-	if (rel.size() >= root_slash.size()
-	    && rel.compare(0, root_slash.size(), root_slash) == 0)
-		return rel;
-	return root_slash + rel;
+	const RootRec* r = root_for_rel(rel);
+	if (!r) return {};
+	auto slash = rel.find('/');
+	if (slash == std::string::npos) return r->cfg.path;
+	return r->path_slash + rel.substr(slash + 1);
 	}
 
 // Defence-in-depth: returns true iff the canonicalised candidate sits within
 // the (already-canonicalised) base. Used to refuse any filesystem operation on
-// a path that — after symlink resolution — escapes music_root_. The base is
+// a path that — after symlink resolution — escapes every root. The bases are
 // canonicalised once at MediaStore ctor; the candidate is canonicalised every
 // call.
 static bool is_within(const fs::path& candidate, const fs::path& canonical_base)
@@ -288,26 +312,35 @@ static std::string derive_path(const std::string& base, const std::string& suffi
 	return base + suffix;
 	}
 
-MediaStore::MediaStore(const std::string& db_path, const std::string& music_root,
+MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& roots,
                        const std::string& user_db_path)
-	: music_root_(music_root),
-	  db_music_(derive_path(db_path, "-music"), SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)
+	: db_music_(derive_path(db_path, "-music"), SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)
 	{
-	// Normalise music_root_: strip a trailing '/' so it never has one, and
-	// derive music_root_slash_ as the form that always does. Used as the
-	// hinge between music-root-relative paths (stored in folders.path /
-	// songs.path / albums.cover_path / client.*) and absolute filesystem
-	// paths (used by std::filesystem / TagLib / ffmpeg).
-	while (music_root_.size() > 1 && music_root_.back() == '/')
-		music_root_.pop_back();
-	music_root_slash_ = music_root_ + "/";
-
-	// Compute the canonical music_root once. path_is_within_root() compares
-	// against this, so symlinks within the tree are checked at every file open.
-	std::error_code ec;
-	music_root_canonical_ = fs::weakly_canonical(fs::path(music_root_), ec);
-	if (ec)
-		music_root_canonical_ = fs::path(music_root_);
+	// Normalise each root: strip trailing '/' so path never has one, derive
+	// the always-has-one form used to compose and strip absolute paths, and
+	// canonicalise once. path_is_within_root() compares against the canonical
+	// forms, so a symlink inside a root that escapes it is caught at every
+	// file open — while a root that is *itself* a symlink still works, since
+	// its own canonical form is one of the bases.
+	for (const auto& r : roots) {
+		RootRec rec;
+		rec.cfg = r;
+		while (rec.cfg.path.size() > 1 && rec.cfg.path.back() == '/')
+			rec.cfg.path.pop_back();
+		rec.path_slash = rec.cfg.path + "/";
+		std::error_code ec;
+		rec.canonical = fs::weakly_canonical(fs::path(rec.cfg.path), ec);
+		if (ec) rec.canonical = fs::path(rec.cfg.path);
+		roots_.push_back(std::move(rec));
+		}
+	for (const auto& r : roots_)
+		roots_public_.push_back(r.cfg);
+	for (const auto& r : roots_)
+		if (r.cfg.type == "uploads") {
+			uploads_prefix_ = r.cfg.name + "/";
+			uploads_like_   = r.cfg.name + "/%";
+			break;
+			}
 
 	// User/state DB: explicit override if given, else derived from db_path.
 	std::string client_path = user_db_path.empty()
@@ -318,6 +351,7 @@ MediaStore::MediaStore(const std::string& db_path, const std::string& music_root
 	db_music_.exec("PRAGMA client.journal_mode=WAL");
 	db_music_.exec("PRAGMA client.foreign_keys=ON");
 	create_schema();
+	sync_roots();
 	}
 
 void MediaStore::create_schema()
@@ -329,8 +363,12 @@ void MediaStore::create_schema()
 		CREATE TABLE IF NOT EXISTS folders (
 			id           INTEGER PRIMARY KEY,
 			parent_id    INTEGER REFERENCES folders(id),
-			path         TEXT NOT NULL UNIQUE,    -- relative to music_root; root row stores ""
+			path         TEXT NOT NULL UNIQUE,    -- "<root>/<rest>"; a root row stores just "<root>"
 			name         TEXT NOT NULL,
+			-- Set only on root rows: "artists" or "categories". Refreshed from
+			-- the configuration on every start, so this is a cache of config
+			-- rather than a source of truth.
+			content_type TEXT,
 			last_scanned DATETIME
 		);
 		CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_id);
@@ -355,7 +393,7 @@ void MediaStore::create_schema()
 			disc_count     INTEGER DEFAULT 1,
 			duration       REAL DEFAULT 0,
 			song_count     INTEGER DEFAULT 0,
-			cover_path     TEXT,                  -- relative to music_root
+			cover_path     TEXT,                  -- "<root>/<rest>"
 			musicbrainz_id TEXT,
 			created        DATETIME DEFAULT CURRENT_TIMESTAMP,
 			last_scanned   DATETIME
@@ -376,7 +414,7 @@ void MediaStore::create_schema()
 			id                  INTEGER PRIMARY KEY,
 			album_id            INTEGER NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
 			folder_id           INTEGER NOT NULL REFERENCES folders(id),
-			path                TEXT NOT NULL UNIQUE, -- relative to music_root
+			path                TEXT NOT NULL UNIQUE, -- "<root>/<rest>"
 			filename            TEXT NOT NULL,
 			title               TEXT NOT NULL,
 			sort_title          TEXT,
@@ -458,7 +496,7 @@ void MediaStore::create_schema()
 		);
 
 		-- All references to music-DB rows are by filesystem path, RELATIVE
-		-- to music_root, never by row id. This keeps client data alive
+		-- form "<root name>/<rest>", never by row id. This keeps client data alive
 		-- across:
 		--   * a music-DB rebuild (rowids reset)
 		--   * the rowid churn from upsert_song_with_data's INSERT OR REPLACE
@@ -567,6 +605,8 @@ void MediaStore::create_schema()
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE songs ADD COLUMN audio_codec TEXT"); }
 	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE folders ADD COLUMN content_type TEXT"); }
+	catch (const SQLite::Exception&) {}
 
 	// Backfill song_artists from album_artists for any songs that were scanned
 	// before this link was introduced.
@@ -580,56 +620,68 @@ void MediaStore::create_schema()
 
 void MediaStore::scan()
 	{
-	std::cout << stamp() << "Scan started: " << music_root_ << std::endl;
+	// The uploads root holds per-user personal files, not library content, so
+	// it is never walked here — that is what replaced the old ".users" hidden
+	// directory sitting inside the music tree.
+	for (const auto& root : roots_) {
+		if (root.cfg.type == "uploads") continue;
+		std::cout << stamp() << "Scan started: " << root.cfg.name
+		          << " (" << root.cfg.path << ")" << std::endl;
 
-	// Ensure the root folder row exists before per-artist work begins.
-	{
-	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Transaction txn(db_music_);
-	upsert_folder(fs::path(music_root_), -1);
-	txn.commit();
-	}
-
-	// Collect paths to scan (absolute, since scan_artist_dir needs absolute for
-	// fs ops): artist dirs present on disk, plus any still in the DB (so
-	// deleted artist directories get pruned).  The root folder is stored
-	// with path = "" in the relative-path scheme.
-	std::set<fs::path> to_scan;
-	for (auto& e : fs::directory_iterator(music_root_)) {
-		if (e.is_directory() && e.path().filename() != ".users")
-			to_scan.insert(e.path());
+		// Ensure the root folder row exists before per-artist work begins.
+		// Its stored path is the root *name*, which is what makes every path
+		// below it self-identifying.
+		{
+		std::lock_guard<std::mutex> lock(db_mutex_);
+		SQLite::Transaction txn(db_music_);
+		upsert_folder(fs::path(root.cfg.path), -1);
+		txn.commit();
 		}
-	{
-	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement s(db_music_,
-		"SELECT path FROM folders"
-		" WHERE parent_id = (SELECT id FROM folders WHERE path = ?)"
-		"   AND path != ?"
-		"   AND path NOT LIKE '.users%'");
-	s.bind(1, std::string(""));
-	s.bind(2, std::string(""));
-	while (s.executeStep())
-		to_scan.insert(fs::path(music_root_slash_ + s.getColumn(0).getString()));
-	}
 
-	// Process each artist in its own transaction so db_mutex_ is released
-	// between artists and API handlers can run during the scan.
-	for (auto& artist_path : to_scan)
-		scan_artist_dir(artist_path);
+		// Collect paths to scan (absolute, since scan_artist_dir needs absolute
+		// for fs ops): level-1 dirs present on disk, plus any still in the DB
+		// so deleted ones get pruned.
+		std::set<fs::path> to_scan;
+		std::error_code ec;
+		for (auto& e : fs::directory_iterator(root.cfg.path, ec)) {
+			if (e.is_directory()) to_scan.insert(e.path());
+			}
+		if (ec)
+			std::cout << stamp() << "Scan: cannot read " << root.cfg.path
+			          << ": " << ec.message() << std::endl;
+		{
+		std::lock_guard<std::mutex> lock(db_mutex_);
+		SQLite::Statement s(db_music_,
+			"SELECT path FROM folders"
+			" WHERE parent_id = (SELECT id FROM folders WHERE path = ?)");
+		s.bind(1, root.cfg.name);
+		while (s.executeStep())
+			to_scan.insert(fs::path(join_root(s.getColumn(0).getString())));
+		}
+
+		// Process each level-1 dir in its own transaction so db_mutex_ is
+		// released between them and API handlers stay responsive.
+		for (auto& artist_path : to_scan)
+			scan_artist_dir(artist_path);
+		}
 
 	std::cout << stamp() << "Scan complete" << std::endl;
 	}
 
 void MediaStore::scan_dirs(const std::set<std::string>& dirs)
 	{
-	// dirs are paths relative to music_root_; "" means the root itself
-	// (queue overflow or other situation where we lost track of what changed).
-	if (dirs.count("")) {
-		scan();
-		return;
+	// dirs are stored-form paths ("<root>/<level-1 dir>").  A bare root name,
+	// or anything that does not resolve, means we lost track of what changed
+	// (queue overflow, unknown root) and the safe answer is a full scan.
+	for (auto& d : dirs) {
+		std::string abs = join_root(d);
+		if (abs.empty() || d.find('/') == std::string::npos) {
+			scan();
+			return;
+			}
 		}
 	for (auto& d : dirs)
-		scan_artist_dir(fs::path(music_root_slash_ + d));
+		scan_artist_dir(fs::path(join_root(d)));
 	}
 
 // Per-song data collected in Phases 1–3, consumed in Phase 4.
@@ -668,14 +720,12 @@ struct AlbumReadData {
 
 // DB-only counterpart of upsert_song(); all slow I/O has already happened.
 // Caller must hold db_mutex_ and an open transaction. sdat.path is absolute
-// (Phase 1/3 use it for TagLib I/O); this function strips to music-root-
-// relative for all DB binds.
+// (Phase 1/3 use it for TagLib I/O); rel_path is its stored form, which the
+// caller computes because strip_root() is a member and this is not.
 static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat,
                                    int album_id, int folder_id, int artist_id,
-                                   const std::string& music_root_slash)
+                                   const std::string& rel_path)
 	{
-	std::string rel_path = strip_root(sdat.path, music_root_slash);
-
 	if (!sdat.changed) {
 		if (sdat.disc_number > 0) {
 			SQLite::Statement upd(db,
@@ -743,11 +793,21 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 //      bounded so REST handlers stay responsive during the scan.
 void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	{
-	// SQL `path LIKE ?` queries below compare against the relative-form column,
-	// so the prefix must also be relative (e.g. "Artist Name/%").
+	// SQL `path LIKE ?` queries below compare against the stored-form column,
+	// so the prefix must be stored-form too (e.g. "music/Artist Name/%").
 	std::string prefix =
-		strip_root(artist_path.string(), music_root_slash_) + "/%";
+		strip_root(artist_path.string()) + "/%";
 	bool exists = fs::is_directory(artist_path);
+
+	// The owning root, needed to re-create the root folder row below. A path
+	// outside every root cannot be scanned — refuse rather than inventing one.
+	const RootRec* root = root_for_abs(artist_path.string());
+	if (!root) {
+		std::cout << stamp() << "Rescan: ignoring path outside every root: "
+		          << artist_path << std::endl;
+		return;
+		}
+	const std::string& root_path = root->cfg.path;
 
 	std::cout << stamp() << "Rescan: " << artist_path.filename().string()
 	          << (exists ? "" : " (removed)") << std::endl;
@@ -816,7 +876,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// ---- Phase 2: brief read lock — identify changed files ----
 	// known_mtimes is keyed by the same absolute-path form as sdat.path so the
 	// per-song lookup below stays a direct comparison. The DB column is
-	// relative; compose absolute via music_root_slash_ on the way in.
+	// relative; compose absolute via join_root() on the way in.
 	std::unordered_map<std::string, int64_t> known_mtimes;
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
@@ -824,7 +884,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		"SELECT path, file_modified FROM songs WHERE path LIKE ?");
 	q.bind(1, prefix);
 	while (q.executeStep())
-		known_mtimes[music_root_slash_ + q.getColumn(0).getString()]
+		known_mtimes[join_root(q.getColumn(0).getString())]
 			= q.getColumn(1).getInt64();
 	}
 
@@ -840,9 +900,9 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			if (!sdat.changed) continue;
 
 			// Defence-in-depth: refuse to open any file that — after symlink
-			// resolution — sits outside music_root_.
-			if (!is_within(sdat.path, music_root_canonical_)) {
-				std::cout << stamp() << "scan: skipping file outside music_root: "
+			// resolution — sits outside every root.
+			if (!path_is_within_root(sdat.path)) {
+				std::cout << stamp() << "scan: skipping file outside every root: "
 				          << sdat.path << std::endl;
 				continue;
 				}
@@ -917,7 +977,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		{
 		std::lock_guard<std::mutex> lock(db_mutex_);
 		SQLite::Transaction txn(db_music_);
-		root_id          = upsert_folder(fs::path(music_root_), -1);
+		root_id          = upsert_folder(fs::path(root_path), -1);
 		artist_folder_id = upsert_folder(artist_path, root_id);
 		artist_id        = upsert_artist(artist_path.filename().string());
 		txn.commit();
@@ -934,7 +994,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			if (!adat.cover.empty()) {
 				SQLite::Statement upd(db_music_,
 					"UPDATE albums SET cover_path = ? WHERE id = ?");
-				upd.bind(1, strip_root(adat.cover, music_root_slash_));
+				upd.bind(1, strip_root(adat.cover));
 				upd.bind(2, album_id);
 				upd.exec();
 				}
@@ -952,7 +1012,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 				auto fit = fid_map.find(sdat.folder_path);
 				int  fid = (fit != fid_map.end()) ? fit->second : album_folder_id;
 				upsert_song_with_data(db_music_, sdat, album_id, fid, artist_id,
-				                       music_root_slash_);
+				                       strip_root(sdat.path));
 				}
 
 			if (disc_count > 1) {
@@ -1037,7 +1097,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	s.exec();
 	}
 	if (!exists) {
-		std::string artist_rel = strip_root(artist_path.string(), music_root_slash_);
+		std::string artist_rel = strip_root(artist_path.string());
 		{
 		SQLite::Statement s(db_music_,
 			"DELETE FROM artist_info_cache"
@@ -1063,11 +1123,12 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 
 int MediaStore::upsert_folder(const fs::path& path, int parent_id)
 	{
-	// Caller passes an absolute path (from fs walks); strip to music-root-
-	// relative form for storage. The root folder ends up stored as "".
-	std::string path_str = strip_root(path.string(), music_root_slash_);
+	// Caller passes an absolute path (from fs walks); strip to stored form.
+	// A root's own path strips to just its name, which is how a root row ends
+	// up with path == name and no parent.
+	std::string path_str = strip_root(path.string());
 	std::string name     = path.filename().string();
-	if (name.empty()) name = path.string();  // for the root itself
+	if (name.empty()) name = path.string();  // trailing-slash paths
 
 	if (parent_id < 0) {
 		SQLite::Statement ins(db_music_,
@@ -1159,7 +1220,7 @@ void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
 	int64_t mtime = mtime_of(path);
 
 	// path arrives absolute (from fs walk); the DB stores it relative.
-	std::string rel_path = strip_root(path.string(), music_root_slash_);
+	std::string rel_path = strip_root(path.string());
 
 	// Skip if the file hasn't changed since last scan.
 	SQLite::Statement chk(db_music_,
@@ -1181,9 +1242,9 @@ void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
 		}
 
 	// Defence-in-depth: refuse to open any file that — after symlink
-	// resolution — sits outside music_root_.
-	if (!is_within(path, music_root_canonical_)) {
-		std::cout << stamp() << "scan: skipping file outside music_root: "
+	// resolution — sits outside every root.
+	if (!path_is_within_root(path)) {
+		std::cout << stamp() << "scan: skipping file outside every root: "
 		          << path.string() << std::endl;
 		return;
 		}
@@ -1507,12 +1568,22 @@ void MediaStore::cache_album_info(int folder_id, const CachedAlbumInfo& info)
 std::vector<MediaStore::MusicFolder> MediaStore::get_music_folders()
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
+	// Name is the root's configured name (which is also its stored path), not
+	// the directory basename: the basename can change without the library
+	// changing, and clients use this to label a folder they may have pinned.
 	SQLite::Statement q(db_music_,
-		"SELECT id, name FROM folders WHERE parent_id IS NULL");
+		"SELECT id, path, COALESCE(content_type, 'artists')"
+		" FROM folders WHERE parent_id IS NULL ORDER BY path");
 	std::vector<MusicFolder> result;
-	while (q.executeStep())
-		result.push_back({ q.getColumn(0).getInt(),
-		                   q.getColumn(1).getString() });
+	while (q.executeStep()) {
+		std::string name = q.getColumn(1).getString();
+		// The uploads root is per-user personal space, not a shared library.
+		// It gets a root row because scan_dirs() runs over uploaded batches,
+		// but it must never be offered as something to browse.
+		if (!uploads_prefix_.empty() && name + "/" == uploads_prefix_) continue;
+		result.push_back({ q.getColumn(0).getInt(), name,
+		                   q.getColumn(2).getString() });
+		}
 	return result;
 	}
 
@@ -1538,7 +1609,7 @@ std::vector<std::string> MediaStore::get_extra_image_paths(int folder_id)
 	std::vector<std::string> result;
 	result.reserve(abs_results.size());
 	for (auto& p : abs_results)
-		result.push_back(strip_root(p, music_root_slash_));
+		result.push_back(strip_root(p));
 	return result;
 	}
 
@@ -1597,7 +1668,7 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_videos()
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
-		" WHERE s.is_video = 1 AND s.path NOT LIKE '.users%'"
+		" WHERE s.is_video = 1" + not_uploads("s.path") +
 		" ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE,"
 		"          s.disc_number, s.track_number, s.title COLLATE NOCASE");
 	std::vector<ChildEntry> result;
@@ -1724,25 +1795,32 @@ MediaStore::VideoStreams MediaStore::get_video_streams(int song_id)
 	}
 
 std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
-	const std::string& personal_user)
+	const std::string& personal_user, int music_folder_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	// Count albums per artist via the child folders (album folders are one level down).
+	// "IN (…roots…)" rather than "= root": level-1 entries now come from every
+	// configured root, and which root a folder belongs to is visible in its
+	// path prefix rather than in a column.
 	std::string sql =
 		"SELECT f.id, f.name, COUNT(al.id) AS album_count"
 		" FROM folders f"
 		" LEFT JOIN folders af ON af.parent_id = f.id"
 		" LEFT JOIN albums al ON al.folder_id = af.id"
-		" WHERE f.parent_id = (SELECT id FROM folders WHERE parent_id IS NULL)";
+		" WHERE f.parent_id IN (SELECT id FROM folders WHERE parent_id IS NULL)";
+	if (music_folder_id > 0)
+		sql += " AND f.parent_id = ?";
 	if (personal_user.empty())
-		sql += " AND f.path NOT LIKE '.users%'";
+		sql += not_uploads("f.path");
 	else
 		sql += " AND f.path LIKE ?";
 	sql += " GROUP BY f.id ORDER BY f.name COLLATE NOCASE";
 
 	SQLite::Statement sel(db_music_, sql);
+	int idx = 1;
+	if (music_folder_id > 0)      sel.bind(idx++, music_folder_id);
 	if (!personal_user.empty())
-		sel.bind(1, ".users/" + personal_user + "/%");
+		sel.bind(idx++, uploads_prefix_ + personal_user + "/%");
 
 	std::vector<ArtistDir> result;
 	while (sel.executeStep())
@@ -1917,7 +1995,7 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 
 	// WHERE clause.
 	bool has_where = false;
-	auto add_where = [&](const char* clause) {
+	auto add_where = [&](const std::string& clause) {
 		sql += has_where ? " AND " : " WHERE ";
 		sql += clause;
 		has_where = true;
@@ -1926,8 +2004,12 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 	else if (type == "byGenre") add_where("LOWER(COALESCE(al.genre,'')) = LOWER(?)");
 	else if (type == "starred") add_where("sa.album_folder_path IS NOT NULL");
 
-	if (personal_user.empty())
-		add_where("f.path NOT LIKE '.users%'");
+	// Braces are load-bearing: without them the else binds to the inner if,
+	// and a personal listing would silently become an unfiltered one.
+	if (personal_user.empty()) {
+		if (!uploads_like_.empty())
+			add_where("f.path NOT LIKE '" + uploads_like_ + "'");
+		}
 	else
 		add_where("f.path LIKE ?");
 
@@ -1958,7 +2040,7 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 	if (type == "byYear") { q.bind(idx++, from_year); q.bind(idx++, to_year); }
 	if (type == "byGenre")  q.bind(idx++, genre);
 	if (!personal_user.empty())
-		q.bind(idx++, ".users/" + personal_user + "/%");
+		q.bind(idx++, uploads_prefix_ + personal_user + "/%");
 	q.bind(idx++, size);
 	q.bind(idx++, offset);
 
@@ -2636,12 +2718,116 @@ bool MediaStore::delete_playlist(int playlist_id, const std::string& username)
 
 std::string MediaStore::abs_path(const std::string& rel) const
 	{
-	return join_root(rel, music_root_slash_);
+	return join_root(rel);
+	}
+
+std::string MediaStore::rel_path(const std::string& abs) const
+	{
+	return strip_root(abs);
+	}
+
+bool MediaStore::is_category_folder(int folder_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT COALESCE(p.content_type, 'artists')"
+		" FROM folders f JOIN folders p ON p.id = f.parent_id"
+		" WHERE f.id = ? AND p.parent_id IS NULL");
+	q.bind(1, folder_id);
+	if (!q.executeStep()) return false;
+	return q.getColumn(0).getString() == "categories";
+	}
+
+// Brings the folders table's root rows into line with the configuration:
+// creates a row per configured library root, stamps its content_type, and
+// removes any root that is no longer configured along with everything beneath
+// it. Without the removal a dropped root would keep appearing in
+// getMusicFolders and its stale artists would still be browsable, because
+// every query reaches content by path prefix and nothing else would ever
+// revisit it.
+void MediaStore::sync_roots()
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Transaction txn(db_music_);
+
+	std::set<std::string> configured;
+	for (const auto& r : roots_) {
+		if (r.cfg.type == "uploads") continue;   // never part of the library
+		configured.insert(r.cfg.name);
+		int id = upsert_folder(fs::path(r.cfg.path), -1);
+		SQLite::Statement upd(db_music_,
+			"UPDATE folders SET content_type = ? WHERE id = ?");
+		upd.bind(1, r.cfg.type);
+		upd.bind(2, id);
+		upd.exec();
+		}
+
+	std::vector<std::string> stale;
+	{
+	SQLite::Statement q(db_music_,
+		"SELECT path FROM folders WHERE parent_id IS NULL");
+	while (q.executeStep()) {
+		std::string name = q.getColumn(0).getString();
+		if (!configured.count(name)) stale.push_back(name);
+		}
+	}
+
+	for (const auto& name : stale) {
+		std::cout << stamp() << "Root '" << name
+		          << "' is no longer configured; removing its entries"
+		          << std::endl;
+		// Order matters: rows that reference folders go before the folders.
+		std::string prefix = name + "/%";
+		for (const char* sql : {
+		        "DELETE FROM songs WHERE path = ? OR path LIKE ?",
+		        "DELETE FROM albums WHERE folder_id IN "
+		            "(SELECT id FROM folders WHERE path = ? OR path LIKE ?)",
+		        "DELETE FROM album_info_cache WHERE folder_id IN "
+		            "(SELECT id FROM folders WHERE path = ? OR path LIKE ?)",
+		        "DELETE FROM artist_info_cache WHERE folder_id IN "
+		            "(SELECT id FROM folders WHERE path = ? OR path LIKE ?)",
+		        "DELETE FROM folders WHERE path = ? OR path LIKE ?" }) {
+			SQLite::Statement s(db_music_, sql);
+			s.bind(1, name);
+			s.bind(2, prefix);
+			s.exec();
+			}
+		}
+
+	txn.commit();
+	}
+
+std::string MediaStore::not_uploads(const char* col) const
+	{
+	if (uploads_like_.empty()) return {};
+	// The pattern is interpolated rather than bound: these fragments are
+	// stitched into larger statements whose bind indices are counted by hand,
+	// and a root name is validated at startup to [A-Za-z0-9_-] so it cannot
+	// carry a quote.
+	return std::string(" AND ") + col + " NOT LIKE '" + uploads_like_ + "'";
+	}
+
+const std::vector<MediaStore::Root>& MediaStore::roots() const
+	{
+	return roots_public_;
+	}
+
+const MediaStore::Root* MediaStore::uploads_root() const
+	{
+	for (const auto& r : roots_)
+		if (r.cfg.type == "uploads") return &r.cfg;
+	return nullptr;
 	}
 
 bool MediaStore::path_is_within_root(const fs::path& candidate) const
 	{
-	return is_within(candidate, music_root_canonical_);
+	// Within *any* root, not one fixed base.  That generalisation is what
+	// makes several roots possible at all, and it does not weaken the check:
+	// a symlink inside a root pointing at /etc still fails, because /etc
+	// prefixes none of the canonical bases.
+	for (const auto& r : roots_)
+		if (is_within(candidate, r.canonical)) return true;
+	return false;
 	}
 
 std::optional<std::string> MediaStore::song_path_by_id(int song_id)
@@ -2728,20 +2914,20 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 	SearchResult result;
 	std::string pattern = "%" + query + "%";
 	std::string path_filter = personal_user.empty()
-		? " AND f.path NOT LIKE '.users%'"
+		? not_uploads("f.path")
 		: " AND f.path LIKE ?";
 	std::string path_bind = personal_user.empty()
 		? ""
-		: ".users/" + personal_user + "/%";
+		: uploads_prefix_ + personal_user + "/%";
 	std::string song_filter = personal_user.empty()
-		? " AND s.path NOT LIKE '.users%'"
+		? not_uploads("s.path")
 		: " AND s.path LIKE ?";
 
 	// Artists — folder-level, depth-1 children of the root.
 	std::string aq_sql =
 		"SELECT f.id, f.name"
 		" FROM folders f"
-		" WHERE f.parent_id = (SELECT id FROM folders WHERE parent_id IS NULL)"
+		" WHERE f.parent_id IN (SELECT id FROM folders WHERE parent_id IS NULL)"
 		"   AND LOWER(f.name) LIKE LOWER(?)";
 	aq_sql += path_filter;
 	aq_sql += " ORDER BY f.name COLLATE NOCASE LIMIT ? OFFSET ?";
