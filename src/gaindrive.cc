@@ -25,6 +25,7 @@
 #include <sys/socket.h>
 
 #include <reproc++/reproc.hpp>
+#include <reproc++/drain.hpp>
 
 #include <archive.h>
 #include <archive_entry.h>
@@ -410,40 +411,60 @@ static std::string url_encode(const std::string& s)
 
 // Scales an image file to fit within size×size pixels (JPEG output) using
 // ffmpeg.  Isolated here so it can be swapped for a proper image library later.
+//
+// The result is buffered and sent with set_content() rather than streamed.
+// That is not an optimisation, it is the framing: the no-length content
+// provider this used to call emits neither Content-Length nor
+// Transfer-Encoding, and httplib only sends Connection: close when the
+// connection is closing for unrelated reasons.  The response therefore went
+// out on a keep-alive connection with nothing marking where the body ended,
+// the client read on into the following response, and every image after the
+// first on that connection was the previous one's — which is what "all the
+// thumbnails are wrong, and reloading doesn't help" looks like.  CLAUDE.md
+// records the same hazard for serve_transcoded; this call site never got it.
+//
+// A scaled cover is a few hundred KB at most, so there is nothing to gain from
+// streaming it, and buffering also lets the caller hash the bytes for an ETag.
 static void serve_cover_scaled(httplib::Response& res,
                                 const std::string& path, int size)
 	{
 	std::vector<std::string> args = {
-		"ffmpeg", "-i", path,
+		"ffmpeg", "-v", "quiet", "-i", path,
 		"-vf", "scale=" + std::to_string(size) + ":" + std::to_string(size)
 		       + ":force_original_aspect_ratio=decrease",
 		"-frames:v", "1", "-f", "mjpeg", "pipe:1"
 		};
 
-	auto proc = std::make_shared<reproc::process>();
+	reproc::process proc;
 	reproc::options opts;
 	opts.redirect.err.type = reproc::redirect::type::discard;
 
-	auto ec = proc->start(args, opts);
-	if (ec) {
-		std::cout << stamp() << "getCoverArt: ffmpeg launch failed: "
-		          << ec.message() << std::endl;
+	if (proc.start(args, opts)) {
+		std::cout << stamp() << "getCoverArt: ffmpeg launch failed for "
+		          << path << std::endl;
 		res.status = 500;
 		return;
 		}
 
-	res.set_content_provider(
-		"image/jpeg",
-		[proc](size_t, httplib::DataSink& sink) {
-			uint8_t buf[65536];
-			auto [n, err] = proc->read(reproc::stream::out, buf, sizeof(buf));
-			if (n == 0) { sink.done(); return false; }
-			return sink.write(reinterpret_cast<char*>(buf), n);
-			},
-		[proc](bool success) {
-			if (!success) proc->terminate();
-			proc->wait(reproc::infinite);
-			});
+	std::string          out;
+	reproc::sink::string sink(out);
+	// drain() checks the error code itself, which is the point: reading by
+	// hand needs `n == 0 || err`, because reproc wraps a negative return into
+	// size_t and the old `n == 0` test let a huge length reach sink.write().
+	auto ec            = reproc::drain(proc, sink, reproc::sink::null);
+	auto [status, wec] = proc.wait(reproc::infinite);
+
+	if (ec || wec || status != 0 || out.empty()) {
+		// A zero-length 200 renders as a broken image and looks like a
+		// missing file; say what actually happened instead.
+		std::cout << stamp() << "getCoverArt: ffmpeg failed for " << path
+		          << " (status=" << status << ", " << out.size() << " bytes)"
+		          << std::endl;
+		res.status = 500;
+		return;
+		}
+
+	res.set_content(out, "image/jpeg");
 	}
 
 // Extracts u/p/t/s params and validates auth. Writes error into res on failure.
@@ -2303,14 +2324,43 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
+		namespace fs = std::filesystem;
 		auto size_it = req.params.find("size");
+
+		// Revalidate rather than trust the cache.  A cover URL is identified
+		// only by `id`, and folders.id is a rowid that is NOT stable across a
+		// rescan — which is exactly why stars and playlists key on paths
+		// instead.  Without a validator a browser caches the image
+		// heuristically and indefinitely, so after a rebuild reassigns ids it
+		// keeps showing the previous album's art with no way to notice.
+		// "no-cache" means "keep it, but check first", so this stays fast.
+		std::error_code mec, sec;
+		auto  mtime = fs::last_write_time(path, mec);
+		auto  fsize = fs::file_size(path, sec);
+		// Each stat gets its own error_code, and both are resolved before the
+		// string is built: sharing one would read and write it within a single
+		// unsequenced expression.
+		long long mstamp = mec ? 0 : static_cast<long long>(
+			mtime.time_since_epoch().count());
+		std::string etag = "\"" + std::to_string(mstamp)
+		    + "-" + std::to_string(sec ? 0 : fsize)
+		    + "-" + (size_it != req.params.end() ? size_it->second
+		                                         : std::string("full"))
+		    + "-" + (idx_it != req.params.end() ? idx_it->second
+		                                        : std::string("0")) + "\"";
+		res.set_header("Cache-Control", "no-cache");
+		res.set_header("ETag", etag);
+		if (req.get_header_value("If-None-Match") == etag) {
+			res.status = 304;
+			return;
+			}
+
 		if (size_it != req.params.end()) {
-			serve_cover_scaled(res, path, std::stoi(size_it->second));
+			serve_cover_scaled(res, path, to_int(size_it->second, 200));
 			return;
 			}
 
 		// Serve the full-size image directly.
-		namespace fs = std::filesystem;
 		auto file_size = static_cast<size_t>(fs::file_size(path));
 		res.set_content_provider(
 			file_size, "image/jpeg",

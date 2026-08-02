@@ -644,7 +644,15 @@ void MediaStore::scan()
 		std::set<fs::path> to_scan;
 		std::error_code ec;
 		for (auto& e : fs::directory_iterator(root.cfg.path, ec)) {
-			if (e.is_directory()) to_scan.insert(e.path());
+			// Skip hidden directories. Nothing dot-prefixed at the top of a
+			// library is an artist: a leftover .users from before uploads got
+			// their own root, .stfolder/.stversions on a synced tree, @eaDir
+			// on a Synology share. Indexing them adds junk entries and churns
+			// every folders.id after them on each rescan.
+			if (!e.is_directory()) continue;
+			auto name = e.path().filename().string();
+			if (!name.empty() && name.front() == '.') continue;
+			to_scan.insert(e.path());
 			}
 		if (ec)
 			std::cout << stamp() << "Scan: cannot read " << root.cfg.path
