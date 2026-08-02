@@ -2752,8 +2752,13 @@ void MediaStore::sync_roots()
 
 	std::set<std::string> configured;
 	for (const auto& r : roots_) {
-		if (r.cfg.type == "uploads") continue;   // never part of the library
+		// The uploads root counts as configured — otherwise it would be judged
+		// stale below and every user's personal library deleted at startup —
+		// but no row is created for it here. Its row appears only when the
+		// upload handler scans a batch, and it is filtered out of
+		// get_music_folders() so it is never offered as a library to browse.
 		configured.insert(r.cfg.name);
+		if (r.cfg.type == "uploads") continue;
 		int id = upsert_folder(fs::path(r.cfg.path), -1);
 		SQLite::Statement upd(db_music_,
 			"UPDATE folders SET content_type = ? WHERE id = ?");
@@ -2772,24 +2777,40 @@ void MediaStore::sync_roots()
 		}
 	}
 
+	if (stale.empty()) {
+		txn.commit();
+		return;
+		}
+
+	// Foreign keys are deferred to the commit below so the subtree can be torn
+	// down in any order. Without it, deleting a parent folder before its
+	// children fails, and there is no ordering that satisfies both the
+	// folders self-reference and songs.folder_id.
+	db_music_.exec("PRAGMA defer_foreign_keys=ON");
+
 	for (const auto& name : stale) {
 		std::cout << stamp() << "Root '" << name
 		          << "' is no longer configured; removing its entries"
 		          << std::endl;
-		// Order matters: rows that reference folders go before the folders.
-		std::string prefix = name + "/%";
-		for (const char* sql : {
-		        "DELETE FROM songs WHERE path = ? OR path LIKE ?",
-		        "DELETE FROM albums WHERE folder_id IN "
-		            "(SELECT id FROM folders WHERE path = ? OR path LIKE ?)",
-		        "DELETE FROM album_info_cache WHERE folder_id IN "
-		            "(SELECT id FROM folders WHERE path = ? OR path LIKE ?)",
-		        "DELETE FROM artist_info_cache WHERE folder_id IN "
-		            "(SELECT id FROM folders WHERE path = ? OR path LIKE ?)",
-		        "DELETE FROM folders WHERE path = ? OR path LIKE ?" }) {
-			SQLite::Statement s(db_music_, sql);
+		// Descend the folder tree by id rather than matching a path prefix.
+		// A root row is not guaranteed to prefix the paths beneath it — rows
+		// written before roots had names store the root's *absolute* path
+		// while their descendants are stored relative, so a prefix match finds
+		// none of them, leaves them orphaned, and the delete then trips the
+		// foreign key. Parentage is the one relationship that is always true.
+		static const char* SUBTREE =
+			"WITH RECURSIVE sub(id) AS ("
+			"  SELECT id FROM folders WHERE path = ?"
+			"  UNION ALL"
+			"  SELECT f.id FROM folders f JOIN sub ON f.parent_id = sub.id) ";
+		for (const char* tail : {
+		        "DELETE FROM songs       WHERE folder_id IN (SELECT id FROM sub)",
+		        "DELETE FROM albums      WHERE folder_id IN (SELECT id FROM sub)",
+		        "DELETE FROM album_info_cache  WHERE folder_id IN (SELECT id FROM sub)",
+		        "DELETE FROM artist_info_cache WHERE folder_id IN (SELECT id FROM sub)",
+		        "DELETE FROM folders     WHERE id IN (SELECT id FROM sub)" }) {
+			SQLite::Statement s(db_music_, std::string(SUBTREE) + tail);
 			s.bind(1, name);
-			s.bind(2, prefix);
 			s.exec();
 			}
 		}
