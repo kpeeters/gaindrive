@@ -21,6 +21,12 @@
 
 namespace fs = std::filesystem;
 
+// How long a contended write waits before SQLite reports SQLITE_BUSY.
+// Generous enough to absorb the brief overlaps that happen in practice, short
+// enough that a writer which is genuinely stuck gets reported rather than
+// hanging the scan indefinitely.
+static constexpr int DB_BUSY_TIMEOUT_MS = 10000;
+
 static const std::set<std::string> AUDIO_EXTENSIONS = {
 	".flac", ".mp3", ".ogg", ".oga", ".m4a", ".aac", ".wav", ".opus", ".wma"
 	};
@@ -314,7 +320,22 @@ static std::string derive_path(const std::string& base, const std::string& suffi
 
 MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& roots,
                        const std::string& user_db_path)
-	: db_music_(derive_path(db_path, "-music"), SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)
+	// The third argument is the busy timeout, and it defaults to 0 — meaning
+	// SQLite gives up on a contended write *immediately* and SQLiteCpp turns
+	// that into a throw.  Any external writer (a second gaindrive, or sqlite3
+	// running BEGIN IMMEDIATE) would therefore kill a scan in progress, even
+	// though the contention is almost always momentary.  Waiting is the whole
+	// fix for the common case; the exception handling around the scan covers
+	// a writer that genuinely sits on the lock.
+	//
+	// Set here rather than by PRAGMA because the pragmas below — including
+	// journal_mode=WAL — can themselves hit a locked database.  The timeout is
+	// a property of the connection, so it also covers the attached client
+	// schema.  db_mutex_ is no help: it serialises our own threads, and this
+	// contention is between processes.
+	: db_music_(derive_path(db_path, "-music"),
+	            SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE,
+	            DB_BUSY_TIMEOUT_MS)
 	{
 	// Normalise each root: strip trailing '/' so path never has one, derive
 	// the always-has-one form used to compose and strip absolute paths, and
@@ -980,6 +1001,11 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	txn.commit();
 	}
 
+	// Set when an album's commit failed, which makes the prune unsafe: the
+	// prune deletes whatever is still marked unvisited, and a failed album is
+	// indistinguishable from a deleted one by that mark alone.
+	bool album_failed = false;
+
 	if (exists) {
 		int root_id, artist_folder_id, artist_id;
 		{
@@ -992,6 +1018,15 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		}
 
 		for (auto& adat : albums) {
+			// One album's transaction failing must not cost the rest of the
+			// scan.  A full scan of a large library is minutes of work, and
+			// the usual cause here is an external writer holding the lock for
+			// longer than the busy timeout — momentary, and specific to this
+			// commit.  Note the prune at the end of this function is then
+			// skipped: a failed album leaves its folder row still marked
+			// unvisited, and pruning on incomplete information would delete an
+			// album that is present on disk.
+			try {
 			{
 			std::lock_guard<std::mutex> lock(db_mutex_);
 			SQLite::Transaction txn(db_music_);
@@ -1044,10 +1079,26 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			}
 			std::cout << stamp() << "  " << fs::path(adat.path).filename().string() << std::endl;
 			}
+			catch (const std::exception& e) {
+				std::cout << stamp() << "  " << fs::path(adat.path).filename().string()
+				          << ": skipped, " << e.what() << std::endl;
+				album_failed = true;
+				}
+			}
 		}
 
 	// Prune stale entries within this artist's subtree.  Anything still
-	// last_scanned IS NULL after the album commits above is genuinely gone.
+	// last_scanned IS NULL after the album commits above is genuinely gone —
+	// but only if every album actually committed.  After a failure the mark
+	// cannot distinguish "deleted from disk" from "we could not write it", so
+	// pruning would remove an album that is still there.  Leave the subtree
+	// alone and let the next scan sort it out.
+	if (album_failed) {
+		std::cout << stamp() << "  prune skipped: an album failed to commit"
+		          << std::endl;
+		return;
+		}
+
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Transaction txn(db_music_);

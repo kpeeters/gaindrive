@@ -4204,7 +4204,15 @@ GainDrive::GainDrive(const std::string& db_path,
 			if (e.is_directory())
 				to_scan.insert(rel_batch + "/" + e.path().filename().string());
 		if (!to_scan.empty())
-			std::thread([this, to_scan]{ store_.scan_dirs(to_scan); }).detach();
+			std::thread([this, to_scan]{
+				// Same reason as the full scan in listen(): an escaping
+				// exception here would terminate the server.
+				try { store_.scan_dirs(to_scan); }
+				catch (const std::exception& e) {
+					std::cout << stamp() << "Upload scan aborted: " << e.what()
+					          << std::endl;
+					}
+				}).detach();
 		}
 
 		nlohmann::json j;
@@ -4393,8 +4401,18 @@ bool GainDrive::listen(const std::string& host, int port)
 
 	// Only now that the port is ours: a server that cannot serve should do no
 	// work at all, and should be able to exit at once.
+	// An exception escaping a thread's top-level function calls
+	// std::terminate, so an unguarded scan turns a momentary database lock
+	// into a dead server.  A stale library until the next scan is a far better
+	// outcome, and the folder watcher will retry on the next filesystem event.
 	if (!no_scan_)
-		std::thread([this]{ store_.scan(); }).detach();
+		std::thread([this]{
+			try { store_.scan(); }
+			catch (const std::exception& e) {
+				std::cout << stamp() << "Scan aborted: " << e.what()
+				          << std::endl;
+				}
+			}).detach();
 	cast_manager_.discover_background();
 	watcher_.start();
 

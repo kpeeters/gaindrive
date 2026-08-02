@@ -180,24 +180,34 @@ int main(int argc, char* argv[])
 	}
 
 	// --add-user: create a user in the DB and exit without starting the server.
-	if (args.count("add-user")) {
-		if (!args.count("password")) {
-			std::cerr << "Error: --password is required with --add-user.\n";
-			return 1;
+	// Opening the database writes — the journal_mode pragma, the ATTACH, the
+	// schema DDL, the root reconciliation — so a database locked by another
+	// process, or a corrupt one, throws out here. Report it instead of letting
+	// it reach the default terminate handler and abort.
+	try {
+		if (args.count("add-user")) {
+			if (!args.count("password")) {
+				std::cerr << "Error: --password is required with --add-user.\n";
+				return 1;
+				}
+			std::string username = args["add-user"].as<std::string>();
+			std::string password = args["password"].as<std::string>();
+			MediaStore store(db_path, roots, user_db_path);
+			bool ok = store.add_user(username, password, true /* is_admin */);
+			std::cout << (ok ? "User '" + username + "' created."
+			               : "User '" + username + "' already exists.") << "\n";
+			return ok ? 0 : 1;
 			}
-		std::string username = args["add-user"].as<std::string>();
-		std::string password = args["password"].as<std::string>();
-		MediaStore store(db_path, roots, user_db_path);
-		bool ok = store.add_user(username, password, true /* is_admin */);
-		std::cout << (ok ? "User '" + username + "' created."
-		               : "User '" + username + "' already exists.") << "\n";
-		return ok ? 0 : 1;
-		}
 
-	GainDrive gd(db_path, roots, upload_dir, no_scan, debug, flat_multi_disc,
-	             user_db_path, transcode_cache_dir, transcode_cache_mb,
-	             transcode_jobs);
-	// Non-zero on a failed bind, so a supervisor restarts rather than
-	// recording a clean shutdown for a server that never served anything.
-	return gd.listen(host, port) ? 0 : 1;
+		GainDrive gd(db_path, roots, upload_dir, no_scan, debug, flat_multi_disc,
+		             user_db_path, transcode_cache_dir, transcode_cache_mb,
+		             transcode_jobs);
+		// Non-zero on a failed bind, so a supervisor restarts rather than
+		// recording a clean shutdown for a server that never served anything.
+		return gd.listen(host, port) ? 0 : 1;
+		}
+	catch (const std::exception& e) {
+		std::cerr << "Error: " << e.what() << "\n";
+		return 1;
+		}
 	}

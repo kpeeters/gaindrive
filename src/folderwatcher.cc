@@ -220,7 +220,15 @@ void FolderWatcher::run()
 						rel_dirs.insert(store_.rel_path(d));
 					std::thread([this, rel_dirs = std::move(rel_dirs),
 					             abs_dirs = std::move(abs_dirs)]{
-						store_.scan_dirs(rel_dirs);
+						// Only the scan is guarded: an exception escaping this
+						// thread would terminate the server, but the bookkeeping
+						// below must run either way — leaving scan_running_ set
+						// would stop the watcher ever scanning again.
+						try { store_.scan_dirs(rel_dirs); }
+						catch (const std::exception& e) {
+							std::cout << stamp() << "FolderWatcher: rescan "
+							          << "aborted: " << e.what() << std::endl;
+							}
 						// Signal run() to re-watch the rescanned dirs so that
 						// directories which were inaccessible at creation time
 						// (transient EACCES) get a watch added now.
