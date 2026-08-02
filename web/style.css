@@ -852,6 +852,9 @@ body {
 
 .view-header {
    display: flex;
+   /* Wraps so the Library mode toggle can sit on its own line inside the
+      sticky header rather than competing with the title for width. */
+   flex-wrap: wrap;
    align-items: baseline;
    gap: 1rem;
    margin-bottom: 1.2rem;
@@ -916,7 +919,10 @@ body {
    display: flex;
    flex-wrap: wrap;
    gap: 0.35rem;
-   padding: 0 1rem 0.6rem;
+   /* Own line inside .view-header, which is position:sticky — so the toggle
+      stays visible while the list scrolls under it. */
+   flex-basis: 100%;
+   margin-top: 0.1rem;
 }
 
 .library-mode {

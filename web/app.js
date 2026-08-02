@@ -765,11 +765,13 @@ async function viewArtists() {
    title.className = 'view-title';
    title.textContent = 'Library';
    header.appendChild(title);
-   frag.appendChild(header);
 
    // Segmented control, one segment per available mode. Hidden entirely when
    // there is only one — a music-only server with no upload rights then looks
    // exactly as it did before this control existed.
+   //
+   // It goes *inside* the header, which is position:sticky, so it stays put
+   // while the list scrolls under it.
    if (modes.length > 1) {
       const seg = document.createElement('div');
       seg.className = 'library-modes';
@@ -786,8 +788,10 @@ async function viewArtists() {
             });
          seg.appendChild(btn);
          }
-      frag.appendChild(seg);
+      header.appendChild(seg);
       }
+
+   frag.appendChild(header);
 
    for (const index of indexes) {
       const heading = document.createElement('h2');
