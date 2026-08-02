@@ -906,6 +906,40 @@ body {
 }
 .personal-toggle-btn:hover { color: var(--text, #eee); border-color: var(--text, #eee); }
 
+/* ── Library mode toggle ────────────────────────────────
+   Segmented control selecting which kind of top-level entry the Library view
+   shows. Rendered only when there is more than one kind, so a music-only
+   server never sees it. Wraps rather than scrolls: the number of segments
+   follows the number of configured root types, which is small but not fixed. */
+
+.library-modes {
+   display: flex;
+   flex-wrap: wrap;
+   gap: 0.35rem;
+   padding: 0 1rem 0.6rem;
+}
+
+.library-mode {
+   background: none;
+   border: 1px solid var(--border);
+   border-radius: 999px;
+   color: var(--text-dim);
+   cursor: pointer;
+   font-size: 0.8rem;
+   padding: 0.25rem 0.8rem;
+}
+
+.library-mode:hover {
+   color: var(--text);
+   border-color: var(--divider);
+}
+
+.library-mode.active {
+   background: var(--accent);
+   border-color: var(--accent);
+   color: #fff;
+}
+
 .promote-btn {
    margin-left: auto;
    background: none;

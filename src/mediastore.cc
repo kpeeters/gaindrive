@@ -1931,7 +1931,8 @@ MediaStore::VideoStreams MediaStore::get_video_streams(int song_id)
 	}
 
 std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
-	const std::string& personal_user, int music_folder_id)
+	const std::string& personal_user, int music_folder_id,
+	const std::string& content_type)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	// Count albums per artist via the child folders (album folders are one level down).
@@ -1943,7 +1944,14 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
 		" FROM folders f"
 		" LEFT JOIN folders af ON af.parent_id = f.id"
 		" LEFT JOIN albums al ON al.folder_id = af.id"
-		" WHERE f.parent_id IN (SELECT id FROM folders WHERE parent_id IS NULL)";
+		" WHERE f.parent_id IN (SELECT id FROM folders WHERE parent_id IS NULL";
+	// Narrow the *root set* by kind rather than the folders themselves: one
+	// kind can span several roots, so this must not become an equality on a
+	// single parent id.  COALESCE because a root row written before
+	// content_type existed defaults to artists.
+	if (!content_type.empty())
+		sql += " AND COALESCE(content_type, 'artists') = ?";
+	sql += ")";
 	if (music_folder_id > 0)
 		sql += " AND f.parent_id = ?";
 	if (personal_user.empty())
@@ -1954,6 +1962,8 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
 
 	SQLite::Statement sel(db_music_, sql);
 	int idx = 1;
+	// Bind order follows the order the fragments were appended above.
+	if (!content_type.empty())    sel.bind(idx++, content_type);
 	if (music_folder_id > 0)      sel.bind(idx++, music_folder_id);
 	if (!personal_user.empty())
 		sel.bind(idx++, uploads_prefix_ + personal_user + "/%");

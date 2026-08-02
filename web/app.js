@@ -695,16 +695,60 @@ async function viewUserEdit(user, refreshFn) {
       });
    }
 
+// Human labels for root content types. An unknown type falls back to its own
+// name capitalised, so a server that grows a new kind of root still renders a
+// sensible segment without a client change.
+const LIBRARY_MODE_LABELS = {
+   artists:    'Artists',
+   categories: 'Categories',
+   uploads:    'Uploads',
+   };
+
+// The segments to offer, in display order: one per distinct root content type,
+// plus Uploads when the user may upload. Derived rather than hardcoded — that
+// is what keeps the toggle correct as roots change.
+//
+// Uploads cannot be conditioned on an uploads root actually existing:
+// getMusicFolders deliberately omits it, since it is per-user space rather
+// than shared library. Offering it on the role alone matches what the old
+// My Uploads button did.
+function libraryModes() {
+   const seen = [];
+   for (const f of musicFolders ?? [])
+      if (f.contentType && !seen.includes(f.contentType))
+         seen.push(f.contentType);
+   seen.sort();   // stable order regardless of how the server listed them
+   if (currentUser?.uploadRole || currentUser?.adminRole)
+      seen.push('uploads');
+   return seen;
+   }
+
 async function viewArtists() {
-   console.log('[artists] loading, personal=', personalMode);
    const pane = document.getElementById('pane-artists');
    pane.innerHTML = '';
    document.getElementById('pane-albums').innerHTML = '';
    document.getElementById('pane-tracks').innerHTML = '';
 
+   // Roots are static for the life of the server; fetch once.
+   if (musicFolders === null) {
+      try {
+         const mf = await apiCall('getMusicFolders');
+         musicFolders = mf.musicFolders?.musicFolder ?? [];
+         }
+      catch { musicFolders = []; }
+      }
+
+   // Fall back if the stored mode is no longer offered — a root may have been
+   // removed, or upload rights revoked, since it was chosen.
+   const modes = libraryModes();
+   if (modes.length && !modes.includes(libraryMode)) libraryMode = modes[0];
+   console.log('[library] loading, mode=', libraryMode);
+
    let sr;
    try {
-      sr = await apiCall('getArtists', personalMode ? {personal: 'true'} : {});
+      sr = await apiCall('getArtists',
+         libraryMode === 'uploads' ? {personal: 'true'}
+                                   : {contentType: libraryMode});
       }
    catch {
       showError('Could not reach the server. Please check your connection.');
@@ -719,22 +763,31 @@ async function viewArtists() {
    header.className = 'view-header';
    const title = document.createElement('h1');
    title.className = 'view-title';
-   title.textContent = personalMode ? 'My Uploads' : 'Artists';
+   title.textContent = 'Library';
    header.appendChild(title);
-
-   // Toggle between shared library and personal uploads (upload/admin users only).
-   if (currentUser?.uploadRole || currentUser?.adminRole) {
-      const toggleBtn = document.createElement('button');
-      toggleBtn.className = 'personal-toggle-btn';
-      toggleBtn.textContent = personalMode ? 'Library' : 'My Uploads';
-      toggleBtn.addEventListener('click', () => {
-         personalMode = !personalMode;
-         viewArtists();
-         });
-      header.appendChild(toggleBtn);
-      }
-
    frag.appendChild(header);
+
+   // Segmented control, one segment per available mode. Hidden entirely when
+   // there is only one — a music-only server with no upload rights then looks
+   // exactly as it did before this control existed.
+   if (modes.length > 1) {
+      const seg = document.createElement('div');
+      seg.className = 'library-modes';
+      for (const m of modes) {
+         const btn = document.createElement('button');
+         btn.className = 'library-mode' + (m === libraryMode ? ' active' : '');
+         btn.textContent = LIBRARY_MODE_LABELS[m]
+            ?? (m.charAt(0).toUpperCase() + m.slice(1));
+         btn.addEventListener('click', () => {
+            if (m === libraryMode) return;
+            libraryMode = m;
+            localStorage.setItem('gd_library_mode', m);
+            viewArtists();
+            });
+         seg.appendChild(btn);
+         }
+      frag.appendChild(seg);
+      }
 
    for (const index of indexes) {
       const heading = document.createElement('h2');
@@ -1210,8 +1263,8 @@ async function viewAlbums(artistId, artistName) {
       row.appendChild(info);
       row.appendChild(makeAlbumStar(album));
 
-      // Promote-to-library button (admin only, personal mode only).
-      if (personalMode && currentUser?.adminRole) {
+      // Promote-to-library button (admin only, uploads mode only).
+      if (libraryMode === 'uploads' && currentUser?.adminRole) {
          const promoteBtn = document.createElement('button');
          promoteBtn.className = 'promote-btn';
          promoteBtn.title = 'Move to shared library';
@@ -1379,9 +1432,17 @@ function timeAgo(isoStr) {
 // Info for the currently logged-in user (populated in showShell).
 let currentUser = null;
 
-// When true, browse views show the current user's personal upload folder
-// instead of the shared library.
-let personalMode = false;
+// Which kind of top-level entry the Library view is showing: a root content
+// type ('artists', 'categories', …) or 'uploads' for the user's own files.
+// A list must never contain more than one kind, so this is a single value
+// rather than a set of flags — the server filters on it and the rendered list
+// is single-kind by construction.
+let libraryMode = localStorage.getItem('gd_library_mode') || 'artists';
+
+// Roots as reported by getMusicFolders, fetched once. The client otherwise has
+// no idea roots exist; the Library toggle is built from what is in here, so a
+// server growing a new root type grows a new segment without a client change.
+let musicFolders = null;
 
 // Id of the currently active cast device, or null when not casting.
 let castDeviceId        = null;

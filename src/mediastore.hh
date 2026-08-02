@@ -150,9 +150,14 @@ class MediaStore {
 		// music_folder_id > 0 restricts to one root (the Subsonic
 		// musicFolderId filter); <= 0 spans every root, which is what an
 		// unfiltered request means.
+		// content_type non-empty restricts to roots of that kind — "artists"
+		// or "categories". Complementary to music_folder_id rather than a
+		// replacement: a kind may span several roots, which a single folder id
+		// cannot express, and two artist roots must list together.
 		std::vector<ArtistDir> get_artist_dirs(
 			const std::string& personal_user = "",
-			int music_folder_id = 0);
+			int music_folder_id = 0,
+			const std::string& content_type = "");
 
 		struct ChildEntry {
 			int         id;

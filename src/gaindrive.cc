@@ -1927,8 +1927,13 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string pu = personal ? req.get_param_value("u") : "";
 		// musicFolderId restricts to one root; absent means all of them,
 		// which is what every existing client sends.
+		// contentType is a gaindrive extension: it narrows to a *kind* of
+		// root, which musicFolderId cannot express because a kind may span
+		// several roots. Absent means every root, mixed, which is what
+		// third-party clients expect and get.
 		auto artists = store_.get_artist_dirs(
-			pu, to_int(req.get_param_value("musicFolderId"), 0));
+			pu, to_int(req.get_param_value("musicFolderId"), 0),
+			req.get_param_value("contentType"));
 
 		std::sort(artists.begin(), artists.end(),
 			[](const MediaStore::ArtistDir& a, const MediaStore::ArtistDir& b) {
@@ -1995,8 +2000,13 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string pu = personal ? req.get_param_value("u") : "";
 		// musicFolderId restricts to one root; absent means all of them,
 		// which is what every existing client sends.
+		// contentType is a gaindrive extension: it narrows to a *kind* of
+		// root, which musicFolderId cannot express because a kind may span
+		// several roots. Absent means every root, mixed, which is what
+		// third-party clients expect and get.
 		auto artists = store_.get_artist_dirs(
-			pu, to_int(req.get_param_value("musicFolderId"), 0));
+			pu, to_int(req.get_param_value("musicFolderId"), 0),
+			req.get_param_value("contentType"));
 		std::sort(artists.begin(), artists.end(),
 			[](const MediaStore::ArtistDir& a, const MediaStore::ArtistDir& b) {
 				return sort_key(a.name) < sort_key(b.name);
