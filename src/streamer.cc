@@ -478,12 +478,29 @@ std::vector<std::string> Streamer::video_ffmpeg_argv(
 		a.push_back("mpegts");
 	else {
 		a.push_back("mp4");
+		// The layout depends on the destination, exactly as it does in the
+		// audio builder above.
+		//
 		// A normal moov atom is written after the media and needs a seek back
 		// to the start of the output.  A pipe cannot do that and ffmpeg aborts
 		// rather than emit a headerless file, so the fragmented layout is the
-		// only form that streams.  Harmless on the cache path too.
+		// only form that streams there.  For a cache file it is the wrong
+		// choice: the remux tier exists to produce a *seekable file with a
+		// real index*, and an empty moov is precisely the weaker form of that.
+		//
+		// The option is spelled `default_base_moof`.  "default-base-is-moof"
+		// is the ISO BMFF field name and appears only in ffmpeg's description
+		// of the option; using it as the value makes ffmpeg reject the whole
+		// movflags argument and exit before writing a byte.
 		a.push_back("-movflags");
-		a.push_back("frag_keyframe+empty_moov+default_base_is_moof");
+		if (out == "pipe:1")
+			a.push_back("frag_keyframe+empty_moov+default_base_moof");
+		else
+			// Second pass to move the index to the front.  Proportionate: the
+			// cache build already blocks on the entire remux before serving a
+			// byte, and it saves the client a Range request for the tail
+			// before it can start.
+			a.push_back("+faststart");
 		}
 	a.push_back(out);
 	return a;
