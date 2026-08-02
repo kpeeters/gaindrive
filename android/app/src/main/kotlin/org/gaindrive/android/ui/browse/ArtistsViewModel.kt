@@ -9,13 +9,16 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.ServerFailure
 import org.gaindrive.android.data.ServerSelection
+import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.model.ArtistIndex
 import org.gaindrive.android.data.model.BrowseScope
+import org.gaindrive.android.data.model.LibraryMode
 import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.net.runCatchingCancellable
@@ -27,6 +30,7 @@ import javax.inject.Inject
 class ArtistsViewModel @Inject constructor(
 	private val library: LibraryRepository,
 	private val selection: ServerSelection,
+	private val settings: SettingsStore,
 ) : ViewModel() {
 
 	/**
@@ -49,21 +53,57 @@ class ArtistsViewModel @Inject constructor(
 	private val _isRefreshing = MutableStateFlow(false)
 	val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
+	/** The kinds on offer, and which one is showing. */
+	private val _modes = MutableStateFlow(listOf(LibraryMode.ARTISTS))
+	val modes: StateFlow<List<LibraryMode>> = _modes.asStateFlow()
+
+	private val _mode = MutableStateFlow(LibraryMode.ARTISTS)
+	val mode: StateFlow<LibraryMode> = _mode.asStateFlow()
+
 	private var scope: BrowseScope = BrowseScope.AllServers
 	private var loadJob: Job? = null
 
 	init {
 		viewModelScope.launch {
+			// The stored mode is read once, before the first load, so the
+			// first list drawn is already the right kind rather than artists
+			// flashing past on the way to categories.
+			settings.libraryMode.first()?.let { _mode.value = LibraryMode(it) }
+
 			// distinctUntilChanged because the registry re-emits whenever
 			// anything in DataStore changes, and an unchanged scope is not a
 			// reason to re-read the library.
 			selection.browse.distinctUntilChanged().collect { selected ->
 				scope = selected.scope
+				refreshModes()
 				// A different scope is a different library, and going offline
 				// is the same library from a different source — either way the
 				// old list must go rather than linger under a spinner.
 				startLoad(clearFirst = true)
 			}
+		}
+	}
+
+	fun selectMode(next: LibraryMode) {
+		if (next == _mode.value) return
+		_mode.value = next
+		viewModelScope.launch { settings.setLibraryMode(next.id) }
+		startLoad(clearFirst = true)
+	}
+
+	/**
+	 * Re-reads which kinds this scope offers, and falls back when the stored
+	 * one is gone — a server may have been removed, or upload rights revoked,
+	 * since it was chosen. Failure leaves the current list alone: the chips
+	 * are navigation, and losing them because one server timed out would be
+	 * worse than showing a stale set.
+	 */
+	private fun refreshModes() {
+		viewModelScope.launch {
+			val available = runCatchingCancellable { library.availableModes(scope) }
+				.getOrNull() ?: return@launch
+			_modes.value = available
+			if (_mode.value !in available) _mode.value = available.first()
 		}
 	}
 
@@ -86,7 +126,7 @@ class ArtistsViewModel @Inject constructor(
 				return@launch
 			}
 
-			runCatchingCancellable { library.artistIndexes(scope) }.fold(
+			runCatchingCancellable { library.artistIndexes(scope, _mode.value) }.fold(
 				onSuccess = { merged ->
 					// Every server failing is a failed screen; some of them
 					// failing is a note over the ones that worked.

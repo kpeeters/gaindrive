@@ -19,7 +19,9 @@ import androidx.room.RoomDatabase
 		PlaylistSongEntity::class,
 		PinEntity::class,
 	],
-	version = 1,
+	// 2: artists gained contentType. The mirror is a cache and the database is
+// built with fallbackToDestructiveMigration, so a bump is the whole cost.
+	version = 2,
 	// Nothing consumes exported schemas yet, and destructive migration is the
 	// right answer for a mirror: it refills itself from the servers.
 	exportSchema = false,

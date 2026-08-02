@@ -106,6 +106,30 @@ data class GetArtistsBody(
 ) : SubsonicBody
 
 @Serializable
+data class MusicFolderDto(
+	val id: String = "",
+	val name: String = "",
+	/**
+	 * gaindrive extension: "artists" or "categories". Absent on a server that
+	 * predates library roots, where every folder holds artists — so the
+	 * default is what an older server means, not a placeholder.
+	 */
+	val contentType: String = "artists",
+)
+
+@Serializable
+data class MusicFoldersContainer(
+	val musicFolder: List<MusicFolderDto> = emptyList(),
+)
+
+@Serializable
+data class GetMusicFoldersBody(
+	override val status: String = "failed",
+	override val error: SubsonicError? = null,
+	val musicFolders: MusicFoldersContainer? = null,
+) : SubsonicBody
+
+@Serializable
 data class ArtistWithAlbums(
 	val id: String = "",
 	val name: String = "",

@@ -3,7 +3,7 @@ package org.gaindrive.android.ui
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -76,7 +76,11 @@ enum class TopLevel(
 	val label: String,
 	val icon: ImageVector,
 ) {
-	ARTISTS(Route.Artists, "Artists", Icons.Default.Person),
+	// The destination shows artists, categories or uploads depending on the
+	// mode chosen in its own top bar, so the label names the place rather than
+	// one of the things it can hold. Route.Artists keeps its name to avoid
+	// churning navigation for a wording change.
+	ARTISTS(Route.Artists, "Library", Icons.Default.LibraryMusic),
 	PLAYLISTS(Route.Playlists, "Playlists", Icons.AutoMirrored.Filled.QueueMusic),
 	RECENTS(Route.Recents, "Recents", Icons.Default.History),
 	SEARCH(Route.Search, "Search", Icons.Default.Search),

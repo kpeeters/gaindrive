@@ -38,6 +38,19 @@ class SettingsStore @Inject constructor(
 	 */
 	val browseScope: Flow<String?> = dataStore.data.map { it[SELECTED_SERVER] }
 
+	/**
+	 * Which kind of top-level entry the library view is showing.
+	 *
+	 * Stored as the raw content-type id rather than an enum ordinal: the modes
+	 * come from the server, so a value written today may name a kind this
+	 * build has never heard of, and it must survive a round trip regardless.
+	 */
+	val libraryMode: Flow<String?> = dataStore.data.map { it[LIBRARY_MODE] }
+
+	suspend fun setLibraryMode(value: String) {
+		dataStore.edit { it[LIBRARY_MODE] = value }
+	}
+
 	suspend fun setBrowseScope(value: String) {
 		dataStore.edit { it[SELECTED_SERVER] = value }
 	}
@@ -144,6 +157,7 @@ class SettingsStore @Inject constructor(
 
 		private val THEME = stringPreferencesKey("theme_mode")
 		private val SELECTED_SERVER = stringPreferencesKey("selected_server")
+		private val LIBRARY_MODE = stringPreferencesKey("library_mode")
 		private val MERGE_ALBUMS = booleanPreferencesKey("merge_duplicate_albums")
 		private val CACHE_MAX_BYTES = longPreferencesKey("cache_max_bytes")
 		private val CACHE_ON_PLAY = booleanPreferencesKey("cache_on_play")

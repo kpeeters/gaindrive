@@ -4,6 +4,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -11,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -19,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -29,6 +34,7 @@ import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.components.AlphabetRail
 import org.gaindrive.android.ui.components.ArtistRow
+import org.gaindrive.android.ui.components.ChipRow
 import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.components.PartialFailureNote
 import org.gaindrive.android.ui.components.RefreshableLoadBox
@@ -48,10 +54,40 @@ fun ArtistsScreen(
 	val offline by viewModel.offline.collectAsStateWithLifecycle()
 	val failures by viewModel.failures.collectAsStateWithLifecycle()
 
+	val modes by viewModel.modes.collectAsStateWithLifecycle()
+	val mode by viewModel.mode.collectAsStateWithLifecycle()
+
 	Scaffold(
 		topBar = {
 			TopAppBar(
-				title = { Text("Artists") },
+				title = {
+					// Title and chips share the bar rather than taking a row
+					// of their own: there is room here, and a second row costs
+					// vertical space on every screen for a control that is
+					// used occasionally.
+					Row(verticalAlignment = Alignment.CenterVertically) {
+						Text("Library")
+						if (modes.size > 1) {
+							Spacer(Modifier.width(12.dp))
+							// ChipRow rather than a plain Row so a narrow
+							// screen scrolls the chips instead of clipping
+							// them, and so the selected one is scrolled into
+							// view on first layout.
+							ChipRow(
+								selectedIndex = modes.indexOf(mode),
+								chipCount = modes.size,
+							) {
+								modes.forEach { m ->
+									FilterChip(
+										selected = m == mode,
+										onClick = { viewModel.selectMode(m) },
+										label = { Text(m.label) },
+									)
+								}
+							}
+						}
+					}
+				},
 				actions = {
 					LibrarySelector(
 						servers = servers,

@@ -24,6 +24,13 @@ data class ArtistEntity(
 	val starredAt: String?,
 	/** The `getArtists` index bucket, kept so the letter rail works offline. */
 	val indexLabel: String,
+	/**
+	 * Which kind of root this came from — "artists", "categories". Stored so
+	 * the offline list can be filtered the same way the online one is:
+	 * without it, going offline would silently show artists and categories
+	 * mixed together, which is the thing the mode toggle exists to prevent.
+	 */
+	val contentType: String = "artists",
 )
 
 @Entity(tableName = "albums", primaryKeys = ["serverId", "id"])

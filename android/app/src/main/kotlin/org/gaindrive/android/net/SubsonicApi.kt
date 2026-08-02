@@ -28,10 +28,21 @@ interface SubsonicApi {
 	// it works, but it is a subtlety not worth relying on. Callers pass null
 	// or an empty list explicitly.
 
+	@GET("rest/getMusicFolders.view")
+	suspend fun getMusicFolders(): SubsonicEnvelope<GetMusicFoldersBody>
+
 	@GET("rest/getArtists.view")
 	suspend fun getArtists(
 		/** gaindrive extension: restricts the list to the user's own uploads. */
 		@Query("personal") personal: String?,
+		/**
+		 * gaindrive extension: restricts the list to roots of one kind,
+		 * "artists" or "categories". Null returns every root's children mixed,
+		 * which is what a client with no concept of categories gets. In
+		 * practice mutually exclusive with [personal] — uploads are their own
+		 * root and are never part of the shared library.
+		 */
+		@Query("contentType") contentType: String?,
 	): SubsonicEnvelope<GetArtistsBody>
 
 	@GET("rest/getArtist.view")

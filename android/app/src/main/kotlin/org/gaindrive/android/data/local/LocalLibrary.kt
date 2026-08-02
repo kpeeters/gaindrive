@@ -11,6 +11,7 @@ import org.gaindrive.android.data.model.AlbumDetail
 import org.gaindrive.android.data.model.Artist
 import org.gaindrive.android.data.model.ArtistIndex
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.data.model.LibraryMode
 import org.gaindrive.android.data.model.LibrarySelection
 import org.gaindrive.android.data.model.Playlist
 import org.gaindrive.android.data.model.ServerId
@@ -46,19 +47,26 @@ class LocalLibrary @Inject constructor(
 
 	// ── Artists ─────────────────────────────────────────────────────────────
 
-	suspend fun saveArtistIndexes(server: ServerId, indexes: List<ArtistIndex>) = write {
+	suspend fun saveArtistIndexes(
+		server: ServerId,
+		mode: LibraryMode,
+		indexes: List<ArtistIndex>,
+	) = write {
 		dao.upsertArtists(
 			indexes.flatMap { index ->
-				index.artists.map { it.toEntity(server, index.label) }
+				index.artists.map { it.toEntity(server, index.label, mode.id) }
 			}
 		)
 	}
 
-	suspend fun artistIndexes(server: ServerId): List<ArtistIndex> = io {
-		dao.artists(server.value)
+	suspend fun artistIndexes(server: ServerId, mode: LibraryMode): List<ArtistIndex> = io {
+		dao.artists(server.value, mode.id)
 			.groupBy { it.indexLabel }
 			.map { (label, rows) -> ArtistIndex(label, rows.map { it.toDomain() }) }
 	}
+
+	/** Kinds of root present in the mirror, so offline chips reflect reality. */
+	suspend fun storedContentTypes(): List<String> = io { dao.storedContentTypes() }
 
 	suspend fun artist(ref: ItemRef): Artist? = io {
 		dao.artist(ref.server.value, ref.id)?.toDomain()
@@ -70,7 +78,13 @@ class LocalLibrary @Inject constructor(
 	 * answer overwrites it.
 	 */
 	suspend fun saveArtist(server: ServerId, artist: Artist) = write {
-		dao.upsertArtists(listOf(artist.toEntity(server, indexLabelFor(artist.name))))
+		// Preserve the stored kind. @Upsert replaces the whole row, and this
+		// path has no idea which root the artist came from — overwriting it
+		// with the default would move a category section into the Artists
+		// list the next time the app is offline.
+		val kind = dao.artist(server.value, artist.ref.id)?.contentType
+			?: LibraryMode.ARTISTS.id
+		dao.upsertArtists(listOf(artist.toEntity(server, indexLabelFor(artist.name), kind)))
 	}
 
 	// ── Albums and songs ────────────────────────────────────────────────────
@@ -178,6 +192,12 @@ class LocalLibrary @Inject constructor(
 	suspend fun saveSelection(server: ServerId, selection: LibrarySelection) = write {
 		// Artists from a search have no index bucket of their own; the first
 		// letter is what the rail would have put them under anyway.
+		//
+		// Nor do they carry a root kind — search spans every root — so they
+		// land under artists. A category section found this way is mislabelled
+		// in the mirror until the Categories list is browsed and rewrites it.
+		// Accepted rather than paid for with a lookup per result: search
+		// results are a means of reaching something, not a browse listing.
 		dao.upsertArtists(selection.artists.map { it.toEntity(server, indexLabelFor(it.name)) })
 		dao.upsertAlbums(selection.albums.map { it.toEntity(server) })
 		dao.upsertSongs(selection.songs.map { it.toEntity(server) })
@@ -273,7 +293,12 @@ private fun indexLabelFor(name: String): String {
 // (`refs`) that has no place in storage, so the conversion is lossy in one
 // direction by design and a mechanical mapping would hide that.
 
-private fun Artist.toEntity(server: ServerId, indexLabel: String) = ArtistEntity(
+private fun Artist.toEntity(
+	server: ServerId,
+	indexLabel: String,
+	/** Defaulted for the paths that genuinely cannot know — see saveSelection. */
+	contentType: String = LibraryMode.ARTISTS.id,
+) = ArtistEntity(
 	serverId = server.value,
 	id = ref.id,
 	name = name,
@@ -281,6 +306,7 @@ private fun Artist.toEntity(server: ServerId, indexLabel: String) = ArtistEntity
 	coverArtId = coverArt?.id,
 	starredAt = starredAt,
 	indexLabel = indexLabel,
+	contentType = contentType,
 )
 
 private fun ArtistEntity.toDomain(): Artist {

@@ -26,6 +26,7 @@ import org.gaindrive.android.data.model.ArtistIndex
 import org.gaindrive.android.data.model.ArtistInfo
 import org.gaindrive.android.data.model.BrowseScope
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.data.model.LibraryMode
 import org.gaindrive.android.data.model.LibrarySelection
 import org.gaindrive.android.data.model.Playlist
 import org.gaindrive.android.data.model.ServerConfig
@@ -81,29 +82,72 @@ class LibraryRepository @Inject constructor(
 
 	suspend fun artistIndexes(
 		scope: BrowseScope,
-		personalOnly: Boolean = false,
+		mode: LibraryMode = LibraryMode.ARTISTS,
 	): MergedResult<List<ArtistIndex>> {
 		val stored = storedOnly()
 		return fanOut(
 			scope,
-			// The mirror does not model the personal-only filter — it is a view
-			// of the same artists — so an unreachable server contributes
-			// everything stored for it rather than nothing at all.
+			// The mirror is filtered by mode too. Uploads are the exception:
+			// they are not part of the shared library and are never mirrored,
+			// so offline they simply have nothing to show.
 			fallback = { config ->
-				local.artistIndexes(config.id)
+				if (mode.isUploads) null
+				else local.artistIndexes(config.id, mode)
 					.let { stored?.filterIndexes(it) ?: it }
 					.takeIf { it.isNotEmpty() }
 			},
 		) { client, config ->
 			// Positional: SubsonicClient reaches the API through interface
 			// delegation, so named arguments lean on generated parameter names.
-			client.getArtists(if (personalOnly) "true" else null)
+			client.getArtists(
+				if (mode.isUploads) "true" else null,
+				if (mode.isUploads) null else mode.id,
+			)
 				.requireOk().artists?.index.orEmpty()
 				.map { it.toDomain(config.id) }
 				// Buckets with no artists are noise in a sticky-header list.
 				.filter { it.artists.isNotEmpty() }
-				.also { local.saveArtistIndexes(config.id, it) }
+				// Uploads are per-user and transient; mirroring them would put
+				// somebody's unsorted batch into the offline library.
+				.also { if (!mode.isUploads) local.saveArtistIndexes(config.id, mode, it) }
 		}.map { mergeArtistIndexes(it) }
+	}
+
+	/**
+	 * The modes worth offering, unioned across every configured server.
+	 *
+	 * Online this comes from each server's `getMusicFolders`; offline that is
+	 * unreachable, so it comes from the content types actually present in the
+	 * mirror — which is the honest answer, since those are the only ones that
+	 * can be browsed at all.
+	 *
+	 * Uploads is appended when any server grants the account upload rights.
+	 */
+	suspend fun availableModes(scope: BrowseScope): List<LibraryMode> {
+		if (offline)
+			return local.storedContentTypes().sorted().map { LibraryMode(it) }
+				.ifEmpty { listOf(LibraryMode.ARTISTS) }
+
+		// Each server returns its own answer and they are combined afterwards:
+		// fanOut runs the blocks concurrently, so accumulating into shared
+		// state inside one would be a data race.
+		val perServer = fanOut(scope, fallback = { null }) { client, _ ->
+			val types = client.getMusicFolders().requireOk()
+				.musicFolders?.musicFolder.orEmpty().map { it.contentType }
+			// Roles are per server, so upload rights on any one of them are
+			// enough to make the mode worth offering. A failure here must not
+			// cost the content types we did get.
+			val canUpload = runCatchingCancellable {
+				client.getUser(client.username).requireOk().user
+			}.getOrNull()?.let { it.uploadRole || it.adminRole } ?: false
+			types to canUpload
+		}.items
+
+		val modes = perServer.flatMap { it.first }.distinct().sorted()
+			.map { LibraryMode(it) }.toMutableList()
+		if (perServer.any { it.second }) modes += LibraryMode.UPLOADS
+		// Every server failing still has to leave something selectable.
+		return modes.ifEmpty { listOf(LibraryMode.ARTISTS) }
 	}
 
 	/**

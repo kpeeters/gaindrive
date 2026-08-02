@@ -39,9 +39,14 @@ interface LibraryDao {
 
 	@Query(
 		"SELECT * FROM artists WHERE serverId = :server " +
+			"AND contentType = :contentType " +
 			"ORDER BY indexLabel, name COLLATE NOCASE"
 	)
-	suspend fun artists(server: String): List<ArtistEntity>
+	suspend fun artists(server: String, contentType: String): List<ArtistEntity>
+
+	/** The kinds of root actually present in the mirror, for the mode chips. */
+	@Query("SELECT DISTINCT contentType FROM artists")
+	suspend fun storedContentTypes(): List<String>
 
 	@Query("SELECT * FROM artists WHERE serverId = :server AND id = :id")
 	suspend fun artist(server: String, id: String): ArtistEntity?

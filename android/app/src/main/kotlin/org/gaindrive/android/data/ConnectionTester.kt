@@ -63,7 +63,7 @@ class ConnectionTester @Inject constructor(
 	private suspend fun verify(client: SubsonicClient): ConnectionTest {
 		val outcome = withTimeoutOrNull(VERIFY_TIMEOUT_MS) {
 			try {
-				client.getArtists(null).requireOk()
+				client.getArtists(null, null).requireOk()
 				ConnectionTest.Reachable
 			} catch (e: CancellationException) {
 				throw e
