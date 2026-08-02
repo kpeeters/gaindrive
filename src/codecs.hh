@@ -69,7 +69,7 @@ struct VideoTarget
 	std::string_view mime;
 	};
 
-inline constexpr std::array<VideoTarget, 9> VIDEO_TARGETS = {{
+inline constexpr std::array<VideoTarget, 10> VIDEO_TARGETS = {{
 	{ "mkv",  "video/x-matroska" },
 	{ "mp4",  "video/mp4"        },
 	{ "m4v",  "video/mp4"        },
@@ -79,6 +79,7 @@ inline constexpr std::array<VideoTarget, 9> VIDEO_TARGETS = {{
 	{ "mov",  "video/quicktime"  },
 	{ "webm", "video/webm"       },
 	{ "wmv",  "video/x-ms-asf"   },
+	{ "vob",  "video/mpeg"       },
 	}};
 
 inline std::optional<VideoTarget> video_target_for(std::string_view ext)
@@ -152,4 +153,33 @@ inline bool video_seeks_natively(std::string_view video_codec,
 	{
 	return browser_video_codec(video_codec)
 	    && (audio_codec.empty() || browser_audio_codec(audio_codec));
+	}
+
+// WebM is a profile of Matroska, so an .mkv carrying these codecs is a WebM
+// file in all but name and every browser that plays WebM will decode it.
+inline bool webm_codecs(std::string_view video_codec,
+                        std::string_view audio_codec)
+	{
+	return (video_codec == "vp8" || video_codec == "vp9"
+	        || video_codec == "av1")
+	    && (audio_codec.empty() || audio_codec == "vorbis"
+	        || audio_codec == "opus");
+	}
+
+// True when the file can go to a browser untouched.  Two callers must agree on
+// this — serve_video()'s tier choice and the transcoded* fields the API
+// advertises — for the same reason as video_seeks_natively() above.
+//
+// The .mkv case is not a technicality: a VP9/Opus Matroska (yt-dlp's usual
+// output) would otherwise pay a whole-file remux to produce something it
+// already is.  It must be *relabelled* video/webm when served, though —
+// browsers reject video/x-matroska on the MIME alone, whatever the bytes hold.
+inline bool video_direct_playable(std::string_view container,
+                                  std::string_view video_codec,
+                                  std::string_view audio_codec)
+	{
+	if (browser_container(container)
+	        && video_seeks_natively(video_codec, audio_codec))
+		return true;
+	return container == "mkv" && webm_codecs(video_codec, audio_codec);
 	}

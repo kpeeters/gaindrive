@@ -19,6 +19,8 @@
 #include <reproc++/reproc.hpp>
 #include <reproc++/drain.hpp>
 
+#include "dvd.hh"
+
 namespace fs = std::filesystem;
 
 // How long a contended write waits before SQLite reports SQLITE_BUSY.
@@ -35,7 +37,8 @@ static const std::set<std::string> AUDIO_EXTENSIONS = {
 // same extensions to MIME types; this set is the scanner's admission test and
 // that table is the serving side.
 static const std::set<std::string> VIDEO_EXTENSIONS = {
-	".mkv", ".mp4", ".m4v", ".avi", ".mpg", ".mpeg", ".mov", ".webm", ".wmv"
+	".mkv", ".mp4", ".m4v", ".avi", ".mpg", ".mpeg", ".mov", ".webm", ".wmv",
+	".vob"
 	};
 
 // Candidate cover art filenames in priority order.  Add more here as needed.
@@ -737,6 +740,10 @@ struct SongReadData {
 	int         height      = 0;
 	std::string video_codec;
 	std::string audio_codec;
+	// DVD rips only: the ordered VOBs of one titleset, discovered in Phase 1
+	// so Phase 3 does not have to rediscover them. `path` is the first of
+	// these. Empty for everything else, which is what marks a row as ordinary.
+	std::vector<std::string> parts;
 	};
 
 struct AlbumReadData {
@@ -853,6 +860,42 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			std::replace(adat.title.begin(), adat.title.end(), '_', ' ');
 			adat.cover = find_cover(album_entry.path());
 
+			// A DVD rip is one track per titleset and nothing else.  This has
+			// to short-circuit the normal enumeration below: otherwise
+			// VIDEO_TS becomes a disc subdirectory and every menu VOB becomes
+			// a track of its own.
+			if (auto video_ts = dvd_video_ts_dir(album_entry.path());
+			        !video_ts.empty()) {
+				for (auto& [ts, vobs] : dvd_titlesets(video_ts)) {
+					int64_t total = 0;
+					int64_t newest = 0;
+					std::error_code fec;
+					for (auto& v : vobs) {
+						total  += static_cast<int64_t>(fs::file_size(v, fec));
+						newest  = std::max(newest, mtime_of(v));
+						}
+					// A few seconds of DVD video is reliably an FBI warning or
+					// a studio logo, never something worth a row.
+					if (total < 10 * 1024 * 1024) continue;
+
+					SongReadData sdat;
+					sdat.path        = vobs.front().string();
+					sdat.folder_path = adat.path;   // the album, not VIDEO_TS
+					sdat.mtime       = newest;
+					sdat.file_size   = total;
+					sdat.codec       = "vob";
+					sdat.is_video    = true;
+					sdat.disc_number = 0;
+					// DVD titles carry no names, only numbers.
+					sdat.title       = "Title " + std::to_string(ts);
+					sdat.track_nr    = ts;
+					for (auto& v : vobs) sdat.parts.push_back(v.string());
+					adat.songs.push_back(std::move(sdat));
+					}
+				albums.push_back(std::move(adat));
+				continue;
+				}
+
 			std::vector<fs::directory_entry> disc_dirs;
 			std::vector<fs::path>            direct_files;
 			for (auto& e : fs::directory_iterator(album_entry.path())) {
@@ -933,6 +976,31 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			if (!path_is_within_root(sdat.path)) {
 				std::cout << stamp() << "scan: skipping file outside every root: "
 				          << sdat.path << std::endl;
+				continue;
+				}
+
+			// A DVD titleset: dimensions and codecs are identical across the
+			// parts, but the duration is not — probing only the first would
+			// report a 1 GB fragment's length as the whole title, so sum them.
+			// Title and track number came from the titleset number in Phase 1
+			// and must not be overwritten by the filename-based rules below.
+			if (!sdat.parts.empty()) {
+				for (const auto& part : sdat.parts) {
+					auto vp = probe_video(part);
+					if (!vp) {
+						std::cout << stamp() << "scan: ffprobe failed for "
+						          << part << std::endl;
+						continue;
+						}
+					sdat.duration += vp->duration;
+					if (sdat.width == 0) {
+						sdat.width       = vp->width;
+						sdat.height      = vp->height;
+						sdat.video_codec = vp->video_codec;
+						sdat.audio_codec = vp->audio_codec;
+						sdat.bitrate     = vp->bitrate;
+						}
+					}
 				continue;
 				}
 
@@ -1838,6 +1906,15 @@ MediaStore::VideoStreams MediaStore::get_video_streams(int song_id)
 		for (const auto& s : *streams) {
 			auto type = s.value("codec_type", std::string());
 			if (type != "subtitle" && type != "audio") continue;
+			// DVD and Blu-ray subtitles are bitmaps, not text: there is no
+			// WebVTT to convert them into, and ffmpeg fails outright if asked.
+			// Offering them would mean every DVD's caption list is a list of
+			// tracks that 500 when selected.
+			auto codec = s.value("codec_name", std::string());
+			if (type == "subtitle"
+			        && (codec == "dvd_subtitle" || codec == "hdmv_pgs_subtitle"
+			            || codec == "dvb_subtitle" || codec == "xsub"))
+				continue;
 			CaptionTrack t;
 			t.index = static_cast<int>(probe_num(s, "index"));
 			if (auto tags = s.find("tags"); tags != s.end()) {

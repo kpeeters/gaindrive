@@ -514,11 +514,14 @@ body {
    justify-content: center;
 }
 
+/* Fill the frame in both directions and let object-fit keep the aspect ratio,
+   letterboxing against the black background. The previous max-width/max-height
+   pair only ever scaled *down*: a 720x404 rip sat at its intrinsic size in the
+   middle of a much larger theatre surface. */
 #video-el {
-   max-width: 100%;
-   max-height: 100%;
-   width: auto;
-   height: auto;
+   width: 100%;
+   height: 100%;
+   object-fit: contain;
    background: #000;
 }
 

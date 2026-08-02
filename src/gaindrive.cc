@@ -202,8 +202,9 @@ static std::optional<TranscodeInfo> transcode_target(
 	// a full re-encode.  Whether it is *seekable* is a different question and
 	// is answered separately by nativeSeek — see song_entry_json().
 	if (is_video_ext(c.codec)) {
-		if (browser_container(c.codec)
-		        && video_seeks_natively(c.video_codec, c.audio_codec))
+		// Same predicate serve_video() picks its tier with, so the advertised
+		// type cannot disagree with what the stream turns out to be.
+		if (video_direct_playable(c.codec, c.video_codec, c.audio_codec))
 			return std::nullopt;   // served untouched
 		return TranscodeInfo{ VIDEO_MP4_MIME, "mp4", 0 };
 		}

@@ -1,5 +1,6 @@
 #include "streamer.hh"
 #include "stamp.hh"
+#include "dvd.hh"
 
 #include <algorithm>
 #include <chrono>
@@ -413,7 +414,12 @@ std::vector<std::string> Streamer::video_ffmpeg_argv(
 		a.push_back(std::to_string(time_offset));
 		}
 	a.push_back("-i");
-	a.push_back(song.path);
+	// A DVD titleset is split across 1 GB VOBs that are one continuous stream,
+	// so the input is a concat: list rather than a single file.  dvd_input()
+	// returns the plain path for everything else, including a stray .vob that
+	// is not part of a titleset.  ffmpeg's concat protocol seeks across the
+	// joined files, so the -ss above still lands where it should.
+	a.push_back(dvd_input(song.path));
 	if (segment_duration > 0) {
 		a.push_back("-t");
 		a.push_back(std::to_string(segment_duration));
@@ -492,15 +498,17 @@ std::vector<std::string> Streamer::video_ffmpeg_argv(
 		// is the ISO BMFF field name and appears only in ffmpeg's description
 		// of the option; using it as the value makes ffmpeg reject the whole
 		// movflags argument and exit before writing a byte.
-		a.push_back("-movflags");
-		if (out == "pipe:1")
+		// A file gets NO movflags at all, deliberately.  ffmpeg then writes a
+		// normal MP4 with the moov at the end, in a single pass, and that is
+		// fully seekable over HTTP: the response carries a Content-Length and
+		// honours Range, so the client fetches the tail once to find the index
+		// and then seeks freely.  +faststart would move the index to the front
+		// but rewrites the whole output to do it, doubling the I/O of a
+		// multi-gigabyte remux to save exactly one request.
+		if (out == "pipe:1") {
+			a.push_back("-movflags");
 			a.push_back("frag_keyframe+empty_moov+default_base_moof");
-		else
-			// Second pass to move the index to the front.  Proportionate: the
-			// cache build already blocks on the entire remux before serving a
-			// byte, and it saves the client a Range request for the tail
-			// before it can start.
-			a.push_back("+faststart");
+			}
 		}
 	a.push_back(out);
 	return a;
@@ -524,10 +532,17 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	                || (!format.empty() && format != "raw");
 	bool partial     = time_offset > 0 || segment_duration > 0;
 
+	// A VP9/Opus .mkv is a WebM file wearing the wrong extension: it can be
+	// served untouched, but only once relabelled (see the Direct branch).
+	bool relabel_webm = song.codec == "mkv"
+	                 && webm_codecs(song.video_codec, song.audio_codec);
+
 	enum class Tier { Direct, Remux, Encode };
 	Tier tier = Tier::Encode;
 	if (codecs_ok && !constrained && !partial)
-		tier = browser_container(song.codec) ? Tier::Direct : Tier::Remux;
+		tier = video_direct_playable(song.codec, song.video_codec,
+		                             song.audio_codec)
+		     ? Tier::Direct : Tier::Remux;
 	const char* tier_name = tier == Tier::Direct ? "direct"
 	                      : tier == Tier::Remux  ? "remux" : "encode";
 
@@ -548,6 +563,17 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 		// The raw file, byte ranges and all.  is_browser is passed as false:
 		// the wall-clock throttle is sized for audio and would cap a 6 Mbps
 		// video at 15 s of buffer on a link that could do better.
+		//
+		// A qualifying .mkv is relabelled video/webm on the way out: the bytes
+		// are already a valid WebM stream, but browsers refuse
+		// video/x-matroska on the MIME alone.  codec is only read here for
+		// codec_to_mime(), so overriding the copy is enough.
+		if (relabel_webm) {
+			SongInfo as_webm = song;
+			as_webm.codec = "webm";
+			serve_direct(req, res, as_webm, false, std::move(get_position));
+			return;
+			}
 		serve_direct(req, res, song, false, std::move(get_position));
 		return;
 		}
