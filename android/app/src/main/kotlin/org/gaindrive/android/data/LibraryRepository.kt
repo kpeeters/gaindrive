@@ -70,6 +70,15 @@ class LibraryRepository @Inject constructor(
 	private val offline: Boolean get() = !connectivity.online.value
 
 	/**
+	 * Root kinds per server, as reported by getMusicFolders. Populated lazily
+	 * and kept for the session: roots are configuration, and re-asking on every
+	 * mode switch would put a request in front of a control that should feel
+	 * instant. See [typesFor] for what an empty set means.
+	 */
+	private val advertisedTypes = mutableMapOf<ServerId, Set<String>>()
+	private val typesMutex = Mutex()
+
+	/**
 	 * What to hide from browse listings, or null when there is nothing to hide.
 	 *
 	 * Null whenever the app is online, including when a server has just failed:
@@ -87,29 +96,30 @@ class LibraryRepository @Inject constructor(
 		val stored = storedOnly()
 		return fanOut(
 			scope,
-			// The mirror is filtered by mode too. Uploads are the exception:
-			// they are not part of the shared library and are never mirrored,
-			// so offline they simply have nothing to show.
+			// The mirror is filtered by mode too, so an unreachable server
+			// contributes the same kind the live one would have.
 			fallback = { config ->
-				if (mode.isUploads) null
-				else local.artistIndexes(config.id, mode)
+				local.artistIndexes(config.id, mode)
 					.let { stored?.filterIndexes(it) ?: it }
 					.takeIf { it.isNotEmpty() }
 			},
 		) { client, config ->
+			// Servers that do not advertise this kind are not asked at all.
+			// Not asking is the whole point: a server predating library roots
+			// ignores the unknown contentType parameter and answers with its
+			// entire library, so the request itself is what would put the same
+			// folders under every mode. Filtering the response instead would
+			// be too late — nothing in it says which entries to discard.
+			if (!advertises(typesFor(client, config), mode)) return@fanOut emptyList()
+
 			// Positional: SubsonicClient reaches the API through interface
 			// delegation, so named arguments lean on generated parameter names.
-			client.getArtists(
-				if (mode.isUploads) "true" else null,
-				if (mode.isUploads) null else mode.id,
-			)
+			client.getArtists(null, mode.id)
 				.requireOk().artists?.index.orEmpty()
 				.map { it.toDomain(config.id) }
 				// Buckets with no artists are noise in a sticky-header list.
 				.filter { it.artists.isNotEmpty() }
-				// Uploads are per-user and transient; mirroring them would put
-				// somebody's unsorted batch into the offline library.
-				.also { if (!mode.isUploads) local.saveArtistIndexes(config.id, mode, it) }
+				.also { local.saveArtistIndexes(config.id, mode, it) }
 		}.map { mergeArtistIndexes(it) }
 	}
 
@@ -131,24 +141,45 @@ class LibraryRepository @Inject constructor(
 		// Each server returns its own answer and they are combined afterwards:
 		// fanOut runs the blocks concurrently, so accumulating into shared
 		// state inside one would be a data race.
-		val perServer = fanOut(scope, fallback = { null }) { client, _ ->
-			val types = client.getMusicFolders().requireOk()
-				.musicFolders?.musicFolder.orEmpty().map { it.contentType }
-			// Roles are per server, so upload rights on any one of them are
-			// enough to make the mode worth offering. A failure here must not
-			// cost the content types we did get.
-			val canUpload = runCatchingCancellable {
-				client.getUser(client.username).requireOk().user
-			}.getOrNull()?.let { it.uploadRole || it.adminRole } ?: false
-			types to canUpload
+		val perServer = fanOut(scope, fallback = { null }) { client, config ->
+			typesFor(client, config)
 		}.items
 
-		val modes = perServer.flatMap { it.first }.distinct().sorted()
-			.map { LibraryMode(it) }.toMutableList()
-		if (perServer.any { it.second }) modes += LibraryMode.UPLOADS
-		// Every server failing still has to leave something selectable.
-		return modes.ifEmpty { listOf(LibraryMode.ARTISTS) }
+		return perServer
+			// A legacy server names no kinds and is taken to hold artists.
+			.map { it.ifEmpty { setOf(LibraryMode.ARTISTS.id) } }
+			.flatten().distinct().sorted().map { LibraryMode(it) }
+			// Every server failing still has to leave something selectable.
+			.ifEmpty { listOf(LibraryMode.ARTISTS) }
 	}
+
+	/**
+	 * The root kinds a server advertises, fetched once and remembered.
+	 *
+	 * An **empty set means the server has no concept of roots at all** — it
+	 * either returned no folders or named no content type on any of them. That
+	 * is not the same as "it has no categories", and the difference decides
+	 * whether the server can be trusted to honour a contentType filter.
+	 *
+	 * A failure caches nothing, so a server that was briefly unreachable is
+	 * asked again rather than being written off as legacy for the session.
+	 */
+	private suspend fun typesFor(client: SubsonicClient, config: ServerConfig): Set<String> {
+		advertisedTypes[config.id]?.let { return it }
+		return typesMutex.withLock {
+			advertisedTypes[config.id] ?: run {
+				val types = client.getMusicFolders().requireOk()
+					.musicFolders?.musicFolder.orEmpty()
+					.mapNotNull { it.contentType }
+					.toSet()
+				types.also { advertisedTypes[config.id] = it }
+			}
+		}
+	}
+
+	/** Whether a server holding [types] can answer for [mode]. */
+	private fun advertises(types: Set<String>, mode: LibraryMode): Boolean =
+		if (types.isEmpty()) mode == LibraryMode.ARTISTS else mode.id in types
 
 	/**
 	 * The union of one artist's albums across every server that has them.

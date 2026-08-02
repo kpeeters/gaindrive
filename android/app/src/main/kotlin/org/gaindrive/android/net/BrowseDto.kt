@@ -110,11 +110,14 @@ data class MusicFolderDto(
 	val id: String = "",
 	val name: String = "",
 	/**
-	 * gaindrive extension: "artists" or "categories". Absent on a server that
-	 * predates library roots, where every folder holds artists — so the
-	 * default is what an older server means, not a placeholder.
+	 * gaindrive extension: "artists" or "categories".
+	 *
+	 * Null, not defaulted, and the distinction carries weight: absent means the
+	 * server has no concept of root kinds, which also means it will ignore a
+	 * `contentType` query parameter and answer with its entire library. That
+	 * has to be detectable, or such a server's folders appear under every mode.
 	 */
-	val contentType: String = "artists",
+	val contentType: String? = null,
 )
 
 @Serializable
