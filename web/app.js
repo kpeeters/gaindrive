@@ -2006,7 +2006,34 @@ function videoPreparing(on) {
    document.getElementById('video-preparing').hidden = !on;
 }
 
+// Stops the current stream and returns the transport bar to its idle state.
+// Closing the surface has to stop playback, not just hide it: a hidden video
+// element still holding a stream would leave the bar offering play, pause and
+// seek for something the user can no longer see, and would go on downloading.
+// The queue is deliberately left intact, so Next still works.
+function playerStop() {
+   player.media.pause();
+   player.media.removeAttribute('src');
+   player.media.load();   // drops the buffered data and cancels the fetch
+   player.localOffset = 0;
+   player.scrobbled   = false;
+   videoSurfaceSet(null);
+
+   document.getElementById('player-playpause').textContent = '▶';
+   document.getElementById('player-title').textContent     = '—';
+   document.getElementById('player-artist').textContent    = '';
+   document.getElementById('player-info-btn').disabled     = true;
+   document.getElementById('player-time').textContent      = '0:00 / 0:00';
+   const seek = document.getElementById('player-seek');
+   seek.value = 0;
+   seek.max   = 0;
+   // '' resolves to GET / and must never be assigned.
+   document.getElementById('player-cover').removeAttribute('src');
+   document.querySelector('.track-row.playing')?.classList.remove('playing');
+}
+
 function setupVideoSurface() {
+   document.getElementById('video-close').addEventListener('click', playerStop);
    document.getElementById('video-minimise').addEventListener('click',
       () => videoSurfaceSet('minimised'));
    document.getElementById('video-restore').addEventListener('click',

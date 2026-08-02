@@ -546,6 +546,39 @@ body {
    cursor: pointer;
 }
 
+/* Sits above #video-restore so the surface can still be dismissed in the
+   minimised state, where a click anywhere else expands it instead. */
+#video-close {
+   position: absolute;
+   top: 0.4rem;
+   right: 0.4rem;
+   z-index: 2;
+   width: 1.75rem;
+   height: 1.75rem;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   border: 0;
+   border-radius: 50%;
+   background: rgba(0, 0, 0, 0.55);
+   color: #fff;
+   font-size: 0.9rem;
+   line-height: 1;
+   cursor: pointer;
+   opacity: 0;
+   transition: opacity 0.15s ease;
+}
+
+#video-surface:hover #video-close,
+#video-close:focus-visible {
+   opacity: 1;
+}
+
+/* Touch devices never hover, so the only way out would be unreachable. */
+@media (hover: none) {
+   #video-close { opacity: 1; }
+}
+
 #video-bar {
    display: flex;
    align-items: center;
