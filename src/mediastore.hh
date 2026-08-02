@@ -145,6 +145,10 @@ class MediaStore {
 			// already selects the codec answers it for free.
 			int         width  = 0;
 			int         height = 0;
+			// The codec pair decides whether the served stream will be
+			// seekable, which the API passes to the client as nativeSeek.
+			std::string video_codec;
+			std::string audio_codec;
 			};
 
 		struct RecentSongEntry {

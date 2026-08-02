@@ -1592,7 +1592,7 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_videos()
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
-		"       s.path, s.width, s.height"
+		"       s.path, s.width, s.height, s.video_codec, s.audio_codec"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -1621,6 +1621,8 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_videos()
 		e.path         = q.getColumn(14).getString();
 		e.width        = q.getColumn(15).isNull() ? 0 : q.getColumn(15).getInt();
 		e.height       = q.getColumn(16).isNull() ? 0 : q.getColumn(16).getInt();
+		e.video_codec  = q.getColumn(17).isNull() ? "" : q.getColumn(17).getString();
+		e.audio_codec  = q.getColumn(18).isNull() ? "" : q.getColumn(18).getString();
 		result.push_back(std::move(e));
 		}
 	return result;
@@ -1816,7 +1818,8 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		"       s.year, s.genre, s.duration, s.bitrate,"
 		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name, '') AS artist,"
-		"       COALESCE(al.title, '') AS album, s.width, s.height"
+		"       COALESCE(al.title, '') AS album, s.width, s.height,"
+		"       s.video_codec, s.audio_codec"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -1830,7 +1833,8 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		"       s.year, s.genre, s.duration, s.bitrate,"
 		"       s.file_size, s.codec, s.folder_id,"
 		"       COALESCE(a.name, '') AS artist,"
-		"       COALESCE(al.title, '') AS album, s.width, s.height"
+		"       COALESCE(al.title, '') AS album, s.width, s.height,"
+		"       s.video_codec, s.audio_codec"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -1860,6 +1864,8 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		e.album        = ssel.getColumn(12).getString();
 		e.width        = ssel.getColumn(13).isNull() ? 0 : ssel.getColumn(13).getInt();
 		e.height       = ssel.getColumn(14).isNull() ? 0 : ssel.getColumn(14).getInt();
+		e.video_codec  = ssel.getColumn(15).isNull() ? "" : ssel.getColumn(15).getString();
+		e.audio_codec  = ssel.getColumn(16).isNull() ? "" : ssel.getColumn(16).getString();
 		// Songs inherit cover art from their parent album folder.
 		if (dir.cover_art_id >= 0)
 			e.cover_art_id = dir.cover_art_id;
@@ -2155,7 +2161,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		"       COALESCE(a.name, '') AS artist,"
 		"       COALESCE(al.title, '') AS album"
 		+ star_col +
-		", s.width, s.height"
+		", s.width, s.height, s.video_codec, s.audio_codec"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -2172,7 +2178,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		"       COALESCE(a.name, '') AS artist,"
 		"       COALESCE(al.title, '') AS album"
 		+ star_col +
-		", s.width, s.height"
+		", s.width, s.height, s.video_codec, s.audio_codec"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -2207,6 +2213,8 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		e.starred      = ssel.getColumn(13).getString();
 		e.width        = ssel.getColumn(14).isNull() ? 0 : ssel.getColumn(14).getInt();
 		e.height       = ssel.getColumn(15).isNull() ? 0 : ssel.getColumn(15).getInt();
+		e.video_codec  = ssel.getColumn(16).isNull() ? "" : ssel.getColumn(16).getString();
+		e.audio_codec  = ssel.getColumn(17).isNull() ? "" : ssel.getColumn(17).getString();
 		if (info.album.cover_art_id >= 0)
 			e.cover_art_id = info.album.cover_art_id;
 		info.songs.push_back(std::move(e));
@@ -2678,7 +2686,7 @@ std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
-		"       s.width, s.height"
+		"       s.width, s.height, s.video_codec, s.audio_codec"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -2705,6 +2713,8 @@ std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
 	e.cover_art_id = q.getColumn(13).getInt();
 	e.width        = q.getColumn(14).isNull() ? 0 : q.getColumn(14).getInt();
 	e.height       = q.getColumn(15).isNull() ? 0 : q.getColumn(15).getInt();
+	e.video_codec  = q.getColumn(16).isNull() ? "" : q.getColumn(16).getString();
+	e.audio_codec  = q.getColumn(17).isNull() ? "" : q.getColumn(17).getString();
 	return e;
 	}
 

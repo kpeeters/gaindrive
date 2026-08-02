@@ -195,12 +195,17 @@ static std::optional<TranscodeInfo> transcode_target(
 	const MediaStore::ChildEntry& c, int max_bitrate,
 	const std::string& format = "")
 	{
-	// Video advertises nothing.  Which tier a video takes — direct, remux or
-	// re-encode — depends on its video/audio codec pair, which a ChildEntry
-	// does not carry, and the transcoded* fields are optional.  Staying silent
-	// is correct; guessing would hand the client a content type the stream
-	// then contradicts, with no way to tell which of the two lied.
-	if (is_video_ext(c.codec)) return std::nullopt;
+	// Video: the container is what changes, not the audio muxer, so none of
+	// the negotiation below applies.  Anything that is not already in a
+	// browser-playable container arrives as MP4, whether that took a remux or
+	// a full re-encode.  Whether it is *seekable* is a different question and
+	// is answered separately by nativeSeek — see song_entry_json().
+	if (is_video_ext(c.codec)) {
+		if (browser_container(c.codec)
+		        && video_seeks_natively(c.video_codec, c.audio_codec))
+			return std::nullopt;   // served untouched
+		return TranscodeInfo{ VIDEO_MP4_MIME, "mp4", 0 };
+		}
 
 	auto source = target_for(c.codec);
 	std::optional<Target> wanted;
@@ -263,8 +268,17 @@ static nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
 	if (auto t = transcode_target(c, max_bitrate, format)) {
 		s["transcodedContentType"] = std::string(t->mime);
 		s["transcodedSuffix"]      = std::string(t->suffix);
-		s["transcodedBitRate"]     = t->bitrate;
+		// Video has no meaningful single bitrate to promise — the encode is
+		// CRF-driven — so the field is omitted rather than sent as 0.
+		if (t->bitrate > 0) s["transcodedBitRate"] = t->bitrate;
 		}
+	// gaindrive extension.  Says whether the stream this entry would produce
+	// carries a Content-Length and answers Range requests, so the client can
+	// let the media element seek by itself instead of re-requesting with
+	// timeOffset.  transcodedSuffix cannot answer this: it is present for both
+	// the remux and re-encode tiers, and those differ precisely here.
+	if (is_video) s["nativeSeek"] = video_seeks_natively(c.video_codec,
+	                                                     c.audio_codec);
 	return s;
 	}
 
@@ -303,8 +317,12 @@ static XMLElement* song_entry_xml(XMLDocument& doc,
 	if (auto t = transcode_target(c, max_bitrate, format)) {
 		el->SetAttribute("transcodedContentType", std::string(t->mime).c_str());
 		el->SetAttribute("transcodedSuffix",      std::string(t->suffix).c_str());
-		el->SetAttribute("transcodedBitRate",     t->bitrate);
+		if (t->bitrate > 0)
+			el->SetAttribute("transcodedBitRate", t->bitrate);
 		}
+	if (is_video)
+		el->SetAttribute("nativeSeek",
+		                 video_seeks_natively(c.video_codec, c.audio_codec));
 	return el;
 	}
 

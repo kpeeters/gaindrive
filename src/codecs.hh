@@ -107,3 +107,49 @@ inline std::string_view codec_to_mime(std::string_view codec)
 // share the fragmented-MP4 form; HLS segments use MPEG-TS.
 inline constexpr std::string_view VIDEO_MP4_MIME = "video/mp4";
 inline constexpr std::string_view VIDEO_TS_MIME  = "video/mp2t";
+
+// Codecs a browser can be expected to decode without help, and containers it
+// will accept them in.  The lists are deliberately conservative: being wrong
+// in the permissive direction means a black player and a support question,
+// while being wrong in the strict direction only costs a remux.
+//
+// These live here rather than in streamer.cc because two callers must agree on
+// them: Streamer::serve_video() picks the tier, and the API advertises to the
+// client whether the resulting stream can be seeked natively.  If those two
+// ever disagreed, a client would seek into a stream that has no Range support
+// and the seek would silently do nothing.
+inline bool browser_video_codec(std::string_view c)
+	{
+	return c == "h264" || c == "vp8" || c == "vp9" || c == "av1";
+	}
+
+inline bool browser_audio_codec(std::string_view c)
+	{
+	return c == "aac" || c == "mp3" || c == "opus" || c == "vorbis"
+	    || c == "flac";
+	}
+
+inline bool browser_container(std::string_view ext)
+	{
+	return ext == "mp4" || ext == "m4v" || ext == "webm";
+	}
+
+// True when the served stream will carry a Content-Length and answer Range
+// requests, so the client can let the media element seek by itself.
+//
+// This is deliberately **not** "does ffmpeg run": the remux tier runs ffmpeg
+// but writes a real file through the transcode cache, so it seeks just as well
+// as the untouched original.  Only a re-encode is chunked and unseekable.
+// Conflating the two would make a client send timeOffset for a remuxable MKV,
+// which sets partial=true in serve_video() and demotes a cheap -c copy into a
+// full re-encode — the exact opposite of what the tier ladder is for.
+//
+// An empty audio codec counts as playable: a silent video is fine, and a file
+// the scanner could not probe at all is better handled by the fallbacks in
+// serve_video() than by pessimising every request.
+inline bool video_seeks_natively(std::string_view video_codec,
+                                 std::string_view audio_codec)
+	{
+	return browser_video_codec(video_codec)
+	    && (audio_codec.empty() || browser_audio_codec(audio_codec));
+	}

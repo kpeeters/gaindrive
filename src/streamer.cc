@@ -398,26 +398,6 @@ std::vector<std::string> Streamer::ffmpeg_argv(const SongInfo& song,
 
 // ---- Video -----------------------------------------------------------
 
-// Codecs a browser can be expected to decode without help, and containers it
-// will accept them in.  The lists are deliberately conservative: being wrong
-// in the permissive direction means a black player and a support question,
-// while being wrong in the strict direction only costs a remux.
-static bool browser_video_codec(std::string_view c)
-	{
-	return c == "h264" || c == "vp8" || c == "vp9" || c == "av1";
-	}
-
-static bool browser_audio_codec(std::string_view c)
-	{
-	return c == "aac" || c == "mp3" || c == "opus" || c == "vorbis"
-	    || c == "flac";
-	}
-
-static bool browser_container(std::string_view ext)
-	{
-	return ext == "mp4" || ext == "m4v" || ext == "webm";
-	}
-
 std::vector<std::string> Streamer::video_ffmpeg_argv(
 	const SongInfo& song, bool copy, int max_bitrate,
 	const std::string& size, int time_offset, int segment_duration,
@@ -516,9 +496,10 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
                            int segment_duration, bool is_browser,
                            std::function<float()> get_position)
 	{
-	bool codecs_ok = browser_video_codec(song.video_codec)
-	              && (song.audio_codec.empty()
-	                  || browser_audio_codec(song.audio_codec));
+	// Same predicate the API uses to tell the client whether it may seek
+	// natively — see video_seeks_natively() in codecs.hh for why the two must
+	// not drift apart.
+	bool codecs_ok = video_seeks_natively(song.video_codec, song.audio_codec);
 	// Anything that changes the picture or bounds the output forces a real
 	// encode; a seek or a segment forces the pipe because neither a raw file
 	// nor a whole-file remux can start partway in.
