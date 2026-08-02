@@ -4323,10 +4323,13 @@ GainDrive::GainDrive(const std::string& db_path,
 		             "Create one with --add-user <name> --password <pass>."
 		          << std::endl;
 
-	if (!no_scan)
-		std::thread([this]{ store_.scan(); }).detach();
-	cast_manager_.discover_background();
-	watcher_.start();
+	// Background work (library scan, Cast discovery, folder watching) is NOT
+	// started here — listen() starts it once the port is actually held.
+	// Starting it in the constructor meant a server that could not bind still
+	// spent minutes scanning, and could not exit promptly either: the detached
+	// scan holds db_mutex_, so the watcher's join in the destructor blocks
+	// behind it.  Nothing should run until we know we can serve.
+	no_scan_ = no_scan;
 	}
 
 void GainDrive::serve_artist_portrait(httplib::Response& res,
@@ -4387,6 +4390,14 @@ bool GainDrive::listen(const std::string& host, int port)
 		return false;
 		}
 	std::cout << stamp() << "Listening on " << host << ":" << port << std::endl;
+
+	// Only now that the port is ours: a server that cannot serve should do no
+	// work at all, and should be able to exit at once.
+	if (!no_scan_)
+		std::thread([this]{ store_.scan(); }).detach();
+	cast_manager_.discover_background();
+	watcher_.start();
+
 	if (!server_.listen_after_bind()) {
 		std::cerr << stamp() << "Error: server loop exited unexpectedly."
 		          << std::endl;

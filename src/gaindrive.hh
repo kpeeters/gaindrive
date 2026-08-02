@@ -33,6 +33,10 @@ class GainDrive {
 	private:
 		bool            debug_;
 		bool            flat_multi_disc_;
+		// Held from construction until listen() decides whether to scan. The
+		// scan cannot start in the constructor: a server that fails to bind
+		// must do no work and exit at once.
+		bool            no_scan_ = false;
 		std::string     upload_dir_;
 		// Absolute path of the uploads root, or empty when none is configured
 		// — in which case the upload endpoints refuse rather than writing into
