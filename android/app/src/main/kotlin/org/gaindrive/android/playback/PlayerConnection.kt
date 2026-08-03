@@ -2,10 +2,14 @@ package org.gaindrive.android.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.view.SurfaceView
+import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import androidx.media3.ui.SubtitleView
 import com.google.common.util.concurrent.MoreExecutors
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +25,7 @@ import org.gaindrive.android.data.CoverUrls
 import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
+import org.gaindrive.android.playback.cast.CastSession
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -44,9 +49,19 @@ data class PlayerState(
 	val hasPrevious: Boolean = false,
 	val queue: List<NowPlaying> = emptyList(),
 	val queueIndex: Int = 0,
+	/**
+	 * The subtitle tracks the current item offers, and which one is on. Empty
+	 * for audio, and for a video whose captions could not be listed or whose
+	 * source has none — a DVD always lands here, since its subtitles are
+	 * bitmaps the server cannot turn into WebVTT.
+	 */
+	val textTracks: List<TextTrack> = emptyList(),
 ) {
 	/** The bar and sheet only exist once something has been queued. */
 	val isActive: Boolean get() = current != null
+
+	/** Whether what is playing wants a picture. */
+	val isVideo: Boolean get() = current?.isVideo == true
 
 	/** How [ref] should render in a track listing. */
 	fun trackStateOf(ref: ItemRef): TrackState = when {
@@ -61,6 +76,16 @@ data class PlayerState(
 enum class TrackState { IDLE, LOADING, CURRENT }
 
 /**
+ * One selectable subtitle track.
+ *
+ * [index] is a position in [PlayerState.textTracks], not anything the server
+ * issued: the picker's job is to name a track the player already knows about,
+ * and going back through caption ids would mean re-deriving a mapping the
+ * player is holding.
+ */
+data class TextTrack(val index: Int, val label: String, val selected: Boolean)
+
+/**
  * The UI's only route to playback.
  *
  * Deliberately a [MediaController] rather than the [androidx.media3.exoplayer.ExoPlayer]
@@ -71,11 +96,32 @@ enum class TrackState { IDLE, LOADING, CURRENT }
 class PlayerConnection @Inject constructor(
 	@ApplicationContext private val context: Context,
 	private val library: LibraryRepository,
+	private val videoSurface: VideoSurface,
+	private val castSession: CastSession,
 	private val scope: CoroutineScope,
 ) {
 
 	private val _state = MutableStateFlow(PlayerState())
 	val state: StateFlow<PlayerState> = _state.asStateFlow()
+
+	private val _message = MutableStateFlow<String?>(null)
+
+	/**
+	 * Something the user asked for that could not be done, in words. Held
+	 * rather than thrown because the refusal has to outlive whatever sheet or
+	 * row the tap came from; the shell shows it and calls [consumeMessage].
+	 */
+	val message: StateFlow<String?> = _message.asStateFlow()
+
+	fun consumeMessage() {
+		_message.value = null
+	}
+
+	/**
+	 * The picture's shape, once the decoder has reported it. Null until then;
+	 * the screen falls back to the figure the server gave for the entry.
+	 */
+	val videoAspectRatio: StateFlow<Float?> = videoSurface.aspectRatio
 
 	private var controller: MediaController? = null
 	private var ticker: Job? = null
@@ -131,8 +177,24 @@ class PlayerConnection @Inject constructor(
 		)
 	}
 
+	/**
+	 * Whether [songs] can be played where playback is currently going.
+	 *
+	 * Video is not cast. The receiver would need a video MIME and a video
+	 * metadata type, and the throttle in the server's stream path assumes a
+	 * near-constant bitrate that VBR video does not have — so handing it a film
+	 * fails minutes in rather than at the tap. Refusing here, in words, is the
+	 * honest version of that.
+	 */
+	private fun refuseIfCasting(songs: List<Song>): Boolean {
+		if (castSession.device.value == null || songs.none { it.isVideo }) return false
+		_message.value = "Video cannot be cast. Disconnect to watch on this device."
+		return true
+	}
+
 	/** Replaces the queue and starts at [startIndex]. */
 	fun play(songs: List<Song>, startIndex: Int) = scope.launch {
+		if (refuseIfCasting(songs)) return@launch
 		markPending(songs.getOrNull(startIndex)?.ref)
 		// Publish before awaiting the controller: on the very first tap the
 		// session is not bound yet, and that wait is precisely the delay the
@@ -155,6 +217,7 @@ class PlayerConnection @Inject constructor(
 	 * what "add to queue" is asked to mean.
 	 */
 	fun addToQueue(song: Song) = scope.launch {
+		if (refuseIfCasting(listOf(song))) return@launch
 		val controller = awaitController() ?: return@launch
 		val covers = library.coverUrls()
 		autoFrom.tailToDrop(controller.mediaItemCount)?.let { tail ->
@@ -170,6 +233,7 @@ class PlayerConnection @Inject constructor(
 
 	/** Inserts a hand-picked track directly after the one playing. */
 	fun playNext(song: Song) = scope.launch {
+		if (refuseIfCasting(listOf(song))) return@launch
 		val controller = awaitController() ?: return@launch
 		val covers = library.coverUrls()
 		val at = (controller.currentMediaItemIndex + 1).coerceIn(0, controller.mediaItemCount)
@@ -189,6 +253,30 @@ class PlayerConnection @Inject constructor(
 	fun next() = controller?.seekToNextMediaItem()
 	fun previous() = controller?.seekToPreviousMediaItem()
 	fun seekTo(positionMs: Long) = controller?.seekTo(positionMs)
+
+	// ── Video output ────────────────────────────────────────────────────────
+	//
+	// Delegated rather than done here: the surface has to reach the ExoPlayer
+	// itself, and the reasons are all in VideoSurface. Routed through this
+	// class anyway so the screen still talks to one thing.
+
+	fun attachVideo(surface: SurfaceView, subtitles: SubtitleView) =
+		videoSurface.attach(surface, subtitles)
+
+	fun detachVideo(surface: SurfaceView) = videoSurface.detach(surface)
+
+	/**
+	 * Turns on the track at [index] in [PlayerState.textTracks], or turns
+	 * subtitles off when it is null.
+	 *
+	 * The groups are read from the controller — published state, always
+	 * propagated — and the choice is applied to the player, where a refused
+	 * session command cannot turn it into a silent no-op. See [VideoSurface].
+	 */
+	fun selectTextTrack(index: Int?) {
+		val groups = controller?.textGroups().orEmpty()
+		videoSurface.selectTextTrack(index?.let { groups.getOrNull(it) }?.mediaTrackGroup)
+	}
 
 	fun jumpTo(queueIndex: Int) {
 		controller?.seekTo(queueIndex, 0L)
@@ -255,9 +343,33 @@ class PlayerConnection @Inject constructor(
 				hasPrevious = controller.hasPreviousMediaItem(),
 				queue = items,
 				queueIndex = controller.currentMediaItemIndex,
+				textTracks = controller.textTracks(),
 			)
 		}
 	}
+
+	/**
+	 * One entry per subtitle group the player has resolved. Side-loaded tracks
+	 * only appear once the source has been prepared, so the picker fills in
+	 * shortly after playback starts rather than at the moment the item is
+	 * queued — which is why this is published state and not a one-shot query.
+	 */
+	private fun MediaController.textTracks(): List<TextTrack> =
+		textGroups().mapIndexed { index, group ->
+			val format = group.mediaTrackGroup.getFormat(0)
+			TextTrack(
+				index = index,
+				label = format.label ?: format.language ?: "Track ${index + 1}",
+				selected = group.isSelected,
+			)
+		}
+
+	/**
+	 * The subtitle groups, in the order the picker numbers them. Shared with
+	 * [selectTextTrack] so an index means the same thing to both.
+	 */
+	private fun MediaController.textGroups(): List<Tracks.Group> =
+		currentTracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
 
 	/**
 	 * Marks [ref] as awaited, with a watchdog: a load that neither succeeds nor

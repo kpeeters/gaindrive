@@ -367,6 +367,7 @@ private fun Song.toEntity(server: ServerId) = SongEntity(
 	sizeBytes = sizeBytes,
 	coverArtId = coverArt?.id,
 	starredAt = starredAt,
+	isVideo = isVideo,
 )
 
 private fun SongEntity.toDomain(): Song {
@@ -387,6 +388,11 @@ private fun SongEntity.toDomain(): Song {
 		sizeBytes = sizeBytes,
 		coverArt = coverArtId?.let { ItemRef(server, it) },
 		starredAt = starredAt,
+		isVideo = isVideo,
+		// Left at its default: the mirror does not store it, and false is the
+		// answer that still plays — HLS works for every video, it is merely
+		// more work for the server than a file that could have been ranged.
+		nativeSeek = false,
 	)
 }
 

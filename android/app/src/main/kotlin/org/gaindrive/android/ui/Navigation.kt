@@ -68,6 +68,17 @@ sealed interface Route {
 	/** Null [serverId] means "add a server" — the same screen serves both. */
 	@Serializable
 	data class ServerEdit(val serverId: String? = null) : Route
+
+	/**
+	 * The picture for whatever video is currently playing.
+	 *
+	 * Carries no argument: the surface shows what the player is playing, and an
+	 * id here could disagree with that the moment the queue advances. Leaving
+	 * the screen does not stop playback — the sound continues and the
+	 * mini-player takes over.
+	 */
+	@Serializable
+	data object Video : Route
 }
 
 /** The bottom navigation destinations, in bar order. */

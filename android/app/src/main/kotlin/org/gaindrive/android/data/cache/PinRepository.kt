@@ -255,16 +255,27 @@ class PinRepository @Inject constructor(
 	private suspend fun computeCoverage(pins: List<Pin>): PinCoverage = expandPins(
 		pins = pins,
 		albumSongs = pins.filter { it.kind == PinKind.ALBUM }
-			.associate { it.ref to local.songsOfAlbum(it.ref).map(Song::ref) },
+			.associate { it.ref to local.songsOfAlbum(it.ref).downloadable().map(Song::ref) },
 		playlistSongs = pins.filter { it.kind == PinKind.PLAYLIST }
-			.associate { it.ref to local.songsOfPlaylist(it.ref).map(Song::ref) },
+			.associate { it.ref to local.songsOfPlaylist(it.ref).downloadable().map(Song::ref) },
 	)
 
 	private suspend fun songsFor(pin: Pin): List<Song> = when (pin.kind) {
 		PinKind.SONG -> listOfNotNull(local.song(pin.ref))
 		PinKind.ALBUM -> local.songsOfAlbum(pin.ref)
 		PinKind.PLAYLIST -> local.songsOfPlaylist(pin.ref)
-	}
+	}.downloadable()
+
+	/**
+	 * Videos are never stored, so they are never part of what a pin covers.
+	 *
+	 * Left in, an album pin over a film folder could never complete: a video the
+	 * server can only re-encode has no `Content-Length`, so nothing downstream
+	 * can decide the copy is whole. The individual action is hidden for the same
+	 * reason (see `TrackActionsSheet`); this is the collection case, where the
+	 * video is incidental and the rest of the album should still download.
+	 */
+	private fun List<Song>.downloadable(): List<Song> = filterNot { it.isVideo }
 
 	private suspend fun enqueue(songs: List<Song>) {
 		songs.forEach { song ->

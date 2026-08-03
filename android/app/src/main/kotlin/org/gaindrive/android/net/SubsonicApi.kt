@@ -57,6 +57,20 @@ interface SubsonicApi {
 	@GET("rest/getAlbumInfo2.view")
 	suspend fun getAlbumInfo2(@Query("id") id: String): SubsonicEnvelope<GetAlbumInfoBody>
 
+	// ── Video ───────────────────────────────────────────────────────────
+
+	/**
+	 * The subtitle and audio streams inside one video.
+	 *
+	 * The server runs `ffprobe` on every call rather than answering from the
+	 * scan, so this is slower than it looks — call it once per video load, not
+	 * per listing. `getCaptions` is not here: it returns raw WebVTT rather than
+	 * a Subsonic envelope, and its URL is handed to the player rather than
+	 * fetched by the app.
+	 */
+	@GET("rest/getVideoInfo.view")
+	suspend fun getVideoInfo(@Query("id") id: String): SubsonicEnvelope<GetVideoInfoBody>
+
 	// ── Searching ───────────────────────────────────────────────────────
 
 	@GET("rest/search3.view")

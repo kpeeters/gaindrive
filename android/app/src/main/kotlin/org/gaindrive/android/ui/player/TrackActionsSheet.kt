@@ -133,13 +133,19 @@ fun TrackActionsSheet(
 				) {
 					picking = true
 				}
-				val status = pinStatuses[song.ref.encode()]
-				SheetAction(
-					leading = { DownloadIndicator(status) },
-					label = downloadActionLabel(status),
-				) {
-					pins.toggle(song.ref, PinKind.SONG)
-					onDismiss()
+				// No download for video. The byte cache is sized for tracks, and
+				// a video the server can only re-encode arrives with no
+				// Content-Length, so nothing could ever call the copy complete
+				// — the row would sit at "downloading" for good.
+				if (!song.isVideo) {
+					val status = pinStatuses[song.ref.encode()]
+					SheetAction(
+						leading = { DownloadIndicator(status) },
+						label = downloadActionLabel(status),
+					) {
+						pins.toggle(song.ref, PinKind.SONG)
+						onDismiss()
+					}
 				}
 			}
 		}

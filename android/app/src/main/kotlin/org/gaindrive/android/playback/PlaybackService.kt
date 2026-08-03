@@ -6,7 +6,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
@@ -22,9 +21,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import org.gaindrive.android.data.CaptionTracks
 import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.StreamUrls
 import org.gaindrive.android.data.cache.AudioCache
+import org.gaindrive.android.data.local.LocalLibrary
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.playback.cast.CastBridge
 import org.gaindrive.android.playback.cast.CastPlayer
@@ -67,6 +68,15 @@ class PlaybackService : MediaLibraryService() {
 	@Inject
 	lateinit var castBridge: CastBridge
 
+	@Inject
+	lateinit var videoSurface: VideoSurface
+
+	@Inject
+	lateinit var local: LocalLibrary
+
+	@Inject
+	lateinit var captions: CaptionTracks
+
 	private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
 	private var session: MediaLibrarySession? = null
@@ -84,13 +94,17 @@ class PlaybackService : MediaLibraryService() {
 	override fun onCreate() {
 		super.onCreate()
 
+		// Streams go through the same OkHttp as everything else, so the
+		// connection pool is shared; AudioCache then wraps it so playing a
+		// track also stores it, and a stored track plays with no network.
+		// Video takes the unwrapped one — see GainDriveMediaSourceFactory.
+		val network = OkHttpDataSource.Factory(httpClient)
+
 		val player = ExoPlayer.Builder(this)
-			// Streams go through the same OkHttp as everything else, so the
-			// connection pool is shared; AudioCache then wraps it so playing a
-			// track also stores it, and a stored track plays with no network.
 			.setMediaSourceFactory(
-				DefaultMediaSourceFactory(
-					audioCache.dataSourceFactory(OkHttpDataSource.Factory(httpClient))
+				GainDriveMediaSourceFactory(
+					cached = audioCache.dataSourceFactory(network),
+					direct = network,
 				)
 			)
 			// Media3 then handles audio focus and ducking for us.
@@ -101,6 +115,8 @@ class PlaybackService : MediaLibraryService() {
 		localPlayer = player
 		attachListeners(player)
 		startScrobbleWatcher()
+		// The video screen may already be waiting for this; see VideoSurface.
+		videoSurface.registerPlayer(player)
 
 		session = MediaLibrarySession.Builder(this, player, LibraryCallback()).build()
 		watchCastDevice()
@@ -219,7 +235,12 @@ class PlaybackService : MediaLibraryService() {
 			val player = activePlayer ?: return
 			val index = player.nextMediaItemIndex
 			if (index == C.INDEX_UNSET) return
-			val next = player.getMediaItemAt(index).itemRef() ?: return
+			val item = player.getMediaItemAt(index)
+			// Not for video. The prewarmer builds an *audio* stream URL, so it
+			// would ask the server to encode a film's soundtrack to Opus —
+			// minutes of ffmpeg for bytes nothing will ever read.
+			if (item.isVideo()) return
+			val next = item.itemRef() ?: return
 			scope.launch { prewarm.warm(next) }
 		}
 	}
@@ -270,6 +291,7 @@ class PlaybackService : MediaLibraryService() {
 		// and the other would leak its listener and its coroutine.
 		castPlayer?.release()
 		castPlayer = null
+		videoSurface.registerPlayer(null)
 		localPlayer?.release()
 		localPlayer = null
 		scope.cancel()
@@ -306,17 +328,56 @@ class PlaybackService : MediaLibraryService() {
 		): ListenableFuture<MutableList<MediaItem>> = scope.future {
 			mediaItems.mapNotNull { item ->
 				val ref = item.itemRef() ?: return@mapNotNull null
-				val target = streamUrls.forPlayback(ref) ?: return@mapNotNull null
-				item.buildUpon()
-					.setUri(target.url)
-					.setCustomCacheKey(target.cacheKey)
-					// Set after the URI: it applies to the LocalConfiguration,
-					// which only exists once there is one. Null for the
-					// original, where sniffing is the only honest answer.
-					.setMimeType(target.mimeType)
-					.build()
+				if (isVideo(item, ref)) resolveVideo(item, ref) else resolveAudio(item, ref)
 			}.toMutableList()
 		}
+
+		private suspend fun resolveAudio(item: MediaItem, ref: ItemRef): MediaItem? {
+			val target = streamUrls.forPlayback(ref) ?: return null
+			return item.buildUpon()
+				.setUri(target.url)
+				.setCustomCacheKey(target.cacheKey)
+				// Set after the URI: it applies to the LocalConfiguration,
+				// which only exists once there is one. Null for the
+				// original, where sniffing is the only honest answer.
+				.setMimeType(target.mimeType)
+				.build()
+		}
+
+		/**
+		 * No cache key, because video never enters the byte cache — see
+		 * [GainDriveMediaSourceFactory], which reads the same flag to decide
+		 * which data source the item loads through.
+		 *
+		 * Subtitles are attached here rather than later because a
+		 * `SubtitleConfiguration` is part of the item ExoPlayer prepares, and
+		 * adding one afterwards means preparing the source again. The lookup
+		 * costs one `getVideoInfo`, in which the server runs `ffprobe`, so it
+		 * is allowed to fail quietly: a film with no captions is a film, a film
+		 * that would not load is not.
+		 */
+		private suspend fun resolveVideo(item: MediaItem, ref: ItemRef): MediaItem? {
+			val target = streamUrls.forVideo(ref, item.nativeSeek()) ?: return null
+			// Marked before it goes out, so a restored item carries the answer
+			// the mirror just gave: GainDriveMediaSourceFactory reads the same
+			// flag to keep this off the byte cache, and the UI reads it to
+			// offer a picture.
+			return item.markedAsVideo().buildUpon()
+				.setUri(target.url)
+				.setMimeType(target.mimeType)
+				.setSubtitleConfigurations(captions.configurationsFor(ref))
+				.build()
+		}
+
+		/**
+		 * Items the system restored after process death carry only a media id,
+		 * so the extra that would answer this is gone. Falling back to audio
+		 * would resolve a film to `format=opus` and play its soundtrack under a
+		 * black screen — the exact failure video support exists to remove — so
+		 * the mirror is consulted instead. A local read, no network.
+		 */
+		private suspend fun isVideo(item: MediaItem, ref: ItemRef): Boolean =
+			item.isVideoOrNull() ?: local.song(ref)?.isVideo ?: false
 
 		// ── Browsable tree: stubbed ─────────────────────────────────────
 		//

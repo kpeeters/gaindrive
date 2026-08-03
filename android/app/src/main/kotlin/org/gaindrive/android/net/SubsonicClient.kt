@@ -20,9 +20,18 @@ class SubsonicClient(
 	 * Builds a URL for an endpoint fetched by something other than Retrofit.
 	 * Carries the same auth parameters the interceptor would have added — this
 	 * is the one place they are constructed by hand.
+	 *
+	 * [suffix] exists for `hls.m3u8`, the one endpoint in the API that is not
+	 * spelled `<name>.view`. Passing an empty string leaves the endpoint name
+	 * alone; ExoPlayer also infers HLS from that trailing `.m3u8`, which is a
+	 * happy accident rather than something to rely on.
 	 */
-	fun url(endpoint: String, params: Map<String, String> = emptyMap()): String {
-		val base = "$baseUrl/rest/$endpoint.view".toHttpUrlOrNull()
+	fun url(
+		endpoint: String,
+		params: Map<String, String> = emptyMap(),
+		suffix: String = ".view",
+	): String {
+		val base = "$baseUrl/rest/$endpoint$suffix".toHttpUrlOrNull()
 			?: error("Server URL is not a valid HTTP URL: $baseUrl")
 		val builder = base.newBuilder()
 		params.forEach { (k, v) -> builder.addQueryParameter(k, v) }

@@ -1,6 +1,7 @@
 package org.gaindrive.android.playback
 
 import android.net.Uri
+import android.os.Bundle
 import androidx.core.os.bundleOf
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -23,6 +24,20 @@ private const val KEY_ALBUM_REF = "org.gaindrive.albumRef"
  * refusal to start. Every transcoded quality knows its own MIME already.
  */
 private const val KEY_CONTENT_TYPE = "org.gaindrive.contentType"
+
+/**
+ * Whether this entry is a video, and if so what the server said about seeking
+ * it and how big its frame is.
+ *
+ * Carried on the item because three separate decisions need it before anything
+ * has been fetched: which stream URL to build, whether the source may go
+ * through the byte cache, and whether the UI should offer a picture at all.
+ * The seek flag rides along so the service does not have to fetch the song
+ * again to learn something the browse response already told it.
+ */
+private const val KEY_IS_VIDEO = "org.gaindrive.isVideo"
+private const val KEY_NATIVE_SEEK = "org.gaindrive.nativeSeek"
+private const val KEY_ASPECT = "org.gaindrive.aspect"
 
 /**
  * Song ↔ MediaItem. The `mediaId` carries the encoded [ItemRef], because it is
@@ -50,6 +65,12 @@ fun Song.toMediaItem(artworkUrl: String?): MediaItem {
 			bundleOf(
 				KEY_ALBUM_REF to albumRef?.encode(),
 				KEY_CONTENT_TYPE to contentType,
+				KEY_IS_VIDEO to isVideo,
+				KEY_NATIVE_SEEK to nativeSeek,
+				// 0 rather than null: a Bundle float has no absent value, and
+				// the reader treats anything non-positive as "not known yet",
+				// which is also what an unprobed video gives.
+				KEY_ASPECT to (aspectRatio ?: 0f),
 			)
 		)
 		.build()
@@ -71,6 +92,52 @@ fun MediaItem.itemRef(): ItemRef? = ItemRef.decode(mediaId)
 fun MediaItem.sourceContentType(): String? =
 	mediaMetadata.extras?.getString(KEY_CONTENT_TYPE)
 
+/**
+ * Whether this item is a video, or null when the item carries no extras at all
+ * — a queue the system restored from bare media ids after process death.
+ *
+ * Null is not false, and the difference matters: resolving a video as audio
+ * gets the soundtrack alone, so the caller has to go and find out rather than
+ * assume. [PlaybackService] asks the local mirror.
+ */
+fun MediaItem.isVideoOrNull(): Boolean? =
+	// containsKey rather than the Bundle's own default: a queue saved by a
+	// build that predates video has extras, just not this one, and reading
+	// `false` there would call a film audio instead of going to look.
+	mediaMetadata.extras
+		?.takeIf { it.containsKey(KEY_IS_VIDEO) }
+		?.getBoolean(KEY_IS_VIDEO)
+
+/** False for anything whose video-ness is not known here; see [isVideoOrNull]. */
+fun MediaItem.isVideo(): Boolean = isVideoOrNull() == true
+
+fun MediaItem.nativeSeek(): Boolean =
+	mediaMetadata.extras?.getBoolean(KEY_NATIVE_SEEK) == true
+
+/** The frame's aspect as the server reported it, or null if it never did. */
+fun MediaItem.aspectRatio(): Float? =
+	mediaMetadata.extras?.getFloat(KEY_ASPECT)?.takeIf { it > 0f }
+
+/**
+ * The same item, now saying it is a video.
+ *
+ * For the queue the system restored from bare media ids: the service works out
+ * what such an item is by asking the mirror, and everything downstream — which
+ * data source loads it, whether the UI offers a picture — reads the flag off
+ * the item rather than repeating that lookup. Without this the answer would be
+ * found once and then thrown away.
+ */
+fun MediaItem.markedAsVideo(): MediaItem {
+	// Copied rather than mutated: MediaMetadata hands out its own Bundle, and
+	// writing into it would edit an item other code may already be holding.
+	val extras = Bundle(mediaMetadata.extras ?: Bundle()).apply {
+		putBoolean(KEY_IS_VIDEO, true)
+	}
+	return buildUpon()
+		.setMediaMetadata(mediaMetadata.buildUpon().setExtras(extras).build())
+		.build()
+}
+
 /** What the player UI needs to render one queue entry. */
 data class NowPlaying(
 	val ref: ItemRef?,
@@ -84,6 +151,10 @@ data class NowPlaying(
 	 */
 	val albumRef: ItemRef?,
 	val artworkUrl: String?,
+	/** Drives whether the UI offers a picture; see [isVideoOrNull]. */
+	val isVideo: Boolean = false,
+	/** The server's figure, used to shape the surface before the first frame. */
+	val aspectRatio: Float? = null,
 )
 
 fun MediaItem.toNowPlaying(): NowPlaying = NowPlaying(
@@ -93,4 +164,6 @@ fun MediaItem.toNowPlaying(): NowPlaying = NowPlaying(
 	album = mediaMetadata.albumTitle?.toString().orEmpty(),
 	albumRef = mediaMetadata.extras?.getString(KEY_ALBUM_REF)?.let { ItemRef.decode(it) },
 	artworkUrl = mediaMetadata.artworkUri?.toString(),
+	isVideo = isVideo(),
+	aspectRatio = aspectRatio(),
 )

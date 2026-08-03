@@ -81,8 +81,26 @@ data class Song(
 	val starredAt: String?,
 	/** Only populated by the recents query. */
 	val lastPlayedAt: String? = null,
+	val isVideo: Boolean = false,
+	/**
+	 * Whether the stream this song would produce can be seeked by byte range.
+	 * False for a video the server can only re-encode on the fly, which is what
+	 * sends playback to `hls.m3u8` instead. Meaningless for audio.
+	 */
+	val nativeSeek: Boolean = false,
+	/** Video frame size, when the server could probe it. */
+	val width: Int? = null,
+	val height: Int? = null,
 ) {
 	val isStarred: Boolean get() = starredAt != null
+
+	/** The frame's aspect, or null when the dimensions are unknown. */
+	val aspectRatio: Float?
+		get() = if (width != null && height != null && width > 0 && height > 0) {
+			width.toFloat() / height.toFloat()
+		} else {
+			null
+		}
 }
 
 data class Playlist(

@@ -9,6 +9,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -210,5 +211,61 @@ class BrowseApiTest {
 	fun `star returns a bare ok`() = runTest {
 		respond("""{"subsonic-response":{"status":"ok"}}""")
 		assertEquals("ok", api.star("501", null, null).requireOk().status)
+	}
+
+	// ── Video ───────────────────────────────────────────────────────────
+
+	@Test
+	fun `a video entry carries its video fields`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"ok","album":{"id":"9",
+			   "name":"The Third Man (1949)","songCount":1,"duration":6240,
+			   "song":[{"id":"900","title":"The Third Man","isDir":false,
+			     "type":"video","isVideo":true,"nativeSeek":true,
+			     "suffix":"mp4","contentType":"video/mp4","duration":6240,
+			     "originalWidth":1920,"originalHeight":1080}]}}}"""
+		)
+		val entry = api.getAlbum("9").requireOk().album!!.song[0]
+		assertTrue(entry.isVideo)
+		assertTrue(entry.nativeSeek)
+		assertEquals(1920, entry.originalWidth)
+	}
+
+	/**
+	 * Only four server queries select the codec columns `nativeSeek` is derived
+	 * from, so a video reached through search or a playlist arrives without it.
+	 * False is the safe reading — such a video is played over HLS, which works
+	 * for everything — and the parser must produce that rather than a default
+	 * of true.
+	 */
+	@Test
+	fun `a video without nativeSeek defaults to false`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"ok","searchResult3":{"song":[
+			   {"id":"900","title":"The Third Man","isVideo":true}]}}}"""
+		)
+		val song = api.search3("third", 0, 0, 20).requireOk().searchResult3!!.song[0]
+		assertTrue(song.isVideo)
+		assertFalse(song.nativeSeek)
+	}
+
+	@Test
+	fun `getVideoInfo parses the caption list`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"ok","videoInfo":{"id":"900",
+			   "captions":[{"id":"2","name":"English"},{"id":"3","name":"Dutch"}],
+			   "audioTrack":[{"id":"1","name":"aac","languageCode":"eng"}]}}}"""
+		)
+		val info = api.getVideoInfo("900").requireOk().videoInfo!!
+		assertEquals(2, info.captions.size)
+		assertEquals("English", info.captions[0].name)
+		assertEquals("2", info.captions[0].id)
+	}
+
+	/** A DVD's subtitles are bitmaps, so the server filters them all out. */
+	@Test
+	fun `getVideoInfo with no captions parses to an empty list`() = runTest {
+		respond("""{"subsonic-response":{"status":"ok","videoInfo":{"id":"900"}}}""")
+		assertTrue(api.getVideoInfo("900").requireOk().videoInfo!!.captions.isEmpty())
 	}
 }

@@ -1,5 +1,6 @@
 package org.gaindrive.android.ui
 
+import android.widget.Toast
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -16,12 +17,14 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination
@@ -43,6 +46,7 @@ import org.gaindrive.android.ui.player.CastViewModel
 import org.gaindrive.android.ui.player.MiniPlayer
 import org.gaindrive.android.ui.player.NowPlayingSheet
 import org.gaindrive.android.ui.player.PlayerViewModel
+import org.gaindrive.android.ui.player.VideoScreen
 import org.gaindrive.android.ui.playlists.PlaylistDetailScreen
 import org.gaindrive.android.ui.playlists.PlaylistsScreen
 import org.gaindrive.android.ui.recents.RecentsScreen
@@ -101,8 +105,36 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 	}
 
 	// The bar is for switching top-level sections; it has no meaning on a
-	// form that the user is expected to finish or cancel.
-	val showBottomBar = destination?.hasRoute(Route.ServerEdit::class) != true
+	// form that the user is expected to finish or cancel, nor over a picture
+	// that wants the whole screen.
+	val showBottomBar = destination?.hasRoute(Route.ServerEdit::class) != true &&
+		destination?.hasRoute(Route.Video::class) != true
+
+	// A refusal — today only "video cannot be cast" — outlives the sheet or row
+	// the tap came from, so it is shown from the shell rather than from there.
+	val playerMessage by playerViewModel.message.collectAsStateWithLifecycle()
+	val context = LocalContext.current
+	LaunchedEffect(playerMessage) {
+		playerMessage?.let {
+			Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+			playerViewModel.consumeMessage()
+		}
+	}
+
+	// Sends the user to the picture when what starts playing is a video.
+	//
+	// Keyed on the item rather than done at the tap, so it covers a video
+	// reached by the queue advancing as well as one reached from a list, and so
+	// it lives in one place instead of in every browse screen's row handler.
+	// Because it keys on the item, backing out to carry on browsing while the
+	// sound plays does not bounce the user straight back in.
+	val currentRef = playerState.current?.ref
+	LaunchedEffect(currentRef, playerState.isVideo) {
+		if (currentRef == null || !playerState.isVideo) return@LaunchedEffect
+		if (destination?.hasRoute(Route.Video::class) == true) return@LaunchedEffect
+		nowPlayingOpen = false
+		navController.navigate(Route.Video)
+	}
 
 	Scaffold(
 		bottomBar = {
@@ -120,7 +152,16 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 					// footer does.
 					MiniPlayer(
 						state = playerState,
-						onExpand = { nowPlayingOpen = true },
+						// A film's bar leads back to the film. Opening the
+						// audio-shaped sheet instead would make the user find
+						// the way back to the picture from inside it.
+						onExpand = {
+							if (playerState.isVideo) {
+								navController.navigate(Route.Video)
+							} else {
+								nowPlayingOpen = true
+							}
+						},
 						onTogglePlay = playerViewModel::togglePlayPause,
 						onNext = playerViewModel::next,
 					)
@@ -289,6 +330,10 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 			composable<Route.ServerEdit> {
 				ServerEditScreen(onDone = { navController.popBackStack() })
 			}
+
+			composable<Route.Video> {
+				VideoScreen(onBack = { navController.popBackStack() })
+			}
 		}
 	}
 
@@ -313,6 +358,10 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 			onJumpTo = playerViewModel::jumpTo,
 			onCast = { castPickerOpen = true },
 			onRemoveFromQueue = playerViewModel::removeFromQueue,
+			onWatch = {
+				nowPlayingOpen = false
+				navController.navigate(Route.Video)
+			},
 		)
 	}
 
@@ -333,6 +382,9 @@ private fun NavDestination?.isDetail(): Boolean =
 			hasRoute(Route.Album::class) ||
 			hasRoute(Route.Playlist::class) ||
 			hasRoute(Route.ServerEdit::class) ||
+			// Listed so back and the tap-the-current-tab gesture shed it like
+			// any other drill-down; leaving it does not stop the film.
+			hasRoute(Route.Video::class) ||
 			// The settings categories drill down like anything else, and being
 			// listed here is also what makes tapping the Settings tab shed them.
 			hasRoute(Route.SettingsServers::class) ||

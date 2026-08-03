@@ -1,6 +1,8 @@
 package org.gaindrive.android.ui.player
 
+import android.view.SurfaceView
 import androidx.lifecycle.ViewModel
+import androidx.media3.ui.SubtitleView
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.StateFlow
 import org.gaindrive.android.data.model.Song
@@ -19,6 +21,12 @@ class PlayerViewModel @Inject constructor(
 ) : ViewModel() {
 
 	val state: StateFlow<PlayerState> = player.state
+
+	val videoAspectRatio: StateFlow<Float?> = player.videoAspectRatio
+
+	val message: StateFlow<String?> = player.message
+
+	fun consumeMessage() = player.consumeMessage()
 
 	init {
 		// Binding early means the bar can restore an already-playing session
@@ -45,4 +53,11 @@ class PlayerViewModel @Inject constructor(
 	fun previous() { player.previous() }
 	fun seekTo(positionMs: Long) { player.seekTo(positionMs) }
 	fun jumpTo(index: Int) = player.jumpTo(index)
+
+	fun attachVideo(surface: SurfaceView, subtitles: SubtitleView) =
+		player.attachVideo(surface, subtitles)
+
+	fun detachVideo(surface: SurfaceView) = player.detachVideo(surface)
+
+	fun selectTextTrack(index: Int?) = player.selectTextTrack(index)
 }

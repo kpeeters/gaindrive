@@ -66,6 +66,16 @@ data class SongEntity(
 	val sizeBytes: Long,
 	val coverArtId: String?,
 	val starredAt: String?,
+	/**
+	 * Stored so a listing read from the mirror still marks its videos, and so
+	 * the service can tell what a queue entry is after process death has taken
+	 * the metadata extras with it.
+	 *
+	 * `nativeSeek` and the frame size are deliberately not mirrored: they only
+	 * matter once a stream URL is being built, and no video can be played
+	 * without the network anyway.
+	 */
+	val isVideo: Boolean = false,
 )
 
 @Entity(tableName = "playlists", primaryKeys = ["serverId", "id"])

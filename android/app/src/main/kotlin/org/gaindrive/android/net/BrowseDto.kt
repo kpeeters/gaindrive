@@ -71,6 +71,26 @@ data class SongDto(
 	val transcodedBitRate: Int? = null,
 	/** Only present in `getRecentSongs`; a gaindrive extension. */
 	val lastPlayed: String? = null,
+
+	// ── Video ───────────────────────────────────────────────────────────
+	//
+	// The server derives isVideo from the file extension, so it is right on
+	// every endpoint. nativeSeek is not: only getVideos, getMusicDirectory,
+	// getAlbum and getSong select the codec columns it is computed from, and
+	// everywhere else it comes back false. That is the safe direction — such a
+	// video plays and seeks, just over HLS when it need not have — so the flag
+	// is trusted as given rather than second-guessed.
+
+	val isVideo: Boolean = false,
+	/**
+	 * gaindrive extension: whether the stream this entry would produce carries
+	 * a Content-Length and answers Range requests. False means the server can
+	 * only re-encode it on the fly, which is chunked and unseekable.
+	 */
+	val nativeSeek: Boolean = false,
+	/** Both omitted when the scan could not probe the file. */
+	val originalWidth: Int? = null,
+	val originalHeight: Int? = null,
 )
 
 @Serializable
@@ -192,6 +212,33 @@ data class GetArtistInfoBody(
 	override val status: String = "failed",
 	override val error: SubsonicError? = null,
 	val artistInfo2: ArtistInfoDto? = null,
+) : SubsonicBody
+
+/**
+ * One selectable subtitle stream. [id] is the ffprobe stream index, which is
+ * what `getCaptions` expects back as `captionId`; [name] is the stream's title,
+ * falling back to its language.
+ *
+ * Expect an empty list for a DVD: its subtitles are bitmaps, and the server
+ * filters those out rather than offer tracks that could never become WebVTT.
+ */
+@Serializable
+data class CaptionDto(
+	val id: String = "",
+	val name: String = "",
+)
+
+@Serializable
+data class VideoInfoDto(
+	val id: String = "",
+	val captions: List<CaptionDto> = emptyList(),
+)
+
+@Serializable
+data class GetVideoInfoBody(
+	override val status: String = "failed",
+	override val error: SubsonicError? = null,
+	val videoInfo: VideoInfoDto? = null,
 ) : SubsonicBody
 
 @Serializable

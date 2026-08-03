@@ -1,0 +1,370 @@
+package org.gaindrive.android.ui.player
+
+import android.view.SurfaceView
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.ui.SubtitleView
+import kotlinx.coroutines.delay
+import org.gaindrive.android.playback.PlayerState
+
+/**
+ * The picture, and controls over it.
+ *
+ * Deliberately not media3's `PlayerView`. Its controls are its own, not
+ * Material 3, and they would be the one part of the app that does not look like
+ * the rest; the pieces actually needed here — a surface, a subtitle view and a
+ * scrub bar — are three composables and the [SeekBar] already existed.
+ *
+ * Backing out does not stop playback: the surface detaches, the sound carries
+ * on, and the mini-player offers the way back in. That is the choice made for
+ * concert recordings, which are listened to as often as they are watched.
+ */
+@Composable
+fun VideoScreen(
+	onBack: () -> Unit,
+	viewModel: PlayerViewModel = hiltViewModel(),
+) {
+	val state by viewModel.state.collectAsStateWithLifecycle()
+	val decodedAspect by viewModel.videoAspectRatio.collectAsStateWithLifecycle()
+	val current = state.current
+
+	var controlsVisible by remember { mutableStateOf(true) }
+	// Bumped on every touch; the auto-hide effect restarts with it, so a tap
+	// during the countdown extends the reprieve rather than being ignored.
+	var interactionTick by remember { mutableIntStateOf(0) }
+
+	// Nothing to watch any more: the queue moved on to a track, or emptied.
+	// Staying would leave a black rectangle with an inert seek bar under it.
+	// Safe to fire on the first frame, because the only ways here are a video
+	// having just become current and the Watch button on a video.
+	LaunchedEffect(state.isVideo) {
+		if (!state.isVideo) onBack()
+	}
+
+	LaunchedEffect(interactionTick, state.isPlaying) {
+		// Controls over a paused picture are not in the way of anything, and
+		// hiding them would leave no visible way to resume.
+		if (!state.isPlaying) return@LaunchedEffect
+		delay(CONTROLS_TIMEOUT_MS)
+		controlsVisible = false
+	}
+
+	// The screen must not sleep while a film is on: nothing is touching it, so
+	// the system has no other reason to believe it is being watched. This is
+	// the one thing PlayerView would have done for us.
+	val view = LocalView.current
+	DisposableEffect(view) {
+		view.keepScreenOn = true
+		onDispose { view.keepScreenOn = false }
+	}
+
+	// Back is the same gesture as the button, and both mean "leave the picture",
+	// not "stop the film".
+	BackHandler(onBack = onBack)
+
+	Box(
+		modifier = Modifier
+			.fillMaxSize()
+			.background(Color.Black)
+			.clickable(
+				interactionSource = remember { MutableInteractionSource() },
+				// No ripple: this is the whole screen, and a ripple across the
+				// picture reads as a glitch rather than a response.
+				indication = null,
+			) {
+				controlsVisible = !controlsVisible
+				interactionTick++
+			},
+		contentAlignment = Alignment.Center,
+	) {
+		VideoOutput(
+			// The decoder's figure once it has one, the server's until then.
+			// Starting square and snapping is the thing this avoids.
+			aspectRatio = decodedAspect ?: current?.aspectRatio ?: DEFAULT_ASPECT,
+			onSurface = { surface, subtitles -> viewModel.attachVideo(surface, subtitles) },
+			onRelease = { surface -> viewModel.detachVideo(surface) },
+		)
+
+		// Over the picture rather than beside it: a video that has not started
+		// is a black rectangle, and nothing else says the app is still working.
+		if (state.isBuffering) {
+			CircularProgressIndicator(color = Color.White)
+		}
+
+		AnimatedVisibility(
+			visible = controlsVisible,
+			enter = fadeIn(),
+			exit = fadeOut(),
+			modifier = Modifier.fillMaxSize(),
+		) {
+			Controls(
+				title = current?.title.orEmpty(),
+				subtitle = listOf(current?.artist, current?.album)
+					.filterNot { it.isNullOrBlank() }
+					.joinToString(" · "),
+				state = state,
+				onBack = onBack,
+				onTogglePlay = {
+					viewModel.togglePlayPause()
+					interactionTick++
+				},
+				onNext = viewModel::next,
+				onPrevious = viewModel::previous,
+				onSeek = {
+					viewModel.seekTo(it)
+					interactionTick++
+				},
+				onSelectTextTrack = viewModel::selectTextTrack,
+			)
+		}
+	}
+}
+
+/**
+ * The surface and the subtitle view, held at the video's shape.
+ *
+ * Both are plain Android views inside one [AndroidView], because a
+ * [SurfaceView] has to be a real view for the decoder to render into and
+ * subtitle cues arrive as `Cue` objects that `SubtitleView` already knows how
+ * to lay out. The factory runs once — recreating a `SurfaceView` tears down and
+ * restarts the decoder's output, which shows as a black flash.
+ */
+@Composable
+private fun VideoOutput(
+	aspectRatio: Float,
+	onSurface: (SurfaceView, SubtitleView) -> Unit,
+	onRelease: (SurfaceView) -> Unit,
+) {
+	AndroidView(
+		modifier = Modifier
+			.fillMaxWidth()
+			.aspectRatio(aspectRatio),
+		factory = { context ->
+			val surface = SurfaceView(context)
+			val subtitles = SubtitleView(context)
+			FrameLayout(context).apply {
+				layoutParams = ViewGroup.LayoutParams(
+					ViewGroup.LayoutParams.MATCH_PARENT,
+					ViewGroup.LayoutParams.MATCH_PARENT,
+				)
+				addView(surface)
+				addView(subtitles)
+				// Tagged so onRelease can find the surface again without this
+				// composable holding a reference across recomposition.
+				tag = surface
+				onSurface(surface, subtitles)
+			}
+		},
+		onRelease = { container -> (container.tag as? SurfaceView)?.let(onRelease) },
+	)
+}
+
+@Composable
+private fun Controls(
+	title: String,
+	subtitle: String,
+	state: PlayerState,
+	onBack: () -> Unit,
+	onTogglePlay: () -> Unit,
+	onNext: () -> Unit,
+	onPrevious: () -> Unit,
+	onSeek: (Long) -> Unit,
+	onSelectTextTrack: (Int?) -> Unit,
+) {
+	Box(
+		modifier = Modifier
+			.fillMaxSize()
+			// Scrim so white controls stay readable over a bright frame.
+			.background(Color.Black.copy(alpha = CONTROLS_SCRIM)),
+	) {
+		Row(
+			modifier = Modifier
+				.align(Alignment.TopStart)
+				.fillMaxWidth()
+				.padding(horizontal = 4.dp),
+			verticalAlignment = Alignment.CenterVertically,
+		) {
+			IconButton(onClick = onBack) {
+				Icon(
+					Icons.AutoMirrored.Filled.ArrowBack,
+					contentDescription = "Back",
+					tint = Color.White,
+				)
+			}
+			Column(modifier = Modifier.weight(1f)) {
+				Text(
+					text = title,
+					style = MaterialTheme.typography.titleMedium,
+					color = Color.White,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis,
+				)
+				if (subtitle.isNotBlank()) {
+					Text(
+						text = subtitle,
+						style = MaterialTheme.typography.bodySmall,
+						color = Color.White.copy(alpha = 0.7f),
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+				}
+			}
+			// Absent rather than disabled when there is nothing to choose: a
+			// DVD's subtitles are bitmaps the server cannot convert, so an
+			// inert button would be a permanent fixture on every disc rip.
+			if (state.textTracks.isNotEmpty()) {
+				SubtitleMenu(state, onSelectTextTrack)
+			}
+		}
+
+		Column(
+			modifier = Modifier
+				.align(Alignment.BottomCenter)
+				.fillMaxWidth(),
+		) {
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.Center,
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				IconButton(onClick = onPrevious, enabled = state.hasPrevious) {
+					Icon(
+						Icons.Default.SkipPrevious,
+						contentDescription = "Previous",
+						tint = Color.White,
+						modifier = Modifier.size(36.dp),
+					)
+				}
+				IconButton(onClick = onTogglePlay) {
+					Icon(
+						imageVector = if (state.isPlaying) {
+							Icons.Default.Pause
+						} else {
+							Icons.Default.PlayArrow
+						},
+						contentDescription = if (state.isPlaying) "Pause" else "Play",
+						tint = Color.White,
+						modifier = Modifier.size(56.dp),
+					)
+				}
+				IconButton(onClick = onNext, enabled = state.hasNext) {
+					Icon(
+						Icons.Default.SkipNext,
+						contentDescription = "Next",
+						tint = Color.White,
+						modifier = Modifier.size(36.dp),
+					)
+				}
+			}
+			SeekBar(
+				state = state,
+				onSeek = onSeek,
+				modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+				textColor = Color.White,
+			)
+		}
+	}
+}
+
+@Composable
+private fun SubtitleMenu(
+	state: PlayerState,
+	onSelect: (Int?) -> Unit,
+) {
+	var open by remember { mutableStateOf(false) }
+	Box {
+		IconButton(onClick = { open = true }) {
+			Icon(
+				Icons.Default.ClosedCaption,
+				contentDescription = "Subtitles",
+				tint = if (state.textTracks.any { it.selected }) {
+					MaterialTheme.colorScheme.primary
+				} else {
+					Color.White
+				},
+			)
+		}
+		DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+			DropdownMenuItem(
+				text = { Text("Off") },
+				onClick = {
+					onSelect(null)
+					open = false
+				},
+			)
+			state.textTracks.forEach { track ->
+				DropdownMenuItem(
+					text = {
+						Text(
+							text = track.label,
+							color = if (track.selected) {
+								MaterialTheme.colorScheme.primary
+							} else {
+								MaterialTheme.colorScheme.onSurface
+							},
+						)
+					},
+					onClick = {
+						onSelect(track.index)
+						open = false
+					},
+				)
+			}
+		}
+	}
+}
+
+/** 16:9, until either the server or the decoder says otherwise. */
+private const val DEFAULT_ASPECT = 16f / 9f
+
+/** Long enough to read the title, short enough to get out of the way. */
+private const val CONTROLS_TIMEOUT_MS = 3_500L
+
+private const val CONTROLS_SCRIM = 0.4f

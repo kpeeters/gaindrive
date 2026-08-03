@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -245,6 +246,7 @@ fun TrackRow(
 			overflow = TextOverflow.Ellipsis,
 			modifier = Modifier.weight(1f),
 		)
+		VideoMark(song)
 		TrackDownloadMark(song.ref)
 		Text(
 			text = formatDuration(song.duration),
@@ -253,6 +255,24 @@ fun TrackRow(
 		)
 		trailing?.invoke()
 	}
+}
+
+/**
+ * Marks a row that will take over the screen when tapped.
+ *
+ * Videos sit in the same listings as tracks — a concert lives under its
+ * performer, a film is an album with one track — so without this the only
+ * warning is the film starting.
+ */
+@Composable
+private fun VideoMark(song: Song) {
+	if (!song.isVideo) return
+	Icon(
+		imageVector = Icons.Default.Movie,
+		contentDescription = "Video",
+		tint = MaterialTheme.colorScheme.onSurfaceVariant,
+		modifier = Modifier.size(16.dp),
+	)
 }
 
 /** A song shown outside its album, so it needs artist and album for context. */
@@ -322,6 +342,7 @@ fun SongRow(
 				overflow = TextOverflow.Ellipsis,
 			)
 		}
+		VideoMark(song)
 		TrackDownloadMark(song.ref)
 		ServerBadge(badge)
 		if (trailingText != null) {

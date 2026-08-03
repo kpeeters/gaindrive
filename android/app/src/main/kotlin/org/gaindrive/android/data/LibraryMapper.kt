@@ -88,6 +88,10 @@ fun SongDto.toDomain(server: ServerId) = Song(
 	coverArt = server.ref(coverArt),
 	starredAt = starred,
 	lastPlayedAt = lastPlayed,
+	isVideo = isVideo,
+	nativeSeek = nativeSeek,
+	width = originalWidth?.takeIf { it > 0 },
+	height = originalHeight?.takeIf { it > 0 },
 )
 
 fun PlaylistDto.toDomain(server: ServerId) = Playlist(

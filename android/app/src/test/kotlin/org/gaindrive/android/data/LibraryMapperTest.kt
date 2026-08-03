@@ -97,6 +97,48 @@ class LibraryMapperTest {
 		assertEquals(server, artist.coverArt?.server)
 	}
 
+	@Test
+	fun `video fields map through`() {
+		val video = SongDto(
+			id = "1",
+			title = "The Third Man",
+			isVideo = true,
+			nativeSeek = true,
+			originalWidth = 1920,
+			originalHeight = 1080,
+		).toDomain(server)
+
+		assertTrue(video.isVideo)
+		assertTrue(video.nativeSeek)
+		assertEquals(1920, video.width)
+		assertEquals(1080, video.height)
+		assertEquals(16f / 9f, video.aspectRatio!!, 0.001f)
+	}
+
+	/**
+	 * Every audio entry the server has ever sent lacks all four, and an
+	 * endpoint that omits `nativeSeek` for a video must not be read as
+	 * promising byte-range seeking it cannot do.
+	 */
+	@Test
+	fun `a song with no video fields is audio that cannot be range-seeked`() {
+		val song = SongDto(id = "1", title = "Peg").toDomain(server)
+		assertFalse(song.isVideo)
+		assertFalse(song.nativeSeek)
+		assertNull(song.width)
+		assertNull(song.height)
+		assertNull(song.aspectRatio)
+	}
+
+	/** Unprobed videos report zero, which is not a shape. */
+	@Test
+	fun `zero dimensions become null rather than an aspect of zero`() {
+		val video = SongDto(id = "1", title = "x", isVideo = true, originalWidth = 0)
+			.toDomain(server)
+		assertNull(video.width)
+		assertNull(video.aspectRatio)
+	}
+
 	/** Counts are derived when the server omits them, e.g. on search results. */
 	@Test
 	fun `song count falls back to the songs actually present`() {
