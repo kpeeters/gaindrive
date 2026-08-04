@@ -2,7 +2,6 @@ package org.gaindrive.android.net
 
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -25,10 +24,8 @@ class SubsonicApiTest {
 	private lateinit var server: MockWebServer
 	private lateinit var api: SubsonicApi
 
-	private val json = Json {
-		ignoreUnknownKeys = true
-		coerceInputValues = true
-	}
+	// The production parser, not a copy of its settings — see BrowseApiTest.
+	private val json = SubsonicJson
 
 	@Before
 	fun setUp() {

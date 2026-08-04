@@ -19,6 +19,7 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import org.gaindrive.android.BuildConfig
 import org.gaindrive.android.net.AuthInterceptor
+import org.gaindrive.android.net.SubsonicJson
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
@@ -26,16 +27,17 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object AppModule {
 
+	/**
+	 * One [Json] for the whole app, configured where the tests can reach it.
+	 *
+	 * Its settings are argued in `SubsonicJson`, because reading other people's
+	 * servers is the strictest constraint on it; the cast channel and the stored
+	 * server list also use it, and neither cares — leniency is a decoding
+	 * concession and what this app writes it also wrote.
+	 */
 	@Provides
 	@Singleton
-	fun json(): Json = Json {
-		// Servers add fields over time and OpenSubsonic extensions add more;
-		// an unknown key must never fail a response.
-		ignoreUnknownKeys = true
-		// Tolerates nulls where the DTO declares a non-null default, which
-		// some Subsonic implementations emit for absent values.
-		coerceInputValues = true
-	}
+	fun json(): Json = SubsonicJson
 
 	@Provides
 	@Singleton

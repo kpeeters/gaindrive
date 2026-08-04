@@ -2,7 +2,6 @@ package org.gaindrive.android.net
 
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -26,10 +25,10 @@ class BrowseApiTest {
 	private lateinit var server: MockWebServer
 	private lateinit var api: SubsonicApi
 
-	private val json = Json {
-		ignoreUnknownKeys = true
-		coerceInputValues = true
-	}
+	// The production parser, not a copy of its settings: a copy proves the DTOs
+	// match some configuration, which is exactly the gap a legacy server's
+	// unquoted ids slipped through.
+	private val json = SubsonicJson
 
 	@Before
 	fun setUp() {
@@ -211,6 +210,58 @@ class BrowseApiTest {
 	fun `star returns a bare ok`() = runTest {
 		respond("""{"subsonic-response":{"status":"ok"}}""")
 		assertEquals("ok", api.star("501", null, null).requireOk().status)
+	}
+
+	// ── Legacy servers ──────────────────────────────────────────────────
+	//
+	// gaindrive quotes every id, but Subsonic's own XSD types several of them
+	// as integers and older servers emit them unquoted. One such field used to
+	// fail the whole response, which surfaced as "Expected quotation mark but
+	// had '1'" the moment a legacy server was enabled — and the artist list
+	// went with it, because getMusicFolders is fetched first to learn which
+	// root kinds the server has.
+
+	@Test
+	fun `getMusicFolders accepts an unquoted id`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"ok","version":"1.16.1",
+			   "musicFolders":{"musicFolder":[{"id":1,"name":"Music"}]}}}"""
+		)
+		val folders = api.getMusicFolders().requireOk().musicFolders!!.musicFolder
+		assertEquals("1", folders[0].id)
+		// Absent, not empty: a server with no concept of root kinds must stay
+		// distinguishable from one that named them.
+		assertNull(folders[0].contentType)
+	}
+
+	@Test
+	fun `browse entries accept unquoted ids throughout`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"ok","album":{"id":77,"parent":12,
+			   "artistId":12,"name":"The Royal Scam","songCount":1,"song":[
+			     {"id":501,"parent":77,"albumId":77,"title":"Kid Charlemagne",
+			      "coverArt":77,"duration":279}]}}}"""
+		)
+		val album = api.getAlbum("77").requireOk().album!!
+		assertEquals("77", album.id)
+		assertEquals("12", album.artistId)
+		assertEquals("501", album.song[0].id)
+		assertEquals("77", album.song[0].coverArt)
+	}
+
+	/** The mirror image, for a server that quotes what the DTO calls a number. */
+	@Test
+	fun `numbers survive being quoted`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"ok","album":{"id":"77","name":"X",
+			   "songCount":"1","duration":"2340","song":[
+			     {"id":"501","title":"Peg","track":"3","bitRate":"961"}]}}}"""
+		)
+		val album = api.getAlbum("77").requireOk().album!!
+		assertEquals(1, album.songCount)
+		assertEquals(2340, album.duration)
+		assertEquals(3, album.song[0].track)
+		assertEquals(961, album.song[0].bitRate)
 	}
 
 	// ── Video ───────────────────────────────────────────────────────────
