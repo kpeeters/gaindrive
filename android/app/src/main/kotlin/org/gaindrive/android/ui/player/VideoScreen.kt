@@ -26,13 +26,16 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -74,6 +77,7 @@ fun VideoScreen(
 	val state by viewModel.state.collectAsStateWithLifecycle()
 	val decodedAspect by viewModel.videoAspectRatio.collectAsStateWithLifecycle()
 	val current = state.current
+	val error = state.error
 
 	var controlsVisible by remember { mutableStateOf(true) }
 	// Bumped on every touch; the auto-hide effect restarts with it, so a tap
@@ -134,8 +138,20 @@ fun VideoScreen(
 
 		// Over the picture rather than beside it: a video that has not started
 		// is a black rectangle, and nothing else says the app is still working.
-		if (state.isBuffering) {
-			CircularProgressIndicator(color = Color.White)
+		//
+		// The error takes precedence, because it is the answer to the question
+		// the spinner was posing. Anything that stalls long enough for the
+		// watchdog to give up ends here rather than spinning indefinitely.
+		when {
+			// Read once into a local: `state` comes from a delegate, so the
+			// compiler will not smart-cast a property reached through it.
+			error != null -> StalledNotice(
+				message = error,
+				onRetry = viewModel::retry,
+				onDismiss = viewModel::clearError,
+			)
+
+			state.isBuffering -> CircularProgressIndicator(color = Color.White)
 		}
 
 		AnimatedVisibility(
@@ -163,6 +179,38 @@ fun VideoScreen(
 				},
 				onSelectTextTrack = viewModel::selectTextTrack,
 			)
+		}
+	}
+}
+
+/**
+ * What replaces the spinner once the watchdog has given up.
+ *
+ * Over the picture rather than in place of it: the surface must not be torn
+ * down, or a retry would restart the decoder's output from nothing.
+ */
+@Composable
+private fun StalledNotice(message: String, onRetry: () -> Unit, onDismiss: () -> Unit) {
+	Surface(
+		color = Color.Black.copy(alpha = 0.8f),
+		shape = MaterialTheme.shapes.medium,
+	) {
+		Column(
+			modifier = Modifier.padding(24.dp),
+			horizontalAlignment = Alignment.CenterHorizontally,
+			verticalArrangement = Arrangement.spacedBy(8.dp),
+		) {
+			Text(
+				text = message,
+				style = MaterialTheme.typography.bodyMedium,
+				color = Color.White,
+			)
+			Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+				TextButton(onClick = onDismiss) { Text("Dismiss") }
+				// Picks up where it stopped: stop() keeps the queue and the
+				// position, so there is nothing to rebuild.
+				Button(onClick = onRetry) { Text("Retry") }
+			}
 		}
 	}
 }

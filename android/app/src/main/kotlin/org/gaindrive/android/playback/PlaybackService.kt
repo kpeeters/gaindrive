@@ -72,6 +72,9 @@ class PlaybackService : MediaLibraryService() {
 	lateinit var videoSurface: VideoSurface
 
 	@Inject
+	lateinit var watchdog: PlaybackWatchdog
+
+	@Inject
 	lateinit var local: LocalLibrary
 
 	@Inject
@@ -117,6 +120,9 @@ class PlaybackService : MediaLibraryService() {
 		startScrobbleWatcher()
 		// The video screen may already be waiting for this; see VideoSurface.
 		videoSurface.registerPlayer(player)
+		// Only the local player can stall on a stream — the Chromecast fetches
+		// its own, and nothing here would see it.
+		watchdog.registerPlayer(player)
 
 		session = MediaLibrarySession.Builder(this, player, LibraryCallback()).build()
 		watchCastDevice()
@@ -292,6 +298,7 @@ class PlaybackService : MediaLibraryService() {
 		castPlayer?.release()
 		castPlayer = null
 		videoSurface.registerPlayer(null)
+		watchdog.registerPlayer(null)
 		localPlayer?.release()
 		localPlayer = null
 		scope.cancel()

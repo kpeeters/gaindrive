@@ -479,6 +479,29 @@ std::vector<std::string> Streamer::video_ffmpeg_argv(
 		a.push_back("1");
 		}
 
+	// An HLS segment must carry the timestamps its position in the playlist
+	// claims.  -ss before -i rebases the output, so without this every segment
+	// starts at PTS 0 while the playlist says segment 190 belongs at 1900s.  A
+	// player seeds its timestamp adjuster from the first segment it loads and
+	// reuses it for the rest, so the second segment maps to the same instant as
+	// the first and the timeline simply stops advancing — the stream stalls
+	// with no error, because bytes are still arriving and nothing has failed.
+	//
+	// NOT -copyts, which is the more accurate answer: it keeps the input's own
+	// timestamps, so a keyframe at 1897 stays at 1897 rather than being labelled
+	// 1900.  But -t is measured from zero unless -start_at_zero is also given,
+	// so with absolute timestamps ffmpeg sees a first packet far beyond the
+	// requested 10 seconds and writes an empty segment.  -output_ts_offset is
+	// applied by the muxer, after -t has already done its work.
+	//
+	// Segments only.  A bare timeOffset with no duration is the progressive
+	// tier-2 path, where web/app.js adds player.localOffset back itself and
+	// therefore needs the stream to start at zero.
+	if (mpegts && time_offset > 0) {
+		a.push_back("-output_ts_offset");
+		a.push_back(std::to_string(time_offset));
+		}
+
 	a.push_back("-f");
 	if (mpegts)
 		a.push_back("mpegts");

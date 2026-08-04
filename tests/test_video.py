@@ -13,6 +13,8 @@ Then run:
 """
 
 import json
+import shutil
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -214,6 +216,52 @@ def test_hls_segments_resolve():
     print("PASS  first, middle and last HLS segments all transcode")
 
 
+def test_hls_segments_carry_absolute_timestamps():
+    """Each segment must be stamped where the playlist says it belongs.
+
+    -ss before -i rebases the output, so without -output_ts_offset every
+    segment starts at PTS 0.  A player seeds its timestamp adjuster from the
+    first segment it loads and reuses it, so the second maps to the same
+    instant as the first and the timeline stops advancing — playback stalls
+    with no error at all, because bytes keep arriving and nothing has failed.
+    """
+    _need_video()
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        print("SKIP  ffprobe not on PATH")
+        return
+
+    _, _, body = _raw("hls.m3u8", {"id": _video()["id"]})
+    segs = [l for l in body.decode().splitlines()
+            if l.startswith("stream.view")]
+    if len(segs) < 3:
+        print("SKIP  video too short to have three segments")
+        return
+
+    def first_pts(seg):
+        with urllib.request.urlopen(f"{BASE}/{seg}") as r:
+            data = r.read()
+        out = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "packet=pts_time", "-of", "csv=p=0", "-"],
+            input=data, capture_output=True)
+        for line in out.stdout.decode().splitlines():
+            value = line.strip().rstrip(",")
+            if value:
+                return float(value)
+        raise AssertionError(f"no video packets in segment: {seg}")
+
+    # The first and the third, so the gap is two whole segments and a keyframe
+    # snap of a second or two cannot be mistaken for the real thing.
+    start, later = first_pts(segs[0]), first_pts(segs[2])
+    gap = later - start
+    assert gap > 10.0, (
+        f"segments start {gap:.2f}s apart; two segments should be ~20s. "
+        "Timestamps are being rebased to zero — see -output_ts_offset in "
+        "video_ffmpeg_argv.")
+    print(f"PASS  HLS segments advance ({gap:.1f}s across two segments)")
+
+
 def test_hls_rejects_audio():
     r = _json("search3.view", {"query": "", "songCount": "5",
                                "artistCount": "0", "albumCount": "0"})
@@ -295,6 +343,7 @@ TESTS = [
     test_segment_request_returns_mpegts,
     test_hls_playlist_is_well_formed,
     test_hls_segments_resolve,
+    test_hls_segments_carry_absolute_timestamps,
     test_hls_rejects_audio,
     test_video_info_lists_tracks,
     test_video_info_rejects_audio,

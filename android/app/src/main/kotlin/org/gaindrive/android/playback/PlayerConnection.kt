@@ -56,6 +56,14 @@ data class PlayerState(
 	 * bitmaps the server cannot turn into WebVTT.
 	 */
 	val textTracks: List<TextTrack> = emptyList(),
+	/**
+	 * Why playback stopped, when it stopped for a reason worth explaining.
+	 *
+	 * Distinct from [isBuffering]: a stall that is still being waited on is
+	 * buffering, and one the watchdog gave up on is this. The queue survives
+	 * either way, so the only thing needed to recover is a retry.
+	 */
+	val error: String? = null,
 ) {
 	/** The bar and sheet only exist once something has been queued. */
 	val isActive: Boolean get() = current != null
@@ -97,6 +105,7 @@ class PlayerConnection @Inject constructor(
 	@ApplicationContext private val context: Context,
 	private val library: LibraryRepository,
 	private val videoSurface: VideoSurface,
+	private val watchdog: PlaybackWatchdog,
 	private val castSession: CastSession,
 	private val scope: CoroutineScope,
 ) {
@@ -110,6 +119,11 @@ class PlayerConnection @Inject constructor(
 	 * Something the user asked for that could not be done, in words. Held
 	 * rather than thrown because the refusal has to outlive whatever sheet or
 	 * row the tap came from; the shell shows it and calls [consumeMessage].
+	 *
+	 * Not [PlayerState.error], which is a different thing: this is a request
+	 * that was declined and left nothing running, so it is shown once and
+	 * dismissed. That one is playback having stopped, and stays on screen until
+	 * it is retried or dismissed.
 	 */
 	val message: StateFlow<String?> = _message.asStateFlow()
 
@@ -154,6 +168,16 @@ class PlayerConnection @Inject constructor(
 			// battery cost for nothing.
 			if (player.isPlaying) startTicker() else stopTicker()
 		}
+	}
+
+	// Last, and deliberately: the collector runs eagerly on Main.immediate and
+	// a StateFlow replays at once, so publish() is called before this
+	// constructor returns — with everything above it already initialised.
+	init {
+		// The watchdog fires from the service, on no player event this class
+		// would otherwise hear about, so its message has to push a republish
+		// rather than wait for one.
+		scope.launch { watchdog.message.collect { publish() } }
 	}
 
 	/** Idempotent: safe to call from every screen that needs the player. */
@@ -254,6 +278,23 @@ class PlayerConnection @Inject constructor(
 	fun previous() = controller?.seekToPreviousMediaItem()
 	fun seekTo(positionMs: Long) = controller?.seekTo(positionMs)
 
+	/**
+	 * Starts the stopped queue again from where it was.
+	 *
+	 * `stop()` keeps the media items and the current index, so preparing again
+	 * is the whole recovery — there is nothing to rebuild and no position to
+	 * restore by hand.
+	 */
+	fun retry() {
+		val controller = controller ?: return
+		watchdog.clear()
+		controller.prepare()
+		controller.play()
+	}
+
+	/** Dismisses the explanation without acting on it. */
+	fun clearError() = watchdog.clear()
+
 	// ── Video output ────────────────────────────────────────────────────────
 	//
 	// Delegated rather than done here: the surface has to reach the ExoPlayer
@@ -297,6 +338,10 @@ class PlayerConnection @Inject constructor(
 			stop()
 		}
 		autoFrom = QueueBoundary.EMPTY
+		// Cleared at the source, not just in the snapshot below: the watchdog
+		// holds the message, so the next publish would otherwise bring back an
+		// explanation for a queue that no longer exists.
+		watchdog.clear()
 		_state.value = PlayerState()
 	}
 
@@ -315,7 +360,7 @@ class PlayerConnection @Inject constructor(
 		if (controller == null) {
 			// Nothing to report but the pending track — which is the whole
 			// state there is before the session binds.
-			_state.value = PlayerState(loadingRef = pendingRef)
+			_state.value = PlayerState(loadingRef = pendingRef, error = watchdog.message.value)
 			return
 		}
 
@@ -344,6 +389,7 @@ class PlayerConnection @Inject constructor(
 				queue = items,
 				queueIndex = controller.currentMediaItemIndex,
 				textTracks = controller.textTracks(),
+				error = watchdog.message.value,
 			)
 		}
 	}

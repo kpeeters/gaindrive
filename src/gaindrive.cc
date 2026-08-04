@@ -2722,7 +2722,18 @@ GainDrive::GainDrive(const std::string& db_path,
 		int         max_bitrate = to_int(qp("maxBitRate"), 0);
 		// Enforce the user account's max_bitrate as a ceiling (0 = unlimited).
 		// Cast requests authenticate via token and have no 'u' param; skip for those.
-		if (!cast_authed) {
+		//
+		// Audio only, and that exemption is load-bearing rather than a policy
+		// preference.  For video, any non-zero max_bitrate sets `constrained` in
+		// serve_video and disqualifies both the direct and remux tiers — while
+		// nativeSeek is a pure function of the codec pair and never sees it.  A
+		// capped account would therefore be told every video is Range-seekable
+		// and handed a chunked stream with Accept-Ranges: none, and would have
+		// H.264/AAC MP4s re-encoded that could have been served off disk
+		// untouched.  Subsonic defines maxBitRate as an audio ceiling anyway,
+		// and a client that really wants a smaller picture still says so with
+		// size= or maxBitRate=, which constrains exactly as before.
+		if (!cast_authed && !song->is_video) {
 			int acct_max = request_max_bitrate(req, store_);
 			if (acct_max > 0 && (max_bitrate == 0 || max_bitrate > acct_max))
 				max_bitrate = acct_max;

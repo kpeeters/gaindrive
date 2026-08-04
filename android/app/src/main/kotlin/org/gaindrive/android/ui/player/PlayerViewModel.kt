@@ -60,4 +60,7 @@ class PlayerViewModel @Inject constructor(
 	fun detachVideo(surface: SurfaceView) = player.detachVideo(surface)
 
 	fun selectTextTrack(index: Int?) = player.selectTextTrack(index)
+
+	fun retry() = player.retry()
+	fun clearError() = player.clearError()
 }
