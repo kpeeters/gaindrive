@@ -64,6 +64,27 @@ struct SubsonicClient: Sendable {
 		suffix: String = ".view",
 		parameters: [String: String] = [:]
 	) -> URL {
+		url(endpoint, suffix: suffix, items: parameters.map(URLQueryItem.init))
+	}
+
+	/// The query-item form, which is the primitive the dictionary form is
+	/// written in terms of.
+	///
+	/// It exists because **a dictionary cannot express a repeated parameter**,
+	/// and four endpoints need one: `updatePlaylist`'s `songIdToAdd` and
+	/// `songIndexToRemove`, `createPlaylist`'s `songId`, and `star`/`unstar`'s
+	/// `id`/`albumId`/`artistId`.
+	///
+	/// The sort is **by name only, and stable**: repeated values keep the order
+	/// the caller gave them. `songIndexToRemove` is positional, so reordering
+	/// two of them would remove the wrong tracks. `Array.sorted(by:)` is not
+	/// documented as stable, so this sorts on (name, original offset) rather
+	/// than trusting that it is.
+	func url(
+		_ endpoint: String,
+		suffix: String = ".view",
+		items: [URLQueryItem]
+	) -> URL {
 		let path = baseURL.appending(path: "rest/\(endpoint)\(suffix)")
 		// The invariant that makes this non-optional: `ServerConfig` only
 		// yields a `baseURL` that already parsed, and the registry only builds
@@ -71,9 +92,11 @@ struct SubsonicClient: Sendable {
 		guard var components = URLComponents(url: path, resolvingAgainstBaseURL: false) else {
 			return path
 		}
-		let items = parameters.sorted { $0.key < $1.key }
-			.map { URLQueryItem(name: $0.key, value: $0.value) } + auth.queryItems
-		components.percentEncodedQueryItems = items.map {
+		let ordered =
+			items.enumerated()
+			.sorted { ($0.element.name, $0.offset) < ($1.element.name, $1.offset) }
+			.map(\.element) + auth.queryItems
+		components.percentEncodedQueryItems = ordered.map {
 			URLQueryItem(
 				name: Self.encode($0.name),
 				value: $0.value.map(Self.encode)
@@ -105,9 +128,19 @@ struct SubsonicClient: Sendable {
 		parameters: [String: String] = [:],
 		expecting: Body.Type
 	) async throws -> Body {
-		let (data, response) = try await session.data(from: url(endpoint, parameters: parameters))
-		let decoded = try Self.decode(data, expecting: Body.self, httpStatus: (response as? HTTPURLResponse)?.statusCode)
-		return decoded
+		try await perform(
+			endpoint, items: parameters.map(URLQueryItem.init), expecting: Body.self)
+	}
+
+	func perform<Body: Decodable & Sendable>(
+		_ endpoint: String,
+		items: [URLQueryItem],
+		expecting: Body.Type
+	) async throws -> Body {
+		let (data, response) = try await session.data(from: url(endpoint, items: items))
+		return try Self.decode(
+			data, expecting: Body.self,
+			httpStatus: (response as? HTTPURLResponse)?.statusCode)
 	}
 
 	/// Split out from `perform` so the envelope handling can be tested without

@@ -20,14 +20,38 @@ final class SettingsStore {
 		didSet { defaults.set(themeMode.rawValue, forKey: Self.themeKey) }
 	}
 
+	/// The browse scope, as `BrowseScope.stored` — a server's UUID or the
+	/// `"all"` sentinel. Kept as a string rather than as a `BrowseScope`
+	/// because resolving it needs the current server list, which this type
+	/// deliberately knows nothing about. `ServerSelection` does the resolving.
+	var selectedServer: String? {
+		didSet { defaults.set(selectedServer, forKey: Self.selectedServerKey) }
+	}
+
+	/// **On by default here, off by default on Android.** The two apps
+	/// genuinely differ: `ios/PLAN.md` says "Albums merge, on by default" and
+	/// `android/data/Merge.kt` says the opposite. Recorded so the next reader
+	/// does not "fix" one of them into agreement.
+	var mergeDuplicateAlbums: Bool {
+		didSet { defaults.set(mergeDuplicateAlbums, forKey: Self.mergeAlbumsKey) }
+	}
+
 	@ObservationIgnored private let defaults: UserDefaults
-	// Spelled as Android spells it in its DataStore, so the two apps
-	// describe the same setting by the same name.
+	// Spelled as Android spells them in its DataStore, so the two apps
+	// describe the same settings by the same names.
 	private static let themeKey = "theme_mode"
+	private static let selectedServerKey = "selected_server"
+	private static let mergeAlbumsKey = "merge_duplicate_albums"
 
 	init(defaults: UserDefaults = .standard) {
 		self.defaults = defaults
 		let stored = defaults.string(forKey: Self.themeKey)
 		themeMode = stored.flatMap(ThemeMode.init(rawValue:)) ?? .auto
+		selectedServer = defaults.string(forKey: Self.selectedServerKey)
+		// `bool(forKey:)` answers false for an absent key, so the default has
+		// to be read through `object(forKey:)` or a fresh install would get
+		// the opposite of what is intended.
+		mergeDuplicateAlbums =
+			defaults.object(forKey: Self.mergeAlbumsKey) as? Bool ?? true
 	}
 }

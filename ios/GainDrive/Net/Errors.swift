@@ -45,4 +45,18 @@ extension Error {
 		}
 		return localizedDescription
 	}
+
+	/// The user navigated away, or typed another character. **Not a failure**,
+	/// and the distinction is load-bearing: a cancelled branch recorded as one
+	/// would flash "this server did not answer" over the results on every
+	/// keystroke in search and on every change of scope.
+	///
+	/// Two types have to be checked because the two layers disagree —
+	/// `Task.checkCancellation` throws `CancellationError`, while `URLSession`
+	/// reports the same event as `URLError.cancelled`. Android needed
+	/// `runCatchingCancellable` for exactly this, having found that
+	/// `runCatching` swallowed it.
+	var isCancellation: Bool {
+		self is CancellationError || (self as? URLError)?.code == .cancelled
+	}
 }

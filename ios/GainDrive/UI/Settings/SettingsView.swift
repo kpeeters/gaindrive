@@ -31,7 +31,7 @@ struct SettingsView: View {
 	}
 
 	enum Route: Hashable {
-		case servers, appearance
+		case servers, library, appearance
 	}
 
 	var body: some View {
@@ -40,6 +40,9 @@ struct SettingsView: View {
 				Section {
 					NavigationLink(value: Route.servers) {
 						LabeledContent("Servers", value: serversSummary)
+					}
+					NavigationLink(value: Route.library) {
+						LabeledContent("Library", value: librarySummary)
 					}
 					NavigationLink(value: Route.appearance) {
 						LabeledContent("Appearance", value: settings.themeMode.label)
@@ -71,6 +74,7 @@ struct SettingsView: View {
 			.navigationDestination(for: Route.self) { route in
 				switch route {
 				case .servers: ServersSettingsView(startAdding: startOnServers)
+				case .library: LibrarySettingsView()
 				case .appearance: AppearanceSettingsView()
 				}
 			}
@@ -83,6 +87,10 @@ struct SettingsView: View {
 		let disabled = total - registry.enabled.count
 		let configured = "\(total) configured"
 		return disabled > 0 ? "\(configured), \(disabled) disabled" : configured
+	}
+
+	private var librarySummary: String {
+		settings.mergeDuplicateAlbums ? "Merging duplicates" : "Showing duplicates"
 	}
 
 	private static var versionText: String {

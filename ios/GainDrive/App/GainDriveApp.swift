@@ -16,7 +16,9 @@ import SwiftUI
 @main
 struct GainDriveApp: App {
 	@State private var registry: ServerRegistry
-	@State private var settings = SettingsStore()
+	@State private var settings: SettingsStore
+	@State private var selection: ServerSelection
+	@State private var library: LibraryRepository
 
 	/// Read once, here, before any view exists. `RootView` explains why this
 	/// cannot be derived inside the view hierarchy.
@@ -24,15 +26,21 @@ struct GainDriveApp: App {
 
 	init() {
 		let registry = ServerRegistry()
+		let settings = SettingsStore()
 		firstRun = registry.servers.isEmpty
 		_registry = State(initialValue: registry)
+		_settings = State(initialValue: settings)
+		_selection = State(initialValue: ServerSelection(registry: registry, settings: settings))
+		_library = State(initialValue: LibraryRepository(registry: registry, settings: settings))
 	}
 
 	var body: some Scene {
 		WindowGroup {
-			RootView(firstRun: firstRun)
+			RootView(firstRun: firstRun, library: library, selection: selection)
 				.environment(registry)
 				.environment(settings)
+				.environment(selection)
+				.environment(library)
 				.preferredColorScheme(settings.themeMode.colorScheme)
 		}
 	}

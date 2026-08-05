@@ -9,9 +9,7 @@
 import SwiftUI
 
 /// The persistent shell: five destinations, matching the web client's bottom
-/// bar and `android/SCREENS.md`. Four of them are placeholders until phase 2
-/// fills them; the shell exists now so the start-destination routing is a real
-/// thing that can be exercised rather than a promise.
+/// bar and `android/SCREENS.md`.
 struct RootView: View {
 	/// Decided **once**, by the composition root, from the registry as it was
 	/// at launch — and then frozen. Re-deriving it from `servers.isEmpty`
@@ -20,10 +18,22 @@ struct RootView: View {
 	let firstRun: Bool
 
 	@State private var tab: Destination
+	/// The tab-root view model is built here rather than inside `ArtistsView`
+	/// because a `@State` initial value cannot read `@Environment`, and the
+	/// usual workaround — an optional filled in from `.task` — puts a spinner
+	/// in front of the tab for a frame and an unwrap at every use site.
+	///
+	/// This initialiser runs again on **every** re-evaluation of
+	/// `GainDriveApp.body`, which `preferredColorScheme` guarantees on each
+	/// theme change; `@State` keeps the first value and discards the rest. That
+	/// is why a view model's own initialiser must start no work.
+	@State private var artists: ArtistsViewModel
 
-	init(firstRun: Bool) {
+	init(firstRun: Bool, library: LibraryRepository, selection: ServerSelection) {
 		self.firstRun = firstRun
 		_tab = State(initialValue: firstRun ? .settings : .artists)
+		_artists = State(
+			initialValue: ArtistsViewModel(library: library, selection: selection))
 	}
 
 	/// Not called `Tab`: SwiftUI's own `Tab` is what the builder below
@@ -37,7 +47,7 @@ struct RootView: View {
 	var body: some View {
 		TabView(selection: $tab) {
 			Tab("Artists", systemImage: "music.mic", value: Destination.artists) {
-				PlaceholderView(title: "Artists", symbol: "music.mic")
+				ArtistsView(model: artists)
 			}
 			Tab("Playlists", systemImage: "music.note.list", value: Destination.playlists) {
 				PlaceholderView(title: "Playlists", symbol: "music.note.list")
@@ -55,8 +65,8 @@ struct RootView: View {
 	}
 }
 
-/// Stands in for a phase 2 screen. It says which one and that it is not built
-/// yet, because a blank tab reads as a bug.
+/// Stands in for a screen that is not built yet. It says which one, because a
+/// blank tab reads as a bug.
 struct PlaceholderView: View {
 	let title: String
 	let symbol: String
@@ -66,21 +76,9 @@ struct PlaceholderView: View {
 			ContentUnavailableView {
 				Label(title, systemImage: symbol)
 			} description: {
-				Text("Browsing arrives in phase 2.")
+				Text("Arrives in stage B.")
 			}
 			.navigationTitle(title)
 		}
 	}
-}
-
-#Preview("Configured") {
-	RootView(firstRun: false)
-		.environment(ServerRegistry())
-		.environment(SettingsStore())
-}
-
-#Preview("First run") {
-	RootView(firstRun: true)
-		.environment(ServerRegistry())
-		.environment(SettingsStore())
 }
