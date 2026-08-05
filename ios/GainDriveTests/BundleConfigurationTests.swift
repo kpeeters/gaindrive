@@ -19,6 +19,10 @@ struct BundleConfigurationTests {
 	/// Debug and release share this identifier deliberately, so switching
 	/// between them keeps the configured servers rather than installing a
 	/// second, empty app. A suffix added later would be a silent migration.
+	///
+	/// Run under `make test-mac` this also pins the Catalyst build to the same
+	/// identifier: Xcode's default would make it `maccatalyst.org.gaindrive.ios`,
+	/// and the Mac app would then be a stranger to every id the iOS one stores.
 	@Test func bundleIdentifierIsStable() {
 		#expect(Bundle.main.bundleIdentifier == "org.gaindrive.ios")
 	}

@@ -17,7 +17,12 @@ ICON_RAW := build/appicon-raw.png
 #   make test DEST='platform=iOS Simulator,name=iPad Pro 13-inch (M4)'
 DEST ?= platform=iOS Simulator,name=iPhone 16
 
-.PHONY: generate open build test icon clean help
+# The Mac Catalyst destination — Xcode's "My Mac (Mac Catalyst)". The variant
+# is what distinguishes it from a native macOS build, which this project does
+# not have; omitting it asks for a platform the target does not support.
+DEST_MAC ?= platform=macOS,variant=Mac Catalyst
+
+.PHONY: generate open build build-mac test test-mac icon clean help
 
 # Default target, so `make` alone leaves a project ready to open. Regenerating
 # is idempotent and cheap; Xcode notices the project changed under it.
@@ -30,8 +35,18 @@ open: generate
 build: generate
 	$(XCODEBUILD) build -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST)'
 
+build-mac: generate
+	$(XCODEBUILD) build -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST_MAC)'
+
 test: generate
 	$(XCODEBUILD) test -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST)'
+
+# Worth running on both: the bundle assertions cover Info.plist keys that
+# Catalyst treats differently from iOS, and a derived bundle identifier or a
+# resource that failed to reach the Mac bundle shows up here rather than as a
+# puzzling runtime failure.
+test-mac: generate
+	$(XCODEBUILD) test -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST_MAC)'
 
 # The app icon is rendered from the shared artwork rather than kept as a second
 # copy of it, so the two cannot drift. graphics/gaindrive.svg is already a
@@ -80,8 +95,10 @@ help:
 	@echo "Targets:"
 	@echo "  generate   Regenerate GainDrive.xcodeproj from project.yml (default)"
 	@echo "  open       Regenerate and open the project in Xcode"
-	@echo "  build      Build for \$$DEST"
+	@echo "  build      Build for \$$DEST (an iOS simulator by default)"
+	@echo "  build-mac  Build for \$$DEST_MAC (My Mac, Mac Catalyst)"
 	@echo "  test       Run the unit tests on \$$DEST"
+	@echo "  test-mac   Run the unit tests on \$$DEST_MAC"
 	@echo "  icon       Re-render the app icon from graphics/gaindrive.svg"
 	@echo "             (needs Inkscape and ImageMagick; not part of a build)"
 	@echo "  clean      Remove the generated project and DerivedData"

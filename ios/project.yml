@@ -38,6 +38,31 @@ settings:
     SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
     GCC_WARN_ABOUT_RETURN_TYPE: YES_ERROR
 
+# Mac Catalyst, giving the "My Mac (Mac Catalyst)" destination from the same
+# single target and the same sources. PLAN.md, "Mac Catalyst", records why this
+# rather than a native macOS target: AVAudioSession, which the interruption and
+# route-change handling is built on, does not exist on macOS.
+#
+# A group rather than a per-target block because **the test bundle needs the
+# same settings as the app**. A test target that does not itself support
+# Catalyst is simply not built for the destination, so `make test-mac` would
+# report success having run nothing.
+settingGroups:
+  catalyst:
+    SUPPORTS_MACCATALYST: YES
+    # Mutually exclusive with the above in practice; kept explicit so enabling
+    # it later is a decision rather than a default.
+    SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+    # The default (YES) would ship the Mac build as
+    # `maccatalyst.org.gaindrive.ios`. One identifier across both is what
+    # universal purchase expects, and it keeps `Bundle.main.bundleIdentifier`
+    # the same constant everywhere — the tests assert on it and would otherwise
+    # need a platform branch.
+    DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
+    # The macOS contemporary of the iOS 18 floor, so an availability guard never
+    # has to differ between the two.
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+
 targets:
   GainDrive:
     type: application
@@ -50,12 +75,17 @@ targets:
         excludes:
           - ".gitkeep"
           - "**/.gitkeep"
-      # Info.plist is the target's own plist, not a bundle resource; including
-      # it as one would copy a second, redundant copy into the app.
+      # Neither of these is a bundle resource — the plist is the target's own,
+      # and the entitlements are consumed by the code signer. Including either
+      # as a resource would copy a second, redundant, confusing copy into the
+      # app. PrivacyInfo.xcprivacy is the one file here that *is* a resource.
       - path: Resources
         excludes:
           - Info.plist
+          - GainDrive.entitlements
     settings:
+      groups:
+        - catalyst
       base:
         PRODUCT_NAME: GainDrive
         # Debug and release share this deliberately, so switching between them
@@ -65,10 +95,24 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Resources/Info.plist
-        # iPhone and iPad from one adaptive layout.
+        # iPhone and iPad from one adaptive layout. The iPad idiom is also what
+        # makes Mac Catalyst possible at all — a phone-only target is not
+        # offered the destination.
         TARGETED_DEVICE_FAMILY: "1,2"
-        SUPPORTS_MACCATALYST: NO
-        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+
+        # Required by Catalyst, which must adopt the App Sandbox; the file also
+        # carries the outgoing-network permission without which the app cannot
+        # reach a server at all.
+        #
+        # Scoped to the Mac build rather than applied to both. A Catalyst
+        # target compiles against the macOS SDK, which is what the condition
+        # keys on, and the two entitlements in the file mean nothing on iOS —
+        # where the app is sandboxed unconditionally and may open outgoing
+        # connections without asking. Handing them to the iOS signer instead of
+        # withholding them buys nothing and gives provisioning one more thing
+        # to have an opinion about.
+        CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: Resources/GainDrive.entitlements
+
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic
@@ -82,6 +126,11 @@ targets:
     dependencies:
       - target: GainDrive
     settings:
+      # Same group as the app: a test bundle that does not support Catalyst is
+      # not built for that destination, and `make test-mac` would then pass
+      # without having run a thing.
+      groups:
+        - catalyst
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.gaindrive.ios.tests
         GENERATE_INFOPLIST_FILE: YES
