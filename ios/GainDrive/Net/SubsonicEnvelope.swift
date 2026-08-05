@@ -51,8 +51,9 @@ struct SubsonicEnvelope<Body: Decodable & Sendable>: Decodable, Sendable {
 		}
 	}
 
-	/// The payload, or the failure the envelope described.
-	func unwrap() throws -> Body {
+	/// The payload, or the failure the envelope described. Named as Android
+	/// names it in `net/SubsonicException.kt`.
+	func requireOk() throws -> Body {
 		guard status == "ok" else {
 			guard let error else { throw SubsonicError.failedWithoutError }
 			throw SubsonicError(code: error.code, message: error.message)

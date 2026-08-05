@@ -23,7 +23,7 @@ struct SubsonicApiTests {
 		try SubsonicClient.decode(Data(json.utf8), expecting: type, httpStatus: httpStatus)
 	}
 
-	@Test func unwrapsSuccessfulEnvelope() throws {
+	@Test func returnsTheBodyOnSuccess() throws {
 		let body: UserBody = try decode(
 			"""
 			{"subsonic-response":{"status":"ok","version":"1.16.1",
