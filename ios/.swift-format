@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "indentation": { "tabs": 1 },
+  "tabWidth": 3,
+  "lineLength": 100,
+  "respectsExistingLineBreaks": true,
+  "lineBreakBeforeControlFlowKeywords": false,
+  "lineBreakBeforeEachArgument": false,
+  "prioritizeKeepingFunctionOutputTogether": true,
+  "indentConditionalCompilationBlocks": false,
+  "rules": {
+    "AlwaysUseLowerCamelCase": true,
+    "NoBlockComments": false,
+    "OrderedImports": true,
+    "UseLetInEveryBoundCaseVariable": false,
+    "UseShorthandTypeNames": true,
+    "UseSynthesizedInitializer": false
+  }
+}

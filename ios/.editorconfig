@@ -1,0 +1,28 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Tabs, to match the rest of the GainDrive tree. Three columns wide is how the
+# C++ sources are read; keep the same setting here so mixed diffs line up.
+# Xcode reads .editorconfig only indirectly — the authoritative setting for its
+# own reformatter is .swift-format, which says the same thing.
+[*.swift]
+indent_style = tab
+tab_width = 3
+
+[*.{plist,xcprivacy,md}]
+indent_style = tab
+tab_width = 3
+
+# XcodeGen's spec and the asset catalogues are read by tools that expect the
+# conventional two-space style, and nobody hand-diffs them against C++.
+[*.{yml,yaml,json,xcconfig}]
+indent_style = space
+indent_size = 2
+
+[Makefile]
+indent_style = tab

@@ -1,0 +1,107 @@
+# The single source of truth for the Xcode project. GainDrive.xcodeproj is
+# generated from this file and is not committed — see PLAN.md, "Project
+# generation", for why.
+#
+# Run `make` after changing anything here.
+
+name: GainDrive
+
+options:
+  bundleIdPrefix: org.gaindrive
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+  # Empty directories in the package layout are placeholders for phases that
+  # have not landed yet; they should not become groups in the project.
+  generateEmptyDirectories: false
+  groupSortPosition: top
+
+# Machine-local settings, chiefly DEVELOPMENT_TEAM, which differs per developer
+# and must not be committed. `make` writes the file if it is missing, so
+# generate through the Makefile rather than calling xcodegen directly.
+#
+# Nothing below may set DEVELOPMENT_TEAM: a build setting written into the
+# project overrides the xcconfig, which would silently defeat this.
+configFiles:
+  Debug: Local.xcconfig
+  Release: Local.xcconfig
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CLANG_ENABLE_MODULES: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+    # Warnings are cheap here and the alternative is discovering the same
+    # things at review time.
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
+    GCC_WARN_ABOUT_RETURN_TYPE: YES_ERROR
+
+targets:
+  GainDrive:
+    type: application
+    platform: iOS
+    sources:
+      - path: GainDrive
+        # Placeholders that hold the package layout in git. Without these
+        # excludes XcodeGen would treat an unknown file type as a resource and
+        # copy it into the app.
+        excludes:
+          - ".gitkeep"
+          - "**/.gitkeep"
+      # Info.plist is the target's own plist, not a bundle resource; including
+      # it as one would copy a second, redundant copy into the app.
+      - path: Resources
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_NAME: GainDrive
+        # Debug and release share this deliberately, so switching between them
+        # replaces the app in place and keeps the configured servers.
+        PRODUCT_BUNDLE_IDENTIFIER: org.gaindrive.ios
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Resources/Info.plist
+        # iPhone and iPad from one adaptive layout.
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_EMIT_LOC_STRINGS: NO
+
+  GainDriveTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: GainDriveTests
+    dependencies:
+      - target: GainDrive
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.gaindrive.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  GainDrive:
+    build:
+      targets:
+        GainDrive: all
+        GainDriveTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - GainDriveTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

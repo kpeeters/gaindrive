@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+	Hand-written rather than synthesised by Xcode, because the transport
+	security and local-network keys below want their reasoning next to them and
+	a stable diff. See PLAN.md, "App Store constraints".
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>GainDrive</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+
+	<!-- The system launch screen. An empty dictionary is the modern
+	     replacement for a storyboard and is what a SwiftUI app wants. -->
+	<key>UILaunchScreen</key>
+	<dict/>
+
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+
+	<!-- Upside-down is omitted on the phone (the platform convention); the
+	     landscape orientations are kept because video, phase 6, needs them. -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+
+	<!-- `audio` only. Anything else is a review risk for no benefit while the
+	     app merely plays music. Note that this mode does not keep the app
+	     alive while casting, since the phone is then not playing audio —
+	     see PLAN.md, phase 7. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
+
+	<!-- GainDrive servers are commonly plain HTTP at a LAN address with a
+	     port (http://192.0.2.9:4040) or reached over WireGuard at a private
+	     address. NSAllowsLocalNetworking alone does not cover a bare private
+	     IPv4 address, which is the common case, so arbitrary loads are
+	     required. The app has no first-party endpoint to pin: the only server
+	     it ever contacts is one the user runs themselves, at an address only
+	     they know. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+
+	<!-- Denial of this permission is a state to explain, not to time out on:
+	     a LAN server with the permission refused must say so rather than
+	     report itself unreachable. NSBonjourServices is deliberately absent —
+	     it arrives with casting, phase 7, not speculatively. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>GainDrive connects to your own music server on your local network.</string>
+
+	<!-- The app uses only the standard HTTPS and cryptography the system
+	     provides, which is exempt. Declaring it here answers the export
+	     compliance question once instead of at every upload. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+</dict>
+</plist>

@@ -140,9 +140,10 @@ GPLv3. Only the Apache-2.0 `androidx.mediarouter` route-picker UI is needed.
 
 ## iOS app — shipped in the bundle
 
-The iOS app currently has **no third-party dependencies**; `ios/` holds only
-`PLAN.md` and `ios/LICENSE`. Two are planned (`ios/PLAN.md`, "Dependencies"),
-recorded here so the licence question is settled before either is adopted:
+The iOS app currently has **no third-party dependencies**; `ios/project.yml`
+declares no Swift packages, and the phase 0 skeleton links only Apple
+frameworks. Two are planned (`ios/PLAN.md`, "Dependencies"), recorded here so
+the licence question is settled before either is adopted:
 
 * GRDB · MIT · Copyright (c) Gwendal Roué
   https://github.com/groue/GRDB.swift
@@ -184,6 +185,20 @@ redistribution of GainDrive.
   https://junit.org/junit4/
 
 * Hamcrest · BSD-3-Clause · transitive, via JUnit 4.
+
+* XcodeGen · MIT · Copyright (c) Yonas Kolb
+  https://github.com/yonaskolb/XcodeGen
+  Generates `ios/GainDrive.xcodeproj` from `ios/project.yml`. Installed with
+  Homebrew on the build machine and not vendored, so nothing of it is in the
+  repository or the app.
+
+* Swift Testing · Apache-2.0 with LLVM exception · Copyright (c) Apple Inc.
+  https://github.com/swiftlang/swift-testing
+  Used by `ios/GainDriveTests/`. It ships with the Xcode toolchain rather than
+  being resolved as a package, and the framework is linked into the test
+  bundle only — never into the app. XCTest, likewise part of the toolchain, is
+  in the same position. Note the contrast with JUnit above: this is the
+  test-framework slot, and on iOS it happens to be GPL-compatible anyway.
 
 
 ## Invoked as separate programs, not linked

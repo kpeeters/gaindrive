@@ -1,0 +1,14 @@
+# The Xcode project is generated from project.yml — see PLAN.md, "Project
+# generation". Committing it would reintroduce the .pbxproj merge problem the
+# generator exists to avoid.
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+.swiftpm/
+DerivedData/
+build/
+
+# Per-developer signing identity. Bootstrapped by `make`.
+Local.xcconfig
+
+.DS_Store
