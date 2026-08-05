@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+	The Mac Catalyst build only — project.yml attaches this with an
+	[sdk=macosx*] condition, because neither key means anything on iOS, where
+	the app is sandboxed unconditionally and may open outgoing connections
+	without asking.
+
+	Both keys are load-bearing on the Mac. A Catalyst app must adopt the App
+	Sandbox, and a sandboxed app with no network-client entitlement cannot open
+	an outgoing connection at all — so the app would launch, look entirely
+	healthy, and fail every request to the user's server with what appears to
+	be an unreachable-host error. That is the failure this file prevents, and
+	it is not one the iOS build can ever reproduce.
+
+	Nothing else is granted. Reading files the user picks, and the incoming
+	connections a future Cast bridge might want, are separate entitlements to
+	be added when the phase that needs them arrives.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+</dict>
+</plist>
