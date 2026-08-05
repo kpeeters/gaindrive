@@ -28,7 +28,15 @@ enum Keychain {
 	/// restore time and is indistinguishable from a genuine problem — a hazard
 	/// that does not exist here, since the Keychain restores the secret itself
 	/// rather than something that needs a key held elsewhere.
-	private static let accessibility = kSecAttrAccessibleAfterFirstUnlock
+	///
+	/// Computed rather than stored, because `CFString` is not `Sendable` and a
+	/// stored static of a non-`Sendable` type is shared mutable state as far as
+	/// strict concurrency is concerned. A computed property has no storage to
+	/// share, so this needs no `nonisolated(unsafe)` — the escape hatch would
+	/// have silenced the check rather than answered it. The `kSec…` globals
+	/// themselves are fine to read: the importer already treats imported C
+	/// constants as safe, which is why the `query` dictionary below compiles.
+	private static var accessibility: CFString { kSecAttrAccessibleAfterFirstUnlock }
 
 	private static let service = "org.gaindrive.ios.server-password"
 
