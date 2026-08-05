@@ -138,6 +138,29 @@ deliberate: Google Play Services is proprietary and would be incompatible with
 GPLv3. Only the Apache-2.0 `androidx.mediarouter` route-picker UI is needed.
 
 
+## iOS app — shipped in the bundle
+
+The iOS app currently has **no third-party dependencies**; `ios/` holds only
+`PLAN.md` and `ios/LICENSE`. Two are planned (`ios/PLAN.md`, "Dependencies"),
+recorded here so the licence question is settled before either is adopted:
+
+* GRDB · MIT · Copyright (c) Gwendal Roué
+  https://github.com/groue/GRDB.swift
+
+* Nuke · MIT · Copyright (c) Alexander Grebenyuk
+  or Kingfisher · MIT · Copyright (c) Wei Wang — undecided
+  https://github.com/kean/Nuke · https://github.com/onevcat/Kingfisher
+
+Both are MIT and therefore fine. Add them to this section when they actually
+land in `project.yml`, not before.
+
+Note that `ios/` is GPLv3 **with the Application Distribution Exception**
+(`ios/LICENSE`), which permits app-store distribution of the binary but
+explicitly does not permit linking against non-free libraries. Google's Cast
+SDK for iOS is proprietary and so remains excluded, notwithstanding that it is
+an ordinary Swift Package Manager dependency — see `ios/PLAN.md` phase 7.
+
+
 ## Build- and test-only — not distributed
 
 These never reach a release artifact, so their licences do not affect

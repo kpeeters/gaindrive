@@ -1,0 +1,100 @@
+GainDrive for iOS
+Copyright (C) 2026 Kasper Peeters
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version. The full text of that License is in the file LICENSE at
+the root of this repository.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+more details.
+
+The additional permission below is granted for the contents of this
+directory (ios/) only. It does not apply to any other part of GainDrive.
+
+
+                    APPLICATION DISTRIBUTION EXCEPTION
+
+           Additional permission under GNU GPL version 3 section 7
+
+Section 7 of the GNU General Public License version 3 permits the copyright
+holder to grant additional permissions that remove conditions from the
+License. The following additional permission is granted.
+
+GRANT
+
+You are granted permission to convey the work in object-code form through an
+application distribution platform operated by a third party (an "App
+Store") -- including but not limited to Apple's App Store -- and to accept
+that platform's standard terms for doing so, notwithstanding that those
+terms may be inconsistent with sections 3, 4, 5, 6, 10 or 12 of the GNU
+General Public License.
+
+Without limiting the generality of the grant above, this permission
+specifically covers:
+
+ a) limits the platform imposes on the number or kind of devices on which a
+    recipient may install the object code, and restrictions the platform
+    imposes on a recipient's ability to redistribute object code obtained
+    from it;
+
+ b) digital rights management, code signing, or other technological
+    measures applied to the object code by the platform or its operator,
+    and any resulting inability of a recipient to install a modified
+    version on a device;
+
+ c) the absence of Installation Information, within the meaning of section
+    6 of the License, for object code conveyed through such a platform;
+
+ d) the platform operator conveying the object code to recipients under the
+    platform's own end-user licence terms rather than under this License.
+
+LIMITS OF THE GRANT
+
+This permission extends only to conveying the work in object-code form
+through such a platform. In particular:
+
+ 1) It grants nothing with respect to the Corresponding Source, which must
+    still be offered under the terms of the GNU General Public License. A
+    recipient who obtains the object code from an App Store remains
+    entitled to the Corresponding Source on the ordinary terms of section
+    6.
+
+ 2) It does not permit linking or combining this work with software whose
+    source is not available under a licence compatible with the GNU General
+    Public License. A proprietary library is not made permissible by this
+    exception merely because the platform that distributes the result is.
+
+ 3) It does not restrict any recipient who obtains the source, or an
+    object-code build, by any other means. Such a recipient has the full
+    rights the GNU General Public License grants, unmodified.
+
+As provided by section 7 of the License, a recipient may remove this
+additional permission from any copy of the work, or from any part of it,
+that the recipient conveys.
+
+If you modify this work, you may extend this permission to your modified
+version, but you are not obliged to do so. If you do not wish to extend it,
+delete this statement from your version.
+
+
+                    APPENDIX: HOW TO APPLY THIS TO A FILE
+
+Source files in this directory should carry the following notice, so that
+the exception travels with the code if a file is copied out of the
+repository:
+
+    GainDrive for iOS
+    Copyright (C) 2026 Kasper Peeters
+
+    This file is part of GainDrive, distributed under the GNU General
+    Public License version 3 or later, with the Application Distribution
+    Exception in ios/LICENSE. See LICENSE at the repository root for the
+    full text of the GPL.
+
+A file that does not carry the notice is still covered -- this file governs
+the whole directory -- but a copy of it taken elsewhere would not obviously
+be.
