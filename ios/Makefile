@@ -2,6 +2,12 @@
 # CMake — see CLAUDE.md. Everything here but `icon` runs on the macOS build
 # machine, which has its own checkout.
 
+# A formatter in the pipe below must not be able to turn a failed build into a
+# successful make: without pipefail the exit status is the last command's, so
+# `xcodebuild | anything` always succeeds.
+SHELL := /bin/bash
+.SHELLFLAGS := -o pipefail -c
+
 XCODEGEN := xcodegen
 XCODEBUILD := xcodebuild
 INKSCAPE ?= inkscape
@@ -23,6 +29,29 @@ DEST ?= platform=iOS Simulator,name=iPhone 16
 # not have; omitting it asks for a platform the target does not support.
 DEST_MAC ?= platform=macOS,variant=Mac Catalyst
 
+# xcodebuild echoes the entire compiler invocation for every file it touches,
+# which buries the handful of lines that matter — a failing build is thousands
+# of lines with four that say `error:`, and they are not at the end. `-quiet`
+# prints warnings, errors and the result and nothing else; what is left is
+# already clang-shaped, source line and caret included.
+#
+# `make build V=1` restores the full output, for when the problem is the build
+# system rather than the code — a missing file, a signing failure, a script
+# phase — which is exactly what -quiet hides.
+ifeq ($(V),1)
+XCFLAGS :=
+else
+XCFLAGS := -quiet
+endif
+
+# xcbeautify, if it happens to be installed, groups diagnostics per file and
+# colours them. Optional on purpose: nothing in this build may depend on a tool
+# that is not in the repository, so its absence costs only the colours.
+#
+#   brew install xcbeautify
+BEAUTIFY := $(if $(filter 1,$(V)),,$(shell command -v xcbeautify 2>/dev/null))
+PIPE := $(if $(BEAUTIFY),| $(BEAUTIFY),)
+
 .PHONY: generate open build build-mac test test-mac art icon logo clean help
 
 # Default target, so `make` alone leaves a project ready to open. Regenerating
@@ -34,20 +63,24 @@ open: generate
 	open $(PROJECT)
 
 build: generate
-	$(XCODEBUILD) build -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST)'
+	$(XCODEBUILD) build -project $(PROJECT) -scheme $(SCHEME) \
+	 -destination '$(DEST)' $(XCFLAGS) $(PIPE)
 
 build-mac: generate
-	$(XCODEBUILD) build -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST_MAC)'
+	$(XCODEBUILD) build -project $(PROJECT) -scheme $(SCHEME) \
+	 -destination '$(DEST_MAC)' $(XCFLAGS) $(PIPE)
 
 test: generate
-	$(XCODEBUILD) test -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST)'
+	$(XCODEBUILD) test -project $(PROJECT) -scheme $(SCHEME) \
+	 -destination '$(DEST)' $(XCFLAGS) $(PIPE)
 
 # Worth running on both: the bundle assertions cover Info.plist keys that
 # Catalyst treats differently from iOS, and a derived bundle identifier or a
 # resource that failed to reach the Mac bundle shows up here rather than as a
 # puzzling runtime failure.
 test-mac: generate
-	$(XCODEBUILD) test -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST_MAC)'
+	$(XCODEBUILD) test -project $(PROJECT) -scheme $(SCHEME) \
+	 -destination '$(DEST_MAC)' $(XCFLAGS) $(PIPE)
 
 # Both assets derive from graphics/gaindrive.svg rather than being second
 # copies of it, so they cannot drift from the artwork or from each other.
@@ -120,3 +153,6 @@ help:
 	@echo "  icon       Just the app icon PNG"
 	@echo "  logo       Just the in-app logo SVG"
 	@echo "  clean      Remove the generated project and DerivedData"
+	@echo
+	@echo "Build output is quiet by default: warnings, errors and the result"
+	@echo "only. Pass V=1 for xcodebuild's full output."

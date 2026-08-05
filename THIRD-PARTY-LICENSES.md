@@ -192,6 +192,13 @@ redistribution of GainDrive.
   Homebrew on the build machine and not vendored, so nothing of it is in the
   repository or the app.
 
+* xcbeautify · MIT · Copyright (c) Thomas Hempel and contributors
+  https://github.com/cpisciotta/xcbeautify
+  **Optional.** `ios/Makefile` pipes `xcodebuild` through it when it happens to
+  be installed and runs unchanged when it is not, so this is a convenience on
+  one developer's machine rather than a dependency. Listed anyway because the
+  Makefile names it.
+
 * Swift Testing · Apache-2.0 with LLVM exception · Copyright (c) Apple Inc.
   https://github.com/swiftlang/swift-testing
   Used by `ios/GainDriveTests/`. It ships with the Xcode toolchain rather than
