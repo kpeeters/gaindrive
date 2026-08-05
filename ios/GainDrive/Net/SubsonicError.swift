@@ -89,29 +89,3 @@ extension SubsonicError: LocalizedError {
 		}
 	}
 }
-
-/// A user-facing sentence for anything that can come back from a request,
-/// including the transport errors `URLSession` raises, which are the common
-/// case for a self-hosted server that is simply switched off.
-func describeRequestFailure(_ error: Error) -> String {
-	if let subsonic = error as? SubsonicError {
-		return subsonic.errorDescription ?? "The request failed."
-	}
-	if let url = error as? URLError {
-		switch url.code {
-		case .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
-			.notConnectedToInternet, .timedOut:
-			return "Could not reach the server. Check the address and that it is running."
-		case .appTransportSecurityRequiresSecureConnection:
-			return "The connection was blocked by App Transport Security."
-		case .userAuthenticationRequired:
-			return "The server asked for authentication the app did not provide."
-		default:
-			return url.localizedDescription
-		}
-	}
-	if error is DecodingError {
-		return "The server's reply was not in the expected format."
-	}
-	return error.localizedDescription
-}

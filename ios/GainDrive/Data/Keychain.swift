@@ -44,7 +44,7 @@ enum Keychain {
 		[
 			kSecClass as String: kSecClassGenericPassword,
 			kSecAttrService as String: service,
-			kSecAttrAccount as String: server.raw.uuidString,
+			kSecAttrAccount as String: server.value.uuidString,
 			// Says "the iOS keychain, not the old file-based macOS one".
 			// Ignored on iOS and already the default under Mac Catalyst, but
 			// stated so the Mac build cannot quietly land in the other

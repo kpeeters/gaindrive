@@ -76,11 +76,11 @@ struct PlaceholderView: View {
 #Preview("Configured") {
 	RootView(firstRun: false)
 		.environment(ServerRegistry())
-		.environment(AppSettings())
+		.environment(SettingsStore())
 }
 
 #Preview("First run") {
 	RootView(firstRun: true)
 		.environment(ServerRegistry())
-		.environment(AppSettings())
+		.environment(SettingsStore())
 }

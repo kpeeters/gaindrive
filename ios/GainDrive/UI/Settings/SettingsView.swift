@@ -22,7 +22,7 @@ struct SettingsView: View {
 	let startOnServers: Bool
 
 	@Environment(ServerRegistry.self) private var registry
-	@Environment(AppSettings.self) private var settings
+	@Environment(SettingsStore.self) private var settings
 	@State private var path: [Route]
 
 	init(startOnServers: Bool = false) {
@@ -42,7 +42,7 @@ struct SettingsView: View {
 						LabeledContent("Servers", value: serversSummary)
 					}
 					NavigationLink(value: Route.appearance) {
-						LabeledContent("Appearance", value: settings.theme.label)
+						LabeledContent("Appearance", value: settings.themeMode.label)
 					}
 				}
 
@@ -70,8 +70,8 @@ struct SettingsView: View {
 			.navigationTitle("Settings")
 			.navigationDestination(for: Route.self) { route in
 				switch route {
-				case .servers: ServerListView(startAdding: startOnServers)
-				case .appearance: AppearanceView()
+				case .servers: ServersSettingsView(startAdding: startOnServers)
+				case .appearance: AppearanceSettingsView()
 				}
 			}
 		}
@@ -96,5 +96,5 @@ struct SettingsView: View {
 #Preview {
 	SettingsView()
 		.environment(ServerRegistry())
-		.environment(AppSettings())
+		.environment(SettingsStore())
 }

@@ -16,7 +16,7 @@ import SwiftUI
 @main
 struct GainDriveApp: App {
 	@State private var registry: ServerRegistry
-	@State private var settings = AppSettings()
+	@State private var settings = SettingsStore()
 
 	/// Read once, here, before any view exists. `RootView` explains why this
 	/// cannot be derived inside the view hierarchy.
@@ -33,7 +33,7 @@ struct GainDriveApp: App {
 			RootView(firstRun: firstRun)
 				.environment(registry)
 				.environment(settings)
-				.preferredColorScheme(settings.theme.colorScheme)
+				.preferredColorScheme(settings.themeMode.colorScheme)
 		}
 	}
 }

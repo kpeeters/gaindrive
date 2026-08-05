@@ -119,7 +119,7 @@ struct SubsonicClient: Sendable {
 		httpStatus: Int?
 	) throws -> Body {
 		do {
-			return try JSONDecoder().decode(SubsonicResponse<Body>.self, from: data).unwrap()
+			return try JSONDecoder().decode(SubsonicEnvelope<Body>.self, from: data).requireOk()
 		} catch is DecodingError {
 			// A server that answers a non-2xx with no envelope has still told
 			// us something; reporting the status beats reporting a parse
@@ -142,5 +142,29 @@ struct SubsonicClient: Sendable {
 	func user(named username: String? = nil) async throws -> SubsonicUser {
 		let name = username ?? auth.username
 		return try await perform("getUser", parameters: ["username": name], expecting: UserBody.self).user
+	}
+}
+
+/// Outcome of a connection test. "The server said no" and "there was no
+/// server" need different fixes, so the UI must be able to tell them apart.
+///
+/// Lives here rather than beside `ConnectionTester` to match
+/// `net/SubsonicClient.kt`, which holds the same four cases.
+enum ConnectionTest: Sendable, Equatable {
+	/// Reachable, and the account was proved by a reply that named it.
+	case reachable(SubsonicUser)
+	/// Answered `ping`, but the call that would have proved the credentials
+	/// did not happen — this server does not implement `getUser`, or refused
+	/// it. Not a failure, and not the reassurance the button exists to give
+	/// either, so it says so rather than claiming success.
+	case unverified
+	case rejected(String)
+	case unreachable(String)
+
+	var isSuccess: Bool {
+		switch self {
+		case .reachable, .unverified: true
+		case .rejected, .unreachable: false
+		}
 	}
 }
