@@ -19,32 +19,36 @@ struct RootView: View {
 	/// their first server, resetting the navigation stack mid-task.
 	let firstRun: Bool
 
-	@State private var tab: Tab
+	@State private var tab: Destination
 
 	init(firstRun: Bool) {
 		self.firstRun = firstRun
 		_tab = State(initialValue: firstRun ? .settings : .artists)
 	}
 
-	enum Tab: Hashable {
+	/// Not called `Tab`: SwiftUI's own `Tab` is what the builder below
+	/// constructs, and a nested type of that name shadows it inside this
+	/// scope — which surfaces as "cannot be constructed because it has no
+	/// accessible initializers" pointing at the wrong thing entirely.
+	enum Destination: Hashable {
 		case artists, playlists, recents, search, settings
 	}
 
 	var body: some View {
 		TabView(selection: $tab) {
-			Tab("Artists", systemImage: "music.mic", value: Tab.artists) {
+			Tab("Artists", systemImage: "music.mic", value: Destination.artists) {
 				PlaceholderView(title: "Artists", symbol: "music.mic")
 			}
-			Tab("Playlists", systemImage: "music.note.list", value: Tab.playlists) {
+			Tab("Playlists", systemImage: "music.note.list", value: Destination.playlists) {
 				PlaceholderView(title: "Playlists", symbol: "music.note.list")
 			}
-			Tab("Recents", systemImage: "clock.arrow.circlepath", value: Tab.recents) {
+			Tab("Recents", systemImage: "clock.arrow.circlepath", value: Destination.recents) {
 				PlaceholderView(title: "Recents", symbol: "clock.arrow.circlepath")
 			}
-			Tab("Search", systemImage: "magnifyingglass", value: Tab.search) {
+			Tab("Search", systemImage: "magnifyingglass", value: Destination.search) {
 				PlaceholderView(title: "Search", symbol: "magnifyingglass")
 			}
-			Tab("Settings", systemImage: "gearshape", value: Tab.settings) {
+			Tab("Settings", systemImage: "gearshape", value: Destination.settings) {
 				SettingsView(startOnServers: firstRun)
 			}
 		}
