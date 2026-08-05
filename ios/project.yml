@@ -26,6 +26,12 @@ configFiles:
   Debug: Local.xcconfig
   Release: Local.xcconfig
 
+# Xcodegen's default, stated so the config names the Makefile and the
+# xcconfig above refer to are visible in one place.
+configs:
+  Debug: debug
+  Release: release
+
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -117,6 +123,13 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic
         SWIFT_EMIT_LOC_STRINGS: NO
+      configs:
+        # `@testable import GainDrive` links against the app target's symbols
+        # and needs this. XcodeGen's debug preset already sets it; stated
+        # anyway, because the failure is a link error in the test bundle that
+        # says nothing about testability.
+        Debug:
+          ENABLE_TESTABILITY: YES
 
   GainDriveTests:
     type: bundle.unit-test

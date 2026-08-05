@@ -8,32 +8,75 @@
 
 import SwiftUI
 
-/// Placeholder root, replaced by the servers screen in phase 1 — though this
-/// empty state is plausibly what that screen keeps for a fresh install.
+/// The persistent shell: five destinations, matching the web client's bottom
+/// bar and `android/SCREENS.md`. Four of them are placeholders until phase 2
+/// fills them; the shell exists now so the start-destination routing is a real
+/// thing that can be exercised rather than a promise.
 struct RootView: View {
+	/// Decided **once**, by the composition root, from the registry as it was
+	/// at launch — and then frozen. Re-deriving it from `servers.isEmpty`
+	/// would move the user out from under themselves the moment they saved
+	/// their first server, resetting the navigation stack mid-task.
+	let firstRun: Bool
+
+	@State private var tab: Tab
+
+	init(firstRun: Bool) {
+		self.firstRun = firstRun
+		_tab = State(initialValue: firstRun ? .settings : .artists)
+	}
+
+	enum Tab: Hashable {
+		case artists, playlists, recents, search, settings
+	}
+
 	var body: some View {
-		VStack(spacing: 16) {
-			// The asset is a vector, so this is drawn at whatever size it is
-			// given rather than scaled from a raster. The artwork is a
-			// full-bleed square with no corner treatment of its own, which
-			// reads as a red block unless it is masked the way the platform
-			// masks an app icon.
-			Image("Logo")
-				.resizable()
-				.scaledToFit()
-				.frame(width: 96, height: 96)
-				.clipShape(RoundedRectangle(cornerRadius: 21, style: .continuous))
-			Text("GainDrive")
-				.font(.largeTitle.weight(.semibold))
-			Text("No servers configured yet.")
-				.font(.subheadline)
-				.foregroundStyle(.secondary)
+		TabView(selection: $tab) {
+			Tab("Artists", systemImage: "music.mic", value: Tab.artists) {
+				PlaceholderView(title: "Artists", symbol: "music.mic")
+			}
+			Tab("Playlists", systemImage: "music.note.list", value: Tab.playlists) {
+				PlaceholderView(title: "Playlists", symbol: "music.note.list")
+			}
+			Tab("Recents", systemImage: "clock.arrow.circlepath", value: Tab.recents) {
+				PlaceholderView(title: "Recents", symbol: "clock.arrow.circlepath")
+			}
+			Tab("Search", systemImage: "magnifyingglass", value: Tab.search) {
+				PlaceholderView(title: "Search", symbol: "magnifyingglass")
+			}
+			Tab("Settings", systemImage: "gearshape", value: Tab.settings) {
+				SettingsView(startOnServers: firstRun)
+			}
 		}
-		.frame(maxWidth: .infinity, maxHeight: .infinity)
-		.background(Color(.systemBackground))
 	}
 }
 
-#Preview {
-	RootView()
+/// Stands in for a phase 2 screen. It says which one and that it is not built
+/// yet, because a blank tab reads as a bug.
+struct PlaceholderView: View {
+	let title: String
+	let symbol: String
+
+	var body: some View {
+		NavigationStack {
+			ContentUnavailableView {
+				Label(title, systemImage: symbol)
+			} description: {
+				Text("Browsing arrives in phase 2.")
+			}
+			.navigationTitle(title)
+		}
+	}
+}
+
+#Preview("Configured") {
+	RootView(firstRun: false)
+		.environment(ServerRegistry())
+		.environment(AppSettings())
+}
+
+#Preview("First run") {
+	RootView(firstRun: true)
+		.environment(ServerRegistry())
+		.environment(AppSettings())
 }

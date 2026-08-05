@@ -4,11 +4,15 @@
 	The app collects nothing and contacts no service other than the user's own
 	GainDrive server, so all three collection keys are empty and stay that way.
 
-	NSPrivacyAccessedAPITypes is the part that will grow. The cache phase
-	(PLAN.md phase 5) adds two entries: file timestamps (C617.1) for the LRU
-	eviction, and disk space (E174.1) for the usage readout and the cap check.
-	Storing settings in UserDefaults adds CA92.1. Each is a one-line addition
-	here; the point of writing the file now is that it is never a discovery.
+	NSPrivacyAccessedAPITypes grows as phases land. UserDefaults (CA92.1) is
+	here from phase 1, which stores the server list and the theme in it. The
+	cache phase (PLAN.md phase 5) adds two more: file timestamps (C617.1) for
+	the LRU eviction, and disk space (E174.1) for the usage readout and the cap
+	check. Each is a few lines here; the point of writing the file early is
+	that it is never a discovery.
+
+	Note the Keychain is not a required-reason API and needs no entry, even
+	though it holds the one genuinely sensitive thing the app stores.
 -->
 <plist version="1.0">
 <dict>
@@ -19,6 +23,18 @@
 	<key>NSPrivacyCollectedDataTypes</key>
 	<array/>
 	<key>NSPrivacyAccessedAPITypes</key>
-	<array/>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<!-- CA92.1: the app's own defaults, read and written only by
+				     this app. Nothing is shared with an app group or another
+				     process. -->
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
