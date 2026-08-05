@@ -12,6 +12,7 @@ SCHEME := GainDrive
 LOGO := ../graphics/gaindrive.svg
 ICON := Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
 ICON_RAW := build/appicon-raw.png
+LOGO_ASSET := Resources/Assets.xcassets/Logo.imageset/gaindrive.svg
 
 # Override on the command line for a different simulator, e.g.
 #   make test DEST='platform=iOS Simulator,name=iPad Pro 13-inch (M4)'
@@ -22,7 +23,7 @@ DEST ?= platform=iOS Simulator,name=iPhone 16
 # not have; omitting it asks for a platform the target does not support.
 DEST_MAC ?= platform=macOS,variant=Mac Catalyst
 
-.PHONY: generate open build build-mac test test-mac icon clean help
+.PHONY: generate open build build-mac test test-mac art icon logo clean help
 
 # Default target, so `make` alone leaves a project ready to open. Regenerating
 # is idempotent and cheap; Xcode notices the project changed under it.
@@ -48,16 +49,31 @@ test: generate
 test-mac: generate
 	$(XCODEBUILD) test -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST_MAC)'
 
-# The app icon is rendered from the shared artwork rather than kept as a second
-# copy of it, so the two cannot drift. graphics/gaindrive.svg is already a
-# full-bleed square — brand red to the edge, sand disc inside — so this is a
-# straight rasterise with no padding or background of its own.
+# Both assets derive from graphics/gaindrive.svg rather than being second
+# copies of it, so they cannot drift from the artwork or from each other.
 #
-# Deliberately a prerequisite of nothing. The PNG is committed, and an ordinary
-# build must not need Inkscape and ImageMagick on the machine doing it; the
-# macOS build machine has neither. Run this on the Linux tree when the artwork
-# changes, and commit the result.
+# Deliberately a prerequisite of nothing. The results are committed, and an
+# ordinary build must not need Inkscape and ImageMagick on the machine doing
+# it; the macOS build machine has neither. Run this on the Linux tree when the
+# artwork changes, and commit what it produces.
+art: icon logo
+
+# The app icon. graphics/gaindrive.svg is already a full-bleed square — brand
+# red to the edge, sand disc inside — so this is a straight rasterise with no
+# padding or background of its own.
 icon: $(ICON)
+
+# The in-app logo, kept as a vector so it is drawn at whatever size a view asks
+# for. Exported as plain SVG rather than copied: Inkscape's own file carries
+# sodipodi and inkscape namespaces, and actool accepts only a subset of SVG, so
+# handing it the editor's working file is asking a strict parser to tolerate
+# things it has no reason to. The plain export is five elements and renders
+# pixel-identically.
+logo: $(LOGO_ASSET)
+
+$(LOGO_ASSET): $(LOGO)
+	@mkdir -p $(dir $@)
+	$(INKSCAPE) $< --export-type=svg --export-plain-svg --export-filename=$@
 
 # Rendered at 2048 and downsampled, because supersampling antialiases the
 # grooves better than asking Inkscape for 1024 directly.
@@ -99,6 +115,8 @@ help:
 	@echo "  build-mac  Build for \$$DEST_MAC (My Mac, Mac Catalyst)"
 	@echo "  test       Run the unit tests on \$$DEST"
 	@echo "  test-mac   Run the unit tests on \$$DEST_MAC"
-	@echo "  icon       Re-render the app icon from graphics/gaindrive.svg"
+	@echo "  art        Re-derive both assets from graphics/gaindrive.svg"
 	@echo "             (needs Inkscape and ImageMagick; not part of a build)"
+	@echo "  icon       Just the app icon PNG"
+	@echo "  logo       Just the in-app logo SVG"
 	@echo "  clean      Remove the generated project and DerivedData"

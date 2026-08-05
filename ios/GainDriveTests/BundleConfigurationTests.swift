@@ -60,4 +60,11 @@ struct BundleConfigurationTests {
 	@Test func accentColourResolves() {
 		#expect(UIColor(named: "AccentColor") != nil)
 	}
+
+	/// Same silent failure as the colour, and worse to spot: SwiftUI's
+	/// `Image("Logo")` renders an empty space for a missing asset rather than
+	/// complaining, so a renamed or dropped image set looks like a layout bug.
+	@Test func logoResolves() {
+		#expect(UIImage(named: "Logo") != nil)
+	}
 }
