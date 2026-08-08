@@ -12,7 +12,7 @@ struct AlbumsView: View {
 	let refs: [ItemRef]
 	let artistName: String
 
-	@Environment(LibraryRepository.self) private var library
+	@Environment(\.library) private var library
 	@Environment(ServerSelection.self) private var selection
 	@State private var model: AlbumsViewModel?
 	@State private var notesDismissed = false
@@ -33,7 +33,7 @@ struct AlbumsView: View {
 			// Built here rather than in an initialiser because a `@State`
 			// initial value cannot read `@Environment`. Assigned once, so the
 			// model survives every re-evaluation of this body.
-			if model == nil {
+			if model == nil, let library {
 				model = AlbumsViewModel(library: library, selection: selection, refs: refs)
 			}
 			model?.appear()

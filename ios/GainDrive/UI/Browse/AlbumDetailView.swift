@@ -12,7 +12,7 @@ struct AlbumDetailView: View {
 	let ref: ItemRef
 	let albumTitle: String
 
-	@Environment(LibraryRepository.self) private var library
+	@Environment(\.library) private var library
 	@State private var model: AlbumDetailViewModel?
 
 	var body: some View {
@@ -28,7 +28,7 @@ struct AlbumDetailView: View {
 		.navigationTitle(albumTitle)
 		.navigationBarTitleDisplayMode(.inline)
 		.task {
-			if model == nil {
+			if model == nil, let library {
 				model = AlbumDetailViewModel(library: library, ref: ref)
 			}
 			model?.appear()

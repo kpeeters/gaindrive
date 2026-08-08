@@ -40,7 +40,7 @@ struct GainDriveApp: App {
 				.environment(registry)
 				.environment(settings)
 				.environment(selection)
-				.environment(library)
+				.environment(\.library, library)
 				.preferredColorScheme(settings.themeMode.colorScheme)
 		}
 	}
