@@ -19,6 +19,8 @@ struct GainDriveApp: App {
 	@State private var settings: SettingsStore
 	@State private var selection: ServerSelection
 	@State private var library: LibraryRepository
+	@State private var events: LibraryEvents
+	@State private var stars: StarStore
 
 	/// Read once, here, before any view exists. `RootView` explains why this
 	/// cannot be derived inside the view hierarchy.
@@ -30,18 +32,26 @@ struct GainDriveApp: App {
 		firstRun = registry.servers.isEmpty
 		_registry = State(initialValue: registry)
 		_settings = State(initialValue: settings)
+		let events = LibraryEvents()
+		let library = LibraryRepository(registry: registry, settings: settings, events: events)
 		_selection = State(initialValue: ServerSelection(registry: registry, settings: settings))
-		_library = State(initialValue: LibraryRepository(registry: registry, settings: settings))
+		_events = State(initialValue: events)
+		_library = State(initialValue: library)
+		_stars = State(initialValue: StarStore(library: library))
 	}
 
 	var body: some Scene {
 		WindowGroup {
-			RootView(firstRun: firstRun, library: library, selection: selection)
-				.environment(registry)
-				.environment(settings)
-				.environment(selection)
-				.environment(\.library, library)
-				.preferredColorScheme(settings.themeMode.colorScheme)
+			RootView(
+				firstRun: firstRun, library: library, selection: selection, events: events
+			)
+			.environment(registry)
+			.environment(settings)
+			.environment(selection)
+			.environment(events)
+			.environment(stars)
+			.environment(\.library, library)
+			.preferredColorScheme(settings.themeMode.colorScheme)
 		}
 	}
 }

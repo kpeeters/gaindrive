@@ -29,10 +29,12 @@ import Foundation
 final class LibraryRepository: Sendable {
 	private let registry: ServerRegistry
 	private let settings: SettingsStore
+	private let events: LibraryEvents
 
-	init(registry: ServerRegistry, settings: SettingsStore) {
+	init(registry: ServerRegistry, settings: SettingsStore, events: LibraryEvents) {
 		self.registry = registry
 		self.settings = settings
+		self.events = events
 	}
 
 	// MARK: - Fan-out reads
@@ -98,6 +100,96 @@ final class LibraryRepository: Sendable {
 			}
 		}
 		return MergedResult(items: sections(gathered), failures: gathered.failures)
+	}
+
+	/// One emission per server as it answers, each carrying **everything
+	/// received so far** and rebuilt in registry order.
+	///
+	/// Cumulative rather than incremental, and ordered rather than
+	/// chronological, for the same reason: a slow server's rows have to appear
+	/// *in place* rather than being appended, or the list shuffles under the
+	/// user's finger the moment the second server lands.
+	///
+	/// Unlike Android, which guards the same accumulation with a `Mutex`, the
+	/// results are folded in by a single serial loop — structured concurrency
+	/// is the lock, so there is nothing to hold.
+	func searchProgressively(
+		scope: BrowseScope, query: String, limits: SearchLimits
+	) -> AsyncStream<MergedResult<LibrarySelection>> {
+		AsyncStream { continuation in
+			let task = Task {
+				let clients = await registry.clientsSnapshot()
+				let servers = clients.servers(in: scope)
+				let collapse = await settings.mergeDuplicateAlbums
+				guard !servers.isEmpty else {
+					continuation.yield(MergedResult(items: LibrarySelection()))
+					continuation.finish()
+					return
+				}
+
+				var arrived = [LibrarySelection?](repeating: nil, count: servers.count)
+				var failed = [ServerFailure?](repeating: nil, count: servers.count)
+
+				await withTaskGroup(of: (Int, Answer<LibrarySelection>).self) { group in
+					for (index, config) in servers.enumerated() {
+						guard let client = clients.client(for: config.id) else { continue }
+						group.addTask {
+							do {
+								let found = try await client.search3(
+									query: query,
+									artistCount: limits.artists,
+									albumCount: limits.albums,
+									songCount: limits.songs)
+								return (
+									index,
+									.ok(config.id, LibraryMapper.selection(found, server: config.id))
+								)
+							} catch {
+								guard !error.isCancellation else { return (index, .cancelled) }
+								return (
+									index,
+									.failed(
+										ServerFailure(
+											server: config.id, serverName: config.displayName,
+											message: error.userMessage))
+								)
+							}
+						}
+					}
+					for await (index, answer) in group {
+						switch answer {
+						case .ok(_, let selection): arrived[index] = selection
+						case .failed(let failure): failed[index] = failure
+						// A keystroke replaced this query. Recording it would
+						// flash a failure note for something nobody is waiting
+						// for any more.
+						case .cancelled: continue
+						}
+						continuation.yield(
+							Self.combine(arrived, failures: failed, collapse: collapse))
+					}
+				}
+				continuation.finish()
+			}
+			// Without this, abandoning the stream on the next keystroke leaves
+			// the old query's servers running to completion.
+			continuation.onTermination = { _ in task.cancel() }
+		}
+	}
+
+	/// `compactMap` over an index-keyed array, so what survives is still in
+	/// registry order.
+	private static func combine(
+		_ arrived: [LibrarySelection?], failures: [ServerFailure?], collapse: Bool
+	) -> MergedResult<LibrarySelection> {
+		let selections = arrived.compactMap { $0 }
+		let albums = selections.flatMap(\.albums)
+		return MergedResult(
+			items: LibrarySelection(
+				artists: Merge.artists(perServer: selections.map(\.artists)),
+				albums: collapse ? Merge.albums(albums) : albums,
+				songs: selections.flatMap(\.songs)),
+			failures: failures.compactMap { $0 })
 	}
 
 	// MARK: - Single-ref reads
@@ -171,6 +263,44 @@ final class LibraryRepository: Sendable {
 		} else {
 			try await client.unstar(songIds: songs, albumIds: albums, artistIds: artists)
 		}
+	}
+
+	/// `songs` are `ItemRef`s rather than bare ids because **a playlist cannot
+	/// hold a track from another server**, and the type is where that is said.
+	/// Anything from elsewhere is dropped rather than sent, since the server
+	/// would silently ignore it and the playlist would come back shorter than
+	/// the user asked for with nothing to explain why.
+	@discardableResult
+	func createPlaylist(server: ServerId, name: String, songs: [ItemRef]) async throws -> Playlist? {
+		guard let client = await client(for: server) else { return nil }
+		let created = try await client.createPlaylist(
+			name: name, songIds: songs.filter { $0.server == server }.map(\.id))
+		await events.playlistsChanged()
+		return created.flatMap { LibraryMapper.playlist($0, server: server) }
+	}
+
+	func addToPlaylist(_ playlist: ItemRef, song: ItemRef) async throws {
+		guard song.server == playlist.server,
+			let client = await client(for: playlist.server)
+		else { return }
+		try await client.updatePlaylist(playlistId: playlist.id, songIdToAdd: [song.id])
+		await events.playlistsChanged()
+	}
+
+	/// Removes by **position**. The caller must serialise these: positions shift
+	/// the moment one is removed, so a second request issued before the first
+	/// lands would carry an index the server has already moved and delete the
+	/// wrong track.
+	func removeFromPlaylist(_ playlist: ItemRef, at index: Int) async throws {
+		guard let client = await client(for: playlist.server) else { return }
+		try await client.updatePlaylist(playlistId: playlist.id, songIndexToRemove: [index])
+		await events.playlistsChanged()
+	}
+
+	func deletePlaylist(_ playlist: ItemRef) async throws {
+		guard let client = await client(for: playlist.server) else { return }
+		try await client.deletePlaylist(id: playlist.id)
+		await events.playlistsChanged()
 	}
 
 	// MARK: - Covers
@@ -326,4 +456,12 @@ final class LibraryRepository: Sendable {
 	private func client(for server: ServerId) async -> SubsonicClient? {
 		await registry.client(for: server)
 	}
+}
+
+/// How many of each kind to ask for. Zero asks the server to skip that
+/// category entirely, which is what a switched-off filter chip means.
+struct SearchLimits: Sendable {
+	var artists = 20
+	var albums = 30
+	var songs = 60
 }

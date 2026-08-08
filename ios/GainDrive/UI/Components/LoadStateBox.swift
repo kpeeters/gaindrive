@@ -22,7 +22,7 @@ import SwiftUI
 /// a refresh, and only a scope change or a retry blanks it) by construction.
 struct LoadStateBox<Value, Content: View>: View {
 	let state: Load<Value>
-	var onRetry: (() -> Void)?
+	var onRetry: (() -> Void)? = nil
 	@ViewBuilder let content: (Value) -> Content
 
 	var body: some View {

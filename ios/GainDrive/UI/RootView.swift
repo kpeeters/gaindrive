@@ -28,12 +28,25 @@ struct RootView: View {
 	/// theme change; `@State` keeps the first value and discards the rest. That
 	/// is why a view model's own initialiser must start no work.
 	@State private var artists: ArtistsViewModel
+	@State private var playlists: PlaylistsViewModel
+	@State private var recents: RecentsViewModel
+	@State private var search: SearchViewModel
 
-	init(firstRun: Bool, library: LibraryRepository, selection: ServerSelection) {
+	init(
+		firstRun: Bool, library: LibraryRepository, selection: ServerSelection,
+		events: LibraryEvents
+	) {
 		self.firstRun = firstRun
 		_tab = State(initialValue: firstRun ? .settings : .artists)
 		_artists = State(
 			initialValue: ArtistsViewModel(library: library, selection: selection))
+		_playlists = State(
+			initialValue: PlaylistsViewModel(
+				library: library, selection: selection, events: events))
+		_recents = State(
+			initialValue: RecentsViewModel(library: library, selection: selection))
+		_search = State(
+			initialValue: SearchViewModel(library: library, selection: selection))
 	}
 
 	/// Not called `Tab`: SwiftUI's own `Tab` is what the builder below
@@ -50,35 +63,17 @@ struct RootView: View {
 				ArtistsView(model: artists)
 			}
 			Tab("Playlists", systemImage: "music.note.list", value: Destination.playlists) {
-				PlaceholderView(title: "Playlists", symbol: "music.note.list")
+				PlaylistsView(model: playlists)
 			}
 			Tab("Recents", systemImage: "clock.arrow.circlepath", value: Destination.recents) {
-				PlaceholderView(title: "Recents", symbol: "clock.arrow.circlepath")
+				RecentsView(model: recents)
 			}
 			Tab("Search", systemImage: "magnifyingglass", value: Destination.search) {
-				PlaceholderView(title: "Search", symbol: "magnifyingglass")
+				SearchView(model: search)
 			}
 			Tab("Settings", systemImage: "gearshape", value: Destination.settings) {
 				SettingsView(startOnServers: firstRun)
 			}
-		}
-	}
-}
-
-/// Stands in for a screen that is not built yet. It says which one, because a
-/// blank tab reads as a bug.
-struct PlaceholderView: View {
-	let title: String
-	let symbol: String
-
-	var body: some View {
-		NavigationStack {
-			ContentUnavailableView {
-				Label(title, systemImage: symbol)
-			} description: {
-				Text("Arrives in stage B.")
-			}
-			.navigationTitle(title)
 		}
 	}
 }

@@ -48,14 +48,18 @@ struct AlbumDetailView: View {
 			if detail.isMultiDisc {
 				ForEach(discs(detail), id: \.number) { disc in
 					Section {
-						ForEach(disc.songs) { TrackRow(song: $0) }
+						ForEach(disc.songs) { song in
+							TrackRow(song: song).trackActions(for: song)
+						}
 					} header: {
 						SectionHeading(text: "Disc \(disc.number)")
 					}
 				}
 			} else {
 				Section {
-					ForEach(detail.songs) { TrackRow(song: $0) }
+					ForEach(detail.songs) { song in
+						TrackRow(song: song).trackActions(for: song)
+					}
 				}
 			}
 		}
@@ -77,9 +81,14 @@ struct AlbumDetailView: View {
 				CoverHero(source: model.heroes.first)
 			}
 
-			VStack(alignment: .leading, spacing: 2) {
-				Text(detail.album.title).font(.title3.weight(.semibold))
-				Text(subtitle(detail)).font(.subheadline).foregroundStyle(.secondary)
+			HStack(alignment: .firstTextBaseline) {
+				VStack(alignment: .leading, spacing: 2) {
+					Text(detail.album.title).font(.title3.weight(.semibold))
+					Text(subtitle(detail)).font(.subheadline).foregroundStyle(.secondary)
+				}
+				Spacer(minLength: 12)
+				StarButton(
+					ref: detail.album.ref, kind: .album, starredAt: detail.album.starredAt)
 			}
 
 			if let notes = model.notes {
