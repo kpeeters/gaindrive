@@ -7,6 +7,7 @@
 //	full text of the GPL.
 
 import Foundation
+import OSLog
 import Security
 
 /// Server passwords, one Keychain item per server.
@@ -40,6 +41,16 @@ enum Keychain {
 
 	private static let service = "org.gaindrive.ios.server-password"
 
+	/// Every failure is logged with its `OSStatus`.
+	///
+	/// Not diagnostics for their own sake: a rejected write and a successful one
+	/// are indistinguishable from the call site, and the *symptom* of a rejected
+	/// one appears much later and somewhere else — the server list saying "no
+	/// saved password", or a browse screen failing to build a client — which
+	/// reads as a bug anywhere but here. `-34018` is `errSecMissingEntitlement`
+	/// and means the signed app may not reach the keychain it asked for.
+	private static let log = Logger(subsystem: "org.gaindrive.ios", category: "keychain")
+
 	private static func query(for server: ServerId) -> [String: Any] {
 		[
 			kSecClass as String: kSecClassGenericPassword,
@@ -68,10 +79,18 @@ enum Keychain {
 		]
 		let updated = SecItemUpdate(attributes as CFDictionary, update as CFDictionary)
 		if updated == errSecSuccess { return true }
+		if updated != errSecItemNotFound {
+			log.error("SecItemUpdate failed: \(updated)")
+		}
 
 		attributes[kSecValueData as String] = data
 		attributes[kSecAttrAccessible as String] = accessibility
-		return SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess
+		let added = SecItemAdd(attributes as CFDictionary, nil)
+		guard added == errSecSuccess else {
+			log.error("SecItemAdd failed: \(added)")
+			return false
+		}
+		return true
 	}
 
 	static func password(for server: ServerId) -> String? {
@@ -80,9 +99,13 @@ enum Keychain {
 		attributes[kSecMatchLimit as String] = kSecMatchLimitOne
 
 		var item: CFTypeRef?
-		guard SecItemCopyMatching(attributes as CFDictionary, &item) == errSecSuccess,
-			let data = item as? Data
-		else {
+		let status = SecItemCopyMatching(attributes as CFDictionary, &item)
+		guard status == errSecSuccess, let data = item as? Data else {
+			// Absent is an ordinary answer — a server whose password was never
+			// saved, or one restored without it. Anything else is not.
+			if status != errSecItemNotFound {
+				log.error("SecItemCopyMatching failed: \(status)")
+			}
 			return nil
 		}
 		return String(data: data, encoding: .utf8)

@@ -13,6 +13,21 @@
 	be an unreachable-host error. That is the failure this file prevents, and
 	it is not one the iOS build can ever reproduce.
 
+	The keychain access group is the third, and it is not optional either.
+	`Keychain` asks for the **data protection** keychain rather than the old
+	file-based macOS one, so that a password is the same item under both builds
+	and `kSecAttrAccessible` actually means something. A sandboxed Mac app may
+	use the file-based keychain freely, but the data protection keychain needs
+	the app to be signed into an access group — without one every write fails
+	with `errSecMissingEntitlement` and every read afterwards finds nothing.
+	Nothing reports that at the time; it surfaces later as a saved server whose
+	password has vanished, which reads as a bug in the editor.
+
+	`$(AppIdentifierPrefix)$(CFBundleIdentifier)` is the group every app
+	implicitly has. Declaring it explicitly asks for nothing new — it is not
+	the Keychain Sharing capability — it just makes the implicit group reachable
+	from the data protection keychain.
+
 	Nothing else is granted. Reading files the user picks, and the incoming
 	connections a future Cast bridge might want, are separate entitlements to
 	be added when the phase that needs them arrives.
@@ -23,5 +38,9 @@
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)$(CFBundleIdentifier)</string>
+	</array>
 </dict>
 </plist>

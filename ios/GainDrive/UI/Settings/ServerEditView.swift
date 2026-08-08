@@ -34,6 +34,7 @@ struct ServerEditView: View {
 	@State private var password: String
 	@State private var isTesting = false
 	@State private var testResult: ConnectionTest?
+	@State private var saveError: String?
 
 	init(target: Target) {
 		self.target = target
@@ -124,6 +125,16 @@ struct ServerEditView: View {
 						.disabled(!isComplete)
 				}
 			}
+			.alert(
+				"Could not save the password",
+				isPresented: Binding(
+					get: { saveError != nil },
+					set: { if !$0 { saveError = nil } })
+			) {
+				Button("OK") { saveError = nil }
+			} message: {
+				Text(saveError ?? "")
+			}
 		}
 	}
 
@@ -149,16 +160,37 @@ struct ServerEditView: View {
 	}
 
 	private func save() {
+		let id: ServerId
 		switch target {
 		case .new:
-			registry.add(
-				name: name, urlString: urlText, username: username, password: password)
+			id = registry.add(
+				name: name, urlString: urlText, username: username, password: password
+			).id
 		case .existing(let config):
 			var updated = config
 			updated.name = ServerConfig.normalisedName(name)
 			updated.urlString = normalisedURL
 			updated.username = ServerConfig.normalisedUsername(username)
 			registry.update(updated, newPassword: password)
+			id = config.id
+		}
+
+		// Read the password back rather than trusting that writing it worked.
+		//
+		// The Keychain can refuse a write for reasons that have nothing to do
+		// with this screen — a signing or entitlement problem being the usual
+		// one — and the symptom appears much later and somewhere else: the
+		// server list saying it has no saved password, or every browse screen
+		// failing to build a client. Catching it here names the right thing at
+		// the moment it happened, and is robust to whatever the cause turns out
+		// to be. See the log line in `Keychain` for the `OSStatus` itself.
+		let trimmed = password.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard trimmed.isEmpty || registry.password(for: id) != nil else {
+			saveError = """
+				The server was saved but its password could not be stored in the \
+				keychain. Playback and browsing will fail until it can be.
+				"""
+			return
 		}
 		dismiss()
 	}
