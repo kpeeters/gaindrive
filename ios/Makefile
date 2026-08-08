@@ -44,6 +44,21 @@ else
 XCFLAGS := -quiet
 endif
 
+# Let xcodebuild create or update the provisioning profile itself.
+#
+# Xcode's GUI does this silently; xcodebuild refuses unless asked, and says so
+# with an error that names neither the cause nor the fix — "no profiles for
+# org.gaindrive.ios were found". The cause is always the same: the entitlements
+# changed, so the existing profile no longer matches the app. `keychain-access-
+# groups` was the change that first triggered it, and any future capability will
+# do it again.
+#
+# The cost, stated plainly: with this flag a build may contact Apple's developer
+# portal and create or modify a profile on the signed-in account. It does
+# nothing when the profile is already valid. Set SIGNING= to switch it off and
+# manage profiles by opening the project in Xcode instead.
+SIGNING ?= -allowProvisioningUpdates
+
 # xcbeautify, if it happens to be installed, groups diagnostics per file and
 # colours them. Optional on purpose: nothing in this build may depend on a tool
 # that is not in the repository, so its absence costs only the colours.
@@ -64,15 +79,15 @@ open: generate
 
 build: generate
 	$(XCODEBUILD) build -project $(PROJECT) -scheme $(SCHEME) \
-	 -destination '$(DEST)' $(XCFLAGS) $(PIPE)
+	 -destination '$(DEST)' $(SIGNING) $(XCFLAGS) $(PIPE)
 
 build-mac: generate
 	$(XCODEBUILD) build -project $(PROJECT) -scheme $(SCHEME) \
-	 -destination '$(DEST_MAC)' $(XCFLAGS) $(PIPE)
+	 -destination '$(DEST_MAC)' $(SIGNING) $(XCFLAGS) $(PIPE)
 
 test: generate
 	$(XCODEBUILD) test -project $(PROJECT) -scheme $(SCHEME) \
-	 -destination '$(DEST)' $(XCFLAGS) $(PIPE)
+	 -destination '$(DEST)' $(SIGNING) $(XCFLAGS) $(PIPE)
 
 # Worth running on both: the bundle assertions cover Info.plist keys that
 # Catalyst treats differently from iOS, and a derived bundle identifier or a
@@ -80,7 +95,7 @@ test: generate
 # puzzling runtime failure.
 test-mac: generate
 	$(XCODEBUILD) test -project $(PROJECT) -scheme $(SCHEME) \
-	 -destination '$(DEST_MAC)' $(XCFLAGS) $(PIPE)
+	 -destination '$(DEST_MAC)' $(SIGNING) $(XCFLAGS) $(PIPE)
 
 # Both assets derive from graphics/gaindrive.svg rather than being second
 # copies of it, so they cannot drift from the artwork or from each other.
