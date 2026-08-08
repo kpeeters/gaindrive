@@ -59,6 +59,10 @@ struct ServerSection<Item: Sendable>: Identifiable, Sendable {
 	var id: ServerId { server.id }
 }
 
+// Both halves stated, and at their own bounds: a conditional `Hashable`
+// conformance does not imply the inherited `Equatable` one, and equality only
+// ever needed `Equatable`.
+extension ServerSection: Equatable where Item: Equatable {}
 extension ServerSection: Hashable where Item: Hashable {}
 
 extension MergedResult where Value: Collection {
