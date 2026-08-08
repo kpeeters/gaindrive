@@ -29,31 +29,50 @@ func parseTimestamp(_ timestamp: String?) -> Date? {
 	let text = timestamp.trimmingCharacters(in: .whitespacesAndNewlines)
 	guard !text.isEmpty else { return nil }
 
-	if let date = isoParser.date(from: text) { return date }
-	if let date = isoFractionalParser.date(from: text) { return date }
-	return sqliteParser.date(from: text)
+	// `Date.ISO8601FormatStyle` rather than `ISO8601DateFormatter`: the strategy
+	// is a value type and therefore `Sendable`, where the formatter is a class
+	// that cannot be held in a global under strict concurrency. The alternative
+	// was `nonisolated(unsafe)`, which would have asserted thread-safety the
+	// compiler cannot check instead of using the type that has it.
+	if let date = try? Date(text, strategy: .iso8601) { return date }
+	if let date = try? Date(text, strategy: fractionalISO) { return date }
+	return parseSQLiteTimestamp(text)
 }
 
-private let isoParser: ISO8601DateFormatter = {
-	let parser = ISO8601DateFormatter()
-	parser.formatOptions = [.withInternetDateTime]
-	return parser
-}()
+/// Foundation's ISO 8601 parsing is all-or-nothing about fractional seconds
+/// where Java's `OffsetDateTime.parse` is not, so this is a second strategy
+/// rather than a second option. gaindrive never emits them — its `iso8601()`
+/// only inserts a `T` and appends a `Z` — but other Subsonic servers do.
+private let fractionalISO = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
 
-private let isoFractionalParser: ISO8601DateFormatter = {
-	let parser = ISO8601DateFormatter()
-	parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-	return parser
-}()
+/// `yyyy-MM-dd HH:mm:ss` in UTC, which is what gaindrive sends for
+/// `lastPlayed`: SQLite's `CURRENT_TIMESTAMP`, raw, with no `T` and no zone.
+/// Parsing only ISO would leave the whole Recents column silently blank.
+///
+/// Parsed by hand rather than with a `DateFormatter` — which is the other class
+/// that cannot live in a global — and strictly, which a formatter is not: a
+/// fixed machine format has no reason to accept month 13, and `Calendar` would
+/// quietly roll it over into the next year rather than refusing it.
+private func parseSQLiteTimestamp(_ text: String) -> Date? {
+	let halves = text.split(separator: " ")
+	guard halves.count == 2 else { return nil }
+	let date = halves[0].split(separator: "-")
+	let time = halves[1].split(separator: ":")
+	guard date.count == 3, time.count == 3,
+		let year = Int(date[0]), let month = Int(date[1]), let day = Int(date[2]),
+		let hour = Int(time[0]), let minute = Int(time[1]), let second = Int(time[2]),
+		1...12 ~= month, 1...31 ~= day,
+		0...23 ~= hour, 0...59 ~= minute, 0...60 ~= second
+	else {
+		return nil
+	}
 
-/// Pinned to `en_US_POSIX` and UTC. A fixed-format parser on the user's own
-/// locale is the classic way to produce a parser that works everywhere except
-/// on the devices of people who do not use Gregorian dates, and reading the
-/// value as local time would put every play a few hours out.
-private let sqliteParser: DateFormatter = {
-	let parser = DateFormatter()
-	parser.locale = Locale(identifier: "en_US_POSIX")
-	parser.timeZone = TimeZone(identifier: "UTC")
-	parser.dateFormat = "yyyy-MM-dd HH:mm:ss"
-	return parser
-}()
+	var calendar = Calendar(identifier: .gregorian)
+	// Read as UTC. Left on the device's zone this would be wrong by hours, and
+	// only for people who are not on GMT — the kind of bug that never shows up
+	// where it was written.
+	calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+	return calendar.date(
+		from: DateComponents(
+			year: year, month: month, day: day, hour: hour, minute: minute, second: second))
+}
