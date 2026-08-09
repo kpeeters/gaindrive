@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GainDrive — self-hosted music server</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=block" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="index.html">
+      <img src="assets/gaindrive.svg" alt="GainDrive logo">
+      <b>GainDrive</b>
+    </a>
+    <nav class="nav-links">
+      <a href="server.html">Server</a>
+      <a href="web.html">Web</a>
+      <a href="android.html">Android</a>
+      <a href="ios.html">iOS</a>
+      <a href="docs.html">Docs</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="nav-gh" href="https://github.com/kpeeters/gaindrive" target="_blank" rel="noopener" aria-label="GainDrive on GitHub">
+        <img class="gh-mark" src="assets/github.svg" alt="">
+      </a>
+      </div>
+  </div>
+</header>
+
+<section class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div class="hero-text">
+      <span class="eyebrow">Self-hosted music server/players</span>
+      <h1>GainDrive</h1>
+      <p class="lead">Full-featured OpenSubsonic-compatible server, and separate Web, Android and iOS players. Open source (GPLv3).</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="server.html#download">
+          <span class="msym">download</span>
+          Download
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/kpeeters/gaindrive" target="_blank" rel="noopener">View source</a>
+      </div>
+    </div>
+    <div class="vinyl-stage">
+      <div class="vinyl">
+        <div class="label"><img src="assets/gaindrive.svg" alt=""></div>
+        <div class="hole"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="parts">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Components</span>
+      <h2>Complete music self-hosting suite</h2>
+    </div>
+    <div class="prods">
+
+      <a class="prod" href="server.html">
+        <div class="ic"><span class="msym">dns</span></div>
+        <div class="k">Server</div>
+        <h3>GainDrive Server</h3>
+        <p>A single ~7 MB binary that scans your collection, stores it in SQLite, and serves it over the Subsonic API.</p>
+        <span class="go">Server details <span class="msym">arrow_forward</span></span>
+      </a>
+
+      <a class="prod" href="web.html">
+        <div class="ic"><span class="msym">web</span></div>
+        <div class="k">Web player</div>
+        <h3>Built-in web player</h3>
+        <p>Ships inside the server binary. Keyboard navigation, a responsive UI and one-click Chromecast, in any browser.</p>
+        <span class="go">Web player details <span class="msym">arrow_forward</span></span>
+      </a>
+
+      <a class="prod" href="android.html">
+        <div class="ic"><span class="msym">smartphone</span></div>
+        <div class="k">Android</div>
+        <h3>Native Android app</h3>
+        <p>A native Android client that connects to your server over the Subsonic API and plays your collection on the go.</p>
+        <span class="go">Android app details <span class="msym">arrow_forward</span></span>
+      </a>
+
+      <a class="prod" href="ios.html">
+        <div class="ic"><span class="msym">phone_iphone</span></div>
+        <div class="k">iOS</div>
+        <h3>Native iOS app</h3>
+        <p>A native iOS client that connects to your server over the Subsonic API and plays your collection on the go.</p>
+        <span class="go">iOS app details <span class="msym">arrow_forward</span></span>
+      </a>
+
+    </div>
+  </div>
+</section>
+
+<section id="why">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Background</span>
+      <h2>Why and how.</h2>
+    </div>
+    <div class="prose">
+      <p>I have been using the original <a href="https://www.subsonic.org/" target="_blank" rel="noopener">Subsonic</a> server together with the <a href="https://f-droid.org/packages/github.daneren2005.dsub/" target="_blank" rel="noopener">DSub Android app</a> for many years, but have always missed a few features, and the alternatives had other issues. GainDrive was started as an experiment to use AI to do most of the tedious work of writing both server and client apps from the ground up, using modern techniques and libraries, and adding the features I always wanted in a music server and player.</p>
+      <p>GainDrive Server came first. It was written over the course of a few weeks, with most of it going into thinking about what I really wanted it to do (e.g. the cast-from-server functionality, or the auto-rescan logic). The Android app then followed, in about a week's worth of work. The iOS app was built to mirror the Android app, and took another few days. I have occasionally tweaked small things in the source by hand (more so in the server than the clients), but most of it was written by <a href="https://claude.ai" target="_blank" rel="noopener">Claude</a> under my supervision.</p>
+      <p>GainDrive is what I need to self-host all the music I listen to, without the things I never use (your mileage may vary). Creating it with AI was a different kind of “fun” than doing it by hand, but without AI, I would most likely never have had the time to finish it.</p>
+      <p class="signoff">— Kasper Peeters, August 2026</p>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-top">
+      <div>
+        <a class="brand" href="index.html"><img src="assets/gaindrive.svg" alt="GainDrive logo" style="width:36px;height:36px;border-radius:7px"><b>GainDrive</b></a>
+        <p class="tag">A self-hosted music server with a built-in web player and an Android client.</p>
+      </div>
+      <div class="footer-cols">
+        <div class="col">
+          <h5>Product</h5>
+          <a href="server.html">Server</a>
+          <a href="web.html">Web player</a>
+          <a href="android.html">Android app</a>
+          <a href="ios.html">iOS app</a>
+        </div>
+        <div class="col">
+          <h5>Resources</h5>
+          <a href="docs.html">Documentation</a>
+          <a href="https://opensubsonic.netlify.app/" target="_blank" rel="noopener">OpenSubsonic</a>
+          <a href="https://github.com/kpeeters/gaindrive/releases" target="_blank" rel="noopener">Changelog</a>
+        </div>
+        <div class="col">
+          <h5>Project</h5>
+          <a href="https://github.com/kpeeters/gaindrive" target="_blank" rel="noopener">Source</a>
+          <a href="https://github.com/kpeeters/gaindrive/issues" target="_blank" rel="noopener">Issues</a>
+          <a href="https://github.com/kpeeters/gaindrive/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Released under the <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GNU GPL v3</a></span>
+      <span>© 2026 <a href="https://github.com/kpeeters" target="_blank" rel="noopener">Kasper Peeters</a></span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

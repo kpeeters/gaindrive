@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GainDrive Server — self-hosted music server</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=block" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="index.html">
+      <img src="assets/gaindrive.svg" alt="GainDrive logo">
+      <b>GainDrive</b>
+    </a>
+    <nav class="nav-links">
+      <a class="on" href="server.html">Server</a>
+      <a href="web.html">Web player</a>
+      <a href="android.html">Android app</a>
+      <a href="ios.html">iOS app</a>
+      <a href="docs.html">Docs</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="nav-gh" href="https://github.com/kpeeters/gaindrive" target="_blank" rel="noopener" aria-label="GainDrive on GitHub">
+        <img class="gh-mark" src="assets/github.svg" alt="">
+      </a>
+      </div>
+  </div>
+</header>
+
+<section class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div class="hero-text">
+      <span class="eyebrow">Subsonic compatible music server</span>
+      <h1 style="white-space:nowrap">GainDrive: Server</h1>
+      <p class="lead">Serves your music and video collection over the Subsonic API, with a built-in web player. Open source, single binary, written in C++.</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="#download">
+          <span class="msym">download</span>
+          Download
+        </a>
+        <a class="btn btn-ghost" href="#features">Features</a>
+      </div>
+      <div class="hero-meta">
+        <div class="stat"><div class="n">~7 MB</div><div class="l">Single binary</div></div>
+        <div class="stat"><div class="n">SQLite</div><div class="l">Zero-config storage</div></div>
+        <div class="stat"><div class="n">Subsonic</div><div class="l">API compatible</div></div>
+      </div>
+    </div>
+    <div class="rack-stage">
+      <div class="rack">
+        <div class="unit"><span class="led on"></span><span class="led"></span><span class="vent"></span><img class="badge" src="assets/gaindrive.svg" alt=""></div>
+        <div class="unit"><span class="led on"></span><span class="led"></span><span class="vent"></span><span class="bay"></span></div>
+        <div class="unit"><span class="led"></span><span class="led"></span><span class="vent"></span><span class="bay"></span></div>
+        <div class="unit"><span class="led on"></span><span class="led"></span><span class="vent"></span><span class="bay"></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">What's inside</span>
+      <h2>Server features.</h2>
+    </div>
+    <div class="features">
+
+      <div class="fgroup">
+        <div class="fg-head">
+          <div class="ic"><span class="msym">memory</span></div>
+          <h3>C++ server</h3>
+        </div>
+        <ul class="fg-list">
+          <li><span class="msym check">check</span><span><b>One single binary.</b> The whole server is one ~7 MB statically linked executable in modern C++. Drop it on a box and run. No runtime dependencies except ffmpeg.</span></li>
+          <li><span class="msym check">check</span><span><b>SQLite storage.</b> Your catalogue lives in one SQLite database; accounts and playlists in a separate one.</span></li>
+          <li><span class="msym check">check</span><span><b>Runs anywhere.</b> A Raspberry Pi, a NAS, a spare VPS; no runtime, no container required. Binaries for arm64 and x86 provided.</span></li>
+        </ul>
+      </div>
+
+      <div class="fgroup">
+        <div class="fg-head">
+          <div class="ic"><span class="msym">database</span></div>
+          <h3>Storage features</h3>
+        </div>
+        <ul class="fg-list">
+          <li><span class="msym check">check</span><span><b>Automatic scanning.</b> Watches your folders (using inotify) and automatically updates the library as you add, move or retag files.</span></li>
+          <li><span class="msym check">check</span><span><b>Unified metadata.</b> Reads ID3 tags or folder structure, then presents one clean, consistent library to every app.</span></li>
+          <li><span class="msym check">check</span><span><b><a href="https://musicbrainz.org/" target="_blank" rel="noopener">MusicBrainz</a> lookups.</b> Pulls artist and album metadata and artwork from MusicBrainz (and other sources to fill the gaps).</span></li>
+          <li><span class="msym check">check</span><span><b>Multi-disc albums.</b> Full support for box sets (inferred from folder structure or ID3 tags). Discs and track numbers stay correctly grouped and ordered.</span></li>
+        </ul>
+      </div>
+
+      <div class="fgroup">
+        <div class="fg-head">
+          <div class="ic"><span class="msym">cast</span></div>
+          <h3>Anything anywhere</h3>
+        </div>
+        <ul class="fg-list">
+          <li><span class="msym check">check</span><span><b>Subsonic API.</b> Speaks the <a href="https://opensubsonic.netlify.app/" target="_blank" rel="noopener">OpenSubsonic</a> protocol, so any compatible app on iOS, Android or desktop just works.</span></li>
+          <li><span class="msym check">check</span><span><b>Audio and video.</b> Supports the Subsonic audio <i>and</i> video API.</span></li>
+          <li><span class="msym check">check</span><span><b>Built-in web player.</b> Open a browser, sign in, and you're listening; nothing extra to install.</span></li>
+          <li><span class="msym check">check</span><span><b>Chromecast.</b> Send audio straight from the server to any Chromecast on your network, from any browser (uses its own Chromecast implementation).</span></li>
+          <li><span class="msym check">check</span><span><b>Transcoding</b>. Automatic on-the-fly transcoding of audio and video using ffmpeg, with optional cache.</span></li>
+        </ul>
+      </div>
+
+      <div class="fgroup">
+        <div class="fg-head">
+          <div class="ic"><span class="msym">group</span></div>
+          <h3>Multi-user</h3>
+        </div>
+        <ul class="fg-list">
+          <li><span class="msym check">check</span><span><b>Multiple accounts.</b> Everyone gets their own login, playlists and listening history, all from one instance.</span></li>
+          <li><span class="msym check">check</span><span><b>Direct uploads.</b> An upload API endpoint lets you add whole albums right from the web player.</span></li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="crimson" id="download">
+  <div class="wrap dl-grid">
+    <div class="dl-copy">
+      <span class="eyebrow" style="color:var(--gold)">Get started</span>
+      <h2>Download the server.</h2>
+      <p>Download the binary, point it at your music folder, and open the player in your browser.</p>
+      <div class="dl-cta">
+        <a class="btn btn-gold" href="https://github.com/kpeeters/gaindrive/releases/latest" target="_blank" rel="noopener">
+          <span class="msym">download</span>
+          Download for Linux
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-top">
+      <div>
+        <a class="brand" href="index.html"><img src="assets/gaindrive.svg" alt="GainDrive logo" style="width:36px;height:36px;border-radius:7px"><b>GainDrive</b></a>
+        <p class="tag">A self-hosted music server with a built-in web player and an Android client.</p>
+      </div>
+      <div class="footer-cols">
+        <div class="col">
+          <h5>Product</h5>
+          <a href="server.html">Server</a>
+          <a href="web.html">Web player</a>
+          <a href="android.html">Android app</a>
+          <a href="ios.html">iOS app</a>
+        </div>
+        <div class="col">
+          <h5>Resources</h5>
+          <a href="docs.html">Documentation</a>
+          <a href="https://opensubsonic.netlify.app/" target="_blank" rel="noopener">OpenSubsonic</a>
+          <a href="https://github.com/kpeeters/gaindrive/releases" target="_blank" rel="noopener">Changelog</a>
+        </div>
+        <div class="col">
+          <h5>Project</h5>
+          <a href="https://github.com/kpeeters/gaindrive" target="_blank" rel="noopener">Source</a>
+          <a href="https://github.com/kpeeters/gaindrive/issues" target="_blank" rel="noopener">Issues</a>
+          <a href="https://github.com/kpeeters/gaindrive/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Released under the <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GNU GPL v3</a></span>
+      <span>© 2026 <a href="https://github.com/kpeeters" target="_blank" rel="noopener">Kasper Peeters</a></span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

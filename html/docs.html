@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GainDrive — Documentation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=block" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="index.html">
+      <img src="assets/gaindrive.svg" alt="GainDrive logo">
+      <b>GainDrive</b>
+    </a>
+    <nav class="nav-links">
+      <a href="server.html">Server</a>
+      <a href="web.html">Web</a>
+      <a href="android.html">Android</a>
+      <a href="ios.html">iOS</a>
+      <a class="on" href="docs.html">Docs</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="nav-gh" href="https://github.com/kpeeters/gaindrive" target="_blank" rel="noopener" aria-label="GainDrive on GitHub">
+        <img class="gh-mark" src="assets/github.svg" alt="">
+      </a>
+    </div>
+  </div>
+</header>
+
+<section class="docs-head">
+  <div class="wrap">
+    <span class="eyebrow">Documentation</span>
+    <h1>Install and run GainDrive.</h1>
+  </div>
+</section>
+
+<section class="docs-body">
+  <div class="wrap docs">
+
+    <aside class="docs-nav">
+      <div class="dn-grp">
+        <div class="h">Server</div>
+        <a href="#requirements">Requirements</a>
+        <a href="#install">Install</a>
+        <a href="#first-run">First run</a>
+        <a href="#library">Configuring your library</a>
+        <a href="#service">Running as a service</a>
+        <a href="#proxy">Reverse proxy &amp; HTTPS</a>
+        <a href="#transcoding">Transcoding</a>
+      </div>
+      <div class="dn-grp">
+        <div class="h">Clients</div>
+        <a href="#android">Android app</a>
+        <a href="#ios">iOS app</a>
+        <a href="#clients">Other Subsonic clients</a>
+      </div>
+      <div class="dn-grp">
+        <div class="h">Help</div>
+        <a href="#troubleshooting">Troubleshooting</a>
+      </div>
+    </aside>
+
+    <div class="docs-main">
+
+      <div class="doc-sec" id="requirements">
+        <h2>Requirements</h2>
+        <p>GainDrive Server is a single statically linked executable with no runtime dependencies. Binaries are provided for <code>arm64</code> and <code>x86_64</code> Linux.</p>
+        <ul class="doc-list">
+          <li>A machine that can reach your music files — a Raspberry Pi, a NAS or a small VPS is plenty.</li>
+          <li>Disk space for two SQLite databases; these stay small relative to the music itself.</li>
+          <li><code>ffmpeg</code> on <code>PATH</code>, only if you want on-the-fly transcoding.</li>
+        </ul>
+      </div>
+
+      <div class="doc-sec" id="install">
+        <h2>Install</h2>
+        <h3>Linux binary</h3>
+        <p>Download the release for your architecture, make it executable, and move it somewhere on your <code>PATH</code>.</p>
+        <div class="code">
+<pre><span class="p">$</span> <span class="o">curl -LO https://github.com/kpeeters/gaindrive/releases/latest/download/gaindrive-linux-x86_64</span>
+<span class="p">$</span> <span class="o">chmod +x gaindrive-linux-x86_64</span>
+<span class="p">$</span> <span class="o">sudo mv gaindrive-linux-x86_64 /usr/local/bin/gaindrive</span>
+</pre>
+        </div>
+        <h3>Build from source</h3>
+        <p>You need a C++ compiler with C++20 support and CMake.</p>
+        <div class="code">
+<pre><span class="p">$</span> <span class="o">git clone https://github.com/kpeeters/gaindrive.git</span>
+<span class="p">$</span> <span class="o">cd gaindrive</span>
+<span class="p">$</span> <span class="o">cmake -B build -DCMAKE_BUILD_TYPE=Release</span>
+<span class="p">$</span> <span class="o">cmake --build build -j</span>
+</pre>
+        </div>
+      </div>
+
+      <div class="doc-sec" id="first-run">
+        <h2>First run</h2>
+        <p>Point GainDrive at your music folder and start it. On the first start it creates both databases and begins an initial scan.</p>
+        <div class="code">
+<pre><span class="p">$</span> <span class="o">gaindrive --music ~/Music --port 4040</span>
+
+<span class="g">  ♪ GainDrive  ·  listening on :4040
+  ✓ scanned 1,284 albums · 18,902 tracks
+  ✓ web player ready → http://localhost:4040</span>
+</pre>
+        </div>
+        <p>Open <code>http://localhost:4040</code> in a browser and create the first account; it becomes the administrator. Further accounts are added from the admin panel in the web player.</p>
+        <div class="note">
+          <span class="msym">info</span>
+          <div>The initial scan runs in the background. Large collections keep populating while you browse, and metadata lookups continue after the file scan finishes.</div>
+        </div>
+      </div>
+
+      <div class="doc-sec" id="library">
+        <h2>Configuring your library</h2>
+        <p>GainDrive reads metadata from ID3 tags where they exist, and falls back to the folder structure where they do not. Either way it presents one unified library to every client.</p>
+        <p>A conventional layout gives the best results, and multi-disc sets are picked up automatically:</p>
+        <div class="code">
+<pre><span class="o">Music/
+├── Artist Name/
+│   ├── 1994 — Album Title/
+│   │   ├── 01 First Track.flac
+│   │   └── cover.jpg
+│   └── 1998 — Box Set/
+│       ├── Disc 1/
+│       └── Disc 2/</span>
+</pre>
+        </div>
+        <p>Folders are watched with <code>inotify</code>, so added, moved and retagged files are reflected without a manual rescan. Artist and album metadata and artwork missing from your files are fetched from <a href="https://musicbrainz.org/" target="_blank" rel="noopener">MusicBrainz</a> and other sources.</p>
+      </div>
+
+      <div class="doc-sec" id="service">
+        <h2>Running as a service</h2>
+        <p>To keep GainDrive running across reboots, install it as a systemd unit at <code>/etc/systemd/system/gaindrive.service</code>.</p>
+        <div class="code">
+<pre><span class="c">[Unit]</span>
+<span class="o">Description=GainDrive music server
+After=network.target</span>
+
+<span class="c">[Service]</span>
+<span class="o">User=music
+ExecStart=/usr/local/bin/gaindrive --music /srv/music --port 4040
+Restart=on-failure</span>
+
+<span class="c">[Install]</span>
+<span class="o">WantedBy=multi-user.target</span>
+</pre>
+        </div>
+        <div class="code">
+<pre><span class="p">$</span> <span class="o">sudo systemctl enable --now gaindrive</span>
+<span class="p">$</span> <span class="o">systemctl status gaindrive</span>
+</pre>
+        </div>
+      </div>
+
+      <div class="doc-sec" id="proxy">
+        <h2>Reverse proxy &amp; HTTPS</h2>
+        <p>Put GainDrive behind nginx or Caddy if you want it reachable from outside your network with a certificate.</p>
+        <div class="code">
+<pre><span class="o">server {
+    server_name music.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:4040;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}</span>
+</pre>
+        </div>
+        <div class="note">
+          <span class="msym">cast</span>
+          <div>Casting from the server needs the Chromecast device to be able to reach the server directly on your local network. If your server is only reachable over a VPN, use the Android app's bridge mode instead.</div>
+        </div>
+      </div>
+
+      <div class="doc-sec" id="transcoding">
+        <h2>Transcoding</h2>
+        <p>When a client asks for a format or bitrate your files are not already in, GainDrive transcodes on the fly using <code>ffmpeg</code>. Enable a cache so a given transcode is only produced once.</p>
+        <div class="code">
+<pre><span class="p">$</span> <span class="o">gaindrive --music /srv/music \
+           --transcode-cache /var/cache/gaindrive</span>
+</pre>
+        </div>
+        <p>Without <code>ffmpeg</code> on <code>PATH</code>, GainDrive streams original files only; everything else keeps working.</p>
+      </div>
+
+      <div class="doc-sec" id="android">
+        <h2>Android app</h2>
+        <p>Install the APK from the <a href="https://github.com/kpeeters/gaindrive/releases" target="_blank" rel="noopener">releases page</a>. You will need to allow installation from unknown sources the first time.</p>
+        <ol class="doc-steps">
+          <li><b>Add a server.</b> Open the app, tap <i>Add server</i>, and enter your server URL (for example <code>https://music.example.com</code>) with your username and password.</li>
+          <li><b>Add more servers if you want.</b> Any OpenSubsonic-compatible server can be added alongside your own; their artist and album lists are merged into one browsable library.</li>
+          <li><b>Cache for offline.</b> Long-press an album or playlist and choose <i>Download</i> to keep it on the device; cached music plays with no connection to the server.</li>
+          <li><b>Cast.</b> Tap the cast icon to send playback to any Chromecast on the network. The app uses its own Chromecast implementation, so it works on de-Googled phones, and it can bridge playback when the server is behind a VPN but the Chromecast is not.</li>
+        </ol>
+      </div>
+
+      <div class="doc-sec" id="ios">
+        <h2>iOS app</h2>
+      </div>
+
+      <div class="doc-sec" id="clients">
+        <h2>Other Subsonic clients</h2>
+        <p>GainDrive speaks the <a href="https://opensubsonic.netlify.app/" target="_blank" rel="noopener">OpenSubsonic</a> API, so any compatible client on iOS, Android or desktop works. Point the client at your server URL and sign in with a GainDrive account. Each user gets their own playlists and listening history.</p>
+      </div>
+
+      <div class="doc-sec" id="troubleshooting">
+        <h2>Troubleshooting</h2>
+        <div class="doc-qa">
+          <h3>The library is empty after starting</h3>
+          <p>Check that the user running GainDrive can read the music directory, and that <code>--music</code> points at the folder containing your artist folders rather than a parent of it.</p>
+        </div>
+        <div class="doc-qa">
+          <h3>New files are not appearing</h3>
+          <p>Filesystem watching relies on <code>inotify</code>, which does not work over most network mounts. On an NFS or SMB share, run a periodic rescan instead.</p>
+        </div>
+        <div class="doc-qa">
+          <h3>Albums are split or tracks are out of order</h3>
+          <p>This is almost always inconsistent tagging — usually the album artist differing between tracks. Fix the tags and the watcher will regroup the album on its own.</p>
+        </div>
+        <div class="doc-qa">
+          <h3>Playback fails on one client but not another</h3>
+          <p>That client is likely requesting a format your files are not in. Install <code>ffmpeg</code> so transcoding can take over.</p>
+        </div>
+        <p class="doc-foot">Still stuck? Open an issue on <a href="https://github.com/kpeeters/gaindrive/issues" target="_blank" rel="noopener">GitHub</a>.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-top">
+      <div>
+        <a class="brand" href="index.html"><img src="assets/gaindrive.svg" alt="GainDrive logo" style="width:36px;height:36px;border-radius:7px"><b>GainDrive</b></a>
+        <p class="tag">A self-hosted music server with a built-in web player and an Android client.</p>
+      </div>
+      <div class="footer-cols">
+        <div class="col">
+          <h5>Product</h5>
+          <a href="server.html">Server</a>
+          <a href="web.html">Web player</a>
+          <a href="android.html">Android app</a>
+          <a href="ios.html">iOS app</a>
+        </div>
+        <div class="col">
+          <h5>Resources</h5>
+          <a href="docs.html">Documentation</a>
+          <a href="https://opensubsonic.netlify.app/" target="_blank" rel="noopener">OpenSubsonic</a>
+          <a href="https://github.com/kpeeters/gaindrive/releases" target="_blank" rel="noopener">Changelog</a>
+        </div>
+        <div class="col">
+          <h5>Project</h5>
+          <a href="https://github.com/kpeeters/gaindrive" target="_blank" rel="noopener">Source</a>
+          <a href="https://github.com/kpeeters/gaindrive/issues" target="_blank" rel="noopener">Issues</a>
+          <a href="https://github.com/kpeeters/gaindrive/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Released under the <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GNU GPL v3</a></span>
+      <span>© 2026 <a href="https://github.com/kpeeters" target="_blank" rel="noopener">Kasper Peeters</a></span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
