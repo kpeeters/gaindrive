@@ -33,14 +33,14 @@ struct AlbumUi: Identifiable, Hashable, Sendable {
 	var id: ItemRef { album.ref }
 }
 
+/// No `cover`, unlike `AlbumUi` — see `ArtistRow` for why an artist row shows
+/// no artwork.
 struct ArtistUi: Identifiable, Hashable, Sendable {
 	let artist: Artist
-	let cover: CoverSource?
 	let badges: [String]
 
-	init(artist: Artist, cover: CoverSource? = nil, badges: [String] = []) {
+	init(artist: Artist, badges: [String] = []) {
 		self.artist = artist
-		self.cover = cover
 		self.badges = badges
 	}
 

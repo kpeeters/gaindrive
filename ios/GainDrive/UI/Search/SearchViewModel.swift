@@ -161,10 +161,7 @@ final class SearchViewModel {
 	) -> SearchResults {
 		SearchResults(
 			artists: merged.items.artists.map {
-				ArtistUi(
-					artist: $0,
-					cover: covers.source($0.coverArt, size: CoverSize.thumb),
-					badges: $0.sources.compactMap { badges[$0] })
+				ArtistUi(artist: $0, badges: $0.sources.compactMap { badges[$0] })
 			},
 			albums: merged.items.albums.map {
 				AlbumUi(

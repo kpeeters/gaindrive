@@ -29,7 +29,6 @@ final class ArtistsViewModel {
 	private(set) var failures: [ServerFailure] = []
 	private(set) var isRefreshing = false
 	private(set) var badgeNames: [ServerId: String] = [:]
-	private(set) var covers = CoverUrls(clients: [:])
 
 	@ObservationIgnored private let library: LibraryRepository
 	@ObservationIgnored private let selection: ServerSelection
@@ -78,10 +77,8 @@ final class ArtistsViewModel {
 		// screen on `.loading` forever. The view's `.task` closure only kicks
 		// this off and returns.
 		task = Task { [library] in
-			let covers = await library.coverUrls()
 			let merged = await library.artistIndexes(scope: scope)
 			guard !Task.isCancelled else { return }
-			self.covers = covers
 			self.state = merged.load
 			self.failures = merged.failures
 		}
@@ -91,12 +88,7 @@ final class ArtistsViewModel {
 		failures = []
 	}
 
-	/// Resolved once per load rather than per row: building a `CoverUrls` means
-	/// reading the registry and the Keychain.
 	func artistUi(_ artist: Artist) -> ArtistUi {
-		ArtistUi(
-			artist: artist,
-			cover: covers.source(artist.coverArt, size: CoverSize.thumb),
-			badges: artist.sources.compactMap { badgeNames[$0] })
+		ArtistUi(artist: artist, badges: artist.sources.compactMap { badgeNames[$0] })
 	}
 }

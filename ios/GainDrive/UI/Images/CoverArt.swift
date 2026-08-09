@@ -23,31 +23,57 @@ struct CoverArt: View {
 	@State private var image: UIImage?
 
 	var body: some View {
-		ZStack {
-			Rectangle()
-				.fill(.quaternary)
-				.overlay {
-					Image(systemName: symbol)
-						.font(.system(size: 20))
-						.foregroundStyle(.secondary)
-				}
-			if let image {
-				Image(uiImage: image)
-					.resizable()
-					.scaledToFill()
-					.transition(.opacity)
+		// The placeholder is the **base** and the artwork an overlay, rather
+		// than both being siblings in a `ZStack`.
+		//
+		// An overlay is sized to its base and cannot affect layout, which is
+		// exactly the "fill a fixed square, crop the overflow" primitive. A
+		// `ZStack` instead sizes to the union of its children, and
+		// `scaledToFill` *reports* the overflowed size — so a 3:2 cover in a
+		// 44 pt slot made the stack 66×44, `clipShape` laid its rounded
+		// rectangle out in that rect and clipped nothing, the artwork bled over
+		// the adjacent text, and `ArtistAvatar`'s `size/2` radius drew a
+		// lozenge instead of a circle.
+		//
+		// The server really does return non-square images: `serve_cover_scaled`
+		// fits the source inside the requested box with
+		// `force_original_aspect_ratio=decrease` and neither pads nor crops, so
+		// a 1000×600 cover at `size=144` arrives 144×86.
+		Rectangle()
+			.fill(.quaternary)
+			.overlay {
+				Image(systemName: symbol)
+					.font(.system(size: 20))
+					.foregroundStyle(.secondary)
 			}
-		}
-		.clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-		// Keyed on the cache key: a reused cell whose source changed must drop
-		// the previous image, or a scrolling list shows the wrong artwork for a
-		// frame — and with `List` reuse, sometimes for longer.
-		.task(id: source?.cacheKey) {
-			image = nil
-			guard let source else { return }
-			image = await ImageStore.shared.image(for: source)
-		}
-		.animation(.easeIn(duration: 0.15), value: image != nil)
+			.overlay {
+				if let image {
+					Image(uiImage: image)
+						.resizable()
+						.scaledToFill()
+				}
+			}
+			.clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+			// Keyed on the cache key: a reused cell whose source changed must
+			// drop the previous image, or a scrolling list shows the wrong
+			// artwork for a frame — and with `List` reuse, sometimes for longer.
+			.task(id: source?.cacheKey) {
+				guard let source else {
+					image = nil
+					return
+				}
+				image = nil
+				let loaded = await ImageStore.shared.image(for: source)
+				// **Without this the cell can end up showing another artist's
+				// artwork indefinitely.** SwiftUI cancels this task when the row
+				// is recycled but does not wait for it, and awaiting a
+				// `Task<_, Never>` is not a cancellation point — so the old
+				// row's fetch always resumes, and would write its image into a
+				// cell that has since been given a different source.
+				guard !Task.isCancelled else { return }
+				image = loaded
+			}
+			.animation(.easeIn(duration: 0.15), value: image != nil)
 	}
 }
 

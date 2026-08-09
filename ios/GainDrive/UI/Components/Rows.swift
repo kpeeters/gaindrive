@@ -21,24 +21,34 @@ struct SectionHeading: View {
 	}
 }
 
+/// **No artwork, deliberately** — as `ArtistRow` on Android, which takes no
+/// cover either.
+///
+/// `getArtists` hands out a `coverArt` id for *every* artist whether or not any
+/// image exists (the server has no `cover_art_id` for artists and simply reuses
+/// the folder id), and `getCoverArt` answers an id with no local art by querying
+/// MusicBrainz, Wikidata, Wikipedia, TheAudioDB and Discogs **inline on the
+/// request thread, with three one-second sleeps**. An avatar per row therefore
+/// costs one of those per artist, and the negative result is not even cached
+/// when MusicBrainz is rate-limiting.
+///
+/// The portrait is worth one request on the artist header, where `AlbumsView`
+/// still shows it. It is not worth N on a list.
 struct ArtistRow: View {
 	let item: ArtistUi
 
 	var body: some View {
-		HStack(spacing: 12) {
-			ArtistAvatar(source: item.cover, size: 44)
-			VStack(alignment: .leading, spacing: 2) {
-				Text(item.artist.name)
-					.lineLimit(1)
-				HStack(spacing: 6) {
-					Text(albumCountText)
-						.font(.footnote)
-						.foregroundStyle(.secondary)
-					ServerBadges(names: item.badges)
-				}
+		VStack(alignment: .leading, spacing: 2) {
+			Text(item.artist.name)
+				.lineLimit(1)
+			HStack(spacing: 6) {
+				Text(albumCountText)
+					.font(.footnote)
+					.foregroundStyle(.secondary)
+				ServerBadges(names: item.badges)
 			}
-			Spacer(minLength: 0)
 		}
+		.frame(maxWidth: .infinity, alignment: .leading)
 		.contentShape(.rect)
 	}
 
