@@ -102,7 +102,7 @@ actor ImageStore {
 		let task = Task<UIImage?, Never> { [session, directory] in
 			await self.acquire()
 			let fetched = await Self.load(source, session: session, directory: directory)
-			await self.finish(fetched, for: key)
+			self.finish(fetched, for: key)
 			return fetched.image
 		}
 		inFlight[key] = task
@@ -296,7 +296,7 @@ actor ImageStore {
 				continue
 			}
 			let date =
-				(try? file.resourceValues(forKeys: keys))?.contentModificationDate ?? .distantPast
+				(try? file.resourceValues(forKeys: Set(keys)))?.contentModificationDate ?? .distantPast
 			entries.append((file, date, size))
 		}
 
