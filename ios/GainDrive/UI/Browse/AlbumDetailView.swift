@@ -13,6 +13,7 @@ struct AlbumDetailView: View {
 	let albumTitle: String
 
 	@Environment(\.library) private var library
+	@Environment(PlayerConnection.self) private var player
 	@State private var model: AlbumDetailViewModel?
 
 	var body: some View {
@@ -49,7 +50,7 @@ struct AlbumDetailView: View {
 				ForEach(discs(detail), id: \.number) { disc in
 					Section {
 						ForEach(disc.songs) { song in
-							TrackRow(song: song).trackActions(for: song)
+							trackRow(song, in: detail)
 						}
 					} header: {
 						SectionHeading(text: "Disc \(disc.number)")
@@ -58,7 +59,7 @@ struct AlbumDetailView: View {
 			} else {
 				Section {
 					ForEach(detail.songs) { song in
-						TrackRow(song: song).trackActions(for: song)
+						trackRow(song, in: detail)
 					}
 				}
 			}
@@ -96,6 +97,21 @@ struct AlbumDetailView: View {
 			}
 		}
 		.padding(.vertical, 4)
+	}
+
+	/// **The index is into the flat `detail.songs`, never into the disc slice.**
+	/// The multi-disc branch renders a grouped slice, and taking the slice index
+	/// would play the wrong track on every disc after the first — silently, and
+	/// invisibly to anyone testing with a single-disc album.
+	private func trackRow(_ song: Song, in detail: AlbumDetail) -> some View {
+		Button {
+			guard let index = detail.songs.firstIndex(of: song) else { return }
+			player.play(detail.songs, startIndex: index)
+		} label: {
+			TrackRow(song: song, state: player.trackState(of: song.ref))
+		}
+		.buttonStyle(.plain)
+		.trackActions(for: song)
 	}
 
 	private func subtitle(_ detail: AlbumDetail) -> String {

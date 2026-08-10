@@ -21,6 +21,7 @@ struct GainDriveApp: App {
 	@State private var library: LibraryRepository
 	@State private var events: LibraryEvents
 	@State private var stars: StarStore
+	@State private var player: PlayerConnection
 
 	/// Read once, here, before any view exists. `RootView` explains why this
 	/// cannot be derived inside the view hierarchy.
@@ -38,6 +39,10 @@ struct GainDriveApp: App {
 		_events = State(initialValue: events)
 		_library = State(initialValue: library)
 		_stars = State(initialValue: StarStore(library: library))
+		// Built here, never in `RootView.init`, which re-runs on every
+		// re-evaluation of this body — `@State` would keep the first player and
+		// silently discard the rest, each with its own audio session.
+		_player = State(initialValue: PlayerConnection(registry: registry, settings: settings))
 	}
 
 	var body: some Scene {
@@ -50,6 +55,7 @@ struct GainDriveApp: App {
 			.environment(selection)
 			.environment(events)
 			.environment(stars)
+			.environment(player)
 			.environment(\.library, library)
 			.preferredColorScheme(settings.themeMode.colorScheme)
 		}

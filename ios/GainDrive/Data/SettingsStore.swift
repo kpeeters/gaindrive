@@ -36,12 +36,20 @@ final class SettingsStore {
 		didSet { defaults.set(mergeDuplicateAlbums, forKey: Self.mergeAlbumsKey) }
 	}
 
+	/// One global quality, capped per track by *that track's* account ceiling —
+	/// a queue spanning servers crosses caps at every boundary, so this is
+	/// deliberately not per server.
+	var audioQuality: AudioQuality {
+		didSet { defaults.set(audioQuality.tag, forKey: Self.audioQualityKey) }
+	}
+
 	@ObservationIgnored private let defaults: UserDefaults
 	// Spelled as Android spells them in its DataStore, so the two apps
 	// describe the same settings by the same names.
 	private static let themeKey = "theme_mode"
 	private static let selectedServerKey = "selected_server"
 	private static let mergeAlbumsKey = "merge_duplicate_albums"
+	private static let audioQualityKey = "audio_quality"
 
 	init(defaults: UserDefaults = .standard) {
 		self.defaults = defaults
@@ -53,5 +61,9 @@ final class SettingsStore {
 		// the opposite of what is intended.
 		mergeDuplicateAlbums =
 			defaults.object(forKey: Self.mergeAlbumsKey) as? Bool ?? true
+		// Stored as the tag so it is a single value — a format and a bitrate
+		// that could disagree would be two settings pretending to be one.
+		audioQuality =
+			defaults.string(forKey: Self.audioQualityKey).flatMap(AudioQuality.parse) ?? .default
 	}
 }

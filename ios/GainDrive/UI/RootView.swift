@@ -75,5 +75,10 @@ struct RootView: View {
 				SettingsView(startOnServers: firstRun)
 			}
 		}
+		// `safeAreaInset` rather than an overlay, so every list's content inset
+		// grows by the bar's height and the last row is still reachable.
+		.safeAreaInset(edge: .bottom, spacing: 0) {
+			MiniPlayer()
+		}
 	}
 }

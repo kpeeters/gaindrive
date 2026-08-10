@@ -91,19 +91,17 @@ struct AlbumRow: View {
 /// no cover, because the screen above it is already the artwork.
 struct TrackRow: View {
 	let song: Song
+	var state: TrackState = .idle
 	var showNumber = true
 	var trailing: AnyView?
 
 	var body: some View {
 		HStack(spacing: 12) {
 			if showNumber {
-				// A fixed box rather than an intrinsic width, so nothing in the
-				// row shifts when a mark appears beside it — which is what
-				// phase 3's playing indicator and phase 5's download tick will
-				// both do.
-				Text(song.track.map(String.init) ?? "")
-					.font(.footnote.monospacedDigit())
-					.foregroundStyle(.secondary)
+				// A fixed box rather than an intrinsic width, so the row does
+				// not reflow when the indicator replaces the number — which is
+				// exactly what this column was reserved for.
+				numberOrIndicator
 					.frame(width: 24, alignment: .trailing)
 			}
 			VStack(alignment: .leading, spacing: 2) {
@@ -131,6 +129,22 @@ struct TrackRow: View {
 				.foregroundStyle(.secondary)
 		}
 		.contentShape(.rect)
+	}
+
+	@ViewBuilder
+	private var numberOrIndicator: some View {
+		switch state {
+		case .idle:
+			Text(song.track.map(String.init) ?? "")
+				.font(.footnote.monospacedDigit())
+				.foregroundStyle(.secondary)
+		case .loading:
+			ProgressView().controlSize(.mini)
+		case .current:
+			Image(systemName: "speaker.wave.2.fill")
+				.font(.caption)
+				.foregroundStyle(Color.accentColor)
+		}
 	}
 }
 
