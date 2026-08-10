@@ -98,8 +98,18 @@ final class NowPlayingCenter {
 			var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
 			// **Patched, not rebuilt.** A rebuild here would clobber the
 			// elapsed time written a moment ago.
-			info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in
-				image
+			//
+			// **`@Sendable` is load-bearing and looks like noise.** A closure
+			// literal that is not `@Sendable` inherits the isolation of the
+			// context it is written in — here `@MainActor` — but MediaPlayer
+			// invokes this one on its own serial queue whenever the system asks
+			// for artwork. The runtime then traps on the executor assertion, and
+			// nothing warns beforehand because the isolation is inferred and the
+			// parameter is a plain `(CGSize) -> UIImage`. `@Sendable` opts the
+			// closure out of inheriting isolation, so it carries no claim to
+			// break; the capture is legal because `UIImage` is `Sendable`.
+			info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) {
+				@Sendable _ in image
 			}
 			MPNowPlayingInfoCenter.default().nowPlayingInfo = info
 		}
@@ -107,39 +117,47 @@ final class NowPlayingCenter {
 
 	/// Registered **once**. A second `addTarget` on the same command fires the
 	/// handler twice, which reads as "next skips two tracks".
+	///
+	/// Every handler is `@Sendable` and hops explicitly, for the reason spelled
+	/// out on the artwork closure above: a plain closure literal here would
+	/// inherit `@MainActor` from this method and trap if MediaPlayer ever
+	/// invoked it on a queue of its own — which it makes no promise not to do.
+	/// Returning `.success` before the work happens is already the shape of the
+	/// seek command, so nothing about the behaviour changes.
 	private func registerCommands() {
 		let centre = MPRemoteCommandCenter.shared()
 
 		centre.playCommand.addTarget { [weak self] _ in
-			self?.onPlay?()
+			Task { @MainActor in self?.onPlay?() }
 			return .success
 		}
 		centre.pauseCommand.addTarget { [weak self] _ in
-			self?.onPause?()
+			Task { @MainActor in self?.onPause?() }
 			return .success
 		}
 		centre.togglePlayPauseCommand.addTarget { [weak self] _ in
 			// Headphone controls and the CarPlay button send this rather than
 			// play or pause, so it needs its own handler.
-			self?.onTogglePlayPause?()
+			Task { @MainActor in self?.onTogglePlayPause?() }
 			return .success
 		}
 		centre.nextTrackCommand.addTarget { [weak self] _ in
 			// No "is there a next track" guard: `setAvailability` disables the
 			// command when there is not, and a disabled command is never
 			// delivered.
-			self?.onNext?()
+			Task { @MainActor in self?.onNext?() }
 			return .success
 		}
 		centre.previousTrackCommand.addTarget { [weak self] _ in
-			self?.onPrevious?()
+			Task { @MainActor in self?.onPrevious?() }
 			return .success
 		}
 		centre.changePlaybackPositionCommand.addTarget { [weak self] event in
 			guard let event = event as? MPChangePlaybackPositionCommandEvent else {
 				return .commandFailed
 			}
-			self?.onSeek?(event.positionTime)
+			let seconds = event.positionTime
+			Task { @MainActor in self?.onSeek?(seconds) }
 			return .success
 		}
 
