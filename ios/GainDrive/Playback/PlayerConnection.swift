@@ -181,8 +181,8 @@ final class PlayerConnection {
 		player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) { [weak self] _ in
 			Task { @MainActor in
 				guard let self else { return }
-				position = seconds
-				nowPlaying.setPlayback(isPlaying: isPlaying, position: seconds)
+				self.position = seconds
+				self.nowPlaying.setPlayback(isPlaying: self.isPlaying, position: seconds)
 			}
 		}
 	}
@@ -356,7 +356,7 @@ final class PlayerConnection {
 		) { [weak self] time in
 			MainActor.assumeIsolated {
 				guard let self, !time.seconds.isNaN else { return }
-				position = time.seconds
+				self.position = time.seconds
 			}
 		}
 	}

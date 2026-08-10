@@ -69,19 +69,19 @@ final class AudioSessionController {
 		// body is already on the main actor rather than having to hop.
 		Task { [weak self] in
 			for await note in center.notifications(named: AVAudioSession.interruptionNotification) {
-				await self?.handleInterruption(note)
+				self?.handleInterruption(note)
 			}
 		}
 		Task { [weak self] in
 			for await note in center.notifications(named: AVAudioSession.routeChangeNotification) {
-				await self?.handleRouteChange(note)
+				self?.handleRouteChange(note)
 			}
 		}
 		Task { [weak self] in
 			for await _ in center.notifications(
 				named: AVAudioSession.mediaServicesWereResetNotification)
 			{
-				await self?.handleReset()
+				self?.handleReset()
 			}
 		}
 	}
@@ -93,14 +93,11 @@ final class AudioSessionController {
 
 		switch type {
 		case .began:
-			// iOS 16 and later deliver an interruption for a suspension that
-			// was never one. Resuming from it would start playing while the app
-			// is in the background for no reason the user asked for.
-			if let reasonRaw = note.userInfo?[AVAudioSessionInterruptionReasonKey] as? UInt,
-				AVAudioSession.InterruptionReason(rawValue: reasonRaw) == .appWasSuspended
-			{
-				return
-			}
+			// No `.appWasSuspended` guard. Older iOS delivered a spurious
+			// interruption for a suspension that never was one, and clients had
+			// to filter it out; the reason is deprecated precisely because that
+			// interruption is no longer sent. At an iOS 18 floor the guard is
+			// dead code that only reads as if it does something.
 			wasPlayingBeforeInterruption = true
 			isActive = false
 			onPause?()
