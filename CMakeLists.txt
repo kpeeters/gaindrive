@@ -1,9 +1,22 @@
 cmake_minimum_required(VERSION 3.20)
 set(CMAKE_POLICY_DEFAULT_CMP0148 NEW)
-project(gaindrive CXX)
+project(gaindrive VERSION 0.1 CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Reported as serverVersion and baked into the outgoing User-Agent. Overridden
+# from the git tag by the release build, so a downloaded binary can say which
+# one it is.
+set(GAINDRIVE_VERSION "${PROJECT_VERSION}" CACHE STRING
+	"Version string reported by the server")
+
+# There was no default, so a plain `cmake -B build` compiled with no -O flag at
+# all. Release is what an unqualified build should mean; pass -DCMAKE_BUILD_TYPE
+# explicitly for anything else.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+	set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
 
 # Optional mostly-static link for easy distribution: OpenSSL, zlib, libstdc++
 # and libgcc are linked statically while glibc stays dynamic (a fully static
@@ -13,6 +26,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(GAINDRIVE_STATIC
 	"Link gaindrive mostly-statically (static OpenSSL/zlib/libstdc++/libgcc; glibc stays dynamic) for easier distribution"
 	OFF)
+
+# Goes further and links libc too, which needs musl: the NSS problem above is
+# glibc-specific, whereas musl's resolver lives inside libc and works fine in a
+# fully static binary. This is what the release artifacts are built with; see
+# cmake/static_build.cmake for the Alpine container that provides the toolchain.
+option(GAINDRIVE_STATIC_LIBC
+	"Also link libc statically. Requires a musl toolchain — a fully static glibc breaks NSS, so getaddrinfo() stops resolving and the MusicBrainz/Wikidata/Discogs lookups fail."
+	OFF)
+
+# Implied, not independent: a static libc cannot be combined with a dynamic
+# OpenSSL/zlib. A plain set() is enough — it shadows the cache entry for the
+# rest of this file, which is all the GAINDRIVE_STATIC blocks below need.
+if(GAINDRIVE_STATIC_LIBC)
+	set(GAINDRIVE_STATIC ON)
+endif()
 
 include(FetchContent)
 
@@ -115,6 +143,14 @@ if(GAINDRIVE_STATIC)
 	set(ENABLE_LZO     OFF CACHE BOOL "" FORCE)
 	set(ENABLE_NETTLE  OFF CACHE BOOL "" FORCE)
 	set(ENABLE_LIBB2   OFF CACHE BOOL "" FORCE)
+
+	# Directory-scoped rather than target-scoped so the dependencies get it too:
+	# taglib, libarchive, sqlite3 and static OpenSSL are the bulk of the binary,
+	# and --gc-sections can only drop a function that was given its own section.
+	# One genex per flag: a `;` inside an unquoted argument is a list separator,
+	# so a combined $<...:-a;-b> would be split into two broken fragments.
+	add_compile_options($<$<CONFIG:Release,MinSizeRel>:-ffunction-sections>)
+	add_compile_options($<$<CONFIG:Release,MinSizeRel>:-fdata-sections>)
 endif()
 
 FetchContent_MakeAvailable(httplib cxxopts nlohmann_json SQLiteCpp taglib tinyxml2 reproc mdns libarchive)
@@ -156,7 +192,9 @@ add_executable(gaindrive
 	${EMBEDDED_WEB_CC}
 )
 
-target_compile_definitions(gaindrive PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
+target_compile_definitions(gaindrive PRIVATE
+	CPPHTTPLIB_OPENSSL_SUPPORT
+	GAINDRIVE_VERSION="${GAINDRIVE_VERSION}")
 
 # So #include "embedded_web.hh" resolves from both src/ and the build dir.
 target_include_directories(gaindrive PRIVATE src ${CMAKE_CURRENT_BINARY_DIR})
@@ -185,7 +223,44 @@ target_link_libraries(gaindrive PRIVATE
 # static OpenSSL pulls in (libdl/libpthread/libm) stay dynamic, by design.
 if(GAINDRIVE_STATIC)
 	target_link_options(gaindrive PRIVATE -static-libstdc++ -static-libgcc)
+
+	# Pairs with -ffunction-sections above. -s is the strip, done at link time
+	# so no separate strip step is needed for a release artifact.
+	target_link_options(gaindrive PRIVATE
+		$<$<CONFIG:Release,MinSizeRel>:-Wl,--gc-sections>
+		$<$<CONFIG:Release,MinSizeRel>:-s>)
+
+	if(GAINDRIVE_STATIC_LIBC)
+		target_link_options(gaindrive PRIVATE -static)
+
+		# musl gives every thread a 128 KB stack by default, against glibc's
+		# 8 MB, and takes that default from PT_GNU_STACK. Three 64 KB stack
+		# buffers (streamer.cc, gaindrive.cc) live on httplib worker threads,
+		# which leaves almost no margin once OpenSSL and iostream frames sit on
+		# top. glibc ignores this header when sizing thread stacks, so the flag
+		# costs nothing in the non-musl case.
+		target_link_options(gaindrive PRIVATE -Wl,-z,stack-size=1048576)
+
+		# Linking -static against glibc succeeds and produces a binary whose
+		# name resolution is dead, which only shows up as artist info silently
+		# returning nothing. Say so at configure time.
+		execute_process(COMMAND ${CMAKE_CXX_COMPILER} -dumpmachine
+			OUTPUT_VARIABLE _triple OUTPUT_STRIP_TRAILING_WHITESPACE)
+		if(NOT _triple MATCHES "musl")
+			message(WARNING "GAINDRIVE_STATIC_LIBC with a non-musl toolchain "
+			                "(${_triple}): hostname lookups will fail at runtime.")
+		endif()
+	endif()
 endif()
+
+# Not part of ALL: it shells out to a container. The script is the source of
+# truth for the release build and also runs standalone (cmake -P), which is what
+# CI uses so it need not configure this tree just to invoke docker.
+add_custom_target(static
+	COMMAND ${CMAKE_COMMAND} -DVERSION=${GAINDRIVE_VERSION}
+	        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/static_build.cmake
+	USES_TERMINAL
+	COMMENT "Building fully static release binary in Alpine")
 
 # ---- Install ---------------------------------------------------------------
 

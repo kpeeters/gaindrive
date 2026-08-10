@@ -89,11 +89,16 @@ int main(int argc, char* argv[])
 		("add-user",   "Create a user and exit",      cxxopts::value<std::string>())
 		("password",   "Password for --add-user",     cxxopts::value<std::string>())
 		("h,help",     "Show help")
+		("version",    "Show version and exit")
 		;
 
 	auto args = options.parse(argc, argv);
 	if (args.count("help")) {
 		std::cout << options.help() << "\n";
+		return 0;
+		}
+	if (args.count("version")) {
+		std::cout << "gaindrive " GAINDRIVE_VERSION "\n";
 		return 0;
 		}
 

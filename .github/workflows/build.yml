@@ -1,0 +1,75 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: x86_64, runner: ubuntu-24.04}
+          # Re-enable once the repo is public: ubuntu-24.04-arm runners are
+          # free for public repos only, and billed on a private one. Nothing
+          # else needs changing — the build is arch-agnostic.
+          # - {arch: arm64,  runner: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: ver
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then v="${GITHUB_REF_NAME#v}";
+          else v="0.0-$(git rev-parse --short HEAD)"; fi
+          echo "v=$v" >> "$GITHUB_OUTPUT"
+
+      # Nine FetchContent repositories are cloned and built from source on a
+      # cold run, libarchive and taglib among them.
+      - uses: actions/cache@v4
+        with:
+          path: build-static/_deps
+          key: deps-${{ matrix.arch }}-${{ hashFiles('CMakeLists.txt') }}
+
+      # The Alpine package list and configure flags live in the script, so this
+      # is reproducible locally as `cmake --build build --target static`.
+      # Deliberately not a job-level `container:`: GitHub injects its own
+      # glibc-linked node to run JS actions, so actions/checkout dies on musl
+      # with `exec /__e/node20/bin/node: no such file or directory`. Keeping
+      # checkout, cache and upload on the host avoids that entirely.
+      - name: Build (alpine / musl, fully static)
+        run: cmake -DVERSION=${{ steps.ver.outputs.v }} -P cmake/static_build.cmake
+
+      - name: Verify
+        run: |
+          # Alpine's gcc defaults to PIE, so a static link can come out as
+          # either ET_EXEC ("statically linked") or "static-pie linked".
+          file build-static/gaindrive | grep -qE 'statically linked|static-pie linked'
+          ./build-static/gaindrive --version
+          mv build-static/gaindrive gaindrive-linux-${{ matrix.arch }}
+
+      # These names are what html/docs.html already tells users to download.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gaindrive-linux-${{ matrix.arch }}
+          path: gaindrive-linux-${{ matrix.arch }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {merge-multiple: true, path: dist}
+      - run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --repo "$GITHUB_REPOSITORY"
+        env: {GH_TOKEN: '${{ github.token }}'}

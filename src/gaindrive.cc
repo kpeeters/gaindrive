@@ -20,6 +20,7 @@
 #include <sstream>
 #include <thread>
 
+#include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
@@ -47,7 +48,12 @@ static const char* SUBSONIC_VER = "1.16.1";
 // itself: `type` is the implementation, `serverVersion` is our own version as
 // distinct from the API version above.
 static const char* SERVER_TYPE    = "gaindrive";
-static const char* SERVER_VERSION = "0.1";
+static const char* SERVER_VERSION = GAINDRIVE_VERSION;
+
+// Sent on every outbound metadata request. One definition rather than the nine
+// copies this used to be, so a version bump cannot leave some of them behind.
+static const char* USER_AGENT =
+	"GainDrive/" GAINDRIVE_VERSION " (https://github.com/kpeeters/gaindrive)";
 
 // Subsonic ids are strings in the API even though they are row ids here. Every
 // id crossing the wire in JSON goes through this — the XML path renders
@@ -551,7 +557,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 	MediaStore::CachedArtistInfo info;
 	httplib::SSLClient mb("musicbrainz.org");
 	mb.set_default_headers({
-		{"User-Agent", "GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+		{"User-Agent", USER_AGENT}
 		});
 	httplib::Params params{
 		{"query", "artist:\"" + name + "\""},
@@ -634,7 +640,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 					          << "] Wikidata entity: " << entity << std::endl;
 					httplib::SSLClient wd("www.wikidata.org");
 					wd.set_default_headers({
-						{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+						{"User-Agent",USER_AGENT}
 						});
 					auto rwd = wd.Get("/w/api.php",
 						httplib::Params{
@@ -680,7 +686,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 			if (!wiki_title.empty()) {
 				httplib::SSLClient wp("en.wikipedia.org");
 				wp.set_default_headers({
-					{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+					{"User-Agent",USER_AGENT}
 					});
 				std::string path_title = wiki_title;
 				for (char& c : path_title) if (c == ' ') c = '_';
@@ -719,7 +725,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 				std::this_thread::sleep_for(std::chrono::seconds(1));
 				httplib::SSLClient tadb("www.theaudiodb.com");
 				tadb.set_default_headers({
-					{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+					{"User-Agent",USER_AGENT}
 					});
 				auto rt = tadb.Get("/api/v1/json/2/artist-mb.php",
 				                   httplib::Params{{"i", info.mbid}},
@@ -754,8 +760,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 							std::this_thread::sleep_for(std::chrono::seconds(1));
 							httplib::SSLClient disc("api.discogs.com");
 							disc.set_default_headers({
-								{"User-Agent",
-								 "GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"},
+								{"User-Agent", USER_AGENT},
 								{"Authorization", "Discogs token=" + token}
 								});
 							auto rd = disc.Get("/artists/" + id_str,
@@ -915,7 +920,7 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 		          << "] querying MusicBrainz" << std::endl;
 		httplib::SSLClient mb("musicbrainz.org");
 		mb.set_default_headers({
-			{"User-Agent", "GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+			{"User-Agent", USER_AGENT}
 			});
 
 		// Step 1 — search for the release-group by title + artist.
@@ -992,7 +997,7 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 						          << "] Wikidata entity: " << entity << std::endl;
 						httplib::SSLClient wd("www.wikidata.org");
 						wd.set_default_headers({
-							{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+							{"User-Agent",USER_AGENT}
 							});
 						auto rwd = wd.Get("/w/api.php",
 							httplib::Params{
@@ -1018,7 +1023,7 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 				if (!wiki_title.empty()) {
 					httplib::SSLClient wp("en.wikipedia.org");
 					wp.set_default_headers({
-						{"User-Agent","GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+						{"User-Agent",USER_AGENT}
 						});
 					std::string path_title = wiki_title;
 					for (char& c : path_title) if (c == ' ') c = '_';
@@ -4107,8 +4112,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			auto fetch = [&](auto& cli) {
 				cli.set_follow_location(true);
 				cli.set_default_headers({
-					{"User-Agent",
-					 "GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+					{"User-Agent", USER_AGENT}
 					});
 				return cli.Get(path.c_str());
 				};
@@ -4387,7 +4391,7 @@ void GainDrive::serve_artist_portrait(httplib::Response& res,
 
 	httplib::SSLClient cli(host);
 	cli.set_default_headers({
-		{"User-Agent", "GainDrive/0.1 (https://github.com/kpeeters/gaindrive)"}
+		{"User-Agent", USER_AGENT}
 		});
 	auto r = cli.Get(path.c_str());
 	if (!r || r->status != 200) { res.status = 404; return; }
@@ -4407,6 +4411,39 @@ void GainDrive::cast_teardown()
 	cast_manager_.stop();
 	last_cast_song_id_.clear();
 	last_cast_offset_ = 0.0f;
+	}
+
+// A statically linked binary resolves names through whatever its libc provides:
+// musl does it itself and works, a static glibc cannot do it at all. Either way
+// the failure is invisible — the library serves fine and only the MusicBrainz,
+// Wikidata, Discogs and cover-art-by-URL fetches quietly come back empty. One
+// lookup at startup turns that into a line in the log.
+static void check_dns_background()
+	{
+	std::thread([]{
+		try {
+			addrinfo hints{};
+			hints.ai_family   = AF_UNSPEC;
+			hints.ai_socktype = SOCK_STREAM;
+			addrinfo* res = nullptr;
+			int rc = getaddrinfo("www.gaindrive.org", nullptr, &hints, &res);
+			if (rc == 0) {
+				freeaddrinfo(res);
+				return;
+				}
+			std::cout << stamp() << "Warning: cannot resolve www.gaindrive.org ("
+			          << gai_strerror(rc) << "). Artist info, lyrics and cover "
+			             "art fetched from the web will not work. Harmless if "
+			             "this server is deliberately offline." << std::endl;
+			}
+		catch (const std::exception& e) {
+			std::cout << stamp() << "DNS check failed: " << e.what() << std::endl;
+			}
+		catch (...) {
+			std::cout << stamp() << "DNS check failed: unknown exception"
+			          << std::endl;
+			}
+		}).detach();
 	}
 
 bool GainDrive::listen(const std::string& host, int port)
@@ -4436,6 +4473,7 @@ bool GainDrive::listen(const std::string& host, int port)
 				}
 			}).detach();
 	cast_manager_.discover_background();
+	check_dns_background();
 	watcher_.start();
 
 	if (!server_.listen_after_bind()) {

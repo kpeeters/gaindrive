@@ -71,6 +71,18 @@ Pulled in through libarchive and httplib when `GAINDRIVE_STATIC` is set
 (`CMakeLists.txt`). All GPL-compatible; versions are whatever the build host
 provides.
 
+The released binaries add `GAINDRIVE_STATIC_LIBC` on top and are built in the
+Alpine container defined by `cmake/static_build.cmake`, so for those the build
+host is pinned and musl libc is linked in as well. Alpine also settles the
+OpenSSL question below: it ships OpenSSL 3.x, which a redistributable static
+build requires.
+
+* musl libc
+  MIT · Copyright (c) Rich Felker and contributors
+  Statically linked into the released binaries only; a glibc build links glibc
+  dynamically and never includes it.
+  https://musl.libc.org/
+
 * zlib
   zlib licence · Copyright (c) Jean-loup Gailly and Mark Adler
   https://zlib.net/
