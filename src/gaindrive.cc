@@ -1498,7 +1498,14 @@ GainDrive::GainDrive(const std::string& db_path,
 		int idle  = 10;   // start probing after 10 s of silence
 		int intvl =  5;   // probe every 5 s
 		int cnt   =  3;   // give up after 3 missed probes
+		// Darwin spells the idle timer TCP_KEEPALIVE; same units (seconds).
+		// Keyed on the macro rather than __APPLE__ so any platform that
+		// happens to use either name works without another #ifdef here.
+#ifdef TCP_KEEPIDLE
 		setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE,   &idle,  sizeof(idle));
+#elif defined(TCP_KEEPALIVE)
+		setsockopt(sock, IPPROTO_TCP, TCP_KEEPALIVE,  &idle,  sizeof(idle));
+#endif
 		setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL,  &intvl, sizeof(intvl));
 		setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT,    &cnt,   sizeof(cnt));
 		});

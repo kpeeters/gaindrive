@@ -16,6 +16,17 @@
 #include "gaindrive.hh"
 #include "mediastore.hh"
 
+// Installation-dependent defaults, normally supplied by CMake from
+// GAINDRIVE_SYSCONFDIR/GAINDRIVE_LOCALSTATEDIR. A package that installs under a
+// prefix (Homebrew) points these into that prefix; a distribution package
+// leaves them at the FHS locations these fallbacks name.
+#ifndef GAINDRIVE_DEFAULT_CONFIG
+#define GAINDRIVE_DEFAULT_CONFIG "/etc/gaindrive.conf"
+#endif
+#ifndef GAINDRIVE_DEFAULT_DB
+#define GAINDRIVE_DEFAULT_DB "/var/lib/gaindrive/gaindrive.db"
+#endif
+
 // Parses one "name=path" root argument. Splits on the FIRST '=' so a path
 // containing '=' still works; a name never can, since it is restricted below.
 static bool parse_root(const std::string& arg, const std::string& type,
@@ -167,12 +178,22 @@ static bool create_first_user(MediaStore& store)
 
 int main(int argc, char* argv[])
 	{
+	// A peer that goes away mid-write must surface as EPIPE, not as a signal
+	// that kills the server. Linux is covered incidentally because OpenSSL's
+	// socket BIO and httplib both pass MSG_NOSIGNAL there; Darwin has no such
+	// flag and issues a plain write(), so a Chromecast dropping its TLS
+	// connection during SSL_write would take the whole process down.
+	// ffmpeg inherits this — SIG_IGN survives exec — which is also what we
+	// want: it exits non-zero on a closed pipe instead of dying by signal, and
+	// every ffmpeg call site already handles a non-zero exit.
+	signal(SIGPIPE, SIG_IGN);
+
 	cxxopts::Options options("gaindrive", "Subsonic-compatible music server");
 	options.add_options()
 		("host",       "Host interface to listen on", cxxopts::value<std::string>()->default_value("127.0.0.1") )
 		("port",       "Port to listen on",           cxxopts::value<int>()->default_value("4040"))
-		("config",     "Path to config file",         cxxopts::value<std::string>()->default_value("/etc/gaindrive.conf"))
-		("db",         "Path to database file",       cxxopts::value<std::string>()->default_value("/var/lib/gaindrive/gaindrive.db"))
+		("config",     "Path to config file",         cxxopts::value<std::string>()->default_value(GAINDRIVE_DEFAULT_CONFIG))
+		("db",         "Path to database file",       cxxopts::value<std::string>()->default_value(GAINDRIVE_DEFAULT_DB))
 		("user-db",    "Path to the user/state database (default: derived from --db)", cxxopts::value<std::string>())
 		("artist-root",   "Library root whose subdirectories are artists, as name=path (repeatable)", cxxopts::value<std::vector<std::string>>())
 		("category-root", "Library root whose subdirectories are categories, as name=path (repeatable)", cxxopts::value<std::vector<std::string>>())

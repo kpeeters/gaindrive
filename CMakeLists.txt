@@ -42,6 +42,18 @@ if(GAINDRIVE_STATIC_LIBC)
 	set(GAINDRIVE_STATIC ON)
 endif()
 
+# Both static options are GNU-ld only: -static, -static-libstdc++, --gc-sections
+# and -z stack-size are all rejected by ld64. Fail here rather than at link time
+# with an error that reads like a toolchain problem. macOS distribution goes
+# through the Homebrew formula instead, which wants a normal dynamic link
+# against brew's own openssl@3 — see README.
+if(GAINDRIVE_STATIC AND APPLE)
+	message(FATAL_ERROR
+		"GAINDRIVE_STATIC/GAINDRIVE_STATIC_LIBC are Linux-only: Apple ships no "
+		"static libSystem and ld64 rejects these flags. On macOS build normally "
+		"and distribute via the Homebrew tap.")
+endif()
+
 include(FetchContent)
 
 FetchContent_Declare(
@@ -112,6 +124,25 @@ FetchContent_Declare(
 	GIT_TAG        v3.7.4
 )
 
+# Trim optional backends gaindrive never uses. Applies to every build, not just
+# the static one, because the alternative is libarchive linking whatever happens
+# to be installed on the build machine: on a Homebrew box that means undeclared
+# dependencies that `brew audit` rejects and that break bottle relocation, and on
+# any box it means the dependency set is a property of the machine rather than of
+# this file. The worst offender is libarchive's xar reader — its libxml2 pulls in
+# ICU (libicuuc/libicudata), and because ICU is C++ it drags libstdc++/libgcc_s
+# back into an otherwise static link even with -static-libstdc++. httplib's
+# Brotli/Zstd HTTP content-encoding is likewise unused. zlib/bz2/lzma/zstd stay
+# enabled so zip and the common compressed-tar uploads still extract.
+set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_ZSTD_IF_AVAILABLE   OFF CACHE BOOL "" FORCE)
+set(ENABLE_LIBXML2 OFF CACHE BOOL "" FORCE)   # xar -> libxml2 -> ICU
+set(ENABLE_EXPAT   OFF CACHE BOOL "" FORCE)
+set(ENABLE_ICONV   OFF CACHE BOOL "" FORCE)
+set(ENABLE_LZO     OFF CACHE BOOL "" FORCE)
+set(ENABLE_NETTLE  OFF CACHE BOOL "" FORCE)
+set(ENABLE_LIBB2   OFF CACHE BOOL "" FORCE)
+
 # Must be set before MakeAvailable: httplib (and libarchive/taglib) run their
 # own find_package(OpenSSL)/find_package(ZLIB) during configuration, and
 # FindOpenSSL/FindZLIB pick shared-vs-static for the imported targets the first
@@ -128,21 +159,6 @@ if(GAINDRIVE_STATIC)
 	# the static dev libs to be present (on Debian/Ubuntu the -dev packages
 	# ship the .a, e.g. zlib1g-dev, liblzma-dev, libbz2-dev, libzstd-dev).
 	set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
-
-	# Trim optional backends gaindrive never uses but which otherwise drag in
-	# heavy shared libraries. The worst offender is libarchive's xar reader:
-	# its libxml2 pulls in ICU (libicuuc/libicudata), and because ICU is C++ it
-	# drags libstdc++/libgcc_s back in even with -static-libstdc++. httplib's
-	# Brotli/Zstd HTTP content-encoding is likewise unused. zlib/bz2/lzma/zstd
-	# stay enabled so zip and the common compressed-tar uploads still extract.
-	set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
-	set(HTTPLIB_USE_ZSTD_IF_AVAILABLE   OFF CACHE BOOL "" FORCE)
-	set(ENABLE_LIBXML2 OFF CACHE BOOL "" FORCE)   # xar -> libxml2 -> ICU
-	set(ENABLE_EXPAT   OFF CACHE BOOL "" FORCE)
-	set(ENABLE_ICONV   OFF CACHE BOOL "" FORCE)
-	set(ENABLE_LZO     OFF CACHE BOOL "" FORCE)
-	set(ENABLE_NETTLE  OFF CACHE BOOL "" FORCE)
-	set(ENABLE_LIBB2   OFF CACHE BOOL "" FORCE)
 
 	# Directory-scoped rather than target-scoped so the dependencies get it too:
 	# taglib, libarchive, sqlite3 and static OpenSSL are the bulk of the binary,
@@ -180,6 +196,17 @@ add_custom_command(
 	COMMENT "Embedding web client files"
 )
 
+# ---- Install locations -----------------------------------------------------
+
+# Where the config file and the database live. These are compiled into the
+# binary as the --config/--db defaults AND used by install(), so the two can
+# never disagree. The defaults are the FHS locations gaindrive has always used,
+# so a distribution package sees no change; a prefix-based package manager
+# (Homebrew) points them inside its own prefix, which it must, because its build
+# sandbox refuses any write outside the prefix.
+set(GAINDRIVE_SYSCONFDIR    "/etc"     CACHE PATH "Directory holding gaindrive.conf")
+set(GAINDRIVE_LOCALSTATEDIR "/var/lib" CACHE PATH "Parent directory of gaindrive's state directory")
+
 add_executable(gaindrive
 	src/main.cc
 	src/gaindrive.cc
@@ -194,7 +221,9 @@ add_executable(gaindrive
 
 target_compile_definitions(gaindrive PRIVATE
 	CPPHTTPLIB_OPENSSL_SUPPORT
-	GAINDRIVE_VERSION="${GAINDRIVE_VERSION}")
+	GAINDRIVE_VERSION="${GAINDRIVE_VERSION}"
+	GAINDRIVE_DEFAULT_CONFIG="${GAINDRIVE_SYSCONFDIR}/gaindrive.conf"
+	GAINDRIVE_DEFAULT_DB="${GAINDRIVE_LOCALSTATEDIR}/gaindrive/gaindrive.db")
 
 # So #include "embedded_web.hh" resolves from both src/ and the build dir.
 target_include_directories(gaindrive PRIVATE src ${CMAKE_CURRENT_BINARY_DIR})
@@ -217,6 +246,13 @@ target_link_libraries(gaindrive PRIVATE
 	reproc++
 	archive_static
 )
+
+# FolderWatcher's macOS branch uses FSEvents, which lives in CoreServices
+# (CarbonCore). The framework also brings in CoreFoundation, which that branch
+# needs for the CFArray of watched roots.
+if(APPLE)
+	target_link_libraries(gaindrive PRIVATE "-framework CoreServices")
+endif()
 
 # OpenSSL/zlib are made static by the USE_STATIC_LIBS vars set before
 # MakeAvailable; the C++ runtime is made static here. glibc and the satellites
@@ -268,9 +304,18 @@ include(GNUInstallDirs)
 
 install(TARGETS gaindrive RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-# systemd integration: unit file + declarative user creation. Gated so non-Linux
-# builds and minimal setups can opt out.
-option(GAINDRIVE_INSTALL_SYSTEMD "Install systemd unit and sysusers.d file" ON)
+# systemd integration: unit file + declarative user creation. Defaults OFF off
+# Linux — the block below falls back to /lib/systemd/system when pkg-config finds
+# no systemd, so leaving it ON would have a macOS install write units into
+# directories that do not exist. macOS gets a launchd job from the Homebrew
+# formula's `service` block instead.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+	set(_gd_systemd_default ON)
+else()
+	set(_gd_systemd_default OFF)
+endif()
+option(GAINDRIVE_INSTALL_SYSTEMD "Install systemd unit and sysusers.d file"
+       ${_gd_systemd_default})
 
 if(GAINDRIVE_INSTALL_SYSTEMD)
 	# Resolve systemd's real directories from its pkg-config file. These live
@@ -302,7 +347,9 @@ if(GAINDRIVE_INSTALL_SYSTEMD)
 	        DESTINATION ${SYSTEMD_SYSUSERS_DIR} RENAME gaindrive.conf)
 endif()
 
-# Example config installs to /etc (not CMAKE_INSTALL_SYSCONFDIR): gaindrive
-# always reads /etc/gaindrive.conf regardless of prefix. Installed with an
-# .example suffix so it never clobbers an admin's live config.
-install(FILES dist/gaindrive.conf.example DESTINATION /etc)
+# Example config installs next to the config the binary actually reads, which is
+# GAINDRIVE_SYSCONFDIR and not CMAKE_INSTALL_SYSCONFDIR: on Linux that stays
+# /etc regardless of prefix, exactly as before, while a Homebrew build redirects
+# both the default and this file into its own prefix. Installed with an .example
+# suffix so it never clobbers an admin's live config.
+install(FILES dist/gaindrive.conf.example DESTINATION ${GAINDRIVE_SYSCONFDIR})

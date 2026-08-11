@@ -2,6 +2,51 @@
 #include "mediastore.hh"
 #include "stamp.hh"
 
+#include <filesystem>
+#include <iostream>
+
+namespace fs = std::filesystem;
+
+// ---- Shared across platforms ----------------------------------------------
+
+FolderWatcher::FolderWatcher(MediaStore& store, int debounce_ms)
+	: store_(store), debounce_ms_(debounce_ms)
+	{
+	for (const auto& r : store_.roots())
+		if (r.type != "uploads") roots_.push_back(r.path);
+	}
+
+FolderWatcher::~FolderWatcher()
+	{
+	stop();
+	}
+
+std::string FolderWatcher::root_of(const std::string& path) const
+	{
+	for (const auto& r : roots_) {
+		if (path == r) return r;
+		if (path.size() > r.size() && path.compare(0, r.size(), r) == 0
+		        && path[r.size()] == '/')
+			return r;
+		}
+	return "";
+	}
+
+std::string FolderWatcher::artist_dir_for_path(const std::string& path) const
+	{
+	std::string owner = root_of(path);
+	if (owner.empty()) return "";   // not under any library root
+
+	fs::path p(path);
+	fs::path root(owner);
+	if (p == root) return "";       // the root itself; caller decides what to do
+
+	// Walk up to the depth-1 child of the owning root.
+	auto rel = p.lexically_relative(root);
+	if (rel.empty()) return "";
+	return (root / *rel.begin()).string();
+	}
+
 #ifdef __linux__
 
 #include <sys/inotify.h>
@@ -10,12 +55,8 @@
 #include <fcntl.h>
 #include <cerrno>
 #include <cstring>
-#include <filesystem>
 #include <chrono>
 #include <optional>
-#include <iostream>
-
-namespace fs = std::filesystem;
 
 // Self-pipe wakeup.  A one-byte write to a pipe with room cannot fail for any
 // reason worth handling except EINTR, but the result must still be consumed —
@@ -37,18 +78,6 @@ static constexpr uint32_t WATCH_MASK =
 	IN_MOVED_TO    |   // rename / move destination
 	IN_DELETE_SELF |   // the watched directory itself was deleted
 	IN_MOVE_SELF   ;   // the watched directory itself was moved
-
-FolderWatcher::FolderWatcher(MediaStore& store, int debounce_ms)
-	: store_(store), debounce_ms_(debounce_ms)
-	{
-	for (const auto& r : store_.roots())
-		if (r.type != "uploads") roots_.push_back(r.path);
-	}
-
-FolderWatcher::~FolderWatcher()
-	{
-	stop();
-	}
 
 void FolderWatcher::add_watch(const std::string& path)
 	{
@@ -76,40 +105,6 @@ void FolderWatcher::remove_watch(int wd)
 	{
 	inotify_rm_watch(inotify_fd_, wd);   // may already be auto-removed; ignore error
 	wd_to_path_.erase(wd);
-	}
-
-std::string FolderWatcher::root_of(const std::string& path) const
-	{
-	for (const auto& r : roots_) {
-		if (path == r) return r;
-		if (path.size() > r.size() && path.compare(0, r.size(), r) == 0
-		        && path[r.size()] == '/')
-			return r;
-		}
-	return "";
-	}
-
-std::string FolderWatcher::artist_dir_for(int wd, const char* ev_name) const
-	{
-	auto it = wd_to_path_.find(wd);
-	if (it == wd_to_path_.end()) return "";
-
-	std::string owner = root_of(it->second);
-	if (owner.empty()) return "";   // not under any library root
-
-	fs::path dir(it->second);
-	fs::path root(owner);
-
-	// Event is on a root itself: the affected level-1 dir is root/ev_name.
-	if (dir == root) {
-		if (ev_name && ev_name[0]) return (root / ev_name).string();
-		return "";
-		}
-
-	// Walk up to the depth-1 child of the owning root.
-	auto rel = dir.lexically_relative(root);
-	if (rel.empty()) return "";
-	return (root / *rel.begin()).string();
 	}
 
 void FolderWatcher::add_watches_recursive(const std::string& root)
@@ -229,6 +224,10 @@ void FolderWatcher::run()
 							std::cout << stamp() << "FolderWatcher: rescan "
 							          << "aborted: " << e.what() << std::endl;
 							}
+						catch (...) {
+							std::cout << stamp() << "FolderWatcher: rescan "
+							             "aborted: unknown exception" << std::endl;
+							}
 						// Signal run() to re-watch the rescanned dirs so that
 						// directories which were inaccessible at creation time
 						// (transient EACCES) get a watch added now.
@@ -328,13 +327,22 @@ void FolderWatcher::run()
 					continue;
 					}
 
-				// Arm / reset the debounce timer and record the affected artist dir.
+				// Arm / reset the debounce timer and record the affected artist
+				// dir. The full path of the changed entry is what identifies it:
+				// when the watch is on a root, parent + "/" + name IS the artist
+				// directory; deeper down, the first component below the root is
+				// the same either way.
 				last_event = Clock::now();
 				{
-				std::string artist = artist_dir_for(ev->wd,
-				                                    ev->len > 0 ? ev->name : nullptr);
-				if (!artist.empty())
-					changed_artists_.insert(artist);
+				auto it = wd_to_path_.find(ev->wd);
+				std::string parent = (it != wd_to_path_.end()) ? it->second : "";
+				std::string name   = (ev->len > 0) ? ev->name : "";
+				if (!parent.empty()) {
+					std::string full = name.empty() ? parent : parent + "/" + name;
+					std::string artist = artist_dir_for_path(full);
+					if (!artist.empty())
+						changed_artists_.insert(artist);
+					}
 				}
 
 				// Log the event.
@@ -374,14 +382,225 @@ void FolderWatcher::run()
 		}
 	}
 
-#else  // non-Linux stubs
+#elif defined(__APPLE__)
 
-FolderWatcher::FolderWatcher(MediaStore& store, int debounce_ms)
-	: store_(store), debounce_ms_(debounce_ms)
+#include <CoreServices/CoreServices.h>
+#include <dispatch/dispatch.h>
+
+// FSEvents watches a path RECURSIVELY from a single stream, so unlike the
+// inotify branch there is no per-directory registration: no startup walk, no
+// watch map, and no rewatch pass after a scan.
+//
+// kqueue would have been the portable-to-BSD choice and was rejected on cost.
+// EVFILT_VNODE needs one open fd per watched directory, and this watcher covers
+// every directory at every depth — roots, artists, albums, disc subfolders — so
+// a 3,000-album library means several thousand permanently-held descriptors.
+// inotify pays one fd total for the same job. On macOS that difference is not
+// merely wasteful:
+//   * CastManager's discovery loop uses select(), and FD_SETSIZE is 1024. Once
+//     the watcher holds more descriptors than that, sockets opened afterwards
+//     get numbers past the end of an fd_set and FD_SET() corrupts the stack —
+//     a bug that only appears above a library-size threshold.
+//   * macOS ships a soft RLIMIT_NOFILE of 256, shared with httplib's workers,
+//     SQLite handles, ffmpeg pipes and transcode-cache files.
+//   * Open descriptors pin the volume, so a library on an external drive could
+//     not be ejected while gaindrive was running.
+
+static void fsevents_cb(ConstFSEventStreamRef, void* info, size_t n,
+                        void* paths, const FSEventStreamEventFlags*,
+                        const FSEventStreamEventId*)
 	{
+	// Flags are deliberately ignored. The only one that would change our
+	// behaviour is kFSEventStreamEventFlagMustScanSubDirs (the daemon dropped
+	// events, as IN_Q_OVERFLOW does on Linux), and it already reports the
+	// subtree's directory — which maps to the same artist directory any
+	// ordinary event under it would, so the rescan covers it either way.
+	static_cast<FolderWatcher*>(info)->handle_paths(n, static_cast<char**>(paths));
 	}
 
-FolderWatcher::~FolderWatcher() { }
+// FSEvents reports fully RESOLVED paths, while MediaStore::rel_path() — which
+// drain_and_scan() has to call to get stored-form paths — keys off the
+// CONFIGURED root path. Those differ whenever a root is reached through a
+// symlink, and on macOS that is not exotic: /tmp and /var are symlinks into
+// /private on every install. Without this translation root_of() would match
+// nothing, every event would be discarded, and live rescan would do exactly
+// nothing while logging no error at all.
+std::string FolderWatcher::unresolve(const std::string& path) const
+	{
+	for (const auto& [canon, cfg] : canon_roots_) {
+		if (path == canon) return cfg;
+		if (path.size() > canon.size() && path.compare(0, canon.size(), canon) == 0
+		        && path[canon.size()] == '/')
+			return cfg + path.substr(canon.size());
+		}
+	return path;
+	}
+
+void FolderWatcher::handle_paths(size_t n, const char* const* paths)
+	{
+	bool spawn = false;
+		{
+		std::lock_guard<std::mutex> lk(changed_mutex_);
+		for (size_t i = 0; i < n; i++) {
+			std::string path = paths[i];
+			// FSEvents reports directories with a trailing slash.
+			while (path.size() > 1 && path.back() == '/') path.pop_back();
+			path = unresolve(path);
+
+			std::string artist = artist_dir_for_path(path);
+			if (artist.empty()) {
+				// Either outside every root, or the root itself changed. Unlike
+				// inotify, FSEvents carries no entry name, so we cannot tell
+				// which artist appeared directly under a root — record the bare
+				// root, which scan_dirs() reads as "lost track" and escalates to
+				// a full scan of it. Rare in practice: a new artist directory
+				// gets files written into it, and those events name it.
+				std::string owner = root_of(path);
+				if (owner.empty()) continue;
+				artist = owner;
+				}
+			std::cout << stamp() << "FolderWatcher: changed  " << path << std::endl;
+			changed_artists_.insert(artist);
+			}
+		if (changed_artists_.empty()) return;
+		// One scan thread at a time. It loops until nothing new is left, so a
+		// batch delivered mid-scan is picked up rather than dropped.
+		if (!scan_running_) { scan_running_ = true; spawn = true; }
+		}
+
+	if (spawn)
+		std::thread(&FolderWatcher::drain_and_scan, this).detach();
+	}
+
+void FolderWatcher::drain_and_scan()
+	{
+	while (true) {
+		std::set<std::string> abs_dirs;
+			{
+			std::lock_guard<std::mutex> lk(changed_mutex_);
+			abs_dirs.swap(changed_artists_);
+			// Clearing the flag under the lock that guards the set closes the
+			// handoff race: a batch arriving after this point sees scan_running_
+			// false and starts a new thread, and one arriving before it is
+			// already in abs_dirs.
+			if (abs_dirs.empty()) { scan_running_ = false; return; }
+			}
+
+		std::cout << stamp() << "FolderWatcher: rescanning "
+		          << abs_dirs.size() << " artist director"
+		          << (abs_dirs.size() == 1 ? "y" : "ies") << std::endl;
+
+		// This is a detached thread touching the DB: an escaping exception
+		// calls std::terminate and takes the server down with it. Both arms log
+		// — a silent catch turns a dead watcher into a mystery.
+		try {
+			// scan_dirs() expects stored-form paths ("<root>/<dir>"); MediaStore
+			// owns that mapping, so ask it rather than reimplementing the prefix
+			// arithmetic here.
+			std::set<std::string> rel_dirs;
+			for (auto& d : abs_dirs)
+				rel_dirs.insert(store_.rel_path(d));
+			store_.scan_dirs(rel_dirs);
+			}
+		catch (const std::exception& e) {
+			std::cout << stamp() << "FolderWatcher: rescan aborted: "
+			          << e.what() << std::endl;
+			}
+		catch (...) {
+			std::cout << stamp() << "FolderWatcher: rescan aborted: "
+			             "unknown exception" << std::endl;
+			}
+		}
+	}
+
+void FolderWatcher::start()
+	{
+	if (stream_ || roots_.empty())
+		return;   // already running, or nothing to watch
+
+	// Resolve each root once so unresolve() can map FSEvents' reported paths
+	// back. Done here rather than in the constructor because it touches the
+	// filesystem, and a root that does not exist yet should not fail construction.
+	canon_roots_.clear();
+	for (const auto& r : roots_) {
+		std::error_code ec;
+		auto canon = fs::weakly_canonical(fs::path(r), ec);
+		if (!ec && canon.string() != r)
+			canon_roots_.emplace_back(canon.string(), r);
+		}
+
+	CFMutableArrayRef cf_paths =
+		CFArrayCreateMutable(nullptr, (CFIndex)roots_.size(), &kCFTypeArrayCallBacks);
+	if (!cf_paths) return;
+	for (const auto& r : roots_) {
+		CFStringRef s = CFStringCreateWithCString(nullptr, r.c_str(),
+		                                          kCFStringEncodingUTF8);
+		if (s) { CFArrayAppendValue(cf_paths, s); CFRelease(s); }
+		}
+
+	FSEventStreamContext ctx = { 0, this, nullptr, nullptr, nullptr };
+
+	// The stream's latency IS the debounce: FSEvents coalesces everything inside
+	// the window into one callback, which is what the inotify branch assembles
+	// by hand out of poll() timeouts. kFSEventStreamCreateFlagNoDefer is
+	// deliberately NOT set — without it the callback fires at the END of the
+	// window, so a long file copy produces periodic batches instead of one
+	// callback per write. kFSEventStreamCreateFlagWatchRoot additionally reports
+	// a root that is itself moved or deleted.
+	stream_ = FSEventStreamCreate(nullptr, fsevents_cb, &ctx, cf_paths,
+	                              kFSEventStreamEventIdSinceNow,
+	                              debounce_ms_ / 1000.0,
+	                              kFSEventStreamCreateFlagWatchRoot);
+	CFRelease(cf_paths);
+	if (!stream_) {
+		std::cout << stamp() << "FolderWatcher: FSEventStreamCreate failed"
+		          << std::endl;
+		return;
+		}
+
+	queue_ = dispatch_queue_create("gaindrive.folderwatcher", DISPATCH_QUEUE_SERIAL);
+	FSEventStreamSetDispatchQueue((FSEventStreamRef)stream_, (dispatch_queue_t)queue_);
+
+	if (!FSEventStreamStart((FSEventStreamRef)stream_)) {
+		std::cout << stamp() << "FolderWatcher: FSEventStreamStart failed"
+		          << std::endl;
+		// Not stop(): FSEventStreamStop() must not be called on a stream that
+		// never started, so unwind by hand instead.
+		FSEventStreamInvalidate((FSEventStreamRef)stream_);
+		FSEventStreamRelease((FSEventStreamRef)stream_);
+		stream_ = nullptr;
+		dispatch_release((dispatch_queue_t)queue_);
+		queue_ = nullptr;
+		return;
+		}
+
+	std::cout << stamp() << "FolderWatcher: watching " << roots_.size()
+	          << " root" << (roots_.size() == 1 ? "" : "s")
+	          << " recursively via FSEvents" << std::endl;
+	}
+
+void FolderWatcher::stop()
+	{
+	if (stream_) {
+		auto s = (FSEventStreamRef)stream_;
+		FSEventStreamStop(s);
+		FSEventStreamInvalidate(s);
+		FSEventStreamRelease(s);
+		stream_ = nullptr;
+		}
+	if (queue_) {
+		// Stop() guarantees no further callback is scheduled, but one may still
+		// be running. Draining the serial queue before we return keeps a
+		// callback from touching a half-destroyed FolderWatcher.
+		// dispatch_sync_f rather than a block literal so this stays plain C++.
+		dispatch_sync_f((dispatch_queue_t)queue_, nullptr, [](void*){});
+		dispatch_release((dispatch_queue_t)queue_);
+		queue_ = nullptr;
+		}
+	}
+
+#else  // no live rescan on this platform
+
 void FolderWatcher::start() { }
 void FolderWatcher::stop()  { }
 

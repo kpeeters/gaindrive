@@ -243,7 +243,10 @@ std::vector<CastManager::CastDevice> CastManager::discover(int timeout_ms)
 		auto us = std::chrono::duration_cast<std::chrono::microseconds>(
 		              deadline - std::chrono::steady_clock::now()).count();
 		if (us <= 0) break;
-		struct timeval tv = { (long)(us / 1000000), (long)(us % 1000000) };
+		// Cast to the real member types rather than long: on Darwin tv_usec is
+		// suseconds_t (int), so a long here narrows inside a braced initialiser,
+		// which is ill-formed and rejected outright rather than warned about.
+		struct timeval tv = { (time_t)(us / 1000000), (suseconds_t)(us % 1000000) };
 		fd_set fds;
 		FD_ZERO(&fds);
 		int maxfd = 0;
