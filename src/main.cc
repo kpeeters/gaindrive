@@ -1,10 +1,14 @@
 #include <cctype>
+#include <csignal>
 #include <filesystem>
 #include <iostream>
 #include <fstream>
 #include <set>
 #include <string>
 #include <vector>
+
+#include <termios.h>
+#include <unistd.h>
 
 #include <cxxopts.hpp>
 #include <nlohmann/json.hpp>
@@ -66,6 +70,99 @@ static bool validate_roots(const std::vector<MediaStore::Root>& roots,
 		return false;
 		}
 	return true;
+	}
+
+// Ctrl-C at a password prompt would otherwise kill the process with ECHO still
+// off, leaving the user in a shell that does not show what they type. Restore
+// the terminal, then die the way we would have.
+static termios g_saved_termios;
+
+static void restore_termios_and_die(int sig)
+	{
+	tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_saved_termios);
+	signal(sig, SIG_DFL);
+	raise(sig);
+	}
+
+// Reads one line with terminal echo turned off, so a password never lands on
+// screen or in a scrollback buffer. Falls back to an ordinary read when stdin
+// is not a terminal — callers only get here after checking isatty(), so that
+// is a redirected-stdin corner case rather than the normal path.
+static bool read_hidden(const char* prompt, std::string& out)
+	{
+	std::cout << prompt << std::flush;
+
+	bool tty = tcgetattr(STDIN_FILENO, &g_saved_termios) == 0;
+	if (tty) {
+		signal(SIGINT, restore_termios_and_die);
+		termios quiet = g_saved_termios;
+		quiet.c_lflag &= ~ECHO;
+		tcsetattr(STDIN_FILENO, TCSAFLUSH, &quiet);
+		}
+
+	bool ok = static_cast<bool>(std::getline(std::cin, out));
+
+	if (tty) {
+		tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_saved_termios);
+		signal(SIGINT, SIG_DFL);
+		// The Enter that ended the line was not echoed either.
+		std::cout << "\n";
+		}
+	return ok;
+	}
+
+static std::string trim(const std::string& s)
+	{
+	auto b = s.find_first_not_of(" \t");
+	if (b == std::string::npos) return "";
+	return s.substr(b, s.find_last_not_of(" \t") - b + 1);
+	}
+
+// Nobody can log in to a server with no accounts, so an empty user table is a
+// hard stop rather than a warning. On a fresh install there is a terminal to
+// ask on; a systemd start has none, and gets told what to run instead.
+static bool create_first_user(MediaStore& store)
+	{
+	if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO)) {
+		std::cerr << "Error: no user accounts exist, and there is no terminal "
+		             "to ask on.\nCreate the first one with:\n"
+		             "  gaindrive --add-user <name> --password <password>\n";
+		return false;
+		}
+
+	std::cout << "No user accounts exist yet. Creating the first one; it will "
+	             "be an administrator.\n";
+
+	for (;;) {
+		std::string username;
+		std::cout << "Username: " << std::flush;
+		// Failure here is EOF (^D), not a retryable mistake.
+		if (!std::getline(std::cin, username)) return false;
+		username = trim(username);
+		if (username.empty()) {
+			std::cout << "Username cannot be empty.\n";
+			continue;
+			}
+
+		std::string password, again;
+		if (!read_hidden("Password: ", password))        return false;
+		if (password.empty()) {
+			std::cout << "Password cannot be empty.\n";
+			continue;
+			}
+		if (!read_hidden("Repeat password: ", again))    return false;
+		if (password != again) {
+			std::cout << "Passwords do not match.\n";
+			continue;
+			}
+
+		if (!store.add_user(username, password, true /* is_admin */)) {
+			std::cout << "User '" << username << "' already exists.\n";
+			continue;
+			}
+		std::cout << "User '" << username << "' created.\n";
+		return true;
+		}
 	}
 
 int main(int argc, char* argv[])
@@ -191,18 +288,40 @@ int main(int argc, char* argv[])
 	// it reach the default terminate handler and abort.
 	try {
 		if (args.count("add-user")) {
-			if (!args.count("password")) {
-				std::cerr << "Error: --password is required with --add-user.\n";
+			std::string username = args["add-user"].as<std::string>();
+			std::string password;
+			if (args.count("password"))
+				password = args["password"].as<std::string>();
+			else if (isatty(STDIN_FILENO)) {
+				// Better than the command line anyway: --password puts the
+				// password in the shell history and in ps output.
+				if (!read_hidden("Password: ", password)) return 1;
+				}
+			else {
+				std::cerr << "Error: --password is required with --add-user "
+				             "when there is no terminal to ask on.\n";
 				return 1;
 				}
-			std::string username = args["add-user"].as<std::string>();
-			std::string password = args["password"].as<std::string>();
+			if (password.empty()) {
+				std::cerr << "Error: password cannot be empty.\n";
+				return 1;
+				}
 			MediaStore store(db_path, roots, user_db_path);
 			bool ok = store.add_user(username, password, true /* is_admin */);
 			std::cout << (ok ? "User '" + username + "' created."
 			               : "User '" + username + "' already exists.") << "\n";
 			return ok ? 0 : 1;
 			}
+
+		// Before constructing GainDrive, which starts the cast manager, the
+		// watcher and the transcode cache: a server nobody can log in to
+		// should do none of that. The store is opened in its own scope so it
+		// is closed again before GainDrive opens the same database.
+		{
+		MediaStore store(db_path, roots, user_db_path);
+		if (store.list_users().empty() && !create_first_user(store))
+			return 1;
+		}
 
 		GainDrive gd(db_path, roots, upload_dir, no_scan, debug, flat_multi_disc,
 		             user_db_path, transcode_cache_dir, transcode_cache_mb,
