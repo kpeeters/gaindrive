@@ -13,55 +13,67 @@ Keep this file in step with `CMakeLists.txt`,
 the licensing section of `CLAUDE.md`.
 
 
-## Server — linked into the gaindrive binary
+## Server — vendored in this repository
 
-Fetched by CMake `FetchContent` unless noted.
+Copied verbatim into `third_party/`, with their licence texts alongside. Neither
+can be relied on from a package manager; `third_party/README.md` explains why.
+A version change here is a manual `cp` and must be recorded in this file in the
+same commit.
 
-* cpp-httplib 0.18.7
-  MIT · Copyright (c) 2017 yhirose
+* cpp-httplib 0.18.7 — `third_party/httplib.h`, `third_party/httplib.LICENSE`
+  MIT · Copyright (c) 2025 Yuji Hirose
   https://github.com/yhirose/cpp-httplib
 
-* cxxopts 3.2.1
+* mdns 1.4.3 — `third_party/mdns.h`, `third_party/mdns.LICENSE`
+  Public domain (Unlicense) · Mattias Jansson
+  https://github.com/mjansson/mdns
+
+
+## Server — system packages
+
+The default build requires these from the distribution, so the version linked
+is whichever the system provides at or above the floor listed. The versions
+below are the ones pinned by `-DGAINDRIVE_BUNDLED_DEPS=ON`, which builds them
+from source instead and is used only for the static release binary.
+
+* cxxopts 3.3.1 (floor 3.0)
   MIT · Copyright (c) 2014 Jarryd Beck
   https://github.com/jarro2783/cxxopts
 
-* nlohmann/json 3.11.3
-  MIT · Copyright (c) 2013-2022 Niels Lohmann
+* nlohmann/json 3.12.0 (floor 3.11)
+  MIT · Copyright (c) 2013-2025 Niels Lohmann
   https://github.com/nlohmann/json
 
-* SQLiteCpp 3.3.2
+* SQLiteCpp 3.3.2 (floor 3.3)
   MIT · Copyright (c) 2012-2024 Sébastien Rombauts
   https://github.com/SRombauts/SQLiteCpp
 
 * SQLite3
-  Public domain · bundled inside SQLiteCpp, not fetched separately
+  Public domain · the system library in the default build; bundled inside
+  SQLiteCpp and not fetched separately under `GAINDRIVE_BUNDLED_DEPS`
   https://www.sqlite.org/copyright.html
 
-* TagLib 2.0.2
+* TagLib 2.0.2 (floor 2.0)
   LGPL-2.1-or-later OR MPL-1.1 · Copyright (c) Scott Wheeler and contributors
   Used under the LGPL arm; see the note below.
   https://github.com/taglib/taglib
 
-* tinyxml2 10.0.0
+* tinyxml2 10.0.0 (floor 9.0)
   zlib · Copyright (c) Lee Thomason
   https://github.com/leethomason/tinyxml2
 
-* reproc / reproc++ 14.2.5
+* reproc / reproc++ 14.2.5 (floor 14.2)
   MIT · Copyright (c) Daan De Meyer
   https://github.com/DaanDeMeyer/reproc
 
-* mdns 1.4.3
-  Public domain (Unlicense) · Mattias Jansson
-  https://github.com/mjansson/mdns
-
-* libarchive 3.7.4
+* libarchive 3.8.9 (floor 3.6)
   BSD-2-Clause · Copyright (c) Tim Kientzle and contributors
   https://github.com/libarchive/libarchive
 
 * OpenSSL
   Apache-2.0 (3.x) · Copyright (c) The OpenSSL Project Authors
-  System dependency, `find_package(OpenSSL REQUIRED)`. Must be 3.x; see the
-  note below.
+  `find_package(OpenSSL REQUIRED)` in every mode. Must be 3.x; see the note
+  below.
   https://www.openssl.org/
 
 

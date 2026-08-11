@@ -18,6 +18,12 @@ cmake_minimum_required(VERSION 3.20)
 set(ALPINE_IMAGE alpine:3.22)
 set(BUILD_DIR    build-static)
 
+# This is the one build that passes GAINDRIVE_BUNDLED_DEPS=ON, so no dev
+# packages for the C++ dependencies appear below. That is not a preference: a
+# fully static musl link needs .a archives, and Alpine ships no taglib-static,
+# no tinyxml2-static and no reproc-static, and no SQLiteCpp in any branch. The
+# ordinary build uses system packages and needs no container at all.
+#
 # -static-suffixed packages carry the .a archives; CMAKE_FIND_LIBRARY_SUFFIXES
 # is forced to ".a" under GAINDRIVE_STATIC, so a missing one silently disables
 # that libarchive backend rather than failing the build.
@@ -53,7 +59,7 @@ string(JOIN " " APK_LIST ${APK_PACKAGES})
 set(SCRIPT "set -eu
 apk add --no-cache ${APK_LIST}
 git config --global --add safe.directory '*'
-cmake -B ${BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DGAINDRIVE_STATIC_LIBC=ON ${VERSION_ARG}
+cmake -B ${BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DGAINDRIVE_STATIC_LIBC=ON -DGAINDRIVE_BUNDLED_DEPS=ON ${VERSION_ARG}
 cmake --build ${BUILD_DIR} -j\"$(nproc)\"
 ${CHOWN}")
 

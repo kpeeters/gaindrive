@@ -62,6 +62,36 @@ jobs:
           path: gaindrive-linux-${{ matrix.arch }}
           if-no-files-found: error
 
+  # The default build: system packages, no network at configure time. Debian 13
+  # is the only Linux that satisfies all seven — Ubuntu 24.04 ships taglib 1.13
+  # against the taglib 2 API this code uses, and has no libreproc-dev — so the
+  # runner's own image cannot serve and this runs in a container.
+  system-deps:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            libtag-dev libtinyxml2-dev libcxxopts-dev nlohmann-json3-dev \
+            libsqlitecpp-dev libreproc-dev libarchive-dev libssl-dev
+
+      - name: Configure and build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DGAINDRIVE_INSTALL_SYSTEMD=OFF
+          cmake --build build -j"$(nproc)"
+
+      - name: Verify
+        run: |
+          ./build/gaindrive --version
+          # Nothing under _deps means no dependency was fetched: the whole point
+          # of this job is that the default build resolves everything locally.
+          test ! -d build/_deps
+
   # Compile-only guard for the Darwin branches. macOS is distributed through the
   # Homebrew tap rather than as an artifact, so nothing is uploaded here — the
   # job exists because the Linux matrix cannot catch a Darwin regression, and
@@ -72,13 +102,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: brew install ffmpeg openssl@3
+      - run: |
+          brew install ffmpeg openssl@3 taglib tinyxml2 cxxopts \
+                       nlohmann-json sqlitecpp reproc libarchive
 
+      # openssl@3 and libarchive are both keg-only, so neither is on the default
+      # search path. libarchive matters especially: macOS ships its own, older
+      # copy in /usr/lib, and without the prefix hint find_package would pick
+      # that one up instead of the formula's.
       - name: Configure
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
                 -DGAINDRIVE_INSTALL_SYSTEMD=OFF \
-                -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)"
+                -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
+                -DCMAKE_PREFIX_PATH="$(brew --prefix libarchive)"
 
       - name: Build
         run: cmake --build build -j"$(sysctl -n hw.ncpu)"
@@ -90,6 +127,7 @@ jobs:
           # the folderwatcher branch would fail to link, but check anyway so a
           # silent fallback to the no-op stub cannot pass unnoticed.
           otool -L build/gaindrive | grep -q CoreServices
+          test ! -d build/_deps
 
   release:
     needs: build
