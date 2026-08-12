@@ -4287,7 +4287,12 @@ GainDrive::GainDrive(const std::string& db_path,
 		namespace fs = std::filesystem;
 		fs::path rel_p(item_rel);
 		std::vector<std::string> parts;
-		for (auto& c : rel_p) parts.push_back(c.string());
+		// const auto&, not auto&: path::iterator's reference type is
+		// implementation-defined. libstdc++ hands out a const path&, but libc++
+		// returns a path by value, and a non-const lvalue reference cannot bind
+		// to that temporary. const& works on both — it binds the reference on
+		// libstdc++ and lifetime-extends the temporary on libc++.
+		for (const auto& c : rel_p) parts.push_back(c.string());
 		if (parts.size() != 5 || uploads_root_name_.empty()
 		        || parts[0] != uploads_root_name_) {
 			err(0, "Item is not in a personal library folder.");
