@@ -31,10 +31,19 @@ same commit.
 
 ## Server — system packages
 
-The default build requires these from the distribution, so the version linked
-is whichever the system provides at or above the floor listed. The versions
-below are the ones pinned by `-DGAINDRIVE_BUNDLED_DEPS=ON`, which builds them
-from source instead and is used only for the static release binary.
+**Whether these are linked from the system or built from source is a property
+of the build host.** The default build takes whatever the distribution provides
+at or above the floor listed and compiles the rest from the pinned versions
+below; `GAINDRIVE_BUNDLED_DEPS` forces a source build regardless, and
+`GAINDRIVE_ALLOW_FETCH=OFF` turns a missing package into an error rather than a
+source build, so that nothing can end up bundled unintentionally.
+
+The practical consequence for anyone redistributing a gaindrive binary: the
+versions recorded here apply to the components their build actually compiled in.
+For the rest, the notices that travel with the binary are the distribution's.
+Configure prints which is which (`gaindrive: system packages: ...` /
+`gaindrive: built from source: ...`); the released static binaries compile all
+of them, so for those every version below applies.
 
 * cxxopts 3.3.1 (floor 3.0)
   MIT · Copyright (c) 2014 Jarryd Beck

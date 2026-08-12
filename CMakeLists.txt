@@ -58,11 +58,55 @@ endif()
 #
 # cpp-httplib and mdns are vendored in third_party/ and are not dependencies at
 # all; see third_party/README.md for why neither can be taken from a package.
-# The remaining seven come from system packages by default. Building them from
-# source is the exception, not the rule:
-option(GAINDRIVE_BUNDLED_DEPS
-	"Build the remaining dependencies from source instead of requiring system packages. Needed only for the fully static release build, since Alpine ships no static taglib/tinyxml2/reproc and no SQLiteCpp at all."
-	OFF)
+# The remaining seven come from system packages by default. Building from source
+# is per-dependency, not all-or-nothing: a distribution that is merely behind on
+# one library should not force every other one to be rebuilt too. Ubuntu 24.04 is
+# the case that shaped this — it has five of the seven, but TagLib only at 1.13
+# and no reproc++ package at all, so
+#
+#     cmake -B build -DGAINDRIVE_BUNDLED_DEPS="TagLib;reproc++"
+#
+# is the right answer there, not rebuilding the lot.
+set(GAINDRIVE_BUNDLED_DEPS "" CACHE STRING
+	"Dependencies to build from source even when the system provides them: a list of names from GD_ALL_DEPS, or ALL. Empty (the default) takes whatever the system has and builds only the rest.")
+
+# Anything not found is built from source rather than refused. A distribution
+# that is merely behind on one library — Ubuntu 24.04 has no reproc package at
+# all and TagLib only at 1.13 — should still give a working `cmake -B build`.
+#
+# Turning this OFF is how the stricter guarantee is asserted by the people who
+# actually need it. A distribution packager must not ship convenience copies and
+# must not download during a build, so they set it and get an error listing
+# exactly what belongs in Build-Depends. Refusing by default would not have
+# bought them anything they cannot assert themselves, while blocking everyone
+# else on a distro they do not control.
+option(GAINDRIVE_ALLOW_FETCH
+	"Build a dependency from source when the system does not provide one new enough. Turn OFF for distribution packaging or an offline build, so a missing package is an error instead of a download."
+	ON)
+
+set(GD_ALL_DEPS TagLib tinyxml2 cxxopts nlohmann_json SQLiteCpp reproc++ LibArchive)
+
+# Accept the boolean spellings too, so -DGAINDRIVE_BUNDLED_DEPS=ON keeps meaning
+# "all of them" for anyone who already has that in a script.
+string(TOUPPER "${GAINDRIVE_BUNDLED_DEPS}" _gd_req)
+if(_gd_req STREQUAL "ALL" OR _gd_req STREQUAL "ON"
+		OR _gd_req STREQUAL "TRUE" OR _gd_req STREQUAL "YES" OR _gd_req STREQUAL "1")
+	set(GD_BUNDLED ${GD_ALL_DEPS})
+elseif(_gd_req STREQUAL "" OR _gd_req STREQUAL "OFF"
+		OR _gd_req STREQUAL "FALSE" OR _gd_req STREQUAL "NO" OR _gd_req STREQUAL "0")
+	set(GD_BUNDLED "")
+else()
+	set(GD_BUNDLED ${GAINDRIVE_BUNDLED_DEPS})
+	foreach(_d IN LISTS GD_BUNDLED)
+		if(NOT _d IN_LIST GD_ALL_DEPS)
+			list(JOIN GD_ALL_DEPS ", " _known)
+			message(FATAL_ERROR
+				"GAINDRIVE_BUNDLED_DEPS names an unknown dependency: ${_d}\n"
+				"  Known names are: ${_known}\n"
+				"  (or ALL for every one of them)")
+		endif()
+	endforeach()
+endif()
 
 # Minimum versions. These are not decoration — they are what keeps a system-first
 # default safe on an older distribution. Ubuntu 24.04 ships taglib 1.13.1, and
@@ -103,14 +147,101 @@ if(GAINDRIVE_STATIC)
 	add_compile_options($<$<CONFIG:Release,MinSizeRel>:-fdata-sections>)
 endif()
 
-if(GAINDRIVE_BUNDLED_DEPS)
+set(GD_FETCH "")     # FetchContent names to make available
+set(GD_SYSTEM "")    # resolved from a system package
+set(_gd_missing "")  # wanted from the system, not found there
+set(_gd_apt     "")
+set(_gd_brew    "")
 
+# find_package name | FetchContent name | apt package | brew formula.
+#
+# Getting a find_package name wrong reports "not found" for something that is in
+# fact installed, so: TagLib is spelled capitalised even though the file is
+# taglib-config.cmake — CMake also searches the lowercase-dashed form, and
+# taglib's own config calls check_required_components("TagLib"), so the
+# capitalised spelling is the one its internals agree with. LibArchive is
+# CMake's bundled find module rather than an upstream config package.
+#
+# The apt names are for Debian 13 and newer, and the advisory below says so.
+# Older releases differ: Ubuntu 24.04 calls taglib libtag1-dev (and ships 1.13
+# anyway) and has no reproc package at all. An install command must never mix
+# names that do and do not exist on the target release — apt aborts the entire
+# transaction on one unknown name, so the user installs nothing, and the next
+# configure then reports every package missing including the available ones.
+foreach(dep
+		"TagLib|taglib|libtag-dev|taglib"
+		"tinyxml2|tinyxml2|libtinyxml2-dev|tinyxml2"
+		"cxxopts|cxxopts|libcxxopts-dev|cxxopts"
+		"nlohmann_json|nlohmann_json|nlohmann-json3-dev|nlohmann-json"
+		"SQLiteCpp|SQLiteCpp|libsqlitecpp-dev|sqlitecpp"
+		"reproc++|reproc|libreproc-dev|reproc"
+		"LibArchive|libarchive|libarchive-dev|libarchive")
+	string(REPLACE "|" ";" _parts "${dep}")
+	list(GET _parts 0 _name)
+	list(GET _parts 1 _fetch)
+	list(GET _parts 2 _apt)
+	list(GET _parts 3 _brew)
+
+	if(_name IN_LIST GD_BUNDLED)
+		list(APPEND GD_FETCH ${_fetch})
+	else()
+		find_package(${_name} ${GD_MIN_${_name}} QUIET)
+		if(${_name}_FOUND)
+			list(APPEND GD_SYSTEM "${_name}")
+		else()
+			# Fall back to building it. Appending to GD_BUNDLED is what the
+			# per-dependency declaration blocks below key on, so they need no
+			# knowledge of how a name got there.
+			list(APPEND _gd_missing "${_name} >= ${GD_MIN_${_name}}")
+			list(APPEND _gd_apt     "${_apt}")
+			list(APPEND _gd_brew    "${_brew}")
+			list(APPEND GD_BUNDLED  "${_name}")
+			list(APPEND GD_FETCH    "${_fetch}")
+		endif()
+	endif()
+endforeach()
+
+if(_gd_missing)
+	list(JOIN _gd_missing "\n      " _list)
+	if(APPLE)
+		list(JOIN _gd_brew " " _cmd)
+		set(_install "brew install ${_cmd}")
+	else()
+		list(JOIN _gd_apt " " _cmd)
+		set(_install "sudo apt install ${_cmd}\n      (those names are Debian 13 or newer; older releases differ)")
+	endif()
+
+	if(GAINDRIVE_ALLOW_FETCH)
+		# Information, not a complaint: on a distribution that is behind this is
+		# the normal, expected outcome of a perfectly good build.
+		message(STATUS
+			"gaindrive: not available from system packages, will build from source:\n"
+			"      ${_list}\n"
+			"    To use system copies instead, install:\n"
+			"      ${_install}")
+	else()
+		message(FATAL_ERROR
+			"These dependencies were not found on the system, or are too old:\n"
+			"      ${_list}\n\n"
+			"  GAINDRIVE_ALLOW_FETCH is OFF, so they cannot be built from source.\n"
+			"  Install them:\n"
+			"      ${_install}\n\n"
+			"  Or drop -DGAINDRIVE_ALLOW_FETCH=OFF to have them built instead.\n")
+	endif()
+endif()
+
+if(GD_BUNDLED)
 	include(FetchContent)
-
-	# Nothing may leak in from the machine: the point of this mode is a build
-	# whose dependency versions are a property of this file.
+	# Nothing may leak in from the machine: a bundled dependency's version is a
+	# property of this file, not of the build host.
 	set(FETCHCONTENT_TRY_FIND_PACKAGE_MODE NEVER)
+endif()
 
+# ---- Bundled dependency declarations ---------------------------------------
+# Each is declared only when it is actually being built, so an unrelated
+# dependency's options never reach a build that does not include it.
+
+if("cxxopts" IN_LIST GD_BUNDLED)
 	# v3.3.1 rather than v3.2.1 only because the older tag declares
 	# cmake_minimum_required(VERSION 3.1...3.19), and CMake 4 rejects a <min>
 	# below 3.5 even in the range form.
@@ -119,14 +250,18 @@ if(GAINDRIVE_BUNDLED_DEPS)
 		GIT_REPOSITORY https://github.com/jarro2783/cxxopts.git
 		GIT_TAG        v3.3.1
 	)
+endif()
 
+if("nlohmann_json" IN_LIST GD_BUNDLED)
 	# Likewise: 3.11.3 declares 3.1...3.14, 3.12.0 declares 3.5...4.0.
 	FetchContent_Declare(
 		nlohmann_json
 		GIT_REPOSITORY https://github.com/nlohmann/json.git
 		GIT_TAG        v3.12.0
 	)
+endif()
 
+if("SQLiteCpp" IN_LIST GD_BUNDLED)
 	# SQLiteCpp bundles and builds sqlite3 from source (SQLITECPP_INTERNAL_SQLITE
 	# defaults ON), which is what we want for a single self-contained binary.
 	# Disable cpplint so it never searches for Python.
@@ -136,7 +271,9 @@ if(GAINDRIVE_BUNDLED_DEPS)
 		GIT_REPOSITORY https://github.com/SRombauts/SQLiteCpp.git
 		GIT_TAG        3.3.2
 	)
+endif()
 
+if("TagLib" IN_LIST GD_BUNDLED)
 	# Build taglib as a static library; disable things we don't need.
 	set(BUILD_SHARED_LIBS     OFF CACHE BOOL "" FORCE)
 	set(TAGLIB_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
@@ -147,13 +284,17 @@ if(GAINDRIVE_BUNDLED_DEPS)
 		GIT_REPOSITORY https://github.com/taglib/taglib.git
 		GIT_TAG        v2.0.2
 	)
+endif()
 
+if("tinyxml2" IN_LIST GD_BUNDLED)
 	FetchContent_Declare(
 		tinyxml2
 		GIT_REPOSITORY https://github.com/leethomason/tinyxml2.git
 		GIT_TAG        10.0.0
 	)
+endif()
 
+if("reproc++" IN_LIST GD_BUNDLED)
 	# reproc++ for spawning ffmpeg child processes.
 	set(REPROC++ ON CACHE BOOL "" FORCE)
 	FetchContent_Declare(
@@ -161,7 +302,9 @@ if(GAINDRIVE_BUNDLED_DEPS)
 		GIT_REPOSITORY https://github.com/DaanDeMeyer/reproc.git
 		GIT_TAG        v14.2.5
 	)
+endif()
 
+if("LibArchive" IN_LIST GD_BUNDLED)
 	# libarchive for extracting user-uploaded zip/tar archives. v3.8.9 rather
 	# than v3.7.4, whose CMAKE_MINIMUM_REQUIRED(VERSION 2.8.12) CMake 4 refuses;
 	# 3.8.x declares 3.17.
@@ -173,95 +316,54 @@ if(GAINDRIVE_BUNDLED_DEPS)
 		GIT_TAG        v3.8.9
 	)
 
-	# Trim optional backends gaindrive never uses. This only bites in bundled
-	# mode — with a system libarchive the distribution has already chosen its
-	# backends — and it matters most for the static link this mode exists to
-	# serve. The worst offender is libarchive's xar reader: its libxml2 pulls in
-	# ICU (libicuuc/libicudata), and because ICU is C++ it drags
-	# libstdc++/libgcc_s back into an otherwise static link even with
-	# -static-libstdc++. zlib/bz2/lzma/zstd stay enabled so zip and the common
-	# compressed-tar uploads still extract.
+	# Trim optional backends gaindrive never uses. This only applies when we
+	# build libarchive ourselves — with a system one the distribution has
+	# already chosen its backends — and it matters most for the static link.
+	# The worst offender is libarchive's xar reader: its libxml2 pulls in ICU
+	# (libicuuc/libicudata), and because ICU is C++ it drags libstdc++/libgcc_s
+	# back into an otherwise static link even with -static-libstdc++.
+	# zlib/bz2/lzma/zstd stay enabled so zip and the common compressed-tar
+	# uploads still extract.
 	set(ENABLE_LIBXML2 OFF CACHE BOOL "" FORCE)   # xar -> libxml2 -> ICU
 	set(ENABLE_EXPAT   OFF CACHE BOOL "" FORCE)
 	set(ENABLE_ICONV   OFF CACHE BOOL "" FORCE)
 	set(ENABLE_LZO     OFF CACHE BOOL "" FORCE)
 	set(ENABLE_NETTLE  OFF CACHE BOOL "" FORCE)
 	set(ENABLE_LIBB2   OFF CACHE BOOL "" FORCE)
+endif()
 
-	FetchContent_MakeAvailable(
-		cxxopts nlohmann_json SQLiteCpp taglib tinyxml2 reproc libarchive)
+# One line saying where each dependency came from, so the answer is in the
+# configure log rather than something to infer from build noise later.
+if(GD_SYSTEM)
+	list(JOIN GD_SYSTEM ", " _s)
+else()
+	set(_s "(none)")
+endif()
+if(GD_BUNDLED)
+	list(JOIN GD_BUNDLED ", " _b)
+else()
+	set(_b "(none)")
+endif()
+message(STATUS "gaindrive: system packages: ${_s}")
+message(STATUS "gaindrive: built from source: ${_b}")
 
+if(GD_FETCH)
+	FetchContent_MakeAvailable(${GD_FETCH})
+endif()
+
+if("TagLib" IN_LIST GD_BUNDLED)
 	# Reproduce, for the in-tree build, the include layout taglib's INSTALLED
 	# form provides — its exported target offers both <prefix>/include and
 	# <prefix>/include/taglib, and its PUBLIC_HEADER install flattens
 	# toolkit/tpropertymap.h to include/taglib/tpropertymap.h. The source tree
 	# keeps the toolkit headers in a subdirectory instead, so without these three
-	# entries the same #include lines resolve in system mode and fail here.
+	# entries the same #include lines resolve against a system taglib and fail
+	# against this one.
 	target_include_directories(tag PUBLIC
 		$<BUILD_INTERFACE:${taglib_SOURCE_DIR}>
 		$<BUILD_INTERFACE:${taglib_SOURCE_DIR}/taglib>
 		$<BUILD_INTERFACE:${taglib_SOURCE_DIR}/taglib/toolkit>
 	)
-
-else()
-
-	# System packages. Every miss is collected so one configure run reports
-	# everything that needs installing, rather than making the user rediscover
-	# the list one failure at a time.
-	set(_gd_missing "")
-	set(_gd_apt     "")
-	set(_gd_brew    "")
-
-	# find_package name, apt package, brew formula. Getting a find_package name
-	# wrong reports "not found" for something that is in fact installed, so:
-	# TagLib is spelled capitalised even though the file is taglib-config.cmake
-	# (CMake also searches the lowercase-dashed form, and taglib's own config
-	# calls check_required_components("TagLib"), so the capitalised spelling is
-	# the one its internals agree with). LibArchive is CMake's bundled find
-	# module rather than an upstream config package.
-	foreach(dep
-			"TagLib|libtag-dev|taglib"
-			"tinyxml2|libtinyxml2-dev|tinyxml2"
-			"cxxopts|libcxxopts-dev|cxxopts"
-			"nlohmann_json|nlohmann-json3-dev|nlohmann-json"
-			"SQLiteCpp|libsqlitecpp-dev|sqlitecpp"
-			"reproc++|libreproc-dev|reproc"
-			"LibArchive|libarchive-dev|libarchive")
-		string(REPLACE "|" ";" _parts "${dep}")
-		list(GET _parts 0 _name)
-		list(GET _parts 1 _apt)
-		list(GET _parts 2 _brew)
-		find_package(${_name} ${GD_MIN_${_name}} QUIET)
-		if(NOT ${_name}_FOUND)
-			list(APPEND _gd_missing "${_name} >= ${GD_MIN_${_name}}")
-			list(APPEND _gd_apt  "${_apt}")
-			list(APPEND _gd_brew "${_brew}")
-		endif()
-	endforeach()
-
-	if(_gd_missing)
-		list(JOIN _gd_missing "\n    " _list)
-		if(APPLE)
-			list(JOIN _gd_brew " " _cmd)
-			set(_install "brew install ${_cmd} openssl@3")
-		elseif(EXISTS "/etc/debian_version")
-			list(JOIN _gd_apt " " _cmd)
-			set(_install "sudo apt install ${_cmd} libssl-dev")
-		else()
-			list(JOIN _gd_apt " " _cmd)
-			# One argument, not two: a second would make this a list and render
-			# with a stray semicolon in the middle of the message.
-			set(_install "install your distribution's development packages for the above.\n    Debian and Ubuntu name them: ${_cmd} libssl-dev")
-		endif()
-		message(FATAL_ERROR
-			"Missing system dependencies:\n"
-			"    ${_list}\n\n"
-			"  Install them with:\n"
-			"    ${_install}\n\n"
-			"  Or build them from source instead, which needs network access:\n"
-			"    cmake -B build -DGAINDRIVE_BUNDLED_DEPS=ON\n")
-	endif()
-
 endif()
 
 find_package(OpenSSL REQUIRED)
@@ -304,7 +406,8 @@ foreach(candidates
 			"A dependency was found but exposes none of the CMake targets "
 			"gaindrive knows how to link: ${_tried}.\n"
 			"  Its installed config package probably differs from upstream's. "
-			"Build from source instead with -DGAINDRIVE_BUNDLED_DEPS=ON, and "
+			"Build that one from source instead with "
+			"-DGAINDRIVE_BUNDLED_DEPS=<name>, and "
 			"please report the target name your distribution uses.")
 	endif()
 	list(APPEND GD_DEP_TARGETS ${_hit})
@@ -367,7 +470,7 @@ target_include_directories(gaindrive PRIVATE
 # exports no usage requirement for the un-installed target. A system libarchive
 # needs none of this: <archive.h> resolves from the standard include path and
 # LibArchive::LibArchive carries its own.
-if(GAINDRIVE_BUNDLED_DEPS)
+if("LibArchive" IN_LIST GD_BUNDLED)
 	target_include_directories(gaindrive PRIVATE
 		${libarchive_SOURCE_DIR}/libarchive)
 endif()

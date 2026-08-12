@@ -80,16 +80,21 @@ jobs:
             libtag-dev libtinyxml2-dev libcxxopts-dev nlohmann-json3-dev \
             libsqlitecpp-dev libreproc-dev libarchive-dev libssl-dev
 
+      # ALLOW_FETCH=OFF is the point of this job. Without it a dependency that
+      # stopped resolving would be silently downloaded and the build would still
+      # pass, so the job would no longer be testing anything.
       - name: Configure and build
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DGAINDRIVE_INSTALL_SYSTEMD=OFF
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+                -DGAINDRIVE_INSTALL_SYSTEMD=OFF \
+                -DGAINDRIVE_ALLOW_FETCH=OFF
           cmake --build build -j"$(nproc)"
 
       - name: Verify
         run: |
           ./build/gaindrive --version
-          # Nothing under _deps means no dependency was fetched: the whole point
-          # of this job is that the default build resolves everything locally.
+          # Belt and braces: the flag above turns a missing package into a
+          # configure error, this catches a fetch arriving by any other route.
           test ! -d build/_deps
 
   # Compile-only guard for the Darwin branches. macOS is distributed through the
