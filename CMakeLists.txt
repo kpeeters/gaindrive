@@ -185,13 +185,45 @@ foreach(dep
 	if(_name IN_LIST GD_BUNDLED)
 		list(APPEND GD_FETCH ${_fetch})
 	else()
-		find_package(${_name} ${GD_MIN_${_name}} QUIET)
+		# No version is passed to find_package, deliberately. The COMPATIBILITY
+		# mode of a package's version file is its upstream author's choice, not
+		# ours, and several of these use SameMajorVersion — under which a
+		# "minimum" request is really a major-version match. Asking for
+		# tinyxml2 >= 9.0 therefore REJECTED the installed 11.0.0, and reproc's
+		# floor of 14.2 only works because 14 is still the current major. Ask
+		# for any version and do the comparison here, where >= means >=.
+		find_package(${_name} QUIET)
+		set(_ver "${${_name}_VERSION}")
+
+		# Installed, but older than we can use. This cannot fall back to a source
+		# build the way an absent package can: a successful find_package has
+		# already created imported targets, and the bundled build would then try
+		# to create targets of the same names — plain `SQLiteCpp` and `reproc++`
+		# collide directly, tinyxml2 collides on its ::tinyxml2 alias — which
+		# CMake rejects with an "add_library cannot create target" error that
+		# reads like a bug in this file. A failed find_package never loads the
+		# config at all, which is why the absent case is safe and this one is not.
+		if(${_name}_FOUND AND NOT _ver STREQUAL ""
+				AND _ver VERSION_LESS "${GD_MIN_${_name}}")
+			message(FATAL_ERROR
+				"${_name} ${_ver} is installed, but gaindrive needs "
+				"${GD_MIN_${_name}} or newer.\n\n"
+				"  Upgrade the package, or build this one from source:\n"
+				"      cmake -B build -DGAINDRIVE_BUNDLED_DEPS=${_name}\n\n"
+				"  (That flag skips the system probe for ${_name} entirely, "
+				"which is what makes the source build possible here.)\n")
+		endif()
+		# A package that ships no version file at all leaves _ver empty — cxxopts
+		# upstream is one. Accept it rather than rebuild a library that is
+		# probably fine; the compile would catch a genuinely too-old one.
+
 		if(${_name}_FOUND)
 			list(APPEND GD_SYSTEM "${_name}")
 		else()
-			# Fall back to building it. Appending to GD_BUNDLED is what the
-			# per-dependency declaration blocks below key on, so they need no
-			# knowledge of how a name got there.
+			# Absent entirely: safe to build from source, since nothing was
+			# loaded. Appending to GD_BUNDLED is what the per-dependency
+			# declaration blocks below key on, so they need no knowledge of how a
+			# name got there.
 			list(APPEND _gd_missing "${_name} >= ${GD_MIN_${_name}}")
 			list(APPEND _gd_apt     "${_apt}")
 			list(APPEND _gd_brew    "${_brew}")
