@@ -13,9 +13,11 @@
 #include <cxxopts.hpp>
 #include <nlohmann/json.hpp>
 
+#include "codecs.hh"
 #include "gaindrive.hh"
 #include "mediastore.hh"
 #include "videoart.hh"
+#include "videoname.hh"
 
 // Installation-dependent defaults, normally supplied by CMake from
 // GAINDRIVE_SYSCONFDIR/GAINDRIVE_LOCALSTATEDIR. A package that installs under a
@@ -130,6 +132,83 @@ static std::string trim(const std::string& s)
 	return s.substr(b, s.find_last_not_of(" \t") - b + 1);
 	}
 
+// The name to parse, given a path. The extension is only stripped when it is
+// actually a video extension: a bare release name is full of dots, and
+// stem() on "The.Third.Man.1949.1080p" would eat ".1080p" as an extension.
+static std::string name_to_parse(const std::filesystem::path& p)
+	{
+	std::string ext = p.extension().string();
+	if (!ext.empty() && ext.front() == '.') ext.erase(0, 1);
+	std::transform(ext.begin(), ext.end(), ext.begin(),
+	               [](unsigned char c) { return std::tolower(c); });
+	return is_video_ext(ext) ? p.stem().string() : p.filename().string();
+	}
+
+static void print_video_name(const std::filesystem::path& p,
+                              const std::string& label)
+	{
+	auto v = resolve_video_name(name_to_parse(p),
+	                            p.parent_path().filename().string(),
+	                            p.parent_path().parent_path().filename().string());
+	std::string ep;
+	if (v.season > 0)
+		ep = "S" + std::to_string(v.season) + "E" + std::to_string(v.episode);
+	else if (v.episode > 0)
+		ep = "E" + std::to_string(v.episode);
+	// Tab separated, one line per file: readable in a terminal and parseable
+	// by tests/test_video_names.py, which is what regression-tests the rules.
+	std::cout << label << '\t' << v.title << '\t'
+	          << (v.year ? std::to_string(v.year) : "") << '\t'
+	          << ep << '\t' << (v.from_folder ? "folder" : "file") << '\t'
+	          << (v.cleaned ? "cleaned" : "as-is") << '\t'
+	          << v.series_title << '\n';
+	}
+
+// --video-name-test: what the filename parser makes of a name, with no
+// database, no scan and no server. A directory is walked; "-" reads names on
+// stdin, one per line, which is the seam the regression test drives.
+static int run_video_name_test(const std::string& target)
+	{
+	namespace fs = std::filesystem;
+	if (target == "-") {
+		std::string line;
+		while (std::getline(std::cin, line)) {
+			if (line.empty()) continue;
+			print_video_name(fs::path(line), line);
+			}
+		return 0;
+		}
+
+	std::error_code ec;
+	if (fs::is_directory(target, ec)) {
+		int n = 0;
+		for (auto& e : fs::recursive_directory_iterator(
+		         target, fs::directory_options::skip_permission_denied, ec)) {
+			if (!e.is_regular_file()) continue;
+			std::string ext = e.path().extension().string();
+			if (!ext.empty() && ext.front() == '.') ext.erase(0, 1);
+			std::transform(ext.begin(), ext.end(), ext.begin(),
+			               [](unsigned char c) { return std::tolower(c); });
+			if (!is_video_ext(ext)) continue;
+			print_video_name(e.path(), e.path().filename().string());
+			n++;
+			}
+		if (ec) {
+			std::cerr << "Cannot read " << target << ": " << ec.message() << "\n";
+			return 1;
+			}
+		std::cerr << n << " video files\n";
+		return 0;
+		}
+
+	if (!fs::exists(target, ec)) {
+		std::cerr << "No such file or directory: " << target << "\n";
+		return 1;
+		}
+	print_video_name(fs::path(target), target);
+	return 0;
+	}
+
 // Nobody can log in to a server with no accounts, so an empty user table is a
 // hard stop rather than a warning. On a fresh install there is a terminal to
 // ask on; a systemd start has none, and gets told what to run instead.
@@ -206,6 +285,7 @@ int main(int argc, char* argv[])
 		("no-video-art",  "Do not manufacture cover art for videos that have none")
 		("video-art-px",  "Long edge of manufactured video cover art", cxxopts::value<int>()->default_value("640"))
 		("video-art-test","Write cover art for one video file and exit", cxxopts::value<std::string>())
+		("video-name-test","Parse video filenames and exit; takes a file, a directory, or - for stdin", cxxopts::value<std::string>())
 		("no-scan",    "Skip startup filesystem scan")
 		("debug",      "Print all API responses to stdout")
 		("add-user",   "Create a user and exit",      cxxopts::value<std::string>())
@@ -223,6 +303,9 @@ int main(int argc, char* argv[])
 		std::cout << "gaindrive " GAINDRIVE_VERSION "\n";
 		return 0;
 		}
+
+	if (args.count("video-name-test"))
+		return run_video_name_test(args["video-name-test"].as<std::string>());
 
 	// Before anything else touches a database or a root: this is a standalone
 	// check of what VideoArt makes of one file, meant for judging the result

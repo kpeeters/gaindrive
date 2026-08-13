@@ -480,6 +480,7 @@ add_executable(gaindrive
 	src/streamer.cc
 	src/transcodecache.cc
 	src/videoart.cc
+	src/videoname.cc
 	src/stamp.cc
 	src/castmanager.cc
 	src/folderwatcher.cc

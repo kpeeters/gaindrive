@@ -20,6 +20,7 @@
 #include <reproc++/drain.hpp>
 
 #include "dvd.hh"
+#include "videoname.hh"
 
 namespace fs = std::filesystem;
 
@@ -272,23 +273,6 @@ static std::optional<VideoProbe> probe_video(const std::string& path)
 		}
 
 	return vp;
-	}
-
-// Video files carry no tag to take a track number from, so the filename is the
-// only source.  Three shapes cover essentially everything in practice: SxxEyy,
-// 1x05, and a leading number.  Returns 0 when none match, which leaves the
-// ordering to the query's tiebreaker.
-static int episode_number(const std::string& stem)
-	{
-	static const std::regex sxxeyy (R"([Ss](\d{1,3})[Ee](\d{1,3}))");
-	static const std::regex season_x(R"((\d{1,3})[Xx](\d{1,3}))");
-	static const std::regex leading (R"(^(\d{1,3})[ ._-])");
-	std::smatch m;
-	// \d{1,3} bounds every capture well inside int, so stoi cannot throw.
-	if (std::regex_search(stem, m, sxxeyy))   return std::stoi(m[2]);
-	if (std::regex_search(stem, m, season_x)) return std::stoi(m[2]);
-	if (std::regex_search(stem, m, leading))  return std::stoi(m[1]);
-	return 0;
 	}
 
 // Returns file modification time as Unix seconds.
@@ -876,6 +860,29 @@ static SongReadData read_song_file(const fs::path& p,
 	sdat.cover       = find_song_cover(p);
 	sdat.is_video    = is_video_file(p);
 	sdat.disc_number = disc_number;
+
+	// A video's title comes from its filename, and that parse happens here in
+	// Phase 1 rather than in Phase 3 with the other metadata reads.  Two
+	// reasons: it is pure string work with no I/O, so it costs nothing to do
+	// for every file; and Phase 3 runs only for *changed* files, so a parse
+	// living there would never reach a video already in the database.  The
+	// guarded UPDATE in upsert_song_with_data() is what carries it to those.
+	//
+	// The folder and the one above it are passed because the title is often on
+	// the folder rather than on the file — "The Third Man (1949)/title00.mkv" —
+	// and because a "Season 01" folder means the show's name is one level up.
+	if (sdat.is_video) {
+		auto vn = resolve_video_name(
+			p.stem().string(),
+			p.parent_path().filename().string(),
+			p.parent_path().parent_path().filename().string());
+		// A name that is nothing but a year, in a folder that says no more,
+		// parses to an empty title.  The raw stem is a poor title but an empty
+		// one is worse, and every caller below assumes there is something.
+		sdat.title    = vn.title.empty() ? p.stem().string() : vn.title;
+		sdat.year     = vn.year;
+		sdat.track_nr = vn.episode;
+		}
 	return sdat;
 	}
 
@@ -909,12 +916,10 @@ static void read_song_metadata(SongReadData& sdat)
 		}
 
 	// Video takes a different reader entirely: TagLib cannot open these
-	// containers, so ffprobe supplies duration, bitrate and dimensions, and
-	// the filename supplies the title and episode number.  A probe failure
-	// still leaves a usable row.
+	// containers, so ffprobe supplies duration, bitrate and dimensions.  Title,
+	// year and episode number came from the filename back in Phase 1 — see
+	// read_song_file().  A probe failure still leaves a usable row.
 	if (sdat.is_video) {
-		sdat.title    = fs::path(sdat.path).stem().string();
-		sdat.track_nr = episode_number(sdat.title);
 		if (auto vp = probe_video(sdat.path)) {
 			sdat.duration    = vp->duration;
 			sdat.bitrate     = vp->bitrate;
@@ -957,6 +962,40 @@ static void read_song_metadata(SongReadData& sdat)
 		sdat.sr       = ap->sampleRate();
 		sdat.channels = ap->channels();
 		}
+	}
+
+// A film's title is as often on the folder as on the file — "The.Third.Man.
+// 1949.1080p.BluRay/movie.mkv" — so the album name gets the same treatment the
+// song titles get.
+//
+// Only for albums that actually hold video.  A music album folder legitimately
+// named "Album (2017)" would otherwise lose its year, and that year is not
+// junk there.
+//
+// Guarded the same way song titles are, against the folder name as stored:
+// upsert_album() is INSERT OR IGNORE, so an existing album's title is never
+// rewritten by the scan today, and a title somebody edited must keep that
+// property.
+static void apply_album_video_name(SQLite::Database& db, int album_id,
+                                    const std::string& stored_title,
+                                    const std::vector<SongReadData>& songs)
+	{
+	if (std::none_of(songs.begin(), songs.end(),
+	        [](const SongReadData& s) { return s.is_video; }))
+		return;
+
+	VideoName vn = parse_video_name(stored_title);
+	if (!vn.cleaned || vn.title.empty() || vn.title == stored_title) return;
+
+	SQLite::Statement upd(db,
+		"UPDATE albums SET title = ?,"
+		"                  year = CASE WHEN year = 0 THEN ? ELSE year END"
+		" WHERE id = ? AND title = ?");
+	upd.bind(1, vn.title);
+	upd.bind(2, vn.year);
+	upd.bind(3, album_id);
+	upd.bind(4, stored_title);
+	upd.exec();
 	}
 
 // Phase 3b for one album's worth of files: manufacture cover art for the videos
@@ -1058,11 +1097,46 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 		upd.bind(3, rel_cover);
 		upd.bind(4, rel_path);
 		upd.exec();
+
+		// A video's title is derived from its filename, so it can improve
+		// without the file changing — which is how a library scanned before
+		// the parser existed gets back-filled.
+		//
+		// Guarded, and the guard is the point: the title is overwritten only
+		// while it is still one of the two things the scanner itself could
+		// have put there — the raw stem, or the raw stem with the old leading
+		// track-number strip applied.  Anything else was typed by a person
+		// through updateSong, and for video that edit exists *only* in the
+		// database: TagLib cannot write these containers, so there is no tag
+		// to re-read and a clobber would be unrecoverable.
+		if (sdat.is_video && !sdat.title.empty()) {
+			static const std::regex old_prefix(R"(^\d+[. -]+)");
+			std::string stem = fs::path(sdat.path).stem().string();
+			SQLite::Statement t(db,
+				"UPDATE songs SET title = ?,"
+				"                 year = CASE WHEN year = 0 THEN ? ELSE year END,"
+				"                 track_number = CASE WHEN ? > 0 THEN ?"
+				"                                ELSE track_number END"
+				" WHERE path = ? AND title IN (?, ?)");
+			t.bind(1, sdat.title);
+			t.bind(2, sdat.year);
+			t.bind(3, sdat.track_nr);
+			t.bind(4, sdat.track_nr);
+			t.bind(5, rel_path);
+			t.bind(6, stem);
+			t.bind(7, std::regex_replace(stem, old_prefix, ""));
+			t.exec();
+			}
 		return;
 		}
 
+	// Audio only.  A video title has already been through the filename parser,
+	// which takes a leading number as an episode number without touching the
+	// title — applying this to it as well would turn "12 Angry Men" into
+	// "Angry Men".
 	static const std::regex track_prefix(R"(^\d+[. -]+)");
-	std::string title = std::regex_replace(sdat.title, track_prefix, "");
+	std::string title = sdat.is_video
+	    ? sdat.title : std::regex_replace(sdat.title, track_prefix, "");
 
 	SQLite::Statement ins(db,
 		"INSERT OR REPLACE INTO songs"
@@ -1326,6 +1400,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			                    ? artist_folder_id
 			                    : upsert_folder(fs::path(adat.path), artist_folder_id);
 			int album_id        = upsert_album(album_folder_id, adat.title, artist_id, 0, "");
+			apply_album_video_name(db_music_, album_id, adat.title, adat.songs);
 
 			if (!adat.cover.empty()) {
 				SQLite::Statement upd(db_music_,
@@ -1601,6 +1676,10 @@ void MediaStore::scan_root_files(const RootRec& root)
 
 	if (!songs.empty()) {
 		int artist_id = upsert_artist(root.cfg.name);
+		// No apply_album_video_name() here, unlike the album commit in
+		// scan_artist_dir(): this album's title is the *root's name*, which is
+		// configuration the user chose and a durable identifier, not a
+		// filename that might be carrying release junk.
 		int album_id  = upsert_album(folder_id, root.cfg.name, artist_id, 0, "");
 		// Non-recursive: the subdirectories of a root are its sections, and
 		// their covers are not this album's.
