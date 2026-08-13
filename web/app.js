@@ -509,22 +509,68 @@ async function viewSettings() {
    tokenStatus.className = 'upload-status';
    serverSection.appendChild(tokenStatus);
 
+   const tmdbLabel = document.createElement('p');
+   tmdbLabel.textContent = 'TMDB API key (posters and descriptions for video):';
+   serverSection.appendChild(tmdbLabel);
+
+   const tmdbRow = document.createElement('div');
+   tmdbRow.className = 'token-row';
+
+   const tmdbInput = document.createElement('input');
+   tmdbInput.type        = 'password';
+   tmdbInput.className   = 'token-input';
+   tmdbInput.placeholder = '(not set)';
+   tmdbRow.appendChild(tmdbInput);
+
+   const tmdbSave = document.createElement('button');
+   tmdbSave.textContent = 'Save';
+   tmdbSave.className   = 'upload-btn';
+   tmdbRow.appendChild(tmdbSave);
+
+   serverSection.appendChild(tmdbRow);
+
+   const tmdbStatus = document.createElement('p');
+   tmdbStatus.className = 'upload-status';
+   serverSection.appendChild(tmdbStatus);
+
+   // Required by TMDB's terms of use; it has to be visible wherever the API is
+   // used, not buried in a licence file.
+   const tmdbAttrib = document.createElement('p');
+   tmdbAttrib.className = 'upload-status';
+   tmdbAttrib.textContent =
+      'This product uses the TMDB API but is not endorsed or certified by TMDB.';
+   serverSection.appendChild(tmdbAttrib);
+
    pane.appendChild(serverSection);
 
    try {
       const sr = await apiCall('getServerSettings');
       tokenInput.value = sr.serverSettings?.discogsToken ?? '';
+      tmdbInput.value  = sr.serverSettings?.tmdbKey ?? '';
       }
    catch { /* server may not yet have this endpoint */ }
 
    tokenSave.addEventListener('click', async () => {
       tokenStatus.textContent = '';
       try {
+         // Only this field is sent: saveServerSettings writes what it is given,
+         // so sending both would let a stale input overwrite the other setting.
          await apiCall('saveServerSettings', {discogsToken: tokenInput.value});
          tokenStatus.textContent = 'Saved.';
          }
       catch (e) {
          tokenStatus.textContent = `Error: ${e.message}`;
+         }
+      });
+
+   tmdbSave.addEventListener('click', async () => {
+      tmdbStatus.textContent = '';
+      try {
+         await apiCall('saveServerSettings', {tmdbKey: tmdbInput.value});
+         tmdbStatus.textContent = 'Saved. Applies on the next library scan.';
+         }
+      catch (e) {
+         tmdbStatus.textContent = `Error: ${e.message}`;
          }
       });
 

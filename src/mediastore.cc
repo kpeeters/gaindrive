@@ -5,6 +5,7 @@
 #include <iostream>
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <regex>
 #include <set>
 #include <unordered_map>
@@ -20,6 +21,7 @@
 #include <reproc++/drain.hpp>
 
 #include "dvd.hh"
+#include "tmdb.hh"
 #include "videoname.hh"
 
 namespace fs = std::filesystem;
@@ -598,9 +600,38 @@ void MediaStore::create_schema()
 			path          TEXT PRIMARY KEY,   -- "<root>/<rest>"
 			file_modified INTEGER NOT NULL,
 			mime          TEXT NOT NULL,
-			source        TEXT NOT NULL,      -- embedded | frame
+			source        TEXT NOT NULL,      -- embedded | frame | tmdb
 			image         BLOB NOT NULL,
 			created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+		);
+
+		-- What an online provider was asked about a video, and what it said.
+		-- The filename parser (src/videoname.hh) produces the question; TMDB
+		-- answers with a poster, a plot and a canonical title.
+		--
+		-- `path` is the *album folder* for a film in a folder of its own, and
+		-- the song for a loose file in a section: a film is a folder, so it is
+		-- one question however many parts it was split into.
+		--
+		-- The row exists as much to record a *failure* as a success. Without
+		-- it every scan would re-ask about the same unmatchable file forever,
+		-- and this is the table that makes a rescan cost no traffic at all.
+		-- `query` is what was asked; when the parser produces a different
+		-- question — because the file was renamed — the old answer no longer
+		-- applies and the lookup runs again.
+		CREATE TABLE IF NOT EXISTS video_meta (
+			path       TEXT PRIMARY KEY,   -- "<root>/<rest>"
+			query       TEXT NOT NULL,     -- "title|year" as asked
+			media_type  TEXT NOT NULL,     -- movie | tv
+			tmdb_id     INTEGER,
+			title       TEXT,
+			year        INTEGER,
+			overview    TEXT,
+			-- Kept so the poster can be re-fetched without asking TMDB who
+			-- this is again: art and identity expire for different reasons.
+			poster_path TEXT,
+			status     TEXT NOT NULL,      -- matched | unmatched | error
+			fetched_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 		);
 	)");
 
@@ -747,6 +778,11 @@ void MediaStore::create_schema()
 
 void MediaStore::scan()
 	{
+	// The API key is a stored setting, not a start-up argument, so it is read
+	// here rather than in the constructor: entering it in the client takes
+	// effect on the next scan without a restart.
+	tmdb_.set_api_key(get_setting("tmdb_key"));
+
 	// The uploads root holds per-user personal files, not library content, so
 	// it is never walked here — that is what replaced the old ".users" hidden
 	// directory sitting inside the music tree.
@@ -807,6 +843,8 @@ void MediaStore::scan()
 
 void MediaStore::scan_dirs(const std::set<std::string>& dirs)
 	{
+	tmdb_.set_api_key(get_setting("tmdb_key"));
+
 	// dirs are stored-form paths ("<root>/<level-1 dir>").  A bare root name,
 	// or anything that does not resolve, means we lost track of what changed
 	// (queue overflow, unknown root) and the safe answer is a full scan.
@@ -855,6 +893,10 @@ struct SongReadData {
 	int         disc_number = 0;
 	bool        changed     = false;
 	bool        is_video    = false;
+	// Video only, from the filename parse in Phase 1. Season is stored
+	// nowhere — disc numbers are positional — but Phase 3c needs it to know
+	// whether to ask TMDB about a film or about a series.
+	int         season      = 0;
 	// populated in Phase 3 only when changed == true:
 	std::string title;
 	int         track_nr    = 0;
@@ -881,6 +923,12 @@ struct AlbumReadData {
 	std::string               cover;
 	std::vector<std::string>  disc_paths;  // sorted; index+1 = disc number
 	std::vector<SongReadData> songs;
+	// Filled by Phase 3c when TMDB identified this album, consumed by the
+	// album transaction in Phase 4 — which is where the folder id, and so the
+	// row to attach a description to, finally exists.
+	std::string               tmdb_title;
+	int                       tmdb_year = 0;
+	std::string               overview;
 	};
 
 // One media file → everything Phase 1 can learn about it without a lock.
@@ -921,6 +969,7 @@ static SongReadData read_song_file(const fs::path& p,
 		sdat.title    = vn.title.empty() ? p.stem().string() : vn.title;
 		sdat.year     = vn.year;
 		sdat.track_nr = vn.episode;
+		sdat.season   = vn.season;
 		}
 	return sdat;
 	}
@@ -1015,26 +1064,58 @@ static void read_song_metadata(SongReadData& sdat)
 // upsert_album() is INSERT OR IGNORE, so an existing album's title is never
 // rewritten by the scan today, and a title somebody edited must keep that
 // property.
+// A TMDB match, when there is one, supersedes the filename parse — that is the
+// whole point of asking, and it is what turns "THE.THIRD.MAN.1949" into "The
+// Third Man". The guard is unchanged either way.
 static void apply_album_video_name(SQLite::Database& db, int album_id,
                                     const std::string& stored_title,
-                                    const std::vector<SongReadData>& songs)
+                                    const std::vector<SongReadData>& songs,
+                                    const std::string& tmdb_title = "",
+                                    int tmdb_year = 0)
 	{
 	if (std::none_of(songs.begin(), songs.end(),
 	        [](const SongReadData& s) { return s.is_video; }))
 		return;
 
-	VideoName vn = parse_video_name(stored_title);
-	if (!vn.cleaned || vn.title.empty() || vn.title == stored_title) return;
+	std::string title = tmdb_title;
+	int         year  = tmdb_year;
+	if (title.empty()) {
+		VideoName vn = parse_video_name(stored_title);
+		if (!vn.cleaned || vn.title.empty()) return;
+		title = vn.title;
+		year  = vn.year;
+		}
+	if (title == stored_title) return;
 
 	SQLite::Statement upd(db,
 		"UPDATE albums SET title = ?,"
 		"                  year = CASE WHEN year = 0 THEN ? ELSE year END"
 		" WHERE id = ? AND title = ?");
-	upd.bind(1, vn.title);
-	upd.bind(2, vn.year);
+	upd.bind(1, title);
+	upd.bind(2, year);
 	upd.bind(3, album_id);
 	upd.bind(4, stored_title);
 	upd.exec();
+	}
+
+// A film's plot goes where an album's liner notes go, which is why this needed
+// no new endpoint and no web-client change: getAlbumInfo2 already reads this
+// table and the album view already renders `notes`.
+//
+// ON CONFLICT rather than INSERT OR REPLACE so a row a MusicBrainz lookup
+// already created keeps its other columns. Called from inside the album
+// transaction, so it takes the database directly — cache_album_info() would
+// deadlock, taking db_mutex_ a second time on a non-recursive mutex.
+static void apply_album_overview(SQLite::Database& db, int folder_id,
+                                  const std::string& overview)
+	{
+	if (overview.empty()) return;
+	SQLite::Statement ins(db,
+		"INSERT INTO album_info_cache (folder_id, notes) VALUES (?, ?)"
+		" ON CONFLICT(folder_id) DO UPDATE SET notes = excluded.notes");
+	ins.bind(1, folder_id);
+	ins.bind(2, overview);
+	ins.exec();
 	}
 
 // Phase 3b for one album's worth of files: manufacture cover art for the videos
@@ -1109,6 +1190,157 @@ static void make_video_art(MediaStore& store, const VideoArt& art,
 		// An album that already has an image keeps it: a hand-placed poster,
 		// or one uploaded through setCoverArt, outranks a frame grab.
 		if (adat.cover.empty() && !album_art.empty()) adat.cover = album_art;
+		}
+	}
+
+// ---- Phase 3c: identify the video online ------------------------------
+
+// An 'error' row is a network failure, which is temporary by nature. An
+// 'unmatched' one is a judgement about the name, and re-asking tomorrow would
+// get the same answer — only a rename changes it, and a rename changes the
+// stored query, which re-asks anyway.
+static constexpr int64_t TMDB_ERROR_RETRY_S = 24 * 60 * 60;
+
+// What was asked, stored so a rename can be detected as a different question.
+static std::string tmdb_query_key(const std::string& title, int year, bool tv)
+	{
+	return title + "|" + std::to_string(year) + "|" + (tv ? "tv" : "movie");
+	}
+
+// One lookup: consults the cache, asks TMDB only when it has to, and records
+// the outcome either way. Returns the row to act on, matched or not.
+static MediaStore::VideoMetaRow tmdb_lookup(
+	MediaStore& store, const Tmdb& tmdb, const std::string& rel_key,
+	const std::string& title, int year, bool tv, int explicit_id)
+	{
+	std::string query = tmdb_query_key(title, year, tv);
+
+	if (auto cached = store.get_video_meta(rel_key)) {
+		bool stale = cached->status == "error"
+		    && std::time(nullptr) - cached->fetched_at > TMDB_ERROR_RETRY_S;
+		if (cached->query == query && !stale) return *cached;
+		}
+
+	MediaStore::VideoMetaRow row;
+	row.query      = query;
+	row.media_type = tv ? "tv" : "movie";
+
+	std::optional<TmdbMatch> m;
+	if (explicit_id > 0) m = tmdb.by_id(explicit_id, tv);
+	else                 m = tmdb.search(title, year, tv);
+
+	if (m) {
+		row.status      = "matched";
+		row.tmdb_id     = m->id;
+		row.title       = m->title;
+		row.year        = m->year;
+		row.overview    = m->overview;
+		row.poster_path = m->poster_path;
+		std::cout << stamp() << "tmdb: " << rel_key << " -> " << m->title
+		          << " (" << m->year << ") id=" << m->id << std::endl;
+		}
+	else {
+		// A network failure and a considered rejection are recorded
+		// differently because they expire differently. There is no way to
+		// tell them apart from here, so anything with no key configured or no
+		// answer at all counts as an error and will be retried.
+		row.status = tmdb.configured() ? "unmatched" : "error";
+		std::cout << stamp() << "tmdb: no match for " << rel_key
+		          << " (\"" << title << "\""
+		          << (year ? " " + std::to_string(year) : "") << ")"
+		          << std::endl;
+		}
+
+	store.store_video_meta(rel_key, row);
+	return row;
+	}
+
+// Fetches the poster for a matched row unless there is already art for that
+// path, and returns true when art exists afterwards either way. Keeping the
+// poster keyed on a *song* path is what lets getCoverArt stay untouched: it
+// resolves cover_path -> video_art exactly as it does for an embedded cover.
+static bool tmdb_fetch_poster(MediaStore& store, const Tmdb& tmdb,
+                               const MediaStore::VideoMetaRow& row,
+                               const std::string& rel_song, int64_t mtime)
+	{
+	if (row.poster_path.empty()) return false;
+	if (store.get_video_art(rel_song)) return true;
+
+	auto bytes = tmdb.poster(row.poster_path);
+	if (!bytes) return false;
+	store.store_video_art(rel_song, mtime, "image/jpeg", "tmdb", *bytes);
+	std::cout << stamp() << "tmdb: poster " << bytes->size() << " bytes for "
+	          << rel_song << std::endl;
+	return true;
+	}
+
+// Phase 3c for one artist or root.
+//
+// **One lookup per album, not per file.** A film is a folder, so
+// "Movies/The Third Man (1949)/" is one question however many parts the film
+// was split into. The exception is the loose-file album — the section holding
+// makingcheese.mp4 next to other films — where each file is its own work; that
+// album is the one whose path is the artist folder's, the same test the
+// folder-parenting rule uses.
+//
+// Only the poster download is skipped when local art already exists. The
+// description is wanted either way, and skipping the whole lookup would make
+// an embedded thumbnail cost the film its plot.
+static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
+                              std::vector<AlbumReadData>& albums,
+                              const std::string& artist_path)
+	{
+	for (auto& adat : albums) {
+		// The first video in sort order: the one whose path carries the album's
+		// art, matching what Phase 3b picks for the same reason.
+		const SongReadData* first = nullptr;
+		bool                is_tv = false;
+		for (const auto& s : adat.songs) {
+			if (!s.is_video) continue;
+			if (s.season > 0) is_tv = true;
+			if (!first || s.path < first->path) first = &s;
+			}
+		if (!first) continue;
+
+		bool loose = adat.path == artist_path;
+
+		if (!loose) {
+			VideoName vn = parse_video_name(adat.title);
+			std::string title = vn.title.empty() ? adat.title : vn.title;
+			int explicit_id = 0;
+			if (!vn.tmdb_id.empty()) { try { explicit_id = std::stoi(vn.tmdb_id); }
+			                           catch (...) {} }
+
+			auto row = tmdb_lookup(store, tmdb, store.rel_path(adat.path),
+			                        title, vn.year, is_tv, explicit_id);
+			if (row.status != "matched") continue;
+
+			adat.tmdb_title = row.title;
+			adat.tmdb_year  = row.year;
+			adat.overview   = row.overview;
+			if (adat.cover.empty()
+			        && tmdb_fetch_poster(store, tmdb, row,
+			                              store.rel_path(first->path),
+			                              first->mtime))
+				adat.cover = first->path;
+			continue;
+			}
+
+		// Loose files: each is its own work, so each is its own question.
+		for (auto& sdat : adat.songs) {
+			if (!sdat.is_video) continue;
+			std::string rel = store.rel_path(sdat.path);
+			auto row = tmdb_lookup(store, tmdb, rel, sdat.title, sdat.year,
+			                        sdat.season > 0, 0);
+			if (row.status != "matched") continue;
+			if (!row.title.empty()) {
+				sdat.title = row.title;
+				if (row.year > 0) sdat.year = row.year;
+				}
+			if (sdat.cover.empty()
+			        && tmdb_fetch_poster(store, tmdb, row, rel, sdat.mtime))
+				sdat.cover = sdat.path;
+			}
 		}
 	}
 
@@ -1390,6 +1622,14 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// ---- Phase 3b: cover art for videos that have none (no lock) ----
 	if (video_art_) make_video_art(*this, *video_art_, albums, prefix);
 
+	// ---- Phase 3c: identify films and series online (no lock) ----
+	// Only under a categories root. A concert or a music video sitting under a
+	// performer stays local: both layouts are L1/L2/files and the scanner
+	// cannot tell a concert film from a documentary by shape, which is the
+	// same reason is_category_folder() exists — pointed the other way.
+	if (tmdb_.configured() && root->cfg.type == "categories")
+		lookup_video_meta(*this, tmdb_, albums, artist_path.string());
+
 	// ---- Phase 4: short write txns ----
 	// Mark this artist's subfolders as unvisited.  Folders not re-stamped
 	// by an album commit below are pruned at the end of the artist.
@@ -1439,7 +1679,9 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			                    ? artist_folder_id
 			                    : upsert_folder(fs::path(adat.path), artist_folder_id);
 			int album_id        = upsert_album(album_folder_id, adat.title, artist_id, 0, "");
-			apply_album_video_name(db_music_, album_id, adat.title, adat.songs);
+			apply_album_video_name(db_music_, album_id, adat.title, adat.songs,
+			                        adat.tmdb_title, adat.tmdb_year);
+			apply_album_overview(db_music_, album_folder_id, adat.overview);
 
 			if (!adat.cover.empty()) {
 				SQLite::Statement upd(db_music_,
@@ -1589,6 +1831,19 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	if (n > 0)
 		std::cout << stamp() << "  pruned " << n << " folders" << std::endl;
 	}
+	{
+	// video_meta is keyed by *either* an album folder or a song, so unlike
+	// video_art above it cannot key its prune on songs alone — that would
+	// delete every film, all of which are folders.  Runs after the folders
+	// delete so a folder that went away this pass is already gone from the
+	// set being checked against.
+	SQLite::Statement s(db_music_,
+		"DELETE FROM video_meta WHERE path LIKE ?"
+		"  AND path NOT IN (SELECT path FROM songs)"
+		"  AND path NOT IN (SELECT path FROM folders)");
+	s.bind(1, prefix);
+	s.exec();
+	}
 	// The loose-file album hangs off the artist folder itself, which is never
 	// marked unvisited, so nothing above can reach it.  When the walk found no
 	// loose files at all no album transaction ran for it either, so its songs
@@ -1700,6 +1955,20 @@ void MediaStore::scan_root_files(const RootRec& root)
 		root_art   = make_video_art_songs(*this, *video_art_, songs, known);
 		}
 
+	// ---- Phase 3c: identify films online (no lock) ----
+	// Every file directly in a root is a loose file, so this is always the
+	// per-song case; wrapping them in a one-album vector reuses that branch
+	// rather than repeating it. The root itself plays artist and album, so its
+	// path is what marks the album as the loose one.
+	if (tmdb_.configured() && root.cfg.type == "categories") {
+		std::vector<AlbumReadData> one;
+		one.push_back(AlbumReadData{});
+		one.front().path  = root.cfg.path;
+		one.front().songs = std::move(songs);
+		lookup_video_meta(*this, tmdb_, one, root.cfg.path);
+		songs = std::move(one.front().songs);
+		}
+
 	// ---- Phase 4: one write txn ----
 	// A contended commit must not take the rest of the scan with it; the next
 	// pass redoes this root's loose files from scratch anyway.
@@ -1748,6 +2017,17 @@ void MediaStore::scan_root_files(const RootRec& root)
 	SQLite::Statement s(db_music_,
 		"DELETE FROM video_art WHERE path LIKE ?"
 		"  AND path NOT IN (SELECT path FROM songs)");
+	s.bind(1, root.cfg.name + "/%");
+	s.exec();
+	}
+	{
+	// Loose files in a root are looked up per song, so unlike the artist
+	// prune there are no folder-keyed rows in this prefix — but the folders
+	// clause costs nothing and keeps the two prunes reading the same way.
+	SQLite::Statement s(db_music_,
+		"DELETE FROM video_meta WHERE path LIKE ?"
+		"  AND path NOT IN (SELECT path FROM songs)"
+		"  AND path NOT IN (SELECT path FROM folders)");
 	s.bind(1, root.cfg.name + "/%");
 	s.exec();
 	}
@@ -2116,6 +2396,50 @@ MediaStore::get_video_art(const std::string& rel_path)
 	               static_cast<size_t>(blob.getBytes()));
 	r.file_modified = q.getColumn(2).getInt64();
 	return r;
+	}
+
+std::optional<MediaStore::VideoMetaRow>
+MediaStore::get_video_meta(const std::string& rel_path)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT query, media_type, tmdb_id, title, year, overview, status,"
+		"       fetched_at, poster_path"
+		" FROM video_meta WHERE path = ?");
+	q.bind(1, rel_path);
+	if (!q.executeStep()) return std::nullopt;
+	VideoMetaRow r;
+	r.query      = q.getColumn(0).getString();
+	r.media_type = q.getColumn(1).getString();
+	r.tmdb_id    = q.getColumn(2).isNull() ? 0 : q.getColumn(2).getInt();
+	r.title      = q.getColumn(3).isNull() ? "" : q.getColumn(3).getString();
+	r.year       = q.getColumn(4).isNull() ? 0 : q.getColumn(4).getInt();
+	r.overview   = q.getColumn(5).isNull() ? "" : q.getColumn(5).getString();
+	r.status      = q.getColumn(6).getString();
+	r.fetched_at  = q.getColumn(7).getInt64();
+	r.poster_path = q.getColumn(8).isNull() ? "" : q.getColumn(8).getString();
+	return r;
+	}
+
+void MediaStore::store_video_meta(const std::string& rel_path,
+                                   const VideoMetaRow& row)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement ins(db_music_,
+		"INSERT OR REPLACE INTO video_meta"
+		" (path, query, media_type, tmdb_id, title, year, overview, status,"
+		"  poster_path, fetched_at)"
+		" VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'))");
+	ins.bind(1, rel_path);
+	ins.bind(2, row.query);
+	ins.bind(3, row.media_type);
+	ins.bind(4, row.tmdb_id);
+	ins.bind(5, row.title);
+	ins.bind(6, row.year);
+	ins.bind(7, row.overview);
+	ins.bind(8, row.status);
+	ins.bind(9, row.poster_path);
+	ins.exec();
 	}
 
 std::optional<MediaStore::CachedAlbumInfo>

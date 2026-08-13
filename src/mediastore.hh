@@ -9,6 +9,7 @@
 #include <mutex>
 #include <SQLiteCpp/SQLiteCpp.h>
 
+#include "tmdb.hh"
 #include "videoart.hh"
 
 class MediaStore {
@@ -163,6 +164,27 @@ class MediaStore {
 		                     const std::string& mime, const std::string& source,
 		                     const std::string& bytes);
 		std::optional<VideoArtRow> get_video_art(const std::string& rel_path);
+
+		// What TMDB was asked about a video and what it said. Recorded for
+		// failures as much as for successes: without that, every scan would
+		// re-ask about the same unmatchable file forever. `query` is what was
+		// asked, so a rename produces a different question and re-runs the
+		// lookup. See videoart.hh's neighbour table for the poster itself.
+		struct VideoMetaRow {
+			std::string query;
+			std::string media_type;   // movie | tv
+			int         tmdb_id = 0;
+			std::string title;
+			int         year    = 0;
+			std::string overview;
+			std::string status;       // matched | unmatched | error
+			int64_t     fetched_at = 0;
+			std::string poster_path;  // TMDB-relative; lets the poster be
+			                          // re-fetched without a second lookup
+			};
+		std::optional<VideoMetaRow> get_video_meta(const std::string& rel_path);
+		void store_video_meta(const std::string& rel_path,
+		                      const VideoMetaRow& row);
 
 		std::string get_setting(const std::string& key,
 		                        const std::string& default_val = "");
@@ -576,6 +598,11 @@ class MediaStore {
 		// Empty when cover art for videos is switched off. Held here because
 		// the scan is what runs it, in a phase of its own.
 		std::optional<VideoArt> video_art_;
+
+		// The online lookup. Constructed unconditionally; it is inert until an
+		// API key is configured, which is a setting rather than a start-up
+		// argument, so it is re-read at the top of each scan.
+		Tmdb                    tmdb_{""};
 
 		void create_schema();
 

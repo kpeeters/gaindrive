@@ -1885,9 +1885,11 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto ri = store_.get_user(qp("u"));
 		if (!ri || !ri->is_admin) { err(50, "User is not authorized for this operation."); return; }
 
-		std::string token = store_.get_setting("discogs_token");
-		std::string body = subsonic_ok_json([&token](nlohmann::json& r) {
+		std::string token    = store_.get_setting("discogs_token");
+		std::string tmdb_key = store_.get_setting("tmdb_key");
+		std::string body = subsonic_ok_json([&](nlohmann::json& r) {
 			r["serverSettings"]["discogsToken"] = token;
+			r["serverSettings"]["tmdbKey"]      = tmdb_key;
 			});
 		res.set_content(body, "application/json");
 		});
@@ -1907,7 +1909,13 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto ri = store_.get_user(qp("u"));
 		if (!ri || !ri->is_admin) { err(50, "User is not authorized for this operation."); return; }
 
-		store_.set_setting("discogs_token", qp("discogsToken"));
+		// Only settings the caller actually sent are written. With one field
+		// that distinction did not exist; with two, a client saving just one
+		// of them would otherwise blank the other.
+		if (req.params.count("discogsToken"))
+			store_.set_setting("discogs_token", qp("discogsToken"));
+		if (req.params.count("tmdbKey"))
+			store_.set_setting("tmdb_key", qp("tmdbKey"));
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});

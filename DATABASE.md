@@ -231,14 +231,55 @@ CREATE TABLE video_art (
     path          TEXT PRIMARY KEY,   -- "<root>/<rest>"
     file_modified INTEGER NOT NULL,
     mime          TEXT NOT NULL,
-    -- embedded | frame; kept so a bad batch of one
-    -- kind can be deleted and regenerated, which is
-    -- what happens to every 'frame' row on startup
-    -- when the frame tier is off
+    -- embedded | frame | tmdb; kept so a bad batch
+    -- of one kind can be deleted and regenerated,
+    -- which is what happens to every 'frame' row on
+    -- startup when the frame tier is off
     source        TEXT NOT NULL,
     image         BLOB NOT NULL,
     created_at    INTEGER NOT NULL
                     DEFAULT (strftime('%s','now'))
+);
+
+-- What TMDB was asked about a video, and what it
+-- said. The filename parser (src/videoname.hh)
+-- produces the question; a match supplies the
+-- poster (stored in video_art above, with
+-- source='tmdb'), the plot (written into
+-- album_info_cache.notes, where getAlbumInfo2
+-- already looks) and the canonical title.
+--
+-- `path` is the *album folder* for a film in a
+-- folder of its own, and the song for a loose file
+-- in a section: a film is a folder, so it is one
+-- question however many parts it was split into.
+--
+-- The row exists as much to record a failure as a
+-- success. Without it every scan would re-ask about
+-- the same unmatchable file forever; with it, a
+-- rescan of an identified library costs no traffic
+-- at all. `query` is what was asked, so renaming a
+-- file poses a different question and the lookup
+-- runs again.
+--
+-- status: matched | unmatched | error. Only 'error'
+-- is retried (after a day) — 'unmatched' is a
+-- judgement about the name, and asking again
+-- tomorrow would get the same answer.
+CREATE TABLE video_meta (
+    path        TEXT PRIMARY KEY,   -- "<root>/<rest>"
+    query       TEXT NOT NULL,      -- "title|year|type"
+    media_type  TEXT NOT NULL,      -- movie | tv
+    tmdb_id     INTEGER,
+    title       TEXT,
+    year        INTEGER,
+    overview    TEXT,
+    -- lets the poster be re-fetched without asking
+    -- who this is a second time
+    poster_path TEXT,
+    status      TEXT NOT NULL,
+    fetched_at  INTEGER NOT NULL
+                  DEFAULT (strftime('%s','now'))
 );
 ```
 

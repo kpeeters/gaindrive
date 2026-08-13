@@ -16,6 +16,7 @@
 #include "codecs.hh"
 #include "gaindrive.hh"
 #include "mediastore.hh"
+#include "tmdb.hh"
 #include "videoart.hh"
 #include "videoname.hh"
 
@@ -209,6 +210,30 @@ static int run_video_name_test(const std::string& target)
 	return 0;
 	}
 
+// --tmdb-test: one query against TMDB, printed. The matching rule is the part
+// of this feature that decides whether a poster is right or confidently wrong,
+// so being able to try a name without running a scan is what it is for.
+static int run_tmdb_test(const std::string& title, int year, bool tv,
+                          const std::string& key)
+	{
+	Tmdb tmdb(key);
+	if (!tmdb.configured()) {
+		std::cerr << "No TMDB API key. Pass --tmdb-key, or set one in the "
+		             "client's Settings screen.\n";
+		return 1;
+		}
+	auto m = tmdb.search(title, year, tv);
+	if (!m) {
+		std::cout << "no confident match for \"" << title << "\""
+		          << (year ? " (" + std::to_string(year) + ")" : "") << "\n";
+		return 1;
+		}
+	std::cout << m->title << " (" << m->year << ")  tmdb id " << m->id
+	          << (m->poster_path.empty() ? "  [no poster]" : "")
+	          << "\n" << m->overview << "\n";
+	return 0;
+	}
+
 // Nobody can log in to a server with no accounts, so an empty user table is a
 // hard stop rather than a warning. On a fresh install there is a terminal to
 // ask on; a systemd start has none, and gets told what to run instead.
@@ -287,6 +312,10 @@ int main(int argc, char* argv[])
 		("video-art-frames", "Fall back to an extracted frame when a video has no embedded cover")
 		("video-art-test","Write cover art for one video file and exit", cxxopts::value<std::string>())
 		("video-name-test","Parse video filenames and exit; takes a file, a directory, or - for stdin", cxxopts::value<std::string>())
+		("tmdb-test",     "Look one title up on TMDB and exit", cxxopts::value<std::string>())
+		("tmdb-year",     "Year for --tmdb-test", cxxopts::value<int>()->default_value("0"))
+		("tmdb-key",      "API key for --tmdb-test (default: the stored setting)", cxxopts::value<std::string>())
+		("tmdb-tv",       "Search series rather than films for --tmdb-test")
 		("no-scan",    "Skip startup filesystem scan")
 		("debug",      "Print all API responses to stdout")
 		("add-user",   "Create a user and exit",      cxxopts::value<std::string>())
@@ -307,6 +336,7 @@ int main(int argc, char* argv[])
 
 	if (args.count("video-name-test"))
 		return run_video_name_test(args["video-name-test"].as<std::string>());
+
 
 	// Before anything else touches a database or a root: this is a standalone
 	// check of what VideoArt makes of one file, meant for judging the result
@@ -421,6 +451,29 @@ int main(int argc, char* argv[])
 		catch (const std::exception& e) {
 			std::cerr << "Warning: failed to parse " << config_path << ": " << e.what() << "\n";
 			}
+		}
+
+	// --tmdb-test needs the database only to read the stored API key, and no
+	// roots at all, so it runs before the library is validated.
+	if (args.count("tmdb-test")) {
+		std::string key = args.count("tmdb-key")
+		    ? args["tmdb-key"].as<std::string>() : "";
+		if (key.empty()) {
+			// The key normally lives in the database, so read it from there
+			// rather than making the flag useless without a second argument.
+			// video_art_px 0 so opening the store manufactures nothing.
+			try {
+				MediaStore store(db_path, {}, user_db_path, 0);
+				key = store.get_setting("tmdb_key");
+				}
+			catch (const std::exception& e) {
+				std::cerr << "Cannot read the stored API key (" << e.what()
+				          << "); pass --tmdb-key.\n";
+				}
+			}
+		return run_tmdb_test(args["tmdb-test"].as<std::string>(),
+		                      args["tmdb-year"].as<int>(),
+		                      args.count("tmdb-tv") > 0, key);
 		}
 
 	// --add-user touches no library, so it is the one mode that may run with

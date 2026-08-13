@@ -481,6 +481,7 @@ add_executable(gaindrive
 	src/transcodecache.cc
 	src/videoart.cc
 	src/videoname.cc
+	src/tmdb.cc
 	src/stamp.cc
 	src/castmanager.cc
 	src/folderwatcher.cc
