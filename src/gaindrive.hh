@@ -23,7 +23,8 @@ class GainDrive {
 		// transcode_cache_dir empty = derived from db_path.
 		// transcode_cache_mb 0 = cache disabled.
 		// video_art_px 0 = do not manufacture cover art for videos.
-		// video_art_frames enables the frame-grab tier (off by default).
+		// video_art_frames and video_art_embedded enable the two local tiers,
+		// both off by default.
 		GainDrive(const std::string& db_path,
 		          const std::vector<MediaStore::Root>& roots,
 		          const std::string& upload_dir,
@@ -35,7 +36,8 @@ class GainDrive {
 		          int transcode_cache_mb = 1024,
 		          int transcode_jobs = 0,
 		          int video_art_px = 640,
-		          bool video_art_frames = false);
+		          bool video_art_frames = false,
+		          bool video_art_embedded = false);
 		// Binds and serves. Returns false without serving if the port could
 		// not be acquired, so the caller can exit non-zero rather than treat a
 		// doomed start as a clean shutdown.

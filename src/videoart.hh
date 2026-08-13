@@ -12,13 +12,25 @@
 // and failing that a representative frame.  Neither needs a network round
 // trip, an API key or a correctly named file.
 //
-// **The frame tier is off by default** (`allow_frames`).  A frame is a fine
-// cover for a home video and a poor one for a film or a documentary, where
-// what is wanted is the poster — so it belongs *after* an online lookup, as
-// the thing that runs only when nothing else could identify the file at all.
-// Until that lookup exists, a frame grab would be the only tier reached for
-// most of a collection, which is worse than showing no art. The code stays
-// because that last-resort position is where it is going.
+// **Both tiers are off by default**, and each for its own reason.
+//
+// A frame (`allow_frames`) is a fine cover for a home video and a poor one for
+// a film or a documentary, where what is wanted is the poster — so it belongs
+// *after* an online lookup, as the thing that runs only when nothing else
+// could identify the file at all.  Until that lookup existed, a frame grab was
+// the only tier most of a collection reached, which is worse than showing no
+// art.  The code stays because that last-resort position is where it is going.
+//
+// An embedded cover (`allow_embedded`) is the better image when it is there,
+// but on a real collection it is almost never there, and finding out costs an
+// ffprobe run per video on *every* scan — a file that yields nothing is not
+// recorded, so the probe repeats for ever.  That is the whole cost of a
+// rescan for a large video library, paid for a tier that returns nothing.  It
+// is off until a collection is known to have such covers, which is what
+// --video-art-embedded and --video-art-test are for.
+//
+// With both off, generate() returns before probing at all, and the scan skips
+// Phase 3b entirely — that early return is the point of the flag.
 //
 // There is deliberately no third tier for Matroska cover *attachments*.  They
 // look like a separate mechanism (a whole file carried in the container, which
@@ -50,11 +62,17 @@ class VideoArt
 		// is passed through untouched unless it exceeds it: it was chosen by
 		// whoever made the file and re-encoding it can only lose.
 		//
-		// allow_frames enables the frame-grab tier — see the note above for
-		// why it defaults off.
-		explicit VideoArt(int max_px = 640, bool allow_frames = false);
+		// allow_frames and allow_embedded enable the two tiers — see the note
+		// above for why both default off.
+		explicit VideoArt(int max_px = 640, bool allow_frames = false,
+		                   bool allow_embedded = false);
 
-		bool frames_allowed() const { return allow_frames_; }
+		bool frames_allowed() const   { return allow_frames_; }
+		bool embedded_allowed() const { return allow_embedded_; }
+
+		// False when no tier is on, in which case this class can produce
+		// nothing and the caller should not walk any files for it.
+		bool enabled() const { return allow_frames_ || allow_embedded_; }
 
 		// Empty when every enabled tier failed, which is never fatal — the
 		// caller just has no cover, exactly as before.  Never throws.
@@ -92,4 +110,5 @@ class VideoArt
 
 		int  max_px_;
 		bool allow_frames_;
+		bool allow_embedded_;
 	};

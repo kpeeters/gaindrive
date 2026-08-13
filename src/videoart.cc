@@ -53,8 +53,9 @@ static std::string scale_filter(int max_px)
 	return "scale=min(" + m + "\\,iw):-2";
 	}
 
-VideoArt::VideoArt(int max_px, bool allow_frames)
-	: max_px_(max_px > 0 ? max_px : 640), allow_frames_(allow_frames)
+VideoArt::VideoArt(int max_px, bool allow_frames, bool allow_embedded)
+	: max_px_(max_px > 0 ? max_px : 640), allow_frames_(allow_frames),
+	  allow_embedded_(allow_embedded)
 	{
 	}
 
@@ -209,6 +210,11 @@ std::optional<VideoArtResult> VideoArt::generate(
 	{
 	const std::string& input = ffmpeg_input.empty() ? path : ffmpeg_input;
 
+	// Before the probe, which is the cost. With every tier off this class has
+	// nothing to say about any file, and asking it per video per scan is the
+	// ffprobe run the caller is trying to avoid.
+	if (!enabled()) return std::nullopt;
+
 	auto p = probe(input);
 	if (!p) {
 		std::cout << stamp() << "video art: ffprobe failed for " << path
@@ -219,11 +225,13 @@ std::optional<VideoArtResult> VideoArt::generate(
 	// Falling through to a frame grab when the embedded cover fails to extract
 	// is deliberate: a frame is a worse cover than the one the file came with,
 	// but it beats no cover at all.
-	if (p->attached_pic >= 0)
+	if (allow_embedded_ && p->attached_pic >= 0)
 		if (auto art = from_embedded(input, *p)) return art;
 
-	// Off unless asked for. See videoart.hh: a frame belongs after an online
-	// lookup, not instead of one.
+	// Both tiers are off unless asked for. See videoart.hh: a frame belongs
+	// after an online lookup rather than instead of one, and an embedded cover
+	// is rare enough in practice that probing every file to find one costs
+	// more than it returns.
 	if (!allow_frames_) return std::nullopt;
 
 	return from_frame(input, p->duration);

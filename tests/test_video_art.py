@@ -16,9 +16,11 @@ Then run:
     python3 tests/test_video_art.py
 
 Everything here **skips** when no video in the library has art, rather than
-failing. That is a legitimate state, and currently the common one: only the
-embedded-cover tier is on by default, and most collections have no embedded
-covers. Start the server with --video-art-frames to exercise these properly.
+failing. That is a legitimate state, and with no TMDB key configured it is the
+usual one: both local tiers are off by default. Configure a key, or start the
+server with --video-art-embedded or --video-art-frames, to exercise these
+properly. The checks are the same whichever tier supplied the image — that is
+the point of routing all three through one convention.
 """
 
 import json
@@ -93,8 +95,9 @@ class Skip(Exception):
 def _need_art():
     _need_video()
     if not _with_art():
-        raise Skip("no video in the library has cover art — only the embedded "
-                   "tier is on by default; try --video-art-frames")
+        raise Skip("no video in the library has cover art — both local tiers "
+                   "are off by default; configure a TMDB key, or try "
+                   "--video-art-embedded / --video-art-frames")
 
 
 # The magic bytes rather than the declared type: the point of the whole

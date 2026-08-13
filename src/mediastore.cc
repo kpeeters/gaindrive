@@ -362,7 +362,7 @@ static std::string derive_path(const std::string& base, const std::string& suffi
 
 MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& roots,
                        const std::string& user_db_path, int video_art_px,
-                       bool video_art_frames)
+                       bool video_art_frames, bool video_art_embedded)
 	// The third argument is the busy timeout, and it defaults to 0 — meaning
 	// SQLite gives up on a contended write *immediately* and SQLiteCpp turns
 	// that into a throw.  Any external writer (a second gaindrive, or sqlite3
@@ -380,7 +380,11 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	            SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE,
 	            DB_BUSY_TIMEOUT_MS)
 	{
-	if (video_art_px > 0) video_art_.emplace(video_art_px, video_art_frames);
+	// Emplaced even when every tier is off, because purge_disabled_video_art()
+	// below asks it which ones are. Phase 3b is guarded on enabled(), not on
+	// this being set.
+	if (video_art_px > 0)
+		video_art_.emplace(video_art_px, video_art_frames, video_art_embedded);
 
 	// Normalise each root: strip trailing '/' so path never has one, derive
 	// the always-has-one form used to compose and strip absolute paths, and
@@ -421,13 +425,16 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	sync_roots();
 	}
 
-// Frames stored by an earlier run, when the tier producing them is now off.
+// Images stored by an earlier run, by a tier that is now off.
 //
 // Leaving them would make "off" mean only "stop making new ones", which is not
-// what anybody asking for it wants: the useless frames would go on being the
-// cover art for the whole collection. They are cheap to get back — one rescan
-// with the tier enabled — which is what makes deleting them the right default
-// rather than a destructive one.
+// what anybody asking for it wants: the images would go on being the cover art
+// for the whole collection. They are cheap to get back — one rescan with the
+// tier enabled — which is what makes deleting them the right default rather
+// than a destructive one.
+//
+// A TMDB poster is never touched here. It is not manufactured from the file
+// and no local flag disables it; the key that would delete it is the API key.
 void MediaStore::purge_disabled_video_art()
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
@@ -438,6 +445,14 @@ void MediaStore::purge_disabled_video_art()
 		if (int n = db_music_.getChanges(); n > 0)
 			std::cout << stamp() << "video art: dropped " << n
 			          << " frame grabs (the frame tier is off)" << std::endl;
+		}
+
+	if (!video_art_ || !video_art_->embedded_allowed()) {
+		db_music_.exec("DELETE FROM video_art WHERE source = 'embedded'");
+		if (int n = db_music_.getChanges(); n > 0)
+			std::cout << stamp() << "video art: dropped " << n
+			          << " embedded covers (the embedded tier is off)"
+			          << std::endl;
 		}
 
 	// Whatever the reason a row went away, the cover_path pointing at it has
@@ -498,6 +513,11 @@ void MediaStore::create_schema()
 			duration       REAL DEFAULT 0,
 			song_count     INTEGER DEFAULT 0,
 			cover_path     TEXT,                  -- "<root>/<rest>"
+			-- Set when cover_path came from setCoverArt rather than from the
+			-- scan. The scan's video tier prefers a TMDB poster to whatever
+			-- image it finds in the folder; this is what keeps it off a cover
+			-- a person chose, which is also the way to fix a wrong match.
+			cover_manual   INTEGER DEFAULT 0,
 			musicbrainz_id TEXT,
 			created        DATETIME DEFAULT CURRENT_TIMESTAMP,
 			last_scanned   DATETIME
@@ -764,6 +784,8 @@ void MediaStore::create_schema()
 	try { db_music_.exec("ALTER TABLE folders ADD COLUMN content_type TEXT"); }
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE songs ADD COLUMN cover_path TEXT"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE albums ADD COLUMN cover_manual INTEGER DEFAULT 0"); }
 	catch (const SQLite::Exception&) {}
 
 	// Backfill song_artists from album_artists for any songs that were scanned
@@ -1255,16 +1277,22 @@ static MediaStore::VideoMetaRow tmdb_lookup(
 	return row;
 	}
 
-// Fetches the poster for a matched row unless there is already art for that
-// path, and returns true when art exists afterwards either way. Keeping the
-// poster keyed on a *song* path is what lets getCoverArt stay untouched: it
-// resolves cover_path -> video_art exactly as it does for an embedded cover.
+// Fetches the poster for a matched row and returns true when art from this
+// tier or better exists afterwards. Keeping the poster keyed on a *song* path
+// is what lets getCoverArt stay untouched: it resolves cover_path -> video_art
+// exactly as it does for an embedded cover.
+//
+// The skip is on the *source*, not on there being a row at all. A row left by
+// a local tier has to be replaced — the poster outranks it, which is the whole
+// point — and store_video_art() is INSERT OR REPLACE, so it is. Only a poster
+// already fetched for this file stops the download, which is what makes a
+// rescan cost no traffic.
 static bool tmdb_fetch_poster(MediaStore& store, const Tmdb& tmdb,
                                const MediaStore::VideoMetaRow& row,
                                const std::string& rel_song, int64_t mtime)
 	{
 	if (row.poster_path.empty()) return false;
-	if (store.get_video_art(rel_song)) return true;
+	if (store.get_video_art_source(rel_song) == "tmdb") return true;
 
 	auto bytes = tmdb.poster(row.poster_path);
 	if (!bytes) return false;
@@ -1283,9 +1311,17 @@ static bool tmdb_fetch_poster(MediaStore& store, const Tmdb& tmdb,
 // album is the one whose path is the artist folder's, the same test the
 // folder-parenting rule uses.
 //
-// Only the poster download is skipped when local art already exists. The
-// description is wanted either way, and skipping the whole lookup would make
-// an embedded thumbnail cost the film its plot.
+// **The poster outranks whatever local art the scan found**, which is the one
+// place video inverts the rule the rest of gaindrive follows. For an album a
+// folder image is the album's own art and nothing should displace it; for a
+// film it is usually whatever a downloader happened to leave in the directory,
+// and the TMDB poster is plainly better. A film nothing matched keeps its
+// local image, so this only ever replaces art for a file we can name.
+//
+// The exception is a cover a person uploaded through setCoverArt, which
+// albums.cover_manual marks. That upload is also the way to fix a wrong match,
+// so putting the wrong poster back on the next scan would take away the only
+// remedy the client offers.
 static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
                               std::vector<AlbumReadData>& albums,
                               const std::string& artist_path)
@@ -1318,11 +1354,23 @@ static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
 			adat.tmdb_title = row.title;
 			adat.tmdb_year  = row.year;
 			adat.overview   = row.overview;
-			if (adat.cover.empty()
+			// The title and the plot apply either way; only the cover is held
+			// back for a hand-uploaded one.
+			if (!store.cover_is_manual(store.rel_path(adat.path))
 			        && tmdb_fetch_poster(store, tmdb, row,
 			                              store.rel_path(first->path),
-			                              first->mtime))
+			                              first->mtime)) {
 				adat.cover = first->path;
+				// Drop the videos' own sidecar images (film.jpg beside
+				// film.mkv), so they fall through to the album's cover, which
+				// is now the poster. Without this a matched film shows the
+				// poster in the album grid and the sidecar on the video entry
+				// — the same film with two covers, which is worse than either
+				// image winning outright. Audio in the folder keeps its art:
+				// none of this reasoning applies to it.
+				for (auto& sdat : adat.songs)
+					if (sdat.is_video) sdat.cover.clear();
+				}
 			continue;
 			}
 
@@ -1337,8 +1385,10 @@ static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
 				sdat.title = row.title;
 				if (row.year > 0) sdat.year = row.year;
 				}
-			if (sdat.cover.empty()
-			        && tmdb_fetch_poster(store, tmdb, row, rel, sdat.mtime))
+			// No manual check here: setCoverArt is folder-level, so an upload
+			// on a section marks the section's own album row and each film in
+			// it still takes its own poster.
+			if (tmdb_fetch_poster(store, tmdb, row, rel, sdat.mtime))
 				sdat.cover = sdat.path;
 			}
 		}
@@ -1620,7 +1670,11 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			}
 
 	// ---- Phase 3b: cover art for videos that have none (no lock) ----
-	if (video_art_) make_video_art(*this, *video_art_, albums, prefix);
+	// enabled(), not just video_art_: with every tier off this phase would
+	// still query video_art and ffprobe every video that has no cover, on
+	// every scan, to be told each time that there is nothing to take.
+	if (video_art_ && video_art_->enabled())
+		make_video_art(*this, *video_art_, albums, prefix);
 
 	// ---- Phase 3c: identify films and series online (no lock) ----
 	// Only under a categories root. A concert or a music video sitting under a
@@ -1950,7 +2004,7 @@ void MediaStore::scan_root_files(const RootRec& root)
 	// cheap, and there is no narrower LIKE — "<root>/%" is the entire root,
 	// which is the same reason this function exists at all.
 	std::string root_art;
-	if (video_art_) {
+	if (video_art_ && video_art_->enabled()) {
 		auto known = load_video_art_keys(root.cfg.name + "/%");
 		root_art   = make_video_art_songs(*this, *video_art_, songs, known);
 		}
@@ -2375,6 +2429,16 @@ void MediaStore::store_video_art(const std::string& rel_path, int64_t mtime,
 	ins.bind(4, source);
 	ins.bind(5, bytes.data(), static_cast<int>(bytes.size()));
 	ins.exec();
+	}
+
+std::string MediaStore::get_video_art_source(const std::string& rel_path)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT source FROM video_art WHERE path = ?");
+	q.bind(1, rel_path);
+	if (!q.executeStep()) return "";
+	return q.getColumn(0).getString();
 	}
 
 std::optional<MediaStore::VideoArtRow>
@@ -4375,15 +4439,35 @@ bool MediaStore::update_song_meta(int song_id,
 	return true;
 	}
 
+// cover_manual is set here and nowhere else: this is called only by
+// setCoverArt, so the flag means exactly "a person chose this image". The scan
+// reads it to keep a TMDB poster off a hand-picked cover — see
+// lookup_video_meta().
 bool MediaStore::set_cover_art_path(int folder_id, const std::string& path)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement q(db_music_,
-		"UPDATE albums SET cover_path = ? WHERE folder_id = ?");
+		"UPDATE albums SET cover_path = ?, cover_manual = 1 WHERE folder_id = ?");
 	q.bind(1, path);
 	q.bind(2, folder_id);
 	q.exec();
 	return db_music_.getChanges() > 0;
+	}
+
+// Keyed on the album's folder path rather than on an id, because the scan asks
+// this in Phase 3c — before Phase 4 has upserted the folder and so before any
+// id for it exists. Paths are stable across a rescan and rowids are not, which
+// is the same reason stars and playlists key on them.
+bool MediaStore::cover_is_manual(const std::string& rel_album_path)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT a.cover_manual FROM albums a"
+		" JOIN folders f ON f.id = a.folder_id"
+		" WHERE f.path = ?");
+	q.bind(1, rel_album_path);
+	if (!q.executeStep()) return false;
+	return q.getColumn(0).getInt() != 0;
 	}
 
 std::string MediaStore::get_setting(const std::string& key,

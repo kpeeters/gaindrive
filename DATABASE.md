@@ -77,6 +77,14 @@ CREATE TABLE albums (
     song_count    INTEGER DEFAULT 0,
     -- stored form, e.g. "music/Artist/Album/cover.jpg"
     cover_path    TEXT,
+    -- Set when cover_path came from setCoverArt rather
+    -- than from the scan. A video album's cover is
+    -- otherwise replaced by the TMDB poster, which is
+    -- better than a folder image for a film; this is
+    -- what keeps the scan off one a person chose, and
+    -- so keeps an upload working as the fix for a
+    -- wrong match.
+    cover_manual  INTEGER DEFAULT 0,
     musicbrainz_id TEXT,
     created       DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_scanned  DATETIME
@@ -198,13 +206,15 @@ CREATE INDEX idx_song_artists_artist
 CREATE INDEX idx_song_artists_role
     ON song_artists(role);
 
--- Cover art manufactured from a video file by
--- VideoArt (src/videoart.hh): an image already
--- embedded in the container, or — only with
--- --video-art-frames — a representative frame.
--- Video files carry no tag anything writes and are
--- rarely named well, so without this every video
--- shows a placeholder.
+-- Cover art for a video: a poster fetched from TMDB
+-- (source 'tmdb'), or one of the two local tiers of
+-- VideoArt (src/videoart.hh) — the image embedded in
+-- the container, with --video-art-embedded, or a
+-- representative frame, with --video-art-frames.
+-- Both local tiers are off by default; turning one
+-- off deletes the rows it wrote. Video files carry
+-- no tag anything writes and are rarely named well,
+-- so without this every video shows a placeholder.
 --
 -- It lives here with artist_info_cache and
 -- album_info_cache rather than being written into

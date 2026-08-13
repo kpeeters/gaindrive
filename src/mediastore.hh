@@ -37,14 +37,15 @@ class MediaStore {
 		// only normalises them.
 		//
 		// video_art_px of 0 disables manufacturing cover art for videos
-		// entirely; nothing else about a scan changes. video_art_frames
-		// enables the frame-grab tier, which is off by default — see
-		// videoart.hh. Turning it off also purges the frames a previous run
-		// stored, since leaving them is indistinguishable from still having
-		// the feature on.
+		// entirely; nothing else about a scan changes. video_art_frames and
+		// video_art_embedded enable the two tiers, both off by default — see
+		// videoart.hh. Turning either off also purges what it stored on an
+		// earlier run, since leaving those images is indistinguishable from
+		// still having the tier on.
 		MediaStore(const std::string& db_path, const std::vector<Root>& roots,
 		           const std::string& user_db_path = "",
-		           int video_art_px = 640, bool video_art_frames = false);
+		           int video_art_px = 640, bool video_art_frames = false,
+		           bool video_art_embedded = false);
 
 		// The configured roots, in the order given.
 		const std::vector<Root>& roots() const;
@@ -164,6 +165,12 @@ class MediaStore {
 		                     const std::string& mime, const std::string& source,
 		                     const std::string& bytes);
 		std::optional<VideoArtRow> get_video_art(const std::string& rel_path);
+
+		// Which tier produced the stored image, or empty when there is none.
+		// Separate from get_video_art() because the scan asks this of every
+		// video and only wants to know whether a better tier already won —
+		// get_video_art() would read the whole JPEG out of the row to answer.
+		std::string get_video_art_source(const std::string& rel_path);
 
 		// What TMDB was asked about a video and what it said. Recorded for
 		// failures as much as for successes: without that, every scan would
@@ -533,7 +540,14 @@ class MediaStore {
 
 		// Set the cover art path for the album that owns the given folder_id.
 		// path is stored-form. Returns false if no matching album exists.
+		// Also marks the cover as hand-picked (albums.cover_manual), which is
+		// what stops the scan replacing it with a TMDB poster.
 		bool set_cover_art_path(int folder_id, const std::string& path);
+
+		// Whether this album's cover was set through setCoverArt. Takes the
+		// album folder's stored-form path, since the scan asks before Phase 4
+		// has given that folder an id.
+		bool cover_is_manual(const std::string& rel_album_path);
 
 		// Compose an absolute filesystem path from a music-root-relative path.
 		// All path-typed return values from MediaStore are music-root-relative;

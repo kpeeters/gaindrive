@@ -310,6 +310,7 @@ int main(int argc, char* argv[])
 		("no-video-art",  "Do not manufacture cover art for videos that have none")
 		("video-art-px",  "Long edge of manufactured video cover art", cxxopts::value<int>()->default_value("640"))
 		("video-art-frames", "Fall back to an extracted frame when a video has no embedded cover")
+		("video-art-embedded", "Take the cover embedded in a video container; off because most files have none and looking costs an ffprobe each")
 		("video-art-test","Write cover art for one video file and exit", cxxopts::value<std::string>())
 		("video-name-test","Parse video filenames and exit; takes a file, a directory, or - for stdin", cxxopts::value<std::string>())
 		("tmdb-test",     "Look one title up on TMDB and exit", cxxopts::value<std::string>())
@@ -344,10 +345,13 @@ int main(int argc, char* argv[])
 	if (args.count("video-art-test")) {
 		std::string in     = args["video-art-test"].as<std::string>();
 		bool        frames = args.count("video-art-frames") > 0;
-		// Honours --video-art-frames like the scan does, so what this prints is
-		// what a scan would actually store rather than what the tiers could do
-		// if they were all switched on.
-		VideoArt    art(args["video-art-px"].as<int>(), frames);
+		// The embedded tier is forced on here whatever the configuration says,
+		// because answering "is there a cover inside this file" is the whole
+		// job of this flag — with the tier off as it is by default, the tool
+		// would report nothing for every file and tell you nothing about your
+		// collection. --video-art-frames is still honoured, so what this
+		// prints for the *second* tier is what a scan would store.
+		VideoArt    art(args["video-art-px"].as<int>(), frames, true);
 		auto        result = art.generate(in);
 		if (!result) {
 			std::cerr << "No cover art could be made from " << in
@@ -408,6 +412,7 @@ int main(int argc, char* argv[])
 	int         video_art_px        = args.count("no-video-art")
 	    ? 0 : args["video-art-px"].as<int>();
 	bool        video_art_frames    = args.count("video-art-frames") > 0;
+	bool        video_art_embedded  = args.count("video-art-embedded") > 0;
 
 	// Read config file; missing file is not fatal, just use defaults.
 	std::string config_path = args["config"].as<std::string>();
@@ -447,6 +452,8 @@ int main(int argc, char* argv[])
 				video_art_px = cfg["video_art_px"].get<int>();
 			if (cfg.contains("video_art_frames") && !args.count("video-art-frames"))
 				video_art_frames = cfg["video_art_frames"].get<bool>();
+			if (cfg.contains("video_art_embedded") && !args.count("video-art-embedded"))
+				video_art_embedded = cfg["video_art_embedded"].get<bool>();
 			}
 		catch (const std::exception& e) {
 			std::cerr << "Warning: failed to parse " << config_path << ": " << e.what() << "\n";
@@ -515,7 +522,7 @@ int main(int argc, char* argv[])
 			// opening a store purges art whose tier is now off, and
 			// --add-user must not decide that on default settings.
 			MediaStore store(db_path, roots, user_db_path, video_art_px,
-			                 video_art_frames);
+			                 video_art_frames, video_art_embedded);
 			bool ok = store.add_user(username, password, true /* is_admin */);
 			std::cout << (ok ? "User '" + username + "' created."
 			               : "User '" + username + "' already exists.") << "\n";
@@ -528,14 +535,15 @@ int main(int argc, char* argv[])
 		// is closed again before GainDrive opens the same database.
 		{
 		MediaStore store(db_path, roots, user_db_path, video_art_px,
-		                 video_art_frames);
+		                 video_art_frames, video_art_embedded);
 		if (store.list_users().empty() && !create_first_user(store))
 			return 1;
 		}
 
 		GainDrive gd(db_path, roots, upload_dir, no_scan, debug, flat_multi_disc,
 		             user_db_path, transcode_cache_dir, transcode_cache_mb,
-		             transcode_jobs, video_art_px, video_art_frames);
+		             transcode_jobs, video_art_px, video_art_frames,
+		             video_art_embedded);
 		// Non-zero on a failed bind, so a supervisor restarts rather than
 		// recording a clean shutdown for a server that never served anything.
 		return gd.listen(host, port) ? 0 : 1;

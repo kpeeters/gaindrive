@@ -1393,9 +1393,11 @@ GainDrive::GainDrive(const std::string& db_path,
                      int transcode_cache_mb,
                      int transcode_jobs,
                      int video_art_px,
-                     bool video_art_frames)
+                     bool video_art_frames,
+                     bool video_art_embedded)
 	: debug_(debug), flat_multi_disc_(flat_multi_disc), upload_dir_(upload_dir),
-	  store_(db_path, roots, user_db_path, video_art_px, video_art_frames),
+	  store_(db_path, roots, user_db_path, video_art_px, video_art_frames,
+	         video_art_embedded),
 	  transcode_cache_(
 	      transcode_cache_dir.empty()
 	          ? std::filesystem::path(db_path).parent_path() / "transcodes"
