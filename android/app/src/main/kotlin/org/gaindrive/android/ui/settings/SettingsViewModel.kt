@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import org.gaindrive.android.data.ServerRegistry
 import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.cache.AudioCache
+import org.gaindrive.android.data.cache.ImageCache
 import org.gaindrive.android.data.cache.PinRepository
 import org.gaindrive.android.data.cache.PinStatus
 import org.gaindrive.android.data.cache.PinnedItem
@@ -42,6 +43,8 @@ data class StorageUiState(
 	val quality: AudioQuality = AudioQuality.DEFAULT,
 	val usedBytes: Long = 0,
 	val pinnedBytes: Long = 0,
+	/** Coil's disk cache; see [ImageCache.sizeBytes] for what it leaves out. */
+	val imageBytes: Long = 0,
 )
 
 /** The stored half of [StorageUiState]; the measured half comes from the cache. */
@@ -58,6 +61,7 @@ class SettingsViewModel @Inject constructor(
 	private val registry: ServerRegistry,
 	private val settings: SettingsStore,
 	private val audioCache: AudioCache,
+	private val imageCache: ImageCache,
 	private val pins: PinRepository,
 	private val player: PlayerConnection,
 ) : ViewModel() {
@@ -77,7 +81,8 @@ class SettingsViewModel @Inject constructor(
 		storagePrefs,
 		audioCache.usedBytes,
 		audioCache.pinnedBytes,
-	) { prefs, used, pinned ->
+		imageCache.sizeBytes,
+	) { prefs, used, pinned, images ->
 		StorageUiState(
 			maxBytes = prefs.maxBytes,
 			cacheOnPlay = prefs.cacheOnPlay,
@@ -86,7 +91,13 @@ class SettingsViewModel @Inject constructor(
 			quality = prefs.quality,
 			usedBytes = used,
 			pinnedBytes = pinned,
+			imageBytes = images,
 		)
+	}
+
+	init {
+		// Nothing else reads Coil's disk cache, so it has no size until asked.
+		viewModelScope.launch { imageCache.refreshSize() }
 	}
 
 	private val pinnedItems = pins.pins.map { pins.describe(it) }
@@ -171,4 +182,13 @@ class SettingsViewModel @Inject constructor(
 		val inUse = player.state.value.queue.mapNotNull { it.ref?.encode() }.toSet()
 		audioCache.flush(keepKeys = inUse)
 	}
+
+	/**
+	 * Throws away every stored cover and portrait. No confirmation anywhere in
+	 * the UI: unlike the music cache this costs nothing but the next few
+	 * requests, and being able to press it twice without thinking is the point
+	 * — it exists for the case where the art on screen disagrees with the
+	 * server and nobody wants to work out why.
+	 */
+	fun clearImageCache() = viewModelScope.launch { imageCache.clear() }
 }

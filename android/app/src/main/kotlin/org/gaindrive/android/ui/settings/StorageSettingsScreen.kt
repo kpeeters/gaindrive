@@ -172,6 +172,29 @@ fun StorageSettingsScreen(
 			}
 		}
 
+		item { SectionTitle("Cover art") }
+
+		item {
+			Text(
+				text = "Covers and artist portraits are stored separately from " +
+					"music, outside the cap above. Clearing them is what to do " +
+					"when the art on screen no longer matches the server; they " +
+					"come back as you browse.",
+				style = MaterialTheme.typography.bodySmall,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+			)
+		}
+		item {
+			// Never disabled, and no confirmation. The size shown covers only
+			// the image cache's own files, while the button also clears the
+			// in-memory copies and the art sitting in the shared HTTP cache —
+			// so "0 B" does not mean there is nothing to do, and nothing here
+			// is lost by pressing it again.
+			OutlinedButton(onClick = viewModel::clearImageCache) {
+				Text("Clear cover art (${formatBytes(storage.imageBytes)})")
+			}
+		}
+
 		// Listed only when there are some. Pins are placed deep in the library,
 		// so without this the only way to find one again is to remember where
 		// it was.
