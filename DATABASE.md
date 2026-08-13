@@ -145,6 +145,13 @@ CREATE TABLE songs (
     height        INTEGER DEFAULT 0,
     video_codec   TEXT,      -- "h264","mpeg2video", etc. (ffprobe codec_name)
     audio_codec   TEXT,      -- "aac","ac3", etc.
+    -- Sidecar image beside this file, stored form; empty for a song that
+    -- inherits its album's cover. Set for a loose file — one sitting directly
+    -- in a section or a root, whose folder cover belongs to the whole section
+    -- rather than to it. Reached as cover art id
+    -- MediaStore::SONG_COVER_ID_BASE + songs.id, since a cover art id is
+    -- otherwise a folders.id and the wire format is a plain integer.
+    cover_path    TEXT,
     -- cover art embedded in file
     has_embedded_cover INTEGER DEFAULT 0,
     -- timestamps

@@ -55,7 +55,10 @@ static bool iends_with(const std::string& s, const std::string& suffix)
 	return lo.compare(lo.size() - suffix.size(), suffix.size(), suffix) == 0;
 	}
 
-static std::string find_cover(const fs::path& dir)
+// recurse=false is for a folder that is an album *and* a parent of albums —
+// a section holding loose files next to its subfolders.  Pass 5 would then
+// hand the section one of its own albums' covers.
+static std::string find_cover(const fs::path& dir, bool recurse = true)
 	{
 	// Pass 1: exact well-known names.
 	for (auto& name : COVER_FILENAMES) {
@@ -78,6 +81,7 @@ static std::string find_cover(const fs::path& dir)
 	if (!jpg_fallback.empty()) return jpg_fallback;
 	if (!any_img_fallback.empty()) return any_img_fallback;
 	// Pass 5: recurse into subdirectories for any image.
+	if (!recurse) return "";
 	for (auto& entry : fs::recursive_directory_iterator(dir)) {
 		if (!entry.is_regular_file()) continue;
 		std::string fname = entry.path().filename().string();
@@ -87,21 +91,58 @@ static std::string find_cover(const fs::path& dir)
 	return "";
 	}
 
-// Returns sorted list of image paths in dir (recursive), excluding cover_path.
+// A poster belonging to one file rather than to a folder: "film.mp4" is
+// matched by "film.jpg" or "film-poster.jpg".  That is what Kodi and Jellyfin
+// read beside a flat movie file, and it is the only way a loose file can carry
+// a cover of its own — a folder cover belongs to the whole section it sits in.
+static std::string find_song_cover(const fs::path& file)
+	{
+	static const std::vector<std::string> SUFFIXES = {
+		".jpg", ".jpeg", ".png",
+		"-poster.jpg", "-poster.jpeg", "-poster.png"
+		};
+	std::string stem = (file.parent_path() / file.stem()).string();
+	for (auto& suffix : SUFFIXES) {
+		fs::path p = stem + suffix;
+		if (fs::exists(p)) return p.string();
+		}
+	return "";
+	}
+
+// Cover art for a song row: its own sidecar image when it has one, otherwise
+// the album folder's cover.  al.folder_id rather than s.folder_id because a
+// song on a multi-disc album lives in a disc subfolder, which has no albums
+// row to resolve a cover on.  See MediaStore::SONG_COVER_ID_BASE for why a
+// song's own cover is an offset id.
+static const std::string SONG_COVER_ART_SQL =
+	"       CASE WHEN s.cover_path IS NOT NULL AND s.cover_path != ''"
+	"            THEN " + std::to_string(MediaStore::SONG_COVER_ID_BASE) + " + s.id"
+	"            WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
+	"            THEN COALESCE(al.folder_id, s.folder_id)"
+	"            ELSE -1 END AS cover_art_id,";
+
+// Returns sorted list of image paths in dir, excluding cover_path.  Recursive
+// unless the caller says otherwise — see get_extra_image_paths(), where a
+// folder with subfolders is a section whose albums' images are not its own.
 static std::vector<std::string> find_extra_images(const fs::path& dir,
-                                                   const std::string& cover_path)
+                                                   const std::string& cover_path,
+                                                   bool recurse = true)
 	{
 	static const std::set<std::string> IMG_EXT = {".jpg", ".jpeg", ".png"};
 	std::vector<std::string> result;
+	auto consider = [&](const fs::directory_entry& entry) {
+		if (!entry.is_regular_file()) return;
+		std::string ext = entry.path().extension().string();
+		std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+		if (!IMG_EXT.count(ext)) return;
+		if (entry.path().string() == cover_path) return;
+		result.push_back(entry.path().string());
+		};
 	try {
-		for (auto& entry : fs::recursive_directory_iterator(dir)) {
-			if (!entry.is_regular_file()) continue;
-			std::string ext = entry.path().extension().string();
-			std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-			if (!IMG_EXT.count(ext)) continue;
-			if (entry.path().string() == cover_path) continue;
-			result.push_back(entry.path().string());
-			}
+		if (recurse)
+			for (auto& entry : fs::recursive_directory_iterator(dir)) consider(entry);
+		else
+			for (auto& entry : fs::directory_iterator(dir))           consider(entry);
 		}
 	catch (...) {}
 	std::sort(result.begin(), result.end());
@@ -461,6 +502,10 @@ void MediaStore::create_schema()
 			height              INTEGER DEFAULT 0,
 			video_codec         TEXT,
 			audio_codec         TEXT,
+			-- Sidecar image beside this file ("<root>/<rest>"), for a loose
+			-- file whose folder cover belongs to a whole section rather than
+			-- to it. Empty for everything that inherits its album's cover.
+			cover_path          TEXT,
 			has_embedded_cover  INTEGER DEFAULT 0,
 			musicbrainz_id      TEXT,
 			file_modified       INTEGER,
@@ -631,6 +676,8 @@ void MediaStore::create_schema()
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE folders ADD COLUMN content_type TEXT"); }
 	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE songs ADD COLUMN cover_path TEXT"); }
+	catch (const SQLite::Exception&) {}
 
 	// Backfill song_artists from album_artists for any songs that were scanned
 	// before this link was introduced.
@@ -695,6 +742,8 @@ void MediaStore::scan()
 		// released between them and API handlers stay responsive.
 		for (auto& artist_path : to_scan)
 			scan_artist_dir(artist_path);
+
+		scan_root_files(root);
 		}
 
 	std::cout << stamp() << "Scan complete" << std::endl;
@@ -712,8 +761,31 @@ void MediaStore::scan_dirs(const std::set<std::string>& dirs)
 			return;
 			}
 		}
-	for (auto& d : dirs)
-		scan_artist_dir(fs::path(join_root(d)));
+	// Known to the DB as a folder — which is what tells a section that has just
+	// been deleted apart from a file that never was one.
+	auto is_known_folder = [&](const std::string& rel) {
+		std::lock_guard<std::mutex> lock(db_mutex_);
+		SQLite::Statement q(db_music_, "SELECT 1 FROM folders WHERE path = ?");
+		q.bind(1, rel);
+		return q.executeStep();
+		};
+
+	for (auto& d : dirs) {
+		fs::path abs(join_root(d));
+		// A depth-1 entry that is neither a directory now nor a folder in the
+		// DB is a loose file sitting in the root itself — added, changed or
+		// deleted.  The watcher reports the file, since there is no directory
+		// between it and the root.
+		if (!fs::is_directory(abs) && !is_known_folder(d)) {
+			const RootRec* r = root_for_rel(d);
+			// The uploads root is per-user space, never library content, and
+			// scan() does not walk it either.
+			if (r && r->cfg.type != "uploads")
+				scan_root_files(*r);
+			continue;
+			}
+		scan_artist_dir(abs);
+		}
 	}
 
 // Per-song data collected in Phases 1–3, consumed in Phase 4.
@@ -723,6 +795,7 @@ struct SongReadData {
 	int64_t     mtime       = 0;
 	int64_t     file_size   = 0;
 	std::string codec;
+	std::string cover;         // sidecar image beside the file; "" for none
 	int         disc_number = 0;
 	bool        changed     = false;
 	bool        is_video    = false;
@@ -754,23 +827,129 @@ struct AlbumReadData {
 	std::vector<SongReadData> songs;
 	};
 
-// DB-only counterpart of upsert_song(); all slow I/O has already happened.
+// One media file → everything Phase 1 can learn about it without a lock.
+static SongReadData read_song_file(const fs::path& p,
+                                    const std::string& folder_path,
+                                    int disc_number)
+	{
+	SongReadData sdat;
+	sdat.path        = p.string();
+	sdat.folder_path = folder_path;
+	sdat.mtime       = mtime_of(p);
+	sdat.file_size   = static_cast<int64_t>(fs::file_size(p));
+	sdat.codec       = p.extension().string().substr(1);
+	std::transform(sdat.codec.begin(), sdat.codec.end(),
+	               sdat.codec.begin(), ::tolower);
+	sdat.cover       = find_song_cover(p);
+	sdat.is_video    = is_video_file(p);
+	sdat.disc_number = disc_number;
+	return sdat;
+	}
+
+// Phase 3 for one changed file: the slow reads, with no lock held.  Shared by
+// scan_artist_dir() and scan_root_files().
+static void read_song_metadata(SongReadData& sdat)
+	{
+	// A DVD titleset: dimensions and codecs are identical across the parts,
+	// but the duration is not — probing only the first would report a 1 GB
+	// fragment's length as the whole title, so sum them.  Title and track
+	// number came from the titleset number in Phase 1 and must not be
+	// overwritten by the filename-based rules below.
+	if (!sdat.parts.empty()) {
+		for (const auto& part : sdat.parts) {
+			auto vp = probe_video(part);
+			if (!vp) {
+				std::cout << stamp() << "scan: ffprobe failed for "
+				          << part << std::endl;
+				continue;
+				}
+			sdat.duration += vp->duration;
+			if (sdat.width == 0) {
+				sdat.width       = vp->width;
+				sdat.height      = vp->height;
+				sdat.video_codec = vp->video_codec;
+				sdat.audio_codec = vp->audio_codec;
+				sdat.bitrate     = vp->bitrate;
+				}
+			}
+		return;
+		}
+
+	// Video takes a different reader entirely: TagLib cannot open these
+	// containers, so ffprobe supplies duration, bitrate and dimensions, and
+	// the filename supplies the title and episode number.  A probe failure
+	// still leaves a usable row.
+	if (sdat.is_video) {
+		sdat.title    = fs::path(sdat.path).stem().string();
+		sdat.track_nr = episode_number(sdat.title);
+		if (auto vp = probe_video(sdat.path)) {
+			sdat.duration    = vp->duration;
+			sdat.bitrate     = vp->bitrate;
+			sdat.width       = vp->width;
+			sdat.height      = vp->height;
+			sdat.video_codec = vp->video_codec;
+			sdat.audio_codec = vp->audio_codec;
+			}
+		else
+			std::cout << stamp() << "scan: ffprobe failed for "
+			          << sdat.path << std::endl;
+		return;
+		}
+
+	TagLib::FileStream stream(sdat.path.c_str(), true /* readOnly */);
+	TagLib::FileRef    f(&stream);
+	sdat.title = fs::path(sdat.path).stem().string();
+
+	if (!f.isNull() && f.tag()) {
+		auto* t = f.tag();
+		if (!t->title().isEmpty())
+			sdat.title = t->title().toCString(true);
+		sdat.track_nr = static_cast<int>(t->track());
+		sdat.year     = static_cast<int>(t->year());
+		if (!t->genre().isEmpty())
+			sdat.genre = t->genre().toCString(true);
+		}
+	if (sdat.disc_number == 0 && !f.isNull()) {
+		auto props = f.file()->properties();
+		auto it    = props.find("DISCNUMBER");
+		if (it != props.end() && !it->second.isEmpty()) {
+			try { sdat.disc_number = it->second.front().toInt(); }
+			catch (...) {}
+			}
+		}
+	if (!f.isNull() && f.audioProperties()) {
+		auto* ap      = f.audioProperties();
+		sdat.duration = ap->lengthInSeconds();
+		sdat.bitrate  = ap->bitrate();
+		sdat.sr       = ap->sampleRate();
+		sdat.channels = ap->channels();
+		}
+	}
+
+// Writes one song row; all slow I/O has already happened.
 // Caller must hold db_mutex_ and an open transaction. sdat.path is absolute
 // (Phase 1/3 use it for TagLib I/O); rel_path is its stored form, which the
 // caller computes because strip_root() is a member and this is not.
 static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat,
                                    int album_id, int folder_id, int artist_id,
-                                   const std::string& rel_path)
+                                   const std::string& rel_path,
+                                   const std::string& rel_cover)
 	{
 	if (!sdat.changed) {
-		if (sdat.disc_number > 0) {
-			SQLite::Statement upd(db,
-				"UPDATE songs SET disc_number=? WHERE path=? AND disc_number!=?");
-			upd.bind(1, sdat.disc_number);
-			upd.bind(2, rel_path);
-			upd.bind(3, sdat.disc_number);
-			upd.exec();
-			}
+		// An unchanged song still has to say it was seen: the per-album prune
+		// below deletes whatever is left marked unvisited.  Disc number and
+		// sidecar cover come from the folder layout, not from the file, so
+		// they can change while the file itself does not.
+		SQLite::Statement upd(db,
+			"UPDATE songs SET last_scanned = CURRENT_TIMESTAMP,"
+			"                 disc_number = CASE WHEN ? > 0 THEN ? ELSE disc_number END,"
+			"                 cover_path = ?"
+			" WHERE path = ?");
+		upd.bind(1, sdat.disc_number);
+		upd.bind(2, sdat.disc_number);
+		upd.bind(3, rel_cover);
+		upd.bind(4, rel_path);
+		upd.exec();
 		return;
 		}
 
@@ -782,8 +961,8 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 		" (album_id, folder_id, path, filename, title, track_number, disc_number,"
 		"  year, genre, duration, bitrate, sample_rate, channels, codec,"
 		"  file_size, file_modified, is_video, width, height, video_codec,"
-		"  audio_codec, last_scanned)"
-		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
+		"  audio_codec, cover_path, last_scanned)"
+		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
 	ins.bind(1,  album_id);
 	ins.bind(2,  folder_id);
 	ins.bind(3,  rel_path);
@@ -805,6 +984,7 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 	ins.bind(19, sdat.height);
 	ins.bind(20, sdat.video_codec);
 	ins.bind(21, sdat.audio_codec);
+	ins.bind(22, rel_cover);
 	ins.exec();
 
 	int song_id = static_cast<int>(db.getLastInsertRowid());
@@ -850,6 +1030,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 
 	// ---- Phase 1: walk disk (no lock) ----
 	std::vector<AlbumReadData> albums;
+	bool had_loose = false;   // media files directly in the artist folder
 	if (exists) {
 		for (auto& album_entry : fs::directory_iterator(artist_path)) {
 			if (!album_entry.is_directory()) continue;
@@ -914,34 +1095,38 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			for (int dn = 0; dn < disc_count; ++dn) {
 				for (auto& te : fs::directory_iterator(disc_dirs[dn].path())) {
 					if (!te.is_regular_file() || !is_media_file(te.path())) continue;
-					SongReadData sdat;
-					sdat.path        = te.path().string();
-					sdat.folder_path = disc_dirs[dn].path().string();
-					sdat.mtime       = mtime_of(te.path());
-					sdat.file_size   = static_cast<int64_t>(fs::file_size(te.path()));
-					sdat.codec       = te.path().extension().string().substr(1);
-					std::transform(sdat.codec.begin(), sdat.codec.end(),
-					               sdat.codec.begin(), ::tolower);
-					sdat.is_video    = is_video_file(te.path());
-					sdat.disc_number = dn + 1;
-					adat.songs.push_back(std::move(sdat));
+					adat.songs.push_back(read_song_file(
+						te.path(), disc_dirs[dn].path().string(), dn + 1));
 					}
 				}
-			for (auto& p : direct_files) {
-				SongReadData sdat;
-				sdat.path        = p.string();
-				sdat.folder_path = adat.path;
-				sdat.mtime       = mtime_of(p);
-				sdat.file_size   = static_cast<int64_t>(fs::file_size(p));
-				sdat.codec       = p.extension().string().substr(1);
-				std::transform(sdat.codec.begin(), sdat.codec.end(),
-				               sdat.codec.begin(), ::tolower);
-				sdat.is_video    = is_video_file(p);
-				sdat.disc_number = 0;
-				adat.songs.push_back(std::move(sdat));
-				}
+			for (auto& p : direct_files)
+				adat.songs.push_back(read_song_file(p, adat.path, 0));
 
 			albums.push_back(std::move(adat));
+			}
+
+		// Media files sitting directly in the artist/section folder, with no
+		// folder of their own — one documentary, one home video, one clip.
+		// The rule is Subsonic's and Airsonic's: a folder that directly
+		// contains media is itself an album.  So the section becomes an album
+		// alongside the albums below it, and does not stop being their parent.
+		AlbumReadData loose;
+		for (auto& e : fs::directory_iterator(artist_path)) {
+			if (!e.is_regular_file() || !is_media_file(e.path())) continue;
+			// "._movie.mp4" is an AppleDouble resource fork, not a film.
+			auto name = e.path().filename().string();
+			if (!name.empty() && name.front() == '.') continue;
+			loose.songs.push_back(read_song_file(e.path(), artist_path.string(), 0));
+			}
+		if (!loose.songs.empty()) {
+			loose.path  = artist_path.string();
+			loose.title = artist_path.filename().string();
+			std::replace(loose.title.begin(), loose.title.end(), '_', ' ');
+			// Non-recursive: this folder's subdirectories are other albums,
+			// and their covers are not this one's.
+			loose.cover = find_cover(artist_path, false);
+			albums.push_back(std::move(loose));
+			had_loose = true;
 			}
 		}
 
@@ -967,7 +1152,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			}
 
 	// ---- Phase 3: TagLib reads for changed files only (no lock) ----
-	for (auto& adat : albums) {
+	for (auto& adat : albums)
 		for (auto& sdat : adat.songs) {
 			if (!sdat.changed) continue;
 
@@ -978,83 +1163,8 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 				          << sdat.path << std::endl;
 				continue;
 				}
-
-			// A DVD titleset: dimensions and codecs are identical across the
-			// parts, but the duration is not — probing only the first would
-			// report a 1 GB fragment's length as the whole title, so sum them.
-			// Title and track number came from the titleset number in Phase 1
-			// and must not be overwritten by the filename-based rules below.
-			if (!sdat.parts.empty()) {
-				for (const auto& part : sdat.parts) {
-					auto vp = probe_video(part);
-					if (!vp) {
-						std::cout << stamp() << "scan: ffprobe failed for "
-						          << part << std::endl;
-						continue;
-						}
-					sdat.duration += vp->duration;
-					if (sdat.width == 0) {
-						sdat.width       = vp->width;
-						sdat.height      = vp->height;
-						sdat.video_codec = vp->video_codec;
-						sdat.audio_codec = vp->audio_codec;
-						sdat.bitrate     = vp->bitrate;
-						}
-					}
-				continue;
-				}
-
-			// Video takes a different reader entirely: TagLib cannot open
-			// these containers, so ffprobe supplies duration, bitrate and
-			// dimensions, and the filename supplies the title and episode
-			// number.  A probe failure still leaves a usable row.
-			if (sdat.is_video) {
-				sdat.title    = fs::path(sdat.path).stem().string();
-				sdat.track_nr = episode_number(sdat.title);
-				if (auto vp = probe_video(sdat.path)) {
-					sdat.duration    = vp->duration;
-					sdat.bitrate     = vp->bitrate;
-					sdat.width       = vp->width;
-					sdat.height      = vp->height;
-					sdat.video_codec = vp->video_codec;
-					sdat.audio_codec = vp->audio_codec;
-					}
-				else
-					std::cout << stamp() << "scan: ffprobe failed for "
-					          << sdat.path << std::endl;
-				continue;
-				}
-
-			TagLib::FileStream stream(sdat.path.c_str(), true /* readOnly */);
-			TagLib::FileRef    f(&stream);
-			sdat.title = fs::path(sdat.path).stem().string();
-
-			if (!f.isNull() && f.tag()) {
-				auto* t = f.tag();
-				if (!t->title().isEmpty())
-					sdat.title = t->title().toCString(true);
-				sdat.track_nr = static_cast<int>(t->track());
-				sdat.year     = static_cast<int>(t->year());
-				if (!t->genre().isEmpty())
-					sdat.genre = t->genre().toCString(true);
-				}
-			if (sdat.disc_number == 0 && !f.isNull()) {
-				auto props = f.file()->properties();
-				auto it    = props.find("DISCNUMBER");
-				if (it != props.end() && !it->second.isEmpty()) {
-					try { sdat.disc_number = it->second.front().toInt(); }
-					catch (...) {}
-					}
-				}
-			if (!f.isNull() && f.audioProperties()) {
-				auto* ap      = f.audioProperties();
-				sdat.duration = ap->lengthInSeconds();
-				sdat.bitrate  = ap->bitrate();
-				sdat.sr       = ap->sampleRate();
-				sdat.channels = ap->channels();
-				}
+			read_song_metadata(sdat);
 			}
-		}
 
 	// ---- Phase 4: short write txns ----
 	// Mark this artist's subfolders as unvisited.  Folders not re-stamped
@@ -1099,7 +1209,11 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			std::lock_guard<std::mutex> lock(db_mutex_);
 			SQLite::Transaction txn(db_music_);
 
-			int album_folder_id = upsert_folder(fs::path(adat.path), artist_folder_id);
+			// The loose-file album *is* the artist folder, so it must not be
+			// upserted with itself as its parent.
+			int album_folder_id = adat.path == artist_path.string()
+			                    ? artist_folder_id
+			                    : upsert_folder(fs::path(adat.path), artist_folder_id);
 			int album_id        = upsert_album(album_folder_id, adat.title, artist_id, 0, "");
 
 			if (!adat.cover.empty()) {
@@ -1119,12 +1233,34 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 				fid_map[adat.disc_paths[dn]] = disc_fid;
 				}
 
+			// Songs get the same mark→sweep the folders get, scoped to exactly
+			// this album's folders.  The folder-level prune below cannot reach
+			// a track deleted from an album that still exists, and it can
+			// never reach the loose-file album at all, whose folder is the
+			// artist folder and is always re-stamped.  Listing the ids rather
+			// than "parent_id = album_folder_id" matters for that album: its
+			// child folders are the section's *other* albums.
+			std::string fid_list;
+			for (auto& [_, fid] : fid_map) {
+				if (!fid_list.empty()) fid_list += ",";
+				fid_list += std::to_string(fid);
+				}
+			db_music_.exec(("UPDATE songs SET last_scanned = NULL"
+			                " WHERE folder_id IN (" + fid_list + ")").c_str());
+
 			for (auto& sdat : adat.songs) {
 				auto fit = fid_map.find(sdat.folder_path);
 				int  fid = (fit != fid_map.end()) ? fit->second : album_folder_id;
 				upsert_song_with_data(db_music_, sdat, album_id, fid, artist_id,
-				                       strip_root(sdat.path));
+				                       strip_root(sdat.path),
+				                       sdat.cover.empty() ? "" : strip_root(sdat.cover));
 				}
+
+			db_music_.exec(("DELETE FROM songs WHERE last_scanned IS NULL"
+			                " AND folder_id IN (" + fid_list + ")").c_str());
+			if (int n = db_music_.getChanges(); n > 0)
+				std::cout << stamp() << "  pruned " << n << " songs from "
+				          << fs::path(adat.path).filename().string() << std::endl;
 
 			if (disc_count > 1) {
 				SQLite::Statement upd(db_music_, "UPDATE albums SET disc_count=? WHERE id=?");
@@ -1217,6 +1353,28 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	if (n > 0)
 		std::cout << stamp() << "  pruned " << n << " folders" << std::endl;
 	}
+	// The loose-file album hangs off the artist folder itself, which is never
+	// marked unvisited, so nothing above can reach it.  When the walk found no
+	// loose files at all no album transaction ran for it either, so its songs
+	// have to go from here; otherwise that transaction has already swept them.
+	std::string artist_rel = strip_root(artist_path.string());
+	if (!had_loose) {
+		SQLite::Statement s(db_music_,
+			"DELETE FROM songs"
+			" WHERE folder_id = (SELECT id FROM folders WHERE path = ?)");
+		s.bind(1, artist_rel);
+		s.exec();
+		if (int n = db_music_.getChanges(); n > 0)
+			std::cout << stamp() << "  pruned " << n << " loose songs" << std::endl;
+		}
+	{
+	SQLite::Statement s(db_music_,
+		"DELETE FROM albums"
+		" WHERE folder_id = (SELECT id FROM folders WHERE path = ?)"
+		"   AND NOT EXISTS (SELECT 1 FROM songs WHERE songs.album_id = albums.id)");
+	s.bind(1, artist_rel);
+	s.exec();
+	}
 	{
 	SQLite::Statement s(db_music_,
 		"DELETE FROM artists WHERE id NOT IN"
@@ -1224,7 +1382,6 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	s.exec();
 	}
 	if (!exists) {
-		std::string artist_rel = strip_root(artist_path.string());
 		{
 		SQLite::Statement s(db_music_,
 			"DELETE FROM artist_info_cache"
@@ -1244,6 +1401,106 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	txn.commit();
 	}
 	std::cout << stamp() << "Rescan complete" << std::endl;
+	}
+
+// Media files sitting directly in a root, with no section folder above them —
+// a root used as one flat library, which is how Plex and Jellyfin organise a
+// movie library.  Same rule as the loose files inside a section: the folder
+// that directly contains media is itself an album.  Here the root row plays
+// the part of both the artist and the album.
+void MediaStore::scan_root_files(const RootRec& root)
+	{
+	// ---- Phase 1: walk the root itself (no lock) ----
+	std::vector<SongReadData> songs;
+	std::error_code ec;
+	for (auto& e : fs::directory_iterator(root.cfg.path, ec)) {
+		if (!e.is_regular_file() || !is_media_file(e.path())) continue;
+		auto name = e.path().filename().string();
+		if (!name.empty() && name.front() == '.') continue;
+		songs.push_back(read_song_file(e.path(), root.cfg.path, 0));
+		}
+	if (ec) return;   // scan() has already reported the unreadable root
+
+	// ---- Phase 2: brief read lock — identify changed files ----
+	// Keyed by folder rather than by path prefix: "<root>/%" is the entire
+	// root, and only the files directly in it belong to this album.
+	std::unordered_map<std::string, int64_t> known_mtimes;
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT s.path, s.file_modified FROM songs s"
+		" JOIN folders f ON f.id = s.folder_id WHERE f.path = ?");
+	q.bind(1, root.cfg.name);
+	while (q.executeStep())
+		known_mtimes[join_root(q.getColumn(0).getString())]
+			= q.getColumn(1).getInt64();
+	}
+	if (songs.empty() && known_mtimes.empty()) return;
+
+	for (auto& sdat : songs) {
+		auto it = known_mtimes.find(sdat.path);
+		sdat.changed = (it == known_mtimes.end() || it->second != sdat.mtime);
+		}
+
+	// ---- Phase 3: metadata for changed files only (no lock) ----
+	for (auto& sdat : songs) {
+		if (!sdat.changed) continue;
+		if (!path_is_within_root(sdat.path)) {
+			std::cout << stamp() << "scan: skipping file outside every root: "
+			          << sdat.path << std::endl;
+			continue;
+			}
+		read_song_metadata(sdat);
+		}
+
+	// ---- Phase 4: one write txn ----
+	// A contended commit must not take the rest of the scan with it; the next
+	// pass redoes this root's loose files from scratch anyway.
+	try {
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Transaction txn(db_music_);
+
+	int         folder_id = upsert_folder(fs::path(root.cfg.path), -1);
+	std::string fid       = std::to_string(folder_id);
+
+	db_music_.exec(("UPDATE songs SET last_scanned = NULL WHERE folder_id = "
+	                + fid).c_str());
+
+	if (!songs.empty()) {
+		int artist_id = upsert_artist(root.cfg.name);
+		int album_id  = upsert_album(folder_id, root.cfg.name, artist_id, 0, "");
+		// Non-recursive: the subdirectories of a root are its sections, and
+		// their covers are not this album's.
+		std::string cover = find_cover(fs::path(root.cfg.path), false);
+		if (!cover.empty()) {
+			SQLite::Statement upd(db_music_,
+				"UPDATE albums SET cover_path = ? WHERE id = ?");
+			upd.bind(1, strip_root(cover));
+			upd.bind(2, album_id);
+			upd.exec();
+			}
+		for (auto& sdat : songs)
+			upsert_song_with_data(db_music_, sdat, album_id, folder_id, artist_id,
+			                       strip_root(sdat.path),
+			                       sdat.cover.empty() ? "" : strip_root(sdat.cover));
+		}
+
+	db_music_.exec(("DELETE FROM songs WHERE last_scanned IS NULL"
+	                " AND folder_id = " + fid).c_str());
+	if (int n = db_music_.getChanges(); n > 0)
+		std::cout << stamp() << "  pruned " << n << " loose songs from "
+		          << root.cfg.name << std::endl;
+	// A root's album can only ever be the loose-file one, so it goes when the
+	// last loose file does.
+	db_music_.exec(("DELETE FROM albums WHERE folder_id = " + fid +
+	                " AND NOT EXISTS (SELECT 1 FROM songs"
+	                " WHERE songs.album_id = albums.id)").c_str());
+	txn.commit();
+	}
+	catch (const std::exception& e) {
+		std::cout << stamp() << "Scan: loose files in " << root.cfg.name
+		          << ": skipped, " << e.what() << std::endl;
+		}
 	}
 
 // ---- upsert helpers ---------------------------------------------------
@@ -1339,122 +1596,6 @@ int MediaStore::upsert_album(int folder_id, const std::string& title,
 	lnk.exec();
 
 	return album_id;
-	}
-
-void MediaStore::upsert_song(const fs::path& path, int album_id, int folder_id,
-                              int artist_id, int disc_number)
-	{
-	int64_t mtime = mtime_of(path);
-
-	// path arrives absolute (from fs walk); the DB stores it relative.
-	std::string rel_path = strip_root(path.string());
-
-	// Skip if the file hasn't changed since last scan.
-	SQLite::Statement chk(db_music_,
-		"SELECT file_modified FROM songs WHERE path = ?");
-	chk.bind(1, rel_path);
-	if (chk.executeStep()) {
-		if (chk.getColumn(0).getInt64() == mtime) {
-			// Still update disc_number if it was folder-derived — folders may be reordered.
-			if (disc_number > 0) {
-				SQLite::Statement upd(db_music_,
-					"UPDATE songs SET disc_number=? WHERE path=? AND disc_number!=?");
-				upd.bind(1, disc_number);
-				upd.bind(2, rel_path);
-				upd.bind(3, disc_number);
-				upd.exec();
-				}
-			return;
-			}
-		}
-
-	// Defence-in-depth: refuse to open any file that — after symlink
-	// resolution — sits outside every root.
-	if (!path_is_within_root(path)) {
-		std::cout << stamp() << "scan: skipping file outside every root: "
-		          << path.string() << std::endl;
-		return;
-		}
-
-	// Read tags with taglib — open read-only so we never mutate media files.
-	TagLib::FileStream stream(path.c_str(), true /* readOnly */);
-	TagLib::FileRef    f(&stream);
-	std::string title    = path.stem().string();  // fallback: filename stem
-	int         track_nr = 0;
-	int         year     = 0;
-	std::string genre;
-	double      duration = 0;
-	int         bitrate  = 0;
-	int         sr       = 0;
-	int         channels = 0;
-
-	if (!f.isNull() && f.tag()) {
-		auto* t = f.tag();
-		if (!t->title().isEmpty())
-			title = t->title().toCString(true);
-		track_nr = static_cast<int>(t->track());
-		year     = static_cast<int>(t->year());
-		if (!t->genre().isEmpty())
-			genre = t->genre().toCString(true);
-		}
-	// Fall back to DISCNUMBER file tag when folder structure gives no disc info.
-	if (disc_number == 0 && !f.isNull()) {
-		auto props = f.file()->properties();
-		auto it = props.find("DISCNUMBER");
-		if (it != props.end() && !it->second.isEmpty()) {
-			try { disc_number = it->second.front().toInt(); }
-			catch (...) {}
-			}
-		}
-	// Strip leading track-number prefixes (e.g. "01 - ", "1. ") from title.
-	// Requires at least one separator char so bare numbers/years are left alone.
-	static const std::regex track_prefix(R"(^\d+[. -]+)");
-	title = std::regex_replace(title, track_prefix, "");
-
-	if (!f.isNull() && f.audioProperties()) {
-		auto* ap = f.audioProperties();
-		duration = ap->lengthInSeconds();
-		bitrate  = ap->bitrate();
-		sr       = ap->sampleRate();
-		channels = ap->channels();
-		}
-
-	int64_t file_size = static_cast<int64_t>(fs::file_size(path));
-	std::string codec = path.extension().string().substr(1);  // strip leading dot
-	std::transform(codec.begin(), codec.end(), codec.begin(), ::tolower);
-
-	SQLite::Statement ins(db_music_,
-		"INSERT OR REPLACE INTO songs"
-		" (album_id, folder_id, path, filename, title, track_number, disc_number,"
-		"  year, genre, duration, bitrate, sample_rate, channels, codec,"
-		"  file_size, file_modified, last_scanned)"
-		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
-	ins.bind(1,  album_id);
-	ins.bind(2,  folder_id);
-	ins.bind(3,  rel_path);
-	ins.bind(4,  path.filename().string());
-	ins.bind(5,  title);
-	ins.bind(6,  track_nr);
-	ins.bind(7,  disc_number > 0 ? disc_number : 1);
-	ins.bind(8,  year);
-	ins.bind(9,  genre);
-	ins.bind(10, duration);
-	ins.bind(11, bitrate);
-	ins.bind(12, sr);
-	ins.bind(13, channels);
-	ins.bind(14, codec);
-	ins.bind(15, file_size);
-	ins.bind(16, mtime);
-	ins.exec();
-
-	// Link song to its artist (derived from the folder hierarchy).
-	int song_id = static_cast<int>(db_music_.getLastInsertRowid());
-	SQLite::Statement lnk(db_music_,
-		"INSERT OR IGNORE INTO song_artists (song_id, artist_id, role)"
-		" VALUES (?, ?, 'artist')");
-	lnk.bind(1, song_id);
-	lnk.bind(2, artist_id);
-	lnk.exec();
 	}
 
 // ---- User management --------------------------------------------------
@@ -1714,12 +1855,19 @@ std::vector<MediaStore::MusicFolder> MediaStore::get_music_folders()
 	return result;
 	}
 
-std::string MediaStore::get_cover_path(int folder_id)
+std::string MediaStore::get_cover_path(int cover_art_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
+	if (cover_art_id >= SONG_COVER_ID_BASE) {
+		SQLite::Statement q(db_music_,
+			"SELECT cover_path FROM songs WHERE id = ?");
+		q.bind(1, cover_art_id - SONG_COVER_ID_BASE);
+		if (!q.executeStep() || q.getColumn(0).isNull()) return "";
+		return q.getColumn(0).getString();
+		}
 	SQLite::Statement q(db_music_,
 		"SELECT cover_path FROM albums WHERE folder_id = ?");
-	q.bind(1, folder_id);
+	q.bind(1, cover_art_id);
 	if (!q.executeStep() || q.getColumn(0).isNull()) return "";
 	return q.getColumn(0).getString();
 	}
@@ -1728,11 +1876,24 @@ std::string MediaStore::get_cover_path(int folder_id)
 std::vector<std::string> MediaStore::get_extra_image_paths(int folder_id)
 	{
 	std::string cover  = get_cover_path(folder_id);
+	// Empty for a song's sidecar cover id, which has no folder and no extras.
 	std::string folder = get_folder_path(folder_id);
 	if (cover.empty() || folder.empty()) return {};
+
+	// A folder with subfolders is a section that also holds loose files: the
+	// subfolders are its albums, and their images are not this one's extras.
+	bool recurse;
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT 1 FROM folders WHERE parent_id = ? LIMIT 1");
+	q.bind(1, folder_id);
+	recurse = !q.executeStep();
+	}
+
 	// find_extra_images works in absolute paths (it walks the filesystem);
 	// we strip back to relative on return so the public API stays uniform.
-	auto abs_results = find_extra_images(abs_path(folder), abs_path(cover));
+	auto abs_results = find_extra_images(abs_path(folder), abs_path(cover), recurse);
 	std::vector<std::string> result;
 	result.reserve(abs_results.size());
 	for (auto& p : abs_results)
@@ -1742,12 +1903,8 @@ std::vector<std::string> MediaStore::get_extra_image_paths(int folder_id)
 
 int MediaStore::get_image_count(int folder_id)
 	{
-	std::string cover = get_cover_path(folder_id);
-	if (cover.empty()) return 0;
-	std::string folder = get_folder_path(folder_id);
-	if (folder.empty()) return 0;
-	return 1 + static_cast<int>(
-		find_extra_images(abs_path(folder), abs_path(cover)).size());
+	if (get_cover_path(folder_id).empty()) return 0;
+	return 1 + static_cast<int>(get_extra_image_paths(folder_id).size());
 	}
 
 std::optional<MediaStore::SongInfo> MediaStore::get_song(int song_id)
@@ -1788,8 +1945,7 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_videos()
 		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
-		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
+		+ SONG_COVER_ART_SQL +
 		"       s.path, s.width, s.height, s.video_codec, s.audio_codec"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
@@ -1935,16 +2091,24 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
 	const std::string& content_type)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	// Count albums per artist via the child folders (album folders are one level down).
+	// Count albums per artist via the child folders (album folders are one level
+	// down), plus an album on the folder itself for loose files sitting beside
+	// them.
 	// "IN (…roots…)" rather than "= root": level-1 entries now come from every
 	// configured root, and which root a folder belongs to is visible in its
 	// path prefix rather than in a column.
+	// A root row joins the list only when it carries loose files of its own.
+	// Its name comes from `path`, not `name`: for a root those differ, and
+	// `name` is the directory basename, which is never exposed.
 	std::string sql =
-		"SELECT f.id, f.name, COUNT(al.id) AS album_count"
+		"SELECT f.id,"
+		"       CASE WHEN f.parent_id IS NULL THEN f.path ELSE f.name END AS name,"
+		"       COUNT(al.id) + (SELECT COUNT(*) FROM albums own"
+		"                        WHERE own.folder_id = f.id) AS album_count"
 		" FROM folders f"
 		" LEFT JOIN folders af ON af.parent_id = f.id"
 		" LEFT JOIN albums al ON al.folder_id = af.id"
-		" WHERE f.parent_id IN (SELECT id FROM folders WHERE parent_id IS NULL";
+		" WHERE (f.parent_id IN (SELECT id FROM folders WHERE parent_id IS NULL";
 	// Narrow the *root set* by kind rather than the folders themselves: one
 	// kind can span several roots, so this must not become an equality on a
 	// single parent id.  COALESCE because a root row written before
@@ -1952,18 +2116,24 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
 	if (!content_type.empty())
 		sql += " AND COALESCE(content_type, 'artists') = ?";
 	sql += ")";
+	sql += " OR (f.parent_id IS NULL";
+	if (!content_type.empty())
+		sql += " AND COALESCE(f.content_type, 'artists') = ?";
+	sql += "     AND EXISTS (SELECT 1 FROM albums own WHERE own.folder_id = f.id)))";
 	if (music_folder_id > 0)
-		sql += " AND f.parent_id = ?";
+		sql += " AND (f.parent_id = ? OR f.id = ?)";
 	if (personal_user.empty())
 		sql += not_uploads("f.path");
 	else
 		sql += " AND f.path LIKE ?";
-	sql += " GROUP BY f.id ORDER BY f.name COLLATE NOCASE";
+	sql += " GROUP BY f.id ORDER BY name COLLATE NOCASE";
 
 	SQLite::Statement sel(db_music_, sql);
 	int idx = 1;
 	// Bind order follows the order the fragments were appended above.
 	if (!content_type.empty())    sel.bind(idx++, content_type);
+	if (!content_type.empty())    sel.bind(idx++, content_type);
+	if (music_folder_id > 0)      sel.bind(idx++, music_folder_id);
 	if (music_folder_id > 0)      sel.bind(idx++, music_folder_id);
 	if (!personal_user.empty())
 		sel.bind(idx++, uploads_prefix_ + personal_user + "/%");
@@ -1982,8 +2152,12 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
 	// Fetch the folder itself. al.id tells us whether this is an album folder.
+	// A root is named by its `path`; its `name` is the directory basename,
+	// which is never exposed.
 	SQLite::Statement fsel(db_music_,
-		"SELECT f.id, f.name, f.parent_id,"
+		"SELECT f.id,"
+		"       CASE WHEN f.parent_id IS NULL THEN f.path ELSE f.name END,"
+		"       f.parent_id,"
 		"       al.id AS album_id,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN f.id ELSE -1 END AS cover_art_id"
@@ -2000,7 +2174,20 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 	bool is_album    = !fsel.getColumn(3).isNull();
 	dir.cover_art_id = fsel.getColumn(4).getInt();
 
-	bool flatten = flat_multi_disc && is_album;
+	// Flattening pulls in the songs of every child folder, which is right for
+	// an album's disc subdirectories and wrong for a section that holds loose
+	// files *and* albums: it would absorb the whole section into one listing
+	// and hide the albums themselves.  A disc folder has a folders row but no
+	// albums row, which is exactly the distinction needed.
+	bool has_child_album = false;
+	if (flat_multi_disc && is_album) {
+		SQLite::Statement q(db_music_,
+			"SELECT 1 FROM folders f JOIN albums al ON al.folder_id = f.id"
+			" WHERE f.parent_id = ? LIMIT 1");
+		q.bind(1, folder_id);
+		has_child_album = q.executeStep();
+		}
+	bool flatten = flat_multi_disc && is_album && !has_child_album;
 
 	// Child directories — skipped in flat mode for album folders (disc subdirs
 	// are absorbed into the song list below).
@@ -2043,7 +2230,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name, '') AS artist,"
 		"       COALESCE(al.title, '') AS album, s.width, s.height,"
-		"       s.video_codec, s.audio_codec"
+		"       s.video_codec, s.audio_codec, s.cover_path"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -2058,7 +2245,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		"       s.file_size, s.codec, s.folder_id,"
 		"       COALESCE(a.name, '') AS artist,"
 		"       COALESCE(al.title, '') AS album, s.width, s.height,"
-		"       s.video_codec, s.audio_codec"
+		"       s.video_codec, s.audio_codec, s.cover_path"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -2090,8 +2277,12 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		e.height       = ssel.getColumn(14).isNull() ? 0 : ssel.getColumn(14).getInt();
 		e.video_codec  = ssel.getColumn(15).isNull() ? "" : ssel.getColumn(15).getString();
 		e.audio_codec  = ssel.getColumn(16).isNull() ? "" : ssel.getColumn(16).getString();
-		// Songs inherit cover art from their parent album folder.
-		if (dir.cover_art_id >= 0)
+		// Songs inherit cover art from their parent album folder, unless they
+		// have a sidecar image of their own — a loose file's folder cover
+		// belongs to the whole section it sits in.
+		if (!ssel.getColumn(17).isNull() && ssel.getColumn(17).getString() != "")
+			e.cover_art_id = SONG_COVER_ID_BASE + e.id;
+		else if (dir.cover_art_id >= 0)
 			e.cover_art_id = dir.cover_art_id;
 		dir.children.push_back(std::move(e));
 		}
@@ -2272,9 +2463,12 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id,
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
-	// Look up the artist folder itself.
+	// Look up the artist folder itself.  A root reached this way (it holds
+	// loose files, so it is its own artist) is named by its `path`: a root's
+	// `name` is the directory basename, which is never exposed.
 	SQLite::Statement fsel(db_music_,
-		"SELECT id, name FROM folders WHERE id = ?");
+		"SELECT id, CASE WHEN parent_id IS NULL THEN path ELSE name END"
+		" FROM folders WHERE id = ?");
 	fsel.bind(1, folder_id);
 	if (!fsel.executeStep()) return std::nullopt;
 
@@ -2282,7 +2476,9 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id,
 	info.artist.id   = fsel.getColumn(0).getInt();
 	info.artist.name = fsel.getColumn(1).getString();
 
-	// Fetch albums whose folder is a direct child of this artist folder.
+	// Fetch albums whose folder is a direct child of this artist folder, plus
+	// an album on the folder itself — the loose files that sit beside the
+	// albums rather than inside one.
 	// Trailing column is the per-user album-star flag.
 	SQLite::Statement asel(db_music_,
 		"SELECT f.id, COALESCE(f.parent_id,-1),"
@@ -2302,10 +2498,11 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id,
 		" LEFT JOIN artists a ON a.id = aa.artist_id"
 		" LEFT JOIN client.stars sa ON sa.album_folder_path = f.path"
 		"      AND sa.user_id = (SELECT id FROM client.users WHERE username = ?)"
-		" WHERE f.parent_id = ?"
+		" WHERE f.parent_id = ? OR f.id = ?"
 		" ORDER BY al.year, al.title COLLATE NOCASE");
 	asel.bind(1, username);
 	asel.bind(2, folder_id);
+	asel.bind(3, folder_id);
 
 	while (asel.executeStep()) {
 		AlbumEntry e;
@@ -2389,7 +2586,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		"       COALESCE(a.name, '') AS artist,"
 		"       COALESCE(al.title, '') AS album"
 		+ star_col +
-		", s.width, s.height, s.video_codec, s.audio_codec"
+		", s.width, s.height, s.video_codec, s.audio_codec, s.cover_path"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -2406,7 +2603,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		"       COALESCE(a.name, '') AS artist,"
 		"       COALESCE(al.title, '') AS album"
 		+ star_col +
-		", s.width, s.height, s.video_codec, s.audio_codec"
+		", s.width, s.height, s.video_codec, s.audio_codec, s.cover_path"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -2415,12 +2612,25 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		" WHERE s.folder_id = ?"
 		" ORDER BY s.disc_number, s.track_number, s.filename";
 
-	SQLite::Statement ssel(db_music_, flat_multi_disc ? song_sql_flat : song_sql_normal);
+	// As in get_directory(): flattening absorbs the songs of every child
+	// folder, and for a loose-file album those children are the section's
+	// other albums, not disc subdirectories.
+	bool has_child_album = false;
+	if (flat_multi_disc) {
+		SQLite::Statement q(db_music_,
+			"SELECT 1 FROM folders f JOIN albums al ON al.folder_id = f.id"
+			" WHERE f.parent_id = ? LIMIT 1");
+		q.bind(1, folder_id);
+		has_child_album = q.executeStep();
+		}
+	bool flatten = flat_multi_disc && !has_child_album;
+
+	SQLite::Statement ssel(db_music_, flatten ? song_sql_flat : song_sql_normal);
 	int idx = 1;
 	if (!username.empty())
 		ssel.bind(idx++, username);
 	ssel.bind(idx++, folder_id);
-	if (flat_multi_disc) ssel.bind(idx, folder_id);
+	if (flatten) ssel.bind(idx, folder_id);
 
 	while (ssel.executeStep()) {
 		ChildEntry e;
@@ -2443,7 +2653,11 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		e.height       = ssel.getColumn(15).isNull() ? 0 : ssel.getColumn(15).getInt();
 		e.video_codec  = ssel.getColumn(16).isNull() ? "" : ssel.getColumn(16).getString();
 		e.audio_codec  = ssel.getColumn(17).isNull() ? "" : ssel.getColumn(17).getString();
-		if (info.album.cover_art_id >= 0)
+		// A sidecar image beats the album cover: on a loose-file album the
+		// album cover belongs to the section, not to this file.
+		if (!ssel.getColumn(18).isNull() && ssel.getColumn(18).getString() != "")
+			e.cover_art_id = SONG_COVER_ID_BASE + e.id;
+		else if (info.album.cover_art_id >= 0)
 			e.cover_art_id = info.album.cover_art_id;
 		info.songs.push_back(std::move(e));
 		}
@@ -2875,6 +3089,16 @@ std::string MediaStore::rel_path(const std::string& abs) const
 bool MediaStore::is_category_folder(int folder_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
+	// A root row is never a performer either: loose files directly in a root
+	// make the root itself the artist, and looking that up would query
+	// MusicBrainz for a thing called "movies" — the failure this function
+	// exists to prevent.
+	{
+	SQLite::Statement r(db_music_,
+		"SELECT 1 FROM folders WHERE id = ? AND parent_id IS NULL");
+	r.bind(1, folder_id);
+	if (r.executeStep()) return true;
+	}
 	SQLite::Statement q(db_music_,
 		"SELECT COALESCE(p.content_type, 'artists')"
 		" FROM folders f JOIN folders p ON p.id = f.parent_id"
@@ -3037,8 +3261,7 @@ std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
 		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
-		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
+		+ SONG_COVER_ART_SQL +
 		"       s.width, s.height, s.video_codec, s.audio_codec"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"

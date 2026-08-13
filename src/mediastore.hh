@@ -258,8 +258,15 @@ class MediaStore {
 		std::optional<AlbumInfo> get_album(int folder_id, bool flat_multi_disc = true,
 		                                    const std::string& username = "");
 
+		// A cover art id is a folder id, except above this base, where it is
+		// SONG_COVER_ID_BASE + song id: a loose file with a sidecar image of
+		// its own, whose folder cover belongs to a whole section instead. The
+		// wire format is an integer, so the two id spaces are separated by an
+		// offset rather than by a prefix.
+		static constexpr int SONG_COVER_ID_BASE = 1'000'000'000;
+
 		// Returns the stored-form cover image path, or "" if none.
-		std::string get_cover_path(int folder_id);
+		std::string get_cover_path(int cover_art_id);
 
 		// Returns sorted stored-form paths of all image files in
 		// the album folder tree, excluding the main cover. Used to serve
@@ -531,13 +538,14 @@ class MediaStore {
 		// Targeted rescan of one artist subtree; called by scan_dirs().
 		void scan_artist_dir(const std::filesystem::path& path);
 
+		// Media files sitting directly in a root, with no section folder above
+		// them. scan_artist_dir() cannot do this job: its prune prefix is
+		// "<root>/%", which is the whole root.
+		void scan_root_files(const RootRec& root);
+
 		// Helpers used by scan(); all called within a single transaction.
 		int  upsert_folder(const std::filesystem::path& path, int parent_id);
 		int  upsert_artist(const std::string& name);
 		int  upsert_album (int folder_id, const std::string& title,
 		                   int artist_id, int year, const std::string& genre);
-		// disc_number: 0 = default to 1, >0 = override (folder-derived disc position)
-		void upsert_song  (const std::filesystem::path& path,
-		                   int album_id, int folder_id, int artist_id,
-		                   int disc_number = 0);
 	};
