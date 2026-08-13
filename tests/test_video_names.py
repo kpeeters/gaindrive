@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""Filename → title/year/episode rules.
+
+Video files carry no tag anything writes, so the filename is the only metadata
+there is, and it is usually a name meant for a tracker rather than for a
+person. These are the rules that turn it back into something a client can show
+and a metadata provider can be asked with.
+
+Unlike every other script in tests/, this one needs **no running server** — it
+pipes names through the parser directly:
+
+    python3 tests/test_video_names.py [path/to/gaindrive]
+
+Inputs may carry folder context, written as "Parent/Folder/Name", because the
+title is as often on the folder as on the file. Each case asserts only the
+fields it is actually about; anything unstated is not checked, so tuning the
+stop-word list does not break unrelated cases.
+"""
+
+import subprocess
+import sys
+
+BINARY = sys.argv[1] if len(sys.argv) > 1 else "./build/gaindrive"
+
+# name -> expected fields. Keys: title, year, ep, source, cleaned, series.
+CASES = {
+    # --- scene-style, dotted -------------------------------------------
+    "The.Third.Man.1949.1080p.BluRay.x264-GRP":
+        {"title": "The Third Man", "year": "1949"},
+    "Some.Doc.2019.WEBRip.XviD.MP3-XVID":
+        {"title": "Some Doc", "year": "2019"},
+    "www.Torrenting.com - Big.Film.2019.720p":
+        {"title": "Big Film", "year": "2019"},
+    "Arrival.2016.2160p.UHD.BluRay.x265.HDR10.DTS-HD.MA.7.1-TERMiNAL":
+        {"title": "Arrival", "year": "2016"},
+
+    # --- Kodi / Jellyfin -----------------------------------------------
+    "The Third Man (1949)":
+        {"title": "The Third Man", "year": "1949"},
+    "Star Trek II The Wrath of Khan (1982)":
+        {"title": "Star Trek II The Wrath of Khan", "year": "1982"},
+
+    # --- plain descriptive, nothing to strip ---------------------------
+    # The safety property: nothing matched, so nothing changed.
+    "cheese making documentary":
+        {"title": "cheese making documentary", "year": "", "cleaned": "as-is"},
+    "Spider-Man":
+        {"title": "Spider-Man", "cleaned": "as-is"},
+
+    # --- the three cases that decide the rules -------------------------
+    # Last year wins, so the 2049 in the title survives and 2017 is the year.
+    "Blade.Runner.2049.2017.1080p":
+        {"title": "Blade Runner 2049", "year": "2017"},
+    # A year followed by a real word is not a year.
+    "holiday 2019 crete":
+        {"title": "holiday 2019 crete", "year": "", "cleaned": "as-is"},
+    # The file says nothing; the folder does.
+    "The Third Man (1949)/title00":
+        {"title": "The Third Man", "year": "1949", "source": "folder"},
+
+    # A title that is *only* a year, disambiguated by a bracketed one. The
+    # bracketed year is authoritative, so no token in the title can be a
+    # second one — without that rule this loses its whole title.
+    "1917 (2019)":
+        {"title": "1917", "year": "2019"},
+    "Blade Runner 2049 (2017)":
+        {"title": "Blade Runner 2049", "year": "2017"},
+    # A title opening with a word the stop-word table calls release junk.
+    # Cutting at the first token would empty it, and no name is improved by
+    # being emptied.
+    "4K Nature Scenes":
+        {"title": "4K Nature Scenes", "cleaned": "as-is"},
+    "HD Home Video 2015":
+        {"title": "HD Home Video", "year": "2015"},
+    # Digits and a hyphen inside the title itself.
+    "Se7en.1995.REMASTERED.1080p.BluRay.x264-AMIABLE":
+        {"title": "Se7en", "year": "1995"},
+    "WALL-E (2008)":
+        {"title": "WALL-E", "year": "2008"},
+
+    # A year token that is part of the title, with nothing after it.
+    "2001 A Space Odyssey":
+        {"title": "2001 A Space Odyssey", "year": "", "cleaned": "as-is"},
+    # ...and the same title with junk after it, where the year is real.
+    "2001.A.Space.Odyssey.1968.1080p.BluRay":
+        {"title": "2001 A Space Odyssey", "year": "1968"},
+
+    # A leading number orders episodes but must never claim the title:
+    # "12 Angry Men" is a film.
+    "12 Angry Men":
+        {"title": "12 Angry Men", "ep": "E12", "cleaned": "as-is"},
+
+    # --- series ---------------------------------------------------------
+    "Planet Earth II/Season 01/Planet.Earth.II.S01E03.Jungles.1080p":
+        {"title": "Jungles", "ep": "S1E3", "series": "Planet Earth II"},
+    # No episode name anywhere: the show comes from two levels up, since the
+    # folder is a season.
+    "Planet Earth II/Season 01/S01E03":
+        {"title": "Episode 3", "ep": "S1E3", "series": "Planet Earth II"},
+    "Breaking Bad/Season 02/2x05 - Breakage":
+        {"title": "Breakage", "ep": "S2E5", "series": "Breaking Bad"},
+
+    # --- uninformative filenames ---------------------------------------
+    "Some Documentary/title00":
+        {"title": "Some Documentary", "source": "folder"},
+    "Movies/The Third Man (1949)/movie":
+        {"title": "The Third Man", "year": "1949", "source": "folder"},
+    "Big Film 2019/VIDEO_TS":
+        {"title": "Big Film", "year": "2019", "source": "folder"},
+    # A part marker ends the title, and the folder supplies the year.
+    "Big Film 2019/BigFilm.CD1":
+        {"title": "BigFilm", "year": "2019"},
+
+    # --- explicit overrides ---------------------------------------------
+    "The Matrix [tmdbid=603]":
+        {"title": "The Matrix"},
+    "Some Obscure Film [imdbid=tt0090605]":
+        {"title": "Some Obscure Film"},
+
+    # --- real extensions are stripped, fake ones are not ----------------
+    "The Third Man (1949).mkv":
+        {"title": "The Third Man", "year": "1949"},
+}
+
+FIELDS = ["label", "title", "year", "ep", "source", "cleaned", "series"]
+
+
+def run():
+    names = "\n".join(CASES) + "\n"
+    try:
+        p = subprocess.run([BINARY, "--video-name-test", "-"],
+                           input=names, capture_output=True, text=True)
+    except FileNotFoundError:
+        print(f"FAIL  no binary at {BINARY} — pass its path as the first "
+              f"argument")
+        return 1
+    if p.returncode != 0:
+        print(f"FAIL  {BINARY} exited {p.returncode}: {p.stderr.strip()}")
+        return 1
+
+    got = {}
+    for line in p.stdout.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        # Trailing empty fields may be dropped by nothing here, but be lenient
+        # so a future extra column does not break every case at once.
+        parts += [""] * (len(FIELDS) - len(parts))
+        row = dict(zip(FIELDS, parts))
+        got[row["label"]] = row
+
+    failed = 0
+    for name, expect in CASES.items():
+        row = got.get(name)
+        if row is None:
+            print(f"FAIL  {name!r}: no output line")
+            failed += 1
+            continue
+        for field, want in expect.items():
+            if row[field] != want:
+                print(f"FAIL  {name!r}: {field} = {row[field]!r}, "
+                      f"expected {want!r}")
+                failed += 1
+
+    checks = sum(len(e) for e in CASES.values())
+    print(f"\n{checks - failed}/{checks} assertions passed "
+          f"over {len(CASES)} names")
+    return failed
+
+
+if __name__ == "__main__":
+    sys.exit(min(run(), 1))
