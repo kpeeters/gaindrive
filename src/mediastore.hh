@@ -36,10 +36,14 @@ class MediaStore {
 		// only normalises them.
 		//
 		// video_art_px of 0 disables manufacturing cover art for videos
-		// entirely; nothing else about a scan changes.
+		// entirely; nothing else about a scan changes. video_art_frames
+		// enables the frame-grab tier, which is off by default — see
+		// videoart.hh. Turning it off also purges the frames a previous run
+		// stored, since leaving them is indistinguishable from still having
+		// the feature on.
 		MediaStore(const std::string& db_path, const std::vector<Root>& roots,
 		           const std::string& user_db_path = "",
-		           int video_art_px = 640);
+		           int video_art_px = 640, bool video_art_frames = false);
 
 		// The configured roots, in the order given.
 		const std::vector<Root>& roots() const;
@@ -574,6 +578,11 @@ class MediaStore {
 		std::optional<VideoArt> video_art_;
 
 		void create_schema();
+
+		// Drops video art produced by a tier that is now switched off, and
+		// repairs the cover_path pointers left dangling by it. Called once
+		// from the constructor.
+		void purge_disabled_video_art();
 
 		// Reconciles the folders table's root rows with the configuration.
 		// Called once from the constructor.

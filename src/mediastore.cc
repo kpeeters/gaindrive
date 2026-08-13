@@ -359,7 +359,8 @@ static std::string derive_path(const std::string& base, const std::string& suffi
 	}
 
 MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& roots,
-                       const std::string& user_db_path, int video_art_px)
+                       const std::string& user_db_path, int video_art_px,
+                       bool video_art_frames)
 	// The third argument is the busy timeout, and it defaults to 0 — meaning
 	// SQLite gives up on a contended write *immediately* and SQLiteCpp turns
 	// that into a throw.  Any external writer (a second gaindrive, or sqlite3
@@ -377,7 +378,7 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	            SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE,
 	            DB_BUSY_TIMEOUT_MS)
 	{
-	if (video_art_px > 0) video_art_.emplace(video_art_px);
+	if (video_art_px > 0) video_art_.emplace(video_art_px, video_art_frames);
 
 	// Normalise each root: strip trailing '/' so path never has one, derive
 	// the always-has-one form used to compose and strip absolute paths, and
@@ -414,7 +415,45 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	db_music_.exec("PRAGMA client.journal_mode=WAL");
 	db_music_.exec("PRAGMA client.foreign_keys=ON");
 	create_schema();
+	purge_disabled_video_art();
 	sync_roots();
+	}
+
+// Frames stored by an earlier run, when the tier producing them is now off.
+//
+// Leaving them would make "off" mean only "stop making new ones", which is not
+// what anybody asking for it wants: the useless frames would go on being the
+// cover art for the whole collection. They are cheap to get back — one rescan
+// with the tier enabled — which is what makes deleting them the right default
+// rather than a destructive one.
+void MediaStore::purge_disabled_video_art()
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Transaction txn(db_music_);
+
+	if (!video_art_ || !video_art_->frames_allowed()) {
+		db_music_.exec("DELETE FROM video_art WHERE source = 'frame'");
+		if (int n = db_music_.getChanges(); n > 0)
+			std::cout << stamp() << "video art: dropped " << n
+			          << " frame grabs (the frame tier is off)" << std::endl;
+		}
+
+	// Whatever the reason a row went away, the cover_path pointing at it has
+	// to go too. A cover_path that is also a songs.path is by construction the
+	// video-art convention — a real image is never a song — so this repairs
+	// exactly the dangling pointers and nothing else. Without it the art is
+	// gone but every affected album still claims to have some, and getCoverArt
+	// answers 404 for a cover the client was told existed.
+	db_music_.exec(
+		"UPDATE albums SET cover_path = ''"
+		" WHERE cover_path IN (SELECT path FROM songs)"
+		"   AND cover_path NOT IN (SELECT path FROM video_art)");
+	db_music_.exec(
+		"UPDATE songs SET cover_path = ''"
+		" WHERE cover_path IN (SELECT path FROM songs)"
+		"   AND cover_path NOT IN (SELECT path FROM video_art)");
+
+	txn.commit();
 	}
 
 void MediaStore::create_schema()

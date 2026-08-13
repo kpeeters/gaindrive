@@ -53,8 +53,8 @@ static std::string scale_filter(int max_px)
 	return "scale=min(" + m + "\\,iw):-2";
 	}
 
-VideoArt::VideoArt(int max_px)
-	: max_px_(max_px > 0 ? max_px : 640)
+VideoArt::VideoArt(int max_px, bool allow_frames)
+	: max_px_(max_px > 0 ? max_px : 640), allow_frames_(allow_frames)
 	{
 	}
 
@@ -221,6 +221,10 @@ std::optional<VideoArtResult> VideoArt::generate(
 	// but it beats no cover at all.
 	if (p->attached_pic >= 0)
 		if (auto art = from_embedded(input, *p)) return art;
+
+	// Off unless asked for. See videoart.hh: a frame belongs after an online
+	// lookup, not instead of one.
+	if (!allow_frames_) return std::nullopt;
 
 	return from_frame(input, p->duration);
 	}

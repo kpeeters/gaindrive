@@ -15,8 +15,10 @@ startup scan finish:
 Then run:
     python3 tests/test_video_art.py
 
-Run it against a server started with --no-video-art and every test here should
-skip rather than fail: with no art, there are no ids to resolve.
+Everything here **skips** when no video in the library has art, rather than
+failing. That is a legitimate state, and currently the common one: only the
+embedded-cover tier is on by default, and most collections have no embedded
+covers. Start the server with --video-art-frames to exercise these properly.
 """
 
 import json
@@ -84,6 +86,17 @@ def _with_art():
     return [v for v in _videos() if v.get("coverArt")]
 
 
+class Skip(Exception):
+    """Not a failure: there is simply nothing of this kind to test."""
+
+
+def _need_art():
+    _need_video()
+    if not _with_art():
+        raise Skip("no video in the library has cover art — only the embedded "
+                   "tier is on by default; try --video-art-frames")
+
+
 # The magic bytes rather than the declared type: the point of the whole
 # exercise is that the response is a real image, and a Content-Type header
 # costs nothing to get right while serving the wrong bytes.
@@ -94,15 +107,13 @@ def _looks_like_an_image(body):
 # ---- ids resolve ------------------------------------------------------
 
 def test_videos_carry_cover_art_ids():
-    _need_video()
+    _need_art()
     got = _with_art()
-    assert got, ("no video reported a coverArt id — either --no-video-art is "
-                 "set, or the scan has not run since the feature was added")
     print(f"PASS  {len(got)}/{len(_videos())} videos carry a coverArt id")
 
 
 def test_cover_art_ids_serve_images():
-    _need_video()
+    _need_art()
     checked = 0
     for v in _with_art():
         status, hdrs, body = _raw("getCoverArt.view", {"id": v["coverArt"]})
@@ -119,10 +130,8 @@ def test_cover_art_ids_serve_images():
 def test_cover_art_is_revalidated_not_cached_blindly():
     """folders.id is a rowid and moves across a rescan, so a cover URL must
     carry a validator or a browser keeps showing the previous film's frame."""
-    _need_video()
-    got = _with_art()
-    assert got, "no video cover art to check"
-    v = got[0]
+    _need_art()
+    v = _with_art()[0]
     status, hdrs, _ = _raw("getCoverArt.view", {"id": v["coverArt"]})
     assert status == 200
     assert "no-cache" in hdrs.get("Cache-Control", ""), \
@@ -140,9 +149,8 @@ def test_cover_art_is_revalidated_not_cached_blindly():
 def test_size_parameter_is_accepted():
     """The stored image is served at its stored size whatever `size` says —
     what must not happen is a 500 or an empty body."""
-    _need_video()
+    _need_art()
     got = _with_art()
-    assert got, "no video cover art to check"
     for size in ("64", "200", "400"):
         status, _, body = _raw("getCoverArt.view",
                                {"id": got[0]["coverArt"], "size": size})
@@ -157,7 +165,7 @@ def test_album_holding_a_video_has_a_cover():
     """A single-video album folder with no image of its own takes the video's
     art, which is what makes the browse grid fill in rather than showing a
     wall of placeholders."""
-    _need_video()
+    _need_art()
     seen = 0
     for v in _with_art():
         album_id = v.get("albumId") or v.get("parent")
@@ -198,12 +206,17 @@ TESTS = [
 ]
 
 if __name__ == "__main__":
-    failed = 0
+    failed = skipped = 0
     for t in TESTS:
         try:
             t()
+        except Skip as e:
+            print(f"SKIP  {t.__name__}: {e}")
+            skipped += 1
         except Exception as e:
             print(f"FAIL  {t.__name__}: {e}")
             failed += 1
-    print(f"\n{len(TESTS) - failed}/{len(TESTS)} passed")
+    passed = len(TESTS) - failed - skipped
+    print(f"\n{passed}/{len(TESTS)} passed"
+          + (f", {skipped} skipped" if skipped else ""))
     sys.exit(failed)

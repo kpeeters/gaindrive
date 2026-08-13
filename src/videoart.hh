@@ -10,8 +10,15 @@
 // actually writes, so the art has to be manufactured.  Two local tiers, in
 // descending order of fidelity: a cover image already embedded in the file,
 // and failing that a representative frame.  Neither needs a network round
-// trip, an API key or a correctly named file, which is the whole point — a
-// badly named collection still looks organised.
+// trip, an API key or a correctly named file.
+//
+// **The frame tier is off by default** (`allow_frames`).  A frame is a fine
+// cover for a home video and a poor one for a film or a documentary, where
+// what is wanted is the poster — so it belongs *after* an online lookup, as
+// the thing that runs only when nothing else could identify the file at all.
+// Until that lookup exists, a frame grab would be the only tier reached for
+// most of a collection, which is worse than showing no art. The code stays
+// because that last-resort position is where it is going.
 //
 // There is deliberately no third tier for Matroska cover *attachments*.  They
 // look like a separate mechanism (a whole file carried in the container, which
@@ -39,13 +46,18 @@ struct VideoArtResult
 class VideoArt
 	{
 	public:
-		// max_px bounds the long edge of a generated frame.  An embedded cover
-		// is passed through untouched: it was chosen by whoever made the file
-		// and is already small.
-		explicit VideoArt(int max_px = 640);
+		// max_px bounds the long edge of a generated image.  An embedded cover
+		// is passed through untouched unless it exceeds it: it was chosen by
+		// whoever made the file and re-encoding it can only lose.
+		//
+		// allow_frames enables the frame-grab tier — see the note above for
+		// why it defaults off.
+		explicit VideoArt(int max_px = 640, bool allow_frames = false);
 
-		// Empty when every tier failed, which is never fatal — the caller just
-		// has no cover, exactly as before.  Never throws.
+		bool frames_allowed() const { return allow_frames_; }
+
+		// Empty when every enabled tier failed, which is never fatal — the
+		// caller just has no cover, exactly as before.  Never throws.
 		//
 		// ffmpeg_input differs from `path` only for a DVD titleset, where the
 		// caller passes dvd_input(first_vob) so the whole concat: list is read
@@ -78,5 +90,6 @@ class VideoArt
 		static std::optional<std::string> run(
 			const std::vector<std::string>& argv);
 
-		int max_px_;
+		int  max_px_;
+		bool allow_frames_;
 	};

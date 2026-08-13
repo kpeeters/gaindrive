@@ -200,10 +200,11 @@ CREATE INDEX idx_song_artists_role
 
 -- Cover art manufactured from a video file by
 -- VideoArt (src/videoart.hh): an image already
--- embedded in the container, or failing that a
--- representative frame. Video files carry no tag
--- anything writes and are rarely named well, so
--- without this every video shows a placeholder.
+-- embedded in the container, or — only with
+-- --video-art-frames — a representative frame.
+-- Video files carry no tag anything writes and are
+-- rarely named well, so without this every video
+-- shows a placeholder.
 --
 -- It lives here with artist_info_cache and
 -- album_info_cache rather than being written into
@@ -231,7 +232,9 @@ CREATE TABLE video_art (
     file_modified INTEGER NOT NULL,
     mime          TEXT NOT NULL,
     -- embedded | frame; kept so a bad batch of one
-    -- kind can be deleted and regenerated
+    -- kind can be deleted and regenerated, which is
+    -- what happens to every 'frame' row on startup
+    -- when the frame tier is off
     source        TEXT NOT NULL,
     image         BLOB NOT NULL,
     created_at    INTEGER NOT NULL
