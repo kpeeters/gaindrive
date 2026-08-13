@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <exception>
 #include <iostream>
 #include <thread>
 
@@ -64,17 +65,36 @@ static int year_of(const std::string& date)
 	catch (...) { return 0; }
 	}
 
+// Absent and null must mean the same thing here, and nlohmann's value() does
+// not: it substitutes the default only when the key is *missing*, and throws
+// type_error.302 when the key is present carrying null. TMDB sends null rather
+// than omitting — a search result with no poster is "poster_path": null, and a
+// film with no announced date is "release_date": null — so value() aborted a
+// whole scan on the first such result. These check the type instead.
+static std::string str_of(const nlohmann::json& j, const char* key)
+	{
+	auto it = j.find(key);
+	if (it == j.end() || !it->is_string()) return {};
+	return it->get<std::string>();
+	}
+
+static int int_of(const nlohmann::json& j, const char* key)
+	{
+	auto it = j.find(key);
+	if (it == j.end() || !it->is_number_integer()) return 0;
+	return it->get<int>();
+	}
+
 static TmdbMatch match_from(const nlohmann::json& j, bool tv)
 	{
 	TmdbMatch m;
 	m.is_tv       = tv;
-	m.id          = j.value("id", 0);
-	m.title       = tv ? j.value("name", std::string())
-	                   : j.value("title", std::string());
-	m.year        = year_of(tv ? j.value("first_air_date", std::string())
-	                           : j.value("release_date",   std::string()));
-	m.overview    = j.value("overview", std::string());
-	m.poster_path = j.value("poster_path", std::string());
+	m.id          = int_of(j, "id");
+	m.title       = tv ? str_of(j, "name")  : str_of(j, "title");
+	m.year        = year_of(tv ? str_of(j, "first_air_date")
+	                           : str_of(j, "release_date"));
+	m.overview    = str_of(j, "overview");
+	m.poster_path = str_of(j, "poster_path");
 	return m;
 	}
 
@@ -143,9 +163,9 @@ std::optional<std::string> Tmdb::get(const std::string& path,
 	return r->body;
 	}
 
-std::optional<TmdbMatch> tmdb_pick(const std::string& results_json,
-                                    const std::string& title, int year,
-                                    bool tv)
+static std::optional<TmdbMatch> pick_impl(const std::string& results_json,
+                                           const std::string& title, int year,
+                                           bool tv)
 	{
 	auto j = nlohmann::json::parse(results_json, nullptr, false);
 	if (j.is_discarded() || !j.contains("results") || !j["results"].is_array())
@@ -181,6 +201,25 @@ std::optional<TmdbMatch> tmdb_pick(const std::string& results_json,
 	return std::nullopt;
 	}
 
+// This class is the whole boundary with the provider's JSON, so a surprise in
+// it must cost one file rather than the scan. It already treats a network
+// error and a 404 as "no match"; an unreadable body is the same answer. The
+// catch is here and not around the caller so that whatever a future field does
+// cannot escape into the scanner, which runs in a detached thread.
+std::optional<TmdbMatch> tmdb_pick(const std::string& results_json,
+                                    const std::string& title, int year,
+                                    bool tv)
+	{
+	try {
+		return pick_impl(results_json, title, year, tv);
+		}
+	catch (const std::exception& e) {
+		std::cout << stamp() << "tmdb: unreadable search response for \""
+		          << title << "\": " << e.what() << std::endl;
+		return std::nullopt;
+		}
+	}
+
 std::optional<TmdbMatch> Tmdb::search(const std::string& title, int year,
                                        bool tv) const
 	{
@@ -211,9 +250,16 @@ std::optional<TmdbMatch> Tmdb::by_id(int id, bool tv) const
 	                + std::to_string(id), "");
 	if (!body) return std::nullopt;
 
-	auto j = nlohmann::json::parse(*body, nullptr, false);
-	if (j.is_discarded() || !j.contains("id")) return std::nullopt;
-	return match_from(j, tv);
+	try {
+		auto j = nlohmann::json::parse(*body, nullptr, false);
+		if (j.is_discarded() || !j.contains("id")) return std::nullopt;
+		return match_from(j, tv);
+		}
+	catch (const std::exception& e) {
+		std::cout << stamp() << "tmdb: unreadable detail response for id " << id
+		          << ": " << e.what() << std::endl;
+		return std::nullopt;
+		}
 	}
 
 std::optional<std::string> Tmdb::poster(const std::string& poster_path) const
