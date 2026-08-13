@@ -100,6 +100,32 @@ CASES = {
     "Breaking Bad/Season 02/2x05 - Breakage":
         {"title": "Breakage", "ep": "S2E5", "series": "Breaking Bad"},
 
+    # --- the season from the folder --------------------------------------
+    # Episodes regularly do not repeat the season the folder already states,
+    # and the season is what groups them in a client, so the folder has to
+    # supply it. The leading number still orders them.
+    "Planet Earth II/Season 02/03 Jungles":
+        {"title": "03 Jungles", "ep": "S2E3", "series": "Planet Earth II"},
+    "Blackadder/Series 4/title00":
+        {"title": "Blackadder", "ep": "S4E0", "source": "folder"},
+    "Wallander/Seizoen 3/aflevering":
+        {"ep": "S3E0", "series": "Wallander"},
+    # The file is the more specific claim: an S03E01 sitting in "Season 02" is
+    # a misfiled episode, not a season 2 one.
+    "Show/Season 02/Show.S03E01":
+        {"ep": "S3E1", "series": "Show"},
+    # A disc is not a season. This is the whole reason the folder rules use a
+    # narrower pattern than the one that finds the show's name: reading "2"
+    # here would label a two-disc film as a series.
+    "Some Film/Disc 2/title00":
+        {"title": "Some Film", "ep": "", "source": "folder"},
+    "Some Film/CD1/part":
+        {"ep": ""},
+    # An unnumbered folder says nothing, and must not: a Specials folder read
+    # as a season would collide with season 1.
+    "Planet Earth II/Specials/making of":
+        {"ep": ""},
+
     # --- uninformative filenames ---------------------------------------
     "Some Documentary/title00":
         {"title": "Some Documentary", "source": "folder"},

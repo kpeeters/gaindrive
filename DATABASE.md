@@ -153,6 +153,13 @@ CREATE TABLE songs (
     height        INTEGER DEFAULT 0,
     video_codec   TEXT,      -- "h264","mpeg2video", etc. (ffprobe codec_name)
     audio_codec   TEXT,      -- "aac","ac3", etc.
+    -- The season an episode belongs to, from an S02E03 marker or a folder
+    -- naming its season; 0 for anything that is not one. disc_number holds
+    -- the same number, because that is what clients group and sort by; this
+    -- says the grouping is a season rather than a disc, which is what lets a
+    -- client head it "Series 2". A "Disc 2" or "CD1" folder is deliberately
+    -- not a season, and neither is an unnumbered "Specials".
+    season        INTEGER DEFAULT 0,
     -- Sidecar image beside this file, stored form; empty for a song that
     -- inherits its album's cover. Set for a loose file — one sitting directly
     -- in a section or a root, whose folder cover belongs to the whole section

@@ -2809,7 +2809,11 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
          currentDisc = disc;
          const dh = document.createElement('div');
          dh.className = 'disc-heading';
-         dh.textContent = `Disc ${disc}`;
+         // season is a gaindrive extension carrying the same number as
+         // discNumber, present only when the grouping really is a season. Read
+         // per group rather than per album, so a show with an unnumbered
+         // Specials folder still heads that one "Disc".
+         dh.textContent = `${song.season > 0 ? 'Series' : 'Disc'} ${disc}`;
          frag.appendChild(dh);
          }
 

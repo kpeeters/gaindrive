@@ -23,7 +23,11 @@ struct VideoName
 	{
 	std::string title;          // cleaned; the raw name when nothing matched
 	int         year    = 0;
-	int         season  = 0;    // 0 = not an episode
+	// 0 = not an episode. From a marker in the name (S02E03, 2x03, Season 2
+	// Episode 3), or — only through resolve_video_name() — from a folder that
+	// says which season it is. A "Disc 2" or "CD1" folder is *not* a season:
+	// see SEASON_FOLDER_NUM in videoname.cc.
+	int         season  = 0;
 	int         episode = 0;
 	std::string episode_title;  // "Jungles" from ...S01E03.Jungles.1080p
 	std::string series_title;   // for an episode: the show

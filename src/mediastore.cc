@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <ctime>
+#include <map>
 #include <regex>
 #include <set>
 #include <unordered_map>
@@ -561,6 +562,13 @@ void MediaStore::create_schema()
 			height              INTEGER DEFAULT 0,
 			video_codec         TEXT,
 			audio_codec         TEXT,
+			-- The season an episode belongs to, from an S02E03 marker or from
+			-- a "Season 2" folder; 0 for everything that is not an episode.
+			-- disc_number carries the same number, because that is the field
+			-- clients group and sort by; this one says the grouping is a
+			-- season rather than a disc, which is all that separates
+			-- "Series 2" from "Disc 2" in a client.
+			season              INTEGER DEFAULT 0,
 			-- Sidecar image beside this file ("<root>/<rest>"), for a loose
 			-- file whose folder cover belongs to a whole section rather than
 			-- to it. Empty for everything that inherits its album's cover.
@@ -787,6 +795,8 @@ void MediaStore::create_schema()
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE albums ADD COLUMN cover_manual INTEGER DEFAULT 0"); }
 	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE songs ADD COLUMN season INTEGER DEFAULT 0"); }
+	catch (const SQLite::Exception&) {}
 
 	// Backfill song_artists from album_artists for any songs that were scanned
 	// before this link was introduced.
@@ -915,9 +925,10 @@ struct SongReadData {
 	int         disc_number = 0;
 	bool        changed     = false;
 	bool        is_video    = false;
-	// Video only, from the filename parse in Phase 1. Season is stored
-	// nowhere — disc numbers are positional — but Phase 3c needs it to know
-	// whether to ask TMDB about a film or about a series.
+	// Video only, from the filename parse in Phase 1: the season an episode
+	// belongs to. Stored in songs.season, copied into disc_number so clients
+	// group and sort by it, and read by Phase 3c to know whether to ask TMDB
+	// about a film or about a series.
 	int         season      = 0;
 	// populated in Phase 3 only when changed == true:
 	std::string title;
@@ -992,6 +1003,14 @@ static SongReadData read_song_file(const fs::path& p,
 		sdat.year     = vn.year;
 		sdat.track_nr = vn.episode;
 		sdat.season   = vn.season;
+		// The season *is* the disc number for an episode, and saying so here
+		// is what makes a series group and sort correctly. The number passed
+		// in is the position of the subdirectory in sorted order, which is
+		// right for the discs of an album and wrong for seasons twice over: a
+		// show whose episodes sit flat in one folder has no subdirectory to
+		// count, and one with ten season folders sorts "Season 10" second.
+		// Only the parsed number can be trusted, and only videos have one.
+		if (vn.season > 0) sdat.disc_number = vn.season;
 		}
 	return sdat;
 	}
@@ -1138,6 +1157,36 @@ static void apply_album_overview(SQLite::Database& db, int folder_id,
 	ins.bind(1, folder_id);
 	ins.bind(2, overview);
 	ins.exec();
+	}
+
+// A season is parsed, everything else is positional, and the two numberings
+// share one column — so in an album that has both they can collide. "Extras"
+// sorts before "Season 1" and takes disc number 1 from it, merging a season
+// into a bonus folder; the same happens to a loose film sitting beside an
+// episode, since a song with no disc folder is written as disc 1.
+//
+// Anything with no season in an album that has one is therefore renumbered
+// above the highest season. That also sorts it last, which is where a specials
+// or extras folder belongs. Albums with no season at all — every music album,
+// and every film split across discs — are left completely alone.
+//
+// Runs after Phase 3, because the disc number 0 it reads is also what makes
+// read_song_metadata() consult an audio file's DISCNUMBER tag.
+static void renumber_unseasoned(std::vector<SongReadData>& songs)
+	{
+	int max_season = 0;
+	for (const auto& s : songs) max_season = std::max(max_season, s.season);
+	if (max_season == 0) return;
+
+	// Keyed on the old number so a whole folder moves together, and assigned
+	// in the order the songs come, which is the sorted disc-folder order.
+	std::map<int, int> renumbered;
+	for (auto& s : songs) {
+		if (s.season > 0) continue;
+		auto [it, inserted] = renumbered.try_emplace(s.disc_number, 0);
+		if (inserted) it->second = ++max_season;
+		s.disc_number = it->second;
+		}
 	}
 
 // Phase 3b for one album's worth of files: manufacture cover art for the videos
@@ -1405,18 +1454,22 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 	{
 	if (!sdat.changed) {
 		// An unchanged song still has to say it was seen: the per-album prune
-		// below deletes whatever is left marked unvisited.  Disc number and
-		// sidecar cover come from the folder layout, not from the file, so
-		// they can change while the file itself does not.
+		// below deletes whatever is left marked unvisited.  Disc number, season
+		// and sidecar cover come from the folder layout and the filename, not
+		// from the file's contents, so they can change while the file itself
+		// does not — and a library scanned before any of them existed is
+		// back-filled here rather than needing every file touched.
 		SQLite::Statement upd(db,
 			"UPDATE songs SET last_scanned = CURRENT_TIMESTAMP,"
 			"                 disc_number = CASE WHEN ? > 0 THEN ? ELSE disc_number END,"
+			"                 season = ?,"
 			"                 cover_path = ?"
 			" WHERE path = ?");
 		upd.bind(1, sdat.disc_number);
 		upd.bind(2, sdat.disc_number);
-		upd.bind(3, rel_cover);
-		upd.bind(4, rel_path);
+		upd.bind(3, sdat.season);
+		upd.bind(4, rel_cover);
+		upd.bind(5, rel_path);
 		upd.exec();
 
 		// A video's title is derived from its filename, so it can improve
@@ -1464,8 +1517,8 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 		" (album_id, folder_id, path, filename, title, track_number, disc_number,"
 		"  year, genre, duration, bitrate, sample_rate, channels, codec,"
 		"  file_size, file_modified, is_video, width, height, video_codec,"
-		"  audio_codec, cover_path, last_scanned)"
-		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
+		"  audio_codec, season, cover_path, last_scanned)"
+		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
 	ins.bind(1,  album_id);
 	ins.bind(2,  folder_id);
 	ins.bind(3,  rel_path);
@@ -1487,7 +1540,8 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 	ins.bind(19, sdat.height);
 	ins.bind(20, sdat.video_codec);
 	ins.bind(21, sdat.audio_codec);
-	ins.bind(22, rel_cover);
+	ins.bind(22, sdat.season);
+	ins.bind(23, rel_cover);
 	ins.exec();
 
 	int song_id = static_cast<int>(db.getLastInsertRowid());
@@ -1668,6 +1722,8 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 				}
 			read_song_metadata(sdat);
 			}
+
+	for (auto& adat : albums) renumber_unseasoned(adat.songs);
 
 	// ---- Phase 3b: cover art for videos that have none (no lock) ----
 	// enabled(), not just video_art_: with every tier off this phase would
@@ -1997,6 +2053,8 @@ void MediaStore::scan_root_files(const RootRec& root)
 			}
 		read_song_metadata(sdat);
 		}
+
+	renumber_unseasoned(songs);
 
 	// ---- Phase 3b: cover art for videos that have none (no lock) ----
 	// The prefix takes in the whole root rather than just its loose files.
@@ -2650,7 +2708,8 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_videos()
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
 		+ SONG_COVER_ART_SQL +
-		"       s.path, s.width, s.height, s.video_codec, s.audio_codec"
+		"       s.path, s.width, s.height, s.video_codec, s.audio_codec,"
+		"       s.season"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -2681,6 +2740,7 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_videos()
 		e.height       = q.getColumn(16).isNull() ? 0 : q.getColumn(16).getInt();
 		e.video_codec  = q.getColumn(17).isNull() ? "" : q.getColumn(17).getString();
 		e.audio_codec  = q.getColumn(18).isNull() ? "" : q.getColumn(18).getString();
+		e.season       = q.getColumn(19).getInt();
 		result.push_back(std::move(e));
 		}
 	return result;
@@ -2934,7 +2994,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name, '') AS artist,"
 		"       COALESCE(al.title, '') AS album, s.width, s.height,"
-		"       s.video_codec, s.audio_codec, s.cover_path"
+		"       s.video_codec, s.audio_codec, s.cover_path, s.season"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -2949,7 +3009,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		"       s.file_size, s.codec, s.folder_id,"
 		"       COALESCE(a.name, '') AS artist,"
 		"       COALESCE(al.title, '') AS album, s.width, s.height,"
-		"       s.video_codec, s.audio_codec, s.cover_path"
+		"       s.video_codec, s.audio_codec, s.cover_path, s.season"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -2988,6 +3048,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 			e.cover_art_id = SONG_COVER_ID_BASE + e.id;
 		else if (dir.cover_art_id >= 0)
 			e.cover_art_id = dir.cover_art_id;
+		e.season       = ssel.getColumn(18).getInt();
 		dir.children.push_back(std::move(e));
 		}
 
@@ -3294,6 +3355,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		"       COALESCE(al.title, '') AS album"
 		+ star_col +
 		", s.width, s.height, s.video_codec, s.audio_codec, s.cover_path"
+		", s.season"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -3311,6 +3373,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		"       COALESCE(al.title, '') AS album"
 		+ star_col +
 		", s.width, s.height, s.video_codec, s.audio_codec, s.cover_path"
+		", s.season"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -3366,6 +3429,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 			e.cover_art_id = SONG_COVER_ID_BASE + e.id;
 		else if (info.album.cover_art_id >= 0)
 			e.cover_art_id = info.album.cover_art_id;
+		e.season       = ssel.getColumn(19).getInt();
 		info.songs.push_back(std::move(e));
 		}
 
@@ -3970,7 +4034,7 @@ std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
 		+ SONG_COVER_ART_SQL +
-		"       s.width, s.height, s.video_codec, s.audio_codec"
+		"       s.width, s.height, s.video_codec, s.audio_codec, s.season"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -3999,6 +4063,7 @@ std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
 	e.height       = q.getColumn(15).isNull() ? 0 : q.getColumn(15).getInt();
 	e.video_codec  = q.getColumn(16).isNull() ? "" : q.getColumn(16).getString();
 	e.audio_codec  = q.getColumn(17).isNull() ? "" : q.getColumn(17).getString();
+	e.season       = q.getColumn(18).getInt();
 	return e;
 	}
 

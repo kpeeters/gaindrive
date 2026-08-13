@@ -261,6 +261,13 @@ class MediaStore {
 			// seekable, which the API passes to the client as nativeSeek.
 			std::string video_codec;
 			std::string audio_codec;
+			// The season an episode belongs to; 0 for anything that is not
+			// one. disc_number carries the same number — it is what clients
+			// group and sort by — and this says that grouping is a season
+			// rather than a disc, which is all that separates "Series 2" from
+			// "Disc 2" in a listing. Populated by the same four queries as the
+			// two codecs above, and zero elsewhere for the same reason.
+			int         season = 0;
 			};
 
 		struct RecentSongEntry {

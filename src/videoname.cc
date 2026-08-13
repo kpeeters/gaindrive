@@ -53,6 +53,16 @@ static const std::regex SEASON_FOLDER(
 	R"(^(season|series|seizoen|staffel|s|disc|disk|cd)[\s._-]*\d{1,3}$)",
 	std::regex::icase);
 
+// A folder that says which *season* it is, with the number captured.  The
+// season words only: "Disc 2" and "CD1" are excluded deliberately, and that
+// exclusion is the whole point of having a second regex. Above, a folder is
+// being classified as "not the show's name", for which a disc counts; here it
+// is being asked for a season number, and answering 2 for a two-disc film
+// would label it as a series.
+static const std::regex SEASON_FOLDER_NUM(
+	R"(^(?:season|series|seizoen|staffel|s)[\s._-]*(\d{1,3})$)",
+	std::regex::icase);
+
 static std::string to_lower(std::string s)
 	{
 	std::transform(s.begin(), s.end(), s.begin(),
@@ -319,6 +329,17 @@ VideoName resolve_video_name(std::string_view file_stem,
 		show_dir = std::string(parent_name);
 	VideoName folder = parse_video_name(show_dir);
 
+	// "Planet Earth/Season 2/03 Jungles.mkv" — the episodes of a season are
+	// regularly named without repeating the season, so the folder is the only
+	// thing that says which one it is. Used below wherever the file itself did
+	// not say; a file that carries S03E01 while sitting in "Season 2" is a
+	// misfiled episode, and its own name is the more specific claim.
+	int folder_season = 0;
+	std::smatch fm;
+	std::string fname(folder_name);
+	if (std::regex_match(fname, fm, SEASON_FOLDER_NUM))
+		folder_season = std::stoi(fm[1]);
+
 	// season > 0 means one of the unambiguous markers matched, not the leading
 	// number, which never claims a title.
 	if (file.season > 0) {
@@ -346,6 +367,10 @@ VideoName resolve_video_name(std::string_view file_stem,
 			if (out.year    == 0) out.year    = file.year;
 			if (out.tmdb_id.empty()) out.tmdb_id = file.tmdb_id;
 			if (out.imdb_id.empty()) out.imdb_id = file.imdb_id;
+			if (out.season == 0) {
+				out.season       = folder_season;
+				out.series_title = folder.title;
+				}
 			return out;
 			}
 		}
@@ -355,6 +380,10 @@ VideoName resolve_video_name(std::string_view file_stem,
 	if (file.year == 0 && folder.year != 0) {
 		file.year    = folder.year;
 		file.cleaned = true;
+		}
+	if (file.season == 0 && folder_season > 0) {
+		file.season       = folder_season;
+		file.series_title = folder.title;
 		}
 	return file;
 	}

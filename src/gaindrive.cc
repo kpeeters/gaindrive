@@ -281,6 +281,12 @@ static nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
 		};
 	if (c.cover_art_id >= 0) s["coverArt"] = sid(c.cover_art_id);
 	if (!c.starred.empty()) s["starred"] = iso8601(c.starred);
+	// gaindrive extension. discNumber already carries this number, and every
+	// Subsonic client groups by that; this says the grouping is a *season*, so
+	// a client that knows about it can head the group "Series 2" rather than
+	// "Disc 2". Omitted rather than sent as 0, so its absence means "not an
+	// episode, or an entry from a query that does not select it".
+	if (c.season > 0) s["season"] = c.season;
 	// Omitted rather than sent as 0 when the scan could not probe the file, or
 	// when the query that produced this entry does not select the dimensions.
 	if (c.width  > 0) s["originalWidth"]  = c.width;
@@ -332,6 +338,8 @@ static XMLElement* song_entry_xml(XMLDocument& doc,
 	el->SetAttribute("albumId",     c.parent_id);
 	if (c.width  > 0) el->SetAttribute("originalWidth",  c.width);
 	if (c.height > 0) el->SetAttribute("originalHeight", c.height);
+	// See the JSON entry: a gaindrive extension marking discNumber as a season.
+	if (c.season > 0) el->SetAttribute("season", c.season);
 	if (!c.starred.empty())
 		el->SetAttribute("starred", iso8601(c.starred).c_str());
 	if (auto t = transcode_target(c, max_bitrate, format)) {
