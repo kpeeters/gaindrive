@@ -8,6 +8,7 @@
 
 #include "castmanager.hh"
 #include "stamp.hh"
+#include "jsonread.hh"
 
 #include <cstdio>
 #include <cstring>
@@ -474,7 +475,14 @@ static nlohmann::json cast_recv(SSL* ssl)
 		}
 	std::string payload = pb_payload(msg);
 	if (payload.empty()) return nullptr;
-	return nlohmann::json::parse(payload, nullptr, false);
+	// Null for anything unusable, because that is what every caller already
+	// tests. A failed parse yields a *discarded* value, and `is_null()` is
+	// false for one — so returning it directly would send a body we could not
+	// read past the "did we receive a message" check and into a value() call
+	// that throws, on the poll thread, where an exception is std::terminate.
+	auto j = nlohmann::json::parse(payload, nullptr, false);
+	if (!j.is_object()) return nullptr;
+	return j;
 	}
 
 // Poll until we see a RECEIVER_STATUS that includes a running application.
@@ -484,10 +492,10 @@ static std::string wait_transport(SSL* ssl)
 	for (int i = 0; i < 20; i++) {
 		auto m = cast_recv(ssl);
 		if (m.is_null()) break;
-		if (m.value("type", "") == "RECEIVER_STATUS") {
-			auto& apps = m["status"]["applications"];
-			if (apps.is_array() && !apps.empty())
-				return apps[0].value("transportId", "");
+		if (jstr(m, "type") == "RECEIVER_STATUS") {
+			std::string tid = jstr(jidx(jsub(jsub(m, "status"), "applications"), 0),
+			                       "transportId");
+			if (!tid.empty()) return tid;
 			}
 		}
 	return {};
@@ -659,17 +667,17 @@ void CastManager::load_worker(std::string url, std::string mime, int gen,
 
 void CastManager::update_status(const nlohmann::json& msg)
 	{
-	auto& list = msg["status"];
-	if (!list.is_array() || list.empty()) return;
-	auto& s = list[0];
+	const auto& s = jidx(jsub(msg, "status"), 0);
+	if (!s.is_object()) return;
 	CastStatus cs;
-	cs.player_state     = s.value("playerState",    "IDLE");
-	cs.current_time     = s.value("currentTime",     0.0f);
-	cs.media_session_id = s.value("mediaSessionId",  0);
-	cs.idle_reason      = s.value("idleReason",     "");
-	if (s.contains("media") && s["media"].contains("duration")
-	                        && s["media"]["duration"].is_number())
-		cs.duration = s["media"]["duration"].get<float>();
+	std::string state   = jstr(s, "playerState");
+	cs.player_state     = state.empty() ? "IDLE" : state;
+	cs.current_time     = static_cast<float>(jnum(s, "currentTime"));
+	cs.media_session_id = jint(s, "mediaSessionId");
+	cs.idle_reason      = jstr(s, "idleReason");
+	// Left at 0 when the receiver does not report one, which the caller below
+	// reads as "keep the duration we already had".
+	cs.duration         = static_cast<float>(jnum(jsub(s, "media"), "duration"));
 
 	bool        do_retry = false;
 	std::string retry_url, retry_mime;
@@ -824,69 +832,87 @@ void CastManager::poll_loop()
 
 		std::cout << stamp() << "Cast: poll_loop connected to transport " << tid << std::endl;
 
-		while (poll_active_) {
-			// If load() has started a new track, reconnect to the new transport.
-			{
-			std::lock_guard<std::mutex> lk(tid_mutex_);
-			if (transport_id_ != connected_tid) break;
-			}
+		// The receiver's messages are the only untrusted input on this thread,
+		// and this thread is detached: anything escaping it is std::terminate, a
+		// dead server rather than a failed request. Nothing in here should throw
+		// — every field is read through jsonread.hh — so this is a backstop, and
+		// it drops out to the reconnect above rather than ending the loop, since
+		// a thread that has quietly stopped polling looks exactly like a
+		// Chromecast that has stopped answering.
+		try {
+			while (poll_active_) {
+				// If load() has started a new track, reconnect to the new transport.
+				{
+				std::lock_guard<std::mutex> lk(tid_mutex_);
+				if (transport_id_ != connected_tid) break;
+				}
 
-			auto m = cast_recv(t.ssl);
-			if (m.is_null()) {
-				// EAGAIN means SO_RCVTIMEO fired with no data — loop to re-check
-				// poll_active_ and transport_id_ before blocking again.
-				if (errno == EAGAIN || errno == EWOULDBLOCK) {
-					// Chromecast only pushes MEDIA_STATUS on state changes, not
-					// during continuous playback — poll for position explicitly.
-					cast_send(t.ssl, NS_MEDIA, src, tid,
-					          {{"type", "GET_STATUS"}, {"requestId", 101}});
-					continue;
+				auto m = cast_recv(t.ssl);
+				if (m.is_null()) {
+					// EAGAIN means SO_RCVTIMEO fired with no data — loop to re-check
+					// poll_active_ and transport_id_ before blocking again.
+					if (errno == EAGAIN || errno == EWOULDBLOCK) {
+						// Chromecast only pushes MEDIA_STATUS on state changes, not
+						// during continuous playback — poll for position explicitly.
+						cast_send(t.ssl, NS_MEDIA, src, tid,
+						          {{"type", "GET_STATUS"}, {"requestId", 101}});
+						continue;
+						}
+					break;  // real error or closed connection — reconnect
 					}
-				break;  // real error or closed connection — reconnect
-				}
 
-			std::string type = m.value("type", "");
-			if (type == "PING") {
-				cast_send(t.ssl, NS_HEARTBEAT, src, "receiver-0",
-				          {{"type", "PONG"}});
-				}
-			else if (type == "MEDIA_STATUS") {
-				auto& list = m["status"];
-				if (list.is_array() && !list.empty()) {
-					auto& s = list[0];
-					std::string idle_reason = s.value("idleReason", "");
-					std::cout << stamp() << "Cast rx MEDIA_STATUS"
-					          << " state="    << s.value("playerState", "?")
-					          << " t="        << s.value("currentTime",  0.0f)
-					          << " dur="      << (s.contains("media") && s["media"]["duration"].is_number()
-					                              ? s["media"]["duration"].get<float>() : 0.0f)
-					          << " msid="     << s.value("mediaSessionId", 0)
-					          << (idle_reason.empty() ? std::string{}
-					                                  : " idleReason=" + idle_reason)
-					          << std::endl;
-					// Dump the full payload for every push — fields like autoplay,
-					// loadingItemId, extendedStatus, supportedMediaCommands and
-					// preloadedItemId reveal what the receiver thinks it's doing
-					// and are essential for diagnosing stuck-IDLE sessions.
-					std::cout << stamp() << "Cast rx MEDIA_STATUS payload: "
+				std::string type = jstr(m, "type");
+				if (type == "PING") {
+					cast_send(t.ssl, NS_HEARTBEAT, src, "receiver-0",
+					          {{"type", "PONG"}});
+					}
+				else if (type == "MEDIA_STATUS") {
+					const auto& s = jidx(jsub(m, "status"), 0);
+					if (s.is_object()) {
+						std::string idle_reason = jstr(s, "idleReason");
+						std::string state       = jstr(s, "playerState");
+						std::cout << stamp() << "Cast rx MEDIA_STATUS"
+						          << " state="    << (state.empty() ? "?" : state)
+						          << " t="        << jnum(s, "currentTime")
+						          << " dur="      << jnum(jsub(s, "media"), "duration")
+						          << " msid="     << jint(s, "mediaSessionId")
+						          << (idle_reason.empty() ? std::string{}
+						                                  : " idleReason=" + idle_reason)
+						          << std::endl;
+						// Dump the full payload for every push — fields like autoplay,
+						// loadingItemId, extendedStatus, supportedMediaCommands and
+						// preloadedItemId reveal what the receiver thinks it's doing
+						// and are essential for diagnosing stuck-IDLE sessions.
+						std::cout << stamp() << "Cast rx MEDIA_STATUS payload: "
+						          << m.dump() << std::endl;
+						}
+					update_status(m);
+					}
+				else if (type == "ERROR") {
+					std::cout << stamp() << "Cast rx ERROR: " << m.dump() << std::endl;
+					}
+				else if (type == "RECEIVER_STATUS") {
+					// Dump the full payload so we can see whether the Default
+					// Media Receiver app is still running and what transportId
+					// it's advertising — STOP can trigger an idle-app teardown
+					// that invalidates our cached transport_id.
+					std::cout << stamp() << "Cast rx RECEIVER_STATUS: "
 					          << m.dump() << std::endl;
 					}
-				update_status(m);
+				else if (type != "PONG") {
+					std::cout << stamp() << "Cast rx " << type << std::endl;
+					}
 				}
-			else if (type == "ERROR") {
-				std::cout << stamp() << "Cast rx ERROR: " << m.dump() << std::endl;
-				}
-			else if (type == "RECEIVER_STATUS") {
-				// Dump the full payload so we can see whether the Default
-				// Media Receiver app is still running and what transportId
-				// it's advertising — STOP can trigger an idle-app teardown
-				// that invalidates our cached transport_id.
-				std::cout << stamp() << "Cast rx RECEIVER_STATUS: "
-				          << m.dump() << std::endl;
-				}
-			else if (type != "PONG") {
-				std::cout << stamp() << "Cast rx " << type << std::endl;
-				}
+			}
+		catch (const std::exception& e) {
+			std::cout << stamp() << "Cast: poll_loop error: " << e.what()
+			          << " — reconnecting" << std::endl;
+			std::this_thread::sleep_for(std::chrono::milliseconds(500));
+			}
+		catch (...) {
+			std::cout << stamp() << "Cast: poll_loop error: unknown exception"
+			          << " — reconnecting" << std::endl;
+			std::this_thread::sleep_for(std::chrono::milliseconds(500));
 			}
 		}
 	}
@@ -923,11 +949,9 @@ void CastManager::stop()
 	for (int i = 0; i < 5 && session_id.empty(); i++) {
 		auto m = cast_recv(t.ssl);
 		if (m.is_null()) break;
-		if (m.value("type", "") == "RECEIVER_STATUS") {
-			auto& apps = m["status"]["applications"];
-			if (apps.is_array() && !apps.empty())
-				session_id = apps[0].value("sessionId", "");
-			}
+		if (jstr(m, "type") == "RECEIVER_STATUS")
+			session_id = jstr(jidx(jsub(jsub(m, "status"), "applications"), 0),
+			                  "sessionId");
 		}
 
 	if (!session_id.empty())

@@ -2,6 +2,7 @@
 #include "stamp.hh"
 #include "streamer.hh"
 #include "codecs.hh"
+#include "jsonread.hh"
 #include "embedded_web.hh"
 
 #include <algorithm>
@@ -169,54 +170,6 @@ static std::string fmt_of(const httplib::Request& req)
 	{
 	auto it = req.params.find("f");
 	return (it != req.params.end() && it->second == "json") ? "json" : "xml";
-	}
-
-// ---- Reading a metadata provider's JSON --------------------------------
-//
-// Every field the MusicBrainz, Wikidata, Wikipedia, TheAudioDB and Discogs
-// lookups pull out of a response goes through these three, and none of them
-// can throw. Neither of the obvious ways to write it holds:
-//
-// * `value(key, default)` substitutes the default only when the key is
-//   *absent*, and throws type_error.302 when the key is present holding null
-//   — which is how a provider says it has nothing. TheAudioDB answers a miss
-//   with `"artists": null`, and a TMDB result with no poster carries
-//   `"poster_path": null`; that one killed an entire scan (see the TMDB
-//   section of CLAUDE.md).
-// * `operator[]` throws type_error.305 on a string or an array, so one field
-//   coming back in an unexpected shape takes down a whole chain like
-//   `claims["P18"][0]["mainsnak"]["datavalue"]` — and being non-const it also
-//   silently *inserts* nulls into the parsed document as it walks.
-//
-// A field that is missing, null or the wrong type is worth exactly as much as
-// an empty one here: these lookups are all best-effort embellishment, and
-// every caller already handles the empty case because a provider is allowed
-// not to know. So each helper narrows to what it wants and yields nothing
-// when it does not find it.
-
-// A member of an object, or a null that stays null. Chainable.
-static const nlohmann::json& jsub(const nlohmann::json& j,
-                                  const std::string& key)
-	{
-	static const nlohmann::json none;
-	if (!j.is_object()) return none;
-	auto it = j.find(key);
-	return it == j.end() ? none : *it;
-	}
-
-// An element of an array, or null. Chainable with the above.
-static const nlohmann::json& jidx(const nlohmann::json& j, size_t i)
-	{
-	static const nlohmann::json none;
-	if (!j.is_array() || i >= j.size()) return none;
-	return j[i];
-	}
-
-// A string member, or empty.
-static std::string jstr(const nlohmann::json& j, const std::string& key)
-	{
-	const auto& v = jsub(j, key);
-	return v.is_string() ? v.get<std::string>() : std::string();
 	}
 
 // ---- Helpers ----------------------------------------------------------

@@ -1,5 +1,6 @@
 #include "tmdb.hh"
 #include "stamp.hh"
+#include "jsonread.hh"
 
 #include <algorithm>
 #include <cctype>
@@ -65,36 +66,22 @@ static int year_of(const std::string& date)
 	catch (...) { return 0; }
 	}
 
-// Absent and null must mean the same thing here, and nlohmann's value() does
-// not: it substitutes the default only when the key is *missing*, and throws
-// type_error.302 when the key is present carrying null. TMDB sends null rather
-// than omitting — a search result with no poster is "poster_path": null, and a
-// film with no announced date is "release_date": null — so value() aborted a
-// whole scan on the first such result. These check the type instead.
-static std::string str_of(const nlohmann::json& j, const char* key)
-	{
-	auto it = j.find(key);
-	if (it == j.end() || !it->is_string()) return {};
-	return it->get<std::string>();
-	}
-
-static int int_of(const nlohmann::json& j, const char* key)
-	{
-	auto it = j.find(key);
-	if (it == j.end() || !it->is_number_integer()) return 0;
-	return it->get<int>();
-	}
-
+// Every field here goes through jsonread.hh, never through value(): TMDB
+// sends null rather than omitting — a search result with no poster is
+// "poster_path": null, and a film with no announced date is
+// "release_date": null — and value() throws on that, which aborted a whole
+// scan on the first such result. The rule and the rest of the reasoning are
+// at the definitions.
 static TmdbMatch match_from(const nlohmann::json& j, bool tv)
 	{
 	TmdbMatch m;
 	m.is_tv       = tv;
-	m.id          = int_of(j, "id");
-	m.title       = tv ? str_of(j, "name")  : str_of(j, "title");
-	m.year        = year_of(tv ? str_of(j, "first_air_date")
-	                           : str_of(j, "release_date"));
-	m.overview    = str_of(j, "overview");
-	m.poster_path = str_of(j, "poster_path");
+	m.id          = jint(j, "id");
+	m.title       = tv ? jstr(j, "name")  : jstr(j, "title");
+	m.year        = year_of(tv ? jstr(j, "first_air_date")
+	                           : jstr(j, "release_date"));
+	m.overview    = jstr(j, "overview");
+	m.poster_path = jstr(j, "poster_path");
 	return m;
 	}
 
