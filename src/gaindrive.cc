@@ -171,6 +171,54 @@ static std::string fmt_of(const httplib::Request& req)
 	return (it != req.params.end() && it->second == "json") ? "json" : "xml";
 	}
 
+// ---- Reading a metadata provider's JSON --------------------------------
+//
+// Every field the MusicBrainz, Wikidata, Wikipedia, TheAudioDB and Discogs
+// lookups pull out of a response goes through these three, and none of them
+// can throw. Neither of the obvious ways to write it holds:
+//
+// * `value(key, default)` substitutes the default only when the key is
+//   *absent*, and throws type_error.302 when the key is present holding null
+//   — which is how a provider says it has nothing. TheAudioDB answers a miss
+//   with `"artists": null`, and a TMDB result with no poster carries
+//   `"poster_path": null`; that one killed an entire scan (see the TMDB
+//   section of CLAUDE.md).
+// * `operator[]` throws type_error.305 on a string or an array, so one field
+//   coming back in an unexpected shape takes down a whole chain like
+//   `claims["P18"][0]["mainsnak"]["datavalue"]` — and being non-const it also
+//   silently *inserts* nulls into the parsed document as it walks.
+//
+// A field that is missing, null or the wrong type is worth exactly as much as
+// an empty one here: these lookups are all best-effort embellishment, and
+// every caller already handles the empty case because a provider is allowed
+// not to know. So each helper narrows to what it wants and yields nothing
+// when it does not find it.
+
+// A member of an object, or a null that stays null. Chainable.
+static const nlohmann::json& jsub(const nlohmann::json& j,
+                                  const std::string& key)
+	{
+	static const nlohmann::json none;
+	if (!j.is_object()) return none;
+	auto it = j.find(key);
+	return it == j.end() ? none : *it;
+	}
+
+// An element of an array, or null. Chainable with the above.
+static const nlohmann::json& jidx(const nlohmann::json& j, size_t i)
+	{
+	static const nlohmann::json none;
+	if (!j.is_array() || i >= j.size()) return none;
+	return j[i];
+	}
+
+// A string member, or empty.
+static std::string jstr(const nlohmann::json& j, const std::string& key)
+	{
+	const auto& v = jsub(j, key);
+	return v.is_string() ? v.get<std::string>() : std::string();
+	}
+
 // ---- Helpers ----------------------------------------------------------
 
 // The lowercased extension of a path with no leading dot, which is the form
@@ -588,11 +636,9 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 	else {
 		mb_ok = true;
 		auto j = nlohmann::json::parse(r->body, nullptr, false);
-		if (!j.is_discarded() && j.contains("artists") && !j["artists"].empty()) {
-			info.mbid = j["artists"][0].value("id", "");
-			if (!info.mbid.empty())
-				info.last_fm_url = "https://www.last.fm/music/" + url_encode(name);
-			}
+		info.mbid = jstr(jidx(jsub(j, "artists"), 0), "id");
+		if (!info.mbid.empty())
+			info.last_fm_url = "https://www.last.fm/music/" + url_encode(name);
 		}
 
 	// Step 2 — MusicBrainz URL relations → Wikipedia article URL.
@@ -610,20 +656,21 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 			}
 		else {
 			auto j2 = nlohmann::json::parse(r2->body, nullptr, false);
-			auto rels = j2.value("relations", nlohmann::json::array());
+			const auto& rels = jsub(j2, "relations");
 			std::cout << stamp() << "getArtistInfo [" << name
 			          << "] MusicBrainz url-rels: " << rels.size() << " relation(s)";
-			for (auto& rel : rels)
-				std::cout << " [" << rel.value("type","?") << "]";
+			for (auto& rel : rels) {
+				std::string t = jstr(rel, "type");
+				std::cout << " [" << (t.empty() ? "?" : t) << "]";
+				}
 			std::cout << std::endl;
 
 			// Prefer direct wikipedia relation; fall back to wikidata.
 			std::string wiki_title;
 			std::string wd_image_url;
 			for (auto& rel : rels) {
-				std::string type     = rel.value("type","");
-				std::string resource = rel.value("url", nlohmann::json::object())
-				                          .value("resource","");
+				std::string type     = jstr(rel, "type");
+				std::string resource = jstr(jsub(rel, "url"), "resource");
 				if (type == "allmusic" && info.allmusic_url.empty()) {
 					info.allmusic_url = resource;
 					std::cout << stamp() << "getArtistInfo [" << name
@@ -662,32 +709,24 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 						httplib::Headers{});
 					if (rwd && rwd->status == 200) {
 						auto jwd = nlohmann::json::parse(rwd->body, nullptr, false);
-						if (!jwd.is_discarded()) {
-							auto& ents = jwd["entities"];
-							if (ents.contains(entity)
-							        && ents[entity].contains("sitelinks")
-							        && ents[entity]["sitelinks"].contains("enwiki")) {
-								wiki_title = ents[entity]["sitelinks"]["enwiki"]
-								                .value("title","");
-								if (!wiki_title.empty())
-									std::cout << stamp() << "getArtistInfo [" << name
-									          << "] Wikipedia (via Wikidata): "
-									          << wiki_title << std::endl;
-								}
-							// Wikidata P18 (image) as fallback when no Wikipedia article.
-							if (ents.contains(entity) && ents[entity].contains("claims")) {
-								auto& claims = ents[entity]["claims"];
-								if (claims.contains("P18") && !claims["P18"].empty()) {
-									std::string fn = claims["P18"][0]["mainsnak"]["datavalue"]
-									                    .value("value","");
-									if (!fn.empty()) {
-										for (char& c : fn) if (c == ' ') c = '_';
-										wd_image_url =
-											"https://commons.wikimedia.org/wiki/Special:FilePath/"
-											+ url_encode(fn);
-										}
-									}
-								}
+						const auto& ent = jsub(jsub(jwd, "entities"), entity);
+						wiki_title = jstr(jsub(jsub(ent, "sitelinks"), "enwiki"),
+						                  "title");
+						if (!wiki_title.empty())
+							std::cout << stamp() << "getArtistInfo [" << name
+							          << "] Wikipedia (via Wikidata): "
+							          << wiki_title << std::endl;
+
+						// Wikidata P18 (image) as fallback when no Wikipedia article.
+						const auto& p18 =
+							jidx(jsub(jsub(ent, "claims"), "P18"), 0);
+						std::string fn =
+							jstr(jsub(jsub(p18, "mainsnak"), "datavalue"), "value");
+						if (!fn.empty()) {
+							for (char& c : fn) if (c == ' ') c = '_';
+							wd_image_url =
+								"https://commons.wikimedia.org/wiki/Special:FilePath/"
+								+ url_encode(fn);
 							}
 						}
 					}
@@ -714,10 +753,9 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 				else {
 					auto j3 = nlohmann::json::parse(r3->body, nullptr, false);
 					if (!j3.is_discarded()) {
-						info.biography = j3.value("extract","");
+						info.biography = jstr(j3, "extract");
 						info.wiki_url  = "https://en.wikipedia.org/wiki/" + wiki_title;
-						if (j3.contains("thumbnail"))
-							info.image_url = j3["thumbnail"].value("source","");
+						info.image_url = jstr(jsub(j3, "thumbnail"), "source");
 						std::cout << stamp() << "getArtistInfo [" << name
 						          << "] bio=" << info.biography.size()
 						          << " chars, image="
@@ -742,15 +780,14 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 				                   httplib::Params{{"i", info.mbid}},
 				                   httplib::Headers{});
 				if (rt && rt->status == 200) {
+					// A miss here is "artists": null, not an empty array.
 					auto jt = nlohmann::json::parse(rt->body, nullptr, false);
-					if (!jt.is_discarded() && !jt["artists"].is_null()
-					        && !jt["artists"].empty()) {
-						info.image_url = jt["artists"][0].value("strArtistThumb","");
-						if (!info.image_url.empty())
-							std::cout << stamp() << "getArtistInfo [" << name
-							          << "] image from TheAudioDB: "
-							          << info.image_url << std::endl;
-						}
+					info.image_url =
+						jstr(jidx(jsub(jt, "artists"), 0), "strArtistThumb");
+					if (!info.image_url.empty())
+						std::cout << stamp() << "getArtistInfo [" << name
+						          << "] image from TheAudioDB: "
+						          << info.image_url << std::endl;
 					}
 				}
 
@@ -778,20 +815,17 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 							                   httplib::Params{}, httplib::Headers{});
 							if (rd && rd->status == 200) {
 								auto jd = nlohmann::json::parse(rd->body, nullptr, false);
-								if (!jd.is_discarded() && jd.contains("images")
-								        && !jd["images"].empty()) {
-									std::string uri;
-									for (auto& img : jd["images"])
-										if (img.value("type","") == "primary")
-											{ uri = img.value("uri",""); break; }
-									if (uri.empty())
-										uri = jd["images"][0].value("uri","");
-									if (!uri.empty()) {
-										info.image_url = uri;
-										std::cout << stamp() << "getArtistInfo [" << name
-										          << "] image from Discogs API: "
-										          << uri << std::endl;
-										}
+								const auto& imgs = jsub(jd, "images");
+								std::string uri;
+								for (auto& img : imgs)
+									if (jstr(img, "type") == "primary")
+										{ uri = jstr(img, "uri"); break; }
+								if (uri.empty()) uri = jstr(jidx(imgs, 0), "uri");
+								if (!uri.empty()) {
+									info.image_url = uri;
+									std::cout << stamp() << "getArtistInfo [" << name
+									          << "] image from Discogs API: "
+									          << uri << std::endl;
 									}
 								}
 							else {
@@ -951,9 +985,7 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 			}
 		else {
 			auto j1 = nlohmann::json::parse(r1->body, nullptr, false);
-			if (!j1.is_discarded() && j1.contains("release-groups")
-			                       && !j1["release-groups"].empty())
-				info.mbid = j1["release-groups"][0].value("id", "");
+			info.mbid = jstr(jidx(jsub(j1, "release-groups"), 0), "id");
 			}
 
 		// Step 2 — fetch URL relations for the release-group.
@@ -972,19 +1004,21 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 				}
 			else {
 				auto j2 = nlohmann::json::parse(r2->body, nullptr, false);
-				auto rels = j2.value("relations", nlohmann::json::array());
+				const auto& rels = jsub(j2, "relations");
 				std::cout << stamp() << "getAlbumInfo [" << title
 				          << "] MusicBrainz url-rels: " << rels.size()
 				          << " relation(s)";
-				for (auto& rel : rels) std::cout << " [" << rel.value("type","?") << "]";
+				for (auto& rel : rels) {
+					std::string t = jstr(rel, "type");
+					std::cout << " [" << (t.empty() ? "?" : t) << "]";
+					}
 				std::cout << std::endl;
 
 				// Prefer direct wikipedia relation; fall back to wikidata.
 				std::string wiki_title;
 				for (auto& rel : rels) {
-					std::string type     = rel.value("type","");
-					std::string resource = rel.value("url", nlohmann::json::object())
-					                          .value("resource","");
+					std::string type     = jstr(rel, "type");
+					std::string resource = jstr(jsub(rel, "url"), "resource");
 					if (type == "allmusic" && info.allmusic_url.empty()) {
 						info.allmusic_url = resource;
 						std::cout << stamp() << "getAlbumInfo [" << title
@@ -1019,9 +1053,9 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 							httplib::Headers{});
 						if (rwd && rwd->status == 200) {
 							auto jwd = nlohmann::json::parse(rwd->body, nullptr, false);
-							if (!jwd.is_discarded())
-								wiki_title = jwd["entities"][entity]["sitelinks"]["enwiki"]
-								                .value("title","");
+							const auto& ent = jsub(jsub(jwd, "entities"), entity);
+							wiki_title = jstr(jsub(jsub(ent, "sitelinks"), "enwiki"),
+							                  "title");
 							if (!wiki_title.empty())
 								std::cout << stamp() << "getAlbumInfo [" << title
 								          << "] Wikipedia (via Wikidata): "
@@ -1051,7 +1085,7 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 					else {
 						auto j3 = nlohmann::json::parse(r3->body, nullptr, false);
 						if (!j3.is_discarded()) {
-							info.notes    = j3.value("extract", "");
+							info.notes    = jstr(j3, "extract");
 							info.wiki_url = "https://en.wikipedia.org/wiki/" + wiki_title;
 							std::cout << stamp() << "getAlbumInfo [" << title
 							          << "] notes=" << info.notes.size()
