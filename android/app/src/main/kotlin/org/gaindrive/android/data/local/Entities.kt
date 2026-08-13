@@ -76,6 +76,13 @@ data class SongEntity(
 	 * without the network anyway.
 	 */
 	val isVideo: Boolean = false,
+	/**
+	 * Mirrored so an album read offline heads its groups the same way an online
+	 * one does. Unlike `nativeSeek` this costs nothing to keep — the ordering
+	 * already relies on `discNumber` being stored, and this is the one bit that
+	 * says the same number is a season.
+	 */
+	val season: Int? = null,
 )
 
 @Entity(tableName = "playlists", primaryKeys = ["serverId", "id"])

@@ -147,7 +147,14 @@ fun AlbumDetailScreen(
 							val disc = song.discNumber ?: 1
 							val previous = detail.songs.getOrNull(index - 1)
 							if (previous == null || (previous.discNumber ?: 1) != disc) {
-								SectionHeading("Disc $disc")
+								// season carries the same number as discNumber
+								// and is set only when the group really is a
+								// season, so a show reads "Series 2" while a
+								// two-disc film still reads "Disc 2". Per group
+								// rather than per album: a show's unnumbered
+								// Specials folder is a disc.
+								val kind = if (song.season != null) "Series" else "Disc"
+								SectionHeading("$kind $disc")
 							}
 						}
 						TrackRow(

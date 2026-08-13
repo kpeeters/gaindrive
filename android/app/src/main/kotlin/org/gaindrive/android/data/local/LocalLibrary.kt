@@ -368,6 +368,7 @@ private fun Song.toEntity(server: ServerId) = SongEntity(
 	coverArtId = coverArt?.id,
 	starredAt = starredAt,
 	isVideo = isVideo,
+	season = season,
 )
 
 private fun SongEntity.toDomain(): Song {
@@ -389,6 +390,7 @@ private fun SongEntity.toDomain(): Song {
 		coverArt = coverArtId?.let { ItemRef(server, it) },
 		starredAt = starredAt,
 		isVideo = isVideo,
+		season = season,
 		// Left at its default, along with transcodedContentType: the mirror
 		// stores neither, and false is the answer that still plays — HLS works
 		// for every video, it is merely more work for the server than a file

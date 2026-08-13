@@ -83,6 +83,28 @@ class LibraryMapperTest {
 		assertNull(song.discNumber)
 	}
 
+	/**
+	 * An episode carries its season alongside the disc number, which holds the
+	 * same value. Null is what makes the album screen head a group "Disc"
+	 * rather than "Series", so the server omitting the field — for a film, or
+	 * on an endpoint that does not select it — has to arrive as null and not
+	 * as 0.
+	 */
+	@Test
+	fun `season survives, and its absence is null`() {
+		val episode = SongDto(id = "1", title = "Jungles", discNumber = 2, season = 2)
+			.toDomain(server)
+		assertEquals(2, episode.season)
+		assertEquals(2, episode.discNumber)
+
+		val film = SongDto(id = "2", title = "The Third Man", discNumber = 1)
+			.toDomain(server)
+		assertNull(film.season)
+
+		val zeroed = SongDto(id = "3", title = "x", season = 0).toDomain(server)
+		assertNull(zeroed.season)
+	}
+
 	@Test
 	fun `blank optional strings become null`() {
 		val album = AlbumDto(id = "1", name = "x", genre = "").toDomain(server)

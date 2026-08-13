@@ -88,6 +88,15 @@ data class SongDto(
 	 * only re-encode it on the fly, which is chunked and unseekable.
 	 */
 	val nativeSeek: Boolean = false,
+	/**
+	 * gaindrive extension: the season an episode belongs to, absent for
+	 * anything that is not one. `discNumber` already carries the same number —
+	 * it is what orders and groups the tracks — so this only decides whether a
+	 * group is headed "Series 2" or "Disc 2". Populated by the same endpoints
+	 * as [nativeSeek], and absent from the rest, where a season reads as a
+	 * disc; that is cosmetic and the ordering is unaffected.
+	 */
+	val season: Int? = null,
 	/** Both omitted when the scan could not probe the file. */
 	val originalWidth: Int? = null,
 	val originalHeight: Int? = null,

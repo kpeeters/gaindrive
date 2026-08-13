@@ -90,6 +90,7 @@ fun SongDto.toDomain(server: ServerId) = Song(
 	lastPlayedAt = lastPlayed,
 	isVideo = isVideo,
 	nativeSeek = nativeSeek,
+	season = season?.takeIf { it > 0 },
 	transcodedContentType = transcodedContentType,
 	width = originalWidth?.takeIf { it > 0 },
 	height = originalHeight?.takeIf { it > 0 },

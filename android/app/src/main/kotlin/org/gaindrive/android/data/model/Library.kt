@@ -89,6 +89,12 @@ data class Song(
 	 */
 	val nativeSeek: Boolean = false,
 	/**
+	 * The season an episode belongs to, or null. [discNumber] holds the same
+	 * number and is what orders and groups tracks; this only decides whether
+	 * the group is headed "Series 2" or "Disc 2".
+	 */
+	val season: Int? = null,
+	/**
 	 * What the server will actually send if it has to convert this, or null when
 	 * it will send the file as it stands.
 	 *
