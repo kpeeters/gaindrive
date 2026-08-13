@@ -132,6 +132,31 @@ class AudioCache @Inject constructor(
 		ContentMetadata.getContentLength(cache.getContentMetadata(key))
 
 	/**
+	 * The length the cache recorded for [key], or null when it never learned one.
+	 *
+	 * Null is a refusal rather than a detail. Without a length there is no
+	 * `Content-Length` to send and no way to answer a ranged request, so a caller
+	 * serving these bytes over HTTP has to decline and let the fetch go to the
+	 * server instead.
+	 */
+	fun storedLength(key: String): Long? =
+		contentLengthOf(key).takeIf { it != C.LENGTH_UNSET.toLong() && it > 0 }
+
+	/**
+	 * A read-only source over the stored bytes, for serving a downloaded track to
+	 * something that is not ExoPlayer — the Cast bridge, when the track being cast
+	 * is already on the device.
+	 *
+	 * Deliberately given **no upstream factory**: a read that runs off the end of
+	 * what is stored then throws rather than quietly going to the network. For a
+	 * cast with no connectivity that is the difference between a clear failure and
+	 * a stall, which the receiver would eventually report as its own timeout —
+	 * error 103, and nothing in the log to say why.
+	 */
+	fun readOnlySource(): DataSource =
+		CacheDataSource.Factory().setCache(cache).createDataSource()
+
+	/**
 	 * The quality tag of a copy of [refKey] that is held in full, preferring
 	 * [preferred] when that one is present.
 	 *

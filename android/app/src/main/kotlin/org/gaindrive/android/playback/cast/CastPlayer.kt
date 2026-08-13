@@ -268,14 +268,12 @@ class CastPlayer(
 		ended = false
 		loadJob?.cancel()
 		loadJob = scope.launch {
-			val target = castUrls.forCast(ref) ?: return@launch
+			val target = castUrls.forCast(ref, entry.item.sourceContentType()) ?: return@launch
 			val metadata = entry.item.mediaMetadata
 			session.load(
 				CastMedia(
 					url = target.url,
-					// Null for the original file, where the transcode's MIME does
-					// not apply and the server's own content type is the answer.
-					mimeType = target.mimeType ?: entry.item.sourceContentType(),
+					mimeType = target.mimeType,
 					durationSeconds = metadata.durationMs
 						?.takeIf { it > 0 }
 						?.let { it / 1000.0 },

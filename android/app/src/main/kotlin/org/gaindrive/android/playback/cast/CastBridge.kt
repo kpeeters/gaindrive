@@ -1,8 +1,11 @@
 package org.gaindrive.android.playback.cast
 
 import android.content.Context
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.util.Log
+import androidx.media3.common.C
+import androidx.media3.datasource.DataSpec
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -10,6 +13,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.gaindrive.android.data.cache.AudioCache
 import java.io.BufferedOutputStream
 import java.io.IOException
 import java.net.ServerSocket
@@ -33,17 +37,24 @@ import javax.inject.Singleton
  * parses little more than the request line and `Range`, so a library would buy
  * little, and the socket has to be bound to a specific interface.
  *
+ * It serves two kinds of thing, and the receiver cannot tell them apart: bytes
+ * fetched from the server on the phone's behalf, and bytes already on the device
+ * because the track was downloaded. The second is not merely an optimisation —
+ * it is the only one that works with no connectivity at all, which is the state
+ * a downloaded library exists for.
+ *
  * **Security.** The bridge must never become an open proxy into a private music
  * library, so: an unguessable token, rotated per session, is required in the
- * path; requests from outside the local Wi-Fi subnet are refused; and only URLs
- * that have been [publish]ed for the current queue can be fetched at all — this
- * is not a general gateway keyed on song id.
+ * path; requests from outside the local Wi-Fi subnet are refused; and only
+ * resources that have been [publish]ed or [publishLocal]ed for the current queue
+ * can be fetched at all — this is not a general gateway keyed on song id.
  */
 @Singleton
 class CastBridge @Inject constructor(
 	@ApplicationContext private val context: Context,
 	private val wifi: WifiNetworks,
 	private val httpClient: OkHttpClient,
+	private val audioCache: AudioCache,
 	private val scope: CoroutineScope,
 ) {
 
@@ -53,14 +64,30 @@ class CastBridge @Inject constructor(
 	private var token: String = ""
 	private var origin: String = ""
 
+	/** Where a published resource's bytes come from. */
+	private sealed interface Resource {
+		/** Fetched from the owning server, on the phone's default route. */
+		class Upstream(val url: String) : Resource
+
+		/**
+		 * Read out of the byte cache, for a track already downloaded.
+		 *
+		 * The length is carried rather than looked up because it is what decided
+		 * this resource could be published at all: the cache does not always know
+		 * one, and without it there is no `Content-Length` and no way to answer a
+		 * ranged request — which is most of what a receiver asks for.
+		 */
+		class Local(val cacheKey: String, val mimeType: String?, val length: Long) : Resource
+	}
+
 	/**
-	 * Published upstream URLs by opaque key. Bounded because a long queue would
+	 * Published resources by opaque key. Bounded because a long queue would
 	 * otherwise accumulate one entry per track played; a handful covers the track
 	 * playing, its artwork, and the seeks and re-loads around them.
 	 */
 	private val published = Collections.synchronizedMap(
-		object : LinkedHashMap<String, String>(16, 0.75f, true) {
-			override fun removeEldestEntry(eldest: Map.Entry<String, String>): Boolean =
+		object : LinkedHashMap<String, Resource>(16, 0.75f, true) {
+			override fun removeEldestEntry(eldest: Map.Entry<String, Resource>): Boolean =
 				size > MAX_PUBLISHED
 		}
 	)
@@ -116,11 +143,23 @@ class CastBridge @Inject constructor(
 	 * server, and a receiver that cannot fetch the audio cannot fetch the sleeve
 	 * either.
 	 */
+	fun publish(upstreamUrl: String): String? = publish(Resource.Upstream(upstreamUrl))
+
+	/**
+	 * Makes bytes already held under [cacheKey] fetchable through the bridge.
+	 *
+	 * [length] is the caller's assertion that the whole track is stored and how
+	 * long it is; the bridge does not re-check, because the caller had to know
+	 * both to decide to come here rather than publish a server URL.
+	 */
+	fun publishLocal(cacheKey: String, mimeType: String?, length: Long): String? =
+		publish(Resource.Local(cacheKey, mimeType, length))
+
 	@Synchronized
-	fun publish(upstreamUrl: String): String? {
+	private fun publish(resource: Resource): String? {
 		if (server == null && !start()) return null
 		val key = newKey()
-		published[key] = upstreamUrl
+		published[key] = resource
 		return "$origin/$token/$key"
 	}
 
@@ -177,7 +216,7 @@ class CastBridge @Inject constructor(
 			}
 		}
 
-		val upstream = resolve(request.path) ?: run {
+		val resource = resolve(request.path) ?: run {
 			// Logged without the path, which carries the session token.
 			Log.w(TAG, "bridge $from: ${request.method} for an unpublished key")
 			output.respondEmpty(404, "Not Found")
@@ -190,6 +229,106 @@ class CastBridge @Inject constructor(
 		// apart. The token is deliberately not logged.
 		Log.i(TAG, "bridge $from: ${request.method}${request.range?.let { " $it" }.orEmpty()}")
 
+		when (resource) {
+			is Resource.Local -> serveStored(output, from, resource, request)
+			is Resource.Upstream -> serveUpstream(output, from, resource.url, request)
+		}
+	}
+
+	/**
+	 * Serves bytes the device already holds, without touching the network.
+	 *
+	 * The response is built here rather than relayed, so `Range` has to be
+	 * honoured rather than passed on: receivers read the tail of an Ogg or FLAC
+	 * for its duration and seek table before playing a note, and a server that
+	 * answers 200 to all of them hands over the whole track each time.
+	 */
+	private fun serveStored(
+		output: BufferedOutputStream,
+		from: String,
+		resource: Resource.Local,
+		request: BridgeRead.Ok,
+	) {
+		val range = parseRange(request.range, resource.length)
+		val start = range?.first ?: 0
+		val end = range?.last ?: (resource.length - 1)
+		val count = end - start + 1
+
+		Log.i(TAG, "bridge $from: stored $start-$end/${resource.length}")
+
+		// Opened before a byte of the response is written. Committing to a status
+		// line and a Content-Length and only then discovering the bytes are not
+		// there would leave the receiver with a truncated body and no error —
+		// which it reports much later, as its own network timeout.
+		val source = audioCache.readOnlySource()
+		try {
+			source.open(
+				DataSpec.Builder()
+					// The key, not the URI, is what selects the stored bytes;
+					// CacheDataSource only falls back to the URI when no key is
+					// given, and there is no URI here to give.
+					.setUri(Uri.EMPTY)
+					.setKey(resource.cacheKey)
+					.setPosition(start)
+					.setLength(count)
+					.build()
+			)
+
+			output.write(
+				if (range != null) "HTTP/1.1 206 Partial Content\r\n".toByteArray()
+				else "HTTP/1.1 200 OK\r\n".toByteArray()
+			)
+			resource.mimeType?.let { output.write("Content-Type: $it\r\n".toByteArray()) }
+			output.write("Content-Length: $count\r\n".toByteArray())
+			output.write("Accept-Ranges: bytes\r\n".toByteArray())
+			if (range != null) {
+				output.write("Content-Range: bytes $start-$end/${resource.length}\r\n".toByteArray())
+			}
+			output.write("Connection: close\r\n\r\n".toByteArray())
+
+			if (request.method != "HEAD") {
+				val buffer = ByteArray(COPY_BUFFER)
+				while (true) {
+					val n = source.read(buffer, 0, buffer.size)
+					if (n == C.RESULT_END_OF_INPUT) break
+					output.write(buffer, 0, n)
+				}
+			}
+			output.flush()
+		} finally {
+			runCatching { source.close() }
+		}
+	}
+
+	/**
+	 * `bytes=start-end`, `bytes=start-` or `bytes=-count`, and null for anything
+	 * else — including a range that runs off the end, which is answered whole
+	 * rather than with a 416 no receiver is going to act on.
+	 */
+	private fun parseRange(header: String?, length: Long): LongRange? {
+		val spec = header?.trim() ?: return null
+		if (!spec.startsWith("bytes", ignoreCase = true)) return null
+		val parts = spec.substringAfter('=').substringBefore(',').split('-')
+		if (parts.size != 2) return null
+
+		val startText = parts[0].trim()
+		val endText = parts[1].trim()
+		if (startText.isEmpty()) {
+			val count = endText.toLongOrNull()?.takeIf { it > 0 } ?: return null
+			return (length - minOf(count, length))..(length - 1)
+		}
+		val start = startText.toLongOrNull() ?: return null
+		val end = if (endText.isEmpty()) length - 1 else (endText.toLongOrNull() ?: return null)
+		if (start < 0 || start > end || end >= length) return null
+		return start..end
+	}
+
+	private fun serveUpstream(
+		output: BufferedOutputStream,
+		from: String,
+		upstream: String,
+		request: BridgeRead.Ok,
+	) {
 		val builder = Request.Builder().url(upstream)
 		// Passed through unchanged, and not optional: receivers issue ranged
 		// requests to read FLAC and Ogg seek tables, and seeking depends on the
@@ -219,7 +358,7 @@ class CastBridge @Inject constructor(
 	}
 
 	/** `/<token>/<key>`, and nothing else is servable. */
-	private fun resolve(path: String): String? {
+	private fun resolve(path: String): Resource? {
 		if (token.isEmpty()) return null
 		val parts = path.trim('/').split('/')
 		if (parts.size != 2) return null
