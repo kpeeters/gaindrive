@@ -173,6 +173,17 @@ static std::string fmt_of(const httplib::Request& req)
 
 // ---- Helpers ----------------------------------------------------------
 
+// The lowercased extension of a path with no leading dot, which is the form
+// songs.codec holds and therefore the form is_video_ext() and codec_to_mime()
+// expect. Empty for a path with no extension.
+static std::string ext_of(const std::string& path)
+	{
+	std::string ext = std::filesystem::path(path).extension().string();
+	if (!ext.empty() && ext.front() == '.') ext.erase(0, 1);
+	std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+	return ext;
+	}
+
 // Returns the name stripped of a leading article ("The ", "A ", …) for
 // alphabetical index grouping.
 static std::string sort_key(const std::string& name)
@@ -1393,9 +1404,10 @@ GainDrive::GainDrive(const std::string& db_path,
                      const std::string& user_db_path,
                      const std::string& transcode_cache_dir,
                      int transcode_cache_mb,
-                     int transcode_jobs)
+                     int transcode_jobs,
+                     int video_art_px)
 	: debug_(debug), flat_multi_disc_(flat_multi_disc), upload_dir_(upload_dir),
-	  store_(db_path, roots, user_db_path),
+	  store_(db_path, roots, user_db_path, video_art_px),
 	  transcode_cache_(
 	      transcode_cache_dir.empty()
 	          ? std::filesystem::path(db_path).parent_path() / "transcodes"
@@ -2346,6 +2358,36 @@ GainDrive::GainDrive(const std::string& db_path,
 					}
 				rel_path = extras[idx - 1];
 				}
+			}
+
+		// A cover_path naming a *media* file means the art was manufactured
+		// from that file and lives in the video_art table — see videoart.hh.
+		// Storing the media path rather than inventing a marker is what lets
+		// every cover-art query, and the whole web client, stay unchanged.
+		if (is_video_ext(ext_of(rel_path))) {
+			auto art = store_.get_video_art(rel_path);
+			if (!art) {
+				res.status = 404;
+				return;
+				}
+			// Same revalidation as below, over the source file's mtime and the
+			// stored size — folders.id is a rowid and is not stable across a
+			// rescan, so without a validator a browser keeps showing the
+			// previous film's frame after a rebuild.
+			std::string etag = "\"va-" + std::to_string(art->file_modified)
+			    + "-" + std::to_string(art->bytes.size()) + "\"";
+			res.set_header("Cache-Control", "no-cache");
+			res.set_header("ETag", etag);
+			if (req.get_header_value("If-None-Match") == etag) {
+				res.status = 304;
+				return;
+				}
+			// Served at its stored size whatever `size` asked for. Scaling it
+			// would mean an ffmpeg run per request for an image already small
+			// enough to be in a database row.
+			res.set_content(art->bytes,
+			                art->mime.empty() ? "image/jpeg" : art->mime);
+			return;
 			}
 
 		// Compose absolute filesystem path for the actual file open.

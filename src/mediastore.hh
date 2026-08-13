@@ -2,11 +2,14 @@
 
 #include <string>
 #include <set>
+#include <unordered_map>
 #include <vector>
 #include <optional>
 #include <filesystem>
 #include <mutex>
 #include <SQLiteCpp/SQLiteCpp.h>
+
+#include "videoart.hh"
 
 class MediaStore {
 	public:
@@ -31,8 +34,12 @@ class MediaStore {
 		// can be overridden by passing a non-empty user_db_path.
 		// Callers must have validated `roots` (see main.cc); this constructor
 		// only normalises them.
+		//
+		// video_art_px of 0 disables manufacturing cover art for videos
+		// entirely; nothing else about a scan changes.
 		MediaStore(const std::string& db_path, const std::vector<Root>& roots,
-		           const std::string& user_db_path = "");
+		           const std::string& user_db_path = "",
+		           int video_art_px = 640);
 
 		// The configured roots, in the order given.
 		const std::vector<Root>& roots() const;
@@ -124,6 +131,34 @@ class MediaStore {
 
 		std::optional<CachedArtistInfo> get_cached_artist_info(int folder_id);
 		void cache_artist_info(int folder_id, const CachedArtistInfo& info);
+
+		// ---- Video cover art (see videoart.hh) ----
+		//
+		// Art derived from a video file by ffmpeg and cached in the music DB,
+		// alongside the artist and album info caches, rather than written into
+		// the library as a sidecar image.
+		//
+		// A song or album whose art comes from here has its cover_path set to
+		// the *media file's* own path. That is a real file inside a root, so
+		// path_is_within_root() and every existing "cover_path is not empty"
+		// cover-art expression behave exactly as they do for a JPEG; only
+		// getCoverArt has to notice the extension and read the blob instead of
+		// opening the file as an image.
+		struct VideoArtRow {
+			std::string mime;
+			std::string bytes;
+			int64_t     file_modified = 0;
+			};
+
+		// path → file_modified for every cached image under a stored-form
+		// prefix ("music/Artist/%"). One query per artist, mirroring the
+		// known-mtimes fetch the scan already does.
+		std::unordered_map<std::string, int64_t> load_video_art_keys(
+			const std::string& path_prefix);
+		void store_video_art(const std::string& rel_path, int64_t mtime,
+		                     const std::string& mime, const std::string& source,
+		                     const std::string& bytes);
+		std::optional<VideoArtRow> get_video_art(const std::string& rel_path);
 
 		std::string get_setting(const std::string& key,
 		                        const std::string& default_val = "");
@@ -533,6 +568,10 @@ class MediaStore {
 
 		SQLite::Database db_music_;
 		std::mutex       db_mutex_;  // guards db_music_ across scan thread + API threads
+
+		// Empty when cover art for videos is switched off. Held here because
+		// the scan is what runs it, in a phase of its own.
+		std::optional<VideoArt> video_art_;
 
 		void create_schema();
 

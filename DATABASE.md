@@ -197,6 +197,46 @@ CREATE INDEX idx_song_artists_artist
     ON song_artists(artist_id);
 CREATE INDEX idx_song_artists_role
     ON song_artists(role);
+
+-- Cover art manufactured from a video file by
+-- VideoArt (src/videoart.hh): an image already
+-- embedded in the container, or failing that a
+-- representative frame. Video files carry no tag
+-- anything writes and are rarely named well, so
+-- without this every video shows a placeholder.
+--
+-- It lives here with artist_info_cache and
+-- album_info_cache rather than being written into
+-- the library as a sidecar image: nothing gaindrive
+-- derives should land in the user's collection.
+-- Deleting the music database throws it away and
+-- the next scan rebuilds it, exactly as it does for
+-- fetched artist biographies.
+--
+-- Keyed on the stored path, not on songs.id, for
+-- the reason stars and playlists are: a rowid is
+-- not stable across a rescan. file_modified is
+-- what invalidates the image when the file is
+-- replaced or re-encoded.
+--
+-- A song or album whose art comes from here has
+-- its cover_path set to the *media file's* own
+-- path. That is a real file inside a root, so
+-- every existing "cover_path is not empty"
+-- cover-art expression, and path_is_within_root(),
+-- behave as they do for a JPEG; only getCoverArt
+-- has to notice the extension and read the blob.
+CREATE TABLE video_art (
+    path          TEXT PRIMARY KEY,   -- "<root>/<rest>"
+    file_modified INTEGER NOT NULL,
+    mime          TEXT NOT NULL,
+    -- embedded | frame; kept so a bad batch of one
+    -- kind can be deleted and regenerated
+    source        TEXT NOT NULL,
+    image         BLOB NOT NULL,
+    created_at    INTEGER NOT NULL
+                    DEFAULT (strftime('%s','now'))
+);
 ```
 
 # User-facing and API state tables

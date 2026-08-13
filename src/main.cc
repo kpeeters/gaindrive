@@ -15,6 +15,7 @@
 
 #include "gaindrive.hh"
 #include "mediastore.hh"
+#include "videoart.hh"
 
 // Installation-dependent defaults, normally supplied by CMake from
 // GAINDRIVE_SYSCONFDIR/GAINDRIVE_LOCALSTATEDIR. A package that installs under a
@@ -202,6 +203,9 @@ int main(int argc, char* argv[])
 		("transcode-cache",    "Directory for cached transcodes (default: alongside --db)", cxxopts::value<std::string>())
 		("transcode-cache-mb", "Transcode cache size in MB (0 disables)", cxxopts::value<int>()->default_value("1024"))
 		("transcode-jobs",     "Max concurrent ffmpeg transcodes (0 = half the cores)", cxxopts::value<int>()->default_value("0"))
+		("no-video-art",  "Do not manufacture cover art for videos that have none")
+		("video-art-px",  "Long edge of manufactured video cover art", cxxopts::value<int>()->default_value("640"))
+		("video-art-test","Write cover art for one video file and exit", cxxopts::value<std::string>())
 		("no-scan",    "Skip startup filesystem scan")
 		("debug",      "Print all API responses to stdout")
 		("add-user",   "Create a user and exit",      cxxopts::value<std::string>())
@@ -217,6 +221,31 @@ int main(int argc, char* argv[])
 		}
 	if (args.count("version")) {
 		std::cout << "gaindrive " GAINDRIVE_VERSION "\n";
+		return 0;
+		}
+
+	// Before anything else touches a database or a root: this is a standalone
+	// check of what VideoArt makes of one file, meant for judging the result
+	// by eye across a sample of a collection without running a scan.
+	if (args.count("video-art-test")) {
+		std::string in  = args["video-art-test"].as<std::string>();
+		VideoArt    art(args["video-art-px"].as<int>());
+		auto        result = art.generate(in);
+		if (!result) {
+			std::cerr << "No cover art could be made from " << in << "\n";
+			return 1;
+			}
+		std::string out = std::filesystem::path(in).stem().string() + "-art"
+		    + (result->mime == "image/png" ? ".png" : ".jpg");
+		std::ofstream f(out, std::ios::binary);
+		f.write(result->bytes.data(),
+		        static_cast<std::streamsize>(result->bytes.size()));
+		if (!f) {
+			std::cerr << "Could not write " << out << "\n";
+			return 1;
+			}
+		std::cout << out << ": " << result->source << ", "
+		          << result->bytes.size() << " bytes, " << result->mime << "\n";
 		return 0;
 		}
 
@@ -254,6 +283,9 @@ int main(int argc, char* argv[])
 	    ? args["transcode-cache"].as<std::string>() : "";
 	int         transcode_cache_mb  = args["transcode-cache-mb"].as<int>();
 	int         transcode_jobs      = args["transcode-jobs"].as<int>();
+	// 0 switches the whole thing off, which is what --no-video-art means.
+	int         video_art_px        = args.count("no-video-art")
+	    ? 0 : args["video-art-px"].as<int>();
 
 	// Read config file; missing file is not fatal, just use defaults.
 	std::string config_path = args["config"].as<std::string>();
@@ -286,6 +318,11 @@ int main(int argc, char* argv[])
 				transcode_cache_mb = cfg["transcode_cache_mb"].get<int>();
 			if (cfg.contains("transcode_jobs") && !args.count("transcode-jobs"))
 				transcode_jobs = cfg["transcode_jobs"].get<int>();
+			// Same key for both flags: --no-video-art is just 0 px, so a
+			// config that sets 0 turns it off exactly as the flag does.
+			if (cfg.contains("video_art_px") && !args.count("video-art-px")
+			        && !args.count("no-video-art"))
+				video_art_px = cfg["video_art_px"].get<int>();
 			}
 		catch (const std::exception& e) {
 			std::cerr << "Warning: failed to parse " << config_path << ": " << e.what() << "\n";
@@ -346,7 +383,7 @@ int main(int argc, char* argv[])
 
 		GainDrive gd(db_path, roots, upload_dir, no_scan, debug, flat_multi_disc,
 		             user_db_path, transcode_cache_dir, transcode_cache_mb,
-		             transcode_jobs);
+		             transcode_jobs, video_art_px);
 		// Non-zero on a failed bind, so a supervisor restarts rather than
 		// recording a clean shutdown for a server that never served anything.
 		return gd.listen(host, port) ? 0 : 1;

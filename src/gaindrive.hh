@@ -22,6 +22,7 @@ class GainDrive {
 	public:
 		// transcode_cache_dir empty = derived from db_path.
 		// transcode_cache_mb 0 = cache disabled.
+		// video_art_px 0 = do not manufacture cover art for videos.
 		GainDrive(const std::string& db_path,
 		          const std::vector<MediaStore::Root>& roots,
 		          const std::string& upload_dir,
@@ -31,7 +32,8 @@ class GainDrive {
 		          const std::string& user_db_path = "",
 		          const std::string& transcode_cache_dir = "",
 		          int transcode_cache_mb = 1024,
-		          int transcode_jobs = 0);
+		          int transcode_jobs = 0,
+		          int video_art_px = 640);
 		// Binds and serves. Returns false without serving if the port could
 		// not be acquired, so the caller can exit non-zero rather than treat a
 		// doomed start as a clean shutdown.

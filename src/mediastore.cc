@@ -375,7 +375,7 @@ static std::string derive_path(const std::string& base, const std::string& suffi
 	}
 
 MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& roots,
-                       const std::string& user_db_path)
+                       const std::string& user_db_path, int video_art_px)
 	// The third argument is the busy timeout, and it defaults to 0 — meaning
 	// SQLite gives up on a contended write *immediately* and SQLiteCpp turns
 	// that into a throw.  Any external writer (a second gaindrive, or sqlite3
@@ -393,6 +393,8 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	            SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE,
 	            DB_BUSY_TIMEOUT_MS)
 	{
+	if (video_art_px > 0) video_art_.emplace(video_art_px);
+
 	// Normalise each root: strip trailing '/' so path never has one, derive
 	// the always-has-one form used to compose and strip absolute paths, and
 	// canonicalise once. path_is_within_root() compares against the canonical
@@ -557,6 +559,25 @@ void MediaStore::create_schema()
 			wiki_url     TEXT NOT NULL DEFAULT '',
 			allmusic_url TEXT NOT NULL DEFAULT '',
 			fetched_at   INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+		);
+
+		-- Cover art manufactured from a video file itself, by VideoArt.  Video
+		-- containers carry no tag anything actually writes and these files are
+		-- rarely named well, so without this every video shows a placeholder.
+		-- It sits here with the other derived caches rather than being written
+		-- into the library as a sidecar image: nothing gaindrive derives should
+		-- land in the user's collection.
+		--
+		-- Keyed on the stored path, not on songs.id, for the reason stars and
+		-- playlists are: a rowid is not stable across a rescan.  file_modified
+		-- is what invalidates the art when the file is replaced or re-tagged.
+		CREATE TABLE IF NOT EXISTS video_art (
+			path          TEXT PRIMARY KEY,   -- "<root>/<rest>"
+			file_modified INTEGER NOT NULL,
+			mime          TEXT NOT NULL,
+			source        TEXT NOT NULL,      -- embedded | frame
+			image         BLOB NOT NULL,
+			created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 		);
 	)");
 
@@ -938,6 +959,81 @@ static void read_song_metadata(SongReadData& sdat)
 		}
 	}
 
+// Phase 3b for one album's worth of files: manufacture cover art for the videos
+// that have none.  Returns the path whose art should also serve as the album's,
+// or "" — chosen by sort order rather than by re-running find_cover(), whose
+// pass 3 takes whatever directory_iterator hands it first, so a season folder
+// would otherwise get a different episode's frame on different machines.
+//
+// It runs for *unchanged* songs too.  The guard is "has no cover and has no
+// cached image", not sdat.changed, so switching the feature on back-fills an
+// existing library on the next scan without anything having to be re-tagged or
+// touched — the unchanged-song UPDATE writes cover_path unconditionally for
+// exactly this class of reason.
+//
+// The image is written immediately rather than carried into Phase 4: a season
+// of two dozen episodes would otherwise hold a couple of megabytes of JPEG in
+// SongReadData for the whole artist.  Nothing in Phase 4 depends on it; what
+// Phase 4 needs is the cover_path this leaves behind.
+static std::string make_video_art_songs(
+	MediaStore& store, const VideoArt& art, std::vector<SongReadData>& songs,
+	const std::unordered_map<std::string, int64_t>& known)
+	{
+	std::string album_art;
+
+	for (auto& sdat : songs) {
+		// A sidecar image beside the file always wins — this tier exists only
+		// for the files that have nothing at all.
+		if (!sdat.is_video || !sdat.cover.empty()) continue;
+
+		std::string rel = store.rel_path(sdat.path);
+		auto        it  = known.find(rel);
+		if (it == known.end() || it->second != sdat.mtime) {
+			// A DVD titleset is one stream split across VOBs, so the whole
+			// concat: list is the input — seeking into the first part alone
+			// would land inside a 1 GB fragment rather than inside the film.
+			std::string input;
+			if (!sdat.parts.empty()) input = dvd_input(sdat.parts.front());
+
+			auto result = art.generate(sdat.path, input);
+			if (!result) {
+				std::cout << stamp() << "video art: nothing usable in " << rel
+				          << std::endl;
+				continue;
+				}
+			store.store_video_art(rel, sdat.mtime, result->mime,
+			                      result->source, result->bytes);
+			std::cout << stamp() << "video art: " << result->source << ", "
+			          << result->bytes.size() << " bytes for " << rel
+			          << std::endl;
+			}
+
+		// cover_path names the media file itself, which is what makes every
+		// existing cover-art query and the whole web client work unchanged.
+		// See MediaStore::VideoArtRow.
+		sdat.cover = sdat.path;
+		if (album_art.empty() || sdat.path < album_art) album_art = sdat.path;
+		}
+
+	return album_art;
+	}
+
+// The whole of Phase 3b for one artist.  Shared with scan_root_files(), which
+// has no AlbumReadData and calls make_video_art_songs() directly.
+static void make_video_art(MediaStore& store, const VideoArt& art,
+                           std::vector<AlbumReadData>& albums,
+                           const std::string& prefix)
+	{
+	auto known = store.load_video_art_keys(prefix);
+	for (auto& adat : albums) {
+		std::string album_art = make_video_art_songs(store, art, adat.songs,
+		                                              known);
+		// An album that already has an image keeps it: a hand-placed poster,
+		// or one uploaded through setCoverArt, outranks a frame grab.
+		if (adat.cover.empty() && !album_art.empty()) adat.cover = album_art;
+		}
+	}
+
 // Writes one song row; all slow I/O has already happened.
 // Caller must hold db_mutex_ and an open transaction. sdat.path is absolute
 // (Phase 1/3 use it for TagLib I/O); rel_path is its stored form, which the
@@ -1178,6 +1274,9 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			read_song_metadata(sdat);
 			}
 
+	// ---- Phase 3b: cover art for videos that have none (no lock) ----
+	if (video_art_) make_video_art(*this, *video_art_, albums, prefix);
+
 	// ---- Phase 4: short write txns ----
 	// Mark this artist's subfolders as unvisited.  Folders not re-stamped
 	// by an album commit below are pruned at the end of the artist.
@@ -1330,6 +1429,17 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		std::cout << stamp() << "  pruned " << n << " songs" << std::endl;
 	}
 	{
+	// Keyed on "no song has this path any more" rather than on the folder
+	// marks, so it also catches a single file deleted from an album that is
+	// still there — the folder-level prune never reaches those.  Must run
+	// after the songs delete above, in this same transaction.
+	SQLite::Statement s(db_music_,
+		"DELETE FROM video_art WHERE path LIKE ?"
+		"  AND path NOT IN (SELECT path FROM songs)");
+	s.bind(1, prefix);
+	s.exec();
+	}
+	{
 	SQLite::Statement s(db_music_,
 		"DELETE FROM albums WHERE folder_id IN ("
 		"  SELECT id FROM folders WHERE last_scanned IS NULL AND path LIKE ?"
@@ -1465,6 +1575,17 @@ void MediaStore::scan_root_files(const RootRec& root)
 		read_song_metadata(sdat);
 		}
 
+	// ---- Phase 3b: cover art for videos that have none (no lock) ----
+	// The prefix takes in the whole root rather than just its loose files.
+	// That over-fetches (path, mtime) pairs for the sections below, which is
+	// cheap, and there is no narrower LIKE — "<root>/%" is the entire root,
+	// which is the same reason this function exists at all.
+	std::string root_art;
+	if (video_art_) {
+		auto known = load_video_art_keys(root.cfg.name + "/%");
+		root_art   = make_video_art_songs(*this, *video_art_, songs, known);
+		}
+
 	// ---- Phase 4: one write txn ----
 	// A contended commit must not take the rest of the scan with it; the next
 	// pass redoes this root's loose files from scratch anyway.
@@ -1484,6 +1605,7 @@ void MediaStore::scan_root_files(const RootRec& root)
 		// Non-recursive: the subdirectories of a root are its sections, and
 		// their covers are not this album's.
 		std::string cover = find_cover(fs::path(root.cfg.path), false);
+		if (cover.empty()) cover = root_art;
 		if (!cover.empty()) {
 			SQLite::Statement upd(db_music_,
 				"UPDATE albums SET cover_path = ? WHERE id = ?");
@@ -1502,6 +1624,15 @@ void MediaStore::scan_root_files(const RootRec& root)
 	if (int n = db_music_.getChanges(); n > 0)
 		std::cout << stamp() << "  pruned " << n << " loose songs from "
 		          << root.cfg.name << std::endl;
+	// Same rule as the artist prune: an image outlives its file only until the
+	// next scan notices there is no song at that path any more.
+	{
+	SQLite::Statement s(db_music_,
+		"DELETE FROM video_art WHERE path LIKE ?"
+		"  AND path NOT IN (SELECT path FROM songs)");
+	s.bind(1, root.cfg.name + "/%");
+	s.exec();
+	}
 	// A root's album can only ever be the loose-file one, so it goes when the
 	// last loose file does.
 	db_music_.exec(("DELETE FROM albums WHERE folder_id = " + fid +
@@ -1812,6 +1943,61 @@ void MediaStore::cache_artist_info(int folder_id, const CachedArtistInfo& info)
 	ins.bind(7, info.allmusic_url);
 	ins.bind(8, info.discogs_url);
 	ins.exec();
+	}
+
+// One query per artist rather than one per song: the scan asks this before it
+// decides which files still need art, exactly as Phase 2 fetches every known
+// mtime in one go.
+std::unordered_map<std::string, int64_t>
+MediaStore::load_video_art_keys(const std::string& path_prefix)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	std::unordered_map<std::string, int64_t> result;
+	SQLite::Statement q(db_music_,
+		"SELECT path, file_modified FROM video_art WHERE path LIKE ?");
+	q.bind(1, path_prefix);
+	while (q.executeStep())
+		result[q.getColumn(0).getString()] = q.getColumn(1).getInt64();
+	return result;
+	}
+
+void MediaStore::store_video_art(const std::string& rel_path, int64_t mtime,
+                                  const std::string& mime,
+                                  const std::string& source,
+                                  const std::string& bytes)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement ins(db_music_,
+		"INSERT OR REPLACE INTO video_art"
+		" (path, file_modified, mime, source, image)"
+		" VALUES (?, ?, ?, ?, ?)");
+	ins.bind(1, rel_path);
+	ins.bind(2, mtime);
+	ins.bind(3, mime);
+	ins.bind(4, source);
+	ins.bind(5, bytes.data(), static_cast<int>(bytes.size()));
+	ins.exec();
+	}
+
+std::optional<MediaStore::VideoArtRow>
+MediaStore::get_video_art(const std::string& rel_path)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT mime, image, file_modified FROM video_art WHERE path = ?");
+	q.bind(1, rel_path);
+	if (!q.executeStep()) return std::nullopt;
+	auto blob = q.getColumn(1);
+	// A zero-length blob would hand assign() a null pointer, and would reach a
+	// client as a 200 with an empty body — which renders as a broken image and
+	// looks like a missing file rather than like a bad row.
+	if (blob.getBytes() <= 0 || blob.getBlob() == nullptr) return std::nullopt;
+	VideoArtRow r;
+	r.mime = q.getColumn(0).getString();
+	r.bytes.assign(static_cast<const char*>(blob.getBlob()),
+	               static_cast<size_t>(blob.getBytes()));
+	r.file_modified = q.getColumn(2).getInt64();
+	return r;
 	}
 
 std::optional<MediaStore::CachedAlbumInfo>
