@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Pause
@@ -74,6 +75,7 @@ import org.gaindrive.android.ui.components.CoverArt
 @Composable
 fun VideoScreen(
 	onBack: () -> Unit,
+	onCast: () -> Unit,
 	viewModel: PlayerViewModel = hiltViewModel(),
 	castViewModel: CastViewModel = hiltViewModel(),
 ) {
@@ -92,8 +94,17 @@ fun VideoScreen(
 	// Staying would leave a black rectangle with an inert seek bar under it.
 	// Safe to fire on the first frame, because the only ways here are a video
 	// having just become current and the Watch button on a video.
+	//
+	// The wait is what makes it safe to fire while casting. Connecting a device
+	// swaps the session's player, and the new one publishes an empty queue for
+	// the instant between being installed and being given the items — which
+	// reads here as "no longer a video" and would drop the user off this screen
+	// the moment they cast. A key change cancels the pending coroutine, so the
+	// flicker back to true simply calls this off.
 	LaunchedEffect(state.isVideo) {
-		if (!state.isVideo) onBack()
+		if (state.isVideo) return@LaunchedEffect
+		delay(SWAP_GRACE_MS)
+		onBack()
 	}
 
 	LaunchedEffect(interactionTick, state.isPlaying) {
@@ -180,6 +191,7 @@ fun VideoScreen(
 					.filterNot { it.isNullOrBlank() }
 					.joinToString(" · "),
 				state = state,
+				casting = castDevice != null,
 				onBack = onBack,
 				onTogglePlay = {
 					viewModel.togglePlayPause()
@@ -192,6 +204,7 @@ fun VideoScreen(
 					interactionTick++
 				},
 				onSelectTextTrack = viewModel::selectTextTrack,
+				onCast = onCast,
 			)
 		}
 	}
@@ -310,12 +323,14 @@ private fun Controls(
 	title: String,
 	subtitle: String,
 	state: PlayerState,
+	casting: Boolean,
 	onBack: () -> Unit,
 	onTogglePlay: () -> Unit,
 	onNext: () -> Unit,
 	onPrevious: () -> Unit,
 	onSeek: (Long) -> Unit,
 	onSelectTextTrack: (Int?) -> Unit,
+	onCast: () -> Unit,
 ) {
 	Box(
 		modifier = Modifier
@@ -360,6 +375,27 @@ private fun Controls(
 			// inert button would be a permanent fixture on every disc rip.
 			if (state.textTracks.isNotEmpty()) {
 				SubtitleMenu(state, onSelectTextTrack)
+			}
+			// The only way to reach a Chromecast from here. The Now Playing
+			// sheet has the other one, and this screen is not reached through
+			// it — a video takes the app straight here — so without this the
+			// button exists in a place a film never visits.
+			//
+			// Offered only for a video the receiver could play, on the same
+			// rule the sheet uses, and always while casting so the way back off
+			// the television stays where it was.
+			if (state.nativeSeek || casting) {
+				IconButton(onClick = onCast) {
+					Icon(
+						imageVector = if (casting) {
+							Icons.Default.CastConnected
+						} else {
+							Icons.Default.Cast
+						},
+						contentDescription = if (casting) "Casting" else "Cast",
+						tint = Color.White,
+					)
+				}
 			}
 		}
 
@@ -465,5 +501,11 @@ private const val DEFAULT_ASPECT = 16f / 9f
 
 /** Long enough to read the title, short enough to get out of the way. */
 private const val CONTROLS_TIMEOUT_MS = 3_500L
+
+/**
+ * Long enough to cover the player swap that starts or ends a cast session,
+ * short enough that a queue which really did move on does not sit here.
+ */
+private const val SWAP_GRACE_MS = 500L
 
 private const val CONTROLS_SCRIM = 0.4f

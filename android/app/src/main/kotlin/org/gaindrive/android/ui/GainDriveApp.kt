@@ -332,7 +332,10 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 			}
 
 			composable<Route.Video> {
-				VideoScreen(onBack = { navController.popBackStack() })
+				VideoScreen(
+					onBack = { navController.popBackStack() },
+					onCast = { castPickerOpen = true },
+				)
 			}
 		}
 	}
