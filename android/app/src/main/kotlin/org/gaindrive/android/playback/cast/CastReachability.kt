@@ -82,7 +82,10 @@ class CastReachability @Inject constructor(
 				true
 			}
 		}.onFailure {
-			Log.w(TAG, "probe ${config.name} at $host:$port failed (${wifi.describe()})", it)
+			// Expected, and repeated every session, while a VPN is up: the bind
+			// is refused with EPERM before the probe can ask anything. One line,
+			// for the same reason the control channel logs one.
+			Log.w(TAG, "probe ${config.name} at $host:$port failed (${wifi.describe()}): $it")
 		}.getOrDefault(false)
 	}
 

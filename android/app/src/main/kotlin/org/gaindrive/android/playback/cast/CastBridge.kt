@@ -162,10 +162,19 @@ class CastBridge @Inject constructor(
 			return
 		}
 
-		val request = readRequest(client) ?: run {
-			Log.w(TAG, "bridge $from: unparseable request")
-			output.respondEmpty(400, "Bad Request")
-			return
+		val request = when (val read = readRequest(client)) {
+			is BridgeRead.Ok -> read
+			// Not an error, and not answered: there is nothing to answer, and
+			// the peer has already gone.
+			BridgeRead.Silent -> {
+				Log.i(TAG, "bridge $from: opened and closed without a request")
+				return
+			}
+			is BridgeRead.Malformed -> {
+				Log.w(TAG, "bridge $from: ${read.why}")
+				output.respondEmpty(400, "Bad Request")
+				return
+			}
 		}
 
 		val upstream = resolve(request.path) ?: run {
@@ -218,15 +227,35 @@ class CastBridge @Inject constructor(
 		return published[parts[1]]
 	}
 
-	private class BridgeRequest(val method: String, val path: String, val range: String?)
+	/** What [readRequest] found. */
+	private sealed interface BridgeRead {
+		class Ok(val method: String, val path: String, val range: String?) : BridgeRead
 
-	private fun readRequest(client: Socket): BridgeRequest? {
+		/**
+		 * The peer opened a connection and closed it without sending anything.
+		 *
+		 * Receivers do this routinely — the Default Media Receiver opens a
+		 * speculative socket alongside the one it fetches on — so it is not a
+		 * failure and must not read as one. On the first successful cast it was
+		 * reported as `unparseable request`, a warning and a 400 for something
+		 * that was never a request in the first place, sitting in a log where
+		 * every other line was being read as evidence.
+		 */
+		data object Silent : BridgeRead
+
+		/** Never carries the request line: the path holds the session token. */
+		class Malformed(val why: String) : BridgeRead
+	}
+
+	private fun readRequest(client: Socket): BridgeRead {
 		val reader = client.getInputStream().bufferedReader()
-		val requestLine = reader.readLine() ?: return null
+		val requestLine = reader.readLine() ?: return BridgeRead.Silent
 		val parts = requestLine.split(' ')
-		if (parts.size < 2) return null
+		if (parts.size < 2) return BridgeRead.Malformed("malformed request line")
 		val method = parts[0].uppercase()
-		if (method != "GET" && method != "HEAD") return null
+		if (method != "GET" && method != "HEAD") {
+			return BridgeRead.Malformed("unsupported method $method")
+		}
 
 		var range: String? = null
 		while (true) {
@@ -238,7 +267,7 @@ class CastBridge @Inject constructor(
 				range = line.substring(split + 1).trim()
 			}
 		}
-		return BridgeRequest(method, parts[1], range)
+		return BridgeRead.Ok(method, parts[1], range)
 	}
 
 	private fun BufferedOutputStream.respondEmpty(code: Int, reason: String) {

@@ -207,14 +207,21 @@ internal class CastChannel private constructor(
 		 * Binding to the Wi-Fi network is the right thing under a full tunnel,
 		 * where everything addressed to the LAN over the default route goes into
 		 * the tunnel and dies. But it is *refused outright* while an ordinary
-		 * `VpnService` is up: a VPN that has not called `allowBypass()` — and
-		 * WireGuard does not — gets a per-UID rule that outranks explicit network
-		 * selection, so the bind succeeds and the connect returns `EPERM` in
-		 * microseconds. Unmarked traffic is not caught by that rule and reaches a
-		 * LAN address normally, which is why the fallback works where the binding
-		 * does not, and why [CastBridge] — whose `ServerSocket` is bound to an
-		 * address rather than to a network — could serve the LAN all along while
-		 * this channel could not reach it.
+		 * `VpnService` is up. A VPN that has not called `allowBypass()` — and
+		 * WireGuard does not — makes every other network off limits to the apps
+		 * it covers, and the refusal comes from `Network.bindSocket` inside
+		 * `createSocket()`:
+		 *
+		 *     java.net.SocketException: Binding socket to network 1084 failed:
+		 *     EPERM (Operation not permitted)
+		 *
+		 * So no route is consulted and no connection is attempted — which is why
+		 * this looked like an unreachable receiver and cost a long investigation.
+		 * An *unbound* socket is not covered by that restriction and reaches a
+		 * LAN address perfectly well, which is why the fallback works where the
+		 * binding does not, and why [CastBridge] — whose `ServerSocket` is bound
+		 * to an address rather than to a network — could serve the LAN all along
+		 * while this channel could not reach it.
 		 *
 		 * Neither order suits every configuration, so both are tried. Wi-Fi goes
 		 * first because its failure is instant, while an unbound attempt swallowed
@@ -248,7 +255,10 @@ internal class CastChannel private constructor(
 		): Socket? =
 			runCatching(create)
 				.onSuccess { Log.i(TAG, "cast connected to ${device.address} $how ($where)") }
-				.onFailure { Log.w(TAG, "cast connect to ${device.address} $how failed ($where)", it) }
+				// The message, not the throwable: for a socket failure it carries
+				// the errno, which is the whole of the diagnosis, and the stack is
+				// sixteen frames of coroutine plumbing under R8 names.
+				.onFailure { Log.w(TAG, "cast connect to ${device.address} $how failed ($where): $it") }
 				.getOrNull()
 
 		/** Connects, or closes, so that a failed attempt leaves no socket behind. */
