@@ -121,6 +121,18 @@ static const std::string SONG_COVER_ART_SQL =
 	"            THEN COALESCE(al.folder_id, s.folder_id)"
 	"            ELSE -1 END AS cover_art_id,";
 
+// The artist folder of an album whose folder is aliased `f`.  Normally the
+// folder above it, but a folder that directly contains media is itself an
+// album, and when that folder is a level-1 one (its parent is a root) or a
+// root, it is its own artist — the section holding loose files is both.
+// Reporting the parent there would name the *root*, and a client that anchors
+// its album list on this field lands on the list of sections.
+static const std::string ALBUM_ARTIST_ID_SQL =
+	"       CASE WHEN f.parent_id IS NULL"
+	"              OR (SELECT p.parent_id FROM folders p WHERE p.id = f.parent_id)"
+	"                 IS NULL"
+	"            THEN f.id ELSE f.parent_id END,";
+
 // Returns sorted list of image paths in dir, excluding cover_path.  Recursive
 // unless the caller says otherwise — see get_extra_image_paths(), where a
 // folder with subfolders is a section whose albums' images are not its own.
@@ -2305,7 +2317,8 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 	// Base SELECT — common to all types. The trailing column is a per-user
 	// album-star flag, populated from a LEFT JOIN on client.stars.
 	std::string sql =
-		"SELECT f.id, COALESCE(f.parent_id,-1),"
+		"SELECT f.id,"
+		+ ALBUM_ARTIST_ID_SQL +
 		"       COALESCE(al.title, f.name),"
 		"       COALESCE(a.name,''),"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
@@ -2481,7 +2494,8 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id,
 	// albums rather than inside one.
 	// Trailing column is the per-user album-star flag.
 	SQLite::Statement asel(db_music_,
-		"SELECT f.id, COALESCE(f.parent_id,-1),"
+		"SELECT f.id,"
+		+ ALBUM_ARTIST_ID_SQL +
 		"       COALESCE(al.title, f.name),"
 		"       COALESCE(a.name,''),"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
@@ -2532,7 +2546,8 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 
 	// Fetch album metadata. Trailing column is the per-user album-star flag.
 	SQLite::Statement msel(db_music_,
-		"SELECT f.id, COALESCE(f.parent_id,-1),"
+		"SELECT f.id,"
+		+ ALBUM_ARTIST_ID_SQL +
 		"       COALESCE(al.title, f.name),"
 		"       COALESCE(a.name,''),"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
@@ -2928,7 +2943,8 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 
 	// Starred albums — stars.album_folder_path stores the album folder path.
 	SQLite::Statement aq(db_music_,
-		"SELECT f.id, COALESCE(f.parent_id,-1),"
+		"SELECT f.id,"
+		+ ALBUM_ARTIST_ID_SQL +
 		"       COALESCE(al.title, f.name) AS title,"
 		"       COALESCE(a.name,'') AS artist,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
@@ -3339,7 +3355,8 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 
 	// Albums.
 	std::string alq_sql =
-		"SELECT f.id, COALESCE(f.parent_id,-1),"
+		"SELECT f.id,"
+		+ ALBUM_ARTIST_ID_SQL +
 		"       COALESCE(al.title, f.name),"
 		"       COALESCE(a.name,''),"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"

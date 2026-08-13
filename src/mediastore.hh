@@ -217,7 +217,12 @@ class MediaStore {
 
 		struct AlbumEntry {
 			int         id;           // folder_id (used as Subsonic album id)
-			int         parent_id;    // artist folder_id
+			// Artist folder_id, which is the album's own folder when that
+			// folder is also an artist folder — a section holding loose files
+			// is both. Emitted as `parent` and `artistId`; folder-model
+			// navigation uses DirInfo::parent_id instead, which stays the
+			// folder above.
+			int         parent_id;
 			std::string title;
 			std::string artist;
 			int         cover_art_id = -1;
