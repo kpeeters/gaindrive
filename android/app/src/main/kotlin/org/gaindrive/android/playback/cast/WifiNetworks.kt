@@ -62,6 +62,20 @@ class WifiNetworks @Inject constructor(
 	fun localAddress(): Inet4Address? = wifiLinkAddress()?.address as? Inet4Address
 
 	/**
+	 * What a cast socket failure has to be read against: which Wi-Fi network was
+	 * tracked, if any, and the address it would have gone out from.
+	 *
+	 * Without it, "no Wi-Fi network so we never bound at all", "bound and the
+	 * kernel refused the route" and "bound and the receiver did not answer" all
+	 * reach logcat as the same failure, which is how the VPN routing bug stayed
+	 * invisible for as long as it did.
+	 */
+	fun describe(): String {
+		val net = _network.value ?: return "no Wi-Fi network"
+		return "Wi-Fi ${net.networkHandle} at ${localAddress()?.hostAddress ?: "no address"}"
+	}
+
+	/**
 	 * True when [address] is on the same Wi-Fi subnet as this phone, which is the
 	 * bridge's admission test. Anything else has no business fetching a private
 	 * music library.

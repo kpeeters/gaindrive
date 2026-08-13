@@ -1,6 +1,7 @@
 package org.gaindrive.android.playback.cast
 
 import android.annotation.SuppressLint
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -143,10 +144,19 @@ internal class CastChannel private constructor(
 	}
 
 	companion object {
+		private const val TAG = "GainDriveCast"
+
 		private const val FIRST_TIMEOUT = -1
 		private const val FIRST_CLOSED = -2
 
 		private const val CONNECT_TIMEOUT_MS = 5_000
+
+		/**
+		 * The fallback only runs once the first attempt has already spent its own
+		 * timeout, so it is kept shorter: a receiver that is simply switched off
+		 * then costs eight seconds a round rather than ten.
+		 */
+		private const val FALLBACK_TIMEOUT_MS = 3_000
 
 		/**
 		 * Short enough that the receive loop wakes regularly to poll for
@@ -156,44 +166,101 @@ internal class CastChannel private constructor(
 		const val READ_TIMEOUT_MS = 1_000
 
 		/**
-		 * Opens the control channel **on the Wi-Fi network**, not on whichever
-		 * network holds the default route.
-		 *
-		 * This is the whole difference between casting working and not working
-		 * with a full-tunnel VPN up: a Chromecast lives on the LAN, and packets
-		 * addressed to it over the default route go into the tunnel and die.
-		 * The socket is created by the Wi-Fi network's factory and TLS is layered
-		 * over it afterwards, because `SSLSocketFactory` has no notion of a
-		 * network to bind to.
+		 * Opens the control channel, layering TLS over a plain socket from
+		 * [connectPlain] because `SSLSocketFactory` has no notion of a network to
+		 * bind to.
 		 *
 		 * Note the asymmetry, which is deliberate and matches [CastBridge]: this
-		 * channel and the reachability probe are Wi-Fi-bound, while fetches from
-		 * the music server stay on the default route — that is how the phone
-		 * reaches a server over the VPN and a receiver over the LAN at once.
+		 * channel and the reachability probe reach for the Wi-Fi network, while
+		 * fetches from the music server stay on the default route — that is how
+		 * the phone reaches a server over the VPN and a receiver over the LAN at
+		 * once.
 		 */
 		suspend fun open(device: CastDevice, json: Json, wifi: WifiNetworks): CastChannel? =
 			withContext(Dispatchers.IO) {
+				val plain = connectPlain(device, wifi) ?: return@withContext null
 				runCatching {
-					val address = InetSocketAddress(device.address, device.port)
-					val network = wifi.network.value
-
-					// No Wi-Fi is no reason to fail outright: without a VPN the
-					// default route reaches the LAN perfectly well, and a phone
-					// with no Wi-Fi at all cannot see a Chromecast either way.
-					val plain = network?.socketFactory?.createSocket() ?: Socket()
-					plain.connect(address, CONNECT_TIMEOUT_MS)
-
 					val socket = context().socketFactory.createSocket(
 						plain,
 						device.address,
 						device.port,
 						/* autoClose = */ true,
 					) as SSLSocket
-					socket.soTimeout = READ_TIMEOUT_MS
+					// The handshake reads on this socket, so it cannot run under
+					// the steady-state timeout: a certificate exchange that pauses
+					// for a second is ordinary, and would otherwise abort the
+					// connection and be reported as one more failure to connect.
+					socket.soTimeout = CONNECT_TIMEOUT_MS
 					socket.startHandshake()
+					socket.soTimeout = READ_TIMEOUT_MS
 					CastChannel(socket, json)
+				}.onFailure {
+					Log.w(TAG, "cast TLS handshake with ${device.address} failed", it)
+					runCatching { plain.close() }
 				}.getOrNull()
 			}
+
+		/**
+		 * A TCP connection to the receiver, over the Wi-Fi network if the kernel
+		 * permits it and over the default route if it does not.
+		 *
+		 * Binding to the Wi-Fi network is the right thing under a full tunnel,
+		 * where everything addressed to the LAN over the default route goes into
+		 * the tunnel and dies. But it is *refused outright* while an ordinary
+		 * `VpnService` is up: a VPN that has not called `allowBypass()` — and
+		 * WireGuard does not — gets a per-UID rule that outranks explicit network
+		 * selection, so the bind succeeds and the connect returns `EPERM` in
+		 * microseconds. Unmarked traffic is not caught by that rule and reaches a
+		 * LAN address normally, which is why the fallback works where the binding
+		 * does not, and why [CastBridge] — whose `ServerSocket` is bound to an
+		 * address rather than to a network — could serve the LAN all along while
+		 * this channel could not reach it.
+		 *
+		 * Neither order suits every configuration, so both are tried. Wi-Fi goes
+		 * first because its failure is instant, while an unbound attempt swallowed
+		 * by a full tunnel has to time out.
+		 */
+		private fun connectPlain(device: CastDevice, wifi: WifiNetworks): Socket? {
+			val address = InetSocketAddress(device.address, device.port)
+			val network = wifi.network.value
+			val where = wifi.describe()
+
+			// No Wi-Fi network is no reason to fail outright, and no reason to
+			// spend a timeout finding that out: go straight to the default route,
+			// which without a VPN reaches the LAN perfectly well.
+			if (network != null) {
+				attempt("Wi-Fi-bound", device, where) {
+					network.socketFactory.createSocket()
+						.connectOrClose(address, CONNECT_TIMEOUT_MS)
+				}?.let { return it }
+			}
+
+			return attempt("unbound", device, where) {
+				Socket().connectOrClose(address, FALLBACK_TIMEOUT_MS)
+			}
+		}
+
+		private fun attempt(
+			how: String,
+			device: CastDevice,
+			where: String,
+			create: () -> Socket,
+		): Socket? =
+			runCatching(create)
+				.onSuccess { Log.i(TAG, "cast connected to ${device.address} $how ($where)") }
+				.onFailure { Log.w(TAG, "cast connect to ${device.address} $how failed ($where)", it) }
+				.getOrNull()
+
+		/** Connects, or closes, so that a failed attempt leaves no socket behind. */
+		private fun Socket.connectOrClose(address: InetSocketAddress, timeout: Int): Socket {
+			try {
+				connect(address, timeout)
+			} catch (e: Exception) {
+				runCatching { close() }
+				throw e
+			}
+			return this
+		}
 
 		/**
 		 * A permissive trust manager, scoped to this socket factory and never

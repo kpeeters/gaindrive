@@ -50,6 +50,18 @@ class CastReachability @Inject constructor(
 		return reachable
 	}
 
+	/**
+	 * The binding is the question, so unlike the control channel this must
+	 * **not** fall back to an unbound socket when the kernel refuses it. An
+	 * unbound attempt would reach the server through the tunnel and answer
+	 * "direct", which hands the receiver a URL only the phone can fetch.
+	 *
+	 * The consequence is that while an ordinary VPN is up the answer can only
+	 * ever be "bridge" — a VPN that has not called `allowBypass()` refuses the
+	 * bound socket outright, for the reasons set out on `CastChannel`'s
+	 * `connectPlain`. That is the right answer arrived at for the wrong reason,
+	 * and the log line below is what tells the two apart.
+	 */
 	private fun probe(config: ServerConfig): Boolean {
 		val network = wifi.network.value ?: return false
 		val uri = runCatching { URI(config.url) }.getOrNull() ?: return false
@@ -69,6 +81,8 @@ class CastReachability @Inject constructor(
 				socket.connect(InetSocketAddress(address, port), PROBE_TIMEOUT_MS)
 				true
 			}
+		}.onFailure {
+			Log.w(TAG, "probe ${config.name} at $host:$port failed (${wifi.describe()})", it)
 		}.getOrDefault(false)
 	}
 
