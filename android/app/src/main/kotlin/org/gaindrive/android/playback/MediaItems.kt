@@ -18,12 +18,26 @@ private const val KEY_ALBUM_REF = "org.gaindrive.albumRef"
 /**
  * The source file's own MIME type, as the server reported it.
  *
- * Only casting reads it, and only when the chosen quality is the original file:
- * a Cast receiver picks its decode pipeline from `contentType`, and a wrong
- * guess surfaces as a decode error minutes into playback rather than as a
- * refusal to start. Every transcoded quality knows its own MIME already.
+ * Only casting reads it, and only when nothing else answers: for audio, when
+ * the chosen quality is the original file, and for video, when the server will
+ * send the file as it stands. A Cast receiver picks its decode pipeline from
+ * `contentType`, and a wrong guess surfaces as a decode error minutes into
+ * playback rather than as a refusal to start. Every transcoded audio quality
+ * knows its own MIME already, and for video [KEY_TRANSCODED_TYPE] does.
  */
 private const val KEY_CONTENT_TYPE = "org.gaindrive.contentType"
+
+/**
+ * What the server will send if it has to convert this one, and absent when it
+ * will send the file as it stands.
+ *
+ * Also read only by casting, and it is what saves the cast path from working
+ * out the server's tier for itself: an H.264/AAC `.mkv` is remuxed and reaches
+ * the receiver as `video/mp4`, so [KEY_CONTENT_TYPE] — the *source* container —
+ * is wrong in exactly the case that matters most. Deriving it here instead
+ * would be a second copy of `video_direct_playable()`, in another language.
+ */
+private const val KEY_TRANSCODED_TYPE = "org.gaindrive.transcodedContentType"
 
 /**
  * Whether this entry is a video, and if so what the server said about seeking
@@ -65,6 +79,7 @@ fun Song.toMediaItem(artworkUrl: String?): MediaItem {
 			bundleOf(
 				KEY_ALBUM_REF to albumRef?.encode(),
 				KEY_CONTENT_TYPE to contentType,
+				KEY_TRANSCODED_TYPE to transcodedContentType,
 				KEY_IS_VIDEO to isVideo,
 				KEY_NATIVE_SEEK to nativeSeek,
 				// 0 rather than null: a Bundle float has no absent value, and
@@ -91,6 +106,39 @@ fun MediaItem.itemRef(): ItemRef? = ItemRef.decode(mediaId)
  */
 fun MediaItem.sourceContentType(): String? =
 	mediaMetadata.extras?.getString(KEY_CONTENT_TYPE)
+
+/**
+ * Everything the cast path needs from a queue entry that it would otherwise
+ * have to go and fetch again.
+ *
+ * It travels as one value rather than four arguments because the four are only
+ * meaningful together: whether this is a video decides which stream builder to
+ * use, whether it seeks natively decides whether it can be cast at all, and the
+ * two MIME types are a pair — the second overrides the first exactly when the
+ * server is going to convert.
+ */
+data class CastSource(
+	val isVideo: Boolean,
+	val nativeSeek: Boolean,
+	val sourceMime: String?,
+	val transcodedMime: String?,
+)
+
+/**
+ * Reads [CastSource] off this item.
+ *
+ * A queue the system restored from bare media ids after process death carries
+ * no extras, and so reports no video, no native seek and no types. For casting
+ * that is the safe direction and lands such an item on the same path as a file
+ * the receiver could not have played anyway — the service re-derives `isVideo`
+ * from the mirror for *local* playback, which is where it matters.
+ */
+fun MediaItem.castSource(): CastSource = CastSource(
+	isVideo = isVideo(),
+	nativeSeek = nativeSeek(),
+	sourceMime = sourceContentType(),
+	transcodedMime = mediaMetadata.extras?.getString(KEY_TRANSCODED_TYPE),
+)
 
 /**
  * Whether this item is a video, or null when the item carries no extras at all
@@ -153,6 +201,12 @@ data class NowPlaying(
 	val artworkUrl: String?,
 	/** Drives whether the UI offers a picture; see [isVideoOrNull]. */
 	val isVideo: Boolean = false,
+	/**
+	 * For a video, whether it can be cast: the receiver is offered only the tier
+	 * the server can hand over as a seekable MP4. Meaningless for audio, which
+	 * is always castable.
+	 */
+	val nativeSeek: Boolean = false,
 	/** The server's figure, used to shape the surface before the first frame. */
 	val aspectRatio: Float? = null,
 )
@@ -165,5 +219,6 @@ fun MediaItem.toNowPlaying(): NowPlaying = NowPlaying(
 	albumRef = mediaMetadata.extras?.getString(KEY_ALBUM_REF)?.let { ItemRef.decode(it) },
 	artworkUrl = mediaMetadata.artworkUri?.toString(),
 	isVideo = isVideo(),
+	nativeSeek = nativeSeek(),
 	aspectRatio = aspectRatio(),
 )

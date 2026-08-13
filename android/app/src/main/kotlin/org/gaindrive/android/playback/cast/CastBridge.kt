@@ -20,6 +20,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.security.SecureRandom
 import java.util.Collections
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -57,6 +58,17 @@ class CastBridge @Inject constructor(
 	private val audioCache: AudioCache,
 	private val scope: CoroutineScope,
 ) {
+
+	/**
+	 * The shared client with a read timeout long enough for the server to build
+	 * a video remux, whose transcode cache does not answer until ffmpeg has
+	 * finished. [CastUrls] warms that before the receiver ever asks, so this is
+	 * the backstop for a warm that did not happen or did not work; 30 s — the
+	 * shared client's figure, sized for audio — would turn it into a failure.
+	 */
+	private val upstream by lazy {
+		httpClient.newBuilder().readTimeout(UPSTREAM_TIMEOUT_MINUTES, TimeUnit.MINUTES).build()
+	}
 
 	private var server: ServerSocket? = null
 	private var acceptJob: Job? = null
@@ -336,7 +348,7 @@ class CastBridge @Inject constructor(
 		request.range?.let { builder.header("Range", it) }
 		if (request.method == "HEAD") builder.head()
 
-		httpClient.newCall(builder.build()).execute().use { response ->
+		upstream.newCall(builder.build()).execute().use { response ->
 			Log.i(
 				TAG,
 				"bridge $from: upstream ${response.code}" +
@@ -448,6 +460,9 @@ class CastBridge @Inject constructor(
 		const val BACKLOG = 8
 		const val MAX_PUBLISHED = 16
 		const val COPY_BUFFER = 64 * 1024
+
+		/** Long enough for a whole-film remux to finish; see [upstream]. */
+		const val UPSTREAM_TIMEOUT_MINUTES = 10L
 
 		val random = SecureRandom()
 

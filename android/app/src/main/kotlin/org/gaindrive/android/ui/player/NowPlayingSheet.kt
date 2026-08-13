@@ -185,11 +185,12 @@ fun NowPlayingSheet(
 							)
 						}
 					}
-					// Not offered for video: the receiver cannot play it, and a
-					// button whose only outcome is a refusal is worse than no
-					// button. Still shown while casting, so the way to
-					// disconnect stays where it always is.
-					if (!state.isVideo || casting) {
+					// Offered for a video only when the receiver could actually
+					// play it: one the server can hand over as a seekable MP4.
+					// For the rest a button whose only outcome is a refusal is
+					// worse than no button. Still shown while casting, so the
+					// way to disconnect stays where it always is.
+					if (!state.isVideo || state.nativeSeek || casting) {
 						IconButton(
 							onClick = onCast,
 							modifier = Modifier

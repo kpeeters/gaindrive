@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -56,6 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.ui.SubtitleView
 import kotlinx.coroutines.delay
 import org.gaindrive.android.playback.PlayerState
+import org.gaindrive.android.ui.components.CoverArt
 
 /**
  * The picture, and controls over it.
@@ -73,9 +75,11 @@ import org.gaindrive.android.playback.PlayerState
 fun VideoScreen(
 	onBack: () -> Unit,
 	viewModel: PlayerViewModel = hiltViewModel(),
+	castViewModel: CastViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
 	val decodedAspect by viewModel.videoAspectRatio.collectAsStateWithLifecycle()
+	val castDevice by castViewModel.connected.collectAsStateWithLifecycle()
 	val current = state.current
 	val error = state.error
 
@@ -102,10 +106,12 @@ fun VideoScreen(
 
 	// The screen must not sleep while a film is on: nothing is touching it, so
 	// the system has no other reason to believe it is being watched. This is
-	// the one thing PlayerView would have done for us.
+	// the one thing PlayerView would have done for us. Not while casting — the
+	// picture is on the television and there is nothing here to keep awake.
 	val view = LocalView.current
-	DisposableEffect(view) {
-		view.keepScreenOn = true
+	val keepAwake = castDevice == null
+	DisposableEffect(view, keepAwake) {
+		view.keepScreenOn = keepAwake
 		onDispose { view.keepScreenOn = false }
 	}
 
@@ -128,13 +134,21 @@ fun VideoScreen(
 			},
 		contentAlignment = Alignment.Center,
 	) {
-		VideoOutput(
-			// The decoder's figure once it has one, the server's until then.
-			// Starting square and snapping is the thing this avoids.
-			aspectRatio = decodedAspect ?: current?.aspectRatio ?: DEFAULT_ASPECT,
-			onSurface = { surface, subtitles -> viewModel.attachVideo(surface, subtitles) },
-			onRelease = { surface -> viewModel.detachVideo(surface) },
-		)
+		// Not merely hidden while casting: composing it is what attaches the
+		// surface to the local player, and a surface attached to a paused
+		// ExoPlayer would sit here showing the frame it stopped on.
+		val device = castDevice
+		if (device == null) {
+			VideoOutput(
+				// The decoder's figure once it has one, the server's until then.
+				// Starting square and snapping is the thing this avoids.
+				aspectRatio = decodedAspect ?: current?.aspectRatio ?: DEFAULT_ASPECT,
+				onSurface = { surface, subtitles -> viewModel.attachVideo(surface, subtitles) },
+				onRelease = { surface -> viewModel.detachVideo(surface) },
+			)
+		} else {
+			CastingElsewhere(artworkUrl = current?.artworkUrl, deviceName = device.name)
+		}
 
 		// Over the picture rather than beside it: a video that has not started
 		// is a black rectangle, and nothing else says the app is still working.
@@ -178,6 +192,43 @@ fun VideoScreen(
 					interactionTick++
 				},
 				onSelectTextTrack = viewModel::selectTextTrack,
+			)
+		}
+	}
+}
+
+/**
+ * What stands in for the picture while it is on a television.
+ *
+ * The screen is not left, and the controls above it are untouched: the scrub
+ * bar, the transport and the way back all stay exactly where they were, because
+ * from here casting is a change of screen and not a change of activity.
+ */
+@Composable
+private fun CastingElsewhere(artworkUrl: String?, deviceName: String) {
+	Column(
+		horizontalAlignment = Alignment.CenterHorizontally,
+		verticalArrangement = Arrangement.spacedBy(16.dp),
+	) {
+		CoverArt(
+			url = artworkUrl,
+			contentDescription = null,
+			modifier = Modifier.size(160.dp),
+			cornerRadius = 8.dp,
+		)
+		Row(
+			horizontalArrangement = Arrangement.spacedBy(8.dp),
+			verticalAlignment = Alignment.CenterVertically,
+		) {
+			Icon(
+				imageVector = Icons.Default.CastConnected,
+				contentDescription = null,
+				tint = Color.White,
+			)
+			Text(
+				text = "Playing on $deviceName",
+				color = Color.White,
+				style = MaterialTheme.typography.bodyLarge,
 			)
 		}
 	}

@@ -31,8 +31,10 @@ import javax.inject.Singleton
  * three negotiations whose failure mode is a black rectangle with nothing in
  * the log. The service and the UI share a process (`PlaybackService` declares
  * no `android:process`), so the direct reference is available, exact, and has
- * no state to get wrong. Video is never cast either, so the local player is the
- * right target even while the session is driving a Chromecast.
+ * no state to get wrong. The local player stays the right target even while the
+ * session is driving a Chromecast: while casting, `VideoScreen` composes a panel
+ * instead of the surface, so nothing attaches here at all and the question of
+ * which player owns it does not arise.
  *
  * Both ends can arrive in either order — the screen can be composed before the
  * service exists, and the service can be destroyed while the screen is still up

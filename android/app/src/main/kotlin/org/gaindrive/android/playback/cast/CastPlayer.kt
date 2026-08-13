@@ -1,6 +1,7 @@
 package org.gaindrive.android.playback.cast
 
 import android.os.Looper
+import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -11,8 +12,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import org.gaindrive.android.playback.castSource
 import org.gaindrive.android.playback.itemRef
-import org.gaindrive.android.playback.sourceContentType
 
 /**
  * A Media3 [Player] backed by a Chromecast.
@@ -261,14 +262,25 @@ class CastPlayer(
 	 * [CastUrls] builds it the same way local playback would — same quality,
 	 * same per-server bitrate cap — and then decides whether the receiver
 	 * fetches from the server or through the bridge.
+	 *
+	 * When it cannot build one at all, the entry is skipped rather than left to
+	 * stall. That is a video the server could only convert as it plays, which
+	 * the receiver would not be able to seek; the UI declines to offer such a
+	 * thing and refuses to enqueue one, but neither guard covers connecting a
+	 * device to a queue that already holds it.
 	 */
 	private fun loadCurrent(positionMs: Long) {
 		val entry = entries.getOrNull(index) ?: return
 		val ref = entry.item.itemRef() ?: return
+		val source = entry.item.castSource()
 		ended = false
 		loadJob?.cancel()
 		loadJob = scope.launch {
-			val target = castUrls.forCast(ref, entry.item.sourceContentType()) ?: return@launch
+			val target = castUrls.forCast(ref, source) ?: run {
+				Log.i(TAG, "nothing castable for $ref, skipping")
+				advance()
+				return@launch
+			}
 			val metadata = entry.item.mediaMetadata
 			session.load(
 				CastMedia(
@@ -285,12 +297,15 @@ class CastPlayer(
 						metadata.artworkUri?.toString(),
 						bridged = target.bridged,
 					),
+					isVideo = source.isVideo,
 				)
 			)
 		}
 	}
 
 	private companion object {
+		const val TAG = "GainDriveCast"
+
 		val COMMANDS: Player.Commands = Player.Commands.Builder()
 			.addAll(
 				Player.COMMAND_PLAY_PAUSE,

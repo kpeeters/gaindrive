@@ -71,6 +71,12 @@ data class PlayerState(
 	/** Whether what is playing wants a picture. */
 	val isVideo: Boolean get() = current?.isVideo == true
 
+	/**
+	 * Whether what is playing could go to a Chromecast. Always true for audio;
+	 * for video, only the tier the server can hand over as a seekable MP4.
+	 */
+	val nativeSeek: Boolean get() = current?.nativeSeek == true
+
 	/** How [ref] should render in a track listing. */
 	fun trackStateOf(ref: ItemRef): TrackState = when {
 		loadingRef == ref -> TrackState.LOADING
@@ -204,15 +210,18 @@ class PlayerConnection @Inject constructor(
 	/**
 	 * Whether [songs] can be played where playback is currently going.
 	 *
-	 * Video is not cast. The receiver would need a video MIME and a video
-	 * metadata type, and the throttle in the server's stream path assumes a
-	 * near-constant bitrate that VBR video does not have — so handing it a film
-	 * fails minutes in rather than at the tap. Refusing here, in words, is the
-	 * honest version of that.
+	 * Video is cast, but only the tier the server can hand over as a real MP4 —
+	 * which is what `nativeSeek` names. Anything else it can only convert as it
+	 * plays, and that stream is chunked with no byte ranges, so the receiver
+	 * would show a seek bar that does nothing on exactly the long content where
+	 * seeking matters most. The answer for those is `hls.m3u8`, which the bridge
+	 * cannot yet carry. Refusing here, in words, is the honest version of that.
 	 */
 	private fun refuseIfCasting(songs: List<Song>): Boolean {
-		if (castSession.device.value == null || songs.none { it.isVideo }) return false
-		_message.value = "Video cannot be cast. Disconnect to watch on this device."
+		if (castSession.device.value == null) return false
+		if (songs.none { it.isVideo && !it.nativeSeek }) return false
+		_message.value = "This video has to be converted as it plays, which the TV " +
+			"cannot seek. Disconnect to watch on this device."
 		return true
 	}
 

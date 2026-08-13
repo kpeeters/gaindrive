@@ -88,6 +88,17 @@ data class Song(
 	 * sends playback to `hls.m3u8` instead. Meaningless for audio.
 	 */
 	val nativeSeek: Boolean = false,
+	/**
+	 * What the server will actually send if it has to convert this, or null when
+	 * it will send the file as it stands.
+	 *
+	 * Only casting reads it, and it is the reason casting does not have to work
+	 * out the tier for itself: the receiver picks its decode pipeline from the
+	 * declared type, and for a video the *source* `contentType` is wrong in
+	 * exactly the common case — an H.264/AAC `.mkv` is remuxed and arrives as
+	 * `video/mp4`, not as `video/x-matroska`.
+	 */
+	val transcodedContentType: String? = null,
 	/** Video frame size, when the server could probe it. */
 	val width: Int? = null,
 	val height: Int? = null,

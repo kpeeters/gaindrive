@@ -39,6 +39,8 @@ data class CastMedia(
 	val artist: String? = null,
 	val album: String? = null,
 	val artworkUrl: String? = null,
+	/** Selects the metadata block the receiver is given; see `metadata()`. */
+	val isVideo: Boolean = false,
 )
 
 /**
@@ -368,15 +370,28 @@ class CastSession @Inject constructor(
 	 * The receiver shows this on the TV while playing. The C++ sends none
 	 * because the web client is the only thing looking at the browser's own UI;
 	 * on a phone the television is the second screen and the one people watch.
+	 *
+	 * A branch rather than a changed constant: `artist` and `albumName` are
+	 * fields of a music track and not of a movie, so sending them under
+	 * `metadataType: 1` would put nothing on screen. The album line carries a
+	 * film's section — `Documentaries`, a series name — which is what `subtitle`
+	 * is for.
 	 */
 	private fun CastMedia.metadata(): JsonObject? {
 		if (title == null && artist == null && album == null && artworkUrl == null) return null
 		return buildJsonObject {
-			// 3 = MusicTrackMediaMetadata.
-			put("metadataType", 3)
-			title?.let { put("title", it) }
-			artist?.let { put("artist", it) }
-			album?.let { put("albumName", it) }
+			if (isVideo) {
+				// 1 = MovieMediaMetadata.
+				put("metadataType", 1)
+				title?.let { put("title", it) }
+				album?.let { put("subtitle", it) }
+			} else {
+				// 3 = MusicTrackMediaMetadata.
+				put("metadataType", 3)
+				title?.let { put("title", it) }
+				artist?.let { put("artist", it) }
+				album?.let { put("albumName", it) }
+			}
 			artworkUrl?.let {
 				put("images", kotlinx.serialization.json.buildJsonArray {
 					add(buildJsonObject { put("url", it) })
