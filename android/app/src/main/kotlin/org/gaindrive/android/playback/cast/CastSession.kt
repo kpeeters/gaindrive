@@ -267,7 +267,7 @@ class CastSession @Inject constructor(
 	}
 
 	private suspend fun onReceiverStatus(open: CastChannel, message: JsonObject) {
-		val transport = CastStatus.transportIdOf(message)
+		val transport = CastStatus.transportIdOf(message, CastNs.DEFAULT_MEDIA_APP)
 		if (transport == null) {
 			transportId.value = null
 			return

@@ -13,6 +13,9 @@ import org.junit.Test
  */
 class CastStatusTest {
 
+	/** The Default Media Receiver, the only app these lookups are about. */
+	private val MEDIA_APP = "CC1AD845"
+
 	private fun message(raw: String): JsonObject =
 		Json.parseToJsonElement(raw) as JsonObject
 
@@ -94,8 +97,8 @@ class CastStatusTest {
 			  "appId":"CC1AD845","sessionId":"a-session","transportId":"transport-9"
 			}]}}
 		""".trimIndent()
-		assertEquals("transport-9", CastStatus.transportIdOf(message(raw)))
-		assertEquals("a-session", CastStatus.sessionIdOf(message(raw)))
+		assertEquals("transport-9", CastStatus.transportIdOf(message(raw), MEDIA_APP))
+		assertEquals("a-session", CastStatus.sessionIdOf(message(raw), MEDIA_APP))
 	}
 
 	/**
@@ -104,12 +107,42 @@ class CastStatusTest {
 	 */
 	@Test
 	fun `no running app yields no transport`() {
-		assertNull(CastStatus.transportIdOf(message("""{"status":{"applications":[]}}""")))
-		assertNull(CastStatus.transportIdOf(message("""{"status":{}}""")))
+		assertNull(CastStatus.transportIdOf(message("""{"status":{"applications":[]}}"""), MEDIA_APP))
+		assertNull(CastStatus.transportIdOf(message("""{"status":{}}"""), MEDIA_APP))
 		assertNull(
 			CastStatus.transportIdOf(
-				message("""{"status":{"applications":[{"appId":"CC1AD845","transportId":""}]}}""")
+				message("""{"status":{"applications":[{"appId":"CC1AD845","transportId":""}]}}"""),
+				MEDIA_APP,
 			)
 		)
+	}
+
+	/**
+	 * The regression that made casting depend on what the television happened
+	 * to be showing: an idle TV runs its own ambient app, which publishes a
+	 * transportId like any other, and loading into it does nothing at all.
+	 */
+	@Test
+	fun `another app running is not a media receiver`() {
+		val backdrop = """
+			{"type":"RECEIVER_STATUS","status":{"applications":[{
+			  "appId":"E8C28D3C","isIdleScreen":true,
+			  "sessionId":"ad7da4be","transportId":"ad7da4be"
+			}]}}
+		""".trimIndent()
+		assertNull(CastStatus.transportIdOf(message(backdrop), MEDIA_APP))
+		assertNull(CastStatus.sessionIdOf(message(backdrop), MEDIA_APP))
+	}
+
+	/** And it is found when it is one of several. */
+	@Test
+	fun `the media receiver is picked out of a list`() {
+		val both = """
+			{"type":"RECEIVER_STATUS","status":{"applications":[
+			  {"appId":"E8C28D3C","transportId":"backdrop"},
+			  {"appId":"CC1AD845","transportId":"ours"}
+			]}}
+		""".trimIndent()
+		assertEquals("ours", CastStatus.transportIdOf(message(both), MEDIA_APP))
 	}
 }

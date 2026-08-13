@@ -93,19 +93,34 @@ data class CastStatus(
 		}
 
 		/**
-		 * The `transportId` of a running receiver application, from a
-		 * `RECEIVER_STATUS`. Null means no application is running, which is the
-		 * signal to LAUNCH one.
+		 * The `transportId` of a running instance of [appId], from a
+		 * `RECEIVER_STATUS`. Null means it is not running, which is the signal to
+		 * LAUNCH it.
 		 */
-		fun transportIdOf(message: JsonObject): String? =
-			message.runningApp()?.string("transportId")
+		fun transportIdOf(message: JsonObject, appId: String): String? =
+			message.runningApp(appId)?.string("transportId")
 
-		/** The `sessionId` of the running application, needed to STOP it. */
-		fun sessionIdOf(message: JsonObject): String? =
-			message.runningApp()?.string("sessionId")
+		/** The `sessionId` of that same application, needed to STOP it. */
+		fun sessionIdOf(message: JsonObject, appId: String): String? =
+			message.runningApp(appId)?.string("sessionId")
 
-		private fun JsonObject.runningApp(): JsonObject? =
-			obj("status")?.array("applications")?.firstOrNull() as? JsonObject
+		/**
+		 * Matched on [appId] rather than taken as the first entry, which is a
+		 * fix and not a refinement.
+		 *
+		 * A television that has been sitting idle is running its own ambient
+		 * app — `E8C28D3C`, "Backdrop" — and it publishes a `transportId` like
+		 * any other. Taking the first one made that look like a media receiver
+		 * ready to be loaded into, so the LOAD went to a screensaver, which
+		 * ignores the media namespace entirely: no `MEDIA_STATUS`, no fetch,
+		 * nothing in any log, and a player that simply does nothing. Whether
+		 * casting worked then depended on what the TV happened to be showing
+		 * when the user reached for it.
+		 */
+		private fun JsonObject.runningApp(appId: String): JsonObject? =
+			obj("status")?.array("applications")
+				?.filterIsInstance<JsonObject>()
+				?.firstOrNull { it.string("appId") == appId }
 
 		private fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
 
