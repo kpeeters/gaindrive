@@ -66,7 +66,7 @@ class CastBridge @Inject constructor(
 	 * the backstop for a warm that did not happen or did not work; 30 s — the
 	 * shared client's figure, sized for audio — would turn it into a failure.
 	 */
-	private val upstream by lazy {
+	private val upstreamClient by lazy {
 		httpClient.newBuilder().readTimeout(UPSTREAM_TIMEOUT_MINUTES, TimeUnit.MINUTES).build()
 	}
 
@@ -348,7 +348,7 @@ class CastBridge @Inject constructor(
 		request.range?.let { builder.header("Range", it) }
 		if (request.method == "HEAD") builder.head()
 
-		upstream.newCall(builder.build()).execute().use { response ->
+		upstreamClient.newCall(builder.build()).execute().use { response ->
 			Log.i(
 				TAG,
 				"bridge $from: upstream ${response.code}" +
@@ -461,7 +461,7 @@ class CastBridge @Inject constructor(
 		const val MAX_PUBLISHED = 16
 		const val COPY_BUFFER = 64 * 1024
 
-		/** Long enough for a whole-film remux to finish; see [upstream]. */
+		/** Long enough for a whole-film remux to finish; see [upstreamClient]. */
 		const val UPSTREAM_TIMEOUT_MINUTES = 10L
 
 		val random = SecureRandom()
