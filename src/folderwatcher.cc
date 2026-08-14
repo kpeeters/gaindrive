@@ -57,6 +57,7 @@ std::string FolderWatcher::artist_dir_for_path(const std::string& path) const
 #include <cstring>
 #include <chrono>
 #include <optional>
+#include <system_error>
 
 // Self-pipe wakeup.  A one-byte write to a pipe with room cannot fail for any
 // reason worth handling except EINTR, but the result must still be consumed —
@@ -83,6 +84,13 @@ void FolderWatcher::add_watch(const std::string& path)
 	{
 	int wd = inotify_add_watch(inotify_fd_, path.c_str(), WATCH_MASK);
 	if (wd == -1) {
+		// A directory that has just been deleted is the ordinary case here,
+		// not a failure: every removal ends with a rescan of the folder that
+		// went away, and the rewatch afterwards asks for a watch on a path
+		// that is gone by definition. Reporting it — twice, with the walk
+		// below — made a normal `rmdir` look like something had broken.
+		if (errno == ENOENT)
+			return;
 		if (errno == ENOSPC)
 			std::cout << stamp()
 			          << "FolderWatcher: inotify watch limit reached for " << path
@@ -121,7 +129,9 @@ void FolderWatcher::add_watches_recursive(const std::string& root)
 		if (entry.is_directory(ec))
 			add_watch(entry.path().string());
 		}
-	if (ec)
+	// Same reason as the ENOENT above: a rewatch of a directory that has just
+	// been removed is expected, and its walk cannot start.
+	if (ec && ec != std::errc::no_such_file_or_directory)
 		std::cout << stamp() << "FolderWatcher: error walking " << root
 		          << ": " << ec.message() << std::endl;
 	}

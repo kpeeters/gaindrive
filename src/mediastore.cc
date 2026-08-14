@@ -1895,17 +1895,6 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		std::cout << stamp() << "  pruned " << n << " songs" << std::endl;
 	}
 	{
-	// Keyed on "no song has this path any more" rather than on the folder
-	// marks, so it also catches a single file deleted from an album that is
-	// still there — the folder-level prune never reaches those.  Must run
-	// after the songs delete above, in this same transaction.
-	SQLite::Statement s(db_music_,
-		"DELETE FROM video_art WHERE path LIKE ?"
-		"  AND path NOT IN (SELECT path FROM songs)");
-	s.bind(1, prefix);
-	s.exec();
-	}
-	{
 	SQLite::Statement s(db_music_,
 		"DELETE FROM albums WHERE folder_id IN ("
 		"  SELECT id FROM folders WHERE last_scanned IS NULL AND path LIKE ?"
@@ -1940,19 +1929,6 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	int n = db_music_.getChanges();
 	if (n > 0)
 		std::cout << stamp() << "  pruned " << n << " folders" << std::endl;
-	}
-	{
-	// video_meta is keyed by *either* an album folder or a song, so unlike
-	// video_art above it cannot key its prune on songs alone — that would
-	// delete every film, all of which are folders.  Runs after the folders
-	// delete so a folder that went away this pass is already gone from the
-	// set being checked against.
-	SQLite::Statement s(db_music_,
-		"DELETE FROM video_meta WHERE path LIKE ?"
-		"  AND path NOT IN (SELECT path FROM songs)"
-		"  AND path NOT IN (SELECT path FROM folders)");
-	s.bind(1, prefix);
-	s.exec();
 	}
 	// The loose-file album hangs off the artist folder itself, which is never
 	// marked unvisited, so nothing above can reach it.  When the walk found no
@@ -1998,7 +1974,52 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		if (db_music_.getChanges() > 0)
 			std::cout << stamp() << "  pruned artist folder" << std::endl;
 		}
+		// Both caches are keyed by path, and the two prunes below can only see
+		// paths *under* this folder — "video/Road/%" does not match
+		// "video/Road". Nothing writes a row on a section folder today, since
+		// the loose-file album is looked up per song, but a row that did land
+		// there would otherwise outlive the folder with nothing able to reach
+		// it again.
+		{
+		SQLite::Statement s(db_music_, "DELETE FROM video_art WHERE path = ?");
+		s.bind(1, artist_rel);
+		s.exec();
 		}
+		{
+		SQLite::Statement s(db_music_, "DELETE FROM video_meta WHERE path = ?");
+		s.bind(1, artist_rel);
+		s.exec();
+		}
+		}
+
+	// The two derived caches go last, and that ordering is the whole of their
+	// correctness: both ask "is there still a song (or folder) at this path",
+	// so they have to run once every delete above has happened. They used to
+	// sit in the middle, where the loose-file album's song and folder rows —
+	// which go last, because nothing marks them unvisited — were still there
+	// to be found, and a section deleted from disk left its posters and its
+	// TMDB answers behind for ever.
+	{
+	// Keyed on "no song has this path any more" rather than on the folder
+	// marks, so it also catches a single file deleted from an album that is
+	// still there — the folder-level prune never reaches those.
+	SQLite::Statement s(db_music_,
+		"DELETE FROM video_art WHERE path LIKE ?"
+		"  AND path NOT IN (SELECT path FROM songs)");
+	s.bind(1, prefix);
+	s.exec();
+	}
+	{
+	// video_meta is keyed by *either* an album folder or a song, so unlike
+	// video_art it cannot key its prune on songs alone — that would delete
+	// every film, all of which are folders.
+	SQLite::Statement s(db_music_,
+		"DELETE FROM video_meta WHERE path LIKE ?"
+		"  AND path NOT IN (SELECT path FROM songs)"
+		"  AND path NOT IN (SELECT path FROM folders)");
+	s.bind(1, prefix);
+	s.exec();
+	}
 	txn.commit();
 	}
 	std::cout << stamp() << "Rescan complete" << std::endl;
