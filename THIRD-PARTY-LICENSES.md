@@ -28,6 +28,24 @@ same commit.
   Public domain (Unlicense) · Mattias Jansson
   https://github.com/mjansson/mdns
 
+The web client's icon font is vendored the same way, but lives in `web/`
+rather than `third_party/` because it is embedded into the binary by
+`cmake/embed_web.cmake` along with the rest of the client:
+
+* Material Symbols Rounded (Google Fonts release v368) —
+  `web/material-symbols-rounded.woff2`,
+  `web/material-symbols-rounded.LICENSE`
+  Apache-2.0 · Copyright Google LLC
+  https://github.com/google/material-design-icons
+  Taken verbatim from the file Google Fonts serves for
+  `Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0..1,0`: the whole
+  icon set with `opsz`, `wght` and `GRAD` pinned and only `FILL` left as a
+  variable axis. It is shipped whole rather than subset because the icons are
+  addressed by ligature, so a subset keyed on the names actually used still
+  drags in every icon spellable from the same letters — measured at 374 KB
+  against 537 KB, for the price of a build-time dependency on Python
+  fontTools. Not worth it.
+
 
 ## Server — system packages
 

@@ -1541,6 +1541,15 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(embedded::favicon_svg.data(), embedded::favicon_svg.size(),
 		                embedded::favicon_svg_mime.data());
 		});
+	// Half a megabyte that only changes when the binary does, so it is worth
+	// telling the browser not to ask again.
+	server_.Get("/material-symbols-rounded.woff2",
+	            [](const httplib::Request&, httplib::Response& res) {
+		res.set_header("Cache-Control", "public, max-age=31536000, immutable");
+		res.set_content(embedded::material_symbols_woff2.data(),
+		                embedded::material_symbols_woff2.size(),
+		                embedded::material_symbols_woff2_mime.data());
+		});
 
 	// ping
 	server_.Get("/rest/ping.view", [this](const httplib::Request& req,

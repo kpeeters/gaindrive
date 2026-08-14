@@ -14,4 +14,7 @@ namespace embedded {
 
    extern const std::string_view favicon_svg;
    extern const std::string_view favicon_svg_mime;
+
+   extern const std::string_view material_symbols_woff2;
+   extern const std::string_view material_symbols_woff2_mime;
    }

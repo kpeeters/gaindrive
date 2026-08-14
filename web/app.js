@@ -1268,9 +1268,9 @@ async function viewAlbums(artistId, artistName) {
    heading.className = 'view-title';
    heading.textContent = artistName;
    const refreshBtn = document.createElement('button');
-   refreshBtn.className = 'refresh-btn';
+   refreshBtn.className = 'refresh-btn mi';
    refreshBtn.title = 'Reload artist info from MusicBrainz';
-   refreshBtn.textContent = '↻';
+   refreshBtn.textContent = 'refresh';
    header.appendChild(back);
    header.appendChild(heading);
    header.appendChild(refreshBtn);
@@ -1595,7 +1595,7 @@ function onCastStatus(s) {
       seek.value = Math.floor(absCurrent);
       }
    document.getElementById('player-playpause').textContent =
-      s.playerState === 'PAUSED' ? '▶' : '⏸';
+      s.playerState === 'PAUSED' ? 'play_arrow' : 'pause';
    }
 
 // Open (or re-open) the SSE connection for cast status events.
@@ -1922,18 +1922,18 @@ function makeAlbumCover(album) {
       return img;
       }
    const div = document.createElement('div');
-   div.className = 'album-cover album-cover-placeholder';
+   div.className = 'album-cover album-cover-placeholder mi';
    div.dataset.albumId   = album.id;
    div.dataset.coverSize = 80;
-   div.textContent = '♫';
+   div.textContent = 'music_note';
    return div;
    }
 
 function makeAlbumStar(album) {
    const btn = document.createElement('span');
-   btn.className = 'album-star' + (album.starred ? ' starred' : '');
+   btn.className = 'album-star mi' + (album.starred ? ' starred' : '');
    btn.title = album.starred ? 'Unstar album' : 'Star album';
-   btn.textContent = '★';
+   btn.textContent = 'star';
    btn.dataset.starKind       = 'album';
    btn.dataset.starId         = album.id;
    btn.dataset.titleStarred   = 'Unstar album';
@@ -1958,9 +1958,9 @@ function makeAlbumStar(album) {
 
 function makeTrackActions(song, ctx) {
    const starBtn = document.createElement('span');
-   starBtn.className = 'track-action' + (song.starred ? ' starred' : '');
+   starBtn.className = 'track-action mi' + (song.starred ? ' starred' : '');
    starBtn.title = song.starred ? 'Unstar' : 'Star';
-   starBtn.textContent = '★';
+   starBtn.textContent = 'star';
    starBtn.dataset.starKind       = 'track';
    starBtn.dataset.starId         = song.id;
    starBtn.dataset.titleStarred   = 'Unstar';
@@ -1980,9 +1980,9 @@ function makeTrackActions(song, ctx) {
 
    if (ctx?.playlistId != null) {
       const removeBtn = document.createElement('span');
-      removeBtn.className = 'track-action track-action-remove';
+      removeBtn.className = 'track-action track-action-remove mi';
       removeBtn.title = 'Remove from playlist';
-      removeBtn.textContent = '✕';
+      removeBtn.textContent = 'close';
 
       removeBtn.addEventListener('click', e => {
          e.stopPropagation();
@@ -2006,9 +2006,9 @@ function makeTrackActions(song, ctx) {
       }
 
    const listBtn = document.createElement('span');
-   listBtn.className = 'track-action';
+   listBtn.className = 'track-action mi';
    listBtn.title = 'Add to playlist';
-   listBtn.textContent = '☰';
+   listBtn.textContent = 'playlist_add';
 
    listBtn.addEventListener('click', e => {
       e.stopPropagation();
@@ -2130,7 +2130,7 @@ function playerStop() {
    player.scrobbled   = false;
    videoSurfaceSet(null);
 
-   document.getElementById('player-playpause').textContent = '▶';
+   document.getElementById('player-playpause').textContent = 'play_arrow';
    document.getElementById('player-title').textContent     = '—';
    document.getElementById('player-artist').textContent    = '';
    document.getElementById('player-info-btn').disabled     = true;
@@ -2357,9 +2357,9 @@ function sidebarQueueUpdate() {
       title.title       = song.artist ? `${song.artist} — ${song.title}` : song.title;
 
       const btn = document.createElement('button');
-      btn.className = 'sq-remove';
+      btn.className = 'sq-remove mi';
       btn.title     = 'Remove from queue';
-      btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+      btn.textContent = 'delete';
 
       li.appendChild(title);
       li.appendChild(btn);
@@ -2446,10 +2446,10 @@ el.addEventListener('timeupdate', () => {
    });
 
 el.addEventListener('play',  () => {
-   document.getElementById('player-playpause').textContent = '⏸';
+   document.getElementById('player-playpause').textContent = 'pause';
    });
 el.addEventListener('pause', () => {
-   document.getElementById('player-playpause').textContent = '▶';
+   document.getElementById('player-playpause').textContent = 'play_arrow';
    });
 
 // canPlayType() lies in some browser/codec pairings — Firefox claims it can
@@ -2504,11 +2504,11 @@ function setupPlayer() {
       if (castDeviceId !== null) {
          const btn = document.getElementById('player-playpause');
          // Flip immediately so the UI responds without waiting for the next poll.
-         if (btn.textContent === '▶') {
-            btn.textContent = '⏸';
+         if (btn.textContent === 'play_arrow') {
+            btn.textContent = 'pause';
             apiCall('castControl', {action: 'play'}).catch(() => {});
             } else {
-            btn.textContent = '▶';
+            btn.textContent = 'play_arrow';
             apiCall('castControl', {action: 'pause'}).catch(() => {});
             }
          return;
@@ -2890,16 +2890,16 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       // is no cover yet.
       if (!heroImg) {
          placeholder = document.createElement('div');
-         placeholder.className = 'album-hero album-hero-placeholder';
+         placeholder.className = 'album-hero album-hero-placeholder mi';
          placeholder.dataset.albumId   = album.id;
          placeholder.dataset.coverSize = 400;
-         placeholder.textContent = '♫';
+         placeholder.textContent = 'music_note';
          heroWrap.appendChild(placeholder);
          }
 
       const pencilBtn = document.createElement('button');
-      pencilBtn.className = 'cover-edit-btn';
-      pencilBtn.textContent = '✏';
+      pencilBtn.className = 'cover-edit-btn mi';
+      pencilBtn.textContent = 'edit';
       pencilBtn.setAttribute('aria-label', 'Change cover art');
       pencilBtn.addEventListener('click', () => {
          showCoverArtDialog(picked => {
@@ -3261,13 +3261,13 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       label.className = 'liner-notes-label';
 
       const prev = document.createElement('button');
-      prev.className = 'liner-notes-btn';
-      prev.textContent = '‹';
+      prev.className = 'liner-notes-btn mi';
+      prev.textContent = 'chevron_left';
       prev.setAttribute('aria-label', 'Previous text file');
 
       const next = document.createElement('button');
-      next.className = 'liner-notes-btn';
-      next.textContent = '›';
+      next.className = 'liner-notes-btn mi';
+      next.textContent = 'chevron_right';
       next.setAttribute('aria-label', 'Next text file');
 
       if (files.length > 1) {

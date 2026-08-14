@@ -8,6 +8,43 @@
    stylesheet's [hidden]{display:none}, so we restore it here. */
 [hidden] { display: none !important; }
 
+/* ── Icons ─────────────────────────────────────────────────────────────────
+   Material Symbols Rounded, served from the binary rather than from Google's
+   CDN — a server on a LAN with no route out still has to draw its own UI.
+   Icons are named by ligature (<span class="mi">library_music</span>), so
+   `font-feature-settings: 'liga'` is what makes them render at all.
+
+   The shipped font keeps FILL as a variable axis and pins the rest, which is
+   what lets a star be one glyph that fills rather than two glyphs that swap.
+   ── */
+
+@font-face {
+   font-family: 'Material Symbols Rounded';
+   font-style: normal;
+   font-weight: 400;
+   font-display: block;   /* no flash of the ligature name as literal text */
+   src: url(material-symbols-rounded.woff2) format('woff2');
+}
+
+.mi {
+   font-family: 'Material Symbols Rounded';
+   font-weight: normal;
+   font-style: normal;
+   font-size: 1.25rem;
+   line-height: 1;
+   letter-spacing: normal;
+   text-transform: none;
+   display: inline-block;
+   white-space: nowrap;
+   word-wrap: normal;
+   direction: ltr;
+   font-feature-settings: 'liga';
+   font-variation-settings: 'FILL' 0;
+   -webkit-font-smoothing: antialiased;
+   user-select: none;
+   flex-shrink: 0;
+}
+
 /* ── Colour themes ─────────────────────────────────────────────────────────
    Dark is the default. Light is applied when:
      a) the OS prefers light AND no explicit class is set, OR
@@ -252,8 +289,8 @@ body {
    margin: 0 0.4rem;
 }
 
-#sidebar a svg {
-   flex-shrink: 0;
+#sidebar a .mi {
+   font-size: 1.125rem;
 }
 
 #sidebar a:hover,
@@ -309,6 +346,7 @@ body {
 
 .sq-remove {
    flex-shrink: 0;
+   font-size: 0.95rem;
    opacity: 0;
    background: none;
    border: none;
@@ -391,7 +429,7 @@ body {
    border: none;
    color: var(--text-dim);
    cursor: pointer;
-   font-size: 1rem;
+   font-size: 1.15rem;
    padding: 0.2rem 0.4rem;
    border-radius: 3px;
    flex-shrink: 0;
@@ -565,7 +603,7 @@ body {
    border-radius: 50%;
    background: rgba(0, 0, 0, 0.55);
    color: #fff;
-   font-size: 0.9rem;
+   font-size: 1.05rem;
    line-height: 1;
    cursor: pointer;
    opacity: 0;
@@ -605,7 +643,7 @@ body {
    background: none;
    border: 0;
    color: var(--text-dim);
-   font-size: 1rem;
+   font-size: 1.15rem;
    cursor: pointer;
    padding: 0.1rem 0.4rem;
    border-radius: 4px;
@@ -1157,7 +1195,7 @@ body {
    background: var(--surface);
 }
 
-/* Column 1: icon slot — shows "+" on hover, "▶" when playing. */
+/* Column 1: icon slot — shows "add" on hover, "play_arrow" when playing. */
 .track-icon {
    font-size: 1rem;
    color: var(--text-dim);
@@ -1175,19 +1213,31 @@ body {
    content: '\00a0';
 }
 
-.track-row:hover .track-icon::before {
-   content: '+';
-   font-weight: 700;
+/* Only the states that actually draw an icon switch to the icon font — the
+   default ::before keeps the nbsp in the body font, which is what holds the
+   baseline still (see above). */
+.track-row:hover .track-icon::before,
+.track-row.queued .track-icon::before,
+.track-row.playing .track-icon::before {
+   font-family: 'Material Symbols Rounded';
+   font-feature-settings: 'liga';
+   font-variation-settings: 'FILL' 0;
 }
 
+.track-row:hover .track-icon::before {
+   content: 'add';
+}
+
+/* Queued and playing are the same glyph; the FILL axis is the difference. */
 .track-row.queued .track-icon::before {
-   content: '▷';
+   content: 'play_arrow';
 }
 
 .track-row.playing .track-icon::before {
-   content: '▶';
+   content: 'play_arrow';
+   font-variation-settings: 'FILL' 1;
    color: var(--accent);
-   font-size: 0.8rem;
+   font-size: 0.9rem;
    vertical-align: middle;
 }
 
@@ -1221,8 +1271,8 @@ body {
 
 /* Action icons — hidden until row is hovered */
 .track-action {
-   width: 1rem;
-   font-size: 0.85rem;
+   width: 1em;
+   font-size: 0.95rem;
    color: var(--text-dim);
    text-align: center;
    cursor: pointer;
@@ -1239,6 +1289,7 @@ body {
 
 .track-action.starred {
    color: var(--accent);
+   font-variation-settings: 'FILL' 1;
 }
 
 .track-action-remove:hover {
@@ -1260,6 +1311,7 @@ body {
 .album-star.starred {
     color: var(--accent);
     opacity: 1.0;
+    font-variation-settings: 'FILL' 1;
 }
 
 /* In an album-list row, hide the star until hover unless the album is
@@ -1411,7 +1463,7 @@ body {
    border-radius: 50%;
    width: 2rem;
    height: 2rem;
-   font-size: 1rem;
+   font-size: 1.15rem;
    cursor: pointer;
    display: flex;
    align-items: center;
@@ -1598,7 +1650,7 @@ body {
    border: none;
    color: var(--text-dim);
    cursor: pointer;
-   font-size: 1.8rem;
+   font-size: 1.5rem;
    line-height: 1;
    width: 40px;
    height: 40px;
@@ -1735,6 +1787,16 @@ body {
 #playlist-new-row {
    display: flex;
    gap: 0.4rem;
+}
+
+#playlist-new-btn {
+   background: var(--bg);
+   border: 1px solid var(--border);
+   color: var(--text);
+   font-size: 1.15rem;
+   padding: 0 0.5rem;
+   border-radius: 4px;
+   cursor: pointer;
 }
 
 #playlist-new-row input {
