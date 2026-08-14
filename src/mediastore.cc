@@ -1880,6 +1880,13 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		return;
 		}
 
+	// One artist's prune failing must not take the scan with it. It is a
+	// single transaction, so a failure part-way puts this subtree back exactly
+	// as it was — including rows this pass has already logged as pruned — and
+	// the next scan retries it. What must not happen is the exception escaping
+	// into scan(), which abandons every root after this one: a stale folder is
+	// a wrong listing, an abandoned scan is a library that stops updating.
+	try {
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Transaction txn(db_music_);
@@ -1967,6 +1974,23 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		s.exec();
 		}
 		{
+		// And the *album* info cache on the same folder, which is not the
+		// same row and not reachable by the prefix prune above. A folder that
+		// directly holds media is its own album, so a loose-file section's
+		// notes — a film's TMDB plot, or whatever getAlbumInfo cached — are
+		// keyed on the section folder itself, and "<section>/%" never matches
+		// it. Both caches reference folders(id) with no cascade, so leaving
+		// this row behind made the DELETE below fail with FOREIGN KEY
+		// constraint failed: the whole prune rolled back, the section came
+		// back complete with the song this pass had already reported pruning,
+		// and the exception took the rest of the scan with it.
+		SQLite::Statement s(db_music_,
+			"DELETE FROM album_info_cache"
+			" WHERE folder_id = (SELECT id FROM folders WHERE path = ?)");
+		s.bind(1, artist_rel);
+		s.exec();
+		}
+		{
 		SQLite::Statement s(db_music_,
 			"DELETE FROM folders WHERE path = ?");
 		s.bind(1, artist_rel);
@@ -2022,6 +2046,11 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	}
 	txn.commit();
 	}
+	}
+	catch (const std::exception& e) {
+		std::cout << stamp() << "  prune failed, left as it was: " << e.what()
+		          << std::endl;
+		}
 	std::cout << stamp() << "Rescan complete" << std::endl;
 	}
 
