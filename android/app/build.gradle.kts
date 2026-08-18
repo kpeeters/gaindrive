@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
 	alias(libs.plugins.android.application)
 	alias(libs.plugins.kotlin.android)
@@ -5,7 +7,24 @@ plugins {
 	alias(libs.plugins.kotlin.serialization)
 	alias(libs.plugins.ksp)
 	alias(libs.plugins.hilt)
+	alias(libs.plugins.play.publisher)
 }
+
+// Release signing. The keystore itself is never in the repository — only a
+// pointer to it, from android/keystore.properties or from the environment, so a
+// build machine can supply the same thing without a file. Absent both, the
+// release variant falls back to the debug key (see buildTypes below), which is
+// what keeps `make install-device` working on a machine that will never
+// publish. `make keystore` generates one.
+val keystoreProps = Properties().apply {
+	val f = rootProject.file("keystore.properties")
+	if (f.exists()) f.inputStream().use { load(it) }
+}
+
+fun keystoreValue(key: String, env: String): String? =
+	keystoreProps.getProperty(key) ?: System.getenv(env)
+
+val releaseStore = keystoreValue("storeFile", "GAINDRIVE_KEYSTORE")
 
 android {
 	namespace = "org.gaindrive.android"
@@ -21,6 +40,21 @@ android {
 		testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 	}
 
+	signingConfigs {
+		// ?.let rather than a null check, because a script-level val is a
+		// property and so is not smart-cast.
+		releaseStore?.let { path ->
+			create("release") {
+				storeFile = rootProject.file(path)
+				storePassword = keystoreValue("storePassword", "GAINDRIVE_KEYSTORE_PASSWORD")
+				keyAlias = keystoreValue("keyAlias", "GAINDRIVE_KEY_ALIAS") ?: "upload"
+				// One password for both is what keytool produces by default.
+				keyPassword = keystoreValue("keyPassword", "GAINDRIVE_KEY_PASSWORD")
+					?: storePassword
+			}
+		}
+	}
+
 	buildTypes {
 		debug {
 			// No applicationIdSuffix: both variants install under the same id, so
@@ -33,12 +67,16 @@ android {
 			isShrinkResources = true
 			proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
 
-			// Signed with the debug key so `installRelease` works without any
-			// keystore ceremony. This exists to make performance measurable:
+			// The upload key when one is configured, and otherwise the debug
+			// key, so `installRelease` still works without any keystore
+			// ceremony. That fallback exists to make performance measurable:
 			// judging Compose animation smoothness from a debug build is
 			// misleading, because debug builds skip R8 and run Compose's
-			// unoptimised paths. Replace this before distributing anything.
-			signingConfig = signingConfigs.getByName("debug")
+			// unoptimised paths. Play rejects a debug-signed upload, which is
+			// why `make publish` refuses before building rather than letting
+			// the rejection arrive at the end of a long R8 run.
+			signingConfig = signingConfigs.findByName("release")
+				?: signingConfigs.getByName("debug")
 		}
 	}
 
@@ -56,6 +94,29 @@ android {
 	packaging {
 		resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
 	}
+}
+
+// Google Play upload; driven from the Makefile, which is where the workflow is
+// documented. Every property here is also a CLI option on the publish tasks
+// (camelCase becomes kebab-case), so `--track` overrides the default per run
+// without editing this file.
+play {
+	// Internal testing: no review wait and nothing user-visible, so a mistake
+	// costs nothing. Promotion out of it is a Play Console action.
+	track.set("internal")
+	// Only affects the plain `publish` task; `publishReleaseBundle` is explicit.
+	defaultToAppBundles.set(true)
+
+	// Credentials are the service-account JSON key: this file when it exists,
+	// or the whole key in ANDROID_PUBLISHER_CREDENTIALS, which GPP reads by
+	// itself when nothing is set here. Neither is in the repository.
+	val creds = rootProject.file("play-credentials.json")
+	if (creds.exists()) serviceAccountCredentials.set(creds)
+
+	// resolutionStrategy is deliberately left at its default of failing. AUTO
+	// would take the next free version code from Play, which makes what was
+	// uploaded untraceable to the versionCode in this file; a refused upload
+	// naming the clash is more useful, and the fix is to bump versionCode.
 }
 
 kotlin {

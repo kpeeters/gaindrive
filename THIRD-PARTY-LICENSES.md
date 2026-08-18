@@ -221,6 +221,14 @@ redistribution of GainDrive.
 * Android Gradle Plugin 8.10.1, Gradle, KSP 2.0.21-1.0.28, the Room and Hilt
   annotation processors · Apache-2.0
 
+* Gradle Play Publisher 3.13.0 · MIT · Copyright (c) Christian Becker, Björn
+  Hurling, Alexandre Saveau
+  https://github.com/Triple-T/gradle-play-publisher
+  Uploads the release App Bundle to Google Play (`make publish`). It runs on
+  the Gradle classpath only and nothing of it is in the APK. It pulls in
+  Google's API client libraries (Apache-2.0) for the same classpath. Held at
+  3.x because 4.0.0 requires AGP 9.
+
 * Compose ui-tooling and ui-test-manifest (`debugImplementation`),
   ui-test-junit4, androidx.test ext-junit 1.2.1, Espresso 3.6.1 · Apache-2.0
   Copyright (c) The Android Open Source Project

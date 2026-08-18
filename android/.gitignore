@@ -9,3 +9,11 @@ captures/
 .cxx/
 *.apk
 *.aab
+
+# Release signing and Play credentials. Nothing here may be committed: the
+# keystore and its passwords are the app's identity, and the service-account
+# key is write access to the Play listing.
+keystore.properties
+*.jks
+*.keystore
+play-credentials.json
