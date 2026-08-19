@@ -104,6 +104,22 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 		mutableStateOf(if (settings.servers.isEmpty()) TopLevel.SETTINGS else TopLevel.ARTISTS)
 	}
 
+	// ...but it still has to follow the destination whenever the destination is
+	// itself a tab's root, because plenty of ways out of a tab do not go through
+	// the bar: a back press or back gesture out of Settings lands on the library
+	// with nothing to tell the bar it has left. A tab left lit that the user is
+	// no longer in makes the next tap on it take the "already here" branch, which
+	// sheds the drill-down instead of switching — and leaves them there, since
+	// every tap after that does the same nothing.
+	//
+	// Only tab roots. A detail is deliberately not matched: an album reached from
+	// Search has to keep Search lit, which is why this is tracked at all.
+	LaunchedEffect(destination) {
+		TopLevel.entries
+			.firstOrNull { destination?.hasRoute(it.route::class) == true }
+			?.let { selectedTab = it }
+	}
+
 	// The bar is for switching top-level sections; it has no meaning on a
 	// form that the user is expected to finish or cancel, nor over a picture
 	// that wants the whole screen.
@@ -407,9 +423,14 @@ private const val TRANSITION_MS = 280
  * back to that holds for every tab, and [isDetail] is already this file's
  * definition of "reached by drilling down". Both pops land in the same frame,
  * so the user sees one transition, not one per level.
+ *
+ * The [previousBackStackEntry] test is not the same as the pop's own return
+ * value: with no servers configured the start destination *is* a detail
+ * (Servers), and popping the only entry leaves the NavHost with nothing to
+ * draw — a blank screen no gesture recovers from.
  */
 private fun NavHostController.popToTabRoot() {
-	while (currentBackStackEntry?.destination.isDetail()) {
+	while (currentBackStackEntry?.destination.isDetail() && previousBackStackEntry != null) {
 		// A pop that fails would otherwise spin here forever.
 		if (!popBackStack()) return
 	}
