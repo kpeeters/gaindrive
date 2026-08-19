@@ -1,9 +1,15 @@
 package org.gaindrive.android.ui.settings
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.BuildConfig
@@ -67,15 +73,44 @@ fun SettingsScreen(
 		// Inline rather than a category of its own. A screen holding one line
 		// of version text would be a tap that buys nothing.
 		item {
-			Text(
-				text = "GainDrive ${BuildConfig.VERSION_NAME}\n" +
-					"A self-hosted, OpenSubsonic-compatible music client.",
-				style = MaterialTheme.typography.bodySmall,
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
-			)
+			AboutBlock()
 		}
 	}
 }
+
+/**
+ * Version, authorship and licence.
+ *
+ * The GPL asks that an interactive program tell the user it is free software
+ * and where the terms are; a settings screen is the only place this app has to
+ * say so. The website is the one line that is a control rather than prose, so
+ * it is the only one coloured and clickable — a whole paragraph in link blue
+ * reads as a mis-styled screen.
+ */
+@Composable
+private fun AboutBlock() {
+	val uriHandler = LocalUriHandler.current
+
+	Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+		Text(
+			text = "GainDrive ${BuildConfig.VERSION_NAME}\n" +
+				"A self-hosted, OpenSubsonic-compatible music client.\n" +
+				"Copyright (C) 2026  Kasper Peeters\n" +
+				"Licensed under the GNU General Public License, version 3 " +
+				"or later.",
+			style = MaterialTheme.typography.bodySmall,
+			color = MaterialTheme.colorScheme.onSurfaceVariant,
+		)
+		Text(
+			text = WEBSITE,
+			style = MaterialTheme.typography.bodySmall,
+			color = MaterialTheme.colorScheme.primary,
+			modifier = Modifier.clickable { uriHandler.openUri(WEBSITE) },
+		)
+	}
+}
+
+private const val WEBSITE = "https://www.gaindrive.org"
 
 private fun serversSummary(state: SettingsUiState): String {
 	if (!state.loaded) return ""
