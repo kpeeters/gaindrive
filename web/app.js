@@ -76,6 +76,13 @@ function apiUrl(endpoint, extra = {}) {
    return `${server}/rest/${endpoint}.view?${p}`;
 }
 
+// What the server said it is, for the About box. Taken from whatever response
+// happens to arrive rather than asked for: every one carries the field, and
+// this client is served by the binary it is reporting on, so the server's
+// version is its own. Nothing else here needs a version, which is why there is
+// no build-time substitution for one.
+let serverVersion = null;
+
 // Call a subsonic endpoint and return the parsed subsonic-response object.
 // Throws on network error or non-ok subsonic status.
 async function apiCall(endpoint, extra = {}) {
@@ -84,6 +91,7 @@ async function apiCall(endpoint, extra = {}) {
       throw new Error(`HTTP ${resp.status}`);
    const data = await resp.json();
    const sr = data['subsonic-response'];
+   if (sr.serverVersion) serverVersion = sr.serverVersion;
    if (sr.status !== 'ok')
       throw new Error(sr.error?.message ?? 'Unknown error');
    return sr;
@@ -2588,6 +2596,7 @@ function setupPlayer() {
       });
 
    document.querySelector('.nav-title').addEventListener('click', () => {
+      document.getElementById('about-version').textContent = serverVersion ?? '?';
       document.getElementById('about-modal').classList.remove('hidden');
       });
    document.getElementById('about-close-btn').addEventListener('click', () => {

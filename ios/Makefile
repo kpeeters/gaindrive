@@ -15,6 +15,14 @@ MAGICK ?= magick
 PROJECT := GainDrive.xcodeproj
 SCHEME := GainDrive
 
+# The version comes from the repository root and nowhere else; project.yml
+# refers to these two by name and XcodeGen substitutes them from the
+# environment, so they have to be exported rather than merely set. Named for
+# gaindrive rather than for the Xcode settings they end up in, so that nothing
+# reads as a build setting referring to itself.
+export GAINDRIVE_VERSION := $(shell sed -n 's/^version=//p' ../VERSION)
+export GAINDRIVE_BUILD := $(shell sed -n 's/^build=//p' ../VERSION)
+
 LOGO := ../graphics/gaindrive.svg
 ICON := Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
 ICON_RAW := build/appicon-raw.png
@@ -72,7 +80,12 @@ PIPE := $(if $(BEAUTIFY),| $(BEAUTIFY),)
 # Default target, so `make` alone leaves a project ready to open. Regenerating
 # is idempotent and cheap; Xcode notices the project changed under it.
 generate: Local.xcconfig
+	@test -n "$(GAINDRIVE_VERSION)" -a -n "$(GAINDRIVE_BUILD)" || { \
+	  echo "Could not read version and build from ../VERSION."; exit 1; }
 	$(XCODEGEN) generate
+	@grep -q 'MARKETING_VERSION = $(GAINDRIVE_VERSION);' $(PROJECT)/project.pbxproj || { \
+	  echo "xcodegen did not substitute the version into the project — it is"; \
+	  echo "probably too old for \$${VAR} expansion in project.yml."; exit 1; }
 
 open: generate
 	open $(PROJECT)

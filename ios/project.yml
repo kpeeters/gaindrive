@@ -22,6 +22,10 @@ options:
 #
 # Nothing below may set DEVELOPMENT_TEAM: a build setting written into the
 # project overrides the xcconfig, which would silently defeat this.
+#
+# The version settings below rely on that same precedence in the opposite
+# direction, deliberately. Do not "tidy" them into this xcconfig: they would be
+# overridden by the project and silently stop tracking the VERSION file.
 configFiles:
   Debug: Local.xcconfig
   Release: Local.xcconfig
@@ -97,8 +101,15 @@ targets:
         # Debug and release share this deliberately, so switching between them
         # replaces the app in place and keeps the configured servers.
         PRODUCT_BUNDLE_IDENTIFIER: org.gaindrive.ios
-        MARKETING_VERSION: "0.1"
-        CURRENT_PROJECT_VERSION: "1"
+        # From the repository's root VERSION file, which the Makefile reads and
+        # exports before running xcodegen. These are not spelled out here on
+        # purpose: the same two numbers drive the server and the Android app,
+        # and a copy would be a fourth one to forget. `make generate` refuses to
+        # run if it cannot read them, since XcodeGen substitutes an unset
+        # variable with nothing and a versionless project only fails much later,
+        # at App Store validation.
+        MARKETING_VERSION: "${GAINDRIVE_VERSION}"
+        CURRENT_PROJECT_VERSION: "${GAINDRIVE_BUILD}"
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Resources/Info.plist
         # iPhone and iPad from one adaptive layout. The iPad idiom is also what

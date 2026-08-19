@@ -1,8 +1,8 @@
 #pragma once
 
-// Normally supplied by CMake from the project version, or from the git tag for
-// a release build. The fallback only exists so the tree still compiles if it is
-// built by hand outside CMake.
+// Normally supplied by CMake from the root VERSION file, or from the git tag
+// for a release build. The fallback only exists so the tree still compiles if
+// it is built by hand outside CMake.
 #ifndef GAINDRIVE_VERSION
 #define GAINDRIVE_VERSION "0.0-dev"
 #endif

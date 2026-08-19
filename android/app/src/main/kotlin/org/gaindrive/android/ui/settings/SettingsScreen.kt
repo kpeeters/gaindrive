@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.gaindrive.android.BuildConfig
 import org.gaindrive.android.data.model.ThemeMode
 import org.gaindrive.android.ui.components.formatBytes
 
@@ -67,7 +68,7 @@ fun SettingsScreen(
 		// of version text would be a tap that buys nothing.
 		item {
 			Text(
-				text = "GainDrive 0.1\n" +
+				text = "GainDrive ${BuildConfig.VERSION_NAME}\n" +
 					"A self-hosted, OpenSubsonic-compatible music client.",
 				style = MaterialTheme.typography.bodySmall,
 				color = MaterialTheme.colorScheme.onSurfaceVariant,

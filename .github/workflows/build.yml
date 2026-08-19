@@ -31,6 +31,18 @@ jobs:
           else v="0.0-$(git rev-parse --short HEAD)"; fi
           echo "v=$v" >> "$GITHUB_OUTPUT"
 
+      # The tag is what stamps the binary, so it keeps overriding the VERSION
+      # file — but the two disagreeing means someone tagged without bumping,
+      # and the release would then report a version no app built from the same
+      # commit agrees with. This is the only place that can notice.
+      - name: Tag agrees with VERSION
+        if: github.ref_type == 'tag'
+        run: |
+          v=$(sed -n 's/^version=//p' VERSION)
+          [ "${{ steps.ver.outputs.v }}" = "$v" ] || {
+            echo "::error::tag $GITHUB_REF_NAME does not match VERSION ($v)"
+            exit 1; }
+
       # Nine FetchContent repositories are cloned and built from source on a
       # cold run, libarchive and taglib among them.
       - uses: actions/cache@v4

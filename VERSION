@@ -1,0 +1,13 @@
+# The single source of the GainDrive version. The server, the Android and iOS
+# apps and the web client all derive from this file and nothing else spells a
+# version out. See CLAUDE.md, "Versioning", for the rules.
+#
+# `version` is major.minor.patch, plain integers, no padding and no suffix:
+# CMake's project(VERSION) accepts nothing else.
+#
+# `build` identifies one store upload and is bumped for every one of them, even
+# a discarded internal-track release — Google Play refuses a versionCode it has
+# already seen. It may be reset when `version` changes; the derived code still
+# increases, because each field outweighs the largest value below it.
+version=1.0.1
+build=1

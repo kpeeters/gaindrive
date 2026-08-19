@@ -1,15 +1,35 @@
 cmake_minimum_required(VERSION 3.20)
 set(CMAKE_POLICY_DEFAULT_CMP0148 NEW)
-project(gaindrive VERSION 0.1 LANGUAGES CXX)
+# The root VERSION file is the only place a version is written; the Android and
+# iOS builds read the same file. Only the `version` line is of interest here —
+# `build` numbers a store upload and means nothing to the server.
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/VERSION _gd_version REGEX "^version=")
+string(REGEX REPLACE "^version=" "" _gd_version "${_gd_version}")
+# Without this, an empty result would leave `project(gaindrive VERSION LANGUAGES
+# CXX)` and CMake would report a problem with LANGUAGES.
+if(NOT _gd_version MATCHES "^[0-9]+(\\.[0-9]+)*$")
+	message(FATAL_ERROR "VERSION: no usable `version=' line (got '${_gd_version}')")
+endif()
+project(gaindrive VERSION ${_gd_version} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Reported as serverVersion and baked into the outgoing User-Agent. Overridden
-# from the git tag by the release build, so a downloaded binary can say which
-# one it is.
-set(GAINDRIVE_VERSION "${PROJECT_VERSION}" CACHE STRING
-	"Version string reported by the server")
+# Reported as serverVersion and baked into the outgoing User-Agent.
+#
+# -DGAINDRIVE_VERSION= still wins, which is how a release binary is stamped with
+# its git tag (.github/workflows/build.yml, via cmake/static_build.cmake) and how
+# the Homebrew formula stamps its own — the `if` sees the cache entry that -D
+# creates. But this is deliberately *not* `set(... CACHE STRING)` any more: a
+# cached value is only written on the first configure, so an existing build/
+# would go on reporting the version it was configured with however often VERSION
+# was bumped afterwards, and nothing would say so.
+if(NOT GAINDRIVE_VERSION)
+	set(GAINDRIVE_VERSION "${PROJECT_VERSION}")
+elseif(NOT GAINDRIVE_VERSION STREQUAL PROJECT_VERSION)
+	message(STATUS "gaindrive version: ${GAINDRIVE_VERSION} "
+		"(overriding VERSION, which says ${PROJECT_VERSION})")
+endif()
 
 # There was no default, so a plain `cmake -B build` compiled with no -O flag at
 # all. Release is what an unqualified build should mean; pass -DCMAKE_BUILD_TYPE

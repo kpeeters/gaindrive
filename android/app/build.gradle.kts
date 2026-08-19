@@ -10,6 +10,43 @@ plugins {
 	alias(libs.plugins.play.publisher)
 }
 
+// The version, from the one file at the top of the checkout that carries it.
+// android/ is its own Gradle root, so rootProject is android/ and the repo root
+// is one level up.
+val versionProps = Properties().apply {
+	rootProject.file("../VERSION").inputStream().use { load(it) }
+}
+
+val gdVersionName: String = versionProps.getProperty("version")?.trim()
+	?: error("VERSION has no `version` line")
+// toIntOrNull, not toInt: a malformed value should name the file it came from
+// rather than throw a bare NumberFormatException out of the configure.
+val gdBuild: Int = versionProps.getProperty("build")?.trim()?.toIntOrNull()
+	?: error("VERSION has no `build` line, or it is not a plain integer")
+
+// Fixed-width fields rather than the version's digits concatenated, which is
+// the obvious scheme and a trap: `1.10.1` and `11.0.1` both flatten to 11001,
+// and Play never lets a versionCode be reused, so a collision cannot be undone.
+//
+// Each field also outweighs the largest value below it (999 < 1000, 99999 <
+// 100000, 9999999 < 10000000), which is what makes it safe to reset `build` on
+// a version bump — the code still increases.
+//
+// The bounds are all load-bearing. A versionCode is a signed 32-bit int that
+// Play caps at 2100000000, so a major of 210 is already past the cap and Kotlin
+// would wrap silently to a negative number rather than complain — which is the
+// one failure this whole scheme exists to make impossible.
+val gdVersionCode: Int = run {
+	val p = gdVersionName.split(".").mapNotNull { it.toIntOrNull() }
+	require(p.size == 3 && p[0] <= 209 && p[1] <= 99 && p[2] <= 99 &&
+	        gdBuild in 0..999) {
+		"VERSION: version '$gdVersionName' build $gdBuild does not fit the " +
+		"versionCode scheme: major.minor.patch of plain integers, major at " +
+		"most 209, minor and patch at most 99, build at most 999"
+	}
+	p[0] * 10_000_000 + p[1] * 100_000 + p[2] * 1_000 + gdBuild
+}
+
 // Release signing. The keystore itself is never in the repository — only a
 // pointer to it, from android/keystore.properties or from the environment, so a
 // build machine can supply the same thing without a file. Absent both, the
@@ -34,8 +71,8 @@ android {
 		applicationId = "org.gaindrive.android"
 		minSdk = 26
 		targetSdk = 35
-		versionCode = 1
-		versionName = "0.1"
+		versionCode = gdVersionCode
+		versionName = gdVersionName
 
 		testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 	}
@@ -48,9 +85,11 @@ android {
 				storeFile = rootProject.file(path)
 				storePassword = keystoreValue("storePassword", "GAINDRIVE_KEYSTORE_PASSWORD")
 				keyAlias = keystoreValue("keyAlias", "GAINDRIVE_KEY_ALIAS") ?: "upload"
-				// One password for both is what keytool produces by default.
-				keyPassword = keystoreValue("keyPassword", "GAINDRIVE_KEY_PASSWORD")
-					?: storePassword
+				// The same password, because there is only one. keytool has
+				// produced PKCS12 keystores since Java 9 whatever the file is
+				// named, and PKCS12 has no separate per-key password — which
+				// is why it prompts once. Gradle still wants the field set.
+				keyPassword = storePassword
 			}
 		}
 	}

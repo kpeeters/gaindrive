@@ -14,6 +14,7 @@ captures/
 # keystore and its passwords are the app's identity, and the service-account
 # key is write access to the Play listing.
 keystore.properties
+*.p12
 *.jks
 *.keystore
 play-credentials.json
