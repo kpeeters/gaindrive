@@ -1,8 +1,11 @@
 package org.gaindrive.android.data
 
+import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.net.AlbumDto
 import org.gaindrive.android.net.ArtistDto
+import org.gaindrive.android.net.DirectoryDto
+import org.gaindrive.android.net.MusicFolderDto
 import org.gaindrive.android.net.SongDto
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -170,5 +173,88 @@ class LibraryMapperTest {
 			song = listOf(SongDto(id = "a", title = "a"), SongDto(id = "b", title = "b")),
 		).toDomain(server)
 		assertEquals(2, album.songCount)
+	}
+
+	// ── Folder browsing ─────────────────────────────────────────────────
+
+	/**
+	 * The sibling of `song album ref prefers albumId but accepts parent`, and
+	 * the reason that preference had to become overridable: a directory child
+	 * carries both fields, and in folder mode neither is the album — `albumId`
+	 * names the tag hierarchy's album, `parent` names the disc folder.
+	 */
+	@Test
+	fun `an explicit album ref wins over albumId and parent`() {
+		val song = SongDto(id = "501", title = "Peg", albumId = "5000", parent = "90")
+			.toDomain(server, albumRef = ItemRef(server, "77"))
+		assertEquals("77", song.albumRef?.id)
+	}
+
+	@Test
+	fun `a child directory becomes an album with no counts`() {
+		val album = SongDto(
+			id = "77",
+			parent = "12",
+			isDir = true,
+			title = "Aja",
+			artist = "Steely Dan",
+			year = 1977,
+		).toAlbum(server)
+
+		assertEquals("Aja", album.title)
+		assertEquals("Steely Dan", album.artistName)
+		assertEquals("12", album.artistRef?.id)
+		assertEquals(1977, album.year)
+		// The listing says nothing about either, and a zero must read as absent
+		// rather than as an album of no tracks.
+		assertEquals(0, album.songCount)
+		assertEquals(0, album.duration)
+	}
+
+	/** The folder's own id doubles as its cover art id, as it does for artists. */
+	@Test
+	fun `a child directory's cover falls back to its own id`() {
+		assertEquals("77", SongDto(id = "77", isDir = true).toAlbum(server).coverArt?.id)
+		assertEquals("9", SongDto(id = "77", isDir = true, coverArt = "9").toAlbum(server).coverArt?.id)
+	}
+
+	@Test
+	fun `a directory read as an artist counts only its subdirectories`() {
+		val artist = DirectoryDto(
+			id = "12",
+			name = "Steely Dan",
+			child = listOf(
+				SongDto(id = "77", isDir = true),
+				SongDto(id = "78", isDir = true),
+				SongDto(id = "501", isDir = false),
+			),
+		).toArtist(server)
+
+		assertEquals("Steely Dan", artist.name)
+		assertEquals(2, artist.albumCount)
+	}
+
+	/** The folder names the album; its tracks name the artist. */
+	@Test
+	fun `a directory read as an album takes its artist from its tracks`() {
+		val songs = listOf(
+			SongDto(id = "501", title = "Black Cow", artist = "Steely Dan", duration = 314),
+			SongDto(id = "502", title = "Aja", artist = "Steely Dan", duration = 479),
+		).map { it.toDomain(server) }
+
+		val album = DirectoryDto(id = "77", name = "Aja", parent = "12").toAlbum(server, songs)
+
+		assertEquals("Aja", album.title)
+		assertEquals("Steely Dan", album.artistName)
+		assertEquals("12", album.artistRef?.id)
+		assertEquals(2, album.songCount)
+		assertEquals(793, album.duration)
+	}
+
+	@Test
+	fun `a music folder maps its content type through, or the absence of one`() {
+		assertEquals("artists", MusicFolderDto("1", "music", "artists").toDomain().contentType)
+		assertNull(MusicFolderDto("1", "Music").toDomain().contentType)
+		assertEquals("Music", MusicFolderDto("1", "Music").toDomain().name)
 	}
 }

@@ -252,13 +252,42 @@ class PinRepository @Inject constructor(
 		_pins.value.forEach { enqueue(songsFor(it)) }
 	}
 
-	private suspend fun computeCoverage(pins: List<Pin>): PinCoverage = expandPins(
-		pins = pins,
-		albumSongs = pins.filter { it.kind == PinKind.ALBUM }
-			.associate { it.ref to local.songsOfAlbum(it.ref).downloadable().map(Song::ref) },
-		playlistSongs = pins.filter { it.kind == PinKind.PLAYLIST }
-			.associate { it.ref to local.songsOfPlaylist(it.ref).downloadable().map(Song::ref) },
+	private suspend fun computeCoverage(pins: List<Pin>): PinCoverage = retaining(
+		expandPins(
+			pins = pins,
+			albumSongs = pins.filter { it.kind == PinKind.ALBUM }
+				.associate { it.ref to local.songsOfAlbum(it.ref).downloadable().map(Song::ref) },
+			playlistSongs = pins.filter { it.kind == PinKind.PLAYLIST }
+				.associate { it.ref to local.songsOfPlaylist(it.ref).downloadable().map(Song::ref) },
+		)
 	)
+
+	/**
+	 * Keeps the previous membership of any pin that has just come back empty.
+	 *
+	 * An empty expansion is a legitimate *state* — pinning an album that has
+	 * never been opened protects nothing, which `expandPins` documents — but it
+	 * is never a legitimate *transition* for a pin that already covered
+	 * something. What produces one is the mirror being emptied underneath it:
+	 * removing a server, or changing one's browse mode. Both write through
+	 * `LocalLibrary`, which bumps the revision this class listens on, so the
+	 * recompute lands while the tables are bare.
+	 *
+	 * Without this the coverage collapses, `PinnedKeys` shrinks, and the evictor
+	 * is free to reclaim audio the user explicitly asked to keep — silently, and
+	 * only until they next happen to open the album. The stale membership is the
+	 * safer of the two wrong answers: it protects bytes that are already on
+	 * disk, and the next successful browse replaces it.
+	 */
+	private fun retaining(fresh: PinCoverage): PinCoverage {
+		val previous = _coverage.value.byPin
+		if (previous.isEmpty()) return fresh
+		return PinCoverage(
+			fresh.byPin.mapValues { (pin, songs) ->
+				songs.ifEmpty { previous[pin].orEmpty() }
+			}
+		)
+	}
 
 	private suspend fun songsFor(pin: Pin): List<Song> = when (pin.kind) {
 		PinKind.SONG -> listOfNotNull(local.song(pin.ref))

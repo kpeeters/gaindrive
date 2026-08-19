@@ -319,4 +319,88 @@ class BrowseApiTest {
 		respond("""{"subsonic-response":{"status":"ok","videoInfo":{"id":"900"}}}""")
 		assertTrue(api.getVideoInfo("900").requireOk().videoInfo!!.captions.isEmpty())
 	}
+
+	// ── Folder browsing ─────────────────────────────────────────────────
+
+	@Test
+	fun `getIndexes parses index buckets without an album count`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"ok","indexes":{"lastModified":0,
+			   "ignoredArticles":"The El La","index":[
+			     {"name":"S","artist":[
+			       {"id":"12","name":"Steely Dan","coverArt":"12"}]}]}}}"""
+		)
+		val index = api.getIndexes(null, null).requireOk().indexes!!.index
+		assertEquals(1, index.size)
+		assertEquals("S", index[0].name)
+		assertEquals("Steely Dan", index[0].artist[0].name)
+		// The folder listing does not count albums; the mapper must not invent
+		// one and the row must not print a zero.
+		assertEquals(0, index[0].artist[0].albumCount)
+	}
+
+	@Test
+	fun `getMusicDirectory tells child directories from songs`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"ok","directory":{"id":"12",
+			   "name":"Steely Dan","parent":"1","coverArt":"12","child":[
+			     {"id":"77","parent":"12","isDir":true,"title":"Aja",
+			      "artist":"Steely Dan","album":"Aja","coverArt":"77","year":1977},
+			     {"id":"501","parent":"12","albumId":"12","isDir":false,
+			      "title":"Loose Ends","duration":211}]}}}"""
+		)
+		val dir = api.getMusicDirectory("12").requireOk().directory!!
+		assertEquals("Steely Dan", dir.name)
+		assertEquals("1", dir.parent)
+		val (dirs, songs) = dir.child.partition { it.isDir }
+		assertEquals(1, dirs.size)
+		assertEquals("Aja", dirs[0].title)
+		assertEquals(1977, dirs[0].year)
+		assertEquals(1, songs.size)
+		assertEquals("Loose Ends", songs[0].title)
+	}
+
+	/** Both are omitted rather than sent as null at the top of a root. */
+	@Test
+	fun `getMusicDirectory omits parent and coverArt at a root`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"ok","directory":{"id":"1",
+			   "name":"music","child":[]}}}"""
+		)
+		val dir = api.getMusicDirectory("1").requireOk().directory!!
+		assertNull(dir.parent)
+		assertNull(dir.coverArt)
+		assertTrue(dir.child.isEmpty())
+	}
+
+	/** The same leniency the artist list needed; see the section above. */
+	@Test
+	fun `getMusicDirectory tolerates unquoted ids`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"ok","directory":{"id":12,
+			   "name":"Steely Dan","parent":1,"child":[
+			     {"id":77,"parent":12,"isDir":true,"title":"Aja"}]}}}"""
+		)
+		val dir = api.getMusicDirectory("12").requireOk().directory!!
+		assertEquals("12", dir.id)
+		assertEquals("1", dir.parent)
+		assertEquals("77", dir.child[0].id)
+		assertTrue(dir.child[0].isDir)
+	}
+
+	@Test
+	fun `search2 parses folder-shaped albums`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"ok","searchResult2":{
+			   "album":[{"id":"77","parent":"12","title":"Aja","artist":"Steely Dan"}],
+			   "song":[{"id":"501","parent":"77","title":"Peg"}]}}}"""
+		)
+		val found = api.search2("aja", 5, 5, 5).requireOk().searchResult2!!
+		assertEquals("77", found.album[0].id)
+		// Folder-shaped: the title arrives as `title`, and the parent stands in
+		// for artistId.
+		assertEquals("Aja", found.album[0].title)
+		assertEquals("12", found.album[0].parent)
+		assertEquals("Peg", found.song[0].title)
+	}
 }

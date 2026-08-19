@@ -25,12 +25,18 @@ class ConnectionTester @Inject constructor(
 	private val clients: SubsonicClientFactory,
 ) {
 
-	suspend fun test(url: String, username: String, password: String): ConnectionTest =
+	suspend fun test(
+		url: String,
+		username: String,
+		password: String,
+		/** Tests the endpoints this server will actually be browsed by. */
+		browseByFolder: Boolean,
+	): ConnectionTest =
 		withContext(Dispatchers.IO) {
 			try {
 				val client = clients.transientClient(url, username, password)
 				client.ping().requireOk()
-				verify(client)
+				verify(client, browseByFolder)
 			} catch (e: CancellationException) {
 				throw e
 			} catch (e: SubsonicException) {
@@ -57,13 +63,19 @@ class ConnectionTester @Inject constructor(
 	 * user up. A test that only pinged went green on credentials the app could
 	 * not use — which is the one thing this button exists to catch.
 	 *
-	 * `getArtists` specifically: it is the first thing the app really does, so
-	 * a server that passes here cannot fail on the first screen.
+	 * The artist list specifically: it is the first thing the app really does, so
+	 * a server that passes here cannot fail on the first screen. Which endpoint
+	 * that is follows the browse setting, or the button would go green on the
+	 * half of the API this server is not going to be asked.
 	 */
-	private suspend fun verify(client: SubsonicClient): ConnectionTest {
+	private suspend fun verify(
+		client: SubsonicClient,
+		browseByFolder: Boolean,
+	): ConnectionTest {
 		val outcome = withTimeoutOrNull(VERIFY_TIMEOUT_MS) {
 			try {
-				client.getArtists(null, null).requireOk()
+				if (browseByFolder) client.getIndexes(null, null).requireOk()
+				else client.getArtists(null, null).requireOk()
 				ConnectionTest.Reachable
 			} catch (e: CancellationException) {
 				throw e

@@ -18,7 +18,10 @@ import javax.inject.Singleton
  * reaches here — see [org.gaindrive.android.data.crypto.CredentialCipher].
  *
  * Every field beyond the first four has a default so that adding fields later
- * (cast mode, LAN address) reads older documents without a migration.
+ * (cast mode, LAN address) reads older documents without a migration. That is
+ * not merely convenient: a decode failure falls back to an empty list below, so
+ * a field added *without* a default would not fail loudly — it would silently
+ * discard every configured server.
  */
 @Serializable
 data class StoredServer(
@@ -28,6 +31,8 @@ data class StoredServer(
 	val username: String,
 	val password: String = "",
 	val enabled: Boolean = true,
+	/** See [org.gaindrive.android.data.model.ServerConfig.browseByFolder]. */
+	val browseByFolder: Boolean = false,
 )
 
 /**

@@ -32,6 +32,19 @@ data class Artist(
 	val sources: List<ServerId> get() = refs.map { it.server }
 }
 
+/**
+ * One configured library root, from `getMusicFolders`.
+ *
+ * [contentType] is a gaindrive extension and is null everywhere else — which is
+ * the whole of what tells a server that knows about kinds of root from one that
+ * only has folders. See `data/browse/LibraryRoots.kt`.
+ */
+data class MusicRoot(
+	val id: String,
+	val name: String,
+	val contentType: String?,
+)
+
 /** One index bucket from `getArtists`, e.g. "S" or "#". */
 data class ArtistIndex(
 	val label: String,

@@ -30,4 +30,11 @@ sealed interface BrowseScope {
 data class BrowseState(
 	val scope: BrowseScope,
 	val offline: Boolean,
+	/**
+	 * Bumped when a server's configuration invalidates what is on screen rather
+	 * than merely ageing it — see `ServerRegistry.revision`. It is part of this
+	 * state purely so that a change to it compares unequal and the screens
+	 * reload; nothing reads the number.
+	 */
+	val revision: Int = 0,
 )

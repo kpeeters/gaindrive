@@ -52,6 +52,19 @@ data class SongDto(
 	val id: String = "",
 	val parent: String? = null,
 	val albumId: String? = null,
+	/**
+	 * Set only by `getMusicDirectory`, whose `child` array mixes subdirectories
+	 * with tracks. Every other endpoint returns songs alone and either omits it
+	 * or sends false.
+	 *
+	 * Defaulting to false is a decision, not an oversight: `coerceInputValues`
+	 * turns an explicit null into the default, so a server that sends
+	 * `"isDir": null` has its children read as songs. That is the safe
+	 * direction — a directory misread as a song is one visible unplayable row,
+	 * whereas a song misread as a directory disappears from the track list and
+	 * provokes a pointless request.
+	 */
+	val isDir: Boolean = false,
 	val title: String = "",
 	val artist: String? = null,
 	val album: String? = null,
@@ -132,6 +145,52 @@ data class GetArtistsBody(
 	override val status: String = "failed",
 	override val error: SubsonicError? = null,
 	val artists: ArtistsContainer? = null,
+) : SubsonicBody
+
+/**
+ * `getIndexes` wraps the same buckets as `getArtists` under a different key and
+ * adds two fields nothing here reads: `lastModified`, which gaindrive leaves at
+ * a placeholder 0, and `ignoredArticles`, which is the server's own sorting
+ * rule and has already been applied to the order it sent.
+ */
+@Serializable
+data class IndexesContainer(
+	val index: List<IndexDto> = emptyList(),
+)
+
+@Serializable
+data class GetIndexesBody(
+	override val status: String = "failed",
+	override val error: SubsonicError? = null,
+	val indexes: IndexesContainer? = null,
+) : SubsonicBody
+
+/**
+ * One directory and its children.
+ *
+ * `parent` is absent at a root rather than null, and `coverArt` is absent when
+ * the folder has no image — both are omitted by the server, which the defaults
+ * already cover.
+ *
+ * [child] is deliberately typed as [SongDto] even though it holds directories
+ * too: everything a child directory sends is a strict subset of what a child
+ * song sends, so one class parses both and `isDir` decides which mapper reads
+ * it. A second DTO would duplicate two dozen fields to express nothing new.
+ */
+@Serializable
+data class DirectoryDto(
+	val id: String = "",
+	val name: String = "",
+	val parent: String? = null,
+	val coverArt: String? = null,
+	val child: List<SongDto> = emptyList(),
+)
+
+@Serializable
+data class GetMusicDirectoryBody(
+	override val status: String = "failed",
+	override val error: SubsonicError? = null,
+	val directory: DirectoryDto? = null,
 ) : SubsonicBody
 
 @Serializable
@@ -262,6 +321,14 @@ data class Search3Body(
 	override val status: String = "failed",
 	override val error: SubsonicError? = null,
 	val searchResult3: SearchResultDto? = null,
+) : SubsonicBody
+
+/** Same payload as [Search3Body] under a different key; see `search2`. */
+@Serializable
+data class Search2Body(
+	override val status: String = "failed",
+	override val error: SubsonicError? = null,
+	val searchResult2: SearchResultDto? = null,
 ) : SubsonicBody
 
 @Serializable

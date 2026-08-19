@@ -1,8 +1,12 @@
 package org.gaindrive.android.data
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import org.gaindrive.android.data.crypto.CredentialCipher
 import org.gaindrive.android.data.local.LocalLibrary
 import org.gaindrive.android.data.model.ServerConfig
@@ -25,6 +29,7 @@ class ServerRegistry @Inject constructor(
 	private val cipher: CredentialCipher,
 	private val clients: SubsonicClientFactory,
 	private val local: LocalLibrary,
+	private val roots: MusicRoots,
 ) {
 
 	val servers: Flow<List<ServerConfig>> = store.servers.map { stored ->
@@ -37,8 +42,23 @@ class ServerRegistry @Inject constructor(
 	suspend fun get(id: ServerId): ServerConfig? =
 		servers.first().firstOrNull { it.id == id }
 
+	/**
+	 * Bumped whenever a change makes what the browse screens are showing wrong
+	 * rather than merely stale — today, only a flip of [ServerConfig.browseByFolder],
+	 * which empties that server's mirror underneath them. They hold their lists
+	 * deliberately and would otherwise go on showing the old one.
+	 */
+	private val _revision = MutableStateFlow(0)
+	val revision: StateFlow<Int> = _revision.asStateFlow()
+
 	/** Returns the new server's id. */
-	suspend fun add(name: String, url: String, username: String, password: String): ServerId {
+	suspend fun add(
+		name: String,
+		url: String,
+		username: String,
+		password: String,
+		browseByFolder: Boolean,
+	): ServerId {
 		val id = ServerId.new()
 		val normalised = ServerConfig.normaliseUrl(url)
 		val entry = StoredServer(
@@ -47,6 +67,7 @@ class ServerRegistry @Inject constructor(
 			url = normalised,
 			username = ServerConfig.normaliseUsername(username),
 			password = cipher.encrypt(ServerConfig.normalisePassword(password)),
+			browseByFolder = browseByFolder,
 		)
 		store.save(store.servers.first() + entry)
 		return id
@@ -62,7 +83,12 @@ class ServerRegistry @Inject constructor(
 		url: String,
 		username: String,
 		password: String,
+		browseByFolder: Boolean,
 	) {
+		// Read before mutating: whether the browse mode changed is only
+		// answerable against the value that was there.
+		val previous = store.servers.first().firstOrNull { it.id == id.value }
+
 		mutate { list ->
 			list.map { entry ->
 				if (entry.id != id.value) entry
@@ -78,6 +104,7 @@ class ServerRegistry @Inject constructor(
 						username = ServerConfig.normaliseUsername(username),
 						password = if (newPassword.isEmpty()) entry.password
 						else cipher.encrypt(newPassword),
+						browseByFolder = browseByFolder,
 					)
 				}
 			}
@@ -85,6 +112,18 @@ class ServerRegistry @Inject constructor(
 		// Credentials or address may have changed; the cached client was built
 		// from the old ones.
 		clients.forget(id)
+
+		// A browse mode changed underneath everything derived from it. The two
+		// hierarchies are separate id spaces on a server that keeps them apart,
+		// so the mirrored library is not stale — it names things the new mode
+		// will never ask for, and would answer offline browsing with rows that
+		// cannot be opened. The chips are computed from the roots and the flag
+		// together, so that cache goes too.
+		if (previous != null && previous.browseByFolder != browseByFolder) {
+			roots.forget(id)
+			local.forgetServer(id)
+			_revision.update { it + 1 }
+		}
 	}
 
 	suspend fun setEnabled(id: ServerId, enabled: Boolean) =
@@ -93,6 +132,7 @@ class ServerRegistry @Inject constructor(
 	suspend fun remove(id: ServerId) {
 		mutate { list -> list.filterNot { it.id == id.value } }
 		clients.forget(id)
+		roots.forget(id)
 		// Its mirrored library would otherwise sit there forever, unreachable
 		// and unremovable — nothing else knows the server ever existed.
 		local.forgetServer(id)
@@ -120,5 +160,6 @@ class ServerRegistry @Inject constructor(
 		username = username,
 		password = cipher.decryptOrNull(password).orEmpty(),
 		enabled = enabled,
+		browseByFolder = browseByFolder,
 	)
 }

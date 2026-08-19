@@ -23,6 +23,7 @@ data class ServerEditUiState(
 	val url: String = "",
 	val username: String = "",
 	val password: String = "",
+	val browseByFolder: Boolean = false,
 	val isNew: Boolean = true,
 	val testing: Boolean = false,
 	val testResult: ConnectionTest? = null,
@@ -61,6 +62,7 @@ class ServerEditViewModel @Inject constructor(
 						// kept by leaving this blank, so it never has to make
 						// a round trip through the UI just to rename a server.
 						password = "",
+						browseByFolder = existing.browseByFolder,
 						isNew = false,
 					)
 				}
@@ -72,6 +74,14 @@ class ServerEditViewModel @Inject constructor(
 	fun onUrl(v: String) = _state.update { it.copy(url = v, testResult = null) }
 	fun onUsername(v: String) = _state.update { it.copy(username = v, testResult = null) }
 	fun onPassword(v: String) = _state.update { it.copy(password = v, testResult = null) }
+
+	/**
+	 * Alone among the setters in not clearing [ServerEditUiState.testResult]:
+	 * the others change who or where we are connecting to, which invalidates a
+	 * result already on screen. This changes only which half of the API will be
+	 * asked once we are in, and re-testing costs a request either way.
+	 */
+	fun onBrowseByFolder(v: Boolean) = _state.update { it.copy(browseByFolder = v) }
 
 	/**
 	 * Testing an edit that leaves the password blank would test the wrong
@@ -87,6 +97,7 @@ class ServerEditViewModel @Inject constructor(
 				s.url,
 				ServerConfig.normaliseUsername(s.username),
 				ServerConfig.normalisePassword(s.password),
+				s.browseByFolder,
 			)
 			_state.update { it.copy(testing = false, testResult = result) }
 		}
@@ -96,9 +107,11 @@ class ServerEditViewModel @Inject constructor(
 		val s = _state.value
 		viewModelScope.launch {
 			if (serverId == null) {
-				registry.add(s.name, s.url, s.username, s.password)
+				registry.add(s.name, s.url, s.username, s.password, s.browseByFolder)
 			} else {
-				registry.update(serverId, s.name, s.url, s.username, s.password)
+				registry.update(
+					serverId, s.name, s.url, s.username, s.password, s.browseByFolder,
+				)
 			}
 			_state.update { it.copy(saved = true) }
 		}

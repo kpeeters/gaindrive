@@ -79,11 +79,16 @@ fun ArtistRow(artist: Artist, onClick: () -> Unit, badges: List<String> = emptyL
 		// Several badges mean this one row is several servers' artists, which
 		// is worth seeing before tapping into a merged album list.
 		ServerBadges(badges)
-		Text(
-			text = if (artist.albumCount == 1) "1 album" else "${artist.albumCount} albums",
-			style = MaterialTheme.typography.bodySmall,
-			color = MaterialTheme.colorScheme.onSurfaceVariant,
-		)
+		// Omitted rather than shown as zero, the same way an album row omits a
+		// track count it was not given. Not every listing carries one: the
+		// folder-browsing index does not count albums, and neither does search.
+		if (artist.albumCount > 0) {
+			Text(
+				text = if (artist.albumCount == 1) "1 album" else "${artist.albumCount} albums",
+				style = MaterialTheme.typography.bodySmall,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+			)
+		}
 	}
 }
 

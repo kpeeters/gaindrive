@@ -7,6 +7,7 @@ import org.gaindrive.android.data.model.ArtistInfo
 import org.gaindrive.android.data.model.ArtistIndex
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.LibrarySelection
+import org.gaindrive.android.data.model.MusicRoot
 import org.gaindrive.android.data.model.Playlist
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.data.model.Song
@@ -15,7 +16,9 @@ import org.gaindrive.android.net.AlbumInfoDto
 import org.gaindrive.android.net.ArtistDto
 import org.gaindrive.android.net.ArtistInfoDto
 import org.gaindrive.android.net.ArtistWithAlbums
+import org.gaindrive.android.net.DirectoryDto
 import org.gaindrive.android.net.IndexDto
+import org.gaindrive.android.net.MusicFolderDto
 import org.gaindrive.android.net.PlaylistDto
 import org.gaindrive.android.net.SearchResultDto
 import org.gaindrive.android.net.SongDto
@@ -71,12 +74,23 @@ fun AlbumDto.toDomain(server: ServerId) = Album(
 	starredAt = starred,
 )
 
-fun SongDto.toDomain(server: ServerId) = Song(
+/**
+ * [albumRef] overrides where the track says it belongs, and folder browsing has
+ * to pass it. Two reasons the fields below cannot be trusted there: a directory
+ * child carries *both* `albumId` and `parent` on a server that keeps the ID3 and
+ * folder hierarchies apart, and the ID3 one wins here — pointing the track at an
+ * album no folder-mode listing will ever produce. And a track inside a disc
+ * subfolder has `parent` set to that subfolder rather than to the album.
+ *
+ * It matters beyond the screen: `LibraryDao.songsOfAlbum` keys on this, and it
+ * backs both offline album detail and what an album pin protects.
+ */
+fun SongDto.toDomain(server: ServerId, albumRef: ItemRef? = null) = Song(
 	ref = ItemRef(server, id),
 	title = title,
 	artistName = artist.orEmpty(),
 	albumTitle = album.orEmpty(),
-	albumRef = server.ref(albumId ?: parent),
+	albumRef = albumRef ?: server.ref(albumId ?: parent),
 	track = track?.takeIf { it > 0 },
 	discNumber = discNumber?.takeIf { it > 0 },
 	year = year?.takeIf { it > 0 },
@@ -125,4 +139,63 @@ fun SearchResultDto.toDomain(server: ServerId) = LibrarySelection(
 	artists = artist.map { it.toDomain(server) },
 	albums = album.map { it.toDomain(server) },
 	songs = song.map { it.toDomain(server) },
+)
+
+fun MusicFolderDto.toDomain() = MusicRoot(id = id, name = name, contentType = contentType)
+
+// ── Folder browsing ─────────────────────────────────────────────────────────
+//
+// `getMusicDirectory` describes the same artists, albums and tracks as the ID3
+// endpoints, in a shape that names none of them: everything is a directory or a
+// child. Which of the three a given listing is depends only on where the user
+// was, so the mappers below are named for what the caller knows it asked for.
+
+/**
+ * A child directory of an artist's listing, read as one of their albums.
+ *
+ * The folder listing does not count tracks or sum durations, so both are zero
+ * and the row simply omits them — `AlbumRow` already draws a subtitle from
+ * whichever parts it has. The cover falls back to the folder's own id, the same
+ * convention `ArtistDto.toDomain` relies on.
+ */
+fun SongDto.toAlbum(server: ServerId) = Album(
+	ref = ItemRef(server, id),
+	title = title.ifBlank { album.orEmpty() },
+	artistName = artist.orEmpty(),
+	artistRef = server.ref(parent),
+	songCount = 0,
+	duration = 0,
+	year = year?.takeIf { it > 0 },
+	genre = null,
+	coverArt = server.ref(coverArt ?: id),
+	starredAt = null,
+)
+
+/** A directory reached as an artist. Its albums are its subdirectories. */
+fun DirectoryDto.toArtist(server: ServerId) = Artist(
+	ref = ItemRef(server, id),
+	name = name,
+	albumCount = child.count { it.isDir },
+	coverArt = server.ref(coverArt ?: id),
+	starredAt = null,
+)
+
+/**
+ * A directory reached as an album, with the tracks that were found under it —
+ * which may have come from disc subfolders rather than from this listing, so
+ * they are passed in rather than read from [child].
+ */
+fun DirectoryDto.toAlbum(server: ServerId, songs: List<Song>) = Album(
+	ref = ItemRef(server, id),
+	title = name,
+	// The folder says nothing about who made the record; its tracks do, and on
+	// a well-ordered library they agree with each other.
+	artistName = songs.firstOrNull()?.artistName.orEmpty(),
+	artistRef = server.ref(parent),
+	songCount = songs.size,
+	duration = songs.sumOf { it.duration },
+	year = songs.firstNotNullOfOrNull { it.year },
+	genre = null,
+	coverArt = server.ref(coverArt ?: id),
+	starredAt = null,
 )

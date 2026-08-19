@@ -15,6 +15,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.gaindrive.android.data.browse.browseSource
+import org.gaindrive.android.data.browse.chipsFor
+import org.gaindrive.android.data.browse.mergeChips
+import org.gaindrive.android.data.browse.rootRequest
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.local.LocalLibrary
 import org.gaindrive.android.data.local.StoredFilter
@@ -28,6 +32,7 @@ import org.gaindrive.android.data.model.BrowseScope
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.LibraryMode
 import org.gaindrive.android.data.model.LibrarySelection
+import org.gaindrive.android.data.model.MusicRoot
 import org.gaindrive.android.data.model.Playlist
 import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
@@ -58,6 +63,7 @@ class LibraryRepository @Inject constructor(
 	private val local: LocalLibrary,
 	private val connectivity: Connectivity,
 	private val audioCache: AudioCache,
+	private val musicRoots: MusicRoots,
 ) {
 
 	/**
@@ -68,15 +74,6 @@ class LibraryRepository @Inject constructor(
 	 * dealing with a value that could change under it mid-fan-out.
 	 */
 	private val offline: Boolean get() = !connectivity.online.value
-
-	/**
-	 * Root kinds per server, as reported by getMusicFolders. Populated lazily
-	 * and kept for the session: roots are configuration, and re-asking on every
-	 * mode switch would put a request in front of a control that should feel
-	 * instant. See [typesFor] for what an empty set means.
-	 */
-	private val advertisedTypes = mutableMapOf<ServerId, Set<String>>()
-	private val typesMutex = Mutex()
 
 	/**
 	 * What to hide from browse listings, or null when there is nothing to hide.
@@ -104,19 +101,16 @@ class LibraryRepository @Inject constructor(
 					.takeIf { it.isNotEmpty() }
 			},
 		) { client, config ->
-			// Servers that do not advertise this kind are not asked at all.
+			// Servers that cannot answer for this chip are not asked at all.
 			// Not asking is the whole point: a server predating library roots
 			// ignores the unknown contentType parameter and answers with its
 			// entire library, so the request itself is what would put the same
 			// folders under every mode. Filtering the response instead would
 			// be too late — nothing in it says which entries to discard.
-			if (!advertises(typesFor(client, config), mode)) return@fanOut emptyList()
+			val request = rootRequest(config.browseByFolder, rootsOf(client, config), mode)
+				?: return@fanOut emptyList()
 
-			// Positional: SubsonicClient reaches the API through interface
-			// delegation, so named arguments lean on generated parameter names.
-			client.getArtists(null, mode.id)
-				.requireOk().artists?.index.orEmpty()
-				.map { it.toDomain(config.id) }
+			config.browseSource.indexes(client, config.id, request)
 				// Buckets with no artists are noise in a sticky-header list.
 				.filter { it.artists.isNotEmpty() }
 				.also { local.saveArtistIndexes(config.id, mode, it) }
@@ -124,62 +118,37 @@ class LibraryRepository @Inject constructor(
 	}
 
 	/**
-	 * The modes worth offering, unioned across every configured server.
+	 * The slices worth offering, unioned across every configured server.
 	 *
 	 * Online this comes from each server's `getMusicFolders`; offline that is
-	 * unreachable, so it comes from the content types actually present in the
-	 * mirror — which is the honest answer, since those are the only ones that
-	 * can be browsed at all.
-	 *
-	 * Uploads is appended when any server grants the account upload rights.
+	 * unreachable, so it comes from what is actually present in the mirror —
+	 * which is the honest answer, since those are the only slices that can be
+	 * browsed at all. The mirror stores the same strings, so a folder chip
+	 * survives going offline as readily as a content type does.
 	 */
 	suspend fun availableModes(scope: BrowseScope): List<LibraryMode> {
 		if (offline)
-			return local.storedContentTypes().sorted().map { LibraryMode(it) }
+			return mergeChips(listOf(local.storedContentTypes().map { LibraryMode(it) }))
 				.ifEmpty { listOf(LibraryMode.ARTISTS) }
 
 		// Each server returns its own answer and they are combined afterwards:
 		// fanOut runs the blocks concurrently, so accumulating into shared
 		// state inside one would be a data race.
 		val perServer = fanOut(scope, fallback = { null }) { client, config ->
-			typesFor(client, config)
+			chipsFor(config.browseByFolder, rootsOf(client, config))
 		}.items
 
-		return perServer
-			// A legacy server names no kinds and is taken to hold artists.
-			.map { it.ifEmpty { setOf(LibraryMode.ARTISTS.id) } }
-			.flatten().distinct().sorted().map { LibraryMode(it) }
-			// Every server failing still has to leave something selectable.
-			.ifEmpty { listOf(LibraryMode.ARTISTS) }
+		// Every server failing still has to leave something selectable.
+		return mergeChips(perServer).ifEmpty { listOf(LibraryMode.ARTISTS) }
 	}
 
-	/**
-	 * The root kinds a server advertises, fetched once and remembered.
-	 *
-	 * An **empty set means the server has no concept of roots at all** — it
-	 * either returned no folders or named no content type on any of them. That
-	 * is not the same as "it has no categories", and the difference decides
-	 * whether the server can be trusted to honour a contentType filter.
-	 *
-	 * A failure caches nothing, so a server that was briefly unreachable is
-	 * asked again rather than being written off as legacy for the session.
-	 */
-	private suspend fun typesFor(client: SubsonicClient, config: ServerConfig): Set<String> {
-		advertisedTypes[config.id]?.let { return it }
-		return typesMutex.withLock {
-			advertisedTypes[config.id] ?: run {
-				val types = client.getMusicFolders().requireOk()
-					.musicFolders?.musicFolder.orEmpty()
-					.mapNotNull { it.contentType }
-					.toSet()
-				types.also { advertisedTypes[config.id] = it }
-			}
+	/** This server's configured roots, fetched once per session. */
+	private suspend fun rootsOf(client: SubsonicClient, config: ServerConfig): List<MusicRoot> =
+		musicRoots.of(config.id) {
+			client.getMusicFolders().requireOk()
+				.musicFolders?.musicFolder.orEmpty()
+				.map { it.toDomain() }
 		}
-	}
-
-	/** Whether a server holding [types] can answer for [mode]. */
-	private fun advertises(types: Set<String>, mode: LibraryMode): Boolean =
-		if (types.isEmpty()) mode == LibraryMode.ARTISTS else mode.id in types
 
 	/**
 	 * The union of one artist's albums across every server that has them.
@@ -200,9 +169,8 @@ class LibraryRepository @Inject constructor(
 					.let { stored?.filterAlbums(it) ?: it }
 					.takeIf { it.isNotEmpty() }
 			},
-		) { client, ref ->
-			client.getArtist(ref.id).requireOk().artist?.album.orEmpty()
-				.map { it.toDomain(ref.server) }
+		) { client, config, ref ->
+			config.browseSource.albums(client, ref)
 				// Stored before merging: the merge collapses the same album on
 				// two servers into one row, and the mirror has to keep both.
 				.also { local.saveAlbums(ref.server, it) }
@@ -213,8 +181,8 @@ class LibraryRepository @Inject constructor(
 	}
 
 	suspend fun artist(ref: ItemRef): Artist? = networkFirst({ local.artist(ref) }) {
-		onServer(ref.server) { client ->
-			client.getArtist(ref.id).requireOk().artist?.toDomain(ref.server)
+		withServer(ref.server) { client, config ->
+			config.browseSource.artist(client, ref)
 		}?.also { local.saveArtist(ref.server, it) }
 	}
 
@@ -241,15 +209,15 @@ class LibraryRepository @Inject constructor(
 	 * to show as soon as possible. The notes live in [albumNotes] and must be
 	 * fetched separately: a lookup that may never succeed cannot be allowed to
 	 * cost the user their track list.
+	 *
+	 * "One request" holds for the tag hierarchy and for the common folder case.
+	 * An album whose discs are subfolders costs one more round — see
+	 * `FolderSource`, which is where that is arranged rather than here.
 	 */
 	suspend fun albumDetail(album: ItemRef): AlbumDetail? =
 		networkFirst({ local.albumDetail(album) }) {
-			onServer(album.server) { client ->
-				val dto = client.getAlbum(album.id).requireOk().album ?: return@onServer null
-				AlbumDetail(
-					album = dto.toDomain(album.server),
-					songs = dto.song.map { it.toDomain(album.server) },
-				)
+			withServer(album.server) { client, config ->
+				config.browseSource.albumDetail(client, album)
 			}?.also { local.saveAlbumDetail(album.server, it) }
 		}
 
@@ -316,9 +284,12 @@ class LibraryRepository @Inject constructor(
 		artistCount: Int,
 		albumCount: Int,
 		songCount: Int,
-	): LibrarySelection = onServer(server) { client ->
-		val found = client.search3(query, artistCount, albumCount, songCount)
-			.requireOk().searchResult3?.toDomain(server) ?: LibrarySelection()
+	): LibrarySelection = withServer(server) { client, config ->
+		// Which search endpoint is asked follows the browse mode, because a
+		// result is only useful if the id it carries is one the rest of the mode
+		// can open — see BrowseSource.search.
+		val found = config.browseSource
+			.search(client, server, query, artistCount, albumCount, songCount)
 		local.saveSelection(server, found)
 		found
 	}
@@ -497,10 +468,22 @@ class LibraryRepository @Inject constructor(
 	private suspend fun <T> onServer(
 		server: ServerId,
 		block: suspend (SubsonicClient) -> T,
+	): T = withServer(server) { client, _ -> block(client) }
+
+	/**
+	 * As [onServer], but handing the block the configuration too — which the
+	 * hierarchy queries need in order to know which of the two ways of reading
+	 * it this server is set to. A sibling rather than a wider [onServer]: most
+	 * of its callers name an endpoint that works the same either way, and would
+	 * only have gained an ignored parameter.
+	 */
+	private suspend fun <T> withServer(
+		server: ServerId,
+		block: suspend (SubsonicClient, ServerConfig) -> T,
 	): T = withContext(Dispatchers.IO) {
 		val config = registry.get(server)
 			?: error("No such server configured: $server")
-		block(clients.clientFor(config))
+		block(clients.clientFor(config), config)
 	}
 
 	/** The user's answer to "is the same album on two servers one row or two?" */
@@ -548,7 +531,7 @@ class LibraryRepository @Inject constructor(
 	private suspend fun <T> fanOutRefs(
 		refs: List<ItemRef>,
 		fallback: (suspend (ItemRef) -> T?)? = null,
-		block: suspend (SubsonicClient, ItemRef) -> T,
+		block: suspend (SubsonicClient, ServerConfig, ItemRef) -> T,
 	): MergedResult<List<T>> = coroutineScope {
 		val configs = registry.enabledServers.first()
 
@@ -564,7 +547,11 @@ class LibraryRepository @Inject constructor(
 			// reported: it is stale navigation state, not a server that failed.
 			val config = configs.firstOrNull { it.id == ref.server } ?: return@mapNotNull null
 			async(Dispatchers.IO) {
-				Triple(config, ref, runCatchingCancellable { block(clients.clientFor(config), ref) })
+				Triple(
+					config,
+					ref,
+					runCatchingCancellable { block(clients.clientFor(config), config, ref) },
+				)
 			}
 		}.awaitAll()
 

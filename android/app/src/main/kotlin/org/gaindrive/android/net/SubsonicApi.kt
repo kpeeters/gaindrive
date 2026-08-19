@@ -54,6 +54,33 @@ interface SubsonicApi {
 	@GET("rest/getArtistInfo2.view")
 	suspend fun getArtistInfo2(@Query("id") id: String): SubsonicEnvelope<GetArtistInfoBody>
 
+	// ── Browsing by folder ──────────────────────────────────────────────
+	//
+	// The same hierarchy read from the directory tree rather than from tags,
+	// for a server whose ID3 tags are patchy. Selected per server; see
+	// `data/browse/BrowseSource.kt` for which endpoints pair with which.
+
+	/**
+	 * The folder-browsing counterpart of [getArtists]: the level-1 entries of
+	 * every root, grouped into index buckets. Carries no `albumCount` — the
+	 * server does not count albums it was not asked to enumerate.
+	 */
+	@GET("rest/getIndexes.view")
+	suspend fun getIndexes(
+		/** Restricts to one music folder. Null spans every one of them. */
+		@Query("musicFolderId") musicFolderId: String?,
+		/** gaindrive extension, honoured here exactly as on [getArtists]. */
+		@Query("contentType") contentType: String?,
+	): SubsonicEnvelope<GetIndexesBody>
+
+	/**
+	 * One directory's children: subdirectories and tracks in a single mixed
+	 * array, told apart by `isDir`. Serves as both "the albums of an artist"
+	 * and "the tracks of an album" — which level it is depends only on the id.
+	 */
+	@GET("rest/getMusicDirectory.view")
+	suspend fun getMusicDirectory(@Query("id") id: String): SubsonicEnvelope<GetMusicDirectoryBody>
+
 	@GET("rest/getAlbumInfo2.view")
 	suspend fun getAlbumInfo2(@Query("id") id: String): SubsonicEnvelope<GetAlbumInfoBody>
 
@@ -80,6 +107,22 @@ interface SubsonicApi {
 		@Query("albumCount") albumCount: Int,
 		@Query("songCount") songCount: Int,
 	): SubsonicEnvelope<Search3Body>
+
+	/**
+	 * The folder-browsing counterpart of [search3], and the reason it exists
+	 * here: `search3` answers with ID3 ids, which on a server that keeps the two
+	 * hierarchies apart are not the ids `getMusicDirectory` accepts. Tapping a
+	 * result would then open the wrong album rather than fail — both id spaces
+	 * are integers, so nothing detects the mismatch. Folder mode asks the
+	 * endpoint that answers in its own ids.
+	 */
+	@GET("rest/search2.view")
+	suspend fun search2(
+		@Query("query") query: String,
+		@Query("artistCount") artistCount: Int,
+		@Query("albumCount") albumCount: Int,
+		@Query("songCount") songCount: Int,
+	): SubsonicEnvelope<Search2Body>
 
 	// ── Playlists ───────────────────────────────────────────────────────
 

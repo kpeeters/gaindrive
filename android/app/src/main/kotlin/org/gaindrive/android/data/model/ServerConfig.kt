@@ -13,6 +13,21 @@ data class ServerConfig(
 	val username: String,
 	val password: String,
 	val enabled: Boolean = true,
+	/**
+	 * Read the library from the server's directory tree rather than from its
+	 * tags — `getIndexes`/`getMusicDirectory` instead of
+	 * `getArtists`/`getArtist`/`getAlbum`.
+	 *
+	 * Off by default, because the tag hierarchy is what a Subsonic client is
+	 * expected to use and is right on any well-tagged library. It exists for the
+	 * one that is not: a collection filed correctly on disk but tagged
+	 * haphazardly browses properly through its folders and badly through its
+	 * tags, with artists that do not exist and tracks that never appear.
+	 *
+	 * A gaindrive server derives both views from the same directory tree, so the
+	 * setting makes no difference there.
+	 */
+	val browseByFolder: Boolean = false,
 ) {
 	companion object {
 		/** Trailing slashes break path joining; the web client strips them too. */

@@ -58,10 +58,10 @@ class ServerSelection @Inject constructor(
 		.onStart { emit(connectivity.online.value) }
 
 	/**
-	 * Scope and connectivity together, because both change what a browse screen
-	 * should be showing and both therefore have to trigger the same reload.
-	 * Screens watch this rather than [scope] so neither can be honoured while
-	 * the other is quietly ignored.
+	 * Scope, connectivity and the registry's revision together, because each
+	 * changes what a browse screen should be showing and all three therefore have
+	 * to trigger the same reload. Screens watch this rather than [scope] so none
+	 * can be honoured while the others are quietly ignored.
 	 *
 	 * Deliberately sourced from [Connectivity.online] — losing the network and
 	 * choosing offline mode are the same thing to a browse screen — and not
@@ -73,8 +73,8 @@ class ServerSelection @Inject constructor(
 	 * offline, with nothing left to emit and correct it.
 	 */
 	val browse: Flow<BrowseState> =
-		combine(scope, settledOnline) { current, online ->
-			BrowseState(current, offline = !online)
+		combine(scope, settledOnline, registry.revision) { current, online, revision ->
+			BrowseState(current, offline = !online, revision = revision)
 		}
 
 	/**

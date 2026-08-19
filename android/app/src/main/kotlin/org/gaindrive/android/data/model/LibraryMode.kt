@@ -1,37 +1,63 @@
 package org.gaindrive.android.data.model
 
 /**
- * Which kind of top-level entry the library is showing.
+ * Which slice of the library the top-level list is showing.
  *
  * A value class over a plain string rather than an enum, deliberately. The
- * modes on offer come from the server — one per configured root content type —
- * so an enum would have to be edited every time a server grows a new kind of
- * root, and would have no sensible branch for one it had never heard of.
+ * slices on offer come from the server, so an enum would have to be edited every
+ * time a server grows a new kind of root and would have no sensible branch for
+ * one it had never heard of.
  *
- * A list must never mix kinds, which is why this is a single value rather than
- * a set: the server filters on it and the resulting list is single-kind by
+ * A list must never mix slices, which is why this is a single value rather than
+ * a set: the server filters on it and the resulting list is single-slice by
  * construction.
  *
- * Personal uploads are not a mode here. The server offers them, but this app
+ * The string names one of two different things, distinguished by a prefix:
+ *
+ * * a **content type** — `artists`, `categories` — which is a gaindrive
+ *   extension naming a *kind* of root, and may span several of them
+ * * a **music folder**, written `folder:<name>`, which is one root of a server
+ *   that has no concept of kinds
+ *
+ * Keeping both in one string is what lets `SettingsStore.libraryMode` and the
+ * mirror's `contentType` column carry either without a migration, and what makes
+ * a value written by an older build still parse. A folder is keyed on its
+ * **name** rather than its id because ids are per-server and the chip row unions
+ * several servers — the same reason `Merge.kt` matches everything else by name.
+ *
+ * Personal uploads are not a slice here. The server offers them, but this app
  * cannot upload, so the chip would name somewhere nothing can be put from.
  */
 @JvmInline
 value class LibraryMode(val id: String) {
 
+	/** The folder this names, or null when it names a content type. */
+	val folderName: String?
+		get() = if (id.startsWith(FOLDER)) id.removePrefix(FOLDER) else null
+
 	/**
-	 * Title-cased for display. Falls back to capitalising the raw id, so a
-	 * content type this app has never seen still shows something sensible
-	 * rather than nothing.
+	 * Title-cased for display. A folder shows its own name, which the server's
+	 * owner chose and is already how they think of it. A content type falls back
+	 * to capitalising the raw id, so a kind this app has never seen still shows
+	 * something sensible rather than nothing.
 	 */
 	val label: String
-		get() = LABELS[id] ?: id.replaceFirstChar { it.uppercase() }
+		get() = folderName ?: (LABELS[id] ?: id.replaceFirstChar { it.uppercase() })
 
 	companion object {
 		/**
-		 * What a server that has never heard of root kinds is taken to hold —
-		 * see the legacy handling in LibraryRepository.
+		 * What a server that names no kind of root is taken to hold — see
+		 * `data/browse/LibraryRoots.kt`.
 		 */
 		val ARTISTS = LibraryMode("artists")
+
+		/**
+		 * A folder named "artists" is `folder:artists`, so it cannot be mistaken
+		 * for the content type of the same name.
+		 */
+		fun folder(name: String) = LibraryMode("$FOLDER$name")
+
+		private const val FOLDER = "folder:"
 
 		private val LABELS = mapOf(
 			"artists" to "Artists",

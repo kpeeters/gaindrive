@@ -75,6 +75,13 @@ class ArtistsViewModel @Inject constructor(
 			// reason to re-read the library.
 			selection.browse.distinctUntilChanged().collect { selected ->
 				scope = selected.scope
+				// Awaited rather than launched alongside the load, because it
+				// may *change* the selected chip — a server offering only
+				// folders has no "artists" among them — and loading first would
+				// then query a chip nothing answers for and leave the correction
+				// with no reload behind it. It costs nothing to wait: both this
+				// and the load below read the same per-session root cache, so
+				// only one of them reaches the network.
 				refreshModes()
 				// A different scope is a different library, and going offline
 				// is the same library from a different source — either way the
@@ -92,19 +99,20 @@ class ArtistsViewModel @Inject constructor(
 	}
 
 	/**
-	 * Re-reads which kinds this scope offers, and falls back when the stored
-	 * one is gone — a server may have been removed, or upload rights revoked,
-	 * since it was chosen. Failure leaves the current list alone: the chips
-	 * are navigation, and losing them because one server timed out would be
-	 * worse than showing a stale set.
+	 * Re-reads which slices this scope offers, and falls back when the stored
+	 * one is gone — a server may have been removed since it was chosen, or
+	 * switched to browsing by folder, which replaces its chips entirely.
+	 * Failure leaves the current list alone: the chips are navigation, and
+	 * losing them because one server timed out would be worse than showing a
+	 * stale set.
+	 *
+	 * The caller must load *after* this, not alongside it; see the collector.
 	 */
-	private fun refreshModes() {
-		viewModelScope.launch {
-			val available = runCatchingCancellable { library.availableModes(scope) }
-				.getOrNull() ?: return@launch
-			_modes.value = available
-			if (_mode.value !in available) _mode.value = available.first()
-		}
+	private suspend fun refreshModes() {
+		val available = runCatchingCancellable { library.availableModes(scope) }
+			.getOrNull() ?: return
+		_modes.value = available
+		if (_mode.value !in available) _mode.value = available.first()
 	}
 
 	/** Retry after a failure: there is nothing worth keeping on screen. */

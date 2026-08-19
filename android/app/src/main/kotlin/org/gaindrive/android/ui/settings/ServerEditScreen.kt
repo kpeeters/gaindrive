@@ -122,6 +122,18 @@ fun ServerEditScreen(
 				modifier = Modifier.fillMaxWidth(),
 			)
 
+			// The subtitle carries the consequence because saving applies it
+			// with no confirmation of its own, and this server's stored library
+			// goes when it changes.
+			SwitchRow(
+				title = "Browse by folder",
+				subtitle = "Uses the server's folders instead of its tags. Turn this " +
+					"on for a library whose tags are patchy. Changing it reloads " +
+					"this server's library; downloads are kept.",
+				checked = state.browseByFolder,
+				onCheckedChange = viewModel::onBrowseByFolder,
+			)
+
 			Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
 				OutlinedButton(
 					// Testing an edit with a blank password would test the
