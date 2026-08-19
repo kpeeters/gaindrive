@@ -1,6 +1,7 @@
 package org.gaindrive.android.ui.browse
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -82,7 +83,13 @@ fun AlbumDetailScreen(
 			onRetry = viewModel::load,
 			modifier = Modifier.padding(insets),
 		) { detail ->
-			LazyColumn(modifier = Modifier.fillMaxSize()) {
+			LazyColumn(
+				modifier = Modifier.fillMaxSize(),
+				// contentPadding rather than a spacer item: it scrolls with the
+				// content and needs no key. The last track otherwise ends flush
+				// against the mini-player, which reads as a cut-off list.
+				contentPadding = PaddingValues(bottom = 16.dp),
+			) {
 				// The placeholder already occupies the full square, so the
 				// artwork arriving later does not move anything below it.
 				item(key = "hero") {

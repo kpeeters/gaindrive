@@ -1,5 +1,6 @@
 package org.gaindrive.android.ui.playlists
 
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.cache.PinKind
@@ -94,7 +96,11 @@ fun PlaylistDetailScreen(
 				return@RefreshableLoadBox
 			}
 
-			LazyColumn(modifier = Modifier.fillMaxSize()) {
+			LazyColumn(
+				modifier = Modifier.fillMaxSize(),
+				// Same tail gap as an album's tracks; see AlbumDetailScreen.
+				contentPadding = PaddingValues(bottom = 16.dp),
+			) {
 				itemsIndexed(
 					items = songs,
 					// Position, not id: a playlist may hold the same track
