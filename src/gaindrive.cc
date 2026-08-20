@@ -625,6 +625,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 		};
 
 	bool mb_ok = false;
+	mb_pace();
 	auto r = mb.Get("/ws/2/artist", params, httplib::Headers{});
 	note(r);
 	if (!r) {
@@ -633,7 +634,11 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 		}
 	else if (r->status != 200) {
 		std::cout << stamp() << "getArtistInfo [" << name
-		          << "] MusicBrainz HTTP " << r->status << std::endl;
+		          << "] MusicBrainz HTTP " << r->status
+		          << (mb_rate_limited(r)
+		                  ? " - rate limited; something in this server is asking"
+		                    " MusicBrainz faster than once a second" : "")
+		          << std::endl;
 		}
 	else {
 		mb_ok = true;
@@ -645,8 +650,10 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 
 	// Step 2 — MusicBrainz URL relations → Wikipedia article URL.
 	if (!info.mbid.empty()) {
-		std::this_thread::sleep_for(std::chrono::seconds(1));
+		// The one-second wait that used to sit here is now mb_pace()'s job;
+		// doing it in both places only made every lookup a second slower.
 		httplib::Params p2{{"inc","url-rels"},{"fmt","json"}};
+		mb_pace();
 		auto r2 = mb.Get("/ws/2/artist/" + info.mbid, p2, httplib::Headers{});
 		note(r2);
 		if (!r2) {
@@ -655,7 +662,9 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 			}
 		else if (r2->status != 200) {
 			std::cout << stamp() << "getArtistInfo [" << name
-			          << "] MusicBrainz url-rels HTTP " << r2->status << std::endl;
+			          << "] MusicBrainz url-rels HTTP " << r2->status
+			          << (mb_rate_limited(r2) ? " - rate limited" : "")
+			          << std::endl;
 			}
 		else {
 			auto j2 = nlohmann::json::parse(r2->body, nullptr, false);
@@ -981,6 +990,7 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 			{"limit", "1"},
 			{"fmt",   "json"}
 			};
+		mb_pace();
 		auto r1 = mb.Get("/ws/2/release-group", p1, httplib::Headers{});
 		if (!r1) {
 			std::cout << stamp() << "getAlbumInfo [" << title
@@ -988,7 +998,9 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 			}
 		else if (r1->status != 200) {
 			std::cout << stamp() << "getAlbumInfo [" << title
-			          << "] MusicBrainz HTTP " << r1->status << std::endl;
+			          << "] MusicBrainz HTTP " << r1->status
+			          << (mb_rate_limited(r1) ? " - rate limited" : "")
+			          << std::endl;
 			}
 		else {
 			auto j1 = nlohmann::json::parse(r1->body, nullptr, false);
@@ -997,7 +1009,9 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 
 		// Step 2 — fetch URL relations for the release-group.
 		if (!info.mbid.empty()) {
-			std::this_thread::sleep_for(std::chrono::seconds(1));
+			// The one-second wait that used to sit here is now mb_pace()'s job;
+			// doing it in both places only made every lookup a second slower.
+			mb_pace();
 			auto r2 = mb.Get("/ws/2/release-group/" + info.mbid,
 			                 httplib::Params{{"inc","url-rels"},{"fmt","json"}},
 			                 httplib::Headers{});
@@ -1007,7 +1021,9 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 				}
 			else if (r2->status != 200) {
 				std::cout << stamp() << "getAlbumInfo [" << title
-				          << "] MusicBrainz url-rels HTTP " << r2->status << std::endl;
+				          << "] MusicBrainz url-rels HTTP " << r2->status
+				          << (mb_rate_limited(r2) ? " - rate limited" : "")
+				          << std::endl;
 				}
 			else {
 				auto j2 = nlohmann::json::parse(r2->body, nullptr, false);
