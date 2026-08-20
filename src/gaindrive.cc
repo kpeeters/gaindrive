@@ -114,12 +114,81 @@ static void mb_pace()
 	mb_last_request_ = std::chrono::steady_clock::now();
 	}
 
-// True when a response is MusicBrainz saying "you asked too fast". Worth
-// naming, because it is the one failure here that is entirely our own doing and
-// the one a reader will otherwise mistake for the service being down.
+// **Most MusicBrainz 503s are not about our rate at all**, and assuming they
+// were is what made artist lookups fail wholesale.
+//
+// Measured against the live service: a successful response carries
+// `X-RateLimit-Limit: 1200` with `remaining` in the hundreds — our per-address
+// budget is barely touched — while a 503 carries a *different* header,
+// `X-RateLimit-Limit: 15` with `remaining: 11`, `Retry-After: 0`, and a body
+// reading "The MusicBrainz web server is currently busy. Please try again
+// later." That is their global load shedding, not our quota, and at the time of
+// writing roughly one request in three hits it on both the search and the
+// lookup endpoint.
+//
+// So the right answer to a 503 is to **ask again for the same thing**, not to
+// give up on this artist and move to the next one — which merely spends
+// another attempt on the same busy server and makes the whole pass look like a
+// permanent failure.
+static constexpr int  MB_MAX_ATTEMPTS   = 4;
+static constexpr auto MB_RETRY_BACKOFF  = std::chrono::milliseconds(700);
+static constexpr auto MB_RETRY_CAP      = std::chrono::milliseconds(8000);
+
+// True when a 503 is MusicBrainz saying it is busy rather than that we asked
+// too fast. The two are worth telling apart in the log: one is theirs and one
+// would be ours.
+static bool mb_busy(const httplib::Result& r)
+	{
+	return r && r->status == 503
+	    && r->body.find("currently busy") != std::string::npos;
+	}
+
 static bool mb_rate_limited(const httplib::Result& r)
 	{
-	return r && r->status == 503;
+	return r && r->status == 503 && !mb_busy(r);
+	}
+
+// One paced MusicBrainz GET, retried while the service says it is busy.
+// `what` labels the log lines; every caller already has a name to hand.
+static httplib::Result mb_get(httplib::SSLClient& cli, const std::string& path,
+                               const httplib::Params& params,
+                               const std::string& what)
+	{
+	httplib::Result r;
+	for (int attempt = 1; attempt <= MB_MAX_ATTEMPTS; ++attempt) {
+		mb_pace();
+		r = cli.Get(path, params, httplib::Headers{});
+
+		// Anything that is not a 503 is an answer, including a 404.
+		if (r && r->status != 503) return r;
+		if (attempt == MB_MAX_ATTEMPTS) break;
+
+		// Exponential, but Retry-After wins when they send a usable one. They
+		// send 0 with a busy 503, which means "immediately" and would spin, so
+		// the backoff is a floor rather than a default.
+		auto wait = MB_RETRY_BACKOFF * (1 << (attempt - 1));
+		if (r) {
+			auto ra = r->get_header_value("Retry-After");
+			if (!ra.empty()) {
+				try {
+					auto secs = std::stoi(ra);
+					if (secs > 0)
+						wait = std::max(wait, std::chrono::milliseconds(secs * 1000));
+					}
+				catch (const std::exception&) { /* not a number; keep ours */ }
+				}
+			}
+		if (wait > MB_RETRY_CAP) wait = MB_RETRY_CAP;
+
+		std::cout << stamp() << what << ": MusicBrainz "
+		          << (!r              ? "did not answer"
+		              : mb_busy(r)    ? "is busy"
+		                              : "refused (503)")
+		          << ", retrying in " << wait.count() << " ms (attempt "
+		          << attempt << " of " << MB_MAX_ATTEMPTS << ")" << std::endl;
+		std::this_thread::sleep_for(wait);
+		}
+	return r;
 	}
 
 // Subsonic ids are strings in the API even though they are row ids here. Every
@@ -625,8 +694,8 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 		};
 
 	bool mb_ok = false;
-	mb_pace();
-	auto r = mb.Get("/ws/2/artist", params, httplib::Headers{});
+	auto r = mb_get(mb, "/ws/2/artist", params,
+	                "getArtistInfo [" + name + "]");
 	note(r);
 	if (!r) {
 		std::cout << stamp() << "getArtistInfo [" << name
@@ -650,11 +719,11 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 
 	// Step 2 — MusicBrainz URL relations → Wikipedia article URL.
 	if (!info.mbid.empty()) {
-		// The one-second wait that used to sit here is now mb_pace()'s job;
+		// The one-second wait that used to sit here is mb_get()'s job now;
 		// doing it in both places only made every lookup a second slower.
 		httplib::Params p2{{"inc","url-rels"},{"fmt","json"}};
-		mb_pace();
-		auto r2 = mb.Get("/ws/2/artist/" + info.mbid, p2, httplib::Headers{});
+		auto r2 = mb_get(mb, "/ws/2/artist/" + info.mbid, p2,
+		                 "getArtistInfo [" + name + "] url-rels");
 		note(r2);
 		if (!r2) {
 			std::cout << stamp() << "getArtistInfo [" << name
@@ -990,8 +1059,8 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 			{"limit", "1"},
 			{"fmt",   "json"}
 			};
-		mb_pace();
-		auto r1 = mb.Get("/ws/2/release-group", p1, httplib::Headers{});
+		auto r1 = mb_get(mb, "/ws/2/release-group", p1,
+		                 "getAlbumInfo [" + title + "]");
 		if (!r1) {
 			std::cout << stamp() << "getAlbumInfo [" << title
 			          << "] MusicBrainz request failed (no response)" << std::endl;
@@ -1009,12 +1078,11 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 
 		// Step 2 — fetch URL relations for the release-group.
 		if (!info.mbid.empty()) {
-			// The one-second wait that used to sit here is now mb_pace()'s job;
+			// The one-second wait that used to sit here is mb_get()'s job now;
 			// doing it in both places only made every lookup a second slower.
-			mb_pace();
-			auto r2 = mb.Get("/ws/2/release-group/" + info.mbid,
+			auto r2 = mb_get(mb, "/ws/2/release-group/" + info.mbid,
 			                 httplib::Params{{"inc","url-rels"},{"fmt","json"}},
-			                 httplib::Headers{});
+			                 "getAlbumInfo [" + title + "] url-rels");
 			if (!r2) {
 				std::cout << stamp() << "getAlbumInfo [" << title
 				          << "] MusicBrainz url-rels request failed" << std::endl;
