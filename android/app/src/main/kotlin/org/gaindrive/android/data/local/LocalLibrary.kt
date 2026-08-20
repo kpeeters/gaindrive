@@ -65,8 +65,9 @@ class LocalLibrary @Inject constructor(
 			.map { (label, rows) -> ArtistIndex(label, rows.map { it.toDomain() }) }
 	}
 
-	/** Kinds of root present in the mirror, so offline chips reflect reality. */
-	suspend fun storedContentTypes(): List<String> = io { dao.storedContentTypes() }
+	/** Slices present in the mirror, so offline chips reflect reality. */
+	suspend fun storedContentTypes(servers: List<ServerId>): List<String> =
+		io { dao.storedContentTypes(servers.map { it.value }) }
 
 	suspend fun artist(ref: ItemRef): Artist? = io {
 		dao.artist(ref.server.value, ref.id)?.toDomain()

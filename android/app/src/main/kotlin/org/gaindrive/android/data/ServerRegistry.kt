@@ -43,10 +43,19 @@ class ServerRegistry @Inject constructor(
 		servers.first().firstOrNull { it.id == id }
 
 	/**
-	 * Bumped whenever a change makes what the browse screens are showing wrong
-	 * rather than merely stale — today, only a flip of [ServerConfig.browseByFolder],
-	 * which empties that server's mirror underneath them. They hold their lists
-	 * deliberately and would otherwise go on showing the old one.
+	 * Bumped on **every** change to the server list, and watched by the browse
+	 * screens as their signal to re-read the library.
+	 *
+	 * It has to exist because the scope alone cannot carry the change:
+	 * `BrowseScope.AllServers` is a singleton, so disabling one server and
+	 * enabling another produces an identical scope, an identical `BrowseState`,
+	 * and a `distinctUntilChanged` that swallows it — leaving the disabled
+	 * server's artists on screen under the newly enabled server's badges. Every
+	 * other in-place edit has the same shape: a corrected URL, a reorder (which
+	 * is the tie-break for merged rows), a browse-mode flip.
+	 *
+	 * Bumped in [mutate] and nowhere else, which is why [add] goes through it
+	 * rather than saving for itself.
 	 */
 	private val _revision = MutableStateFlow(0)
 	val revision: StateFlow<Int> = _revision.asStateFlow()
@@ -69,7 +78,7 @@ class ServerRegistry @Inject constructor(
 			password = cipher.encrypt(ServerConfig.normalisePassword(password)),
 			browseByFolder = browseByFolder,
 		)
-		store.save(store.servers.first() + entry)
+		mutate { it + entry }
 		return id
 	}
 
@@ -119,10 +128,12 @@ class ServerRegistry @Inject constructor(
 		// will never ask for, and would answer offline browsing with rows that
 		// cannot be opened. The chips are computed from the roots and the flag
 		// together, so that cache goes too.
+		//
+		// The reload itself is not arranged here: `mutate` has already bumped
+		// the revision, as it does for any change to the list.
 		if (previous != null && previous.browseByFolder != browseByFolder) {
 			roots.forget(id)
 			local.forgetServer(id)
-			_revision.update { it + 1 }
 		}
 	}
 
@@ -143,8 +154,22 @@ class ServerRegistry @Inject constructor(
 		else list.toMutableList().apply { add(to, removeAt(from)) }
 	}
 
+	/**
+	 * The single write path, so [revision] has one place to be bumped from.
+	 *
+	 * A change that changes nothing is dropped rather than announced — `move`
+	 * with out-of-range indices returns the list it was given, and re-saving an
+	 * editor without touching a field produces an identical one. DataStore
+	 * already declines to re-emit for an unchanged value, but [revision] is a
+	 * separate flow and would fire regardless, reloading every browse screen for
+	 * nothing.
+	 */
 	private suspend fun mutate(block: (List<StoredServer>) -> List<StoredServer>) {
-		store.save(block(store.servers.first()))
+		val current = store.servers.first()
+		val next = block(current)
+		if (next == current) return
+		store.save(next)
+		_revision.update { it + 1 }
 	}
 
 	/**

@@ -127,9 +127,14 @@ class LibraryRepository @Inject constructor(
 	 * survives going offline as readily as a content type does.
 	 */
 	suspend fun availableModes(scope: BrowseScope): List<LibraryMode> {
-		if (offline)
-			return mergeChips(listOf(local.storedContentTypes().map { LibraryMode(it) }))
+		if (offline) {
+			// Scoped, like every other query: the mirror still holds the rows of
+			// a server that has been disabled, and offering its chips would be a
+			// slice with nothing behind it.
+			val stored = local.storedContentTypes(serversIn(scope).map { it.id })
+			return mergeChips(listOf(stored.map { LibraryMode(it) }))
 				.ifEmpty { listOf(LibraryMode.ARTISTS) }
+		}
 
 		// Each server returns its own answer and they are combined afterwards:
 		// fanOut runs the blocks concurrently, so accumulating into shared

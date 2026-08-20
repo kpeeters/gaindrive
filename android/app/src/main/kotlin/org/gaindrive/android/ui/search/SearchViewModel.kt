@@ -103,6 +103,12 @@ class SearchViewModel @Inject constructor(
 		selection.scoped,
 		reruns,
 	) { query, filters, browse, servers, _ ->
+		// `servers.size` is not an identity, and deliberately is not asked to
+		// be: this combine has no distinctUntilChanged, so flatMapLatest
+		// restarts the search on every emission and the value is only carried
+		// for the header. Adding one here would need the server ids or
+		// `browse.revision` instead — swapping one server for another leaves
+		// the count untouched.
 		Search(query.trim(), filters, browse.scope, servers.size)
 	}
 		.flatMapLatest { search ->

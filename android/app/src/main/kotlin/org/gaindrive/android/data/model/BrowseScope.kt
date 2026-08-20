@@ -31,10 +31,13 @@ data class BrowseState(
 	val scope: BrowseScope,
 	val offline: Boolean,
 	/**
-	 * Bumped when a server's configuration invalidates what is on screen rather
-	 * than merely ageing it — see `ServerRegistry.revision`. It is part of this
-	 * state purely so that a change to it compares unequal and the screens
-	 * reload; nothing reads the number.
+	 * Bumped on every change to the server list — see `ServerRegistry.revision`,
+	 * which explains why the scope alone cannot carry one.
+	 *
+	 * Mostly it is here so that a change compares unequal and the screens
+	 * reload. The number itself is only read where a screen distinguishes
+	 * "reload" from "reload and blank what is there first", as the playlists
+	 * screen does.
 	 */
 	val revision: Int = 0,
 )

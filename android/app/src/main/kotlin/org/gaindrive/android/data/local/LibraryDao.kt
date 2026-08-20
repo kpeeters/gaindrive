@@ -44,9 +44,16 @@ interface LibraryDao {
 	)
 	suspend fun artists(server: String, contentType: String): List<ArtistEntity>
 
-	/** The kinds of root actually present in the mirror, for the mode chips. */
-	@Query("SELECT DISTINCT contentType FROM artists")
-	suspend fun storedContentTypes(): List<String>
+	/**
+	 * The slices actually present in the mirror, for the chip row when offline.
+	 *
+	 * Scoped to the servers asked about, not the whole table: a server that has
+	 * been disabled keeps its mirrored rows — it may be enabled again, and
+	 * dropping them would mean re-browsing to get them back — so an unscoped
+	 * query offers chips for a library that is not currently on offer.
+	 */
+	@Query("SELECT DISTINCT contentType FROM artists WHERE serverId IN (:servers)")
+	suspend fun storedContentTypes(servers: List<String>): List<String>
 
 	@Query("SELECT * FROM artists WHERE serverId = :server AND id = :id")
 	suspend fun artist(server: String, id: String): ArtistEntity?

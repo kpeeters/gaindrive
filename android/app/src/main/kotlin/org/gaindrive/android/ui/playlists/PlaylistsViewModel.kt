@@ -55,6 +55,9 @@ class PlaylistsViewModel @Inject constructor(
 
 	/** Named apart from the exposed `offline` flow, which is the same value. */
 	private var wasOffline: Boolean = false
+
+	/** The server list this screen's playlists came from; see [switched]. */
+	private var serverRevision: Int = 0
 	private var loadJob: Job? = null
 
 	init {
@@ -65,13 +68,19 @@ class PlaylistsViewModel @Inject constructor(
 				library.playlistRevision,
 			) { selected, _ -> selected }.collect { selected ->
 				// A different scope is a different set of playlists, so the old
-				// list must go. A revision bump is the same list changed, and
-				// blanking it there would flash the whole screen on every edit.
-				// Going offline counts as switching: the source changed even
-				// though the scope did not.
-				val switched = selected.scope != scope || selected.offline != wasOffline
+				// list must go. A playlist revision bump is the same list
+				// changed, and blanking it there would flash the whole screen on
+				// every edit. Going offline counts as switching: the source
+				// changed even though the scope did not. So does a change to the
+				// server list, which is the case the scope cannot see — enabling
+				// one server and disabling another leaves the scope reading "all
+				// servers" throughout.
+				val switched = selected.scope != scope ||
+					selected.offline != wasOffline ||
+					selected.revision != serverRevision
 				scope = selected.scope
 				wasOffline = selected.offline
+				serverRevision = selected.revision
 				startLoad(clearFirst = switched)
 			}
 		}
