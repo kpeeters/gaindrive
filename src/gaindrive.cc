@@ -2403,7 +2403,17 @@ GainDrive::GainDrive(const std::string& db_path,
 				// Cacheable on purpose — a client retrying on a timer would
 				// otherwise poll for ever over an artist nobody has a portrait
 				// of, and on a real library that is many of them.
-				res.set_header("Cache-Control", "public, max-age=86400");
+				//
+				// An hour, not a day. This is the one answer here a client is
+				// allowed to keep without asking, so its lifetime is also how
+				// long a *wrong* "none" survives on the device after the
+				// server has stopped believing it — and a wrong one is
+				// entirely possible, since it is what a provider outage looks
+				// like if anything upstream mistakes silence for a verdict.
+				// Deleting the row server-side cannot reach a cache on a
+				// phone. An hour still silences any retry loop; a day meant a
+				// correction took a day to arrive.
+				res.set_header("Cache-Control", "public, max-age=3600");
 				res.status = 404;
 				return;
 				}

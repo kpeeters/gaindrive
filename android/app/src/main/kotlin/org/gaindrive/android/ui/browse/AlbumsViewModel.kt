@@ -129,8 +129,17 @@ class AlbumsViewModel @Inject constructor(
 	}
 
 	/**
-	 * Fills in the header as it arrives. Portrait first, since that is a plain
-	 * file the server already has; the biography may involve a lookup.
+	 * Fills in the header as it arrives: the portrait URL first, then the
+	 * biography, which may involve a lookup.
+	 *
+	 * Note that the portrait URL arriving is not the portrait arriving. Both
+	 * halves of this header come from a server-side lookup now — `getCoverArt`
+	 * answers 404 for an artist it has not resolved yet, and only the request
+	 * itself puts them at the front of the queue. Re-running this function
+	 * cannot recover from that, because the URL it computes is identical and
+	 * [ArtistHeaderUi] is a data class, so the state never changes and nothing
+	 * recomposes. The retry lives in `ArtistAvatar`, which is the only thing
+	 * that can see whether the image actually loaded.
 	 */
 	private fun loadHeader() = viewModelScope.launch {
 		runCatchingCancellable {

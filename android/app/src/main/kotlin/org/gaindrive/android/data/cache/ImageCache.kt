@@ -35,6 +35,15 @@ import javax.inject.Singleton
  * The OkHttp side is cleared by URL rather than wholesale: that cache also
  * holds API responses, and dropping those would make this button quietly mean
  * "re-fetch the library" as well.
+ *
+ * **Artist portraits are included**, since an artist's cover art id is its
+ * folder id and so its URL carries [ART_ENDPOINT] like any other. They are the
+ * one case where clearing can be the actual remedy rather than a precaution: a
+ * portrait is resolved server-side after the first request, and a 404 saying
+ * "there is none" is cacheable for an hour, so a device can be holding a "no"
+ * that the server has since changed its mind about. Note that this only drops
+ * the stored answers — nothing is re-fetched until something asks again, which
+ * for a portrait is `ArtistAvatar` next time it is composed.
  */
 @Singleton
 class ImageCache @Inject constructor(
