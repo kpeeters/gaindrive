@@ -55,7 +55,7 @@ static const char* SERVER_VERSION = GAINDRIVE_VERSION;
 // Sent on every outbound metadata request. One definition rather than the nine
 // copies this used to be, so a version bump cannot leave some of them behind.
 static const char* USER_AGENT =
-	"GainDrive/" GAINDRIVE_VERSION " (https://github.com/kpeeters/gaindrive)";
+	"GainDrive/" GAINDRIVE_VERSION " (info@phi-sci.com)";
 
 // An artist portrait is stored at this bound on its long edge — comfortably
 // above the largest any client asks for (iOS wants 800 for a hero), so the
@@ -68,11 +68,59 @@ static constexpr int PORTRAIT_PX = 800;
 // this scale is a mistake somewhere.
 static constexpr size_t MAX_PORTRAIT_BYTES = 8u * 1024 * 1024;
 
-// Wait between artists in the portrait resolver. MusicBrainz permits one
-// request a second per address; the chain spends two on each artist, roughly a
-// second apart, so two more seconds here puts the sustained rate near 0.7/s
-// with room for a client's own getArtistInfo2 call to land in between.
+// Wait between artists in the portrait resolver. The MusicBrainz gate below is
+// what actually enforces the rate limit; this is a courtesy gap on top, so a
+// background pass over the whole library leaves headroom for a client's own
+// getArtistInfo2 rather than keeping the gate permanently saturated.
 static constexpr auto PORTRAIT_GAP = std::chrono::milliseconds(2000);
+
+// ---- MusicBrainz rate limiting ----------------------------------------
+//
+// **One gate for the whole process, and every request to musicbrainz.org goes
+// through it.** The limit is per IP address, not per caller, so pacing each
+// caller separately does not add up to anything: the artist chain paced itself
+// through the portrait worker, while getAlbumInfo — which makes two more
+// MusicBrainz requests per album — ran straight off the HTTP thread pool with
+// no pacing at all, up to 32 at a time. A client browsing a library would then
+// spend the whole budget, and the next artist lookup got a 503 on its *first*
+// request, which reads exactly like "MusicBrainz is broken" rather than "we
+// asked too fast".
+//
+// A 503 is not free to earn, either: it is indistinguishable from "this artist
+// has nothing" unless the caller is careful, which is why artist_art records
+// 'error' separately.
+//
+// MusicBrainz documents one request per second averaged over time. 1100 ms
+// leaves a margin for clock jitter and for the round trip itself counting
+// against the window at the far end.
+static constexpr auto MB_REQUEST_GAP = std::chrono::milliseconds(1100);
+
+static std::mutex                            mb_gate_mu_;
+static std::chrono::steady_clock::time_point mb_last_request_;
+
+// Blocks until the next MusicBrainz request is allowed. Modelled on
+// Tmdb::pace(), and deliberately a plain sleep under a mutex: the callers are
+// either background threads, where waiting costs nothing, or a request handler
+// that was going to spend far longer on the network anyway.
+static void mb_pace()
+	{
+	std::lock_guard<std::mutex> lock(mb_gate_mu_);
+	auto now = std::chrono::steady_clock::now();
+	if (mb_last_request_.time_since_epoch().count() != 0) {
+		auto since = now - mb_last_request_;
+		if (since < MB_REQUEST_GAP)
+			std::this_thread::sleep_for(MB_REQUEST_GAP - since);
+		}
+	mb_last_request_ = std::chrono::steady_clock::now();
+	}
+
+// True when a response is MusicBrainz saying "you asked too fast". Worth
+// naming, because it is the one failure here that is entirely our own doing and
+// the one a reader will otherwise mistake for the service being down.
+static bool mb_rate_limited(const httplib::Result& r)
+	{
+	return r && r->status == 503;
+	}
 
 // Subsonic ids are strings in the API even though they are row ids here. Every
 // id crossing the wire in JSON goes through this — the XML path renders
