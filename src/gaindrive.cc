@@ -68,6 +68,12 @@ static constexpr int PORTRAIT_PX = 800;
 // this scale is a mistake somewhere.
 static constexpr size_t MAX_PORTRAIT_BYTES = 8u * 1024 * 1024;
 
+// Wait between artists in the portrait resolver. MusicBrainz permits one
+// request a second per address; the chain spends two on each artist, roughly a
+// second apart, so two more seconds here puts the sustained rate near 0.7/s
+// with room for a client's own getArtistInfo2 call to land in between.
+static constexpr auto PORTRAIT_GAP = std::chrono::milliseconds(2000);
+
 // Subsonic ids are strings in the API even though they are row ids here. Every
 // id crossing the wire in JSON goes through this — the XML path renders
 // attributes as text anyway, so it needs no equivalent.
@@ -517,8 +523,17 @@ static bool check_cast_perm(const httplib::Request& req, httplib::Response& res,
 
 // Performs MusicBrainz/Wikipedia lookup for an artist, caching the result.
 // Returns cached data immediately when available; triggers a fresh fetch otherwise.
+//
+// `provider_error`, when given, is set true if any provider failed to answer —
+// no response, or a status that is neither 200 nor 404. That distinction is the
+// whole point of the parameter: **a provider that says "no" is a fact, and a
+// provider that says nothing is not.** Without it a caller cannot tell "nobody
+// has a picture of this artist" from "MusicBrainz returned 503 because we asked
+// too fast", and recording the second as though it were the first makes a
+// transient rate-limit permanent.
 static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::string& name,
-                                                         MediaStore& store, bool force = false)
+                                                         MediaStore& store, bool force = false,
+                                                         bool* provider_error = nullptr)
 	{
 	// A level-1 folder of a categories root is a section — Film, Series,
 	// Documentary — not a performer.  Looking it up would query MusicBrainz
@@ -553,8 +568,17 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 		{"limit", "1"},
 		{"fmt",   "json"}
 		};
+	// 404 is an answer: this artist is not there. Anything else — no response
+	// at all, 503, 429, 500 — means we did not get to ask, and the caller must
+	// not record the silence as a result.
+	auto note = [&](const httplib::Result& res) {
+		if (provider_error && (!res || (res->status != 200 && res->status != 404)))
+			*provider_error = true;
+		};
+
 	bool mb_ok = false;
 	auto r = mb.Get("/ws/2/artist", params, httplib::Headers{});
+	note(r);
 	if (!r) {
 		std::cout << stamp() << "getArtistInfo [" << name
 		          << "] MusicBrainz request failed (no response)" << std::endl;
@@ -576,6 +600,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 		httplib::Params p2{{"inc","url-rels"},{"fmt","json"}};
 		auto r2 = mb.Get("/ws/2/artist/" + info.mbid, p2, httplib::Headers{});
+		note(r2);
 		if (!r2) {
 			std::cout << stamp() << "getArtistInfo [" << name
 			          << "] MusicBrainz url-rels request failed" << std::endl;
@@ -637,6 +662,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 							{"format","json"}
 							},
 						httplib::Headers{});
+					note(rwd);
 					if (rwd && rwd->status == 200) {
 						auto jwd = nlohmann::json::parse(rwd->body, nullptr, false);
 						const auto& ent = jsub(jsub(jwd, "entities"), entity);
@@ -672,6 +698,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 				for (char& c : path_title) if (c == ' ') c = '_';
 				auto r3 = wp.Get("/api/rest_v1/page/summary/" + path_title,
 				                 httplib::Params{}, httplib::Headers{});
+				note(r3);
 				if (!r3) {
 					std::cout << stamp() << "getArtistInfo [" << name
 					          << "] Wikipedia request failed" << std::endl;
@@ -709,6 +736,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 				auto rt = tadb.Get("/api/v1/json/2/artist-mb.php",
 				                   httplib::Params{{"i", info.mbid}},
 				                   httplib::Headers{});
+				note(rt);
 				if (rt && rt->status == 200) {
 					// A miss here is "artists": null, not an empty array.
 					auto jt = nlohmann::json::parse(rt->body, nullptr, false);
@@ -743,6 +771,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 								});
 							auto rd = disc.Get("/artists/" + id_str,
 							                   httplib::Params{}, httplib::Headers{});
+							note(rd);
 							if (rd && rd->status == 200) {
 								auto jd = nlohmann::json::parse(rd->body, nullptr, false);
 								const auto& imgs = jsub(jd, "images");
@@ -4700,9 +4729,31 @@ void GainDrive::portrait_worker()
 				row.status = "none";
 				}
 			else {
-				auto info = resolve_artist_info(job.folder_id, job.name, store_);
-				if (info.image_url.empty()) {
-					// Nothing found. Recorded, or every pass would ask again.
+				// force = true, always, and not because a refresh is wanted:
+				// artist_info_cache must not be allowed to answer this
+				// question. resolve_artist_info() caches whenever the
+				// MusicBrainz *search* succeeded, so an artist whose image
+				// providers were the ones that fell over — then or in any
+				// earlier version of gaindrive — has a cached row with an
+				// empty image_url. Reading that back would find no image and
+				// conclude there is none, which is the very confusion this
+				// table exists to record correctly. It costs one lookup per
+				// artist, once, and the answer is then kept here for good.
+				bool provider_error = false;
+				auto info = resolve_artist_info(job.folder_id, job.name, store_,
+				                                true, &provider_error);
+				if (provider_error && info.image_url.empty()) {
+					// A provider did not answer — a 503 from MusicBrainz is the
+					// usual one, since it rate-limits hard. We have learnt
+					// nothing about this artist, so record that rather than a
+					// verdict: 'error' is retried, 'none' is not touched for a
+					// month. Getting this wrong made one rate-limited moment
+					// look exactly like "nobody has a picture of them".
+					row.status = "error";
+					}
+				else if (info.image_url.empty()) {
+					// Every provider was asked and none had one. Recorded, or
+					// every pass would ask again.
 					row.status = "none";
 					}
 				else {
@@ -4721,20 +4772,40 @@ void GainDrive::portrait_worker()
 				std::cout << stamp() << "Artist portrait: " << job.name << " "
 				          << row.width << "x" << row.height << ", "
 				          << row.bytes.size() << " bytes" << std::endl;
+			else
+				// Which of the two it is matters — "error" will be asked
+				// again, "none" will not for a month — so say which, rather
+				// than leaving the difference to be inferred from behaviour a
+				// month later.
+				std::cout << stamp() << "Artist portrait: " << job.name
+				          << ": " << row.status
+				          << (row.status == "error"
+				                  ? " (a provider did not answer; will retry)"
+				                  : " (no provider has one)") << std::endl;
 
-			// MusicBrainz allows one request a second and the chain makes
-			// several, most of which already pace themselves. This is the gap
-			// between artists, and it is skipped when somebody is waiting.
-			bool demanded;
+			// The gap between artists, and it is never skipped.
+			//
+			// MusicBrainz allows one request a second per address and answers
+			// 503 when that is exceeded. The chain makes two MusicBrainz
+			// requests per artist with a one-second sleep between them, so
+			// this wait is what keeps the sustained rate under the limit —
+			// and being rate-limited is not a harmless slowdown here, because
+			// a 503 is indistinguishable from "this artist has no picture"
+			// unless the code is careful, and one full-speed pass over a
+			// library would earn a great many of them.
+			//
+			// An earlier version skipped the wait whenever the queue was not
+			// empty, meaning to let a user who was waiting jump ahead. But a
+			// seeded backlog leaves the queue permanently non-empty, so the
+			// pacing never applied at all during precisely the pass that
+			// needed it. A demand request already gets what it needs by going
+			// to the front of the queue; it does not also need to outrun the
+			// rate limit.
 			{
-			std::lock_guard<std::mutex> lk(portrait_mu_);
-			demanded = !portrait_queue_.empty();
+			std::unique_lock<std::mutex> lk(portrait_mu_);
+			portrait_cv_.wait_for(lk, PORTRAIT_GAP,
+				[this] { return portrait_stop_.load(); });
 			}
-			if (!demanded) {
-				std::unique_lock<std::mutex> lk(portrait_mu_);
-				portrait_cv_.wait_for(lk, std::chrono::milliseconds(1500),
-					[this] { return portrait_stop_.load(); });
-				}
 			}
 		}
 	catch (const std::exception& e) {
