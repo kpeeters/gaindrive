@@ -76,6 +76,61 @@ function apiUrl(endpoint, extra = {}) {
    return `${server}/rest/${endpoint}.view?${p}`;
 }
 
+// ---- Artist portraits -------------------------------------------------
+//
+// An artist portrait is not a file on the server, it is something the server
+// has to go and find: MusicBrainz, then Wikidata, then Wikipedia, then a
+// couple of others. That runs on a background thread now, so asking for one
+// that has not been resolved yet gets a 404 rather than a stalled request —
+// and the request itself is what pushes that artist to the front of the
+// resolver's queue.
+//
+// So a 404 here means "not yet", and the only thing missing is a nudge to ask
+// again. Without one the portraits would appear on the next navigation, which
+// is a strange thing to ask a user to discover.
+const portraitPending = {
+   items: new Map(),          // id -> {img, size, tries}
+   timer: null,
+
+   add(id, img, size) {
+      this.items.set(String(id), {img, size, tries: 0});
+      if (this.timer === null)
+         this.timer = setInterval(() => this.tick(), 15000);
+      },
+
+   tick() {
+      for (const [id, e] of this.items) {
+         // A pane that has been navigated away from and reused drops its
+         // nodes. Nobody can see this image, so stop asking about it.
+         if (!document.contains(e.img)) { this.items.delete(id); continue; }
+         // Ten minutes is long enough for any backlog a person is waiting on.
+         if (++e.tries > 40) { this.items.delete(id); continue; }
+         // The cache-buster is not superstition: assigning the same string to
+         // img.src is a no-op in every browser.
+         e.img.src = apiUrl('getCoverArt', {id, size: e.size, _v: Date.now()});
+         }
+      if (this.items.size === 0) {
+         clearInterval(this.timer);
+         this.timer = null;
+         }
+      },
+   };
+
+// An <img> pointing at our own getCoverArt, which retries itself while the
+// server is still working out who this artist is.
+function artistPortrait(id, size, className, alt = '') {
+   const img = document.createElement('img');
+   img.className = className;
+   img.alt = alt;
+   img.addEventListener('load',  () => img.classList.remove('is-missing'));
+   img.addEventListener('error', () => {
+      img.classList.add('is-missing');
+      portraitPending.add(id, img, size);
+      });
+   img.src = apiUrl('getCoverArt', {id, size});
+   return img;
+   }
+
 // What the server said it is, for the About box. Taken from whatever response
 // happens to arrive rather than asked for: every one carries the field, and
 // this client is served by the binary it is reporting on, so the server's
@@ -1370,7 +1425,6 @@ async function viewAlbums(artistId, artistName) {
       if (force) params.force = '1';
       apiCall('getArtistInfo2', params).then(srInfo => {
          const info        = srInfo?.artistInfo2 ?? {};
-         const imgUrl      = info.largeImageUrl || info.mediumImageUrl || info.smallImageUrl || '';
          const bio         = info.biography ?? '';
          const wikiUrl     = info.wikiUrl ?? '';
          const allMusicUrl = info.allMusicUrl ?? '';
@@ -1378,17 +1432,18 @@ async function viewAlbums(artistId, artistName) {
          bioSlot.className = '';   // remove shimmer regardless of outcome
          refreshBtn.disabled = false;
 
-         if (!imgUrl && !bio && !wikiUrl && !allMusicUrl) return;
-
+         // The portrait is served by us and is no longer conditional on what
+         // this response says: the image and the words arrive from different
+         // places now, so a bio with no picture still gets one when the
+         // resolver catches up, and vice versa.
          const block = document.createElement('div');
          block.className = 'artist-bio';
+         block.appendChild(
+            artistPortrait(artistId, 240, 'artist-bio-img', artistName));
 
-         if (imgUrl) {
-            const img = document.createElement('img');
-            img.className = 'artist-bio-img';
-            img.src = imgUrl;
-            img.alt = artistName;
-            block.appendChild(img);
+         if (!bio && !wikiUrl && !allMusicUrl) {
+            bioSlot.appendChild(block);   // the picture, with nothing to say
+            return;
             }
 
          let bioP = null;
@@ -3399,9 +3454,13 @@ function renderSearchResults(res) {
          const row = document.createElement('div');
          row.className = 'artist-row';
 
-         const img = document.createElement('img');
-         img.className = 'search-artist-img';
-         img.alt = '';
+         // The portrait comes from our own server, not from the URL
+         // getArtistInfo2 reports. That URL points at Wikimedia, so every
+         // client of every install used to fetch a full-size original
+         // straight from the internet — slow on a LAN, impossible offline,
+         // and one getArtistInfo2 round trip per row on top. Same argument
+         // that put the icon font in the binary.
+         const img = artistPortrait(artist.id, 160, 'search-artist-img');
          row.appendChild(img);
 
          const name = document.createElement('span');
@@ -3411,13 +3470,6 @@ function renderSearchResults(res) {
 
          row.addEventListener('click', () => viewAlbums(artist.id, artist.name));
          frag.appendChild(row);
-
-         // Fetch bio image asynchronously; fill in if one is available.
-         apiCall('getArtistInfo2', {id: artist.id}).then(sr => {
-            const info = sr?.artistInfo2 ?? {};
-            const url  = info.largeImageUrl || info.mediumImageUrl || info.smallImageUrl || '';
-            if (url) img.src = url;
-            }).catch(() => {});
          }
       }
 

@@ -500,6 +500,8 @@ add_executable(gaindrive
 	src/mediastore.cc
 	src/streamer.cc
 	src/transcodecache.cc
+	src/imagescale.cc
+	src/coverart.cc
 	src/videoart.cc
 	src/videoname.cc
 	src/tmdb.cc

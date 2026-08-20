@@ -1900,9 +1900,14 @@ body {
    flex-shrink: 0;
    background: var(--border);
 }
-/* Hide broken-image icon while the URL is being fetched. */
+/* Hide the broken-image icon before a portrait loads, and again whenever one
+   404s — which for an artist means "the server has not resolved this one yet",
+   not "there is none". app.js re-asks on a timer and clears .is-missing when a
+   picture finally arrives. */
 .search-artist-img:not([src]),
-.search-artist-img[src=""] {
+.search-artist-img[src=""],
+.search-artist-img.is-missing,
+.artist-bio-img.is-missing {
    visibility: hidden;
 }
 

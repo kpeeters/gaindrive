@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <iostream>
 #include <fstream>
+#include <iterator>
 #include <set>
 #include <string>
 #include <vector>
@@ -15,6 +16,7 @@
 
 #include "codecs.hh"
 #include "gaindrive.hh"
+#include "imagescale.hh"
 #include "mediastore.hh"
 #include "tmdb.hh"
 #include "videoart.hh"
@@ -312,6 +314,7 @@ int main(int argc, char* argv[])
 		("video-art-frames", "Fall back to an extracted frame when a video has no embedded cover")
 		("video-art-embedded", "Take the cover embedded in a video container; off because most files have none and looking costs an ffprobe each")
 		("video-art-test","Write cover art for one video file and exit", cxxopts::value<std::string>())
+		("image-scale-test","Scale one image file at each cover size and exit", cxxopts::value<std::string>())
 		("video-name-test","Parse video filenames and exit; takes a file, a directory, or - for stdin", cxxopts::value<std::string>())
 		("tmdb-test",     "Look one title up on TMDB and exit", cxxopts::value<std::string>())
 		("tmdb-year",     "Year for --tmdb-test", cxxopts::value<int>()->default_value("0"))
@@ -371,6 +374,50 @@ int main(int argc, char* argv[])
 			}
 		std::cout << out << ": " << result->source << ", "
 		          << result->bytes.size() << " bytes, " << result->mime << "\n";
+		return 0;
+		}
+
+	// Standalone check of what the scaler makes of one image, with no server,
+	// no database and no library.  Every future report about cover art on this
+	// path is really asking one of two questions — can gaindrive decode this
+	// file, and what does it produce — and this answers both without needing
+	// the file to be in a collection first.
+	if (args.count("image-scale-test")) {
+		std::string in = args["image-scale-test"].as<std::string>();
+
+		std::ifstream f(in, std::ios::binary);
+		if (!f) { std::cerr << "Cannot open " << in << "\n"; return 1; }
+		std::string raw((std::istreambuf_iterator<char>(f)),
+		                 std::istreambuf_iterator<char>());
+
+		std::string mime = imagescale::sniff_mime(raw);
+		auto        dims = imagescale::probe(raw);
+		std::cout << in << ": " << raw.size() << " bytes, "
+		          << (mime.empty() ? "unrecognised" : mime) << ", ";
+		if (dims)
+			std::cout << dims->width << "x" << dims->height << ", "
+			          << dims->channels << " channels\n";
+		else
+			std::cout << "header not parsable by stb\n";
+
+		// The sizes gaindrive's own clients ask for: the web player row and
+		// grid, Android, the web hero, Android artwork, the iOS hero.
+		for (int px : {64, 80, 144, 256, 288, 400, 512, 800}) {
+			auto s = imagescale::scale_to_fit(raw, px);
+			std::cout << "  size=" << px << ": ";
+			if (!s.ok) { std::cout << "FAILED — " << s.error << "\n"; continue; }
+			std::cout << s.width << "x" << s.height << ", " << s.bytes.size()
+			          << " bytes, " << s.mime
+			          << (s.bytes.size() == raw.size()
+			                  ? "  (source returned unchanged)" : "")
+			          << "\n";
+			if (px != 400) continue;
+			std::string out = std::filesystem::path(in).stem().string()
+			    + "-400" + (s.mime == "image/png" ? ".png" : ".jpg");
+			std::ofstream o(out, std::ios::binary);
+			o.write(s.bytes.data(), static_cast<std::streamsize>(s.bytes.size()));
+			if (o) std::cout << "  wrote " << out << "\n";
+			}
 		return 0;
 		}
 

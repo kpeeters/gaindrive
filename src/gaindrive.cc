@@ -2,6 +2,7 @@
 #include "stamp.hh"
 #include "streamer.hh"
 #include "codecs.hh"
+#include "imagescale.hh"
 #include "jsonread.hh"
 #include "embedded_web.hh"
 
@@ -55,6 +56,17 @@ static const char* SERVER_VERSION = GAINDRIVE_VERSION;
 // copies this used to be, so a version bump cannot leave some of them behind.
 static const char* USER_AGENT =
 	"GainDrive/" GAINDRIVE_VERSION " (https://github.com/kpeeters/gaindrive)";
+
+// An artist portrait is stored at this bound on its long edge — comfortably
+// above the largest any client asks for (iOS wants 800 for a hero), so the
+// stored image is never the limiting factor, and small enough that a database
+// row stays a sensible place to keep it.
+static constexpr int PORTRAIT_PX = 800;
+
+// A portrait URL points at a third party, and nothing about what comes back is
+// bounded except by us. Wikimedia renders are tens of kilobytes; anything at
+// this scale is a mistake somewhere.
+static constexpr size_t MAX_PORTRAIT_BYTES = 8u * 1024 * 1024;
 
 // Subsonic ids are strings in the API even though they are row ids here. Every
 // id crossing the wire in JSON goes through this — the XML path renders
@@ -436,63 +448,20 @@ static std::string url_encode(const std::string& s)
 	return out;
 	}
 
-// Scales an image file to fit within size×size pixels (JPEG output) using
-// ffmpeg.  Isolated here so it can be swapped for a proper image library later.
+// A scaled cover is buffered and sent with set_content(), never with the
+// no-length content provider.  That is framing, not an optimisation: the
+// no-length overload emits neither Content-Length nor Transfer-Encoding, and
+// httplib only sends Connection: close when the connection is closing for
+// unrelated reasons.  The response then goes out on a keep-alive connection
+// with nothing marking where the body ends, the client reads on into the
+// following response, and every image after the first on that connection is
+// the previous one's — which is what "all the thumbnails are wrong, and
+// reloading doesn't help" looks like.  CLAUDE.md records the same hazard for
+// serve_transcoded; this call site cost a long investigation before it got it.
 //
-// The result is buffered and sent with set_content() rather than streamed.
-// That is not an optimisation, it is the framing: the no-length content
-// provider this used to call emits neither Content-Length nor
-// Transfer-Encoding, and httplib only sends Connection: close when the
-// connection is closing for unrelated reasons.  The response therefore went
-// out on a keep-alive connection with nothing marking where the body ended,
-// the client read on into the following response, and every image after the
-// first on that connection was the previous one's — which is what "all the
-// thumbnails are wrong, and reloading doesn't help" looks like.  CLAUDE.md
-// records the same hazard for serve_transcoded; this call site never got it.
-//
-// A scaled cover is a few hundred KB at most, so there is nothing to gain from
-// streaming it, and buffering also lets the caller hash the bytes for an ETag.
-static void serve_cover_scaled(httplib::Response& res,
-                                const std::string& path, int size)
-	{
-	std::vector<std::string> args = {
-		"ffmpeg", "-v", "quiet", "-i", path,
-		"-vf", "scale=" + std::to_string(size) + ":" + std::to_string(size)
-		       + ":force_original_aspect_ratio=decrease",
-		"-frames:v", "1", "-f", "mjpeg", "pipe:1"
-		};
-
-	reproc::process proc;
-	reproc::options opts;
-	opts.redirect.err.type = reproc::redirect::type::discard;
-
-	if (proc.start(args, opts)) {
-		std::cout << stamp() << "getCoverArt: ffmpeg launch failed for "
-		          << path << std::endl;
-		res.status = 500;
-		return;
-		}
-
-	std::string          out;
-	reproc::sink::string sink(out);
-	// drain() checks the error code itself, which is the point: reading by
-	// hand needs `n == 0 || err`, because reproc wraps a negative return into
-	// size_t and the old `n == 0` test let a huge length reach sink.write().
-	auto ec            = reproc::drain(proc, sink, reproc::sink::null);
-	auto [status, wec] = proc.wait(reproc::infinite);
-
-	if (ec || wec || status != 0 || out.empty()) {
-		// A zero-length 200 renders as a broken image and looks like a
-		// missing file; say what actually happened instead.
-		std::cout << stamp() << "getCoverArt: ffmpeg failed for " << path
-		          << " (status=" << status << ", " << out.size() << " bytes)"
-		          << std::endl;
-		res.status = 500;
-		return;
-		}
-
-	res.set_content(out, "image/jpeg");
-	}
+// The scaling itself now happens in process (see imagescale.hh) and its result
+// is cached (see coverart.hh), so this file no longer runs ffmpeg for images;
+// CoverArtCache keeps a fork as a last resort for what stb cannot decode.
 
 // Extracts u/p/t/s params and validates auth. Writes error into res on failure.
 static bool check_auth(const httplib::Request& req, httplib::Response& res,
@@ -1413,6 +1382,7 @@ GainDrive::GainDrive(const std::string& db_path,
 	      static_cast<int64_t>(transcode_cache_mb) * 1024 * 1024,
 	      transcode_jobs > 0 ? transcode_jobs
 	          : std::max(2u, std::thread::hardware_concurrency() / 2)),
+	  cover_cache_(store_),
 	  watcher_(store_)
 	{
 	namespace fs = std::filesystem;
@@ -2346,76 +2316,135 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		int folder_id = std::stoi(it->second);
 		std::string rel_path = store_.get_cover_path(folder_id);
-		if (rel_path.empty()) {
-			// For artist folder IDs: trigger MusicBrainz/Wikipedia lookup if needed
-			// and serve the portrait. Never fall back to album cover art.
-			std::string name = store_.get_folder_name(folder_id);
-			if (!name.empty()) {
-				auto artist_info = resolve_artist_info(folder_id, name, store_);
-				if (!artist_info.image_url.empty()) {
-					serve_artist_portrait(res, artist_info.image_url, folder_id);
-					return;
-					}
-				}
-			res.status = 404;
-			return;
-			}
+
+		namespace fs = std::filesystem;
+
+		// The size the client asked for, rounded to the ladder — see
+		// CoverArtCache::ladder_size. 0 means "serve the source".
+		auto size_it = req.params.find("size");
+		int  ladder  = size_it != req.params.end()
+		    ? CoverArtCache::ladder_size(to_int(size_it->second, 200)) : 0;
 
 		// Optional index: 0 (default) = main cover, 1+ = extra images sorted.
 		auto idx_it = req.params.find("index");
-		if (idx_it != req.params.end()) {
-			int idx = std::stoi(idx_it->second);
-			if (idx > 0) {
-				auto extras = store_.get_extra_image_paths(folder_id);
-				if (idx - 1 >= static_cast<int>(extras.size())) {
-					res.status = 404;
-					return;
-					}
-				rel_path = extras[idx - 1];
-				}
-			}
 
-		// A cover_path naming a *media* file means the art was manufactured
-		// from that file and lives in the video_art table — see videoart.hh.
-		// Storing the media path rather than inventing a marker is what lets
-		// every cover-art query, and the whole web client, stay unchanged.
-		if (is_video_ext(ext_of(rel_path))) {
-			auto art = store_.get_video_art(rel_path);
+		// Resolve the id into something with bytes, a key and a stamp. The
+		// three kinds of art differ only here; everything below is shared, so
+		// a video poster and an artist portrait are scaled, cached and
+		// revalidated by exactly the code that handles an ordinary cover.
+		CoverArtCache::Source src;
+		std::string           orig_mime;
+		int64_t               orig_len = 0;
+
+		if (rel_path.empty()) {
+			// An artist folder. Never fall back to album cover art: an artist
+			// showing one of their album covers as a portrait looks like a bug
+			// in whichever client drew it.
+			//
+			// This reads the database and nothing else. It used to run the
+			// whole MusicBrainz -> Wikidata -> Wikipedia -> TheAudioDB ->
+			// Discogs chain right here, in the request thread, pacing sleeps
+			// included — so a client showing a grid of artists could hold the
+			// entire HTTP pool in network waits.
+			std::string fpath = store_.get_folder_path(folder_id);
+			std::string name  = store_.get_folder_name(folder_id);
+			if (fpath.empty() || name.empty()) {
+				res.status = 404;
+				return;
+				}
+			auto state = store_.get_artist_art_state(fpath);
+
+			if (!state || state->status == "error") {
+				// Not resolved yet, or the network failed last time. Push this
+				// artist to the front of the queue — what somebody is looking
+				// at beats the alphabet — and say so at once.
+				//
+				// no-store, not no-cache: a client must be able to re-ask in a
+				// few seconds and get the picture. A cached 404 is how "the
+				// portraits never appear until you restart the browser" would
+				// happen.
+				if (!store_.is_category_folder(folder_id))
+					portrait_request_front(folder_id, fpath, name);
+				res.set_header("Cache-Control", "no-store");
+				res.status = 404;
+				return;
+				}
+			if (state->status != "ok") {
+				// "none": every provider was asked and none had a picture.
+				// Cacheable on purpose — a client retrying on a timer would
+				// otherwise poll for ever over an artist nobody has a portrait
+				// of, and on a real library that is many of them.
+				res.set_header("Cache-Control", "public, max-age=86400");
+				res.status = 404;
+				return;
+				}
+
+			auto art = store_.get_artist_art(fpath);
 			if (!art) {
 				res.status = 404;
 				return;
 				}
-			// Same revalidation as below, over the source file's mtime and the
-			// stored size — folders.id is a rowid and is not stable across a
-			// rescan, so without a validator a browser keeps showing the
-			// previous film's frame after a rebuild.
-			std::string etag = "\"va-" + std::to_string(art->file_modified)
-			    + "-" + std::to_string(art->bytes.size()) + "\"";
-			res.set_header("Cache-Control", "no-cache");
-			res.set_header("ETag", etag);
-			if (req.get_header_value("If-None-Match") == etag) {
-				res.status = 304;
-				return;
+			src.kind  = CoverArtCache::Source::Kind::Blob;
+			src.key   = fpath;
+			src.stamp = art->fetched_at;
+			orig_len  = static_cast<int64_t>(art->bytes.size());
+			orig_mime = art->mime.empty() ? "image/jpeg" : art->mime;
+			src.bytes = std::move(art->bytes);
+			}
+		else {
+			if (idx_it != req.params.end()) {
+				int idx = std::stoi(idx_it->second);
+				if (idx > 0) {
+					auto extras = store_.get_extra_image_paths(folder_id);
+					if (idx - 1 >= static_cast<int>(extras.size())) {
+						res.status = 404;
+						return;
+						}
+					rel_path = extras[idx - 1];
+					}
 				}
-			// Served at its stored size whatever `size` asked for. Scaling it
-			// would mean an ffmpeg run per request for an image already small
-			// enough to be in a database row.
-			res.set_content(art->bytes,
-			                art->mime.empty() ? "image/jpeg" : art->mime);
-			return;
-			}
 
-		// Compose absolute filesystem path for the actual file open.
-		std::string path = store_.abs_path(rel_path);
-		if (!store_.path_is_within_root(path)) {
-			std::cout << stamp() << "getCoverArt: refusing path outside every root: "
-			          << path << std::endl;
-			res.status = 403;
-			return;
+			// A cover_path naming a *media* file means the art was manufactured
+			// from that file and lives in the video_art table — see videoart.hh.
+			// Storing the media path rather than inventing a marker is what lets
+			// every cover-art query, and the whole web client, stay unchanged.
+			if (is_video_ext(ext_of(rel_path))) {
+				auto art = store_.get_video_art(rel_path);
+				if (!art) {
+					res.status = 404;
+					return;
+					}
+				src.kind  = CoverArtCache::Source::Kind::Blob;
+				src.key   = rel_path;
+				src.stamp = art->file_modified;
+				orig_len  = static_cast<int64_t>(art->bytes.size());
+				orig_mime = art->mime.empty() ? "image/jpeg" : art->mime;
+				src.bytes = std::move(art->bytes);
+				}
+			else {
+				// Compose absolute filesystem path for the actual file open.
+				std::string path = store_.abs_path(rel_path);
+				if (!store_.path_is_within_root(path)) {
+					std::cout << stamp()
+					          << "getCoverArt: refusing path outside every root: "
+					          << path << std::endl;
+					res.status = 403;
+					return;
+					}
+				std::error_code mec, sec;
+				auto  mtime = fs::last_write_time(path, mec);
+				auto  fsize = fs::file_size(path, sec);
+				// Each stat gets its own error_code, and both are resolved before
+				// they are read: sharing one would read and write it within a
+				// single unsequenced expression.
+				src.kind     = CoverArtCache::Source::Kind::File;
+				src.key      = rel_path;
+				src.abs_path = path;
+				src.stamp    = mec ? 0 : static_cast<int64_t>(
+					mtime.time_since_epoch().count());
+				orig_len     = sec ? 0 : static_cast<int64_t>(fsize);
+				}
 			}
-
-		namespace fs = std::filesystem;
-		auto size_it = req.params.find("size");
 
 		// Revalidate rather than trust the cache.  A cover URL is identified
 		// only by `id`, and folders.id is a rowid that is NOT stable across a
@@ -2424,18 +2453,19 @@ GainDrive::GainDrive(const std::string& db_path,
 		// heuristically and indefinitely, so after a rebuild reassigns ids it
 		// keeps showing the previous album's art with no way to notice.
 		// "no-cache" means "keep it, but check first", so this stays fast.
-		std::error_code mec, sec;
-		auto  mtime = fs::last_write_time(path, mec);
-		auto  fsize = fs::file_size(path, sec);
-		// Each stat gets its own error_code, and both are resolved before the
-		// string is built: sharing one would read and write it within a single
-		// unsequenced expression.
-		long long mstamp = mec ? 0 : static_cast<long long>(
-			mtime.time_since_epoch().count());
-		std::string etag = "\"" + std::to_string(mstamp)
-		    + "-" + std::to_string(sec ? 0 : fsize)
-		    + "-" + (size_it != req.params.end() ? size_it->second
-		                                         : std::string("full"))
+		//
+		// The "t1-" is a scheme marker, and it is not decoration: every client
+		// out there holds ETags for images ffmpeg produced, and the same URL
+		// now answers with bytes from stb. Without a marker a browser would
+		// 304 its way into keeping the old thumbnail for ever. Bump it if the
+		// encoder, the quality or the ladder changes again.
+		//
+		// The *ladder* value goes in, not what the client asked for: two
+		// requests that round to the same rung are the same bytes and must
+		// share a validator.
+		std::string etag = "\"t1-" + std::to_string(src.stamp)
+		    + "-" + std::to_string(orig_len)
+		    + "-" + (ladder > 0 ? std::to_string(ladder) : std::string("full"))
 		    + "-" + (idx_it != req.params.end() ? idx_it->second
 		                                        : std::string("0")) + "\"";
 		res.set_header("Cache-Control", "no-cache");
@@ -2445,15 +2475,43 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
-		if (size_it != req.params.end()) {
-			serve_cover_scaled(res, path, to_int(size_it->second, 200));
+		if (ladder > 0) {
+			// nullopt means the source is already small enough, or nothing
+			// could decode it. Both fall through to serving it whole, and both
+			// were recorded, so neither is worked out again.
+			if (auto out = cover_cache_.scaled(src, ladder)) {
+				res.set_content(out->bytes, out->mime);
+				return;
+				}
+			}
+
+		if (src.kind == CoverArtCache::Source::Kind::Blob) {
+			res.set_content(src.bytes, orig_mime);
 			return;
 			}
 
-		// Serve the full-size image directly.
-		auto file_size = static_cast<size_t>(fs::file_size(path));
+		// Serve the full-size image directly. This keeps the length-carrying
+		// content provider rather than buffering: a full-size cover can be
+		// twenty megabytes, and no UI asks for one — only the lightbox does.
+		//
+		// The MIME comes from the magic bytes. It used to be image/jpeg
+		// whatever was on disk, which every browser renders anyway and every
+		// cache and proxy in between believes.
+		std::string head;
+		{
+		std::ifstream hf(src.abs_path, std::ios::binary);
+		char          hb[12];
+		if (hf) {
+			hf.read(hb, sizeof(hb));
+			head.assign(hb, static_cast<size_t>(hf.gcount()));
+			}
+		}
+		std::string mime = imagescale::sniff_mime(head);
+		if (mime.empty()) mime = "application/octet-stream";
+
+		std::string path = src.abs_path;
 		res.set_content_provider(
-			file_size, "image/jpeg",
+			static_cast<size_t>(orig_len), mime,
 			[path](size_t offset, size_t length, httplib::DataSink& sink) {
 				std::ifstream f(path, std::ios::binary);
 				if (!f) return false;
@@ -4197,8 +4255,22 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string folder_rel = store_.get_folder_path(folder_id);
 		if (folder_rel.empty()) { err(70, "Album folder not found."); return; }
 
+		// The filename follows the bytes, not the claim.  Both checks above
+		// are claims — an upload's content_type is whatever the client typed
+		// and a provider's Content-Type is whatever it felt like — and this
+		// used to write everything as cover.jpg regardless.  That is not
+		// cosmetic: the scanner indexes only .jpg/.jpeg/.png, so a WebP
+		// written as cover.jpg became a cover nothing could decode.
+		std::string up_mime = imagescale::sniff_mime(bytes);
+		if (up_mime != "image/jpeg" && up_mime != "image/png") {
+			err(0, "Unsupported image format; use JPEG or PNG.");
+			return;
+			}
+		const bool is_png = (up_mime == "image/png");
+
 		namespace fs = std::filesystem;
-		fs::path cover_rel = fs::path(folder_rel) / "cover.jpg";
+		fs::path cover_rel = fs::path(folder_rel)
+		    / (is_png ? "cover.png" : "cover.jpg");
 		fs::path cover_abs = fs::path(store_.abs_path(cover_rel.string()));
 		if (!store_.path_is_within_root(cover_abs)) {
 			std::cout << stamp() << "setCoverArt: refusing path outside every root: "
@@ -4212,7 +4284,25 @@ GainDrive::GainDrive(const std::string& db_path,
 		out.write(bytes.data(), (std::streamsize)bytes.size());
 		}
 
+		// find_cover() prefers cover.jpg over cover.png, so uploading a PNG
+		// beside an existing cover.jpg would leave the old one winning on the
+		// next scan and the upload apparently ignored.  Only the name this
+		// upload replaces is removed — it is the file the write above would
+		// have overwritten had the format not changed.
+		{
+		fs::path other_rel = fs::path(folder_rel)
+		    / (is_png ? "cover.jpg" : "cover.png");
+		fs::path other_abs = fs::path(store_.abs_path(other_rel.string()));
+		std::error_code rec;
+		if (store_.path_is_within_root(other_abs) && fs::exists(other_abs, rec)) {
+			fs::remove(other_abs, rec);
+			store_.drop_cover_thumbs(other_rel.string());
+			cover_cache_.invalidate(other_rel.string());
+			}
+		}
+
 		store_.set_cover_art_path(folder_id, cover_rel.string());
+		cover_cache_.invalidate(cover_rel.string());
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
@@ -4435,44 +4525,227 @@ GainDrive::GainDrive(const std::string& db_path,
 	no_scan_ = no_scan;
 	}
 
-void GainDrive::serve_artist_portrait(httplib::Response& res,
-                                      const std::string& image_url,
-                                      int folder_id)
+GainDrive::~GainDrive()
 	{
+	portrait_stop_ = true;
+	portrait_cv_.notify_all();
+	if (portrait_thread_.joinable()) portrait_thread_.join();
+	}
+
+// The artist folders with nothing resolved yet, oldest question first. Called
+// once at start and again whenever the queue drains, which is how an artist a
+// scan has just added is picked up without the scanner needing to know this
+// exists.
+void GainDrive::portrait_seed()
 	{
-	std::lock_guard<std::mutex> lk(artist_img_cache_mu_);
-	auto it = artist_img_cache_.find(folder_id);
-	if (it != artist_img_cache_.end()) {
-		auto& [ct, body] = it->second;
-		res.set_content(body.c_str(), body.size(), ct.c_str());
-		return;
+	// A 'none' — the providers had nothing — is worth re-asking about after a
+	// month; an 'error' says the network failed and is retried at once, which
+	// artists_needing_art() handles by not excluding it at all.
+	const int64_t month_ago = static_cast<int64_t>(std::time(nullptr))
+	    - 30LL * 24 * 3600;
+	auto jobs = store_.artists_needing_art(month_ago);
+
+	std::lock_guard<std::mutex> lk(portrait_mu_);
+	for (auto& j : jobs) {
+		if (portrait_queued_.count(j.path)) continue;
+		portrait_queued_.insert(j.path);
+		portrait_queue_.push_back(PortraitJob{j.folder_id, j.path, j.name});
 		}
+	if (!portrait_queue_.empty())
+		std::cout << stamp() << "Artist portraits: " << portrait_queue_.size()
+		          << " to resolve" << std::endl;
 	}
 
-	// Parse https://host/path
-	const std::string prefix = "https://";
-	if (image_url.rfind(prefix, 0) != 0) { res.status = 404; return; }
-	auto rest     = image_url.substr(prefix.size());
-	auto slash    = rest.find('/');
-	if (slash == std::string::npos) { res.status = 404; return; }
-	std::string host = rest.substr(0, slash);
-	std::string path = rest.substr(slash);
-
-	httplib::SSLClient cli(host);
-	cli.set_default_headers({
-		{"User-Agent", USER_AGENT}
-		});
-	auto r = cli.Get(path.c_str());
-	if (!r || r->status != 200) { res.status = 404; return; }
-
-	std::string ct = r->get_header_value("Content-Type");
-	if (ct.empty()) ct = "image/jpeg";
-
+void GainDrive::portrait_request_front(int folder_id, const std::string& path,
+                                        const std::string& name)
 	{
-	std::lock_guard<std::mutex> lk(artist_img_cache_mu_);
-	artist_img_cache_.emplace(folder_id, std::make_pair(ct, r->body));
+	{
+	std::lock_guard<std::mutex> lk(portrait_mu_);
+	// Already queued: move it to the front rather than adding it twice. What
+	// a client is looking at right now should not wait behind the alphabet.
+	for (auto it = portrait_queue_.begin(); it != portrait_queue_.end(); ++it) {
+		if (it->path == path) {
+			PortraitJob j = *it;
+			portrait_queue_.erase(it);
+			portrait_queue_.push_front(std::move(j));
+			portrait_cv_.notify_one();
+			return;
+			}
+		}
+	if (portrait_queued_.count(path)) return;   // in flight; it will finish
+	portrait_queued_.insert(path);
+	portrait_queue_.push_front(PortraitJob{folder_id, path, name});
 	}
-	res.set_content(r->body.c_str(), r->body.size(), ct.c_str());
+	portrait_cv_.notify_one();
+	}
+
+// Downloads one image URL and normalises it to something that can be stored
+// and scaled later. Never throws: this runs on a background thread, where an
+// escaping exception is std::terminate.
+MediaStore::ArtistArtRow GainDrive::portrait_fetch(const std::string& url)
+	{
+	MediaStore::ArtistArtRow row;
+	row.status     = "error";
+	row.source_url = url;
+
+	try {
+		bool https = url.rfind("https://", 0) == 0;
+		bool http  = url.rfind("http://",  0) == 0;
+		if (!https && !http) return row;
+
+		std::string fetch_url = url;
+		// Ask Wikimedia for a render, never the original. Special:FilePath
+		// with no width serves the *file* behind a P18 claim, which is quite
+		// often an SVG or a multi-megabyte TIFF — undecodable here and a waste
+		// of bandwidth even when it is a JPEG. With a width it rasterises.
+		if (fetch_url.find("wikimedia.org/wiki/Special:FilePath") != std::string::npos
+		    && fetch_url.find("width=") == std::string::npos)
+			fetch_url += (fetch_url.find('?') == std::string::npos ? "?" : "&")
+			           + std::string("width=") + std::to_string(PORTRAIT_PX);
+
+		size_t scheme_end = https ? 8 : 7;
+		size_t slash      = fetch_url.find('/', scheme_end);
+		std::string host  = fetch_url.substr(scheme_end,
+			slash == std::string::npos ? std::string::npos : slash - scheme_end);
+		std::string path  = (slash == std::string::npos) ? "/"
+		                                                 : fetch_url.substr(slash);
+
+		auto get = [&](auto& cli) {
+			// Commons answers Special:FilePath with a 302, so without this
+			// every Wikidata-sourced portrait 404s — which is how they have
+			// behaved since the feature was written.
+			cli.set_follow_location(true);
+			cli.set_connection_timeout(5);
+			cli.set_read_timeout(15);
+			cli.set_default_headers({{"User-Agent", USER_AGENT}});
+			return cli.Get(path.c_str());
+			};
+		httplib::Result r;
+		if (https) { httplib::SSLClient cli(host); r = get(cli); }
+		else       { httplib::Client    cli(host); r = get(cli); }
+		if (!r || r->status != 200 || r->body.empty()) return row;
+
+		// These are arbitrary third-party URLs; nothing about them is bounded
+		// except by us.
+		if (r->body.size() > MAX_PORTRAIT_BYTES) {
+			std::cout << stamp() << "Artist portrait: " << url << " is "
+			          << r->body.size() << " bytes; refusing it" << std::endl;
+			return row;
+			}
+
+		// Normalise. Whatever a provider sent becomes one predictable thing at
+		// a known bound, so scaling it later needs no second download and no
+		// second guess about the format.
+		auto s = imagescale::scale_to_fit(r->body, PORTRAIT_PX);
+		if (!s.ok) {
+			std::cout << stamp() << "Artist portrait: cannot decode " << url
+			          << " (" << s.error << ")" << std::endl;
+			return row;
+			}
+
+		row.status = "ok";
+		row.mime   = s.mime;
+		row.width  = s.width;
+		row.height = s.height;
+		row.bytes  = std::move(s.bytes);
+		return row;
+		}
+	catch (const std::exception& e) {
+		std::cout << stamp() << "Artist portrait: " << url << ": " << e.what()
+		          << std::endl;
+		}
+	catch (...) {
+		std::cout << stamp() << "Artist portrait: " << url
+		          << ": unknown exception while fetching" << std::endl;
+		}
+	return row;
+	}
+
+void GainDrive::portrait_worker()
+	{
+	// The whole body is guarded. This thread parses four providers' JSON and
+	// touches the database, and an exception escaping it would take the server
+	// with it rather than one portrait.
+	try {
+		portrait_seed();
+
+		while (!portrait_stop_) {
+			PortraitJob job;
+			{
+			std::unique_lock<std::mutex> lk(portrait_mu_);
+			if (portrait_queue_.empty()) {
+				// Nothing to do: sleep, then look again. That is also how an
+				// artist added by a scan since the last pass is found.
+				portrait_cv_.wait_for(lk, std::chrono::minutes(15),
+					[this] { return portrait_stop_ || !portrait_queue_.empty(); });
+				if (portrait_stop_) break;
+				if (portrait_queue_.empty()) {
+					lk.unlock();
+					portrait_seed();
+					continue;
+					}
+				}
+			job = portrait_queue_.front();
+			portrait_queue_.pop_front();
+			}
+
+			if (portrait_stop_) break;
+
+			MediaStore::ArtistArtRow row;
+			// A categories section is called "Film" or "Series"; asking
+			// MusicBrainz about that is exactly the mistake is_category_folder
+			// exists to prevent. The seed query already excludes them, but a
+			// demand request comes straight from an id in a URL.
+			if (store_.is_category_folder(job.folder_id)) {
+				row.status = "none";
+				}
+			else {
+				auto info = resolve_artist_info(job.folder_id, job.name, store_);
+				if (info.image_url.empty()) {
+					// Nothing found. Recorded, or every pass would ask again.
+					row.status = "none";
+					}
+				else {
+					row = portrait_fetch(info.image_url);
+					}
+				}
+
+			store_.store_artist_art(job.path, job.name, row);
+			cover_cache_.invalidate(job.path);
+			{
+			std::lock_guard<std::mutex> lk(portrait_mu_);
+			portrait_queued_.erase(job.path);
+			}
+
+			if (row.status == "ok")
+				std::cout << stamp() << "Artist portrait: " << job.name << " "
+				          << row.width << "x" << row.height << ", "
+				          << row.bytes.size() << " bytes" << std::endl;
+
+			// MusicBrainz allows one request a second and the chain makes
+			// several, most of which already pace themselves. This is the gap
+			// between artists, and it is skipped when somebody is waiting.
+			bool demanded;
+			{
+			std::lock_guard<std::mutex> lk(portrait_mu_);
+			demanded = !portrait_queue_.empty();
+			}
+			if (!demanded) {
+				std::unique_lock<std::mutex> lk(portrait_mu_);
+				portrait_cv_.wait_for(lk, std::chrono::milliseconds(1500),
+					[this] { return portrait_stop_.load(); });
+				}
+			}
+		}
+	catch (const std::exception& e) {
+		std::cout << stamp() << "Artist portrait worker stopped: " << e.what()
+		          << std::endl;
+		}
+	catch (...) {
+		std::cout << stamp()
+		          << "Artist portrait worker stopped: unknown exception"
+		          << std::endl;
+		}
 	}
 
 void GainDrive::cast_teardown()
@@ -4544,6 +4817,9 @@ bool GainDrive::listen(const std::string& host, int port)
 	cast_manager_.discover_background();
 	check_dns_background();
 	watcher_.start();
+	// Joined in the destructor rather than detached: it holds references to
+	// store_ and cover_cache_, so it must not outlive them.
+	portrait_thread_ = std::thread([this]{ portrait_worker(); });
 
 	if (!server_.listen_after_bind()) {
 		std::cerr << stamp() << "Error: server loop exited unexpectedly."

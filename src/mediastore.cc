@@ -471,6 +471,14 @@ void MediaStore::purge_disabled_video_art()
 		" WHERE cover_path IN (SELECT path FROM songs)"
 		"   AND cover_path NOT IN (SELECT path FROM video_art)");
 
+	// And whatever was scaled from a blob that is now gone. Same test as the
+	// two repairs above, for the same reason: a source_key that is also a
+	// songs.path is a video-art key by construction.
+	db_music_.exec(
+		"DELETE FROM cover_thumbs"
+		" WHERE source_key IN (SELECT path FROM songs)"
+		"   AND source_key NOT IN (SELECT path FROM video_art)");
+
 	txn.commit();
 	}
 
@@ -631,6 +639,87 @@ void MediaStore::create_schema()
 			source        TEXT NOT NULL,      -- embedded | frame | tmdb
 			image         BLOB NOT NULL,
 			created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+		);
+
+		-- The artist portrait itself, rather than a URL to it.
+		--
+		-- artist_info_cache stores an image_url, which is a promise a third
+		-- party may not keep. The bytes lived only in a std::unordered_map in
+		-- the HTTP server, so every restart re-fetched every portrait from
+		-- Wikimedia, TheAudioDB or Discogs — and a getCoverArt for an artist
+		-- nobody had resolved yet ran the whole MusicBrainz -> Wikidata ->
+		-- Wikipedia -> TheAudioDB -> Discogs chain *inside the request
+		-- thread*, two one-second pacing sleeps included. An artist grid could
+		-- occupy the entire HTTP pool.
+		--
+		-- Keyed on the artist folder's stored path, not on folders.id.
+		-- artist_info_cache keys on the id and is wrong for the same reason a
+		-- rowid is wrong everywhere else here; the difference is that its rows
+		-- cost one lookup to rebuild and these cost a download.
+		--
+		-- The image is normalised to at most 800px on the long edge when it is
+		-- stored, so whatever a provider sent — a PNG, a Wikimedia render of
+		-- an SVG, a 4000px Discogs scan — what is kept is one predictable
+		-- thing that can be scaled again without another download.
+		--
+		-- status records a failure as much as a success, the same reasoning as
+		-- video_meta. 'none' means the providers had nothing and is not
+		-- re-asked for 30 days; 'error' means the network failed, which says
+		-- nothing about the artist, so it is retried at once.
+		CREATE TABLE IF NOT EXISTS artist_art (
+			folder_path TEXT PRIMARY KEY,     -- "<root>/<artist>"
+			name        TEXT NOT NULL,        -- what the providers were asked
+			status      TEXT NOT NULL,        -- ok | none | error
+			source      TEXT NOT NULL DEFAULT '',
+			source_url  TEXT NOT NULL DEFAULT '',
+			mime        TEXT NOT NULL DEFAULT '',
+			width       INTEGER NOT NULL DEFAULT 0,
+			height      INTEGER NOT NULL DEFAULT 0,
+			image       BLOB,
+			fetched_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+		);
+
+		-- Scaled cover art. getCoverArt is asked for a specific pixel size by
+		-- every client there is — 64, 80, 256 and 400 from the web client,
+		-- 144/288/512 from Android, 144/288/800 from iOS — and before this
+		-- table each of those forked ffmpeg and decoded the full-size source,
+		-- on every request, for ever. A folder cover is routinely 3000x3000,
+		-- so an album grid was a few hundred process launches.
+		--
+		-- Keyed on the stored path for the reason video_art, stars and
+		-- playlists are: a rowid moves across a rescan. The key is the image
+		-- file's own path for a cover or an extra image, the *media* file's
+		-- path for a video_art blob (which is already what cover_path holds
+		-- for one), and the *artist folder's* path for a portrait. Those
+		-- three cannot collide, because a directory and a file cannot share a
+		-- path and an artist folder is a directory.
+		--
+		-- source_stamp is deliberately not in the key. (source_key, size)
+		-- being the key makes re-encoding after a cover is replaced an
+		-- INSERT OR REPLACE rather than a second row, so a file edited a
+		-- hundred times leaves one row per size and not a hundred.
+		--
+		-- `size` is quantised to a ladder before it gets here (see
+		-- imagescale.hh). That is not cosmetic: size is an unvalidated client
+		-- integer and this table has no eviction policy, so without the
+		-- ladder any authenticated account could write a row per pixel value
+		-- and fill the disk. With it the worst case is one row per rung.
+		--
+		-- status 'unscalable' records an image neither stb nor ffmpeg could
+		-- decode, with a zero-length blob. Without it a file nothing can read
+		-- would be retried on every single request for ever — a negative
+		-- result is a result, the same reasoning as video_meta's 'unmatched'.
+		CREATE TABLE IF NOT EXISTS cover_thumbs (
+			source_key   TEXT    NOT NULL,   -- "<root>/<rest>"
+			size         INTEGER NOT NULL,   -- long edge, already quantised
+			source_stamp INTEGER NOT NULL,
+			status       TEXT    NOT NULL,   -- ok | unscalable
+			mime         TEXT    NOT NULL,
+			width        INTEGER NOT NULL,
+			height       INTEGER NOT NULL,
+			image        BLOB    NOT NULL,
+			created_at   INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+			PRIMARY KEY (source_key, size)
 		);
 
 		-- What an online provider was asked about a video, and what it said.
@@ -1929,6 +2018,30 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	s.exec();
 	}
 	{
+	// Scaled art belonging to the folders about to go. This has to run
+	// *before* the folder delete, because it identifies its rows through the
+	// same unvisited marks.
+	//
+	// The reference test is the folder, not somebody's cover_path. An *extra*
+	// image (index=1..n) is found by find_extra_images() at request time and
+	// recorded in no column at all, so a cover_path test would delete every
+	// extra's thumbnails on every scan. An orphan sweep run afterwards does
+	// not work either: the artist folder survives and covers every path
+	// beneath it, so a deleted album's thumbnails would look reachable for
+	// ever. The leading source_key LIKE is what keeps the correlated EXISTS
+	// bounded to this artist. Both LIKEs treat _ as a wildcard, which here can
+	// only ever keep a row.
+	SQLite::Statement s(db_music_,
+		"DELETE FROM cover_thumbs WHERE source_key LIKE ?"
+		"  AND EXISTS (SELECT 1 FROM folders f"
+		"    WHERE f.last_scanned IS NULL AND f.path LIKE ?"
+		"      AND (cover_thumbs.source_key = f.path"
+		"           OR cover_thumbs.source_key LIKE f.path || '/%'))");
+	s.bind(1, prefix);
+	s.bind(2, prefix);
+	s.exec();
+	}
+	{
 	SQLite::Statement s(db_music_,
 		"DELETE FROM folders WHERE last_scanned IS NULL AND path LIKE ?");
 	s.bind(1, prefix);
@@ -2011,6 +2124,23 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		}
 		{
 		SQLite::Statement s(db_music_, "DELETE FROM video_meta WHERE path = ?");
+		s.bind(1, artist_rel);
+		s.exec();
+		}
+		{
+		// The artist's own portrait, and anything scaled from a loose file
+		// sitting directly in this folder. Keyed on the folder itself, which
+		// is exactly what the prefix delete above cannot reach: "video/Road/%"
+		// does not match "video/Road".
+		SQLite::Statement s(db_music_,
+			"DELETE FROM cover_thumbs WHERE source_key = ? OR source_key LIKE ?");
+		s.bind(1, artist_rel);
+		s.bind(2, artist_rel + "/%");
+		s.exec();
+		}
+		{
+		SQLite::Statement s(db_music_,
+			"DELETE FROM artist_art WHERE folder_path = ?");
 		s.bind(1, artist_rel);
 		s.exec();
 		}
@@ -2191,6 +2321,28 @@ void MediaStore::scan_root_files(const RootRec& root)
 		"  AND path NOT IN (SELECT path FROM songs)"
 		"  AND path NOT IN (SELECT path FROM folders)");
 	s.bind(1, root.cfg.name + "/%");
+	s.exec();
+	}
+	{
+	// Scaled art for a loose file that has gone. Restricted to things sitting
+	// *directly* in the root — "root/%" but not "root/%/%" — because the
+	// artist prune already owns everything in a subfolder and does it far more
+	// precisely, through the unvisited marks.
+	//
+	// Known cost: an *extra* image loose in the root (index=1..n) appears in
+	// no column, so its thumbnails are dropped by each scan and re-made on the
+	// next request. That is one decode per scan for a rare arrangement, and it
+	// is the price of not having a table of what an extra image is.
+	SQLite::Statement s(db_music_,
+		"DELETE FROM cover_thumbs WHERE source_key LIKE ?"
+		"  AND source_key NOT LIKE ?"
+		"  AND source_key NOT IN (SELECT path FROM songs)"
+		"  AND source_key NOT IN (SELECT cover_path FROM songs"
+		"                          WHERE cover_path <> '')"
+		"  AND source_key NOT IN (SELECT cover_path FROM albums"
+		"                          WHERE cover_path <> '')");
+	s.bind(1, root.cfg.name + "/%");
+	s.bind(2, root.cfg.name + "/%/%");
 	s.exec();
 	}
 	// A root's album can only ever be the loose-file one, so it goes when the
@@ -2441,10 +2593,29 @@ bool MediaStore::validate_auth(const std::string& username,
 		}
 
 	if (ok) {
-		SQLite::Statement upd(db_music_,
-			"UPDATE client.users SET last_access = CURRENT_TIMESTAMP WHERE username = ?");
-		upd.bind(1, username);
-		upd.exec();
+		// One write per minute per user, not one per request.
+		//
+		// Every authenticated request came through here, and an album grid is
+		// a hundred of them — so loading one page was a hundred writes to a
+		// single row, each taking the WAL write lock while still holding
+		// db_mutex_, in exactly the window where a scan wants both. The Users
+		// list shows this to the minute, so a minute is all the resolution
+		// there is to lose.
+		//
+		// Kept in memory rather than expressed as a WHERE on the column: a
+		// statement that matches nothing still opens a write transaction, and
+		// this map is consulted under a lock the caller is holding anyway.
+		auto now  = std::chrono::steady_clock::now();
+		auto seen = last_access_seen_.find(username);
+		if (seen == last_access_seen_.end()
+		    || now - seen->second >= std::chrono::seconds(60)) {
+			SQLite::Statement upd(db_music_,
+				"UPDATE client.users SET last_access = CURRENT_TIMESTAMP"
+				" WHERE username = ?");
+			upd.bind(1, username);
+			upd.exec();
+			last_access_seen_[username] = now;
+			}
 		}
 
 	return ok;
@@ -2537,6 +2708,16 @@ void MediaStore::store_video_art(const std::string& rel_path, int64_t mtime,
 	ins.bind(4, source);
 	ins.bind(5, bytes.data(), static_cast<int>(bytes.size()));
 	ins.exec();
+
+	// Anything scaled from the old blob is now wrong. A better tier winning —
+	// a TMDB poster replacing a frame grab — changes the image without the
+	// media file's mtime moving, so the stamp check in the serving path
+	// cannot see it. Inlined rather than calling drop_cover_thumbs(), which
+	// would take db_mutex_ a second time; it is not recursive.
+	SQLite::Statement del(db_music_,
+		"DELETE FROM cover_thumbs WHERE source_key = ?");
+	del.bind(1, rel_path);
+	del.exec();
 	}
 
 std::string MediaStore::get_video_art_source(const std::string& rel_path)
@@ -2568,6 +2749,189 @@ MediaStore::get_video_art(const std::string& rel_path)
 	               static_cast<size_t>(blob.getBytes()));
 	r.file_modified = q.getColumn(2).getInt64();
 	return r;
+	}
+
+std::optional<MediaStore::ThumbRow>
+MediaStore::get_cover_thumb(const std::string& source_key, int size)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT status, mime, image, width, height, source_stamp"
+		" FROM cover_thumbs WHERE source_key = ? AND size = ?");
+	q.bind(1, source_key);
+	q.bind(2, size);
+	if (!q.executeStep()) return std::nullopt;
+	ThumbRow r;
+	r.status       = q.getColumn(0).getString();
+	r.mime         = q.getColumn(1).getString();
+	r.width        = q.getColumn(3).getInt();
+	r.height       = q.getColumn(4).getInt();
+	r.source_stamp = q.getColumn(5).getInt64();
+	auto blob = q.getColumn(2);
+	// An 'unscalable' row carries no image on purpose; anything else with an
+	// empty blob is a bad row and is treated as a miss, for the reason
+	// get_video_art() gives — a 200 with no body reads as a missing file.
+	if (blob.getBytes() > 0 && blob.getBlob() != nullptr)
+		r.bytes.assign(static_cast<const char*>(blob.getBlob()),
+		               static_cast<size_t>(blob.getBytes()));
+	else if (r.status != "unscalable")
+		return std::nullopt;
+	return r;
+	}
+
+void MediaStore::store_cover_thumb(const std::string& source_key, int size,
+                                    int64_t source_stamp,
+                                    const std::string& status,
+                                    const std::string& mime, int width,
+                                    int height, const std::string& bytes)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Transaction tx(db_music_);
+	{
+	// The hygiene delete for a cover replaced on disk. Without it the sizes
+	// nobody happens to re-request would keep their superseded images for
+	// ever, since only the size being written is replaced below.
+	SQLite::Statement del(db_music_,
+		"DELETE FROM cover_thumbs"
+		" WHERE source_key = ? AND source_stamp <> ?");
+	del.bind(1, source_key);
+	del.bind(2, source_stamp);
+	del.exec();
+	}
+	{
+	SQLite::Statement ins(db_music_,
+		"INSERT OR REPLACE INTO cover_thumbs"
+		" (source_key, size, source_stamp, status, mime, width, height, image)"
+		" VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+	ins.bind(1, source_key);
+	ins.bind(2, size);
+	ins.bind(3, source_stamp);
+	ins.bind(4, status);
+	ins.bind(5, mime);
+	ins.bind(6, width);
+	ins.bind(7, height);
+	ins.bind(8, bytes.data(), static_cast<int>(bytes.size()));
+	ins.exec();
+	}
+	tx.commit();
+	}
+
+void MediaStore::drop_cover_thumbs(const std::string& source_key)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement del(db_music_,
+		"DELETE FROM cover_thumbs WHERE source_key = ?");
+	del.bind(1, source_key);
+	del.exec();
+	}
+
+std::optional<MediaStore::ArtistArtRow>
+MediaStore::get_artist_art(const std::string& folder_path)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT status, source, source_url, mime, image, width, height,"
+		"       fetched_at FROM artist_art WHERE folder_path = ?");
+	q.bind(1, folder_path);
+	if (!q.executeStep()) return std::nullopt;
+	ArtistArtRow r;
+	r.status     = q.getColumn(0).getString();
+	r.source     = q.getColumn(1).getString();
+	r.source_url = q.getColumn(2).getString();
+	r.mime       = q.getColumn(3).getString();
+	r.width      = q.getColumn(5).getInt();
+	r.height     = q.getColumn(6).getInt();
+	r.fetched_at = q.getColumn(7).getInt64();
+	auto blob = q.getColumn(4);
+	if (blob.getBytes() > 0 && blob.getBlob() != nullptr)
+		r.bytes.assign(static_cast<const char*>(blob.getBlob()),
+		               static_cast<size_t>(blob.getBytes()));
+	// An "ok" row with no image is a bad row; say there is nothing rather than
+	// hand the client a 200 with an empty body.
+	if (r.status == "ok" && r.bytes.empty()) return std::nullopt;
+	return r;
+	}
+
+std::optional<MediaStore::ArtistArtState>
+MediaStore::get_artist_art_state(const std::string& folder_path)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT status, fetched_at FROM artist_art WHERE folder_path = ?");
+	q.bind(1, folder_path);
+	if (!q.executeStep()) return std::nullopt;
+	ArtistArtState s;
+	s.status     = q.getColumn(0).getString();
+	s.fetched_at = q.getColumn(1).getInt64();
+	return s;
+	}
+
+void MediaStore::store_artist_art(const std::string& folder_path,
+                                   const std::string& name,
+                                   const ArtistArtRow& row)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Transaction tx(db_music_);
+	{
+	SQLite::Statement ins(db_music_,
+		"INSERT OR REPLACE INTO artist_art"
+		" (folder_path, name, status, source, source_url, mime, width, height,"
+		"  image, fetched_at)"
+		" VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'))");
+	ins.bind(1, folder_path);
+	ins.bind(2, name);
+	ins.bind(3, row.status);
+	ins.bind(4, row.source);
+	ins.bind(5, row.source_url);
+	ins.bind(6, row.mime);
+	ins.bind(7, row.width);
+	ins.bind(8, row.height);
+	ins.bind(9, row.bytes.data(), static_cast<int>(row.bytes.size()));
+	ins.exec();
+	}
+	{
+	// Anything scaled from the previous portrait. fetched_at is this row's
+	// stamp in cover_thumbs, so a stale thumbnail would miss on its own — but
+	// only after the second in which both were written, and a re-fetch is
+	// exactly when somebody is looking.
+	SQLite::Statement del(db_music_,
+		"DELETE FROM cover_thumbs WHERE source_key = ?");
+	del.bind(1, folder_path);
+	del.exec();
+	}
+	tx.commit();
+	}
+
+std::vector<MediaStore::ArtistArtJob>
+MediaStore::artists_needing_art(int64_t retry_none_before)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	// "Needing" means: no row, or a row that says the network failed, or a
+	// 'none' old enough to be worth asking about again. An 'ok' is never
+	// re-asked — a portrait does not go stale on its own, and the way to
+	// replace one is to change what the provider chain finds.
+	std::string sql =
+		"SELECT f.id, f.name, f.path FROM folders f"
+		" WHERE f.parent_id IN (SELECT id FROM folders WHERE parent_id IS NULL"
+		"                        AND COALESCE(content_type, 'artists') = 'artists')"
+		"   AND NOT EXISTS (SELECT 1 FROM artist_art a"
+		"                    WHERE a.folder_path = f.path"
+		"                      AND (a.status = 'ok'"
+		"                           OR (a.status = 'none' AND a.fetched_at > ?)))";
+	sql += not_uploads("f.path");
+	sql += " ORDER BY f.name COLLATE NOCASE";
+
+	SQLite::Statement q(db_music_, sql);
+	q.bind(1, retry_none_before);
+	std::vector<ArtistArtJob> out;
+	while (q.executeStep()) {
+		ArtistArtJob j;
+		j.folder_id = q.getColumn(0).getInt();
+		j.name      = q.getColumn(1).getString();
+		j.path      = q.getColumn(2).getString();
+		out.push_back(std::move(j));
+		}
+	return out;
 	}
 
 std::optional<MediaStore::VideoMetaRow>
@@ -4005,6 +4369,24 @@ void MediaStore::sync_roots()
 			s.bind(1, name);
 			s.exec();
 			}
+		{
+		// cover_thumbs hangs off a path rather than folders.id, so it cannot
+		// join the subtree walk above — and the reason that walk exists (rows
+		// written before roots had names store an absolute path) cannot apply
+		// here, because every source_key was written in stored form by this
+		// version or later. A prefix match is therefore exactly right.
+		SQLite::Statement s(db_music_,
+			"DELETE FROM cover_thumbs WHERE source_key = ? OR source_key LIKE ?");
+		s.bind(1, name);
+		s.bind(2, name + "/%");
+		s.exec();
+		}
+		{
+		SQLite::Statement s(db_music_,
+			"DELETE FROM artist_art WHERE folder_path LIKE ?");
+		s.bind(1, name + "/%");
+		s.exec();
+		}
 		}
 
 	txn.commit();
@@ -4566,7 +4948,19 @@ bool MediaStore::set_cover_art_path(int folder_id, const std::string& path)
 	q.bind(1, path);
 	q.bind(2, folder_id);
 	q.exec();
-	return db_music_.getChanges() > 0;
+	bool changed = db_music_.getChanges() > 0;
+
+	// Whatever was scaled from the previous image at this path is now wrong.
+	// The mtime moved too, so the serving path's stamp check would catch it —
+	// except on a filesystem with one-second timestamps and a second upload
+	// inside the same tick, which is precisely the case where somebody is
+	// watching to see whether their new cover took.
+	SQLite::Statement del(db_music_,
+		"DELETE FROM cover_thumbs WHERE source_key = ?");
+	del.bind(1, path);
+	del.exec();
+
+	return changed;
 	}
 
 // Keyed on the album's folder path rather than on an id, because the scan asks

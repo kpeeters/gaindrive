@@ -258,6 +258,84 @@ CREATE TABLE video_art (
                     DEFAULT (strftime('%s','now'))
 );
 
+-- Scaled cover art. Every client asks getCoverArt
+-- for a pixel size, and before this table each of
+-- those requests forked ffmpeg and decoded the
+-- full-size source — on every request, for ever.
+--
+-- Keyed on the stored path, like video_art and for
+-- the same reason: a rowid moves across a rescan.
+-- One key space serves all three kinds of art,
+-- because a directory and a file cannot share a
+-- path:
+--   * a cover or extra image -> its own path
+--   * a video_art blob       -> the media file's
+--     path, which is already what cover_path holds
+--   * an artist portrait     -> the artist folder
+--
+-- source_stamp is deliberately NOT in the key.
+-- (source_key, size) being the key makes a
+-- re-encode after a cover is replaced an
+-- INSERT OR REPLACE rather than a second row, so a
+-- file edited a hundred times leaves one row per
+-- size and not a hundred.
+--
+-- `size` is quantised to a ladder before it gets
+-- here. That is the table's only bound: size is an
+-- unvalidated client integer and there is no
+-- eviction policy, so without the ladder any
+-- account could write a row per pixel value.
+--
+-- status 'unscalable' records an image neither stb
+-- nor ffmpeg could decode, with a zero-length blob,
+-- so it is not retried on every request. Same
+-- reasoning as video_meta's 'unmatched'.
+CREATE TABLE cover_thumbs (
+    source_key   TEXT    NOT NULL,   -- "<root>/<rest>"
+    size         INTEGER NOT NULL,   -- long edge, quantised
+    source_stamp INTEGER NOT NULL,
+    status       TEXT    NOT NULL,   -- ok | unscalable
+    mime         TEXT    NOT NULL,
+    width        INTEGER NOT NULL,
+    height       INTEGER NOT NULL,
+    image        BLOB    NOT NULL,
+    created_at   INTEGER NOT NULL
+                   DEFAULT (strftime('%s','now')),
+    PRIMARY KEY (source_key, size)
+);
+
+-- The artist portrait itself, rather than a URL to
+-- it. artist_info_cache stores an image_url, which
+-- is a promise a third party may not keep; the
+-- bytes lived only in a map in the HTTP server, so
+-- every restart re-fetched every portrait, and a
+-- getCoverArt for an unresolved artist ran the
+-- whole provider chain inside the request thread.
+--
+-- Keyed on the artist folder's path. Filled by a
+-- background thread, so serving one is a plain
+-- read. The image is normalised to at most 800px
+-- on the long edge when stored.
+--
+-- status records a failure as much as a success:
+-- 'none' means the providers had nothing and is
+-- not re-asked for 30 days, 'error' means the
+-- network failed and is retried at once.
+CREATE TABLE artist_art (
+    folder_path TEXT PRIMARY KEY,   -- "<root>/<artist>"
+    name        TEXT NOT NULL,      -- what was asked
+    status      TEXT NOT NULL,      -- ok | none | error
+    -- wikipedia | wikidata | theaudiodb | discogs
+    source      TEXT NOT NULL DEFAULT '',
+    source_url  TEXT NOT NULL DEFAULT '',
+    mime        TEXT NOT NULL DEFAULT '',
+    width       INTEGER NOT NULL DEFAULT 0,
+    height      INTEGER NOT NULL DEFAULT 0,
+    image       BLOB,
+    fetched_at  INTEGER NOT NULL
+                  DEFAULT (strftime('%s','now'))
+);
+
 -- What TMDB was asked about a video, and what it
 -- said. The filename parser (src/videoname.hh)
 -- produces the question; a match supplies the

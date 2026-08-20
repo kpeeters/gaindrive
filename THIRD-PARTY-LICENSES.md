@@ -15,10 +15,10 @@ the licensing section of `CLAUDE.md`.
 
 ## Server — vendored in this repository
 
-Copied verbatim into `third_party/`, with their licence texts alongside. Neither
-can be relied on from a package manager; `third_party/README.md` explains why.
-A version change here is a manual `cp` and must be recorded in this file in the
-same commit.
+Copied verbatim into `third_party/`, with their licence texts alongside. None of
+them can be relied on from a package manager; `third_party/README.md` explains
+why. A version change here is a manual `cp` and must be recorded in this file in
+the same commit.
 
 * cpp-httplib 0.18.7 — `third_party/httplib.h`, `third_party/httplib.LICENSE`
   MIT · Copyright (c) 2025 Yuji Hirose
@@ -27,6 +27,17 @@ same commit.
 * mdns 1.4.3 — `third_party/mdns.h`, `third_party/mdns.LICENSE`
   Public domain (Unlicense) · Mattias Jansson
   https://github.com/mjansson/mdns
+
+* stb — `third_party/stb_image.h` (v2.30),
+  `third_party/stb_image_resize2.h` (v2.18),
+  `third_party/stb_image_write.h` (v1.16), `third_party/stb.LICENSE`
+  Dual-licensed: public domain (Unlicense) *or* MIT, at the recipient's
+  choice · Copyright (c) 2017 Sean Barrett
+  https://github.com/nothings/stb
+  Both arms are GPLv3-compatible, so nothing in the compatibility notes below
+  turns on which is taken. Upstream publishes no releases and no version
+  numbers outside the headers, which is why these carry the versions from
+  their own first lines rather than a tag.
 
 The web client's icon font is vendored the same way, but lives in `web/`
 rather than `third_party/` because it is embedded into the binary by
