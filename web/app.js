@@ -440,92 +440,9 @@ async function viewSettings() {
       showError('Could not reach the server. Please check your connection.');
       }
 
-   // ── Upload section — visible if uploadRole or adminRole ────────────────
-
-   if (userInfo?.uploadRole || userInfo?.adminRole) {
-
-   const uploadSection = document.createElement('div');
-   uploadSection.className = 'admin-section';
-
-   const uploadHeading = document.createElement('h2');
-   uploadHeading.className = 'admin-section-title';
-   uploadHeading.textContent = 'Upload';
-   uploadSection.appendChild(uploadHeading);
-
-   const uploadLabel = document.createElement('p');
-   uploadLabel.textContent = 'Upload a music archive (zip, tar, tar.gz):';
-   uploadSection.appendChild(uploadLabel);
-
-   const fileInput = document.createElement('input');
-   fileInput.type   = 'file';
-   fileInput.accept = '.zip,.tar,.tar.gz,.tgz';
-   uploadSection.appendChild(fileInput);
-
-   const uploadBtn = document.createElement('button');
-   uploadBtn.textContent = 'Upload';
-   uploadBtn.className   = 'upload-btn';
-   uploadSection.appendChild(uploadBtn);
-
-   const progress = document.createElement('progress');
-   progress.value  = 0;
-   progress.max    = 100;
-   progress.hidden = true;
-   uploadSection.appendChild(progress);
-
-   const uploadStatus = document.createElement('p');
-   uploadStatus.className = 'upload-status';
-   uploadSection.appendChild(uploadStatus);
-
-   pane.appendChild(uploadSection);
-
-   uploadBtn.addEventListener('click', () => {
-      const file = fileInput.files[0];
-      if (!file) { uploadStatus.textContent = 'No file selected.'; return; }
-
-      const {server, user, password} = creds.load();
-      const p = new URLSearchParams({
-         u: user, p: password, v: '1.16.1', c: 'gaindrive-web', f: 'json'
-         });
-      const url = `${server}/upload?${p}`;
-
-      const fd = new FormData();
-      fd.append('file', file);
-
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', url);
-
-      progress.hidden = false;
-      progress.value  = 0;
-      uploadStatus.textContent = '';
-
-      xhr.upload.onprogress = e => {
-         if (e.lengthComputable)
-            progress.value = Math.round(e.loaded / e.total * 100);
-         };
-
-      xhr.onload = () => {
-         progress.hidden = true;
-         try {
-            const j = JSON.parse(xhr.responseText);
-            if (j.status === 'ok')
-               uploadStatus.textContent = `Extracted ${j.files} file(s) to your personal library.`;
-            else
-               uploadStatus.textContent = `Error: ${j.message}`;
-            }
-         catch {
-            uploadStatus.textContent = `Unexpected response (HTTP ${xhr.status}).`;
-            }
-         };
-
-      xhr.onerror = () => {
-         progress.hidden = true;
-         uploadStatus.textContent = 'Network error during upload.';
-         };
-
-      xhr.send(fd);
-      });
-
-   } // end upload section
+   // The archive-upload form used to sit here. It now lives at the top of the
+   // Library view's Uploads mode — see makeUploadBar() — because that is the
+   // listing it fills.
 
    // ── Users section — visible to admins only ──────────────────────────────
 
@@ -890,6 +807,144 @@ function libraryModes() {
    return seen;
    }
 
+// Signature of the personal library as last rendered, and the timer watching
+// for it to change. Both are module-level because viewArtists() destroys the
+// upload bar's DOM when it re-renders, so a timer owned by that node would be
+// orphaned mid-poll.
+let uploadsSignature = '';
+let uploadsPollTimer = null;
+
+// name+albumCount per artist, not the artist count: a second upload usually
+// adds an album to an artist who is already listed, which leaves the count
+// untouched.
+function personalSignature(indexes) {
+   return (indexes ?? [])
+      .flatMap(i => i.artist.map(a => `${a.name}:${a.albumCount}`))
+      .join('|');
+   }
+
+// The upload response returns before the server has scanned — scan_dirs() runs
+// on a detached thread — so there is nothing to show at the moment of success.
+// Poll until the listing actually changes rather than re-rendering once into
+// the same list.
+function pollForUpload(status, files) {
+   let tries = 0;
+   clearInterval(uploadsPollTimer);
+   uploadsPollTimer = setInterval(async () => {
+      // The bar is gone once anything else has rewritten pane 0 — another
+      // library mode, or Settings/Playlists/Recents — and a re-render then
+      // would drag the user back here.
+      if (!document.querySelector('#pane-artists .upload-bar')) {
+         clearInterval(uploadsPollTimer);
+         return;
+         }
+      let sr;
+      try { sr = await apiCall('getArtists', {personal: 'true'}); }
+      catch { return; }   // a blip should not end the wait
+      // viewArtists() slides back to pane 0, so hold off while the user is
+      // reading an album; the try count still bounds the wait.
+      if (personalSignature(sr.artists?.index) !== uploadsSignature
+          && paneNav.depth === 0) {
+         clearInterval(uploadsPollTimer);
+         viewArtists();
+         return;
+         }
+      if (++tries >= 10) {
+         clearInterval(uploadsPollTimer);
+         status.textContent =
+            `Extracted ${files} file(s); the server is still scanning them.`;
+         }
+      }, 2000);
+   }
+
+// The archive-upload form, drawn at the top of the Uploads listing. Returns the
+// node rather than appending it, so the caller places it.
+function makeUploadBar() {
+   const bar = document.createElement('div');
+   bar.className = 'upload-bar';
+
+   const row = document.createElement('div');
+   row.className = 'upload-row';
+   bar.appendChild(row);
+
+   const fileInput = document.createElement('input');
+   fileInput.type   = 'file';
+   fileInput.accept = '.zip,.tar,.tar.gz,.tgz';
+   row.appendChild(fileInput);
+
+   const uploadBtn = document.createElement('button');
+   uploadBtn.textContent = 'Upload';
+   uploadBtn.className   = 'upload-btn';
+   row.appendChild(uploadBtn);
+
+   const hint = document.createElement('p');
+   hint.className   = 'admin-hint';
+   hint.textContent = 'Music archive: zip, tar, tar.gz';
+   bar.appendChild(hint);
+
+   const progress = document.createElement('progress');
+   progress.value  = 0;
+   progress.max    = 100;
+   progress.hidden = true;
+   bar.appendChild(progress);
+
+   const uploadStatus = document.createElement('p');
+   uploadStatus.className = 'upload-status';
+   bar.appendChild(uploadStatus);
+
+   uploadBtn.addEventListener('click', () => {
+      const file = fileInput.files[0];
+      if (!file) { uploadStatus.textContent = 'No file selected.'; return; }
+
+      const {server, user, password} = creds.load();
+      const p = new URLSearchParams({
+         u: user, p: password, v: '1.16.1', c: 'gaindrive-web', f: 'json'
+         });
+      const url = `${server}/upload?${p}`;
+
+      const fd = new FormData();
+      fd.append('file', file);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', url);
+
+      clearInterval(uploadsPollTimer);
+      progress.hidden = false;
+      progress.value  = 0;
+      uploadStatus.textContent = '';
+
+      xhr.upload.onprogress = e => {
+         if (e.lengthComputable)
+            progress.value = Math.round(e.loaded / e.total * 100);
+         };
+
+      xhr.onload = () => {
+         progress.hidden = true;
+         try {
+            const j = JSON.parse(xhr.responseText);
+            if (j.status === 'ok') {
+               uploadStatus.textContent = `Extracted ${j.files} file(s); scanning…`;
+               pollForUpload(uploadStatus, j.files);
+               }
+            else
+               uploadStatus.textContent = `Error: ${j.message}`;
+            }
+         catch {
+            uploadStatus.textContent = `Unexpected response (HTTP ${xhr.status}).`;
+            }
+         };
+
+      xhr.onerror = () => {
+         progress.hidden = true;
+         uploadStatus.textContent = 'Network error during upload.';
+         };
+
+      xhr.send(fd);
+      });
+
+   return bar;
+   }
+
 async function viewArtists() {
    const pane = document.getElementById('pane-artists');
    pane.innerHTML = '';
@@ -925,6 +980,8 @@ async function viewArtists() {
    const indexes = sr.artists?.index ?? [];
    console.log('[artists] got', indexes.reduce((n, i) => n + i.artist.length, 0), 'artists');
 
+   if (libraryMode === 'uploads') uploadsSignature = personalSignature(indexes);
+
    const frag = document.createDocumentFragment();
    const header = document.createElement('div');
    header.className = 'view-header';
@@ -959,6 +1016,17 @@ async function viewArtists() {
       }
 
    frag.appendChild(header);
+
+   // The form belongs to the library it fills, so it is drawn only in that
+   // mode. Role-gated rather than root-gated for the same reason
+   // libraryModes() is: getMusicFolders omits the uploads root, so the client
+   // cannot tell whether one is configured — the server says so on submit.
+   // The role test is not redundant with libraryModes(): libraryMode is
+   // restored from localStorage, and the fallback above only fires when some
+   // other mode is on offer, so revoked upload rights can still land here.
+   if (libraryMode === 'uploads'
+       && (currentUser?.uploadRole || currentUser?.adminRole))
+      frag.appendChild(makeUploadBar());
 
    for (const index of indexes) {
       const heading = document.createElement('h2');

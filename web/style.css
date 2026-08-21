@@ -1995,11 +1995,37 @@ body {
 
 /* ── Admin / upload ────────────────────────────────── */
 
-.upload-section {
-   padding: 1rem 1.5rem;
+/* The archive-upload form, at the top of the Library view's Uploads mode. No
+   horizontal padding of its own — .pane already provides it — and a bottom
+   border so it reads as part of the header above rather than as the first row
+   of the list below. */
+.upload-bar {
    display: flex;
    flex-direction: column;
-   gap: 0.75rem;
+   gap: 0.5rem;
+   padding-bottom: 1rem;
+   margin-bottom: 0.4rem;
+   border-bottom: 1px solid var(--divider);
+   }
+
+.upload-row {
+   display: flex;
+   align-items: center;
+   gap: 0.6rem;
+   }
+
+.upload-row input[type=file] {
+   flex: 1;
+   min-width: 0;
+   font-size: 0.85rem;
+   }
+
+/* .upload-btn is shared with the Settings buttons, where it is the only child
+   of a column flex and so sets align-self: flex-start. In this row that is the
+   cross axis and would top-align it. */
+.upload-row .upload-btn {
+   align-self: auto;
+   flex: 0 0 auto;
    }
 
 .upload-btn {
@@ -2032,7 +2058,7 @@ body {
    font-size: 0.9rem;
    }
 
-.upload-section progress {
+.upload-bar progress {
    width: 100%;
    height: 6px;
    }
