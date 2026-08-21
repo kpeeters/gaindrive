@@ -18,7 +18,7 @@
       <img src="assets/gaindrive.svg" alt="GainDrive logo">
       <b>GainDrive</b>
     </a>
-    <nav class="nav-links">
+    <nav class="nav-links" id="nav-links">
       <a href="server.html">Server</a>
       <a href="web.html">Web</a>
       <a href="android.html">Android</a>
@@ -26,6 +26,9 @@
       <a class="on" href="docs.html">Docs</a>
     </nav>
     <div class="nav-cta">
+      <button class="nav-toggle" type="button" aria-label="Menu" aria-expanded="false" aria-controls="nav-links">
+        <span class="msym">menu</span>
+      </button>
       <a class="nav-gh" href="https://github.com/kpeeters/gaindrive" target="_blank" rel="noopener" aria-label="GainDrive on GitHub">
         <img class="gh-mark" src="assets/github.svg" alt="">
       </a>
@@ -49,7 +52,9 @@
         <a href="#requirements">Requirements</a>
         <a href="#install">Install</a>
         <a href="#first-run">First run</a>
-        <a href="#library">Configuring your library</a>
+        <a href="#options">Command-line options</a>
+        <a href="#config-file">Configuration file</a>
+        <a href="#library">Structuring your library</a>
         <a href="#service">Running as a service</a>
         <a href="#proxy">Reverse proxy &amp; HTTPS</a>
         <a href="#transcoding">Transcoding</a>
@@ -70,9 +75,9 @@
 
       <div class="doc-sec" id="requirements">
         <h2>Requirements</h2>
-        <p>GainDrive Server is a single statically linked executable with no runtime dependencies. Binaries are provided for <code>arm64</code> and <code>x86_64</code> Linux.</p>
+        <p>GainDrive Server is a single statically linked executable with no runtime dependencies except an optional <code>ffmpeg</code> (if you want to be able to stream transcoded audio/video). Binaries are provided for <code>arm64</code> and <code>x86_64</code> Linux.</p>
         <ul class="doc-list">
-          <li>A machine that can reach your music files — a Raspberry Pi, a NAS or a small VPS is plenty.</li>
+          <li>A machine that can reach your music files. A Raspberry Pi, a NAS or a small VPS is plenty.</li>
           <li>Disk space for two SQLite databases; these stay small relative to the music itself.</li>
           <li><code>ffmpeg</code> on <code>PATH</code>, only if you want on-the-fly transcoding.</li>
         </ul>
@@ -85,7 +90,7 @@
         <div class="code">
 <pre><span class="p">$</span> <span class="o">curl -LO https://github.com/kpeeters/gaindrive/releases/latest/download/gaindrive-linux-x86_64</span>
 <span class="p">$</span> <span class="o">chmod +x gaindrive-linux-x86_64</span>
-<span class="p">$</span> <span class="o">sudo mv gaindrive-linux-x86_64 /usr/local/bin/gaindrive</span>
+<span class="p">$</span> <span class="o">sudo install gaindrive-linux-x86_64 /usr/local/bin/gaindrive</span>
 </pre>
         </div>
         <h3>Build from source</h3>
@@ -101,25 +106,84 @@
 
       <div class="doc-sec" id="first-run">
         <h2>First run</h2>
-        <p>Point GainDrive at your music folder and start it. On the first start it creates both databases and begins an initial scan.</p>
+        <p>Before you can sign in, you need an account. Run GainDrive once with <code>--add-user</code> and <code>--password</code> to create one. This account will be an administrator account, but you can change that later in the web UI.</p>
         <div class="code">
-<pre><span class="p">$</span> <span class="o">gaindrive --music ~/Music --port 4040</span>
-
-<span class="g">  ♪ GainDrive  ·  listening on :4040
-  ✓ scanned 1,284 albums · 18,902 tracks
-  ✓ web player ready → http://localhost:4040</span>
+<pre><span class="p">$</span> <span class="o">gaindrive --db ~/GainDrive --add-user alice --password s3cret</span>
 </pre>
         </div>
-        <p>Open <code>http://localhost:4040</code> in a browser and create the first account; it becomes the administrator. Further accounts are added from the admin panel in the web player.</p>
+        <p>If you do not provide the user name or password, gaindrive will prompt you. After this is set, the server will exit.</p>
+        <p>Then start the server proper, pointing it at your database directory and your music. On the first start it creates both databases and begins an initial scan.</p>
+        <div class="code">
+<pre><span class="p">$</span> <span class="o">gaindrive --db ~/GainDrive --artist-root music=~/Music</span>
+</pre>
+        </div>
+        <p>Open <code>http://localhost:4040</code> in a browser and sign in with the credentials set on the first run. Additional user accounts can be created in the web UI or by running the server with the <code>--add-user</code> flag again.</p>
         <div class="note">
           <span class="msym">info</span>
-          <div>The initial scan runs in the background. Large collections keep populating while you browse, and metadata lookups continue after the file scan finishes.</div>
+          <div>The audio/video scan runs in the background. Large collections keep populating while you browse, and metadata lookups continue after the file scan finishes.</div>
+        </div>
+      </div>
+
+      <div class="doc-sec" id="options">
+        <h2>Command-line options</h2>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Option</th><th>Argument</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>--host</code></td><td>IP address</td><td>Interface to listen on; use <code>0.0.0.0</code> for all interfaces. Default <code>127.0.0.1</code>.</td></tr>
+            <tr><td><code>--port</code></td><td>number</td><td>Port to listen on. Default <code>4040</code>.</td></tr>
+            <tr><td><code>--config</code></td><td>path</td><td>Path to the config file. Default <code>/etc/gaindrive.conf</code>.</td></tr>
+            <tr><td><code>--db</code></td><td>path</td><td>Path to the music database file. Default <code>/var/lib/gaindrive/gaindrive.db</code>.</td></tr>
+            <tr><td><code>--user-db</code></td><td>path</td><td>Path to the user/state database. Derived from <code>--db</code> if not given.</td></tr>
+            <tr><td><code>--artist-root</code></td><td>name=path</td><td>Library root whose subdirectories are artists, i.e. organised as Artist/Album/Tracks. Repeatable.</td></tr>
+            <tr><td><code>--category-root</code></td><td>name=path</td><td>Library root whose subdirectories are categories, i.e. organised as Category/Name/Tracks. Repeatable.</td></tr>
+            <tr><td><code>--upload-root</code></td><td>name=path</td><td>Root holding per-user personal uploads.</td></tr>
+            <tr><td><code>--upload-dir</code></td><td>path</td><td>Directory for uploaded archives. Default <code>/tmp/gaindrive-uploads</code>.</td></tr>
+            <tr><td><code>--transcode-cache</code></td><td>path</td><td>Directory for cached transcodes. Placed alongside <code>--db</code> if not given.</td></tr>
+            <tr><td><code>--transcode-cache-mb</code></td><td>number</td><td>Transcode cache size in MB; <code>0</code> disables caching. Default <code>1024</code>.</td></tr>
+            <tr><td><code>--transcode-jobs</code></td><td>number</td><td>Maximum concurrent ffmpeg transcodes; <code>0</code> uses half the available cores. Default <code>0</code>.</td></tr>
+            <tr><td><code>--no-scan</code></td><td>n/a</td><td>Skip the filesystem scan at startup.</td></tr>
+            <tr><td><code>--debug</code></td><td>n/a</td><td>Print all API responses to stdout.</td></tr>
+            <tr><td><code>--add-user</code></td><td>name</td><td>Create a user account and exit.</td></tr>
+            <tr><td><code>--password</code></td><td>password</td><td>Password for the account created with <code>--add-user</code>.</td></tr>
+            <tr><td><code>-h, --help</code></td><td>n/a</td><td>Show the list of options.</td></tr>
+            <tr><td><code>--version</code></td><td>n/a</td><td>Show version and exit.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="doc-sec" id="config-file">
+        <h2>Configuration file</h2>
+        <p>Everything that matters for a permanent install can also be set in a JSON configuration file, read from <code>/etc/gaindrive.conf</code> unless <code>--config</code> points elsewhere. This is the normal way to configure a service install, since the systemd unit runs GainDrive with no arguments.</p>
+        <div class="code">
+<pre><span class="o">{
+  "host": "0.0.0.0",
+  "port": 4040,
+  "db_path": "/var/lib/gaindrive/gaindrive.db",
+  "user_db_path": "/var/lib/gaindrive/users.db",
+  "roots": [
+    { "name": "music",     "type": "artists",    "path": "/srv/music" },
+    { "name": "audiobooks", "type": "categories", "path": "/srv/audiobooks" }
+  ],
+  "upload_dir": "/var/lib/gaindrive/uploads",
+  "flat_multi_disc": false,
+  "transcode_cache_dir": "/var/cache/gaindrive",
+  "transcode_cache_mb": 1024,
+  "transcode_jobs": 0
+}</span>
+</pre>
+        </div>
+        <p>Every key is optional; anything left out keeps its default. Each entry in <code>roots</code> takes a <code>name</code>, a <code>path</code> and a <code>type</code> of either <code>artists</code> or <code>categories</code>, matching <code>--artist-root</code> and <code>--category-root</code>. <code>flat_multi_disc</code> has no command-line equivalent and controls whether multi-disc sets are presented as a single flat album.</p>
+        <div class="note">
+          <span class="msym">info</span>
+          <div>Command-line arguments win over the configuration file, so you can override a single setting for one run without editing the file. Library roots from the file are used only when no roots are given on the command line.</div>
         </div>
       </div>
 
       <div class="doc-sec" id="library">
-        <h2>Configuring your library</h2>
-        <p>GainDrive reads metadata from ID3 tags where they exist, and falls back to the folder structure where they do not. Either way it presents one unified library to every client.</p>
+        <h2>Structuring your library</h2>
+        <p>GainDrive reads Artist and Album metadata from the folder structure, and uses ID3 tags where they exist to display track names and other track metadata. Either way it presents one unified library to every client, whether they use the tag-based browsing method or the file-based method.</p>
         <p>A conventional layout gives the best results, and multi-disc sets are picked up automatically:</p>
         <div class="code">
 <pre><span class="o">Music/
@@ -161,7 +225,7 @@ Restart=on-failure</span>
 
       <div class="doc-sec" id="proxy">
         <h2>Reverse proxy &amp; HTTPS</h2>
-        <p>Put GainDrive behind nginx or Caddy if you want it reachable from outside your network with a certificate.</p>
+        <p>Put GainDrive behind nginx, Apache or Caddy if you want it reachable from outside your network with a certificate. For nginx:</p>
         <div class="code">
 <pre><span class="o">server {
     server_name music.example.com;
@@ -175,6 +239,19 @@ Restart=on-failure</span>
 }</span>
 </pre>
         </div>
+        <p>For Apache, enable <code>proxy</code>, <code>proxy_http</code>, <code>proxy_wstunnel</code> and <code>headers</code>, then add a virtual host:</p>
+        <div class="code">
+<pre><span class="o">&lt;VirtualHost *:443&gt;
+    ServerName music.example.com
+
+    ProxyPreserveHost On
+    ProxyPass        / http://127.0.0.1:4040/
+    ProxyPassReverse / http://127.0.0.1:4040/
+    RequestHeader set X-Forwarded-Proto "https"
+&lt;/VirtualHost&gt;</span>
+</pre>
+        </div>
+        <p>Either way, run <code>certbot</code> afterwards to add the certificate and the HTTPS redirect.</p>
         <div class="note">
           <span class="msym">cast</span>
           <div>Casting from the server needs the Chromecast device to be able to reach the server directly on your local network. If your server is only reachable over a VPN, use the Android app's bridge mode instead.</div>
@@ -205,6 +282,7 @@ Restart=on-failure</span>
 
       <div class="doc-sec" id="ios">
         <h2>iOS app</h2>
+        <p>The iOS app is currently only available for building and installing from source. It should hopefully be available from the App Store soon.</p>
       </div>
 
       <div class="doc-sec" id="clients">
@@ -242,7 +320,7 @@ Restart=on-failure</span>
     <div class="footer-top">
       <div>
         <a class="brand" href="index.html"><img src="assets/gaindrive.svg" alt="GainDrive logo" style="width:36px;height:36px;border-radius:7px"><b>GainDrive</b></a>
-        <p class="tag">A self-hosted music server with a built-in web player and an Android client.</p>
+        <p class="tag">Full-featured OpenSubsonic-compatible audio/video server, and separate Web, Android and iOS players. Open source (GPLv3).</p>
       </div>
       <div class="footer-cols">
         <div class="col">
@@ -257,6 +335,7 @@ Restart=on-failure</span>
           <a href="docs.html">Documentation</a>
           <a href="https://opensubsonic.netlify.app/" target="_blank" rel="noopener">OpenSubsonic</a>
           <a href="https://github.com/kpeeters/gaindrive/releases" target="_blank" rel="noopener">Changelog</a>
+          <a href="privacy.html">Privacy policy</a>
         </div>
         <div class="col">
           <h5>Project</h5>
@@ -273,5 +352,6 @@ Restart=on-failure</span>
   </div>
 </footer>
 
+<script src="nav.js"></script>
 </body>
 </html>

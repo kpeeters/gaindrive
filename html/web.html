@@ -18,7 +18,7 @@
       <img src="assets/gaindrive.svg" alt="GainDrive logo">
       <b>GainDrive</b>
     </a>
-    <nav class="nav-links">
+    <nav class="nav-links" id="nav-links">
       <a href="server.html">Server</a>
       <a class="on" href="web.html">Web</a>
       <a href="android.html">Android</a>
@@ -26,6 +26,9 @@
       <a href="docs.html">Docs</a>
     </nav>
     <div class="nav-cta">
+      <button class="nav-toggle" type="button" aria-label="Menu" aria-expanded="false" aria-controls="nav-links">
+        <span class="msym">menu</span>
+      </button>
       <a class="nav-gh" href="https://github.com/kpeeters/gaindrive" target="_blank" rel="noopener" aria-label="GainDrive on GitHub">
         <img class="gh-mark" src="assets/github.svg" alt="">
       </a>
@@ -118,7 +121,7 @@
     <div class="footer-top">
       <div>
         <a class="brand" href="index.html"><img src="assets/gaindrive.svg" alt="GainDrive logo" style="width:36px;height:36px;border-radius:7px"><b>GainDrive</b></a>
-        <p class="tag">A self-hosted music server with a built-in web player and an Android client.</p>
+        <p class="tag">Full-featured OpenSubsonic-compatible audio/video server, and separate Web, Android and iOS players. Open source (GPLv3).</p>
       </div>
       <div class="footer-cols">
         <div class="col">
@@ -133,6 +136,7 @@
           <a href="docs.html">Documentation</a>
           <a href="https://opensubsonic.netlify.app/" target="_blank" rel="noopener">OpenSubsonic</a>
           <a href="https://github.com/kpeeters/gaindrive/releases" target="_blank" rel="noopener">Changelog</a>
+          <a href="privacy.html">Privacy policy</a>
         </div>
         <div class="col">
           <h5>Project</h5>
@@ -149,5 +153,6 @@
   </div>
 </footer>
 
+<script src="nav.js"></script>
 </body>
 </html>

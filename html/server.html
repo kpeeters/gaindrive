@@ -18,7 +18,7 @@
       <img src="assets/gaindrive.svg" alt="GainDrive logo">
       <b>GainDrive</b>
     </a>
-    <nav class="nav-links">
+    <nav class="nav-links" id="nav-links">
       <a class="on" href="server.html">Server</a>
       <a href="web.html">Web player</a>
       <a href="android.html">Android app</a>
@@ -26,6 +26,9 @@
       <a href="docs.html">Docs</a>
     </nav>
     <div class="nav-cta">
+      <button class="nav-toggle" type="button" aria-label="Menu" aria-expanded="false" aria-controls="nav-links">
+        <span class="msym">menu</span>
+      </button>
       <a class="nav-gh" href="https://github.com/kpeeters/gaindrive" target="_blank" rel="noopener" aria-label="GainDrive on GitHub">
         <img class="gh-mark" src="assets/github.svg" alt="">
       </a>
@@ -38,7 +41,7 @@
     <div class="hero-text">
       <span class="eyebrow">Subsonic compatible music server</span>
       <h1 style="white-space:nowrap">GainDrive: Server</h1>
-      <p class="lead">Serves your music and video collection over the Subsonic API, with a built-in web player. Open source, single binary, written in C++.</p>
+      <p class="lead">Serves your music and video collection over the Subsonic API, with a built-in web player. Open source, single binary, written in C++. On Linux and macOS.</p>
       <div class="hero-cta">
         <a class="btn btn-primary" href="#download">
           <span class="msym">download</span>
@@ -47,7 +50,7 @@
         <a class="btn btn-ghost" href="#features">Features</a>
       </div>
       <div class="hero-meta">
-        <div class="stat"><div class="n">~7 MB</div><div class="l">Single binary</div></div>
+        <div class="stat"><div class="n">~10 MB</div><div class="l">Single binary</div></div>
         <div class="stat"><div class="n">SQLite</div><div class="l">Zero-config storage</div></div>
         <div class="stat"><div class="n">Subsonic</div><div class="l">API compatible</div></div>
       </div>
@@ -77,7 +80,7 @@
           <h3>C++ server</h3>
         </div>
         <ul class="fg-list">
-          <li><span class="msym check">check</span><span><b>One single binary.</b> The whole server is one ~7 MB statically linked executable in modern C++. Drop it on a box and run. No runtime dependencies except ffmpeg.</span></li>
+          <li><span class="msym check">check</span><span><b>One single binary.</b> The whole server is one ~10 MB statically linked executable in modern C++. Drop it on a box and run. No runtime dependencies except ffmpeg.</span></li>
           <li><span class="msym check">check</span><span><b>SQLite storage.</b> Your catalogue lives in one SQLite database; accounts and playlists in a separate one.</span></li>
           <li><span class="msym check">check</span><span><b>Runs anywhere.</b> A Raspberry Pi, a NAS, a spare VPS; no runtime, no container required. Binaries for arm64 and x86 provided.</span></li>
         </ul>
@@ -90,7 +93,7 @@
         </div>
         <ul class="fg-list">
           <li><span class="msym check">check</span><span><b>Automatic scanning.</b> Watches your folders (using inotify) and automatically updates the library as you add, move or retag files.</span></li>
-          <li><span class="msym check">check</span><span><b>Unified metadata.</b> Reads ID3 tags or folder structure, then presents one clean, consistent library to every app.</span></li>
+          <li><span class="msym check">check</span><span><b>Unified metadata.</b> Reads ID3 tags or folder structure, then presents one clean, consistent library to every app. Uses the Subsonic rule: a folder that directly contains media is itself an album.</span></li>
           <li><span class="msym check">check</span><span><b><a href="https://musicbrainz.org/" target="_blank" rel="noopener">MusicBrainz</a> lookups.</b> Pulls artist and album metadata and artwork from MusicBrainz (and other sources to fill the gaps).</span></li>
           <li><span class="msym check">check</span><span><b>Multi-disc albums.</b> Full support for box sets (inferred from folder structure or ID3 tags). Discs and track numbers stay correctly grouped and ordered.</span></li>
         </ul>
@@ -131,11 +134,22 @@
       <span class="eyebrow" style="color:var(--gold)">Get started</span>
       <h2>Download the server.</h2>
       <p>Download the binary, point it at your music folder, and open the player in your browser.</p>
-      <div class="dl-cta">
-        <a class="btn btn-gold" href="https://github.com/kpeeters/gaindrive/releases/latest" target="_blank" rel="noopener">
-          <span class="msym">download</span>
-          Download for Linux
-        </a>
+    </div>
+    <div class="dl-plats">
+      <div class="dl-plat">
+        <h3>Linux</h3>
+        <p>Grab the statically linked x86_64 binary from the latest release.</p>
+        <div class="dl-cta">
+          <a class="btn btn-gold" href="https://github.com/kpeeters/gaindrive/releases/latest" target="_blank" rel="noopener">
+            <span class="msym">download</span>
+            Download for Linux
+          </a>
+        </div>
+      </div>
+      <div class="dl-plat">
+        <h3>macOS</h3>
+        <p>Install with Homebrew (Apple silicon only).</p>
+        <div class="dl-code"><code>brew install gaindrive-server</code></div>
       </div>
     </div>
   </div>
@@ -146,7 +160,7 @@
     <div class="footer-top">
       <div>
         <a class="brand" href="index.html"><img src="assets/gaindrive.svg" alt="GainDrive logo" style="width:36px;height:36px;border-radius:7px"><b>GainDrive</b></a>
-        <p class="tag">A self-hosted music server with a built-in web player and an Android client.</p>
+        <p class="tag">Full-featured OpenSubsonic-compatible audio/video server, and separate Web, Android and iOS players. Open source (GPLv3).</p>
       </div>
       <div class="footer-cols">
         <div class="col">
@@ -161,6 +175,7 @@
           <a href="docs.html">Documentation</a>
           <a href="https://opensubsonic.netlify.app/" target="_blank" rel="noopener">OpenSubsonic</a>
           <a href="https://github.com/kpeeters/gaindrive/releases" target="_blank" rel="noopener">Changelog</a>
+          <a href="privacy.html">Privacy policy</a>
         </div>
         <div class="col">
           <h5>Project</h5>
@@ -177,5 +192,6 @@
   </div>
 </footer>
 
+<script src="nav.js"></script>
 </body>
 </html>

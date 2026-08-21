@@ -18,7 +18,7 @@
       <img src="assets/gaindrive.svg" alt="GainDrive logo">
       <b>GainDrive</b>
     </a>
-    <nav class="nav-links">
+    <nav class="nav-links" id="nav-links">
       <a href="server.html">Server</a>
       <a href="web.html">Web player</a>
       <a class="on" href="android.html">Android app</a>
@@ -26,6 +26,9 @@
       <a href="docs.html">Docs</a>
     </nav>
     <div class="nav-cta">
+      <button class="nav-toggle" type="button" aria-label="Menu" aria-expanded="false" aria-controls="nav-links">
+        <span class="msym">menu</span>
+      </button>
       <a class="nav-gh" href="https://github.com/kpeeters/gaindrive" target="_blank" rel="noopener" aria-label="GainDrive on GitHub">
         <img class="gh-mark" src="assets/github.svg" alt="">
       </a>
@@ -71,6 +74,7 @@
         <ul class="fg-list">
           <li><span class="msym check">check</span><span>Native Android application, not a web view.</span></li>
           <li><span class="msym check">check</span><span>Written in Kotlin using modern Android components like Jetpack Compose, Material3, Room3 and MediaPlayer3.</span></li>
+          <li><span class="msym check">check</span><span>Receives native audio or a transcoded format (default Opus 160) from the server.</span></li>
         </ul>
       </div>
 
@@ -92,7 +96,7 @@
         </div>
         <ul class="fg-list">
           <li><span class="msym check">check</span><span>Keep albums and playlists on the device and play them without a connection to the server.</span></li>
-          <li><span class="msym check">check</span><span>Automatically cache played tracks, with configurable cache size.</span></li>
+          <li><span class="msym check">check</span><span>Automatically cache played tracks, with configurable cache size. With option to pin albums/tracks manually so they never get removed automatically.</span></li>
         </ul>
       </div>
 
@@ -104,7 +108,7 @@
         <ul class="fg-list">
           <li><span class="msym check">check</span><span>Use your phone to control music playing on any Chromecast device.</span></li>
           <li><span class="msym check">check</span><span>Uses its own Chromecast implementation, so works on de-Googled phones.</span></li>
-          <li><span class="msym check">check</span><span>Uses phone as bridge if your server is behind a VPN but the player is not.</span></li>
+          <li><span class="msym check">check</span><span>Uses phone as bridge if your server is behind a VPN but the player is not (e.g. play on the hotel TV which cannot reach your server directly).</span></li>
         </ul>
       </div>
 
@@ -117,7 +121,7 @@
     <div class="dl-copy">
       <span class="eyebrow" style="color:var(--gold)">Get the app</span>
       <h2>Download for Android.</h2>
-      <p>Install the app, point it at your server address, and sign in with your GainDrive account.</p>
+      <p>Install the app, point it at your server address, and sign in with your account details.</p>
       <div class="dl-cta">
         <a class="btn btn-gold" href="https://github.com/kpeeters/gaindrive/releases/latest" target="_blank" rel="noopener">
           <span class="msym">download</span>
@@ -134,7 +138,7 @@
     <div class="footer-top">
       <div>
         <a class="brand" href="index.html"><img src="assets/gaindrive.svg" alt="GainDrive logo" style="width:36px;height:36px;border-radius:7px"><b>GainDrive</b></a>
-        <p class="tag">A self-hosted music server with a built-in web player and an Android client.</p>
+        <p class="tag">Full-featured OpenSubsonic-compatible audio/video server, and separate Web, Android and iOS players. Open source (GPLv3).</p>
       </div>
       <div class="footer-cols">
         <div class="col">
@@ -149,6 +153,7 @@
           <a href="docs.html">Documentation</a>
           <a href="https://opensubsonic.netlify.app/" target="_blank" rel="noopener">OpenSubsonic</a>
           <a href="https://github.com/kpeeters/gaindrive/releases" target="_blank" rel="noopener">Changelog</a>
+          <a href="privacy.html">Privacy policy</a>
         </div>
         <div class="col">
           <h5>Project</h5>
@@ -165,5 +170,6 @@
   </div>
 </footer>
 
+<script src="nav.js"></script>
 </body>
 </html>
