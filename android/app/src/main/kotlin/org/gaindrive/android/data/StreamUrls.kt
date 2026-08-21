@@ -84,6 +84,28 @@ class StreamUrls @Inject constructor(
 	}
 
 	/**
+	 * The file as it stands, for a Cast receiver that fetches from the server
+	 * itself. See `SettingsStore.castOriginal` for why that route alone.
+	 *
+	 * Deliberately does **not** prefer a quality already held, the way
+	 * [forPlayback] does: a copy stored at the streaming quality is the answer
+	 * to a different question here, and preferring it would defeat the setting
+	 * on precisely the tracks the user listens to most.
+	 *
+	 * The account ceiling still applies — `AudioQuality.cappedBy` turns a
+	 * request for the original into mp3 at the cap — because the server would
+	 * enforce it whatever was asked for. So "original" means "as far as the
+	 * account allows", which the track info dialog's `Sent` row makes visible.
+	 *
+	 * The returned `cacheKey` names bytes nobody will store: the receiver
+	 * fetches this URL, not the phone. It is carried only because
+	 * [StreamTarget] travels as one value, and the direct cast path returns
+	 * without ever reading it.
+	 */
+	suspend fun forCastOriginal(ref: ItemRef): StreamTarget? =
+		build(ref, AudioQuality.ORIGINAL)
+
+	/**
 	 * Where to fetch a video from, and how it will have to be seeked.
 	 *
 	 * Two parameters are conspicuously absent, and both omissions are

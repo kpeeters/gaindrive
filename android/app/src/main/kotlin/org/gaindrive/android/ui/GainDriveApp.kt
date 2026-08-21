@@ -53,6 +53,7 @@ import org.gaindrive.android.ui.playlists.PlaylistsScreen
 import org.gaindrive.android.ui.recents.RecentsScreen
 import org.gaindrive.android.ui.search.SearchScreen
 import org.gaindrive.android.ui.settings.AppearanceSettingsScreen
+import org.gaindrive.android.ui.settings.CastSettingsScreen
 import org.gaindrive.android.ui.settings.LibrarySettingsScreen
 import org.gaindrive.android.ui.settings.ServerEditScreen
 import org.gaindrive.android.ui.settings.ServersSettingsScreen
@@ -320,6 +321,7 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 					onOpenServers = { navController.navigate(Route.SettingsServers) },
 					onOpenLibrary = { navController.navigate(Route.SettingsLibrary) },
 					onOpenStorage = { navController.navigate(Route.SettingsStorage) },
+					onOpenCasting = { navController.navigate(Route.SettingsCasting) },
 					onOpenAppearance = { navController.navigate(Route.SettingsAppearance) },
 				)
 			}
@@ -339,6 +341,10 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 
 			composable<Route.SettingsStorage> {
 				StorageSettingsScreen(onBack = { navController.popBackStack() })
+			}
+
+			composable<Route.SettingsCasting> {
+				CastSettingsScreen(onBack = { navController.popBackStack() })
 			}
 
 			composable<Route.SettingsAppearance> {
@@ -425,6 +431,7 @@ private fun NavDestination?.isDetail(): Boolean =
 			hasRoute(Route.SettingsServers::class) ||
 			hasRoute(Route.SettingsLibrary::class) ||
 			hasRoute(Route.SettingsStorage::class) ||
+			hasRoute(Route.SettingsCasting::class) ||
 			hasRoute(Route.SettingsAppearance::class)
 		)
 

@@ -2,10 +2,13 @@ package org.gaindrive.android.playback.cast
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.gaindrive.android.data.ServerRegistry
+import org.gaindrive.android.data.SettingsStore
+import org.gaindrive.android.data.StreamTarget
 import org.gaindrive.android.data.StreamUrls
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.model.AudioQuality
@@ -58,6 +61,38 @@ data class CastTarget(
 	val bridged: Boolean get() = route != CastRoute.DIRECT
 }
 
+/**
+ * Whether a Cast receiver will decode a file of this type as it stands.
+ *
+ * The set is what the Default Media Receiver documents, intersected with the
+ * types `src/codecs.hh` can report. It reports seven for audio and only
+ * `audio/x-ms-wma` is missing here — but this is an allowlist rather than a
+ * one-entry denylist on purpose: a codec added to the server later would
+ * otherwise be sent to a receiver that cannot play it, and demoting to a
+ * transcode is the safe direction of a wrong guess.
+ *
+ * **ALAC is the gap it cannot close.** `songs.codec` is a file extension, so
+ * the server reports `audio/mp4` for AAC and for ALAC alike and nothing here
+ * can tell them apart. An ALAC `.m4a` cast at original quality will still fail.
+ *
+ * A null type is a queue the system restored from bare media ids, and is
+ * refused for the same reason: not knowing is not the same as knowing it is
+ * fine.
+ *
+ * Top-level rather than a member so it can be exercised without `android.util`
+ * being loaded — the class it sits beside logs, this function does not.
+ */
+internal fun castPlaysNatively(mime: String?): Boolean = mime in CAST_NATIVE_TYPES
+
+private val CAST_NATIVE_TYPES = setOf(
+	"audio/flac",
+	"audio/mpeg",
+	"audio/mp4",
+	"audio/aac",
+	"audio/ogg",
+	"audio/wav",
+)
+
 @Singleton
 class CastUrls @Inject constructor(
 	private val streamUrls: StreamUrls,
@@ -66,11 +101,20 @@ class CastUrls @Inject constructor(
 	private val bridge: CastBridge,
 	private val audioCache: AudioCache,
 	private val httpClient: OkHttpClient,
+	private val settings: SettingsStore,
 ) {
 
 	/**
-	 * Resolves the stream URL exactly as local playback would — same quality,
-	 * same per-server bitrate cap — and then decides who fetches it.
+	 * Decides who fetches the track, and then at what quality.
+	 *
+	 * That order is the reverse of what this used to do, and it is the whole
+	 * shape of `SettingsStore.castOriginal`: the original file is worth sending
+	 * only to a receiver that pulls it off the server itself, so the route has
+	 * to be settled first. Asking costs nothing — [CastReachability] caches its
+	 * answer per server and network, not per track.
+	 *
+	 * Every other route resolves exactly as local playback would, same quality
+	 * and same per-server bitrate cap.
 	 *
 	 * [source] is what the queue entry already knows. Its MIME types are used
 	 * rather than re-derived so that the type declared in the `LOAD` and the type
@@ -79,13 +123,20 @@ class CastUrls @Inject constructor(
 	suspend fun forCast(ref: ItemRef, source: CastSource): CastTarget? {
 		if (source.isVideo) return forVideo(ref, source)
 
-		val target = streamUrls.forPlayback(ref) ?: return null
 		val config = registry.get(ref.server) ?: return null
-		val mime = target.mimeType ?: source.sourceMime
 
 		if (reachability.canReachDirectly(config)) {
-			return CastTarget(target.url, mime, CastRoute.DIRECT, target.quality)
+			val direct = directTarget(ref, source) ?: return null
+			return CastTarget(
+				direct.url,
+				direct.mimeType ?: source.sourceMime,
+				CastRoute.DIRECT,
+				direct.quality,
+			)
 		}
+
+		val target = streamUrls.forPlayback(ref) ?: return null
+		val mime = target.mimeType ?: source.sourceMime
 
 		// Downloaded: serve the copy on the device rather than fetching it back
 		// from the server through the phone. Not an optimisation — it is the
@@ -114,6 +165,29 @@ class CastUrls @Inject constructor(
 			if (relayed != null) CastRoute.RELAY else CastRoute.DIRECT,
 			target.quality,
 		)
+	}
+
+	/**
+	 * What to hand a receiver that will fetch from the server itself.
+	 *
+	 * Two conditions have to hold before the original is sent, and the second
+	 * is not a caution but a fix: a `.wma` handed over as it stands fails the
+	 * `LOAD` with `IDLE`/`ERROR`, is retried once by [LoadRetryWatcher], fails
+	 * again and stalls — with nothing on screen to say why. Falling back to the
+	 * streaming quality plays the track instead, and the log line is what makes
+	 * "why is this one still Opus" answerable.
+	 */
+	private suspend fun directTarget(ref: ItemRef, source: CastSource): StreamTarget? {
+		if (!settings.castOriginal.first()) return streamUrls.forPlayback(ref)
+		if (!castPlaysNatively(source.sourceMime)) {
+			Log.i(
+				TAG,
+				"original ${source.sourceMime ?: "type unknown"} is not one the" +
+					" receiver takes; sending the streaming quality",
+			)
+			return streamUrls.forPlayback(ref)
+		}
+		return streamUrls.forCastOriginal(ref)
 	}
 
 	/**

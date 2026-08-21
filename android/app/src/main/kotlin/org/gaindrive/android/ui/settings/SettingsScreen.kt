@@ -21,9 +21,9 @@ import org.gaindrive.android.ui.components.formatBytes
  * own.
  *
  * Nested rather than one long list, which is what this was and was already
- * outgrowing. Casting, metadata editing, user administration and upload are all
- * still to come, and a flat screen would become a scroll nobody reads. Nesting
- * is also what Android's own Settings does, so it needs no explaining.
+ * outgrowing. Metadata editing, user administration and upload are all still to
+ * come, and a flat screen would become a scroll nobody reads. Nesting is also
+ * what Android's own Settings does, so it needs no explaining.
  *
  * Not a navigation drawer: with five top-level destinations the bottom bar is
  * exactly the control Material 3 intends, and a drawer beside it on a phone
@@ -34,6 +34,7 @@ fun SettingsScreen(
 	onOpenServers: () -> Unit,
 	onOpenLibrary: () -> Unit,
 	onOpenStorage: () -> Unit,
+	onOpenCasting: () -> Unit,
 	onOpenAppearance: () -> Unit,
 	viewModel: SettingsViewModel = hiltViewModel(),
 ) {
@@ -60,6 +61,14 @@ fun SettingsScreen(
 				title = "Storage & offline",
 				summary = storageSummary(state),
 				onClick = onOpenStorage,
+			)
+		}
+		item {
+			CategoryRow(
+				title = "Casting",
+				summary = if (state.castOriginal) "Original quality when direct"
+				else "Same quality as this phone",
+				onClick = onOpenCasting,
 			)
 		}
 		item {

@@ -63,6 +63,9 @@ sealed interface Route {
 	data object SettingsStorage : Route
 
 	@Serializable
+	data object SettingsCasting : Route
+
+	@Serializable
 	data object SettingsAppearance : Route
 
 	/** Null [serverId] means "add a server" — the same screen serves both. */

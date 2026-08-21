@@ -142,6 +142,30 @@ class SettingsStore @Inject constructor(
 	}
 
 	/**
+	 * Whether a Chromecast fetching from the server itself is sent the file as
+	 * it stands, rather than the streaming quality above.
+	 *
+	 * The setting exists because [audioQuality] answers a different question:
+	 * what is worth sending to *this phone*, where a transcode saves battery,
+	 * airtime and cache. A television pulling straight off the server over a
+	 * wired LAN spends none of those, so the transcode there buys nothing and
+	 * costs fidelity.
+	 *
+	 * It applies only to that route. A cast relayed through the phone crosses
+	 * this phone's Wi-Fi and, when roaming, its VPN and mobile data — the
+	 * situation the bridge exists for, and the last place to start sending
+	 * FLAC. `CastUrls` is where that distinction is made.
+	 *
+	 * Off by default: turning it on changes what every existing cast sends, and
+	 * on a weak access point that is a regression nobody asked for.
+	 */
+	val castOriginal: Flow<Boolean> = dataStore.data.map { it[CAST_ORIGINAL] ?: false }
+
+	suspend fun setCastOriginal(enabled: Boolean) {
+		dataStore.edit { it[CAST_ORIGINAL] = enabled }
+	}
+
+	/**
 	 * Whether the user has ever chosen a quality.
 	 *
 	 * Used once, at startup: someone upgrading with pins already downloaded
@@ -164,5 +188,6 @@ class SettingsStore @Inject constructor(
 		private val DOWNLOAD_UNMETERED_ONLY = booleanPreferencesKey("download_unmetered_only")
 		private val OFFLINE_MODE = booleanPreferencesKey("offline_mode")
 		private val AUDIO_QUALITY = stringPreferencesKey("audio_quality")
+		private val CAST_ORIGINAL = booleanPreferencesKey("cast_original")
 	}
 }

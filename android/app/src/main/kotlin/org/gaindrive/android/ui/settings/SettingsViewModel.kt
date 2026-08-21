@@ -28,6 +28,7 @@ data class SettingsUiState(
 	val servers: List<ServerConfig> = emptyList(),
 	val themeMode: ThemeMode = ThemeMode.AUTO,
 	val mergeDuplicateAlbums: Boolean = false,
+	val castOriginal: Boolean = false,
 	val storage: StorageUiState = StorageUiState(),
 	val pins: List<PinnedItem> = emptyList(),
 	/** Distinguishes "no servers yet" from "not loaded yet" for routing. */
@@ -46,6 +47,14 @@ data class StorageUiState(
 	/** Coil's disk cache; see [ImageCache.sizeBytes] for what it leaves out. */
 	val imageBytes: Long = 0,
 )
+
+/**
+ * Two switches that share a slot in the outer `combine`, which is full at its
+ * typed limit of five flows — the same squeeze [StoragePrefs] answers. They ride
+ * together because there was room for one more value, not because they belong
+ * together; both are unpacked into [SettingsUiState], which stays flat.
+ */
+private data class Toggles(val mergeDuplicateAlbums: Boolean, val castOriginal: Boolean)
 
 /** The stored half of [StorageUiState]; the measured half comes from the cache. */
 private data class StoragePrefs(
@@ -108,18 +117,25 @@ class SettingsViewModel @Inject constructor(
 	 */
 	val pinStatuses: StateFlow<Map<String, PinStatus>> = pins.statuses
 
+	private val toggles = combine(
+		settings.mergeDuplicateAlbums,
+		settings.castOriginal,
+		::Toggles,
+	)
+
 	val state: StateFlow<SettingsUiState> =
 		combine(
 			registry.servers,
 			settings.themeMode,
-			settings.mergeDuplicateAlbums,
+			toggles,
 			storage,
 			pinnedItems,
-		) { servers, theme, merge, storage, pins ->
+		) { servers, theme, toggles, storage, pins ->
 			SettingsUiState(
 				servers = servers,
 				themeMode = theme,
-				mergeDuplicateAlbums = merge,
+				mergeDuplicateAlbums = toggles.mergeDuplicateAlbums,
+				castOriginal = toggles.castOriginal,
 				storage = storage,
 				pins = pins,
 				loaded = true,
@@ -144,6 +160,13 @@ class SettingsViewModel @Inject constructor(
 
 	fun setMergeDuplicateAlbums(enabled: Boolean) =
 		viewModelScope.launch { settings.setMergeDuplicateAlbums(enabled) }
+
+	/**
+	 * No side effect, unlike [setAudioQuality]: nothing is stored for a cast, so
+	 * there is nothing to re-fetch. It applies from the next `LOAD`.
+	 */
+	fun setCastOriginal(enabled: Boolean) =
+		viewModelScope.launch { settings.setCastOriginal(enabled) }
 
 	fun setCacheMaxBytes(bytes: Long) =
 		viewModelScope.launch { settings.setCacheMaxBytes(bytes) }
