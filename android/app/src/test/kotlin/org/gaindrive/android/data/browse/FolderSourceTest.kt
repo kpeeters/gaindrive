@@ -4,8 +4,10 @@ import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFact
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.net.SubsonicApi
@@ -51,6 +53,29 @@ class FolderSourceTest {
 		server.enqueue(
 			MockResponse().setHeader("Content-Type", "application/json").setBody(body)
 		)
+	}
+
+	/**
+	 * Answer by the `id` a request asks for, rather than in the order responses
+	 * were queued.
+	 *
+	 * MockWebServer's default dispatcher is FIFO, so a caller that fetches
+	 * concurrently — [FolderSource.albumDetail] does, one request per disc
+	 * folder — can be handed the body belonging to the other request. That is a
+	 * coin flip, not a test. Setting a dispatcher replaces the queue, but
+	 * [setUp] builds a fresh server per test, so the sequential tests above keep
+	 * their [respond].
+	 */
+	private fun respondById(bodies: Map<String, String>) {
+		server.dispatcher = object : Dispatcher() {
+			override fun dispatch(request: RecordedRequest): MockResponse {
+				val id = request.requestUrl?.queryParameter("id")
+				val body = id?.let { bodies[it] }
+					?: return MockResponse().setResponseCode(404)
+				return MockResponse()
+					.setHeader("Content-Type", "application/json").setBody(body)
+			}
+		}
 	}
 
 	private fun ref(id: String) = ItemRef(serverId, id)
@@ -105,22 +130,22 @@ class FolderSourceTest {
 
 	@Test
 	fun `an album directory of subfolders is flattened into discs`() = runTest {
-		// The album folder: two discs and no tracks of its own.
-		respond(
-			"""{"subsonic-response":{"status":"ok","directory":{"id":"77",
-			   "name":"The Wall","parent":"12","child":[
-			     {"id":"90","parent":"77","isDir":true,"title":"CD1"},
-			     {"id":"91","parent":"77","isDir":true,"title":"CD2"}]}}}"""
-		)
-		respond(
-			"""{"subsonic-response":{"status":"ok","directory":{"id":"90",
-			   "name":"CD1","parent":"77","child":[
-			     {"id":"501","parent":"90","isDir":false,"title":"In the Flesh?"}]}}}"""
-		)
-		respond(
-			"""{"subsonic-response":{"status":"ok","directory":{"id":"91",
-			   "name":"CD2","parent":"77","child":[
-			     {"id":"601","parent":"91","isDir":false,"title":"Hey You"}]}}}"""
+		// The two disc folders are fetched concurrently, so the mock has to
+		// answer by id — see respondById.
+		respondById(
+			mapOf(
+				// The album folder: two discs and no tracks of its own.
+				"77" to """{"subsonic-response":{"status":"ok","directory":{"id":"77",
+				   "name":"The Wall","parent":"12","child":[
+				     {"id":"90","parent":"77","isDir":true,"title":"CD1"},
+				     {"id":"91","parent":"77","isDir":true,"title":"CD2"}]}}}""",
+				"90" to """{"subsonic-response":{"status":"ok","directory":{"id":"90",
+				   "name":"CD1","parent":"77","child":[
+				     {"id":"501","parent":"90","isDir":false,"title":"In the Flesh?"}]}}}""",
+				"91" to """{"subsonic-response":{"status":"ok","directory":{"id":"91",
+				   "name":"CD2","parent":"77","child":[
+				     {"id":"601","parent":"91","isDir":false,"title":"Hey You"}]}}}""",
+			)
 		)
 
 		val detail = FolderSource.albumDetail(api, ref("77"))!!

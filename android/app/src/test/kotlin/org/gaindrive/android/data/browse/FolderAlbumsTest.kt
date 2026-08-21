@@ -2,7 +2,6 @@ package org.gaindrive.android.data.browse
 
 import org.gaindrive.android.net.SongDto
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Test
 
 /** Turning an album folder's subdirectories into disc numbers. */
@@ -54,15 +53,19 @@ class FolderAlbumsTest {
 	}
 
 	/**
-	 * `season` decides whether a group is headed "Series 2" or "Disc 2", so
-	 * synthesising one would label a two-CD album a television series.
+	 * `season` decides whether a group is headed "Series 2" or "Disc 2", and the
+	 * rule is per folder: a disc whose tracks never had one must not acquire one
+	 * from its position, or a two-CD album becomes a television series. A folder
+	 * whose tracks all had one keeps it, so a show with an unnumbered `Specials`
+	 * folder still heads that one group "Disc" — the same answer the server
+	 * gives. Mixed input is therefore allowed to produce mixed headings.
 	 */
 	@Test
-	fun `season is dropped unless every track already had one`() {
+	fun `season is synthesised only for a folder whose tracks all had one`() {
 		val flat = flattenDiscs(
 			listOf(listOf(song("A"), song("B")), listOf(song("C", season = 9)))
 		)
-		flat.forEach { assertNull(it.season) }
+		assertEquals(listOf(null, null, 2), flat.map { it.season })
 		assertEquals(listOf(1, 1, 2), flat.map { it.discNumber })
 	}
 

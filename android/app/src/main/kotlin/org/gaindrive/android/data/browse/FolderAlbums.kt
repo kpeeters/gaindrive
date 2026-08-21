@@ -37,11 +37,14 @@ val DISC_ORDER: Comparator<SongDto> = compareBy { naturalKey(it.title) }
  *   Distrusting the tags is the entire reason someone turned folder browsing on;
  *   a set whose discs all claim to be disc 1 is precisely the library this
  *   exists for.
- * * **`season` is dropped unless every track in the folder already had one.**
- *   The two fields carry the same number and `season` only decides whether the
- *   group is headed "Series 2" or "Disc 2", so synthesising one would label a
- *   two-CD album a television series. Keeping it where it was already unanimous
- *   preserves a real series read through folders.
+ * * **`season` is dropped unless every track in *that disc folder* already had
+ *   one**, judged per folder rather than across the album. The two fields carry
+ *   the same number and `season` only decides whether the group is headed
+ *   "Series 2" or "Disc 2", so synthesising one would label a two-CD album a
+ *   television series. Keeping it where it was already unanimous preserves a
+ *   real series read through folders — including a show with an unnumbered
+ *   `Specials` folder, which heads that one group "Disc" and the rest "Series",
+ *   exactly as the server does.
  */
 fun flattenDiscs(discs: List<List<SongDto>>): List<SongDto> =
 	discs.flatMapIndexed { index, songs ->
