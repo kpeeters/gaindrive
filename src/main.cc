@@ -52,9 +52,9 @@ static bool parse_root(const std::string& arg, const std::string& type,
 // so a bad or duplicated name is not a cosmetic problem: it silently detaches
 // content from the rows that reference it.
 static bool validate_roots(const std::vector<MediaStore::Root>& roots,
-                           bool need_library, std::string& err)
+                           std::string& err)
 	{
-	int uploads = 0, library = 0;
+	int uploads = 0;
 	std::set<std::string> names;
 	for (const auto& r : roots) {
 		if (r.name.empty()) { err = "a root has an empty name"; return false; }
@@ -75,18 +75,24 @@ static bool validate_roots(const std::vector<MediaStore::Root>& roots,
 			err = "root '" + r.name + "' path is not a directory: " + r.path;
 			return false;
 			}
-		if (r.type == "uploads") ++uploads; else ++library;
+		if (r.type == "uploads") ++uploads;
 		}
 	if (uploads > 1) {
 		err = "at most one uploads root may be configured";
 		return false;
 		}
-	if (need_library && library == 0) {
-		err = "no library root configured; pass at least one --artist-root "
-		      "or --category-root";
-		return false;
-		}
 	return true;
+	}
+
+// Anything that is not the uploads root is library content. Deliberately not
+// part of validate_roots(): having no library root is not a malformed
+// configuration, it only matters at the moment the server would actually read
+// one, and a start that stops before then must not be turned away for it.
+static bool has_library_root(const std::vector<MediaStore::Root>& roots)
+	{
+	for (const auto& r : roots)
+		if (r.type != "uploads") return true;
+	return false;
 	}
 
 // Ctrl-C at a password prompt would otherwise kill the process with ECHO still
@@ -530,11 +536,12 @@ int main(int argc, char* argv[])
 		                      args.count("tmdb-tv") > 0, key);
 		}
 
-	// --add-user touches no library, so it is the one mode that may run with
-	// no roots configured.
+	// Only the shape of what was configured is checked here. Whether a library
+	// root is *required* is decided further down, once it is known whether this
+	// process is going to serve a library at all.
 	{
 	std::string err;
-	if (!validate_roots(roots, !args.count("add-user"), err)) {
+	if (!validate_roots(roots, err)) {
 		std::cerr << "Error: " << err << "\n";
 		return 1;
 		}
@@ -583,8 +590,29 @@ int main(int argc, char* argv[])
 		{
 		MediaStore store(db_path, roots, user_db_path, video_art_px,
 		                 video_art_frames, video_art_embedded);
-		if (store.list_users().empty() && !create_first_user(store))
+		bool first_start = store.list_users().empty();
+		if (first_start && !create_first_user(store))
 			return 1;
+
+		// A library root can only come from the command line or the config
+		// file, so a server started without one has nothing to serve and no
+		// way of being given anything — hence an error rather than an empty
+		// library. It is checked here rather than with the rest of the root
+		// validation because a first start reads no music: it creates the
+		// account and stops, and complaining about a library it was never
+		// going to open only obscures the one thing the operator has to do
+		// first.
+		if (!has_library_root(roots)) {
+			if (first_start) {
+				std::cout << "\nNothing is configured to serve yet. Start the "
+				             "server with at least one library root:\n"
+				             "  gaindrive --artist-root music=/path/to/music\n";
+				return 0;
+				}
+			std::cerr << "Error: no library root configured; pass at least one "
+			             "--artist-root or --category-root\n";
+			return 1;
+			}
 		}
 
 		GainDrive gd(db_path, roots, upload_dir, no_scan, debug, flat_multi_disc,
