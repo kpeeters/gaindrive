@@ -72,12 +72,15 @@ jobs:
         run: ./gradlew assembleRelease
 
       # Same version derivation as build.yml, so the APK and the server
-      # binaries of one run are recognisable as a pair.
+      # binaries of one run are recognisable as a pair. Untagged, that is
+      # VERSION plus the commit rather than a literal 0.0 — nothing here stamps
+      # a version into the APK (app/build.gradle.kts reads ../VERSION itself),
+      # so a 0.0 filename was a name the installed app disagreed with.
       - id: name
         working-directory: .
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then v="${GITHUB_REF_NAME#v}";
-          else v="0.0-$(git rev-parse --short HEAD)"; fi
+          else v="$(sed -n 's/^version=//p' VERSION)-$(git rev-parse --short HEAD)"; fi
           mv android/app/build/outputs/apk/release/app-release.apk \
              "gaindrive-$v.apk"
           echo "apk=gaindrive-$v.apk" >> "$GITHUB_OUTPUT"

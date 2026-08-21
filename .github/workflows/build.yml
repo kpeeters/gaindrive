@@ -25,10 +25,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # An untagged build takes its version from VERSION too, not a literal
+      # 0.0, so that what a binary reports is always the version of the tree it
+      # was built from; the commit is what says it is not a release. The old
+      # 0.0 made an artifact from master look like a version that exists
+      # nowhere, and made the APK's filename disagree with the versionName
+      # Gradle had already read out of the same file.
       - id: ver
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then v="${GITHUB_REF_NAME#v}";
-          else v="0.0-$(git rev-parse --short HEAD)"; fi
+          else v="$(sed -n 's/^version=//p' VERSION)-$(git rev-parse --short HEAD)"; fi
           echo "v=$v" >> "$GITHUB_OUTPUT"
 
       # The tag is what stamps the binary, so it keeps overriding the VERSION
