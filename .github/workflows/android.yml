@@ -1,0 +1,115 @@
+name: android
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  # The path filter is on pull_request only, deliberately. A tag push can
+  # present an empty changed-file set, and a filtered job would then be skipped
+  # — taking the release upload with it.
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'VERSION'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: android
+    # Job level rather than step level, so the decode step's own `if:` can read
+    # KEYSTORE_B64 — a step's own env is not in scope for its condition.
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+      GAINDRIVE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      GAINDRIVE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+    steps:
+      # Not a sparse checkout of android/: app/build.gradle.kts reads
+      # ../VERSION at configure time and throws before compiling anything.
+      - uses: actions/checkout@v4
+
+      # JavaVersion.VERSION_17 / JvmTarget.JVM_17, as declared by the build.
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+
+      # Wrapper and dependency cache. No Android SDK step: the runner image
+      # ships it with ANDROID_HOME set and the licences accepted, and AGP
+      # fetches compileSdk 35 itself.
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Without these secrets the step is skipped and the release variant falls
+      # back to the debug key — see the signingConfigs comment in
+      # app/build.gradle.kts. That is not a failure, but it does mean the APK
+      # this workflow produces is debug-signed until the secrets exist.
+      #
+      # The path must be absolute: storeFile = rootProject.file(path) resolves
+      # a relative one against android/.
+      - name: Decode signing keystore
+        if: env.KEYSTORE_B64 != ''
+        run: |
+          printf %s "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/upload.p12"
+          echo "GAINDRIVE_KEYSTORE=$RUNNER_TEMP/upload.p12" >> "$GITHUB_ENV"
+
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest
+
+      # A red run with no report is a local re-run for no reason.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: android-test-reports
+          path: |
+            android/app/build/test-results/
+            android/app/build/reports/tests/
+
+      - name: Build
+        run: ./gradlew assembleRelease
+
+      # Same version derivation as build.yml, so the APK and the server
+      # binaries of one run are recognisable as a pair.
+      - id: name
+        working-directory: .
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then v="${GITHUB_REF_NAME#v}";
+          else v="0.0-$(git rev-parse --short HEAD)"; fi
+          mv android/app/build/outputs/apk/release/app-release.apk \
+             "gaindrive-$v.apk"
+          echo "apk=gaindrive-$v.apk" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.apk }}
+          path: ${{ steps.name.outputs.apk }}
+          if-no-files-found: error
+
+  # Attaching the APK to the release rather than merging this workflow into
+  # build.yml is the trade-off taken here, and the polling below is its price:
+  # build.yml's release job is what *creates* the release, a second
+  # `gh release create` for the same tag fails, and this job usually finishes
+  # first because the server build compiles nine dependencies from source. So
+  # wait for the release to exist rather than creating it. Do not "simplify"
+  # this into a create — merge the two workflows instead.
+  release:
+    needs: apk
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {merge-multiple: true, path: dist}
+      - run: |
+          for _ in $(seq 1 60); do
+            gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              >/dev/null 2>&1 && break
+            sleep 30
+          done
+          gh release upload "$GITHUB_REF_NAME" dist/*.apk --clobber \
+            --repo "$GITHUB_REPOSITORY"
+        env: {GH_TOKEN: '${{ github.token }}'}
