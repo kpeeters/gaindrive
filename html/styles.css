@@ -401,6 +401,7 @@ section.dark .sec-head p { color: rgba(246,239,224,0.7); }
   .features { grid-template-columns: 1fr; }
   .specs { grid-template-columns: 1fr; }
   .hero-meta { gap: 20px; }
+  .phone { padding: 5px; }
 }
 
 /* ============================================================

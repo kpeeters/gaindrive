@@ -12,7 +12,11 @@ PLAY_FEAT := $(PLAY_DIR)/feature-1024x500.png
 PLAY_RAW  := $(PLAY_DIR)/.icon-raw.png
 FEAT_RAW  := $(PLAY_DIR)/.feature-raw.png
 
-.PHONY: upload-web create-play-assets
+.PHONY: help upload-web create-play-assets
+
+help:
+	@echo "upload-web:          Upload web pages to server."
+	@echo "create-play-assets:  Convert original assets to play store png files."
 
 upload-web:
 	rsync -r html/ gaindrive-html:/var/www/gaindrive/
