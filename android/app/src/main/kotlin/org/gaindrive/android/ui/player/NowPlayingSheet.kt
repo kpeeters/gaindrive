@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -51,6 +52,7 @@ fun NowPlayingSheet(
 	onSeek: (Long) -> Unit,
 	onJumpTo: (Int) -> Unit,
 	onCast: () -> Unit,
+	onInfo: () -> Unit,
 	onRemoveFromQueue: (Int) -> Unit,
 	onWatch: () -> Unit,
 ) {
@@ -185,31 +187,48 @@ fun NowPlayingSheet(
 							)
 						}
 					}
-					// Offered for a video only when the receiver could actually
-					// play it: one the server can hand over as a seekable MP4.
-					// For the rest a button whose only outcome is a refusal is
-					// worse than no button. Still shown while casting, so the
-					// way to disconnect stays where it always is.
-					if (!state.isVideo || state.nativeSeek || casting) {
-						IconButton(
-							onClick = onCast,
-							modifier = Modifier
-								.align(Alignment.CenterEnd)
-								.padding(end = 12.dp),
-						) {
+					// A Row rather than two aligned buttons, so the transport
+					// stays centred whatever the trailing pair adds up to —
+					// which is the same reason the Box above exists.
+					Row(
+						modifier = Modifier
+							.align(Alignment.CenterEnd)
+							.padding(end = 12.dp),
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						// Always offered, unlike cast: it has no outcome that
+						// is only a refusal, and what it answers — how the
+						// audio is reaching the speaker, and in what format —
+						// is nowhere else in the UI.
+						IconButton(onClick = onInfo) {
 							Icon(
-								imageVector = if (casting) {
-									Icons.Default.CastConnected
-								} else {
-									Icons.Default.Cast
-								},
-								contentDescription = if (casting) "Casting" else "Cast",
-								tint = if (casting) {
-									MaterialTheme.colorScheme.primary
-								} else {
-									MaterialTheme.colorScheme.onSurfaceVariant
-								},
+								Icons.Default.Info,
+								contentDescription = "Track info",
+								tint = MaterialTheme.colorScheme.onSurfaceVariant,
 							)
+						}
+						// Offered for a video only when the receiver could
+						// actually play it: one the server can hand over as a
+						// seekable MP4. For the rest a button whose only
+						// outcome is a refusal is worse than no button. Still
+						// shown while casting, so the way to disconnect stays
+						// where it always is.
+						if (!state.isVideo || state.nativeSeek || casting) {
+							IconButton(onClick = onCast) {
+								Icon(
+									imageVector = if (casting) {
+										Icons.Default.CastConnected
+									} else {
+										Icons.Default.Cast
+									},
+									contentDescription = if (casting) "Casting" else "Cast",
+									tint = if (casting) {
+										MaterialTheme.colorScheme.primary
+									} else {
+										MaterialTheme.colorScheme.onSurfaceVariant
+									},
+								)
+							}
 						}
 					}
 				}

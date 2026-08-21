@@ -46,6 +46,7 @@ import org.gaindrive.android.ui.player.CastViewModel
 import org.gaindrive.android.ui.player.MiniPlayer
 import org.gaindrive.android.ui.player.NowPlayingSheet
 import org.gaindrive.android.ui.player.PlayerViewModel
+import org.gaindrive.android.ui.player.TrackInfoDialog
 import org.gaindrive.android.ui.player.VideoScreen
 import org.gaindrive.android.ui.playlists.PlaylistDetailScreen
 import org.gaindrive.android.ui.playlists.PlaylistsScreen
@@ -85,6 +86,7 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 	val playerViewModel: PlayerViewModel = hiltViewModel()
 	val playerState by playerViewModel.state.collectAsStateWithLifecycle()
 	var nowPlayingOpen by remember { mutableStateOf(false) }
+	var trackInfoOpen by remember { mutableStateOf(false) }
 
 	// Held here rather than inside the picker so the Now Playing sheet can show
 	// whether a device is connected without opening anything. Same view model
@@ -351,6 +353,7 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 				VideoScreen(
 					onBack = { navController.popBackStack() },
 					onCast = { castPickerOpen = true },
+					onInfo = { trackInfoOpen = true },
 				)
 			}
 		}
@@ -376,6 +379,7 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 			onSeek = playerViewModel::seekTo,
 			onJumpTo = playerViewModel::jumpTo,
 			onCast = { castPickerOpen = true },
+			onInfo = { trackInfoOpen = true },
 			onRemoveFromQueue = playerViewModel::removeFromQueue,
 			onWatch = {
 				nowPlayingOpen = false
@@ -388,6 +392,18 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 	// possible once that sheet has closed itself behind the tap.
 	if (castPickerOpen) {
 		CastDeviceSheet(onDismiss = { castPickerOpen = false })
+	}
+
+	// Outside it for the same reason, and gated on there being a track: the
+	// dialog describes one, and the queue can empty underneath it.
+	if (trackInfoOpen) {
+		playerState.current?.let { current ->
+			TrackInfoDialog(
+				current = current,
+				casting = castDevice != null,
+				onDismiss = { trackInfoOpen = false },
+			)
+		}
 	}
 }
 

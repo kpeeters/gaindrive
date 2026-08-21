@@ -8,6 +8,7 @@ import okhttp3.Request
 import org.gaindrive.android.data.ServerRegistry
 import org.gaindrive.android.data.StreamUrls
 import org.gaindrive.android.data.cache.AudioCache
+import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.playback.CastSource
 import java.util.concurrent.TimeUnit
@@ -15,20 +16,47 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * What to hand a Cast receiver for a track: a URL it can actually fetch, and the
- * MIME type to declare for it.
+ * Who serves the bytes to the receiver. Three values rather than a `bridged`
+ * flag, because the third is not a relay at all and is the one worth telling
+ * apart: it is the branch that works with no connectivity, so a user asking
+ * "why is this playing when the server is unreachable" has an answer.
+ *
+ * Note none of these is "the server drives the Chromecast" — that mode is the
+ * web client's and is deliberately not ported; see `CAST.md`. The phone always
+ * holds the control channel.
+ */
+enum class CastRoute {
+	/** The receiver fetches `stream.view` from the owning server itself. */
+	DIRECT,
+
+	/** The receiver fetches from [CastBridge], which fetches from the server. */
+	RELAY,
+
+	/** The receiver fetches from [CastBridge], which serves a downloaded copy. */
+	LOCAL,
+}
+
+/**
+ * What to hand a Cast receiver for a track: a URL it can actually fetch, the
+ * MIME type to declare for it, and how it got to be that URL.
  *
  * [url] points at the owning server, or at the bridge relaying that server, or
  * at the bridge serving a copy already on the device — and the receiver cannot
  * tell the three apart. The decision is made per track, so a queue that spans
  * servers may mix them, which is the one place several servers make casting
- * easier rather than harder.
+ * easier rather than harder. [route] is the same decision written down, for the
+ * one observer that does need to tell them apart: the track info dialog.
  */
 data class CastTarget(
 	val url: String,
 	val mimeType: String?,
-	val bridged: Boolean,
-)
+	val route: CastRoute,
+	/** What the server was asked to send. Null for video, which is never asked. */
+	val quality: AudioQuality? = null,
+) {
+	/** Whether artwork has to travel the same road; see [CastUrls.artworkFor]. */
+	val bridged: Boolean get() = route != CastRoute.DIRECT
+}
 
 @Singleton
 class CastUrls @Inject constructor(
@@ -56,7 +84,7 @@ class CastUrls @Inject constructor(
 		val mime = target.mimeType ?: source.sourceMime
 
 		if (reachability.canReachDirectly(config)) {
-			return CastTarget(target.url, mime, bridged = false)
+			return CastTarget(target.url, mime, CastRoute.DIRECT, target.quality)
 		}
 
 		// Downloaded: serve the copy on the device rather than fetching it back
@@ -70,15 +98,22 @@ class CastUrls @Inject constructor(
 		// sleeping, going out of range or running flat.
 		storedCopy(target.cacheKey)?.let { length ->
 			bridge.publishLocal(target.cacheKey, mime, length)?.let { url ->
-				return CastTarget(url, mime, bridged = true)
+				return CastTarget(url, mime, CastRoute.LOCAL, target.quality)
 			}
 		}
 
 		// A bridge that will not start is not a reason to play nothing: the
 		// direct URL may still work, since the probe is a guess about the
-		// receiver, not a measurement of it.
-		val bridged = bridge.publish(target.url)
-		return CastTarget(bridged ?: target.url, mime, bridged = bridged != null)
+		// receiver, not a measurement of it. That fallback really does hand
+		// over a server URL, so it reports DIRECT — the route says what was
+		// done, not what was intended.
+		val relayed = bridge.publish(target.url)
+		return CastTarget(
+			relayed ?: target.url,
+			mime,
+			if (relayed != null) CastRoute.RELAY else CastRoute.DIRECT,
+			target.quality,
+		)
 	}
 
 	/**
@@ -113,10 +148,14 @@ class CastUrls @Inject constructor(
 		warmTranscode(target.url)
 
 		if (reachability.canReachDirectly(config)) {
-			return CastTarget(target.url, mime, bridged = false)
+			return CastTarget(target.url, mime, CastRoute.DIRECT)
 		}
-		val bridged = bridge.publish(target.url)
-		return CastTarget(bridged ?: target.url, mime, bridged = bridged != null)
+		val relayed = bridge.publish(target.url)
+		return CastTarget(
+			relayed ?: target.url,
+			mime,
+			if (relayed != null) CastRoute.RELAY else CastRoute.DIRECT,
+		)
 	}
 
 	/**

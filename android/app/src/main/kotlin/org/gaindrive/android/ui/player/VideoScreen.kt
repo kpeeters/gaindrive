@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
@@ -76,6 +77,7 @@ import org.gaindrive.android.ui.components.CoverArt
 fun VideoScreen(
 	onBack: () -> Unit,
 	onCast: () -> Unit,
+	onInfo: () -> Unit,
 	viewModel: PlayerViewModel = hiltViewModel(),
 	castViewModel: CastViewModel = hiltViewModel(),
 ) {
@@ -205,6 +207,7 @@ fun VideoScreen(
 				},
 				onSelectTextTrack = viewModel::selectTextTrack,
 				onCast = onCast,
+				onInfo = onInfo,
 			)
 		}
 	}
@@ -331,6 +334,7 @@ private fun Controls(
 	onSeek: (Long) -> Unit,
 	onSelectTextTrack: (Int?) -> Unit,
 	onCast: () -> Unit,
+	onInfo: () -> Unit,
 ) {
 	Box(
 		modifier = Modifier
@@ -375,6 +379,14 @@ private fun Controls(
 			// inert button would be a permanent fixture on every disc rip.
 			if (state.textTracks.isNotEmpty()) {
 				SubtitleMenu(state, onSelectTextTrack)
+			}
+			// Here for the same reason the cast button is: a video takes the
+			// app straight to this screen, so a control that lives only in the
+			// Now Playing sheet is one a film never reaches. It answers most
+			// for a video, which is where remuxing and the cast route are
+			// hardest to guess at.
+			IconButton(onClick = onInfo) {
+				Icon(Icons.Default.Info, contentDescription = "Track info", tint = Color.White)
 			}
 			// The only way to reach a Chromecast from here. The Now Playing
 			// sheet has the other one, and this screen is not reached through

@@ -298,6 +298,8 @@ class CastPlayer(
 						bridged = target.bridged,
 					),
 					isVideo = source.isVideo,
+					route = target.route,
+					quality = target.quality,
 				)
 			)
 		}

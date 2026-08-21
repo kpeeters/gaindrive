@@ -341,7 +341,11 @@ class PlaybackService : MediaLibraryService() {
 
 		private suspend fun resolveAudio(item: MediaItem, ref: ItemRef): MediaItem? {
 			val target = streamUrls.forPlayback(ref) ?: return null
-			return item.buildUpon()
+			// The quality is recorded on the item on the way past, the same way
+			// resolveVideo marks what it learned: it is decided here and
+			// nowhere else, and the info dialog would otherwise have to
+			// recompute it from inputs that move underneath a playing track.
+			return item.withQuality(target.quality).buildUpon()
 				.setUri(target.url)
 				.setCustomCacheKey(target.cacheKey)
 				// Set after the URI: it applies to the LocalConfiguration,

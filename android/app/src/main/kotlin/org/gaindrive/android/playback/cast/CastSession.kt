@@ -18,6 +18,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import org.gaindrive.android.data.model.AudioQuality
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -41,6 +42,14 @@ data class CastMedia(
 	val artworkUrl: String? = null,
 	/** Selects the metadata block the receiver is given; see `metadata()`. */
 	val isVideo: Boolean = false,
+	/**
+	 * Who is serving [url]. Carried here rather than left in [CastUrls] because
+	 * this is the only record of what a live session is doing — the decision is
+	 * made per track and there is nothing else holding it afterwards.
+	 */
+	val route: CastRoute = CastRoute.DIRECT,
+	/** What the server was asked to send. Null for video, which is never asked. */
+	val quality: AudioQuality? = null,
 )
 
 /**
@@ -92,9 +101,20 @@ class CastSession @Inject constructor(
 
 	private val retry = LoadRetryWatcher()
 
-	/** The parameters of the last LOAD, so a retry can repeat it verbatim. */
-	@Volatile
-	private var lastLoad: CastMedia? = null
+	/**
+	 * The parameters of the last LOAD, so a retry can repeat it verbatim — and
+	 * so the UI can say what the receiver is playing and where it is fetching
+	 * it from, neither of which is recoverable from a `MEDIA_STATUS`: the
+	 * receiver reports no codec and no bitrate, and the `contentType` it echoes
+	 * is only what we put in the LOAD.
+	 *
+	 * Null between sessions, which is what makes the info dialog fall back to
+	 * describing local playback rather than keeping a stale route on screen.
+	 * A [MutableStateFlow] is already thread-safe, so the `@Volatile` this
+	 * replaced is not missing.
+	 */
+	private val _loaded = MutableStateFlow<CastMedia?>(null)
+	val loaded: StateFlow<CastMedia?> = _loaded.asStateFlow()
 
 	// ── Session lifecycle ───────────────────────────────────────────────────
 
@@ -152,21 +172,28 @@ class CastSession @Inject constructor(
 		transportId.value = null
 		_status.value = CastStatus()
 		retry.disarm()
-		lastLoad = null
+		_loaded.value = null
 	}
 
 	// ── Commands ────────────────────────────────────────────────────────────
 
 	fun load(media: CastMedia) {
 		val gen = loadGen.incrementAndGet()
-		Log.i(TAG, "load gen=$gen url=${media.url} start=${media.startSeconds}")
+		// The route is logged beside the URL because the two together are what
+		// distinguishes a routing problem from a relaying one, which is the
+		// same reason CastBridge logs every request it serves.
+		Log.i(
+			TAG,
+			"load gen=$gen route=${media.route} url=${media.url}" +
+				" start=${media.startSeconds}",
+		)
 
 		// Reset the visible status for the new track, seeding the duration we
 		// were told so the UI has one before the receiver reports its own, and
 		// arm the retry against the session this LOAD is about to replace.
 		retry.arm(_status.value.mediaSessionId)
 		_status.value = CastStatus(duration = media.durationSeconds?.toFloat() ?: 0f)
-		lastLoad = media
+		_loaded.value = media
 
 		scope.launch(Dispatchers.IO) { sendLoad(media, gen) }
 	}
@@ -290,7 +317,7 @@ class CastSession @Inject constructor(
 		_status.value = merged
 
 		if (retry.onStatus(merged)) {
-			val media = lastLoad ?: return
+			val media = _loaded.value ?: return
 			val gen = loadGen.get()
 			Log.w(TAG, "auto-retry LOAD (gen=$gen) — receiver went IDLE/ERROR")
 			scope.launch(Dispatchers.IO) { sendLoad(media, gen) }

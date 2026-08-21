@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.core.os.bundleOf
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
 
@@ -52,6 +53,21 @@ private const val KEY_TRANSCODED_TYPE = "org.gaindrive.transcodedContentType"
 private const val KEY_IS_VIDEO = "org.gaindrive.isVideo"
 private const val KEY_NATIVE_SEEK = "org.gaindrive.nativeSeek"
 private const val KEY_ASPECT = "org.gaindrive.aspect"
+
+/**
+ * The quality the stream URL was actually built for, written by the service
+ * when it resolves the item and read by the track info dialog.
+ *
+ * It has to be recorded rather than worked out again, because the answer
+ * depends on three things that all move: the quality setting, the account's
+ * bitrate ceiling, and which quality the byte cache already holds in full. Two
+ * of those can change while a track is playing, so a second computation would
+ * describe what the *next* track will get rather than what this one did.
+ *
+ * Stored as [AudioQuality.tag], which is already the short, stable spelling the
+ * cache keys on, with [AudioQuality.parse] as its inverse.
+ */
+private const val KEY_QUALITY = "org.gaindrive.quality"
 
 /**
  * Song ↔ MediaItem. The `mediaId` carries the encoded [ItemRef], because it is
@@ -167,6 +183,31 @@ fun MediaItem.aspectRatio(): Float? =
 	mediaMetadata.extras?.getFloat(KEY_ASPECT)?.takeIf { it > 0f }
 
 /**
+ * The quality this item's URL was built for, or null for one that has not been
+ * resolved yet, for a video (which has no such choice), or for a queue the
+ * system restored from bare media ids. The info dialog omits the row rather
+ * than guessing.
+ */
+fun MediaItem.quality(): AudioQuality? =
+	mediaMetadata.extras?.getString(KEY_QUALITY)?.let(AudioQuality::parse)
+
+/**
+ * The same item, now recording the quality it was resolved at.
+ *
+ * Copied rather than mutated, for the reason [markedAsVideo] gives: the
+ * metadata hands out its own Bundle, and writing into it would edit an item
+ * other code may already be holding.
+ */
+fun MediaItem.withQuality(quality: AudioQuality): MediaItem {
+	val extras = Bundle(mediaMetadata.extras ?: Bundle()).apply {
+		putString(KEY_QUALITY, quality.tag)
+	}
+	return buildUpon()
+		.setMediaMetadata(mediaMetadata.buildUpon().setExtras(extras).build())
+		.build()
+}
+
+/**
  * The same item, now saying it is a video.
  *
  * For the queue the system restored from bare media ids: the service works out
@@ -209,6 +250,8 @@ data class NowPlaying(
 	val nativeSeek: Boolean = false,
 	/** The server's figure, used to shape the surface before the first frame. */
 	val aspectRatio: Float? = null,
+	/** What the server was asked to send; see [KEY_QUALITY]. Null for video. */
+	val quality: AudioQuality? = null,
 )
 
 fun MediaItem.toNowPlaying(): NowPlaying = NowPlaying(
@@ -221,4 +264,5 @@ fun MediaItem.toNowPlaying(): NowPlaying = NowPlaying(
 	isVideo = isVideo(),
 	nativeSeek = nativeSeek(),
 	aspectRatio = aspectRatio(),
+	quality = quality(),
 )
