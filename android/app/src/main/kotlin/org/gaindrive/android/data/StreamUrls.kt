@@ -62,8 +62,8 @@ class StreamUrls @Inject constructor(
 	 * Always the current setting: pinning is the user asking for this track at
 	 * the quality they have chosen, so an older copy does not satisfy it.
 	 */
-	suspend fun forDownload(ref: ItemRef): StreamTarget? =
-		build(ref, settings.audioQuality.first())
+	suspend fun forDownload(ref: ItemRef, audioOnlyVideo: Boolean = false): StreamTarget? =
+		build(ref, settings.audioQuality.first(), audioOnlyVideo)
 
 	/**
 	 * Prefers a quality already held in full, so a library downloaded at an
@@ -73,14 +73,16 @@ class StreamUrls @Inject constructor(
 	 * copy turns out to need topping up, the bytes that arrive have to match the
 	 * bytes already there.
 	 */
-	suspend fun forPlayback(ref: ItemRef): StreamTarget? {
-		val preferred = settings.audioQuality.first()
+	suspend fun forPlayback(ref: ItemRef, audioOnlyVideo: Boolean = false): StreamTarget? {
+		val preferred = settings.audioQuality.first().let {
+			if (audioOnlyVideo) it.forVideoAudio() else it
+		}
 		// Off the main thread: this walks the cache index, and onAddMediaItems
 		// runs on the player's thread.
 		val held = withContext(Dispatchers.IO) {
 			audioCache.heldTagOf(ref.encode(), preferred)
 		}?.let(AudioQuality::parse)
-		return build(ref, held ?: preferred)
+		return build(ref, held ?: preferred, audioOnlyVideo)
 	}
 
 	/**
@@ -113,8 +115,11 @@ class StreamUrls @Inject constructor(
 	 *
 	 *  - **`format`** is validated against the *audio* target table, so a video
 	 *    container name is rejected outright and an audio one asks the server
-	 *    for the soundtrack alone — a film that plays as a black rectangle.
-	 *    `web/app.js` skips format negotiation for video for the same reason.
+	 *    for the soundtrack alone. That second behaviour is now a feature —
+	 *    `SettingsStore.videoAudioOnly` — but it is reached by resolving the
+	 *    item through the *audio* path instead, never from here. This builder
+	 *    is for someone who wants the picture, and a format here would take it
+	 *    away. `web/app.js` splits the same two cases the same way.
 	 *  - **`maxBitRate`** sets `constrained` server-side, which forces the
 	 *    re-encode tier and demotes a file that could have been served straight
 	 *    off disk. The account ceiling is applied by the server regardless of
@@ -154,13 +159,25 @@ class StreamUrls @Inject constructor(
 			}
 		}
 
-	private suspend fun build(ref: ItemRef, wanted: AudioQuality): StreamTarget? =
+	/**
+	 * [audioOnlyVideo] says [ref] names a video and only its soundtrack is
+	 * wanted. It changes exactly one thing — [AudioQuality.ORIGINAL] cannot be
+	 * expressed for a video, since it is spelled by sending no `format` and
+	 * that fetches the film — but it has to be threaded all the way here
+	 * because the cache key is derived from the same quality value.
+	 */
+	private suspend fun build(
+		ref: ItemRef,
+		wanted: AudioQuality,
+		audioOnlyVideo: Boolean = false,
+	): StreamTarget? =
 		withContext(Dispatchers.IO) {
 			val config = registry.get(ref.server) ?: return@withContext null
 			// The account ceiling is applied here, where this track's own server
 			// is in hand. A queue may span servers, so there is no single
 			// "current" cap to read.
-			val quality = wanted.cappedBy(limits.capFor(config))
+			val quality = (if (audioOnlyVideo) wanted.forVideoAudio() else wanted)
+				.cappedBy(limits.capFor(config))
 
 			val params = buildMap {
 				put("id", ref.id)

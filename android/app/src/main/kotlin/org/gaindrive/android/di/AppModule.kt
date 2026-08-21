@@ -74,6 +74,14 @@ object AppModule {
 		}
 		.build()
 
+	/** See [MediaHttp] for why media bytes need their own timeout. */
+	@Provides
+	@Singleton
+	@MediaHttp
+	fun mediaOkHttp(base: OkHttpClient): OkHttpClient = base.newBuilder()
+		.readTimeout(MEDIA_READ_TIMEOUT_MINUTES, TimeUnit.MINUTES)
+		.build()
+
 	@Provides
 	@Singleton
 	fun dataStore(@ApplicationContext context: Context): DataStore<Preferences> =

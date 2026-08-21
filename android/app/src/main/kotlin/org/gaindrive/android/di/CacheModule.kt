@@ -67,6 +67,10 @@ object CacheModule {
 	 * Two parallel downloads: enough that a slow track does not hold up an
 	 * album, few enough that pinning something does not swamp the connection
 	 * the user is streaming over at the same time.
+	 *
+	 * [MediaHttp] rather than the shared client: a pinned film's soundtrack is
+	 * built by a blocking transcode on the server, and 30 s is not enough to
+	 * wait for one.
 	 */
 	@Provides
 	@Singleton
@@ -74,7 +78,7 @@ object CacheModule {
 		@ApplicationContext context: Context,
 		databaseProvider: DatabaseProvider,
 		cache: SimpleCache,
-		httpClient: OkHttpClient,
+		@MediaHttp httpClient: OkHttpClient,
 	): DownloadManager = DownloadManager(
 		context,
 		DefaultDownloadIndex(databaseProvider),

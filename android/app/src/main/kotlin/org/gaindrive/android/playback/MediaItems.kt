@@ -55,6 +55,21 @@ private const val KEY_NATIVE_SEEK = "org.gaindrive.nativeSeek"
 private const val KEY_ASPECT = "org.gaindrive.aspect"
 
 /**
+ * Set when this item is a video resolved for its soundtrack alone.
+ *
+ * It is deliberately *not* [KEY_IS_VIDEO]. Such an item is an audio stream in
+ * every way that matters downstream — it goes through the byte cache, it draws
+ * no surface, it can be downloaded — so leaving the video flag off is what
+ * makes all of that fall out with no consumer needing to know the setting
+ * exists.
+ *
+ * One consumer does need to know, and it is the reason this extra exists at
+ * all: casting. [CastSource] must not offer the receiver the "original file"
+ * quality for one of these, because the original file is the film.
+ */
+private const val KEY_AUDIO_ONLY_VIDEO = "org.gaindrive.audioOnlyVideo"
+
+/**
  * The quality the stream URL was actually built for, written by the service
  * when it resolves the item and read by the track info dialog.
  *
@@ -138,6 +153,8 @@ data class CastSource(
 	val nativeSeek: Boolean,
 	val sourceMime: String?,
 	val transcodedMime: String?,
+	/** See [KEY_AUDIO_ONLY_VIDEO]. Never true at the same time as [isVideo]. */
+	val audioOnlyVideo: Boolean = false,
 )
 
 /**
@@ -154,7 +171,32 @@ fun MediaItem.castSource(): CastSource = CastSource(
 	nativeSeek = nativeSeek(),
 	sourceMime = sourceContentType(),
 	transcodedMime = mediaMetadata.extras?.getString(KEY_TRANSCODED_TYPE),
+	audioOnlyVideo = isAudioOnlyVideo(),
 )
+
+/** Whether this item is a video resolved as audio; see [KEY_AUDIO_ONLY_VIDEO]. */
+fun MediaItem.isAudioOnlyVideo(): Boolean =
+	mediaMetadata.extras?.getBoolean(KEY_AUDIO_ONLY_VIDEO) == true
+
+/**
+ * The same item, now saying it is a video being played as audio.
+ *
+ * Copied rather than mutated, for the reason [markedAsVideo] gives: the
+ * metadata hands out its own Bundle, and writing into it would edit an item
+ * other code may already be holding.
+ */
+fun MediaItem.markedAsAudioOnlyVideo(): MediaItem {
+	val extras = Bundle(mediaMetadata.extras ?: Bundle()).apply {
+		putBoolean(KEY_AUDIO_ONLY_VIDEO, true)
+		// Cleared as well as set. An item re-resolved because the setting was
+		// turned off must not go on claiming it is a video, and the reverse
+		// re-resolve goes through markedAsVideo().
+		putBoolean(KEY_IS_VIDEO, false)
+	}
+	return buildUpon()
+		.setMediaMetadata(mediaMetadata.buildUpon().setExtras(extras).build())
+		.build()
+}
 
 /**
  * Whether this item is a video, or null when the item carries no extras at all
@@ -221,6 +263,9 @@ fun MediaItem.markedAsVideo(): MediaItem {
 	// writing into it would edit an item other code may already be holding.
 	val extras = Bundle(mediaMetadata.extras ?: Bundle()).apply {
 		putBoolean(KEY_IS_VIDEO, true)
+		// The other half of the pair, for an item re-resolved because
+		// `videoAudioOnly` was turned off while it was queued.
+		putBoolean(KEY_AUDIO_ONLY_VIDEO, false)
 	}
 	return buildUpon()
 		.setMediaMetadata(mediaMetadata.buildUpon().setExtras(extras).build())

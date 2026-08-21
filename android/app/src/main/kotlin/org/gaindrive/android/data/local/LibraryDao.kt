@@ -154,6 +154,23 @@ interface LibraryDao {
 	suspend fun songSizes(keys: List<String>): List<SongSizeRow>
 
 	/**
+	 * Which of these refs name videos.
+	 *
+	 * One query rather than a `song()` per ref, because the caller is
+	 * `PinRepository.applyProtection` and a playlist pin can cover hundreds.
+	 * It needs the answer to build the right cache key: a video played for its
+	 * soundtrack substitutes a real container for `AudioQuality.ORIGINAL` (see
+	 * `AudioQuality.forVideoAudio`), so protecting it under the unsubstituted
+	 * key would protect bytes that are not there while the ones that are stay
+	 * evictable.
+	 */
+	@Query(
+		"SELECT serverId || '/' || id AS refKey FROM songs " +
+			"WHERE isVideo != 0 AND serverId || '/' || id IN (:keys)"
+	)
+	suspend fun videoRefKeys(keys: List<String>): List<String>
+
+	/**
 	 * One row per album, not distinct: the caller counts them to say how many
 	 * albums an artist actually has on the device.
 	 */

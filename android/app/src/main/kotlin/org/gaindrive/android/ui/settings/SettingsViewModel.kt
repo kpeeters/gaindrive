@@ -29,6 +29,7 @@ data class SettingsUiState(
 	val themeMode: ThemeMode = ThemeMode.AUTO,
 	val mergeDuplicateAlbums: Boolean = false,
 	val castOriginal: Boolean = false,
+	val videoAudioOnly: Boolean = false,
 	val storage: StorageUiState = StorageUiState(),
 	val pins: List<PinnedItem> = emptyList(),
 	/** Distinguishes "no servers yet" from "not loaded yet" for routing. */
@@ -49,12 +50,16 @@ data class StorageUiState(
 )
 
 /**
- * Two switches that share a slot in the outer `combine`, which is full at its
- * typed limit of five flows — the same squeeze [StoragePrefs] answers. They ride
+ * Switches that share a slot in the outer `combine`, which is full at its typed
+ * limit of five flows — the same squeeze [StoragePrefs] answers. They ride
  * together because there was room for one more value, not because they belong
- * together; both are unpacked into [SettingsUiState], which stays flat.
+ * together; all are unpacked into [SettingsUiState], which stays flat.
  */
-private data class Toggles(val mergeDuplicateAlbums: Boolean, val castOriginal: Boolean)
+private data class Toggles(
+	val mergeDuplicateAlbums: Boolean,
+	val castOriginal: Boolean,
+	val videoAudioOnly: Boolean,
+)
 
 /** The stored half of [StorageUiState]; the measured half comes from the cache. */
 private data class StoragePrefs(
@@ -120,6 +125,7 @@ class SettingsViewModel @Inject constructor(
 	private val toggles = combine(
 		settings.mergeDuplicateAlbums,
 		settings.castOriginal,
+		settings.videoAudioOnly,
 		::Toggles,
 	)
 
@@ -136,6 +142,7 @@ class SettingsViewModel @Inject constructor(
 				themeMode = theme,
 				mergeDuplicateAlbums = toggles.mergeDuplicateAlbums,
 				castOriginal = toggles.castOriginal,
+				videoAudioOnly = toggles.videoAudioOnly,
 				storage = storage,
 				pins = pins,
 				loaded = true,
@@ -167,6 +174,20 @@ class SettingsViewModel @Inject constructor(
 	 */
 	fun setCastOriginal(enabled: Boolean) =
 		viewModelScope.launch { settings.setCastOriginal(enabled) }
+
+	/**
+	 * Pins are re-expanded, because this changes what one *covers*: with it on,
+	 * a video under an album pin becomes something that can be downloaded, and
+	 * with it off it stops being covered again. Without the refresh a pin would
+	 * only pick the change up the next time it was touched for another reason.
+	 *
+	 * Playback follows separately — `PlaybackService` watches the same flow and
+	 * re-resolves what is already queued.
+	 */
+	fun setVideoAudioOnly(enabled: Boolean) = viewModelScope.launch {
+		settings.setVideoAudioOnly(enabled)
+		pins.refreshDownloads()
+	}
 
 	fun setCacheMaxBytes(bytes: Long) =
 		viewModelScope.launch { settings.setCacheMaxBytes(bytes) }

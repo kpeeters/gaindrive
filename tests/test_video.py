@@ -183,6 +183,86 @@ def test_segment_request_returns_mpegts():
     print("PASS  a bounded request returns one MPEG-TS segment")
 
 
+# ---- audio only -------------------------------------------------------
+#
+# Naming an audio format for a video asks for its soundtrack alone.  This is
+# not an extension: `format` is an ordinary Subsonic parameter, and VIDEO.md
+# specified the behaviour from the start — the `-vn` the audio path already
+# passes *is* the extraction.  What makes it worth having is everything that
+# follows from being ordinary audio: the transcode cache materialises it, so
+# it carries a real Content-Length, answers Range requests, and is a fraction
+# of the bytes.
+
+
+def test_audio_format_returns_the_soundtrack():
+    _need_video()
+    status, hdrs, body = _raw("stream.view",
+                              {"id": _video()["id"], "format": "opus",
+                               "maxBitRate": "128"})
+    assert status == 200, status
+    assert hdrs.get("Content-Type") == "audio/ogg", hdrs.get("Content-Type")
+    # The cache path is the whole point: a piped transcode has no length.
+    assert hdrs.get("Content-Length"), \
+        "no Content-Length — the transcode cache did not produce a file"
+    assert body[:4] == b"OggS", f"not an Ogg stream: {body[:8]!r}"
+    print("PASS  an audio format on a video returns its soundtrack, with a length")
+
+
+def test_audio_only_stream_is_seekable():
+    """The property the video path cannot offer, and the reason to cache."""
+    _need_video()
+    status, hdrs, body = _raw("stream.view",
+                              {"id": _video()["id"], "format": "opus",
+                               "maxBitRate": "128"},
+                              {"Range": "bytes=1024-2047"})
+    assert status == 206, f"expected 206, got {status}"
+    assert len(body) == 1024, len(body)
+    assert "Content-Range" in hdrs, hdrs
+    print("PASS  the extracted soundtrack answers byte ranges")
+
+
+def test_audio_only_covers_the_whole_video():
+    """A DVD rip is several VOBs that are one stream; extracting only the
+    first gives a film that reports and stops after twenty minutes."""
+    _need_video()
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        print("SKIP  ffprobe not on PATH")
+        return
+
+    video = _video()
+    expected = video.get("duration")
+    if not expected:
+        print("SKIP  the server reports no duration for this video")
+        return
+
+    _, _, body = _raw("stream.view", {"id": video["id"], "format": "opus",
+                                      "maxBitRate": "128"})
+    out = subprocess.run(
+        [ffprobe, "-v", "error", "-show_entries", "format=duration",
+         "-of", "csv=p=0", "-"],
+        input=body, capture_output=True)
+    got = float(out.stdout.decode().strip() or 0)
+    # Generous: a keyframe-aligned container and the server's own rounding
+    # disagree by a second or two on a long film.
+    assert abs(got - expected) <= max(5, expected * 0.02), \
+        f"soundtrack is {got:.0f}s, video is {expected}s"
+    print(f"PASS  the soundtrack covers the whole video ({got:.0f}s)")
+
+
+def test_raw_and_absent_format_still_serve_video():
+    """The switch is `format`, so neither of the other two spellings may
+    accidentally become an audio request."""
+    _need_video()
+    for extra in ({"id": _video()["id"]},
+                  {"id": _video()["id"], "format": "raw"}):
+        status, hdrs, _ = _raw("stream.view", extra, {"Range": "bytes=0-1023"})
+        assert status in (200, 206), f"{extra}: HTTP {status}"
+        ctype = hdrs.get("Content-Type", "")
+        assert ctype.startswith("video/"), f"{extra}: Content-Type {ctype}"
+    print("PASS  no format, and format=raw, both still serve the video")
+
+
 # ---- HLS --------------------------------------------------------------
 
 def test_hls_playlist_is_well_formed():
@@ -341,6 +421,10 @@ TESTS = [
     test_direct_tier_honours_ranges,
     test_transcoded_tier_returns_video,
     test_segment_request_returns_mpegts,
+    test_audio_format_returns_the_soundtrack,
+    test_audio_only_stream_is_seekable,
+    test_audio_only_covers_the_whole_video,
+    test_raw_and_absent_format_still_serve_video,
     test_hls_playlist_is_well_formed,
     test_hls_segments_resolve,
     test_hls_segments_carry_absolute_timestamps,

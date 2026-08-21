@@ -3018,24 +3018,6 @@ GainDrive::GainDrive(const std::string& db_path,
 			};
 
 		int         max_bitrate = to_int(qp("maxBitRate"), 0);
-		// Enforce the user account's max_bitrate as a ceiling (0 = unlimited).
-		// Cast requests authenticate via token and have no 'u' param; skip for those.
-		//
-		// Audio only, and that exemption is load-bearing rather than a policy
-		// preference.  For video, any non-zero max_bitrate sets `constrained` in
-		// serve_video and disqualifies both the direct and remux tiers — while
-		// nativeSeek is a pure function of the codec pair and never sees it.  A
-		// capped account would therefore be told every video is Range-seekable
-		// and handed a chunked stream with Accept-Ranges: none, and would have
-		// H.264/AAC MP4s re-encoded that could have been served off disk
-		// untouched.  Subsonic defines maxBitRate as an audio ceiling anyway,
-		// and a client that really wants a smaller picture still says so with
-		// size= or maxBitRate=, which constrains exactly as before.
-		if (!cast_authed && !song->is_video) {
-			int acct_max = request_max_bitrate(req, store_);
-			if (acct_max > 0 && (max_bitrate == 0 || max_bitrate > acct_max))
-				max_bitrate = acct_max;
-			}
 		std::string format      = qp("format");
 		// Reject a format we have no encoder for here, where the Subsonic error
 		// helpers live.  Letting it reach ffmpeg produced a 200 with an empty
@@ -3051,6 +3033,33 @@ GainDrive::GainDrive(const std::string& db_path,
 				                as_json ? "application/json" : "application/xml");
 				return;
 				}
+			}
+
+		// Enforce the user account's max_bitrate as a ceiling (0 = unlimited).
+		// Cast requests authenticate via token and have no 'u' param; skip for those.
+		//
+		// Skipped for video, and that exemption is load-bearing rather than a
+		// policy preference.  Any non-zero max_bitrate sets `constrained` in
+		// serve_video and disqualifies both the direct and remux tiers — while
+		// nativeSeek is a pure function of the codec pair and never sees it.  A
+		// capped account would therefore be told every video is Range-seekable
+		// and handed a chunked stream with Accept-Ranges: none, and would have
+		// H.264/AAC MP4s re-encoded that could have been served off disk
+		// untouched.  Subsonic defines maxBitRate as an audio ceiling anyway,
+		// and a client that really wants a smaller picture still says so with
+		// size= or maxBitRate=, which constrains exactly as before.
+		//
+		// An audio-only request is *not* a video request — it produces an
+		// ordinary audio transcode through the ordinary audio path — so the
+		// ceiling applies to it exactly as it does to a music track.  That is
+		// why the format is parsed above rather than below: the ceiling now
+		// depends on it.
+		bool audio_only = audio_only_request(song->is_video, format,
+		                                     song->audio_codec);
+		if (!cast_authed && (!song->is_video || audio_only)) {
+			int acct_max = request_max_bitrate(req, store_);
+			if (acct_max > 0 && (max_bitrate == 0 || max_bitrate > acct_max))
+				max_bitrate = acct_max;
 			}
 		// The Chromecast sometimes probes the stream URL with timeOffset stripped.
 		// Always use the authoritative offset stored at castLoad time for cast

@@ -84,7 +84,7 @@ class PlaybackWatchdog @Inject constructor(
 		if (countdown?.isActive == true) return
 		countdown = scope.launch {
 			val positionAtStart = player.currentPosition
-			delay(STALL_TIMEOUT_MS)
+			delay(timeoutFor(player))
 
 			// Re-checked rather than assumed: disarm cancels this job, but the
 			// cancellation and the resumption can race, and killing playback
@@ -107,6 +107,27 @@ class PlaybackWatchdog @Inject constructor(
 		countdown = null
 	}
 
+	/**
+	 * How long this item is allowed to make no progress for.
+	 *
+	 * A film is the exception, whether it is being watched or played for its
+	 * soundtrack. gaindrive's transcode cache is blocking — it runs ffmpeg over
+	 * the whole source and sends nothing at all until the file is complete — so
+	 * a remux or an audio extraction of a multi-gigabyte file is minutes of
+	 * buffering in which no byte arrives and the position cannot move. That is
+	 * indistinguishable from a wedge by every signal this class has, and half a
+	 * minute of it is normal rather than broken.
+	 *
+	 * The real answer to that wait is `TranscodePrewarmer`, which moves it off
+	 * the tap for everything but the first track. This is what keeps the safety
+	 * net from firing on the first one.
+	 */
+	private fun timeoutFor(player: Player): Long {
+		val item = player.currentMediaItem ?: return STALL_TIMEOUT_MS
+		return if (item.isVideo() || item.isAudioOnlyVideo()) BUILD_TIMEOUT_MS
+		else STALL_TIMEOUT_MS
+	}
+
 	private companion object {
 		/**
 		 * Long enough that a slow link is not mistaken for a broken one — the
@@ -115,5 +136,13 @@ class PlaybackWatchdog @Inject constructor(
 		 * that nobody sits watching a spinner wondering.
 		 */
 		const val STALL_TIMEOUT_MS = 30_000L
+
+		/**
+		 * Sized for the slowest build worth waiting for: a several-hour source
+		 * has to be read end to end before a byte of it is sent. Below the
+		 * `MediaHttp` read timeout on purpose, so a server that really has
+		 * given up is still reported by the HTTP layer, which knows why.
+		 */
+		const val BUILD_TIMEOUT_MS = 5 * 60_000L
 	}
 }

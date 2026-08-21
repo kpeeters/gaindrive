@@ -4,9 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.cache.PinKind
 import org.gaindrive.android.data.cache.PinPhase
 import org.gaindrive.android.data.cache.PinRepository
@@ -23,7 +26,22 @@ import javax.inject.Inject
 @HiltViewModel
 class PinViewModel @Inject constructor(
 	private val pins: PinRepository,
+	settings: SettingsStore,
 ) : ViewModel() {
+
+	/**
+	 * Whether a video can be downloaded, which it can only when it is being
+	 * played for its soundtrack — see `PinRepository.downloadable`.
+	 *
+	 * Exposed here rather than read at each call site so the rule stays one
+	 * rule: what the sheet offers and what the pin actually covers have to be
+	 * the same answer, or the button starts a download that never completes.
+	 */
+	val videoDownloadable: StateFlow<Boolean> = settings.videoAudioOnly.stateIn(
+		scope = viewModelScope,
+		started = SharingStarted.WhileSubscribed(5_000),
+		initialValue = false,
+	)
 
 	/**
 	 * Keyed by encoded pin ref; absent means not pinned.

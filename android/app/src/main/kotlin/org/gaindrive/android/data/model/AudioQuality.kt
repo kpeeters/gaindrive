@@ -63,6 +63,26 @@ data class AudioQuality(val format: AudioFormat, val bitRate: Int) {
 		else -> this
 	}
 
+	/**
+	 * This quality as it applies to a video played for its soundtrack alone.
+	 *
+	 * [AudioFormat.ORIGINAL] cannot mean anything here. It is expressed by
+	 * sending no `format` at all, and for a video that is a request for the
+	 * film — the opposite of what was asked for. There is no "the original
+	 * audio track" the server can be asked for either: extracting a soundtrack
+	 * is a re-encode, so a container has to be named. [DEFAULT] is that name.
+	 *
+	 * Every other quality passes through, so someone who set 96 kbps to save
+	 * data gets 96 kbps here too.
+	 *
+	 * One function rather than the substitution written at each call site,
+	 * because the cache key is derived from the same value: a URL naming one
+	 * quality paired with a key naming another stores bytes that will later be
+	 * served to a request expecting something else.
+	 */
+	fun forVideoAudio(): AudioQuality =
+		if (format == AudioFormat.ORIGINAL) DEFAULT else this
+
 	companion object {
 		/**
 		 * Opus at 160 kbps: transparent enough for headphones on a phone, and

@@ -257,6 +257,14 @@ class LocalLibrary @Inject constructor(
 		}
 	}
 
+	/** Which of [keys] name videos; see `LibraryDao.videoRefKeys`. */
+	suspend fun videoRefKeys(keys: Collection<String>): Set<String> = io {
+		if (keys.isEmpty()) return@io emptySet()
+		buildSet {
+			keys.chunked(SQL_CHUNK).forEach { chunk -> addAll(dao.videoRefKeys(chunk)) }
+		}
+	}
+
 	// ── Housekeeping ────────────────────────────────────────────────────────
 
 	suspend fun forgetServer(server: ServerId) = write {

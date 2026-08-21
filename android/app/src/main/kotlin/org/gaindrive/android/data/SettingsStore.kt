@@ -166,6 +166,32 @@ class SettingsStore @Inject constructor(
 	}
 
 	/**
+	 * Whether a video is played for its soundtrack alone.
+	 *
+	 * Backing out of the video surface does not do this — the whole picture
+	 * still arrives over the network, and nothing is kept afterwards, because
+	 * video deliberately never enters the byte cache. Asking the server for an
+	 * audio `format` instead makes it send only the audio track (see
+	 * `audio_only_request()` in `src/codecs.hh`), and what arrives is then an
+	 * ordinary audio stream in every respect: cached on play, downloadable for
+	 * offline, and seekable.
+	 *
+	 * Global rather than a per-track toggle, and that is what makes the caching
+	 * work at all: a pin has to know, before anything is fetched, whether the
+	 * bytes it stores for a film are its soundtrack or nothing. A toggle that
+	 * moved per track would leave [org.gaindrive.android.data.cache.PinRepository]
+	 * with no stable answer.
+	 *
+	 * Off by default: a video library is a video library until someone says
+	 * otherwise.
+	 */
+	val videoAudioOnly: Flow<Boolean> = dataStore.data.map { it[VIDEO_AUDIO_ONLY] ?: false }
+
+	suspend fun setVideoAudioOnly(enabled: Boolean) {
+		dataStore.edit { it[VIDEO_AUDIO_ONLY] = enabled }
+	}
+
+	/**
 	 * Whether the user has ever chosen a quality.
 	 *
 	 * Used once, at startup: someone upgrading with pins already downloaded
@@ -189,5 +215,6 @@ class SettingsStore @Inject constructor(
 		private val OFFLINE_MODE = booleanPreferencesKey("offline_mode")
 		private val AUDIO_QUALITY = stringPreferencesKey("audio_quality")
 		private val CAST_ORIGINAL = booleanPreferencesKey("cast_original")
+		private val VIDEO_AUDIO_ONLY = booleanPreferencesKey("video_audio_only")
 	}
 }

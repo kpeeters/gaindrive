@@ -22,6 +22,19 @@ const creds = {
    },
 };
 
+// ── Playback preferences ────────────────────────────────────────────────────
+
+// "Play videos as audio only": ask the server for the soundtrack alone rather
+// than the picture.  Backing out of the video surface does not do this — the
+// whole stream still arrives — so it is a request-level choice, not a UI one.
+const videoAudioOnly = {
+   get()   { return localStorage.getItem('gd_video_audio_only') === '1'; },
+   set(on) {
+      if (on) localStorage.setItem('gd_video_audio_only', '1');
+      else    localStorage.removeItem('gd_video_audio_only');
+      },
+   };
+
 // ── Theme ────────────────────────────────────────────────────────────────────
 
 // Cycles: auto (system preference) → light → dark → auto.
@@ -60,6 +73,18 @@ function pickStreamFormat(song) {
    if (!mime) return null;
    if (_canPlayProbe.canPlayType(mime) === 'probably') return null;
    return 'mp3';
+}
+
+// Which container to ask for when playing a video as audio only.
+//
+// Deliberately not pickStreamFormat(): that probes the song's own type, which
+// for a video is a *video* container, so an audio element answers "no" and it
+// would land on mp3 by accident rather than by decision.  Opus is the better
+// answer where it decodes — a film's soundtrack is long, and this is a
+// re-encode either way, so the container is a free choice.
+function audioOnlyFormat() {
+   return _canPlayProbe.canPlayType('audio/ogg; codecs=opus') === 'probably'
+      ? 'opus' : 'mp3';
 }
 
 // Build a subsonic API URL. Extra params can be passed as an object.
@@ -361,6 +386,39 @@ async function viewSettings() {
 
    themeSection.appendChild(themeRow);
    pane.appendChild(themeSection);
+
+   // ── Playback section — visible to all users ─────────────────────────────
+
+   const playbackSection = document.createElement('div');
+   playbackSection.className = 'admin-section';
+
+   const playbackHeading = document.createElement('h2');
+   playbackHeading.className = 'admin-section-title';
+   playbackHeading.textContent = 'Playback';
+   playbackSection.appendChild(playbackHeading);
+
+   const audioOnlyRow   = document.createElement('div');
+   audioOnlyRow.className = 'form-row';
+   const audioOnlyLabel = document.createElement('label');
+   const audioOnlyBox   = document.createElement('input');
+   audioOnlyBox.type    = 'checkbox';
+   audioOnlyBox.checked = videoAudioOnly.get();
+   audioOnlyBox.addEventListener('change',
+      () => videoAudioOnly.set(audioOnlyBox.checked));
+   audioOnlyLabel.appendChild(audioOnlyBox);
+   audioOnlyLabel.appendChild(
+      document.createTextNode('Play videos as audio only'));
+   audioOnlyRow.appendChild(audioOnlyLabel);
+   playbackSection.appendChild(audioOnlyRow);
+
+   const audioOnlyHint = document.createElement('p');
+   audioOnlyHint.className = 'admin-hint';
+   audioOnlyHint.textContent =
+      'Streams the soundtrack instead of the picture, which is a fraction of '
+      + 'the data. Takes effect on the next track.';
+   playbackSection.appendChild(audioOnlyHint);
+
+   pane.appendChild(playbackSection);
 
    // Mark the currently active theme button.
    function markActiveTheme() {
@@ -2310,20 +2368,33 @@ function playerPlay(offset = 0, forceMp3 = false) {
       return;
       }
    const streamParams = {id: song.id};
-   // Video skips format negotiation entirely.  pickStreamFormat() probes with
-   // an *audio* element and answers 'mp3' when it is unsure, which for a video
-   // would fetch the soundtrack alone.  The server already knows which tier a
-   // video takes; asking for nothing lets it decide.
+   // Naming an audio format for a video is what asks the server for its
+   // soundtrack alone (see audio_only_request() in src/codecs.hh), so the
+   // setting is expressed entirely as a format choice and everything below
+   // then treats the track as ordinary transcoded audio.
+   const audioOnly = song.isVideo && videoAudioOnly.get();
+   // A video otherwise skips format negotiation entirely.  pickStreamFormat()
+   // probes with an *audio* element and answers 'mp3' when it is unsure, which
+   // for a video would fetch the soundtrack when the user wanted the picture.
+   // The server already knows which tier a video takes; asking for nothing
+   // lets it decide.
    //
    // nativeSeek is the server's answer to "will this stream carry a
    // Content-Length and answer Range requests".  It is true for both the
    // direct and remux tiers and false only for a re-encode, which is exactly
    // the distinction streamIsTranscoded already means.  Getting this wrong in
    // the pessimistic direction is not harmless: sending timeOffset for a
-   // remuxable file demotes it from a cheap -c copy to a full re-encode.
-   const fmt = song.isVideo ? null : (forceMp3 ? 'mp3' : pickStreamFormat(song));
+   // remuxable file demotes it from a cheap -c copy to a full re-encode.  It
+   // describes the *video* stream, so it says nothing about an audio-only
+   // request — which seeks the way every other transcode does.
+   let fmt;
+   if (audioOnly)         fmt = audioOnlyFormat();
+   else if (song.isVideo) fmt = null;
+   else                   fmt = forceMp3 ? 'mp3' : pickStreamFormat(song);
    if (fmt) streamParams.format = fmt;
-   const chunked = song.isVideo ? (song.nativeSeek === false) : !!fmt;
+   const chunked = (song.isVideo && !audioOnly)
+      ? (song.nativeSeek === false)
+      : !!fmt;
    // For transcoded streams the browser can't seek to un-buffered offsets
    // (chunked, no Range support), so ask the server to start ffmpeg at the
    // seek point instead — the served stream is already the slice we want.
@@ -2332,8 +2403,10 @@ function playerPlay(offset = 0, forceMp3 = false) {
    player.streamFormat       = fmt ?? null;
    player.localOffset        = (chunked && offset > 0) ? offset : 0;
 
-   playerSelectMedia(song.isVideo);
-   if (song.isVideo) {
+   // An audio-only video is played by the audio element and draws no surface:
+   // there is no picture in the stream to draw, and nothing to caption.
+   playerSelectMedia(song.isVideo && !audioOnly);
+   if (song.isVideo && !audioOnly) {
       // Keep whichever state the user last left the surface in, so skipping
       // to the next episode does not re-expand a surface they minimised.
       const surf = document.getElementById('video-surface');
@@ -2538,7 +2611,10 @@ el.addEventListener('error', () => {
    // soundtrack alone — the picture would vanish and the player would look
    // like it had merely lost its cover art.  A video that will not decode is
    // a real failure and should say so.
-   if (song.isVideo) {
+   //
+   // Unless the soundtrack alone is what was asked for, in which case this is
+   // already an audio stream and mp3 is the ordinary fallback for one.
+   if (song.isVideo && !videoAudioOnly.get()) {
       showError(`Cannot play “${song.title}”: the browser could not decode ` +
                 `the video stream.`);
       return;

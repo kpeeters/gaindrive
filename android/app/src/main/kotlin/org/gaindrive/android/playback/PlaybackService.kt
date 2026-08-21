@@ -18,15 +18,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.gaindrive.android.data.CaptionTracks
 import org.gaindrive.android.data.LibraryRepository
+import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.StreamUrls
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.local.LocalLibrary
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.di.MediaHttp
 import org.gaindrive.android.playback.cast.CastBridge
 import org.gaindrive.android.playback.cast.CastPlayer
 import org.gaindrive.android.playback.cast.CastSession
@@ -47,7 +52,15 @@ class PlaybackService : MediaLibraryService() {
 	@Inject
 	lateinit var library: LibraryRepository
 
+	/**
+	 * [MediaHttp], not the shared client: the first play of anything the server
+	 * has to build — a remux, or a film's soundtrack under
+	 * `SettingsStore.videoAudioOnly` — sends no bytes at all until ffmpeg has
+	 * finished, which is minutes for a large file and well past the shared
+	 * client's 30 s read timeout.
+	 */
 	@Inject
+	@MediaHttp
 	lateinit var httpClient: OkHttpClient
 
 	@Inject
@@ -80,12 +93,22 @@ class PlaybackService : MediaLibraryService() {
 	@Inject
 	lateinit var captions: CaptionTracks
 
+	@Inject
+	lateinit var settings: SettingsStore
+
 	private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
 	private var session: MediaLibrarySession? = null
 
 	private var localPlayer: ExoPlayer? = null
 	private var castPlayer: CastPlayer? = null
+
+	/**
+	 * Held as well as handed to the session, so [watchAudioOnly] can put a
+	 * queued item back through exactly the same resolution the session's
+	 * callback performed on it.
+	 */
+	private var libraryCallback: LibraryCallback? = null
 
 	/**
 	 * Whichever player the session is driving. Everything that observes playback
@@ -124,8 +147,50 @@ class PlaybackService : MediaLibraryService() {
 		// its own, and nothing here would see it.
 		watchdog.registerPlayer(player)
 
-		session = MediaLibrarySession.Builder(this, player, LibraryCallback()).build()
+		val callback = LibraryCallback()
+		libraryCallback = callback
+		session = MediaLibrarySession.Builder(this, player, callback).build()
 		watchCastDevice()
+		watchAudioOnly()
+	}
+
+	/**
+	 * Re-resolves the queue when `videoAudioOnly` changes.
+	 *
+	 * Items are resolved once, when they are added, so without this the switch
+	 * would only reach the track *after* the one playing — and the gesture it
+	 * replaces (backing out of the video surface) acts on the film in front of
+	 * you. The position is carried across, so a film picks up its soundtrack
+	 * where the picture stopped.
+	 *
+	 * `drop(1)` because the first value is the state the queue was already
+	 * resolved under; collecting it would rebuild the queue on every start.
+	 */
+	private fun watchAudioOnly() = scope.launch {
+		settings.videoAudioOnly.distinctUntilChanged().drop(1).collect { audioOnly ->
+			val player = activePlayer ?: return@collect
+			val callback = libraryCallback ?: return@collect
+			val items = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }
+			// A queue of nothing but music is unaffected. `!= false` rather
+			// than `== true`: an item the system restored from a bare media id
+			// carries no extras, and not knowing is a reason to go and ask.
+			if (items.none { it.isVideoOrNull() != false || it.isAudioOnlyVideo() })
+				return@collect
+
+			val index = player.currentMediaItemIndex
+			val position = player.currentPosition.coerceAtLeast(0)
+			val wasPlaying = player.isPlaying
+			// Anything that fails to resolve keeps the URL it has, which is
+			// still playable — a re-resolve is an improvement, not a repair.
+			val resolved = items.map { callback.resolve(it, audioOnly) ?: it }
+
+			// setMediaItems with an index and a position, the same shape the
+			// cast handover uses: it is the one call that moves a whole queue
+			// without losing where in it the user was.
+			player.setMediaItems(resolved, index, position)
+			player.prepare()
+			if (wasPlaying) player.play()
+		}
 	}
 
 	private fun attachListeners(player: Player) {
@@ -242,12 +307,17 @@ class PlaybackService : MediaLibraryService() {
 			val index = player.nextMediaItemIndex
 			if (index == C.INDEX_UNSET) return
 			val item = player.getMediaItemAt(index)
-			// Not for video. The prewarmer builds an *audio* stream URL, so it
-			// would ask the server to encode a film's soundtrack to Opus —
-			// minutes of ffmpeg for bytes nothing will ever read.
+			// Not for a video being played as one. The prewarmer builds an
+			// *audio* stream URL, so it would ask the server to encode a film's
+			// soundtrack for bytes nothing will ever read.
+			//
+			// A video being played *as* audio is the opposite case, and the one
+			// that most needs this: extracting a film's soundtrack is a
+			// blocking transcode of a multi-gigabyte file, so landing that wait
+			// on the moment the user taps play is the worst place for it.
 			if (item.isVideo()) return
 			val next = item.itemRef() ?: return
-			scope.launch { prewarm.warm(next) }
+			scope.launch { prewarm.warm(next, audioOnlyVideo = item.isAudioOnlyVideo()) }
 		}
 	}
 
@@ -293,6 +363,7 @@ class PlaybackService : MediaLibraryService() {
 	override fun onDestroy() {
 		session?.release()
 		session = null
+		libraryCallback = null
 		// Both, and by name: the session only holds whichever one was active,
 		// and the other would leak its listener and its coroutine.
 		castPlayer?.release()
@@ -333,25 +404,54 @@ class PlaybackService : MediaLibraryService() {
 			controller: MediaSession.ControllerInfo,
 			mediaItems: MutableList<MediaItem>,
 		): ListenableFuture<MutableList<MediaItem>> = scope.future {
-			mediaItems.mapNotNull { item ->
-				val ref = item.itemRef() ?: return@mapNotNull null
-				if (isVideo(item, ref)) resolveVideo(item, ref) else resolveAudio(item, ref)
-			}.toMutableList()
+			val audioOnly = settings.videoAudioOnly.first()
+			mediaItems.mapNotNull { item -> resolve(item, audioOnly) }.toMutableList()
 		}
 
-		private suspend fun resolveAudio(item: MediaItem, ref: ItemRef): MediaItem? {
-			val target = streamUrls.forPlayback(ref) ?: return null
+		/**
+		 * One item, from a bare media id to a playable URI.
+		 *
+		 * Split out of [onAddMediaItems] because re-resolving the queue after
+		 * `videoAudioOnly` changes has to make exactly the same decision — a
+		 * second copy of this branch is how the two would drift into resolving
+		 * the same film differently.
+		 */
+		suspend fun resolve(item: MediaItem, audioOnly: Boolean): MediaItem? {
+			val ref = item.itemRef() ?: return null
+			val video = isVideo(item, ref)
+			return when {
+				video && !audioOnly -> resolveVideo(item, ref)
+				// Everything downstream reads the item rather than the setting:
+				// with the video flag cleared, the byte cache takes it, no
+				// surface is drawn and it can be downloaded — all of which is
+				// the point.
+				video -> resolveAudio(item, ref, audioOnlyVideo = true)
+				else -> resolveAudio(item, ref, audioOnlyVideo = false)
+			}
+		}
+
+		private suspend fun resolveAudio(
+			item: MediaItem,
+			ref: ItemRef,
+			audioOnlyVideo: Boolean,
+		): MediaItem? {
+			val target = streamUrls.forPlayback(ref, audioOnlyVideo) ?: return null
 			// The quality is recorded on the item on the way past, the same way
 			// resolveVideo marks what it learned: it is decided here and
 			// nowhere else, and the info dialog would otherwise have to
 			// recompute it from inputs that move underneath a playing track.
-			return item.withQuality(target.quality).buildUpon()
+			val marked = if (audioOnlyVideo) item.markedAsAudioOnlyVideo() else item
+			return marked.withQuality(target.quality).buildUpon()
 				.setUri(target.url)
 				.setCustomCacheKey(target.cacheKey)
 				// Set after the URI: it applies to the LocalConfiguration,
 				// which only exists once there is one. Null for the
 				// original, where sniffing is the only honest answer.
 				.setMimeType(target.mimeType)
+				// Dropped rather than kept: an item re-resolved from the video
+				// path is still carrying the film's subtitle configurations,
+				// and there is nothing to draw them on.
+				.setSubtitleConfigurations(emptyList())
 				.build()
 		}
 
@@ -386,9 +486,16 @@ class PlaybackService : MediaLibraryService() {
 		 * would resolve a film to `format=opus` and play its soundtrack under a
 		 * black screen — the exact failure video support exists to remove — so
 		 * the mirror is consulted instead. A local read, no network.
+		 *
+		 * The audio-only flag is checked first and is not redundant with it: an
+		 * item resolved that way carries `isVideo = false` on purpose, so that
+		 * everything downstream treats it as audio. Without this line, turning
+		 * the setting back off would find a film claiming not to be one and
+		 * leave it as audio for ever.
 		 */
 		private suspend fun isVideo(item: MediaItem, ref: ItemRef): Boolean =
-			item.isVideoOrNull() ?: local.song(ref)?.isVideo ?: false
+			item.isAudioOnlyVideo()
+				|| (item.isVideoOrNull() ?: local.song(ref)?.isVideo ?: false)
 
 		// ── Browsable tree: stubbed ─────────────────────────────────────
 		//

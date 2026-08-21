@@ -2059,6 +2059,13 @@ body {
    color: var(--text);
    }
 
+/* Explanatory line under a setting, for what the label has no room to say. */
+.admin-hint {
+   font-size: 0.85rem;
+   margin: 0;
+   color: var(--text-dim);
+   }
+
 .user-list {
    display: flex;
    flex-direction: column;

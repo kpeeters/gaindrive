@@ -13,8 +13,8 @@ import org.gaindrive.android.data.StreamUrls
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.di.MediaHttp
 import org.gaindrive.android.playback.CastSource
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -100,7 +100,10 @@ class CastUrls @Inject constructor(
 	private val reachability: CastReachability,
 	private val bridge: CastBridge,
 	private val audioCache: AudioCache,
-	private val httpClient: OkHttpClient,
+	// The client whose read timeout a whole-film transcode fits inside; see
+	// MediaHttp, which is where this requirement now lives for every caller
+	// that waits on one.
+	@MediaHttp private val httpClient: OkHttpClient,
 	private val settings: SettingsStore,
 ) {
 
@@ -135,7 +138,7 @@ class CastUrls @Inject constructor(
 			)
 		}
 
-		val target = streamUrls.forPlayback(ref) ?: return null
+		val target = streamUrls.forPlayback(ref, source.audioOnlyVideo) ?: return null
 		val mime = target.mimeType ?: source.sourceMime
 
 		// Downloaded: serve the copy on the device rather than fetching it back
@@ -178,7 +181,13 @@ class CastUrls @Inject constructor(
 	 * "why is this one still Opus" answerable.
 	 */
 	private suspend fun directTarget(ref: ItemRef, source: CastSource): StreamTarget? {
-		if (!settings.castOriginal.first()) return streamUrls.forPlayback(ref)
+		if (!settings.castOriginal.first())
+			return streamUrls.forPlayback(ref, source.audioOnlyVideo)
+		// "The original file" for a video played as audio is the film, which is
+		// the one thing this route must not fetch. It is also the only place
+		// the audio-only flag is read: everything else about such an item is
+		// already audio, which is why it is not marked as a video at all.
+		if (source.audioOnlyVideo) return streamUrls.forPlayback(ref, audioOnlyVideo = true)
 		if (!castPlaysNatively(source.sourceMime)) {
 			Log.i(
 				TAG,
@@ -252,7 +261,7 @@ class CastUrls @Inject constructor(
 		withContext(Dispatchers.IO) {
 			runCatching {
 				val request = Request.Builder().url(url).header("Range", "bytes=0-0").build()
-				warmClient.newCall(request).execute().use { response ->
+				httpClient.newCall(request).execute().use { response ->
 					Log.i(
 						TAG,
 						"warm ${response.code}" +
@@ -261,15 +270,6 @@ class CastUrls @Inject constructor(
 				}
 			}.onFailure { Log.w(TAG, "warm failed: $it") }
 		}
-	}
-
-	/**
-	 * The shared client with a read timeout a remux can finish inside. Its 30 s
-	 * is sized for audio, and derived rather than changed because Retrofit and
-	 * Coil are on the same client and want the short one.
-	 */
-	private val warmClient by lazy {
-		httpClient.newBuilder().readTimeout(WARM_TIMEOUT_MINUTES, TimeUnit.MINUTES).build()
 	}
 
 	/**
@@ -299,13 +299,5 @@ class CastUrls @Inject constructor(
 
 	private companion object {
 		const val TAG = "GainDriveCast"
-
-		/**
-		 * Generous, because the thing being waited for is a `-c copy` remux of a
-		 * whole film and the cost of being wrong is asymmetric: too long only
-		 * delays a cast the user is already watching a spinner for, while too
-		 * short hands the receiver a stream that has not been built yet.
-		 */
-		const val WARM_TIMEOUT_MINUTES = 10L
 	}
 }

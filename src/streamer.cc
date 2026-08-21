@@ -61,10 +61,19 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	bool is_browser = req.get_header_value("User-Agent").find("Mozilla/")
 	                  != std::string::npos;
 
-	// Video takes a different ladder entirely — see VIDEO.md.  None of the
-	// negotiation below applies to it: TARGETS has no entry for a video
+	// A video whose request names an audio format is a request for its
+	// soundtrack alone, and falling through to the audio path below is the
+	// entire implementation of that — see audio_only_request() in codecs.hh.
+	// It works because target_for() has no entry for a video container, so
+	// `wanted` always counts as a format change and the encode branch is
+	// taken; the `-vn` that path already passes is the extraction.
+	bool audio_only = audio_only_request(song.is_video, format,
+	                                     song.audio_codec);
+
+	// Video otherwise takes a different ladder entirely — see VIDEO.md.  None
+	// of the negotiation below applies to it: TARGETS has no entry for a video
 	// container, and format/maxBitRate here are about audio muxers.
-	if (song.is_video) {
+	if (song.is_video && !audio_only) {
 		serve_video(req, res, song, cache, max_bitrate, format, time_offset,
 		            video_size, segment_duration, is_browser,
 		            std::move(get_position));
@@ -123,6 +132,7 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	          << " time_offset=" << time_offset
 	          << " transcode=" << (needs_transcode ? "yes" : "no")
 	          << (needs_transcode ? " target=" + std::string(target->name) : "")
+	          << (audio_only ? " audio_only=yes" : "")
 	          << " cast=" << (cast_stream ? "yes" : "no")
 	          << " browser=" << (is_browser ? "yes" : "no")
 	          << std::endl;
@@ -357,13 +367,36 @@ std::vector<std::string> Streamer::ffmpeg_argv(const SongInfo& song,
 		args.push_back(std::to_string(time_offset));
 		}
 	args.push_back("-i");
-	args.push_back(song.path);
+	// A DVD titleset is split across 1 GB VOBs that are one continuous stream,
+	// so its soundtrack is the concatenated list rather than the first part —
+	// otherwise the extracted audio reports and stops after twenty minutes.
+	// dvd_input() returns the plain path for everything else, so this is a
+	// no-op for audio files.
+	args.push_back(song.is_video ? dvd_input(song.path) : song.path);
 	// Drop attached pictures (m4a album art is exposed as a video stream)
 	// and source metadata.  Without -vn, ffmpeg copies embedded JPEG/PNG
 	// art into the mp3's ID3v2 tag at the *start* of the stream — Firefox
 	// must download the whole tag before reaching the first audio frame,
 	// which delays playback by seconds for tracks with large art.
+	//
+	// On a video source the same flag is the audio extraction itself, which is
+	// why the audio-only path needed no separate builder.
 	args.push_back("-vn");
+	if (song.is_video) {
+		// Name the track rather than leaving it to ffmpeg's "best stream"
+		// rule, which scores by channel count and would prefer a 5.1
+		// commentary or a DTS track over the film's own stereo mix.  No
+		// trailing '?': audio_only_request() has already excluded the silent
+		// video, and a hard failure beats an empty file entering the cache.
+		args.push_back("-map");
+		args.push_back("0:a:0");
+		// Downmix, as the video re-encode tier already does.  A film's 5.1
+		// AC3 or DTS track encoded as surround costs several times the
+		// bitrate the audio-quality setting is asking for, and phones and
+		// browsers play the stereo mix regardless.
+		args.push_back("-ac");
+		args.push_back("2");
+		}
 	args.push_back("-map_metadata");
 	args.push_back("-1");
 	args.push_back("-f");

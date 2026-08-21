@@ -11,6 +11,7 @@ import org.gaindrive.android.data.StreamUrls
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.model.AudioFormat
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.di.MediaHttp
 import java.util.Collections
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -32,7 +33,9 @@ class TranscodePrewarmer @Inject constructor(
 	private val streamUrls: StreamUrls,
 	private val audioCache: AudioCache,
 	private val settings: SettingsStore,
-	private val httpClient: OkHttpClient,
+	// The point of the warm is to wait out a transcode, so it must be the
+	// client that is allowed to; see MediaHttp.
+	@MediaHttp private val httpClient: OkHttpClient,
 ) {
 
 	/**
@@ -45,7 +48,13 @@ class TranscodePrewarmer @Inject constructor(
 	 */
 	private val attempted = Collections.synchronizedSet(mutableSetOf<String>())
 
-	suspend fun warm(ref: ItemRef) {
+	/**
+	 * [audioOnlyVideo] says this ref is a video whose soundtrack is what will
+	 * be fetched. It is the case this class matters most for: extracting a
+	 * film's audio is a blocking transcode over a multi-gigabyte source, so the
+	 * wait it moves out of the user's way is a minute rather than a few seconds.
+	 */
+	suspend fun warm(ref: ItemRef, audioOnlyVideo: Boolean = false) {
 		// Offline mode means requests are not to be made at all, not that they
 		// are expected to fail.
 		if (settings.offlineMode.first()) return
@@ -53,7 +62,7 @@ class TranscodePrewarmer @Inject constructor(
 		// cache, so there is nothing for the server to prepare.
 		if (ref.encode() in audioCache.cachedKeys.value) return
 
-		val target = streamUrls.forPlayback(ref) ?: return
+		val target = streamUrls.forPlayback(ref, audioOnlyVideo) ?: return
 		// The original is served straight off disk with no ffmpeg involved, so
 		// there is no transcode to build and nothing to wait for.
 		if (target.quality.format == AudioFormat.ORIGINAL) return

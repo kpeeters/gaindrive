@@ -100,6 +100,21 @@ fun StorageSettingsScreen(
 			}
 		}
 
+		// Here rather than in a playback section of its own, because what it
+		// changes is what gets fetched and stored: with it on, a video becomes
+		// an ordinary track for every purpose on this screen — it is cached as
+		// it plays, it counts against the cap, and it can be downloaded.
+		item {
+			SwitchRow(
+				title = "Play videos as audio only",
+				subtitle = "Fetches just the soundtrack, at the quality above. A " +
+					"fraction of the data, and unlike a video it is cached and " +
+					"can be downloaded for offline.",
+				checked = state.videoAudioOnly,
+				onCheckedChange = viewModel::setVideoAudioOnly,
+			)
+		}
+
 		item { SectionTitle("Cache") }
 
 		item {

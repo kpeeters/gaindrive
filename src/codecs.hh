@@ -183,3 +183,31 @@ inline bool video_direct_playable(std::string_view container,
 		return true;
 	return container == "mkv" && webm_codecs(video_codec, audio_codec);
 	}
+
+// True when a request naming a video is really a request for its soundtrack.
+//
+// This is the whole audio-only contract, and it is deliberately spelled with
+// existing Subsonic parameters rather than an extension: `format` already
+// names an audio container, `target_for()` already validates it, and a client
+// asking for format=mp3 on a video is asking for exactly this.  VIDEO.md
+// specified it from the start — the unconditional `-vn` in
+// Streamer::ffmpeg_argv() exists for m4a cover art, but on a video file it
+// *is* audio extraction, so the audio path needed almost nothing added to it.
+//
+// Two callers must agree on this, for the same reason as the two predicates
+// above: Streamer::serve() decides whether to take the video ladder at all,
+// and the stream.view handler decides whether the account's maxBitRate ceiling
+// applies — it must not for a video, and it must for the soundtrack of one.
+//
+// An empty audio_codec keeps the request on the video ladder.  A silent video
+// has nothing to extract, and `-map 0:a:0` against one makes ffmpeg exit
+// before writing a byte, which reaches the client as a 200 with an empty body
+// — the failure the format validation in stream.view exists to prevent.
+inline bool audio_only_request(bool is_video, std::string_view format,
+                               std::string_view audio_codec)
+	{
+	if (!is_video || audio_codec.empty())  return false;
+	if (format.empty() || format == "raw") return false;
+	auto t = target_for(format);
+	return t && !t->encoder.empty();
+	}

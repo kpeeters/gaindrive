@@ -160,7 +160,9 @@ class PinRepository @Inject constructor(
 		val quality = settings.audioQuality.first()
 		val alreadyPinned = audioCache.pinnedBytes.value
 		val adding = songs
-			.filterNot { pinnedKeys.isPinned(CacheKeys.of(it.ref, quality)) }
+			.filterNot {
+				pinnedKeys.isPinned(CacheKeys.of(it.ref, it.effectiveQuality(quality)))
+			}
 			.sumOf { it.storedSizeAt(quality) }
 		if (alreadyPinned + adding > cap) {
 			return PinResult.TooLarge(alreadyPinned + adding, cap)
@@ -232,9 +234,18 @@ class PinRepository @Inject constructor(
 		// earlier setting stays playable but becomes ordinary evictable cache,
 		// which is what makes a quality change reclaim its own space.
 		val quality = settings.audioQuality.first()
+		// A video's soundtrack is filed under the substituted quality (see
+		// AudioQuality.forVideoAudio), so protecting it under the plain one
+		// would name bytes that do not exist and leave the ones that do
+		// evictable — a downloaded film that quietly stops playing offline.
+		// One bulk query rather than a lookup per ref: a playlist pin can
+		// cover hundreds.
+		val videos = local.videoRefKeys(keys)
 		// Set before publishing: the evictor reads this, and a download racing
 		// ahead of it would be evictable for the length of the race.
-		pinnedKeys.keys = keys.mapTo(mutableSetOf()) { CacheKeys.of(it, quality) }
+		pinnedKeys.keys = keys.mapTo(mutableSetOf()) {
+			CacheKeys.of(it, if (it in videos) quality.forVideoAudio() else quality)
+		}
 		_pins.value = pins
 		_coverage.value = coverage
 		_protectedKeys.value = keys
@@ -252,15 +263,27 @@ class PinRepository @Inject constructor(
 		_pins.value.forEach { enqueue(songsFor(it)) }
 	}
 
-	private suspend fun computeCoverage(pins: List<Pin>): PinCoverage = retaining(
-		expandPins(
-			pins = pins,
-			albumSongs = pins.filter { it.kind == PinKind.ALBUM }
-				.associate { it.ref to local.songsOfAlbum(it.ref).downloadable().map(Song::ref) },
-			playlistSongs = pins.filter { it.kind == PinKind.PLAYLIST }
-				.associate { it.ref to local.songsOfPlaylist(it.ref).downloadable().map(Song::ref) },
+	private suspend fun computeCoverage(pins: List<Pin>): PinCoverage {
+		// Read once for the whole pass rather than per pin: a flip halfway
+		// through would otherwise produce a coverage that included the videos
+		// under some pins and not others.
+		val audioOnly = settings.videoAudioOnly.first()
+		return retaining(
+			expandPins(
+				pins = pins,
+				albumSongs = pins.filter { it.kind == PinKind.ALBUM }
+					.associate {
+						it.ref to local.songsOfAlbum(it.ref)
+							.downloadable(audioOnly).map(Song::ref)
+					},
+				playlistSongs = pins.filter { it.kind == PinKind.PLAYLIST }
+					.associate {
+						it.ref to local.songsOfPlaylist(it.ref)
+							.downloadable(audioOnly).map(Song::ref)
+					},
+			)
 		)
-	)
+	}
 
 	/**
 	 * Keeps the previous membership of any pin that has just come back empty.
@@ -293,25 +316,49 @@ class PinRepository @Inject constructor(
 		PinKind.SONG -> listOfNotNull(local.song(pin.ref))
 		PinKind.ALBUM -> local.songsOfAlbum(pin.ref)
 		PinKind.PLAYLIST -> local.songsOfPlaylist(pin.ref)
-	}.downloadable()
+	}.downloadable(settings.videoAudioOnly.first())
 
 	/**
-	 * Videos are never stored, so they are never part of what a pin covers.
+	 * A video is part of what a pin covers only when it is being played for its
+	 * soundtrack — `SettingsStore.videoAudioOnly`.
 	 *
-	 * Left in, an album pin over a film folder could never complete: a video the
-	 * server can only re-encode has no `Content-Length`, so nothing downstream
-	 * can decide the copy is whole. The individual action is hidden for the same
-	 * reason (see `TrackActionsSheet`); this is the collection case, where the
+	 * Otherwise it could never complete: a video the server can only re-encode
+	 * has no `Content-Length`, so nothing downstream can decide the copy is
+	 * whole, and the byte cache is sized for tracks rather than films. With the
+	 * setting on, what is fetched is an ordinary audio transcode with a real
+	 * length, and none of that applies. The individual action follows the same
+	 * rule (see `TrackActionsSheet`); this is the collection case, where the
 	 * video is incidental and the rest of the album should still download.
+	 *
+	 * Turning the setting back off leaves the stored bytes behind but stops the
+	 * pin covering them, so eviction reclaims them in its own time. That is the
+	 * right way round — a pin means "keep what I can play", and with the setting
+	 * off the film is not something this app plays from the cache.
 	 */
-	private fun List<Song>.downloadable(): List<Song> = filterNot { it.isVideo }
+	private fun List<Song>.downloadable(audioOnly: Boolean): List<Song> =
+		if (audioOnly) this else filterNot { it.isVideo }
 
 	private suspend fun enqueue(songs: List<Song>) {
 		songs.forEach { song ->
-			val target = streamUrls.forDownload(song.ref) ?: return@forEach
+			// A video only ever reaches here through downloadable(), which lets
+			// one past exactly when its soundtrack is what will be fetched — so
+			// `isVideo` is the flag the URL builder wants, not a second reading
+			// of the setting that could disagree with the first.
+			val target = streamUrls.forDownload(song.ref, song.isVideo) ?: return@forEach
 			downloads.add(song.ref, target)
 		}
 	}
+
+	/**
+	 * The quality this song's bytes are actually filed under.
+	 *
+	 * A video's soundtrack is always a transcode — `AudioFormat.ORIGINAL` for
+	 * one means "send the film", which is not a thing that can be stored — so
+	 * the substitution has to be applied wherever a cache key or a size is
+	 * derived, not only where the URL is built.
+	 */
+	private fun Song.effectiveQuality(quality: AudioQuality): AudioQuality =
+		if (isVideo) quality.forVideoAudio() else quality
 
 	/**
 	 * Roughly what this song will occupy once stored.
@@ -320,10 +367,16 @@ class PinRepository @Inject constructor(
 	 * number as soon as anything is transcoded — an album of FLACs would be
 	 * refused for a pin that actually fits several times over at Opus. Bitrate
 	 * times duration is close enough for a capacity check.
+	 *
+	 * A video is the extreme case of the same thing: its `sizeBytes` is the
+	 * whole film, several gigabytes for something that stores as a hundred
+	 * megabytes, which would refuse a pin that fits many times over.
 	 */
-	private fun Song.storedSizeAt(quality: AudioQuality): Long =
-		if (quality.format == AudioFormat.ORIGINAL) sizeBytes
-		else (duration * quality.bitRate * 125L)
+	private fun Song.storedSizeAt(quality: AudioQuality): Long {
+		val effective = effectiveQuality(quality)
+		return if (effective.format == AudioFormat.ORIGINAL) sizeBytes
+		else (duration * effective.bitRate * 125L)
+	}
 
 	private fun PinEntity.toPin(): Pin? {
 		val ref = ItemRef.decode(refKey) ?: return null

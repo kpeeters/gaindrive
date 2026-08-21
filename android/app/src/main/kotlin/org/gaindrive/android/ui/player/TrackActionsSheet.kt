@@ -78,6 +78,7 @@ fun TrackActionsSheet(
 
 	val pinStatuses by pins.statuses.collectAsStateWithLifecycle()
 	val pinMessage by pins.message.collectAsStateWithLifecycle()
+	val videoDownloadable by pins.videoDownloadable.collectAsStateWithLifecycle()
 	val context = LocalContext.current
 	// The sheet is dismissed the moment the action is tapped, so a refusal has
 	// to be told somewhere that outlives it.
@@ -133,11 +134,13 @@ fun TrackActionsSheet(
 				) {
 					picking = true
 				}
-				// No download for video. The byte cache is sized for tracks, and
-				// a video the server can only re-encode arrives with no
-				// Content-Length, so nothing could ever call the copy complete
-				// — the row would sit at "downloading" for good.
-				if (!song.isVideo) {
+				// No download for a video being played as one. The byte cache is
+				// sized for tracks, and a video the server can only re-encode
+				// arrives with no Content-Length, so nothing could ever call the
+				// copy complete — the row would sit at "downloading" for good.
+				// With "Play videos as audio only" on, what would be fetched is
+				// an ordinary audio transcode and neither objection holds.
+				if (!song.isVideo || videoDownloadable) {
 					val status = pinStatuses[song.ref.encode()]
 					SheetAction(
 						leading = { DownloadIndicator(status) },

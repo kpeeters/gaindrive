@@ -18,11 +18,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.gaindrive.android.data.CoverUrls
 import org.gaindrive.android.data.LibraryRepository
+import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.playback.cast.CastSession
@@ -113,6 +115,7 @@ class PlayerConnection @Inject constructor(
 	private val videoSurface: VideoSurface,
 	private val watchdog: PlaybackWatchdog,
 	private val castSession: CastSession,
+	private val settings: SettingsStore,
 	private val scope: CoroutineScope,
 ) {
 
@@ -216,9 +219,14 @@ class PlayerConnection @Inject constructor(
 	 * would show a seek bar that does nothing on exactly the long content where
 	 * seeking matters most. The answer for those is `hls.m3u8`, which the bridge
 	 * cannot yet carry. Refusing here, in words, is the honest version of that.
+	 *
+	 * None of it applies when videos are being played for their soundtrack:
+	 * what the receiver is offered then is an ordinary audio transcode, which
+	 * has a length and byte ranges whatever the video codec was.
 	 */
-	private fun refuseIfCasting(songs: List<Song>): Boolean {
+	private suspend fun refuseIfCasting(songs: List<Song>): Boolean {
 		if (castSession.device.value == null) return false
+		if (settings.videoAudioOnly.first()) return false
 		if (songs.none { it.isVideo && !it.nativeSeek }) return false
 		_message.value = "This video has to be converted as it plays, which the TV " +
 			"cannot seek. Disconnect to watch on this device."
