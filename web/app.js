@@ -2269,6 +2269,11 @@ const player = {
    // if the source is being served as-is.  Used by the info dialog to show
    // the format the user is actually hearing rather than the on-disk format.
    streamFormat: null,
+   // The chosen subtitle track, and the song it was chosen for.  Held across a
+   // re-fetch because a seek on a transcoded stream is one: without this, every
+   // seek would silently turn the subtitles off.
+   captionIndex: null,
+   captionSong: null,
 };
 player.media = player.audioEl;
 
@@ -2325,6 +2330,10 @@ function playerStop() {
    player.localOffset = 0;
    player.scrobbled   = false;
    videoSurfaceSet(null);
+   // Cleared at the source too: playerStop ends the film, so the next one that
+   // starts must not inherit its subtitle choice.
+   player.captionSong  = null;
+   player.captionIndex = null;
    videoCaptionsMenu([]);
 
    document.getElementById('player-playpause').textContent = 'play_arrow';
@@ -2379,6 +2388,13 @@ function setupVideoSurface() {
 // the media request itself — not worth risking playback for subtitles.
 async function videoLoadCaptions(song) {
    player.videoEl.querySelectorAll('track').forEach(t => t.remove());
+   // A seek on a transcoded stream comes back through here for the *same*
+   // film, so the choice is forgotten only when the film changes.  Otherwise
+   // every seek would turn the subtitles off.
+   if (player.captionSong !== song.id) {
+      player.captionSong  = song.id;
+      player.captionIndex = null;
+      }
    // Cleared here rather than only on success: both the early returns below
    // would otherwise leave the previous film's picker on the bar.
    videoCaptionsMenu([]);
@@ -2389,15 +2405,43 @@ async function videoLoadCaptions(song) {
    // these captions belong to a video that is no longer playing.
    if (player.queue[player.index]?.id !== song.id) return;
    const caps = info.videoInfo?.captions ?? [];
+   // Read now rather than in the handler: by the time a track loads, another
+   // seek may have moved it, and these elements would then belong to the
+   // stream before last.
+   const offset = player.localOffset || 0;
    for (const c of caps) {
       const t = document.createElement('track');
       t.kind  = 'subtitles';
       t.label = c.name || 'Subtitles';
       t.src   = apiUrl('getCaptions', {id: song.id, captionId: c.id});
+      t.addEventListener('load', () => videoShiftCues(t.track, offset));
       player.videoEl.appendChild(t);
       }
    // After the elements, so a menu index is a textTracks index.
    videoCaptionsMenu(caps);
+}
+
+// Rebases a caption file onto the stream actually being played.
+//
+// A <track> is timed against the media element's own clock, and for a
+// transcoded seek that clock has been rebased: the server started ffmpeg at
+// the seek point, so currentTime is zero there.  The caption file still
+// describes the whole film, so without this a seek to twenty minutes shows the
+// opening lines — which is what `localOffset` corrects everywhere else.
+// Shifting the cues is the only lever, since nothing else about a <track> can
+// be offset.
+//
+// On 'load' because that is the one moment the cues are known to exist and to
+// be unshifted: a mode change that reuses already-parsed cues fires no such
+// event, so this cannot apply twice.
+function videoShiftCues(track, offset) {
+   if (!offset || !track?.cues) return;
+   // Snapshot first — removeCue mutates the live list underneath the loop.
+   for (const cue of [...track.cues]) {
+      if (cue.endTime <= offset) { track.removeCue(cue); continue; }
+      cue.startTime = Math.max(0, cue.startTime - offset);
+      cue.endTime  -= offset;
+      }
 }
 
 // Fills the subtitle picker, or hides it when there is nothing to pick.
@@ -2424,13 +2468,20 @@ function videoCaptionsMenu(captions) {
       };
    add('Off', null);
    captions.forEach((c, i) => add(c.name || `Track ${i + 1}`, i));
-   menu.firstElementChild.classList.add('current');
+
+   // Put back the track a seek interrupted.  A film that has lost the track it
+   // had — a re-file, a different caption list — falls back to off rather than
+   // to whatever now sits at that index.
+   const keep = player.captionIndex;
+   if (keep !== null && keep < captions.length) videoSelectCaption(keep);
+   else                                        menu.firstElementChild.classList.add('current');
 }
 
 // Shows the track at index, or none when it is null.  Assigning `mode` is also
 // what makes the browser fetch the WebVTT, so a track is only ever loaded once
 // someone asks for it.
 function videoSelectCaption(index) {
+   player.captionIndex = index;
    const tracks = player.videoEl.textTracks;
    for (let i = 0; i < tracks.length; i++)
       tracks[i].mode = (i === index) ? 'showing' : 'disabled';
