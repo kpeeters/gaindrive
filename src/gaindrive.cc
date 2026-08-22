@@ -4700,7 +4700,13 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		// Rescan synchronously: only two artist dirs, so it's fast, and doing it
 		// before the response ensures the client sees a consistent DB immediately.
-		store_.scan_dirs({artist_rel, personal_artist_rel});
+		//
+		// Destination first, in its own call — see the long note in renameAlbum.
+		// A single set would scan in sort order, and tearing down the personal
+		// artist dir while the promoted album's parent_id still points at it
+		// trips a foreign key and silently leaves the emptied artist behind.
+		store_.scan_dirs({artist_rel});
+		store_.scan_dirs({personal_artist_rel});
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
@@ -4873,7 +4879,22 @@ GainDrive::GainDrive(const std::string& db_path,
 		// which relocate_prefix dropped — so a contended database here would
 		// leave the album with no artist until the next scan, and that is worth
 		// a log line rather than a 500 on a rename that has already happened.
-		try { store_.scan_dirs({old_artist_rel, new_artist_rel}); }
+		//
+		// DESTINATION FIRST, and it must be two calls rather than one set:
+		// scan_dirs takes a std::set, so a single call would scan them in
+		// whatever order the names happen to sort in. The relocate moved the
+		// album folder's *path* out from under the old artist but left its
+		// parent_id pointing at the old artist's row, and folders.parent_id has
+		// no ON DELETE CASCADE. Tearing down the source first therefore hits
+		// FOREIGN KEY constraint failed, which rolls the whole prune back and
+		// leaves the emptied artist behind reading "0 albums" — with no error
+		// anywhere, because the prune catches. Scanning the destination first
+		// re-points parent_id, and the source then deletes cleanly.
+		try {
+			store_.scan_dirs({new_artist_rel});
+			if (old_artist_rel != new_artist_rel)
+				store_.scan_dirs({old_artist_rel});
+			}
 		catch (const std::exception& e) {
 			std::cout << stamp() << "Rename: rescan failed: " << e.what()
 			          << std::endl;
