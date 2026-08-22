@@ -25,7 +25,27 @@ class CastManager {
 			std::string idle_reason;            // FINISHED | INTERRUPTED | ERROR (when IDLE)
 			};
 
-		// Scan for Chromecast devices via mDNS for timeout_ms milliseconds.
+		// Knobs on the mDNS discovery pass.  Every default reproduces the
+		// behaviour discover() had before this struct existed, so the server
+		// is unaffected until one of them is deliberately changed; they are
+		// here so gaindrive-cast can vary each one from the command line
+		// while working out why we see fewer devices than the Cast SDK does.
+		struct DiscoverOpts {
+			int  timeout_ms    = 4000;  // total wall clock for the pass
+			int  queries       = 1;     // PTR queries sent per socket
+			int  query_gap_ms  = 1000;  // gap before the 2nd; doubles after
+			bool ipv4          = true;
+			bool ipv6          = true;
+			bool per_interface = false; // one socket per local address
+			std::string iface;          // restrict to this interface ("" = all)
+			bool require_id    = true;  // drop a device with no TXT id
+			bool verbose       = true;  // log every record as it arrives
+			};
+
+		// Scan for Chromecast devices via mDNS.
+		std::vector<CastDevice> discover(const DiscoverOpts& opts);
+
+		// Scan for timeout_ms milliseconds with everything else defaulted.
 		std::vector<CastDevice> discover(int timeout_ms);
 
 		// Run discover() in a background thread and cache the results.

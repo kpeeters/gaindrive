@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iostream>
+#include <sstream>
 #include <map>
 #include <chrono>
 #include <thread>
@@ -56,12 +57,95 @@ static unsigned int find_ipv6_if()
 	return idx;
 	}
 
+// One local interface carrying an address of the family we want to query on.
+struct IfaceV4 { std::string name; struct in_addr addr; };
+struct IfaceV6 { std::string name; unsigned int  idx; };
+
+// Interfaces worth sending a multicast query from. `want` restricts to one by
+// name. IFF_MULTICAST matters: a point-to-point or tunnel interface that
+// cannot carry multicast would only ever produce a socket that hears nothing.
+static std::vector<IfaceV4> list_ifaces4(const std::string& want)
+	{
+	std::vector<IfaceV4> out;
+	struct ifaddrs* iflist;
+	if (getifaddrs(&iflist) < 0) return out;
+	for (struct ifaddrs* ifa = iflist; ifa; ifa = ifa->ifa_next) {
+		if (!ifa->ifa_addr) continue;
+		if (ifa->ifa_addr->sa_family != AF_INET) continue;
+		if (ifa->ifa_flags & IFF_LOOPBACK) continue;
+		if (!(ifa->ifa_flags & IFF_UP)) continue;
+		if (!(ifa->ifa_flags & IFF_MULTICAST)) continue;
+		if (!want.empty() && want != ifa->ifa_name) continue;
+		out.push_back({ifa->ifa_name,
+		               reinterpret_cast<struct sockaddr_in*>(ifa->ifa_addr)->sin_addr});
+		}
+	freeifaddrs(iflist);
+	return out;
+	}
+
+static std::vector<IfaceV6> list_ifaces6(const std::string& want)
+	{
+	std::vector<IfaceV6> out;
+	struct ifaddrs* iflist;
+	if (getifaddrs(&iflist) < 0) return out;
+	for (struct ifaddrs* ifa = iflist; ifa; ifa = ifa->ifa_next) {
+		if (!ifa->ifa_addr) continue;
+		if (ifa->ifa_addr->sa_family != AF_INET6) continue;
+		if (ifa->ifa_flags & IFF_LOOPBACK) continue;
+		if (!(ifa->ifa_flags & IFF_UP)) continue;
+		if (!(ifa->ifa_flags & IFF_MULTICAST)) continue;
+		if (!want.empty() && want != ifa->ifa_name) continue;
+		unsigned int idx = if_nametoindex(ifa->ifa_name);
+		if (!idx) continue;
+		// An interface with several IPv6 addresses appears once per address;
+		// the group join is by interface index, so one socket covers them all.
+		bool dup = false;
+		for (auto& e : out) if (e.idx == idx) dup = true;
+		if (!dup) out.push_back({ifa->ifa_name, idx});
+		}
+	freeifaddrs(iflist);
+	return out;
+	}
+
+// Open an IPv6 mDNS socket pointed at one interface. mdns_socket_setup_ipv6()
+// joins ff02::fb with ipv6mr_interface 0, leaving the kernel to choose; but
+// sending to a link-local multicast address needs an explicit scope, so set
+// IPV6_MULTICAST_IF and re-join with the same index so send and receive agree.
+static int open_ipv6_on(unsigned int ifidx)
+	{
+	int s = mdns_socket_open_ipv6(nullptr);
+	if (s < 0) return -1;
+	if (ifidx) {
+		setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_IF, &ifidx, sizeof(ifidx));
+		struct ipv6_mreq req = {};
+		req.ipv6mr_multiaddr.s6_addr[0]  = 0xFF;
+		req.ipv6mr_multiaddr.s6_addr[1]  = 0x02;
+		req.ipv6mr_multiaddr.s6_addr[15] = 0xFB;
+		req.ipv6mr_interface = ifidx;
+		setsockopt(s, IPPROTO_IPV6, IPV6_JOIN_GROUP, &req, sizeof(req));
+		}
+	return s;
+	}
+
+// A socket opened for one discovery pass. `iface` is the interface it *sends*
+// on — a per-interface IPv4 socket still binds INADDR_ANY:5353 (mdns.h rewrites
+// sin_addr after setting IP_MULTICAST_IF and the group membership), so every
+// such socket also hears every interface's replies. The duplicates are free:
+// DiscState is keyed on the service instance name.
+struct DiscSocket {
+	int         fd = -1;
+	bool        v6 = false;
+	std::string iface;
+	};
+
 // State accumulated across mDNS response packets within one discover() call.
 struct DiscState {
 	std::map<std::string, CastManager::CastDevice> devs;   // service instance → device
 	std::map<std::string, std::string>              hosts;  // hostname → IPv4 address
 	std::map<std::string, std::string>              hosts6; // hostname → IPv6 address (with scope)
 	std::map<std::string, std::string>              srvs;   // service instance → SRV host
+	std::string                                     iface;  // socket currently being drained
+	bool                                            verbose = true;
 	};
 
 static int mdns_cb(int, const struct sockaddr* from, size_t,
@@ -103,9 +187,17 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 	// Prefer IPv4 as device address; fall back to IPv6.
 	std::string src_ip = src_ip4.empty() ? src_ip6 : src_ip4;
 
+	// Every branch below logs one line, and a quiet pass wants none of them.
+	std::ostringstream log;
+	auto say = [&]{
+		if (!st->verbose) return;
+		std::cout << stamp() << "Cast mDNS: " << log.str()
+		          << (st->iface.empty() ? "" : " via=" + st->iface) << std::endl;
+		};
+
 	if (rtype == MDNS_RECORDTYPE_PTR) {
-		std::cout << stamp() << "Cast mDNS: PTR  from=" << src_ip
-		          << " name=" << key << std::endl;
+		log << "PTR  from=" << src_ip << " name=" << key;
+		say();
 		}
 	else if (rtype == MDNS_RECORDTYPE_TXT) {
 		mdns_record_txt_t txt[32];
@@ -119,10 +211,11 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 			if (k == "id") dev.id   = v;
 			if (k == "fn") dev.name = v;
 			}
-		std::cout << stamp() << "Cast mDNS: TXT  from=" << src_ip
-		          << " name=" << key
-		          << " id=" << dev.id
-		          << " fn=" << dev.name << std::endl;
+		log << "TXT  from=" << src_ip
+		    << " name=" << key
+		    << " id=" << dev.id
+		    << " fn=" << dev.name;
+		say();
 		}
 	else if (rtype == MDNS_RECORDTYPE_SRV) {
 		mdns_record_srv_t srv = mdns_record_parse_srv(
@@ -132,10 +225,11 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 		if (!src_ip.empty() && dev.address.empty())
 			dev.address = src_ip;
 		st->srvs[key] = std::string(srv.name.str, srv.name.length);
-		std::cout << stamp() << "Cast mDNS: SRV  from=" << src_ip
-		          << " name=" << key
-		          << " target=" << st->srvs[key]
-		          << " port=" << srv.port << std::endl;
+		log << "SRV  from=" << src_ip
+		    << " name=" << key
+		    << " target=" << st->srvs[key]
+		    << " port=" << srv.port;
+		say();
 		}
 	else if (rtype == MDNS_RECORDTYPE_A) {
 		struct sockaddr_in a4 = {};
@@ -143,8 +237,8 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 		char ip[INET_ADDRSTRLEN];
 		inet_ntop(AF_INET, &a4.sin_addr, ip, sizeof(ip));
 		st->hosts[key] = ip;
-		std::cout << stamp() << "Cast mDNS: A    from=" << src_ip
-		          << " name=" << key << " addr=" << ip << std::endl;
+		log << "A    from=" << src_ip << " name=" << key << " addr=" << ip;
+		say();
 		}
 	else if (rtype == MDNS_RECORDTYPE_AAAA) {
 		struct sockaddr_in6 a6 = {};
@@ -157,93 +251,149 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 		if (scope != std::string::npos)
 			addr6 += src_ip6.substr(scope);
 		st->hosts6[key] = addr6;
-		std::cout << stamp() << "Cast mDNS: AAAA from=" << src_ip
-		          << " name=" << key << " addr=" << addr6 << std::endl;
+		log << "AAAA from=" << src_ip << " name=" << key << " addr=" << addr6;
+		say();
 		}
 	else {
-		std::cout << stamp() << "Cast mDNS: type=" << rtype
-		          << " from=" << src_ip << " name=" << key << std::endl;
+		log << "type=" << rtype << " from=" << src_ip << " name=" << key;
+		say();
 		}
 
 	return 0;
 	}
 
-std::vector<CastManager::CastDevice> CastManager::discover(int timeout_ms)
+std::vector<CastManager::CastDevice> CastManager::discover(const DiscoverOpts& opts)
 	{
 	DiscState state;
+	state.verbose = opts.verbose;
 
-	struct sockaddr_in saddr4 = {};
-	saddr4.sin_family      = AF_INET;
-	saddr4.sin_addr.s_addr = INADDR_ANY;
-	saddr4.sin_port        = htons(MDNS_PORT);
+	std::vector<DiscSocket> socks;
 
-	int sock4 = mdns_socket_open_ipv4(&saddr4);
-	if (sock4 < 0)
-		std::cout << stamp() << "Cast: failed to open IPv4 mDNS socket (errno "
-		          << errno << ")" << std::endl;
+	if (opts.ipv4) {
+		if (opts.per_interface) {
+			// One socket per local address, which is mdns.h's intended
+			// multi-NIC pattern: passing a real address makes it set
+			// IP_MULTICAST_IF and join 224.0.0.251 on *that* interface,
+			// where the INADDR_ANY case below joins only on whichever one
+			// the kernel picks for the group.
+			for (auto& e : list_ifaces4(opts.iface)) {
+				struct sockaddr_in sa = {};
+				sa.sin_family = AF_INET;
+				sa.sin_addr   = e.addr;
+				sa.sin_port   = htons(MDNS_PORT);
+				int s = mdns_socket_open_ipv4(&sa);
+				if (s < 0) {
+					std::cout << stamp() << "Cast: IPv4 mDNS socket on " << e.name
+					          << " failed (errno " << errno << ")" << std::endl;
+					continue;
+					}
+				socks.push_back({s, false, e.name});
+				}
+			if (socks.empty())
+				std::cout << stamp() << "Cast: no usable IPv4 interface"
+				          << (opts.iface.empty() ? "" : " matching " + opts.iface)
+				          << std::endl;
+			}
+		else {
+			struct sockaddr_in sa = {};
+			sa.sin_family      = AF_INET;
+			sa.sin_addr.s_addr = INADDR_ANY;
+			sa.sin_port        = htons(MDNS_PORT);
+			int s = mdns_socket_open_ipv4(&sa);
+			if (s < 0)
+				std::cout << stamp() << "Cast: failed to open IPv4 mDNS socket (errno "
+				          << errno << ")" << std::endl;
+			else
+				socks.push_back({s, false, ""});
+			}
+		}
 
 	// IPv6 is required on many modern networks where devices only respond via
 	// ff02::fb multicast.
-	int sock6 = mdns_socket_open_ipv6(nullptr);
-	if (sock6 < 0) {
-		std::cout << stamp() << "Cast: failed to open IPv6 mDNS socket (errno "
-		          << errno << ")" << std::endl;
-		}
-	else {
-		// Sending to ff02::fb (link-local multicast) requires the kernel to know
-		// which interface to use. Set IPV6_MULTICAST_IF and re-join with that
-		// interface so both send and receive work correctly.
-		unsigned int ifidx = find_ipv6_if();
-		if (ifidx == 0) {
-			std::cout << stamp() << "Cast: no suitable IPv6 interface found" << std::endl;
+	if (opts.ipv6) {
+		if (opts.per_interface) {
+			for (auto& e : list_ifaces6(opts.iface)) {
+				int s = open_ipv6_on(e.idx);
+				if (s < 0) {
+					std::cout << stamp() << "Cast: IPv6 mDNS socket on " << e.name
+					          << " failed (errno " << errno << ")" << std::endl;
+					continue;
+					}
+				socks.push_back({s, true, e.name});
+				}
 			}
 		else {
-			setsockopt(sock6, IPPROTO_IPV6, IPV6_MULTICAST_IF,
-			           &ifidx, sizeof(ifidx));
-			struct ipv6_mreq req = {};
-			req.ipv6mr_multiaddr.s6_addr[0]  = 0xFF;
-			req.ipv6mr_multiaddr.s6_addr[1]  = 0x02;
-			req.ipv6mr_multiaddr.s6_addr[15] = 0xFB;
-			req.ipv6mr_interface = ifidx;
-			setsockopt(sock6, IPPROTO_IPV6, IPV6_JOIN_GROUP,
-			           &req, sizeof(req));
-			std::cout << stamp() << "Cast: IPv6 multicast on interface index "
-			          << ifidx << std::endl;
+			unsigned int ifidx = find_ipv6_if();
+			if (ifidx == 0)
+				std::cout << stamp() << "Cast: no suitable IPv6 interface found" << std::endl;
+			int s = open_ipv6_on(ifidx);
+			if (s < 0) {
+				std::cout << stamp() << "Cast: failed to open IPv6 mDNS socket (errno "
+				          << errno << ")" << std::endl;
+				}
+			else {
+				char nm[IF_NAMESIZE] = {};
+				socks.push_back({s, true, ifidx && if_indextoname(ifidx, nm) ? nm : ""});
+				}
 			}
 		}
 
-	if (sock4 < 0 && sock6 < 0)
+	if (socks.empty())
 		return {};
 
-	std::cout << stamp() << "Cast: querying for " << timeout_ms << " ms"
-	          << " (IPv4=" << (sock4 >= 0 ? "ok" : "fail")
-	          << " IPv6=" << (sock6 >= 0 ? "ok" : "fail") << ")" << std::endl;
+	std::cout << stamp() << "Cast: querying for " << opts.timeout_ms << " ms, "
+	          << opts.queries << " query/queries on " << socks.size()
+	          << " socket(s):";
+	for (auto& s : socks)
+		std::cout << " " << (s.v6 ? "IPv6" : "IPv4")
+		          << (s.iface.empty() ? "" : "/" + s.iface);
+	std::cout << std::endl;
 
-	std::vector<uint8_t> buf(4096);
 	static const char svc[] = "_googlecast._tcp.local.";
+	std::vector<uint8_t> sendbuf(2048);
+	// RFC 6762 §17 caps an mDNS message at 9000 bytes. recvfrom truncates a
+	// larger datagram silently, and mdns_query_recv then abandons the whole
+	// packet at the first section that fails to parse — losing every device
+	// described in it. Sizing to the protocol maximum removes the failure
+	// mode rather than trying to detect it.
+	std::vector<uint8_t> recvbuf(9000);
 
-	// mdns_query_send returns int; storing in uint16_t would corrupt -1 → 65535,
-	// which would then cause mdns_query_recv to reject all ID-0 mDNS responses.
-	if (sock4 >= 0) {
-		int r = mdns_query_send(sock4, MDNS_RECORDTYPE_PTR,
-		                        svc, strlen(svc), buf.data(), buf.size(), 0);
-		std::cout << stamp() << "Cast: IPv4 query "
-		          << (r < 0 ? "failed" : "sent") << std::endl;
-		}
-	if (sock6 >= 0) {
-		int r = mdns_query_send(sock6, MDNS_RECORDTYPE_PTR,
-		                        svc, strlen(svc), buf.data(), buf.size(), 0);
-		std::cout << stamp() << "Cast: IPv6 query "
-		          << (r < 0 ? "failed" : "sent") << std::endl;
-		}
-
-	auto deadline = std::chrono::steady_clock::now()
-	              + std::chrono::milliseconds(timeout_ms);
+	auto now       = std::chrono::steady_clock::now();
+	auto deadline  = now + std::chrono::milliseconds(opts.timeout_ms);
+	auto next_send = now;
+	int  sent      = 0;
+	int  gap_ms    = opts.query_gap_ms;
 
 	while (std::chrono::steady_clock::now() < deadline) {
+		auto t = std::chrono::steady_clock::now();
+
+		if (sent < opts.queries && t >= next_send) {
+			for (auto& s : socks) {
+				// mdns_query_send returns int; storing in uint16_t would corrupt
+				// -1 → 65535, which would then cause mdns_query_recv to reject
+				// all ID-0 mDNS responses.
+				int r = mdns_query_send(s.fd, MDNS_RECORDTYPE_PTR,
+				                        svc, strlen(svc),
+				                        sendbuf.data(), sendbuf.size(), 0);
+				std::cout << stamp() << "Cast: " << (s.v6 ? "IPv6" : "IPv4")
+				          << (s.iface.empty() ? "" : "/" + s.iface)
+				          << " query " << (sent + 1) << "/" << opts.queries
+				          << " " << (r < 0 ? "failed" : "sent") << std::endl;
+				}
+			sent++;
+			// RFC 6762 §5.2: a repeated query doubles its interval.
+			next_send = t + std::chrono::milliseconds(gap_ms);
+			gap_ms *= 2;
+			}
+
+		// Wake for the next send as well as for the deadline, or a repeat
+		// would be deferred behind however long the network stays quiet.
+		auto wake = deadline;
+		if (sent < opts.queries && next_send < wake) wake = next_send;
+
 		auto us = std::chrono::duration_cast<std::chrono::microseconds>(
-		              deadline - std::chrono::steady_clock::now()).count();
-		if (us <= 0) break;
+		              wake - std::chrono::steady_clock::now()).count();
+		if (us < 0) us = 0;
 		// Cast to the real member types rather than long: on Darwin tv_usec is
 		// suseconds_t (int), so a long here narrows inside a braced initialiser,
 		// which is ill-formed and rejected outright rather than warned about.
@@ -251,20 +401,29 @@ std::vector<CastManager::CastDevice> CastManager::discover(int timeout_ms)
 		fd_set fds;
 		FD_ZERO(&fds);
 		int maxfd = 0;
-		if (sock4 >= 0) { FD_SET(sock4, &fds); maxfd = std::max(maxfd, sock4); }
-		if (sock6 >= 0) { FD_SET(sock6, &fds); maxfd = std::max(maxfd, sock6); }
+		for (auto& s : socks) { FD_SET(s.fd, &fds); maxfd = std::max(maxfd, s.fd); }
 		int r = select(maxfd + 1, &fds, nullptr, nullptr, &tv);
-		if (r < 0 && errno == EINTR) continue;
-		if (r <= 0) break;
-		// Pass 0 as only_query_id: mDNS responses always carry ID 0 per RFC 6762.
-		if (sock4 >= 0 && FD_ISSET(sock4, &fds))
-			mdns_query_recv(sock4, buf.data(), buf.size(), mdns_cb, &state, 0);
-		if (sock6 >= 0 && FD_ISSET(sock6, &fds))
-			mdns_query_recv(sock6, buf.data(), buf.size(), mdns_cb, &state, 0);
+		if (r < 0) {
+			if (errno == EINTR) continue;
+			std::cout << stamp() << "Cast: select failed (errno " << errno
+			          << ")" << std::endl;
+			break;
+			}
+		// A quiet interval is not the end of the pass — with queries > 1 there
+		// is another round still to send. This is why the old `break` here had
+		// to go; it would have made every repeat unreachable.
+		if (r == 0) continue;
+		for (auto& s : socks) {
+			if (!FD_ISSET(s.fd, &fds)) continue;
+			state.iface = s.iface;
+			// Pass 0 as only_query_id: mDNS responses always carry ID 0 per
+			// RFC 6762.
+			mdns_query_recv(s.fd, recvbuf.data(), recvbuf.size(),
+			                mdns_cb, &state, 0);
+			}
 		}
 
-	if (sock4 >= 0) mdns_socket_close(sock4);
-	if (sock6 >= 0) mdns_socket_close(sock6);
+	for (auto& s : socks) mdns_socket_close(s.fd);
 
 	// Resolve each SRV target hostname → IPv4 A record, then IPv6 AAAA as fallback.
 	for (auto& [inst, dev] : state.devs) {
@@ -286,11 +445,22 @@ std::vector<CastManager::CastDevice> CastManager::discover(int timeout_ms)
 		          << " addr=" << dev.address
 		          << " port=" << dev.port << std::endl;
 
+	// An instance with no address is not contactable whatever else it sent, so
+	// that half of the filter is unconditional. The id comes from a TXT record,
+	// and require_id=false is how we find out whether devices are arriving but
+	// being dropped for want of one.
 	std::vector<CastDevice> result;
 	for (auto& [inst, dev] : state.devs)
-		if (!dev.id.empty() && !dev.address.empty())
+		if ((!opts.require_id || !dev.id.empty()) && !dev.address.empty())
 			result.push_back(dev);
 	return result;
+	}
+
+std::vector<CastManager::CastDevice> CastManager::discover(int timeout_ms)
+	{
+	DiscoverOpts opts;
+	opts.timeout_ms = timeout_ms;
+	return discover(opts);
 	}
 
 void CastManager::discover_background(int timeout_ms)

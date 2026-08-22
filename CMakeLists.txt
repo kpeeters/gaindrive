@@ -582,6 +582,36 @@ if(GAINDRIVE_STATIC)
 	endif()
 endif()
 
+# ---- gaindrive-cast --------------------------------------------------------
+#
+# A diagnostic front end to the Chromecast code, for investigating mDNS
+# discovery from the command line. It links castmanager.cc and stamp.cc and
+# nothing else: castmanager includes no project header but those two, so no
+# database, no HTTP server and — note the absence of ${EMBEDDED_WEB_CC} — not
+# even the embedded web client, whose custom command fires only for a target
+# that lists its output. Not installed; this is a tool, not a program we ship.
+option(GAINDRIVE_CAST_TOOL "Build the gaindrive-cast discovery diagnostic" ON)
+if(GAINDRIVE_CAST_TOOL)
+	add_executable(gaindrive-cast
+		src/casttool.cc
+		src/castmanager.cc
+		src/stamp.cc
+	)
+	target_include_directories(gaindrive-cast PRIVATE src third_party)
+	# ${GD_DEP_TARGETS} rather than named packages: the spellings differ
+	# between the system and bundled modes. Only cxxopts and nlohmann_json are
+	# actually reached, and both are header-only.
+	target_link_libraries(gaindrive-cast PRIVATE
+		${GD_DEP_TARGETS}
+		OpenSSL::SSL
+		OpenSSL::Crypto
+		Threads::Threads
+	)
+	if(GAINDRIVE_STATIC)
+		target_link_options(gaindrive-cast PRIVATE -static-libstdc++ -static-libgcc)
+	endif()
+endif()
+
 # Not part of ALL: it shells out to a container. The script is the source of
 # truth for the release build and also runs standalone (cmake -P), which is what
 # CI uses so it need not configure this tree just to invoke docker.
