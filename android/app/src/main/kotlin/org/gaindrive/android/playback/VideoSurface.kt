@@ -1,9 +1,9 @@
 package org.gaindrive.android.playback
 
+import android.util.Log
 import android.view.SurfaceView
 import androidx.media3.common.C
 import androidx.media3.common.Player
-import androidx.media3.common.TrackGroup
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.VideoSize
 import androidx.media3.common.text.CueGroup
@@ -102,35 +102,67 @@ class VideoSurface @Inject constructor() {
 	}
 
 	/**
-	 * Turns on the subtitle track in [group], or turns subtitles off when it is
-	 * null.
+	 * Turns on the subtitle track at [index] among the player's text tracks, or
+	 * turns subtitles off when it is null. The numbering is the one
+	 * [PlayerConnection] publishes.
 	 *
 	 * Applied to the player for the same reason the surface is: a controller
 	 * can only carry this if the session grants
 	 * `COMMAND_SET_TRACK_SELECTION_PARAMETERS`, and a refused command is a
 	 * silent no-op — the user would tap a subtitle track and see nothing happen.
 	 *
+	 * **An index rather than the `TrackGroup` itself, and that is the whole
+	 * fix.** `DefaultTrackSelector` looks an override up in a `HashMap` keyed on
+	 * `TrackGroup`, whose equality compares the group's id and every field of
+	 * every `Format`. A group read from the `MediaController` is rebuilt from
+	 * the `PlayerInfo` bundle, so anything that does not survive that round trip
+	 * makes the lookup miss — and a missed override throws nothing, logs
+	 * nothing, and selects nothing. Resolving here, against the player's own
+	 * `currentTracks`, makes the key the very object the selector will compare
+	 * against. The index is what is safe to carry across the session boundary;
+	 * the group is not.
+	 *
+	 * A stale index leaves the selection alone rather than falling through to
+	 * "off": the tracks can republish between the menu opening and the tap, and
+	 * turning the user's "turn on" into "turn off" would then persist across
+	 * items.
+	 *
 	 * Disabling the whole track type is what "off" has to mean. Clearing the
 	 * override alone hands the choice back to the default selector, which would
 	 * promptly turn a track back on.
 	 */
-	fun selectTextTrack(group: TrackGroup?) {
+	fun selectTextTrack(index: Int?) {
 		val player = player ?: return
 		val builder = player.trackSelectionParameters.buildUpon()
 			.clearOverridesOfType(C.TRACK_TYPE_TEXT)
-		player.trackSelectionParameters = if (group == null) {
-			builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
-		} else {
-			builder
-				.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-				.setOverrideForType(TrackSelectionOverride(group, 0))
-				.build()
+
+		if (index == null) {
+			player.trackSelectionParameters =
+				builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+			return
 		}
+
+		val group = player.currentTracks.groups
+			.filter { it.type == C.TRACK_TYPE_TEXT }
+			.getOrNull(index)
+		if (group == null) {
+			Log.w(TAG, "subtitle track $index is gone; selection left alone")
+			return
+		}
+
+		player.trackSelectionParameters = builder
+			.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+			.setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, 0))
+			.build()
 	}
 
 	private fun apply() {
 		val player = player ?: return
 		val surface = surface ?: return
 		player.setVideoSurfaceView(surface)
+	}
+
+	private companion object {
+		const val TAG = "GainDriveVideo"
 	}
 }

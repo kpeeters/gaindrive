@@ -88,6 +88,13 @@
       </div>
       <div id="video-bar">
          <span id="video-caption"></span>
+         <!-- Absent rather than disabled when the film offers nothing: most do
+              not, and an inert button on every one of them says less than no
+              button at all. Opens upward, since this bar is the bottom edge. -->
+         <span id="video-captions-wrap" hidden>
+            <button id="video-captions" class="mi" title="Subtitles" aria-label="Subtitles">closed_caption</button>
+            <div id="video-captions-menu" class="hidden"></div>
+         </span>
          <button id="video-minimise" class="mi" title="Minimise">close_fullscreen</button>
          <button id="video-fullscreen" class="mi" title="Fullscreen">fullscreen</button>
       </div>

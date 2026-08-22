@@ -654,6 +654,44 @@ body {
    background: var(--border);
 }
 
+#video-captions-wrap {
+   position: relative;
+   display: flex;
+}
+
+#video-captions.on { color: var(--accent); }
+
+/* Upward, because #video-bar is the surface's bottom edge and there is nothing
+   below it but the player. */
+#video-captions-menu {
+   position: absolute;
+   right: 0;
+   bottom: 100%;
+   margin-bottom: 0.3rem;
+   z-index: 3;
+   min-width: 9rem;
+   max-height: 12rem;
+   overflow-y: auto;
+   background: var(--surface);
+   border: 1px solid var(--border);
+   border-radius: 6px;
+   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+#video-captions-menu.hidden { display: none; }
+
+#video-captions-menu button {
+   display: block;
+   width: 100%;
+   padding: 0.35rem 0.6rem;
+   border-radius: 0;
+   font-size: 0.85rem;
+   text-align: left;
+   white-space: nowrap;
+}
+
+#video-captions-menu button.current { color: var(--accent); }
+
 @media (max-width: 649px) {
    /* No sidebar, and the bottom nav sits below the player bar. */
    #video-surface[data-state="theatre"] {

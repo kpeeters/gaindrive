@@ -2325,6 +2325,7 @@ function playerStop() {
    player.localOffset = 0;
    player.scrobbled   = false;
    videoSurfaceSet(null);
+   videoCaptionsMenu([]);
 
    document.getElementById('player-playpause').textContent = 'play_arrow';
    document.getElementById('player-title').textContent     = '—';
@@ -2345,10 +2346,15 @@ function setupVideoSurface() {
       () => videoSurfaceSet('minimised'));
    document.getElementById('video-restore').addEventListener('click',
       () => videoSurfaceSet('theatre'));
+   // Fullscreen is requested on the video element itself, so this bar — and
+   // with it the picker — is out of reach while it lasts.  Cues keep drawing:
+   // the browser paints them, not us.  Choose the track before going in.
    document.getElementById('video-fullscreen').addEventListener('click', () => {
       player.videoEl.requestFullscreen?.()
          .catch(err => console.warn('[video] fullscreen refused', err));
       });
+   document.getElementById('video-captions').addEventListener('click', () =>
+      document.getElementById('video-captions-menu').classList.toggle('hidden'));
 
    // The player bar is auto-height on mobile, and the surface is anchored to
    // its top edge.  Measure it rather than trusting --player-h, which is only
@@ -2373,19 +2379,68 @@ function setupVideoSurface() {
 // the media request itself — not worth risking playback for subtitles.
 async function videoLoadCaptions(song) {
    player.videoEl.querySelectorAll('track').forEach(t => t.remove());
+   // Cleared here rather than only on success: both the early returns below
+   // would otherwise leave the previous film's picker on the bar.
+   videoCaptionsMenu([]);
    let info;
    try { info = await apiCall('getVideoInfo', {id: song.id}); }
    catch { return; }
    // The track list arrived asynchronously; if the user has moved on since,
    // these captions belong to a video that is no longer playing.
    if (player.queue[player.index]?.id !== song.id) return;
-   for (const c of info.videoInfo?.captions ?? []) {
+   const caps = info.videoInfo?.captions ?? [];
+   for (const c of caps) {
       const t = document.createElement('track');
       t.kind  = 'subtitles';
       t.label = c.name || 'Subtitles';
       t.src   = apiUrl('getCaptions', {id: song.id, captionId: c.id});
       player.videoEl.appendChild(t);
       }
+   // After the elements, so a menu index is a textTracks index.
+   videoCaptionsMenu(caps);
+}
+
+// Fills the subtitle picker, or hides it when there is nothing to pick.
+//
+// Nothing is turned on: a <track> starts `disabled`, which is also what stops
+// the browser fetching it, so an unselected caption costs no request. The
+// Android app makes the same call — nothing here knows the viewer's language,
+// and subtitles nobody asked for are more intrusive than subtitles one click
+// away.
+function videoCaptionsMenu(captions) {
+   const menu = document.getElementById('video-captions-menu');
+   menu.replaceChildren();
+   menu.classList.add('hidden');
+   document.getElementById('video-captions').classList.remove('on');
+   document.getElementById('video-captions-wrap').hidden = captions.length === 0;
+   if (!captions.length) return;
+
+   const add = (label, index) => {
+      const b = document.createElement('button');
+      b.textContent   = label;
+      b.dataset.index = index ?? '';
+      b.addEventListener('click', () => videoSelectCaption(index));
+      menu.appendChild(b);
+      };
+   add('Off', null);
+   captions.forEach((c, i) => add(c.name || `Track ${i + 1}`, i));
+   menu.firstElementChild.classList.add('current');
+}
+
+// Shows the track at index, or none when it is null.  Assigning `mode` is also
+// what makes the browser fetch the WebVTT, so a track is only ever loaded once
+// someone asks for it.
+function videoSelectCaption(index) {
+   const tracks = player.videoEl.textTracks;
+   for (let i = 0; i < tracks.length; i++)
+      tracks[i].mode = (i === index) ? 'showing' : 'disabled';
+
+   const menu = document.getElementById('video-captions-menu');
+   menu.querySelectorAll('button').forEach(b => b.classList.toggle(
+      'current', (b.dataset.index === '' ? null : +b.dataset.index) === index));
+   menu.classList.add('hidden');
+   document.getElementById('video-captions')
+      .classList.toggle('on', index !== null);
 }
 
 function playerLoad(songs, startIndex) {

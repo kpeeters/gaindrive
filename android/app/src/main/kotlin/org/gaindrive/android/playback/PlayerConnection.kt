@@ -327,14 +327,12 @@ class PlayerConnection @Inject constructor(
 	 * Turns on the track at [index] in [PlayerState.textTracks], or turns
 	 * subtitles off when it is null.
 	 *
-	 * The groups are read from the controller — published state, always
-	 * propagated — and the choice is applied to the player, where a refused
-	 * session command cannot turn it into a silent no-op. See [VideoSurface].
+	 * Only the number crosses over. The groups behind it are published state
+	 * and are what [textTracks] labels, but the `TrackGroup` objects a
+	 * controller hands back are rebuilt from a bundle, and an override keyed on
+	 * one of those never matches the player's own. See [VideoSurface].
 	 */
-	fun selectTextTrack(index: Int?) {
-		val groups = controller?.textGroups().orEmpty()
-		videoSurface.selectTextTrack(index?.let { groups.getOrNull(it) }?.mediaTrackGroup)
-	}
+	fun selectTextTrack(index: Int?) = videoSurface.selectTextTrack(index)
 
 	fun jumpTo(queueIndex: Int) {
 		controller?.seekTo(queueIndex, 0L)
@@ -428,8 +426,13 @@ class PlayerConnection @Inject constructor(
 		}
 
 	/**
-	 * The subtitle groups, in the order the picker numbers them. Shared with
-	 * [selectTextTrack] so an index means the same thing to both.
+	 * The subtitle groups, in the order the picker numbers them.
+	 *
+	 * [VideoSurface] filters the *player's* `currentTracks` the same way to
+	 * resolve that number back to a group. The two lists hold different objects
+	 * — the controller's are rebuilt from a bundle — but they hold them in the
+	 * same order, since one is a copy of the other, and the order is all an
+	 * index needs.
 	 */
 	private fun MediaController.textGroups(): List<Tracks.Group> =
 		currentTracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
