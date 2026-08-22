@@ -1,7 +1,12 @@
 package org.gaindrive.android.ui.player
 
+import android.app.Activity
+import android.content.ContextWrapper
+import android.content.res.Configuration
 import android.view.SurfaceView
+import android.view.View
 import android.view.ViewGroup
+import android.view.Window
 import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -50,10 +55,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.ui.SubtitleView
@@ -126,6 +135,32 @@ fun VideoScreen(
 	DisposableEffect(view, keepAwake) {
 		view.keepScreenOn = keepAwake
 		onDispose { view.keepScreenOn = false }
+	}
+
+	// In landscape the picture is the whole screen, and the activity is
+	// edge-to-edge, so the system bars sit *over* the film rather than beside
+	// it — a navigation triplet down one corner of every shot. Hidden rather
+	// than dimmed, and swipeable back transiently, which is what a video player
+	// is expected to do.
+	//
+	// Portrait keeps its bars. The picture is letterboxed there with black to
+	// spare, so they are over nothing, and bars that came and went with the
+	// rotation would read as a glitch. Nor while casting: that is a panel about
+	// a television, with nothing to be immersed in.
+	val landscape =
+		LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+	val immersive = landscape && castDevice == null
+	DisposableEffect(view, immersive) {
+		val bars = view.activityWindow()?.let { WindowCompat.getInsetsController(it, view) }
+		if (immersive && bars != null) {
+			bars.systemBarsBehavior =
+				WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+			bars.hide(WindowInsetsCompat.Type.systemBars())
+		}
+		// Unconditional, and that is the point: leaving the screen, rotating
+		// back and starting to cast all have to give the bars back. A screen
+		// that swallowed them would leave no way out of itself.
+		onDispose { bars?.show(WindowInsetsCompat.Type.systemBars()) }
 	}
 
 	// Back is the same gesture as the button, and both mean "leave the picture",
@@ -298,9 +333,14 @@ private fun VideoOutput(
 	onRelease: (SurfaceView) -> Unit,
 ) {
 	AndroidView(
-		modifier = Modifier
-			.fillMaxWidth()
-			.aspectRatio(aspectRatio),
+		// **No `fillMaxWidth`.** With the width pinned, `aspectRatio` has only
+		// the height left to solve for, and in landscape the height it arrives
+		// at is taller than the screen: the picture is cropped top and bottom,
+		// and the SubtitleView — which draws its cues near its own bottom edge
+		// — puts them below the display entirely. Left free, the modifier tries
+		// the width first and falls back to the height, which is letterbox in
+		// portrait and pillarbox in landscape. The parent Box centres it.
+		modifier = Modifier.aspectRatio(aspectRatio),
 		factory = { context ->
 			val surface = SurfaceView(context)
 			val subtitles = SubtitleView(context)
@@ -513,6 +553,20 @@ private const val DEFAULT_ASPECT = 16f / 9f
 
 /** Long enough to read the title, short enough to get out of the way. */
 private const val CONTROLS_TIMEOUT_MS = 3_500L
+
+/**
+ * The window this view belongs to, or null if there is somehow no Activity
+ * above it.
+ *
+ * Compose hands out a themed `ContextWrapper` rather than the Activity itself,
+ * so the chain has to be walked. `LocalActivity` would say this in one line,
+ * but it arrived in activity-compose 1.10 and this app is on 1.9.
+ */
+private fun View.activityWindow(): Window? =
+	generateSequence(context) { (it as? ContextWrapper)?.baseContext }
+		.filterIsInstance<Activity>()
+		.firstOrNull()
+		?.window
 
 /**
  * Long enough to cover the player swap that starts or ends a cast session,
