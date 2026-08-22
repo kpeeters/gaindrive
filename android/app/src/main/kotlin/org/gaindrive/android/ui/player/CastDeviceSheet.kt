@@ -44,6 +44,7 @@ fun CastDeviceSheet(
 	viewModel: CastViewModel = hiltViewModel(),
 ) {
 	val devices by viewModel.devices.collectAsStateWithLifecycle()
+	val manual by viewModel.manualDevices.collectAsStateWithLifecycle()
 	val connected by viewModel.connected.collectAsStateWithLifecycle()
 	val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -62,6 +63,9 @@ fun CastDeviceSheet(
 				modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp),
 			)
 
+			// The spinner is about discovery alone, so it keeps running while
+			// manual devices are listed below it — a device that was added by
+			// hand is no reason to stop looking for the others.
 			if (devices.isEmpty()) {
 				Row(
 					modifier = Modifier
@@ -87,6 +91,43 @@ fun CastDeviceSheet(
 						viewModel.select(device)
 						onDismiss()
 					},
+				)
+			}
+
+			if (manual.isNotEmpty()) {
+				// Its own heading rather than one merged list: when discovery is
+				// the thing that has failed, which devices arrived by which route
+				// is the most useful fact on this sheet.
+				Text(
+					text = "Added manually",
+					style = MaterialTheme.typography.titleSmall,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					modifier = Modifier.padding(
+						start = 24.dp,
+						end = 24.dp,
+						top = 16.dp,
+						bottom = 4.dp,
+					),
+				)
+				manual.forEach { device ->
+					DeviceRow(
+						device = device,
+						connected = device.id == connected?.id,
+						onClick = {
+							viewModel.select(device)
+							onDismiss()
+						},
+					)
+				}
+			} else if (devices.isEmpty()) {
+				// Only worth saying when the sheet is otherwise empty: this is
+				// exactly the moment someone needs to know the option exists.
+				Text(
+					text = "A device that has stopped announcing itself can be added " +
+						"by address in Settings → Casting.",
+					style = MaterialTheme.typography.bodySmall,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
 				)
 			}
 
