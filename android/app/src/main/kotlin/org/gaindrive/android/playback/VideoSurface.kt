@@ -59,9 +59,6 @@ class VideoSurface @Inject constructor() {
 	 */
 	val aspectRatio: StateFlow<Float?> = _aspectRatio.asStateFlow()
 
-	/** Whether the last [Player.Listener.onCues] carried anything to draw. */
-	private var hadCues = false
-
 	private val listener = object : Player.Listener {
 		override fun onVideoSizeChanged(videoSize: VideoSize) {
 			val width = videoSize.width * videoSize.pixelWidthHeightRatio
@@ -69,27 +66,18 @@ class VideoSurface @Inject constructor() {
 				if (width > 0f && videoSize.height > 0) width / videoSize.height else null
 		}
 
-		/**
-		 * Logged on the edges only — cues change every line of dialogue, and a
-		 * line per line is a log nobody can read. The edges are what answer the
-		 * question anyway: whether cues arrive at all, and whether there was a
-		 * view of any size to put them in when they did.
-		 */
 		override fun onCues(cueGroup: CueGroup) {
-			val view = subtitles
-			if (cueGroup.cues.isNotEmpty() != hadCues) {
-				hadCues = cueGroup.cues.isNotEmpty()
-				val where = view?.let { "${it.width}x${it.height}" } ?: "no view"
-				Log.d(TAG, "cues ${if (hadCues) "started" else "stopped"}," +
-					" ${cueGroup.cues.size} in $where")
-			}
-			view?.setCues(cueGroup.cues)
+			subtitles?.setCues(cueGroup.cues)
 		}
 
 		/**
-		 * The text tracks the player has resolved, which is the only place the
-		 * side-loaded WebVTT and a subtitle track embedded in the container can
-		 * be told apart — they look identical in the picker.
+		 * Every text track the player resolved, including the ones
+		 * [subtitleGroups] declines to offer — which is the whole reason to log
+		 * it. A side-loaded WebVTT, a track inside the container and a caption
+		 * stream ExoPlayer invented for an HLS playlist are indistinguishable
+		 * in the picker and differ only by MIME type, so a report of "the
+		 * subtitles do not show" is answerable from this line and from almost
+		 * nothing else.
 		 */
 		override fun onTracksChanged(tracks: Tracks) {
 			tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
@@ -135,9 +123,10 @@ class VideoSurface @Inject constructor() {
 	}
 
 	/**
-	 * Turns on the subtitle track at [index] among the player's text tracks, or
-	 * turns subtitles off when it is null. The numbering is the one
-	 * [PlayerConnection] publishes.
+	 * Turns on the subtitle track at [index] in the player's [subtitleGroups],
+	 * or turns subtitles off when it is null. The numbering is the one
+	 * [PlayerConnection] publishes, and both ends go through that one function
+	 * so it cannot mean two different things.
 	 *
 	 * Applied to the player for the same reason the surface is: a controller
 	 * can only carry this if the session grants
@@ -175,9 +164,7 @@ class VideoSurface @Inject constructor() {
 			return
 		}
 
-		val group = player.currentTracks.groups
-			.filter { it.type == C.TRACK_TYPE_TEXT }
-			.getOrNull(index)
+		val group = player.currentTracks.subtitleGroups().getOrNull(index)
 		if (group == null) {
 			Log.w(TAG, "subtitle track $index is gone; selection left alone")
 			return

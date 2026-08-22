@@ -3160,6 +3160,23 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_videos()
 	return result;
 	}
 
+std::string MediaStore::sidecar_captions(const std::string& abs) const
+	{
+	// Preference order, not merely a list: a .vtt is what the endpoint answers
+	// with, so it is asked for first.  Every one of them still goes through
+	// ffmpeg, including the .vtt — the response is then normalised, and a
+	// mislabelled file cannot be served verbatim.
+	fs::path base = fs::path(abs);
+	for (const char* ext : { ".vtt", ".srt", ".ass", ".ssa" }) {
+		fs::path cand = base;
+		cand.replace_extension(ext);
+		std::error_code fec;
+		if (fs::exists(cand, fec) && path_is_within_root(cand))
+			return cand.string();
+		}
+	return {};
+	}
+
 std::string MediaStore::get_captions_vtt(int song_id, int stream_index)
 	{
 	auto song = get_song(song_id);
@@ -3170,22 +3187,8 @@ std::string MediaStore::get_captions_vtt(int song_id, int stream_index)
 
 	std::string source = abs;
 	if (stream_index < 0) {
-		// Sidecar, in preference order.  A .vtt still goes through ffmpeg so
-		// the response is normalised (and so a mislabelled file cannot be
-		// served verbatim).
-		fs::path base = fs::path(abs);
-		bool     found = false;
-		for (const char* ext : { ".vtt", ".srt", ".ass", ".ssa" }) {
-			fs::path cand = base;
-			cand.replace_extension(ext);
-			std::error_code fec;
-			if (fs::exists(cand, fec) && path_is_within_root(cand)) {
-				source = cand.string();
-				found  = true;
-				break;
-				}
-			}
-		if (!found) return {};
+		source = sidecar_captions(abs);
+		if (source.empty()) return {};
 		}
 
 	std::vector<std::string> args = { "ffmpeg", "-v", "quiet", "-i", source };
@@ -3218,6 +3221,17 @@ MediaStore::VideoStreams MediaStore::get_video_streams(int song_id)
 
 	std::string abs = abs_path(song->path);
 	if (!path_is_within_root(abs)) return vs;
+
+	// Before ffprobe, and outside its error paths: a sidecar is a fact about
+	// the directory, so a file ffprobe cannot read still has one.  It leads
+	// because somebody put it there deliberately, which an embedded track
+	// cannot claim.
+	if (!sidecar_captions(abs).empty()) {
+		CaptionTrack t;
+		t.index = SIDECAR_CAPTION_INDEX;
+		t.title = "Subtitles";
+		vs.captions.push_back(std::move(t));
+		}
 
 	std::vector<std::string> args = {
 		"ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", abs

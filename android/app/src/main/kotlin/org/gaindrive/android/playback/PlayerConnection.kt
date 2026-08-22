@@ -3,7 +3,6 @@ package org.gaindrive.android.playback
 import android.content.ComponentName
 import android.content.Context
 import android.view.SurfaceView
-import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
@@ -428,14 +427,14 @@ class PlayerConnection @Inject constructor(
 	/**
 	 * The subtitle groups, in the order the picker numbers them.
 	 *
-	 * [VideoSurface] filters the *player's* `currentTracks` the same way to
-	 * resolve that number back to a group. The two lists hold different objects
-	 * — the controller's are rebuilt from a bundle — but they hold them in the
-	 * same order, since one is a copy of the other, and the order is all an
-	 * index needs.
+	 * [VideoSurface] applies [subtitleGroups] to the *player's* `currentTracks`
+	 * to resolve that number back to a group. The two lists hold different
+	 * objects — the controller's are rebuilt from a bundle — but they hold them
+	 * in the same order, since one is a copy of the other, and the order is all
+	 * an index needs.
 	 */
 	private fun MediaController.textGroups(): List<Tracks.Group> =
-		currentTracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+		currentTracks.subtitleGroups()
 
 	/**
 	 * Marks [ref] as awaited, with a watchdog: a load that neither succeeds nor

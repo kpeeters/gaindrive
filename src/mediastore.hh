@@ -462,13 +462,21 @@ class MediaStore {
 		// All video rows, ordered by folder then disc/track, for getVideos.
 		std::vector<ChildEntry> get_videos();
 
-		// Subtitle streams embedded in a video file, in ffprobe stream order.
-		// index is the absolute stream index for `ffmpeg -map 0:<index>`.
+		// One selectable caption source. index is the absolute ffprobe stream
+		// index for `ffmpeg -map 0:<index>`, or SIDECAR_CAPTION_INDEX for the
+		// subtitle file sitting beside the video.
 		struct CaptionTrack {
 			int         index;
 			std::string language;   // ISO 639 code, empty if untagged
 			std::string title;
 			};
+
+		// A sidecar is not a stream, so it needs an id no stream can have, and
+		// it has to survive the round trip through the wire as a plain integer
+		// — which is why it is negative rather than, say, a name. getCaptions
+		// reads any index < 0 as "the sidecar", so an old client that omits
+		// captionId altogether still lands on the same file.
+		static constexpr int SIDECAR_CAPTION_INDEX = -1;
 
 		// Audio and subtitle tracks of one video, for getVideoInfo and
 		// getCaptions. Runs ffprobe; returns empty vectors for a non-video id
@@ -657,6 +665,13 @@ class MediaStore {
 		// symlinks, so a root that is itself a symlink still works, but
 		// a symlink inside the tree pointing outside is detected.
 		bool path_is_within_root(const std::filesystem::path& candidate) const;
+
+		// The subtitle file beside the video at `abs`, or empty if there is
+		// none. The single place that knows what "beside" means: both
+		// get_video_streams(), which offers it, and get_captions_vtt(), which
+		// serves it, go through here, and a listing that disagreed with the
+		// server would be a caption track that 404s when selected.
+		std::string sidecar_captions(const std::string& abs) const;
 
 		// Rewrite every stored path at or under old_rel to sit under new_rel,
 		// in both databases. This is what makes renaming a directory on disk
