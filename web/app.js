@@ -3081,6 +3081,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
    // ── Edit mode ──────────────────────────────────────────────────────────────
    // Toggled by the "Edit" link in the header.
    let pendingCover = null;  // {kind:'file', file} | {kind:'url', url} | null
+   let nameInput    = null;  // album title input, live only while editing
+   let artistInput  = null;  // artist name input, ditto
 
    function enterEditMode() {
       // Swap "Edit" link for Save + Cancel buttons.
@@ -3093,6 +3095,26 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       cancelBtn.textContent = 'Cancel';
       editLink.appendChild(saveBtn);
       editLink.appendChild(cancelBtn);
+
+      // Album title and artist become inputs. Both are *directory names* on the
+      // server — the scanner never reads them from tags — so saving them moves
+      // files, which is why they are only editable here and not, say, inline.
+      //
+      // The artist comes from album.artist rather than the artistName argument:
+      // callers reaching this view from search, starred or the player cover
+      // pass null for it.
+      nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'album-title-input';
+      nameInput.value = nameInput.dataset.orig = heading.textContent;
+      heading.replaceWith(nameInput);
+
+      artistInput = document.createElement('input');
+      artistInput.type = 'text';
+      artistInput.className = 'album-artist-input';
+      artistInput.placeholder = 'Artist';
+      artistInput.value = artistInput.dataset.orig = album.artist ?? artistName ?? '';
+      nameInput.after(artistInput);
 
       // Show a placeholder tile so the pencil has somewhere to sit when there
       // is no cover yet.
@@ -3309,10 +3331,49 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
                }
             }
 
+         // The rename goes last, and that ordering is load-bearing: it moves the
+         // directory, so every song id and the album id above it stop resolving.
+         // The per-track updateSong calls have to have happened already.
+         const newName   = nameInput.value.trim();
+         const newArtist = artistInput.value.trim();
+         const renaming  = errors.length === 0
+            && (newName   !== nameInput.dataset.orig
+                || newArtist !== artistInput.dataset.orig);
+         let renamed = null;
+         if (renaming) {
+            if (!newName || !newArtist) {
+               errors.push('Album and artist names cannot be empty.');
+               }
+            else {
+               try {
+                  const sr = await apiCall('renameAlbum',
+                     {id: albumId, album: newName, artist: newArtist});
+                  renamed = sr.renamedAlbum ?? null;
+                  }
+               catch (e) {
+                  console.error('[edit] renameAlbum failed', e);
+                  errors.push(`Rename: ${e.message}`);
+                  }
+               }
+            }
+
          if (errors.length > 0) {
             showError('Some changes could not be saved:\n\n' + errors.join('\n'));
             saveBtn.disabled = false;
             cancelBtn.disabled = false;
+            return;
+            }
+
+         if (renamed) {
+            if (Number(renamed.tagFailures) > 0)
+               showError(`Renamed, but the tags in ${renamed.tagFailures} file(s) `
+                  + 'could not be rewritten.');
+            // Every id in this pane has just changed, so there is nothing to
+            // patch in place — re-render all three panes against the new ones.
+            // Pane 0 too: re-filing may have created an artist or emptied one.
+            await viewArtists();
+            await viewAlbums(renamed.parent, renamed.artist);
+            await viewTracks(renamed.id, renamed.album, renamed.parent, renamed.artist);
             return;
             }
 
@@ -3328,6 +3389,17 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
    function exitEditMode(keepValues) {
       // Restore Edit link.
       editLink.textContent = 'Edit';
+
+      // Put the heading back. On a successful rename this function is not
+      // reached at all — the view is re-rendered instead — so keepValues here
+      // only ever restores a name that was never sent.
+      if (nameInput) {
+         heading.textContent = keepValues ? nameInput.value : nameInput.dataset.orig;
+         nameInput.replaceWith(heading);
+         nameInput = null;
+         }
+      artistInput?.remove();
+      artistInput = null;
 
       // Remove pencil button and edit-mode placeholder from heroWrap.
       heroWrap.querySelector('.cover-edit-btn')?.remove();

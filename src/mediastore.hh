@@ -499,6 +499,10 @@ class MediaStore {
 		std::optional<std::string> album_folder_path_by_id(int album_folder_id);
 		std::optional<std::string> artist_folder_path_by_id(int artist_folder_id);
 
+		// The inverse, for a handler that has just moved a folder and needs to
+		// tell the client where it went.
+		std::optional<int> folder_id_by_path(const std::string& rel);
+
 		// ---- Search ----
 
 		struct SearchResult {
@@ -653,6 +657,18 @@ class MediaStore {
 		// symlinks, so a root that is itself a symlink still works, but
 		// a symlink inside the tree pointing outside is detected.
 		bool path_is_within_root(const std::filesystem::path& candidate) const;
+
+		// Rewrite every stored path at or under old_rel to sit under new_rel,
+		// in both databases. This is what makes renaming a directory on disk
+		// something other than data loss: every reference to a media file in
+		// either DB is the path string itself, so the rename invalidates the
+		// key. The caller MUST have verified that nothing already lives at
+		// new_rel — see the note in the definition on why that precondition is
+		// what keeps these plain UPDATEs safe.
+		//
+		// Anything new that persists a path belongs in this function's list.
+		bool relocate_prefix(const std::string& old_rel,
+		                     const std::string& new_rel);
 
 	private:
 		// Everything the root model needs, derived once at construction.

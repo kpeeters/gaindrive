@@ -1422,6 +1422,26 @@ static int extract_archive_to_dir(const std::string& content,
    return count;
    }
 
+// Make a string safe to use as a single directory name. Shared by the upload
+// reorganiser and by renameAlbum, so a name typed by hand lands in exactly the
+// directory the uploader would have created for the same tag.
+//
+// Dropping '/' is also the traversal guard: a name is one path component by
+// construction, so no input can escape the folder it is being created in.
+static std::string sanitise_component(const std::string& s)
+   {
+   std::string r;
+   for (char c : s)
+      if (c != '/' && c != '\\' && c != '\0' && c != ':' &&
+          c != '*'  && c != '?' && c != '"'  && c != '<' && c != '>')
+         r += c;
+   while (!r.empty() && (r.front() == ' ' || r.front() == '.'))
+      r.erase(r.begin());
+   while (!r.empty() && (r.back()  == ' ' || r.back()  == '.'))
+      r.pop_back();
+   return r;
+   }
+
 // Reorganise all audio files under batch_root into <artist>/<album>/ subdirs
 // using embedded tag metadata. Non-audio siblings follow their audio files when
 // all audio in a source dir maps to the same (artist, album) target. Empty
@@ -1438,16 +1458,11 @@ static void reorganise_by_tags(const std::filesystem::path& batch_root)
       std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
       return AUDIO_EXT.count(ext) > 0;
       };
+   // A tag that sanitises away to nothing still has to land somewhere, so this
+   // path substitutes a name. renameAlbum deliberately does not — there a name
+   // was typed, and silently filing it under "Unknown" would hide the mistake.
    auto sanitise = [](const std::string& s) -> std::string {
-      std::string r;
-      for (char c : s)
-         if (c != '/' && c != '\\' && c != '\0' && c != ':' &&
-             c != '*'  && c != '?' && c != '"'  && c != '<' && c != '>')
-            r += c;
-      while (!r.empty() && (r.front() == ' ' || r.front() == '.'))
-         r.erase(r.begin());
-      while (!r.empty() && (r.back()  == ' ' || r.back()  == '.'))
-         r.pop_back();
+      std::string r = sanitise_component(s);
       return r.empty() ? "Unknown" : r;
       };
 
@@ -4667,6 +4682,13 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::cout << stamp() << "Promote: moved " << item_rel
 		          << " → " << target_rel << std::endl;
 
+		// Carry the DB across with the directory. Without this the rescan
+		// below deletes the old folder and inserts the new one cold, and every
+		// star, play count, playlist entry and bookmark — all keyed on the path
+		// string — quietly stops matching anything, along with cover_manual and
+		// the derived art caches.
+		store_.relocate_prefix(item_rel, target_rel);
+
 		// If the personal artist dir is now empty, remove it so that
 		// scan_artist_dir treats it as gone and prunes its folder row.
 		std::string personal_artist_rel =
@@ -4682,6 +4704,212 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
+		});
+
+	// renameAlbum — rename an album directory and/or re-file it under a
+	// different artist directory. Params: id (album folder_id), album, artist;
+	// at least one name required.
+	//
+	// Artist and album names are directory names — the scanner never reads them
+	// from tags — so this is the only way to correct them, and it is necessarily
+	// a filesystem move. Only the named album moves: renaming the artist here
+	// re-files this one album, and leaves the artist's other albums alone.
+	server_.Get("/rest/renameAlbum.view", [this](const httplib::Request& req,
+	                                             httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+
+		auto id_it = req.params.find("id");
+		if (id_it == req.params.end()) { err(10, "Missing parameter: id."); return; }
+		int folder_id = 0;
+		try { folder_id = std::stoi(id_it->second); }
+		catch (...) { err(10, "Parameter id must be a number."); return; }
+
+		auto rel_opt = store_.album_folder_path_by_id(folder_id);
+		if (!rel_opt) { err(70, "Item not found."); return; }
+		const std::string old_rel = *rel_opt;
+
+		namespace fs = std::filesystem;
+		std::vector<std::string> parts;
+		// const auto&, not auto&: see the note in promoteAlbum above.
+		for (const auto& c : fs::path(old_rel)) parts.push_back(c.string());
+
+		// A folder that directly contains media is its own album, so an album
+		// can sit at "<root>/<section>" with no artist level above it. Renaming
+		// that is renaming the artist, which this endpoint does not do — say so
+		// rather than half-performing it.
+		if (parts.size() < 3) {
+			err(0, "This folder is its own artist; rename it on the server instead.");
+			return;
+			}
+
+		const std::string old_artist = parts[parts.size() - 2];
+		const std::string old_album  = parts.back();
+
+		// Permission: your own upload batch, or admin anywhere. An upload user
+		// has to be able to fix the names on the batch they just uploaded, which
+		// is the case this whole feature exists for.
+		{
+		auto u_it = req.params.find("u");
+		auto ui = (u_it != req.params.end()) ? store_.get_user(u_it->second) : std::nullopt;
+		bool own_upload = !uploads_root_name_.empty()
+		                  && parts[0] == uploads_root_name_
+		                  && parts.size() >= 5
+		                  && u_it != req.params.end() && parts[1] == u_it->second;
+		if (!own_upload && (!ui || !ui->is_admin)) {
+			err(50, "Renaming outside your own uploads requires admin role.");
+			return;
+			}
+		}
+
+		std::string new_album  = old_album;
+		std::string new_artist = old_artist;
+		if (req.params.count("album"))
+			new_album  = sanitise_component(req.params.find("album")->second);
+		if (req.params.count("artist"))
+			new_artist = sanitise_component(req.params.find("artist")->second);
+		if (new_album.empty() || new_artist.empty()) {
+			err(10, "Album and artist names cannot be empty.");
+			return;
+			}
+		if (new_album == old_album && new_artist == old_artist) {
+			res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
+			                use_json ? "application/json" : "application/xml");
+			return;
+			}
+
+		// Everything above the artist level is untouched: the library root, and
+		// for an upload the owner and the batch uuid.
+		std::string parent_rel;
+		for (size_t i = 0; i + 2 < parts.size(); ++i)
+			parent_rel += (i ? "/" : "") + parts[i];
+		const std::string new_artist_rel = parent_rel + "/" + new_artist;
+		const std::string new_rel        = new_artist_rel + "/" + new_album;
+		const std::string old_artist_rel = parent_rel + "/" + old_artist;
+
+		fs::path abs_src    = store_.abs_path(old_rel);
+		fs::path abs_target = store_.abs_path(new_rel);
+		if (abs_src.empty() || abs_target.empty()) {
+			err(0, "Could not resolve the library path.");
+			return;
+			}
+		// Belt and braces over sanitise_component's traversal guard.
+		// path_is_within_root uses weakly_canonical, so it answers for a target
+		// that does not exist yet.
+		if (!store_.path_is_within_root(abs_target)) {
+			std::cout << stamp() << "renameAlbum: refusing target outside every root: "
+			          << abs_target << std::endl;
+			err(0, "Refusing to write outside the configured roots.");
+			return;
+			}
+		if (fs::exists(abs_target)) {
+			err(0, "An album with that name already exists for that artist.");
+			return;
+			}
+
+		std::error_code ec;
+		fs::create_directories(store_.abs_path(new_artist_rel), ec);
+
+		fs::rename(abs_src, abs_target, ec);
+		if (ec) {
+			// Cross-device: fall back to recursive copy then remove.
+			fs::copy(abs_src, abs_target, fs::copy_options::recursive, ec);
+			if (ec) { err(0, ("Failed to move item: " + ec.message()).c_str()); return; }
+			fs::remove_all(abs_src, ec);
+			}
+
+		std::cout << stamp() << "Rename: moved " << old_rel
+		          << " → " << new_rel << std::endl;
+
+		store_.relocate_prefix(old_rel, new_rel);
+
+		// Then the tags. Note this is the opposite order to updateSong, which
+		// writes tags first so that a failure cannot be recorded in the DB.
+		// There the DB mirrors the tag; here it mirrors the *directory*, so the
+		// move is the authoritative act and a file TagLib will not write is a
+		// cosmetic loss rather than a desync. Failures are counted, not fatal.
+		int tag_failures = 0;
+		for (auto& e : fs::recursive_directory_iterator(abs_target, ec)) {
+			if (!e.is_regular_file()) continue;
+			try {
+				TagLib::FileRef f(e.path().c_str());
+				if (f.isNull() || !f.tag()) continue;   // not a taggable file
+				f.tag()->setAlbum(TagLib::String(new_album,  TagLib::String::UTF8));
+				f.tag()->setArtist(TagLib::String(new_artist, TagLib::String::UTF8));
+				if (!f.save()) {
+					++tag_failures;
+					std::cout << stamp() << "Rename: could not write tags to "
+					          << e.path() << std::endl;
+					}
+				}
+			catch (const std::exception& ex) {
+				++tag_failures;
+				std::cout << stamp() << "Rename: exception tagging " << e.path()
+				          << ": " << ex.what() << std::endl;
+				}
+			catch (...) {
+				++tag_failures;
+				std::cout << stamp() << "Rename: unknown exception tagging "
+				          << e.path() << std::endl;
+				}
+			}
+
+		// If the old artist dir is now empty it is gone as far as the library is
+		// concerned; removing it lets scan_artist_dir prune its folder row.
+		fs::path old_artist_abs = store_.abs_path(old_artist_rel);
+		if (fs::is_directory(old_artist_abs, ec) && fs::is_empty(old_artist_abs, ec))
+			fs::remove(old_artist_abs, ec);
+
+		// Synchronously, for the reason promoteAlbum gives. After the relocate
+		// above this is a consistency pass rather than a rebuild: the rows
+		// already carry the new paths, so the walk re-stamps them and prunes
+		// nothing. It is also what re-establishes the album's artist link,
+		// which relocate_prefix dropped — so a contended database here would
+		// leave the album with no artist until the next scan, and that is worth
+		// a log line rather than a 500 on a rename that has already happened.
+		try { store_.scan_dirs({old_artist_rel, new_artist_rel}); }
+		catch (const std::exception& e) {
+			std::cout << stamp() << "Rename: rescan failed: " << e.what()
+			          << std::endl;
+			}
+		catch (...) {
+			std::cout << stamp() << "Rename: rescan failed: unknown exception"
+			          << std::endl;
+			}
+
+		// The client needs the new ids to navigate to the album it just renamed.
+		// They are usually unchanged — that is the point of relocating rather
+		// than letting the rescan rebuild — but a re-file into a brand new
+		// artist folder does mint one.
+		int new_album_id  = 0;
+		int new_artist_id = 0;
+		if (auto f = store_.folder_id_by_path(new_rel))        new_album_id  = *f;
+		if (auto f = store_.folder_id_by_path(new_artist_rel)) new_artist_id = *f;
+
+		std::string body = use_json
+			? subsonic_ok_json([&](nlohmann::json& r) {
+				r["renamedAlbum"]["id"]          = std::to_string(new_album_id);
+				r["renamedAlbum"]["parent"]      = std::to_string(new_artist_id);
+				r["renamedAlbum"]["album"]       = new_album;
+				r["renamedAlbum"]["artist"]      = new_artist;
+				r["renamedAlbum"]["tagFailures"] = tag_failures;
+				})
+			: subsonic_ok([&](XMLDocument& doc, XMLElement* root) {
+				auto* el = doc.NewElement("renamedAlbum");
+				el->SetAttribute("id",          std::to_string(new_album_id).c_str());
+				el->SetAttribute("parent",      std::to_string(new_artist_id).c_str());
+				el->SetAttribute("album",       new_album.c_str());
+				el->SetAttribute("artist",      new_artist.c_str());
+				el->SetAttribute("tagFailures", tag_failures);
+				root->InsertEndChild(el);
+				});
+		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
 	// Catch-all for endpoints not yet implemented.

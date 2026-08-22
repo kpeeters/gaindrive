@@ -4425,6 +4425,133 @@ bool MediaStore::path_is_within_root(const fs::path& candidate) const
 	return false;
 	}
 
+bool MediaStore::relocate_prefix(const std::string& old_rel,
+                                 const std::string& new_rel)
+	{
+	if (old_rel.empty() || new_rel.empty() || old_rel == new_rel) return false;
+
+	// These are plain UPDATEs, with no per-table merge policy, and that is only
+	// safe because of the caller's precondition: nothing exists at new_rel. Half
+	// the columns below sit in a UNIQUE or composite primary key (folders.path,
+	// songs.path, video_art.path, video_meta.path, artist_art.folder_path,
+	// stars, play_counts, bookmarks, cover_thumbs), so relocating onto an
+	// occupied prefix would raise a constraint error rather than merge.
+
+	// LIKE treats _ and % as wildcards, so a literal prefix has to be escaped.
+	// The prunes elsewhere in this file get away without it because a spurious
+	// match there can only *keep* a row that was already condemned. Here the
+	// statement is an UPDATE: renaming an album called "Vol_2" would rewrite
+	// the paths of an unrelated "Vol 2" sitting beside it.
+	auto like_escape = [](const std::string& s) {
+		std::string r;
+		for (char c : s) {
+			if (c == '\\' || c == '%' || c == '_') r += '\\';
+			r += c;
+			}
+		return r;
+		};
+	const std::string like_pat = like_escape(old_rel) + "/%";
+	// substr() is 1-based, so the tail of "<old_rel>/rest" starts one past it.
+	const int tail_from = (int)old_rel.size() + 1;
+
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	try {
+		SQLite::Transaction txn(db_music_);
+		db_music_.exec("PRAGMA defer_foreign_keys=ON");
+
+		auto rewrite = [&](const char* table, const char* col) {
+			SQLite::Statement s(db_music_,
+				std::string("UPDATE ") + table + " SET " + col +
+				" = ? || substr(" + col + ", ?)"
+				" WHERE " + col + " = ? OR " + col + " LIKE ? ESCAPE '\\'");
+			s.bind(1, new_rel);
+			s.bind(2, tail_from);
+			s.bind(3, old_rel);
+			s.bind(4, like_pat);
+			s.exec();
+			};
+
+		// Client tables first. The two databases are both in WAL mode, and
+		// SQLite gives no atomic commit across attached databases in WAL — so
+		// this transaction can tear on a crash and the order decides which way.
+		// A client row naming a path that does not exist yet is invisible and
+		// repairable; a music row moved ahead of its client rows orphans them
+		// for good.
+		rewrite("client.stars",          "song_path");
+		rewrite("client.stars",          "album_folder_path");
+		rewrite("client.stars",          "artist_folder_path");
+		rewrite("client.play_counts",    "song_path");
+		rewrite("client.playlist_songs", "song_path");
+		rewrite("client.play_queue",     "song_path");
+		rewrite("client.now_playing",    "song_path");
+		rewrite("client.bookmarks",      "song_path");
+
+		// Music DB. Note what is deliberately absent: video_meta.poster_path is
+		// a path on TMDB's servers, not ours, and artists.image_path is a dead
+		// column that nothing has ever written.
+		rewrite("folders",      "path");
+		rewrite("songs",        "path");
+		rewrite("songs",        "cover_path");
+		rewrite("albums",       "cover_path");
+		rewrite("video_art",    "path");
+		rewrite("artist_art",   "folder_path");
+		rewrite("cover_thumbs", "source_key");
+		rewrite("video_meta",   "path");
+
+		// The three things below are what a following rescan will NOT repair,
+		// because every upsert in the scanner is INSERT OR IGNORE and so only
+		// ever populates a row that did not exist. Relocating rather than
+		// rebuilding is what preserves the row — and therefore also what makes
+		// its derived columns our problem.
+		const std::string leaf = fs::path(new_rel).filename().string();
+		{
+		// upsert_folder() updates only parent_id and last_scanned on an
+		// existing row, so the name would keep its old spelling for ever.
+		SQLite::Statement s(db_music_,
+			"UPDATE folders SET name = ? WHERE path = ?");
+		s.bind(1, leaf);
+		s.bind(2, new_rel);
+		s.exec();
+		}
+		{
+		// Likewise upsert_album() for the title. An album's title is its
+		// folder's leaf name, so this is exactly what the scan would have
+		// written had it been inserting the row fresh.
+		SQLite::Statement s(db_music_,
+			"UPDATE albums SET title = ?"
+			" WHERE folder_id = (SELECT id FROM folders WHERE path = ?)");
+		s.bind(1, leaf);
+		s.bind(2, new_rel);
+		s.exec();
+		}
+		{
+		// And drop the album's artist links. upsert_album()'s link insert is
+		// also OR IGNORE, so re-filing an album under a different artist would
+		// otherwise *add* a second link and leave the album showing under both
+		// names. Deleting them lets the rescan re-establish the one correct
+		// link from the folder layout; the album is briefly artist-less, which
+		// is why the caller runs that rescan synchronously.
+		SQLite::Statement s(db_music_,
+			"DELETE FROM album_artists WHERE album_id ="
+			" (SELECT id FROM albums WHERE folder_id ="
+			"   (SELECT id FROM folders WHERE path = ?))");
+		s.bind(1, new_rel);
+		s.exec();
+		}
+
+		txn.commit();
+		}
+	catch (const std::exception& e) {
+		std::cout << stamp() << "Relocate " << old_rel << " -> " << new_rel
+		          << " failed: " << e.what() << std::endl;
+		return false;
+		}
+
+	std::cout << stamp() << "Relocated DB paths " << old_rel
+	          << " -> " << new_rel << std::endl;
+	return true;
+	}
+
 std::optional<std::string> MediaStore::song_path_by_id(int song_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
@@ -4452,6 +4579,15 @@ std::optional<std::string> MediaStore::artist_folder_path_by_id(int artist_folde
 	q.bind(1, artist_folder_id);
 	if (!q.executeStep()) return std::nullopt;
 	return q.getColumn(0).getString();
+	}
+
+std::optional<int> MediaStore::folder_id_by_path(const std::string& rel)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_, "SELECT id FROM folders WHERE path = ?");
+	q.bind(1, rel);
+	if (!q.executeStep()) return std::nullopt;
+	return q.getColumn(0).getInt();
 	}
 
 std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)

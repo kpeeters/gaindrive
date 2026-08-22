@@ -1347,6 +1347,32 @@ body {
    align-items: baseline;
 }
 
+/* Album title and artist, editable. They replace the .view-title heading inside
+   .view-header, which is a wrapping flex row — flex-basis pushes the artist onto
+   its own line on a narrow pane rather than squeezing both to nothing. */
+.album-title-input {
+   flex: 1 1 12ch;
+   min-width: 0;
+   font-size: 1.2rem;
+   font-weight: 600;
+   background: var(--surface);
+   color: var(--text);
+   border: 1px solid var(--border);
+   border-radius: 3px;
+   padding: 0.1rem 0.3rem;
+}
+
+.album-artist-input {
+   flex: 1 1 10ch;
+   min-width: 0;
+   font-size: 0.9rem;
+   background: var(--surface);
+   color: var(--text-dim);
+   border: 1px solid var(--border);
+   border-radius: 3px;
+   padding: 0.1rem 0.3rem;
+}
+
 .edit-save-btn,
 .edit-cancel-btn {
    font-size: 0.8rem;
