@@ -1,6 +1,7 @@
 package org.gaindrive.android.data
 
 import android.net.Uri
+import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -46,6 +47,12 @@ class CaptionTracks @Inject constructor(
 				client.getVideoInfo(ref.id).requireOk().videoInfo?.captions
 			}.getOrNull().orEmpty()
 
+			// Ids only, never the URL: it carries the account's password. This
+			// is the one place that says whether a track in the picker was
+			// side-loaded from here or came out of the container itself.
+			Log.d(TAG, "getVideoInfo for ${ref.id}: captions=" +
+				captions.joinToString { it.id })
+
 			captions.map { caption ->
 				val url = client.url(
 					"getCaptions",
@@ -65,4 +72,8 @@ class CaptionTracks @Inject constructor(
 					.build()
 			}
 		}
+
+	private companion object {
+		const val TAG = "GainDriveVideo"
+	}
 }

@@ -5,6 +5,7 @@ import android.view.SurfaceView
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.text.CueGroup
 import androidx.media3.exoplayer.ExoPlayer
@@ -58,6 +59,9 @@ class VideoSurface @Inject constructor() {
 	 */
 	val aspectRatio: StateFlow<Float?> = _aspectRatio.asStateFlow()
 
+	/** Whether the last [Player.Listener.onCues] carried anything to draw. */
+	private var hadCues = false
+
 	private val listener = object : Player.Listener {
 		override fun onVideoSizeChanged(videoSize: VideoSize) {
 			val width = videoSize.width * videoSize.pixelWidthHeightRatio
@@ -65,8 +69,37 @@ class VideoSurface @Inject constructor() {
 				if (width > 0f && videoSize.height > 0) width / videoSize.height else null
 		}
 
+		/**
+		 * Logged on the edges only — cues change every line of dialogue, and a
+		 * line per line is a log nobody can read. The edges are what answer the
+		 * question anyway: whether cues arrive at all, and whether there was a
+		 * view of any size to put them in when they did.
+		 */
 		override fun onCues(cueGroup: CueGroup) {
-			subtitles?.setCues(cueGroup.cues)
+			val view = subtitles
+			if (cueGroup.cues.isNotEmpty() != hadCues) {
+				hadCues = cueGroup.cues.isNotEmpty()
+				val where = view?.let { "${it.width}x${it.height}" } ?: "no view"
+				Log.d(TAG, "cues ${if (hadCues) "started" else "stopped"}," +
+					" ${cueGroup.cues.size} in $where")
+			}
+			view?.setCues(cueGroup.cues)
+		}
+
+		/**
+		 * The text tracks the player has resolved, which is the only place the
+		 * side-loaded WebVTT and a subtitle track embedded in the container can
+		 * be told apart — they look identical in the picker.
+		 */
+		override fun onTracksChanged(tracks: Tracks) {
+			tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+				.forEachIndexed { i, group ->
+					val format = group.mediaTrackGroup.getFormat(0)
+					Log.d(TAG, "text track $i: mime=${format.sampleMimeType}" +
+						" label=${format.label} lang=${format.language}" +
+						" supported=${group.isTrackSupported(0)}" +
+						" selected=${group.isSelected}")
+				}
 		}
 	}
 
@@ -150,6 +183,9 @@ class VideoSurface @Inject constructor() {
 			return
 		}
 
+		Log.d(TAG, "selecting text track $index:" +
+			" mime=${group.mediaTrackGroup.getFormat(0).sampleMimeType}" +
+			" supported=${group.isTrackSupported(0)}")
 		player.trackSelectionParameters = builder
 			.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
 			.setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, 0))
