@@ -1,5 +1,6 @@
 #include <cctype>
 #include <csignal>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <fstream>
@@ -8,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include <arpa/inet.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -80,6 +82,123 @@ static bool validate_roots(const std::vector<MediaStore::Root>& roots,
 	if (uploads > 1) {
 		err = "at most one uploads root may be configured";
 		return false;
+		}
+	return true;
+	}
+
+// Parses one "[name=]address[:port]" cast device argument.
+//
+// The name is optional, and when it is absent the address stands in as the
+// display name. That fallback is load-bearing rather than tidy: the web
+// client's picker labels each button with the device's name alone, so a blank
+// one would render as an empty button.
+//
+// A port is only recognised after the last ':' when the address either holds no
+// other ':' or is bracketed, because those are the only two cases that can be
+// told apart. `[fe80::1%eth0]:8009` is an address and a port; `fe80::1` is an
+// address. Guessing at the rest would silently truncate an IPv6 address.
+static bool parse_cast_device(const std::string& arg,
+                              std::vector<CastManager::CastDevice>& out,
+                              std::string& err)
+	{
+	// Split on the FIRST '=' so an address can never be mistaken for a name,
+	// exactly as parse_root does.
+	std::string name, rest = arg;
+	auto eq = arg.find('=');
+	if (eq != std::string::npos) {
+		if (eq == 0 || eq + 1 >= arg.size()) {
+			err = "expected [name=]address[:port], got '" + arg + "'";
+			return false;
+			}
+		name = arg.substr(0, eq);
+		rest = arg.substr(eq + 1);
+		}
+
+	std::string address = rest;
+	int port = 8009;
+
+	auto close = rest.rfind(']');
+	auto colon = rest.rfind(':');
+	bool bracketed = !rest.empty() && rest.front() == '['
+	              && close != std::string::npos;
+	bool has_port = colon != std::string::npos
+	             && (bracketed ? colon > close
+	                           : rest.find(':') == colon);
+	if (has_port) {
+		std::string digits = rest.substr(colon + 1);
+		if (digits.empty()
+		        || digits.find_first_not_of("0123456789") != std::string::npos) {
+			err = "port is not a number in '" + arg + "'";
+			return false;
+			}
+		port    = std::atoi(digits.c_str());
+		address = rest.substr(0, colon);
+		}
+	// The brackets are syntax, not part of the address: tls_connect() hands the
+	// address straight to inet_pton, which rejects them.
+	if (address.size() >= 2 && address.front() == '[' && address.back() == ']')
+		address = address.substr(1, address.size() - 2);
+
+	if (address.empty()) {
+		err = "empty address in '" + arg + "'";
+		return false;
+		}
+
+	CastManager::CastDevice dev;
+	dev.id      = CastManager::manual_id(address, port);
+	dev.name    = name.empty() ? address : name;
+	dev.address = address;
+	dev.port    = port;
+	dev.manual  = true;
+	out.push_back(dev);
+	return true;
+	}
+
+// True for a literal IPv4 or IPv6 address, with an optional %iface scope.
+//
+// It has to be a literal: CastManager's tls_connect() calls inet_pton and never
+// getaddrinfo, so a hostname cannot be connected to at all. That never came up
+// while every device came from mDNS, which yields literals.
+static bool is_ip_literal(const std::string& address)
+	{
+	struct in_addr  v4;
+	struct in6_addr v6;
+	if (inet_pton(AF_INET, address.c_str(), &v4) == 1) return true;
+	std::string bare = address.substr(0, address.find('%'));
+	return inet_pton(AF_INET6, bare.c_str(), &v6) == 1;
+	}
+
+// Configured devices never reach mDNS, so nothing downstream will notice a
+// nonsense one until a cast silently fails to start. Reject it here instead.
+static bool validate_cast_devices(
+	const std::vector<CastManager::CastDevice>& devices, std::string& err)
+	{
+	std::set<std::string> addresses;
+	for (const auto& d : devices) {
+		if (d.address.empty()) {
+			err = "a cast device has an empty address";
+			return false;
+			}
+		// Named separately from any other failure, because "use the IP" is the
+		// fix and nothing else would suggest it — a hostname otherwise reaches
+		// the startup probe and comes back as an ordinary "unreachable".
+		if (!is_ip_literal(d.address)) {
+			err = "cast device address '" + d.address
+			    + "' is not an IP address; a hostname cannot be used here";
+			return false;
+			}
+		if (d.port < 1 || d.port > 65535) {
+			err = "cast device '" + d.name + "' has port " + std::to_string(d.port)
+			    + ", which is not in 1-65535";
+			return false;
+			}
+		// Two entries at one address would carry the same derived id, and
+		// startCast picks the first id that matches — so the second would be
+		// unselectable rather than merely redundant.
+		if (!addresses.insert(d.address).second) {
+			err = "duplicate cast device address '" + d.address + "'";
+			return false;
+			}
 		}
 	return true;
 	}
@@ -311,6 +430,8 @@ int main(int argc, char* argv[])
 		("artist-root",   "Library root whose subdirectories are artists, as name=path (repeatable)", cxxopts::value<std::vector<std::string>>())
 		("category-root", "Library root whose subdirectories are categories, as name=path (repeatable)", cxxopts::value<std::vector<std::string>>())
 		("upload-root",   "Root holding per-user personal uploads, as name=path", cxxopts::value<std::string>())
+		("cast-device",   "Chromecast that does not announce itself, as [name=]IP[:port] (repeatable)", cxxopts::value<std::vector<std::string>>())
+		("cast-probe",    "Connect to one Chromecast by IP, report whether it answered, and exit", cxxopts::value<std::string>())
 		("upload-dir", "Directory for uploaded archives", cxxopts::value<std::string>()->default_value("/tmp/gaindrive-uploads"))
 		("transcode-cache",    "Directory for cached transcodes (default: alongside --db)", cxxopts::value<std::string>())
 		("transcode-cache-mb", "Transcode cache size in MB (0 disables)", cxxopts::value<int>()->default_value("1024"))
@@ -346,6 +467,23 @@ int main(int argc, char* argv[])
 
 	if (args.count("video-name-test"))
 		return run_video_name_test(args["video-name-test"].as<std::string>());
+
+	// Also before any database or root: asking one device whether it is there
+	// needs neither, and this is the check that says whether an address put in
+	// --cast-device or the config file is any good.
+	if (args.count("cast-probe")) {
+		std::vector<CastManager::CastDevice> one;
+		std::string err;
+		if (!parse_cast_device(args["cast-probe"].as<std::string>(), one, err)) {
+			std::cerr << "Error: --cast-probe: " << err << "\n";
+			return 1;
+			}
+		CastManager cast;
+		auto result = cast.probe(one.front());
+		std::cout << one.front().address << ":" << one.front().port << " — "
+		          << CastManager::probe_text(result) << std::endl;
+		return result == CastManager::Probe::ANSWERED ? 0 : 1;
+		}
 
 
 	// Before anything else touches a database or a root: this is a standalone
@@ -454,6 +592,19 @@ int main(int argc, char* argv[])
 		return 1;
 		}
 	}
+
+	std::vector<CastManager::CastDevice> cast_devices;
+	if (args.count("cast-device")) {
+		std::string err;
+		// A cxxopts vector option also splits on commas, so a device name
+		// holding one is not expressible. --artist-root has the same limit.
+		for (const auto& v : args["cast-device"].as<std::vector<std::string>>())
+			if (!parse_cast_device(v, cast_devices, err)) {
+				std::cerr << "Error: --cast-device: " << err << "\n";
+				return 1;
+				}
+		}
+
 	bool        no_scan          = args.count("no-scan") > 0;
 	bool        debug            = args.count("debug")   > 0;
 	bool        flat_multi_disc  = true;
@@ -486,6 +637,22 @@ int main(int argc, char* argv[])
 					roots.push_back({ r.value("name", std::string()),
 					                  r.value("type", std::string("artists")),
 					                  r.value("path", std::string()) });
+				}
+			// Cast devices follow the roots rule rather than the args.count()
+			// one: the command line and the config file do not merge, so a
+			// single --cast-device replaces the configured list rather than
+			// adding to it.
+			if (cfg.contains("cast_devices") && cast_devices.empty()) {
+				for (const auto& d : cfg["cast_devices"]) {
+					CastManager::CastDevice dev;
+					dev.address = d.value("address", std::string());
+					dev.port    = d.value("port", 8009);
+					dev.name    = d.value("name", std::string());
+					if (dev.name.empty()) dev.name = dev.address;
+					dev.id      = CastManager::manual_id(dev.address, dev.port);
+					dev.manual  = true;
+					cast_devices.push_back(dev);
+					}
 				}
 			if (cfg.contains("upload_dir"))  upload_dir  = cfg["upload_dir"];
 			// CLI flags take precedence over config for port.
@@ -542,6 +709,10 @@ int main(int argc, char* argv[])
 	{
 	std::string err;
 	if (!validate_roots(roots, err)) {
+		std::cerr << "Error: " << err << "\n";
+		return 1;
+		}
+	if (!validate_cast_devices(cast_devices, err)) {
 		std::cerr << "Error: " << err << "\n";
 		return 1;
 		}
@@ -618,7 +789,7 @@ int main(int argc, char* argv[])
 		GainDrive gd(db_path, roots, upload_dir, no_scan, debug, flat_multi_disc,
 		             user_db_path, transcode_cache_dir, transcode_cache_mb,
 		             transcode_jobs, video_art_px, video_art_frames,
-		             video_art_embedded);
+		             video_art_embedded, cast_devices);
 		// Non-zero on a failed bind, so a supervisor restarts rather than
 		// recording a clean shutdown for a server that never served anything.
 		return gd.listen(host, port) ? 0 : 1;

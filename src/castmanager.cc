@@ -472,10 +472,35 @@ void CastManager::discover_background(int timeout_ms)
 		}).detach();
 	}
 
+std::string CastManager::manual_id(const std::string& address, int port)
+	{
+	return "manual:" + address + ":" + std::to_string(port);
+	}
+
+void CastManager::set_manual_devices(std::vector<CastDevice> devices)
+	{
+	std::lock_guard<std::mutex> lk(manual_mutex_);
+	manual_devices_ = std::move(devices);
+	}
+
 std::vector<CastManager::CastDevice> CastManager::cached_devices() const
 	{
-	std::lock_guard<std::mutex> lk(cache_mutex_);
-	return devices_cache_;
+	std::vector<CastDevice> result;
+		{
+		std::lock_guard<std::mutex> lk(cache_mutex_);
+		result = devices_cache_;
+		}
+
+	std::lock_guard<std::mutex> lk(manual_mutex_);
+	for (const auto& m : manual_devices_) {
+		// Deduplicated on the address, which is the only field the two kinds
+		// have in common — a configured device has no Cast id to match on.
+		bool found = false;
+		for (const auto& d : result)
+			if (d.address == m.address) { found = true; break; }
+		if (!found) result.push_back(m);
+		}
+	return result;
 	}
 
 // ---- Protobuf helpers (CastMessage encoding / decoding) -----------
@@ -672,6 +697,53 @@ static std::string wait_transport(SSL* ssl)
 	}
 
 // ---- CastManager public methods -----------------------------------
+
+const char* CastManager::probe_text(Probe result)
+	{
+	switch (result) {
+		case Probe::ANSWERED:    return "answered";
+		case Probe::SILENT:      return "connected but did not speak Cast";
+		case Probe::UNREACHABLE: return "unreachable";
+		}
+	return "unknown";
+	}
+
+CastManager::Probe CastManager::probe(const CastDevice& dev, int timeout_ms)
+	{
+	Tls t;
+	if (!tls_connect(t, dev.address, dev.port))
+		return Probe::UNREACHABLE;
+
+	const std::string src = "sender-0";
+	// The virtual connection to the platform has to exist before anything else
+	// is accepted; this is the same opening pair poll_loop() sends.
+	if (!cast_send(t.ssl, NS_CONN, src, "receiver-0", {{"type", "CONNECT"}}))
+		return Probe::UNREACHABLE;
+	cast_send(t.ssl, NS_RECV, src, "receiver-0",
+	          {{"type", "GET_STATUS"}, {"requestId", 1}});
+
+	// cast_recv() blocks up to the socket's own 5 s timeout, so the deadline is
+	// checked between reads rather than being able to interrupt one.
+	auto deadline = std::chrono::steady_clock::now()
+	              + std::chrono::milliseconds(timeout_ms);
+	while (std::chrono::steady_clock::now() < deadline) {
+		auto m = cast_recv(t.ssl);
+		if (m.is_null()) break;
+		std::string type = jstr(m, "type");
+		if (type == "RECEIVER_STATUS") {
+			std::cout << stamp() << "Cast: probe " << dev.address << ":" << dev.port
+			          << " answered: " << m.dump() << std::endl;
+			return Probe::ANSWERED;
+			}
+		// Answering costs one write and keeps this identical to what the
+		// session does; a probe is short enough that a missed PONG would not
+		// have dropped the connection anyway.
+		if (type == "PING")
+			cast_send(t.ssl, NS_HEARTBEAT, src, "receiver-0", {{"type", "PONG"}});
+		}
+
+	return Probe::SILENT;
+	}
 
 bool CastManager::start(const CastDevice& dev)
 	{

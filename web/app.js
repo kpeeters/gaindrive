@@ -1893,8 +1893,15 @@ async function openCastModal() {
          }
       for (const dev of devices) {
          const btn = document.createElement('button');
-         btn.textContent = dev.name;
-         btn.addEventListener('click', () => selectCastDevice(dev.id, dev.name));
+         // Fall back to the address: a device the server could not name would
+         // otherwise be an unlabelled button nobody can tell apart.
+         const label = dev.name || dev.address;
+         // Configured devices are marked rather than given a section of their
+         // own: this list is a flat row of buttons with no heading structure,
+         // and which ones mDNS could not find is worth saying when discovery
+         // is the thing that has gone wrong.
+         btn.textContent = dev.manual ? `${label} (configured)` : label;
+         btn.addEventListener('click', () => selectCastDevice(dev.id, label));
          list.appendChild(btn);
          }
       } catch (err) {

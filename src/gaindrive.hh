@@ -42,7 +42,11 @@ class GainDrive {
 		          int transcode_jobs = 0,
 		          int video_art_px = 640,
 		          bool video_art_frames = false,
-		          bool video_art_embedded = false);
+		          bool video_art_embedded = false,
+		          // Chromecasts named in the configuration, for the ones mDNS
+		          // cannot find. Passed in rather than set afterwards because
+		          // cast_manager_ is private and main has no other way in.
+		          const std::vector<CastManager::CastDevice>& cast_devices = {});
 		~GainDrive();
 		// Binds and serves. Returns false without serving if the port could
 		// not be acquired, so the caller can exit non-zero rather than treat a
@@ -85,6 +89,10 @@ class GainDrive {
 		// (last_cast_song_id_, last_cast_offset_). Called both from the
 		// stopCast endpoint and from the SSE watchdog thread.
 		void cast_teardown();
+
+		// Probe each configured cast device once at startup and log the result,
+		// so a wrong address is reported rather than only failing later.
+		void probe_cast_devices_background();
 
 		// ---- Artist portraits ----
 		//

@@ -15,7 +15,17 @@ class CastManager {
 			std::string name;
 			std::string address;
 			int         port = 8009;
+			// True for a device named in the configuration rather than found by
+			// mDNS.  Nothing in the protocol reads it; it exists so the API can
+			// say where an entry came from.
+			bool        manual = false;
 			};
+
+		// The id given to a configured device, derived from its address rather
+		// than random.  The web client stores the id of the device it is casting
+		// to and restores it after a page reload, so an id that changed across a
+		// restart would break that restore.
+		static std::string manual_id(const std::string& address, int port);
 
 		struct CastStatus {
 			std::string player_state = "IDLE";  // IDLE | PLAYING | PAUSED | BUFFERING
@@ -52,8 +62,42 @@ class CastManager {
 		// Returns immediately; call cached_devices() to read the result.
 		void discover_background(int timeout_ms = 4000);
 
-		// Return the last cached device list (populated by discover_background).
+		// Devices named in the configuration, for the ones mDNS cannot find.
+		// Held separately from the discovery cache and merged only on the way
+		// out (see cached_devices), because discover_background() replaces that
+		// cache wholesale and would drop anything written into it.
+		void set_manual_devices(std::vector<CastDevice> devices);
+
+		// The discovery cache merged with the configured devices.
+		//
+		// Every caller goes through here — listCastDevices and startCast's id
+		// lookup both scan it — so the merge happening in one place is what lets
+		// the endpoints stay as they are.  A configured device whose address
+		// discovery also found is dropped in discovery's favour: that entry
+		// carries the friendly name from the device's own TXT record and its
+		// real Cast id, where a configured one has only what someone typed.
 		std::vector<CastDevice> cached_devices() const;
+
+		// What asking a device whether it is there produced.
+		//
+		// SILENT is worth telling apart from UNREACHABLE: it means something
+		// accepted a TLS connection on the cast port and then said nothing,
+		// which is a live host that is not a Chromecast rather than a wrong
+		// address.
+		enum class Probe { ANSWERED, SILENT, UNREACHABLE };
+
+		// Connect, ask for a receiver status, disconnect.  Touches none of the
+		// session state — deliberately not start(), which sets active_ and
+		// detaches poll_loop(), so probing a typed-in address would begin
+		// casting to it.
+		//
+		// This is the only way a bad address is ever reported.  start() returns
+		// true unconditionally and never connects, so a wrong one yields a
+		// session that says it is active and never produces a status.
+		Probe probe(const CastDevice& device, int timeout_ms = 6000);
+
+		// One word for a Probe, for logging and for the command-line modes.
+		static const char* probe_text(Probe result);
 
 		// Enter cast mode: store device and generate a single-use stream token.
 		bool start(const CastDevice& device);
@@ -125,6 +169,12 @@ class CastManager {
 
 		mutable std::mutex         cache_mutex_;
 		std::vector<CastDevice>    devices_cache_;  // last result of discover_background()
+
+		// Its own mutex rather than sharing cache_mutex_: a discovery pass holds
+		// that one to publish, and the configured list must stay readable
+		// throughout.
+		mutable std::mutex         manual_mutex_;
+		std::vector<CastDevice>    manual_devices_;
 
 		std::atomic<bool>          poll_active_{false};
 

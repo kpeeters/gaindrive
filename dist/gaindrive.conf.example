@@ -9,6 +9,10 @@
 		{ "name": "movies",   "type": "categories", "path": "/srv/movies" },
 		{ "name": "personal", "type": "uploads",    "path": "/var/lib/gaindrive/uploads" }
 	],
+	"//cast_devices": "Chromecasts to offer even though mDNS discovery cannot find them, which happens when a device stops announcing itself or the access point drops multicast. Address must be an IP, not a hostname; port defaults to 8009 and name to the address. Devices that discovery does find need no entry here, and one listed that is also discovered is shown once. Omit this entirely to rely on discovery alone.",
+	"cast_devices": [
+		{ "name": "Living room", "address": "192.168.1.42" }
+	],
 	"upload_dir": "/tmp/gaindrive-uploads",
 	"flat_multi_disc": true,
 	"transcode_cache_dir": "/var/lib/gaindrive/transcodes",

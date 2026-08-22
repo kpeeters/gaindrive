@@ -1547,7 +1547,8 @@ GainDrive::GainDrive(const std::string& db_path,
                      int transcode_jobs,
                      int video_art_px,
                      bool video_art_frames,
-                     bool video_art_embedded)
+                     bool video_art_embedded,
+                     const std::vector<CastManager::CastDevice>& cast_devices)
 	: debug_(debug), flat_multi_disc_(flat_multi_disc), upload_dir_(upload_dir),
 	  store_(db_path, roots, user_db_path, video_art_px, video_art_frames,
 	         video_art_embedded),
@@ -1561,6 +1562,8 @@ GainDrive::GainDrive(const std::string& db_path,
 	  cover_cache_(store_),
 	  watcher_(store_)
 	{
+	cast_manager_.set_manual_devices(cast_devices);
+
 	namespace fs = std::filesystem;
 	// A cache inside any root would be rescanned and indexed, and the
 	// transcodes would then appear in the library as tracks of their own.
@@ -4051,7 +4054,8 @@ GainDrive::GainDrive(const std::string& db_path,
 				nlohmann::json arr = nlohmann::json::array();
 				for (auto& d : devices)
 					arr.push_back({{"id", d.id}, {"name", d.name},
-					               {"address", d.address}, {"port", d.port}});
+					               {"address", d.address}, {"port", d.port},
+					               {"manual", d.manual}});
 				r["castDevices"] = arr;
 				});
 			}
@@ -4064,6 +4068,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					dev->SetAttribute("name",    d.name.c_str());
 					dev->SetAttribute("address", d.address.c_str());
 					dev->SetAttribute("port",    d.port);
+					dev->SetAttribute("manual",  d.manual);
 					el->InsertEndChild(dev);
 					}
 				root->InsertEndChild(el);
@@ -5226,6 +5231,44 @@ void GainDrive::cast_teardown()
 	last_cast_offset_ = 0.0f;
 	}
 
+// A configured cast device is never confirmed by anything: mDNS does not
+// announce it, and CastManager::start() neither connects nor fails, so a typo
+// in --cast-device or the config file stays completely silent until someone
+// tries to cast and gets a session that never begins. One probe each at startup
+// turns that into a line in the log.
+//
+// Detached, because a device that is merely switched off costs the connect
+// timeout and nothing should wait for that.
+void GainDrive::probe_cast_devices_background()
+	{
+	auto devices = cast_manager_.cached_devices();
+	std::vector<CastManager::CastDevice> manual;
+	for (auto& d : devices)
+		if (d.manual) manual.push_back(d);
+	if (manual.empty()) return;
+
+	std::thread([this, manual]{
+		try {
+			for (const auto& d : manual) {
+				auto result = cast_manager_.probe(d);
+				std::cout << stamp() << "Cast: configured device '" << d.name
+				          << "' (" << d.address << ":" << d.port << ") "
+				          << CastManager::probe_text(result) << std::endl;
+				}
+			}
+		// An exception escaping a detached thread is std::terminate, and a
+		// probe is not worth a dead server.
+		catch (const std::exception& e) {
+			std::cout << stamp() << "Cast device probe failed: " << e.what()
+			          << std::endl;
+			}
+		catch (...) {
+			std::cout << stamp() << "Cast device probe failed: unknown exception"
+			          << std::endl;
+			}
+		}).detach();
+	}
+
 // A statically linked binary resolves names through whatever its libc provides:
 // musl does it itself and works, a static glibc cannot do it at all. Either way
 // the failure is invisible — the library serves fine and only the MusicBrainz,
@@ -5286,6 +5329,7 @@ bool GainDrive::listen(const std::string& host, int port)
 				}
 			}).detach();
 	cast_manager_.discover_background();
+	probe_cast_devices_background();
 	check_dns_background();
 	watcher_.start();
 	// Joined in the destructor rather than detached: it holds references to

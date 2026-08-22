@@ -288,6 +288,46 @@ static int run_discover(const CastManager::DiscoverOpts& opts)
 	return devs.empty() ? 1 : 0;
 	}
 
+// ---- probe --------------------------------------------------------
+
+/// Ask one device, by address, whether it is there.
+///
+/// The same CastManager::probe() the server runs over its configured devices at
+/// startup, so the tool and the log line cannot disagree about what "answered"
+/// means. Address form is [name=]address[:port], matching --cast-device, with
+/// an IPv6 address bracketed if it carries a port.
+static int run_probe(const std::string& target, int timeout_ms)
+	{
+	CastManager::CastDevice dev;
+	dev.address = target;
+	dev.port    = 8009;
+
+	auto close  = target.rfind(']');
+	auto colon  = target.rfind(':');
+	bool braces = !target.empty() && target.front() == '['
+	           && close != std::string::npos;
+	// A port only where it can be told from an IPv6 address: after the closing
+	// bracket, or when there is exactly one colon in the whole string.
+	if (colon != std::string::npos
+	        && (braces ? colon > close : target.find(':') == colon)) {
+		std::string digits = target.substr(colon + 1);
+		if (!digits.empty()
+		        && digits.find_first_not_of("0123456789") == std::string::npos) {
+			dev.port    = std::atoi(digits.c_str());
+			dev.address = target.substr(0, colon);
+			}
+		}
+	if (dev.address.size() >= 2 && dev.address.front() == '['
+	        && dev.address.back() == ']')
+		dev.address = dev.address.substr(1, dev.address.size() - 2);
+
+	CastManager cm;
+	auto result = cm.probe(dev, timeout_ms);
+	std::cout << dev.address << ":" << dev.port << " — "
+	          << CastManager::probe_text(result) << std::endl;
+	return result == CastManager::Probe::ANSWERED ? 0 : 1;
+	}
+
 int main(int argc, char** argv)
 	{
 	signal(SIGINT, on_sigint);
@@ -295,8 +335,9 @@ int main(int argc, char** argv)
 	cxxopts::Options options("gaindrive-cast",
 		"Chromecast discovery diagnostics.\n"
 		"\n"
-		"  gaindrive-cast discover [options]   what the gaindrive server sees\n"
-		"  gaindrive-cast browse   [options]   every record on the wire\n");
+		"  gaindrive-cast discover [options]      what the gaindrive server sees\n"
+		"  gaindrive-cast browse   [options]      every record on the wire\n"
+		"  gaindrive-cast probe    <address>      ask one device directly\n");
 
 	options.add_options()
 		("h,help",      "Show this help")
@@ -315,10 +356,12 @@ int main(int argc, char** argv)
 		("no-ipv6",     "discover: skip IPv6")
 		("any-id",      "discover: keep devices that sent no TXT id")
 		("q,quiet",     "discover: do not log every record")
-		("command",     "discover | browse", cxxopts::value<std::string>());
+		("command",     "discover | browse | probe", cxxopts::value<std::string>())
+		("address",     "probe: the device, as address[:port]",
+		                cxxopts::value<std::string>()->default_value(""));
 
-	options.parse_positional({"command"});
-	options.positional_help("discover|browse");
+	options.parse_positional({"command", "address"});
+	options.positional_help("discover|browse|probe [address]");
 
 	std::string cmd;
 	cxxopts::ParseResult args;
@@ -337,6 +380,17 @@ int main(int argc, char** argv)
 		}
 
 	int timeout = args["timeout"].as<int>();
+
+	if (cmd == "probe") {
+		std::string target = args["address"].as<std::string>();
+		if (target.empty()) {
+			std::cout << "gaindrive-cast: probe needs an address" << std::endl;
+			return 2;
+			}
+		// 6000 matches CastManager::probe's own default, which is what the
+		// server's startup check uses.
+		return run_probe(target, timeout > 0 ? timeout : 6000);
+		}
 
 	if (cmd == "browse")
 		return run_browse(timeout < 0 ? 0 : timeout,       // browse: run forever
