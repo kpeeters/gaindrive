@@ -122,11 +122,82 @@ std::vector<UrlHandler> UrlFetcher::default_handlers()
 		"--newline", "--progress", "--no-playlist",
 		"--write-thumbnail", "--convert-thumbnails", "jpg", "-P", "%DIR%" };
 
-	auto with = [&common](std::vector<std::string> head,
-	                       std::vector<std::string> tail) {
+	// Reading "Eric Clapton - I Shot The Sheriff (Live at Budokan 2009)" as
+	// three fields rather than as one channel name.
+	//
+	// The site supplies `artist` and `album` only for tracks it serves with
+	// music metadata — the auto-generated "Topic" channels. For everything else
+	// those fields are absent and the output template falls through to the
+	// *channel*, which is why an ordinary music video used to land under the
+	// name of whoever posted it. The title is the only description there is, so
+	// the title is what gets parsed. Same predicament as a video filename, and
+	// the same shape of answer as videoname.cc, but this belongs here rather
+	// than in C++ because it is the *tool's* naming stage: parsed before the
+	// output template expands, so the directories are right the first time and
+	// nothing has to be renamed afterwards.
+	//
+	// The order below is the whole design and is not arbitrary:
+	//
+	//  1. Strip the junk parenthetical *first*. "(Official Video)", "[4K]" and
+	//     "(Remastered)" are the commonest thing in a bracket on YouTube, and
+	//     taking a bracket as the album without this files half a collection
+	//     under an album called "Official Video". A bracket is junk when it
+	//     *contains* a junk word, since "(Live at Pompeii) [HD]" is one of each.
+	//  2. Then a bracket that is only a year or only a bare noun.
+	//  3. Then the general "Artist - Track" split, and
+	//  4. then the specific "Artist - Track (Album)" split, which overwrites
+	//     what 3 wrote when it applies.
+	//
+	// 3 and 4 both read the *original* title and neither writes it back, so the
+	// specific one does not depend on the general one having run — the two are
+	// ordered only so the more specific result wins. A rule that matches
+	// nothing is not an error; yt-dlp says so on stdout and carries on.
+	//
+	// The year is deliberately *kept* in the album. "Live at Budokan 2009" and
+	// "Live at Budokan 1978" are two concerts, and dropping the year merges
+	// them into one album.
+	//
+	// What this cannot do is tell "Work - Performer" from "Performer - Work":
+	// "Beethoven Symphony No. 5 - Karajan" comes out with the conductor as the
+	// track. Nothing in the string says which way round it is.
+	const std::string junk_bracket =
+		R"(\s*[\(\[][^)\]]*\b(?i:official|lyrics?|visuali[sz]er|remaster(ed)?)"
+		R"(|explicit|hd|hq|4k|8k|m/?v|full\s*album|clip\s*officiel|topic)\b)"
+		R"([^)\]]*[\)\]])";
+	const std::string junk_only =
+		R"(\s*[\(\[]\s*(?i:(19|20)\d{2}|audio|video|music\s*video)\s*[\)\]])";
+	const std::string split_artist =
+		R"(title:(?P<artist>.+?)\s+[-–—]\s+(?P<track>.+))";
+	const std::string split_album =
+		R"(title:(?P<artist>.+?)\s+[-–—]\s+(?P<track>.+?)\s*)"
+		R"([\(\[](?P<album>[^()\[\]]+)[\)\]]\s*$)";
+
+	std::vector<std::string> naming = {
+		"--replace-in-metadata", "title", junk_bracket, "",
+		"--replace-in-metadata", "title", junk_only,    "",
+		"--parse-metadata",      split_artist,
+		"--parse-metadata",      split_album };
+
+	// Falling back through album_artist before the channel, and to the channel
+	// only when the title said nothing at all — at which point it is usually
+	// not music, and a lecture or podcast really is best filed under whoever
+	// published it. An operator who would rather see them collected together
+	// can end the chain with a literal instead: %(artist|Unknown Artist)s.
+	const std::string dir_artist = "%(artist,album_artist,uploader)s";
+	// A track with no album of its own is an album of one, which is what
+	// falling through to the track name means here.
+	const std::string dir_album  = "%(album,track,title)s";
+	const std::string file_stem  = "%(track,title)s";
+
+	auto with = [&](std::vector<std::string> head) {
 		std::vector<std::string> v = std::move(head);
 		v.insert(v.end(), common.begin(), common.end());
-		v.insert(v.end(), tail.begin(), tail.end());
+		v.insert(v.end(), naming.begin(), naming.end());
+		v.push_back("-o");
+		v.push_back(dir_artist + "/" + dir_album + "/" + file_stem + ".%(ext)s");
+		v.push_back("-o");
+		v.push_back("thumbnail:" + dir_artist + "/" + dir_album
+		            + "/cover.%(ext)s");
 		v.push_back("--");
 		v.push_back("%URL%");
 		return v;
@@ -139,16 +210,9 @@ std::vector<UrlHandler> UrlFetcher::default_handlers()
 	// where the consequences are written down.
 	yt.pattern = R"(https?://(www\.|m\.|music\.)?(youtube\.com|youtu\.be)/.*)";
 	yt.audio_argv = with({ "yt-dlp", "-x", "--audio-format", "opus",
-	                       "--embed-metadata", "--max-filesize", "2G" },
-	                     { "-o", "%(artist,uploader)s/%(album,title)s/"
-	                             "%(title)s.%(ext)s",
-	                       "-o", "thumbnail:%(artist,uploader)s/"
-	                             "%(album,title)s/cover.%(ext)s" });
+	                       "--embed-metadata", "--max-filesize", "2G" });
 	yt.video_argv = with({ "yt-dlp", "--merge-output-format", "mp4",
-	                       "--embed-metadata", "--max-filesize", "8G" },
-	                     { "-o", "%(uploader)s/%(title)s/%(title)s.%(ext)s",
-	                       "-o", "thumbnail:%(uploader)s/%(title)s/"
-	                             "cover.%(ext)s" });
+	                       "--embed-metadata", "--max-filesize", "8G" });
 	return { yt };
 	}
 
