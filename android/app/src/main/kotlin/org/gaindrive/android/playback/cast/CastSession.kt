@@ -16,12 +16,34 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import org.gaindrive.android.data.model.AudioQuality
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/**
+ * One side-loaded subtitle track, as the receiver is told about it.
+ *
+ * [trackId] is 1-based and is what `EDIT_TRACKS_INFO` names; [url] is fetched
+ * by the receiver itself, so on the relayed route it must be a bridge URL and
+ * not the server's.
+ */
+data class CastCaption(
+	val trackId: Int,
+	val url: String,
+	val label: String,
+	/**
+	 * Required by the receiver for a subtitle track, and a track without one
+	 * can be dropped with no diagnostic anywhere — hence the ISO 639-2 code
+	 * for "undetermined" rather than an empty string.
+	 */
+	val language: String = "und",
+)
 
 /** What to play, and where the receiver should fetch it from. */
 data class CastMedia(
@@ -50,6 +72,16 @@ data class CastMedia(
 	val route: CastRoute = CastRoute.DIRECT,
 	/** What the server was asked to send. Null for video, which is never asked. */
 	val quality: AudioQuality? = null,
+	/**
+	 * **Declared in every LOAD, whether or not one is switched on.**
+	 * `EDIT_TRACKS_INFO` can activate a trackId the LOAD declared but cannot
+	 * introduce one, so a track omitted here is one the viewer can never reach
+	 * without reloading the film — which shows up as subtitles that work when
+	 * chosen before playback and never when chosen during it.
+	 */
+	val captions: List<CastCaption> = emptyList(),
+	/** Which of [captions] are on, by trackId. Empty is a valid answer. */
+	val activeTrackIds: List<Int> = emptyList(),
 )
 
 /**
@@ -206,6 +238,34 @@ class CastSession @Inject constructor(
 
 	fun stopPlayback() = mediaCommand("STOP")
 
+	/**
+	 * Turns on the subtitle track at [index] in the loaded film's caption list,
+	 * or turns subtitles off when it is null.
+	 *
+	 * An index rather than a trackId, because that is what the picker publishes
+	 * and what [CastPlayer] numbered its `Tracks` with — resolving it here,
+	 * against the very list the LOAD went out with, is what keeps the two
+	 * numberings from being two numberings. The same reasoning as
+	 * `VideoSurface.selectTextTrack` for the local player.
+	 *
+	 * Recorded on `_loaded` as well as sent, so an auto-retry replays the
+	 * selection the viewer made rather than the one the film started with.
+	 */
+	fun selectCaption(index: Int?) {
+		val media = _loaded.value ?: return
+		val ids = index?.let { media.captions.getOrNull(it) }
+			?.let { listOf(it.trackId) }
+			.orEmpty()
+		if (index != null && ids.isEmpty()) {
+			Log.w(TAG, "caption $index is not in the loaded track list; ignored")
+			return
+		}
+		_loaded.value = media.copy(activeTrackIds = ids)
+		mediaCommand("EDIT_TRACKS_INFO") {
+			putJsonArray("activeTrackIds") { ids.forEach { add(it) } }
+		}
+	}
+
 	private fun mediaCommand(type: String, extra: JsonObjectBuilderScope? = null) {
 		scope.launch(Dispatchers.IO) {
 			val open = awaitChannel() ?: return@launch
@@ -311,9 +371,14 @@ class CastSession @Inject constructor(
 
 	private fun onMediaStatus(fresh: CastStatus) {
 		// A push mid-playback carries no `media` block, so duration arrives once
-		// and must be carried forward rather than collapsing to zero.
-		val merged =
-			if (fresh.duration == 0f) fresh.copy(duration = _status.value.duration) else fresh
+		// and must be carried forward rather than collapsing to zero. The
+		// active subtitle tracks are stated on the same terms and carry forward
+		// for the same reason — see CastStatus.activeTrackIds.
+		val previous = _status.value
+		val merged = fresh.copy(
+			duration = if (fresh.duration == 0f) previous.duration else fresh.duration,
+			activeTrackIds = fresh.activeTrackIds ?: previous.activeTrackIds,
+		)
 		_status.value = merged
 
 		if (retry.onStatus(merged)) {
@@ -350,7 +415,27 @@ class CastSession @Inject constructor(
 				// early hint before any byte-range request is made.
 				media.durationSeconds?.let { put("duration", it) }
 				media.metadata()?.let { put("metadata", it) }
+				if (media.captions.isNotEmpty()) {
+					putJsonArray("tracks") {
+						media.captions.forEach { caption ->
+							addJsonObject {
+								put("trackId", caption.trackId)
+								put("type", "TEXT")
+								put("subtype", "SUBTITLES")
+								put("trackContentId", caption.url)
+								put("trackContentType", "text/vtt")
+								put("language", caption.language)
+								put("name", caption.label)
+							}
+						}
+					}
+				}
 			})
+			if (media.activeTrackIds.isNotEmpty()) {
+				putJsonArray("activeTrackIds") {
+					media.activeTrackIds.forEach { add(it) }
+				}
+			}
 		}
 		Log.i(TAG, "LOAD $payload")
 		open.send(CastNs.MEDIA, transport, payload)

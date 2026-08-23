@@ -330,8 +330,16 @@ class PlayerConnection @Inject constructor(
 	 * and are what [textTracks] labels, but the `TrackGroup` objects a
 	 * controller hands back are rebuilt from a bundle, and an override keyed on
 	 * one of those never matches the player's own. See [VideoSurface].
+	 *
+	 * While casting there is no local selection to make: the receiver renders
+	 * the captions and is told which one by `EDIT_TRACKS_INFO`. The index is
+	 * the same either way, because `CastPlayer` publishes its `Tracks` in the
+	 * order it numbers the tracks it sent.
 	 */
-	fun selectTextTrack(index: Int?) = videoSurface.selectTextTrack(index)
+	fun selectTextTrack(index: Int?) {
+		if (castSession.device.value != null) castSession.selectCaption(index)
+		else                                  videoSurface.selectTextTrack(index)
+	}
 
 	fun jumpTo(queueIndex: Int) {
 		controller?.seekTo(queueIndex, 0L)

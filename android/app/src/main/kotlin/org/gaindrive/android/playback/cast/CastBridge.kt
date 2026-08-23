@@ -100,9 +100,33 @@ class CastBridge @Inject constructor(
 	private val published = Collections.synchronizedMap(
 		object : LinkedHashMap<String, Resource>(16, 0.75f, true) {
 			override fun removeEldestEntry(eldest: Map.Entry<String, Resource>): Boolean =
-				size > MAX_PUBLISHED
+				size > MAX_PUBLISHED && eldest.key !in pinned
 		}
 	)
+
+	/**
+	 * Keys belonging to the load currently on the receiver, exempt from
+	 * eviction until the next one replaces them.
+	 *
+	 * **Subtitle tracks are why this exists.** The map is access-ordered, and a
+	 * caption is published at LOAD but not fetched until somebody turns it on —
+	 * so with only use to go by it is the least recently used thing there is,
+	 * and every seek publishes a fresh stream key that ages it further. A
+	 * viewer switching subtitles forty minutes into a film would find the key
+	 * evicted, get a 404 the receiver reports nowhere, and see nothing happen.
+	 * Age is the wrong measure for a resource whose whole purpose is to be
+	 * available later.
+	 */
+	private val pinned = Collections.synchronizedSet(mutableSetOf<String>())
+
+	/**
+	 * Declares that everything published from now until the next call belongs
+	 * to one load. The previous load's keys become evictable again.
+	 */
+	@Synchronized
+	fun beginLoad() {
+		pinned.clear()
+	}
 
 	@Synchronized
 	fun start(): Boolean {
@@ -172,6 +196,7 @@ class CastBridge @Inject constructor(
 		if (server == null && !start()) return null
 		val key = newKey()
 		published[key] = resource
+		pinned.add(key)
 		return "$origin/$token/$key"
 	}
 
@@ -226,6 +251,14 @@ class CastBridge @Inject constructor(
 				output.respondEmpty(400, "Bad Request")
 				return
 			}
+		}
+
+		// Answered before the key is resolved: a preflight asks whether the
+		// request would be allowed, not for the resource, and a receiver that
+		// preflighted an evicted key would learn nothing useful from a 404.
+		if (request.method == "OPTIONS") {
+			output.respondEmpty(204, "No Content")
+			return
 		}
 
 		val resource = resolve(request.path) ?: run {
@@ -290,6 +323,7 @@ class CastBridge @Inject constructor(
 				if (range != null) "HTTP/1.1 206 Partial Content\r\n".toByteArray()
 				else "HTTP/1.1 200 OK\r\n".toByteArray()
 			)
+			output.writeCors()
 			resource.mimeType?.let { output.write("Content-Type: $it\r\n".toByteArray()) }
 			output.write("Content-Length: $count\r\n".toByteArray())
 			output.write("Accept-Ranges: bytes\r\n".toByteArray())
@@ -356,6 +390,10 @@ class CastBridge @Inject constructor(
 					(response.header("Content-Range")?.let { " range=$it" } ?: ""),
 			)
 			output.write("HTTP/1.1 ${response.code} ${response.message}\r\n".toByteArray())
+			// Ours, not relayed: the upstream server sends its own, and
+			// forwarding both would put two Access-Control-Allow-Origin
+			// headers on one response, which a browser treats as neither.
+			output.writeCors()
 			for (header in RELAYED_HEADERS) {
 				response.header(header)?.let {
 					output.write("$header: $it\r\n".toByteArray())
@@ -404,7 +442,10 @@ class CastBridge @Inject constructor(
 		val parts = requestLine.split(' ')
 		if (parts.size < 2) return BridgeRead.Malformed("malformed request line")
 		val method = parts[0].uppercase()
-		if (method != "GET" && method != "HEAD") {
+		// OPTIONS is answered, not served: the receiver fetches a side-loaded
+		// subtitle track by XHR, and a cross-origin XHR may preflight. Treating
+		// it as malformed would fail the caption and, with it, the LOAD.
+		if (method != "GET" && method != "HEAD" && method != "OPTIONS") {
 			return BridgeRead.Malformed("unsupported method $method")
 		}
 
@@ -421,8 +462,30 @@ class CastBridge @Inject constructor(
 		return BridgeRead.Ok(method, parts[1], range)
 	}
 
+	/**
+	 * The headers that let the receiver *read* what it fetched.
+	 *
+	 * A side-loaded subtitle track is fetched by XHR from the receiver app's
+	 * own origin, so without these the browser inside the Chromecast discards a
+	 * response it has already downloaded — and because declaring any track puts
+	 * the media element into anonymous cross-origin mode, the film needs them
+	 * too. On the direct route the gaindrive server sends its own; here the
+	 * bridge is the origin, so it has to.
+	 */
+	private fun BufferedOutputStream.writeCors() {
+		write("Access-Control-Allow-Origin: *\r\n".toByteArray())
+		write("Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n".toByteArray())
+		write("Access-Control-Allow-Headers: Range, Content-Type\r\n".toByteArray())
+		write(
+			("Access-Control-Expose-Headers: " +
+				"Content-Length, Content-Range, Accept-Ranges\r\n").toByteArray()
+		)
+	}
+
 	private fun BufferedOutputStream.respondEmpty(code: Int, reason: String) {
-		write("HTTP/1.1 $code $reason\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+		write("HTTP/1.1 $code $reason\r\n".toByteArray())
+		writeCors()
+		write("Content-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
 		flush()
 	}
 
@@ -458,7 +521,11 @@ class CastBridge @Inject constructor(
 	private companion object {
 		const val TAG = "GainDriveCast"
 		const val BACKLOG = 8
-		const val MAX_PUBLISHED = 16
+		// One load is a stream, its artwork and one entry per subtitle track,
+		// and the entries of the load before last are still worth keeping for
+		// a receiver that re-requests. Raised from 16 when captions arrived:
+		// they multiply the per-load count, and an entry is a URL string.
+		const val MAX_PUBLISHED = 64
 		const val COPY_BUFFER = 64 * 1024
 
 		/** Long enough for a whole-film remux to finish; see [upstreamClient]. */

@@ -1685,6 +1685,7 @@ let musicFolders = null;
 
 // Id of the currently active cast device, or null when not casting.
 let castDeviceId        = null;
+let castDeviceName      = '';    // friendly name, for the panel that replaces the picture
 let castEventSrc        = null;   // EventSource receiving pushed status from server
 let castStartOffset     = 0;      // timeOffset used when cast started (seconds)
 let lastCastPosition    = 0;      // absolute position of last SSE push
@@ -1909,10 +1910,11 @@ async function openCastModal() {
       }
    }
 
-async function selectCastDevice(id) {
+async function selectCastDevice(id, label = '') {
    try {
       await apiCall('startCast', {id});
-      castDeviceId = id;
+      castDeviceId   = id;
+      castDeviceName = label;
       document.getElementById('player-cast').classList.add('active');
       document.getElementById('cast-modal').classList.add('hidden');
       // Stop local playback and re-issue the stream request so the server
@@ -1928,7 +1930,10 @@ async function selectCastDevice(id) {
          castStartOffset  = offset;
          lastCastPosition = offset;
          player.media.pause();
-         player.media.src = '';
+         // removeAttribute, never src = '': an empty src resolves against the
+         // page and makes the browser fetch GET /, which is the whole SPA.
+         player.media.removeAttribute('src');
+         player.media.load();
          playerPlay(offset);
          }
       // Open SSE stream to receive pushed Chromecast status updates.
@@ -1954,6 +1959,7 @@ async function stopCast({resumeLocal = true} = {}) {
       // best-effort stop
       }
    castDeviceId         = null;
+   castDeviceName       = '';
    castStartOffset      = 0;
    lastCastPosition     = 0;
    castWasPlaying       = false;
@@ -1964,8 +1970,16 @@ async function stopCast({resumeLocal = true} = {}) {
    castSongDuration = 0;
    document.getElementById('player-cast').classList.remove('active');
    document.getElementById('cast-modal').classList.add('hidden');
-   if (resumeLocal && player.index >= 0)
+   // Cleared before the resume, which composes the surface again: leaving the
+   // class on would put the panel over a picture that is now local.
+   videoCastPanel(false);
+   if (resumeLocal && player.index >= 0) {
       playerPlay(resumeOffset);
+      } else {
+      // Nothing is going to be played here, so nothing will hide the surface
+      // on its way past.
+      videoSurfaceSet(null);
+      }
    }
 
 // ── Star synchronisation across panes ─────────────────────────────────────
@@ -2274,6 +2288,10 @@ const player = {
    // seek would silently turn the subtitles off.
    captionIndex: null,
    captionSong: null,
+   // The caption list getVideoInfo returned, kept so a menu position can be
+   // turned back into the server's own caption id. The cast API numbers these
+   // 1..n in this order.
+   captions: [],
 };
 player.media = player.audioEl;
 
@@ -2311,6 +2329,25 @@ function videoSurfaceCaption(song) {
       song ? [song.title, song.album].filter(Boolean).join(' — ') : '';
 }
 
+// Swaps the surface between showing the picture and saying where the picture
+// went.
+//
+// The surface is composed while casting rather than hidden, and that is not
+// decoration: #video-bar is where the subtitle picker lives, and a film on a
+// television is exactly when someone wants it. It also fixes a stranded state —
+// starting a cast mid-film used to leave the surface up with a <video> whose
+// source had been taken away, showing black under a live-looking title.
+function videoCastPanel(on) {
+   const surf = document.getElementById('video-surface');
+   surf.classList.toggle('casting', on);
+   document.getElementById('video-cast-name').textContent =
+      castDeviceName ? `Playing on ${castDeviceName}` : 'Playing on your TV';
+   // Fullscreen would ask the browser to blow up an element with no source,
+   // and close means "stop the film", which while casting is the television's
+   // film and not this element's.
+   document.getElementById('video-fullscreen').hidden = on;
+}
+
 // The remux tier blocks on ffmpeg copying the whole file into the transcode
 // cache before it sends a byte, which for a feature-length film is tens of
 // seconds.  Show that rather than a black rectangle that looks broken.
@@ -2334,6 +2371,8 @@ function playerStop() {
    // starts must not inherit its subtitle choice.
    player.captionSong  = null;
    player.captionIndex = null;
+   player.captions     = [];
+   videoCastPanel(false);
    videoCaptionsMenu([]);
 
    document.getElementById('player-playpause').textContent = 'play_arrow';
@@ -2350,7 +2389,11 @@ function playerStop() {
 }
 
 function setupVideoSurface() {
-   document.getElementById('video-close').addEventListener('click', playerStop);
+   // While casting, the film is the television's: playerStop would stop the
+   // local element, which is not playing anything, hide the surface, and leave
+   // the Chromecast running with no way back to it.
+   document.getElementById('video-close').addEventListener('click',
+      () => (castDeviceId !== null ? stopCast({resumeLocal: false}) : playerStop()));
    document.getElementById('video-minimise').addEventListener('click',
       () => videoSurfaceSet('minimised'));
    document.getElementById('video-restore').addEventListener('click',
@@ -2388,34 +2431,51 @@ function setupVideoSurface() {
 // the media request itself — not worth risking playback for subtitles.
 async function videoLoadCaptions(song) {
    player.videoEl.querySelectorAll('track').forEach(t => t.remove());
-   // A seek on a transcoded stream comes back through here for the *same*
-   // film, so the choice is forgotten only when the film changes.  Otherwise
-   // every seek would turn the subtitles off.
-   if (player.captionSong !== song.id) {
+
+   // A seek comes back through here for the *same* film — on a transcoded
+   // stream because it re-fetches, while casting because a seek is a fresh
+   // LOAD. Two things follow. The chosen track is forgotten only when the film
+   // changes, or every seek would silently turn the subtitles off. And the
+   // list itself is not asked for again: getVideoInfo runs ffprobe over the
+   // container on every call, which is not a thing to do once per seek, and a
+   // film's subtitle streams do not change while it is playing.
+   let caps;
+   if (player.captionSong === song.id) {
+      caps = player.captions;
+      } else {
       player.captionSong  = song.id;
       player.captionIndex = null;
+      // Cleared here rather than only on success: both the early returns below
+      // would otherwise leave the previous film's picker on the bar.
+      player.captions = [];
+      videoCaptionsMenu([]);
+      let info;
+      try { info = await apiCall('getVideoInfo', {id: song.id}); }
+      catch { return; }
+      // The track list arrived asynchronously; if the user has moved on since,
+      // these captions belong to a video that is no longer playing.
+      if (player.queue[player.index]?.id !== song.id) return;
+      caps = info.videoInfo?.captions ?? [];
+      player.captions = caps;
       }
-   // Cleared here rather than only on success: both the early returns below
-   // would otherwise leave the previous film's picker on the bar.
-   videoCaptionsMenu([]);
-   let info;
-   try { info = await apiCall('getVideoInfo', {id: song.id}); }
-   catch { return; }
-   // The track list arrived asynchronously; if the user has moved on since,
-   // these captions belong to a video that is no longer playing.
-   if (player.queue[player.index]?.id !== song.id) return;
-   const caps = info.videoInfo?.captions ?? [];
-   // Read now rather than in the handler: by the time a track loads, another
-   // seek may have moved it, and these elements would then belong to the
-   // stream before last.
-   const offset = player.localOffset || 0;
-   for (const c of caps) {
-      const t = document.createElement('track');
-      t.kind  = 'subtitles';
-      t.label = c.name || 'Subtitles';
-      t.src   = apiUrl('getCaptions', {id: song.id, captionId: c.id});
-      t.addEventListener('load', () => videoShiftCues(t.track, offset));
-      player.videoEl.appendChild(t);
+
+   // No <track> elements while casting: the receiver fetches and renders its
+   // own copy, and an element here would only make the browser download a
+   // subtitle for a video it is not showing.  The menu is still built, because
+   // choosing the track is this client's job either way.
+   if (castDeviceId === null) {
+      // Read now rather than in the handler: by the time a track loads, another
+      // seek may have moved it, and these elements would then belong to the
+      // stream before last.
+      const offset = player.localOffset || 0;
+      for (const c of caps) {
+         const t = document.createElement('track');
+         t.kind  = 'subtitles';
+         t.label = c.name || 'Subtitles';
+         t.src   = apiUrl('getCaptions', {id: song.id, captionId: c.id});
+         t.addEventListener('load', () => videoShiftCues(t.track, offset));
+         player.videoEl.appendChild(t);
+         }
       }
    // After the elements, so a menu index is a textTracks index.
    videoCaptionsMenu(caps);
@@ -2472,19 +2532,41 @@ function videoCaptionsMenu(captions) {
    // Put back the track a seek interrupted.  A film that has lost the track it
    // had — a re-file, a different caption list — falls back to off rather than
    // to whatever now sits at that index.
+   //
+   // send:false because this is a redisplay, not a choice: the local path needs
+   // the textTracks modes reapplied to freshly built elements, but the cast
+   // path already carries the selection in its LOAD and must not be told again.
    const keep = player.captionIndex;
-   if (keep !== null && keep < captions.length) videoSelectCaption(keep);
-   else                                        menu.firstElementChild.classList.add('current');
+   if (keep !== null && keep < captions.length)
+      videoSelectCaption(keep, {send: false});
+   else
+      menu.firstElementChild.classList.add('current');
 }
 
 // Shows the track at index, or none when it is null.  Assigning `mode` is also
 // what makes the browser fetch the WebVTT, so a track is only ever loaded once
 // someone asks for it.
-function videoSelectCaption(index) {
+function videoSelectCaption(index, {send = true} = {}) {
    player.captionIndex = index;
-   const tracks = player.videoEl.textTracks;
-   for (let i = 0; i < tracks.length; i++)
-      tracks[i].mode = (i === index) ? 'showing' : 'disabled';
+   if (castDeviceId !== null) {
+      // The receiver owns the rendering, so the only thing to do here is tell
+      // it which track.  trackId numbers the tracks 1..n as getVideoInfo lists
+      // them, and 0 is off — captionId could not say "off", since a missing
+      // parameter and the sidecar file are both -1.
+      //
+      // `send` is false when the menu is merely being rebuilt with the same
+      // choice already in force, which happens on every load; re-sending would
+      // be an EDIT_TRACKS_INFO per track change the user did not make.
+      if (send) {
+         apiCall('castControl',
+                 {action: 'captions', trackId: index === null ? 0 : index + 1})
+            .catch(err => console.warn('[cast] captions failed', err));
+         }
+      } else {
+      const tracks = player.videoEl.textTracks;
+      for (let i = 0; i < tracks.length; i++)
+         tracks[i].mode = (i === index) ? 'showing' : 'disabled';
+      }
 
    const menu = document.getElementById('video-captions-menu');
    menu.querySelectorAll('button').forEach(b => b.classList.toggle(
@@ -2541,13 +2623,34 @@ function playerPlay(offset = 0, forceMp3 = false) {
       player.streamFormat = null;
       const params = {id: song.id};
       if (offset > 0) params.timeOffset = Math.floor(offset);
+      // Carried on the LOAD rather than sent afterwards, because a track has
+      // to be declared in the LOAD to exist at all — EDIT_TRACKS_INFO can turn
+      // one on but cannot introduce it.  This is also what makes the choice
+      // survive a seek, which for a cast is a fresh LOAD.
+      if (song.isVideo && player.captionSong === song.id
+          && player.captionIndex !== null)
+         params.trackId = player.captionIndex + 1;
       // Use the dedicated castLoad endpoint rather than setting player.media.src.
       // Setting audio.src would cause the browser to send a Range request, which
       // httplib converts to 416 because the stream endpoint returns 204 (no body).
       apiCall('castLoad', params).catch(err => console.warn('[cast] load failed', err));
+      // The picture is on the television, so the surface shows where it went
+      // instead — and it has to be composed at all, because it is the only
+      // place the subtitle picker lives.
+      if (song.isVideo) {
+         const surf = document.getElementById('video-surface');
+         videoSurfaceSet(surf.dataset.state || 'theatre');
+         videoSurfaceCaption(song);
+         videoPreparing(false);
+         videoCastPanel(true);
+         videoLoadCaptions(song);
+         } else {
+         videoSurfaceSet(null);
+         }
       playerUpdateUI();
       return;
       }
+   videoCastPanel(false);
    const streamParams = {id: song.id};
    // Naming an audio format for a video is what asks the server for its
    // soundtrack alone (see audio_only_request() in src/codecs.hh), so the
@@ -3957,11 +4060,15 @@ async function showShell() {
          if (sr.castSession?.active) {
             const sess = sr.castSession;
             castDeviceId     = sess.deviceId;
+            castDeviceName   = sess.deviceName ?? '';
             castStartOffset  = sess.startOffset;
             castBaseTime     = sess.currentTime;
             castBaseAt       = Date.now();
             castPlayerState  = sess.playerState;
             castSongDuration = sess.songDuration;
+            // The server numbers caption tracks from 1 and 0 means off; the
+            // picker indexes from 0 and null means off.
+            player.captionIndex = sess.trackId > 0 ? sess.trackId - 1 : null;
             const seek = document.getElementById('player-seek');
             if (sess.songDuration > 0) seek.max = sess.songDuration;
             document.getElementById('player-cast').classList.add('active');
@@ -3978,6 +4085,17 @@ async function showShell() {
                      artistName: songSr.song.artist ?? '',
                      };
                   playerUpdateUI();
+                  // A film already on the television: draw the panel and
+                  // rebuild the picker, so the reload lands on the same
+                  // controls it left. captionIndex was set from the session
+                  // above, so videoCaptionsMenu marks the right entry.
+                  if (songSr.song.isVideo) {
+                     player.captionSong = songSr.song.id;
+                     videoSurfaceSet('theatre');
+                     videoSurfaceCaption(songSr.song);
+                     videoCastPanel(true);
+                     videoLoadCaptions(songSr.song);
+                     }
                   }
                } catch (_) {}
             startCastEvents();

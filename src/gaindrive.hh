@@ -90,6 +90,22 @@ class GainDrive {
 		// stopCast endpoint and from the SSE watchdog thread.
 		void cast_teardown();
 
+		// Build and send one cast LOAD for `song`, starting at `offset`
+		// seconds, with the caption track numbered `track_id` turned on (0 for
+		// none).
+		//
+		// The single place that knows how a cast load is composed: the URL the
+		// receiver will fetch, the castToken standing in for credentials the
+		// television does not have, the contentType the stream will *actually*
+		// carry (see cast_mime_for), and the side-loaded subtitle tracks. Three
+		// endpoints need this — castLoad, castControl's IDLE recovery and
+		// stream.view's cast redirect — and they had three copies of the URL
+		// construction between them, which is two places for a new query
+		// parameter to be forgotten.
+		void cast_load_song(const httplib::Request& req,
+		                    const MediaStore::SongInfo& song,
+		                    int song_id, float offset, int track_id);
+
 		// Probe each configured cast device once at startup and log the result,
 		// so a wrong address is reported rather than only failing later.
 		void probe_cast_devices_background();

@@ -82,6 +82,14 @@
    <div id="video-surface" class="hidden" data-state="theatre">
       <div id="video-frame">
          <video id="video-el" playsinline></video>
+         <!-- Shown in place of the picture while casting. The surface stays
+              composed rather than hidden because #video-bar below it is where
+              the subtitle picker lives, and a film on a television is exactly
+              when it is wanted. -->
+         <div id="video-cast-panel">
+            <span class="mi">cast_connected</span>
+            <span id="video-cast-name"></span>
+         </div>
          <div id="video-preparing" hidden>Preparing…</div>
          <button id="video-restore" title="Expand" hidden></button>
          <button id="video-close" class="mi" title="Stop and close" aria-label="Stop and close">close</button>

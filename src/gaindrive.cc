@@ -1605,12 +1605,47 @@ GainDrive::GainDrive(const std::string& db_path,
 	// Normalise /rest/foo → /rest/foo.view so clients that omit the suffix still work.
 	// In debug mode also strip Accept-Encoding: httplib swaps compressed bytes into
 	// res.body before firing the logger, making it unreadable (cpp-httplib#1656).
-	server_.set_pre_routing_handler([this](const httplib::Request& req, httplib::Response&) {
+	//
+	// Also the one place CORS is answered, for every endpoint and every status.
+	// **A Chromecast needs this to show a subtitle.** The receiver fetches a
+	// side-loaded WebVTT track by XHR, and declaring any track at all puts its
+	// media element into anonymous cross-origin mode — so the *film* needs the
+	// header as much as the captions do, on its 206 responses as much as its
+	// 200s. Setting it here rather than per handler is what makes that true
+	// without anyone having to remember it.
+	//
+	// `*` is safe here in a way it would not be for a cookie-authenticated
+	// server. Every endpoint takes its credentials as query parameters, so
+	// there is no ambient authority for a hostile page to borrow: it would have
+	// to already know the username and password, and if it knows those it does
+	// not need a browser. What the header does cost is that such a page can
+	// read replies from a server it can only reach because the victim is on the
+	// same network — which mainly means it can tell a wrong password from a
+	// right one. Narrowing to one endpoint would not remove that, since any
+	// CORS-open endpoint that checks auth is the same oracle.
+	server_.set_pre_routing_handler([this](const httplib::Request& req,
+	                                       httplib::Response& res) {
 		auto& r = const_cast<httplib::Request&>(req);
 		if (r.path.rfind("/rest/", 0) == 0 && r.path.find('.') == std::string::npos)
 			r.path += ".view";
 		if (debug_)
 			r.headers.erase("Accept-Encoding");
+
+		res.set_header("Access-Control-Allow-Origin",  "*");
+		res.set_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+		res.set_header("Access-Control-Allow-Headers", "Range, Content-Type");
+		// Without this a cross-origin reader is allowed the body but not the
+		// headers that say how long it is or which part of it this was.
+		res.set_header("Access-Control-Expose-Headers",
+		               "Content-Length, Content-Range, Accept-Ranges");
+
+		// Answered here because nothing routes it: there is no Options()
+		// handler for any path, so a preflight would otherwise fall through to
+		// the 404 and take the real request with it.
+		if (r.method == "OPTIONS") {
+			res.status = 204;
+			return httplib::Server::HandlerResponse::Handled;
+			}
 		return httplib::Server::HandlerResponse::Unhandled;
 		});
 
@@ -3013,19 +3048,14 @@ GainDrive::GainDrive(const std::string& db_path,
 		// If cast mode is active and the caller is not the Chromecast itself,
 		// instruct the Chromecast to fetch the stream and return 204 here.
 		if (cast_manager_.active() && !cast_authed) {
-			std::string host = req.get_header_value("Host");
-			if (host.empty()) host = "localhost";
-			std::string proto = req.get_header_value("X-Forwarded-Proto");
-			if (proto.empty()) proto = "http";
-			std::string url = proto + "://" + host + "/rest/stream.view"
-			                + "?id=" + it->second
-			                + "&castToken=" + cast_manager_.token();
 			// Native seek: the URL serves the full file, and the LOAD message
 			// tells the receiver where to seek.  No timeOffset in the URL.
 			auto to_it = req.params.find("timeOffset");
 			float cast_offset = to_it != req.params.end()
 			    ? to_float(to_it->second, 0.0f) : 0.0f;
-			cast_manager_.load(url, std::string(codec_to_mime(song->codec)), cast_offset, song->duration);
+			// No caption: a client redirected here never asked for one, and
+			// the picker sends its choice through castLoad.
+			cast_load_song(req, *song, to_int(it->second, -1), cast_offset, 0);
 			res.status = 204;
 			return;
 			}
@@ -3725,7 +3755,15 @@ GainDrive::GainDrive(const std::string& db_path,
 	// handing back SRT would only push the conversion onto the client.
 	server_.Get("/rest/getCaptions.view", [this](const httplib::Request& req,
 	                                              httplib::Response& res) {
-		if (!check_auth(req, res, store_)) return;
+		// The Chromecast fetches its own subtitle track and has no credentials
+		// to do it with — the same problem stream.view solves the same way.
+		// Handing the television the account's password instead would work and
+		// is what the Android app does for its stream URLs; it is not something
+		// to spread further.
+		auto tok_it = req.params.find("castToken");
+		bool cast_authed = tok_it != req.params.end()
+		                && cast_manager_.valid_token(tok_it->second);
+		if (!cast_authed && !check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 
 		auto it = req.params.find("id");
@@ -4228,6 +4266,12 @@ GainDrive::GainDrive(const std::string& db_path,
 			r["castSession"]["currentTime"]  = st.current_time;
 			r["castSession"]["duration"]     = st.duration;
 			r["castSession"]["songDuration"] = song_duration;
+			// Which subtitle track is on, in the same 1..n numbering castLoad
+			// and castControl take, so a client that has just reloaded can
+			// mark its picker without asking the receiver anything.
+			auto cap = cast_manager_.caption_state();
+			r["castSession"]["trackId"] = cap.active_track_ids.empty()
+			    ? 0 : cap.active_track_ids.front();
 			}), "application/json");
 		});
 
@@ -4249,20 +4293,18 @@ GainDrive::GainDrive(const std::string& db_path,
 				} else if (st.player_state == "IDLE" && !last_cast_song_id_.empty()) {
 				// Session timed out during a long pause — re-issue a full load from
 				// the saved position so the Chromecast can restart the stream.
-				auto song = store_.get_song(std::stoi(last_cast_song_id_));
+				int  sid  = to_int(last_cast_song_id_, -1);
+				auto song = store_.get_song(sid);
 				if (song) {
-					std::string host  = req.get_header_value("Host");
-					if (host.empty()) host = "localhost";
-					std::string proto = req.get_header_value("X-Forwarded-Proto");
-					if (proto.empty()) proto = "http";
 					float pos = cast_manager_.last_known_time();
-					std::string url = proto + "://" + host + "/rest/stream.view"
-					                + "?id=" + last_cast_song_id_
-					                + "&castToken=" + cast_manager_.token();
-					last_cast_offset_ = 0.0f;
-					cast_manager_.load(url, std::string(codec_to_mime(song->codec)),
-					                   pos > 0.5f ? pos : 0.0f,
-					                   song->duration);
+					// The caption the viewer had on, not none: this recovers a
+					// session that timed out mid-film, and coming back without
+					// the subtitles would be a second thing to fix by hand.
+					auto cap = cast_manager_.caption_state();
+					int  track = cap.active_track_ids.empty()
+					    ? 0 : cap.active_track_ids.front();
+					cast_load_song(req, *song, sid,
+					               pos > 0.5f ? pos : 0.0f, track);
 					}
 				}
 			}
@@ -4270,6 +4312,16 @@ GainDrive::GainDrive(const std::string& db_path,
 			auto ti = req.params.find("time");
 			if (ti != req.params.end())
 				cast_manager_.cast_seek(to_float(ti->second, 0.0f));
+			}
+		else if (action == "captions") {
+			// trackId numbers the caption tracks 1..n as getVideoInfo lists
+			// them; 0 or absent turns them off.
+			int track_id = to_int(req.get_param_value("trackId"), 0);
+			std::vector<int> ids;
+			if (track_id > 0) ids.push_back(track_id);
+			if (!cast_manager_.cast_tracks(ids))
+				std::cout << stamp() << "Cast: captions trackId=" << track_id
+				          << " not applied — no media session yet" << std::endl;
 			}
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
@@ -4302,20 +4354,16 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto song = store_.get_song(to_int(it->second, -1));
 		if (!song) { err(70, "Song not found."); return; }
 
-		std::string host  = req.get_header_value("Host");
-		if (host.empty()) host = "localhost";
-		std::string proto = req.get_header_value("X-Forwarded-Proto");
-		if (proto.empty()) proto = "http";
-		std::string url = proto + "://" + host + "/rest/stream.view"
-		                + "?id=" + it->second
-		                + "&castToken=" + cast_manager_.token();
 		auto to_it = req.params.find("timeOffset");
 		float cast_offset = to_it != req.params.end()
 		    ? to_float(to_it->second, 0.0f) : 0.0f;
-		last_cast_song_id_ = it->second;
-		last_cast_offset_ = 0.0f;
-		cast_manager_.load(url, std::string(codec_to_mime(song->codec)),
-		                   cast_offset, song->duration);
+		// trackId, not captionId: the cast API numbers caption tracks 1..n in
+		// the order getVideoInfo lists them, and 0 means none.  captionId
+		// cannot say "none" — SIDECAR_CAPTION_INDEX is -1 and so is a missing
+		// parameter, so "off" and "the sidecar file" would be one value.
+		int track_id = to_int(req.get_param_value("trackId"), 0);
+		cast_load_song(req, *song, to_int(it->second, -1), cast_offset,
+		               track_id);
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
 		});
@@ -5229,6 +5277,64 @@ void GainDrive::cast_teardown()
 	cast_manager_.stop();
 	last_cast_song_id_.clear();
 	last_cast_offset_ = 0.0f;
+	}
+
+void GainDrive::cast_load_song(const httplib::Request& req,
+                               const MediaStore::SongInfo& song,
+                               int song_id, float offset, int track_id)
+	{
+	std::string host  = req.get_header_value("Host");
+	if (host.empty()) host = "localhost";
+	std::string proto = req.get_header_value("X-Forwarded-Proto");
+	if (proto.empty()) proto = "http";
+	// Everything the receiver fetches hangs off this, and every one of them
+	// carries the cast token rather than the account's credentials: a
+	// television is not a place to leave a password, and the token is already
+	// what stream.view accepts.
+	const std::string base = proto + "://" + host + "/rest/";
+	const std::string tok  = "&castToken=" + cast_manager_.token();
+	const std::string sid_s = std::to_string(song_id);
+
+	CastManager::LoadRequest lr;
+	lr.url  = base + "stream.view?id=" + sid_s + tok;
+	lr.mime = std::string(cast_mime_for(song.codec, song.video_codec,
+	                                    song.audio_codec));
+	// Native seek: the URL serves the whole file and the LOAD says where to
+	// begin, so the receiver's clock is absolute.  That is also why the caption
+	// cues need no shifting here, unlike the browser's own transcoded seek —
+	// see videoShiftCues() in web/app.js for the case where they do.
+	lr.current_time = offset;
+	lr.duration     = song.duration;
+
+	if (song.is_video) {
+		auto streams = store_.get_video_streams(song_id);
+		int  n = 0;
+		for (const auto& c : streams.captions) {
+			++n;
+			lr.caption_ids.push_back(c.index);
+			lr.tracks.push_back({
+				{"trackId",          n},
+				{"type",             "TEXT"},
+				{"subtype",          "SUBTITLES"},
+				{"trackContentId",   base + "getCaptions.view?id=" + sid_s
+				                     + "&captionId=" + std::to_string(c.index)
+				                     + tok},
+				{"trackContentType", "text/vtt"},
+				// Required for a subtitle track, and one without it can be
+				// dropped by the receiver with no diagnostic anywhere.  A
+				// sidecar file has no language to report, so it gets the
+				// ISO 639-2 code that means exactly that.
+				{"language",         c.language.empty() ? "und" : c.language},
+				{"name",             c.title.empty() ? "Subtitles" : c.title}
+				});
+			}
+		if (track_id > 0 && track_id <= n)
+			lr.active_track_ids.push_back(track_id);
+		}
+
+	last_cast_song_id_ = sid_s;
+	last_cast_offset_  = 0.0f;
+	cast_manager_.load(lr);
 	}
 
 // A configured cast device is never confirmed by anything: mDNS does not

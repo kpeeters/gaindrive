@@ -767,13 +767,42 @@ bool CastManager::start(const CastDevice& dev)
 	return true;
 	}
 
-void CastManager::load(const std::string& url, const std::string& mime,
-                        float current_time, double duration)
+nlohmann::json CastManager::build_load(const LoadRequest& req, int request_id)
 	{
+	nlohmann::json media = {
+		{"contentId",   req.url},
+		{"contentType", req.mime},
+		{"streamType",  "BUFFERED"},
+		{"duration",    req.duration}
+		};
+	// Omitted rather than sent empty when there are none: an empty tracks array
+	// is legal but says "this medium has no subtitles", and some receiver
+	// versions take the trouble to render a disabled CC control for it.
+	if (!req.tracks.empty()) media["tracks"] = req.tracks;
+
+	nlohmann::json msg = {
+		{"type",      "LOAD"},
+		{"requestId", request_id},
+		{"autoplay",  true},
+		{"media",     media}
+		};
+	// currentTime tells the receiver to start playback at this offset
+	// within the loaded media — the receiver handles the seek itself
+	// using the file's XING/seek tables.  This avoids server-side
+	// transcoding and gives the receiver real duration metadata.
+	if (req.current_time > 0.0f) msg["currentTime"] = req.current_time;
+	if (!req.active_track_ids.empty())
+		msg["activeTrackIds"] = req.active_track_ids;
+	return msg;
+	}
+
+void CastManager::load(const LoadRequest& request)
+	{
+	const std::string& url = request.url;
 	// Signal any running content-provider thread to stop immediately.
 	int gen = ++load_gen_;
 	std::cout << stamp() << "Cast: load gen=" << gen << " url=" << url
-	          << " currentTime=" << current_time << std::endl;
+	          << " currentTime=" << request.current_time << std::endl;
 
 	// Reset playback status for the new track and arm the auto-retry
 	// watcher.  The retry covers the receiver-side bug where a LOAD that
@@ -788,11 +817,8 @@ void CastManager::load(const std::string& url, const std::string& mime,
 	std::lock_guard<std::mutex> lk(status_mutex_);
 	last_load_old_msid_ = status_.media_session_id;
 	status_ = CastStatus{};
-	status_.duration    = static_cast<float>(duration);
-	last_load_url_      = url;
-	last_load_mime_     = mime;
-	last_load_time_     = current_time;
-	last_load_duration_ = duration;
+	status_.duration    = static_cast<float>(request.duration);
+	last_load_          = request;
 	retry_pending_      = true;
 	}
 
@@ -801,14 +827,14 @@ void CastManager::load(const std::string& url, const std::string& mime,
 	// immediately.  load_gen_ acts as a cancellation token: if a newer
 	// load() fires before this worker reaches a blocking call, the worker
 	// detects the stale generation and exits without doing any work.
-	std::thread([this, url, mime, gen, current_time, duration]{
-		load_worker(url, mime, gen, current_time, duration);
+	std::thread([this, request, gen]{
+		load_worker(request, gen);
 		}).detach();
 	}
 
-void CastManager::load_worker(std::string url, std::string mime, int gen,
-                               float current_time, double duration)
+void CastManager::load_worker(LoadRequest req, int gen)
 	{
+	const std::string& url = req.url;
 	std::string src = "sender-0";
 
 	std::string tid;
@@ -833,23 +859,7 @@ void CastManager::load_worker(std::string url, std::string mime, int gen,
 			if (load_gen_.load() != gen) return;
 			cast_send(t.ssl, NS_CONN,  src, "receiver-0", {{"type", "CONNECT"}});
 			cast_send(t.ssl, NS_CONN,  src, tid,           {{"type", "CONNECT"}});
-			nlohmann::json msg = {
-				{"type",      "LOAD"},
-				{"requestId", 2},
-				{"autoplay",  true},
-				{"media", {
-					{"contentId",   url},
-					{"contentType", mime},
-					{"streamType",  "BUFFERED"},
-					{"duration",    duration}
-					}}
-				};
-			// currentTime tells the receiver to start playback at this offset
-			// within the loaded media — the receiver handles the seek itself
-			// using the file's XING/seek tables.  This avoids server-side
-			// transcoding and gives the receiver real duration metadata.
-			if (current_time > 0.0f)
-				msg["currentTime"] = current_time;
+			nlohmann::json msg = build_load(req, 2);
 			std::cout << stamp() << "Cast: LOAD " << msg.dump() << std::endl;
 			cast_send(t.ssl, NS_MEDIA, src, tid, msg);
 			// poll_loop() receives the MEDIA_STATUS response and updates status_.
@@ -887,19 +897,7 @@ void CastManager::load_worker(std::string url, std::string mime, int gen,
 
 	cast_send(t.ssl, NS_CONN,  src, tid, {{"type", "CONNECT"}});
 	{
-	nlohmann::json msg = {
-		{"type",      "LOAD"},
-		{"requestId", 2},
-		{"autoplay",  true},
-		{"media", {
-			{"contentId",   url},
-			{"contentType", mime},
-			{"streamType",  "BUFFERED"},
-			{"duration",    duration}
-			}}
-		};
-	if (current_time > 0.0f)
-		msg["currentTime"] = current_time;
+	nlohmann::json msg = build_load(req, 2);
 	std::cout << stamp() << "Cast: LOAD " << msg.dump() << std::endl;
 	cast_send(t.ssl, NS_MEDIA, src, tid, msg);
 	}
@@ -922,9 +920,7 @@ void CastManager::update_status(const nlohmann::json& msg)
 	cs.duration         = static_cast<float>(jnum(jsub(s, "media"), "duration"));
 
 	bool        do_retry = false;
-	std::string retry_url, retry_mime;
-	float       retry_time = 0.0f;
-	double      retry_dur  = 0.0;
+	LoadRequest retry_req;
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
 	if (cs.player_state != "IDLE")
@@ -945,10 +941,14 @@ void CastManager::update_status(const nlohmann::json& msg)
 		if (cs.player_state == "IDLE" && cs.idle_reason == "ERROR") {
 			retry_pending_ = false;
 			do_retry       = true;
-			retry_url      = last_load_url_;
-			retry_mime     = last_load_mime_;
-			retry_time     = last_load_time_;
-			retry_dur      = last_load_duration_;
+			retry_req      = last_load_;
+			// Degrade rather than repeat.  Once a LOAD carries side-loaded
+			// subtitle tracks, one unreachable track URL is enough to fail
+			// the whole thing — and replaying it identically then loses the
+			// film to a subtitle, twice.  Dropping the tracks costs the
+			// captions for this load and nothing else.
+			retry_req.tracks = nlohmann::json::array();
+			retry_req.active_track_ids.clear();
 			}
 		else if (cs.player_state == "PLAYING"
 		      || cs.player_state == "BUFFERING"
@@ -956,24 +956,73 @@ void CastManager::update_status(const nlohmann::json& msg)
 			retry_pending_ = false;
 			}
 		}
+	else if (retry_pending_ && cs.player_state == "IDLE"
+	      && cs.idle_reason == "ERROR") {
+		// An IDLE/ERROR carrying the *old* msid — both are 0 on a receiver
+		// with no session yet, which is the ordinary shape of a first LOAD
+		// failing outright.  No retry, because this cannot be told apart
+		// from a stale push about the session being replaced; but the flag
+		// must be cleared, or it survives to be consumed by an unrelated
+		// status minutes later and re-LOADs whatever is playing then.
+		retry_pending_ = false;
+		}
 	}
 	status_cv_.notify_all();  // wake any SSE handlers waiting for the next push
 
-	if (do_retry) {
-		// Spawn a detached load_worker with the same gen we're already on.
-		// load_worker will self-abort if a fresh user-driven load() has
-		// bumped load_gen_ in the meantime, so an unwanted retry can never
-		// race with a newer LOAD the user just clicked.
-		int gen = load_gen_.load();
-		std::cout << stamp() << "Cast: auto-retry LOAD (gen=" << gen
-		          << ") — receiver went IDLE/ERROR after first attempt"
-		          << std::endl;
-		std::thread([this, retry_url, retry_mime, gen,
-		             retry_time, retry_dur]{
-			if (load_gen_.load() != gen) return;
-			load_worker(retry_url, retry_mime, gen, retry_time, retry_dur);
-			}).detach();
+	if (do_retry)
+		spawn_retry(retry_req, "receiver went IDLE/ERROR after first attempt");
+	}
+
+void CastManager::spawn_retry(const LoadRequest& req, const char* why)
+	{
+	// The same gen we're already on.  load_worker self-aborts if a fresh
+	// user-driven load() has bumped load_gen_ in the meantime, so an unwanted
+	// retry can never race with a newer LOAD the user just clicked.
+	int gen = load_gen_.load();
+	std::cout << stamp() << "Cast: auto-retry LOAD (gen=" << gen << ") — "
+	          << why << " (retrying without subtitle tracks)" << std::endl;
+	std::thread([this, req, gen]{
+		if (load_gen_.load() != gen) return;
+		load_worker(req, gen);
+		}).detach();
+	}
+
+void CastManager::note_load_failure(int media_session_id)
+	{
+	// The retry is claimed *before* the status is published, and deliberately
+	// without update_status's media-session filter.  That filter exists to
+	// ignore stale pushes about the session being replaced; an ERROR on the
+	// media namespace is not a push about anything else, it is the answer to
+	// our own LOAD, so it is always ours to act on.  Claiming it first is also
+	// what stops update_status below either firing a second attempt or
+	// swallowing the flag.
+	LoadRequest retry_req;
+	bool        do_retry = false;
+	{
+	std::lock_guard<std::mutex> lk(status_mutex_);
+	if (retry_pending_) {
+		retry_pending_   = false;
+		do_retry         = true;
+		retry_req        = last_load_;
+		retry_req.tracks = nlohmann::json::array();
+		retry_req.active_track_ids.clear();
 		}
+	}
+
+	// Routed through update_status rather than writing status_ by hand, so the
+	// duration carry-forward and the condition-variable wake every SSE listener
+	// is blocked on stay in one place.
+	update_status({
+		{"status", nlohmann::json::array({
+			nlohmann::json{
+				{"playerState",    "IDLE"},
+				{"idleReason",     "ERROR"},
+				{"mediaSessionId", media_session_id}
+				}
+			})}
+		});
+
+	if (do_retry) spawn_retry(retry_req, "receiver refused the LOAD");
 	}
 
 float CastManager::last_known_time() const
@@ -1034,6 +1083,48 @@ void CastManager::cast_seek(float seconds)
 	send_media_cmd({{"type", "SEEK"}, {"requestId", 12},
 	                {"mediaSessionId", msid}, {"currentTime", seconds}});
 	std::cout << stamp() << "Cast: SEEK → " << seconds << "s" << std::endl;
+	}
+
+bool CastManager::cast_tracks(const std::vector<int>& track_ids)
+	{
+	int         msid;
+	std::string state;
+	{
+	std::lock_guard<std::mutex> lk(status_mutex_);
+	msid  = status_.media_session_id;
+	state = status_.player_state;
+	}
+	// EDIT_TRACKS_INFO names the session it edits, and there is no session
+	// until the receiver has answered a LOAD with one.  media_session_id is 0
+	// until then, and a command naming session 0 is dropped without a reply —
+	// so a track chosen in the second before playback starts would silently do
+	// nothing.  The caller turns false into "ask again after the LOAD" rather
+	// than into an error.
+	if (msid == 0) return false;
+	if (state != "PLAYING" && state != "PAUSED" && state != "BUFFERING")
+		return false;
+
+	send_media_cmd({{"type",           "EDIT_TRACKS_INFO"},
+	                {"requestId",      13},
+	                {"mediaSessionId", msid},
+	                {"activeTrackIds", track_ids}});
+	// Recorded on the load itself, which serves both readers of it: a page
+	// reloading asks caption_state() what is on, and an auto-retry replays the
+	// selection the viewer actually made rather than the one the film started
+	// with.
+	{
+	std::lock_guard<std::mutex> lk(status_mutex_);
+	last_load_.active_track_ids = track_ids;
+	}
+	std::cout << stamp() << "Cast: EDIT_TRACKS_INFO active="
+	          << nlohmann::json(track_ids).dump() << std::endl;
+	return true;
+	}
+
+CastManager::CaptionState CastManager::caption_state() const
+	{
+	std::lock_guard<std::mutex> lk(status_mutex_);
+	return CaptionState{ last_load_.caption_ids, last_load_.active_track_ids };
 	}
 
 void CastManager::poll_loop()
@@ -1130,8 +1221,20 @@ void CastManager::poll_loop()
 						}
 					update_status(m);
 					}
-				else if (type == "ERROR") {
-					std::cout << stamp() << "Cast rx ERROR: " << m.dump() << std::endl;
+				else if (type == "ERROR" || type == "LOAD_FAILED"
+				      || type == "LOAD_CANCELLED") {
+					std::cout << stamp() << "Cast rx " << type << ": "
+					          << m.dump() << std::endl;
+					// A failed LOAD comes back on this branch, not as a
+					// MEDIA_STATUS — so before this, status_ stayed at its
+					// default: IDLE with an *empty* idle_reason, which the SSE
+					// reports as a track that is simply not playing yet. The
+					// browser parked on a dead progress bar with nothing
+					// anywhere saying why, and the retry watcher never saw the
+					// failure it exists for. Synthesising the status the
+					// receiver did not send puts both back on the ordinary
+					// path.
+					note_load_failure(jint(m, "mediaSessionId"));
 					}
 				else if (type == "RECEIVER_STATUS") {
 					// Dump the full payload so we can see whether the Default

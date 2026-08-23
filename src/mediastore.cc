@@ -3185,6 +3185,13 @@ std::string MediaStore::get_captions_vtt(int song_id, int stream_index)
 	std::string abs = abs_path(song->path);
 	if (!path_is_within_root(abs)) return {};
 
+	const CaptionKey key{ song_id, song->file_modified, stream_index };
+	{
+	std::lock_guard<std::mutex> lk(captions_mutex_);
+	auto it = captions_cache_.find(key);
+	if (it != captions_cache_.end()) return it->second;
+	}
+
 	std::string source = abs;
 	if (stream_index < 0) {
 		source = sidecar_captions(abs);
@@ -3210,6 +3217,24 @@ std::string MediaStore::get_captions_vtt(int song_id, int stream_index)
 	auto ec            = reproc::drain(proc, sink, reproc::sink::null);
 	auto [status, wec] = proc.wait(reproc::infinite);
 	if (ec || wec || status != 0) return {};
+
+	// A failure is not cached. Unlike video_meta's stored negatives, there is
+	// nothing here to be judged: ffmpeg not answering is a transient condition
+	// and the next request should try again.
+	{
+	std::lock_guard<std::mutex> lk(captions_mutex_);
+	if (captions_cache_.emplace(key, out).second) {
+		captions_order_.push_back(key);
+		// Oldest out first rather than least-recently-used: the access
+		// pattern is one film at a time, so age and use order are the same
+		// thing here, and a plain queue needs no bookkeeping on the read
+		// path — which is the path that has to be fast.
+		while (captions_order_.size() > CAPTION_CACHE_MAX) {
+			captions_cache_.erase(captions_order_.front());
+			captions_order_.erase(captions_order_.begin());
+			}
+		}
+	}
 	return out;
 	}
 

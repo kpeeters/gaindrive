@@ -184,6 +184,35 @@ inline bool video_direct_playable(std::string_view container,
 	return container == "mkv" && webm_codecs(video_codec, audio_codec);
 	}
 
+// What a Chromecast will actually receive from stream.view, which is not the
+// same thing as what the file is.
+//
+// A cast URL carries no format, no size, no maxBitRate and no timeOffset — the
+// receiver seeks natively and the account ceiling is skipped for a cast token —
+// so `constrained` and `partial` are both false in serve_video() and the tier
+// is decided by the codec pair alone.  That makes the answer computable here,
+// and it has to be: the LOAD message announces a contentType before a byte is
+// served, and a receiver told video/x-matroska while being sent MP4 refuses the
+// media outright.  Every source the remux or encode tier touches arrives as
+// MP4 whatever it started as.
+//
+// The third caller of the tier predicate, after serve_video() and
+// transcode_target() — the same drift rule those two document applies here.
+// The .mkv relabel is the one case where the bytes go out untouched under a
+// type that is not the container's own, and it is the case transcode_target()
+// does not have to answer because it only reports *that* a transcode happens.
+inline std::string_view cast_mime_for(std::string_view container,
+                                      std::string_view video_codec,
+                                      std::string_view audio_codec)
+	{
+	if (!is_video_ext(container)) return codec_to_mime(container);
+	if (!video_direct_playable(container, video_codec, audio_codec))
+		return VIDEO_MP4_MIME;
+	if (container == "mkv" && webm_codecs(video_codec, audio_codec))
+		return std::string_view("video/webm");
+	return codec_to_mime(container);
+	}
+
 // True when a request naming a video is really a request for its soundtrack.
 //
 // This is the whole audio-only contract, and it is deliberately spelled with

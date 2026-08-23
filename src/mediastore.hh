@@ -737,6 +737,49 @@ class MediaStore {
 		// the scan is what runs it, in a phase of its own.
 		std::optional<VideoArt> video_art_;
 
+		// Converted WebVTT, kept because producing it is not cheap: ffmpeg has
+		// to demux the whole container to collect one subtitle stream, which on
+		// a feature-length mkv is seconds, and getCaptions is asked for the
+		// same track repeatedly — by a <track> element that reloads on every
+		// transcoded seek, and by a Chromecast that fetches it the moment the
+		// viewer turns captions on and would give up long before a cold
+		// conversion finished.
+		//
+		// In memory rather than in the DB or the transcode cache: a subtitle
+		// file is tens of kilobytes, it is derived data that costs one ffmpeg
+		// run to rebuild, and a process that has just started has nothing to
+		// serve stale. Keyed on file_modified as well as the id, so re-tagging
+		// or replacing the file invalidates it — the same key TranscodeCache
+		// entries carry, for the same reason.
+		//
+		// Bounded because nothing else bounds it: a library has as many
+		// subtitle tracks as it has films.
+		struct CaptionKey
+			{
+			int     song_id;
+			int64_t file_modified;
+			int     stream_index;
+			bool operator==(const CaptionKey& o) const
+				{
+				return song_id == o.song_id
+				    && file_modified == o.file_modified
+				    && stream_index == o.stream_index;
+				}
+			};
+		struct CaptionKeyHash
+			{
+			std::size_t operator()(const CaptionKey& k) const
+				{
+				return std::hash<int64_t>()(k.file_modified)
+				     ^ (std::hash<int>()(k.song_id) << 1)
+				     ^ (std::hash<int>()(k.stream_index) << 2);
+				}
+			};
+		static constexpr std::size_t CAPTION_CACHE_MAX = 32;
+		std::mutex captions_mutex_;   // its own: nothing here touches the DB
+		std::unordered_map<CaptionKey, std::string, CaptionKeyHash> captions_cache_;
+		std::vector<CaptionKey> captions_order_;   // insertion order, for eviction
+
 		// The online lookup. Constructed unconditionally; it is inert until an
 		// API key is configured, which is a setting rather than a start-up
 		// argument, so it is re-read at the top of each scan.

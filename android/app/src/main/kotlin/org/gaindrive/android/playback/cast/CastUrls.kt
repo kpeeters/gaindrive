@@ -1,6 +1,7 @@
 package org.gaindrive.android.playback.cast
 
 import android.util.Log
+import androidx.media3.common.MediaItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -124,6 +125,11 @@ class CastUrls @Inject constructor(
 	 * the bridge puts on the response are the same answer and cannot drift.
 	 */
 	suspend fun forCast(ref: ItemRef, source: CastSource): CastTarget? {
+		// One load starts here, and everything published for it — the stream,
+		// the artwork, each subtitle track — is pinned against eviction until
+		// the next one. A caption is published now and fetched only if somebody
+		// turns it on, which by use alone makes it the first thing thrown away.
+		bridge.beginLoad()
 		if (source.isVideo) return forVideo(ref, source)
 
 		val config = registry.get(ref.server) ?: return null
@@ -296,6 +302,36 @@ class CastUrls @Inject constructor(
 		if (url == null) return null
 		return if (bridged) bridge.publish(url) ?: url else url
 	}
+
+	/**
+	 * Subtitle tracks for the receiver, which fetches each one itself — so they
+	 * take the same road as the picture, for the reason [artworkFor] gives.
+	 *
+	 * The trackId is the position in [configs] plus one, and that is the whole
+	 * contract with `CastPlayer.captionTracks`: the two are built from the same
+	 * ordered list so an index in the picker and a trackId on the wire cannot
+	 * come to mean different things.
+	 *
+	 * Nothing is ever dropped, even when the bridge refuses to publish one.
+	 * Dropping would renumber everything after it while `CastPlayer` went on
+	 * numbering the full list, so a viewer choosing the third subtitle would
+	 * silently turn on the fourth. An unbridgeable track falls back to the
+	 * server URL — the same concession [artworkFor] makes — which at worst is
+	 * one track that does not load, not a picker that lies.
+	 */
+	fun captionsFor(
+		configs: List<MediaItem.SubtitleConfiguration>,
+		bridged: Boolean,
+	): List<CastCaption> =
+		configs.mapIndexed { i, config ->
+			val source = config.uri.toString()
+			CastCaption(
+				trackId = i + 1,
+				url = if (bridged) bridge.publish(source) ?: source else source,
+				label = config.label ?: "Subtitles",
+				language = config.language ?: "und",
+			)
+		}
 
 	private companion object {
 		const val TAG = "GainDriveCast"

@@ -42,6 +42,16 @@ data class CastStatus(
 	val duration: Float = 0f,
 	val mediaSessionId: Int = 0,
 	val idleReason: String? = null,
+	/**
+	 * Which subtitle tracks the receiver has on, by trackId.
+	 *
+	 * **Nullable, and null is not empty.** The receiver states this when the
+	 * selection changes and omits it from the position pushes in between,
+	 * exactly as it does with `duration` — so reading an absent field as "none
+	 * selected" would make the picker's tick, and the tinted CC icon, flicker
+	 * off once a second. [CastSession] carries the last stated value forward.
+	 */
+	val activeTrackIds: List<Int>? = null,
 ) {
 	val isIdleError: Boolean
 		get() = playerState == CastPlayerState.IDLE && idleReason == "ERROR"
@@ -89,6 +99,11 @@ data class CastStatus(
 				duration = duration,
 				mediaSessionId = (entry["mediaSessionId"] as? JsonPrimitive)?.intOrNull ?: 0,
 				idleReason = entry.string("idleReason"),
+				// Absent stays null — see the field. An empty array *is* a
+				// statement, and it means the viewer turned subtitles off.
+				activeTrackIds = entry.array("activeTrackIds")?.mapNotNull {
+					(it as? JsonPrimitive)?.intOrNull
+				},
 			)
 		}
 

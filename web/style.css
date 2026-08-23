@@ -563,6 +563,36 @@ body {
    background: #000;
 }
 
+/* Casting: the panel replaces the picture, and the <video> is hidden rather
+   than removed — it is never re-parented, for the same reason the two surface
+   states are a CSS change and not a DOM one. */
+#video-cast-panel { display: none; }
+
+#video-surface.casting #video-el { display: none; }
+
+#video-surface.casting #video-cast-panel {
+   position: absolute;
+   inset: 0;
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+   justify-content: center;
+   gap: 0.5rem;
+   background: #000;
+   color: var(--text-dim);
+   font-size: 0.9rem;
+   text-align: center;
+   padding: 0.5rem;
+}
+
+#video-cast-panel .mi {
+   font-size: 2.5rem;
+   color: var(--accent);
+}
+
+/* No room for the icon beside the name in a 280x158 thumbnail. */
+#video-surface[data-state="minimised"] #video-cast-panel .mi { display: none; }
+
 /* The remux tier materialises the whole file through the transcode cache
    before the first byte arrives, which for a long film is tens of seconds.
    Without this the surface just sits black and looks hung. */

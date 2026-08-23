@@ -3,9 +3,13 @@ package org.gaindrive.android.playback.cast
 import android.os.Looper
 import android.util.Log
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
+import androidx.media3.common.TrackGroup
+import androidx.media3.common.Tracks
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
@@ -63,6 +67,9 @@ class CastPlayer(
 
 	private var loadJob: Job? = null
 
+	/** The queue entry the current subtitle selection belongs to; see [carriedCaptions]. */
+	private var captionedUid = -1L
+
 	/**
 	 * Dispatched rather than immediate on purpose. The application scope uses
 	 * `Main.immediate`, which would run this collector inline during
@@ -107,7 +114,68 @@ class CastPlayer(
 			.setDurationUs(durationUs)
 			.setIsSeekable(true)
 			.setIsDynamic(false)
+			// Only for the track playing. Tracks carry which of them is
+			// selected, and the receiver has one selection — claiming it for a
+			// queued item would tick a subtitle in a film nobody has reached.
+			.setTracks(if (position == index) captionTracks(entry.item) else Tracks.EMPTY)
 			.build()
+	}
+
+	/**
+	 * The film's subtitle tracks as Media3 describes them, so the same picker
+	 * that works locally works while casting.
+	 *
+	 * Manufactured rather than reported: the receiver renders the captions and
+	 * tells us only which trackIds are on, so there is nothing to read them
+	 * back from. What makes that safe is that both ends are built from
+	 * [captionConfigs] in its order — position i here is the index the picker
+	 * publishes and trackId i+1 on the wire.
+	 */
+	/**
+	 * The subtitle selection to re-send with this load: the one in force if
+	 * [entry] is the item already loaded, and none if it is a different one.
+	 *
+	 * A seek is a whole fresh LOAD, so without this every seek would turn the
+	 * subtitles off — the same fault, and the same fix, as `player.captionIndex`
+	 * in the web client. Moving to another film deliberately starts clean:
+	 * nothing here knows the viewer's language, and a track number means
+	 * something different in the next film.
+	 */
+	private fun carriedCaptions(entry: Entry): List<Int> {
+		val carried =
+			if (entry.uid == captionedUid) session.loaded.value?.activeTrackIds.orEmpty()
+			else emptyList()
+		captionedUid = entry.uid
+		return carried
+	}
+
+	private fun captionTracks(item: MediaItem): Tracks {
+		// The receiver's own answer when it has given one, and what we asked
+		// for until then. A receiver that never echoes `activeTrackIds` would
+		// otherwise leave the picker showing nothing selected however many
+		// times it was tapped — the exact shape of the local-playback fault
+		// this feature followed, and not one to reproduce remotely.
+		val active = status.activeTrackIds
+			?: session.loaded.value?.activeTrackIds.orEmpty()
+		val groups = item.captionConfigs().mapIndexed { i, config ->
+			val id = "caption:${i + 1}"
+			val format = Format.Builder()
+				.setId(id)
+				.setSampleMimeType(config.mimeType ?: MimeTypes.TEXT_VTT)
+				// PlayerConnection labels a track `label ?: language`, so a
+				// format without either shows up as "Track n".
+				.setLabel(config.label)
+				.setLanguage(config.language)
+				.setRoleFlags(C.ROLE_FLAG_SUBTITLE)
+				.build()
+			Tracks.Group(
+				TrackGroup(id, format),
+				/* adaptiveSupported= */ false,
+				intArrayOf(C.FORMAT_HANDLED),
+				booleanArrayOf(active.contains(i + 1)),
+			)
+		}
+		return if (groups.isEmpty()) Tracks.EMPTY else Tracks(groups)
 	}
 
 	/**
@@ -300,6 +368,22 @@ class CastPlayer(
 					isVideo = source.isVideo,
 					route = target.route,
 					quality = target.quality,
+					// Always declared, never only when one is chosen: the
+					// receiver will not accept a trackId the LOAD did not
+					// mention, so omitting them would make the picker work
+					// before playback and silently fail during it.
+					captions = castUrls.captionsFor(
+						entry.item.captionConfigs(),
+						bridged = target.bridged,
+					),
+					// Carried across the reload a seek performs, which is the
+					// only way the receiver is ever told twice about one film.
+					//
+					// Keyed on the queue entry, not on the URL: a bridged load
+					// mints a fresh key every time, so comparing URLs would
+					// call every seek a new film and drop the subtitle the
+					// viewer had chosen.
+					activeTrackIds = carriedCaptions(entry),
 				)
 			)
 		}
@@ -307,6 +391,20 @@ class CastPlayer(
 
 	private companion object {
 		const val TAG = "GainDriveCast"
+
+		/**
+		 * The subtitle configurations attached to an item, and **the one
+		 * ordered list captions are numbered by**: position i is index i in
+		 * `PlayerState.textTracks`, the group at i in [captionTracks], and
+		 * trackId i+1 on the wire. Deriving either end from a second lookup
+		 * would be two numberings that agree until they do not — the same
+		 * class of fault as the TrackGroup identity failure in `VideoSurface`.
+		 *
+		 * They are put there by `PlaybackService.resolveVideo`, so no extra
+		 * `getVideoInfo` call is needed here.
+		 */
+		fun MediaItem.captionConfigs(): List<MediaItem.SubtitleConfiguration> =
+			localConfiguration?.subtitleConfigurations.orEmpty()
 
 		val COMMANDS: Player.Commands = Player.Commands.Builder()
 			.addAll(
@@ -325,6 +423,11 @@ class CastPlayer(
 				Player.COMMAND_GET_CURRENT_MEDIA_ITEM,
 				Player.COMMAND_GET_TIMELINE,
 				Player.COMMAND_GET_METADATA,
+				// Without this the MediaController answers Tracks.EMPTY
+				// however well this player fills them in, and the subtitle
+				// picker — which reads controller.currentTracks — vanishes the
+				// moment playback goes remote.
+				Player.COMMAND_GET_TRACKS,
 				Player.COMMAND_RELEASE,
 			)
 			.build()

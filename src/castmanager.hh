@@ -102,12 +102,38 @@ class CastManager {
 		// Enter cast mode: store device and generate a single-use stream token.
 		bool start(const CastDevice& device);
 
+		// Everything one LOAD message says.
+		//
+		// A struct rather than a parameter list because this value is needed in
+		// four places at once — the call, the worker thread, the retry copy and
+		// the JSON builder — so every field added as a parameter had to be
+		// added four times, and a field forgotten in the retry copy is silently
+		// dropped only when a LOAD fails and is re-sent. One assignment now
+		// carries all of it.
+		struct LoadRequest
+			{
+			std::string    url;
+			std::string    mime;
+			float          current_time = 0.0f;
+			double         duration     = 0.0;
+			// Side-loaded subtitle tracks, as the Cast media object spells
+			// them. **Declared in every LOAD, whether or not one is active**:
+			// EDIT_TRACKS_INFO can turn on a trackId the LOAD declared but
+			// cannot introduce one, so tracks omitted here are tracks the
+			// viewer can never reach without reloading the film.
+			nlohmann::json tracks = nlohmann::json::array();
+			std::vector<int> active_track_ids;
+			// trackId (1-based) → the captionId getCaptions expects, so a
+			// client can speak in track numbers without the server having to
+			// re-probe the file to interpret one.
+			std::vector<int> caption_ids;
+			};
+
 		// Connect to the Chromecast, send LOAD, capture initial MEDIA_STATUS, then close.
 		// The Chromecast fetches and plays independently; poll_loop maintains a separate
 		// persistent connection that receives pushed status updates.
 		// current_time tells the device where to start (seconds into the track).
-		void load(const std::string& url, const std::string& mime_type,
-		          float current_time = 0.0f, double duration = 0.0);
+		void load(const LoadRequest& req);
 
 		// Stop Chromecast playback and exit cast mode.
 		void stop();
@@ -116,6 +142,21 @@ class CastManager {
 		void cast_pause();
 		void cast_play();
 		void cast_seek(float seconds);
+
+		// Turn subtitle tracks on or off without reloading, by trackId; an
+		// empty list means none. Returns false when the receiver has no media
+		// session to edit yet, which is not an error — see the definition.
+		bool cast_tracks(const std::vector<int>& track_ids);
+
+		// The caption mapping the last LOAD went out with, and which of them is
+		// active. Read under status_mutex_ so a caller cannot see a list from
+		// one film beside the selection from another.
+		struct CaptionState
+			{
+			std::vector<int> caption_ids;       // trackId−1 → captionId
+			std::vector<int> active_track_ids;
+			};
+		CaptionState caption_state() const;
 
 		// Return the last cached status.
 		CastStatus get_status() const;
@@ -158,14 +199,11 @@ class CastManager {
 		// now-quiet receiver works, which mirrors the user's manual fix of
 		// clicking the same track twice.  retry_pending_ is set in load() and
 		// either cleared on a non-failure state transition or consumed by
-		// firing a single retry from update_status().  All four fields are
+		// firing a single retry from update_status().  All three fields are
 		// guarded by status_mutex_.
 		bool        retry_pending_      = false;
 		int         last_load_old_msid_ = 0;   // msid active when load() was called
-		std::string last_load_url_;
-		std::string last_load_mime_;
-		float       last_load_time_     = 0.0f;
-		double      last_load_duration_ = 0.0;
+		LoadRequest last_load_;
 
 		mutable std::mutex         cache_mutex_;
 		std::vector<CastDevice>    devices_cache_;  // last result of discover_background()
@@ -181,6 +219,15 @@ class CastManager {
 		// Parse a MEDIA_STATUS message and store the result in status_.
 		void update_status(const nlohmann::json& msg);
 
+		// A LOAD the receiver refused, reported on the media namespace as an
+		// ERROR/LOAD_FAILED rather than as a status.  Publishes the IDLE/ERROR
+		// the receiver did not send and consumes the retry.
+		void note_load_failure(int media_session_id);
+
+		// Re-send a LOAD on a detached thread, abandoning it if the user has
+		// asked for something else in the meantime.
+		void spawn_retry(const LoadRequest& req, const char* why);
+
 		// Open a fresh connection and send one media-namespace command.
 		void send_media_cmd(const nlohmann::json& payload);
 
@@ -191,6 +238,11 @@ class CastManager {
 		// Worker spawned by load() — does the actual TLS connect + LOAD.
 		// Checks load_gen_ against gen at each blocking step and aborts early if
 		// a newer load() has been called.
-		void load_worker(std::string url, std::string mime, int gen,
-		                 float current_time, double duration);
+		void load_worker(LoadRequest req, int gen);
+
+		// The LOAD message itself.  One builder for both paths in load_worker:
+		// they were byte-identical literals, and a field added to one and not
+		// the other would apply only when the receiver app happened to already
+		// be running.
+		static nlohmann::json build_load(const LoadRequest& req, int request_id);
 	};
