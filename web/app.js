@@ -2477,6 +2477,9 @@ async function videoLoadCaptions(song) {
          player.videoEl.appendChild(t);
          }
       }
+   console.log('[captions]', caps.length, 'track(s) for', song.id,
+               castDeviceId !== null ? '(casting)' : '(local)',
+               caps.map(c => `${c.id}:${c.name}`).join(', '));
    // After the elements, so a menu index is a textTracks index.
    videoCaptionsMenu(caps);
 }
@@ -2557,9 +2560,11 @@ function videoSelectCaption(index, {send = true} = {}) {
       // `send` is false when the menu is merely being rebuilt with the same
       // choice already in force, which happens on every load; re-sending would
       // be an EDIT_TRACKS_INFO per track change the user did not make.
+      const trackId = index === null ? 0 : index + 1;
+      console.log('[captions] cast select index', index, '→ trackId', trackId,
+                  send ? '(sending)' : '(redisplay only)');
       if (send) {
-         apiCall('castControl',
-                 {action: 'captions', trackId: index === null ? 0 : index + 1})
+         apiCall('castControl', {action: 'captions', trackId})
             .catch(err => console.warn('[cast] captions failed', err));
          }
       } else {

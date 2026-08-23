@@ -778,7 +778,22 @@ nlohmann::json CastManager::build_load(const LoadRequest& req, int request_id)
 	// Omitted rather than sent empty when there are none: an empty tracks array
 	// is legal but says "this medium has no subtitles", and some receiver
 	// versions take the trouble to render a disabled CC control for it.
-	if (!req.tracks.empty()) media["tracks"] = req.tracks;
+	if (!req.tracks.empty()) {
+		media["tracks"] = req.tracks;
+		// Defensive, in the same spirit as `autoplay` below: the receiver has a
+		// default style and the spec does not require this, but a style that
+		// resolves to transparent-on-transparent renders cues that are present
+		// and invisible, which is indistinguishable from cues that never
+		// arrived.  White on semi-opaque black is what every player defaults to
+		// anyway, and stating it costs nothing.
+		media["textTrackStyle"] = {
+			{"backgroundColor", "#00000080"},
+			{"foregroundColor", "#FFFFFFFF"},
+			{"edgeType",        "OUTLINE"},
+			{"edgeColor",       "#000000FF"},
+			{"fontScale",       1.0}
+			};
+		}
 
 	nlohmann::json msg = {
 		{"type",      "LOAD"},

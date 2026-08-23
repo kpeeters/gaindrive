@@ -3786,6 +3786,15 @@ GainDrive::GainDrive(const std::string& db_path,
 			res.status = 404;
 			return;
 			}
+		// Success is logged too, and only here does it matter who asked: a
+		// Chromecast fetches its own subtitle track, so this line arriving from
+		// the television's address is the proof that the receiver accepted the
+		// tracks the LOAD declared and went looking for one. Its absence is the
+		// single most useful fact when captions do not appear on a cast.
+		std::cout << stamp() << "getCaptions: id=" << it->second
+		          << " captionId=" << index << " " << vtt.size() << " bytes"
+		          << (cast_authed ? " (cast token)" : "")
+		          << " to " << req.remote_addr << std::endl;
 		res.set_content(vtt, "text/vtt");
 		});
 
@@ -5331,6 +5340,19 @@ void GainDrive::cast_load_song(const httplib::Request& req,
 		if (track_id > 0 && track_id <= n)
 			lr.active_track_ids.push_back(track_id);
 		}
+
+	// One line rather than reading it out of the LOAD dump below, which for a
+	// film with several tracks is long enough to scroll past. Says the three
+	// things a "subtitles do not appear" report needs first: whether the server
+	// thinks this is a video at all, how many tracks it offered, and which one
+	// it asked for.
+	std::cout << stamp() << "Cast: load song=" << sid_s
+	          << " video=" << (song.is_video ? "yes" : "no")
+	          << " mime=" << lr.mime
+	          << " tracks=" << lr.tracks.size()
+	          << " active=" << (lr.active_track_ids.empty()
+	                            ? 0 : lr.active_track_ids.front())
+	          << std::endl;
 
 	last_cast_song_id_ = sid_s;
 	last_cast_offset_  = 0.0f;
