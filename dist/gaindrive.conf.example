@@ -13,6 +13,14 @@
 	"cast_devices": [
 		{ "name": "Living room", "address": "192.168.1.42" }
 	],
+	"//url_handlers": "Which pasted URLs may be fetched into a personal folder, and what is run for each. 'match' is a regular expression matched against the WHOLE URL, and it is the security boundary: a URL matching nothing is refused, so a pattern of .* makes this server an open outbound fetcher for every account allowed to upload. %URL% and %DIR% are substituted as whole arguments; there is no shell. Pin the output extension (--audio-format, --merge-output-format) or a song will eventually be filed as a video, and write two directories deep or the result cannot be promoted. Omit this key entirely to use the built-in yt-dlp table; give an empty list to disable the feature. Check an entry with --url-fetch-test.",
+	"url_handlers": [
+		{ "name": "yt-dlp",
+		  "match": "https?://(www\\.)?(youtube\\.com|youtu\\.be)/.*",
+		  "audio": ["yt-dlp", "--newline", "--progress", "--no-playlist", "-x", "--audio-format", "opus", "--embed-metadata", "-P", "%DIR%", "-o", "%(artist,uploader)s/%(album,title)s/%(title)s.%(ext)s", "--", "%URL%"],
+		  "video": ["yt-dlp", "--newline", "--progress", "--no-playlist", "--merge-output-format", "mp4", "--embed-metadata", "-P", "%DIR%", "-o", "%(uploader)s/%(title)s/%(title)s.%(ext)s", "--", "%URL%"] }
+	],
+	"url_fetch_timeout": 7200,
 	"upload_dir": "/tmp/gaindrive-uploads",
 	"flat_multi_disc": true,
 	"transcode_cache_dir": "/var/lib/gaindrive/transcodes",

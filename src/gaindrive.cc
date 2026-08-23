@@ -666,6 +666,26 @@ static bool check_cast_perm(const httplib::Request& req, httplib::Response& res,
 	return true;
 	}
 
+// Returns true if the authenticated user may write into their personal uploads
+// folder. Admins may regardless — the same rule /upload has applied inline
+// since it was written, lifted out here because four more endpoints now need it
+// and a permission check with five copies is a permission check with four
+// chances of being forgotten.
+static bool check_upload_perm(const httplib::Request& req,
+                               httplib::Response& res, MediaStore& store,
+                               bool use_json)
+	{
+	auto info = store.get_user(req.get_param_value("u"));
+	if (!info || (!info->upload_allowed && !info->is_admin)) {
+		const char* msg = "User is not authorized for the given operation.";
+		res.set_content(use_json ? subsonic_error_json(50, msg)
+		                        : subsonic_error(50, msg),
+		                use_json ? "application/json" : "application/xml");
+		return false;
+		}
+	return true;
+	}
+
 // ---- Artist info helper -----------------------------------------------
 
 // Performs MusicBrainz/Wikipedia lookup for an artist, caching the result.
@@ -1559,6 +1579,106 @@ static void reorganise_by_tags(const std::filesystem::path& batch_root)
       if (fs::is_empty(d, ec)) fs::remove(d, ec);
    }
 
+// Drops anything that is not well-formed UTF-8, and truncates only on a
+// character boundary.
+//
+// Not defensive programming for its own sake: nlohmann's dump() *throws* on
+// invalid UTF-8, on an httplib thread, where it becomes a bare 500 with nothing
+// in the log. The strings this guards come from a remote site by way of a
+// tool's stdout — a filename in some other encoding is entirely ordinary there
+// — and a half-copied multi-byte sequence is exactly what a byte-count truncate
+// produces.
+static std::string utf8_clean(const std::string& s, size_t max_bytes)
+	{
+	std::string out;
+	for (size_t i = 0; i < s.size(); ) {
+		unsigned char c = s[i];
+		size_t len = c < 0x80 ? 1
+		           : (c & 0xE0) == 0xC0 ? 2
+		           : (c & 0xF0) == 0xE0 ? 3
+		           : (c & 0xF8) == 0xF0 ? 4 : 0;
+		if (len == 0 || i + len > s.size()) { i++; continue; }
+		bool ok = true;
+		for (size_t k = 1; k < len; k++)
+			if ((static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) ok = false;
+		if (!ok) { i++; continue; }
+		if (out.size() + len > max_bytes) break;
+		out.append(s, i, len);
+		i += len;
+		}
+	return out;
+	}
+
+// Pushes anything still loose in a batch down to <artist>/<album>/file.
+//
+// Two invariants downstream want exactly that depth and neither of them says so
+// out loud. The batch is scanned by enumerating its *directories* — a file
+// sitting at the batch root is never scanned at all — and promoteAlbum accepts
+// only a five-component path, so an album one level too shallow can never be
+// moved into the shared library. Handing scan_dirs() the batch directory itself
+// would fix the first and make the second permanent: whatever directory it is
+// given becomes an artist row named by its basename, and the user would be
+// looking at a UUID in their artist list.
+//
+// A file directly in the batch is filed under `fallback_artist` — a handler's
+// name reads far better than a UUID; a file one level down keeps the directory
+// it is in, since something chose that name. Grouping by stem is what keeps a
+// sidecar image with the video it belongs to.
+//
+// reorganise_by_tags() has usually done this already for audio. This is for
+// what it cannot help with: it reads tags, and no video container has any.
+static int reparent_loose_media(const std::filesystem::path& batch_root,
+                                 const std::string& fallback_artist)
+	{
+	namespace fs = std::filesystem;
+	std::error_code ec;
+
+	std::vector<fs::path> loose;
+	for (auto& e : fs::recursive_directory_iterator(batch_root, ec)) {
+		if (!e.is_regular_file(ec)) continue;
+		auto rel   = e.path().lexically_relative(batch_root);
+		int  depth = (int)std::distance(rel.begin(), rel.end()) - 1;
+		if (depth >= 2) continue;
+		loose.push_back(e.path());
+		}
+	if (loose.empty()) return 0;
+
+	std::string artist = sanitise_component(fallback_artist);
+	if (artist.empty()) artist = "Unknown Artist";
+
+	int moved = 0;
+	for (const auto& p : loose) {
+		std::string album = sanitise_component(p.stem().string());
+		if (album.empty()) album = "Unknown Album";
+		fs::path parent = p.parent_path() == batch_root
+		    ? batch_root / artist : p.parent_path();
+		fs::path target = parent / album;
+		fs::create_directories(target, ec);
+		fs::rename(p, target / p.filename(), ec);
+		if (ec)
+			std::cout << stamp() << "reparent: rename failed for " << p << ": "
+			          << ec.message() << std::endl;
+		else
+			moved++;
+		}
+	// Worth a line: for a URL fetch this means the handler's output template
+	// wrote too shallow, which is the operator's to fix.
+	if (moved)
+		std::cout << stamp() << "reparent: filed " << moved
+		          << " loose file(s) under " << batch_root << std::endl;
+	return moved;
+	}
+
+// How many fetches may be waiting at once. One worker runs the queue, so this
+// is a bound on how far behind a user can get the server, not on throughput.
+static constexpr size_t FETCH_QUEUE_MAX = 20;
+
+// How many finished jobs are kept per user, and for how long. Per user rather
+// than server-wide: a shared cap lets one busy account evict another's results
+// before that person's browser has polled for them.
+static constexpr size_t FETCH_KEEP_PER_USER = 10;
+static constexpr int64_t FETCH_KEEP_S       = 15 * 60;
+
 // Grace period before the SSE-as-heartbeat watchdog tears down a cast
 // session whose listener has gone away. Long enough to ride out a page
 // reload or a brief network blip; short enough that closing the tab
@@ -1578,7 +1698,9 @@ GainDrive::GainDrive(const std::string& db_path,
                      int video_art_px,
                      bool video_art_frames,
                      bool video_art_embedded,
-                     const std::vector<CastManager::CastDevice>& cast_devices)
+                     const std::vector<CastManager::CastDevice>& cast_devices,
+                     const std::optional<std::vector<UrlHandler>>& url_handlers,
+                     int url_fetch_timeout_s)
 	: debug_(debug), flat_multi_disc_(flat_multi_disc), upload_dir_(upload_dir),
 	  store_(db_path, roots, user_db_path, video_art_px, video_art_frames,
 	         video_art_embedded),
@@ -1590,6 +1712,7 @@ GainDrive::GainDrive(const std::string& db_path,
 	      transcode_jobs > 0 ? transcode_jobs
 	          : std::max(2u, std::thread::hardware_concurrency() / 2)),
 	  cover_cache_(store_),
+	  url_fetcher_(url_handlers, url_fetch_timeout_s),
 	  watcher_(store_)
 	{
 	cast_manager_.set_manual_devices(cast_devices);
@@ -1781,14 +1904,18 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string body;
 		if (use_json)
 			body = subsonic_ok_json([](nlohmann::json& r) {
-				r["openSubsonicExtensions"] = {{{"name", "gaindrive"}, {"versions", {1}}}};
+				// 2 is 1 plus the URL-fetch endpoints. A separate version
+				// rather than a widening of 1: a client that negotiated 1 was
+				// told what that meant, and redefining it silently would make
+				// the number worth nothing. See API.md.
+				r["openSubsonicExtensions"] = {{{"name", "gaindrive"}, {"versions", {1, 2}}}};
 				});
 		else
 			body = subsonic_ok([](XMLDocument& doc, XMLElement* root) {
 				auto* exts = doc.NewElement("openSubsonicExtensions");
 				auto* ext  = doc.NewElement("extension");
 				ext->SetAttribute("name", "gaindrive");
-				ext->SetAttribute("versions", "1");
+				ext->SetAttribute("versions", "1,2");
 				exts->InsertEndChild(ext);
 				root->InsertEndChild(exts);
 				});
@@ -4657,30 +4784,15 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		std::cout << stamp() << "Upload: extracted " << n << " file(s) to " << dest << std::endl;
 
-		// Reorganise extracted files into <artist>/<album>/ dirs based on tags.
-		reorganise_by_tags(dest);
-		std::cout << stamp() << "Upload: reorganised by tags under " << dest << std::endl;
-
-		// Scan each artist dir inside the batch individually so that artist names
-		// (not the UUID) appear as the top-level entries in personal mode.
 		std::string rel_batch = uploads_root_name_ + "/" + uname + "/" + uuid;
-		{
-		std::set<std::string> to_scan;
-		std::error_code ec;
-		for (auto& e : fs::directory_iterator(dest, ec))
-			if (e.is_directory())
-				to_scan.insert(rel_batch + "/" + e.path().filename().string());
-		if (!to_scan.empty())
-			std::thread([this, to_scan]{
-				// Same reason as the full scan in listen(): an escaping
-				// exception here would terminate the server.
-				try { store_.scan_dirs(to_scan); }
-				catch (const std::exception& e) {
-					std::cout << stamp() << "Upload scan aborted: " << e.what()
-					          << std::endl;
-					}
-				}).detach();
-		}
+		// Normalising and scanning is the same three steps for both producers —
+		// an archive here, a URL fetch in fetch_worker() — so it lives in one
+		// place. Detached here because this one is on an HTTP thread and the
+		// client is holding a request open; the fetch worker calls it directly,
+		// being a background thread already.
+		std::thread([this, rel_batch, dest]{
+			scan_batch(rel_batch, dest, "Unknown Artist");
+			}).detach();
 
 		nlohmann::json j;
 		j["status"] = "ok";
@@ -4799,6 +4911,269 @@ GainDrive::GainDrive(const std::string& db_path,
 		// trips a foreign key and silently leaves the emptied artist behind.
 		store_.scan_dirs({artist_rel});
 		store_.scan_dirs({personal_artist_rel});
+
+		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
+		                use_json ? "application/json" : "application/xml");
+		});
+
+	// ---- Fetching from a URL ------------------------------------------
+	//
+	// The second producer for a personal batch, beside /upload's archive. The
+	// user pastes a URL, the server matches it against the configured handler
+	// table and runs whatever tool that handler names.
+	//
+	// **A URL matching no handler is refused, and that refusal is the security
+	// boundary** — see urlfetch.hh. There is no fallback handler, and adding one
+	// would turn any account allowed to upload into a way of making the server
+	// issue arbitrary outbound requests from inside the network.
+
+	// getUrlHandlers — what this server can fetch. Any account that may upload
+	// can ask; an empty list is what a client keys "do not offer the row" on,
+	// which is what makes an install with no yt-dlp simply not show it.
+	//
+	// The pattern and the argv are deliberately not reported. An argv can carry
+	// --cookies, a proxy credential or an API key, and the pattern is operator
+	// configuration a client cannot act on anyway.
+	server_.Get("/rest/getUrlHandlers.view", [this](const httplib::Request& req,
+	                                                 httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		if (!check_upload_perm(req, res, store_, use_json)) return;
+
+		auto caps = url_fetcher_.capabilities();
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&caps](nlohmann::json& r) {
+				nlohmann::json arr = nlohmann::json::array();
+				for (const auto& c : caps)
+					arr.push_back({{"name",  utf8_clean(c.name, 200)},
+					               {"audio", c.audio},
+					               {"video", c.video}});
+				r["urlHandlers"] = {{"urlHandler", arr}};
+				});
+		else
+			body = subsonic_ok([&caps](XMLDocument& doc, XMLElement* root) {
+				auto* list = doc.NewElement("urlHandlers");
+				for (const auto& c : caps) {
+					auto* e = doc.NewElement("urlHandler");
+					e->SetAttribute("name",  c.name.c_str());
+					e->SetAttribute("audio", c.audio);
+					e->SetAttribute("video", c.video);
+					list->InsertEndChild(e);
+					}
+				root->InsertEndChild(list);
+				});
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// fetchUrl — queue a fetch. Params: url, mode (audio|video, default audio).
+	// Returns at once with a job id; getFetchJobs reports on it.
+	server_.Get("/rest/fetchUrl.view", [this](const httplib::Request& req,
+	                                           httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                        : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+		if (!check_upload_perm(req, res, store_, use_json)) return;
+
+		auto qp = [&](const std::string& k) -> std::string {
+			auto it = req.params.find(k);
+			return it != req.params.end() ? it->second : "";
+			};
+
+		std::string uname = qp("u");
+		std::string url   = qp("url");
+		std::string mode  = qp("mode");
+		bool audio = (mode != "video");
+		if (!mode.empty() && mode != "audio" && mode != "video") {
+			err(0, "mode must be audio or video."); return;
+			}
+
+		if (url.empty())     { err(10, "Required parameter missing."); return; }
+		if (users_dir_.empty()) {
+			err(0, "No uploads root is configured on this server."); return;
+			}
+		// Reported separately from "no handler" so the message names the real
+		// problem: a pattern is never consulted for a scheme we refuse outright.
+		if (!urlfetch_http_url(url)) {
+			err(0, "Only http and https URLs can be fetched."); return;
+			}
+		const UrlHandler* h = url_fetcher_.match(url);
+		if (!h) { err(0, "No handler is configured for that URL."); return; }
+		if ((audio && h->audio_argv.empty()) || (!audio && h->video_argv.empty())) {
+			err(0, audio ? "That handler cannot fetch audio."
+			             : "That handler cannot fetch video.");
+			return;
+			}
+
+		FetchJob job;
+		job.id      = make_uuid();
+		job.batch   = uploads_root_name_ + "/" + uname + "/" + job.id;
+		job.user    = uname;
+		job.url     = url;
+		job.handler = utf8_clean(h->name, 200);
+		job.audio   = audio;
+		job.started = static_cast<int64_t>(std::time(nullptr));
+
+		{
+		std::lock_guard<std::mutex> lk(fetch_mu_);
+		// The same URL twice is a double-click, not two wants. Two batches of
+		// one video is the outcome without this — the same reason the portrait
+		// worker keeps a queued set.
+		for (const auto& j : fetch_jobs_)
+			if (j.user == uname && j.url == url
+			    && (j.state == "queued" || j.state == "running"
+			        || j.state == "scanning")) {
+				err(0, "That URL is already being fetched.");
+				return;
+				}
+		if (fetch_queue_.size() >= FETCH_QUEUE_MAX) {
+			err(0, "Too many fetches are already queued."); return;
+			}
+		fetch_jobs_.push_back(job);
+		fetch_queue_.push_back(job.id);
+		}
+		fetch_cv_.notify_one();
+
+		std::cout << stamp() << "url fetch: queued " << job.id << " for "
+		          << uname << " (" << h->name << ", "
+		          << (audio ? "audio" : "video") << "): " << url << std::endl;
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&job](nlohmann::json& r) {
+				r["fetchJob"] = {{"id",      job.id},
+				                 {"batch",   job.batch},
+				                 {"handler", job.handler},
+				                 {"mode",    job.audio ? "audio" : "video"},
+				                 {"state",   job.state}};
+				});
+		else
+			body = subsonic_ok([&job](XMLDocument& doc, XMLElement* root) {
+				auto* e = doc.NewElement("fetchJob");
+				e->SetAttribute("id",      job.id.c_str());
+				e->SetAttribute("batch",   job.batch.c_str());
+				e->SetAttribute("handler", job.handler.c_str());
+				e->SetAttribute("mode",    job.audio ? "audio" : "video");
+				e->SetAttribute("state",   job.state.c_str());
+				root->InsertEndChild(e);
+				});
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// getFetchJobs — the caller's own jobs, newest first. Admins see their own
+	// too and not everyone else's: this is a progress display, not an audit log.
+	server_.Get("/rest/getFetchJobs.view", [this](const httplib::Request& req,
+	                                                httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		if (!check_upload_perm(req, res, store_, use_json)) return;
+
+		std::string uname = req.get_param_value("u");
+		std::vector<FetchJob> mine;
+		{
+		std::lock_guard<std::mutex> lk(fetch_mu_);
+		for (auto it = fetch_jobs_.rbegin(); it != fetch_jobs_.rend(); ++it)
+			if (it->user == uname) mine.push_back(*it);
+		}
+		// Scrubbed on the way out rather than on the way in: the stored url is
+		// what gets fetched and must stay byte-exact, while what leaves here is
+		// serialised — and a percent-decoded query parameter is arbitrary
+		// bytes. See utf8_clean.
+		for (auto& j : mine) {
+			j.url     = utf8_clean(j.url,     2048);
+			j.handler = utf8_clean(j.handler, 200);
+			j.error   = utf8_clean(j.error,   400);
+			}
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&mine](nlohmann::json& r) {
+				nlohmann::json arr = nlohmann::json::array();
+				for (const auto& j : mine)
+					arr.push_back({{"id",       j.id},
+					               {"batch",    j.batch},
+					               {"handler",  j.handler},
+					               {"mode",     j.audio ? "audio" : "video"},
+					               {"url",      j.url},
+					               {"state",    j.state},
+					               {"percent",  j.percent},
+					               {"detail",   j.detail},
+					               {"error",    j.error},
+					               {"files",    j.files},
+					               {"started",  j.started},
+					               {"finished", j.finished}});
+				r["fetchJobs"] = {{"fetchJob", arr}};
+				});
+		else
+			body = subsonic_ok([&mine](XMLDocument& doc, XMLElement* root) {
+				auto* list = doc.NewElement("fetchJobs");
+				for (const auto& j : mine) {
+					auto* e = doc.NewElement("fetchJob");
+					e->SetAttribute("id",       j.id.c_str());
+					e->SetAttribute("batch",    j.batch.c_str());
+					e->SetAttribute("handler",  j.handler.c_str());
+					e->SetAttribute("mode",     j.audio ? "audio" : "video");
+					e->SetAttribute("url",      j.url.c_str());
+					e->SetAttribute("state",    j.state.c_str());
+					e->SetAttribute("percent",  j.percent);
+					e->SetAttribute("detail",   j.detail.c_str());
+					e->SetAttribute("error",    j.error.c_str());
+					e->SetAttribute("files",    j.files);
+					e->SetAttribute("started",  (int64_t)j.started);
+					e->SetAttribute("finished", (int64_t)j.finished);
+					list->InsertEndChild(e);
+					}
+				root->InsertEndChild(list);
+				});
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// cancelFetch — stop a queued or running fetch. Param: id.
+	//
+	// The ownership check is not a formality: without it any account that may
+	// upload could cancel anybody else's fetch by guessing nothing at all, since
+	// the id is handed to the client that started it.
+	server_.Get("/rest/cancelFetch.view", [this](const httplib::Request& req,
+	                                              httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                        : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+		if (!check_upload_perm(req, res, store_, use_json)) return;
+
+		std::string uname = req.get_param_value("u");
+		std::string id    = req.get_param_value("id");
+		if (id.empty()) { err(10, "Required parameter missing."); return; }
+		auto ui = store_.get_user(uname);
+		bool is_admin = ui && ui->is_admin;
+
+		bool found = false;
+		{
+		std::lock_guard<std::mutex> lk(fetch_mu_);
+		for (auto& j : fetch_jobs_) {
+			if (j.id != id) continue;
+			if (j.user != uname && !is_admin) break;   // report as not found
+			found = true;
+			if (j.state == "queued" || j.state == "running") {
+				// Marked here rather than by the worker so the state is set
+				// before the child dies: the worker sees a non-zero exit and
+				// would otherwise call it an error.
+				j.state    = "cancelled";
+				j.finished = static_cast<int64_t>(std::time(nullptr));
+				}
+			break;
+			}
+		}
+		if (!found) { err(70, "Item not found."); return; }
+		url_fetcher_.cancel(id);
+		std::cout << stamp() << "url fetch: cancelled " << id << std::endl;
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
@@ -5048,9 +5423,239 @@ GainDrive::GainDrive(const std::string& db_path,
 
 GainDrive::~GainDrive()
 	{
+	// The fetch worker first: it is the one that can be inside scan_dirs(), and
+	// joining it here — in the destructor body — is what guarantees it is not
+	// still holding store_ when the members are destroyed.
+	fetch_stop_ = true;
+	fetch_cv_.notify_all();
+	// A fetch is allowed to run for hours, and the worker checks the stop flag
+	// only between jobs — so without killing the child, this join is the
+	// shutdown. The half-written batch is removed by the worker's own failure
+	// path on the way out.
+	url_fetcher_.cancel_any();
+	if (fetch_thread_.joinable()) fetch_thread_.join();
+
 	portrait_stop_ = true;
 	portrait_cv_.notify_all();
 	if (portrait_thread_.joinable()) portrait_thread_.join();
+	}
+
+// Normalise what a producer wrote into a batch, then scan it.
+//
+// Shared by /upload and the URL fetcher, which differ only in what put the
+// files there. The order matters: tags first, since they are the better answer
+// where they exist, then the depth fix for whatever had none.
+void GainDrive::scan_batch(const std::string& rel_batch,
+                           const std::filesystem::path& dest,
+                           const std::string& fallback_artist)
+	{
+	namespace fs = std::filesystem;
+	try {
+		reorganise_by_tags(dest);
+		reparent_loose_media(dest, fallback_artist);
+
+		// One entry per artist directory inside the batch, so artist names —
+		// not the UUID — are what appears as a top-level entry in personal
+		// mode.
+		std::set<std::string> to_scan;
+		std::error_code ec;
+		for (auto& e : fs::directory_iterator(dest, ec))
+			if (e.is_directory())
+				to_scan.insert(rel_batch + "/" + e.path().filename().string());
+		if (!to_scan.empty()) store_.scan_dirs(to_scan);
+		}
+	catch (const std::exception& e) {
+		// Same reason as the full scan in listen(): an exception escaping a
+		// thread's top-level function calls std::terminate, so a momentary
+		// database lock would otherwise be a dead server.
+		std::cout << stamp() << "Batch scan aborted: " << e.what() << std::endl;
+		}
+	catch (...) {
+		std::cout << stamp() << "Batch scan aborted: unknown exception"
+		          << std::endl;
+		}
+	}
+
+std::string GainDrive::sanitise_detail(const std::string& line,
+                                       const std::filesystem::path& dest,
+                                       const std::string& rel_batch) const
+	{
+	// A tool announces the file it is writing, absolutely — "[download]
+	// Destination: /srv/uploads/alice/9c3a…/Artist/Album/Track.opus". Root
+	// paths are private to MediaStore and are never surfaced in an API
+	// response, so the batch's absolute path becomes its stored form and
+	// anything else absolute under the uploads root becomes the root's name.
+	std::string s = line;
+	auto swap = [&s](const std::string& from, const std::string& to) {
+		if (from.empty()) return;
+		for (size_t p = s.find(from); p != std::string::npos;
+		     p = s.find(from, p + to.size()))
+			s.replace(p, from.size(), to);
+		};
+	swap(dest.string(), rel_batch);
+	swap(users_dir_, uploads_root_name_);
+
+	// Belt and braces: a handler names whatever tool an operator chose, and it
+	// may print a path from somewhere else entirely. Anything left that still
+	// looks absolute is replaced.
+	//
+	// Matched as a whole token beginning with '/', not merely as a line
+	// containing one — "[download] 42% of 5.00MiB at 1.00MiB/s" is the most
+	// common line there is, and truncating it at the first slash would throw
+	// away the part worth showing.
+	std::string out;
+	for (size_t i = 0; i < s.size(); ) {
+		bool at_start = (i == 0 || std::isspace((unsigned char)s[i - 1]));
+		if (at_start && s[i] == '/') {
+			while (i < s.size() && !std::isspace((unsigned char)s[i])) i++;
+			out += "…";
+			}
+		else
+			out += s[i++];
+		}
+	return utf8_clean(out, 200);
+	}
+
+// One fetch at a time, in submission order.
+//
+// Serialised deliberately: a fetch is bandwidth- and CPU-heavy (a merge runs
+// ffmpeg), and one running job is also what makes the progress reporting
+// unambiguous — UrlFetcher tracks a single child, which is what cancel() names.
+void GainDrive::fetch_worker()
+	{
+	namespace fs = std::filesystem;
+	try {
+		for (;;) {
+			std::string id;
+			{
+			std::unique_lock<std::mutex> lk(fetch_mu_);
+			fetch_cv_.wait(lk, [this]{
+				return fetch_stop_ || !fetch_queue_.empty(); });
+			if (fetch_stop_) return;
+			id = fetch_queue_.front();
+			fetch_queue_.pop_front();
+			}
+
+			// Everything below works on a copy; fetch_jobs_ is the shared
+			// record and is only touched under the mutex.
+			FetchJob snap;
+			{
+			std::lock_guard<std::mutex> lk(fetch_mu_);
+			auto it = std::find_if(fetch_jobs_.begin(), fetch_jobs_.end(),
+			                       [&id](const FetchJob& j){ return j.id == id; });
+			// Cancelled before it ever started, which is the common case for a
+			// queued job: nothing was created, so there is nothing to remove.
+			if (it == fetch_jobs_.end() || it->state != "queued") continue;
+			it->state = "running";
+			snap      = *it;
+			}
+
+			const UrlHandler* h = url_fetcher_.match(snap.url);
+			fs::path dest = fs::path(users_dir_) / snap.user / snap.id;
+
+			UrlFetcher::Result r;
+			if (!h)
+				r.error = "No handler is configured for that URL.";
+			else {
+				std::error_code ec;
+				fs::create_directories(dest, ec);
+				r = url_fetcher_.run(*h, snap.audio, snap.url, dest, snap.id,
+					[this, &id, &dest, &snap](int pct, const std::string& ln) {
+						std::string clean =
+							sanitise_detail(ln, dest, snap.batch);
+						std::lock_guard<std::mutex> lk(fetch_mu_);
+						for (auto& j : fetch_jobs_)
+							if (j.id == id) {
+								j.percent = pct;
+								j.detail  = clean;
+								break;
+								}
+						});
+				}
+
+			// A cancel flipped the state while the child was running, and the
+			// non-zero exit it caused is not an error worth reporting as one.
+			bool cancelled = false;
+			{
+			std::lock_guard<std::mutex> lk(fetch_mu_);
+			for (auto& j : fetch_jobs_)
+				if (j.id == id) { cancelled = (j.state == "cancelled"); break; }
+			}
+
+			if (cancelled || !r.ok) {
+				// Nothing here is worth keeping: a partial download is not
+				// playable, and left in place it would be scanned into the
+				// library on the next pass over the uploads root.
+				std::error_code ec;
+				fs::remove_all(dest, ec);
+				std::lock_guard<std::mutex> lk(fetch_mu_);
+				for (auto& j : fetch_jobs_)
+					if (j.id == id) {
+						if (!cancelled) {
+							j.state = "error";
+							j.error = r.error.empty() ? "The fetch failed."
+							                          : r.error;
+							}
+						j.finished = static_cast<int64_t>(std::time(nullptr));
+						break;
+						}
+				}
+			else {
+				{
+				std::lock_guard<std::mutex> lk(fetch_mu_);
+				for (auto& j : fetch_jobs_)
+					if (j.id == id) {
+						j.state   = "scanning";
+						j.percent = 100;
+						j.files   = r.files;
+						j.detail  = "Scanning…";
+						break;
+						}
+				}
+				// Synchronously, and only then "done" — this is already a
+				// background thread, so there is nothing to gain by detaching
+				// and everything to gain by "done" meaning the library is
+				// actually correct. The client re-renders rather than guessing.
+				scan_batch(snap.batch, dest, snap.handler);
+				std::lock_guard<std::mutex> lk(fetch_mu_);
+				for (auto& j : fetch_jobs_)
+					if (j.id == id) {
+						j.state    = "done";
+						j.detail.clear();
+						j.finished = static_cast<int64_t>(std::time(nullptr));
+						break;
+						}
+				}
+
+			// Retention, applied per user for the reason given at the constant.
+			{
+			int64_t cutoff = static_cast<int64_t>(std::time(nullptr))
+			               - FETCH_KEEP_S;
+			std::lock_guard<std::mutex> lk(fetch_mu_);
+			std::map<std::string, size_t> kept;
+			for (auto it = fetch_jobs_.rbegin(); it != fetch_jobs_.rend(); ) {
+				bool live = it->finished == 0;
+				if (!live && (++kept[it->user] > FETCH_KEEP_PER_USER
+				              || it->finished < cutoff)) {
+					// Erasing through a reverse iterator: base() is one past
+					// the element, so step it back to name the element itself.
+					it = std::deque<FetchJob>::reverse_iterator(
+						fetch_jobs_.erase(std::next(it).base()));
+					}
+				else
+					++it;
+				}
+			}
+			}
+		}
+	catch (const std::exception& e) {
+		std::cout << stamp() << "url fetch worker died: " << e.what()
+		          << std::endl;
+		}
+	catch (...) {
+		std::cout << stamp() << "url fetch worker died: unknown exception"
+		          << std::endl;
+		}
 	}
 
 // The artist folders with nothing resolved yet, oldest question first. Called
@@ -5493,6 +6098,9 @@ bool GainDrive::listen(const std::string& host, int port)
 	// Joined in the destructor rather than detached: it holds references to
 	// store_ and cover_cache_, so it must not outlive them.
 	portrait_thread_ = std::thread([this]{ portrait_worker(); });
+	// Same reasoning, and more sharply: this one calls scan_dirs().
+	if (url_fetcher_.configured())
+		fetch_thread_ = std::thread([this]{ fetch_worker(); });
 
 	if (!server_.listen_after_bind()) {
 		std::cerr << stamp() << "Error: server loop exited unexpectedly."

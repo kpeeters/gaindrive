@@ -5,6 +5,7 @@
 #include <iostream>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -361,6 +362,52 @@ static int run_tmdb_test(const std::string& title, int year, bool tv,
 	return 0;
 	}
 
+// --url-fetch-test: which handler claims a URL, and exactly what would be run
+// for it. A dry run — nothing is fetched and nothing is written.
+//
+// This is where an operator's own handler entry is debugged. The mistakes it
+// catches are the ones that are otherwise invisible: a pattern that matches
+// nothing because it was written for regex_search, an output template that
+// writes too shallow to be promotable, a %DIR% that ended up inside -o.
+static int run_url_fetch_test(
+	const std::string& url,
+	const std::optional<std::vector<UrlHandler>>& handlers)
+	{
+	UrlFetcher fetcher(handlers);
+	if (!fetcher.configured()) {
+		std::cerr << "No usable URL handlers.\n";
+		return 1;
+		}
+	std::cout << "handlers:\n";
+	for (const auto& c : fetcher.capabilities())
+		std::cout << "  " << c.name
+		          << (c.audio ? "  audio" : "") << (c.video ? "  video" : "")
+		          << "\n";
+
+	if (!urlfetch_http_url(url)) {
+		std::cout << "\nrefused: only http and https URLs can be fetched.\n";
+		return 1;
+		}
+	const UrlHandler* h = fetcher.match(url);
+	if (!h) {
+		std::cout << "\nrefused: no handler is configured for that URL.\n";
+		return 1;
+		}
+
+	std::cout << "\nmatched: " << h->name << "\n";
+	auto show = [&url, h](const char* label,
+	                       const std::vector<std::string>& tmpl) {
+		std::cout << label << ": ";
+		if (tmpl.empty()) { std::cout << "(refused by this handler)\n"; return; }
+		for (const auto& a : urlfetch_expand(tmpl, url, "<batch dir>"))
+			std::cout << ' ' << a;
+		std::cout << "\n";
+		};
+	show("audio", h->audio_argv);
+	show("video", h->video_argv);
+	return 0;
+	}
+
 // Nobody can log in to a server with no accounts, so an empty user table is a
 // hard stop rather than a warning. On a fresh install there is a terminal to
 // ask on; a systemd start has none, and gets told what to run instead.
@@ -447,6 +494,7 @@ int main(int argc, char* argv[])
 		("tmdb-year",     "Year for --tmdb-test", cxxopts::value<int>()->default_value("0"))
 		("tmdb-key",      "API key for --tmdb-test (default: the stored setting)", cxxopts::value<std::string>())
 		("tmdb-tv",       "Search series rather than films for --tmdb-test")
+		("url-fetch-test","Show which handler claims one URL and what would be run, then exit", cxxopts::value<std::string>())
 		("no-scan",    "Skip startup filesystem scan")
 		("debug",      "Print all API responses to stdout")
 		("add-user",   "Create a user and exit",      cxxopts::value<std::string>())
@@ -617,6 +665,9 @@ int main(int argc, char* argv[])
 	    ? 0 : args["video-art-px"].as<int>();
 	bool        video_art_frames    = args.count("video-art-frames") > 0;
 	bool        video_art_embedded  = args.count("video-art-embedded") > 0;
+	// nullopt until the config file says otherwise — see the note at the read.
+	std::optional<std::vector<UrlHandler>> url_handlers;
+	int         url_fetch_timeout   = 2 * 60 * 60;
 
 	// Read config file; missing file is not fatal, just use defaults.
 	std::string config_path = args["config"].as<std::string>();
@@ -674,6 +725,36 @@ int main(int argc, char* argv[])
 				video_art_frames = cfg["video_art_frames"].get<bool>();
 			if (cfg.contains("video_art_embedded") && !args.count("video-art-embedded"))
 				video_art_embedded = cfg["video_art_embedded"].get<bool>();
+			// Config file only — a regex plus an argv template is not a sane
+			// command-line argument, and a cxxopts vector option splits on
+			// commas anyway. Follows flat_multi_disc, which has no flag either.
+			//
+			// The optional is the point: the key being absent must mean "use the
+			// built-in table" while an explicit [] must mean "no fetching from a
+			// URL on this server", and an empty vector cannot say both.
+			if (cfg.contains("url_handlers")) {
+				std::vector<UrlHandler> hs;
+				for (const auto& h : cfg["url_handlers"]) {
+					UrlHandler uh;
+					uh.name    = h.value("name",  std::string());
+					uh.pattern = h.value("match", std::string());
+					auto argv_of = [&h](const char* key) {
+						std::vector<std::string> v;
+						if (h.contains(key))
+							for (const auto& a : h[key])
+								v.push_back(a.get<std::string>());
+						return v;
+						};
+					uh.audio_argv = argv_of("audio");
+					uh.video_argv = argv_of("video");
+					hs.push_back(std::move(uh));
+					}
+				// Compiled and checked by UrlFetcher's constructor, not here, so
+				// there is one place that reports a bad table.
+				url_handlers = std::move(hs);
+				}
+			if (cfg.contains("url_fetch_timeout"))
+				url_fetch_timeout = cfg["url_fetch_timeout"].get<int>();
 			}
 		catch (const std::exception& e) {
 			std::cerr << "Warning: failed to parse " << config_path << ": " << e.what() << "\n";
@@ -702,6 +783,12 @@ int main(int argc, char* argv[])
 		                      args["tmdb-year"].as<int>(),
 		                      args.count("tmdb-tv") > 0, key);
 		}
+
+	// After the config read, since the handler table is the thing being tested;
+	// before the library validation, since it needs no roots and no database.
+	if (args.count("url-fetch-test"))
+		return run_url_fetch_test(args["url-fetch-test"].as<std::string>(),
+		                           url_handlers);
 
 	// Only the shape of what was configured is checked here. Whether a library
 	// root is *required* is decided further down, once it is known whether this
@@ -789,7 +876,8 @@ int main(int argc, char* argv[])
 		GainDrive gd(db_path, roots, upload_dir, no_scan, debug, flat_multi_disc,
 		             user_db_path, transcode_cache_dir, transcode_cache_mb,
 		             transcode_jobs, video_art_px, video_art_frames,
-		             video_art_embedded, cast_devices);
+		             video_art_embedded, cast_devices, url_handlers,
+		             url_fetch_timeout);
 		// Non-zero on a failed bind, so a supervisor restarts rather than
 		// recording a clean shutdown for a server that never served anything.
 		return gd.listen(host, port) ? 0 : 1;

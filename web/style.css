@@ -2162,6 +2162,70 @@ body {
    color: var(--text-dim);
    }
 
+/* ── Fetching from a URL ────────────────────────────── */
+
+/* min-width: 0 as well as flex: 1 — without it a long URL sets the input's
+   min-content width and pushes the Fetch button out of the row. */
+.upload-row .token-input { flex: 1; min-width: 0; }
+
+/* The audio/video toggle is the library segmented control reused, and that one
+   sets flex-basis: 100% to claim its own line inside the sticky view header.
+   Here it shares a row, so that has to be undone. */
+.upload-row .library-modes {
+   flex: 0 0 auto;
+   flex-basis: auto;
+   margin-top: 0;
+   }
+
+.fetch-jobs {
+   display: flex;
+   flex-direction: column;
+   gap: 0.4rem;
+   }
+
+/* Same shape as .user-row below, because it is the same thing: a record with a
+   label, a state and an action. */
+.fetch-job {
+   display: flex;
+   flex-direction: column;
+   gap: 0.25rem;
+   padding: 0.4rem 0.6rem;
+   border: 1px solid var(--divider);
+   border-radius: 4px;
+   }
+
+.fetch-head {
+   display: flex;
+   align-items: center;
+   gap: 0.6rem;
+   font-size: 0.85rem;
+   }
+
+.fetch-name  { flex: 1; min-width: 0; }
+.fetch-state { color: var(--text-dim); }
+
+.fetch-cancel {
+   background: none;
+   border: 1px solid var(--border);
+   border-radius: 4px;
+   color: var(--text-dim);
+   cursor: pointer;
+   font-size: 0.8rem;
+   padding: 0.15rem 0.5rem;
+   }
+
+.fetch-cancel:hover:not(:disabled) { color: var(--text); }
+
+/* Ellipsis rather than wrap: a progress line is long and variable, and without
+   this the whole bar reflows on every poll. */
+.fetch-detail {
+   font-size: 0.8rem;
+   color: var(--text-dim);
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+   }
+
 /* ── Admin — users ──────────────────────────────────── */
 
 .admin-section {

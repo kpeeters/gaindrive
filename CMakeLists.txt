@@ -505,6 +505,7 @@ add_executable(gaindrive
 	src/videoart.cc
 	src/videoname.cc
 	src/tmdb.cc
+	src/urlfetch.cc
 	src/stamp.cc
 	src/castmanager.cc
 	src/folderwatcher.cc

@@ -286,6 +286,18 @@ redistribution of GainDrive.
   so ffmpeg's licence (LGPL or GPL depending on how it was built) does not
   propagate to GainDrive, and no ffmpeg code is distributed here.
 
+* yt-dlp · Unlicense (public domain)
+  https://github.com/yt-dlp/yt-dlp
+  gaindrive runs this as a child process through reproc++ when a configured
+  `url_handlers` entry matches a pasted URL. Same reasoning as ffmpeg: running
+  a program is not linking against it, and no yt-dlp code is distributed here.
+  It is optional and named only by configuration — with no yt-dlp on PATH the
+  URL-fetch endpoints report no handlers and the client does not offer the
+  option. Note it invokes ffmpeg in turn, which gaindrive already requires.
+  Nothing in the code depends on it specifically: the handler table names
+  whatever tool the operator chooses, and the built-in default is the only
+  place yt-dlp is mentioned at all.
+
 
 ## Compatibility notes
 

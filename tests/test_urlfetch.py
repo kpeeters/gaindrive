@@ -1,0 +1,304 @@
+#!/usr/bin/env python3
+"""URL-fetch endpoint tests: getUrlHandlers, fetchUrl, getFetchJobs,
+cancelFetch.
+
+Most of this needs no network and no yt-dlp: the refusals are the part worth
+regression-testing, because each of them is the security boundary rather than a
+convenience. A URL matching no handler must be refused, or an account with
+upload rights can make the server issue requests to anywhere it can reach.
+
+The server must have an uploads root configured, and the account below must
+have upload rights (or be an admin).
+
+    ./build/gaindrive --db /tmp/gd_test.db --artist-root music=/music \\
+                      --upload-root personal=/tmp/gd_uploads --no-scan
+
+    python3 tests/test_urlfetch.py
+
+Set LIVE_URL to a real, short video to exercise the online half — an actual
+fetch, a promote and a cancel. It is None by default because it downloads,
+takes minutes and needs yt-dlp installed on the server.
+"""
+
+import json
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+BASE   = "http://localhost:4040/rest"
+USER   = "admin"
+PASS   = "secret"
+VER    = "1.16.1"
+CLIENT = "test"
+
+# e.g. "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+LIVE_URL = None
+
+# A second account, created and removed by the permission test.
+OTHER_USER = "urlfetch_nobody"
+OTHER_PASS = "nobody"
+
+
+class Skip(Exception):
+    """Precondition absent — reported as a skip rather than a failure."""
+
+
+def _get(endpoint, extra=None, *, user=USER, password=PASS):
+    p = {"u": user, "p": password, "v": VER, "c": CLIENT, "f": "json"}
+    if extra:
+        p.update(extra)
+    url = f"{BASE}/{endpoint}?{urllib.parse.urlencode(p)}"
+    with urllib.request.urlopen(url) as r:
+        return json.loads(r.read())["subsonic-response"]
+
+
+def _ok(sr):
+    assert sr["status"] == "ok", f"Expected ok, got {sr}"
+    return sr
+
+
+def _err(sr, code):
+    assert sr["status"] == "failed", f"Expected failure, got {sr}"
+    got = sr.get("error", {}).get("code")
+    assert got == code, f"Expected error {code}, got {got}: {sr}"
+    return sr["error"].get("message", "")
+
+
+def _handlers():
+    sr = _ok(_get("getUrlHandlers.view"))
+    return sr.get("urlHandlers", {}).get("urlHandler", [])
+
+
+def _require_handlers():
+    hs = _handlers()
+    if not hs:
+        raise Skip("no URL handlers configured on this server")
+    return hs
+
+
+# ---- offline ----------------------------------------------------------
+
+def test_handlers_well_formed():
+    for h in _handlers():
+        assert isinstance(h.get("name"), str) and h["name"], h
+        assert isinstance(h.get("audio"), bool), h
+        assert isinstance(h.get("video"), bool), h
+        # A handler that can do neither should never have been kept.
+        assert h["audio"] or h["video"], h
+        # The pattern and the argv must not be reported: an argv can carry
+        # --cookies, a proxy credential or an API key.
+        assert "match" not in h and "audio_argv" not in h, h
+    print("PASS  getUrlHandlers is well formed and leaks no configuration")
+
+
+def test_missing_url():
+    _require_handlers()
+    _err(_get("fetchUrl.view"), 10)
+    print("PASS  fetchUrl with no url returns error 10")
+
+
+def test_scheme_refused():
+    _require_handlers()
+    msg = _err(_get("fetchUrl.view", {"url": "file:///etc/passwd"}), 0)
+    # The message must name the scheme, not the table: a pattern is never
+    # consulted for something refused outright.
+    assert "http" in msg.lower(), f"Expected a scheme message, got {msg!r}"
+    print("PASS  a file:// URL is refused by scheme")
+
+
+def test_no_handler_refused():
+    _require_handlers()
+    # The SSRF regression test, and the reason the refusal exists at all.
+    msg = _err(_get("fetchUrl.view",
+                    {"url": "http://169.254.169.254/latest/meta-data/"}), 0)
+    assert "handler" in msg.lower(), f"Expected a no-handler message, got {msg!r}"
+    print("PASS  a URL matching no handler is refused")
+
+
+def test_pattern_is_anchored():
+    _require_handlers()
+    # regex_search would accept this — the site name is in the fragment of a
+    # URL pointing somewhere else entirely. regex_match must not.
+    _err(_get("fetchUrl.view",
+              {"url": "http://192.0.2.1/x#https://www.youtube.com/watch?v=a"}), 0)
+    print("PASS  a site name in a fragment does not satisfy a pattern")
+
+
+def test_cancel_unknown_id():
+    _require_handlers()
+    _err(_get("cancelFetch.view", {"id": "not-a-real-job"}), 70)
+    _err(_get("cancelFetch.view"), 10)
+    print("PASS  cancelFetch reports an unknown id as 70")
+
+
+def test_jobs_list_shape():
+    _require_handlers()
+    sr = _ok(_get("getFetchJobs.view"))
+    jobs = sr.get("fetchJobs", {}).get("fetchJob", [])
+    assert isinstance(jobs, list), sr
+    print(f"PASS  getFetchJobs returns a list ({len(jobs)} job(s))")
+
+
+def test_permission_and_isolation():
+    _require_handlers()
+    admin = _ok(_get("getUser.view", {"username": USER}))["user"]
+    if not admin.get("adminRole"):
+        raise Skip("the test account is not an admin, so it cannot create one")
+
+    # Idempotent rather than create-and-remove: there is no deleteUser
+    # endpoint, so the account survives the run and has to be reusable. It is
+    # left disabled, which is why enabling it again is the first thing here.
+    _get("createUser.view", {"username": OTHER_USER,
+                             "password": OTHER_PASS,
+                             "uploadRole": "false"})
+    _ok(_get("updateUser.view", {"username": OTHER_USER,
+                                 "password": OTHER_PASS,
+                                 "uploadRole": "false",
+                                 "adminRole": "false",
+                                 "disabled": "false"}))
+    try:
+        for ep in ("getUrlHandlers.view", "fetchUrl.view",
+                   "getFetchJobs.view", "cancelFetch.view"):
+            _err(_get(ep, user=OTHER_USER, password=OTHER_PASS), 50)
+        print("PASS  an account without upload rights is refused (50)")
+
+        _ok(_get("updateUser.view", {"username": OTHER_USER,
+                                     "uploadRole": "true"}))
+        sr = _ok(_get("getFetchJobs.view",
+                      user=OTHER_USER, password=OTHER_PASS))
+        jobs = sr.get("fetchJobs", {}).get("fetchJob", [])
+        assert jobs == [], f"Expected no jobs for a fresh user, got {jobs}"
+        print("PASS  a user sees no other user's jobs")
+    finally:
+        try:
+            _ok(_get("updateUser.view", {"username": OTHER_USER,
+                                         "uploadRole": "false",
+                                         "disabled": "true"}))
+        except Exception as e:
+            print(f"NOTE  could not disable {OTHER_USER}: {e}")
+
+
+# ---- online -----------------------------------------------------------
+
+def test_live_fetch():
+    if LIVE_URL is None:
+        raise Skip("LIVE_URL is not set")
+    hs = _require_handlers()
+    if not any(h["audio"] for h in hs):
+        raise Skip("no handler offers audio")
+
+    before = _ok(_get("getArtists.view", {"personal": "true"}))
+    before_names = {a["name"]
+                    for i in before.get("artists", {}).get("index", [])
+                    for a in i.get("artist", [])}
+
+    job = _ok(_get("fetchUrl.view", {"url": LIVE_URL, "mode": "audio"}))["fetchJob"]
+    jid, batch = job["id"], job["batch"]
+    assert job["state"] == "queued", job
+
+    deadline = time.time() + 300
+    last_pct = 0
+    state = "queued"
+    while time.time() < deadline:
+        sr = _ok(_get("getFetchJobs.view"))
+        jobs = sr.get("fetchJobs", {}).get("fetchJob", [])
+        me = next((j for j in jobs if j["id"] == jid), None)
+        assert me is not None, f"Job {jid} disappeared"
+        state = me["state"]
+
+        # The bar must never go backwards. A line carrying no percentage has to
+        # keep the previous value, or the whole post-processing phase reads as
+        # a restart.
+        assert me["percent"] >= last_pct, \
+            f"percent went backwards: {last_pct} -> {me['percent']}"
+        last_pct = me["percent"]
+
+        # A root path is never surfaced in an API response, and a tool's
+        # progress line names the file it is writing.
+        d = me.get("detail", "")
+        if "/" in d:
+            assert d.startswith(batch) or batch in d, \
+                f"detail leaks a path outside the batch: {d!r}"
+
+        if state in ("done", "error", "cancelled"):
+            break
+        time.sleep(2)
+
+    assert state == "done", f"Fetch did not finish cleanly: {state}"
+    print(f"PASS  live fetch completed ({last_pct}%)")
+
+    # No sleep here on purpose: the worker scans before it reports done, so
+    # the listing must already be right.
+    after = _ok(_get("getArtists.view", {"personal": "true"}))
+    after_names = {a["name"]
+                   for i in after.get("artists", {}).get("index", [])
+                   for a in i.get("artist", [])}
+    assert after_names - before_names, \
+        "done was reported but the personal listing did not change"
+    print("PASS  the library is correct the moment the job says done")
+
+
+def test_live_cancel():
+    if LIVE_URL is None:
+        raise Skip("LIVE_URL is not set")
+    _require_handlers()
+
+    job = _ok(_get("fetchUrl.view", {"url": LIVE_URL, "mode": "video"}))["fetchJob"]
+    jid = job["id"]
+    time.sleep(2)
+    _ok(_get("cancelFetch.view", {"id": jid}))
+
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        sr = _ok(_get("getFetchJobs.view"))
+        me = next((j for j in sr.get("fetchJobs", {}).get("fetchJob", [])
+                   if j["id"] == jid), None)
+        if me and me["state"] == "cancelled":
+            print("PASS  a running fetch can be cancelled")
+            return
+        time.sleep(1)
+    raise AssertionError("cancelled job never reached the cancelled state")
+
+
+def test_duplicate_refused():
+    if LIVE_URL is None:
+        raise Skip("LIVE_URL is not set")
+    _require_handlers()
+    job = _ok(_get("fetchUrl.view", {"url": LIVE_URL}))["fetchJob"]
+    try:
+        _err(_get("fetchUrl.view", {"url": LIVE_URL}), 0)
+        print("PASS  the same URL twice is refused while one is in flight")
+    finally:
+        _get("cancelFetch.view", {"id": job["id"]})
+
+
+TESTS = [
+    test_handlers_well_formed,
+    test_missing_url,
+    test_scheme_refused,
+    test_no_handler_refused,
+    test_pattern_is_anchored,
+    test_cancel_unknown_id,
+    test_jobs_list_shape,
+    test_permission_and_isolation,
+    test_live_fetch,
+    test_duplicate_refused,
+    test_live_cancel,
+]
+
+if __name__ == "__main__":
+    failed = skipped = 0
+    for t in TESTS:
+        try:
+            t()
+        except Skip as e:
+            print(f"SKIP  {t.__name__}: {e}")
+            skipped += 1
+        except Exception as e:
+            print(f"FAIL  {t.__name__}: {e}")
+            failed += 1
+    ran = len(TESTS) - skipped
+    print(f"\n{ran - failed}/{ran} passed, {skipped} skipped")
+    sys.exit(failed)

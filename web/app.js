@@ -814,6 +814,19 @@ function libraryModes() {
 let uploadsSignature = '';
 let uploadsPollTimer = null;
 
+// What this server can fetch from a URL: null until asked, [] when the feature
+// is unavailable — no handlers configured, or the tool they name is not
+// installed. An empty list is what keeps the row undrawn, so the client never
+// offers something the server would only refuse.
+//
+// Module-level for the same reason the timer above is: viewArtists() destroys
+// the upload bar's DOM whenever it re-renders.
+let urlHandlers    = null;
+let fetchPollTimer = null;
+// The last states seen, keyed by job id, so a job reaching 'done' is noticed
+// once rather than re-triggering a re-render on every tick.
+let fetchLastState = {};
+
 // name+albumCount per artist, not the artist count: a second upload usually
 // adds an album to an artist who is already listed, which leaves the count
 // untouched.
@@ -857,6 +870,98 @@ function pollForUpload(status, files) {
       }, 2000);
    }
 
+// Watches the server's URL-fetch jobs and redraws their rows.
+//
+// Deliberately not pollForUpload(). That one watches the *listing* change,
+// which is the right signal for an archive already on disk and waiting only for
+// a scan, and its ten tries at two seconds are nowhere near long enough for a
+// download. Here the server scans before it reports 'done', so 'done' already
+// means the library is correct and the listing can simply be re-drawn.
+function pollFetchJobs() {
+   clearInterval(fetchPollTimer);
+
+   const tick = async () => {
+      // Gone once anything else has rewritten pane 0 — another library mode, or
+      // Settings/Playlists/Recents. Same guard pollForUpload() uses, and for the
+      // same reason: a re-render then would drag the user back here.
+      const host = document.querySelector('#pane-artists .fetch-jobs');
+      if (!host) { clearInterval(fetchPollTimer); return; }
+
+      let r;
+      try { r = await apiCall('getFetchJobs'); }
+      catch { return; }   // a blip should not end the wait
+      const jobs = r.fetchJobs?.fetchJob ?? [];
+
+      host.innerHTML = '';
+      let live = false, finished = false;
+      for (const j of jobs) {
+         if (j.state === 'queued' || j.state === 'running'
+             || j.state === 'scanning')
+            live = true;
+         if (j.state === 'done' && fetchLastState[j.id] !== 'done')
+            finished = true;
+         fetchLastState[j.id] = j.state;
+
+         const row = document.createElement('div');
+         row.className = 'fetch-job';
+
+         const head = document.createElement('div');
+         head.className = 'fetch-head';
+         const name = document.createElement('span');
+         name.className = 'fetch-name';
+         name.textContent = `${j.handler} · ${j.mode}`;
+         head.appendChild(name);
+         const state = document.createElement('span');
+         state.className = 'fetch-state';
+         state.textContent = j.state === 'done'
+            ? `done — ${j.files} file(s)`
+            : (j.state === 'error' ? (j.error || 'error') : j.state);
+         head.appendChild(state);
+         if (j.state === 'queued' || j.state === 'running') {
+            const cancel = document.createElement('button');
+            cancel.className   = 'fetch-cancel';
+            cancel.textContent = 'Cancel';
+            cancel.addEventListener('click', async () => {
+               cancel.disabled = true;
+               try { await apiCall('cancelFetch', {id: j.id}); } catch {}
+               });
+            head.appendChild(cancel);
+            }
+         row.appendChild(head);
+
+         if (j.state === 'running' || j.state === 'scanning') {
+            const bar = document.createElement('progress');
+            bar.max   = 100;
+            bar.value = j.percent ?? 0;
+            row.appendChild(bar);
+            }
+         if (j.detail) {
+            const d = document.createElement('p');
+            d.className   = 'fetch-detail';
+            d.textContent = j.detail;
+            row.appendChild(d);
+            }
+         host.appendChild(row);
+         }
+
+      // viewArtists() slides back to pane 0, so hold off while the user is
+      // reading an album; the job stays 'done' and this fires on a later tick.
+      if (finished && paneNav.depth === 0) {
+         clearInterval(fetchPollTimer);
+         viewArtists();
+         return;
+         }
+      if (!live) clearInterval(fetchPollTimer);
+      };
+
+   fetchPollTimer = setInterval(tick, 2000);
+   // Deferred rather than called: makeUploadBar() starts the poll while its own
+   // node is still detached, so a tick right now would find no .fetch-jobs and
+   // stop the interval it just set. A macrotask is enough — the caller appends
+   // the fragment before yielding.
+   setTimeout(tick, 0);
+   }
+
 // The archive-upload form, drawn at the top of the Uploads listing. Returns the
 // node rather than appending it, so the caller places it.
 function makeUploadBar() {
@@ -882,14 +987,97 @@ function makeUploadBar() {
    hint.textContent = 'Music archive: zip, tar, tar.gz';
    bar.appendChild(hint);
 
+   // Created here but appended below the URL row: both producers report through
+   // the same status line, and it reads as belonging to whichever was used last
+   // only if it sits under both of them.
    const progress = document.createElement('progress');
    progress.value  = 0;
    progress.max    = 100;
    progress.hidden = true;
-   bar.appendChild(progress);
 
    const uploadStatus = document.createElement('p');
    uploadStatus.className = 'upload-status';
+
+   // The URL row, drawn only when the server says it can fetch something. An
+   // empty handler list is the server saying the feature is unavailable — no
+   // handlers configured, or the tool they name is not installed — and offering
+   // a box that can only be refused would be worse than offering nothing.
+   if (urlHandlers?.length) {
+      const urlRow = document.createElement('div');
+      urlRow.className = 'upload-row';
+      bar.appendChild(urlRow);
+
+      const urlInput = document.createElement('input');
+      urlInput.type        = 'url';
+      urlInput.className   = 'token-input';
+      urlInput.placeholder = 'https://…';
+      urlRow.appendChild(urlInput);
+
+      // Only offered when some handler can actually do both; with one mode
+      // available there is no choice to make and a toggle would be furniture.
+      const canAudio = urlHandlers.some(h => h.audio);
+      const canVideo = urlHandlers.some(h => h.video);
+      let fetchMode = localStorage.getItem('gd_fetch_mode') || 'audio';
+      if (fetchMode === 'audio' && !canAudio) fetchMode = 'video';
+      if (fetchMode === 'video' && !canVideo) fetchMode = 'audio';
+
+      if (canAudio && canVideo) {
+         // The same segmented control the library modes use — it is the same
+         // kind of choice, and it already has an active state.
+         const seg = document.createElement('div');
+         seg.className = 'library-modes';
+         for (const m of ['audio', 'video']) {
+            const btn = document.createElement('button');
+            btn.className = 'library-mode' + (m === fetchMode ? ' active' : '');
+            btn.textContent = m === 'audio' ? 'Audio' : 'Video';
+            btn.addEventListener('click', () => {
+               fetchMode = m;
+               localStorage.setItem('gd_fetch_mode', m);
+               for (const b of seg.children)
+                  b.classList.toggle('active', b === btn);
+               });
+            seg.appendChild(btn);
+            }
+         urlRow.appendChild(seg);
+         }
+
+      const fetchBtn = document.createElement('button');
+      fetchBtn.textContent = 'Fetch';
+      fetchBtn.className   = 'upload-btn';
+      urlRow.appendChild(fetchBtn);
+
+      const names = urlHandlers.map(h => h.name).join(', ');
+      const urlHint = document.createElement('p');
+      urlHint.className   = 'admin-hint';
+      urlHint.textContent = `Or paste a URL — handled by: ${names}`;
+      bar.appendChild(urlHint);
+
+      const submit = async () => {
+         const url = urlInput.value.trim();
+         if (!url) { uploadStatus.textContent = 'No URL entered.'; return; }
+         fetchBtn.disabled = true;
+         uploadStatus.textContent = '';
+         try {
+            // apiCall, not XHR: there is no upload progress to report here —
+            // the server does the fetching, and getFetchJobs reports on it.
+            await apiCall('fetchUrl', {url, mode: fetchMode});
+            // Cleared on success so a re-render cannot resurrect a stale URL
+            // into a second fetch.
+            urlInput.value = '';
+            pollFetchJobs();
+            }
+         catch (e) {
+            uploadStatus.textContent = `Error: ${e.message ?? e}`;
+            }
+         fetchBtn.disabled = false;
+         };
+      fetchBtn.addEventListener('click', submit);
+      urlInput.addEventListener('keydown', e => {
+         if (e.key === 'Enter') submit();
+         });
+      }
+
+   bar.appendChild(progress);
    bar.appendChild(uploadStatus);
 
    uploadBtn.addEventListener('click', () => {
@@ -942,6 +1130,15 @@ function makeUploadBar() {
       xhr.send(fd);
       });
 
+   if (urlHandlers?.length) {
+      const jobs = document.createElement('div');
+      jobs.className = 'fetch-jobs';
+      bar.appendChild(jobs);
+      // Unconditionally, not only after a Fetch: a page reload part-way through
+      // a ten-minute download would otherwise show nothing at all.
+      pollFetchJobs();
+      }
+
    return bar;
    }
 
@@ -958,6 +1155,18 @@ async function viewArtists() {
          musicFolders = mf.musicFolders?.musicFolder ?? [];
          }
       catch { musicFolders = []; }
+      }
+
+   // Static for the life of the server, like the roots above. Asked only when
+   // the user could act on the answer, so an account with no upload rights
+   // never sends the request at all.
+   if (urlHandlers === null
+       && (currentUser?.uploadRole || currentUser?.adminRole)) {
+      try {
+         const r = await apiCall('getUrlHandlers');
+         urlHandlers = r.urlHandlers?.urlHandler ?? [];
+         }
+      catch { urlHandlers = []; }
       }
 
    // Fall back if the stored mode is no longer offered — a root may have been

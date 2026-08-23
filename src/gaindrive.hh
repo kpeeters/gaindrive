@@ -10,11 +10,14 @@
 #include <atomic>
 #include <condition_variable>
 #include <deque>
+#include <filesystem>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 #include <httplib.h>
 
 #include "mediastore.hh"
@@ -22,6 +25,7 @@
 #include "coverart.hh"
 #include "folderwatcher.hh"
 #include "transcodecache.hh"
+#include "urlfetch.hh"
 
 class GainDrive {
 	public:
@@ -46,7 +50,14 @@ class GainDrive {
 		          // Chromecasts named in the configuration, for the ones mDNS
 		          // cannot find. Passed in rather than set afterwards because
 		          // cast_manager_ is private and main has no other way in.
-		          const std::vector<CastManager::CastDevice>& cast_devices = {});
+		          const std::vector<CastManager::CastDevice>& cast_devices = {},
+		          // URL-fetch handlers. nullopt is "the config said nothing",
+		          // which means the built-in table; an empty vector is "the
+		          // config said no", which disables the feature. A plain vector
+		          // could not express both.
+		          const std::optional<std::vector<UrlHandler>>& url_handlers
+		              = std::nullopt,
+		          int url_fetch_timeout_s = 2 * 60 * 60);
 		~GainDrive();
 		// Binds and serves. Returns false without serving if the port could
 		// not be acquired, so the caller can exit non-zero rather than treat a
@@ -147,6 +158,64 @@ class GainDrive {
 		std::deque<PortraitJob> portrait_queue_;
 		std::set<std::string>   portrait_queued_;
 		std::atomic<bool>       portrait_stop_{false};
+
+		// ---- URL fetch ----
+		//
+		// Same shape as the portrait worker, and for the same reason: a fetch
+		// takes minutes, so it cannot run on an httplib thread and the request
+		// cannot wait for it.
+		//
+		// The queue lives here rather than inside UrlFetcher because the work
+		// either side of the child process is gaindrive's — the uploads root,
+		// the username, the depth-two normalisation and scan_dirs() — while
+		// UrlFetcher knows the tool and nothing else. Owning the thread here is
+		// also what makes it safe: it is joined in the destructor *body*, so it
+		// cannot still be inside scan_dirs() when store_ is destroyed.
+		//
+		// Jobs are held in memory only. A batch is a directory and a scan; there
+		// is no state a restart would need to repair, and a table would have to
+		// be pruned by something. The cost is that a fetch in flight when the
+		// server stops is lost, which is why a failed, timed-out or cancelled
+		// job removes its batch directory rather than leaving a part file in the
+		// uploads root for ever.
+		struct FetchJob {
+			std::string id;          // the batch uuid; also the id on the wire
+			std::string batch;       // stored form, <root>/<user>/<uuid>
+			std::string user;
+			std::string url;
+			std::string handler;
+			bool        audio   = true;
+			// queued | running | scanning | done | error | cancelled
+			std::string state   = "queued";
+			int         percent = 0;
+			std::string detail;      // sanitised: never an absolute path
+			std::string error;
+			int         files   = 0;
+			int64_t     started = 0, finished = 0;
+			};
+		void fetch_worker();
+		// Everything between a producer finishing and the library being correct:
+		// normalise what was written into <artist>/<album>/file, then scan each
+		// artist directory in the batch. Shared with /upload, which is the same
+		// three steps around a different producer. Catches — a contended
+		// database must not take the server with it.
+		void scan_batch(const std::string& rel_batch,
+		                const std::filesystem::path& dest,
+		                const std::string& fallback_artist);
+		// Rewrites the batch's absolute path to its stored form. A tool's
+		// progress line names the file it is writing, absolutely, and a root
+		// path is never surfaced in an API response.
+		std::string sanitise_detail(const std::string& line,
+		                            const std::filesystem::path& dest,
+		                            const std::string& rel_batch) const;
+
+		UrlFetcher              url_fetcher_;
+		std::thread             fetch_thread_;
+		std::mutex              fetch_mu_;
+		std::condition_variable fetch_cv_;
+		std::deque<std::string> fetch_queue_;   // job ids, in submission order
+		std::deque<FetchJob>    fetch_jobs_;    // queued, running and retained
+		std::atomic<bool>       fetch_stop_{false};
 
 		FolderWatcher   watcher_;
 		httplib::Server server_;

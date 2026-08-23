@@ -1,5 +1,6 @@
 #include "transcodecache.hh"
 #include "stamp.hh"
+#include "proc.hh"
 
 #include <algorithm>
 #include <chrono>
@@ -222,19 +223,10 @@ bool TranscodeCache::run_ffmpeg(const std::vector<std::string>& argv,
 		if (errf) {
 			// The reason ffmpeg gives is on its last line or two; without this
 			// a failed transcode is indistinguishable from a missing file.
-			std::fflush(errf.get());
-			std::fseek(errf.get(), 0, SEEK_END);
-			long end   = std::ftell(errf.get());
-			long start = end > 4096 ? end - 4096 : 0;
-			if (end > 0 && std::fseek(errf.get(), start, SEEK_SET) == 0) {
-				std::string buf(static_cast<size_t>(end - start), '\0');
-				buf.resize(std::fread(buf.data(), 1, buf.size(), errf.get()));
-				for (auto& c : buf)
-					if (c == '\n' || c == '\r') c = ' ';
-				if (!buf.empty())
-					std::cout << stamp() << "transcode cache: ffmpeg stderr: "
-					          << buf << std::endl;
-				}
+			std::string tail = stderr_tail(errf.get());
+			if (!tail.empty())
+				std::cout << stamp() << "transcode cache: ffmpeg stderr: "
+				          << tail << std::endl;
 			}
 		return false;
 		}
