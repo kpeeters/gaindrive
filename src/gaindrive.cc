@@ -307,6 +307,36 @@ static std::string fmt_of(const httplib::Request& req)
 	return (it != req.params.end() && it->second == "json") ? "json" : "xml";
 	}
 
+// The address to attribute a request to in the log.
+//
+// Behind a reverse proxy every request arrives *from the proxy*, so
+// `remote_addr` is the same value for all of them and distinguishes nothing —
+// which matters most for exactly the question it is there to answer: whether a
+// request came from a browser or from a Chromecast fetching for itself. Apache
+// and nginx both pass the original along in `X-Forwarded-For`, a
+// comma-separated chain with the client first and each proxy appended after it,
+// so the first entry is the one worth having.
+//
+// **Trusted without checking, and only ever for logging.** The header is
+// client-supplied and forgeable, so a directly exposed server can be made to
+// write whatever a caller likes into its own log. That is acceptable here
+// because nothing reads it back and no decision depends on it — anything that
+// ever authorises by address must use `remote_addr`, which cannot be spoofed
+// past the TCP handshake.
+static std::string client_addr(const httplib::Request& req)
+	{
+	const std::string xff = req.get_header_value("X-Forwarded-For");
+	if (xff.empty()) return req.remote_addr;
+
+	const auto comma = xff.find(',');
+	const std::string first = comma == std::string::npos ? xff
+	                                                     : xff.substr(0, comma);
+	const auto b = first.find_first_not_of(" \t");
+	if (b == std::string::npos) return req.remote_addr;   // header was blank
+	const auto e = first.find_last_not_of(" \t");
+	return first.substr(b, e - b + 1);
+	}
+
 // ---- Helpers ----------------------------------------------------------
 
 // The lowercased extension of a path with no leading dot, which is the form
@@ -1650,7 +1680,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		});
 
 	server_.set_logger([this](const httplib::Request& req, const httplib::Response& res) {
-		std::cout << stamp(req.remote_addr)
+		std::cout << stamp(client_addr(req))
 		          << req.method << " " << req.path;
 		if (!req.params.empty()) {
 			std::cout << "?";
@@ -3794,7 +3824,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::cout << stamp() << "getCaptions: id=" << it->second
 		          << " captionId=" << index << " " << vtt.size() << " bytes"
 		          << (cast_authed ? " (cast token)" : "")
-		          << " to " << req.remote_addr << std::endl;
+		          << " to " << client_addr(req) << std::endl;
 		res.set_content(vtt, "text/vtt");
 		});
 
