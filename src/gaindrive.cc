@@ -1473,17 +1473,30 @@ static int extract_archive_to_dir(const std::string& content,
    }
 
 // Make a string safe to use as a single directory name. Shared by the upload
-// reorganiser and by renameAlbum, so a name typed by hand lands in exactly the
-// directory the uploader would have created for the same tag.
+// reorganiser, by renameAlbum and by the URL fetcher's name override, so a name
+// typed by hand lands in exactly the directory the uploader would have created
+// for the same tag.
 //
 // Dropping '/' is also the traversal guard: a name is one path component by
-// construction, so no input can escape the folder it is being created in.
+// construction, so no input can escape the folder it is being created in. Note
+// ".." needs no case of its own: the leading-dot strip below annihilates it,
+// along with "." and "...", and an empty result is refused by every caller that
+// took a name from a person.
+//
+// Dropping the control characters is what keeps such a name out of two places
+// it has no business reaching. A directory name is echoed into the log by the
+// scanner and by the batch renamer, where an embedded newline forges a log
+// line; and it is written into a tinyxml2 attribute by getFetchJobs, where a
+// raw C0 byte is not well-formed XML and nothing escapes it. Neither mattered
+// while every component came from yt-dlp or from TagLib; a typed one is the
+// first arbitrary string here to become a path component.
 static std::string sanitise_component(const std::string& s)
    {
    std::string r;
    for (char c : s)
-      if (c != '/' && c != '\\' && c != '\0' && c != ':' &&
-          c != '*'  && c != '?' && c != '"'  && c != '<' && c != '>')
+      if (static_cast<unsigned char>(c) >= 0x20 && c != 0x7f &&
+          c != '/' && c != '\\' && c != ':' &&
+          c != '*' && c != '?'  && c != '"' && c != '<' && c != '>')
          r += c;
    while (!r.empty() && (r.front() == ' ' || r.front() == '.'))
       r.erase(r.begin());
@@ -1667,6 +1680,201 @@ static int reparent_loose_media(const std::filesystem::path& batch_root,
 		std::cout << stamp() << "reparent: filed " << moved
 		          << " loose file(s) under " << batch_root << std::endl;
 	return moved;
+	}
+
+// Moves everything in `src` into `dst`, which may already hold entries of the
+// same name, then removes the emptied `src`.
+//
+// A plain fs::rename refuses a non-empty target, which is exactly the case
+// merging exists for, so the move is done entry by entry. It recurses only
+// where both sides are directories; doing a whole subtree in one call would
+// abandon half a batch with nothing said about it.
+static void batch_merge_into(const std::filesystem::path& src,
+                             const std::filesystem::path& dst)
+	{
+	namespace fs = std::filesystem;
+	std::error_code ec;
+
+	// Collected before anything moves: the first rename mutates the directory
+	// this iterator is walking, and that is undefined.
+	std::vector<fs::path> entries;
+	for (auto& e : fs::directory_iterator(src, ec)) entries.push_back(e.path());
+	if (ec) {
+		std::cout << stamp() << "batch names: cannot read " << src << ": "
+		          << ec.message() << std::endl;
+		return;
+		}
+
+	fs::create_directories(dst, ec);
+	if (ec) {
+		std::cout << stamp() << "batch names: cannot create " << dst << ": "
+		          << ec.message() << std::endl;
+		return;
+		}
+
+	for (const auto& p : entries) {
+		fs::path target = dst / p.filename();
+		std::error_code sec, tec;
+		if (fs::is_directory(p, sec) && fs::is_directory(target, tec)) {
+			batch_merge_into(p, target);
+			continue;
+			}
+		// Two sources really do collide: the built-in handler writes a
+		// cover.<ext> into every album directory, so merging two albums under
+		// one name brings two of them, and a rename would destroy one silently.
+		for (int n = 2; n < 100; n++) {
+			std::error_code xec;
+			if (!fs::exists(target, xec)) break;
+			target = dst / (p.stem().string() + " (" + std::to_string(n) + ")"
+			                + p.extension().string());
+			}
+		std::error_code rec;
+		fs::rename(p, target, rec);
+		if (rec)
+			std::cout << stamp() << "batch names: rename failed for " << p
+			          << " -> " << target << ": " << rec.message() << std::endl;
+		}
+
+	// Only when it really is empty: a rename that failed above left a file
+	// behind, and removing the directory anyway would delete it.
+	std::error_code eec;
+	if (fs::is_empty(src, eec) && !eec) fs::remove(src, eec);
+	}
+
+// Renames every directory directly inside `parent` to `name`, merging where
+// that collides. Never recurses — see apply_batch_names for why the depth
+// matters.
+static void batch_rename_level(const std::filesystem::path& parent,
+                               const std::string& name)
+	{
+	namespace fs = std::filesystem;
+	std::error_code ec;
+
+	// Two error codes on purpose: is_directory() would otherwise overwrite the
+	// iterator's, so a directory that could not be opened would be reported as
+	// whatever the last entry's type test happened to say.
+	std::vector<fs::path> dirs;
+	std::error_code dec;
+	for (auto& e : fs::directory_iterator(parent, ec))
+		if (e.is_directory(dec)) dirs.push_back(e.path());
+	if (ec) {
+		std::cout << stamp() << "batch names: cannot read " << parent << ": "
+		          << ec.message() << std::endl;
+		return;
+		}
+
+	const fs::path target = parent / name;
+
+	// A regular file already sitting under the wanted name is not something to
+	// merge into. Nothing should put one there, since reparent_loose_media ran
+	// first, but iterating it would only set an error code and the sources
+	// would be left renamed nowhere with no explanation.
+	std::error_code fec;
+	if (fs::exists(target, fec) && !fs::is_directory(target, fec)) {
+		std::cout << stamp() << "batch names: " << target
+		          << " is not a directory; leaving the names alone" << std::endl;
+		return;
+		}
+
+	for (const auto& d : dirs) {
+		if (d.filename() == name) continue;   // already the typed name
+
+		// On a case-insensitive filesystem — macOS by default — exists() is
+		// true for "artist" while "Artist" is what is on disk. Merging a
+		// directory into itself would move each child into the directory it is
+		// already in and then remove it, so the two are told apart by identity
+		// rather than by name: equivalent() compares device and inode. A plain
+		// rename is right there, and is what corrects the case.
+		std::error_code xec, qec;
+		bool exists = fs::exists(target, xec);
+		bool same   = exists && fs::equivalent(d, target, qec) && !qec;
+
+		if (exists && !same) {
+			batch_merge_into(d, target);
+			continue;
+			}
+		std::error_code rec;
+		fs::rename(d, target, rec);
+		if (rec)
+			std::cout << stamp() << "batch names: rename failed for " << d
+			          << " -> " << target << ": " << rec.message() << std::endl;
+		}
+	}
+
+// Files a whole batch under names a person typed before pressing Fetch, by
+// renaming the two directory levels the producers create. An empty name means
+// "keep whatever the handler chose", so a blank artist with an album given
+// renames only the second level.
+//
+// **This is a plain fs::rename and must never become relocate_prefix().**
+// Nothing under the batch has been indexed yet: scan_batch() is the only thing
+// that ever hands a batch to scan_dirs() and does so after this; scan() skips
+// the uploads root outright; and FolderWatcher never watches it, so no inotify
+// event can name one. There is therefore no row holding any of these paths to
+// repair — and relocate_prefix's plain UPDATEs are safe only because its
+// callers first checked the destination was free, which merging deliberately
+// does not do.
+//
+// Renaming rather than substituting the names into the handler's -o template is
+// also deliberate, and the second reason is the stronger one. urlfetch_expand()
+// replaces whole argv elements, so a placeholder inside -o would need a
+// substring rewrite; and -o is yt-dlp's own format language, where '%' is
+// significant, so a name interpolated there would be expanded by the tool
+// rather than by us. The guarantee that a hostile *field* cannot escape the
+// batch says nothing about hostile template text.
+//
+// **Only the top two levels are touched.** A handler that wrote a third
+// (Artist/Album/Disc 2/track) keeps it: that is a disc directory to the
+// scanner, and renaming it would fuse two discs into one. Leaving the depth
+// alone is also what preserves promoteAlbum's exact-five-component check.
+//
+// Several directories at a level are merged into the one typed name, because
+// "fetch this playlist as Artist X, Album Y" is the request being answered.
+//
+// Tags are deliberately *not* rewritten, unlike renameAlbum. The scanner takes
+// artist and album from directory names and never from tags, so nothing in the
+// API is wrong; there is no folder id yet to keep consistent; and running
+// TagLib over a whole batch inside the fetch worker would add minutes to a path
+// whose entire point is that "done" means done.
+static void apply_batch_names(const std::filesystem::path& batch_root,
+                              const std::string& artist,
+                              const std::string& album)
+	{
+	namespace fs = std::filesystem;
+	if (artist.empty() && album.empty()) return;
+
+	// Belt and braces over sanitise_component's traversal guard, the same
+	// pairing renameAlbum keeps. It cannot fire for a name that came through
+	// the endpoint; it is here so that stops being an accident.
+	auto one_component = [](const std::string& s) {
+		return !s.empty() && s != "." && s != ".."
+		    && s.find('/')  == std::string::npos
+		    && s.find('\\') == std::string::npos;
+		};
+	if ((!artist.empty() && !one_component(artist))
+	    || (!album.empty() && !one_component(album))) {
+		std::cout << stamp() << "batch names: refusing a name that is not one "
+		             "path component" << std::endl;
+		return;
+		}
+
+	if (!artist.empty()) batch_rename_level(batch_root, artist);
+
+	// The album level is renamed inside *every* artist directory, not just one.
+	// With no artist given there may be several, and "call the album X" is as
+	// true of each; with an artist given there is exactly one by now, so the
+	// two cases are the same loop.
+	if (!album.empty()) {
+		std::error_code ec, dec;
+		std::vector<fs::path> artists;
+		for (auto& e : fs::directory_iterator(batch_root, ec))
+			if (e.is_directory(dec)) artists.push_back(e.path());
+		for (const auto& a : artists) batch_rename_level(a, album);
+		}
+
+	std::cout << stamp() << "batch names: " << batch_root << " filed under "
+	          << (artist.empty() ? "<handler>" : artist) << " / "
+	          << (album.empty()  ? "<handler>" : album) << std::endl;
 	}
 
 // How many fetches may be waiting at once. One worker runs the queue, so this
@@ -5009,6 +5217,40 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
+		// The two optional names, checked last because they are the only
+		// optional thing: everything above answers "can this URL be fetched at
+		// all", which is the security boundary, and a request that was going to
+		// be refused for the URL should say so rather than complain about a
+		// name it would never have used.
+		//
+		// Blank — absent, or nothing but whitespace — means "keep whatever the
+		// handler chose", so a client can send both fields unconditionally. A
+		// name that is *not* blank but sanitises away to nothing was typed and
+		// is wrong; renameAlbum answers the identical question the same way,
+		// and for the same reason: filing it under "Unknown" would hide the
+		// mistake. That substitution belongs to reorganise_by_tags, where
+		// nobody typed anything.
+		//
+		// utf8_clean before sanitise_component, not the other way round. These
+		// become directory names and from there folders.path, and invalid UTF-8
+		// reaching dump() is a bare 500 on an httplib thread; cleaning it can
+		// also expose a new trailing space, which sanitise_component must then
+		// get the chance to strip. The 200-byte cap keeps the name well under
+		// NAME_MAX.
+		auto typed = [&](const char* key, std::string& out) -> bool {
+			std::string raw = qp(key);
+			if (raw.find_first_not_of(" \t") == std::string::npos) return true;
+			out = sanitise_component(utf8_clean(raw, 200));
+			return !out.empty();
+			};
+		std::string want_artist, want_album;
+		if (!typed("artist", want_artist)) {
+			err(10, "The artist name contains nothing usable."); return;
+			}
+		if (!typed("album", want_album)) {
+			err(10, "The album name contains nothing usable."); return;
+			}
+
 		FetchJob job;
 		job.id      = make_uuid();
 		job.batch   = uploads_root_name_ + "/" + uname + "/" + job.id;
@@ -5016,6 +5258,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		job.url     = url;
 		job.handler = utf8_clean(h->name, 200);
 		job.audio   = audio;
+		job.artist  = want_artist;
+		job.album   = want_album;
 		job.started = static_cast<int64_t>(std::time(nullptr));
 
 		{
@@ -5049,6 +5293,8 @@ GainDrive::GainDrive(const std::string& db_path,
 				                 {"batch",   job.batch},
 				                 {"handler", job.handler},
 				                 {"mode",    job.audio ? "audio" : "video"},
+				                 {"artist",  job.artist},
+				                 {"album",   job.album},
 				                 {"state",   job.state}};
 				});
 		else
@@ -5058,6 +5304,8 @@ GainDrive::GainDrive(const std::string& db_path,
 				e->SetAttribute("batch",   job.batch.c_str());
 				e->SetAttribute("handler", job.handler.c_str());
 				e->SetAttribute("mode",    job.audio ? "audio" : "video");
+				e->SetAttribute("artist",  job.artist.c_str());
+				e->SetAttribute("album",   job.album.c_str());
 				e->SetAttribute("state",   job.state.c_str());
 				root->InsertEndChild(e);
 				});
@@ -5083,6 +5331,11 @@ GainDrive::GainDrive(const std::string& db_path,
 		// what gets fetched and must stay byte-exact, while what leaves here is
 		// serialised — and a percent-decoded query parameter is arbitrary
 		// bytes. See utf8_clean.
+		//
+		// artist and album are absent from this list on purpose. They were
+		// cleaned in fetchUrl, because they become directory names there and a
+		// directory name has to be valid before it is created, not before it is
+		// reported.
 		for (auto& j : mine) {
 			j.url     = utf8_clean(j.url,     2048);
 			j.handler = utf8_clean(j.handler, 200);
@@ -5098,6 +5351,8 @@ GainDrive::GainDrive(const std::string& db_path,
 					               {"batch",    j.batch},
 					               {"handler",  j.handler},
 					               {"mode",     j.audio ? "audio" : "video"},
+					               {"artist",   j.artist},
+					               {"album",    j.album},
 					               {"url",      j.url},
 					               {"state",    j.state},
 					               {"percent",  j.percent},
@@ -5117,6 +5372,8 @@ GainDrive::GainDrive(const std::string& db_path,
 					e->SetAttribute("batch",    j.batch.c_str());
 					e->SetAttribute("handler",  j.handler.c_str());
 					e->SetAttribute("mode",     j.audio ? "audio" : "video");
+					e->SetAttribute("artist",   j.artist.c_str());
+					e->SetAttribute("album",    j.album.c_str());
 					e->SetAttribute("url",      j.url.c_str());
 					e->SetAttribute("state",    j.state.c_str());
 					e->SetAttribute("percent",  j.percent);
@@ -5447,12 +5704,25 @@ GainDrive::~GainDrive()
 // where they exist, then the depth fix for whatever had none.
 void GainDrive::scan_batch(const std::string& rel_batch,
                            const std::filesystem::path& dest,
-                           const std::string& fallback_artist)
+                           const std::string& fallback_artist,
+                           const std::string& artist_override,
+                           const std::string& album_override)
 	{
 	namespace fs = std::filesystem;
 	try {
+		// Tags first, and never skipped even when both names were typed: this
+		// is what derives an album from a file's own metadata, drags a sibling
+		// cover along with the audio it belongs to, and prunes what it empties.
+		// Renaming before it would let a still-loose file scatter into a
+		// tag-named pair *beside* the typed one. It costs one redundant rename.
 		reorganise_by_tags(dest);
-		reparent_loose_media(dest, fallback_artist);
+		// The typed artist doubles as the fallback, so a stray file is filed
+		// under it directly rather than under the handler's name and renamed a
+		// moment later. Cosmetic — the rename below would fix it either way —
+		// but it makes the log read sanely.
+		reparent_loose_media(dest, artist_override.empty() ? fallback_artist
+		                                                   : artist_override);
+		apply_batch_names(dest, artist_override, album_override);
 
 		// One entry per artist directory inside the batch, so artist names —
 		// not the UUID — are what appears as a top-level entry in personal
@@ -5616,7 +5886,8 @@ void GainDrive::fetch_worker()
 				// background thread, so there is nothing to gain by detaching
 				// and everything to gain by "done" meaning the library is
 				// actually correct. The client re-renders rather than guessing.
-				scan_batch(snap.batch, dest, snap.handler);
+				scan_batch(snap.batch, dest, snap.handler,
+				           snap.artist, snap.album);
 				std::lock_guard<std::mutex> lk(fetch_mu_);
 				for (auto& j : fetch_jobs_)
 					if (j.id == id) {

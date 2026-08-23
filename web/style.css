@@ -2177,6 +2177,25 @@ body {
    margin-top: 0;
    }
 
+/* Two name boxes share a line. .upload-row .token-input above already stops
+   them being crushed; the flex-basis is what makes them wrap onto separate
+   lines on a narrow screen instead of shrinking to a few characters each. */
+.fetch-names { flex-wrap: wrap; }
+.fetch-names .token-input { flex: 1 1 8rem; }
+
+.name-clear {
+   background: none;
+   border: 1px solid var(--border);
+   border-radius: 4px;
+   color: var(--text-dim);
+   cursor: pointer;
+   flex: 0 0 auto;
+   font-size: 0.8rem;
+   padding: 0.3rem 0.6rem;
+   }
+
+.name-clear:hover { color: var(--text); }
+
 .fetch-jobs {
    display: flex;
    flex-direction: column;

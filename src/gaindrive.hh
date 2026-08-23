@@ -185,6 +185,14 @@ class GainDrive {
 			std::string url;
 			std::string handler;
 			bool        audio   = true;
+			// What the user typed before pressing Fetch, each already
+			// sanitised into a single path component, and empty when they
+			// typed nothing. Applied by renaming the batch's two directory
+			// levels after the tool exits and before the scan — see
+			// apply_batch_names(). Unlike url and handler these are cleaned on
+			// the way *in*, because they become directory names rather than
+			// only wire strings.
+			std::string artist, album;
 			// queued | running | scanning | done | error | cancelled
 			std::string state   = "queued";
 			int         percent = 0;
@@ -195,13 +203,17 @@ class GainDrive {
 			};
 		void fetch_worker();
 		// Everything between a producer finishing and the library being correct:
-		// normalise what was written into <artist>/<album>/file, then scan each
-		// artist directory in the batch. Shared with /upload, which is the same
-		// three steps around a different producer. Catches — a contended
-		// database must not take the server with it.
+		// normalise what was written into <artist>/<album>/file, apply any names
+		// the user typed by hand, then scan each artist directory in the batch.
+		// Shared with /upload, which is the same steps around a different
+		// producer and passes no overrides — hence the defaults, so that call
+		// site does not have to mention a feature it does not have. Catches — a
+		// contended database must not take the server with it.
 		void scan_batch(const std::string& rel_batch,
 		                const std::filesystem::path& dest,
-		                const std::string& fallback_artist);
+		                const std::string& fallback_artist,
+		                const std::string& artist_override = "",
+		                const std::string& album_override  = "");
 		// Rewrites the batch's absolute path to its stored form. A tool's
 		// progress line names the file it is writing, absolutely, and a root
 		// path is never surfaced in an API response.

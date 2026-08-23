@@ -909,7 +909,11 @@ function pollFetchJobs() {
          head.className = 'fetch-head';
          const name = document.createElement('span');
          name.className = 'fetch-name';
-         name.textContent = `${j.handler} · ${j.mode}`;
+         // The typed names when there were any, so a queued job says what it
+         // will be filed as rather than only which tool is doing it.
+         name.textContent = (j.artist || j.album)
+            ? `${j.artist || '…'} · ${j.album || '…'}`
+            : `${j.handler} · ${j.mode}`;
          head.appendChild(name);
          const state = document.createElement('span');
          state.className = 'fetch-state';
@@ -1046,10 +1050,53 @@ function makeUploadBar() {
       fetchBtn.className   = 'upload-btn';
       urlRow.appendChild(fetchBtn);
 
+      // A second row rather than two more fields in the URL row: .upload-row is
+      // one flex line, and a URL box squeezed between two name boxes and a
+      // button is unusable on a phone.
+      //
+      // The names override whatever the handler would have called this — for
+      // the built-in one, what it parsed out of the video title. Blank keeps
+      // that parse, which is why neither field is marked required.
+      const nameRow = document.createElement('div');
+      nameRow.className = 'upload-row fetch-names';
+      bar.appendChild(nameRow);
+
+      // Sticky, unlike the URL: fetching six tracks off one concert should mean
+      // typing the names once. That is also why they are not cleared on
+      // success — only the URL is, since that one genuinely differs every time.
+      const makeNameInput = (key, placeholder) => {
+         const el = document.createElement('input');
+         el.type        = 'text';
+         el.className   = 'token-input';
+         el.placeholder = placeholder;
+         el.value       = localStorage.getItem(key) || '';
+         el.addEventListener('change', () =>
+            localStorage.setItem(key, el.value.trim()));
+         nameRow.appendChild(el);
+         return el;
+         };
+      const artistInput = makeNameInput('gd_fetch_artist',
+                                        'Artist (from the title if empty)');
+      const albumInput  = makeNameInput('gd_fetch_album',
+                                        'Album (from the title if empty)');
+
+      const clearBtn = document.createElement('button');
+      clearBtn.className   = 'name-clear';
+      clearBtn.textContent = 'Clear';
+      clearBtn.title       = 'Forget these names';
+      clearBtn.addEventListener('click', () => {
+         artistInput.value = albumInput.value = '';
+         localStorage.removeItem('gd_fetch_artist');
+         localStorage.removeItem('gd_fetch_album');
+         });
+      nameRow.appendChild(clearBtn);
+
       const names = urlHandlers.map(h => h.name).join(', ');
       const urlHint = document.createElement('p');
       urlHint.className   = 'admin-hint';
-      urlHint.textContent = `Or paste a URL — handled by: ${names}`;
+      urlHint.textContent =
+         `Or paste a URL — handled by: ${names}. `
+         + 'Leave the names blank to use the ones the site supplies.';
       bar.appendChild(urlHint);
 
       const submit = async () => {
@@ -1058,11 +1105,19 @@ function makeUploadBar() {
          fetchBtn.disabled = true;
          uploadStatus.textContent = '';
          try {
+            // An untouched field sends nothing at all rather than an empty
+            // value: the request line carries the URL already, and the server
+            // is entitled to treat a present-but-empty name as a mistake.
+            const p = {url, mode: fetchMode};
+            const a = artistInput.value.trim();
+            const b = albumInput.value.trim();
+            if (a) p.artist = a;
+            if (b) p.album  = b;
             // apiCall, not XHR: there is no upload progress to report here —
             // the server does the fetching, and getFetchJobs reports on it.
-            await apiCall('fetchUrl', {url, mode: fetchMode});
-            // Cleared on success so a re-render cannot resurrect a stale URL
-            // into a second fetch.
+            await apiCall('fetchUrl', p);
+            // Only the URL is cleared, so a re-render cannot resurrect a stale
+            // one into a second fetch. The names deliberately survive.
             urlInput.value = '';
             pollFetchJobs();
             }
@@ -1072,9 +1127,12 @@ function makeUploadBar() {
          fetchBtn.disabled = false;
          };
       fetchBtn.addEventListener('click', submit);
-      urlInput.addEventListener('keydown', e => {
-         if (e.key === 'Enter') submit();
-         });
+      // Enter submits from any of the three, since artist → album → Enter is
+      // the natural way to fill this in.
+      for (const el of [urlInput, artistInput, albumInput])
+         el.addEventListener('keydown', e => {
+            if (e.key === 'Enter') submit();
+            });
       }
 
    bar.appendChild(progress);

@@ -126,6 +126,56 @@ def test_pattern_is_anchored():
     print("PASS  a site name in a fragment does not satisfy a pattern")
 
 
+def test_blank_names_are_not_an_error():
+    """Absent and all-whitespace must both mean "keep what the handler chose",
+    or a client cannot send the two fields unconditionally.
+
+    The assertion is that the request still fails for the *URL* — proving the
+    names were accepted and that they are checked after the handler, not
+    before."""
+    _require_handlers()
+    for extra in ({}, {"artist": "", "album": ""},
+                  {"artist": "   ", "album": "\t"}):
+        p = {"url": "http://192.0.2.1/nothing"}
+        p.update(extra)
+        msg = _err(_get("fetchUrl.view", p), 0)
+        assert "handler" in msg.lower(), \
+            f"{extra} was rejected for the names, not the URL: {msg!r}"
+    print("PASS  blank names are accepted, and checked after the URL")
+
+
+def test_unusable_names_refused():
+    """A name that is not blank but sanitises away to nothing was typed and is
+    wrong. renameAlbum takes the same line at the same question: filing it
+    under "Unknown" would hide the mistake."""
+    _require_handlers()
+    for field in ("artist", "album"):
+        for bad in ("...", "..", ".", "///", "   ...   ", '<>:*?"'):
+            msg = _err(_get("fetchUrl.view",
+                            {"url": "http://192.0.2.1/nothing", field: bad}), 10)
+            assert field in msg.lower(), \
+                f"error 10 for {field}={bad!r} did not name the field: {msg!r}"
+    print("PASS  a name that sanitises to nothing is error 10, naming the field")
+
+
+def test_control_characters_stripped():
+    """A directory name is echoed into the log and written into an XML
+    attribute, and nothing escapes a raw C0 byte in either. A name that is
+    *only* control characters must therefore be refused like any other name
+    that sanitises away."""
+    _require_handlers()
+    _err(_get("fetchUrl.view",
+              {"url": "http://192.0.2.1/nothing", "artist": "\n\r\t"}), 10)
+    # One that survives, to prove the stripping is not simply a rejection of
+    # anything containing a control character.
+    msg = _err(_get("fetchUrl.view",
+                    {"url": "http://192.0.2.1/nothing",
+                     "artist": "Clapton\nLive"}), 0)
+    assert "handler" in msg.lower(), \
+        f"a name with an embedded newline was rejected outright: {msg!r}"
+    print("PASS  control characters are stripped, not treated as fatal")
+
+
 def test_cancel_unknown_id():
     _require_handlers()
     _err(_get("cancelFetch.view", {"id": "not-a-real-job"}), 70)
@@ -262,6 +312,52 @@ def test_live_cancel():
     raise AssertionError("cancelled job never reached the cancelled state")
 
 
+def test_live_fetch_with_names():
+    """The whole point: a typed name is what the batch is filed under, and the
+    title parsing is not consulted.
+
+    A merge test proper — two directories at one level collapsing into the typed
+    name — needs a playlist, and the built-in handler passes --no-playlist, so
+    it cannot be exercised here without an operator-written handler."""
+    if LIVE_URL is None:
+        raise Skip("LIVE_URL is not set")
+    _require_handlers()
+    artist, album = "GD Test Artist", "GD Test Album"
+
+    job = _ok(_get("fetchUrl.view", {"url": LIVE_URL, "mode": "audio",
+                                     "artist": artist,
+                                     "album": album}))["fetchJob"]
+    assert job["artist"] == artist and job["album"] == album, job
+
+    deadline, state = time.time() + 300, "queued"
+    while time.time() < deadline:
+        sr = _ok(_get("getFetchJobs.view"))
+        me = next((j for j in sr.get("fetchJobs", {}).get("fetchJob", [])
+                   if j["id"] == job["id"]), None)
+        assert me is not None, f"job {job['id']} disappeared"
+        state = me["state"]
+        if state in ("done", "error", "cancelled"):
+            break
+        time.sleep(2)
+    assert state == "done", f"fetch did not finish cleanly: {state}"
+
+    # No sleep: the worker scans before it says done, so the listing is the
+    # assertion and it must already be right.
+    after = _ok(_get("getArtists.view", {"personal": "true"}))
+    index = after.get("artists", {}).get("index", [])
+    names = {a["name"] for i in index for a in i.get("artist", [])}
+    assert artist in names, f"typed artist not in the personal listing: {names}"
+
+    # Exactly one album, named as typed — and therefore still a five-component
+    # path, which is the only thing that makes it promotable.
+    aid = next(a["id"] for i in index for a in i.get("artist", [])
+               if a["name"] == artist)
+    d = _ok(_get("getMusicDirectory.view", {"id": aid}))["directory"]
+    albums = [c["title"] for c in d.get("child", []) if c.get("isDir")]
+    assert albums == [album], f"expected one album named {album!r}, got {albums}"
+    print("PASS  typed names are what the batch is filed under")
+
+
 def test_duplicate_refused():
     if LIVE_URL is None:
         raise Skip("LIVE_URL is not set")
@@ -280,10 +376,14 @@ TESTS = [
     test_scheme_refused,
     test_no_handler_refused,
     test_pattern_is_anchored,
+    test_blank_names_are_not_an_error,
+    test_unusable_names_refused,
+    test_control_characters_stripped,
     test_cancel_unknown_id,
     test_jobs_list_shape,
     test_permission_and_isolation,
     test_live_fetch,
+    test_live_fetch_with_names,
     test_duplicate_refused,
     test_live_cancel,
 ]
