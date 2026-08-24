@@ -192,6 +192,45 @@ class SettingsStore @Inject constructor(
 	}
 
 	/**
+	 * What the URL-fetch panel was last set to.
+	 *
+	 * All four are sticky between shares, which is what the web client does and
+	 * for the same reason: several tracks going into one album is the ordinary
+	 * case, and retyping the album for each of them is the whole friction the
+	 * fields were added to remove. The panel's Clear button is the safeguard
+	 * against a name outliving its usefulness — see `web/app.js`, whose comment
+	 * notes the names "deliberately survive".
+	 *
+	 * The server is stored as a raw [org.gaindrive.android.data.model.ServerId]
+	 * string, and may name one since removed or since stripped of its upload
+	 * rights; resolving it against what is actually eligible is the panel's job.
+	 */
+	val fetchServer: Flow<String?> = dataStore.data.map { it[FETCH_SERVER] }
+
+	suspend fun setFetchServer(value: String) {
+		dataStore.edit { it[FETCH_SERVER] = value }
+	}
+
+	/** "audio" or "video". Audio by default: this is a music library. */
+	val fetchAudio: Flow<Boolean> = dataStore.data.map { it[FETCH_AUDIO] ?: true }
+
+	suspend fun setFetchAudio(audio: Boolean) {
+		dataStore.edit { it[FETCH_AUDIO] = audio }
+	}
+
+	val fetchArtist: Flow<String> = dataStore.data.map { it[FETCH_ARTIST] ?: "" }
+
+	val fetchAlbum: Flow<String> = dataStore.data.map { it[FETCH_ALBUM] ?: "" }
+
+	/** Written together, because Clear has to be able to forget both at once. */
+	suspend fun setFetchNames(artist: String, album: String) {
+		dataStore.edit {
+			it[FETCH_ARTIST] = artist
+			it[FETCH_ALBUM] = album
+		}
+	}
+
+	/**
 	 * Whether the user has ever chosen a quality.
 	 *
 	 * Used once, at startup: someone upgrading with pins already downloaded
@@ -216,5 +255,9 @@ class SettingsStore @Inject constructor(
 		private val AUDIO_QUALITY = stringPreferencesKey("audio_quality")
 		private val CAST_ORIGINAL = booleanPreferencesKey("cast_original")
 		private val VIDEO_AUDIO_ONLY = booleanPreferencesKey("video_audio_only")
+		private val FETCH_SERVER = stringPreferencesKey("fetch_server")
+		private val FETCH_AUDIO = booleanPreferencesKey("fetch_audio")
+		private val FETCH_ARTIST = stringPreferencesKey("fetch_artist")
+		private val FETCH_ALBUM = stringPreferencesKey("fetch_album")
 	}
 }

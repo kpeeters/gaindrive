@@ -187,4 +187,47 @@ interface SubsonicApi {
 
 	@GET("rest/getRecentSongs.view")
 	suspend fun getRecentSongs(@Query("size") size: Int): SubsonicEnvelope<GetRecentSongsBody>
+
+	// ── Fetching a URL into the user's uploads ──────────────────────────
+	//
+	// OpenSubsonic extension "gaindrive" version 2. All four require the
+	// account's upload role, which is why [getUrlHandlers] doubles as the
+	// capability probe: it answers error 50 without that role and an error of
+	// its own on a server too old to know the endpoint, so one call decides
+	// whether this server can be offered at all.
+
+	/**
+	 * Which URLs this server can fetch, and whether each handler can produce
+	 * audio, video or both.
+	 *
+	 * An empty list is the server saying the feature is unavailable — no
+	 * handler table is configured — and is not an error.
+	 */
+	@GET("rest/getUrlHandlers.view")
+	suspend fun getUrlHandlers(): SubsonicEnvelope<GetUrlHandlersBody>
+
+	/**
+	 * Queues a fetch. Returns as soon as the job is queued, not when it is done.
+	 *
+	 * [artist] and [album] must be null rather than blank when the user typed
+	 * nothing: the server distinguishes "not sent" (keep whatever the handler
+	 * parsed out of the title) from a value it cannot use, which is error 10.
+	 * Retrofit omits a null query parameter entirely, so null is that
+	 * distinction.
+	 */
+	@GET("rest/fetchUrl.view")
+	suspend fun fetchUrl(
+		@Query("url") url: String,
+		/** "audio" or "video". */
+		@Query("mode") mode: String,
+		@Query("artist") artist: String?,
+		@Query("album") album: String?,
+	): SubsonicEnvelope<FetchUrlBody>
+
+	/** The caller's own jobs, newest first. Retained briefly after they end. */
+	@GET("rest/getFetchJobs.view")
+	suspend fun getFetchJobs(): SubsonicEnvelope<GetFetchJobsBody>
+
+	@GET("rest/cancelFetch.view")
+	suspend fun cancelFetch(@Query("id") id: String): SubsonicEnvelope<EmptyBody>
 }

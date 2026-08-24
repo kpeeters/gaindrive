@@ -25,8 +25,11 @@ package org.gaindrive.android.data.model
  * **name** rather than its id because ids are per-server and the chip row unions
  * several servers — the same reason `Merge.kt` matches everything else by name.
  *
- * Personal uploads are not a slice here. The server offers them, but this app
- * cannot upload, so the chip would name somewhere nothing can be put from.
+ * Personal uploads are not a slice here, although a URL shared with the app now
+ * lands in them — see `ui/fetch/`. Browsing them is the part still missing, and
+ * a chip is not the whole of it: the listing needs `personal=true` on every
+ * hierarchy query and an admin-only promote action, none of which the merge and
+ * mirror layers below have a notion of yet.
  */
 @JvmInline
 value class LibraryMode(val id: String) {

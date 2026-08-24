@@ -35,14 +35,39 @@
 		android:supportsRtl="true"
 		android:theme="@style/Theme.GainDrive">
 
+		<!--
+			singleTop, not singleTask. A share sheet launches its target with
+			FLAG_ACTIVITY_NEW_TASK, which with the default `standard` mode
+			stacks a *second* MainActivity on the app's existing task — two
+			NavHosts, two of every activity-scoped view model, and two player
+			connections bound to the same session. singleTop delivers the
+			intent to the instance that exists instead, because this is the
+			only activity and is therefore always its task's top.
+
+			singleTask would also fix that, and costs more than it is worth
+			here: it rules out multi-window for good and adds task-clearing
+			semantics that mean nothing to a single-activity app.
+		-->
 		<activity
 			android:name=".MainActivity"
 			android:exported="true"
+			android:launchMode="singleTop"
 			android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
 			android:theme="@style/Theme.GainDrive">
 			<intent-filter>
 				<action android:name="android.intent.action.MAIN" />
 				<category android:name="android.intent.category.LAUNCHER" />
+			</intent-filter>
+			<!--
+				Sharing a URL to gaindrive: the server fetches it into the
+				account's own uploads. text/plain only — the shared text is
+				searched for a link rather than required to be one, since a
+				share is usually a title and then the URL.
+			-->
+			<intent-filter>
+				<action android:name="android.intent.action.SEND" />
+				<category android:name="android.intent.category.DEFAULT" />
+				<data android:mimeType="text/plain" />
 			</intent-filter>
 		</activity>
 

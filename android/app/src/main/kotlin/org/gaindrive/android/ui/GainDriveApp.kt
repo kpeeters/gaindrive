@@ -35,12 +35,14 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.flow.StateFlow
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.ui.browse.AlbumDetailScreen
 import org.gaindrive.android.ui.browse.AlbumsScreen
 import org.gaindrive.android.ui.browse.ArtistsScreen
 import org.gaindrive.android.ui.components.OfflineNote
+import org.gaindrive.android.ui.fetch.FetchUrlScreen
 import org.gaindrive.android.ui.player.CastDeviceSheet
 import org.gaindrive.android.ui.player.CastViewModel
 import org.gaindrive.android.ui.player.MiniPlayer
@@ -61,8 +63,17 @@ import org.gaindrive.android.ui.settings.SettingsScreen
 import org.gaindrive.android.ui.settings.SettingsViewModel
 import org.gaindrive.android.ui.settings.StorageSettingsScreen
 
+/**
+ * [sharedUrl] carries a URL another app sent us, and [onSharedUrlHandled] says
+ * it has been acted on. They are parameters rather than another view model
+ * because the value comes from an `Intent`, which only the activity sees.
+ */
 @Composable
-fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
+fun GainDriveApp(
+	settingsViewModel: SettingsViewModel = hiltViewModel(),
+	sharedUrl: StateFlow<String?>,
+	onSharedUrlHandled: () -> Unit,
+) {
 	val settings by settingsViewModel.state.collectAsStateWithLifecycle()
 	val navController = rememberNavController()
 
@@ -127,6 +138,7 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 	// form that the user is expected to finish or cancel, nor over a picture
 	// that wants the whole screen.
 	val showBottomBar = destination?.hasRoute(Route.ServerEdit::class) != true &&
+		destination?.hasRoute(Route.FetchUrl::class) != true &&
 		destination?.hasRoute(Route.Video::class) != true
 
 	// A refusal — today only "video cannot be cast" — outlives the sheet or row
@@ -153,6 +165,20 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 		if (destination?.hasRoute(Route.Video::class) == true) return@LaunchedEffect
 		nowPlayingOpen = false
 		navController.navigate(Route.Video)
+	}
+
+	// Opens the fetch panel on a URL shared with the app.
+	//
+	// Marked handled before navigating, so the share is acted on exactly once:
+	// this effect re-runs on the null that follows and returns immediately. The
+	// URL travels in the route from here on, which is what makes the panel
+	// survive a rotation without the activity being asked again.
+	val pendingShare by sharedUrl.collectAsStateWithLifecycle()
+	LaunchedEffect(pendingShare) {
+		val url = pendingShare ?: return@LaunchedEffect
+		onSharedUrlHandled()
+		nowPlayingOpen = false
+		navController.navigate(Route.FetchUrl(url))
 	}
 
 	Scaffold(
@@ -355,6 +381,13 @@ fun GainDriveApp(settingsViewModel: SettingsViewModel = hiltViewModel()) {
 				ServerEditScreen(onDone = { navController.popBackStack() })
 			}
 
+			// Always navigated *onto* the start destination, never the start
+			// destination itself, so there is something to pop back to even when
+			// a share is what launched the app.
+			composable<Route.FetchUrl> {
+				FetchUrlScreen(onDone = { navController.popBackStack() })
+			}
+
 			composable<Route.Video> {
 				VideoScreen(
 					onBack = { navController.popBackStack() },
@@ -423,6 +456,9 @@ private fun NavDestination?.isDetail(): Boolean =
 			hasRoute(Route.Album::class) ||
 			hasRoute(Route.Playlist::class) ||
 			hasRoute(Route.ServerEdit::class) ||
+				// Reached from outside the app entirely, but shed by back and by
+				// the tap-the-current-tab gesture like any other drill-down.
+				hasRoute(Route.FetchUrl::class) ||
 			// Listed so back and the tap-the-current-tab gesture shed it like
 			// any other drill-down; leaving it does not stop the film.
 			hasRoute(Route.Video::class) ||

@@ -1,6 +1,7 @@
 package org.gaindrive.android
 
 import android.Manifest
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -14,6 +15,9 @@ import androidx.compose.runtime.getValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import org.gaindrive.android.data.extractSharedUrl
 import org.gaindrive.android.ui.AvailabilityViewModel
 import org.gaindrive.android.ui.GainDriveApp
 import org.gaindrive.android.ui.LocalAvailability
@@ -22,9 +26,28 @@ import org.gaindrive.android.ui.theme.GainDriveTheme
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+	/**
+	 * A URL shared with the app and not yet shown, or null.
+	 *
+	 * Held here rather than read from `getIntent()` by the composables, because
+	 * an intent is not consumed by being read: every recomposition would see it
+	 * again. This is set once per arriving share and cleared by whoever acts on
+	 * it.
+	 */
+	private val sharedUrl = MutableStateFlow<String?>(null)
+
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
 		enableEdgeToEdge()
+
+		// Only on a genuinely new instance. A configuration change or a restore
+		// after process death arrives with the same intent still attached, and
+		// the navigation back stack has already been restored with the panel on
+		// it — reading the intent again would push a second copy of it, in front
+		// of a user who may have backed out of the first.
+		if (savedInstanceState == null) takeSharedUrl(intent)
+
 		setContent {
 			// One view model supplies both the theme and the server list, so
 			// the theme cannot lag a change to the setting.
@@ -41,9 +64,41 @@ class MainActivity : ComponentActivity() {
 
 			GainDriveTheme(mode = state.themeMode) {
 				CompositionLocalProvider(LocalAvailability provides availabilityState) {
-					GainDriveApp(settingsViewModel = viewModel)
+					GainDriveApp(
+						settingsViewModel = viewModel,
+						sharedUrl = sharedUrl.asStateFlow(),
+						onSharedUrlHandled = { sharedUrl.value = null },
+					)
 				}
 			}
+		}
+	}
+
+	/**
+	 * A share arriving while the app is already running.
+	 *
+	 * `launchMode="singleTop"` is what routes it here rather than stacking a
+	 * second copy of this activity: this is the only activity, so it is always
+	 * the top of whatever task the share sheet finds, and the intent is
+	 * therefore delivered to the instance that already exists.
+	 */
+	override fun onNewIntent(intent: Intent) {
+		super.onNewIntent(intent)
+		// Not optional, and its absence is silent: without it `getIntent()` goes
+		// on returning the intent that first started the activity, so anything
+		// reading it after a configuration change sees the wrong one.
+		setIntent(intent)
+		takeSharedUrl(intent)
+	}
+
+	private fun takeSharedUrl(intent: Intent?) {
+		if (intent?.action != Intent.ACTION_SEND) return
+		// Shared text is very often a title and then a link, so a URL is
+		// extracted rather than taken whole. Text with no URL in it leaves this
+		// null and nothing happens, which is the right answer for a paragraph of
+		// prose sent here by mistake.
+		extractSharedUrl(intent.getStringExtra(Intent.EXTRA_TEXT))?.let {
+			sharedUrl.value = it
 		}
 	}
 }

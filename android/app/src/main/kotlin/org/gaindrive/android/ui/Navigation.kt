@@ -73,6 +73,23 @@ sealed interface Route {
 	data class ServerEdit(val serverId: String? = null) : Route
 
 	/**
+	 * Handing a URL shared with the app to a server, which fetches it into the
+	 * account's own uploads.
+	 *
+	 * The URL travels in the route rather than in a holder somewhere, so
+	 * `SavedStateHandle.toRoute` restores it after a configuration change or
+	 * process death without the sharing app being involved again. It is already
+	 * the extracted link, not the shared text — see
+	 * [org.gaindrive.android.data.extractSharedUrl].
+	 *
+	 * A URL is full of characters a path segment cares about. That is safe for
+	 * the same reason [Albums] is: navigation encodes a String argument on the
+	 * way in, and `artistRefs` has carried an embedded `/` since it existed.
+	 */
+	@Serializable
+	data class FetchUrl(val url: String) : Route
+
+	/**
 	 * The picture for whatever video is currently playing.
 	 *
 	 * Carries no argument: the surface shows what the player is playing, and an
