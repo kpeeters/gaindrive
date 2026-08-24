@@ -5,6 +5,12 @@ set(CMAKE_POLICY_DEFAULT_CMP0148 NEW)
 # `build` numbers a store upload and means nothing to the server.
 file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/VERSION _gd_version REGEX "^version=")
 string(REGEX REPLACE "^version=" "" _gd_version "${_gd_version}")
+# file(STRINGS) reads the file but creates no dependency on it, so nothing about
+# editing VERSION makes the build re-run cmake — an existing build/ went on
+# compiling the version it was last configured with, and `cmake --build` said
+# everything was up to date. This is the line that makes a bump take effect.
+set_property(DIRECTORY APPEND PROPERTY
+	CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/VERSION)
 # Without this, an empty result would leave `project(gaindrive VERSION LANGUAGES
 # CXX)` and CMake would report a problem with LANGUAGES.
 if(NOT _gd_version MATCHES "^[0-9]+(\\.[0-9]+)*$")
@@ -20,15 +26,31 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # -DGAINDRIVE_VERSION= still wins, which is how a release binary is stamped with
 # its git tag (.github/workflows/build.yml, via cmake/static_build.cmake) and how
 # the Homebrew formula stamps its own — the `if` sees the cache entry that -D
-# creates. But this is deliberately *not* `set(... CACHE STRING)` any more: a
-# cached value is only written on the first configure, so an existing build/
-# would go on reporting the version it was configured with however often VERSION
-# was bumped afterwards, and nothing would say so.
-if(NOT GAINDRIVE_VERSION)
+# creates.
+#
+# **The entry is then removed again, and that is the whole point.** An override
+# is a property of one configure, not of the build directory, but -D has no way
+# to say so: the value it writes is indistinguishable on the next configure from
+# one someone meant. Dropping `CACHE STRING` from the set() below was an earlier
+# attempt at this and does not work — removing it from the source does not
+# remove an entry an earlier configure already wrote, and `if(NOT
+# GAINDRIVE_VERSION)` goes on reading it. That is not hypothetical: this tree
+# carried GAINDRIVE_VERSION:STRING=0.1 for months while VERSION said 1.0.1, so
+# --version, the User-Agents and the web client's About box all reported 0.1,
+# and the only sign of it was the STATUS line below claiming an override nobody
+# had asked for. Hence WARNING rather than STATUS: a tag is checked against
+# VERSION in CI and Homebrew stamps the version it downloaded, so the two
+# disagreeing is a forgotten bump or a stale cache, never a plan.
+if(GAINDRIVE_VERSION)
+	set(_gd_stamped "${GAINDRIVE_VERSION}")
+	unset(GAINDRIVE_VERSION CACHE)
+	set(GAINDRIVE_VERSION "${_gd_stamped}")
+	if(NOT GAINDRIVE_VERSION STREQUAL PROJECT_VERSION)
+		message(WARNING "gaindrive version: building as ${GAINDRIVE_VERSION}, "
+			"but VERSION says ${PROJECT_VERSION}")
+	endif()
+else()
 	set(GAINDRIVE_VERSION "${PROJECT_VERSION}")
-elseif(NOT GAINDRIVE_VERSION STREQUAL PROJECT_VERSION)
-	message(STATUS "gaindrive version: ${GAINDRIVE_VERSION} "
-		"(overriding VERSION, which says ${PROJECT_VERSION})")
 endif()
 
 # There was no default, so a plain `cmake -B build` compiled with no -O flag at
