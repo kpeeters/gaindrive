@@ -26,12 +26,28 @@ sealed interface Route {
 	 * [artistRefs] is comma-separated: a merged artist row stands for the same
 	 * artist on several servers, each with its own id, and the albums screen
 	 * has to ask all of them.
+	 *
+	 * [fromUploads] travels down from the Library tab's Uploads slice, and is
+	 * the *only* way anything below knows an album is a personal upload — an
+	 * album ref says which server and which id, never where in the library it
+	 * sits, and the same album is reachable from search, starred and the play
+	 * queue where the answer would be no. Defaulted, so every one of those call
+	 * sites is unchanged and gets the safe answer.
 	 */
 	@Serializable
-	data class Albums(val artistRefs: String, val artistName: String) : Route
+	data class Albums(
+		val artistRefs: String,
+		val artistName: String,
+		val fromUploads: Boolean = false,
+	) : Route
 
+	/** [fromUploads] as on [Albums], which is where it is passed down from. */
 	@Serializable
-	data class Album(val albumRef: String, val albumTitle: String) : Route
+	data class Album(
+		val albumRef: String,
+		val albumTitle: String,
+		val fromUploads: Boolean = false,
+	) : Route
 
 	@Serializable
 	data object Playlists : Route

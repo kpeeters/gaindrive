@@ -114,6 +114,97 @@ class LibraryRootsTest {
 		assertNull(rootRequest(true, untyped("Music", "Podcasts"), LibraryMode.folder("Films")))
 	}
 
+	// ── The uploads slice ───────────────────────────────────────────────
+	//
+	// A fact about the account, not about the roots: the server keeps its
+	// uploads root out of getMusicFolders entirely, so nothing in `roots` can
+	// ever produce this chip and nothing in `roots` can ever suppress it.
+
+	@Test
+	fun `uploads is appended to content type chips`() {
+		val roots = typed("music" to "artists", "movies" to "categories")
+		assertEquals(
+			listOf(LibraryMode("artists"), LibraryMode("categories"), LibraryMode.UPLOADS),
+			chipsFor(browseByFolder = false, roots = roots, canUpload = true),
+		)
+	}
+
+	@Test
+	fun `uploads is appended to folder chips`() {
+		val roots = untyped("Music", "Podcasts")
+		assertEquals(
+			listOf(LibraryMode.folder("Music"), LibraryMode.folder("Podcasts"), LibraryMode.UPLOADS),
+			chipsFor(browseByFolder = true, roots = roots, canUpload = true),
+		)
+	}
+
+	/**
+	 * The one chip allowed to turn a would-be single-chip row into a real one.
+	 * The threshold that suppresses a lone folder chip exists because that row
+	 * offered nothing; this one offers somewhere else to be.
+	 */
+	@Test
+	fun `uploads gives a single library server a chip row`() {
+		assertEquals(
+			listOf(LibraryMode.ARTISTS, LibraryMode.UPLOADS),
+			chipsFor(browseByFolder = true, roots = untyped("Music"), canUpload = true),
+		)
+	}
+
+	@Test
+	fun `an account that cannot upload is offered nothing extra`() {
+		val roots = typed("music" to "artists")
+		assertEquals(
+			listOf(LibraryMode("artists")),
+			chipsFor(browseByFolder = false, roots = roots, canUpload = false),
+		)
+		assertNull(rootRequest(false, roots, LibraryMode.UPLOADS, canUpload = false))
+	}
+
+	/**
+	 * `personal=true` and nothing else. Sending `contentType=uploads` would
+	 * narrow the *shared* library to a kind of root no server has, and answer
+	 * with an empty list rather than an error.
+	 */
+	@Test
+	fun `the uploads chip is sent as personal and narrows nothing else`() {
+		val roots = typed("music" to "artists")
+		val request = rootRequest(false, roots, LibraryMode.UPLOADS, canUpload = true)
+		assertEquals(true, request?.personal)
+		assertEquals("true", request?.personalParam)
+		assertNull(request?.contentType)
+		assertNull(request?.musicFolderId)
+	}
+
+	/** Every other slice must go on sending exactly what it sent before. */
+	@Test
+	fun `an ordinary slice sends no personal parameter`() {
+		val roots = typed("music" to "artists")
+		val request = rootRequest(false, roots, LibraryMode("artists"), canUpload = true)
+		assertEquals(false, request?.personal)
+		assertNull(request?.personalParam)
+	}
+
+	/** Uploads sorts last whatever it is spelled next to. */
+	@Test
+	fun `uploads is ranked after content types and folders`() {
+		val merged = mergeChips(
+			listOf(
+				listOf(LibraryMode.UPLOADS, LibraryMode.folder("Music")),
+				listOf(LibraryMode("videos"), LibraryMode("artists")),
+			)
+		)
+		assertEquals(
+			listOf(
+				LibraryMode("artists"),
+				LibraryMode("videos"),
+				LibraryMode.folder("Music"),
+				LibraryMode.UPLOADS,
+			),
+			merged,
+		)
+	}
+
 	// ── Unioning across servers ─────────────────────────────────────────
 
 	@Test

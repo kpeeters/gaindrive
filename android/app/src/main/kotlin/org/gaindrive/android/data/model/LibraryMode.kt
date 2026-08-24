@@ -12,24 +12,19 @@ package org.gaindrive.android.data.model
  * a set: the server filters on it and the resulting list is single-slice by
  * construction.
  *
- * The string names one of two different things, distinguished by a prefix:
+ * The string names one of three different things:
  *
  * * a **content type** — `artists`, `categories` — which is a gaindrive
  *   extension naming a *kind* of root, and may span several of them
  * * a **music folder**, written `folder:<name>`, which is one root of a server
  *   that has no concept of kinds
+ * * **[UPLOADS]**, the account's own upload area
  *
- * Keeping both in one string is what lets `SettingsStore.libraryMode` and the
- * mirror's `contentType` column carry either without a migration, and what makes
- * a value written by an older build still parse. A folder is keyed on its
+ * Keeping them in one string is what lets `SettingsStore.libraryMode` and the
+ * mirror's `contentType` column carry any of them without a migration, and what
+ * makes a value written by an older build still parse. A folder is keyed on its
  * **name** rather than its id because ids are per-server and the chip row unions
  * several servers — the same reason `Merge.kt` matches everything else by name.
- *
- * Personal uploads are not a slice here, although a URL shared with the app now
- * lands in them — see `ui/fetch/`. Browsing them is the part still missing, and
- * a chip is not the whole of it: the listing needs `personal=true` on every
- * hierarchy query and an admin-only promote action, none of which the merge and
- * mirror layers below have a notion of yet.
  */
 @JvmInline
 value class LibraryMode(val id: String) {
@@ -55,6 +50,22 @@ value class LibraryMode(val id: String) {
 		val ARTISTS = LibraryMode("artists")
 
 		/**
+		 * The account's own upload area.
+		 *
+		 * Looks like a content type and is not one: the server deliberately
+		 * keeps the uploads root out of `getMusicFolders`, so no amount of
+		 * inspecting the roots will produce this chip. It is offered because the
+		 * *account* may upload — see `Accounts.canUploadTo` — and it reaches the
+		 * wire as `personal=true` rather than as a `contentType`, which is the
+		 * whole of what `data/browse/LibraryRoots.kt` has to special-case.
+		 *
+		 * It is a slice like any other below that line, which is why the mirror
+		 * needed no schema change: `artists.contentType` simply holds "uploads"
+		 * for those rows.
+		 */
+		val UPLOADS = LibraryMode("uploads")
+
+		/**
 		 * A folder named "artists" is `folder:artists`, so it cannot be mistaken
 		 * for the content type of the same name.
 		 */
@@ -65,6 +76,7 @@ value class LibraryMode(val id: String) {
 		private val LABELS = mapOf(
 			"artists" to "Artists",
 			"categories" to "Categories",
+			"uploads" to "Uploads",
 		)
 	}
 }

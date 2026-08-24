@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -89,12 +90,22 @@ fun FetchUrlScreen(
 				.verticalScroll(rememberScrollState()),
 			verticalArrangement = Arrangement.spacedBy(12.dp),
 		) {
-			Text(
-				text = state.url,
-				style = MaterialTheme.typography.bodyMedium,
-				color = MaterialTheme.colorScheme.onSurfaceVariant,
-				maxLines = 2,
-				overflow = TextOverflow.Ellipsis,
+			// Editable, and pre-filled when a share supplied it. Two entry points
+			// share this screen — a share sheet, and the uploads listing's own
+			// row, which opens it with nothing — and the second needs a field
+			// here whatever the first would have preferred.
+			OutlinedTextField(
+				value = state.url,
+				onValueChange = viewModel::onUrl,
+				label = { Text("URL") },
+				placeholder = { Text("https://…") },
+				singleLine = true,
+				enabled = !state.live && !state.submitting,
+				keyboardOptions = KeyboardOptions(
+					keyboardType = KeyboardType.Uri,
+					imeAction = ImeAction.Next,
+				),
+				modifier = Modifier.fillMaxWidth(),
 			)
 
 			when {

@@ -10,14 +10,20 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,6 +49,12 @@ import org.gaindrive.android.ui.player.TrackActionsSheet
 @Composable
 fun AlbumDetailScreen(
 	onBack: () -> Unit,
+	/**
+	 * Where to go once an album has been moved into the shared library. Not
+	 * [onBack]: the album's own artist folder under uploads may have gone with
+	 * it, so one level up is a list that may no longer exist.
+	 */
+	onPromoted: () -> Unit = onBack,
 	viewModel: AlbumDetailViewModel = hiltViewModel(),
 	player: PlayerViewModel = hiltViewModel(),
 ) {
@@ -52,12 +64,66 @@ fun AlbumDetailScreen(
 	val playerState by player.state.collectAsStateWithLifecycle()
 	var actionsFor by remember { mutableStateOf<Song?>(null) }
 
+	val canPromote by viewModel.canPromote.collectAsStateWithLifecycle()
+	val promoting by viewModel.promoting.collectAsStateWithLifecycle()
+	val promoted by viewModel.promoted.collectAsStateWithLifecycle()
+	val promoteError by viewModel.promoteError.collectAsStateWithLifecycle()
+	var confirmPromote by remember { mutableStateOf(false) }
+
+	// The album this screen is showing has moved and has a new id, so there is
+	// nothing here left to show. The listing it is left on has already been
+	// reloaded by the bumped library revision.
+	LaunchedEffect(promoted) {
+		if (promoted) onPromoted()
+	}
+
 	actionsFor?.let { song ->
 		TrackActionsSheet(
 			song = song,
 			onDismiss = { actionsFor = null },
 			onPlayNext = { player.playNext(song) },
 			onAddToQueue = { player.addToQueue(song) },
+		)
+	}
+
+	if (confirmPromote) {
+		AlertDialog(
+			onDismissRequest = { confirmPromote = false },
+			title = { Text("Move to the library?") },
+			// Says what happens on the server's disk, because that is what makes
+			// this different from every other action on this screen: it is not
+			// undoable from the app, and everyone else browsing sees the result.
+			text = {
+				Text(
+					"“${viewModel.albumTitle}” is moved out of your uploads and " +
+						"into the shared library, where everyone with an account " +
+						"can see it. The files move on the server; this cannot be " +
+						"undone from here."
+				)
+			},
+			confirmButton = {
+				TextButton(
+					enabled = !promoting,
+					onClick = {
+						confirmPromote = false
+						viewModel.promote()
+					},
+				) { Text("Move") }
+			},
+			dismissButton = {
+				TextButton(onClick = { confirmPromote = false }) { Text("Cancel") }
+			},
+		)
+	}
+
+	promoteError?.let { message ->
+		AlertDialog(
+			onDismissRequest = viewModel::clearPromoteError,
+			title = { Text("Not moved") },
+			text = { Text(message) },
+			confirmButton = {
+				TextButton(onClick = viewModel::clearPromoteError) { Text("OK") }
+			},
 		)
 	}
 
@@ -72,7 +138,31 @@ fun AlbumDetailScreen(
 						Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
 					}
 				},
-				actions = { PinAction(ref = viewModel.albumRef, kind = PinKind.ALBUM) },
+				actions = {
+					PinAction(ref = viewModel.albumRef, kind = PinKind.ALBUM)
+					// Drawn only for an admin looking at their own upload. An
+					// overflow rather than its own icon: it is a rare, one-way
+					// action and does not belong a tap away from Pin.
+					if (canPromote) {
+						var menuOpen by remember { mutableStateOf(false) }
+						IconButton(onClick = { menuOpen = true }) {
+							Icon(Icons.Default.MoreVert, contentDescription = "More")
+						}
+						DropdownMenu(
+							expanded = menuOpen,
+							onDismissRequest = { menuOpen = false },
+						) {
+							DropdownMenuItem(
+								text = { Text("Move to library") },
+								enabled = !promoting,
+								onClick = {
+									menuOpen = false
+									confirmPromote = true
+								},
+							)
+						}
+					}
+				},
 			)
 		},
 	) { insets ->

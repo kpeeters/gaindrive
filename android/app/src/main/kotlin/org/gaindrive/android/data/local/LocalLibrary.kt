@@ -270,6 +270,22 @@ class LocalLibrary @Inject constructor(
 	suspend fun forgetServer(server: ServerId) = write {
 		dao.deletePlaylistSongs(server.value)
 		dao.deletePlaylists(server.value)
+		forgetLibraryRows(server)
+	}
+
+	/**
+	 * Drops the mirrored hierarchy of one server, keeping its playlists.
+	 *
+	 * For a move that happened on the server's disk — `promoteAlbum` — after
+	 * which every stored id and index bucket below the moved folder names
+	 * something that is no longer there. Coarse on purpose: the app cannot tell
+	 * which rows moved without re-reading them, and re-reading them is what the
+	 * next browse does anyway. Playlists are spared because they reference songs
+	 * by id and the ids themselves are unchanged by a promote.
+	 */
+	suspend fun forgetLibrary(server: ServerId) = write { forgetLibraryRows(server) }
+
+	private suspend fun forgetLibraryRows(server: ServerId) {
 		dao.deleteSongs(server.value)
 		dao.deleteAlbums(server.value)
 		dao.deleteArtists(server.value)

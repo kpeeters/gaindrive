@@ -54,7 +54,7 @@ class StreamUrls @Inject constructor(
 	private val registry: ServerRegistry,
 	private val clients: SubsonicClientFactory,
 	private val settings: SettingsStore,
-	private val limits: AccountLimits,
+	private val accounts: Accounts,
 	private val audioCache: AudioCache,
 ) {
 
@@ -177,7 +177,7 @@ class StreamUrls @Inject constructor(
 			// is in hand. A queue may span servers, so there is no single
 			// "current" cap to read.
 			val quality = (if (audioOnlyVideo) wanted.forVideoAudio() else wanted)
-				.cappedBy(limits.capFor(config))
+				.cappedBy(accounts.capFor(config))
 
 			val params = buildMap {
 				put("id", ref.id)

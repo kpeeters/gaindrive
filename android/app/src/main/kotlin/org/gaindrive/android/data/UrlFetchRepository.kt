@@ -46,7 +46,7 @@ class UrlFetchRepository @Inject constructor(
 	 * the endpoint. Both reduce to "not eligible", which is why there is no
 	 * separate `getUser` probe for `uploadRole` here.
 	 *
-	 * Cached in memory for the process, like [AccountLimits]: one cheap call per
+	 * Cached in memory for the process, like [Accounts]: one cheap call per
 	 * server per launch, a server-side change picked up on the next launch, and
 	 * nothing to migrate.
 	 *

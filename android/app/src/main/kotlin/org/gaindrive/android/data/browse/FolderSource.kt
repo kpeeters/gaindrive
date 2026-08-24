@@ -35,7 +35,7 @@ object FolderSource : BrowseSource {
 		server: ServerId,
 		request: RootRequest,
 	): List<ArtistIndex> =
-		api.getIndexes(request.musicFolderId, request.contentType)
+		api.getIndexes(request.musicFolderId, request.contentType, request.personalParam)
 			.requireOk().indexes?.index.orEmpty()
 			.map { it.toDomain(server) }
 

@@ -71,6 +71,8 @@ interface SubsonicApi {
 		@Query("musicFolderId") musicFolderId: String?,
 		/** gaindrive extension, honoured here exactly as on [getArtists]. */
 		@Query("contentType") contentType: String?,
+		/** gaindrive extension, honoured here exactly as on [getArtists]. */
+		@Query("personal") personal: String?,
 	): SubsonicEnvelope<GetIndexesBody>
 
 	/**
@@ -187,6 +189,17 @@ interface SubsonicApi {
 
 	@GET("rest/getRecentSongs.view")
 	suspend fun getRecentSongs(@Query("size") size: Int): SubsonicEnvelope<GetRecentSongsBody>
+
+	/**
+	 * Moves an album out of the account's uploads and into the shared library.
+	 *
+	 * Admin only, and the id must be an album whose stored path has the exact
+	 * shape `<uploads root>/<user>/<batch>/<artist>/<album>` — anything else is
+	 * refused rather than guessed at. The move happens on the server's disk, so
+	 * every id below it changes and both listings have to be read again.
+	 */
+	@GET("rest/promoteAlbum.view")
+	suspend fun promoteAlbum(@Query("id") id: String): SubsonicEnvelope<EmptyBody>
 
 	// ── Fetching a URL into the user's uploads ──────────────────────────
 	//

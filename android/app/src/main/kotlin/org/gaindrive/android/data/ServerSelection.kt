@@ -30,6 +30,7 @@ class ServerSelection @Inject constructor(
 	// A val because [settledOnline] reads it from a lambda, not just at
 	// construction the way `registry` is used.
 	private val connectivity: Connectivity,
+	libraryRevision: LibraryRevision,
 ) {
 
 	/** Every server that could be browsed, in registry order. */
@@ -58,10 +59,14 @@ class ServerSelection @Inject constructor(
 		.onStart { emit(connectivity.online.value) }
 
 	/**
-	 * Scope, connectivity and the registry's revision together, because each
-	 * changes what a browse screen should be showing and all three therefore have
-	 * to trigger the same reload. Screens watch this rather than [scope] so none
-	 * can be honoured while the others are quietly ignored.
+	 * Scope, connectivity, the registry's revision and the library's together,
+	 * because each changes what a browse screen should be showing and all four
+	 * therefore have to trigger the same reload. Screens watch this rather than
+	 * [scope] so none can be honoured while the others are quietly ignored.
+	 *
+	 * [LibraryRevision] is the app's own writes — an album promoted out of the
+	 * uploads area is missing from one listing and new in another, and a screen
+	 * that holds its list until its scope changes would show neither correctly.
 	 *
 	 * Deliberately sourced from [Connectivity.online] — losing the network and
 	 * choosing offline mode are the same thing to a browse screen — and not
@@ -73,8 +78,18 @@ class ServerSelection @Inject constructor(
 	 * offline, with nothing left to emit and correct it.
 	 */
 	val browse: Flow<BrowseState> =
-		combine(scope, settledOnline, registry.revision) { current, online, revision ->
-			BrowseState(current, offline = !online, revision = revision)
+		combine(
+			scope,
+			settledOnline,
+			registry.revision,
+			libraryRevision.revision,
+		) { current, online, servers, library ->
+			// Summed into the one field the screens already compare. Both
+			// counters only ever increase, so the sum strictly increases
+			// whenever either does — which is all `distinctUntilChanged`
+			// needs. That two different pairs could add to the same number is
+			// harmless: they cannot occur in that order.
+			BrowseState(current, offline = !online, revision = servers + library)
 		}
 
 	/**

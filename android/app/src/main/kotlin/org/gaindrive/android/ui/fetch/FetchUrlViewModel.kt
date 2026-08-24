@@ -164,6 +164,16 @@ class FetchUrlViewModel @Inject constructor(
 		chosen?.let { alignModeWith(it) }
 	}
 
+	/**
+	 * The URL is editable, not just displayed.
+	 *
+	 * It arrives filled in from a share and empty from the uploads listing's own
+	 * "Fetch from a URL" row, and both want the same field: the second has
+	 * nothing to start from, and the first may have picked the wrong link out of
+	 * a paragraph that held two.
+	 */
+	fun onUrl(v: String) = _state.update { it.copy(url = v, error = null) }
+
 	fun onArtist(v: String) = _state.update { it.copy(artist = v, error = null) }
 
 	fun onAlbum(v: String) = _state.update { it.copy(album = v, error = null) }

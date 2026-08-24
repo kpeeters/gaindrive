@@ -64,6 +64,8 @@ class LibraryRepository @Inject constructor(
 	private val connectivity: Connectivity,
 	private val audioCache: AudioCache,
 	private val musicRoots: MusicRoots,
+	private val accounts: Accounts,
+	private val libraryRevision: LibraryRevision,
 ) {
 
 	/**
@@ -107,8 +109,12 @@ class LibraryRepository @Inject constructor(
 			// entire library, so the request itself is what would put the same
 			// folders under every mode. Filtering the response instead would
 			// be too late — nothing in it says which entries to discard.
-			val request = rootRequest(config.browseByFolder, rootsOf(client, config), mode)
-				?: return@fanOut emptyList()
+			val request = rootRequest(
+				config.browseByFolder,
+				rootsOf(client, config),
+				mode,
+				accounts.canUploadTo(config),
+			) ?: return@fanOut emptyList()
 
 			config.browseSource.indexes(client, config.id, request)
 				// Buckets with no artists are noise in a sticky-header list.
@@ -140,7 +146,7 @@ class LibraryRepository @Inject constructor(
 		// fanOut runs the blocks concurrently, so accumulating into shared
 		// state inside one would be a data race.
 		val perServer = fanOut(scope, fallback = { null }) { client, config ->
-			chipsFor(config.browseByFolder, rootsOf(client, config))
+			chipsFor(config.browseByFolder, rootsOf(client, config), accounts.canUploadTo(config))
 		}.items
 
 		// Every server failing still has to leave something selectable.
@@ -419,6 +425,39 @@ class LibraryRepository @Inject constructor(
 			if (starred) client.star(song, album, artist).requireOk()
 			else client.unstar(song, album, artist).requireOk()
 		}
+	}
+
+	/**
+	 * Moves an album out of the account's uploads into the shared library.
+	 *
+	 * Admin only, and the server is the one that enforces that — asking here as
+	 * well would be a second copy of a rule that can change under us. A refusal
+	 * arrives as a [org.gaindrive.android.net.SubsonicException] for the caller
+	 * to show.
+	 *
+	 * Two things have to happen after it succeeds, and neither is optional. The
+	 * mirror of that server is dropped, because the move happened on its disk
+	 * and every stored id and index bucket beneath the album now names something
+	 * that is not there. And [LibraryRevision] is bumped, because the two
+	 * listings that changed — the uploads slice it left and the library slice it
+	 * joined — are both screens the user is *not* looking at, so nothing else
+	 * would ever correct them.
+	 */
+	/**
+	 * Whether this account administers [server], which is what [promoteAlbum]
+	 * needs. False for a server that is not configured or did not answer — a
+	 * permission guessed present would be an action that fails when used.
+	 */
+	suspend fun isAdminOn(server: ServerId): Boolean {
+		val config = registry.get(server) ?: return false
+		return accounts.isAdminOn(config)
+	}
+
+	suspend fun promoteAlbum(album: ItemRef) {
+		requireOnline()
+		onServer(album.server) { client -> client.promoteAlbum(album.id).requireOk() }
+		local.forgetLibrary(album.server)
+		libraryRevision.bump()
 	}
 
 	suspend fun createPlaylist(server: ServerId, name: String, songIds: List<String>) {

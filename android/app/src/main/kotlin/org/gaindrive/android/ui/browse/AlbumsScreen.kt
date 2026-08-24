@@ -40,7 +40,8 @@ import org.gaindrive.android.ui.components.NotesSection
 @Composable
 fun AlbumsScreen(
 	onBack: () -> Unit,
-	onOpenAlbum: (ItemRef, String) -> Unit,
+	/** The third argument carries "this album is a personal upload" downwards. */
+	onOpenAlbum: (ItemRef, String, Boolean) -> Unit,
 	viewModel: AlbumsViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
@@ -105,7 +106,9 @@ fun AlbumsScreen(
 						AlbumRow(
 							album = row.album,
 							coverUrl = row.coverUrl,
-							onClick = { onOpenAlbum(row.album.ref, row.album.title) },
+							onClick = {
+							onOpenAlbum(row.album.ref, row.album.title, viewModel.fromUploads)
+						},
 							badges = row.badges,
 						)
 					}

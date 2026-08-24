@@ -2,6 +2,7 @@ package org.gaindrive.android.ui.browse
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,8 +14,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -31,6 +37,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import org.gaindrive.android.data.model.ArtistIndex
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.data.model.LibraryMode
 import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.components.AlphabetRail
 import org.gaindrive.android.ui.components.ArtistRow
@@ -43,7 +50,9 @@ import org.gaindrive.android.ui.components.LibrarySelector
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ArtistsScreen(
-	onOpenArtist: (List<ItemRef>, String) -> Unit,
+	/** The third argument says the artist was opened from the Uploads slice. */
+	onOpenArtist: (List<ItemRef>, String, Boolean) -> Unit,
+	onFetchUrl: () -> Unit,
 	viewModel: ArtistsViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
@@ -109,6 +118,23 @@ fun ArtistsScreen(
 				onDismiss = viewModel::dismissFailures,
 			)
 
+			// Outside the list rather than an item in it, so it is there while
+			// the uploads are still loading, when the load failed, and when
+			// there is nothing in them yet — which is exactly when someone wants
+			// to put something there. The Uploads chip is only offered to an
+			// account that may upload, so reaching this means the rights exist.
+			if (mode == LibraryMode.UPLOADS) {
+				ListItem(
+					headlineContent = { Text("Fetch from a URL") },
+					supportingContent = { Text("The server downloads it into your uploads") },
+					leadingContent = {
+						Icon(Icons.Default.AddLink, contentDescription = null)
+					},
+					modifier = Modifier.clickable(onClick = onFetchUrl),
+				)
+				HorizontalDivider()
+			}
+
 			RefreshableLoadBox(
 				state = state,
 				isRefreshing = isRefreshing,
@@ -121,11 +147,16 @@ fun ArtistsScreen(
 					// and saying the latter would send the user hunting for a
 					// problem with their server.
 					EmptyMessage(
-						if (LocalAvailability.current.online) {
-							"This library has no artists yet."
-						} else {
-							"Nothing is stored on this device yet. Play or " +
-								"download something while online first."
+						when {
+							!LocalAvailability.current.online ->
+								"Nothing is stored on this device yet. Play or " +
+									"download something while online first."
+							// Empty uploads is the state everybody starts in,
+							// and the row above is the way out of it. Saying
+							// "no artists" here would read as a fault.
+							mode == LibraryMode.UPLOADS ->
+								"Nothing in your uploads yet."
+							else -> "This library has no artists yet."
 						}
 					)
 					return@RefreshableLoadBox
@@ -163,7 +194,13 @@ fun ArtistsScreen(
 							items(index.artists, key = { it.ref.encode() }) { artist ->
 								ArtistRow(
 									artist = artist,
-									onClick = { onOpenArtist(artist.refs, artist.name) },
+									onClick = {
+										onOpenArtist(
+											artist.refs,
+											artist.name,
+											mode == LibraryMode.UPLOADS,
+										)
+									},
 									badges = artist.sources.mapNotNull { badgeNames[it] },
 								)
 							}

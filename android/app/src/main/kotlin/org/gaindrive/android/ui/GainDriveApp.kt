@@ -292,23 +292,38 @@ fun GainDriveApp(
 		) {
 			composable<Route.Artists> {
 				ArtistsScreen(
-					onOpenArtist = { refs, name ->
-						navController.navigate(Route.Albums(ItemRef.encodeAll(refs), name))
+					onOpenArtist = { refs, name, fromUploads ->
+						navController.navigate(
+							Route.Albums(ItemRef.encodeAll(refs), name, fromUploads)
+						)
 					},
+					// The same panel a shared URL opens, with nothing in its URL
+					// field. Pushed onto the Library tab's stack, so backing out
+					// of it returns to the uploads listing it was started from.
+					onFetchUrl = { navController.navigate(Route.FetchUrl("")) },
 				)
 			}
 
 			composable<Route.Albums> {
 				AlbumsScreen(
 					onBack = { navController.popBackStack() },
-					onOpenAlbum = { ref, title ->
-						navController.navigate(Route.Album(ref.encode(), title))
+					onOpenAlbum = { ref, title, fromUploads ->
+						navController.navigate(Route.Album(ref.encode(), title, fromUploads))
 					},
 				)
 			}
 
 			composable<Route.Album> {
-				AlbumDetailScreen(onBack = { navController.popBackStack() })
+				AlbumDetailScreen(
+					onBack = { navController.popBackStack() },
+					// Back to the Library tab's own list, shedding the artist
+					// folder in between: a promoted album takes its uploads
+					// artist folder with it when it was the only one there, so
+					// the screen one level up may name nothing at all. Promote
+					// is only offered on the Artists → Albums → Album path, so
+					// that root is always on the stack.
+					onPromoted = { navController.popBackStack(Route.Artists, inclusive = false) },
+				)
 			}
 
 			composable<Route.Playlists> {

@@ -25,7 +25,7 @@ object Id3Source : BrowseSource {
 		server: ServerId,
 		request: RootRequest,
 	): List<ArtistIndex> =
-		api.getArtists(null, request.contentType)
+		api.getArtists(request.personalParam, request.contentType)
 			.requireOk().artists?.index.orEmpty()
 			.map { it.toDomain(server) }
 

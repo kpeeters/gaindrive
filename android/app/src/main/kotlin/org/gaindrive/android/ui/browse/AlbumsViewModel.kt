@@ -56,6 +56,9 @@ class AlbumsViewModel @Inject constructor(
 
 	val artistName: String = route.artistName
 
+	/** Passed down to each album, and only ever true when browsing Uploads. */
+	val fromUploads: Boolean = route.fromUploads
+
 	private val _state = MutableStateFlow<Load<List<AlbumUi>>>(Load.Loading)
 	val state: StateFlow<Load<List<AlbumUi>>> = _state.asStateFlow()
 

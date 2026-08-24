@@ -74,7 +74,7 @@ class ConnectionTester @Inject constructor(
 	): ConnectionTest {
 		val outcome = withTimeoutOrNull(VERIFY_TIMEOUT_MS) {
 			try {
-				if (browseByFolder) client.getIndexes(null, null).requireOk()
+				if (browseByFolder) client.getIndexes(null, null, null).requireOk()
 				else client.getArtists(null, null).requireOk()
 				ConnectionTest.Reachable
 			} catch (e: CancellationException) {

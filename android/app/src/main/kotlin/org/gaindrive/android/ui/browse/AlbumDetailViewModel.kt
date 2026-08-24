@@ -46,6 +46,27 @@ class AlbumDetailViewModel @Inject constructor(
 	/** Shown in the app bar while the body is still loading. */
 	val albumTitle: String = route.albumTitle
 
+	/**
+	 * Whether moving this album into the shared library is on offer.
+	 *
+	 * Both halves are needed and neither is guessable from the ref: the route
+	 * says the user reached this through Uploads, and the server says this
+	 * account administers it. The server checks the second one again — this only
+	 * decides whether to draw a control, never whether the move is allowed.
+	 */
+	private val _canPromote = MutableStateFlow(false)
+	val canPromote: StateFlow<Boolean> = _canPromote.asStateFlow()
+
+	/** Set once the move has succeeded, so the screen can leave. */
+	private val _promoted = MutableStateFlow(false)
+	val promoted: StateFlow<Boolean> = _promoted.asStateFlow()
+
+	private val _promoting = MutableStateFlow(false)
+	val promoting: StateFlow<Boolean> = _promoting.asStateFlow()
+
+	private val _promoteError = MutableStateFlow<String?>(null)
+	val promoteError: StateFlow<String?> = _promoteError.asStateFlow()
+
 	private val _state = MutableStateFlow<Load<AlbumDetail>>(Load.Loading)
 	val state: StateFlow<Load<AlbumDetail>> = _state.asStateFlow()
 
@@ -58,6 +79,39 @@ class AlbumDetailViewModel @Inject constructor(
 
 	init {
 		load()
+		// Only asked when the route says it could matter, so an ordinary album
+		// costs no request at all.
+		if (route.fromUploads) {
+			viewModelScope.launch {
+				_canPromote.value = runCatchingCancellable {
+					library.isAdminOn(albumRef.server)
+				}.getOrDefault(false)
+			}
+		}
+	}
+
+	/**
+	 * Moves this album out of the uploads area into the shared library.
+	 *
+	 * The repository drops that server's mirror and bumps the library revision,
+	 * so both listings are re-read; this only has to send the screen back, since
+	 * the album it is showing is at a new id the moment this returns.
+	 */
+	fun promote() {
+		if (_promoting.value) return
+		_promoting.value = true
+		_promoteError.value = null
+		viewModelScope.launch {
+			runCatchingCancellable { library.promoteAlbum(albumRef) }.fold(
+				onSuccess = { _promoted.value = true },
+				onFailure = { _promoteError.value = "Could not move it: ${it.userMessage()}" },
+			)
+			_promoting.value = false
+		}
+	}
+
+	fun clearPromoteError() {
+		_promoteError.value = null
 	}
 
 	/** Initial load and retry. */
