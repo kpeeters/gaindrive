@@ -206,9 +206,10 @@ class GainDrive {
 		// normalise what was written into <artist>/<album>/file, apply any names
 		// the user typed by hand, then scan each artist directory in the batch.
 		// Shared with /upload, which is the same steps around a different
-		// producer and passes no overrides — hence the defaults, so that call
-		// site does not have to mention a feature it does not have. Catches — a
-		// contended database must not take the server with it.
+		// producer — an archive rather than a fetched URL — and now passes the
+		// same overrides. The defaults remain for a caller that has no names to
+		// give. Catches — a contended database must not take the server with
+		// it.
 		void scan_batch(const std::string& rel_batch,
 		                const std::filesystem::path& dest,
 		                const std::string& fallback_artist,

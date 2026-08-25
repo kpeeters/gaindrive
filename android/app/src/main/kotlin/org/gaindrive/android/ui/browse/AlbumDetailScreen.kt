@@ -1,5 +1,7 @@
 package org.gaindrive.android.ui.browse
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
@@ -8,8 +10,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -18,6 +22,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -29,11 +36,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.cache.PinKind
+import org.gaindrive.android.data.model.MusicRoot
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.ui.components.CoverHero
 import org.gaindrive.android.ui.components.ExternalLink
@@ -68,6 +78,10 @@ fun AlbumDetailScreen(
 	val promoting by viewModel.promoting.collectAsStateWithLifecycle()
 	val promoted by viewModel.promoted.collectAsStateWithLifecycle()
 	val promoteError by viewModel.promoteError.collectAsStateWithLifecycle()
+	val roots by viewModel.roots.collectAsStateWithLifecycle()
+	val destRoot by viewModel.destRoot.collectAsStateWithLifecycle()
+	val folder by viewModel.folder.collectAsStateWithLifecycle()
+	val folderSuggestions by viewModel.folderSuggestions.collectAsStateWithLifecycle()
 	var confirmPromote by remember { mutableStateOf(false) }
 
 	// The album this screen is showing has moved and has a new id, so there is
@@ -87,31 +101,19 @@ fun AlbumDetailScreen(
 	}
 
 	if (confirmPromote) {
-		AlertDialog(
-			onDismissRequest = { confirmPromote = false },
-			title = { Text("Move to the library?") },
-			// Says what happens on the server's disk, because that is what makes
-			// this different from every other action on this screen: it is not
-			// undoable from the app, and everyone else browsing sees the result.
-			text = {
-				Text(
-					"“${viewModel.albumTitle}” is moved out of your uploads and " +
-						"into the shared library, where everyone with an account " +
-						"can see it. The files move on the server; this cannot be " +
-						"undone from here."
-				)
-			},
-			confirmButton = {
-				TextButton(
-					enabled = !promoting,
-					onClick = {
-						confirmPromote = false
-						viewModel.promote()
-					},
-				) { Text("Move") }
-			},
-			dismissButton = {
-				TextButton(onClick = { confirmPromote = false }) { Text("Cancel") }
+		PromoteDialog(
+			albumTitle = viewModel.albumTitle,
+			roots = roots,
+			chosen = destRoot,
+			folder = folder,
+			suggestions = folderSuggestions,
+			busy = promoting,
+			onRoot = viewModel::selectRoot,
+			onFolder = viewModel::onFolder,
+			onDismiss = { confirmPromote = false },
+			onConfirm = {
+				confirmPromote = false
+				viewModel.promote()
 			},
 		)
 	}
@@ -270,3 +272,147 @@ fun AlbumDetailScreen(
 	}
 }
 
+
+/**
+ * Where an upload goes when it is moved into the shared library.
+ *
+ * Two controls, not a folder browser, and that is not a simplification: both
+ * layouts are `L1/L2/[L3]/files`, the album being moved *is* L2, and L3 is only
+ * ever a disc or season directory inside it. So a root and one level under it is
+ * the whole of the destination — there is no third level to walk to.
+ *
+ * The root picker is hidden when there is only one, the same rule the library
+ * selector and the fetch panel's server picker use.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PromoteDialog(
+	albumTitle: String,
+	roots: List<MusicRoot>,
+	chosen: MusicRoot?,
+	folder: String,
+	suggestions: List<String>,
+	busy: Boolean,
+	onRoot: (MusicRoot) -> Unit,
+	onFolder: (String) -> Unit,
+	onDismiss: () -> Unit,
+	onConfirm: () -> Unit,
+) {
+	val isCategories = chosen?.contentType == "categories"
+
+	AlertDialog(
+		onDismissRequest = onDismiss,
+		title = { Text("Move to the library") },
+		text = {
+			Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+				// Says what happens on the server's disk, because that is what
+				// makes this different from every other action on this screen:
+				// it is not undoable from the app, and everyone else browsing
+				// the server sees the result.
+				Text(
+					"“$albumTitle” leaves your uploads and joins the shared " +
+						"library, where everyone with an account can see it. " +
+						"The files move on the server; this cannot be undone " +
+						"from here."
+				)
+
+				if (roots.size > 1) {
+					var open by remember { mutableStateOf(false) }
+					Box {
+						OutlinedButton(enabled = !busy, onClick = { open = true }) {
+							Text(chosen?.name ?: "Choose a library")
+							Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+						}
+						DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+							roots.forEach { root ->
+								DropdownMenuItem(
+									text = {
+										// The kind alongside the name: which one
+										// is the film library is not guessable
+										// from an operator's chosen name.
+										Text(
+											root.contentType
+												?.let { "${root.name} ($it)" }
+												?: root.name
+										)
+									},
+									leadingIcon = {
+										RadioButton(
+											selected = root.id == chosen?.id,
+											onClick = null,
+										)
+									},
+									onClick = {
+										open = false
+										onRoot(root)
+									},
+								)
+							}
+						}
+					}
+				}
+
+				// Free text with suggestions rather than a picker: typing a name
+				// that is not in the list is how a new artist or category is
+				// made, and the server creates the directory, so there is no
+				// separate operation for it.
+				var menuOpen by remember { mutableStateOf(false) }
+				val matches = remember(folder, suggestions) {
+					if (folder.isBlank()) suggestions.take(SUGGESTION_LIMIT)
+					else suggestions
+						.filter { it.contains(folder, ignoreCase = true) && it != folder }
+						.take(SUGGESTION_LIMIT)
+				}
+				Box {
+					OutlinedTextField(
+						value = folder,
+						onValueChange = {
+							onFolder(it)
+							menuOpen = true
+						},
+						label = { Text(if (isCategories) "Category" else "Artist") },
+						supportingText = {
+							Text(
+								if (isCategories) "A category that does not exist yet is created."
+								else "An artist that does not exist yet is created."
+							)
+						},
+						singleLine = true,
+						enabled = !busy,
+						keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+						modifier = Modifier.fillMaxWidth(),
+					)
+					DropdownMenu(
+						expanded = menuOpen && matches.isNotEmpty(),
+						onDismissRequest = { menuOpen = false },
+						// Never takes the keyboard focus: this sits under a text
+						// field that is still being typed into.
+						properties = PopupProperties(focusable = false),
+					) {
+						matches.forEach { name ->
+							DropdownMenuItem(
+								text = { Text(name) },
+								onClick = {
+									menuOpen = false
+									onFolder(name)
+								},
+							)
+						}
+					}
+				}
+			}
+		},
+		confirmButton = {
+			TextButton(
+				// A blank folder is allowed: the server reads it as "keep what
+				// this is already filed under", which is a real answer.
+				enabled = !busy && chosen != null,
+				onClick = onConfirm,
+			) { Text("Move") }
+		},
+		dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+	)
+}
+
+/** Enough to be useful in a dialog, few enough not to cover the field. */
+private const val SUGGESTION_LIMIT = 6

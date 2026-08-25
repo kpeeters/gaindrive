@@ -67,7 +67,7 @@ class UploadsApiTest {
 	@Test
 	fun `getArtists sends personal when browsing uploads`() = runTest {
 		respond(emptyArtists)
-		api.getArtists("true", null).requireOk()
+		api.getArtists("true", null, null).requireOk()
 
 		val path = server.takeRequest().path.orEmpty()
 		assertTrue(path.contains("personal=true"))
@@ -81,7 +81,7 @@ class UploadsApiTest {
 	@Test
 	fun `getArtists sends no personal parameter for the shared library`() = runTest {
 		respond(emptyArtists)
-		api.getArtists(null, "categories").requireOk()
+		api.getArtists(null, "categories", null).requireOk()
 
 		val path = server.takeRequest().path.orEmpty()
 		assertFalse(path.contains("personal"))
@@ -108,12 +108,44 @@ class UploadsApiTest {
 		assertFalse(path.contains("personal"))
 	}
 
-	@Test
-	fun `promoteAlbum sends the album id`() = runTest {
-		respond("""{"subsonic-response":{"status":"ok","version":"1.16.1"}}""")
-		api.promoteAlbum("412").requireOk()
+	private val okEnvelope = """{"subsonic-response":{"status":"ok","version":"1.16.1"}}"""
 
-		assertTrue(server.takeRequest().path.orEmpty().contains("id=412"))
+	/**
+	 * No destination at all. This is the compatibility shape — the server falls
+	 * back to the first `artists` root under its own artist name — and it must
+	 * keep sending *nothing*, or a server that predates the parameters would see
+	 * an empty `folder` where it expects none.
+	 */
+	@Test
+	fun `promoteAlbum with no destination sends only the id`() = runTest {
+		respond(okEnvelope)
+		api.promoteAlbum("412", null, null).requireOk()
+
+		val path = server.takeRequest().path.orEmpty()
+		assertTrue(path.contains("id=412"))
+		assertFalse(path.contains("musicFolderId"))
+		assertFalse(path.contains("folder"))
+	}
+
+	@Test
+	fun `promoteAlbum sends a chosen root and folder`() = runTest {
+		respond(okEnvelope)
+		api.promoteAlbum("412", "3", "Documentaries").requireOk()
+
+		val path = server.takeRequest().path.orEmpty()
+		assertTrue(path.contains("musicFolderId=3"))
+		assertTrue(path.contains("folder=Documentaries"))
+	}
+
+	/** A root with no folder: keep the batch's own artist name, but put it there. */
+	@Test
+	fun `promoteAlbum can send a root without a folder`() = runTest {
+		respond(okEnvelope)
+		api.promoteAlbum("412", "3", null).requireOk()
+
+		val path = server.takeRequest().path.orEmpty()
+		assertTrue(path.contains("musicFolderId=3"))
+		assertFalse(path.contains("folder"))
 	}
 
 	/** Not an admin. The screen only draws the action for one, but the server decides. */
@@ -124,11 +156,26 @@ class UploadsApiTest {
 			   "error":{"code":50,"message":"Promote requires admin role."}}}"""
 		)
 		try {
-			api.promoteAlbum("412").requireOk()
+			api.promoteAlbum("412", null, null).requireOk()
 			fail("expected SubsonicException")
 		} catch (e: SubsonicException) {
 			assertEquals(SubsonicException.NOT_AUTHORISED, e.code)
 			assertEquals("Promote requires admin role.", e.message)
+		}
+	}
+
+	/** An id that is not a browsable library root — including the uploads root. */
+	@Test
+	fun `an unusable destination root is error 70`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"failed","version":"1.16.1",
+			   "error":{"code":70,"message":"No such library folder."}}}"""
+		)
+		try {
+			api.promoteAlbum("412", "99", null).requireOk()
+			fail("expected SubsonicException")
+		} catch (e: SubsonicException) {
+			assertEquals(SubsonicException.NOT_FOUND, e.code)
 		}
 	}
 
@@ -143,7 +190,7 @@ class UploadsApiTest {
 			   "error":{"code":0,"message":"Item is not in a personal library folder."}}}"""
 		)
 		try {
-			api.promoteAlbum("7").requireOk()
+			api.promoteAlbum("7", null, null).requireOk()
 			fail("expected SubsonicException")
 		} catch (e: SubsonicException) {
 			assertEquals("Item is not in a personal library folder.", e.message)

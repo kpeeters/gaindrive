@@ -3031,6 +3031,27 @@ std::vector<MediaStore::MusicFolder> MediaStore::get_music_folders()
 	return result;
 	}
 
+std::optional<MediaStore::MusicFolder> MediaStore::music_folder_by_id(int id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	// parent_id IS NULL is what makes this a *root* lookup rather than a
+	// folder one: without it any album's id would resolve here and become a
+	// destination two levels deep.
+	SQLite::Statement q(db_music_,
+		"SELECT id, path, COALESCE(content_type, 'artists')"
+		" FROM folders WHERE id = ? AND parent_id IS NULL");
+	q.bind(1, id);
+	if (!q.executeStep()) return std::nullopt;
+	std::string name = q.getColumn(1).getString();
+	// The same exclusion get_music_folders() applies, and for the same reason.
+	// Kept here too rather than left to the caller: this is the only other way
+	// to reach a root row, so a rule enforced in one of them is not enforced.
+	if (!uploads_prefix_.empty() && name + "/" == uploads_prefix_)
+		return std::nullopt;
+	return MusicFolder{ q.getColumn(0).getInt(), name,
+	                    q.getColumn(2).getString() };
+	}
+
 std::string MediaStore::get_cover_path(int cover_art_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);

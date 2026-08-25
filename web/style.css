@@ -1601,6 +1601,29 @@ body {
    border: 1px solid var(--border);
 }
 
+/* Promote destination. .modal-box is a flex column with its own gap, so the
+   controls need no margins — only a width, since a bare select shrinks to its
+   longest option and a root named "music" would make a box narrower than the
+   sentence above it. */
+#promote-root,
+#promote-folder {
+   width: 100%;
+   box-sizing: border-box;
+}
+
+#promote-what {
+   margin: 0;
+   font-size: 0.9rem;
+}
+
+/* Labels sit tight against the control they name rather than taking the box's
+   full 0.75rem gap, which would read as four unrelated rows. */
+#promote-modal label {
+   font-size: 0.85rem;
+   color: var(--text-dim);
+   margin-bottom: -0.5rem;
+}
+
 /* Suppress spinner arrows on numeric edit inputs (all browsers). */
 .track-num-input::-webkit-inner-spin-button,
 .track-num-input::-webkit-outer-spin-button,
@@ -2195,6 +2218,20 @@ body {
    }
 
 .name-clear:hover { color: var(--text); }
+
+/* "You already have this." Full-strength text rather than the dim of a hint,
+   so it is noticed — but deliberately *not* --accent, which is the red this
+   theme uses for errors: nothing here refuses an upload, and colouring it that
+   way would read as a refusal. Reserves no height when empty, since it is empty
+   most of the time and a permanent gap under the fields would be worse than a
+   reflow. */
+.upload-dupe {
+   color: var(--text);
+   font-size: 0.85rem;
+   margin: 0.2rem 0 0;
+   }
+
+.upload-dupe:empty { display: none; }
 
 .fetch-jobs {
    display: flex;

@@ -43,6 +43,13 @@ interface SubsonicApi {
 		 * root and are never part of the shared library.
 		 */
 		@Query("contentType") contentType: String?,
+		/**
+		 * Restricts to one root. Finer than [contentType], which names a *kind*
+		 * and may span several roots — and that is exactly why it is here: a
+		 * promote destination is one specific root, so the folder suggestions
+		 * for it cannot be asked for by kind.
+		 */
+		@Query("musicFolderId") musicFolderId: String?,
 	): SubsonicEnvelope<GetArtistsBody>
 
 	@GET("rest/getArtist.view")
@@ -199,7 +206,21 @@ interface SubsonicApi {
 	 * every id below it changes and both listings have to be read again.
 	 */
 	@GET("rest/promoteAlbum.view")
-	suspend fun promoteAlbum(@Query("id") id: String): SubsonicEnvelope<EmptyBody>
+	suspend fun promoteAlbum(
+		@Query("id") id: String,
+		/**
+		 * The destination root, as `getMusicFolders` reports it. Null falls back
+		 * to the server's own guess — the first `artists` root declared — which
+		 * cannot reach a `categories` root at all.
+		 */
+		@Query("musicFolderId") musicFolderId: String?,
+		/**
+		 * The level under that root: an artist under an `artists` root, a
+		 * category under a `categories` one. Null keeps the batch's own artist
+		 * name. A name not already there is created.
+		 */
+		@Query("folder") folder: String?,
+	): SubsonicEnvelope<EmptyBody>
 
 	// ── Fetching a URL into the user's uploads ──────────────────────────
 	//

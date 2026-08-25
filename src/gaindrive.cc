@@ -4962,6 +4962,31 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 		}
 
+		// Typed names, exactly as fetchUrl takes them — the two producers are
+		// the same steps around a different source of bytes, and scan_batch()
+		// below has always accepted these. Blank means "keep what the archive's
+		// own folders and the files' tags say", which is what every upload did
+		// before this existed.
+		std::string want_artist, want_album;
+		{
+		auto typed = [&](const char* key, std::string& out) -> bool {
+			auto it = req.params.find(key);
+			if (it == req.params.end()) return true;
+			if (it->second.find_first_not_of(" \t") == std::string::npos) return true;
+			// utf8_clean first: invalid UTF-8 reaches folders.path and then
+			// dump(), which throws. Then sanitise_component, which is what
+			// stops a typed "../.." being a path at all.
+			out = sanitise_component(utf8_clean(it->second, 200));
+			return !out.empty();
+			};
+		if (!typed("artist", want_artist)) {
+			json_err("The artist name contains nothing usable."); return;
+			}
+		if (!typed("album", want_album)) {
+			json_err("The album name contains nothing usable."); return;
+			}
+		}
+
 		if (!req.has_file("file")) { json_err("Missing file part."); return; }
 		const auto& fp = req.get_file_value("file");
 
@@ -4998,8 +5023,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		// place. Detached here because this one is on an HTTP thread and the
 		// client is holding a request open; the fetch worker calls it directly,
 		// being a background thread already.
-		std::thread([this, rel_batch, dest]{
-			scan_batch(rel_batch, dest, "Unknown Artist");
+		std::thread([this, rel_batch, dest, want_artist, want_album]{
+			scan_batch(rel_batch, dest, "Unknown Artist", want_artist, want_album);
 			}).detach();
 
 		nlohmann::json j;
@@ -5010,7 +5035,14 @@ GainDrive::GainDrive(const std::string& db_path,
 		});
 
 	// promoteAlbum — move a personal album into the shared library (admin only).
-	// Param: id (album folder_id). The album must live under .users/<username>/.
+	//
+	// Params: id (album folder_id), and optionally musicFolderId and folder
+	// naming where it should land. The album must live under the uploads root.
+	//
+	// **Both destination parameters absent reproduces the old behaviour exactly**
+	// — first artists root declared, batch's own artist name — because a client
+	// that has not been taught about them must go on working. That fallback is a
+	// guess and is documented as one below; it is kept only for compatibility.
 	server_.Get("/rest/promoteAlbum.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -5057,29 +5089,78 @@ GainDrive::GainDrive(const std::string& db_path,
 		const std::string& artist_name     = parts[3];
 		const std::string& album_name      = parts[4];
 
-		// Album lands under the artist dir in the main library.  With several
-		// artist roots configured there is nothing in a personal upload that
-		// says which one it belongs in, so it goes to the first one declared —
-		// the order the operator wrote them in is the only signal available.
+		// ---- Where it lands ----
+		//
+		// A root and one level under it, which is the whole of the destination:
+		// both layouts are L1/L2/[L3]/files, L2 is this album, and L3 is only
+		// ever a disc or season directory inside it.
 		std::string lib_root;
-		for (const auto& r : store_.roots())
-			if (r.type == "artists") { lib_root = r.name; break; }
-		if (lib_root.empty()) {
-			err(0, "No artist library root is configured to promote into.");
-			return;
+		auto mf_it = req.params.find("musicFolderId");
+		if (mf_it != req.params.end() && !mf_it->second.empty()) {
+			// music_folder_by_id() applies the same rule get_music_folders()
+			// does, so an id naming a folder deeper in the tree — or the
+			// uploads root, which promoting into would produce a path the
+			// five-component check above rejects for ever after — resolves to
+			// nothing here rather than being caught by a test of its own.
+			auto mf = store_.music_folder_by_id(to_int(mf_it->second, 0));
+			if (!mf) { err(70, "No such library folder."); return; }
+			lib_root = mf->name;
 			}
-		std::string artist_rel = lib_root + "/" + artist_name;
-		std::string target_rel = artist_rel + "/" + album_name;
+		else {
+			// The compatibility fallback, and a guess: with several artist
+			// roots configured there is nothing in a personal upload that says
+			// which one it belongs in, so it goes to the first one declared —
+			// the order the operator wrote them in is the only signal there is.
+			// Note this branch cannot reach a categories root at all, which is
+			// exactly why the parameter above exists.
+			for (const auto& r : store_.roots())
+				if (r.type == "artists") { lib_root = r.name; break; }
+			if (lib_root.empty()) {
+				err(0, "No artist library root is configured to promote into.");
+				return;
+				}
+			}
+
+		// The level under the root. Absent keeps the batch's own artist name,
+		// which is what the album is already filed under.
+		std::string dest_folder = artist_name;
+		auto folder_it = req.params.find("folder");
+		if (folder_it != req.params.end()
+		        && folder_it->second.find_first_not_of(" \t") != std::string::npos) {
+			// The first arbitrary string on this route to become a *library*
+			// path component, so it gets the treatment fetchUrl gives its typed
+			// names: utf8_clean first, because invalid UTF-8 reaches
+			// folders.path and then dump(), which throws; then
+			// sanitise_component, which is what stops a typed "../.." from
+			// being a path at all.
+			dest_folder = sanitise_component(utf8_clean(folder_it->second, 200));
+			if (dest_folder.empty()) {
+				err(10, "The folder name contains nothing usable."); return;
+				}
+			}
+
+		std::string dest_rel = lib_root + "/" + dest_folder;
+		std::string target_rel = dest_rel + "/" + album_name;
+
+		// Belt and braces over sanitise_component: that is what makes the
+		// component safe, and this is what proves the result of joining it did
+		// not leave the library. A path escaping to /etc prefixes no root.
+		if (!store_.path_is_within_root(store_.abs_path(target_rel))) {
+			err(0, "That destination is outside the library."); return;
+			}
 
 		fs::path abs_src    = store_.abs_path(item_rel);
 		fs::path abs_target = store_.abs_path(target_rel);
 
 		std::error_code ec;
-		// Create the artist dir in the main library if it doesn't exist yet.
-		fs::create_directories(store_.abs_path(artist_rel), ec);
+		// Create the destination folder if it does not exist yet — which is
+		// what makes "type a name that is not in the list" the way to add an
+		// artist or a category, with no separate operation for it.
+		fs::create_directories(store_.abs_path(dest_rel), ec);
 
 		if (fs::exists(abs_target)) {
-			err(0, "An album with that name already exists for that artist.");
+			// Not "for that artist": the destination may be a category now.
+			err(0, "Something with that name is already in that folder.");
 			return;
 			}
 
@@ -5110,14 +5191,14 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (fs::is_directory(personal_artist_abs, ec) && fs::is_empty(personal_artist_abs, ec))
 			fs::remove(personal_artist_abs, ec);
 
-		// Rescan synchronously: only two artist dirs, so it's fast, and doing it
+		// Rescan synchronously: only two directories, so it's fast, and doing it
 		// before the response ensures the client sees a consistent DB immediately.
 		//
 		// Destination first, in its own call — see the long note in renameAlbum.
 		// A single set would scan in sort order, and tearing down the personal
 		// artist dir while the promoted album's parent_id still points at it
 		// trips a foreign key and silently leaves the emptied artist behind.
-		store_.scan_dirs({artist_rel});
+		store_.scan_dirs({dest_rel});
 		store_.scan_dirs({personal_artist_rel});
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),

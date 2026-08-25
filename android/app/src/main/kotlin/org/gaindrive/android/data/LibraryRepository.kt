@@ -453,9 +453,63 @@ class LibraryRepository @Inject constructor(
 		return accounts.isAdminOn(config)
 	}
 
-	suspend fun promoteAlbum(album: ItemRef) {
+	/**
+	 * The roots of one server that an upload could be promoted into.
+	 *
+	 * `getMusicFolders` already excludes the uploads root, so this is exactly
+	 * the set of valid destinations and needs no filtering of its own.
+	 */
+	suspend fun destinationRoots(server: ServerId): List<MusicRoot> =
+		withServer(server) { client, config -> rootsOf(client, config) }
+
+	/**
+	 * The existing level-1 folders of one root — artists under an `artists`
+	 * root, categories under a `categories` one — for the promote picker's
+	 * suggestions.
+	 *
+	 * Asked by `musicFolderId` rather than by content type, because a
+	 * destination is one specific root and a kind may span several. Not read
+	 * from the mirror: that is keyed by slice, which is the coarser thing, and a
+	 * promote needs a network anyway.
+	 */
+	suspend fun foldersIn(server: ServerId, musicFolderId: String): List<String> =
+		onServer(server) { client ->
+			client.getArtists(null, null, musicFolderId)
+				.requireOk().artists?.index.orEmpty()
+				.flatMap { index -> index.artist.map { it.name } }
+		}
+
+	/**
+	 * Moves an album out of the account's uploads into the shared library.
+	 *
+	 * Admin only, and the server is the one that enforces that — asking here as
+	 * well would be a second copy of a rule that can change under us. A refusal
+	 * arrives as a [org.gaindrive.android.net.SubsonicException] for the caller
+	 * to show.
+	 *
+	 * [musicFolderId] and [folder] say where it lands: a root, and one level
+	 * under it. Both null leaves the choice to the server, which guesses at the
+	 * first `artists` root — a fallback that exists for clients predating the
+	 * parameters and cannot reach a `categories` root at all.
+	 *
+	 * Two things have to happen after it succeeds, and neither is optional. The
+	 * mirror of that server is dropped, because the move happened on its disk
+	 * and every stored id and index bucket beneath the album now names something
+	 * that is not there. And [LibraryRevision] is bumped, because the two
+	 * listings that changed — the uploads slice it left and the library slice it
+	 * joined — are both screens the user is *not* looking at, so nothing else
+	 * would ever correct them.
+	 */
+	suspend fun promoteAlbum(
+		album: ItemRef,
+		musicFolderId: String? = null,
+		folder: String? = null,
+	) {
 		requireOnline()
-		onServer(album.server) { client -> client.promoteAlbum(album.id).requireOk() }
+		onServer(album.server) { client ->
+			client.promoteAlbum(album.id, musicFolderId, folder?.trim()?.ifBlank { null })
+				.requireOk()
+		}
 		local.forgetLibrary(album.server)
 		libraryRevision.bump()
 	}

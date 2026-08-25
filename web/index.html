@@ -189,6 +189,25 @@
 </div>
 <input id="cover-art-file-input" type="file" accept="image/*" hidden>
 
+<!-- Moving an upload into the shared library. A root and one level under it is
+     the whole of the destination: both layouts are L1/L2/[L3]/files, L2 is the
+     album being moved, and L3 is only ever a disc or season directory inside
+     it. So this is two controls, not a folder browser. -->
+<div id="promote-modal" class="modal hidden">
+   <div class="modal-box">
+      <h3>Move to the shared library</h3>
+      <p id="promote-what"></p>
+      <label for="promote-root">Library:</label>
+      <select id="promote-root"></select>
+      <label for="promote-folder" id="promote-folder-label">Artist:</label>
+      <input id="promote-folder" type="text" list="promote-folder-list">
+      <datalist id="promote-folder-list"></datalist>
+      <p id="promote-note" class="admin-hint"></p>
+      <button id="promote-cancel-btn">Cancel</button>
+      <button id="promote-go-btn">Move</button>
+   </div>
+</div>
+
 <div id="cover-lightbox" class="modal hidden">
    <img id="cover-lightbox-img" alt="Cover art">
 </div>

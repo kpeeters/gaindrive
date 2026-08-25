@@ -15,6 +15,7 @@ import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.model.AlbumDetail
 import org.gaindrive.android.data.model.AlbumNotes
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.data.model.MusicRoot
 import org.gaindrive.android.net.runCatchingCancellable
 import org.gaindrive.android.net.userMessage
 import org.gaindrive.android.ui.Load
@@ -67,6 +68,31 @@ class AlbumDetailViewModel @Inject constructor(
 	private val _promoteError = MutableStateFlow<String?>(null)
 	val promoteError: StateFlow<String?> = _promoteError.asStateFlow()
 
+	/**
+	 * Where it could go: the destination roots, and the level-1 folders of
+	 * whichever is chosen.
+	 *
+	 * A root and one level is the whole of the destination — both layouts are
+	 * `L1/L2/[L3]/files`, L2 is this album, and L3 is only ever a disc or season
+	 * directory inside it — so this is two controls rather than a folder
+	 * browser.
+	 */
+	private val _roots = MutableStateFlow<List<MusicRoot>>(emptyList())
+	val roots: StateFlow<List<MusicRoot>> = _roots.asStateFlow()
+
+	private val _destRoot = MutableStateFlow<MusicRoot?>(null)
+	val destRoot: StateFlow<MusicRoot?> = _destRoot.asStateFlow()
+
+	private val _folder = MutableStateFlow("")
+	val folder: StateFlow<String> = _folder.asStateFlow()
+
+	private val _folderSuggestions = MutableStateFlow<List<String>>(emptyList())
+	val folderSuggestions: StateFlow<List<String>> = _folderSuggestions.asStateFlow()
+
+	/** The name the batch is filed under now, which an artists root defaults to. */
+	private val currentArtist: String?
+		get() = _state.value.valueOrNull()?.album?.artistName?.takeIf { it.isNotBlank() }
+
 	private val _state = MutableStateFlow<Load<AlbumDetail>>(Load.Loading)
 	val state: StateFlow<Load<AlbumDetail>> = _state.asStateFlow()
 
@@ -86,8 +112,41 @@ class AlbumDetailViewModel @Inject constructor(
 				_canPromote.value = runCatchingCancellable {
 					library.isAdminOn(albumRef.server)
 				}.getOrDefault(false)
+				// Only once the answer is yes: a non-admin never opens the
+				// dialog, so fetching what it would contain is a request for
+				// nothing.
+				if (_canPromote.value) loadRoots()
 			}
 		}
+	}
+
+	private suspend fun loadRoots() {
+		val found = runCatchingCancellable {
+			library.destinationRoots(albumRef.server)
+		}.getOrDefault(emptyList())
+		_roots.value = found
+		// Pre-selected rather than left empty, so the common single-root case
+		// needs no interaction at all and the dialog is just a confirmation.
+		found.firstOrNull()?.let { selectRoot(it) }
+	}
+
+	fun selectRoot(root: MusicRoot) {
+		_destRoot.value = root
+		// An artists root defaults to what the album is already filed under. A
+		// categories root deliberately does not: L1 there is a *category*, and
+		// the batch's artist is whatever the source called it — for a fetched
+		// video, the channel name, which is never the answer.
+		_folder.value = if (root.contentType == "categories") "" else currentArtist.orEmpty()
+		_folderSuggestions.value = emptyList()
+		viewModelScope.launch {
+			_folderSuggestions.value = runCatchingCancellable {
+				library.foldersIn(albumRef.server, root.id)
+			}.getOrDefault(emptyList())
+		}
+	}
+
+	fun onFolder(v: String) {
+		_folder.value = v
 	}
 
 	/**
@@ -101,9 +160,16 @@ class AlbumDetailViewModel @Inject constructor(
 		if (_promoting.value) return
 		_promoting.value = true
 		_promoteError.value = null
+		val root = _destRoot.value
+		val folder = _folder.value
 		viewModelScope.launch {
-			runCatchingCancellable { library.promoteAlbum(albumRef) }.fold(
+			runCatchingCancellable {
+				library.promoteAlbum(albumRef, root?.id, folder)
+			}.fold(
 				onSuccess = { _promoted.value = true },
+				// The server's own words. "Something with that name is already
+				// in that folder" and "outside the library" need different
+				// fixes, and one flat failure message told the user neither.
 				onFailure = { _promoteError.value = "Could not move it: ${it.userMessage()}" },
 			)
 			_promoting.value = false

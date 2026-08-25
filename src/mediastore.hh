@@ -115,6 +115,17 @@ class MediaStore {
 		// One entry per configured library root.
 		std::vector<MusicFolder> get_music_folders();
 
+		// One root, by the id get_music_folders() reported for it.
+		//
+		// Answers nullopt for anything that is not a browsable library root —
+		// a folder deeper in the tree, an id that resolves to nothing, and the
+		// uploads root, which that listing excludes for the same reason. Both
+		// go through the same rule so a caller cannot be handed a root the
+		// listing would never have offered: promoteAlbum takes this id from a
+		// client, and promoting *into* uploads would produce a path its own
+		// five-component check rejects for ever after.
+		std::optional<MusicFolder> music_folder_by_id(int id);
+
 		struct CachedArtistInfo {
 			std::string mbid;
 			std::string last_fm_url;

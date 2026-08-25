@@ -210,6 +210,79 @@ function _closeCoverArtDialog() {
    _coverArtCb = null;
    }
 
+// ---- Promoting an upload into the shared library --------------------------
+//
+// The destination is a root plus one level, and nothing more: both layouts are
+// L1/L2/[L3]/files, the album being moved is L2, and L3 is only ever a disc or
+// season directory inside it. Two controls, not a browser.
+let _promoteCb = null;
+
+// Suggestions for the chosen root, so that "type a name not in the list" is how
+// a new artist or category is made — the server creates the directory, and
+// there is no separate operation for it.
+async function _fillPromoteFolders(rootId) {
+   const list = document.getElementById('promote-folder-list');
+   list.innerHTML = '';
+   try {
+      const r = await apiCall('getArtists', {musicFolderId: rootId});
+      for (const idx of r.artists?.index ?? [])
+         for (const a of idx.artist) {
+            const opt = document.createElement('option');
+            opt.value = a.name;
+            list.appendChild(opt);
+            }
+      }
+   catch { /* completion only; typing still works */ }
+   }
+
+// [artist] is what the batch is currently filed under, used as the default for
+// an artists root only. Under a categories root L1 is a *category*, and the
+// batch's artist is whatever the source called it — a channel name, usually,
+// which is never the answer.
+function showPromoteDialog(album, artist, onGo) {
+   _promoteCb = onGo;
+   document.getElementById('promote-what').textContent =
+      `“${album}” is moved out of your uploads and onto the server's disk in `
+      + 'the shared library, where everyone with an account can see it. This '
+      + 'cannot be undone from here.';
+
+   const rootSel = document.getElementById('promote-root');
+   const folder  = document.getElementById('promote-folder');
+   const label   = document.getElementById('promote-folder-label');
+   rootSel.innerHTML = '';
+   for (const f of musicFolders ?? []) {
+      const opt = document.createElement('option');
+      opt.value       = f.id;
+      opt.textContent = f.contentType ? `${f.name} (${f.contentType})` : f.name;
+      opt.dataset.contentType = f.contentType ?? '';
+      rootSel.appendChild(opt);
+      }
+
+   const syncRoot = () => {
+      const opt = rootSel.selectedOptions[0];
+      const isCategories = opt?.dataset.contentType === 'categories';
+      label.textContent = isCategories ? 'Category:' : 'Artist:';
+      folder.value = isCategories ? '' : artist;
+      folder.placeholder = isCategories ? 'Which category?' : artist;
+      document.getElementById('promote-note').textContent = isCategories
+         ? 'A category that does not exist yet is created.'
+         : 'An artist that does not exist yet is created.';
+      _fillPromoteFolders(rootSel.value);
+      };
+   // Assigned, not addEventListener: this runs again every time the dialog is
+   // opened, and adding would stack a fresh handler on the same element each
+   // time.
+   rootSel.onchange = syncRoot;
+   syncRoot();
+
+   document.getElementById('promote-modal').classList.remove('hidden');
+   }
+
+function _closePromoteDialog() {
+   document.getElementById('promote-modal').classList.add('hidden');
+   _promoteCb = null;
+   }
+
 function showLightbox(src) {
    document.getElementById('cover-lightbox-img').src = src;
    document.getElementById('cover-lightbox').classList.remove('hidden');
@@ -827,6 +900,102 @@ let fetchPollTimer = null;
 // once rather than re-triggering a re-render on every tick.
 let fetchLastState = {};
 
+// Debounce for the "do I already have this?" check under the name fields.
+let _dupeTimer = null;
+
+// Every top-level name the library already knows, filled into [list] as it
+// arrives and returned as a promise of a Map for the checks below.
+//
+// **Every slice, not the one being filed into.** A name that exists under a
+// categories root is just as much a name already in the library as one under an
+// artists root, and completing against only half of them would offer a fresh
+// spelling of something that is already there. Staging is included too and
+// marked as such: something fetched a fortnight ago and never promoted is the
+// likeliest duplicate of all, and it is the one no library listing would show.
+//
+// The map is name → {id, label}, lowercased for lookup, first slice winning —
+// the same "registry order decides" tie-break used everywhere a merge happens.
+function loadNameSuggestions(list) {
+   const types = [...new Set((musicFolders ?? [])
+      .map(f => f.contentType).filter(Boolean))];
+   // A server naming no kinds still has one library to complete against, and
+   // sending no contentType is what asks for all of it.
+   const slices = types.length ? types.map(t => ({params: {contentType: t}, label: t}))
+                              : [{params: {}, label: 'the library'}];
+   slices.push({params: {personal: 'true'}, label: 'staging'});
+
+   return Promise.all(slices.map(async slice => {
+      // A slice that fails is dropped, not reported: this is completion, and
+      // half a list is worth more than an error where a suggestion should be.
+      try {
+         const r = await apiCall('getArtists', slice.params);
+         return (r.artists?.index ?? []).flatMap(i =>
+            i.artist.map(a => ({name: a.name, id: a.id, label: slice.label})));
+         }
+      catch { return []; }
+      })).then(perSlice => {
+         const known = new Map();
+         for (const entry of perSlice.flat()) {
+            const key = entry.name.toLowerCase();
+            if (known.has(key)) continue;
+            known.set(key, entry);
+            const opt = document.createElement('option');
+            opt.value = entry.name;
+            // Shown as secondary text where the browser supports it, ignored
+            // where it does not — the value is what gets inserted either way.
+            opt.label = entry.label;
+            list.appendChild(opt);
+            }
+         return known;
+         });
+   }
+
+// What the library already holds under these names, as one line of prose, or ''.
+//
+// Strongest signal only. Three separate notes stacked under two text boxes is
+// noise, and the strongest one subsumes the others: knowing the album is
+// already there makes "that artist exists" beside the point.
+async function checkExisting(knownPromise, artist, album) {
+   const known = await knownPromise;
+   const hit   = artist ? known.get(artist.toLowerCase()) : null;
+   const where = hit && hit.label === 'staging'
+      ? 'already in your uploads, not yet promoted'
+      : hit && `already in ${hit.label}`;
+
+   if (hit && album) {
+      // That artist's own albums, which is the precise question — and cheap,
+      // because it is one request against an id we already have.
+      try {
+         const r = await apiCall('getArtist', {id: hit.id});
+         const match = (r.artist?.album ?? [])
+            .find(a => (a.name ?? a.title ?? '').toLowerCase() === album.toLowerCase());
+         if (match) return `You already have “${match.name ?? match.title}” under ` +
+                           `${hit.name} — ${where}.`;
+         }
+      catch { /* fall through to the weaker signals */ }
+      }
+   if (hit) return `“${hit.name}” is ${where}.`;
+
+   // Nothing matched by name, which is the case worth searching for: the same
+   // record filed under a spelling you would not have typed. Searched on the
+   // album rather than the artist because that is the distinctive string.
+   if (album.length >= 3) {
+      try {
+         const r = await apiCall('search3',
+            {query: album, artistCount: 0, albumCount: 3, songCount: 0});
+         const found = r.searchResult3?.album ?? [];
+         if (found.length) {
+            const first = found[0];
+            return `Possibly already there: “${first.name ?? first.title}”` +
+                   (first.artist ? ` by ${first.artist}` : '') +
+                   (found.length > 1 ? ` and ${found.length - 1} more.` : '.');
+            }
+         }
+      catch { /* a search that fails is not worth reporting here */ }
+      }
+   return '';
+   }
+
 // name+albumCount per artist, not the artist count: a second upload usually
 // adds an album to an artist who is already listed, which leaves the count
 // untouched.
@@ -989,6 +1158,15 @@ function makeUploadBar() {
    const hint = document.createElement('p');
    hint.className   = 'admin-hint';
    hint.textContent = 'Music archive: zip, tar, tar.gz';
+   // Says where an upload actually goes, because "Uploads" is a place people
+   // reasonably expect to be the library itself. It is not: an admin has to
+   // move it, and until then only this account can see it.
+   const stagingHint = document.createElement('p');
+   stagingHint.className   = 'admin-hint';
+   stagingHint.textContent =
+      'Everything here stays in your own uploads until an admin moves it into '
+      + 'the shared library. The names below apply to both an archive and a URL.';
+   bar.appendChild(stagingHint);
    bar.appendChild(hint);
 
    // Created here but appended below the URL row: both producers report through
@@ -1001,6 +1179,92 @@ function makeUploadBar() {
 
    const uploadStatus = document.createElement('p');
    uploadStatus.className = 'upload-status';
+
+   // ---- The names, which belong to both producers ----
+   //
+   // Above the URL row rather than inside it: an archive and a fetched URL are
+   // the same batch by the time the server normalises them, and both take the
+   // same overrides. Having these only under the URL box was the earlier shape
+   // and made an uploaded zip the one thing that could not be named.
+   //
+   // A row of their own rather than two more fields beside the URL: .upload-row
+   // is one flex line, and a URL box squeezed between two name boxes and a
+   // button is unusable on a phone.
+   //
+   // The names override whatever the source would have called this — for a
+   // fetch, what the handler parsed out of the video title; for an archive, its
+   // own folders and the files' tags. Blank keeps that, which is why neither
+   // field is marked required.
+   const nameRow = document.createElement('div');
+   nameRow.className = 'upload-row fetch-names';
+   bar.appendChild(nameRow);
+
+   // Completion comes from the whole library, so `list` is shared: the point is
+   // to stop a near-duplicate spelling of a name that already exists, and which
+   // slice it exists in does not change that.
+   const nameList = document.createElement('datalist');
+   nameList.id = 'upload-name-list';
+   bar.appendChild(nameList);
+
+   // Sticky, unlike the URL: fetching six tracks off one concert should mean
+   // typing the names once. That is also why they are not cleared on success —
+   // only the URL is, since that one genuinely differs every time. The check
+   // below is what keeps a stale name from being applied unnoticed.
+   const makeNameInput = (key, placeholder, list) => {
+      const el = document.createElement('input');
+      el.type        = 'text';
+      el.className   = 'token-input';
+      el.placeholder = placeholder;
+      el.value       = localStorage.getItem(key) || '';
+      if (list) el.setAttribute('list', list);
+      el.addEventListener('change', () =>
+         localStorage.setItem(key, el.value.trim()));
+      nameRow.appendChild(el);
+      return el;
+      };
+   const artistInput = makeNameInput('gd_fetch_artist',
+                                     'Artist or category (from the source if empty)',
+                                     nameList.id);
+   const albumInput  = makeNameInput('gd_fetch_album',
+                                     'Album or name (from the source if empty)');
+
+   const clearBtn = document.createElement('button');
+   clearBtn.className   = 'name-clear';
+   clearBtn.textContent = 'Clear';
+   clearBtn.title       = 'Forget these names';
+   clearBtn.addEventListener('click', () => {
+      artistInput.value = albumInput.value = '';
+      localStorage.removeItem('gd_fetch_artist');
+      localStorage.removeItem('gd_fetch_album');
+      dupeNote.textContent = '';
+      });
+   nameRow.appendChild(clearBtn);
+
+   // What the library already has under these names. Advisory and never
+   // blocking: nothing can collide here — the batch is a fresh UUID directory —
+   // and the destination root is not chosen until an admin promotes it, so
+   // whether that will be refused is genuinely unpredictable from here.
+   const dupeNote = document.createElement('p');
+   dupeNote.className = 'upload-dupe';
+   bar.appendChild(dupeNote);
+
+   const known = loadNameSuggestions(nameList);
+   // Debounced the way the search box is, with a module-level timer rather than
+   // a generic helper — same reason, which is that every keystroke would
+   // otherwise be a request.
+   const recheck = () => {
+      clearTimeout(_dupeTimer);
+      _dupeTimer = setTimeout(() => {
+         checkExisting(known, artistInput.value.trim(), albumInput.value.trim())
+            .then(msg => { dupeNote.textContent = msg; })
+            .catch(() => { dupeNote.textContent = ''; });
+         }, 400);
+      };
+   artistInput.addEventListener('input', recheck);
+   albumInput.addEventListener('input', recheck);
+   // Immediately too, because the fields arrive already filled from last time
+   // and a stale name is exactly what this is here to surface.
+   recheck();
 
    // The URL row, drawn only when the server says it can fetch something. An
    // empty handler list is the server saying the feature is unavailable — no
@@ -1050,53 +1314,12 @@ function makeUploadBar() {
       fetchBtn.className   = 'upload-btn';
       urlRow.appendChild(fetchBtn);
 
-      // A second row rather than two more fields in the URL row: .upload-row is
-      // one flex line, and a URL box squeezed between two name boxes and a
-      // button is unusable on a phone.
-      //
-      // The names override whatever the handler would have called this — for
-      // the built-in one, what it parsed out of the video title. Blank keeps
-      // that parse, which is why neither field is marked required.
-      const nameRow = document.createElement('div');
-      nameRow.className = 'upload-row fetch-names';
-      bar.appendChild(nameRow);
-
-      // Sticky, unlike the URL: fetching six tracks off one concert should mean
-      // typing the names once. That is also why they are not cleared on
-      // success — only the URL is, since that one genuinely differs every time.
-      const makeNameInput = (key, placeholder) => {
-         const el = document.createElement('input');
-         el.type        = 'text';
-         el.className   = 'token-input';
-         el.placeholder = placeholder;
-         el.value       = localStorage.getItem(key) || '';
-         el.addEventListener('change', () =>
-            localStorage.setItem(key, el.value.trim()));
-         nameRow.appendChild(el);
-         return el;
-         };
-      const artistInput = makeNameInput('gd_fetch_artist',
-                                        'Artist (from the title if empty)');
-      const albumInput  = makeNameInput('gd_fetch_album',
-                                        'Album (from the title if empty)');
-
-      const clearBtn = document.createElement('button');
-      clearBtn.className   = 'name-clear';
-      clearBtn.textContent = 'Clear';
-      clearBtn.title       = 'Forget these names';
-      clearBtn.addEventListener('click', () => {
-         artistInput.value = albumInput.value = '';
-         localStorage.removeItem('gd_fetch_artist');
-         localStorage.removeItem('gd_fetch_album');
-         });
-      nameRow.appendChild(clearBtn);
-
       const names = urlHandlers.map(h => h.name).join(', ');
       const urlHint = document.createElement('p');
       urlHint.className   = 'admin-hint';
       urlHint.textContent =
          `Or paste a URL — handled by: ${names}. `
-         + 'Leave the names blank to use the ones the site supplies.';
+         + 'Leave the names above blank to use the ones the site supplies.';
       bar.appendChild(urlHint);
 
       const submit = async () => {
@@ -1146,6 +1369,15 @@ function makeUploadBar() {
       const p = new URLSearchParams({
          u: user, p: password, v: '1.16.1', c: 'gaindrive-web', f: 'json'
          });
+      // The same rule the fetch uses: an untouched field sends nothing at all
+      // rather than an empty value, because the server is entitled to treat a
+      // present-but-empty name as a mistake. Query parameters rather than form
+      // fields — the multipart body is the archive, and the handler reads these
+      // from req.params.
+      const a = artistInput.value.trim();
+      const b = albumInput.value.trim();
+      if (a) p.set('artist', a);
+      if (b) p.set('album',  b);
       const url = `${server}/upload?${p}`;
 
       const fd = new FormData();
@@ -1775,19 +2007,35 @@ async function viewAlbums(artistId, artistName) {
          promoteBtn.className = 'promote-btn';
          promoteBtn.title = 'Move to shared library';
          promoteBtn.textContent = '→ Library';
-         promoteBtn.addEventListener('click', async e => {
+         promoteBtn.addEventListener('click', e => {
             e.stopPropagation();
-            promoteBtn.disabled = true;
-            promoteBtn.textContent = '…';
-            try {
-               await apiCall('promoteAlbum', {id: album.id});
-               viewArtists();
-               }
-            catch {
-               promoteBtn.disabled = false;
-               promoteBtn.textContent = '→ Library';
-               showError('Promote failed.');
-               }
+            // The dialog rather than a one-click move: without a destination
+            // the server falls back to the first artists root declared, which
+            // cannot reach a categories root at all — so a film went into the
+            // music library and was then looked up as a musical artist.
+            //
+            // artistName is the batch's own level-1 name, which the dialog
+            // offers as the default under an artists root and ignores under a
+            // categories one.
+            showPromoteDialog(album.title, artistName, async (rootId, folder) => {
+               promoteBtn.disabled = true;
+               promoteBtn.textContent = '…';
+               try {
+                  const p = {id: album.id};
+                  if (rootId) p.musicFolderId = rootId;
+                  if (folder) p.folder = folder;
+                  await apiCall('promoteAlbum', p);
+                  viewArtists();
+                  }
+               catch (err) {
+                  promoteBtn.disabled = false;
+                  promoteBtn.textContent = '→ Library';
+                  // The server's own words: "already in that folder" and
+                  // "outside the library" need different fixes, and a flat
+                  // "Promote failed" told the user neither.
+                  showError(err.message ?? 'Promote failed.');
+                  }
+               });
             });
          row.appendChild(promoteBtn);
          }
@@ -3351,6 +3599,19 @@ function setupPlayer() {
       document.getElementById('cover-art-cancel-btn')
          .addEventListener('click', _closeCoverArtDialog);
       }
+
+   document.getElementById('promote-cancel-btn')
+      .addEventListener('click', _closePromoteDialog);
+   document.getElementById('promote-go-btn').addEventListener('click', () => {
+      const cb   = _promoteCb;
+      const root = document.getElementById('promote-root').value;
+      const name = document.getElementById('promote-folder').value.trim();
+      _closePromoteDialog();
+      // The folder is passed through even when it equals the batch's own
+      // artist: the server treats an absent one as "keep what it is called",
+      // and sending it explicitly is the same answer without depending on that.
+      if (cb) cb(root, name);
+      });
 
    if ('mediaSession' in navigator) {
       navigator.mediaSession.setActionHandler('play',          () => player.media.play());

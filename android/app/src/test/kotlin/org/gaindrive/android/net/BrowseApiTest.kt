@@ -61,7 +61,7 @@ class BrowseApiTest {
 			     {"name":"#","artist":[
 			       {"id":"31","name":"10cc","albumCount":2,"coverArt":"31"}]}]}}}"""
 		)
-		val index = api.getArtists(null, null).requireOk().artists!!.index
+		val index = api.getArtists(null, null, null).requireOk().artists!!.index
 		assertEquals(2, index.size)
 		assertEquals("S", index[0].name)
 		assertEquals("Steely Dan", index[0].artist[0].name)

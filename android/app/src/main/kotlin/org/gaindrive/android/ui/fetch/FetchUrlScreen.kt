@@ -43,6 +43,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.model.ServerId
@@ -165,21 +166,37 @@ private fun FetchForm(state: FetchUrlUiState, viewModel: FetchUrlViewModel) {
 		)
 	}
 
-	OutlinedTextField(
+	// What the two fields are called. Not a destination — an admin picks that
+	// when they promote this — only which words fit what is being filed.
+	if (state.showKinds) {
+		Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+			state.kinds.forEach { kind ->
+				FilterChip(
+					selected = kind == state.kind,
+					onClick = { viewModel.onKind(kind) },
+					enabled = !state.live && !state.submitting,
+					label = { Text(kind.label) },
+				)
+			}
+		}
+	}
+
+	// Completed against the whole library — every slice, every server — and
+	// against staging, so a name typed a second time in a different spelling is
+	// caught before it becomes a second artist.
+	SuggestingField(
 		value = state.artist,
 		onValueChange = viewModel::onArtist,
-		label = { Text("Artist") },
-		placeholder = { Text("From the title if left blank") },
-		singleLine = true,
+		label = state.artistLabel,
+		suggestions = state.suggestions,
 		enabled = !state.live && !state.submitting,
-		keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-		modifier = Modifier.fillMaxWidth(),
+		imeAction = ImeAction.Next,
 	)
 
 	OutlinedTextField(
 		value = state.album,
 		onValueChange = viewModel::onAlbum,
-		label = { Text("Album") },
+		label = { Text(state.albumLabel) },
 		placeholder = { Text("From the title if left blank") },
 		singleLine = true,
 		enabled = !state.live && !state.submitting,
@@ -187,12 +204,26 @@ private fun FetchForm(state: FetchUrlUiState, viewModel: FetchUrlViewModel) {
 		modifier = Modifier.fillMaxWidth(),
 	)
 
-	// Says that the names are kept, because a field that remembers itself is a
-	// surprise otherwise — the next share opens with them already filled in.
+	// Advisory and never blocking: nothing can collide here, since the batch is
+	// a fresh directory and where it will eventually be promoted to is not
+	// decided yet. Deliberately not coloured as an error for the same reason.
+	state.existing?.let {
+		Text(
+			text = it,
+			style = MaterialTheme.typography.bodyMedium,
+			color = MaterialTheme.colorScheme.onSurface,
+		)
+	}
+
+	// Two things people get wrong about this screen and cannot tell by looking:
+	// that the names persist to the next fetch, and that nothing here reaches
+	// the shared library on its own. "Uploads" reads like part of the library
+	// and is not — only an admin can move something out of it.
 	val handlers = state.target?.handlerNames.orEmpty().joinToString()
 	Text(
 		text = buildString {
-			append("Kept for the next URL you share.")
+			append("Goes to your own uploads; an admin moves it into the ")
+			append("shared library. The names are kept for the next URL.")
 			if (handlers.isNotBlank()) append(" Handled by $handlers.")
 		},
 		style = MaterialTheme.typography.bodySmall,
@@ -235,6 +266,74 @@ private fun FetchForm(state: FetchUrlUiState, viewModel: FetchUrlViewModel) {
 			onClick = viewModel::clearNames,
 		) {
 			Text("Clear names")
+		}
+	}
+}
+
+/**
+ * A text field that offers what the library already has, without restricting
+ * what can be typed.
+ *
+ * A field rather than a picker, because most of what is filed here is new: the
+ * suggestions exist to stop a *second spelling* of something already present,
+ * not to constrain the answer. Each one says where it was found — a staging hit
+ * is a different fact from a library hit, and only the second means the thing is
+ * actually in the shared library.
+ */
+@Composable
+private fun SuggestingField(
+	value: String,
+	onValueChange: (String) -> Unit,
+	label: String,
+	suggestions: List<NameSuggestion>,
+	enabled: Boolean,
+	imeAction: ImeAction,
+) {
+	var open by remember { mutableStateOf(false) }
+	val matches = remember(value, suggestions) {
+		if (value.isBlank()) emptyList()
+		else suggestions
+			.filter { it.name.contains(value, ignoreCase = true) && !it.name.equals(value, true) }
+			.take(SUGGESTION_LIMIT)
+	}
+
+	Box {
+		OutlinedTextField(
+			value = value,
+			onValueChange = {
+				onValueChange(it)
+				open = true
+			},
+			label = { Text(label) },
+			placeholder = { Text("From the title if left blank") },
+			singleLine = true,
+			enabled = enabled,
+			keyboardOptions = KeyboardOptions(imeAction = imeAction),
+			modifier = Modifier.fillMaxWidth(),
+		)
+		DropdownMenu(
+			expanded = open && matches.isNotEmpty(),
+			onDismissRequest = { open = false },
+			// Never takes focus: this hangs under a field still being typed in,
+			// and a focusable popup would close the keyboard on every keystroke.
+			properties = PopupProperties(focusable = false),
+		) {
+			matches.forEach { match ->
+				DropdownMenuItem(
+					text = { Text(match.name) },
+					trailingIcon = {
+						Text(
+							text = match.where,
+							style = MaterialTheme.typography.labelSmall,
+							color = MaterialTheme.colorScheme.onSurfaceVariant,
+						)
+					},
+					onClick = {
+						open = false
+						onValueChange(match.name)
+					},
+				)
+			}
 		}
 	}
 }
@@ -347,3 +446,6 @@ private fun Note(text: String, error: Boolean = false) {
 		else MaterialTheme.colorScheme.onSurfaceVariant,
 	)
 }
+
+/** Enough to be useful, few enough not to bury the field being typed into. */
+private const val SUGGESTION_LIMIT = 6
