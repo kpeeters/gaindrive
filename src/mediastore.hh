@@ -298,14 +298,30 @@ class MediaStore {
 		std::optional<CachedAlbumInfo> get_cached_album_info(int folder_id);
 		void cache_album_info(int folder_id, const CachedAlbumInfo& info);
 
-		struct ArtistDir { int id; std::string name; int album_count = 0; };
+		struct ArtistDir {
+			int id;
+			std::string name;
+			int album_count = 0;
+			// Which account's uploads this came from. Empty for the shared
+			// library, and empty for a single-user personal listing too — the
+			// caller already knows whose that is. Set only under
+			// PERSONAL_ALL_USERS, where it is the only thing telling two
+			// identically named folders apart.
+			std::string owner;
+			};
+
+		// The personal_user value meaning "every account's uploads", for an
+		// admin looking at what there is to approve. Not a username: '*' cannot
+		// be one, because sanitise_component() would never produce it.
+		static constexpr const char* PERSONAL_ALL_USERS = "*";
 
 		// All level-1 folders across every library root, sorted by name. For an
 		// artists root these are musicians; for a categories root they are
 		// sections such as Film or Series. Root folders themselves never
 		// appear.
 		// personal_user non-empty → restrict to that user's subtree of the
-		// uploads root; else the shared library, excluding uploads entirely.
+		// uploads root, or to every user's under PERSONAL_ALL_USERS; else the
+		// shared library, excluding uploads entirely.
 		// music_folder_id > 0 restricts to one root (the Subsonic
 		// musicFolderId filter); <= 0 spans every root, which is what an
 		// unfiltered request means.

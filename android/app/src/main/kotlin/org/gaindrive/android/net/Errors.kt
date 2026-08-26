@@ -1,5 +1,6 @@
 package org.gaindrive.android.net
 
+import kotlinx.serialization.SerializationException
 import retrofit2.HttpException
 import java.io.IOException
 import java.net.ConnectException
@@ -43,6 +44,20 @@ fun Throwable.userMessage(): String = when (this) {
 		404 -> "Not found there. Check that the URL points at the server's root."
 		else -> "The server answered HTTP ${code()}."
 	}
+	// A body that is not the JSON we asked for, which in practice means the
+	// request never reached a gaindrive endpoint at all: an older server does
+	// not have it, answers 404, and a reverse proxy configured to serve a single
+	// page app turns that into its index.html with a 200 — HTML, and a
+	// successful status, so nothing upstream of here objects.
+	//
+	// Worth its own branch rather than falling through: kotlinx's own wording is
+	// "Expected start of the object '{' but had '<'", which sends the reader
+	// looking for a parsing bug instead of a missing endpoint. Note it is a
+	// RuntimeException, so it slips past the IOException catch below — the same
+	// trap HttpException sets above.
+	is SerializationException ->
+		"The server did not answer in a form this app understands. It may be " +
+			"too old for this feature."
 	is UnknownHostException -> "Cannot find that host."
 	is ConnectException -> "Nothing is listening at that address."
 	is SocketTimeoutException -> "The server did not answer in time."

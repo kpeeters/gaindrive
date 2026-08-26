@@ -364,6 +364,67 @@ static std::string sort_key(const std::string& name)
 	return name;
 	}
 
+// Sorts level-1 folders and groups them into the index buckets `getArtists` and
+// `getIndexes` both answer with.
+//
+// Shared because those two handlers held byte-identical copies of it, differing
+// only in the wrapper key of the response — and the first thing anyone edits one
+// of them for, they will not think to do twice.
+//
+// Two groupings, because there are two questions. Normally the bucket is the
+// first letter, which is what the alphabet rail and the sticky headers are for.
+// When an admin is looking at *everybody's* uploads it is the owner instead:
+// that is the only thing telling two identically named folders apart, and
+// grouping by letter there would interleave two people's material under one
+// heading with nothing to say whose is whose.
+static std::map<std::string, std::vector<const MediaStore::ArtistDir*>>
+index_buckets(std::vector<MediaStore::ArtistDir>& artists, bool by_owner)
+	{
+	std::sort(artists.begin(), artists.end(),
+		[by_owner](const MediaStore::ArtistDir& a, const MediaStore::ArtistDir& b) {
+			// Owner first when grouping by it, so each person's own list is
+			// still alphabetical inside their heading.
+			if (by_owner && a.owner != b.owner) return a.owner < b.owner;
+			return sort_key(a.name) < sort_key(b.name);
+			});
+
+	std::map<std::string, std::vector<const MediaStore::ArtistDir*>> buckets;
+	for (auto& a : artists) {
+		if (by_owner) { buckets[a.owner].push_back(&a); continue; }
+		std::string key    = sort_key(a.name);
+		std::string letter = key.empty() || !std::isalpha((unsigned char)key[0])
+		                   ? "#"
+		                   : std::string(1, (char)std::toupper((unsigned char)key[0]));
+		buckets[letter].push_back(&a);
+		}
+	return buckets;
+	}
+
+// Resolves the `personal` parameter to what get_artist_dirs() wants.
+//
+// "true" is the caller's own uploads; "*" is everybody's and is **admin only**,
+// because it is other people's material. Anything else, including absent, is the
+// shared library. Returns false having already written the refusal.
+static bool personal_scope(const httplib::Request& req, httplib::Response& res,
+                           MediaStore& store, bool use_json, std::string& out)
+	{
+	const std::string want = req.get_param_value("personal");
+	const std::string uname = req.get_param_value("u");
+	if (want.empty() || want == "false") { out.clear(); return true; }
+	if (want != MediaStore::PERSONAL_ALL_USERS) { out = uname; return true; }
+
+	auto ui = store.get_user(uname);
+	if (!ui || !ui->is_admin) {
+		const char* msg = "Listing every account's uploads requires admin role.";
+		res.set_content(use_json ? subsonic_error_json(50, msg)
+		                         : subsonic_error(50, msg),
+		                use_json ? "application/json" : "application/xml");
+		return false;
+		}
+	out = MediaStore::PERSONAL_ALL_USERS;
+	return true;
+	}
+
 // What stream.view would actually send for this song, when that differs from
 // the stored file.  Mirrors the branch order in Streamer::serve() — a format
 // override wins over the per-user bitrate cap, and the cap alone means mp3.
@@ -2641,8 +2702,9 @@ GainDrive::GainDrive(const std::string& db_path,
 	                                             httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 
-		bool personal = req.get_param_value("personal") == "true";
-		std::string pu = personal ? req.get_param_value("u") : "";
+		bool use_json = (fmt_of(req) == "json");
+		std::string pu;
+		if (!personal_scope(req, res, store_, use_json, pu)) return;
 		// musicFolderId restricts to one root; absent means all of them,
 		// which is what every existing client sends.
 		// contentType is a gaindrive extension: it narrows to a *kind* of
@@ -2653,22 +2715,8 @@ GainDrive::GainDrive(const std::string& db_path,
 			pu, to_int(req.get_param_value("musicFolderId"), 0),
 			req.get_param_value("contentType"));
 
-		std::sort(artists.begin(), artists.end(),
-			[](const MediaStore::ArtistDir& a, const MediaStore::ArtistDir& b) {
-				return sort_key(a.name) < sort_key(b.name);
-				});
+		auto buckets = index_buckets(artists, pu == MediaStore::PERSONAL_ALL_USERS);
 
-		// Build letter → artists map (shared by both branches).
-		std::map<std::string, std::vector<const MediaStore::ArtistDir*>> buckets;
-		for (auto& a : artists) {
-			std::string key    = sort_key(a.name);
-			std::string letter = key.empty() || !std::isalpha((unsigned char)key[0])
-			                   ? "#"
-			                   : std::string(1, (char)std::toupper((unsigned char)key[0]));
-			buckets[letter].push_back(&a);
-			}
-
-		bool use_json = (fmt_of(req) == "json");
 		std::string body;
 		if (use_json)
 			body = subsonic_ok_json([&buckets](nlohmann::json& r) {
@@ -2714,8 +2762,9 @@ GainDrive::GainDrive(const std::string& db_path,
 	                                            httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 
-		bool personal = req.get_param_value("personal") == "true";
-		std::string pu = personal ? req.get_param_value("u") : "";
+		bool use_json = (fmt_of(req) == "json");
+		std::string pu;
+		if (!personal_scope(req, res, store_, use_json, pu)) return;
 		// musicFolderId restricts to one root; absent means all of them,
 		// which is what every existing client sends.
 		// contentType is a gaindrive extension: it narrows to a *kind* of
@@ -2725,21 +2774,9 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto artists = store_.get_artist_dirs(
 			pu, to_int(req.get_param_value("musicFolderId"), 0),
 			req.get_param_value("contentType"));
-		std::sort(artists.begin(), artists.end(),
-			[](const MediaStore::ArtistDir& a, const MediaStore::ArtistDir& b) {
-				return sort_key(a.name) < sort_key(b.name);
-				});
 
-		std::map<std::string, std::vector<const MediaStore::ArtistDir*>> buckets;
-		for (auto& a : artists) {
-			std::string key    = sort_key(a.name);
-			std::string letter = key.empty() || !std::isalpha((unsigned char)key[0])
-			                   ? "#"
-			                   : std::string(1, (char)std::toupper((unsigned char)key[0]));
-			buckets[letter].push_back(&a);
-			}
+		auto buckets = index_buckets(artists, pu == MediaStore::PERSONAL_ALL_USERS);
 
-		bool use_json = (fmt_of(req) == "json");
 		std::string body;
 		if (use_json)
 			body = subsonic_ok_json([&buckets](nlohmann::json& r) {
@@ -5343,16 +5380,19 @@ GainDrive::GainDrive(const std::string& db_path,
 	//
 	// **The path check below is the security boundary, not a validation
 	// nicety.** Without it this is "delete the folder with this id", which is
-	// "delete any folder on the server", reachable by any account with
-	// upload rights guessing integers. Three things have to hold: the path is
-	// exactly five components, the first is the uploads root, and the second is
-	// the account making the request.
+	// "delete any folder on the server", reachable by any account with upload
+	// rights guessing integers. Two things have to hold whoever is asking: the
+	// path is exactly five components, and the first is the uploads root.
 	//
-	// Owner only, with no admin override. Not an oversight — there is no way to
-	// reach another account's uploads through the API at all, since every
-	// personal listing keys on the caller's own username, so an admin branch
-	// here would be a power nothing can exercise and one more thing to get
-	// wrong.
+	// The third — that the second component is the caller — holds for everyone
+	// but an admin. An admin may delete anybody's upload, because an admin is
+	// who approves them: `personal=*` lets them see everyone's, and being able
+	// to see junk without being able to clear it would leave them asking its
+	// owner to do it.
+	//
+	// That widening is also what keeps the clients simple. Both gate the action
+	// on "did I reach this through Uploads" and nothing else, which stays
+	// correct precisely because a non-admin can only ever reach their own.
 	server_.Get("/rest/deleteUpload.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -5366,6 +5406,8 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		if (!check_upload_perm(req, res, store_, use_json)) return;
 		const std::string uname = req.get_param_value("u");
+		auto ui = store_.get_user(uname);
+		const bool is_admin = ui && ui->is_admin;
 
 		auto id_it = req.params.find("id");
 		if (id_it == req.params.end()) { err(10, "Missing parameter: id."); return; }
@@ -5383,12 +5425,17 @@ GainDrive::GainDrive(const std::string& db_path,
 		// to that temporary.
 		for (const auto& c : rel_p) parts.push_back(c.string());
 		if (parts.size() != 5 || uploads_root_name_.empty()
-		        || parts[0] != uploads_root_name_ || parts[1] != uname) {
+		        || parts[0] != uploads_root_name_
+		        || (parts[1] != uname && !is_admin)) {
 			// One message for "not an upload" and "not yours", deliberately: the
 			// difference is only useful to somebody probing ids.
 			err(0, "Item is not in your uploads.");
 			return;
 			}
+		// The *owner's* name, which is the caller's own except for an admin
+		// clearing somebody else's — and it is the owner's directories that get
+		// tidied up below, not the caller's.
+		const std::string& owner       = parts[1];
 		const std::string& batch_uuid  = parts[2];
 		const std::string& artist_name = parts[3];
 
@@ -5419,7 +5466,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		// takes. Removing it makes scan_artist_dir treat it as gone and prune
 		// it — the same two steps promoteAlbum takes for the same reason.
 		std::string artist_rel =
-			uploads_root_name_ + "/" + uname + "/" + batch_uuid + "/" + artist_name;
+			uploads_root_name_ + "/" + owner + "/" + batch_uuid + "/" + artist_name;
 		fs::path artist_abs = store_.abs_path(artist_rel);
 		if (fs::is_directory(artist_abs, ec) && fs::is_empty(artist_abs, ec))
 			fs::remove(artist_abs, ec);
@@ -5436,7 +5483,10 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (fs::is_directory(batch_abs, ec) && fs::is_empty(batch_abs, ec))
 			fs::remove(batch_abs, ec);
 
-		std::cout << stamp() << "Delete upload: removed " << item_rel << std::endl;
+		// Says who asked as well as what went, because those differ when an
+		// admin clears somebody else's and the log is the only record of it.
+		std::cout << stamp() << "Delete upload: " << uname << " removed "
+		          << item_rel << std::endl;
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");

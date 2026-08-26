@@ -3338,11 +3338,16 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
 	// A root row joins the list only when it carries loose files of its own.
 	// Its name comes from `path`, not `name`: for a root those differ, and
 	// `name` is the directory basename, which is never exposed.
+	const bool all_users = (personal_user == PERSONAL_ALL_USERS);
 	std::string sql =
 		"SELECT f.id,"
 		"       CASE WHEN f.parent_id IS NULL THEN f.path ELSE f.name END AS name,"
 		"       COUNT(al.id) + (SELECT COUNT(*) FROM albums own"
-		"                        WHERE own.folder_id = f.id) AS album_count"
+		"                        WHERE own.folder_id = f.id) AS album_count,"
+		// Selected always, used only under all_users. The owner is derived from
+		// the path here rather than in a handler because this file is the only
+		// place that knows the uploads layout on the read side.
+		"       f.path AS path"
 		" FROM folders f"
 		" LEFT JOIN folders af ON af.parent_id = f.id"
 		" LEFT JOIN albums al ON al.folder_id = af.id"
@@ -3374,13 +3379,29 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
 	if (music_folder_id > 0)      sel.bind(idx++, music_folder_id);
 	if (music_folder_id > 0)      sel.bind(idx++, music_folder_id);
 	if (!personal_user.empty())
-		sel.bind(idx++, uploads_prefix_ + personal_user + "/%");
+		sel.bind(idx++, all_users ? uploads_prefix_ + "%"
+		                          : uploads_prefix_ + personal_user + "/%");
 
 	std::vector<ArtistDir> result;
-	while (sel.executeStep())
-		result.push_back({sel.getColumn(0).getInt(),
-		                  sel.getColumn(1).getString(),
-		                  sel.getColumn(2).getInt()});
+	while (sel.executeStep()) {
+		ArtistDir d{ sel.getColumn(0).getInt(),
+		             sel.getColumn(1).getString(),
+		             sel.getColumn(2).getInt(),
+		             "" };
+		if (all_users) {
+			// "<uploads root>/<user>/<batch>/<artist>" — the owner is the
+			// component after the prefix. Anything without one cannot be an
+			// upload, so it is dropped rather than shown under a blank heading.
+			const std::string path = sel.getColumn(3).getString();
+			if (uploads_prefix_.empty() || path.size() <= uploads_prefix_.size())
+				continue;
+			const std::string rest = path.substr(uploads_prefix_.size());
+			auto slash = rest.find('/');
+			if (slash == std::string::npos || slash == 0) continue;
+			d.owner = rest.substr(0, slash);
+			}
+		result.push_back(std::move(d));
+		}
 	return result;
 	}
 

@@ -900,6 +900,19 @@ let fetchPollTimer = null;
 // once rather than re-triggering a re-render on every tick.
 let fetchLastState = {};
 
+// Whose uploads the Uploads mode shows.
+//
+// An admin gets everybody's, because an admin is the only account that can
+// promote one into the shared library — without this a non-admin's upload is
+// stranded, visible to its owner and to nobody who can act on it.
+//
+// The server groups the listing by owner for '*' instead of by first letter, so
+// the index headings become usernames and the rendering needs no change at all:
+// `index.name` was always just a label.
+function uploadsScope() {
+   return currentUser?.adminRole ? '*' : 'true';
+   }
+
 // Debounce for the "do I already have this?" check under the name fields.
 let _dupeTimer = null;
 
@@ -1021,7 +1034,9 @@ function pollForUpload(status, files) {
          return;
          }
       let sr;
-      try { sr = await apiCall('getArtists', {personal: 'true'}); }
+      // The same scope viewArtists() drew with, or the signature it is compared
+      // against would be of a different list.
+      try { sr = await apiCall('getArtists', {personal: uploadsScope()}); }
       catch { return; }   // a blip should not end the wait
       // viewArtists() slides back to pane 0, so hold off while the user is
       // reading an album; the try count still bounds the wait.
@@ -1468,7 +1483,7 @@ async function viewArtists() {
    let sr;
    try {
       sr = await apiCall('getArtists',
-         libraryMode === 'uploads' ? {personal: 'true'}
+         libraryMode === 'uploads' ? {personal: uploadsScope()}
                                    : {contentType: libraryMode});
       }
    catch {

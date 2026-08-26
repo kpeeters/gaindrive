@@ -170,10 +170,39 @@ class LibraryRootsTest {
 	fun `the uploads chip is sent as personal and narrows nothing else`() {
 		val roots = typed("music" to "artists")
 		val request = rootRequest(false, roots, LibraryMode.UPLOADS, canUpload = true)
-		assertEquals(true, request?.personal)
+		assertEquals(PersonalScope.MINE, request?.personal)
 		assertEquals("true", request?.personalParam)
 		assertNull(request?.contentType)
 		assertNull(request?.musicFolderId)
+	}
+
+	/**
+	 * An admin gets everybody's, because an admin is the only account that can
+	 * promote one into the library — without this a non-admin's upload is
+	 * visible to its owner and to nobody who can act on it.
+	 */
+	@Test
+	fun `an admin asks for every account's uploads`() {
+		val roots = typed("music" to "artists")
+		val request = rootRequest(
+			false, roots, LibraryMode.UPLOADS, canUpload = true, isAdmin = true,
+		)
+		assertEquals(PersonalScope.ALL, request?.personal)
+		assertEquals("*", request?.personalParam)
+		assertNull(request?.contentType)
+		assertNull(request?.musicFolderId)
+	}
+
+	/** Being an admin widens Uploads and touches nothing else. */
+	@Test
+	fun `an admin browsing the shared library is unchanged`() {
+		val roots = typed("music" to "artists")
+		val request = rootRequest(
+			false, roots, LibraryMode("artists"), canUpload = true, isAdmin = true,
+		)
+		assertEquals(PersonalScope.NONE, request?.personal)
+		assertNull(request?.personalParam)
+		assertEquals("artists", request?.contentType)
 	}
 
 	/** Every other slice must go on sending exactly what it sent before. */
@@ -181,7 +210,7 @@ class LibraryRootsTest {
 	fun `an ordinary slice sends no personal parameter`() {
 		val roots = typed("music" to "artists")
 		val request = rootRequest(false, roots, LibraryMode("artists"), canUpload = true)
-		assertEquals(false, request?.personal)
+		assertEquals(PersonalScope.NONE, request?.personal)
 		assertNull(request?.personalParam)
 	}
 

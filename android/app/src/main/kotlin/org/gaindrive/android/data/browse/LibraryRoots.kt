@@ -13,30 +13,56 @@ import org.gaindrive.android.data.model.MusicRoot
  */
 
 /**
+ * Whose uploads a listing covers, if anyone's.
+ *
+ * An enum rather than two booleans: exactly one of these is true at a time, and
+ * a pair could be set to a combination that means nothing.
+ */
+enum class PersonalScope(
+	/**
+	 * What the wire wants, or null to send no parameter at all.
+	 *
+	 * [NONE] is deliberately null rather than "false". The server tests for the
+	 * exact strings, so "false" would work — but it would also append a
+	 * parameter to every ordinary library request that never carried one, which
+	 * is a gratuitous difference from what a third-party server has always seen.
+	 * Retrofit omits a null entirely.
+	 */
+	val param: String?,
+) {
+	/** The shared library. */
+	NONE(null),
+
+	/** This account's own uploads. */
+	MINE("true"),
+
+	/**
+	 * Every account's uploads, which the server allows only for an admin.
+	 *
+	 * It also groups the response by owner instead of by first letter, so the
+	 * index labels come back as usernames — which is what makes two people's
+	 * identically named folders tellable apart, and needs no client change
+	 * because a label was always just a string.
+	 */
+	ALL("*"),
+}
+
+/**
  * How a top-level listing is narrowed. All three at their defaults means "the
  * whole shared library".
  *
  * [personal] is not a third way of naming a root — it switches to a different
- * library altogether, the account's own uploads, and the server ignores the
- * other two while it is set. Kept in the same object regardless, because every
- * caller wants exactly one of these and a second parameter alongside would let
- * them be passed inconsistently.
+ * library altogether, and the server ignores the other two while it is set.
+ * Kept in the same object regardless, because every caller wants exactly one of
+ * these and a second parameter alongside would let them be passed
+ * inconsistently.
  */
 data class RootRequest(
 	val musicFolderId: String? = null,
 	val contentType: String? = null,
-	val personal: Boolean = false,
+	val personal: PersonalScope = PersonalScope.NONE,
 ) {
-	/**
-	 * [personal] as the wire wants it: the string "true", or nothing at all.
-	 *
-	 * Not `personal.toString()`. The server tests for exactly "true", so
-	 * "false" would work — but it would also append a parameter to every
-	 * ordinary library request that never carried one before, which is a
-	 * gratuitous difference from what this app has always sent and what a
-	 * third-party server has always seen. Retrofit omits a null entirely.
-	 */
-	val personalParam: String? get() = if (personal) "true" else null
+	val personalParam: String? get() = personal.param
 }
 
 /**
@@ -94,6 +120,13 @@ fun rootRequest(
 	roots: List<MusicRoot>,
 	mode: LibraryMode,
 	canUpload: Boolean = false,
+	/**
+	 * Whether this account administers the server, which widens the Uploads
+	 * slice to every account's. An admin is the only one who can promote an
+	 * upload into the shared library, so without this a non-admin's upload is
+	 * visible to its owner and to nobody able to act on it.
+	 */
+	isAdmin: Boolean = false,
 ): RootRequest? {
 	val chips = chipsFor(browseByFolder, roots, canUpload)
 	if (mode !in chips) return null
@@ -101,7 +134,11 @@ fun rootRequest(
 	// Handled before everything below it, because it is not a root: sending
 	// `contentType=uploads` would narrow the *shared* library to a kind of root
 	// no server has, and answer with nothing at all.
-	if (mode == LibraryMode.UPLOADS) return RootRequest(personal = true)
+	if (mode == LibraryMode.UPLOADS) {
+		return RootRequest(
+			personal = if (isAdmin) PersonalScope.ALL else PersonalScope.MINE,
+		)
+	}
 
 	mode.folderName?.let { name ->
 		val root = roots.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return null

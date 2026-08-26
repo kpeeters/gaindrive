@@ -170,14 +170,22 @@ fun ArtistsScreen(
 				// to be summed rather than derived from the bucket's position.
 				val headerPositions = remember(indexes) { headerPositionsOf(indexes) }
 
+				// Only when the labels really are letters. An admin's Uploads
+				// listing is grouped by owner instead, so they are usernames —
+				// a rail of those is a strip of words down the edge of the
+				// screen, and it is for scrubbing a long alphabetical list
+				// rather than for jumping between four people.
+				val showRail = indexes.all { it.label.length == 1 }
+
 				Box(modifier = Modifier.fillMaxSize()) {
 					LazyColumn(
 						state = listState,
 						modifier = Modifier
 							.fillMaxSize()
 							// Keeps long artist names clear of the rail rather
-							// than letting them slide underneath it.
-							.padding(end = 24.dp),
+							// than letting them slide underneath it. With no
+							// rail it would only be a dead strip.
+							.padding(end = if (showRail) 24.dp else 0.dp),
 					) {
 						indexes.forEach { index ->
 							stickyHeader(key = "hdr-${index.label}") {
@@ -207,18 +215,20 @@ fun ArtistsScreen(
 						}
 					}
 
-					AlphabetRail(
-						letters = indexes.map { it.label },
-						onSelect = { position ->
-							scope.launch {
-								// Jump, not animate: scrubbing the rail issues
-								// these in quick succession and animations
-								// would queue up and lag behind the finger.
-								listState.scrollToItem(headerPositions[position])
-							}
-						},
-						modifier = Modifier.fillMaxSize(),
-					)
+					if (showRail) {
+						AlphabetRail(
+							letters = indexes.map { it.label },
+							onSelect = { position ->
+								scope.launch {
+									// Jump, not animate: scrubbing the rail issues
+									// these in quick succession and animations
+									// would queue up and lag behind the finger.
+									listState.scrollToItem(headerPositions[position])
+								}
+							},
+							modifier = Modifier.fillMaxSize(),
+						)
+					}
 				}
 			}
 		}

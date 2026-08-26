@@ -109,11 +109,15 @@ class LibraryRepository @Inject constructor(
 			// entire library, so the request itself is what would put the same
 			// folders under every mode. Filtering the response instead would
 			// be too late — nothing in it says which entries to discard.
+			// Both facts come from the one cached getUser per server, so the
+			// second costs no request.
+			val facts = accounts.factsFor(config)
 			val request = rootRequest(
 				config.browseByFolder,
 				rootsOf(client, config),
 				mode,
-				accounts.canUploadTo(config),
+				facts.canUpload,
+				facts.isAdmin,
 			) ?: return@fanOut emptyList()
 
 			config.browseSource.indexes(client, config.id, request)
