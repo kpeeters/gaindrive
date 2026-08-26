@@ -481,7 +481,18 @@ class FetchUrlViewModel @Inject constructor(
 				absences = 0
 
 				_state.update { it.copy(job = job) }
-				if (!FetchState.of(job.state).isLive) return@launch
+				if (!FetchState.of(job.state).isLive) {
+					// What just landed is now in staging, and the panel stays
+					// open for the next URL. Without this the suggestions are
+					// the ones loaded when the panel opened, so fetching the
+					// same thing twice in one sitting draws no warning at all —
+					// which is exactly how a duplicate gets made.
+					if (FetchState.of(job.state) == FetchState.DONE) {
+						loadSuggestions()
+						recheck()
+					}
+					return@launch
+				}
 			}
 		}
 	}

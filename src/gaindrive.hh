@@ -215,6 +215,12 @@ class GainDrive {
 		                const std::string& fallback_artist,
 		                const std::string& artist_override = "",
 		                const std::string& album_override  = "");
+		// Serialises the fold at the end of scan_batch, where a finished batch
+		// is merged into the user's earlier ones. Two batches folding at once
+		// would each move the other's contents away, and /upload detaches
+		// scan_batch onto an HTTP thread, so two uploads really can arrive
+		// together. Held only across the fold, never across the scan.
+		std::mutex batch_fold_mu_;
 		// Rewrites the batch's absolute path to its stored form. A tool's
 		// progress line names the file it is writing, absolutely, and a root
 		// path is never surfaced in an API response.

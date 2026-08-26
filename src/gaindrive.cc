@@ -1877,6 +1877,129 @@ static void apply_batch_names(const std::filesystem::path& batch_root,
 	          << (album.empty()  ? "<handler>" : album) << std::endl;
 	}
 
+// Folds a finished batch into the user's earlier ones, and fills [to_scan] with
+// the stored-form path each of its artist directories ended up at.
+//
+// **The batch UUID isolates a fetch while it runs; it is not how the uploads
+// area is organised.** Without this, every fetch is its own island:
+// scan_artist_dir() parents an artist directory straight to the root
+// (`upsert_folder(artist_path, root_id)`), skipping the <user>/<uuid> levels, so
+// two batches naming the same artist become two folder rows with the same name
+// and the personal listing shows both. Fetching six tracks of one concert — the
+// case the sticky name fields exist for — produced six artists holding one
+// one-track album each.
+//
+// So the isolation is kept exactly where it is needed and dropped afterwards.
+// The batch must stay its own directory *during* the fetch: a failed, cancelled
+// or timed-out job does remove_all() on it, and a shared directory would let a
+// failure delete files an earlier fetch had already put there.
+//
+// batch_merge_into() does the work and already has the right semantics — it
+// recurses where both sides are directories, so an album inside a merged artist
+// merges too, and it suffixes colliding *files* rather than overwriting them,
+// which it does because the built-in handler writes a cover.<ext> into every
+// album directory.
+//
+// Callers must serialise this: two batches folding into each other at once would
+// each move the other's contents away. See batch_fold_mu_.
+static void fold_batch_into_siblings(const std::filesystem::path& batch_root,
+                                     const std::string& rel_batch,
+                                     std::set<std::string>& to_scan)
+	{
+	namespace fs = std::filesystem;
+	std::error_code ec;
+
+	// "<uploads root>/<user>", the stored-form prefix every batch of this user
+	// shares. rel_batch always has at least two components, being built as
+	// "<root>/<user>/<uuid>".
+	auto cut = rel_batch.rfind('/');
+	if (cut == std::string::npos) return;
+	const std::string rel_user = rel_batch.substr(0, cut);
+
+	// The user's other batches, in a fixed order so that repeated fetches
+	// converge on the same one rather than picking a different target each
+	// time. In practice at most one holds any given name, because this runs
+	// after every successful batch — the ordering matters only for batches
+	// that predate it.
+	std::vector<fs::path> siblings;
+	for (auto& e : fs::directory_iterator(batch_root.parent_path(), ec)) {
+		std::error_code dec;
+		if (!e.is_directory(dec)) continue;
+		// Identity, not name: the same reason batch_rename_level uses it.
+		std::error_code qec;
+		if (fs::equivalent(e.path(), batch_root, qec) && !qec) continue;
+		siblings.push_back(e.path());
+		}
+	std::sort(siblings.begin(), siblings.end());
+
+	// Collected before anything moves: merging mutates the directory this would
+	// otherwise still be iterating.
+	std::vector<fs::path> mine;
+	for (auto& e : fs::directory_iterator(batch_root, ec)) {
+		std::error_code dec;
+		if (e.is_directory(dec)) mine.push_back(e.path());
+		}
+
+	for (const auto& a : mine) {
+		const std::string name = a.filename().string();
+
+		// Every earlier batch already holding this name. Normally at most one,
+		// since this runs after every successful batch — but a library that
+		// predates the fold can hold several, and merging *all* of them is what
+		// clears those up instead of leaving the strays there for ever.
+		std::vector<fs::path> holders;
+		for (const auto& s : siblings) {
+			std::error_code xec;
+			if (fs::is_directory(s / name, xec)) holders.push_back(s);
+			}
+		if (holders.empty()) {
+			to_scan.insert(rel_batch + "/" + name);
+			continue;
+			}
+
+		const fs::path keep       = holders.front() / name;
+		const std::string keep_rel =
+			rel_user + "/" + holders.front().filename().string() + "/" + name;
+
+		// The strays first, so the survivor holds everything before this batch
+		// joins it. Each of *these* was scanned when it was made, unlike the
+		// batch being folded — so its own path goes into the scan set too: the
+		// directory is about to stop existing, and scan_artist_dir() finding it
+		// gone is what prunes the folder row that still names it. Leaving that
+		// out would swap one visible duplicate for one invisible phantom.
+		//
+		// A stray's stars and play counts do not survive, and cannot: they are
+		// keyed on the path, and the one tool for moving that key —
+		// relocate_prefix() — is safe only when the destination is free, which
+		// is precisely what merging is not. Accepted rather than worked around,
+		// because this is pre-promotion staging: the rows can only exist if
+		// somebody played a duplicate they had not filed yet, and the
+		// alternative is leaving the duplicate on screen for ever.
+		for (size_t i = 1; i < holders.size(); i++) {
+			batch_merge_into(holders[i] / name, keep);
+			to_scan.insert(rel_user + "/" + holders[i].filename().string()
+			               + "/" + name);
+			}
+
+		// Nothing under *this* batch was ever indexed — scan_batch() is the only
+		// thing that hands a batch to scan_dirs() and does so after this — so
+		// the source needs no prune, only the destination a rescan.
+		batch_merge_into(a, keep);
+		to_scan.insert(keep_rel);
+		std::cout << stamp() << "batch merge: " << rel_batch << "/" << name
+		          << " -> " << keep_rel
+		          << (holders.size() > 1
+		              ? " (and " + std::to_string(holders.size() - 1) + " stray)"
+		              : "")
+		          << std::endl;
+		}
+
+	// Only when the fold emptied it. A batch holding an artist nobody else had
+	// stays exactly where it is.
+	std::error_code eec;
+	if (fs::is_empty(batch_root, eec) && !eec) fs::remove(batch_root, eec);
+	}
+
 // How many fetches may be waiting at once. One worker runs the queue, so this
 // is a bound on how far behind a user can get the server, not on throughput.
 static constexpr size_t FETCH_QUEUE_MAX = 20;
@@ -5789,7 +5912,6 @@ void GainDrive::scan_batch(const std::string& rel_batch,
                            const std::string& artist_override,
                            const std::string& album_override)
 	{
-	namespace fs = std::filesystem;
 	try {
 		// Tags first, and never skipped even when both names were typed: this
 		// is what derives an album from a file's own metadata, drags a sibling
@@ -5805,14 +5927,21 @@ void GainDrive::scan_batch(const std::string& rel_batch,
 		                                                   : artist_override);
 		apply_batch_names(dest, artist_override, album_override);
 
-		// One entry per artist directory inside the batch, so artist names —
-		// not the UUID — are what appears as a top-level entry in personal
-		// mode.
+		// One entry per artist directory, so artist names — not the UUID — are
+		// what appears as a top-level entry in personal mode. Which batch each
+		// one ends up in is the fold's answer, not this batch's: an artist the
+		// user already has under some earlier batch is merged into it, so the
+		// path to rescan is that one.
+		//
+		// Serialised because two batches folding at the same moment would each
+		// move the other's contents away. /upload detaches this onto an HTTP
+		// thread, so two uploads really can arrive together; the fetch worker is
+		// single and never races itself.
 		std::set<std::string> to_scan;
-		std::error_code ec;
-		for (auto& e : fs::directory_iterator(dest, ec))
-			if (e.is_directory())
-				to_scan.insert(rel_batch + "/" + e.path().filename().string());
+		{
+		std::lock_guard<std::mutex> lock(batch_fold_mu_);
+		fold_batch_into_siblings(dest, rel_batch, to_scan);
+		}
 		if (!to_scan.empty()) store_.scan_dirs(to_scan);
 		}
 	catch (const std::exception& e) {
