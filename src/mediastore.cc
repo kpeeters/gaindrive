@@ -4612,6 +4612,68 @@ bool MediaStore::relocate_prefix(const std::string& old_rel,
 	return true;
 	}
 
+void MediaStore::forget_prefix(const std::string& rel)
+	{
+	if (rel.empty()) return;
+
+	// The same escaping relocate_prefix needs, and for a stronger reason. The
+	// prunes elsewhere in this file get away without it because a spurious
+	// match there can only *keep* a row that was already condemned. These are
+	// DELETEs aimed at rows that are alive: without the escape, deleting an
+	// album called "Vol_2" would take the stars off an unrelated "Vol 2"
+	// sitting beside it.
+	auto like_escape = [](const std::string& s) {
+		std::string r;
+		for (char c : s) {
+			if (c == '\\' || c == '%' || c == '_') r += '\\';
+			r += c;
+			}
+		return r;
+		};
+	const std::string like_pat = like_escape(rel) + "/%";
+
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	try {
+		SQLite::Transaction txn(db_music_);
+
+		// "= ?" as well as the prefix: stars.album_folder_path holds the album
+		// row exactly, with nothing under it to match.
+		auto forget = [&](const char* table, const char* col) {
+			SQLite::Statement s(db_music_,
+				std::string("DELETE FROM ") + table +
+				" WHERE " + col + " = ? OR " + col + " LIKE ? ESCAPE '\\'");
+			s.bind(1, rel);
+			s.bind(2, like_pat);
+			s.exec();
+			};
+
+		// Client tables only. A following scan_dirs() prunes the music DB and
+		// every derived cache keyed on the path; nothing anywhere prunes these.
+		forget("client.stars",          "song_path");
+		forget("client.stars",          "album_folder_path");
+		forget("client.stars",          "artist_folder_path");
+		forget("client.play_counts",    "song_path");
+		forget("client.playlist_songs", "song_path");
+		forget("client.play_queue",     "song_path");
+		forget("client.now_playing",    "song_path");
+		forget("client.bookmarks",      "song_path");
+
+		txn.commit();
+		}
+	catch (const std::exception& e) {
+		// Not fatal to the caller: the files are already gone, and a client row
+		// left behind is invisible rather than broken. Logged because the one
+		// case where it matters — a later batch folding a new file onto this
+		// exact path — would otherwise present as a track that is mysteriously
+		// already starred.
+		std::cout << stamp() << "Forget client rows under " << rel
+		          << " failed: " << e.what() << std::endl;
+		return;
+		}
+
+	std::cout << stamp() << "Forgot client rows under " << rel << std::endl;
+	}
+
 std::optional<std::string> MediaStore::song_path_by_id(int song_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);

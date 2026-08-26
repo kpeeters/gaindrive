@@ -2040,6 +2040,42 @@ async function viewAlbums(artistId, artistName) {
          row.appendChild(promoteBtn);
          }
 
+      // Delete-from-uploads button. Uploads mode only, but *not* admin only,
+      // unlike promote beside it: clearing out your own staging area after a
+      // fetch went wrong is not an administrative act, and before this the only
+      // way out of the uploads area was to promote into the shared library.
+      if (libraryMode === 'uploads') {
+         const deleteBtn = document.createElement('button');
+         deleteBtn.className = 'promote-btn delete-btn';
+         deleteBtn.title = 'Delete from your uploads';
+         deleteBtn.textContent = 'Delete';
+         deleteBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            showConfirm(
+               `“${album.title}” and its files are removed from the server. `
+               + 'This cannot be undone.',
+               async () => {
+                  deleteBtn.disabled = true;
+                  deleteBtn.textContent = '…';
+                  try {
+                     await apiCall('deleteUpload', {id: album.id});
+                     viewArtists();
+                     }
+                  catch (err) {
+                     deleteBtn.disabled = false;
+                     deleteBtn.textContent = 'Delete';
+                     // The server's own words. "Item is not in your uploads"
+                     // and a transport failure want different reactions, and a
+                     // flat "Delete failed" distinguishes neither.
+                     showError(err.message ?? 'Delete failed.');
+                     }
+                  },
+               {title: 'Delete from uploads?', yes: 'Delete'},
+               );
+            });
+         row.appendChild(deleteBtn);
+         }
+
       row.addEventListener('click', () => {
          document.querySelectorAll('#pane-albums .album-row.selected')
             .forEach(r => r.classList.remove('selected'));

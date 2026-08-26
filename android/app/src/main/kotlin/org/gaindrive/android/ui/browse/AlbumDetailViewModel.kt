@@ -58,9 +58,24 @@ class AlbumDetailViewModel @Inject constructor(
 	private val _canPromote = MutableStateFlow(false)
 	val canPromote: StateFlow<Boolean> = _canPromote.asStateFlow()
 
-	/** Set once the move has succeeded, so the screen can leave. */
+	/**
+	 * Whether deleting this upload is on offer.
+	 *
+	 * The route flag alone, with no permission call behind it: **reaching an
+	 * album through Uploads is ownership**, since every personal listing keys on
+	 * the caller's own username, and deleting your own staging area is not an
+	 * administrative act the way promoting into the shared library is. The
+	 * server checks again regardless — this only decides whether to draw a
+	 * control.
+	 */
+	val canDelete: Boolean = route.fromUploads
+
+	/** Set once the move or the deletion has succeeded, so the screen can leave. */
 	private val _promoted = MutableStateFlow(false)
 	val promoted: StateFlow<Boolean> = _promoted.asStateFlow()
+
+	private val _deleting = MutableStateFlow(false)
+	val deleting: StateFlow<Boolean> = _deleting.asStateFlow()
 
 	private val _promoting = MutableStateFlow(false)
 	val promoting: StateFlow<Boolean> = _promoting.asStateFlow()
@@ -173,6 +188,29 @@ class AlbumDetailViewModel @Inject constructor(
 				onFailure = { _promoteError.value = "Could not move it: ${it.userMessage()}" },
 			)
 			_promoting.value = false
+		}
+	}
+
+	/**
+	 * Removes this upload from the server, files and all.
+	 *
+	 * Shares [promoted] with the move above rather than having a flag of its
+	 * own: both mean "this album is not here any more, leave", and the screen
+	 * does the same thing for each. [promoteError] is shared for the same
+	 * reason — one dialog saying what the server said.
+	 */
+	fun deleteUpload() {
+		if (_deleting.value || _promoting.value) return
+		_deleting.value = true
+		_promoteError.value = null
+		viewModelScope.launch {
+			runCatchingCancellable { library.deleteUpload(albumRef) }.fold(
+				onSuccess = { _promoted.value = true },
+				onFailure = {
+					_promoteError.value = "Could not delete it: ${it.userMessage()}"
+				},
+			)
+			_deleting.value = false
 		}
 	}
 

@@ -179,6 +179,63 @@ class UploadsApiTest {
 		}
 	}
 
+	@Test
+	fun `deleteUpload sends the album id`() = runTest {
+		respond(okEnvelope)
+		api.deleteUpload("412").requireOk()
+
+		assertTrue(server.takeRequest().path.orEmpty().contains("id=412"))
+	}
+
+	/**
+	 * The refusal that is the security boundary: an id naming anything but the
+	 * caller's own upload. One message covers "not an upload" and "not yours",
+	 * deliberately — the difference is only useful to somebody probing ids — so
+	 * the client must show what the server said rather than inventing a reason.
+	 */
+	@Test
+	fun `deleting something that is not your upload is refused with a message`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"failed","version":"1.16.1",
+			   "error":{"code":0,"message":"Item is not in your uploads."}}}"""
+		)
+		try {
+			api.deleteUpload("412").requireOk()
+			fail("expected SubsonicException")
+		} catch (e: SubsonicException) {
+			assertEquals("Item is not in your uploads.", e.message)
+		}
+	}
+
+	@Test
+	fun `deleting an id that resolves to nothing is error 70`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"failed","version":"1.16.1",
+			   "error":{"code":70,"message":"Item not found."}}}"""
+		)
+		try {
+			api.deleteUpload("99999").requireOk()
+			fail("expected SubsonicException")
+		} catch (e: SubsonicException) {
+			assertEquals(SubsonicException.NOT_FOUND, e.code)
+		}
+	}
+
+	/** No upload role at all. Distinct from the two above, and from error 70. */
+	@Test
+	fun `deleting without upload rights is error 50`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"failed","version":"1.16.1",
+			   "error":{"code":50,"message":"User is not authorized for the given operation."}}}"""
+		)
+		try {
+			api.deleteUpload("412").requireOk()
+			fail("expected SubsonicException")
+		} catch (e: SubsonicException) {
+			assertTrue(e.isForbidden)
+		}
+	}
+
 	/**
 	 * An album that is not in a personal folder. The server answers error 0 with
 	 * its own wording, which the panel shows as-is rather than translating.

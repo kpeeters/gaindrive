@@ -82,11 +82,13 @@ fun AlbumDetailScreen(
 	val destRoot by viewModel.destRoot.collectAsStateWithLifecycle()
 	val folder by viewModel.folder.collectAsStateWithLifecycle()
 	val folderSuggestions by viewModel.folderSuggestions.collectAsStateWithLifecycle()
+	val deleting by viewModel.deleting.collectAsStateWithLifecycle()
 	var confirmPromote by remember { mutableStateOf(false) }
+	var confirmDelete by remember { mutableStateOf(false) }
 
-	// The album this screen is showing has moved and has a new id, so there is
-	// nothing here left to show. The listing it is left on has already been
-	// reloaded by the bumped library revision.
+	// The album this screen is showing has either moved to a new id or stopped
+	// existing, so there is nothing here left to draw either way. The listing it
+	// lands on has already been reloaded by the bumped library revision.
 	LaunchedEffect(promoted) {
 		if (promoted) onPromoted()
 	}
@@ -118,10 +120,42 @@ fun AlbumDetailScreen(
 		)
 	}
 
+	if (confirmDelete) {
+		AlertDialog(
+			onDismissRequest = { confirmDelete = false },
+			title = { Text("Delete from uploads?") },
+			// Says where the files go, because that is the whole difference
+			// between this and every other action on the screen. There is no
+			// trash behind it and nothing in the app can put them back.
+			text = {
+				Text(
+					"“${viewModel.albumTitle}” and its files are removed from " +
+						"the server. This cannot be undone."
+				)
+			},
+			confirmButton = {
+				TextButton(
+					enabled = !deleting,
+					onClick = {
+						confirmDelete = false
+						viewModel.deleteUpload()
+					},
+				) {
+					Text("Delete", color = MaterialTheme.colorScheme.error)
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { confirmDelete = false }) { Text("Cancel") }
+			},
+		)
+	}
+
+	// One dialog for both failures — it says whatever the server said, and
+	// "Could not move it" / "Could not delete it" is already in the message.
 	promoteError?.let { message ->
 		AlertDialog(
 			onDismissRequest = viewModel::clearPromoteError,
-			title = { Text("Not moved") },
+			title = { Text("Nothing changed") },
 			text = { Text(message) },
 			confirmButton = {
 				TextButton(onClick = viewModel::clearPromoteError) { Text("OK") }
@@ -142,10 +176,11 @@ fun AlbumDetailScreen(
 				},
 				actions = {
 					PinAction(ref = viewModel.albumRef, kind = PinKind.ALBUM)
-					// Drawn only for an admin looking at their own upload. An
-					// overflow rather than its own icon: it is a rare, one-way
-					// action and does not belong a tap away from Pin.
-					if (canPromote) {
+					// An overflow rather than icons of their own: both are rare
+					// one-way actions and neither belongs a tap away from Pin.
+					// Delete is offered to whoever owns the upload, Move only to
+					// an admin, so the menu itself appears for either.
+					if (canPromote || viewModel.canDelete) {
 						var menuOpen by remember { mutableStateOf(false) }
 						IconButton(onClick = { menuOpen = true }) {
 							Icon(Icons.Default.MoreVert, contentDescription = "More")
@@ -154,14 +189,31 @@ fun AlbumDetailScreen(
 							expanded = menuOpen,
 							onDismissRequest = { menuOpen = false },
 						) {
-							DropdownMenuItem(
-								text = { Text("Move to library") },
-								enabled = !promoting,
-								onClick = {
-									menuOpen = false
-									confirmPromote = true
-								},
-							)
+							if (canPromote) {
+								DropdownMenuItem(
+									text = { Text("Move to library") },
+									enabled = !promoting && !deleting,
+									onClick = {
+										menuOpen = false
+										confirmPromote = true
+									},
+								)
+							}
+							if (viewModel.canDelete) {
+								DropdownMenuItem(
+									text = {
+										Text(
+											"Delete from uploads",
+											color = MaterialTheme.colorScheme.error,
+										)
+									},
+									enabled = !promoting && !deleting,
+									onClick = {
+										menuOpen = false
+										confirmDelete = true
+									},
+								)
+							}
 						}
 					}
 				},

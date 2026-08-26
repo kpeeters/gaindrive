@@ -1067,6 +1067,22 @@ body {
 .promote-btn:hover    { color: var(--text, #eee); border-color: var(--text, #eee); }
 .promote-btn:disabled { opacity: 0.4; cursor: default; }
 
+/* Delete carries .promote-btn as well, so it borrows the shape and only the
+   hover differs. Muted until pointed at, like its neighbour: a row of albums
+   permanently showing a red control reads as a warning about the albums rather
+   than as an action available on them.
+
+   The auto margin comes with .promote-btn and pushes whichever control is first
+   to the right edge — which matters because promote is admin-only and delete is
+   not, so delete is often the only one there. Zeroed on the *second* of the
+   pair, or the two would be split across the row. */
+.promote-btn + .delete-btn { margin-left: 0; }
+
+.delete-btn:hover {
+   color: var(--accent, #c9202f);
+   border-color: var(--accent, #c9202f);
+}
+
 .album-row {
    display: flex;
    align-items: center;

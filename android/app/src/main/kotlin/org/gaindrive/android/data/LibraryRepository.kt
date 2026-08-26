@@ -514,6 +514,26 @@ class LibraryRepository @Inject constructor(
 		libraryRevision.bump()
 	}
 
+	/**
+	 * Removes one of the account's own uploaded albums from the server.
+	 *
+	 * Irreversible — the files go from the server's disk — and the server is
+	 * what enforces that this is the caller's own upload rather than anything
+	 * else with a folder id. A refusal arrives as a
+	 * [org.gaindrive.android.net.SubsonicException] for the caller to show.
+	 *
+	 * The aftermath is a promote's: drop that server's mirror, because the
+	 * album's rows and every id beneath it name something that is no longer
+	 * there, and bump [LibraryRevision], because the listing that changed is one
+	 * the user is not looking at.
+	 */
+	suspend fun deleteUpload(album: ItemRef) {
+		requireOnline()
+		onServer(album.server) { client -> client.deleteUpload(album.id).requireOk() }
+		local.forgetLibrary(album.server)
+		libraryRevision.bump()
+	}
+
 	suspend fun createPlaylist(server: ServerId, name: String, songIds: List<String>) {
 		requireOnline()
 		onServer(server) { client -> client.createPlaylist(name, songIds).requireOk() }

@@ -2235,18 +2235,25 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string body;
 		if (use_json)
 			body = subsonic_ok_json([](nlohmann::json& r) {
-				// 2 is 1 plus the URL-fetch endpoints. A separate version
-				// rather than a widening of 1: a client that negotiated 1 was
-				// told what that meant, and redefining it silently would make
-				// the number worth nothing. See API.md.
-				r["openSubsonicExtensions"] = {{{"name", "gaindrive"}, {"versions", {1, 2}}}};
+				// 2 is 1 plus the URL-fetch endpoints; 3 is 2 plus
+				// deleteUpload. A separate version each time rather than a
+				// widening: a client that negotiated a number was told what
+				// that meant, and redefining it silently would make the number
+				// worth nothing. See API.md.
+				//
+				// Note what does *not* earn a version: new optional parameters
+				// on an endpoint a version already named — promoteAlbum's
+				// destination, /upload's names — since a client that ignores
+				// them gets exactly what it got before.
+				r["openSubsonicExtensions"] =
+					{{{"name", "gaindrive"}, {"versions", {1, 2, 3}}}};
 				});
 		else
 			body = subsonic_ok([](XMLDocument& doc, XMLElement* root) {
 				auto* exts = doc.NewElement("openSubsonicExtensions");
 				auto* ext  = doc.NewElement("extension");
 				ext->SetAttribute("name", "gaindrive");
-				ext->SetAttribute("versions", "1,2");
+				ext->SetAttribute("versions", "1,2,3");
 				exts->InsertEndChild(ext);
 				root->InsertEndChild(exts);
 				});
@@ -5323,6 +5330,113 @@ GainDrive::GainDrive(const std::string& db_path,
 		// trips a foreign key and silently leaves the emptied artist behind.
 		store_.scan_dirs({dest_rel});
 		store_.scan_dirs({personal_artist_rel});
+
+		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
+		                use_json ? "application/json" : "application/xml");
+		});
+
+	// deleteUpload — remove one of the caller's own uploaded albums.
+	//
+	// Param: id (album folder_id). The way out of a fetch that produced the
+	// wrong thing; before this the only route out of the uploads area was
+	// promoting into the shared library, or shell access to the server.
+	//
+	// **The path check below is the security boundary, not a validation
+	// nicety.** Without it this is "delete the folder with this id", which is
+	// "delete any folder on the server", reachable by any account with
+	// upload rights guessing integers. Three things have to hold: the path is
+	// exactly five components, the first is the uploads root, and the second is
+	// the account making the request.
+	//
+	// Owner only, with no admin override. Not an oversight — there is no way to
+	// reach another account's uploads through the API at all, since every
+	// personal listing keys on the caller's own username, so an admin branch
+	// here would be a power nothing can exercise and one more thing to get
+	// wrong.
+	server_.Get("/rest/deleteUpload.view", [this](const httplib::Request& req,
+	                                               httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+
+		if (!check_upload_perm(req, res, store_, use_json)) return;
+		const std::string uname = req.get_param_value("u");
+
+		auto id_it = req.params.find("id");
+		if (id_it == req.params.end()) { err(10, "Missing parameter: id."); return; }
+
+		auto rel_opt = store_.album_folder_path_by_id(to_int(id_it->second, 0));
+		if (!rel_opt) { err(70, "Item not found."); return; }
+		const std::string& item_rel = *rel_opt;
+
+		namespace fs = std::filesystem;
+		fs::path rel_p(item_rel);
+		std::vector<std::string> parts;
+		// const auto&, not auto&: path::iterator's reference type is
+		// implementation-defined. libstdc++ hands out a const path&, but libc++
+		// returns a path by value, and a non-const lvalue reference cannot bind
+		// to that temporary.
+		for (const auto& c : rel_p) parts.push_back(c.string());
+		if (parts.size() != 5 || uploads_root_name_.empty()
+		        || parts[0] != uploads_root_name_ || parts[1] != uname) {
+			// One message for "not an upload" and "not yours", deliberately: the
+			// difference is only useful to somebody probing ids.
+			err(0, "Item is not in your uploads.");
+			return;
+			}
+		const std::string& batch_uuid  = parts[2];
+		const std::string& artist_name = parts[3];
+
+		fs::path abs = store_.abs_path(item_rel);
+		// Belt and braces over the component check, the pairing promoteAlbum
+		// keeps: that establishes the shape, this establishes that the shape
+		// resolves to somewhere inside a root. A symlink escaping to /etc
+		// prefixes none of them.
+		if (!store_.path_is_within_root(abs)) {
+			err(0, "Item is not in your uploads."); return;
+			}
+
+		std::error_code ec;
+		fs::remove_all(abs, ec);
+		if (ec) { err(0, ("Failed to delete item: " + ec.message()).c_str()); return; }
+
+		// Before the rescan, and it is the half the rescan will not do: the
+		// scanner prunes the music DB and its derived caches but has never
+		// touched the client schema, so stars, play counts, playlist entries,
+		// the queue and bookmarks would outlive the files. That matters more
+		// than it used to — a later batch folded into an earlier one can put a
+		// new file at exactly this path, and a surviving star would attach
+		// itself to it.
+		store_.forget_prefix(item_rel);
+
+		// An emptied artist directory left in place is a folder row reading
+		// "0 albums" in the listing, which is the shape every stranding here
+		// takes. Removing it makes scan_artist_dir treat it as gone and prune
+		// it — the same two steps promoteAlbum takes for the same reason.
+		std::string artist_rel =
+			uploads_root_name_ + "/" + uname + "/" + batch_uuid + "/" + artist_name;
+		fs::path artist_abs = store_.abs_path(artist_rel);
+		if (fs::is_directory(artist_abs, ec) && fs::is_empty(artist_abs, ec))
+			fs::remove(artist_abs, ec);
+
+		// Synchronously, so the response is never ahead of the database. One
+		// call covers both outcomes: the artist directory either still stands
+		// with fewer albums, or has gone and is pruned.
+		store_.scan_dirs({artist_rel});
+
+		// And the batch after it. Nothing to rescan for this one — the <uuid>
+		// level never gets a folder row, because scan_artist_dir parents an
+		// artist directory straight to the root.
+		fs::path batch_abs = artist_abs.parent_path();
+		if (fs::is_directory(batch_abs, ec) && fs::is_empty(batch_abs, ec))
+			fs::remove(batch_abs, ec);
+
+		std::cout << stamp() << "Delete upload: removed " << item_rel << std::endl;
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");

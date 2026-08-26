@@ -222,6 +222,18 @@ interface SubsonicApi {
 		@Query("folder") folder: String?,
 	): SubsonicEnvelope<EmptyBody>
 
+	/**
+	 * Removes one of the caller's *own* uploaded albums, files and all.
+	 *
+	 * The server refuses anything whose stored path is not exactly
+	 * `<uploads root>/<this account>/<batch>/<artist>/<album>`, which is what
+	 * keeps an endpoint that deletes "the folder with this id" from being one
+	 * that deletes any folder on the server. Owner only — there is no admin
+	 * override, because no account can reach another's uploads to begin with.
+	 */
+	@GET("rest/deleteUpload.view")
+	suspend fun deleteUpload(@Query("id") id: String): SubsonicEnvelope<EmptyBody>
+
 	// ── Fetching a URL into the user's uploads ──────────────────────────
 	//
 	// OpenSubsonic extension "gaindrive" version 2. All four require the

@@ -696,6 +696,24 @@ class MediaStore {
 		bool relocate_prefix(const std::string& old_rel,
 		                     const std::string& new_rel);
 
+		// Forget every *client* row at or under rel, for a directory that has
+		// been deleted rather than moved. Stars, play counts, playlist entries,
+		// the queue, now-playing and bookmarks.
+		//
+		// The music DB is deliberately absent: a following scan_dirs() prunes
+		// the folder, its songs and every derived cache keyed on the path
+		// (video_art, video_meta, cover_thumbs, artist_art). **Nothing anywhere
+		// prunes the client schema** — the scanner never touches it — which is
+		// the whole reason this exists.
+		//
+		// Leaving those rows behind is not merely untidy. They are read through
+		// INNER JOINs, so an orphan is invisible rather than broken; but a
+		// personal batch that is folded into an earlier one can put a *new* file
+		// at exactly the path a deleted one had, and a surviving star would then
+		// attach itself to it. Anything new that persists a path in the client
+		// schema belongs in this function's list as well as relocate_prefix's.
+		void forget_prefix(const std::string& rel);
+
 	private:
 		// Everything the root model needs, derived once at construction.
 		// `path_slash` is the form used to compose and strip absolute paths;
