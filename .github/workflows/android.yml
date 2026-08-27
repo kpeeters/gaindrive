@@ -116,3 +116,40 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" dist/*.apk --clobber \
             --repo "$GITHUB_REPOSITORY"
         env: {GH_TOKEN: '${{ github.token }}'}
+
+  # The same thing for an untagged master build, because a workflow artifact is
+  # *always* a zip — actions/upload-artifact zips on upload and offers no way
+  # not to — and a phone cannot install one. A release asset is served as the
+  # bare file, so publishing one is the only way to get an installable link.
+  #
+  # `latest-apk` is a rolling prerelease holding one APK, so the page to
+  # bookmark on the phone never changes:
+  #
+  #   https://github.com/kpeeters/gaindrive/releases/tag/latest-apk
+  #
+  # Prerelease matters: `releases/latest` ignores those, so this never displaces
+  # a real v* release as the repository's headline download.
+  latest:
+    needs: apk
+    # Excludes pull_request too, where ref_name is `<n>/merge`.
+    if: github.ref_type == 'branch' && github.ref_name == 'master'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {merge-multiple: true, path: dist}
+      # Deleted rather than clobbered, and `--cleanup-tag` is load-bearing on
+      # both halves: the asset name carries the version and the commit, so
+      # uploading over the old release would accumulate every past build, and
+      # `gh release create` silently ignores `--target` when the tag already
+      # exists — the release would keep pointing at the first commit ever built.
+      # The `|| true` is for the first run, when there is nothing to delete.
+      - run: |
+          gh release delete latest-apk --repo "$GITHUB_REPOSITORY" \
+            --yes --cleanup-tag || true
+          gh release create latest-apk dist/*.apk --repo "$GITHUB_REPOSITORY" \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "Latest master build" \
+            --notes "Unreleased build of \`$GITHUB_SHA\`. Replaced by the next push to master."
+        env: {GH_TOKEN: '${{ github.token }}'}
