@@ -93,11 +93,19 @@ class WiiMEqTest {
 	 * `R&B` unencoded ends the `command` parameter and delivers the device
 	 * `EQLoad:R`, and four documented presets carry a space. Both are why the
 	 * URL is built by `HttpUrl` and never concatenated.
+	 *
+	 * Asserted as the failure mode — one parameter, no raw `&` — rather than as
+	 * a literal query string. `addQueryParameter` encodes against OkHttp's query
+	 * *component* set, which is deliberately wider than the reserved characters
+	 * and includes `:`, so the command goes out as `EQLoad%3AR%26B`. Pinning that
+	 * spelling ties the test to an implementation detail of OkHttp that says
+	 * nothing about whether the device is served correctly.
 	 */
 	@Test
 	fun `a preset name is percent-encoded into the query`() {
 		val ampersand = wiimUrl("10.0.0.5", eqLoadCommand("R&B"))
-		assertTrue(ampersand.toString(), ampersand.toString().endsWith("command=EQLoad:R%26B"))
+		assertEquals(ampersand.toString(), 1, ampersand.querySize)
+		assertFalse(ampersand.toString(), ampersand.encodedQuery!!.contains("&"))
 		// Whatever the encoding, the device must receive the name back whole.
 		assertEquals("EQLoad:R&B", ampersand.queryParameter("command"))
 
