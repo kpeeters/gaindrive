@@ -8,8 +8,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -97,6 +98,22 @@ fun WiiMControlsSheet(
 				onRetry = viewModel::refresh,
 				modifier = Modifier.heightIn(max = LIST_HEIGHT),
 			) { eq ->
+				val listState = rememberLazyListState()
+				// A device's own presets are appended after the two dozen
+				// built-in ones, so the loaded one is routinely below the fold
+				// when the sheet opens — and a selection nobody can see is
+				// indistinguishable from no selection at all, which is exactly
+				// how this read on a device with six custom presets.
+				//
+				// Only when it is out of sight, so tapping a preset never drags
+				// the list under the finger. On first composition nothing is
+				// laid out yet, which counts as out of sight and is what makes
+				// the opening scroll happen.
+				LaunchedEffect(eq.preset, eq.presets) {
+					val index = eq.presets.indexOf(eq.preset)
+					val seen = listState.layoutInfo.visibleItemsInfo.any { it.index == index }
+					if (index >= 0 && !seen) listState.scrollToItem(index)
+				}
 				Column(modifier = Modifier.fillMaxHeight()) {
 					Row(
 						modifier = Modifier
@@ -113,13 +130,16 @@ fun WiiMControlsSheet(
 						)
 					}
 					// weight rather than nothing, so the list gets exactly what
-					// the switch row left and scrolls inside it.
-					Column(
-						modifier = Modifier
-							.weight(1f)
-							.verticalScroll(rememberScrollState())
+					// the switch row left and scrolls inside it. Lazy rather
+					// than a scrolling Column for the state alone — the list is
+					// three dozen rows at most and needs no recycling, but
+					// scrolling to an item needs an index, which a Column has no
+					// notion of.
+					LazyColumn(
+						state = listState,
+						modifier = Modifier.weight(1f),
 					) {
-						eq.presets.forEach { preset ->
+						items(eq.presets) { preset ->
 							PresetRow(
 								name = preset,
 								selected = preset == eq.preset,

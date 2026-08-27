@@ -41,13 +41,31 @@ class WiiMClient @Inject constructor(
 
 	/** The current EQ state, preferring the reading that names the preset. */
 	suspend fun eqState(address: String): WiiMEqState = withContext(Dispatchers.IO) {
-		val band = runCatchingCancellable { get(address, EQ_GET_BAND) }.getOrNull()
-			?.let(::parseEqBand)
-		if (band != null) return@withContext band
+		val body = runCatchingCancellable { get(address, EQ_GET_BAND) }.getOrNull()
+		val band = body?.let(::parseEqBand)
+		if (band != null) {
+			// The reading itself, not only its failures. What the device says
+			// and what the sheet shows have now disagreed twice for different
+			// reasons, and neither was visible from either end alone: one line
+			// per sheet opening is a cheap way to tell "the app never read it"
+			// from "the app read it and drew it somewhere you could not see".
+			Log.i(TAG, "$EQ_GET_BAND at $address: enabled=${band.enabled} preset=${band.preset}")
+			return@withContext band
+		}
 		// EQGetBand is documented by a third-party project rather than by WiiM's
 		// own PDF, so a firmware without it is entirely plausible. EQGetStat is
 		// in the PDF and costs only the preset name.
-		Log.i(TAG, "$EQ_GET_BAND unusable at $address, falling back to $EQ_GET_STAT")
+		//
+		// The body is logged and not merely the fact, because it is the only
+		// thing that separates "this firmware has no EQGetBand" from "it answered
+		// in a shape parseEqBand does not read" — and that is the difference
+		// between a sheet that can never tick the loaded preset and one line of
+		// parsing. A null here means it did not answer at all.
+		Log.i(
+			TAG,
+			"$EQ_GET_BAND unusable at $address, falling back to $EQ_GET_STAT: " +
+				body?.trim()?.take(BODY_LOG_CHARS),
+		)
 		val enabled = parseEqStat(get(address, EQ_GET_STAT))
 			?: throw IOException("The device did not report its equalizer state.")
 		WiiMEqState(enabled = enabled, preset = null)
@@ -61,17 +79,44 @@ class WiiMClient @Inject constructor(
 	 * better answer than an empty sheet.
 	 */
 	suspend fun presets(address: String): List<String> = withContext(Dispatchers.IO) {
-		val listed = runCatchingCancellable { get(address, EQ_GET_LIST) }.getOrNull()
-			?.let(::parsePresets)
-		if (listed == null) Log.i(TAG, "$EQ_GET_LIST unusable at $address, using documented list")
+		val body = runCatchingCancellable { get(address, EQ_GET_LIST) }.getOrNull()
+		val listed = body?.let(::parsePresets)
+		// With the body, because falling back is silent by design: the sheet
+		// fills either way, so a list that could not be read looks exactly like a
+		// device offering the documented set, and the difference only surfaces as
+		// a preset the user made themselves being absent.
+		if (listed == null) {
+			Log.i(
+				TAG,
+				"$EQ_GET_LIST unusable at $address, using documented list: " +
+					body?.trim()?.take(BODY_LOG_CHARS),
+			)
+		}
 		listed ?: DOCUMENTED_PRESETS
 	}
 
 	suspend fun loadPreset(address: String, preset: String): Boolean =
-		withContext(Dispatchers.IO) { isOk(get(address, eqLoadCommand(preset))) }
+		withContext(Dispatchers.IO) { command(address, eqLoadCommand(preset)) }
 
 	suspend fun setEqEnabled(address: String, enabled: Boolean): Boolean =
-		withContext(Dispatchers.IO) { isOk(get(address, if (enabled) EQ_ON else EQ_OFF)) }
+		withContext(Dispatchers.IO) { command(address, if (enabled) EQ_ON else EQ_OFF) }
+
+	/**
+	 * A command whose whole answer is success or failure.
+	 *
+	 * The body is logged when it is judged a failure, because that judgement is
+	 * the one thing here no test can settle. `isOk` knows the two shapes WiiM
+	 * document, and a firmware that performs the command while answering in a
+	 * third is indistinguishable from one that refused — which is exactly the
+	 * fault this replaced, and it took a device to find because every body the
+	 * documentation describes was handled.
+	 */
+	private fun command(address: String, command: String): Boolean {
+		val body = get(address, command)
+		val ok = isOk(body)
+		if (!ok) Log.w(TAG, "$command at $address answered: ${body.trim().take(BODY_LOG_CHARS)}")
+		return ok
+	}
 
 	/**
 	 * One command, tried Wi-Fi-bound and then unbound.
@@ -183,5 +228,12 @@ class WiiMClient @Inject constructor(
 		 */
 		const val CONNECT_TIMEOUT_MS = 3_000L
 		const val READ_TIMEOUT_MS = 5_000L
+
+		/**
+		 * Enough of an unexpected body to recognise its shape. An `EQGetBand`
+		 * answer carries every band value, and the interesting part — `status`,
+		 * `EQStat`, `Name` — is at the front.
+		 */
+		const val BODY_LOG_CHARS = 300
 	}
 }

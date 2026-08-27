@@ -58,11 +58,29 @@ class WiiMEqTest {
 		assertEquals(listOf("Flat", "Acoustic", "Bass Booster", "R&B"), presets)
 	}
 
+	/**
+	 * Defensive rather than measured: the device sends a bare array here, but
+	 * wraps every other response. Refusing a wrapped one is not a visible
+	 * failure — the sheet falls back to the documented list and looks complete —
+	 * so it would cost only the presets the owner made themselves, which are the
+	 * ones they are looking for.
+	 */
+	@Test
+	fun `a list wrapped in a status object is still a list`() {
+		val presets = parsePresets(
+			"""{"status":"OK","EQList":["Flat","Rock","LotsOfHigh"]}"""
+		)
+		assertEquals(listOf("Flat", "Rock", "LotsOfHigh"), presets)
+	}
+
 	/** A device offering nothing is not worth drawing; the documented list wins. */
 	@Test
 	fun `an empty preset list is a miss`() {
 		assertNull(parsePresets("[]"))
 		assertNull(parsePresets("""["", "  "]"""))
+		assertNull(parsePresets("""{"status":"OK","EQList":[]}"""))
+		// An object carrying no array at all is still a miss, not an empty list.
+		assertNull(parsePresets("""{"status":"Failed"}"""))
 	}
 
 	@Test
@@ -72,6 +90,28 @@ class WiiMEqTest {
 		assertTrue(isOk("OK\n"))
 		assertFalse(isOk("Failed"))
 		assertFalse(isOk(""))
+	}
+
+	/**
+	 * Measured against hardware: the device performs the command and answers in
+	 * the OpenAPI description's shape, not the PDF's plain text. Reading only the
+	 * latter reported every successful `EQLoad`/`EQOn`/`EQOff` as a refusal.
+	 */
+	@Test
+	fun `an OK wrapped in an object is still OK`() {
+		assertTrue(isOk("""{"status":"OK"}"""))
+		assertTrue(isOk("""{"status":"OK"}""" + "\n"))
+		assertTrue(isOk("""{"status":"ok","EQStat":"On"}"""))
+	}
+
+	/** Tolerating the second shape must not turn every 2xx into a success. */
+	@Test
+	fun `a wrapped failure is still a failure`() {
+		assertFalse(isOk("""{"status":"Failed"}"""))
+		assertFalse(isOk("""{"EQStat":"On"}"""))
+		assertFalse(isOk("""{"status":""}"""))
+		assertFalse(isOk("""{"status":7}"""))
+		assertFalse(isOk("<html>404</html>"))
 	}
 
 	@Test

@@ -105,17 +105,29 @@ fun parseEqStat(body: String): Boolean? =
 	asObject(body)?.string("EQStat")?.equals("on", ignoreCase = true)
 
 /**
- * Reads an `EQGetList` response: a bare JSON array of names.
+ * Reads an `EQGetList` response: a JSON array of names, bare or wrapped.
  *
  * Served as `text/html` despite being JSON, which is why nothing here consults
  * the content type. An empty array is treated as a miss — a device with no
  * presets at all is not a state worth rendering, and the documented list is a
  * better answer than a blank sheet.
+ *
+ * **An array inside an object counts**, though no device has been seen sending
+ * one: the firmware measured here answers this command with a bare array while
+ * wrapping `EQGetBand` and every mutation in `{"status":"OK", …}`, so the shape
+ * is plainly within its repertoire. Accepting both costs three lines, and the
+ * consequence of refusing is silent — `presets()` never throws, so an unread
+ * list is indistinguishable on screen from a device offering exactly the
+ * documented set, and the difference only surfaces as a preset the owner made
+ * themselves being absent. The field is found by shape and not by name because
+ * nothing documents the name, and no such body carries a second array.
  */
 fun parsePresets(body: String): List<String>? {
-	val root = runCatching { SubsonicJson.parseToJsonElement(body) }.getOrNull() as? JsonArray
+	val root = runCatching { SubsonicJson.parseToJsonElement(body) }.getOrNull() ?: return null
+	val array = root as? JsonArray
+		?: (root as? JsonObject)?.values?.firstNotNullOfOrNull { it as? JsonArray }
 		?: return null
-	val names = root.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+	val names = array.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
 		.filter { it.isNotBlank() }
 	return names.ifEmpty { null }
 }
@@ -123,10 +135,22 @@ fun parsePresets(body: String): List<String>? {
 /**
  * Whether a command that answers `OK` or `Failed` succeeded.
  *
- * The response is plain text, despite the OpenAPI description typing it as an
- * object with a `status` field. Trimmed because a trailing newline is ordinary.
+ * **Both documented shapes are accepted, because a device sends the other one.**
+ * The PDF describes a plain-text `OK`, the OpenAPI description types the
+ * response as an object with a `status` field, and this code believed the PDF —
+ * so on real firmware every `EQLoad`, `EQOn` and `EQOff` was performed by the
+ * device and reported to the user as "the device would not load that preset".
+ * A command that is obeyed and then called a failure is the worst of the three
+ * possible answers, so where the two documents disagree, accept both.
+ *
+ * `Failed` in either shape stays a failure: this is not "any 2xx is success".
+ * Trimmed because a trailing newline is ordinary from this device.
  */
-fun isOk(body: String): Boolean = body.trim().equals("OK", ignoreCase = true)
+fun isOk(body: String): Boolean {
+	val text = body.trim()
+	if (text.equals("OK", ignoreCase = true)) return true
+	return asObject(text)?.string("status")?.equals("OK", ignoreCase = true) == true
+}
 
 private fun asObject(body: String): JsonObject? =
 	runCatching { SubsonicJson.parseToJsonElement(body) }.getOrNull() as? JsonObject
