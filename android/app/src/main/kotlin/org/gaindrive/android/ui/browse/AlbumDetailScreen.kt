@@ -456,9 +456,12 @@ private fun PromoteDialog(
 		},
 		confirmButton = {
 			TextButton(
-				// A blank folder is allowed: the server reads it as "keep what
-				// this is already filed under", which is a real answer.
-				enabled = !busy && chosen != null,
+				// Both halves are required by the server, so the button says so
+				// rather than letting a refusal arrive afterwards. It also
+				// catches a categories root left with the field empty, which
+				// used to file a documentary under the channel that published
+				// it.
+				enabled = !busy && chosen != null && folder.isNotBlank(),
 				onClick = onConfirm,
 			) { Text("Move") }
 		},

@@ -172,14 +172,18 @@ class AlbumDetailViewModel @Inject constructor(
 	 * the album it is showing is at a new id the moment this returns.
 	 */
 	fun promote() {
-		if (_promoting.value) return
+		if (_promoting.value || _deleting.value) return
+		// Both halves of the destination are required by the server, and the
+		// dialog keeps its Move button disabled until they are set — so these
+		// guard against a caller that is not the dialog, rather than a case the
+		// user can reach. Checked before anything is marked in flight.
+		val root = _destRoot.value ?: return
+		val folder = _folder.value.trim().ifBlank { return }
 		_promoting.value = true
 		_promoteError.value = null
-		val root = _destRoot.value
-		val folder = _folder.value
 		viewModelScope.launch {
 			runCatchingCancellable {
-				library.promoteAlbum(albumRef, root?.id, folder)
+				library.promoteAlbum(albumRef, root.id, folder)
 			}.fold(
 				onSuccess = { _promoted.value = true },
 				// The server's own words. "Something with that name is already

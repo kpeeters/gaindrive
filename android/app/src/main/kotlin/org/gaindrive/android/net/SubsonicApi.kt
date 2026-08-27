@@ -205,21 +205,26 @@ interface SubsonicApi {
 	 * refused rather than guessed at. The move happens on the server's disk, so
 	 * every id below it changes and both listings have to be read again.
 	 */
+	/**
+	 * All three parameters are required, and non-null here to say so.
+	 *
+	 * The destination halves were briefly optional and both defaults were
+	 * guesses that put things in the wrong place — the first `artists` root
+	 * declared, which cannot reach a `categories` root at all, and the batch's
+	 * own artist name, which for a fetched video is the channel that published
+	 * it. An omission now earns error 10 rather than a silent wrong answer.
+	 */
 	@GET("rest/promoteAlbum.view")
 	suspend fun promoteAlbum(
 		@Query("id") id: String,
-		/**
-		 * The destination root, as `getMusicFolders` reports it. Null falls back
-		 * to the server's own guess — the first `artists` root declared — which
-		 * cannot reach a `categories` root at all.
-		 */
-		@Query("musicFolderId") musicFolderId: String?,
+		/** The destination root, as `getMusicFolders` reports it. */
+		@Query("musicFolderId") musicFolderId: String,
 		/**
 		 * The level under that root: an artist under an `artists` root, a
-		 * category under a `categories` one. Null keeps the batch's own artist
-		 * name. A name not already there is created.
+		 * category under a `categories` one. A name not already there is
+		 * created.
 		 */
-		@Query("folder") folder: String?,
+		@Query("folder") folder: String,
 	): SubsonicEnvelope<EmptyBody>
 
 	/**

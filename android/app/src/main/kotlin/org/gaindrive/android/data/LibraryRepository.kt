@@ -492,9 +492,9 @@ class LibraryRepository @Inject constructor(
 	 * to show.
 	 *
 	 * [musicFolderId] and [folder] say where it lands: a root, and one level
-	 * under it. Both null leaves the choice to the server, which guesses at the
-	 * first `artists` root — a fallback that exists for clients predating the
-	 * parameters and cannot reach a `categories` root at all.
+	 * under it. Both are required by the server, and non-null here to say so —
+	 * they were briefly optional and each default was a guess that filed things
+	 * wrongly, the root one unable to reach a `categories` root at all.
 	 *
 	 * Two things have to happen after it succeeds, and neither is optional. The
 	 * mirror of that server is dropped, because the move happened on its disk
@@ -504,15 +504,10 @@ class LibraryRepository @Inject constructor(
 	 * joined — are both screens the user is *not* looking at, so nothing else
 	 * would ever correct them.
 	 */
-	suspend fun promoteAlbum(
-		album: ItemRef,
-		musicFolderId: String? = null,
-		folder: String? = null,
-	) {
+	suspend fun promoteAlbum(album: ItemRef, musicFolderId: String, folder: String) {
 		requireOnline()
 		onServer(album.server) { client ->
-			client.promoteAlbum(album.id, musicFolderId, folder?.trim()?.ifBlank { null })
-				.requireOk()
+			client.promoteAlbum(album.id, musicFolderId, folder.trim()).requireOk()
 		}
 		local.forgetLibrary(album.server)
 		libraryRevision.bump()

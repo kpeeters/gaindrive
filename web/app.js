@@ -258,21 +258,34 @@ function showPromoteDialog(album, artist, onGo) {
       rootSel.appendChild(opt);
       }
 
+   // The server requires both halves of the destination, so the button is the
+   // place that says so rather than a refusal after the fact. It is also what
+   // catches a categories root left with the field empty, which used to send
+   // nothing and file a documentary under the channel that published it.
+   const goBtn = document.getElementById('promote-go-btn');
+   const syncGo = () => {
+      goBtn.disabled = !rootSel.value || !folder.value.trim();
+      };
+
    const syncRoot = () => {
       const opt = rootSel.selectedOptions[0];
       const isCategories = opt?.dataset.contentType === 'categories';
       label.textContent = isCategories ? 'Category:' : 'Artist:';
+      // Blank under a categories root, deliberately: L1 there is a category,
+      // and the batch's artist is whatever the source called it.
       folder.value = isCategories ? '' : artist;
       folder.placeholder = isCategories ? 'Which category?' : artist;
       document.getElementById('promote-note').textContent = isCategories
          ? 'A category that does not exist yet is created.'
          : 'An artist that does not exist yet is created.';
       _fillPromoteFolders(rootSel.value);
+      syncGo();
       };
    // Assigned, not addEventListener: this runs again every time the dialog is
    // opened, and adding would stack a fresh handler on the same element each
    // time.
    rootSel.onchange = syncRoot;
+   folder.oninput   = syncGo;
    syncRoot();
 
    document.getElementById('promote-modal').classList.remove('hidden');
@@ -2024,22 +2037,23 @@ async function viewAlbums(artistId, artistName) {
          promoteBtn.textContent = '→ Library';
          promoteBtn.addEventListener('click', e => {
             e.stopPropagation();
-            // The dialog rather than a one-click move: without a destination
-            // the server falls back to the first artists root declared, which
-            // cannot reach a categories root at all — so a film went into the
-            // music library and was then looked up as a musical artist.
+            // The dialog rather than a one-click move: the server requires a
+            // destination root and folder, and there is nothing in an upload
+            // that says which. It used to guess — the first artists root
+            // declared, under the batch's own name — which could not reach a
+            // categories root at all, so a film went into the music library and
+            // was then looked up as a musical artist.
             //
             // artistName is the batch's own level-1 name, which the dialog
-            // offers as the default under an artists root and ignores under a
-            // categories one.
+            // offers as the default under an artists root and leaves out under
+            // a categories one, where it would be the channel rather than a
+            // category.
             showPromoteDialog(album.title, artistName, async (rootId, folder) => {
                promoteBtn.disabled = true;
                promoteBtn.textContent = '…';
                try {
-                  const p = {id: album.id};
-                  if (rootId) p.musicFolderId = rootId;
-                  if (folder) p.folder = folder;
-                  await apiCall('promoteAlbum', p);
+                  await apiCall('promoteAlbum',
+                     {id: album.id, musicFolderId: rootId, folder});
                   viewArtists();
                   }
                catch (err) {
@@ -3657,10 +3671,10 @@ function setupPlayer() {
       const cb   = _promoteCb;
       const root = document.getElementById('promote-root').value;
       const name = document.getElementById('promote-folder').value.trim();
+      // Both are required by the server, and showPromoteDialog keeps the button
+      // disabled until both are set — so this cannot fire without them.
+      if (!root || !name) return;
       _closePromoteDialog();
-      // The folder is passed through even when it equals the batch's own
-      // artist: the server treats an absent one as "keep what it is called",
-      // and sending it explicitly is the same answer without depending on that.
       if (cb) cb(root, name);
       });
 

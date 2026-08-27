@@ -5203,13 +5203,9 @@ GainDrive::GainDrive(const std::string& db_path,
 
 	// promoteAlbum — move a personal album into the shared library (admin only).
 	//
-	// Params: id (album folder_id), and optionally musicFolderId and folder
-	// naming where it should land. The album must live under the uploads root.
-	//
-	// **Both destination parameters absent reproduces the old behaviour exactly**
-	// — first artists root declared, batch's own artist name — because a client
-	// that has not been taught about them must go on working. That fallback is a
-	// guess and is documented as one below; it is kept only for compatibility.
+	// Params: id (album folder_id), musicFolderId and folder — the destination
+	// root and the one level under it. All three required. The album must live
+	// under the uploads root.
 	server_.Get("/rest/promoteAlbum.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -5261,49 +5257,42 @@ GainDrive::GainDrive(const std::string& db_path,
 		// A root and one level under it, which is the whole of the destination:
 		// both layouts are L1/L2/[L3]/files, L2 is this album, and L3 is only
 		// ever a disc or season directory inside it.
-		std::string lib_root;
+		//
+		// **Both are required.** Each was briefly optional, defaulting to the
+		// first `artists` root declared and to the batch's own artist name, and
+		// both defaults were guesses that landed things in the wrong place: the
+		// root one could not reach a `categories` root at all, so a film went
+		// into the music library and was then looked up as a musical artist,
+		// and the folder one filed a documentary under whatever the source
+		// called it — a channel name, not a category. A caller that does not
+		// know where something goes should be told to decide rather than have
+		// it decided for them.
 		auto mf_it = req.params.find("musicFolderId");
-		if (mf_it != req.params.end() && !mf_it->second.empty()) {
-			// music_folder_by_id() applies the same rule get_music_folders()
-			// does, so an id naming a folder deeper in the tree — or the
-			// uploads root, which promoting into would produce a path the
-			// five-component check above rejects for ever after — resolves to
-			// nothing here rather than being caught by a test of its own.
-			auto mf = store_.music_folder_by_id(to_int(mf_it->second, 0));
-			if (!mf) { err(70, "No such library folder."); return; }
-			lib_root = mf->name;
+		if (mf_it == req.params.end() || mf_it->second.empty()) {
+			err(10, "Missing parameter: musicFolderId."); return;
 			}
-		else {
-			// The compatibility fallback, and a guess: with several artist
-			// roots configured there is nothing in a personal upload that says
-			// which one it belongs in, so it goes to the first one declared —
-			// the order the operator wrote them in is the only signal there is.
-			// Note this branch cannot reach a categories root at all, which is
-			// exactly why the parameter above exists.
-			for (const auto& r : store_.roots())
-				if (r.type == "artists") { lib_root = r.name; break; }
-			if (lib_root.empty()) {
-				err(0, "No artist library root is configured to promote into.");
-				return;
-				}
-			}
+		// music_folder_by_id() applies the same rule get_music_folders() does,
+		// so an id naming a folder deeper in the tree — or the uploads root,
+		// which promoting into would produce a path the five-component check
+		// above rejects for ever after — resolves to nothing here rather than
+		// being caught by a test of its own.
+		auto mf = store_.music_folder_by_id(to_int(mf_it->second, 0));
+		if (!mf) { err(70, "No such library folder."); return; }
+		const std::string& lib_root = mf->name;
 
-		// The level under the root. Absent keeps the batch's own artist name,
-		// which is what the album is already filed under.
-		std::string dest_folder = artist_name;
 		auto folder_it = req.params.find("folder");
-		if (folder_it != req.params.end()
-		        && folder_it->second.find_first_not_of(" \t") != std::string::npos) {
-			// The first arbitrary string on this route to become a *library*
-			// path component, so it gets the treatment fetchUrl gives its typed
-			// names: utf8_clean first, because invalid UTF-8 reaches
-			// folders.path and then dump(), which throws; then
-			// sanitise_component, which is what stops a typed "../.." from
-			// being a path at all.
-			dest_folder = sanitise_component(utf8_clean(folder_it->second, 200));
-			if (dest_folder.empty()) {
-				err(10, "The folder name contains nothing usable."); return;
-				}
+		if (folder_it == req.params.end()
+		        || folder_it->second.find_first_not_of(" \t") == std::string::npos) {
+			err(10, "Missing parameter: folder."); return;
+			}
+		// The first arbitrary string on this route to become a *library* path
+		// component, so it gets the treatment fetchUrl gives its typed names:
+		// utf8_clean first, because invalid UTF-8 reaches folders.path and then
+		// dump(), which throws; then sanitise_component, which is what stops a
+		// typed "../.." from being a path at all.
+		std::string dest_folder = sanitise_component(utf8_clean(folder_it->second, 200));
+		if (dest_folder.empty()) {
+			err(10, "The folder name contains nothing usable."); return;
 			}
 
 		std::string dest_rel = lib_root + "/" + dest_folder;
