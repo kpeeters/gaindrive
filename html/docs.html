@@ -235,6 +235,8 @@ Restart=on-failure</span>
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
     }
 }</span>
 </pre>
@@ -245,6 +247,7 @@ Restart=on-failure</span>
     ServerName music.example.com
 
     ProxyPreserveHost On
+    ProxyTimeout     3600
     ProxyPass        / http://127.0.0.1:4040/
     ProxyPassReverse / http://127.0.0.1:4040/
     RequestHeader set X-Forwarded-Proto "https"
@@ -253,8 +256,12 @@ Restart=on-failure</span>
         </div>
         <p>Either way, run <code>certbot</code> afterwards to add the certificate and the HTTPS redirect.</p>
         <div class="note">
+          <span class="msym">timer</span>
+          <div>The raised timeouts are not optional padding. A media stream is read at playback speed, so a connection can legitimately carry no bytes for a long while &mdash; a player whose buffer is full stops reading, and a video remux produces nothing until it finishes. Both proxies default to giving up after 60 seconds of that, which truncates the response mid-track and looks like the file being broken rather than the proxy timing out.</div>
+        </div>
+        <div class="note">
           <span class="msym">cast</span>
-          <div>Casting from the server needs the Chromecast device to be able to reach the server directly on your local network. If your server is only reachable over a VPN, use the Android app's bridge mode instead.</div>
+          <div>Casting from the server needs the Chromecast device to be able to reach the server directly on your local network. If your server is only reachable over a VPN, use the Android app's bridge mode instead. A Chromecast-built-in speaker (a WiiM, for instance) that reaches GainDrive <em>through</em> the proxy is the case the timeouts above matter most for: it buffers a large part of a track, stops reading, and a 60-second default cuts it off.</div>
         </div>
       </div>
 

@@ -5,6 +5,7 @@ import androidx.media3.common.MediaItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.gaindrive.android.data.ServerRegistry
@@ -85,6 +86,39 @@ data class CastTarget(
  */
 internal fun castPlaysNatively(mime: String?): Boolean = mime in CAST_NATIVE_TYPES
 
+/**
+ * Marks a URL as one that will be read at playback speed, so the server
+ * delivers it at roughly 1x instead of as fast as the socket takes it.
+ *
+ * The server cannot work this out for itself, which is why it has to be said
+ * here. It paces a browser by its `Mozilla/` User-Agent and a server-driven
+ * cast by its `castToken`; a receiver on our direct route has neither, since
+ * the app holds the control channel itself and hands over a URL built with the
+ * ordinary credentials. That makes it indistinguishable from a third-party
+ * Subsonic client, which wants the opposite treatment.
+ *
+ * What happens without it is not a slow stream but a dead one. A receiver
+ * reads at 1x and stops reading once its buffer is full; unpaced, the server
+ * writes the whole track into the socket within seconds and then blocks, and
+ * from that moment the connection carries nothing. Something on the path is
+ * counting — the receiver's own ~60 s no-data timeout, and a reverse proxy's
+ * `ProxyTimeout`, which defaults to 60 s — and the track stops about ninety
+ * seconds in. See `serve_direct()` in `src/streamer.cc`.
+ *
+ * Only ever on a URL a *receiver* fetches. Never on an ExoPlayer, download or
+ * pin URL: nothing is playing off those in real time and pacing one would make
+ * a pinned album take as long as it takes to listen to. That is why this is
+ * applied here, at the route, rather than inside [StreamUrls] — whose builders
+ * are shared with playback and the download queue.
+ *
+ * Top-level for the same reason as [castPlaysNatively]: it can then be
+ * exercised without Hilt or `android.util`.
+ */
+internal fun paced(url: String): String {
+	val parsed = url.toHttpUrlOrNull() ?: return url
+	return parsed.newBuilder().addQueryParameter("pace", "true").build().toString()
+}
+
 private val CAST_NATIVE_TYPES = setOf(
 	"audio/flac",
 	"audio/mpeg",
@@ -137,7 +171,7 @@ class CastUrls @Inject constructor(
 		if (reachability.canReachDirectly(config)) {
 			val direct = directTarget(ref, source) ?: return null
 			return CastTarget(
-				direct.url,
+				paced(direct.url),
 				direct.mimeType ?: source.sourceMime,
 				CastRoute.DIRECT,
 				direct.quality,
@@ -167,9 +201,18 @@ class CastUrls @Inject constructor(
 		// receiver, not a measurement of it. That fallback really does hand
 		// over a server URL, so it reports DIRECT — the route says what was
 		// done, not what was intended.
-		val relayed = bridge.publish(target.url)
+		//
+		// [paced] covers both uses of it, and the relay needs it for a
+		// different reason than the direct route does. The receiver never
+		// starves behind the bridge, which forwards at whatever rate the
+		// receiver reads — but that is exactly why the *upstream* leg goes
+		// idle when the receiver stops reading, and that is the leg crossing
+		// a reverse proxy, since the relay exists for precisely the topologies
+		// that have one.
+		val upstream = paced(target.url)
+		val relayed = bridge.publish(upstream)
 		return CastTarget(
-			relayed ?: target.url,
+			relayed ?: upstream,
 			mime,
 			if (relayed != null) CastRoute.RELAY else CastRoute.DIRECT,
 			target.quality,
@@ -223,6 +266,13 @@ class CastUrls @Inject constructor(
 	 * And there is no stored-copy branch, because video never enters the byte
 	 * cache — `GainDriveMediaSourceFactory` hands it the bare network factory —
 	 * so looking would only ever miss.
+	 *
+	 * No [paced] here, unlike the audio route, because the server honours it
+	 * for audio only: `serve_video` passes false at every tier, since a 15 s
+	 * window sized for audio starves a player buffering a 6 Mbps film. Sending
+	 * it would be a claim the server does not act on. A cast film therefore
+	 * still has the shape the audio route was fixed for, and the fix would be a
+	 * video-sized pacing window on the server, not this call.
 	 */
 	private suspend fun forVideo(ref: ItemRef, source: CastSource): CastTarget? {
 		if (!source.nativeSeek) return null

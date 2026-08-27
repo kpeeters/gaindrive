@@ -55,6 +55,12 @@ class Streamer {
 		// the source size. segment_duration > 0 bounds the output to that many
 		// seconds from time_offset and switches the container to MPEG-TS —
 		// that is one HLS segment. Both are ignored for audio.
+		//
+		// `pace=true` on the query string is a gaindrive extension asking for
+		// the audio to be delivered at roughly 1x playback rate instead of as
+		// fast as the socket takes it.  It is part of stream.view's contract
+		// because only the caller knows: see serve_direct() in streamer.cc for
+		// who has to send it and what happens to a connection that does not.
 		static void serve(const httplib::Request& req, httplib::Response& res,
 		                  const SongInfo& song, TranscodeCache& cache,
 		                  int max_bitrate,
@@ -65,10 +71,10 @@ class Streamer {
 		                  const std::string& video_size = "",
 		                  int segment_duration = 0);
 
-		// Serves the original file, never transcoded and never throttled.
+		// Serves the original file, never transcoded and never paced.
 		// download.view is defined as "the original media data", so it must not
-		// go through serve(): that would pace the response at 1x playback rate
-		// for anything with a browser User-Agent.
+		// go through serve(): that would deliver the response at 1x playback
+		// rate for a browser, or for anyone asking with pace=true.
 		static void serve_raw(const httplib::Request& req, httplib::Response& res,
 		                      const SongInfo& song);
 
@@ -77,7 +83,7 @@ class Streamer {
 		// transcode-cache entry cannot be pruned while it is being sent.  It is
 		// otherwise unused — the throttle and range handling are untouched.
 		static void serve_direct(const httplib::Request& req, httplib::Response& res,
-		                         const SongInfo& song, bool is_browser,
+		                         const SongInfo& song, bool pace,
 		                         std::function<float()> get_position,
 		                         std::shared_ptr<const TranscodeCache::Entry>
 		                             keepalive = {});
@@ -93,13 +99,14 @@ class Streamer {
 			bool mpegts, const std::string& out);
 
 		// Picks Tier 0/1/2 and sends the response.  Split out of serve() only
-		// for length; it is not separately callable.
+		// for length; it is not separately callable.  It takes no `pace`: every
+		// tier passes false, for the reason given at the first of them.
 		static void serve_video(const httplib::Request& req,
 		                        httplib::Response& res, const SongInfo& song,
 		                        TranscodeCache& cache, int max_bitrate,
 		                        const std::string& format, int time_offset,
 		                        const std::string& video_size,
-		                        int segment_duration, bool is_browser,
+		                        int segment_duration,
 		                        std::function<float()> get_position);
 
 		// Runs `args` and pipes its stdout to the client.  Takes a prebuilt
@@ -112,7 +119,7 @@ class Streamer {
 		static void serve_transcoded(httplib::Response& res,
 		                             std::vector<std::string> args,
 		                             const std::string& mime, float bps,
-		                             bool is_browser,
+		                             bool pace,
 		                             std::function<float()> get_position,
 		                             int64_t est_length = 0);
 	};
