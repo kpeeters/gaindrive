@@ -6,6 +6,7 @@ import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import javax.net.ssl.SSLException
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -61,6 +62,13 @@ fun Throwable.userMessage(): String = when (this) {
 	is UnknownHostException -> "Cannot find that host."
 	is ConnectException -> "Nothing is listening at that address."
 	is SocketTimeoutException -> "The server did not answer in time."
+	// Above the IOException catch because it is one, and its default message —
+	// a chain of certificate-path exceptions — explains nothing to anyone. A
+	// self-hosted server behind a reverse proxy with its own certificate is the
+	// common case; the other is a device on the LAN presenting one nothing
+	// trusts, which is why `WiiMClient` brings its own trust manager.
+	is SSLException -> "The secure connection was refused. The certificate may " +
+		"be self-signed or issued for a different name."
 	is IOException -> message ?: "Could not reach the server."
 	else -> message ?: "Something went wrong."
 }

@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,6 +45,8 @@ import org.gaindrive.android.ui.components.CoverThumb
 fun NowPlayingSheet(
 	state: PlayerState,
 	casting: Boolean,
+	/** Casting, and to a device whose own HTTP API this app can drive. */
+	wiim: Boolean,
 	onDismiss: () -> Unit,
 	onOpenAlbum: (ItemRef, String) -> Unit,
 	onTogglePlay: () -> Unit,
@@ -52,6 +55,7 @@ fun NowPlayingSheet(
 	onSeek: (Long) -> Unit,
 	onJumpTo: (Int) -> Unit,
 	onCast: () -> Unit,
+	onWiiM: () -> Unit,
 	onInfo: () -> Unit,
 	onRemoveFromQueue: (Int) -> Unit,
 	onWatch: () -> Unit,
@@ -206,6 +210,19 @@ fun NowPlayingSheet(
 								contentDescription = "Track info",
 								tint = MaterialTheme.colorScheme.onSurfaceVariant,
 							)
+						}
+						// Only while casting to a WiiM, since everything behind
+						// it is that device's own HTTP API. Placed before the
+						// cast button so the one that is always there keeps
+						// its position as this one comes and goes.
+						if (wiim) {
+							IconButton(onClick = onWiiM) {
+								Icon(
+									Icons.Default.Tune,
+									contentDescription = "Speaker controls",
+									tint = MaterialTheme.colorScheme.onSurfaceVariant,
+								)
+							}
 						}
 						// Offered for a video only when the receiver could
 						// actually play it: one the server can hand over as a

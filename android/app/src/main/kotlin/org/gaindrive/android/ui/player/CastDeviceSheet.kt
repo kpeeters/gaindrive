@@ -179,9 +179,11 @@ private fun DeviceRow(device: CastDevice, connected: Boolean, onClick: () -> Uni
 			)
 			// The address is the one thing that distinguishes two devices the
 			// user gave the same name, and it is what a connection failure will
-			// be about.
+			// be about. The announced model precedes it where there is one —
+			// a manually added device has no announcement, so it shows the
+			// address alone as it always has.
 			Text(
-				text = device.address,
+				text = listOfNotNull(device.model, device.address).joinToString(" · "),
 				style = MaterialTheme.typography.bodySmall,
 				color = MaterialTheme.colorScheme.onSurfaceVariant,
 			)

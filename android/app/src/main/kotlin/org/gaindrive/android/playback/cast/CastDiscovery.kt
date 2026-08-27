@@ -162,17 +162,32 @@ class CastDiscovery @Inject constructor(
 		val address = host?.hostAddress ?: return null
 		// `fn` is the friendly name the user set on the device; the service name
 		// is a serial-number-ish string nobody would recognise. `id` is stable
-		// across a rename, which the service name is not.
+		// across a rename, which the service name is not. `md` is the model the
+		// receiver announces for itself, which is the only thing on the wire
+		// that tells a WiiM from a television — see `CastDeviceKind`.
 		val text = attributes.orEmpty()
-		val friendly = text["fn"]?.toString(Charsets.UTF_8)?.takeIf { it.isNotBlank() }
-		val id = text["id"]?.toString(Charsets.UTF_8)?.takeIf { it.isNotBlank() }
+		val friendly = text["fn"].asText()
+		val id = text["id"].asText()
+		val model = text["md"].asText()
+		// The whole record, because nothing else reports what a given make of
+		// receiver actually announces, and every value here is guesswork until
+		// it has been read off the device in the room.
+		Log.i(TAG, "resolved $serviceName at $address " +
+			text.entries.joinToString(prefix = "{", postfix = "}") {
+				"${it.key}=${it.value.asText()}"
+			})
 		return CastDevice(
 			id = id ?: serviceName,
 			name = friendly ?: serviceName,
 			address = address,
 			port = if (port > 0) port else 8009,
+			model = model,
 		)
 	}
+
+	/** A TXT value is bytes, absent, or present and empty; all three are "no". */
+	private fun ByteArray?.asText(): String? =
+		this?.toString(Charsets.UTF_8)?.takeIf { it.isNotBlank() }
 
 	private companion object {
 		const val TAG = "GainDriveCast"

@@ -7,12 +7,24 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 
-/** A Chromecast on the network. */
+/**
+ * A Chromecast on the network.
+ *
+ * [model] is the mDNS `md` record — the model name the receiver announces for
+ * itself, `Chromecast` or `WiiM Pro` or a television's marketing name. It is
+ * null for a manually added device, which has no announcement to read.
+ *
+ * Note that [CastSession.connect] early-returns on structural equality, so a
+ * model that appeared and then vanished between resolves would read as a
+ * different device and reconnect. `md` travels in the same TXT record as `fn`,
+ * which has always carried that hazard for the name, so this adds no new one.
+ */
 data class CastDevice(
 	val id: String,
 	val name: String,
 	val address: String,
 	val port: Int = 8009,
+	val model: String? = null,
 )
 
 /**

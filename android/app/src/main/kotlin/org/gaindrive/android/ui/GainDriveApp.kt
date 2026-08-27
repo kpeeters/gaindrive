@@ -38,6 +38,8 @@ import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.flow.StateFlow
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerId
+import org.gaindrive.android.playback.cast.CastDeviceKind
+import org.gaindrive.android.playback.cast.kind
 import org.gaindrive.android.ui.browse.AlbumDetailScreen
 import org.gaindrive.android.ui.browse.AlbumsScreen
 import org.gaindrive.android.ui.browse.ArtistsScreen
@@ -50,6 +52,7 @@ import org.gaindrive.android.ui.player.NowPlayingSheet
 import org.gaindrive.android.ui.player.PlayerViewModel
 import org.gaindrive.android.ui.player.TrackInfoDialog
 import org.gaindrive.android.ui.player.VideoScreen
+import org.gaindrive.android.ui.player.WiiMControlsSheet
 import org.gaindrive.android.ui.playlists.PlaylistDetailScreen
 import org.gaindrive.android.ui.playlists.PlaylistsScreen
 import org.gaindrive.android.ui.recents.RecentsScreen
@@ -106,6 +109,7 @@ fun GainDriveApp(
 	val castViewModel: CastViewModel = hiltViewModel()
 	val castDevice by castViewModel.connected.collectAsStateWithLifecycle()
 	var castPickerOpen by remember { mutableStateOf(false) }
+	var wiimControlsOpen by remember { mutableStateOf(false) }
 
 	val backStackEntry by navController.currentBackStackEntryAsState()
 	val destination = backStackEntry?.destination
@@ -417,6 +421,7 @@ fun GainDriveApp(
 		NowPlayingSheet(
 			state = playerState,
 			casting = castDevice != null,
+			wiim = castDevice?.kind == CastDeviceKind.WIIM,
 			onDismiss = { nowPlayingOpen = false },
 			onOpenAlbum = { ref, title ->
 				// Closed first: the sheet sits on top of the screen it is
@@ -433,6 +438,7 @@ fun GainDriveApp(
 			onSeek = playerViewModel::seekTo,
 			onJumpTo = playerViewModel::jumpTo,
 			onCast = { castPickerOpen = true },
+			onWiiM = { wiimControlsOpen = true },
 			onInfo = { trackInfoOpen = true },
 			onRemoveFromQueue = playerViewModel::removeFromQueue,
 			onWatch = {
@@ -446,6 +452,13 @@ fun GainDriveApp(
 	// possible once that sheet has closed itself behind the tap.
 	if (castPickerOpen) {
 		CastDeviceSheet(onDismiss = { castPickerOpen = false })
+	}
+
+	// Outside it for the same reason, and gated on the device still being a WiiM:
+	// the sheet's whole content is that device's own API, and casting can be
+	// stopped from the picker while this is open.
+	if (wiimControlsOpen && castDevice?.kind == CastDeviceKind.WIIM) {
+		WiiMControlsSheet(onDismiss = { wiimControlsOpen = false })
 	}
 
 	// Outside it for the same reason, and gated on there being a track: the
