@@ -4229,7 +4229,15 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		// If cast mode is active and the caller is not the Chromecast itself,
 		// instruct the Chromecast to fetch the stream and return 204 here.
-		if (cast_manager_.active() && !cast_authed) {
+		//
+		// Only for the client that *owns* the session. Without that test this
+		// is a process-global redirect: every stream request in the server —
+		// the phone, a third-party client, curl, a different account entirely
+		// — was answered 204 and pushed onto whatever receiver anyone had most
+		// recently picked. A client that sent no castController is never the
+		// owner, so it simply plays locally, which is what every client that
+		// does not drive the server's cast endpoints wants.
+		if (cast_manager_.active() && !cast_authed && cast_owned_by(req)) {
 			// Native seek: the URL serves the full file, and the LOAD message
 			// tells the receiver where to seek.  No timeOffset in the URL.
 			auto to_it = req.params.find("timeOffset");
@@ -5384,6 +5392,23 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
+		// Required, not optional with a fallback to `c=`. A client asking the
+		// server to drive a Chromecast is already speaking the gaindrive
+		// extension, so it can be asked to name itself — and refusing the
+		// nameless case is what guarantees that "sent no castController" can
+		// never own a session, and so can never collide with another client
+		// that also sent none. A `c=` fallback would put every install of one
+		// app under a single identity, which is the bug this endpoint is being
+		// fixed for, one scale down.
+		std::string controller = req.get_param_value("castController");
+		if (controller.empty()) {
+			const char* msg = "Required parameter missing: castController.";
+			res.set_content(use_json ? subsonic_error_json(10, msg)
+			                         : subsonic_error(10, msg),
+			                use_json ? "application/json" : "application/xml");
+			return;
+			}
+
 		auto devices = cast_manager_.cached_devices();
 		CastManager::CastDevice chosen;
 		bool found = false;
@@ -5398,7 +5423,23 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
+		// There is one control channel, so a second owner claiming it displaces
+		// the first rather than running beside it. Tearing the old session down
+		// first is what sends the receiver a STOP and clears the previous
+		// owner's song and offset; the generation bump inside cast_teardown()
+		// is what drops that owner's castEvents connection, so its UI leaves
+		// cast mode on its own. This is also the only way back in for a browser
+		// that cleared its site data and lost the id it started the session
+		// with.
+		if (cast_manager_.active() && !cast_owned_by(req)) {
+			std::cout << stamp() << "Cast: session taken over by user="
+			          << req.get_param_value("u") << " device=" << chosen.name
+			          << std::endl;
+			cast_teardown();
+			}
+
 		cast_manager_.start(chosen);
+		cast_claim(req.get_param_value("u"), controller);
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
 		});
@@ -5409,7 +5450,11 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 		if (!check_cast_perm(req, res, store_, use_json)) return;
-		cast_teardown();
+		// A non-owner stops nothing and is told it succeeded. Deliberately not
+		// an error: a client that has just been displaced by a takeover runs
+		// its own cleanup path, and that must neither kill the session that
+		// replaced it nor raise a dialog about a session it no longer has.
+		if (cast_owned_by(req)) cast_teardown();
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
 		});
@@ -5430,7 +5475,16 @@ GainDrive::GainDrive(const std::string& db_path,
 		bool use_json = (fmt_of(req) == "json");
 		if (!check_cast_perm(req, res, store_, use_json)) return;
 		}
-		if (!cast_manager_.active()) { res.status = 204; return; }
+		if (!cast_manager_.active() || !cast_owned_by(req)) {
+			res.status = 204;
+			return;
+			}
+		// The session this connection belongs to. A takeover bumps it, which is
+		// how a displaced listener learns it has been replaced: `active_` is
+		// true either side of the stop()/start() pair, and this thread spends
+		// most of its life blocked inside wait_status(), so the flag alone
+		// would never show the gap.
+		const int session_gen = cast_session_gen_.load();
 		res.set_header("Cache-Control",    "no-cache");
 		res.set_header("X-Accel-Buffering","no");   // disable nginx/apache buffering
 
@@ -5444,7 +5498,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		// wait_status seeing !active(), or normal completion.
 		struct ListenerGuard {
 			GainDrive* self;
-			ListenerGuard(GainDrive* s) : self(s) {
+			int        gen;
+			ListenerGuard(GainDrive* s, int g) : self(s), gen(g) {
 				int n = ++self->cast_sse_listeners_;
 				++self->cast_wd_gen_;
 				if (self->debug_)
@@ -5458,12 +5513,19 @@ GainDrive::GainDrive(const std::string& db_path,
 					std::cout << stamp() << "Cast: SSE listener detached, count="
 					          << n << std::endl;
 				if (n != 0 || !self->cast_manager_.active()) return;
+				// A listener displaced by a takeover must not arm a watchdog
+				// against the session that replaced it: the new owner may not
+				// have opened its own stream yet, so the listener count is
+				// legitimately 0 for a moment.
+				if (self->cast_session_gen_.load() != gen) return;
 				GainDrive* gd = self;
-				std::thread([gd, g] {
+				int        sg = gen;
+				std::thread([gd, g, sg] {
 					std::this_thread::sleep_for(std::chrono::seconds(CAST_IDLE_GRACE_S));
 					if (gd->cast_wd_gen_.load() != g)        return; // newer event
 					if (gd->cast_sse_listeners_.load() != 0) return; // listener back
 					if (!gd->cast_manager_.active())         return; // already stopped
+					if (gd->cast_session_gen_.load() != sg)  return; // another session
 					std::cout << stamp() << "Cast: no SSE listener for "
 					          << CAST_IDLE_GRACE_S << "s, auto-stopping"
 					          << std::endl;
@@ -5471,12 +5533,13 @@ GainDrive::GainDrive(const std::string& db_path,
 					}).detach();
 				}
 			};
-		auto guard = std::make_shared<ListenerGuard>(this);
+		auto guard = std::make_shared<ListenerGuard>(this, session_gen);
 
 		res.set_chunked_content_provider("text/event-stream",
-			[this, guard](size_t, httplib::DataSink& sink) -> bool {
+			[this, guard, session_gen](size_t, httplib::DataSink& sink) -> bool {
 				auto s = cast_manager_.wait_status(15000);
-				if (!cast_manager_.active()) return false;
+				if (!cast_manager_.active())                 return false;
+				if (cast_session_gen_.load() != session_gen) return false;
 				std::string event = "data: " + nlohmann::json({
 					{"playerState", s.player_state},
 					{"currentTime", s.current_time},
@@ -5495,7 +5558,10 @@ GainDrive::GainDrive(const std::string& db_path,
 		bool use_json = (fmt_of(req) == "json");
 		if (!check_cast_perm(req, res, store_, use_json)) return;
 
-		if (!cast_manager_.active()) {
+		// Someone else's session is not visible here. This is what stops a
+		// second browser adopting it wholesale on page load — showShell()
+		// restores the cast UI from whatever this returns.
+		if (!cast_manager_.active() || !cast_owned_by(req)) {
 			res.set_content(subsonic_ok_json([](nlohmann::json& r) {
 				r["castSession"]["active"] = false;
 				}), "application/json");
@@ -5533,6 +5599,15 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 		if (!check_cast_perm(req, res, store_, use_json)) return;
+		// As castLoad: a non-owner controls nothing and is told the session it
+		// thinks it has is not there.
+		if (!cast_manager_.active() || !cast_owned_by(req)) {
+			const char* msg = "Cast not active.";
+			res.set_content(use_json ? subsonic_error_json(0, msg)
+			                         : subsonic_error(0, msg),
+			                use_json ? "application/json" : "application/xml");
+			return;
+			}
 		std::string action;
 		auto ai = req.params.find("action");
 		if (ai != req.params.end()) action = ai->second;
@@ -5596,7 +5671,12 @@ GainDrive::GainDrive(const std::string& db_path,
 			                use_json ? "application/json" : "application/xml");
 			};
 
-		if (!cast_manager_.active()) { err(0, "Cast not active."); return; }
+		// "Cast not active" is the honest answer for a non-owner too: from that
+		// client's point of view it has no session.
+		if (!cast_manager_.active() || !cast_owned_by(req)) {
+			err(0, "Cast not active.");
+			return;
+			}
 
 		auto it = req.params.find("id");
 		if (it == req.params.end()) {
@@ -7327,6 +7407,36 @@ void GainDrive::cast_teardown()
 	cast_manager_.stop();
 	last_cast_song_id_.clear();
 	last_cast_offset_ = 0.0f;
+		{
+		std::lock_guard<std::mutex> lk(cast_owner_mu_);
+		cast_owner_user_.clear();
+		cast_owner_controller_.clear();
+		}
+	// After the owner is cleared, not before: the bump is the signal a
+	// displaced castEvents connection watches for, and it must not see a
+	// session that is half torn down.
+	++cast_session_gen_;
+	}
+
+bool GainDrive::cast_owned_by(const httplib::Request& req)
+	{
+	std::string controller = req.get_param_value("castController");
+	if (controller.empty()) return false;
+	std::lock_guard<std::mutex> lk(cast_owner_mu_);
+	return !cast_owner_controller_.empty()
+	    && cast_owner_controller_ == controller
+	    && cast_owner_user_       == req.get_param_value("u");
+	}
+
+void GainDrive::cast_claim(const std::string& user,
+                           const std::string& controller)
+	{
+		{
+		std::lock_guard<std::mutex> lk(cast_owner_mu_);
+		cast_owner_user_       = user;
+		cast_owner_controller_ = controller;
+		}
+	++cast_session_gen_;
 	}
 
 void GainDrive::cast_load_song(const httplib::Request& req,

@@ -187,6 +187,35 @@ token. All seven endpoints require `castRole` in addition to authentication,
 and return error 50 without it. `stream` and `getCaptions` are exempt when
 called with a valid `castToken`, since only `castLoad` ever issues one.
 
+**A session belongs to one account *and* one client instance.** The client half
+is the `castController` parameter — an opaque id the client makes up once and
+keeps. `startCast` requires it and records the pair; every other endpoint here
+compares against it, and a caller that does not match is treated as having no
+session at all: `castSession` reports inactive, `castEvents` answers 204,
+`castLoad` and `castControl` return error 0, and `stopCast` succeeds without
+stopping anything.
+
+That is also what keeps `stream` honest. While a session is live, `stream`
+answers 204 to the session's **owner** and redirects playback to the receiver;
+everyone else is served normally. Without the owner test it answered 204 to
+every caller in the server, so playing a track in one client sent it to
+whatever receiver another client had most recently picked.
+
+The id cannot be the standard `c=` parameter, which names the kind of client
+rather than the instance — every browser sends the same value, so two of one
+user's browsers could not be told apart. For the same reason there is no
+fallback to `c=` when `castController` is absent: two installs of one app would
+collapse into a single identity. A caller that sends none simply never owns a
+session, which is what every client that does not drive these endpoints wants.
+
+`castController` is **not a credential** and authorises nothing. Authentication
+is unchanged, and the id only breaks ties among one account's own devices.
+
+Only one session exists at a time, because the server holds one control
+channel. `startCast` from a different owner therefore takes the session over:
+the previous owner's receiver is stopped and its `castEvents` stream is
+dropped, so its UI leaves cast mode by itself.
+
 The token is minted per `castLoad` and is scoped to what that load declared —
 one song, and the caption ids offered for it. It is not a general credential:
 presenting it for any other id is refused exactly as if it were absent.
@@ -420,6 +449,22 @@ refused as though it were absent.
 A request carrying a valid token skips the `castRole` check, since only
 `castLoad` ever issues one, and skips the account bitrate ceiling — there is no
 account to apply it to.
+'''
+
+  [[endpoint.param]]
+  name  = "castController"
+  type  = "string"
+  doc   = 'The id given to `startCast`. Only the owner of a live cast session has its playback redirected to the receiver.'
+  notes = '''
+While a cast session is live, a request from the client that **owns** it is
+answered `204` and the track is sent to the Chromecast instead, so that client
+does not play it a second time itself. Every other caller — a client that sent
+no `castController`, one whose id does not match, or a different account — is
+served the stream normally.
+
+Without this the redirect was global: any request in the server was answered
+`204` while anyone was casting, so starting a track on a phone played it on
+whatever receiver a browser had picked earlier.
 '''
 
   [[endpoint.param]]
@@ -1301,11 +1346,17 @@ section = "cast"
 auth    = 'castRole'
 summary = 'Activates cast mode, targeting one device.'
 notes   = '''
-This is where the stream token is generated. It lasts for the whole session
-and is not single-use per request.
+This is where the session's owner is recorded: the authenticated account
+together with `castController`.
 
-While cast mode is active, `stream` answers HTTP 204 to any caller that is not
-the Chromecast, so a client does not end up playing the same track twice.
+While the session is active, `stream` answers HTTP 204 to that owner and sends
+the track to the Chromecast instead, so the owner does not end up playing it
+twice. Every other caller is served the stream normally.
+
+Only one session exists at a time. Calling this while another owner holds one
+takes it over: that receiver is stopped and the previous owner's `castEvents`
+stream is dropped, which is how its UI learns to leave cast mode. It is also
+the way back in for a client that has lost the id it started the session with.
 '''
 see = ["stopCast", "castLoad"]
 
@@ -1314,6 +1365,26 @@ see = ["stopCast", "castLoad"]
   type     = "string"
   required = true
   doc      = 'Device id from `listCastDevices`.'
+
+  [[endpoint.param]]
+  name     = "castController"
+  type     = "string"
+  required = true
+  doc      = 'An opaque id identifying this client instance, which together with the account becomes the owner of the session. Make one up once and keep it — the web client stores eight random bytes in `localStorage`, so it survives a page reload.'
+  notes    = '''
+Required, and deliberately without a fallback to `c=`. A client asking the
+server to drive a Chromecast already speaks this extension, so it can be asked
+to name itself, and refusing the nameless case is what guarantees a caller that
+sends no id can never own a session — and so can never be confused with another
+that also sent none.
+
+It is not a credential. It authorises nothing and only distinguishes one
+account's devices from each other.
+'''
+
+  [[endpoint.error]]
+  code = '10'
+  when = 'No `castController` was given.'
 
   [[endpoint.error]]
   code = '70'
@@ -1325,6 +1396,17 @@ name    = "stopCast"
 section = "cast"
 auth    = 'castRole'
 summary = 'Deactivates cast mode and stops playback on the device.'
+notes   = '''
+Only the session's owner stops anything. A caller that does not match still
+gets a success response, deliberately: a client displaced by a takeover runs
+its own cleanup, and that must neither stop the session that replaced it nor
+raise an error about a session it no longer has.
+'''
+
+  [[endpoint.param]]
+  name = "castController"
+  type = "string"
+  doc  = 'The id given to `startCast`. Without a match this caller is treated as having no session.'
 
 [[endpoint]]
 kind    = 'endpoint'
@@ -1372,9 +1454,15 @@ a missing parameter are both -1, so "no subtitles" and "the sidecar file"
 would be one value.
 '''
 
+
+  [[endpoint.param]]
+  name = "castController"
+  type = "string"
+  doc  = 'The id given to `startCast`. Without a match this caller is treated as having no session.'
+
   [[endpoint.error]]
   code = '0'
-  when = 'No cast session is active.'
+  when = 'No cast session is active, or the caller does not own it.'
 
 [[endpoint]]
 kind    = 'endpoint'
@@ -1409,6 +1497,15 @@ summary = 'Transport control for the active session.'
   type = "int"
   doc  = 'For `action=captions`, numbered as for `castLoad`. 0 or absent turns subtitles off.'
 
+  [[endpoint.param]]
+  name = "castController"
+  type = "string"
+  doc  = 'The id given to `startCast`. Without a match this caller is treated as having no session.'
+
+  [[endpoint.error]]
+  code = '0'
+  when = 'No cast session is active, or the caller does not own it.'
+
 [[endpoint]]
 kind     = 'endpoint'
 name     = "castSession"
@@ -1416,11 +1513,21 @@ section  = "cast"
 auth     = 'castRole'
 response = 'subsonic-json'
 summary  = 'A non-blocking snapshot of the current session, for restoring the UI after a page reload.'
+notes    = '''
+Only the caller's own session. Another owner's is reported as
+`active: false` — otherwise a second browser would adopt it wholesale on page
+load and show itself as casting.
+'''
+
+  [[endpoint.param]]
+  name = "castController"
+  type = "string"
+  doc  = 'The id given to `startCast`. Without a match this caller is treated as having no session.'
 
   [[endpoint.field]]
   name = "castSession.active"
   type = "bool"
-  doc  = 'Whether a session exists. The remaining fields are present only when it does.'
+  doc  = 'Whether a session exists **for this caller**. The remaining fields are present only when it does.'
 
   [[endpoint.field]]
   name = "castSession.deviceId"
@@ -1483,9 +1590,18 @@ every 15 seconds otherwise. Each `data:` payload is a JSON object with
 NOTE: The SSE connection doubles as the liveness signal for the cast session.
 Once the last listener disconnects, casting is torn down automatically after
 30 seconds — so a client that wants the session to survive must keep this open.
+
+NOTE: The stream also ends when another client takes the session over. A client
+should treat that as having left cast mode rather than as a transport error —
+the retry is answered 204, so `EventSource` reaches `CLOSED` and stops.
 '''
 see = ["castSession"]
 
+  [[endpoint.param]]
+  name = "castController"
+  type = "string"
+  doc  = 'The id given to `startCast`. Without a match this caller is treated as having no session.'
+
   [[endpoint.error]]
   http = '204'
-  when = 'No cast session is active. There is nothing to stream, so no event stream is opened.'
+  when = 'No cast session is active, or the caller does not own it. There is nothing to stream, so no event stream is opened.'

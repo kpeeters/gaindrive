@@ -53,6 +53,32 @@ const creds = {
    },
 };
 
+// This browser's identity, as far as casting is concerned.
+//
+// A cast session on the server belongs to one account *and* one client
+// instance, and this is the second half. It cannot be the Subsonic `c=`
+// parameter, which is `gaindrive-web` for every browser in the world: the
+// server would then be unable to tell this browser from another of the same
+// user's, and playing a track in one would push it onto the other's Chromecast
+// — which is the bug this exists to fix, seen from one machine over.
+//
+// Deliberately outside `creds` and never cleared on logout. It identifies the
+// browser, not the account, and ownership is the pair, so carrying it across a
+// logout is harmless and keeps the id stable for as long as the profile lives.
+// It is not a credential and authorises nothing.
+function controllerId() {
+   let id = localStorage.getItem('gd_controller');
+   if (!id) {
+      // The same eight bytes from the platform CSPRNG that deriveToken() takes
+      // its salt from.
+      const bytes = new Uint8Array(8);
+      crypto.getRandomValues(bytes);
+      id = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('gd_controller', id);
+   }
+   return id;
+}
+
 // The auth parameters for one request. Every URL this client builds goes
 // through here, so there is one place that decides what is sent.
 function authParams() {
@@ -201,6 +227,12 @@ function apiUrl(endpoint, extra = {}) {
       ...authParams(),
       v: '1.16.1',
       c: 'gaindrive-web',
+      // Sent on everything rather than threaded through the seven cast calls
+      // by hand — the same bargain authParams() strikes, and stream.view needs
+      // it too since that is where the server decides whether to redirect
+      // playback to the Chromecast. It is constant, so it costs the image
+      // cache nothing.
+      castController: controllerId(),
       f: 'json',
       ...extra,
    });
@@ -2518,9 +2550,36 @@ function onCastStatus(s) {
 // Open (or re-open) the SSE connection for cast status events.
 function startCastEvents() {
    if (castEventSrc) castEventSrc.close();
-   castEventSrc = new EventSource(apiUrl('castEvents'));
-   castEventSrc.onmessage = (e) => {
+   const src = castEventSrc = new EventSource(apiUrl('castEvents'));
+   src.onmessage = (e) => {
       try { onCastStatus(JSON.parse(e.data)); } catch (_) {}
+      };
+   // The session can end without this client asking: another of the user's
+   // devices calls startCast and takes it over, and the server then drops this
+   // stream. EventSource retries once, gets the 204 castEvents answers a
+   // non-owner with, and stops for good.
+   //
+   // Without this handler nothing would notice. castDeviceId would stay set,
+   // the cast button would stay lit, and the interpolation timer below would
+   // go on advancing a seek bar for a session that is now someone else's —
+   // which reads as the player having frozen rather than as having been taken
+   // over. No local resume: the user is at another device, and starting audio
+   // here would be a surprise.
+   src.onerror = () => {
+      // Only a permanent close. onerror also fires when the connection merely
+      // dropped and EventSource is about to retry, which is readyState
+      // CONNECTING and is what a momentary network blip looks like — acting on
+      // that would throw the user out of cast mode for a hiccup. A takeover
+      // reaches CLOSED, because the retry is answered 204 and the spec fails
+      // the connection for good on any non-200.
+      if (src.readyState !== EventSource.CLOSED) return;
+      // A stale handler from a stream already replaced by a newer one has
+      // nothing to say.
+      if (castEventSrc !== src || castDeviceId === null) return;
+      const where = castDeviceName ? ` on ${castDeviceName}` : '';
+      castExit();
+      videoSurfaceSet(null);
+      showError(`The cast session${where} was taken over by another device.`);
       };
    }
 
@@ -2731,7 +2790,18 @@ async function selectCastDevice(id, label = '') {
       }
    }
 
-async function stopCast({resumeLocal = true} = {}) {
+// Leave cast mode locally: close the event stream, reset the cast globals and
+// put the UI back. Says nothing to the server.
+//
+// Split out of stopCast() because there are now two ways out of cast mode. One
+// is the user pressing stop, which also tells the server. The other is being
+// displaced by another client taking the session over, where there is nothing
+// to tell the server — the session is already someone else's, and stopCast
+// from a non-owner is a no-op by design.
+//
+// Returns the absolute position the receiver had reached, so a caller that
+// wants to resume locally can.
+function castExit() {
    if (castEventSrc !== null) {
       castEventSrc.close();
       castEventSrc = null;
@@ -2741,11 +2811,6 @@ async function stopCast({resumeLocal = true} = {}) {
       ? (Date.now() - castBaseAt) / 1000
       : 0;
    const resumeOffset = lastCastPosition || (castStartOffset + castBaseTime + elapsed);
-   try {
-      await apiCall('stopCast');
-      } catch (_) {
-      // best-effort stop
-      }
    castDeviceId         = null;
    castDeviceName       = '';
    castStartOffset      = 0;
@@ -2758,9 +2823,21 @@ async function stopCast({resumeLocal = true} = {}) {
    castSongDuration = 0;
    document.getElementById('player-cast').classList.remove('active');
    document.getElementById('cast-modal').classList.add('hidden');
-   // Cleared before the resume, which composes the surface again: leaving the
+   // Cleared before any resume, which composes the surface again: leaving the
    // class on would put the panel over a picture that is now local.
    videoCastPanel(false);
+   return resumeOffset;
+   }
+
+async function stopCast({resumeLocal = true} = {}) {
+   // Local teardown first, so the position is read before the SSE stream can
+   // push another status into the state it is derived from.
+   const resumeOffset = castExit();
+   try {
+      await apiCall('stopCast');
+      } catch (_) {
+      // best-effort stop
+      }
    if (resumeLocal && player.index >= 0) {
       playerPlay(resumeOffset);
       } else {

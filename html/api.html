@@ -235,6 +235,7 @@
 <tbody>
 <tr><td><code>pace</code></td><td>bool</td><td>Deliver at roughly 1x playback rate rather than as fast as the socket takes it.</td></tr>
 <tr><td><code>castToken</code></td><td>string</td><td>The token minted by <code>castLoad</code>, accepted in place of credentials.</td></tr>
+<tr><td><code>castController</code></td><td>string</td><td>The id given to <code>startCast</code>. Only the owner of a live cast session has its playback redirected to the receiver.</td></tr>
 <tr><td><code>size</code></td><td>string</td><td>Video only. A cap on the output frame size, as <code>WxH</code> — <code>640x480</code>.</td></tr>
 <tr><td><code>duration</code></td><td>int</td><td>Video only. Bound the output to this many seconds from <code>timeOffset</code>, and switch the container to MPEG-TS. That is one HLS segment.</td></tr>
 </tbody>
@@ -245,6 +246,9 @@
 <div class="api-note"><p class="api-note-h"><code>castToken</code></p>
 <p>A Chromecast fetches the media for itself and has no account, so the token is what authorises it. It is not single-use per request — the receiver makes many range requests for one track — but it <b>is</b> scoped to the song <code>castLoad</code> declared, and to a limited lifetime. Presenting it for a different <code>id</code> is refused as though it were absent.</p>
 <p>A request carrying a valid token skips the <code>castRole</code> check, since only <code>castLoad</code> ever issues one, and skips the account bitrate ceiling — there is no account to apply it to.</p></div>
+<div class="api-note"><p class="api-note-h"><code>castController</code></p>
+<p>While a cast session is live, a request from the client that <b>owns</b> it is answered <code>204</code> and the track is sent to the Chromecast instead, so that client does not play it a second time itself. Every other caller — a client that sent no <code>castController</code>, one whose id does not match, or a different account — is served the stream normally.</p>
+<p>Without this the redirect was global: any request in the server was answered <code>204</code> while anyone was casting, so starting a track on a phone played it on whatever receiver a browser had picked earlier.</p></div>
 <div class="api-note"><p class="api-note-h"><code>size</code></p>
 <p>Any value here disqualifies the direct and remux tiers, so the video is re-encoded on the fly and the response is chunked with no <code>Content-Length</code>.</p>
 <p>Strictly <code>WxH</code>, both between 16 and 7680/4320. Anything else is ignored rather than rejected, and means &quot;do not scale&quot; — the same as omitting it.</p></div>
@@ -725,6 +729,11 @@
 <div class="doc-sec" id="cast">
 <h2>Chromecast</h2>
 <p>Casting is server-driven: the browser asks gaindrive to load a URL onto the Chromecast, and the device then fetches the media from <code>stream</code> itself using a token. All seven endpoints require <code>castRole</code> in addition to authentication, and return error 50 without it. <code>stream</code> and <code>getCaptions</code> are exempt when called with a valid <code>castToken</code>, since only <code>castLoad</code> ever issues one.</p>
+<p><b>A session belongs to one account <em>and</em> one client instance.</b> The client half is the <code>castController</code> parameter — an opaque id the client makes up once and keeps. <code>startCast</code> requires it and records the pair; every other endpoint here compares against it, and a caller that does not match is treated as having no session at all: <code>castSession</code> reports inactive, <code>castEvents</code> answers 204, <code>castLoad</code> and <code>castControl</code> return error 0, and <code>stopCast</code> succeeds without stopping anything.</p>
+<p>That is also what keeps <code>stream</code> honest. While a session is live, <code>stream</code> answers 204 to the session&#x27;s <b>owner</b> and redirects playback to the receiver; everyone else is served normally. Without the owner test it answered 204 to every caller in the server, so playing a track in one client sent it to whatever receiver another client had most recently picked.</p>
+<p>The id cannot be the standard <code>c=</code> parameter, which names the kind of client rather than the instance — every browser sends the same value, so two of one user&#x27;s browsers could not be told apart. For the same reason there is no fallback to <code>c=</code> when <code>castController</code> is absent: two installs of one app would collapse into a single identity. A caller that sends none simply never owns a session, which is what every client that does not drive these endpoints wants.</p>
+<p><code>castController</code> is <b>not a credential</b> and authorises nothing. Authentication is unchanged, and the id only breaks ties among one account&#x27;s own devices.</p>
+<p>Only one session exists at a time, because the server holds one control channel. <code>startCast</code> from a different owner therefore takes the session over: the previous owner&#x27;s receiver is stopped and its <code>castEvents</code> stream is dropped, so its UI leaves cast mode by itself.</p>
 <p>The token is minted per <code>castLoad</code> and is scoped to what that load declared — one song, and the caption ids offered for it. It is not a general credential: presenting it for any other id is refused exactly as if it were absent.</p>
 <div class="api-ep">
 <h3 id="ep-listCastDevices">listCastDevices</h3>
@@ -757,17 +766,23 @@
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
 <tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>Device id from <code>listCastDevices</code>.</td></tr>
+<tr><td><code>castController</code> <b class="api-req">*</b></td><td>string</td><td>An opaque id identifying this client instance, which together with the account becomes the owner of the session. Make one up once and keep it — the web client stores eight random bytes in <code>localStorage</code>, so it survives a page reload.</td></tr>
 </tbody>
 </table>
+<div class="api-note"><p class="api-note-h"><code>castController</code></p>
+<p>Required, and deliberately without a fallback to <code>c=</code>. A client asking the server to drive a Chromecast already speaks this extension, so it can be asked to name itself, and refusing the nameless case is what guarantees a caller that sends no id can never own a session — and so can never be confused with another that also sent none.</p>
+<p>It is not a credential. It authorises nothing and only distinguishes one account&#x27;s devices from each other.</p></div>
 <h4>Errors</h4>
 <table class="doc-table">
 <thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
 <tbody>
+<tr><td><code>10</code></td><td>Subsonic</td><td>No <code>castController</code> was given.</td></tr>
 <tr><td><code>70</code></td><td>Subsonic</td><td>No device with that id.</td></tr>
 </tbody>
 </table>
-<p>This is where the stream token is generated. It lasts for the whole session and is not single-use per request.</p>
-<p>While cast mode is active, <code>stream</code> answers HTTP 204 to any caller that is not the Chromecast, so a client does not end up playing the same track twice.</p>
+<p>This is where the session&#x27;s owner is recorded: the authenticated account together with <code>castController</code>.</p>
+<p>While the session is active, <code>stream</code> answers HTTP 204 to that owner and sends the track to the Chromecast instead, so the owner does not end up playing it twice. Every other caller is served the stream normally.</p>
+<p>Only one session exists at a time. Calling this while another owner holds one takes it over: that receiver is stopped and the previous owner&#x27;s <code>castEvents</code> stream is dropped, which is how its UI learns to leave cast mode. It is also the way back in for a client that has lost the id it started the session with.</p>
 <p class="api-see">See also <a href="#ep-stopCast"><code>stopCast</code></a>, <a href="#ep-castLoad"><code>castLoad</code></a>.</p>
 </div>
 <div class="api-ep">
@@ -775,6 +790,14 @@
 <p class="api-meta"><code>GET /rest/stopCast.view</code>
 <span class="api-badge">castRole</span></p>
 <p>Deactivates cast mode and stops playback on the device.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>castController</code></td><td>string</td><td>The id given to <code>startCast</code>. Without a match this caller is treated as having no session.</td></tr>
+</tbody>
+</table>
+<p>Only the session&#x27;s owner stops anything. A caller that does not match still gets a success response, deliberately: a client displaced by a takeover runs its own cleanup, and that must neither stop the session that replaced it nor raise an error about a session it no longer has.</p>
 </div>
 <div class="api-ep">
 <h3 id="ep-castLoad">castLoad</h3>
@@ -788,6 +811,7 @@
 <tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>Song id.</td></tr>
 <tr><td><code>timeOffset</code></td><td>float</td><td>Seek position in seconds, sent to the receiver as <code>currentTime</code>.</td></tr>
 <tr><td><code>trackId</code></td><td>int</td><td>Subtitle track to start with, numbered from 1 in the order <code>getVideoInfo</code> lists captions. 0 or absent means none. default <code>0</code>.</td></tr>
+<tr><td><code>castController</code></td><td>string</td><td>The id given to <code>startCast</code>. Without a match this caller is treated as having no session.</td></tr>
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>trackId</code></p>
@@ -796,7 +820,7 @@
 <table class="doc-table">
 <thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
 <tbody>
-<tr><td><code>0</code></td><td>Subsonic</td><td>No cast session is active.</td></tr>
+<tr><td><code>0</code></td><td>Subsonic</td><td>No cast session is active, or the caller does not own it.</td></tr>
 </tbody>
 </table>
 <p><b>Seeking is also a <code>castLoad</code></b>, not a <code>castControl</code> with <code>action=seek</code> — every seek is a full reload. The server returns as soon as the load is queued; the actual Cast message goes out on a background connection.</p>
@@ -815,10 +839,18 @@
 <tr><td><code>action</code> <b class="api-req">*</b></td><td>string</td><td>What to do. one of <code>play</code>, <code>pause</code>, <code>seek</code>, <code>captions</code>.</td></tr>
 <tr><td><code>time</code></td><td>float</td><td>Seconds, for <code>action=seek</code>.</td></tr>
 <tr><td><code>trackId</code></td><td>int</td><td>For <code>action=captions</code>, numbered as for <code>castLoad</code>. 0 or absent turns subtitles off.</td></tr>
+<tr><td><code>castController</code></td><td>string</td><td>The id given to <code>startCast</code>. Without a match this caller is treated as having no session.</td></tr>
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>action</code></p>
 <ul class="doc-list"><li><code>play</code> resumes a paused session. If the session has gone <code>IDLE</code> — the receiver times out during long pauses — this instead re-issues a full load from the last known position.</li><li><code>seek</code> is only for in-session seeks; the web client seeks via <code>castLoad</code>, which is a full reload.</li><li><code>captions</code> silently does nothing when the receiver has no media session yet. The track belongs on the <code>castLoad</code> in that case.</li></ul></div>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>0</code></td><td>Subsonic</td><td>No cast session is active, or the caller does not own it.</td></tr>
+</tbody>
+</table>
 </div>
 <div class="api-ep">
 <h3 id="ep-castSession">castSession</h3>
@@ -826,11 +858,18 @@
 <span class="api-badge">castRole</span>
 <span class="api-badge">JSON only</span></p>
 <p>A non-blocking snapshot of the current session, for restoring the UI after a page reload.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>castController</code></td><td>string</td><td>The id given to <code>startCast</code>. Without a match this caller is treated as having no session.</td></tr>
+</tbody>
+</table>
 <h4>Response</h4>
 <table class="doc-table">
 <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
-<tr><td><code>castSession.active</code></td><td>bool</td><td>Whether a session exists. The remaining fields are present only when it does.</td></tr>
+<tr><td><code>castSession.active</code></td><td>bool</td><td>Whether a session exists <b>for this caller</b>. The remaining fields are present only when it does.</td></tr>
 <tr><td><code>castSession.deviceId</code></td><td>string</td><td>The device being cast to, as <code>listCastDevices</code> reports it.</td></tr>
 <tr><td><code>castSession.deviceName</code></td><td>string</td><td>Its friendly name.</td></tr>
 <tr><td><code>castSession.songId</code></td><td>string</td><td>What is loaded.</td></tr>
@@ -842,6 +881,7 @@
 <tr><td><code>castSession.trackId</code></td><td>int</td><td>The subtitle track currently showing, or 0.</td></tr>
 </tbody>
 </table>
+<p>Only the caller&#x27;s own session. Another owner&#x27;s is reported as <code>active: false</code> — otherwise a second browser would adopt it wholesale on page load and show itself as casting.</p>
 </div>
 <div class="api-ep">
 <h3 id="ep-castEvents">castEvents</h3>
@@ -850,15 +890,23 @@
 <span class="api-badge">event stream</span></p>
 <p>Server-sent events carrying the receiver&#x27;s status as it changes.</p>
 <p>Content type: <code>text/event-stream</code></p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>castController</code></td><td>string</td><td>The id given to <code>startCast</code>. Without a match this caller is treated as having no session.</td></tr>
+</tbody>
+</table>
 <h4>Errors</h4>
 <table class="doc-table">
 <thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
 <tbody>
-<tr><td><code>204</code></td><td>HTTP</td><td>No cast session is active. There is nothing to stream, so no event stream is opened.</td></tr>
+<tr><td><code>204</code></td><td>HTTP</td><td>No cast session is active, or the caller does not own it. There is nothing to stream, so no event stream is opened.</td></tr>
 </tbody>
 </table>
 <p>An event is emitted whenever the receiver pushes a status change, and at least every 15 seconds otherwise. Each <code>data:</code> payload is a JSON object with <code>playerState</code>, <code>currentTime</code>, <code>duration</code>, <code>idleReason</code> and <code>startOffset</code>.</p>
 <div class="note"><p>The SSE connection doubles as the liveness signal for the cast session. Once the last listener disconnects, casting is torn down automatically after 30 seconds — so a client that wants the session to survive must keep this open.</p></div>
+<div class="note"><p>The stream also ends when another client takes the session over. A client should treat that as having left cast mode rather than as a transport error — the retry is answered 204, so <code>EventSource</code> reaches <code>CLOSED</code> and stops.</p></div>
 <p class="api-see">See also <a href="#ep-castSession"><code>castSession</code></a>.</p>
 </div>
 </div>

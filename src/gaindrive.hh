@@ -86,6 +86,38 @@ class GainDrive {
 		std::string     last_cast_song_id_;
 		float           last_cast_offset_ = 0.0f;
 
+		// The cast session's owner: the account *and* the client instance that
+		// called startCast. Both halves are needed. The account alone is what
+		// this replaced, and it is why casting from the web client and then
+		// playing on the phone under the same login sent the track to the
+		// television — `active_` is one process-global bool, so every
+		// stream.view in the server was rerouted to whatever receiver anyone
+		// had most recently picked.
+		//
+		// The client half is the `castController` parameter rather than the
+		// Subsonic `c=` one, because `c=` names the *kind* of client: every
+		// browser sends `gaindrive-web`, so two browsers of one user would go
+		// on hijacking each other. startCast requires it, which is what makes
+		// the "sent no id" bucket incapable of owning anything — otherwise two
+		// installs of one app would collapse into a single identity and
+		// reproduce the same bug one scale down.
+		//
+		// It is not a credential and authorises nothing: auth is still
+		// u/t/s plus castRole, and this only breaks ties among one user's own
+		// devices. Hence nothing to redact in the access logger.
+		std::mutex      cast_owner_mu_;
+		std::string     cast_owner_user_;
+		std::string     cast_owner_controller_;
+
+		// Bumped whenever the session is claimed or torn down, so a connection
+		// belonging to a *previous* session can notice it has been displaced.
+		// The same pattern as load_gen_ and cast_wd_gen_, and castEvents needs
+		// it because a takeover is stop()-then-start(): `active_` is true
+		// either side of a window the SSE thread spends blocked inside
+		// wait_status(15000), so without a generation the old owner's stream
+		// would quietly go on reporting the new owner's session.
+		std::atomic<int> cast_session_gen_{0};
+
 		// SSE-as-heartbeat: castEvents.view is the only long-lived browser
 		// connection during a cast session, so its disappearance acts as a
 		// "client gone" signal. When the listener count drops to 0 while a
@@ -100,6 +132,15 @@ class GainDrive {
 		// (last_cast_song_id_, last_cast_offset_). Called both from the
 		// stopCast endpoint and from the SSE watchdog thread.
 		void cast_teardown();
+
+		// True when `req` is the client that owns the current cast session.
+		// False when it sent no castController at all, which is what keeps
+		// every client that does not speak the extension — the Android app, a
+		// third-party Subsonic client, curl — out of cast mode entirely.
+		bool cast_owned_by(const httplib::Request& req);
+
+		// Record the owner of a session just started, and bump the generation.
+		void cast_claim(const std::string& user, const std::string& controller);
 
 		// Build and send one cast LOAD for `song`, starting at `offset`
 		// seconds, with the caption track numbered `track_id` turned on (0 for
