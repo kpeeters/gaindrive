@@ -1,0 +1,81 @@
+name: Rolling master release
+description: >
+  Publish assets to the `latest` rolling prerelease, creating it if it does not
+  exist and moving its tag to the commit being built.
+
+# Two workflows publish here on every push to master — the server binaries from
+# build.yml and the APK from android.yml — and they run concurrently. That is
+# what this action exists for: the create-if-missing and the tag move are
+# subtle enough that two copies of them would drift, and a drifted copy does
+# not fail, it silently deletes the other workflow's asset.
+#
+# Prerelease matters: `releases/latest` ignores those, so this never displaces
+# a real v* release as the repository's headline download. html/docs.html
+# points at `releases/latest/download/gaindrive-linux-x86_64`, which must keep
+# resolving to a tagged release.
+
+inputs:
+  assets:
+    description: >
+      Files to upload. Expanded as a shell glob, so `dist/*.apk` is fine.
+    required: true
+  stale-suffix:
+    description: >
+      Delete existing assets ending in this before uploading, except the ones
+      being uploaded now. Needed only where the asset name carries a version —
+      `--clobber` replaces a name, so a versioned name would otherwise leave
+      every past build behind. Assets with a stable name need nothing here.
+    required: false
+    default: ''
+  token:
+    description: "A token with `contents: write` permission."
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        ASSETS: ${{ inputs.assets }}
+        STALE_SUFFIX: ${{ inputs.stale-suffix }}
+      run: |
+        set -euo pipefail
+        R="$GITHUB_REPOSITORY"
+        NOTES="Unreleased build of \`$GITHUB_SHA\`. Replaced by the next push to master."
+
+        # Succeeds on the first run ever and fails harmlessly on every other,
+        # including the one where the sibling workflow won the race a second
+        # ago. Both outcomes leave the release existing, which is all the rest
+        # of this step needs.
+        gh release create latest --repo "$R" --prerelease \
+          --target "$GITHUB_SHA" --title "Latest master build" \
+          --notes "$NOTES" || :
+
+        # `gh release create` silently ignores --target once the tag exists, so
+        # without this the release would point at the first commit ever built,
+        # for ever. Deleting the tag and recreating it is what this replaced,
+        # and it cannot be used any more: a delete takes the sibling workflow's
+        # asset with it.
+        gh api -X PATCH "repos/$R/git/refs/tags/latest" \
+          -f sha="$GITHUB_SHA" -F force=true >/dev/null
+
+        # The notes name the commit, so they are rewritten every run rather
+        # than left at whatever the create wrote once.
+        gh release edit latest --repo "$R" --notes "$NOTES"
+
+        # Unquoted on purpose: the input arrives as the literal glob.
+        set -- $ASSETS
+        keep=""
+        for f in "$@"; do keep="$keep $(basename "$f")"; done
+
+        if [ -n "$STALE_SUFFIX" ]; then
+          gh release view latest --repo "$R" --json assets \
+            --jq ".assets[].name | select(endswith(\"$STALE_SUFFIX\"))" \
+          | while read -r a; do
+              case " $keep " in *" $a "*) continue;; esac
+              gh release delete-asset latest "$a" --repo "$R" --yes
+            done
+        fi
+
+        gh release upload latest "$@" --clobber --repo "$R"
