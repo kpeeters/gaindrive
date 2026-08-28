@@ -522,11 +522,6 @@ void MediaStore::create_schema()
 			duration       REAL DEFAULT 0,
 			song_count     INTEGER DEFAULT 0,
 			cover_path     TEXT,                  -- "<root>/<rest>"
-			-- Set when cover_path came from setCoverArt rather than from the
-			-- scan. The scan's video tier prefers a TMDB poster to whatever
-			-- image it finds in the folder; this is what keeps it off a cover
-			-- a person chose, which is also the way to fix a wrong match.
-			cover_manual   INTEGER DEFAULT 0,
 			musicbrainz_id TEXT,
 			created        DATETIME DEFAULT CURRENT_TIMESTAMP,
 			last_scanned   DATETIME
@@ -845,6 +840,49 @@ void MediaStore::create_schema()
 			key   TEXT PRIMARY KEY,
 			value TEXT NOT NULL DEFAULT ''
 		);
+
+		-- A cover a person chose through setCoverArt.  The *image* survives a
+		-- rebuild -- it is written into the album folder as cover.jpg -- but
+		-- "a human picked this" is recorded nowhere on disk, and it is the one
+		-- thing keeping the scan's TMDB poster tier off a hand-picked cover.
+		-- So it lives here, in the DB that is not a cache, rather than in the
+		-- music DB, which may be deleted and rebuilt at any time.
+		--
+		-- No user_id: the image is written into the library tree and everyone
+		-- sees it, so the choice belongs to the library.  That makes this a
+		-- global row like client.settings, not a per-user one like
+		-- client.stars.
+		--
+		-- Keyed on the album folder's stored-form path rather than a rowid,
+		-- because cover_is_manual() is asked in scan Phase 3c -- before Phase
+		-- 4 has upserted the folder and so before any id for it exists.
+		CREATE TABLE IF NOT EXISTS client.manual_covers (
+			album_folder_path TEXT PRIMARY KEY,
+			created           DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+
+		-- Metadata a person typed for a *video*, which is the one kind of file
+		-- whose edit cannot be written back to the thing it describes.  The
+		-- scanner reads a video's title, year and episode number from its
+		-- filename and never from its tags -- read_song_metadata() returns
+		-- after the ffprobe branch and never reaches TagLib -- so a tag
+		-- written here would be a second copy of a fact that nothing reads.
+		--
+		-- Applied over the scanned values inside the album transaction, so the
+		-- music DB still holds the effective title and every read query stays
+		-- as it was.  NULL means "not overridden", per column: editing a title
+		-- must not blank a year edited earlier.
+		--
+		-- Keyed on the song's stored-form path for the reason client.stars is:
+		-- a rowid does not survive the rebuild this table exists to make safe.
+		CREATE TABLE IF NOT EXISTS client.song_meta (
+			song_path    TEXT PRIMARY KEY,
+			title        TEXT,
+			track_number INTEGER,
+			year         INTEGER,
+			disc_number  INTEGER,
+			changed      DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
 	)");
 
 	txn.commit();
@@ -882,10 +920,42 @@ void MediaStore::create_schema()
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE songs ADD COLUMN cover_path TEXT"); }
 	catch (const SQLite::Exception&) {}
-	try { db_music_.exec("ALTER TABLE albums ADD COLUMN cover_manual INTEGER DEFAULT 0"); }
-	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE songs ADD COLUMN season INTEGER DEFAULT 0"); }
 	catch (const SQLite::Exception&) {}
+
+	// One-time: the hand-picked-cover flag used to be albums.cover_manual, in
+	// the music DB -- which a rebuild would have thrown away, taking with it
+	// the only thing stopping a wrong TMDB match overwriting the cover again.
+	//
+	// Gated on the column still existing rather than wrapped in a try: on a
+	// database created after it was removed -- which is every new install, and
+	// every rebuild from here on -- the SELECT is a hard error, and a catch
+	// would either log that on every single start or swallow it.  There is by
+	// definition nothing to carry across in that case.
+	//
+	// INSERT OR IGNORE makes it idempotent, so it needs no "already done"
+	// marker.  It would need one the day something can *clear* a manual cover:
+	// a repeat pass would resurrect the row from the stale column.
+	{
+	bool has_cover_manual = false;
+	SQLite::Statement cols(db_music_, "PRAGMA table_info(albums)");
+	while (cols.executeStep())
+		if (cols.getColumn(1).getString() == "cover_manual") {
+			has_cover_manual = true;
+			break;
+			}
+	if (has_cover_manual) {
+		db_music_.exec(
+			"INSERT OR IGNORE INTO client.manual_covers (album_folder_path)"
+			" SELECT f.path FROM albums a"
+			" JOIN folders f ON f.id = a.folder_id"
+			" WHERE a.cover_manual = 1");
+		if (int n = db_music_.getChanges(); n > 0)
+			std::cout << stamp() << "Migrated " << n
+			          << " hand-picked cover(s) to client.manual_covers"
+			          << std::endl;
+		}
+	}
 
 	// Backfill song_artists from album_artists for any songs that were scanned
 	// before this link was introduced.
@@ -1466,9 +1536,11 @@ static bool tmdb_fetch_poster(MediaStore& store, const Tmdb& tmdb,
 // local image, so this only ever replaces art for a file we can name.
 //
 // The exception is a cover a person uploaded through setCoverArt, which
-// albums.cover_manual marks. That upload is also the way to fix a wrong match,
-// so putting the wrong poster back on the next scan would take away the only
-// remedy the client offers.
+// client.manual_covers marks. That upload is also the way to fix a wrong
+// match, so putting the wrong poster back on the next scan would take away the
+// only remedy the client offers. It is recorded in the client DB rather than
+// beside the album because the music DB is a cache: a rebuild would otherwise
+// throw the choice away and let the wrong poster win all over again.
 static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
                               std::vector<AlbumReadData>& albums,
                               const std::string& artist_path)
@@ -1541,6 +1613,42 @@ static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
 		}
 	}
 
+// Re-assert whatever a person typed for the videos of one album, over the
+// values this scan just derived from their filenames.
+//
+// This is what keeps the music DB a cache. A video's edit cannot go back into
+// the file — the scanner never reads a video's tags — so it lives in
+// client.song_meta, and running it here means the *music* DB still holds the
+// effective title. Deleting the music DB and rescanning therefore reproduces
+// it, and no read query has to know the override exists.
+//
+// COALESCE per column, because a NULL in client.song_meta means "not
+// overridden": someone who fixed a title must not thereby pin the year.
+//
+// Caller must hold db_mutex_ and an open transaction.
+static void apply_song_meta_overrides(SQLite::Database& db, int album_id)
+	{
+	SQLite::Statement q(db,
+		"UPDATE songs SET"
+		"  title = COALESCE("
+		"    (SELECT m.title FROM client.song_meta m"
+		"      WHERE m.song_path = songs.path), title),"
+		"  track_number = COALESCE("
+		"    (SELECT m.track_number FROM client.song_meta m"
+		"      WHERE m.song_path = songs.path), track_number),"
+		"  year = COALESCE("
+		"    (SELECT m.year FROM client.song_meta m"
+		"      WHERE m.song_path = songs.path), year),"
+		"  disc_number = COALESCE("
+		"    (SELECT m.disc_number FROM client.song_meta m"
+		"      WHERE m.song_path = songs.path), disc_number)"
+		" WHERE album_id = ?"
+		"   AND EXISTS (SELECT 1 FROM client.song_meta m"
+		"                WHERE m.song_path = songs.path)");
+	q.bind(1, album_id);
+	q.exec();
+	}
+
 // Writes one song row; all slow I/O has already happened.
 // Caller must hold db_mutex_ and an open transaction. sdat.path is absolute
 // (Phase 1/3 use it for TagLib I/O); rel_path is its stored form, which the
@@ -1572,31 +1680,23 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 
 		// A video's title is derived from its filename, so it can improve
 		// without the file changing — which is how a library scanned before
-		// the parser existed gets back-filled.
-		//
-		// Guarded, and the guard is the point: the title is overwritten only
-		// while it is still one of the two things the scanner itself could
-		// have put there — the raw stem, or the raw stem with the old leading
-		// track-number strip applied.  Anything else was typed by a person
-		// through updateSong, and for video that edit exists *only* in the
-		// database: TagLib cannot write these containers, so there is no tag
-		// to re-read and a clobber would be unrecoverable.
+		// the parser existed gets back-filled.  Unguarded, unlike the version
+		// this replaced: a title a person typed is no longer in this row's
+		// past, it is in client.song_meta, and apply_song_meta_overrides()
+		// puts it back in the same transaction a few lines later.  Guarding it
+		// now would only stop the parser back-filling a title nobody typed.
 		if (sdat.is_video && !sdat.title.empty()) {
-			static const std::regex old_prefix(R"(^\d+[. -]+)");
-			std::string stem = fs::path(sdat.path).stem().string();
 			SQLite::Statement t(db,
 				"UPDATE songs SET title = ?,"
 				"                 year = CASE WHEN year = 0 THEN ? ELSE year END,"
 				"                 track_number = CASE WHEN ? > 0 THEN ?"
 				"                                ELSE track_number END"
-				" WHERE path = ? AND title IN (?, ?)");
+				" WHERE path = ?");
 			t.bind(1, sdat.title);
 			t.bind(2, sdat.year);
 			t.bind(3, sdat.track_nr);
 			t.bind(4, sdat.track_nr);
 			t.bind(5, rel_path);
-			t.bind(6, stem);
-			t.bind(7, std::regex_replace(stem, old_prefix, ""));
 			t.exec();
 			}
 		return;
@@ -1942,6 +2042,10 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			if (int n = db_music_.getChanges(); n > 0)
 				std::cout << stamp() << "  pruned " << n << " songs from "
 				          << fs::path(adat.path).filename().string() << std::endl;
+
+			// Before the album's year is aggregated below, so a year a person
+			// typed on a track is the one the album inherits.
+			apply_song_meta_overrides(db_music_, album_id);
 
 			if (disc_count > 1) {
 				SQLite::Statement upd(db_music_, "UPDATE albums SET disc_count=? WHERE id=?");
@@ -2311,6 +2415,10 @@ void MediaStore::scan_root_files(const RootRec& root)
 			upsert_song_with_data(db_music_, sdat, album_id, folder_id, artist_id,
 			                       strip_root(sdat.path),
 			                       sdat.cover.empty() ? "" : strip_root(sdat.cover));
+
+		// Loose files are songs like any other, and are the one place an
+		// override would otherwise be silently dropped.
+		apply_song_meta_overrides(db_music_, album_id);
 		}
 
 	db_music_.exec(("DELETE FROM songs WHERE last_scanned IS NULL"
@@ -4530,8 +4638,9 @@ bool MediaStore::relocate_prefix(const std::string& old_rel,
 	// safe because of the caller's precondition: nothing exists at new_rel. Half
 	// the columns below sit in a UNIQUE or composite primary key (folders.path,
 	// songs.path, video_art.path, video_meta.path, artist_art.folder_path,
-	// stars, play_counts, bookmarks, cover_thumbs), so relocating onto an
-	// occupied prefix would raise a constraint error rather than merge.
+	// stars, play_counts, bookmarks, cover_thumbs, manual_covers, song_meta),
+	// so relocating onto an occupied prefix would raise a constraint error
+	// rather than merge.
 
 	// LIKE treats _ and % as wildcards, so a literal prefix has to be escaped.
 	// The prunes elsewhere in this file get away without it because a spurious
@@ -4581,6 +4690,12 @@ bool MediaStore::relocate_prefix(const std::string& old_rel,
 		rewrite("client.play_queue",     "song_path");
 		rewrite("client.now_playing",    "song_path");
 		rewrite("client.bookmarks",      "song_path");
+		// These two used to move for free: the flag was a column on the albums
+		// row and the title was the songs row. Both are paths in a separate
+		// WAL file now, so they belong in this list — and a miss is a cover a
+		// scan silently overwrites, or a typed title that reverts.
+		rewrite("client.manual_covers",  "album_folder_path");
+		rewrite("client.song_meta",      "song_path");
 
 		// Music DB. Note what is deliberately absent: video_meta.poster_path is
 		// a path on TMDB's servers, not ours, and artists.image_path is a dead
@@ -4693,6 +4808,13 @@ void MediaStore::forget_prefix(const std::string& rel)
 		forget("client.play_queue",     "song_path");
 		forget("client.now_playing",    "song_path");
 		forget("client.bookmarks",      "song_path");
+		// Newly load-bearing. The albums row used to be pruned by the
+		// scan_dirs() that follows, taking the flag with it; nothing prunes
+		// the client schema. Left behind, a manual_covers row on a deleted
+		// album silently suppresses the TMDB poster of whatever is uploaded
+		// to that path next.
+		forget("client.manual_covers",  "album_folder_path");
+		forget("client.song_meta",      "song_path");
 
 		txn.commit();
 		}
@@ -5230,17 +5352,34 @@ bool MediaStore::update_song_meta(int song_id,
 	return true;
 	}
 
-// cover_manual is set here and nowhere else: this is called only by
-// setCoverArt, so the flag means exactly "a person chose this image". The scan
-// reads it to keep a TMDB poster off a hand-picked cover — see
+// The manual_covers row is written here and nowhere else: this is called only
+// by setCoverArt, so the row means exactly "a person chose this image". The
+// scan reads it to keep a TMDB poster off a hand-picked cover — see
 // lookup_video_meta().
-bool MediaStore::set_cover_art_path(int folder_id, const std::string& path)
+bool MediaStore::set_cover_art_path(const std::string& rel_folder,
+                                     const std::string& path)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Transaction txn(db_music_);
+
+	// The client row first, and unconditionally. Both databases are in WAL
+	// mode and SQLite offers no atomic commit across attached databases there,
+	// so this transaction can tear and the order decides which way: a
+	// manual_covers row whose albums.cover_path has not caught up is repaired
+	// by the next scan, whereas the reverse loses the choice for good. Writing
+	// it unconditionally also makes it meaningful for a folder the scan has
+	// not given an albums row yet.
+	SQLite::Statement m(db_music_,
+		"INSERT OR REPLACE INTO client.manual_covers (album_folder_path)"
+		" VALUES (?)");
+	m.bind(1, rel_folder);
+	m.exec();
+
 	SQLite::Statement q(db_music_,
-		"UPDATE albums SET cover_path = ?, cover_manual = 1 WHERE folder_id = ?");
+		"UPDATE albums SET cover_path = ?"
+		" WHERE folder_id = (SELECT id FROM folders WHERE path = ?)");
 	q.bind(1, path);
-	q.bind(2, folder_id);
+	q.bind(2, rel_folder);
 	q.exec();
 	bool changed = db_music_.getChanges() > 0;
 
@@ -5254,23 +5393,56 @@ bool MediaStore::set_cover_art_path(int folder_id, const std::string& path)
 	del.bind(1, path);
 	del.exec();
 
+	txn.commit();
 	return changed;
 	}
 
 // Keyed on the album's folder path rather than on an id, because the scan asks
 // this in Phase 3c — before Phase 4 has upserted the folder and so before any
 // id for it exists. Paths are stable across a rescan and rowids are not, which
-// is the same reason stars and playlists key on them.
+// is the same reason stars and playlists key on them — and the reason this
+// lives in the client DB rather than beside the album it describes.
 bool MediaStore::cover_is_manual(const std::string& rel_album_path)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement q(db_music_,
-		"SELECT a.cover_manual FROM albums a"
-		" JOIN folders f ON f.id = a.folder_id"
-		" WHERE f.path = ?");
+		"SELECT 1 FROM client.manual_covers WHERE album_folder_path = ?");
 	q.bind(1, rel_album_path);
-	if (!q.executeStep()) return false;
-	return q.getColumn(0).getInt() != 0;
+	return q.executeStep();
+	}
+
+// A video's edit cannot be written back to the file it describes: the scanner
+// takes a video's title, year and episode number from its filename and never
+// reads its tags, so a tag written here would be a second copy of a fact that
+// nothing reads. Recorded in the client DB instead and re-applied by every
+// scan, which is what makes the music DB safe to delete.
+//
+// Each column is written only when supplied, so editing a title does not blank
+// a year edited earlier.
+void MediaStore::set_song_meta_override(
+                        const std::string& rel_song_path,
+                        const std::optional<std::string>& title,
+                        const std::optional<int>& track_number,
+                        const std::optional<int>& year,
+                        const std::optional<int>& disc_number)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"INSERT INTO client.song_meta"
+		"   (song_path, title, track_number, year, disc_number, changed)"
+		" VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)"
+		" ON CONFLICT(song_path) DO UPDATE SET"
+		"   title        = COALESCE(excluded.title,        title),"
+		"   track_number = COALESCE(excluded.track_number, track_number),"
+		"   year         = COALESCE(excluded.year,         year),"
+		"   disc_number  = COALESCE(excluded.disc_number,  disc_number),"
+		"   changed      = CURRENT_TIMESTAMP");
+	q.bind(1, rel_song_path);
+	if (title)        q.bind(2, *title);        else q.bind(2);
+	if (track_number) q.bind(3, *track_number); else q.bind(3);
+	if (year)         q.bind(4, *year);         else q.bind(4);
+	if (disc_number)  q.bind(5, *disc_number);  else q.bind(5);
+	q.exec();
 	}
 
 std::string MediaStore::get_setting(const std::string& key,

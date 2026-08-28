@@ -18,6 +18,22 @@ storage from the larger music DB that is rebuilt by library scans.
 
 # Music database tables
 
+**This database is a cache.** Delete it, run a full scan, and everything comes
+back: every row is derived either from the filesystem or from an online lookup
+that will simply be made again. Nothing a person typed or chose lives here.
+
+That is a rule to keep rather than an accident. The two things that used to
+break it were `albums.cover_manual` — a hand-picked cover, which a rebuild
+threw away and a wrong TMDB match then overwrote — and a video's title, year
+and episode number, which cannot be written back to the file because the
+scanner reads a video's metadata from its filename and never opens it with
+TagLib. Both now live in the user/state DB as `client.manual_covers` and
+`client.song_meta`, and the scan re-applies them over the values it derives.
+
+So anything new that records a *decision* belongs in the user/state DB below,
+not here. The test is simple: could a full rescan of an empty database put this
+value back? If not, it is in the wrong file.
+
 ```
 -- The filesystem directory tree, cached.
 -- Each row is one directory.
@@ -77,14 +93,12 @@ CREATE TABLE albums (
     song_count    INTEGER DEFAULT 0,
     -- stored form, e.g. "music/Artist/Album/cover.jpg"
     cover_path    TEXT,
-    -- Set when cover_path came from setCoverArt rather
-    -- than from the scan. A video album's cover is
-    -- otherwise replaced by the TMDB poster, which is
-    -- better than a folder image for a film; this is
-    -- what keeps the scan off one a person chose, and
-    -- so keeps an upload working as the fix for a
-    -- wrong match.
-    cover_manual  INTEGER DEFAULT 0,
+    -- NOTE: cover_manual used to sit here, marking a
+    -- cover set through setCoverArt so the scan's TMDB
+    -- tier would leave it alone. It is now
+    -- client.manual_covers, because a rebuild of this
+    -- file threw the flag away and the wrong poster
+    -- won all over again.
     musicbrainz_id TEXT,
     created       DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_scanned  DATETIME
@@ -491,5 +505,71 @@ CREATE TABLE bookmarks (
     created     DATETIME DEFAULT CURRENT_TIMESTAMP,
     changed     DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, song_path)
+);
+
+-- A cover a person chose through setCoverArt.
+--
+-- The *image* survives a rebuild of the music DB --
+-- it is written into the album folder as cover.jpg
+-- -- but "a human picked this" is recorded nowhere
+-- on disk, and it is the only thing keeping the
+-- scan's TMDB poster tier off a hand-picked cover.
+-- Since an upload is also the way to fix a wrong
+-- TMDB match, losing the flag removes the remedy.
+--
+-- No user_id, unlike stars: the image is written
+-- into the library tree and every user sees it, so
+-- the choice belongs to the library. That makes this
+-- a global row like settings.
+--
+-- Keyed on the album folder's stored-form path
+-- rather than a rowid, because cover_is_manual() is
+-- asked in scan Phase 3c -- before Phase 4 has
+-- upserted the folder and so before any id exists.
+--
+-- Only the flag is stored, not the chosen path:
+-- setCoverArt normalises the on-disk name to
+-- cover.jpg or cover.png and deletes the loser, so
+-- find_cover() re-derives the same image anyway.
+CREATE TABLE manual_covers (
+    album_folder_path TEXT PRIMARY KEY,
+    created           DATETIME
+                        DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Metadata a person typed for a *video*: the one
+-- kind of file whose edit cannot be written back to
+-- the thing it describes.
+--
+-- read_song_metadata() returns after the ffprobe
+-- branch and never reaches TagLib, so the scanner
+-- takes a video's title, year and episode number
+-- from its filename and never from its tags. A tag
+-- written here would be a second copy of a fact
+-- that nothing reads -- so updateSong deliberately
+-- does not write one, even for an .mp4, which
+-- TagLib could open.
+--
+-- Applied over the scanned values inside the album
+-- transaction by apply_song_meta_overrides(), so the
+-- music DB still holds the effective title and every
+-- read query stays as it was. That is what makes
+-- this a cache-only fix rather than a join in a
+-- dozen queries that must never drift.
+--
+-- NULL means "not overridden", per column: editing a
+-- title must not blank a year edited earlier.
+--
+-- Keyed on the song's stored-form path, like stars,
+-- because a rowid does not survive the rebuild this
+-- table exists to make safe.
+CREATE TABLE song_meta (
+    song_path    TEXT PRIMARY KEY,
+    title        TEXT,
+    track_number INTEGER,
+    year         INTEGER,
+    disc_number  INTEGER,
+    changed      DATETIME
+                   DEFAULT CURRENT_TIMESTAMP
 );
 ```

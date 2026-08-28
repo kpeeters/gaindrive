@@ -4987,7 +4987,13 @@ GainDrive::GainDrive(const std::string& db_path,
 		});
 
 	// updateSong — update title and/or track number for a single song.
-	// Writes the change to the database and back to the audio file tags.
+	//
+	// For audio the file is authoritative: the tags are written first and the
+	// database only mirrors them.  For video there is no tag worth writing —
+	// the scanner reads a video's title, year and episode number from its
+	// filename and never opens it with TagLib — so the edit is recorded in the
+	// client DB and re-applied by every scan instead.  Either way the music DB
+	// stays a cache that a full rescan can rebuild.
 	server_.Get("/rest/updateSong.view", [this](const httplib::Request& req,
 	                                            httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -5016,41 +5022,52 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto song = store_.get_song(song_id);
 		if (!song) { err(70, "Song not found."); return; }
 
-		// Write tags first — if this fails we must not update the database.
-		try {
-			std::string song_abs = store_.abs_path(song->path);
-			if (!store_.path_is_within_root(song_abs)) {
-				std::cout << stamp() << "updateSong: refusing path outside every root: "
-				          << song_abs << std::endl;
-				err(0, "Refusing to write outside the configured roots.");
-				return;
-				}
-			TagLib::FileRef f(song_abs.c_str());
-			if (f.isNull() || !f.tag()) {
-				err(0, "Could not open file for tag editing.");
-				return;
-				}
-			if (title)        f.tag()->setTitle(TagLib::String(*title, TagLib::String::UTF8));
-			if (track_number) f.tag()->setTrack(*track_number);
-			if (year)         f.tag()->setYear(*year);
-			if (disc_number) {
-				// PropertyMap gives portable access to DISCNUMBER across all formats.
-				TagLib::PropertyMap props = f.file()->properties();
-				props.replace("DISCNUMBER",
-					TagLib::StringList(TagLib::String(std::to_string(*disc_number))));
-				f.file()->setProperties(props);
-				}
-			if (!f.save()) {
-				err(0, "Could not write tags to file.");
-				return;
-				}
+		if (song->is_video) {
+			// Record it where a rescan can find it again.  Note what is
+			// deliberately *not* done: TagLib can write an .mp4, but nothing
+			// ever reads that tag back — read_song_metadata() returns after
+			// the ffprobe branch — so writing it would leave two copies of one
+			// fact, and the unread copy would be the one on disk.
+			store_.set_song_meta_override(song->path, title, track_number,
+			                               year, disc_number);
 			}
-		catch (...) {
-			err(0, "Exception while writing tags to file.");
-			return;
+		else {
+			// Write tags first — if this fails we must not update the database.
+			try {
+				std::string song_abs = store_.abs_path(song->path);
+				if (!store_.path_is_within_root(song_abs)) {
+					std::cout << stamp() << "updateSong: refusing path outside every root: "
+					          << song_abs << std::endl;
+					err(0, "Refusing to write outside the configured roots.");
+					return;
+					}
+				TagLib::FileRef f(song_abs.c_str());
+				if (f.isNull() || !f.tag()) {
+					err(0, "Could not open file for tag editing.");
+					return;
+					}
+				if (title)        f.tag()->setTitle(TagLib::String(*title, TagLib::String::UTF8));
+				if (track_number) f.tag()->setTrack(*track_number);
+				if (year)         f.tag()->setYear(*year);
+				if (disc_number) {
+					// PropertyMap gives portable access to DISCNUMBER across all formats.
+					TagLib::PropertyMap props = f.file()->properties();
+					props.replace("DISCNUMBER",
+						TagLib::StringList(TagLib::String(std::to_string(*disc_number))));
+					f.file()->setProperties(props);
+					}
+				if (!f.save()) {
+					err(0, "Could not write tags to file.");
+					return;
+					}
+				}
+			catch (...) {
+				err(0, "Exception while writing tags to file.");
+				return;
+				}
 			}
 
-		// Tags written successfully — now mirror the change in the database.
+		// Persisted successfully — now mirror the change in the database.
 		store_.update_song_meta(song_id, title, track_number, year, disc_number);
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
@@ -5167,7 +5184,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 		}
 
-		store_.set_cover_art_path(folder_id, cover_rel.string());
+		store_.set_cover_art_path(folder_rel, cover_rel.string());
 		cover_cache_.invalidate(cover_rel.string());
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
@@ -5508,8 +5525,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		// Carry the DB across with the directory.  Without this the rescan
 		// below deletes the old folder and inserts the new one cold, and every
 		// star, play count, playlist entry and bookmark — all keyed on the path
-		// string — quietly stops matching anything, along with cover_manual and
-		// the derived art caches.
+		// string — quietly stops matching anything, along with the hand-picked
+		// cover and any typed video title, and the derived art caches.
 		store_.relocate_prefix(old_rel, new_rel);
 
 		// ---- Then the tags ---------------------------------------------

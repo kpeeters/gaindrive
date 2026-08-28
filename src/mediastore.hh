@@ -672,16 +672,34 @@ class MediaStore {
 		                      const std::optional<int>& year,
 		                      const std::optional<int>& disc_number);
 
-		// Set the cover art path for the album that owns the given folder_id.
-		// path is stored-form. Returns false if no matching album exists.
-		// Also marks the cover as hand-picked (albums.cover_manual), which is
-		// what stops the scan replacing it with a TMDB poster.
-		bool set_cover_art_path(int folder_id, const std::string& path);
+		// Set the cover art path for the album at the given folder. Both
+		// arguments are stored-form. Returns false if no matching album
+		// exists -- but the choice is recorded either way.
+		//
+		// Records the choice in client.manual_covers, which is where it
+		// belongs: the music DB is a cache and may be deleted, and this is the
+		// one thing a rescan could not put back. It is what stops the scan
+		// replacing a hand-picked cover with a TMDB poster.
+		bool set_cover_art_path(const std::string& rel_folder,
+		                        const std::string& path);
 
 		// Whether this album's cover was set through setCoverArt. Takes the
 		// album folder's stored-form path, since the scan asks before Phase 4
 		// has given that folder an id.
 		bool cover_is_manual(const std::string& rel_album_path);
+
+		// Record metadata a person typed for a video, whose edit cannot be
+		// written back to the file: the scanner takes a video's title, year
+		// and episode number from its filename and never reads its tags. The
+		// override is applied over the scanned values during each scan, so
+		// deleting the music DB and rescanning still yields the typed value.
+		// Omitted fields are left as they were, so editing one does not blank
+		// another.
+		void set_song_meta_override(const std::string& rel_song_path,
+		                            const std::optional<std::string>& title,
+		                            const std::optional<int>& track_number,
+		                            const std::optional<int>& year,
+		                            const std::optional<int>& disc_number);
 
 		// Compose an absolute filesystem path from a music-root-relative path.
 		// All path-typed return values from MediaStore are music-root-relative;
@@ -722,7 +740,8 @@ class MediaStore {
 
 		// Forget every *client* row at or under rel, for a directory that has
 		// been deleted rather than moved. Stars, play counts, playlist entries,
-		// the queue, now-playing and bookmarks.
+		// the queue, now-playing, bookmarks, hand-picked covers and typed
+		// video metadata.
 		//
 		// The music DB is deliberately absent: a following scan_dirs() prunes
 		// the folder, its songs and every derived cache keyed on the path

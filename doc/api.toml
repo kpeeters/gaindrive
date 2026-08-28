@@ -666,13 +666,21 @@ section = "metadata"
 version = '1'
 summary = 'Updates the tags of a single track.'
 notes   = '''
-Tags are written to the audio file first via TagLib and mirrored into the
-database only if that succeeds, so a failed write leaves both in their
-original state.
+For an **audio** track the file is authoritative. Tags are written to it first
+via TagLib and mirrored into the database only if that succeeds, so a failed
+write leaves both in their original state.
 
-NOTE: For a video there is no tag to write — TagLib cannot open those
-containers — so the edit lives only in the database, and the scanner is
-careful not to clobber it on a later pass.
+For a **video** the edit is recorded in the server's user database instead, and
+re-applied over the scanned values on every scan. No tag is written, for any
+container: the scanner reads a video's title, year and episode number from its
+filename and never opens it with TagLib, so a tag would be a second copy of a
+fact that nothing reads. This applies to `.mp4` as much as to `.mkv`, even
+though TagLib could write the first of those.
+
+NOTE: The practical difference is that a video edit survives a rebuild of the
+music library database while remaining invisible to other tools, whereas an
+audio edit travels with the file itself. Renaming the file is still the way to
+change a video's title such that another program will see it.
 '''
 
   [[endpoint.param]]
