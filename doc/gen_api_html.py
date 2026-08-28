@@ -34,7 +34,7 @@ OUT    = ROOT / "html" / "api.html"
 
 # Recognised keys.  An unknown key is a typo that would otherwise be dropped in
 # silence, taking a parameter or a whole paragraph with it.
-META_KEYS     = {"extension", "versions", "title", "intro"}
+META_KEYS     = {"extension", "title", "intro"}
 SECTION_KEYS  = {"id", "title", "group", "blurb"}
 ENDPOINT_KEYS = {"kind", "name", "applies_to", "section", "path", "method",
                  "version", "auth", "auth_note", "response", "content_type",
@@ -211,8 +211,6 @@ def _load(path):
         if kind == "endpoint":
             if "name" not in e:
                 sys.exit(f"{path.name}: {label}: an endpoint needs a name")
-            if "version" not in e:
-                sys.exit(f"{path.name}: {label}: an endpoint needs a version")
             if "applies_to" in e:
                 sys.exit(f"{path.name}: {label}: applies_to belongs to additions")
             if e["name"] in names:
@@ -381,7 +379,13 @@ def _endpoint(ep, names):
     if ep["kind"] == "endpoint":
         path = ep.get("path") or f"/rest/{ep['name']}.view"
         meta.append(f'<code>{_esc(ep.get("method", "GET"))} {_esc(path)}</code>')
-        meta.append(f'<span class="api-badge">v{_esc(ep["version"])}</span>')
+        # Optional, defaulting to 1: everything is version 1 until the
+        # first public release, and a badge on every entry saying so is
+        # noise.  A future version 2 sets the key on its own endpoints and
+        # those alone are badged.
+        ver = ep.get("version", "1")
+        if ver != "1":
+            meta.append(f'<span class="api-badge">v{_esc(ver)}</span>')
     else:
         meta.append('<span class="api-badge api-badge-std">standard endpoint</span>')
     auth = AUTH_LABEL.get(ep.get("auth", "user"))

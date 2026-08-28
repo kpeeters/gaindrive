@@ -36,7 +36,9 @@
 # Entry kinds:
 #
 #    kind = 'endpoint'    a gaindrive endpoint, documented in full.
-#                         Requires `name` and `version`.
+#                         Requires `name`.  `version` is optional and defaults
+#                         to '1'; set it only on an endpoint added by a later
+#                         extension version, which is then the only one badged.
 #    kind = 'additions'   a standard Subsonic endpoint that carries gaindrive
 #                         parameters or fields.  Requires `applies_to`; only
 #                         the additions are listed, never what the host
@@ -48,8 +50,6 @@
 
 [meta]
 extension = "gaindrive"
-# Must agree with src/gaindrive.cc:2315 (JSON) and :2323 (XML).
-versions  = ['1', '2', '3', '4']
 title     = "GainDrive API extensions"
 intro     = '''
 GainDrive speaks the [Subsonic](https://opensubsonic.netlify.app/) API, and
@@ -78,34 +78,13 @@ title = "The gaindrive extension"
 group = "Overview"
 blurb = '''
 `getOpenSubsonicExtensions` advertises an extension named `gaindrive` at
-versions 1 to 4. No authentication is needed for that call, so a client can
-negotiate before login.
+version 1. No authentication is needed for that call, so a client can negotiate
+before login. Everything on this page is version 1.
 
-* **Version 1** is `getRecentSongs`, the album text and image endpoints,
-  `updateSong`, `renameAlbum`, `castRole` on the user endpoints, the server
-  settings endpoints, upload and `promoteAlbum`, and the seven cast endpoints.
-* **Version 2** is version 1 plus the four URL-fetch endpoints:
-  `getUrlHandlers`, `fetchUrl`, `getFetchJobs` and `cancelFetch`.
-* **Version 3** is version 2 plus `deleteUpload`.
-* **Version 4** replaces `renameAlbum` and `promoteAlbum` with the single
-  `moveAlbum`.
-
-Each is a separate version rather than a widening of the one before it. A
-client that negotiated version 1 was told what that meant, and silently
-redefining it would make the number worth nothing.
-
-Note what does **not** earn a version of its own: new *optional parameters* on
-an endpoint an existing version already named — `/upload`'s `artist` and
-`album`, or `personal=*` on the two listing endpoints. A client that ignores
-them gets exactly what it got before, so nothing it was told has been
-redefined. A new endpoint is different, because a client cannot discover one
-without being told.
-
-NOTE: **Version 4 is the first that takes something away**, so versions 1 and
-3 no longer describe this server: the two endpoints it replaces are gone
-rather than deprecated. Nothing has shipped, so nobody is holding that
-promise. A released API would have had to keep the old names as aliases
-instead — the numbers are only worth something while they stay true.
+A new *endpoint* will earn a new version, because a client cannot discover one
+without being told. A new *optional parameter* on an endpoint an existing
+version already names will not — a client that ignores it gets exactly what it
+got before, so nothing it was told has been redefined.
 
 A client that does not know the extension will not call any of these, so there
 is no conformance risk in advertising it. Nothing in the standard endpoints
@@ -229,7 +208,7 @@ summary    = 'Advertises the gaindrive extension and the versions this server im
   [[endpoint.field]]
   name = "openSubsonicExtensions.versions"
   type = "int[]"
-  doc  = 'Currently `[1, 2, 3]`. In XML, a comma-separated `versions` attribute.'
+  doc  = 'In XML, a comma-separated `versions` attribute.'
 
 
 # ===========================================================================
@@ -240,7 +219,6 @@ summary    = 'Advertises the gaindrive extension and the versions this server im
 kind    = 'endpoint'
 name    = "getRecentSongs"
 section = "browsing"
-version = '1'
 summary = 'Recently played tracks for the authenticated user, newest first.'
 
   [[endpoint.param]]
@@ -548,7 +526,6 @@ the moment it is switched on.
 kind     = 'endpoint'
 name     = "getAlbumTexts"
 section  = "albumtext"
-version  = '1'
 response = 'subsonic-json'
 summary  = 'Lists the `.txt` files in an album folder, sorted by name.'
 notes    = '''
@@ -571,7 +548,6 @@ Utility files that are not human-readable notes — currently
 kind         = 'endpoint'
 name         = "getAlbumText"
 section      = "albumtext"
-version      = '1'
 response     = 'raw'
 content_type = "text/plain; charset=utf-8"
 summary      = 'Serves one of those files. The response is the file itself, not a Subsonic envelope.'
@@ -596,7 +572,6 @@ summary      = 'Serves one of those files. The response is the file itself, not 
 kind     = 'endpoint'
 name     = "getAlbumImages"
 section  = "albumtext"
-version  = '1'
 response = 'subsonic-json'
 summary  = 'How many images an album folder holds — the cover plus any extras.'
 notes    = '''
@@ -618,7 +593,6 @@ Use it to drive the `index` parameter of `getCoverArt`.
 kind    = 'endpoint'
 name    = "setCoverArt"
 section = "albumtext"
-version = '1'
 method  = 'POST'
 summary = 'Writes `cover.jpg` or `cover.png` into an album folder, whichever the uploaded bytes actually are.'
 notes   = '''
@@ -663,7 +637,6 @@ see = ["getAlbumImages"]
 kind    = 'endpoint'
 name    = "updateSong"
 section = "metadata"
-version = '1'
 summary = 'Updates the tags of a single track.'
 notes   = '''
 For an **audio** track the file is authoritative. Tags are written to it first
@@ -713,7 +686,6 @@ change a video's title such that another program will see it.
 kind      = 'endpoint'
 name      = "moveAlbum"
 section   = "metadata"
-version   = '4'
 auth_note = 'Your own upload batch, or admin anywhere.'
 summary   = 'Puts an album somewhere, under a name, by moving the directory on disk.'
 notes     = '''
@@ -850,7 +822,6 @@ files at all.
 kind     = 'endpoint'
 name     = "getServerSettings"
 section  = "settings"
-version  = '1'
 auth     = 'admin'
 response = 'subsonic-json'
 summary  = 'Returns the third-party API credentials the server holds.'
@@ -873,7 +844,6 @@ summary  = 'Returns the third-party API credentials the server holds.'
 kind    = 'endpoint'
 name    = "saveServerSettings"
 section = "settings"
-version = '1'
 auth    = 'admin'
 summary = 'Sets one or both of those credentials.'
 notes   = '''
@@ -938,7 +908,6 @@ the account's existing value.
 kind     = 'endpoint'
 name     = "upload"
 section  = "upload"
-version  = '1'
 method   = 'POST'
 path     = "/upload"
 auth     = 'uploadRole'
@@ -994,7 +963,6 @@ see = ["fetchUrl", "moveAlbum", "deleteUpload"]
 kind    = 'endpoint'
 name    = "deleteUpload"
 section = "upload"
-version = '3'
 auth    = 'uploadRole'
 summary = 'Removes an uploaded album, files and all. Irreversible — there is no trash behind it.'
 notes   = '''
@@ -1038,7 +1006,6 @@ the client database, which no scan has ever touched.
 kind    = 'endpoint'
 name    = "getUrlHandlers"
 section = "urlfetch"
-version = '2'
 auth    = 'uploadRole'
 summary = 'What this server can fetch.'
 notes   = '''
@@ -1069,7 +1036,6 @@ argv can carry cookies, a proxy credential or an API key.
 kind    = 'endpoint'
 name    = "fetchUrl"
 section = "urlfetch"
-version = '2'
 auth    = 'uploadRole'
 summary = 'Queue a fetch. Returns immediately with a job id; the work happens in the background.'
 notes   = '''
@@ -1165,7 +1131,6 @@ length limit of about 8 kB.
 kind    = 'endpoint'
 name    = "getFetchJobs"
 section = "urlfetch"
-version = '2'
 auth    = 'uploadRole'
 summary = "The calling user's own jobs, newest first."
 notes   = '''
@@ -1230,7 +1195,6 @@ surfaced in an API response.
 kind    = 'endpoint'
 name    = "cancelFetch"
 section = "urlfetch"
-version = '2'
 auth    = 'uploadRole'
 summary = 'Stop a queued or running fetch and delete its batch.'
 
@@ -1257,7 +1221,6 @@ summary = 'Stop a queued or running fetch and delete its batch.'
 kind    = 'endpoint'
 name    = "listCastDevices"
 section = "cast"
-version = '1'
 auth    = 'castRole'
 summary = 'Chromecast devices on the LAN: those discovered over mDNS, plus any named in the server configuration.'
 notes   = '''
@@ -1310,7 +1273,6 @@ hostname is refused at startup.
 kind    = 'endpoint'
 name    = "startCast"
 section = "cast"
-version = '1'
 auth    = 'castRole'
 summary = 'Activates cast mode, targeting one device.'
 notes   = '''
@@ -1336,7 +1298,6 @@ see = ["stopCast", "castLoad"]
 kind    = 'endpoint'
 name    = "stopCast"
 section = "cast"
-version = '1'
 auth    = 'castRole'
 summary = 'Deactivates cast mode and stops playback on the device.'
 
@@ -1344,7 +1305,6 @@ summary = 'Deactivates cast mode and stops playback on the device.'
 kind    = 'endpoint'
 name    = "castLoad"
 section = "cast"
-version = '1'
 auth    = 'castRole'
 summary = 'Tells the Chromecast to fetch and play a track.'
 notes   = '''
@@ -1395,7 +1355,6 @@ would be one value.
 kind    = 'endpoint'
 name    = "castControl"
 section = "cast"
-version = '1'
 auth    = 'castRole'
 summary = 'Transport control for the active session.'
 
@@ -1429,7 +1388,6 @@ summary = 'Transport control for the active session.'
 kind     = 'endpoint'
 name     = "castSession"
 section  = "cast"
-version  = '1'
 auth     = 'castRole'
 response = 'subsonic-json'
 summary  = 'A non-blocking snapshot of the current session, for restoring the UI after a page reload.'
@@ -1488,7 +1446,6 @@ summary  = 'A non-blocking snapshot of the current session, for restoring the UI
 kind         = 'endpoint'
 name         = "castEvents"
 section      = "cast"
-version      = '1'
 auth         = 'castRole'
 response     = 'sse'
 content_type = "text/event-stream"

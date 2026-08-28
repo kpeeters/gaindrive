@@ -2296,31 +2296,22 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string body;
 		if (use_json)
 			body = subsonic_ok_json([](nlohmann::json& r) {
-				// 2 is 1 plus the URL-fetch endpoints; 3 is 2 plus
-				// deleteUpload; 4 replaces renameAlbum and promoteAlbum with
-				// moveAlbum. A separate version each time rather than a
-				// widening: a client that negotiated a number was told what
-				// that meant, and redefining it silently would make the number
-				// worth nothing. See API.md.
-				//
-				// 4 is the first that *removes* something 1 named, so 1 and 3
-				// no longer describe this server. Nothing has shipped, so
-				// nobody is holding that promise; a released API would have
-				// wanted the old names kept as aliases instead.
-				//
-				// Note what does *not* earn a version: new optional parameters
-				// on an endpoint a version already named — /upload's artist
-				// and album names — since a client that ignores
-				// them gets exactly what it got before.
-				r["openSubsonicExtensions"] =
-					{{{"name", "gaindrive"}, {"versions", {1, 2, 3, 4}}}};
+				// One version until the first public release: everything the
+				// extension offers is version 1. A new *endpoint* will earn a
+				// new number, since a client cannot discover one without being
+				// told; a new optional parameter on an endpoint an existing
+				// version already names will not, since a client that ignores
+				// it gets exactly what it got before. doc/api.toml is the
+				// contract.
+				r["openSubsonicExtensions"] = {{{"name", "gaindrive"},
+					{"versions", nlohmann::json::array({1})}}};
 				});
 		else
 			body = subsonic_ok([](XMLDocument& doc, XMLElement* root) {
 				auto* exts = doc.NewElement("openSubsonicExtensions");
 				auto* ext  = doc.NewElement("extension");
 				ext->SetAttribute("name", "gaindrive");
-				ext->SetAttribute("versions", "1,2,3,4");
+				ext->SetAttribute("versions", "1");
 				exts->InsertEndChild(ext);
 				root->InsertEndChild(exts);
 				});

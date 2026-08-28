@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GainDrive API extensions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=block" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="index.html">
+      <img src="assets/gaindrive.svg" alt="GainDrive logo">
+      <b>GainDrive</b>
+    </a>
+    <nav class="nav-links" id="nav-links">
+      <a href="server.html">Server</a>
+      <a href="web.html">Web</a>
+      <a href="android.html">Android</a>
+      <a href="ios.html">iOS</a>
+      <a class="on" href="docs.html">Docs</a>
+    </nav>
+    <div class="nav-cta">
+      <button class="nav-toggle" type="button" aria-label="Menu" aria-expanded="false" aria-controls="nav-links">
+        <span class="msym">menu</span>
+      </button>
+      <a class="nav-gh" href="https://github.com/kpeeters/gaindrive" target="_blank" rel="noopener" aria-label="GainDrive on GitHub">
+        <img class="gh-mark" src="assets/github.svg" alt="">
+      </a>
+    </div>
+  </div>
+</header>
+
+<section class="docs-head">
+  <div class="wrap">
+    <span class="eyebrow">API</span>
+    <h1>GainDrive API extensions</h1>
+  </div>
+</section>
+
+<section class="docs-body">
+  <div class="wrap docs">
+
+<aside class="docs-nav">
+  <div class="dn-grp">
+    <div class="h">Overview</div>
+    <a href="#extension">The gaindrive extension</a>
+  </div>
+  <div class="dn-grp">
+    <div class="h">Library</div>
+    <a href="#browsing">Browsing</a>
+    <a href="#playback">Playback</a>
+    <a href="#video">Video</a>
+    <a href="#albumtext">Album text and images</a>
+  </div>
+  <div class="dn-grp">
+    <div class="h">Editing</div>
+    <a href="#metadata">Metadata editing</a>
+    <a href="#settings">Server settings</a>
+    <a href="#users">Users</a>
+  </div>
+  <div class="dn-grp">
+    <div class="h">Personal files</div>
+    <a href="#upload">Upload</a>
+    <a href="#urlfetch">Fetching from a URL</a>
+  </div>
+  <div class="dn-grp">
+    <div class="h">Casting</div>
+    <a href="#cast">Chromecast</a>
+  </div>
+</aside>
+
+    <div class="docs-main api-main">
+
+<p>GainDrive speaks the <a href="https://opensubsonic.netlify.app/">Subsonic</a> API, and this page documents only what it <em>adds</em> to it: the endpoints Subsonic does not define, and the extra parameters and response fields that standard endpoints carry. The standard endpoints themselves behave as specified and are not repeated here.</p>
+<p>Everything is served at <code>/rest/&lt;name&gt;.view</code> unless stated otherwise, answers in XML or in JSON (<code>f=json</code>), and requires authentication — either <code>u</code> and <code>p</code> or the token scheme <code>u</code>, <code>t</code> and <code>s</code>. A parameter marked with a <code>*</code> is required.</p>
+<p>Clients discover this whole surface through <code>getOpenSubsonicExtensions</code>, which advertises an extension named <code>gaindrive</code>.</p>
+
+<div class="doc-sec" id="extension">
+<h2>The gaindrive extension</h2>
+<p><code>getOpenSubsonicExtensions</code> advertises an extension named <code>gaindrive</code> at version 1. No authentication is needed for that call, so a client can negotiate before login. Everything on this page is version 1.</p>
+<p>A new <em>endpoint</em> will earn a new version, because a client cannot discover one without being told. A new <em>optional parameter</em> on an endpoint an existing version already names will not — a client that ignores it gets exactly what it got before, so nothing it was told has been redefined.</p>
+<p>A client that does not know the extension will not call any of these, so there is no conformance risk in advertising it. Nothing in the standard endpoints changes when the extension is present.</p>
+<div class="api-ep">
+<h3 id="ep-getopensubsonicextensions">getOpenSubsonicExtensions</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span>
+<span class="api-badge">no auth</span></p>
+<p>Carried by <code>getOpenSubsonicExtensions</code>. Only the gaindrive additions are listed here.</p>
+<p>Advertises the gaindrive extension and the versions this server implements.</p>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>openSubsonicExtensions.name</code></td><td>string</td><td>Always <code>gaindrive</code>.</td></tr>
+<tr><td><code>openSubsonicExtensions.versions</code></td><td>int[]</td><td>In XML, a comma-separated <code>versions</code> attribute.</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="doc-sec" id="browsing">
+<h2>Browsing</h2>
+<div class="api-ep">
+<h3 id="ep-getRecentSongs">getRecentSongs</h3>
+<p class="api-meta"><code>GET /rest/getRecentSongs.view</code></p>
+<p>Recently played tracks for the authenticated user, newest first.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>size</code></td><td>int</td><td>How many to return. Clamped to 1..500. default <code>50</code>.</td></tr>
+<tr><td><code>offset</code></td><td>int</td><td>How many to skip. default <code>0</code>.</td></tr>
+</tbody>
+</table>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>recentSongs.song</code></td><td>Child[]</td><td>Ordinary song entries, newest first.</td></tr>
+<tr><td><code>lastPlayed</code> <span class="api-on">on song</span></td><td>string</td><td>When the play this entry reports happened.</td></tr>
+</tbody>
+</table>
+</div>
+<div class="api-ep">
+<h3 id="ep-getmusicfolders">getMusicFolders</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>getMusicFolders</code>. Only the gaindrive additions are listed here.</p>
+<p>Each root says which of the two library layouts it holds.</p>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>contentType</code> <span class="api-on">on musicFolder</span></td><td>string</td><td><code>artists</code> or <code>categories</code>.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>contentType</code></p>
+<p>Artist and category roots cannot be told apart by shape — both are <code>L1/L2/[L3]/files</code> — so which one a root is has to be configured, and a client that wants to draw them differently has to be told.</p>
+<p>The uploads root, if configured, is never listed: it holds per-user personal files rather than shared library content.</p></div>
+</div>
+<div class="api-ep">
+<h3 id="ep-getindexes-getartists">getIndexes / getArtists</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>getIndexes</code>, <code>getArtists</code>. Only the gaindrive additions are listed here.</p>
+<p>Narrow the listing to one kind of root, or replace it with the uploads area.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>contentType</code></td><td>string</td><td>Restrict to roots of one kind. one of <code>artists</code>, <code>categories</code>.</td></tr>
+<tr><td><code>personal</code></td><td>string</td><td>Replace the shared library with the uploads area. one of <code>true</code>, <code>*</code>.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>contentType</code></p>
+<p>It complements <code>musicFolderId</code> rather than replacing it: a kind may span several roots — two artist roots must list together — which a single folder id cannot express.</p>
+<p>Omitting it returns every root&#x27;s children mixed, which is what a client with no concept of categories should get. The sections browse perfectly well as pseudo-artists.</p></div>
+<div class="api-note"><p class="api-note-h"><code>personal</code></p>
+<ul class="doc-list"><li><code>personal=true</code> — the calling account&#x27;s own uploads.</li><li><code>personal=*</code> — <b>every</b> account&#x27;s, and <b>admin only</b>; anything else gets error 50. An admin is the only account that can <code>moveAlbum</code> an upload into the shared library, so without this a non-admin&#x27;s upload is visible to its owner and to nobody able to act on it.</li></ul>
+<p><b><code>personal=*</code> groups the response by owner rather than by first letter</b>, so the <code>index</code> labels come back as usernames instead of <code>A</code>, <code>B</code>, <code>#</code>. That is what makes two accounts&#x27; identically named folders tellable apart — grouped by letter they would interleave under one heading with nothing saying whose is whose — and it needs nothing new from a client, since an index label was always an arbitrary string.</p>
+<div class="note"><p>A client drawing an alphabet scrubber from those labels will want to suppress it when they are not letters.</p></div></div>
+<p>Root folders themselves never appear as artists. Both endpoints return the <em>level-1 entries</em> of every root flattened into one list — musicians from artist roots and sections such as Film or Series from category roots.</p>
+<p>Nothing below the top level is affected: <code>getArtist</code>, <code>getAlbum</code> and <code>getMusicDirectory</code> take plain ids and neither know nor need to know which side of the library one came from.</p>
+</div>
+<div class="api-ep">
+<h3 id="ep-getalbumlist-getalbumlist2-search2-search3">getAlbumList / getAlbumList2 / search2 / search3</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>getAlbumList</code>, <code>getAlbumList2</code>, <code>search2</code>, <code>search3</code>. Only the gaindrive additions are listed here.</p>
+<p>Search and list within the uploads area instead of the shared library.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>personal</code></td><td>bool</td><td>The calling account&#x27;s own uploads. Unlike on <code>getIndexes</code>, <code>personal=*</code> is not accepted here. one of <code>true</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<div class="api-ep">
+<h3 id="ep-getcoverart">getCoverArt</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>getCoverArt</code>. Only the gaindrive additions are listed here.</p>
+<p>Reach the extra images in an album folder, beyond the cover.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>index</code></td><td>int</td><td>0 is the main cover; 1 and up select the extras <code>getAlbumImages</code> counted. default <code>0</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<div class="api-ep">
+<h3 id="ep-getartistinfo-getartistinfo2">getArtistInfo / getArtistInfo2</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>getArtistInfo</code>, <code>getArtistInfo2</code>. Only the gaindrive additions are listed here.</p>
+<p>Re-ask the metadata providers for an artist rather than answering from cache.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>force</code></td><td>bool</td><td>Bypass the cached <code>artist_info_cache</code> row and query the providers again.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>force</code></p>
+<p>The chain is MusicBrainz, then Wikidata, Wikipedia, TheAudioDB and Discogs, paced against MusicBrainz&#x27;s rate limit, so a forced lookup is not instant.</p></div>
+</div>
+<div class="api-ep">
+<h3 id="ep-any-endpoint-returning-song-entries">any endpoint returning song entries</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>any endpoint returning song entries</code>. Only the gaindrive additions are listed here.</p>
+<p>One extra field on every song entry.</p>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>transcodedBitRate</code> <span class="api-on">on Child</span></td><td>int</td><td>The bitrate the stream would carry, in kbps, when this entry would be transcoded.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>transcodedBitRate</code></p>
+<p>Subsonic defines <code>transcodedContentType</code> and <code>transcodedSuffix</code> but no bitrate, so a client could see that a track would be converted without being able to say to what. It is computed the same way <code>stream</code> decides, including the account&#x27;s own ceiling, so the two cannot disagree.</p></div>
+</div>
+</div>
+<div class="doc-sec" id="playback">
+<h2>Playback</h2>
+<div class="api-ep">
+<h3 id="ep-stream">stream</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>stream</code>. Only the gaindrive additions are listed here.</p>
+<p>Four gaindrive parameters on the standard streaming endpoint.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>pace</code></td><td>bool</td><td>Deliver at roughly 1x playback rate rather than as fast as the socket takes it.</td></tr>
+<tr><td><code>castToken</code></td><td>string</td><td>The per-session token from <code>startCast</code>, accepted in place of credentials.</td></tr>
+<tr><td><code>size</code></td><td>string</td><td>Video only. A cap on the output frame size, as <code>WxH</code> — <code>640x480</code>.</td></tr>
+<tr><td><code>duration</code></td><td>int</td><td>Video only. Bound the output to this many seconds from <code>timeOffset</code>, and switch the container to MPEG-TS. That is one HLS segment.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>pace</code></p>
+<p>Send it when the URL is being handed to something that will play it in real time and cannot be recognised from the request — a Cast receiver fetching for itself is the case it exists for. Without it such a receiver is sent the whole track at once, stops reading when its buffer fills, and the connection is then idle until its own 60-second no-data timeout, or a reverse proxy&#x27;s, kills it mid-track.</p>
+<p><b>Never send it on a download or a prefetch</b>: that would make the transfer take as long as the music. A browser is paced already, by its User-Agent, and video is never paced.</p></div>
+<div class="api-note"><p class="api-note-h"><code>castToken</code></p>
+<p>A Chromecast fetches the media for itself and has no account, so the token is what authorises it. It is issued once when the user selects a device and lasts the whole session — it is not single-use per request. A request carrying a valid token also skips the <code>castRole</code> check, since only <code>castLoad</code> ever issues one, and skips the account bitrate ceiling.</p></div>
+<div class="api-note"><p class="api-note-h"><code>size</code></p>
+<p>Any value here disqualifies the direct and remux tiers, so the video is re-encoded on the fly and the response is chunked with no <code>Content-Length</code>.</p></div>
+</div>
+<div class="api-ep">
+<h3 id="ep-hls-m3u8">hls.m3u8</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>hls.m3u8</code>. Only the gaindrive additions are listed here.</p>
+<p>A frame size may ride along with the variant bitrate.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>bitRate</code></td><td>string</td><td>May carry an <code>@WxH</code> suffix naming the frame size for that variant — <code>1000@640x480</code>.</td></tr>
+</tbody>
+</table>
+<p>Note the path: this is the one endpoint not spelled <code>&lt;name&gt;.view</code>.</p>
+<p>The playlist is stateless — it is arithmetic over the stored duration, and every segment is an ordinary <code>stream</code> request bounded by <code>timeOffset</code> and <code>duration</code>. Nothing is written to disk and nothing needs cleaning up if a client stops mid-playlist.</p>
+</div>
+</div>
+<div class="doc-sec" id="video">
+<h2>Video</h2>
+<div class="api-ep">
+<h3 id="ep-getalbum-getmusicdirectory-getvideos-getsong">getAlbum / getMusicDirectory / getVideos / getSong</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>getAlbum</code>, <code>getMusicDirectory</code>, <code>getVideos</code>, <code>getSong</code>. Only the gaindrive additions are listed here.</p>
+<p>Two fields on a video entry, from the four endpoints that populate them.</p>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>nativeSeek</code> <span class="api-on">on Child</span></td><td>bool</td><td>Whether the stream this entry would produce carries a <code>Content-Length</code> and answers <code>Range</code> requests.</td></tr>
+<tr><td><code>season</code> <span class="api-on">on Child</span></td><td>int</td><td>The season an episode belongs to; present only when the entry is one.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>nativeSeek</code></p>
+<p>A client can let its media element seek by itself instead of re-requesting with <code>timeOffset</code>.</p>
+<p>It is <b>not</b> the same question as &quot;will ffmpeg run&quot;: the remux tier runs ffmpeg but writes a real file, so it seeks as well as an untouched original. Only a re-encode is unseekable. <code>transcodedSuffix</code> cannot be used for this — it is present for both the remux and re-encode tiers, which differ precisely here.</p>
+<p>A client that sends <code>timeOffset</code> for a remuxable file demotes it from a <code>-c copy</code> remux to a full re-encode.</p></div>
+<div class="api-note"><p class="api-note-h"><code>season</code></p>
+<p><code>discNumber</code> already carries the same number — that is the field every Subsonic client groups and sorts by, and none of them knows what a season is — so a client that ignores <code>season</code> groups a series correctly and simply calls the groups discs. A client that reads it can head them &quot;Series 2&quot; instead.</p>
+<p>The number comes from an <code>S02E03</code>-style marker or from a folder naming its season. A <code>Disc 2</code> or <code>CD1</code> folder is deliberately not one, and neither is an unnumbered <code>Specials</code> folder, so both of those keep reporting a disc.</p></div>
+<div class="note"><p>Only these four queries select the underlying columns. A video reached through <code>getStarred</code>, <code>getPlaylist</code>, <code>getPlayQueue</code>, <code>getBookmarks</code> or <code>search</code> reports neither field. That is the safe direction — it plays correctly and seeks by re-request — but such a video re-encodes on every seek even when it could have been remuxed.</p></div>
+</div>
+<div class="api-ep">
+<h3 id="ep-getcaptions">getCaptions</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>getCaptions</code>. Only the gaindrive additions are listed here.</p>
+<p>A Chromecast fetches its own subtitle track and has no credentials.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>castToken</code></td><td>string</td><td>The per-session token from <code>startCast</code>, accepted in place of credentials.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>castToken</code></p>
+<p>The converted result is cached, because ffmpeg has to demux the whole container to collect one subtitle stream and the receiver fetches the track the moment it is switched on.</p></div>
+</div>
+</div>
+<div class="doc-sec" id="albumtext">
+<h2>Album text and images</h2>
+<p>Liner notes and scans that sit alongside the audio as ordinary files.</p>
+<div class="api-ep">
+<h3 id="ep-getAlbumTexts">getAlbumTexts</h3>
+<p class="api-meta"><code>GET /rest/getAlbumTexts.view</code>
+<span class="api-badge">JSON only</span></p>
+<p>Lists the <code>.txt</code> files in an album folder, sorted by name.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>Album folder id.</td></tr>
+</tbody>
+</table>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>albumTexts.textFile.name</code></td><td>string</td><td>Filename, to be handed back to <code>getAlbumText</code>.</td></tr>
+</tbody>
+</table>
+<p>Utility files that are not human-readable notes — currently <code>fingerprints.txt</code> — are excluded.</p>
+</div>
+<div class="api-ep">
+<h3 id="ep-getAlbumText">getAlbumText</h3>
+<p class="api-meta"><code>GET /rest/getAlbumText.view</code>
+<span class="api-badge">raw body</span></p>
+<p>Serves one of those files. The response is the file itself, not a Subsonic envelope.</p>
+<p>Content type: <code>text/plain; charset=utf-8</code></p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>Album folder id.</td></tr>
+<tr><td><code>name</code> <b class="api-req">*</b></td><td>string</td><td>Filename from <code>getAlbumTexts</code>. Must end in <code>.txt</code> and may not contain <code>/</code>, <code>\</code> or <code>..</code>.</td></tr>
+</tbody>
+</table>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>400</code></td><td>HTTP</td><td>The name fails either rule above.</td></tr>
+</tbody>
+</table>
+</div>
+<div class="api-ep">
+<h3 id="ep-getAlbumImages">getAlbumImages</h3>
+<p class="api-meta"><code>GET /rest/getAlbumImages.view</code>
+<span class="api-badge">JSON only</span></p>
+<p>How many images an album folder holds — the cover plus any extras.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>Album folder id.</td></tr>
+</tbody>
+</table>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>albumImages.count</code></td><td>int</td><td>Total image count, so valid <code>index</code> values are 0 to count-1.</td></tr>
+</tbody>
+</table>
+<p>Use it to drive the <code>index</code> parameter of <code>getCoverArt</code>.</p>
+</div>
+<div class="api-ep">
+<h3 id="ep-setCoverArt">setCoverArt</h3>
+<p class="api-meta"><code>POST /rest/setCoverArt.view</code></p>
+<p>Writes <code>cover.jpg</code> or <code>cover.png</code> into an album folder, whichever the uploaded bytes actually are.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>Album folder id. Required in both cases.</td></tr>
+<tr><td><code>file</code></td><td>multipart</td><td>A multipart part whose content type must begin with <code>image/</code>.</td></tr>
+<tr><td><code>url</code></td><td>string</td><td>An <code>http://</code> or <code>https://</code> URL, fetched server-side; the response must have an <code>image/</code> content type.</td></tr>
+</tbody>
+</table>
+<p>Supply exactly one of <code>file</code> or <code>url</code>.</p>
+<p><b>JPEG and PNG only</b> — the format is taken from the magic bytes, not from the declared content type, and anything else is rejected. That is not a new restriction so much as the removal of a trap: the scanner indexes only <code>.jpg</code>, <code>.jpeg</code> and <code>.png</code>, so a WebP written as <code>cover.jpg</code> used to become a cover nothing could decode.</p>
+<p>If the upload changes the format, the file it replaces is removed, since <code>cover.jpg</code> outranks <code>cover.png</code> when the scanner looks for a cover.</p>
+<p>A cover set this way is marked as chosen by a person and is never overwritten by a scan — which for a film is the only way to correct a wrong TMDB match.</p>
+<p class="api-see">See also <a href="#ep-getAlbumImages"><code>getAlbumImages</code></a>.</p>
+</div>
+</div>
+<div class="doc-sec" id="metadata">
+<h2>Metadata editing</h2>
+<div class="api-ep">
+<h3 id="ep-updateSong">updateSong</h3>
+<p class="api-meta"><code>GET /rest/updateSong.view</code></p>
+<p>Updates the tags of a single track.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>Song id.</td></tr>
+<tr><td><code>title</code></td><td>string</td><td>Omitted fields are left untouched.</td></tr>
+<tr><td><code>track</code></td><td>int</td><td>Track number.</td></tr>
+<tr><td><code>year</code></td><td>int</td><td>Year.</td></tr>
+<tr><td><code>disc</code></td><td>int</td><td>Disc number, written through TagLib&#x27;s <code>PropertyMap</code> as <code>DISCNUMBER</code> since the generic tag API has no disc setter.</td></tr>
+</tbody>
+</table>
+<p>For an <b>audio</b> track the file is authoritative. Tags are written to it first via TagLib and mirrored into the database only if that succeeds, so a failed write leaves both in their original state.</p>
+<p>For a <b>video</b> the edit is recorded in the server&#x27;s user database instead, and re-applied over the scanned values on every scan. No tag is written, for any container: the scanner reads a video&#x27;s title, year and episode number from its filename and never opens it with TagLib, so a tag would be a second copy of a fact that nothing reads. This applies to <code>.mp4</code> as much as to <code>.mkv</code>, even though TagLib could write the first of those.</p>
+<div class="note"><p>The practical difference is that a video edit survives a rebuild of the music library database while remaining invisible to other tools, whereas an audio edit travels with the file itself. Renaming the file is still the way to change a video&#x27;s title such that another program will see it.</p></div>
+</div>
+<div class="api-ep">
+<h3 id="ep-moveAlbum">moveAlbum</h3>
+<p class="api-meta"><code>GET /rest/moveAlbum.view</code></p>
+<p>Puts an album somewhere, under a name, by moving the directory on disk.</p>
+<p>Permission: Your own upload batch, or admin anywhere.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>Album folder id.</td></tr>
+<tr><td><code>musicFolderId</code></td><td>string</td><td>The destination root, as <code>getMusicFolders</code> reports it. Omitted keeps the album where it is.</td></tr>
+<tr><td><code>folder</code></td><td>string</td><td>The level under the root: an artist under an <code>artists</code> root, a category under a <code>categories</code> one. A name not already present is created, so there is no separate operation for adding an artist or a category.</td></tr>
+<tr><td><code>album</code></td><td>string</td><td>New album name. Omitted keeps the current one.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>musicFolderId</code></p>
+<p>Error 70 if it names anything that is not a browsable library root — including the uploads root, which that listing excludes and which is never a destination.</p>
+<p>Naming a root requires admin, since it is what puts something into the shared library.</p></div>
+<div class="api-note"><p class="api-note-h"><code>folder</code></p>
+<p><b>Required when <code>musicFolderId</code> is given</b>, and omitted keeps the current one otherwise. It was briefly allowed to default when promoting and the default was a guess that filed things wrongly: it used the batch&#x27;s own artist name, which for a fetched video is the channel that published it and never a category. A caller that does not know where something belongs should be made to decide rather than have it decided badly for them.</p></div>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>movedAlbum.id</code></td><td>string</td><td>The album folder id afterwards. Usually unchanged, but a move into a directory that did not exist yet mints one.</td></tr>
+<tr><td><code>movedAlbum.parent</code></td><td>string</td><td>The artist or category folder id afterwards.</td></tr>
+<tr><td><code>movedAlbum.album</code></td><td>string</td><td>The album name as it was applied, after sanitising.</td></tr>
+<tr><td><code>movedAlbum.artist</code></td><td>string</td><td>The folder name as it was applied, after sanitising.</td></tr>
+<tr><td><code>movedAlbum.tagFailures</code></td><td>int</td><td>How many files could not have their tags rewritten. The move still happened.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>movedAlbum.tagFailures</code></p>
+<p>Zero when no tag needed changing — a move that alters neither name opens no files at all.</p></div>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>10</code></td><td>Subsonic</td><td><code>id</code> missing or not a number; <code>folder</code> missing while <code>musicFolderId</code> is given; a supplied name holding nothing usable once sanitised.</td></tr>
+<tr><td><code>50</code></td><td>Subsonic</td><td>Naming a destination root without admin, or moving anything that is not your own upload batch without admin.</td></tr>
+<tr><td><code>70</code></td><td>Subsonic</td><td>No album with that id, or <code>musicFolderId</code> does not name a browsable library root.</td></tr>
+<tr><td><code>0</code></td><td>Subsonic</td><td>The album is its own artist and no destination root was named, something with that name is already in the destination, or the target falls outside every configured root.</td></tr>
+</tbody>
+</table>
+<p>Every parameter but <code>id</code> is optional and every omitted one means <em>unchanged</em>, so this one endpoint covers renaming an album in place, re-filing it under a different artist, moving it between library roots, and promoting an upload into the shared library. It replaces <code>renameAlbum</code> and <code>promoteAlbum</code>, which were the same operation described two ways.</p>
+<p><b>Where it lands</b> is the one rule worth reading:</p>
+<ul class="doc-list"><li><b><code>musicFolderId</code> given</b> — the album goes to <code>&lt;that root&gt;/&lt;folder&gt;/&lt;album&gt;</code>, exactly two levels under the root. Both library layouts are <code>L1/L2/[L3]/ files</code>, L2 is the album being moved, and L3 is only ever a disc or season directory inside it.</li><li><b><code>musicFolderId</code> omitted</b> — everything above the artist level is left alone: the library root, and for an upload the owner and the batch id. The album goes to <code>&lt;all of that&gt;/&lt;folder&gt;/&lt;album&gt;</code>.</li></ul>
+<p>So a plain rename sends <code>album</code>; a re-file sends <code>folder</code>; a promote sends <code>musicFolderId</code> and <code>folder</code>; and moving a film out of the music root and under a <code>categories</code> one sends all three.</p>
+<p>Artist and album names are directory names — the scanner never reads them from tags — so this is the only way to correct them, and it is necessarily a filesystem move.</p>
+<p>It re-files <b>only the album it is given</b>: changing <code>folder</code> moves that one album and leaves the artist&#x27;s other albums alone. A whole-artist rename is deliberately not offered — an album edit screen silently rewriting other albums is too easy to do by accident.</p>
+<p>The directory move happens first and is the authoritative act; the database rows are then repaired to carry the new paths, so stars, play counts, playlist entries, the queue and bookmarks all survive. Tags are rewritten afterwards and a file TagLib will not write is counted in <code>tagFailures</code> rather than failing the call — the opposite order to <code>updateSong</code>, where the database mirrors the tag rather than the directory.</p>
+<div class="note"><p><b>The artist tag is only rewritten under an <code>artists</code> root.</b> Under a <code>categories</code> root the level is a category — Film, Series — and writing that into an artist tag would stamp &quot;Film&quot; across every file of a promoted documentary. The album tag is rewritten whenever <code>album</code> changes.</p></div>
+<p>An emptied source directory is removed, so it does not linger in the listing reading &quot;0 albums&quot;, and an upload&#x27;s batch directory goes with it.</p>
+<p class="api-see">See also <a href="#ep-updateSong"><code>updateSong</code></a>, <a href="#ep-deleteUpload"><code>deleteUpload</code></a>.</p>
+</div>
+</div>
+<div class="doc-sec" id="settings">
+<h2>Server settings</h2>
+<p>Admin only, and JSON only — these carry credentials for third-party services and have no XML representation.</p>
+<div class="api-ep">
+<h3 id="ep-getServerSettings">getServerSettings</h3>
+<p class="api-meta"><code>GET /rest/getServerSettings.view</code>
+<span class="api-badge">admin only</span>
+<span class="api-badge">JSON only</span></p>
+<p>Returns the third-party API credentials the server holds.</p>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>serverSettings.discogsToken</code></td><td>string</td><td>Discogs personal access token, used in the artist-portrait chain. Empty when unset.</td></tr>
+<tr><td><code>serverSettings.tmdbKey</code></td><td>string</td><td>TMDB API key, used to identify films and series during the scan. Empty when unset.</td></tr>
+</tbody>
+</table>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>50</code></td><td>Subsonic</td><td>The caller is not an admin.</td></tr>
+</tbody>
+</table>
+</div>
+<div class="api-ep">
+<h3 id="ep-saveServerSettings">saveServerSettings</h3>
+<p class="api-meta"><code>GET /rest/saveServerSettings.view</code>
+<span class="api-badge">admin only</span></p>
+<p>Sets one or both of those credentials.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>discogsToken</code></td><td>string</td><td>New Discogs token. Omit to leave unchanged.</td></tr>
+<tr><td><code>tmdbKey</code></td><td>string</td><td>New TMDB key. Omit to leave unchanged. Re-read at the top of every scan.</td></tr>
+</tbody>
+</table>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>50</code></td><td>Subsonic</td><td>The caller is not an admin.</td></tr>
+</tbody>
+</table>
+<p><b>Only the settings the caller actually sent are written</b>, so omitting one preserves it. With a single field that distinction did not exist; with two, a client saving just one of them would otherwise blank the other.</p>
+<p>Send an empty value to clear a setting.</p>
+</div>
+</div>
+<div class="doc-sec" id="users">
+<h2>Users</h2>
+<div class="api-ep">
+<h3 id="ep-getuser-getusers-createuser-updateuser">getUser / getUsers / createUser / updateUser</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>getUser</code>, <code>getUsers</code>, <code>createUser</code>, <code>updateUser</code>. Only the gaindrive additions are listed here.</p>
+<p>One role Subsonic does not define.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>castRole</code></td><td>bool</td><td>On <code>createUser</code> and <code>updateUser</code>, the literal string <code>true</code> enables; anything else means false.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>castRole</code></p>
+<p>On <code>updateUser</code>, as with every other field there, omitting the parameter keeps the account&#x27;s existing value.</p></div>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>castRole</code> <span class="api-on">on user</span></td><td>bool</td><td>Whether the account may use the cast endpoints. New accounts default to false.</td></tr>
+</tbody>
+</table>
+<p>Roles gaindrive does not implement are still reported, with fixed values, so that clients expecting them do not break. That behaviour is standard-shaped and documented with the endpoints themselves.</p>
+</div>
+</div>
+<div class="doc-sec" id="upload">
+<h2>Upload</h2>
+<p>Each upload is extracted into <code>&lt;uploads root&gt;/&lt;username&gt;/&lt;uuid&gt;/</code> so that archives with a missing or messy artist/album structure stay isolated and the scanner always has a stable artist-level root to work from.</p>
+<p><b>That isolation ends when the upload succeeds.</b> Each artist directory is then merged into the one the account already has under an earlier batch, and the emptied batch is removed. So uploading two archives that name the same artist gives one artist holding both albums, and fetching several tracks into one album adds them to it rather than making a second album of the same name. Colliding files are suffixed, never overwritten. <code>fetchUrl</code> shares this step, which is why <code>artist</code> and <code>album</code> behave identically on both: a blank or absent value keeps what the source supplied, and a value holding nothing usable once sanitised is refused rather than silently ignored.</p>
+<div class="api-ep">
+<h3 id="ep-upload">upload</h3>
+<p class="api-meta"><code>POST /upload</code>
+<span class="api-badge">uploadRole</span>
+<span class="api-badge">bare JSON</span></p>
+<p>Uploads an archive of audio or video into the calling account&#x27;s personal area.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>file</code> <b class="api-req">*</b></td><td>multipart</td><td>A multipart part named <code>file</code>, with a <code>.zip</code>, <code>.tar</code>, <code>.tar.gz</code> or <code>.tgz</code> filename.</td></tr>
+<tr><td><code>artist</code></td><td>string</td><td>Files the batch under this name instead of whatever the archive&#x27;s own folders and the files&#x27; tags say.</td></tr>
+<tr><td><code>album</code></td><td>string</td><td>The same for the level below.</td></tr>
+</tbody>
+</table>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>status</code></td><td>string</td><td><code>ok</code> or <code>error</code>.</td></tr>
+<tr><td><code>files</code></td><td>int</td><td>How many media files the archive yielded.</td></tr>
+<tr><td><code>batch</code></td><td>string</td><td>The batch id the upload landed in.</td></tr>
+</tbody>
+</table>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>400</code></td><td>HTTP</td><td>No uploads root, an unsupported archive type, or a supplied name holding nothing usable once sanitised.</td></tr>
+</tbody>
+</table>
+<p>Note the path: this is <b>not</b> under <code>/rest/</code>, and it answers with a bare <code>{&quot;status&quot;: ..., &quot;message&quot;: ...}</code> object rather than a Subsonic envelope. A refusal arrives as <code>{&quot;status&quot;: &quot;error&quot;, ...}</code> with HTTP 400, not as a Subsonic error code.</p>
+<p>With no uploads root configured the endpoint refuses rather than writing into a library root.</p>
+<p class="api-see">See also <a href="#ep-fetchUrl"><code>fetchUrl</code></a>, <a href="#ep-moveAlbum"><code>moveAlbum</code></a>, <a href="#ep-deleteUpload"><code>deleteUpload</code></a>.</p>
+</div>
+<div class="api-ep">
+<h3 id="ep-deleteUpload">deleteUpload</h3>
+<p class="api-meta"><code>GET /rest/deleteUpload.view</code>
+<span class="api-badge">uploadRole</span></p>
+<p>Removes an uploaded album, files and all. Irreversible — there is no trash behind it.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>Album folder id.</td></tr>
+</tbody>
+</table>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>0</code></td><td>Subsonic</td><td>Not an upload, or not yours — &quot;Item is not in your uploads.&quot;</td></tr>
+</tbody>
+</table>
+<p>The id must resolve to a path of exactly the shape <code>&lt;uploads root&gt;/&lt;owner&gt;/&lt;batch&gt;/&lt;artist&gt;/&lt;album&gt;</code>, and the owner must be the calling account <b>unless the caller is an admin</b>.</p>
+<p><b>That shape check is the security boundary</b>, not a validation nicety — without it this is &quot;delete the folder with this id&quot;, which is &quot;delete any folder on the server&quot;, reachable by any account with upload rights guessing integers. One message covers both &quot;not an upload&quot; and &quot;not yours&quot;, since telling them apart is only useful to somebody probing ids.</p>
+<p>An admin may delete anybody&#x27;s because an admin is who approves them: with <code>personal=*</code> they can see everyone&#x27;s, and being able to see junk without being able to clear it would leave them asking its owner to do it.</p>
+<p>It tidies upwards. An artist directory left empty by the deletion is removed too, or it would remain in the listing as an artist showing no albums; the batch directory goes after it. Stars, play counts, playlist entries, the queue and bookmarks naming the deleted files are deleted with them — those live in the client database, which no scan has ever touched.</p>
+</div>
+</div>
+<div class="doc-sec" id="urlfetch">
+<h2>Fetching from a URL</h2>
+<p>The second way something reaches a personal folder: instead of uploading an archive, paste a URL and let the server fetch it with an external tool. All four endpoints require <code>uploadRole</code> or admin and return error 50 without it.</p>
+<p>The server matches the URL against a table of handlers configured by the operator. <b>A URL matching no handler is refused, and that refusal is the security boundary</b> — without it, any account allowed to upload could make the server issue outbound requests to anywhere it can reach, including hosts unreachable from outside the network. Only <code>http</code> and <code>https</code> URLs are considered at all.</p>
+<p>A fetch runs in the background, one at a time, and the request returns immediately with a job id. The job&#x27;s state is one of <code>queued</code>, <code>running</code>, <code>scanning</code>, <code>done</code>, <code>error</code> or <code>cancelled</code>; <b>the library scan happens before <code>done</code></b>, so a client seeing <code>done</code> can re-read the listing with no further wait. A failed, timed-out or cancelled job deletes its batch directory.</p>
+<div class="api-ep">
+<h3 id="ep-getUrlHandlers">getUrlHandlers</h3>
+<p class="api-meta"><code>GET /rest/getUrlHandlers.view</code>
+<span class="api-badge">uploadRole</span></p>
+<p>What this server can fetch.</p>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>urlHandlers.urlHandler.name</code></td><td>string</td><td>A label for the handler, for showing the user what is supported.</td></tr>
+<tr><td><code>urlHandlers.urlHandler.audio</code></td><td>bool</td><td>Whether this handler can fetch in <code>audio</code> mode.</td></tr>
+<tr><td><code>urlHandlers.urlHandler.video</code></td><td>bool</td><td>Likewise for <code>video</code>.</td></tr>
+</tbody>
+</table>
+<p>An empty list means the feature is unavailable, either because no handlers are configured or because the tool they name is not installed; a client should then not offer the option at all.</p>
+<p>The pattern and the command line are deliberately not reported — a handler&#x27;s argv can carry cookies, a proxy credential or an API key.</p>
+</div>
+<div class="api-ep">
+<h3 id="ep-fetchUrl">fetchUrl</h3>
+<p class="api-meta"><code>GET /rest/fetchUrl.view</code>
+<span class="api-badge">uploadRole</span></p>
+<p>Queue a fetch. Returns immediately with a job id; the work happens in the background.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>url</code> <b class="api-req">*</b></td><td>string</td><td>The URL to fetch.</td></tr>
+<tr><td><code>mode</code></td><td>string</td><td>Which one a handler supports is what <code>getUrlHandlers</code> reports. default <code>audio</code>; one of <code>audio</code>, <code>video</code>.</td></tr>
+<tr><td><code>artist</code></td><td>string</td><td>The artist directory the batch is filed under, replacing whatever the handler would have chosen. Absent or blank keeps the handler&#x27;s own choice.</td></tr>
+<tr><td><code>album</code></td><td>string</td><td>Likewise for the album directory.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>url</code></p>
+<p>It travels as a query parameter, so it is subject to the server&#x27;s request-line length limit of about 8 kB.</p></div>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>fetchJob.id</code></td><td>string</td><td>The job id, for <code>getFetchJobs</code> and <code>cancelFetch</code>.</td></tr>
+<tr><td><code>fetchJob.batch</code></td><td>string</td><td>The batch directory the fetch will write into, in stored form.</td></tr>
+<tr><td><code>fetchJob.handler</code></td><td>string</td><td>Which handler matched the URL.</td></tr>
+<tr><td><code>fetchJob.mode</code></td><td>string</td><td><code>audio</code> or <code>video</code>, as requested.</td></tr>
+<tr><td><code>fetchJob.artist</code></td><td>string</td><td>The name that will be applied, or empty.</td></tr>
+<tr><td><code>fetchJob.album</code></td><td>string</td><td>Likewise.</td></tr>
+<tr><td><code>fetchJob.state</code></td><td>string</td><td>One of <code>queued</code>, <code>running</code>, <code>scanning</code>, <code>done</code>, <code>error</code>, <code>cancelled</code>.</td></tr>
+</tbody>
+</table>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>10</code></td><td>Subsonic</td><td><code>url</code> missing, or <code>artist</code> or <code>album</code> given but containing nothing usable as a directory name.</td></tr>
+<tr><td><code>0</code></td><td>Subsonic</td><td>No uploads root; the scheme is not http(s); no handler matches; the matched handler cannot do the requested mode; the same URL is already being fetched for this user; or the queue is full.</td></tr>
+</tbody>
+</table>
+<p>The names are applied by renaming the batch&#x27;s two directory levels after the tool exits and before the library scan, so they cost nothing and can never be seen half-applied. Three consequences are worth stating because none of them is guessable:</p>
+<ul class="doc-list"><li>Where a fetch produced several directories at a level — a playlist, or a handler that splits by uploader — they are <b>merged</b> into the one name given, and files that then collide are suffixed rather than overwritten.</li><li>Giving only <code>artist</code> keeps the handler&#x27;s album names; giving only <code>album</code> applies that name inside <em>every</em> artist directory.</li><li>A third directory level, if the handler wrote one, is left alone. That is a disc directory to the scanner, and renaming it would fuse two discs.</li></ul>
+<p>Note also that the duplicate guard keys on the URL alone, so the same URL cannot be fetched twice under two different names while one is in flight.</p>
+<p class="api-see">See also <a href="#ep-getUrlHandlers"><code>getUrlHandlers</code></a>, <a href="#ep-getFetchJobs"><code>getFetchJobs</code></a>, <a href="#ep-cancelFetch"><code>cancelFetch</code></a>.</p>
+</div>
+<div class="api-ep">
+<h3 id="ep-getFetchJobs">getFetchJobs</h3>
+<p class="api-meta"><code>GET /rest/getFetchJobs.view</code>
+<span class="api-badge">uploadRole</span></p>
+<p>The calling user&#x27;s own jobs, newest first.</p>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>fetchJobs.fetchJob</code></td><td>object[]</td><td>Everything <code>fetchUrl</code> returns, plus the fields below.</td></tr>
+<tr><td><code>url</code> <span class="api-on">on fetchJob</span></td><td>string</td><td>The URL as submitted.</td></tr>
+<tr><td><code>percent</code> <span class="api-on">on fetchJob</span></td><td>int</td><td>Progress, parsed from the tool&#x27;s output. A line carrying no percentage keeps the previous value rather than resetting to zero.</td></tr>
+<tr><td><code>detail</code> <span class="api-on">on fetchJob</span></td><td>string</td><td>The tool&#x27;s last output line.</td></tr>
+<tr><td><code>error</code> <span class="api-on">on fetchJob</span></td><td>string</td><td>Why the job failed, when its state is <code>error</code>.</td></tr>
+<tr><td><code>files</code> <span class="api-on">on fetchJob</span></td><td>int</td><td>How many media files the fetch produced.</td></tr>
+<tr><td><code>started</code> <span class="api-on">on fetchJob</span></td><td>string</td><td>When the job began.</td></tr>
+<tr><td><code>finished</code> <span class="api-on">on fetchJob</span></td><td>string</td><td>When it ended, if it has.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>detail</code></p>
+<p>Paths in it are rewritten to their stored form — a root path is never surfaced in an API response.</p></div>
+<p>Admins see their own and nobody else&#x27;s: this is a progress display, not an audit log.</p>
+<p>Finished jobs are kept for fifteen minutes, or the last ten per user.</p>
+</div>
+<div class="api-ep">
+<h3 id="ep-cancelFetch">cancelFetch</h3>
+<p class="api-meta"><code>GET /rest/cancelFetch.view</code>
+<span class="api-badge">uploadRole</span></p>
+<p>Stop a queued or running fetch and delete its batch.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>The job id.</td></tr>
+</tbody>
+</table>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>10</code></td><td>Subsonic</td><td><code>id</code> missing.</td></tr>
+<tr><td><code>70</code></td><td>Subsonic</td><td>No such job belongs to the caller.</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+<div class="doc-sec" id="cast">
+<h2>Chromecast</h2>
+<p>Casting is server-driven: the browser asks gaindrive to load a URL onto the Chromecast, and the device then fetches the media from <code>stream</code> itself using a per-session token. All seven endpoints require <code>castRole</code> in addition to authentication, and return error 50 without it. <code>stream</code> is exempt when called with a valid <code>castToken</code>, since only <code>castLoad</code> ever issues one.</p>
+<div class="api-ep">
+<h3 id="ep-listCastDevices">listCastDevices</h3>
+<p class="api-meta"><code>GET /rest/listCastDevices.view</code>
+<span class="api-badge">castRole</span></p>
+<p>Chromecast devices on the LAN: those discovered over mDNS, plus any named in the server configuration.</p>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>castDevices.castDevice.id</code></td><td>string</td><td>Hand this to <code>startCast</code>. For a configured device it is <code>manual:&lt;address&gt;:&lt;port&gt;</code>, derived rather than random so it survives a server restart.</td></tr>
+<tr><td><code>castDevices.castDevice.name</code></td><td>string</td><td>The device&#x27;s friendly name, from its <code>fn</code> record. A device sending none is named by its instance label, so a row is never labelled by its IP.</td></tr>
+<tr><td><code>castDevices.castDevice.model</code></td><td>string</td><td>The device&#x27;s own model string, from its <code>md</code> record. Empty for a configured device, which has no announcement to read.</td></tr>
+<tr><td><code>castDevices.castDevice.address</code></td><td>string</td><td>IP address.</td></tr>
+<tr><td><code>castDevices.castDevice.port</code></td><td>int</td><td>Usually 8009; a multizone group gets a dynamic one.</td></tr>
+<tr><td><code>castDevices.castDevice.manual</code></td><td>bool</td><td>True for a configured device.</td></tr>
+</tbody>
+</table>
+<p>Discovery assembles a device only from records belonging to <code>_googlecast._tcp</code>, and returns one entry per Cast id, so a device announcing several services or several spellings of its name still appears once.</p>
+<p>A configured device whose address and port were also discovered appears once, as the discovered one, since that carries the device&#x27;s own name and Cast id. The port belongs in that comparison because a Cast multizone group lives at its leader&#x27;s address on a different one.</p>
+<p>Configured devices exist because discovery can fail for reasons no client can fix — a device that answers TLS on 8009 while its mDNS responder has stopped replying even to a direct unicast query. The address must be an IP literal; a hostname is refused at startup.</p>
+</div>
+<div class="api-ep">
+<h3 id="ep-startCast">startCast</h3>
+<p class="api-meta"><code>GET /rest/startCast.view</code>
+<span class="api-badge">castRole</span></p>
+<p>Activates cast mode, targeting one device.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>Device id from <code>listCastDevices</code>.</td></tr>
+</tbody>
+</table>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>70</code></td><td>Subsonic</td><td>No device with that id.</td></tr>
+</tbody>
+</table>
+<p>This is where the stream token is generated. It lasts for the whole session and is not single-use per request.</p>
+<p>While cast mode is active, <code>stream</code> answers HTTP 204 to any caller that is not the Chromecast, so a client does not end up playing the same track twice.</p>
+<p class="api-see">See also <a href="#ep-stopCast"><code>stopCast</code></a>, <a href="#ep-castLoad"><code>castLoad</code></a>.</p>
+</div>
+<div class="api-ep">
+<h3 id="ep-stopCast">stopCast</h3>
+<p class="api-meta"><code>GET /rest/stopCast.view</code>
+<span class="api-badge">castRole</span></p>
+<p>Deactivates cast mode and stops playback on the device.</p>
+</div>
+<div class="api-ep">
+<h3 id="ep-castLoad">castLoad</h3>
+<p class="api-meta"><code>GET /rest/castLoad.view</code>
+<span class="api-badge">castRole</span></p>
+<p>Tells the Chromecast to fetch and play a track.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>Song id.</td></tr>
+<tr><td><code>timeOffset</code></td><td>float</td><td>Seek position in seconds, sent to the receiver as <code>currentTime</code>.</td></tr>
+<tr><td><code>trackId</code></td><td>int</td><td>Subtitle track to start with, numbered from 1 in the order <code>getVideoInfo</code> lists captions. 0 or absent means none. default <code>0</code>.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>trackId</code></p>
+<p><code>trackId</code>, not <code>captionId</code>: the cast API numbers tracks 1..n by position, and 0 means off. <code>captionId</code> cannot express &quot;off&quot; — the sidecar caption index and a missing parameter are both -1, so &quot;no subtitles&quot; and &quot;the sidecar file&quot; would be one value.</p></div>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>0</code></td><td>Subsonic</td><td>No cast session is active.</td></tr>
+</tbody>
+</table>
+<p><b>Seeking is also a <code>castLoad</code></b>, not a <code>castControl</code> with <code>action=seek</code> — every seek is a full reload. The server returns as soon as the load is queued; the actual Cast message goes out on a background connection.</p>
+<p>Subtitle tracks are declared to the receiver in <b>every</b> load, whether or not one is switched on, because <code>castControl</code> with <code>action=captions</code> can only activate a track the load already declared. Emitting them only when a caption is already chosen works when the viewer picks before playing and never when they pick during, which reads as an intermittent fault rather than a missing feature.</p>
+<p class="api-see">See also <a href="#ep-castControl"><code>castControl</code></a>, <a href="#ep-castSession"><code>castSession</code></a>.</p>
+</div>
+<div class="api-ep">
+<h3 id="ep-castControl">castControl</h3>
+<p class="api-meta"><code>GET /rest/castControl.view</code>
+<span class="api-badge">castRole</span></p>
+<p>Transport control for the active session.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>action</code> <b class="api-req">*</b></td><td>string</td><td>What to do. one of <code>play</code>, <code>pause</code>, <code>seek</code>, <code>captions</code>.</td></tr>
+<tr><td><code>time</code></td><td>float</td><td>Seconds, for <code>action=seek</code>.</td></tr>
+<tr><td><code>trackId</code></td><td>int</td><td>For <code>action=captions</code>, numbered as for <code>castLoad</code>. 0 or absent turns subtitles off.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>action</code></p>
+<ul class="doc-list"><li><code>play</code> resumes a paused session. If the session has gone <code>IDLE</code> — the receiver times out during long pauses — this instead re-issues a full load from the last known position.</li><li><code>seek</code> is only for in-session seeks; the web client seeks via <code>castLoad</code>, which is a full reload.</li><li><code>captions</code> silently does nothing when the receiver has no media session yet. The track belongs on the <code>castLoad</code> in that case.</li></ul></div>
+</div>
+<div class="api-ep">
+<h3 id="ep-castSession">castSession</h3>
+<p class="api-meta"><code>GET /rest/castSession.view</code>
+<span class="api-badge">castRole</span>
+<span class="api-badge">JSON only</span></p>
+<p>A non-blocking snapshot of the current session, for restoring the UI after a page reload.</p>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>castSession.active</code></td><td>bool</td><td>Whether a session exists. The remaining fields are present only when it does.</td></tr>
+<tr><td><code>castSession.deviceId</code></td><td>string</td><td>The device being cast to, as <code>listCastDevices</code> reports it.</td></tr>
+<tr><td><code>castSession.deviceName</code></td><td>string</td><td>Its friendly name.</td></tr>
+<tr><td><code>castSession.songId</code></td><td>string</td><td>What is loaded.</td></tr>
+<tr><td><code>castSession.startOffset</code></td><td>float</td><td>Add this to the receiver&#x27;s reported <code>currentTime</code> to get the absolute position in the track. Zero under native seek, which is every codec today.</td></tr>
+<tr><td><code>castSession.playerState</code></td><td>string</td><td>As the receiver reports it: <code>PLAYING</code>, <code>PAUSED</code>, <code>BUFFERING</code>, <code>IDLE</code>.</td></tr>
+<tr><td><code>castSession.currentTime</code></td><td>float</td><td>The receiver&#x27;s reported position.</td></tr>
+<tr><td><code>castSession.duration</code></td><td>float</td><td>Duration as the receiver understands it.</td></tr>
+<tr><td><code>castSession.songDuration</code></td><td>float</td><td>Duration as the library has it, which is the one to trust for a progress bar.</td></tr>
+<tr><td><code>castSession.trackId</code></td><td>int</td><td>The subtitle track currently showing, or 0.</td></tr>
+</tbody>
+</table>
+</div>
+<div class="api-ep">
+<h3 id="ep-castEvents">castEvents</h3>
+<p class="api-meta"><code>GET /rest/castEvents.view</code>
+<span class="api-badge">castRole</span>
+<span class="api-badge">event stream</span></p>
+<p>Server-sent events carrying the receiver&#x27;s status as it changes.</p>
+<p>Content type: <code>text/event-stream</code></p>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>204</code></td><td>HTTP</td><td>No cast session is active. There is nothing to stream, so no event stream is opened.</td></tr>
+</tbody>
+</table>
+<p>An event is emitted whenever the receiver pushes a status change, and at least every 15 seconds otherwise. Each <code>data:</code> payload is a JSON object with <code>playerState</code>, <code>currentTime</code>, <code>duration</code>, <code>idleReason</code> and <code>startOffset</code>.</p>
+<div class="note"><p>The SSE connection doubles as the liveness signal for the cast session. Once the last listener disconnects, casting is torn down automatically after 30 seconds — so a client that wants the session to survive must keep this open.</p></div>
+<p class="api-see">See also <a href="#ep-castSession"><code>castSession</code></a>.</p>
+</div>
+</div>
+
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-top">
+      <div>
+        <a class="brand" href="index.html"><img src="assets/gaindrive.svg" alt="GainDrive logo" style="width:36px;height:36px;border-radius:7px"><b>GainDrive</b></a>
+        <p class="tag">Full-featured OpenSubsonic-compatible audio/video server, and separate Web, Android and iOS players. Open source (GPLv3).</p>
+      </div>
+      <div class="footer-cols">
+        <div class="col">
+          <h5>Product</h5>
+          <a href="server.html">Server</a>
+          <a href="web.html">Web player</a>
+          <a href="android.html">Android app</a>
+          <a href="ios.html">iOS app</a>
+        </div>
+        <div class="col">
+          <h5>Resources</h5>
+          <a href="docs.html">Documentation</a>
+          <a href="api.html">API reference</a>
+          <a href="https://opensubsonic.netlify.app/" target="_blank" rel="noopener">OpenSubsonic</a>
+          <a href="https://github.com/kpeeters/gaindrive/releases" target="_blank" rel="noopener">Changelog</a>
+          <a href="privacy.html">Privacy policy</a>
+        </div>
+        <div class="col">
+          <h5>Project</h5>
+          <a href="https://github.com/kpeeters/gaindrive" target="_blank" rel="noopener">Source</a>
+          <a href="https://github.com/kpeeters/gaindrive/issues" target="_blank" rel="noopener">Issues</a>
+          <a href="https://github.com/kpeeters/gaindrive/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-base">
+      <span>Released under the <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GNU GPL v3</a></span>
+      <span>© 2026 <a href="https://github.com/kpeeters" target="_blank" rel="noopener">Kasper Peeters</a></span>
+    </div>
+  </div>
+</footer>
+
+<script src="nav.js"></script>
+</body>
+</html>

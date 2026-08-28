@@ -243,7 +243,7 @@ interface SubsonicApi {
 
 	// ── Fetching a URL into the user's uploads ──────────────────────────
 	//
-	// OpenSubsonic extension "gaindrive" version 2. All four require the
+	// OpenSubsonic extension "gaindrive" version 1. All four require the
 	// account's upload role, which is why [getUrlHandlers] doubles as the
 	// capability probe: it answers error 50 without that role and an error of
 	// its own on a server too old to know the endpoint, so one call decides
