@@ -1,26 +1,133 @@
 'use strict';
 
 // ── Credential storage ──────────────────────────────────────────────────────
-
+//
+// The password is never stored and, after login, never sent.
+//
+// Subsonic offers two ways to present credentials: `p=<password>` and the token
+// scheme, `t=md5(password + salt)` with `s=<salt>`. This client used the first,
+// which put the password into every request URL — and a URL is the least
+// private thing in a browser. It reaches the server's access log, the reverse
+// proxy's log, the browser's own history, the Referer header of anything the
+// page loads, and every cache in between. Over HTTPS that is not an
+// interception risk; it is a *copies* risk, and the copies outlive the session.
+//
+// So the salt and the token are computed once at login and those are what
+// localStorage holds. The token is still equivalent to the password *for this
+// server* — that is inherent to the scheme, and no client-side arithmetic can
+// change it — but it is not the password itself, which is the part a person is
+// liable to have reused somewhere that matters more than their music.
+//
+// The salt is per login rather than per request, matching AuthInterceptor.kt in
+// the Android app and for the same reason recorded there: a per-request salt
+// gives every cover-art URL a unique query string, so the browser's image cache
+// misses on every scroll.
 const creds = {
    load() {
       return {
-         server:   localStorage.getItem('gd_server'),
-         user:     localStorage.getItem('gd_user'),
-         password: localStorage.getItem('gd_password'),
+         server: localStorage.getItem('gd_server'),
+         user:   localStorage.getItem('gd_user'),
+         salt:   localStorage.getItem('gd_salt'),
+         token:  localStorage.getItem('gd_token'),
       };
    },
-   save(server, user, password) {
-      localStorage.setItem('gd_server',   server);
-      localStorage.setItem('gd_user',     user);
-      localStorage.setItem('gd_password', password);
+   // Stores the derived pair rather than the password, which never reaches
+   // here. tryLogin() derives it, proves it against the server, and then saves
+   // that exact pair — deriving a second time would store a token the login
+   // never tested.
+   save(server, user, salt, token) {
+      localStorage.setItem('gd_server', server);
+      localStorage.setItem('gd_user',   user);
+      localStorage.setItem('gd_salt',   salt);
+      localStorage.setItem('gd_token',  token);
    },
    clear() {
       localStorage.removeItem('gd_server');
       localStorage.removeItem('gd_user');
+      localStorage.removeItem('gd_salt');
+      localStorage.removeItem('gd_token');
+      // Written by versions of this client that sent p=. Removed on any
+      // logout or failed restore so an upgrade does not leave the password
+      // sitting in localStorage for ever.
       localStorage.removeItem('gd_password');
    },
 };
+
+// The auth parameters for one request. Every URL this client builds goes
+// through here, so there is one place that decides what is sent.
+function authParams() {
+   const {user, salt, token} = creds.load();
+   return {u: user, t: token, s: salt};
+}
+
+// A salt and the token derived from it. The server requires at least six
+// characters of salt (the Subsonic spec's floor); sixteen hex characters is
+// eight bytes from the platform CSPRNG.
+function deriveToken(password) {
+   const bytes = new Uint8Array(8);
+   crypto.getRandomValues(bytes);
+   const salt = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+   return {salt, token: md5(password + salt)};
+}
+
+// ── MD5 ─────────────────────────────────────────────────────────────────────
+//
+// RFC 1321, and here only because the Subsonic token scheme specifies it.
+// SubtleCrypto deliberately does not implement MD5, so there is nothing to
+// call; this is the browser counterpart of src/md5.hh and produces the same
+// lowercase hex the server compares against.
+//
+// The input is UTF-8 encoded first: a password with a non-ASCII character has
+// to hash the same bytes the server hashes, and the server hashes the bytes it
+// received.
+function md5(str) {
+   const S = [7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,
+              5, 9,14,20,5, 9,14,20,5, 9,14,20,5, 9,14,20,
+              4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,
+              6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21];
+   const K = new Uint32Array(64);
+   for (let i = 0; i < 64; i++)
+      K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296);
+
+   const msg = new TextEncoder().encode(str);
+   // Append 0x80, pad to 56 mod 64, then the 64-bit little-endian bit length.
+   const padded = new Uint8Array((((msg.length + 8) >> 6) + 1) << 6);
+   padded.set(msg);
+   padded[msg.length] = 0x80;
+   const bits = msg.length * 8;
+   const dv = new DataView(padded.buffer);
+   dv.setUint32(padded.length - 8, bits >>> 0, true);
+   dv.setUint32(padded.length - 4, Math.floor(bits / 4294967296), true);
+
+   let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+   const M = new Uint32Array(16);
+   const rotl = (x, c) => (x << c) | (x >>> (32 - c));
+
+   for (let off = 0; off < padded.length; off += 64) {
+      for (let i = 0; i < 16; i++) M[i] = dv.getUint32(off + i * 4, true);
+      let A = a0, B = b0, C = c0, D = d0;
+      for (let i = 0; i < 64; i++) {
+         let F, g;
+         if (i < 16)      { F = (B & C) | (~B & D);        g = i; }
+         else if (i < 32) { F = (D & B) | (~D & C);        g = (5 * i + 1) & 15; }
+         else if (i < 48) { F = B ^ C ^ D;                 g = (3 * i + 5) & 15; }
+         else             { F = C ^ (B | ~D);              g = (7 * i) & 15; }
+         F = (F + A + K[i] + M[g]) >>> 0;
+         A = D; D = C; C = B;
+         B = (B + rotl(F, S[i])) >>> 0;
+      }
+      a0 = (a0 + A) >>> 0; b0 = (b0 + B) >>> 0;
+      c0 = (c0 + C) >>> 0; d0 = (d0 + D) >>> 0;
+   }
+
+   const hex = n => {
+      let s = '';
+      for (let i = 0; i < 4; i++)
+         s += ((n >>> (i * 8)) & 0xff).toString(16).padStart(2, '0');
+      return s;
+   };
+   return hex(a0) + hex(b0) + hex(c0) + hex(d0);
+}
 
 // ── Playback preferences ────────────────────────────────────────────────────
 
@@ -89,10 +196,9 @@ function audioOnlyFormat() {
 
 // Build a subsonic API URL. Extra params can be passed as an object.
 function apiUrl(endpoint, extra = {}) {
-   const {server, user, password} = creds.load();
+   const {server} = creds.load();
    const p = new URLSearchParams({
-      u: user,
-      p: password,
+      ...authParams(),
       v: '1.16.1',
       c: 'gaindrive-web',
       f: 'json',
@@ -308,9 +414,14 @@ async function tryLogin(server, user, password) {
    server = server.replace(/\/+$/, '');
    console.log('[login] attempting ping', server, user);
 
+   // Derived once and proved before it is stored, so what ends up in
+   // localStorage is a pair the server has already accepted. The password is
+   // not sent and is not kept.
+   const {salt, token} = deriveToken(password);
    const p = new URLSearchParams({
       u: user,
-      p: password,
+      t: token,
+      s: salt,
       v: '1.16.1',
       c: 'gaindrive-web',
       f: 'json',
@@ -331,7 +442,24 @@ async function tryLogin(server, user, password) {
       throw new Error(sr.error?.message ?? 'Authentication failed');
 
    console.log('[login] success, saving credentials');
-   creds.save(server, user, password);
+   creds.save(server, user, salt, token);
+}
+
+// Verify credentials already in localStorage. Separate from tryLogin() because
+// there is no password to derive from at this point — the stored token is the
+// credential, and this only asks the server whether it still works.
+async function verifySaved() {
+   const {server, user, salt, token} = creds.load();
+   if (!server || !user || !salt || !token) return false;
+   const p = new URLSearchParams({
+      u: user, t: token, s: salt, v: '1.16.1', c: 'gaindrive-web', f: 'json',
+   });
+   const resp = await fetch(`${server}/rest/ping.view?${p}`);
+   if (!resp.ok) throw new Error(`Server returned HTTP ${resp.status}`);
+   const sr = (await resp.json())['subsonic-response'];
+   if (sr.status !== 'ok')
+      throw new Error(sr.error?.message ?? 'Authentication failed');
+   return true;
 }
 
 async function detectSubsonicOrigin() {
@@ -780,7 +908,7 @@ async function viewUserEdit(user, refreshFn) {
    const fEmail      = addField('Email',          textInput(user?.email,     ''));
    const fAdmin      = addField('Admin',          checkInput(user?.adminRole));
    const fUpload     = addField('Upload allowed', checkInput(user?.uploadRole));
-   const fCast      = addField('Cast allowed',   checkInput(user?.castRole));
+   const fCast      = addField('Cast on server network allowed',   checkInput(user?.castRole));
    const isSelf = !isNew && user.username === creds.load().user;
    const fDisabled   = addField('Disabled',       checkInput(user?.disabled));
    if (isSelf) {
@@ -818,9 +946,9 @@ async function viewUserEdit(user, refreshFn) {
       formStatus.textContent = '';
       saveBtn.disabled = true;
 
-      const {server, user: authUser, password: authPass} = creds.load();
+      const {server} = creds.load();
       const base = new URLSearchParams({
-         u: authUser, p: authPass, v: '1.16.1', c: 'gaindrive-web', f: 'json'
+         ...authParams(), v: '1.16.1', c: 'gaindrive-web', f: 'json'
          });
 
       try {
@@ -1393,9 +1521,9 @@ function makeUploadBar() {
       const file = fileInput.files[0];
       if (!file) { uploadStatus.textContent = 'No file selected.'; return; }
 
-      const {server, user, password} = creds.load();
+      const {server} = creds.load();
       const p = new URLSearchParams({
-         u: user, p: password, v: '1.16.1', c: 'gaindrive-web', f: 'json'
+         ...authParams(), v: '1.16.1', c: 'gaindrive-web', f: 'json'
          });
       // The same rule the fetch uses: an untouched field sends nothing at all
       // rather than an empty value, because the server is entitled to treat a
@@ -4168,8 +4296,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
          // Save cover art first, if changed.
          if (pendingCover) {
             try {
-               const {server, user, password} = creds.load();
-               const p = new URLSearchParams({u: user, p: password,
+               const {server} = creds.load();
+               const p = new URLSearchParams({...authParams(),
                   v: '1.16.1', c: 'gaindrive-web', f: 'json', id: albumId});
                const fd = new FormData();
                if (pendingCover.kind === 'file') fd.append('file', pendingCover.file);
@@ -4882,11 +5010,11 @@ document.getElementById('login-form').addEventListener('submit', async e => {
 // On load: if we have saved credentials, verify them and skip the login form.
 console.log('[boot] checking saved credentials');
 (async () => {
-   const {server, user, password} = creds.load();
-   console.log('[boot] saved creds present:', !!(server && user && password));
-   if (server && user && password) {
+   const {server, user, salt, token} = creds.load();
+   console.log('[boot] saved creds present:', !!(server && user && salt && token));
+   if (server && user && salt && token) {
       try {
-         await tryLogin(server, user, password);
+         await verifySaved();
          showShell();
          return;
       } catch (err) {
@@ -4894,6 +5022,13 @@ console.log('[boot] checking saved credentials');
          creds.clear();
          showLogin();
       }
+   }
+   // A password left by a version of this client that stored one. There is no
+   // way to turn it into a token without the user typing it again, so the only
+   // safe thing is to remove it and ask.
+   if (localStorage.getItem('gd_password')) {
+      console.log('[boot] clearing a password stored by an older client');
+      creds.clear();
    }
    if (await detectSubsonicOrigin()) {
       console.log('[boot] self-hosted: hiding server field');

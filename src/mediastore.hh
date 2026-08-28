@@ -74,7 +74,12 @@ class MediaStore {
 
 		// ---- User management ----
 
-		// Returns false if username already exists.
+		// Letters, digits, '.', '_' and '-', at most 64 bytes. A username is a
+		// directory component in the uploads tree and the key every ownership
+		// check compares against, so it cannot be an arbitrary string.
+		static bool valid_username(const std::string& u);
+
+		// Returns false if the username already exists or is not valid.
 		bool add_user(const std::string& username, const std::string& password,
 		              bool is_admin = false);
 

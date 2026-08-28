@@ -29,6 +29,8 @@
 #include <ifaddrs.h>
 #include <unistd.h>
 
+#include <algorithm>
+
 #include <openssl/ssl.h>
 #include <openssl/rand.h>
 
@@ -888,18 +890,92 @@ CastManager::Probe CastManager::probe(const CastDevice& dev, int timeout_ms)
 	return Probe::SILENT;
 	}
 
+// How long a minted stream token stays usable. Generous, because it has to
+// outlast the film it was minted for, and a seek mints a fresh one anyway —
+// this is a backstop for a session someone walked away from, not a timeout the
+// receiver will ever notice.
+static constexpr auto CAST_TOKEN_TTL = std::chrono::hours(12);
+
+std::string CastManager::mint_token(int song_id,
+                                     const std::vector<int>& caption_ids)
+	{
+	// 128 bits from the CSPRNG. **The return value is checked**: RAND_bytes
+	// answers 0 on failure, and ignoring that leaves `bytes` holding whatever
+	// was on the stack — a token an attacker may well be able to predict, for
+	// a credential that skips authentication entirely.
+	uint8_t bytes[16];
+	if (RAND_bytes(bytes, sizeof(bytes)) != 1) {
+		std::cout << stamp() << "Cast: RAND_bytes failed; refusing to mint a "
+		          << "stream token" << std::endl;
+		std::lock_guard<std::mutex> lk(token_mutex_);
+		token_.clear();
+		return {};
+		}
+	char hex[33];
+	for (int i = 0; i < 16; i++) snprintf(hex + 2*i, 3, "%02x", bytes[i]);
+
+	std::lock_guard<std::mutex> lk(token_mutex_);
+	token_             = hex;
+	token_song_id_     = song_id;
+	token_caption_ids_ = caption_ids;
+	token_expires_     = std::chrono::steady_clock::now() + CAST_TOKEN_TTL;
+	return token_;
+	}
+
+std::string CastManager::token() const
+	{
+	std::lock_guard<std::mutex> lk(token_mutex_);
+	return token_;
+	}
+
+// Constant-time over the token, which is not really about timing — 128 bits
+// makes that academic — but about not having the wrong primitive sitting in
+// the one place that decides whether an unauthenticated request is served.
+static bool token_eq(const std::string& a, const std::string& b)
+	{
+	if (a.size() != b.size()) return false;
+	unsigned diff = 0;
+	for (size_t i = 0; i < a.size(); ++i)
+		diff |= static_cast<unsigned char>(a[i]) ^ static_cast<unsigned char>(b[i]);
+	return diff == 0;
+	}
+
+bool CastManager::valid_token(const std::string& t, int song_id) const
+	{
+	if (!active_) return false;
+	std::lock_guard<std::mutex> lk(token_mutex_);
+	if (token_.empty() || !token_eq(token_, t)) return false;
+	if (std::chrono::steady_clock::now() > token_expires_) return false;
+	return song_id == token_song_id_;
+	}
+
+bool CastManager::valid_caption_token(const std::string& t, int song_id,
+                                       int caption_id) const
+	{
+	if (!valid_token(t, song_id)) return false;
+	// Only the captions this LOAD actually declared. getVideoInfo and
+	// getCaptions must agree about what exists, and so must this: a track the
+	// LOAD never offered is one the receiver has no reason to ask for.
+	std::lock_guard<std::mutex> lk(token_mutex_);
+	return std::find(token_caption_ids_.begin(), token_caption_ids_.end(),
+	                 caption_id) != token_caption_ids_.end();
+	}
+
 bool CastManager::start(const CastDevice& dev)
 	{
 	device_ = dev;
 	active_ = true;
 
-	// Generate a 128-bit random token. The Chromecast includes this when it
-	// fetches the stream from us, so we can skip normal credential auth.
-	uint8_t bytes[16];
-	RAND_bytes(bytes, sizeof(bytes));
-	char hex[33];
-	for (int i = 0; i < 16; i++) snprintf(hex + 2*i, 3, "%02x", bytes[i]);
-	token_ = hex;
+	// No token is minted here. It used to be, once per session and bound to
+	// nothing; it is now minted per LOAD by cast_load_song(), which is what
+	// scopes it to a single song. Until the first LOAD there is nothing for a
+	// receiver to fetch, so there is nothing to authorise.
+	{
+	std::lock_guard<std::mutex> lk(token_mutex_);
+	token_.clear();
+	token_song_id_ = -1;
+	token_caption_ids_.clear();
+	}
 
 	// Start the background status polling thread.
 	poll_active_ = true;
@@ -1424,7 +1500,12 @@ void CastManager::stop()
 	{
 	poll_active_ = false;
 	active_ = false;
+	{
+	std::lock_guard<std::mutex> lk(token_mutex_);
 	token_.clear();
+	token_song_id_ = -1;
+	token_caption_ids_.clear();
+	}
 	{
 	std::lock_guard<std::mutex> lk(tid_mutex_);
 	transport_id_.clear();

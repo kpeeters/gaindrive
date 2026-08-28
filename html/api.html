@@ -233,7 +233,7 @@
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
 <tr><td><code>pace</code></td><td>bool</td><td>Deliver at roughly 1x playback rate rather than as fast as the socket takes it.</td></tr>
-<tr><td><code>castToken</code></td><td>string</td><td>The per-session token from <code>startCast</code>, accepted in place of credentials.</td></tr>
+<tr><td><code>castToken</code></td><td>string</td><td>The token minted by <code>castLoad</code>, accepted in place of credentials.</td></tr>
 <tr><td><code>size</code></td><td>string</td><td>Video only. A cap on the output frame size, as <code>WxH</code> — <code>640x480</code>.</td></tr>
 <tr><td><code>duration</code></td><td>int</td><td>Video only. Bound the output to this many seconds from <code>timeOffset</code>, and switch the container to MPEG-TS. That is one HLS segment.</td></tr>
 </tbody>
@@ -242,9 +242,11 @@
 <p>Send it when the URL is being handed to something that will play it in real time and cannot be recognised from the request — a Cast receiver fetching for itself is the case it exists for. Without it such a receiver is sent the whole track at once, stops reading when its buffer fills, and the connection is then idle until its own 60-second no-data timeout, or a reverse proxy&#x27;s, kills it mid-track.</p>
 <p><b>Never send it on a download or a prefetch</b>: that would make the transfer take as long as the music. A browser is paced already, by its User-Agent, and video is never paced.</p></div>
 <div class="api-note"><p class="api-note-h"><code>castToken</code></p>
-<p>A Chromecast fetches the media for itself and has no account, so the token is what authorises it. It is issued once when the user selects a device and lasts the whole session — it is not single-use per request. A request carrying a valid token also skips the <code>castRole</code> check, since only <code>castLoad</code> ever issues one, and skips the account bitrate ceiling.</p></div>
+<p>A Chromecast fetches the media for itself and has no account, so the token is what authorises it. It is not single-use per request — the receiver makes many range requests for one track — but it <b>is</b> scoped to the song <code>castLoad</code> declared, and to a limited lifetime. Presenting it for a different <code>id</code> is refused as though it were absent.</p>
+<p>A request carrying a valid token skips the <code>castRole</code> check, since only <code>castLoad</code> ever issues one, and skips the account bitrate ceiling — there is no account to apply it to.</p></div>
 <div class="api-note"><p class="api-note-h"><code>size</code></p>
-<p>Any value here disqualifies the direct and remux tiers, so the video is re-encoded on the fly and the response is chunked with no <code>Content-Length</code>.</p></div>
+<p>Any value here disqualifies the direct and remux tiers, so the video is re-encoded on the fly and the response is chunked with no <code>Content-Length</code>.</p>
+<p>Strictly <code>WxH</code>, both between 16 and 7680/4320. Anything else is ignored rather than rejected, and means &quot;do not scale&quot; — the same as omitting it.</p></div>
 </div>
 <div class="api-ep">
 <h3 id="ep-hls-m3u8">hls.m3u8</h3>
@@ -295,10 +297,11 @@
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
-<tr><td><code>castToken</code></td><td>string</td><td>The per-session token from <code>startCast</code>, accepted in place of credentials.</td></tr>
+<tr><td><code>castToken</code></td><td>string</td><td>The token minted by <code>castLoad</code>, accepted in place of credentials.</td></tr>
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>castToken</code></p>
+<p>Scoped as it is on <code>stream</code>, and additionally to the caption ids the LOAD declared: a track that LOAD did not offer is one the receiver has no reason to ask for, so the token does not authorise it.</p>
 <p>The converted result is cached, because ffmpeg has to demux the whole container to collect one subtitle stream and the receiver fetches the track the moment it is switched on.</p></div>
 </div>
 </div>
@@ -373,6 +376,7 @@
 <h3 id="ep-setCoverArt">setCoverArt</h3>
 <p class="api-meta"><code>POST /rest/setCoverArt.view</code></p>
 <p>Writes <code>cover.jpg</code> or <code>cover.png</code> into an album folder, whichever the uploaded bytes actually are.</p>
+<p>Permission: Your own upload batch, or admin anywhere.</p>
 <h4>Parameters</h4>
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
@@ -383,6 +387,7 @@
 </tbody>
 </table>
 <p>Supply exactly one of <code>file</code> or <code>url</code>.</p>
+<p>A <code>url</code> must be <code>http</code> or <code>https</code> and must resolve to a globally routable address. Loopback, link-local, RFC1918 and other private ranges are refused, and a redirect into one is refused at the hop that names it — the server is reachable from places the caller is not, and an image fetch is not a reason to lend it out. The refusal is deliberately worded the same as a fetch that simply failed, so the endpoint cannot be used to tell one host or port from another. The response body is also size-capped.</p>
 <p><b>JPEG and PNG only</b> — the format is taken from the magic bytes, not from the declared content type, and anything else is rejected. That is not a new restriction so much as the removal of a trap: the scanner indexes only <code>.jpg</code>, <code>.jpeg</code> and <code>.png</code>, so a WebP written as <code>cover.jpg</code> used to become a cover nothing could decode.</p>
 <p>If the upload changes the format, the file it replaces is removed, since <code>cover.jpg</code> outranks <code>cover.png</code> when the scanner looks for a cover.</p>
 <p>A cover set this way is marked as chosen by a person and is never overwritten by a scan — which for a film is the only way to correct a wrong TMDB match.</p>
@@ -395,6 +400,7 @@
 <h3 id="ep-updateSong">updateSong</h3>
 <p class="api-meta"><code>GET /rest/updateSong.view</code></p>
 <p>Updates the tags of a single track.</p>
+<p>Permission: Your own upload batch, or admin anywhere.</p>
 <h4>Parameters</h4>
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
@@ -717,7 +723,8 @@
 </div>
 <div class="doc-sec" id="cast">
 <h2>Chromecast</h2>
-<p>Casting is server-driven: the browser asks gaindrive to load a URL onto the Chromecast, and the device then fetches the media from <code>stream</code> itself using a per-session token. All seven endpoints require <code>castRole</code> in addition to authentication, and return error 50 without it. <code>stream</code> is exempt when called with a valid <code>castToken</code>, since only <code>castLoad</code> ever issues one.</p>
+<p>Casting is server-driven: the browser asks gaindrive to load a URL onto the Chromecast, and the device then fetches the media from <code>stream</code> itself using a token. All seven endpoints require <code>castRole</code> in addition to authentication, and return error 50 without it. <code>stream</code> and <code>getCaptions</code> are exempt when called with a valid <code>castToken</code>, since only <code>castLoad</code> ever issues one.</p>
+<p>The token is minted per <code>castLoad</code> and is scoped to what that load declared — one song, and the caption ids offered for it. It is not a general credential: presenting it for any other id is refused exactly as if it were absent.</p>
 <div class="api-ep">
 <h3 id="ep-listCastDevices">listCastDevices</h3>
 <p class="api-meta"><code>GET /rest/listCastDevices.view</code>

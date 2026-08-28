@@ -26,8 +26,39 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 RestrictSUIDSGID=yes
 PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+# Bounds rather than hardening. A transcode is an ffmpeg child and an upload is
+# an archive read into memory, so both the memory and the process count are
+# things a client can push on; without a ceiling the failure is the whole
+# machine rather than this service. Raise them if a large library needs it --
+# these are sized for a home server, not measured.
+MemoryMax=4G
+TasksMax=512
+
 # NOTE: do NOT add ProtectHome if your music lives under /home -- it must
 # stay writable. Tighten with `systemctl edit gaindrive` if desired.
+#
+# AF_NETLINK is in RestrictAddressFamilies because getaddrinfo() needs it on
+# glibc, and the outbound-fetch guard resolves every host it is asked to
+# reach. Dropping it makes every online lookup fail with a name-resolution
+# error that points nowhere near this file.
+#
+# PrivateDevices also hides /dev/dri, so a future hardware-accelerated
+# transcode (VAAPI, QSV, NVENC) would need it dropped or DeviceAllow= added.
+# Nothing here uses one today -- the video encoder is libx264 -- so the note is
+# for whoever adds one, not a warning about the present configuration.
+#
+# Deliberately NOT set: MemoryDenyWriteExecute, and any subtraction from
+# @system-service. Both apply to the whole unit, ffmpeg and yt-dlp children
+# included, and a codec or a Python extension that trips one of them fails with
+# a bare SIGSYS -- which reads as "transcoding is broken" and points nowhere
+# near this file. The gain over @system-service alone did not look worth that.
 
 [Install]
 WantedBy=multi-user.target

@@ -183,9 +183,13 @@ group = "Casting"
 blurb = '''
 Casting is server-driven: the browser asks gaindrive to load a URL onto the
 Chromecast, and the device then fetches the media from `stream` itself using a
-per-session token. All seven endpoints require `castRole` in addition to
-authentication, and return error 50 without it. `stream` is exempt when called
-with a valid `castToken`, since only `castLoad` ever issues one.
+token. All seven endpoints require `castRole` in addition to authentication,
+and return error 50 without it. `stream` and `getCaptions` are exempt when
+called with a valid `castToken`, since only `castLoad` ever issues one.
+
+The token is minted per `castLoad` and is scoped to what that load declared —
+one song, and the caption ids offered for it. It is not a general credential:
+presenting it for any other id is refused exactly as if it were absent.
 '''
 
 
@@ -405,13 +409,17 @@ video is never paced.
   [[endpoint.param]]
   name  = "castToken"
   type  = "string"
-  doc   = 'The per-session token from `startCast`, accepted in place of credentials.'
+  doc   = 'The token minted by `castLoad`, accepted in place of credentials.'
   notes = '''
 A Chromecast fetches the media for itself and has no account, so the token is
-what authorises it. It is issued once when the user selects a device and lasts
-the whole session — it is not single-use per request. A request carrying a
-valid token also skips the `castRole` check, since only `castLoad` ever issues
-one, and skips the account bitrate ceiling.
+what authorises it. It is not single-use per request — the receiver makes many
+range requests for one track — but it **is** scoped to the song `castLoad`
+declared, and to a limited lifetime. Presenting it for a different `id` is
+refused as though it were absent.
+
+A request carrying a valid token skips the `castRole` check, since only
+`castLoad` ever issues one, and skips the account bitrate ceiling — there is no
+account to apply it to.
 '''
 
   [[endpoint.param]]
@@ -421,6 +429,9 @@ one, and skips the account bitrate ceiling.
   notes = '''
 Any value here disqualifies the direct and remux tiers, so the video is
 re-encoded on the fly and the response is chunked with no `Content-Length`.
+
+Strictly `WxH`, both between 16 and 7680/4320. Anything else is ignored rather
+than rejected, and means "do not scale" — the same as omitting it.
 '''
 
   [[endpoint.param]]
@@ -510,8 +521,12 @@ summary    = 'A Chromecast fetches its own subtitle track and has no credentials
   [[endpoint.param]]
   name  = "castToken"
   type  = "string"
-  doc   = 'The per-session token from `startCast`, accepted in place of credentials.'
+  doc   = 'The token minted by `castLoad`, accepted in place of credentials.'
   notes = '''
+Scoped as it is on `stream`, and additionally to the caption ids the LOAD
+declared: a track that LOAD did not offer is one the receiver has no reason to
+ask for, so the token does not authorise it.
+
 The converted result is cached, because ffmpeg has to demux the whole
 container to collect one subtitle stream and the receiver fetches the track
 the moment it is switched on.
@@ -591,12 +606,21 @@ Use it to drive the `index` parameter of `getCoverArt`.
 
 [[endpoint]]
 kind    = 'endpoint'
-name    = "setCoverArt"
-section = "albumtext"
-method  = 'POST'
-summary = 'Writes `cover.jpg` or `cover.png` into an album folder, whichever the uploaded bytes actually are.'
-notes   = '''
+name      = "setCoverArt"
+section   = "albumtext"
+method    = 'POST'
+auth_note = 'Your own upload batch, or admin anywhere.'
+summary   = 'Writes `cover.jpg` or `cover.png` into an album folder, whichever the uploaded bytes actually are.'
+notes     = '''
 Supply exactly one of `file` or `url`.
+
+A `url` must be `http` or `https` and must resolve to a globally routable
+address. Loopback, link-local, RFC1918 and other private ranges are refused,
+and a redirect into one is refused at the hop that names it — the server is
+reachable from places the caller is not, and an image fetch is not a reason to
+lend it out. The refusal is deliberately worded the same as a fetch that
+simply failed, so the endpoint cannot be used to tell one host or port from
+another. The response body is also size-capped.
 
 **JPEG and PNG only** — the format is taken from the magic bytes, not from the
 declared content type, and anything else is rejected. That is not a new
@@ -635,10 +659,11 @@ see = ["getAlbumImages"]
 
 [[endpoint]]
 kind    = 'endpoint'
-name    = "updateSong"
-section = "metadata"
-summary = 'Updates the tags of a single track.'
-notes   = '''
+name      = "updateSong"
+section   = "metadata"
+auth_note = 'Your own upload batch, or admin anywhere.'
+summary   = 'Updates the tags of a single track.'
+notes     = '''
 For an **audio** track the file is authoritative. Tags are written to it first
 via TagLib and mirrored into the database only if that succeeds, so a failed
 write leaves both in their original state.

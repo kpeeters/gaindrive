@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <chrono>
 #include <condition_variable>
 #include <atomic>
 
@@ -175,12 +176,41 @@ class CastManager {
 		CastStatus wait_status(int timeout_ms = 15000);
 
 		bool        active()          const { return active_; }
-		std::string token()           const { return token_; }
 		std::string get_device_id()   const { return device_.id; }
 		std::string get_device_name() const { return device_.name; }
 		float       last_known_time() const;
-		bool        valid_token(const std::string& t) const
-			{ return active_ && !token_.empty() && token_ == t; }
+
+		// ---- The stream token -----------------------------------------
+		//
+		// A Chromecast fetches stream.view and getCaptions.view for itself and
+		// has no credentials to do it with, so this token stands in for them.
+		// It is therefore a bearer credential that skips check_auth entirely,
+		// and what it is *worth* is decided here.
+		//
+		// It used to be one string per cast session, minted in start() and
+		// bound to nothing: while any session was live, that one value read
+		// the whole library — every root and every user's private uploads —
+		// with no account, no bitrate cap and no expiry. It travels in cleartext
+		// to a television and appears in the LOAD message, so "it never leaves
+		// the LAN" was the only thing limiting it.
+		//
+		// Now it is minted per LOAD and scoped to what that LOAD declared: one
+		// song, and the caption ids offered for it. A leaked token buys the
+		// track it was minted for, until it expires.
+
+		// New token for one song and its caption ids. Returns the token.
+		std::string mint_token(int song_id, const std::vector<int>& caption_ids);
+
+		// The current token, or empty. Only cast_load_song() needs this, to put
+		// it into the URLs the LOAD hands the receiver.
+		std::string token() const;
+
+		// Both take the id the request is asking for, and both are false if it
+		// is not the one this token was minted for. `caption_id` is a
+		// getCaptions captionId, including SIDECAR_CAPTION_INDEX.
+		bool valid_token(const std::string& t, int song_id) const;
+		bool valid_caption_token(const std::string& t, int song_id,
+		                         int caption_id) const;
 
 		// Incremented at the start of every load() call so content-provider
 		// threads can detect that a new stream has started and exit promptly.
@@ -189,7 +219,16 @@ class CastManager {
 	private:
 		bool        active_ = false;
 		CastDevice  device_;
-		std::string token_;           // random token the Chromecast uses for stream auth
+
+		// The token and everything that bounds it, under one mutex. Kept apart
+		// from status_mutex_ deliberately: this is read from httplib threads on
+		// the hot path of every range request the receiver makes, and taking
+		// the status lock there would queue those behind the poll loop.
+		mutable std::mutex token_mutex_;
+		std::string        token_;
+		int                token_song_id_ = -1;
+		std::vector<int>   token_caption_ids_;
+		std::chrono::steady_clock::time_point token_expires_{};
 
 		std::atomic<int> load_gen_{0};
 

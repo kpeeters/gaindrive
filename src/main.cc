@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <arpa/inet.h>
+#include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -21,6 +22,7 @@
 #include "gaindrive.hh"
 #include "imagescale.hh"
 #include "mediastore.hh"
+#include "stamp.hh"
 #include "tmdb.hh"
 #include "videoart.hh"
 #include "videoname.hh"
@@ -479,6 +481,7 @@ int main(int argc, char* argv[])
 		("upload-root",   "Root holding per-user personal uploads, as name=path", cxxopts::value<std::string>())
 		("cast-device",   "Chromecast that does not announce itself, as [name=]IP[:port] (repeatable)", cxxopts::value<std::vector<std::string>>())
 		("cast-probe",    "Connect to one Chromecast by IP, report whether it answered, and exit", cxxopts::value<std::string>())
+		("trusted-proxy", "Address of a reverse proxy whose X-Forwarded-For may be believed (repeatable; default loopback)", cxxopts::value<std::vector<std::string>>())
 		("upload-dir", "Directory for uploaded archives", cxxopts::value<std::string>()->default_value("/tmp/gaindrive-uploads"))
 		("transcode-cache",    "Directory for cached transcodes (default: alongside --db)", cxxopts::value<std::string>())
 		("transcode-cache-mb", "Transcode cache size in MB (0 disables)", cxxopts::value<int>()->default_value("1024"))
@@ -641,6 +644,15 @@ int main(int argc, char* argv[])
 		}
 	}
 
+	// Which peers' X-Forwarded-For may be believed. Empty here means "leave
+	// the built-in default", which is loopback — the reverse proxy the
+	// packaging sets up. It is a list rather than a flag because the header is
+	// what the login throttle keys on, so believing it from the wrong peer
+	// means an attacker choosing their own rate-limit bucket.
+	std::vector<std::string> trusted_proxies;
+	if (args.count("trusted-proxy"))
+		trusted_proxies = args["trusted-proxy"].as<std::vector<std::string>>();
+
 	std::vector<CastManager::CastDevice> cast_devices;
 	if (args.count("cast-device")) {
 		std::string err;
@@ -673,6 +685,24 @@ int main(int argc, char* argv[])
 	std::string config_path = args["config"].as<std::string>();
 	std::ifstream cfg_file(config_path);
 	if (cfg_file) {
+		// The config is not merely settings: `url_handlers` is an argv vector
+		// that this process will execute, so anyone who can write this file has
+		// code execution as the service user, and anyone who can read it may
+		// learn the database's location. A warning rather than a refusal,
+		// because a development tree legitimately keeps one at looser modes and
+		// failing to start over it would be worse than saying so.
+		{
+		struct stat st{};
+		if (::stat(config_path.c_str(), &st) == 0) {
+			if (st.st_mode & S_IWOTH)
+				std::cerr << "Warning: " << config_path << " is world-writable; "
+				          << "anything written there runs as this user. "
+				          << "chmod 0640 it.\n";
+			else if (st.st_mode & S_IROTH)
+				std::cerr << "Warning: " << config_path << " is world-readable. "
+				          << "chmod 0640 it.\n";
+			}
+		}
 		try {
 			nlohmann::json cfg = nlohmann::json::parse(cfg_file);
 			if (cfg.contains("host"))       host       = cfg["host"];
@@ -705,6 +735,11 @@ int main(int argc, char* argv[])
 					cast_devices.push_back(dev);
 					}
 				}
+			// Same non-merging rule as cast_devices: naming one on the
+			// command line replaces the configured list.
+			if (cfg.contains("trusted_proxies") && trusted_proxies.empty())
+				for (const auto& a : cfg["trusted_proxies"])
+					trusted_proxies.push_back(a.get<std::string>());
 			if (cfg.contains("upload_dir"))  upload_dir  = cfg["upload_dir"];
 			// CLI flags take precedence over config for port.
 			if (cfg.contains("port") && !args.count("port")) port = cfg["port"];
@@ -872,6 +907,15 @@ int main(int argc, char* argv[])
 			return 1;
 			}
 		}
+
+		// Before the server exists, because client_addr() is consulted by the
+		// very first request's log line. Empty leaves the loopback default.
+		if (!trusted_proxies.empty()) {
+			gaindrive_set_trusted_proxies(trusted_proxies);
+			std::cout << stamp() << "Trusting X-Forwarded-For from "
+			          << trusted_proxies.size() << " configured proxy address(es)"
+			          << std::endl;
+			}
 
 		GainDrive gd(db_path, roots, upload_dir, no_scan, debug, flat_multi_disc,
 		             user_db_path, transcode_cache_dir, transcode_cache_mb,

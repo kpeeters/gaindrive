@@ -239,3 +239,13 @@ class GainDrive {
 		FolderWatcher   watcher_;
 		httplib::Server server_;
 	};
+
+// Which peers' X-Forwarded-For header may be believed. Defaults to loopback,
+// which is the reverse proxy the packaging installs. Free rather than a member
+// because client_addr() is used by static helpers in gaindrive.cc — the access
+// logger and check_auth's throttle — that have no GainDrive to ask.
+//
+// Believing the header from an untrusted peer is not merely a wrong log line:
+// the login throttle keys on the result, so it would let a caller pick a fresh
+// rate-limit bucket per request.
+void gaindrive_set_trusted_proxies(std::vector<std::string> addrs);

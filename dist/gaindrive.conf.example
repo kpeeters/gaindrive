@@ -3,6 +3,8 @@
 	"port": 4040,
 	"db_path": "/var/lib/gaindrive/gaindrive.db",
 	"user_db_path": "/var/lib/gaindrive/gaindrive-client.db",
+	"//trusted_proxies": "Peers whose X-Forwarded-For header may be believed. Defaults to loopback, which is right when a reverse proxy on this machine terminates TLS -- the normal public deployment. It matters beyond the log: the failed-login throttle keys on the resulting address, so believing the header from an untrusted peer lets a caller pick its own rate-limit bucket and so have no rate limit at all. Set it only if the proxy is on another host, and name that host. Omit this key to keep the loopback default.",
+	"trusted_proxies": [ "127.0.0.1", "::1" ],
 	"//roots": "One entry per library root. 'name' is stored as the first component of every path in the database, so it is permanent: renaming a root detaches everything under it. Type is artists, categories or uploads (at most one uploads root; omit it to disable personal uploads).",
 	"roots": [
 		{ "name": "music",    "type": "artists",    "path": "/srv/music" },

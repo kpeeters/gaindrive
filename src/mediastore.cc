@@ -2578,9 +2578,32 @@ int MediaStore::upsert_album(int folder_id, const std::string& title,
 
 // ---- User management --------------------------------------------------
 
+// A username that can safely be a path component and a comparison key.
+//
+// The uploads tree is <uploads root>/<username>/<batch>/..., so a username is a
+// directory name — and nothing validated it. A '/' in one made the join in the
+// upload handler write outside the user's area, with no path_is_within_root()
+// on it, and silently broke the `parts[1] == uname` ownership tests that
+// deleteUpload and moveAlbum use: those do not error when they stop matching,
+// they just stop granting.
+//
+// Checked here rather than only at the endpoint so that `--add-user` is covered
+// too — it is the one path that creates the very first account.
+bool MediaStore::valid_username(const std::string& u)
+	{
+	if (u.empty() || u.size() > 64) return false;
+	if (u == "." || u == "..") return false;
+	for (char c : u)
+		if (!std::isalnum(static_cast<unsigned char>(c))
+		        && c != '.' && c != '_' && c != '-')
+			return false;
+	return true;
+	}
+
 bool MediaStore::add_user(const std::string& username, const std::string& password,
                            bool is_admin)
 	{
+	if (!valid_username(username)) return false;
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement ins(db_music_,
 		"INSERT OR IGNORE INTO client.users (username, password_enc, is_admin) VALUES (?,?,?)");
@@ -2695,24 +2718,66 @@ bool MediaStore::validate_auth(const std::string& username,
 	bool        disabled = sel.getColumn(1).getInt() != 0;
 	if (disabled) return false;
 
+	// Comparison that does not stop at the first differing byte.
+	//
+	// A network timing attack on a string compare is a marginal threat and
+	// this is a cheap way to stop thinking about it — but the *length* leak is
+	// the one worth naming: std::string::operator== compares sizes first and
+	// returns immediately when they differ, so the obvious spelling tells an
+	// attacker the length of the stored password before anything else.
+	auto const_time_eq = [](const std::string& a, const std::string& b) {
+		unsigned diff = static_cast<unsigned>(a.size() ^ b.size());
+		const size_t n = std::max(a.size(), b.size());
+		for (size_t i = 0; i < n; ++i)
+			diff |= static_cast<unsigned char>(i < a.size() ? a[i] : 0)
+			      ^ static_cast<unsigned char>(i < b.size() ? b[i] : 0);
+		return diff == 0;
+		};
+
 	bool ok = false;
 
 	if (!password.empty()) {
 		// Some clients send p=enc:HEXHEX (hex-encoded plaintext password).
+		//
+		// Decoded by hand rather than with std::stoi, which **throws** on
+		// anything that is not a hex digit. That made `p=enc:zz` an
+		// unauthenticated 500 from any caller — the exception escapes into
+		// httplib's fallback handler, which answers 500 and puts the
+		// exception text in an EXCEPTION_WHAT header. A malformed password is
+		// a wrong password, not a server error.
 		std::string plain = password;
 		if (plain.size() > 4 && plain.substr(0, 4) == "enc:") {
-			std::string hex = plain.substr(4);
+			const std::string hex = plain.substr(4);
 			plain.clear();
-			for (size_t i = 0; i + 1 < hex.size(); i += 2)
-				plain += static_cast<char>(std::stoi(hex.substr(i, 2), nullptr, 16));
+			auto nibble = [](char c) -> int {
+				if (c >= '0' && c <= '9') return c - '0';
+				if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+				if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+				return -1;
+				};
+			bool valid = (hex.size() % 2) == 0;
+			for (size_t i = 0; valid && i + 1 < hex.size(); i += 2) {
+				const int hi = nibble(hex[i]), lo = nibble(hex[i + 1]);
+				if (hi < 0 || lo < 0) { valid = false; break; }
+				plain += static_cast<char>((hi << 4) | lo);
+				}
+			// Not a hex string at all, so it cannot be the password however it
+			// is read. Fail rather than comparing a half-decoded prefix.
+			if (!valid) return false;
 			}
-		ok = (plain == stored);
+		ok = const_time_eq(plain, stored);
 		}
 	else if (!token.empty() && !salt.empty()) {
+		// The Subsonic spec requires a salt of at least six characters, and
+		// nothing checked it. A short salt is what makes the token cheap to
+		// attack offline: t is md5(password + salt) with the salt chosen by
+		// whoever is asking, so a one-character salt turns a captured token
+		// into an ordinary unsalted MD5 that a rainbow table answers.
+		if (salt.size() < 6) return false;
 		std::string expected = md5_hex(stored + salt);
 		std::string tok = token;
 		std::transform(tok.begin(), tok.end(), tok.begin(), ::tolower);
-		ok = (tok == expected);
+		ok = const_time_eq(tok, expected);
 		}
 
 	if (ok) {
@@ -4923,7 +4988,25 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SearchResult result;
-	std::string pattern = "%" + query + "%";
+	// The client's query is a substring to look for, not a pattern to run:
+	// `%` and `_` are LIKE metacharacters, so without escaping them a query of
+	// a single "%" matches every row in the library. That is not an injection
+	// — the value is still bound — but it is the difference between a search
+	// and a full table scan a client can ask for at will, and it is what makes
+	// the count clamp in search2/search3 worth having.
+	//
+	// relocate_prefix() escapes for a related reason and its note explains the
+	// other half: a bare `_` "can only ever keep a row" is true of a DELETE
+	// aimed at rows already condemned, and false everywhere else.
+	auto like_escape = [](const std::string& s) {
+		std::string r;
+		for (char c : s) {
+			if (c == '\\' || c == '%' || c == '_') r += '\\';
+			r += c;
+			}
+		return r;
+		};
+	std::string pattern = "%" + like_escape(query) + "%";
 	std::string path_filter = personal_user.empty()
 		? not_uploads("f.path")
 		: " AND f.path LIKE ?";
@@ -4939,7 +5022,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		"SELECT f.id, f.name"
 		" FROM folders f"
 		" WHERE f.parent_id IN (SELECT id FROM folders WHERE parent_id IS NULL)"
-		"   AND LOWER(f.name) LIKE LOWER(?)";
+		"   AND LOWER(f.name) LIKE LOWER(?) ESCAPE '\\'";
 	aq_sql += path_filter;
 	aq_sql += " ORDER BY f.name COLLATE NOCASE LIMIT ? OFFSET ?";
 	SQLite::Statement aq(db_music_, aq_sql);
@@ -4970,7 +5053,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
 		" LEFT JOIN artists a ON a.id = aa.artist_id"
-		" WHERE LOWER(COALESCE(al.title, f.name)) LIKE LOWER(?)";
+		" WHERE LOWER(COALESCE(al.title, f.name)) LIKE LOWER(?) ESCAPE '\\'";
 	alq_sql += path_filter;
 	alq_sql += " ORDER BY al.title COLLATE NOCASE LIMIT ? OFFSET ?";
 	SQLite::Statement alq(db_music_, alq_sql);
@@ -5006,7 +5089,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
-		" WHERE LOWER(s.title) LIKE LOWER(?)";
+		" WHERE LOWER(s.title) LIKE LOWER(?) ESCAPE '\\'";
 	sq_sql += song_filter;
 	sq_sql += " ORDER BY s.title COLLATE NOCASE LIMIT ? OFFSET ?";
 	SQLite::Statement sq(db_music_, sq_sql);
@@ -5219,13 +5302,23 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
+	// The owner predicate is what makes this a *read* of your own playlist
+	// rather than of anyone's. Without it the id is the only thing protecting
+	// a private playlist, and playlist ids are small sequential integers —
+	// get_playlists() hides them from the listing, which made this an
+	// enumeration away rather than a link away.
+	//
+	// `username` used to reach only the starred join below; the empty case is
+	// an internal caller that wants no starred column, and it is deliberately
+	// *not* a way past this — it selects nothing rather than everything.
 	SQLite::Statement pmeta(db_music_,
 		"SELECT p.name, COALESCE(p.comment,''), u.username, p.is_public,"
 		"       p.created, p.updated"
 		" FROM client.playlists p"
 		" JOIN client.users u ON u.id = p.user_id"
-		" WHERE p.id = ?");
+		" WHERE p.id = ? AND (p.is_public = 1 OR u.username = ?)");
 	pmeta.bind(1, playlist_id);
+	pmeta.bind(2, username);
 	if (!pmeta.executeStep()) return std::nullopt;
 
 	PlaylistInfo pl;
