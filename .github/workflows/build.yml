@@ -152,6 +152,33 @@ jobs:
           otool -L build/gaindrive | grep -q CoreServices
           test ! -d build/_deps
 
+  # A workflow artifact is always a zip — actions/upload-artifact zips on
+  # upload and offers no way not to — so it cannot be curl'd into place the way
+  # html/docs.html documents. A release asset is served as the bare file, which
+  # is why an untagged master build is published as one:
+  #
+  #   https://github.com/kpeeters/gaindrive/releases/tag/latest
+  #
+  # The same release carries the APK from android.yml, and both workflows go
+  # through .github/actions/rolling-release so they cannot disagree about how
+  # it is created. No stale-suffix here: gaindrive-linux-<arch> carries no
+  # version, so --clobber replaces last build's binary rather than adding to it.
+  latest:
+    needs: build
+    # Excludes pull_request too, where ref_name is `<n>/merge`.
+    if: github.ref_type == 'branch' && github.ref_name == 'master'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: {merge-multiple: true, path: dist}
+      - uses: ./.github/actions/rolling-release
+        with:
+          assets: dist/gaindrive-linux-*
+          token: ${{ github.token }}
+
   release:
     needs: build
     if: github.ref_type == 'tag'

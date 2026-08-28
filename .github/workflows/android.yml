@@ -122,13 +122,19 @@ jobs:
   # not to — and a phone cannot install one. A release asset is served as the
   # bare file, so publishing one is the only way to get an installable link.
   #
-  # `latest-apk` is a rolling prerelease holding one APK, so the page to
-  # bookmark on the phone never changes:
+  # `latest` is a rolling prerelease, so the page to bookmark on the phone
+  # never changes:
   #
-  #   https://github.com/kpeeters/gaindrive/releases/tag/latest-apk
+  #   https://github.com/kpeeters/gaindrive/releases/tag/latest
   #
-  # Prerelease matters: `releases/latest` ignores those, so this never displaces
-  # a real v* release as the repository's headline download.
+  # It also carries the server binaries from build.yml, which is why the delete
+  # this used to begin with is gone: the two workflows run concurrently on the
+  # same push, and deleting the release to recreate it would take whichever
+  # asset the other one had just uploaded. Everything that made the delete
+  # necessary now lives in .github/actions/rolling-release — it moves the tag
+  # by hand rather than recreating it, and stale-suffix is what stops the
+  # version-and-commit APK names accumulating, which is the other job the
+  # delete was doing.
   latest:
     needs: apk
     # Excludes pull_request too, where ref_name is `<n>/merge`.
@@ -137,19 +143,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: {merge-multiple: true, path: dist}
-      # Deleted rather than clobbered, and `--cleanup-tag` is load-bearing on
-      # both halves: the asset name carries the version and the commit, so
-      # uploading over the old release would accumulate every past build, and
-      # `gh release create` silently ignores `--target` when the tag already
-      # exists — the release would keep pointing at the first commit ever built.
-      # The `|| true` is for the first run, when there is nothing to delete.
-      - run: |
-          gh release delete latest-apk --repo "$GITHUB_REPOSITORY" \
-            --yes --cleanup-tag || true
-          gh release create latest-apk dist/*.apk --repo "$GITHUB_REPOSITORY" \
-            --prerelease --target "$GITHUB_SHA" \
-            --title "Latest master build" \
-            --notes "Unreleased build of \`$GITHUB_SHA\`. Replaced by the next push to master."
-        env: {GH_TOKEN: '${{ github.token }}'}
+      - uses: ./.github/actions/rolling-release
+        with:
+          assets: dist/*.apk
+          stale-suffix: .apk
+          token: ${{ github.token }}

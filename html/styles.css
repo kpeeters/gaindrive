@@ -170,8 +170,14 @@ h1, h2, h3 { font-family: var(--display); font-weight: 800; line-height: 0.98; m
 section { padding: 100px 0; }
 section.dark { background: var(--ink); color: var(--paper); }
 section.crimson { background: var(--crimson); color: var(--gold); }
-.sec-head { max-width: 720px; margin-bottom: 56px; }
-.sec-head h2 { font-size: clamp(34px, 4.4vw, 56px); margin-top: 16px; }
+/* No width cap here: the cap belonged to the paragraph measure, and .sec-head p
+   sets its own. On a heading it wrapped mid-phrase at a width unrelated to the
+   section. */
+.sec-head { margin-bottom: 56px; }
+.sec-head h2 { font-size: clamp(34px, 4.4vw, 56px); margin-top: 16px; text-wrap: balance; }
+/* A heading long enough to need the whole section width; the smaller ceiling is
+   what keeps it on one line there. */
+.sec-head h2.wide { font-size: clamp(30px, 3.9vw, 48px); }
 .sec-head p { font-size: 18px; color: var(--ink-soft); margin: 18px 0 0; max-width: 56ch; }
 section.dark .sec-head p { color: rgba(246,239,224,0.7); }
 
