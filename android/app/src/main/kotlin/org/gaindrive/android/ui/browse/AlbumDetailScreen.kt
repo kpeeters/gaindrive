@@ -286,6 +286,14 @@ fun AlbumDetailScreen(
 				val multiDisc =
 					detail.songs.mapTo(mutableSetOf()) { it.discNumber ?: 1 }.size > 1
 
+				// An album ripped with no tags, or with every track tagged 1,
+				// carries no usable numbering — number the rows by position
+				// instead of leaving the column blank. The server derives a
+				// number from a numbered filename, so this is the remainder:
+				// files named without one. Matches web/app.js, album-wide index
+				// included, so the two clients read the same.
+				val useSeq = detail.songs.all { (it.track ?: 0) <= 1 }
+
 				itemsIndexed(
 					items = detail.songs,
 					key = { _, song -> song.ref.encode() },
@@ -316,6 +324,7 @@ fun AlbumDetailScreen(
 							onClick = { player.play(detail.songs, index) },
 							onLongClick = { actionsFor = song },
 							playback = playerState.trackStateOf(song.ref),
+							number = if (useSeq) index + 1 else song.track,
 						)
 					}
 				}

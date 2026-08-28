@@ -1132,6 +1132,34 @@ struct AlbumReadData {
 	std::string               overview;
 	};
 
+// A leading number on an audio filename — "05 - Song.flac" — is a track number
+// as often as a tag is, and for a file with no tags at all it is the only one
+// there is.  One regex answers both questions the prefix raises: a title
+// stripped of digits that yielded no number is the two halves disagreeing
+// about the same characters.
+static const std::regex TRACK_PREFIX(R"(^(\d+)[. -]+)");
+
+static std::string strip_track_prefix(const std::string& title)
+	{
+	return std::regex_replace(title, TRACK_PREFIX, "");
+	}
+
+// The number that prefix names, or 0 for none.  Bounded, although the strip
+// deliberately is not: "2001 A Space Odyssey.mp3" already loses its leading
+// 2001 from the title and must not thereby acquire track 2001.
+static int track_prefix_number(const std::string& stem)
+	{
+	std::smatch m;
+	if (!std::regex_search(stem, m, TRACK_PREFIX)) return 0;
+	const std::string digits = m[1].str();
+	// Bounding the length first is what keeps std::stoi from throwing, which
+	// matters because a throw here would be caught somewhere far away and
+	// blamed on the file rather than on its name.
+	if (digits.size() > 9) return 0;
+	const int n = std::stoi(digits);
+	return (n >= 1 && n <= 999) ? n : 0;
+	}
+
 // One media file → everything Phase 1 can learn about it without a lock.
 static SongReadData read_song_file(const fs::path& p,
                                     const std::string& folder_path,
@@ -1179,6 +1207,15 @@ static SongReadData read_song_file(const fs::path& p,
 		// count, and one with ten season folders sorts "Season 10" second.
 		// Only the parsed number can be trusted, and only videos have one.
 		if (vn.season > 0) sdat.disc_number = vn.season;
+		}
+	else {
+		// An untagged audio file's only track number is the one in its
+		// name, and Phase 3 would be too late to look: that runs for
+		// changed files alone, so a derivation living there would never
+		// reach a library already scanned.  A tag still wins where there
+		// is one — read_song_metadata() overwrites this only for a
+		// non-zero track().
+		sdat.track_nr = track_prefix_number(p.stem().string());
 		}
 	return sdat;
 	}
@@ -1239,7 +1276,9 @@ static void read_song_metadata(SongReadData& sdat)
 		auto* t = f.tag();
 		if (!t->title().isEmpty())
 			sdat.title = t->title().toCString(true);
-		sdat.track_nr = static_cast<int>(t->track());
+		// Guarded, because a file with no track tag reads back as 0 and
+		// would otherwise wipe the number Phase 1 took from the filename.
+		if (t->track() > 0) sdat.track_nr = static_cast<int>(t->track());
 		sdat.year     = static_cast<int>(t->year());
 		if (!t->genre().isEmpty())
 			sdat.genre = t->genre().toCString(true);
@@ -1665,17 +1704,29 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 		// from the file's contents, so they can change while the file itself
 		// does not — and a library scanned before any of them existed is
 		// back-filled here rather than needing every file touched.
+		//
+		// The track number is the same kind of thing, and is back-filled only
+		// into a row that has none: unlike the video title below, a tag is the
+		// authority here and the row is already holding it, so only an untagged
+		// file has nothing to lose.  A number someone typed survives anyway —
+		// apply_song_meta_overrides() re-asserts client.song_meta over this in
+		// the same transaction.
 		SQLite::Statement upd(db,
 			"UPDATE songs SET last_scanned = CURRENT_TIMESTAMP,"
 			"                 disc_number = CASE WHEN ? > 0 THEN ? ELSE disc_number END,"
+			"                 track_number = CASE WHEN COALESCE(track_number, 0) = 0"
+			"                                     AND ? > 0"
+			"                                THEN ? ELSE track_number END,"
 			"                 season = ?,"
 			"                 cover_path = ?"
 			" WHERE path = ?");
 		upd.bind(1, sdat.disc_number);
 		upd.bind(2, sdat.disc_number);
-		upd.bind(3, sdat.season);
-		upd.bind(4, rel_cover);
-		upd.bind(5, rel_path);
+		upd.bind(3, sdat.track_nr);
+		upd.bind(4, sdat.track_nr);
+		upd.bind(5, sdat.season);
+		upd.bind(6, rel_cover);
+		upd.bind(7, rel_path);
 		upd.exec();
 
 		// A video's title is derived from its filename, so it can improve
@@ -1706,9 +1757,8 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 	// which takes a leading number as an episode number without touching the
 	// title — applying this to it as well would turn "12 Angry Men" into
 	// "Angry Men".
-	static const std::regex track_prefix(R"(^\d+[. -]+)");
 	std::string title = sdat.is_video
-	    ? sdat.title : std::regex_replace(sdat.title, track_prefix, "");
+	    ? sdat.title : strip_track_prefix(sdat.title);
 
 	SQLite::Statement ins(db,
 		"INSERT OR REPLACE INTO songs"

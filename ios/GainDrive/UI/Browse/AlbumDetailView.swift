@@ -37,7 +37,15 @@ struct AlbumDetailView: View {
 	}
 
 	private func list(_ detail: AlbumDetail, model: AlbumDetailViewModel) -> some View {
-		List {
+		// An album ripped with no tags, or with every track tagged 1, carries
+		// no usable numbering — number the rows by position rather than leave
+		// the column blank. The server derives a number from a numbered
+		// filename, so this is the remainder: files named without one. Matches
+		// web/app.js and the Android client, album-wide index included, so the
+		// three read the same.
+		let useSeq = detail.songs.allSatisfy { ($0.track ?? 0) <= 1 }
+
+		return List {
 			Section {
 				header(detail, model: model)
 			}
@@ -50,7 +58,7 @@ struct AlbumDetailView: View {
 				ForEach(discs(detail), id: \.number) { disc in
 					Section {
 						ForEach(disc.songs) { song in
-							trackRow(song, in: detail)
+							trackRow(song, in: detail, useSeq: useSeq)
 						}
 					} header: {
 						SectionHeading(text: "Disc \(disc.number)")
@@ -59,7 +67,7 @@ struct AlbumDetailView: View {
 			} else {
 				Section {
 					ForEach(detail.songs) { song in
-						trackRow(song, in: detail)
+						trackRow(song, in: detail, useSeq: useSeq)
 					}
 				}
 			}
@@ -103,12 +111,18 @@ struct AlbumDetailView: View {
 	/// The multi-disc branch renders a grouped slice, and taking the slice index
 	/// would play the wrong track on every disc after the first — silently, and
 	/// invisibly to anyone testing with a single-disc album.
-	private func trackRow(_ song: Song, in detail: AlbumDetail) -> some View {
-		Button {
-			guard let index = detail.songs.firstIndex(of: song) else { return }
+	private func trackRow(_ song: Song, in detail: AlbumDetail, useSeq: Bool)
+		-> some View
+	{
+		let index = detail.songs.firstIndex(of: song)
+		return Button {
+			guard let index else { return }
 			player.play(detail.songs, startIndex: index)
 		} label: {
-			TrackRow(song: song, state: player.trackState(of: song.ref))
+			TrackRow(
+				song: song,
+				state: player.trackState(of: song.ref),
+				number: useSeq ? index.map { $0 + 1 } : song.track)
 		}
 		.buttonStyle(.plain)
 		.trackActions(for: song)

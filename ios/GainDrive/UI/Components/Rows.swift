@@ -92,6 +92,11 @@ struct AlbumRow: View {
 struct TrackRow: View {
 	let song: Song
 	var state: TrackState = .idle
+	/// Overrides the song's own track number, so a caller can substitute a
+	/// positional one: an album ripped without tags reports every track as 0,
+	/// which the mapper folds to nil, and a column of blanks is worse than
+	/// numbers nobody wrote down. nil means "use the song's own".
+	var number: Int?
 	var showNumber = true
 	var trailing: AnyView?
 
@@ -135,7 +140,7 @@ struct TrackRow: View {
 	private var numberOrIndicator: some View {
 		switch state {
 		case .idle:
-			Text(song.track.map(String.init) ?? "")
+			Text((number ?? song.track).map(String.init) ?? "")
 				.font(.footnote.monospacedDigit())
 				.foregroundStyle(.secondary)
 		case .loading:

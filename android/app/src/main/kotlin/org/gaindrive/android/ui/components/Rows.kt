@@ -190,6 +190,11 @@ private fun playlistSubtitle(playlist: Playlist): String {
 /**
  * A track inside an album or playlist, where the number column keeps titles
  * aligned. [trailing] carries the per-track actions.
+ *
+ * [number] defaults to the song's own track number and exists so a caller
+ * can substitute a positional one: an album ripped without tags reports
+ * every track as 0, which the mapper folds to null, and a column of blanks
+ * is worse than numbers nobody wrote down. The web client does the same.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -200,6 +205,7 @@ fun TrackRow(
 	onLongClick: (() -> Unit)? = null,
 	playback: TrackState = TrackState.IDLE,
 	showNumber: Boolean = true,
+	number: Int? = song.track,
 	trailing: @Composable (() -> Unit)? = null,
 ) {
 	val availability = LocalAvailability.current
@@ -232,7 +238,7 @@ fun TrackRow(
 					TrackSpinner()
 				} else {
 					Text(
-						text = song.track?.toString().orEmpty(),
+						text = number?.toString().orEmpty(),
 						style = MaterialTheme.typography.bodySmall,
 						color = MaterialTheme.colorScheme.onSurfaceVariant,
 					)
