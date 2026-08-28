@@ -2757,12 +2757,23 @@ async function openCastModal() {
       }, 5000);
    }
 
+// The cast button is both the state and the control: the filled
+// "cast_connected" glyph is what says a session is live, and the accent colour
+// alone did not — a red "cast" reads as an available device on every other
+// platform. One helper, because the three callers that toggle it (start,
+// teardown, page-reload restore) must not be able to set glyph and class apart.
+function castButtonState(on) {
+   const btn = document.getElementById('player-cast');
+   btn.classList.toggle('active', on);
+   btn.textContent = on ? 'cast_connected' : 'cast';
+   }
+
 async function selectCastDevice(id, label = '') {
    try {
       await apiCall('startCast', {id});
       castDeviceId   = id;
       castDeviceName = label;
-      document.getElementById('player-cast').classList.add('active');
+      castButtonState(true);
       document.getElementById('cast-modal').classList.add('hidden');
       // Stop local playback and re-issue the stream request so the server
       // can redirect it to the cast device (the redirect only fires on a
@@ -2821,7 +2832,7 @@ function castExit() {
    castExpectedPosition = null;
    castPlayerState  = 'IDLE';
    castSongDuration = 0;
-   document.getElementById('player-cast').classList.remove('active');
+   castButtonState(false);
    document.getElementById('cast-modal').classList.add('hidden');
    // Cleared before any resume, which composes the surface again: leaving the
    // class on would put the panel over a picture that is now local.
@@ -4959,7 +4970,7 @@ async function showShell() {
             player.captionIndex = sess.trackId > 0 ? sess.trackId - 1 : null;
             const seek = document.getElementById('player-seek');
             if (sess.songDuration > 0) seek.max = sess.songDuration;
-            document.getElementById('player-cast').classList.add('active');
+            castButtonState(true);
             // Populate player queue so title/thumbnail are visible in the bar.
             try {
                const songSr = await apiCall('getSong', {id: sess.songId});
