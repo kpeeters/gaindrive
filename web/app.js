@@ -2455,39 +2455,100 @@ async function openInfoModal() {
       }
    }
 
+// One row of the cast picker, laid out as the Android sheet lays it out: the
+// friendly name, and under it the model and address joined with " · ". The
+// port is deliberately absent — it is never the thing that tells two devices
+// apart, and 8009 on every row is noise.
+function castDeviceButton(dev) {
+   const btn = document.createElement('button');
+   const label = dev.name || dev.address;
+   const connected = dev.id === castDeviceId;
+
+   const icon = document.createElement('span');
+   icon.className = 'mi cast-row-icon';
+   icon.textContent = connected ? 'cast_connected' : 'cast';
+
+   const text = document.createElement('span');
+   text.className = 'cast-row-text';
+   const primary = document.createElement('span');
+   primary.className = 'cast-row-name';
+   primary.textContent = label;
+   text.appendChild(primary);
+
+   const sub = [dev.model, dev.address].filter(Boolean).join(' · ');
+   if (sub) {
+      const secondary = document.createElement('span');
+      secondary.className = 'cast-row-sub';
+      secondary.textContent = sub;
+      text.appendChild(secondary);
+      }
+
+   btn.classList.toggle('connected', connected);
+   btn.appendChild(icon);
+   btn.appendChild(text);
+   btn.addEventListener('click', () => selectCastDevice(dev.id, label));
+   return btn;
+   }
+
+function renderCastDevices(devices) {
+   const list = document.getElementById('cast-device-list');
+   list.textContent = '';
+
+   // Discovered first, sorted by name, then the configured ones under a
+   // heading of their own. Which devices arrived by which route is the most
+   // useful fact on this list when discovery is the thing that has failed,
+   // and it is how the Android picker is arranged.
+   const found  = devices.filter(d => !d.manual)
+                         .sort((a, b) => (a.name || a.address).toLowerCase()
+                            .localeCompare((b.name || b.address).toLowerCase()));
+   const manual = devices.filter(d => d.manual);
+
+   if (found.length === 0 && manual.length === 0) {
+      list.textContent = 'No devices found.';
+      return;
+      }
+
+   for (const dev of found) list.appendChild(castDeviceButton(dev));
+
+   if (manual.length > 0) {
+      const heading = document.createElement('div');
+      heading.className = 'cast-list-heading';
+      heading.textContent = 'Added manually';
+      list.appendChild(heading);
+      for (const dev of manual) list.appendChild(castDeviceButton(dev));
+      }
+   }
+
 async function openCastModal() {
    const modal   = document.getElementById('cast-modal');
    const list    = document.getElementById('cast-device-list');
    const stopRow = document.getElementById('cast-stop-row');
 
-   list.textContent = 'Discovering…';
+   list.textContent = 'Looking for devices…';
    stopRow.classList.toggle('hidden', castDeviceId === null);
    modal.classList.remove('hidden');
 
    try {
-      const sr      = await apiCall('listCastDevices');
-      const devices = sr.castDevices ?? [];
-      list.textContent = '';
-      if (devices.length === 0) {
-         list.textContent = 'No devices found.';
-         return;
-         }
-      for (const dev of devices) {
-         const btn = document.createElement('button');
-         // Fall back to the address: a device the server could not name would
-         // otherwise be an unlabelled button nobody can tell apart.
-         const label = dev.name || dev.address;
-         // Configured devices are marked rather than given a section of their
-         // own: this list is a flat row of buttons with no heading structure,
-         // and which ones mDNS could not find is worth saying when discovery
-         // is the thing that has gone wrong.
-         btn.textContent = dev.manual ? `${label} (configured)` : label;
-         btn.addEventListener('click', () => selectCastDevice(dev.id, label));
-         list.appendChild(btn);
-         }
+      renderCastDevices((await apiCall('listCastDevices')).castDevices ?? []);
       } catch (err) {
       list.textContent = `Error: ${err.message}`;
+      return;
       }
+
+   // listCastDevices answers from the *previous* discovery pass and starts a
+   // fresh one, so a device that has only just been switched on would appear
+   // no earlier than the next time the modal was opened. Ask once more when
+   // that pass has had time to finish.
+   setTimeout(async () => {
+      if (modal.classList.contains('hidden')) return;
+      try {
+         renderCastDevices((await apiCall('listCastDevices')).castDevices ?? []);
+         } catch (err) {
+         // The list already on screen is better than replacing it with an
+         // error, but a refresh that never succeeds should not be invisible.
+         console.warn('cast device refresh failed:', err);
+         }
+      }, 5000);
    }
 
 async function selectCastDevice(id, label = '') {

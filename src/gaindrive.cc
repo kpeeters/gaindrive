@@ -4633,6 +4633,7 @@ GainDrive::GainDrive(const std::string& db_path,
 				nlohmann::json arr = nlohmann::json::array();
 				for (auto& d : devices)
 					arr.push_back({{"id", d.id}, {"name", d.name},
+					               {"model", d.model},
 					               {"address", d.address}, {"port", d.port},
 					               {"manual", d.manual}});
 				r["castDevices"] = arr;
@@ -4645,6 +4646,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					auto* dev = doc.NewElement("castDevice");
 					dev->SetAttribute("id",      d.id.c_str());
 					dev->SetAttribute("name",    d.name.c_str());
+					dev->SetAttribute("model",   d.model.c_str());
 					dev->SetAttribute("address", d.address.c_str());
 					dev->SetAttribute("port",    d.port);
 					dev->SetAttribute("manual",  d.manual);

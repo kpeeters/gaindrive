@@ -13,6 +13,11 @@ class CastManager {
 		struct CastDevice {
 			std::string id;
 			std::string name;
+			// The `md` TXT record — "WiiM Amp Ultra", "Chromecast Ultra". The
+			// only thing on the wire that tells one kind of receiver from
+			// another, and what the picker draws ahead of the address. Empty
+			// for a configured device: there is no announcement to read.
+			std::string model;
 			std::string address;
 			int         port = 8009;
 			// True for a device named in the configuration rather than found by
@@ -49,6 +54,10 @@ class CastManager {
 			bool per_interface = false; // one socket per local address
 			std::string iface;          // restrict to this interface ("" = all)
 			bool require_id    = true;  // drop a device with no TXT id
+			// Assemble devices only from records belonging to
+			// _googlecast._tcp.  Off is how we find out whether a device is
+			// announcing itself under some other service and being ignored.
+			bool cast_service_only = true;
 			bool verbose       = true;  // log every record as it arrives
 			};
 

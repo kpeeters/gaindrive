@@ -10,8 +10,10 @@
 #include "stamp.hh"
 #include "jsonread.hh"
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <unordered_map>
 #include <iostream>
 #include <sstream>
 #include <map>
@@ -138,19 +140,69 @@ struct DiscSocket {
 	std::string iface;
 	};
 
+// The service we query for and the service a record must belong to before it
+// can become a device.  One constant for both, so the two cannot drift.
+static const char kCastSvc[] = "_googlecast._tcp.local.";
+
+// ASCII case fold.  DNS names are case-insensitive (RFC 4343) while a
+// std::map key is not, so one device answering with two spellings of its
+// instance name would otherwise be two devices.  ASCII-only is not a
+// limitation — it is exactly what RFC 4343 specifies, and it leaves the UTF-8
+// in a friendly name alone.
+static std::string lc(std::string s)
+	{
+	for (char& c : s) c = (char)std::tolower(static_cast<unsigned char>(c));
+	return s;
+	}
+
+// Does this (already case-folded) record owner name belong to a Cast service
+// instance?  The dot-less form is accepted too: mdns_string_extract appends a
+// dot after every label, but drops it if the name overruns its 256-byte
+// buffer, and a device lost to a truncated name would be very hard to see.
+static bool is_cast_instance(const std::string& name)
+	{
+	auto ends_with = [&](const std::string& suffix) {
+		return name.size() > suffix.size() &&
+		       name.compare(name.size() - suffix.size(),
+		                    suffix.size(), suffix) == 0;
+		};
+	const std::string dotted = std::string(".") + kCastSvc;
+	return ends_with(dotted) || ends_with(dotted.substr(0, dotted.size() - 1));
+	}
+
+// The instance label of a Cast service instance name — everything before
+// "._googlecast._tcp.local.".  Used as the device's name when it sends no
+// `fn`, which is what the Android client does (CastDiscovery.kt: `name =
+// friendly ?: serviceName`), so a discovered device is never labelled by its
+// IP address.  Takes the raw name so the device's own casing survives.
+static std::string instance_label(const std::string& raw)
+	{
+	size_t dot = lc(raw).find(std::string(".") + kCastSvc);
+	return dot == std::string::npos ? raw : raw.substr(0, dot);
+	}
+
 // State accumulated across mDNS response packets within one discover() call.
+//
+// Every key here is case-folded, and all four must be: the address join in
+// discover() looks a `srvs` *value* up in `hosts` by *key*, so normalising one
+// side alone would leave devices with no address at all.
 struct DiscState {
 	std::map<std::string, CastManager::CastDevice> devs;   // service instance → device
 	std::map<std::string, std::string>              hosts;  // hostname → IPv4 address
 	std::map<std::string, std::string>              hosts6; // hostname → IPv6 address (with scope)
 	std::map<std::string, std::string>              srvs;   // service instance → SRV host
+	// Case-folded instance name → the name as the device spelled it, so a
+	// device that sent no `fn` can still be labelled in its own casing.
+	std::map<std::string, std::string>              raws;
 	std::string                                     iface;  // socket currently being drained
 	bool                                            verbose = true;
+	bool                                            cast_only = true;
+	size_t                                          ignored = 0;  // records not _googlecast
 	};
 
 static int mdns_cb(int, const struct sockaddr* from, size_t,
                     mdns_entry_type_t, uint16_t,
-                    uint16_t rtype, uint16_t, uint32_t,
+                    uint16_t rtype, uint16_t, uint32_t ttl,
                     const void* data, size_t size,
                     size_t name_off, size_t,
                     size_t rec_off, size_t rec_len,
@@ -161,7 +213,8 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 
 	size_t off = name_off;
 	mdns_string_t rname = mdns_string_extract(data, size, &off, buf1, sizeof(buf1));
-	std::string key(rname.str, rname.length);
+	std::string raw(rname.str, rname.length);
+	std::string key = lc(raw);
 
 	// Extract sender IP — used as address fallback and for AAAA scope IDs.
 	std::string src_ip4, src_ip6;
@@ -195,40 +248,71 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 		          << (st->iface.empty() ? "" : " via=" + st->iface) << std::endl;
 		};
 
+	// A record that is not part of a Cast service instance must not become a
+	// device.  The socket is joined to the multicast group and mdns_query_recv
+	// hands us every record of every packet on the wire, so without this any
+	// service announcing a TXT `id` is assembled into a nameless "Chromecast"
+	// — HomeKit's _hap._tcp being the one that shows up on every LAN.
+	//
+	// The reason is logged rather than the record dropped silently: these
+	// per-record lines are how a device that is not appearing gets diagnosed,
+	// and "N instance(s) seen" is about to become a far smaller number.
+	bool assemble = !st->cast_only || is_cast_instance(key);
+	// RFC 6762 §10.1: a TTL of zero is a goodbye, announcing that the device
+	// is leaving.  Building a device out of one invents a phantom.
+	bool goodbye  = ttl == 0;
+
 	if (rtype == MDNS_RECORDTYPE_PTR) {
-		log << "PTR  from=" << src_ip << " name=" << key;
+		log << "PTR  from=" << src_ip << " name=" << raw;
 		say();
 		}
 	else if (rtype == MDNS_RECORDTYPE_TXT) {
 		mdns_record_txt_t txt[32];
 		size_t n = mdns_record_parse_txt(data, size, rec_off, rec_len, txt, 32);
-		auto& dev = st->devs[key];
-		if (!src_ip.empty() && dev.address.empty())
-			dev.address = src_ip;
+		std::string id, fn, md;
 		for (size_t i = 0; i < n; i++) {
 			std::string k(txt[i].key.str,   txt[i].key.length);
 			std::string v(txt[i].value.str, txt[i].value.length);
-			if (k == "id") dev.id   = v;
-			if (k == "fn") dev.name = v;
+			if (k == "id") id = v;
+			if (k == "fn") fn = v;
+			if (k == "md") md = v;
 			}
 		log << "TXT  from=" << src_ip
-		    << " name=" << key
-		    << " id=" << dev.id
-		    << " fn=" << dev.name;
+		    << " name=" << raw
+		    << " id=" << id
+		    << " fn=" << fn
+		    << " md=" << md;
+		if (!assemble)    { st->ignored++; log << " (ignored: not _googlecast)"; }
+		else if (goodbye) { log << " (ignored: goodbye)"; }
+		else {
+			auto& dev = st->devs[key];
+			st->raws[key] = raw;
+			if (!src_ip.empty() && dev.address.empty())
+				dev.address = src_ip;
+			if (!id.empty()) dev.id    = id;
+			if (!fn.empty()) dev.name  = fn;
+			if (!md.empty()) dev.model = md;
+			}
 		say();
 		}
 	else if (rtype == MDNS_RECORDTYPE_SRV) {
 		mdns_record_srv_t srv = mdns_record_parse_srv(
 			data, size, rec_off, rec_len, buf2, sizeof(buf2));
-		auto& dev = st->devs[key];
-		dev.port = srv.port;
-		if (!src_ip.empty() && dev.address.empty())
-			dev.address = src_ip;
-		st->srvs[key] = std::string(srv.name.str, srv.name.length);
+		std::string target(srv.name.str, srv.name.length);
 		log << "SRV  from=" << src_ip
-		    << " name=" << key
-		    << " target=" << st->srvs[key]
+		    << " name=" << raw
+		    << " target=" << target
 		    << " port=" << srv.port;
+		if (!assemble)    { st->ignored++; log << " (ignored: not _googlecast)"; }
+		else if (goodbye) { log << " (ignored: goodbye)"; }
+		else {
+			auto& dev = st->devs[key];
+			st->raws[key] = raw;
+			dev.port = srv.port;
+			if (!src_ip.empty() && dev.address.empty())
+				dev.address = src_ip;
+			st->srvs[key] = lc(target);
+			}
 		say();
 		}
 	else if (rtype == MDNS_RECORDTYPE_A) {
@@ -237,7 +321,7 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 		char ip[INET_ADDRSTRLEN];
 		inet_ntop(AF_INET, &a4.sin_addr, ip, sizeof(ip));
 		st->hosts[key] = ip;
-		log << "A    from=" << src_ip << " name=" << key << " addr=" << ip;
+		log << "A    from=" << src_ip << " name=" << raw << " addr=" << ip;
 		say();
 		}
 	else if (rtype == MDNS_RECORDTYPE_AAAA) {
@@ -251,11 +335,11 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 		if (scope != std::string::npos)
 			addr6 += src_ip6.substr(scope);
 		st->hosts6[key] = addr6;
-		log << "AAAA from=" << src_ip << " name=" << key << " addr=" << addr6;
+		log << "AAAA from=" << src_ip << " name=" << raw << " addr=" << addr6;
 		say();
 		}
 	else {
-		log << "type=" << rtype << " from=" << src_ip << " name=" << key;
+		log << "type=" << rtype << " from=" << src_ip << " name=" << raw;
 		say();
 		}
 
@@ -265,7 +349,8 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 std::vector<CastManager::CastDevice> CastManager::discover(const DiscoverOpts& opts)
 	{
 	DiscState state;
-	state.verbose = opts.verbose;
+	state.verbose   = opts.verbose;
+	state.cast_only = opts.cast_service_only;
 
 	std::vector<DiscSocket> socks;
 
@@ -349,7 +434,6 @@ std::vector<CastManager::CastDevice> CastManager::discover(const DiscoverOpts& o
 		          << (s.iface.empty() ? "" : "/" + s.iface);
 	std::cout << std::endl;
 
-	static const char svc[] = "_googlecast._tcp.local.";
 	std::vector<uint8_t> sendbuf(2048);
 	// RFC 6762 §17 caps an mDNS message at 9000 bytes. recvfrom truncates a
 	// larger datagram silently, and mdns_query_recv then abandons the whole
@@ -373,7 +457,7 @@ std::vector<CastManager::CastDevice> CastManager::discover(const DiscoverOpts& o
 				// -1 → 65535, which would then cause mdns_query_recv to reject
 				// all ID-0 mDNS responses.
 				int r = mdns_query_send(s.fd, MDNS_RECORDTYPE_PTR,
-				                        svc, strlen(svc),
+				                        kCastSvc, strlen(kCastSvc),
 				                        sendbuf.data(), sendbuf.size(), 0);
 				std::cout << stamp() << "Cast: " << (s.v6 ? "IPv6" : "IPv4")
 				          << (s.iface.empty() ? "" : "/" + s.iface)
@@ -437,11 +521,13 @@ std::vector<CastManager::CastDevice> CastManager::discover(const DiscoverOpts& o
 		}
 
 	std::cout << stamp() << "Cast: discovery done — "
-	          << state.devs.size() << " instance(s) seen" << std::endl;
+	          << state.devs.size() << " instance(s) seen, "
+	          << state.ignored << " record(s) ignored" << std::endl;
 	for (auto& [inst, dev] : state.devs)
 		std::cout << stamp() << "  inst=" << inst
 		          << " id=" << dev.id
 		          << " fn=" << dev.name
+		          << " md=" << dev.model
 		          << " addr=" << dev.address
 		          << " port=" << dev.port << std::endl;
 
@@ -449,10 +535,64 @@ std::vector<CastManager::CastDevice> CastManager::discover(const DiscoverOpts& o
 	// that half of the filter is unconditional. The id comes from a TXT record,
 	// and require_id=false is how we find out whether devices are arriving but
 	// being dropped for want of one.
-	std::vector<CastDevice> result;
+	// Each survivor carries its instance label alongside, as the name to fall
+	// back to further down.
+	std::vector<std::pair<CastDevice, std::string>> kept;
 	for (auto& [inst, dev] : state.devs)
-		if ((!opts.require_id || !dev.id.empty()) && !dev.address.empty())
+		if ((!opts.require_id || !dev.id.empty()) && !dev.address.empty()) {
+			auto ri = state.raws.find(inst);
+			kept.emplace_back(dev, instance_label(
+				ri == state.raws.end() ? inst : ri->second));
+			}
+
+	// One row per physical device.
+	//
+	// The Cast id is the device's own identity, so it is the key; the address
+	// is only a fallback for a pass run with require_id off. The port is in
+	// both, because a Cast multizone group publishes its own instance at the
+	// leader's *address* on a dynamic port, and collapsing the two would lose
+	// the group.
+	//
+	// This runs after the filter above, not before: the filter is what
+	// guarantees a non-empty address, without which two addressless entries
+	// would meet under the same fallback key and merge two real devices.
+	std::vector<CastDevice>  result;
+	std::vector<std::string> labels;
+	std::unordered_map<std::string, size_t> index;
+	for (auto& [dev, label] : kept) {
+		std::string k = (dev.id.empty() ? "addr:" + dev.address : "id:" + lc(dev.id))
+		                + ":" + std::to_string(dev.port);
+		auto it = index.find(k);
+		if (it == index.end()) {
+			index[k] = result.size();
 			result.push_back(dev);
+			labels.push_back(label);
+			continue;
+			}
+		// Merge rather than pick: one spelling may carry the only `fn` and
+		// another the only `md`, and dropping either loses something the
+		// device did send.
+		CastDevice& into = result[it->second];
+		if (into.name.empty())  into.name  = dev.name;
+		if (into.model.empty()) into.model = dev.model;
+		if (into.address.empty()) into.address = dev.address;
+		// Prefer IPv4, as the address fallbacks above already do — an IPv6
+		// link-local carries a scope suffix that nothing else here matches on.
+		else if (into.address.find(':') != std::string::npos &&
+		         dev.address.find(':') == std::string::npos)
+			into.address = dev.address;
+		std::cout << stamp() << "Cast: merged duplicate " << k
+		          << " (" << into.name << ")" << std::endl;
+		}
+
+	// A device that sent no `fn` anywhere is named by its instance label rather
+	// than left nameless, which is what the Android client does — the
+	// alternative is a row a client can only label with an IP address. Last,
+	// so that a real `fn` from any of the merged duplicates wins over it.
+	for (size_t i = 0; i < result.size(); i++)
+		if (result[i].name.empty())
+			result[i].name = labels[i];
+
 	return result;
 	}
 
@@ -493,11 +633,14 @@ std::vector<CastManager::CastDevice> CastManager::cached_devices() const
 
 	std::lock_guard<std::mutex> lk(manual_mutex_);
 	for (const auto& m : manual_devices_) {
-		// Deduplicated on the address, which is the only field the two kinds
+		// Deduplicated on the address and port, the only fields the two kinds
 		// have in common — a configured device has no Cast id to match on.
+		// The port is part of it because a Cast group lives at its leader's
+		// address on a different one, and on the address alone a group in
+		// range would suppress a configured entry for the leader itself.
 		bool found = false;
 		for (const auto& d : result)
-			if (d.address == m.address) { found = true; break; }
+			if (d.address == m.address && d.port == m.port) { found = true; break; }
 		if (!found) result.push_back(m);
 		}
 	return result;

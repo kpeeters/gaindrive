@@ -282,7 +282,8 @@ static int run_discover(const CastManager::DiscoverOpts& opts)
 	for (auto& d : devs)
 		std::cout << "  " << d.address << ":" << d.port
 		          << "  id=" << d.id
-		          << "  name=" << d.name << std::endl;
+		          << "  name=" << d.name
+		          << "  model=" << d.model << std::endl;
 
 	// Non-zero on an empty result so a shell loop can tell the runs apart.
 	return devs.empty() ? 1 : 0;
@@ -355,6 +356,8 @@ int main(int argc, char** argv)
 		("no-ipv4",     "discover: skip IPv4")
 		("no-ipv6",     "discover: skip IPv6")
 		("any-id",      "discover: keep devices that sent no TXT id")
+		("any-service", "discover: assemble devices from records of any "
+		                "service, not only _googlecast._tcp")
 		("q,quiet",     "discover: do not log every record")
 		("command",     "discover | browse | probe", cxxopts::value<std::string>())
 		("address",     "probe: the device, as address[:port]",
@@ -407,6 +410,7 @@ int main(int argc, char** argv)
 		opts.ipv4          = args.count("no-ipv4") == 0;
 		opts.ipv6          = args.count("no-ipv6") == 0;
 		opts.require_id    = args.count("any-id") == 0;
+		opts.cast_service_only = args.count("any-service") == 0;
 		opts.verbose       = args.count("quiet") == 0;
 		if (!opts.ipv4 && !opts.ipv6) {
 			std::cout << "gaindrive-cast: --no-ipv4 and --no-ipv6 leave nothing "
