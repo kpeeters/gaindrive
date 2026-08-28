@@ -2052,9 +2052,28 @@ async function viewAlbums(artistId, artistName) {
                promoteBtn.disabled = true;
                promoteBtn.textContent = '…';
                try {
-                  await apiCall('promoteAlbum',
+                  // moveAlbum is the server's one mover; naming a root is what
+                  // makes this a promote rather than a rename in place.
+                  const sr = await apiCall('moveAlbum',
                      {id: album.id, musicFolderId: rootId, folder});
-                  viewArtists();
+                  const moved = sr.movedAlbum ?? null;
+                  // It is in the shared library now, so staying in Uploads
+                  // would leave the user looking at the listing it just left.
+                  // Switch to the destination root's own mode and walk in to
+                  // where it landed — the ids to do that are what moveAlbum
+                  // returns and promoteAlbum never did.
+                  const destType = (musicFolders ?? [])
+                     .find(f => String(f.id) === String(rootId))?.contentType;
+                  if (moved?.id && moved?.parent && destType) {
+                     libraryMode = destType;
+                     localStorage.setItem('gd_library_mode', destType);
+                     await viewArtists();
+                     await viewAlbums(moved.parent, moved.artist);
+                     await viewTracks(moved.id, moved.album, moved.parent,
+                                      moved.artist);
+                     }
+                  else
+                     viewArtists();
                   }
                catch (err) {
                   promoteBtn.disabled = false;
@@ -4221,12 +4240,17 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
                }
             else {
                try {
-                  const sr = await apiCall('renameAlbum',
-                     {id: albumId, album: newName, artist: newArtist});
-                  renamed = sr.renamedAlbum ?? null;
+                  // No musicFolderId, so moveAlbum keeps everything above the
+                  // artist level and this is a rename in place. `folder` is
+                  // the artist level under whatever root the album is already
+                  // in — an artist here, since the edit screen is only drawn
+                  // for an album that has one.
+                  const sr = await apiCall('moveAlbum',
+                     {id: albumId, album: newName, folder: newArtist});
+                  renamed = sr.movedAlbum ?? null;
                   }
                catch (e) {
-                  console.error('[edit] renameAlbum failed', e);
+                  console.error('[edit] moveAlbum failed', e);
                   errors.push(`Rename: ${e.message}`);
                   }
                }

@@ -198,15 +198,17 @@ interface SubsonicApi {
 	suspend fun getRecentSongs(@Query("size") size: Int): SubsonicEnvelope<GetRecentSongsBody>
 
 	/**
-	 * Moves an album out of the account's uploads and into the shared library.
+	 * Puts an album somewhere, under a name, by moving it on the server's disk.
 	 *
-	 * Admin only, and the id must be an album whose stored path has the exact
-	 * shape `<uploads root>/<user>/<batch>/<artist>/<album>` — anything else is
-	 * refused rather than guessed at. The move happens on the server's disk, so
-	 * every id below it changes and both listings have to be read again.
-	 */
-	/**
-	 * All three parameters are required, and non-null here to say so.
+	 * The server's one mover: `moveAlbum` also renames in place and re-files
+	 * under a different artist, since every parameter but the id is optional
+	 * and an omitted one means unchanged. This app uses only the promote
+	 * shape — out of the account's uploads and into the shared library — so
+	 * the destination halves are declared non-null here to say a call site
+	 * cannot forget them. Naming a root is admin's alone.
+	 *
+	 * The move happens on the server's disk, so every id below it changes and
+	 * both listings have to be read again.
 	 *
 	 * The destination halves were briefly optional and both defaults were
 	 * guesses that put things in the wrong place — the first `artists` root
@@ -214,8 +216,8 @@ interface SubsonicApi {
 	 * own artist name, which for a fetched video is the channel that published
 	 * it. An omission now earns error 10 rather than a silent wrong answer.
 	 */
-	@GET("rest/promoteAlbum.view")
-	suspend fun promoteAlbum(
+	@GET("rest/moveAlbum.view")
+	suspend fun moveAlbum(
 		@Query("id") id: String,
 		/** The destination root, as `getMusicFolders` reports it. */
 		@Query("musicFolderId") musicFolderId: String,

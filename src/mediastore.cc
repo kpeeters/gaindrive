@@ -897,8 +897,15 @@ void MediaStore::create_schema()
 		);
 	}
 
+MediaStore::ScanStatus MediaStore::scan_status() const
+	{
+	return { scans_active_.load() > 0, scan_items_.load() };
+	}
+
 void MediaStore::scan()
 	{
+	ScanGuard guard(*this);
+
 	// The API key is a stored setting, not a start-up argument, so it is read
 	// here rather than in the constructor: entering it in the client takes
 	// effect on the next scan without a restart.
@@ -964,6 +971,8 @@ void MediaStore::scan()
 
 void MediaStore::scan_dirs(const std::set<std::string>& dirs)
 	{
+	ScanGuard guard(*this);
+
 	tmdb_.set_api_key(get_setting("tmdb_key"));
 
 	// dirs are stored-form paths ("<root>/<level-1 dir>").  A bare root name,
@@ -1920,6 +1929,12 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 				upsert_song_with_data(db_music_, sdat, album_id, fid, artist_id,
 				                       strip_root(sdat.path),
 				                       sdat.cover.empty() ? "" : strip_root(sdat.cover));
+				// getScanStatus's `count`.  Counted here rather than after the
+				// commit below so the number moves while a large album is
+				// still being written; an album whose transaction then fails
+				// leaves it a little high, which is the right way round for a
+				// progress figure.
+				scan_items_.fetch_add(1);
 				}
 
 			db_music_.exec(("DELETE FROM songs WHERE last_scanned IS NULL"

@@ -100,8 +100,8 @@ std::vector<UrlHandler> UrlFetcher::default_handlers()
 	// what makes reorganise_by_tags() leave them alone (it only collects files
 	// shallower than that), what lets the scan step enumerate artist
 	// directories exactly as it does for an archive, and what satisfies
-	// promoteAlbum's exact five-component path check.  A shallower result is
-	// never promotable.
+	// deleteUpload's exact five-component path check.  A shallower result is
+	// never deletable by its owner.
 	//
 	// -P takes the directory and -o takes the template; %DIR% must not be put
 	// inside -o, where % is significant and an uploads path containing one would

@@ -146,7 +146,7 @@ def test_blank_names_are_not_an_error():
 
 def test_unusable_names_refused():
     """A name that is not blank but sanitises away to nothing was typed and is
-    wrong. renameAlbum takes the same line at the same question: filing it
+    wrong. moveAlbum takes the same line at the same question: filing it
     under "Unknown" would hide the mistake."""
     _require_handlers()
     for field in ("artist", "album"):

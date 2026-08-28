@@ -48,8 +48,8 @@
 
 [meta]
 extension = "gaindrive"
-# Must agree with src/gaindrive.cc:2311 (JSON) and :2318 (XML).
-versions  = ['1', '2', '3']
+# Must agree with src/gaindrive.cc:2315 (JSON) and :2323 (XML).
+versions  = ['1', '2', '3', '4']
 title     = "GainDrive API extensions"
 intro     = '''
 GainDrive speaks the [Subsonic](https://opensubsonic.netlify.app/) API, and
@@ -78,8 +78,8 @@ title = "The gaindrive extension"
 group = "Overview"
 blurb = '''
 `getOpenSubsonicExtensions` advertises an extension named `gaindrive` at
-versions 1, 2 and 3. No authentication is needed for that call, so a client
-can negotiate before login.
+versions 1 to 4. No authentication is needed for that call, so a client can
+negotiate before login.
 
 * **Version 1** is `getRecentSongs`, the album text and image endpoints,
   `updateSong`, `renameAlbum`, `castRole` on the user endpoints, the server
@@ -87,6 +87,8 @@ can negotiate before login.
 * **Version 2** is version 1 plus the four URL-fetch endpoints:
   `getUrlHandlers`, `fetchUrl`, `getFetchJobs` and `cancelFetch`.
 * **Version 3** is version 2 plus `deleteUpload`.
+* **Version 4** replaces `renameAlbum` and `promoteAlbum` with the single
+  `moveAlbum`.
 
 Each is a separate version rather than a widening of the one before it. A
 client that negotiated version 1 was told what that meant, and silently
@@ -99,11 +101,11 @@ them gets exactly what it got before, so nothing it was told has been
 redefined. A new endpoint is different, because a client cannot discover one
 without being told.
 
-`promoteAlbum`'s `musicFolderId` and `folder` are the exception that proves
-it: they are *required*, so a version-1 client calling it now gets error 10
-where it used to get a move. Nothing has shipped, so nobody is holding that
-promise — but were this a released API it would have wanted a version of its
-own, or better, a different endpoint name.
+NOTE: **Version 4 is the first that takes something away**, so versions 1 and
+3 no longer describe this server: the two endpoints it replaces are gone
+rather than deprecated. Nothing has shipped, so nobody is holding that
+promise. A released API would have had to keep the old names as aliases
+instead — the numbers are only worth something while they stay true.
 
 A client that does not know the extension will not call any of these, so there
 is no conformance risk in advertising it. Nothing in the standard endpoints
@@ -322,7 +324,7 @@ pseudo-artists.
   notes  = '''
 * `personal=true` — the calling account's own uploads.
 * `personal=*` — **every** account's, and **admin only**; anything else gets
-  error 50. An admin is the only account that can `promoteAlbum` an upload
+  error 50. An admin is the only account that can `moveAlbum` an upload
   into the shared library, so without this a non-admin's upload is visible to
   its owner and to nobody able to act on it.
 
@@ -701,19 +703,40 @@ careful not to clobber it on a later pass.
 
 [[endpoint]]
 kind      = 'endpoint'
-name      = "renameAlbum"
+name      = "moveAlbum"
 section   = "metadata"
-version   = '1'
+version   = '4'
 auth_note = 'Your own upload batch, or admin anywhere.'
-summary   = 'Renames an album, and optionally re-files it under a different artist, by moving the directory on disk.'
+summary   = 'Puts an album somewhere, under a name, by moving the directory on disk.'
 notes     = '''
-This re-files **only the album it is given**: renaming the artist here moves
-that one album under a new artist directory and leaves the artist's other
-albums alone. A whole-artist rename is deliberately not offered — an album
-edit screen silently rewriting other albums is too easy to do by accident.
+Every parameter but `id` is optional and every omitted one means *unchanged*,
+so this one endpoint covers renaming an album in place, re-filing it under a
+different artist, moving it between library roots, and promoting an upload
+into the shared library. It replaces `renameAlbum` and `promoteAlbum`, which
+were the same operation described two ways.
 
-Everything above the artist level is untouched: the library root, and for an
-upload the owner and the batch id.
+**Where it lands** is the one rule worth reading:
+
+* **`musicFolderId` given** — the album goes to `<that root>/<folder>/<album>`,
+  exactly two levels under the root. Both library layouts are `L1/L2/[L3]/
+  files`, L2 is the album being moved, and L3 is only ever a disc or season
+  directory inside it.
+* **`musicFolderId` omitted** — everything above the artist level is left
+  alone: the library root, and for an upload the owner and the batch id. The
+  album goes to `<all of that>/<folder>/<album>`.
+
+So a plain rename sends `album`; a re-file sends `folder`; a promote sends
+`musicFolderId` and `folder`; and moving a film out of the music root and
+under a `categories` one sends all three.
+
+Artist and album names are directory names — the scanner never reads them from
+tags — so this is the only way to correct them, and it is necessarily a
+filesystem move.
+
+It re-files **only the album it is given**: changing `folder` moves that one
+album and leaves the artist's other albums alone. A whole-artist rename is
+deliberately not offered — an album edit screen silently rewriting other
+albums is too easy to do by accident.
 
 The directory move happens first and is the authoritative act; the database
 rows are then repaired to carry the new paths, so stars, play counts, playlist
@@ -722,10 +745,15 @@ and a file TagLib will not write is counted in `tagFailures` rather than
 failing the call — the opposite order to `updateSong`, where the database
 mirrors the tag rather than the directory.
 
-An emptied artist directory is removed, so it does not linger in the listing
-reading "0 albums".
+NOTE: **The artist tag is only rewritten under an `artists` root.** Under a
+`categories` root the level is a category — Film, Series — and writing that
+into an artist tag would stamp "Film" across every file of a promoted
+documentary. The album tag is rewritten whenever `album` changes.
+
+An emptied source directory is removed, so it does not linger in the listing
+reading "0 albums", and an upload's batch directory goes with it.
 '''
-see = ["updateSong", "promoteAlbum"]
+see = ["updateSong", "deleteUpload"]
 
   [[endpoint.param]]
   name     = "id"
@@ -734,60 +762,81 @@ see = ["updateSong", "promoteAlbum"]
   doc      = 'Album folder id.'
 
   [[endpoint.param]]
+  name  = "musicFolderId"
+  type  = "string"
+  doc   = 'The destination root, as `getMusicFolders` reports it. Omitted keeps the album where it is.'
+  notes = '''
+Error 70 if it names anything that is not a browsable library root —
+including the uploads root, which that listing excludes and which is never a
+destination.
+
+Naming a root requires admin, since it is what puts something into the shared
+library.
+'''
+
+  [[endpoint.param]]
+  name  = "folder"
+  type  = "string"
+  doc   = 'The level under the root: an artist under an `artists` root, a category under a `categories` one. A name not already present is created, so there is no separate operation for adding an artist or a category.'
+  notes = '''
+**Required when `musicFolderId` is given**, and omitted keeps the current one
+otherwise. It was briefly allowed to default when promoting and the default
+was a guess that filed things wrongly: it used the batch's own artist name,
+which for a fetched video is the channel that published it and never a
+category. A caller that does not know where something belongs should be made
+to decide rather than have it decided badly for them.
+'''
+
+  [[endpoint.param]]
   name = "album"
   type = "string"
   doc  = 'New album name. Omitted keeps the current one.'
 
-  [[endpoint.param]]
-  name = "artist"
+  [[endpoint.field]]
+  name = "movedAlbum.id"
   type = "string"
-  doc  = 'New artist name. Omitted keeps the current one; a name not already present is created.'
+  doc  = 'The album folder id afterwards. Usually unchanged, but a move into a directory that did not exist yet mints one.'
 
   [[endpoint.field]]
-  name = "renamedAlbum.id"
+  name = "movedAlbum.parent"
   type = "string"
-  doc  = 'The album folder id afterwards. Usually unchanged, but a re-file into a brand new artist folder mints one.'
+  doc  = 'The artist or category folder id afterwards.'
 
   [[endpoint.field]]
-  name = "renamedAlbum.parent"
+  name = "movedAlbum.album"
   type = "string"
-  doc  = 'The artist folder id afterwards.'
+  doc  = 'The album name as it was applied, after sanitising.'
 
   [[endpoint.field]]
-  name = "renamedAlbum.album"
+  name = "movedAlbum.artist"
   type = "string"
-  doc  = 'The name as it was applied, after sanitising.'
+  doc  = 'The folder name as it was applied, after sanitising.'
 
   [[endpoint.field]]
-  name = "renamedAlbum.artist"
-  type = "string"
-  doc  = 'Likewise for the artist.'
-
-  [[endpoint.field]]
-  name = "renamedAlbum.tagFailures"
-  type = "int"
-  doc  = 'How many files could not have their tags rewritten. The move still happened.'
+  name  = "movedAlbum.tagFailures"
+  type  = "int"
+  doc   = 'How many files could not have their tags rewritten. The move still happened.'
+  notes = '''
+Zero when no tag needed changing — a move that alters neither name opens no
+files at all.
+'''
 
   [[endpoint.error]]
   code = '10'
-  when = '`id` missing or not a number, or both names sanitise to empty.'
+  when = '`id` missing or not a number; `folder` missing while `musicFolderId` is given; a supplied name holding nothing usable once sanitised.'
 
   [[endpoint.error]]
   code = '50'
-  when = 'Renaming outside your own uploads without admin.'
+  when = 'Naming a destination root without admin, or moving anything that is not your own upload batch without admin.'
 
   [[endpoint.error]]
   code = '70'
-  when = 'No album with that id.'
+  when = 'No album with that id, or `musicFolderId` does not name a browsable library root.'
 
   [[endpoint.error]]
   code = '0'
-  when = 'The folder is its own artist and has no artist level above it; the target already exists; or the target would fall outside every configured root.'
+  when = 'The album is its own artist and no destination root was named, something with that name is already in the destination, or the target falls outside every configured root.'
 
-
-# ===========================================================================
-# Server settings
-# ===========================================================================
 
 [[endpoint]]
 kind     = 'endpoint'
@@ -896,7 +945,7 @@ error code.
 With no uploads root configured the endpoint refuses rather than writing into
 a library root.
 '''
-see = ["fetchUrl", "promoteAlbum", "deleteUpload"]
+see = ["fetchUrl", "moveAlbum", "deleteUpload"]
 
   [[endpoint.param]]
   name     = "file"
@@ -932,73 +981,6 @@ see = ["fetchUrl", "promoteAlbum", "deleteUpload"]
   [[endpoint.error]]
   http = '400'
   when = 'No uploads root, an unsupported archive type, or a supplied name holding nothing usable once sanitised.'
-
-[[endpoint]]
-kind    = 'endpoint'
-name    = "promoteAlbum"
-section = "upload"
-version = '1'
-auth    = 'admin'
-summary = 'Moves an uploaded album out of a personal folder and into the shared library.'
-notes   = '''
-From `<uploads root>/<username>/<uuid>/<artist>/<album>` to `<folder>/<album>`
-under a library root. Error 0 if the id does not resolve to a path of exactly
-that shape.
-
-The destination is a root and one level, which is the whole of it: both
-layouts are `L1/L2/[L3]/files`, L2 is the album being moved, and L3 is only
-ever a disc or season directory inside it.
-
-**All three parameters are required.** Each destination half was briefly
-optional, defaulting to the first `artists`-type root declared and to the
-batch's own artist name, and both defaults were guesses that put things in the
-wrong place. The root one could not reach a `categories` root at all, so a
-film went into the music library and was then looked up as a musical artist;
-the folder one filed a documentary under whatever the source called it, which
-for a fetched video is a channel name and never a category. A caller that does
-not know where something belongs should be made to decide rather than have it
-decided badly for them.
-'''
-see = ["renameAlbum", "deleteUpload"]
-
-  [[endpoint.param]]
-  name     = "id"
-  type     = "string"
-  required = true
-  doc      = 'Album folder id.'
-
-  [[endpoint.param]]
-  name     = "musicFolderId"
-  type     = "string"
-  required = true
-  doc      = 'The destination root as `getMusicFolders` reports it.'
-  notes    = '''
-Error 70 if it names anything that is not a browsable library root —
-including the uploads root, which that listing excludes and which is never a
-destination.
-'''
-
-  [[endpoint.param]]
-  name     = "folder"
-  type     = "string"
-  required = true
-  doc      = 'The level under that root: an artist under an `artists` root, a category under a `categories` one.'
-  notes    = '''
-A name not already present is created, so there is no separate operation for
-adding an artist or a category.
-'''
-
-  [[endpoint.error]]
-  code = '10'
-  when = 'Any of the three parameters is missing.'
-
-  [[endpoint.error]]
-  code = '70'
-  when = '`musicFolderId` does not name a browsable library root.'
-
-  [[endpoint.error]]
-  code = '0'
-  when = 'The id does not resolve to a five-component uploads path.'
 
 [[endpoint]]
 kind    = 'endpoint'

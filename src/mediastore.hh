@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <string>
 #include <set>
@@ -65,6 +66,12 @@ class MediaStore {
 		// root itself; if present, falls back to a full scan().
 		void scan_dirs(const std::set<std::string>& dirs);
 
+		// What getScanStatus reports. `count` is songs processed, and it keeps
+		// the finished total once a scan ends — which is what the spec's
+		// "scanning: false, count: N" is for.
+		struct ScanStatus { bool scanning; long long count; };
+		ScanStatus scan_status() const;
+
 		// ---- User management ----
 
 		// Returns false if username already exists.
@@ -121,9 +128,10 @@ class MediaStore {
 		// a folder deeper in the tree, an id that resolves to nothing, and the
 		// uploads root, which that listing excludes for the same reason. Both
 		// go through the same rule so a caller cannot be handed a root the
-		// listing would never have offered: promoteAlbum takes this id from a
-		// client, and promoting *into* uploads would produce a path its own
-		// five-component check rejects for ever after.
+		// listing would never have offered: moveAlbum takes this id straight
+		// from a client, and the uploads root is per-user space rather than a
+		// destination anyone browses to — moving something *into* it would put
+		// a shared-library album inside somebody's personal area.
 		std::optional<MusicFolder> music_folder_by_id(int id);
 
 		struct CachedArtistInfo {
@@ -771,6 +779,27 @@ class MediaStore {
 
 		SQLite::Database db_music_;
 		std::mutex       db_mutex_;  // guards db_music_ across scan thread + API threads
+
+		// What scan_status() reports. Held here rather than in GainDrive
+		// because this is where all four scan entry points converge — the
+		// startup scan, the folder watcher, the upload handler and the URL
+		// fetch worker — and any of them can be running at once.
+		//
+		// A depth *count*, not a flag: scan_dirs() falls back to calling
+		// scan() when it cannot resolve a path, so a bool would be cleared by
+		// the inner call returning while the outer one was still going.
+		std::atomic<int>       scans_active_{0};
+		std::atomic<long long> scan_items_{0};
+
+		// Increments scans_active_ for its lifetime, and zeroes the item count
+		// on the transition into a scan so `count` means "this scan" rather
+		// than "since start-up".
+		struct ScanGuard {
+			MediaStore& s;
+			explicit ScanGuard(MediaStore& st) : s(st)
+				{ if (s.scans_active_.fetch_add(1) == 0) s.scan_items_.store(0); }
+			~ScanGuard() { s.scans_active_.fetch_sub(1); }
+			};
 
 		// When each user's last_access was last written. Guarded by db_mutex_,
 		// which validate_auth() holds anyway. See the comment there for why

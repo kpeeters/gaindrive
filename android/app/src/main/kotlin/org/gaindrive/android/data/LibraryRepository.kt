@@ -496,6 +496,10 @@ class LibraryRepository @Inject constructor(
 	 * they were briefly optional and each default was a guess that filed things
 	 * wrongly, the root one unable to reach a `categories` root at all.
 	 *
+	 * The endpoint behind it is the general `moveAlbum`, which also renames in
+	 * place and re-files under another artist. The name kept here is the one
+	 * thing this app does with it, and is what the screen offers.
+	 *
 	 * Two things have to happen after it succeeds, and neither is optional. The
 	 * mirror of that server is dropped, because the move happened on its disk
 	 * and every stored id and index bucket beneath the album now names something
@@ -507,7 +511,7 @@ class LibraryRepository @Inject constructor(
 	suspend fun promoteAlbum(album: ItemRef, musicFolderId: String, folder: String) {
 		requireOnline()
 		onServer(album.server) { client ->
-			client.promoteAlbum(album.id, musicFolderId, folder.trim()).requireOk()
+			client.moveAlbum(album.id, musicFolderId, folder.trim()).requireOk()
 		}
 		local.forgetLibrary(album.server)
 		libraryRevision.bump()

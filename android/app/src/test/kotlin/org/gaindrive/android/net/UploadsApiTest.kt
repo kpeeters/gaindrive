@@ -118,9 +118,9 @@ class UploadsApiTest {
 	 * remember.
 	 */
 	@Test
-	fun `promoteAlbum sends the id, the root and the folder`() = runTest {
+	fun `moveAlbum sends the id, the root and the folder`() = runTest {
 		respond(okEnvelope)
-		api.promoteAlbum("412", "3", "Documentaries").requireOk()
+		api.moveAlbum("412", "3", "Documentaries").requireOk()
 
 		val path = server.takeRequest().path.orEmpty()
 		assertTrue(path.contains("id=412"))
@@ -128,19 +128,23 @@ class UploadsApiTest {
 		assertTrue(path.contains("folder=Documentaries"))
 	}
 
-	/** Not an admin. The screen only draws the action for one, but the server decides. */
+	/**
+	 * Not an admin. The screen only draws the action for one, but the server
+	 * decides — and naming a destination root is the half of `moveAlbum` that
+	 * requires admin, since it is what puts something into the shared library.
+	 */
 	@Test
-	fun `promoteAlbum without admin is error 50`() = runTest {
+	fun `moveAlbum without admin is error 50`() = runTest {
 		respond(
 			"""{"subsonic-response":{"status":"failed","version":"1.16.1",
-			   "error":{"code":50,"message":"Promote requires admin role."}}}"""
+			   "error":{"code":50,"message":"Moving into the shared library requires admin role."}}}"""
 		)
 		try {
-			api.promoteAlbum("412", "3", "Pink Floyd").requireOk()
+			api.moveAlbum("412", "3", "Pink Floyd").requireOk()
 			fail("expected SubsonicException")
 		} catch (e: SubsonicException) {
 			assertEquals(SubsonicException.NOT_AUTHORISED, e.code)
-			assertEquals("Promote requires admin role.", e.message)
+			assertEquals("Moving into the shared library requires admin role.", e.message)
 		}
 	}
 
@@ -152,7 +156,7 @@ class UploadsApiTest {
 			   "error":{"code":70,"message":"No such library folder."}}}"""
 		)
 		try {
-			api.promoteAlbum("412", "99", "Pink Floyd").requireOk()
+			api.moveAlbum("412", "99", "Pink Floyd").requireOk()
 			fail("expected SubsonicException")
 		} catch (e: SubsonicException) {
 			assertEquals(SubsonicException.NOT_FOUND, e.code)
@@ -217,20 +221,26 @@ class UploadsApiTest {
 	}
 
 	/**
-	 * An album that is not in a personal folder. The server answers error 0 with
+	 * A destination that is already occupied. The server answers error 0 with
 	 * its own wording, which the panel shows as-is rather than translating.
+	 *
+	 * This replaced a test for "item is not in a personal library folder",
+	 * which `promoteAlbum` used to raise from a five-component source-path
+	 * check. `moveAlbum` has no such check — with it an admin could not move a
+	 * library album at all, which was the point of merging the two endpoints —
+	 * so that message no longer exists on the server to assert against.
 	 */
 	@Test
-	fun `promoting something outside uploads is refused with a message`() = runTest {
+	fun `an occupied destination is refused with a message`() = runTest {
 		respond(
 			"""{"subsonic-response":{"status":"failed","version":"1.16.1",
-			   "error":{"code":0,"message":"Item is not in a personal library folder."}}}"""
+			   "error":{"code":0,"message":"Something with that name is already in that folder."}}}"""
 		)
 		try {
-			api.promoteAlbum("7", "3", "Pink Floyd").requireOk()
+			api.moveAlbum("7", "3", "Pink Floyd").requireOk()
 			fail("expected SubsonicException")
 		} catch (e: SubsonicException) {
-			assertEquals("Item is not in a personal library folder.", e.message)
+			assertEquals("Something with that name is already in that folder.", e.message)
 		}
 	}
 }
