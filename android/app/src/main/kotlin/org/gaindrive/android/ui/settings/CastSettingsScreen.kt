@@ -58,7 +58,7 @@ fun CastSettingsScreen(
 				title = "Cast at original quality",
 				// Says which casts it applies to, because that is the whole
 				// shape of the setting and there is no way to see it otherwise.
-				subtitle = "Send the file as it is stored when the TV fetches it " +
+				subtitle = "Send the file as it is stored when the player fetches it " +
 					"from the server itself. Otherwise casting uses the same " +
 					"quality as this phone.",
 				checked = state.castOriginal,
@@ -74,7 +74,7 @@ fun CastSettingsScreen(
 				text = "A cast relayed through this phone keeps the streaming " +
 					"quality: those bytes cross this phone's connection, which is " +
 					"the situation relaying exists for. Your account's bitrate " +
-					"limit still applies. And a file in a format the TV cannot " +
+					"limit still applies. And a file in a format the player cannot " +
 					"decode is converted anyway, rather than failing to play.\n\n" +
 					"The info button in Now Playing shows what is actually being " +
 					"sent, and how.",

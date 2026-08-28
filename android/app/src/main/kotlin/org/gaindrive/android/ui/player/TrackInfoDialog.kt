@@ -131,7 +131,7 @@ private fun PlaybackRows(
 	if (casting) {
 		InfoRow(
 			"Declared type",
-			loaded?.let { it.mimeType ?: "Not declared — the TV sniffs it" },
+			loaded?.let { it.mimeType ?: "Not declared — the player sniffs it" },
 		)
 	}
 }
@@ -163,7 +163,7 @@ private fun sentLabel(current: NowPlaying, song: Song?, quality: AudioQuality?):
 private fun routeLabel(route: CastRoute, serverName: String?): String {
 	val server = serverName ?: "the server"
 	return when (route) {
-		CastRoute.DIRECT -> "Direct — the TV fetches from $server"
+		CastRoute.DIRECT -> "Direct — the player fetches from $server"
 		CastRoute.RELAY -> "Through this phone — relayed from $server"
 		CastRoute.LOCAL -> "Through this phone — from the downloaded copy"
 	}

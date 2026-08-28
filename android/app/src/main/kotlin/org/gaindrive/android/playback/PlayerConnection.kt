@@ -227,7 +227,7 @@ class PlayerConnection @Inject constructor(
 		if (castSession.device.value == null) return false
 		if (settings.videoAudioOnly.first()) return false
 		if (songs.none { it.isVideo && !it.nativeSeek }) return false
-		_message.value = "This video has to be converted as it plays, which the TV " +
+		_message.value = "This video has to be converted as it plays, which the player " +
 			"cannot seek. Disconnect to watch on this device."
 		return true
 	}
