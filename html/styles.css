@@ -413,3 +413,42 @@ section.dark .sec-head p { color: rgba(246,239,224,0.7); }
 .legal-lead { font-size: 20px; line-height: 1.6; margin: 0 0 8px; }
 .legal .doc-sec { margin-top: 44px; }
 .legal .doc-sec h2 { font-size: 24px; }
+
+/* ============================================================
+   API REFERENCE
+   html/api.html, generated from doc/api.toml by doc/gen_api_html.py.
+   The page reuses the DOCS rules above; only what an endpoint listing
+   needs beyond them lives here.
+   ============================================================ */
+
+/* Wider than a prose column: three-column parameter tables plus a mono
+   type column do not fit the 72ch the docs page is set in. */
+.api-main { max-width: 84ch; }
+
+/* .doc-sec rules between sections; this rules between the endpoints
+   inside one, so seven cast endpoints are not an undifferentiated wall. */
+.api-ep { padding-bottom: 34px; margin-bottom: 34px; border-bottom: 1px dashed var(--line); }
+.api-ep:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+
+/* An endpoint heading is a deep-link target, so it needs the same clearance
+   under the sticky nav that .doc-sec already gives a section. */
+.doc-sec h3 { scroll-margin-top: 96px; }
+.doc-sec h4 { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--crimson); margin: 26px 0 10px; }
+
+.api-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 8px 0 16px; }
+.api-badge { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; color: var(--crimson); background: var(--gold); padding: 3px 9px; border-radius: 999px; }
+.api-badge-std { background: none; color: var(--ink-soft); border: 1px solid var(--line); }
+
+.api-req { color: var(--crimson); }
+.api-on { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); white-space: nowrap; }
+
+/* A note about one parameter, indented under the table that named it. */
+.api-note { border-left: 2px solid var(--line); padding-left: 16px; margin: 0 0 18px; }
+.api-note-h { margin: 0 0 6px !important; }
+
+.api-see { font-size: 15px; }
+
+@media (max-width: 720px) {
+  .api-main { max-width: 100%; }
+  .doc-sec .doc-table { display: block; overflow-x: auto; }
+}

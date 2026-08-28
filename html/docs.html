@@ -64,6 +64,7 @@
         <a href="#android">Android app</a>
         <a href="#ios">iOS app</a>
         <a href="#clients">Other Subsonic clients</a>
+        <a href="#api">Writing a client</a>
       </div>
       <div class="dn-grp">
         <div class="h">Help</div>
@@ -297,6 +298,12 @@ Restart=on-failure</span>
         <p>GainDrive speaks the <a href="https://opensubsonic.netlify.app/" target="_blank" rel="noopener">OpenSubsonic</a> API, so any compatible client on iOS, Android or desktop works. Point the client at your server URL and sign in with a GainDrive account. Each user gets their own playlists and listening history.</p>
       </div>
 
+      <div class="doc-sec" id="api">
+        <h2>Writing a client</h2>
+        <p>GainDrive implements the Subsonic API, so the <a href="https://opensubsonic.netlify.app/" target="_blank" rel="noopener">OpenSubsonic</a> documentation covers most of what a client needs. On top of it GainDrive adds endpoints of its own — casting, uploads, fetching from a URL, album notes, metadata editing — along with a few extra parameters and response fields on standard endpoints.</p>
+        <p>All of that is documented on one page: <a href="api.html">the API extensions reference</a>. Clients discover the same surface at runtime through <code>getOpenSubsonicExtensions</code>, which advertises an extension named <code>gaindrive</code>.</p>
+      </div>
+
       <div class="doc-sec" id="troubleshooting">
         <h2>Troubleshooting</h2>
         <div class="doc-qa">
@@ -340,6 +347,7 @@ Restart=on-failure</span>
         <div class="col">
           <h5>Resources</h5>
           <a href="docs.html">Documentation</a>
+          <a href="api.html">API reference</a>
           <a href="https://opensubsonic.netlify.app/" target="_blank" rel="noopener">OpenSubsonic</a>
           <a href="https://github.com/kpeeters/gaindrive/releases" target="_blank" rel="noopener">Changelog</a>
           <a href="privacy.html">Privacy policy</a>

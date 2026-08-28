@@ -1,0 +1,1519 @@
+# The gaindrive API extensions — the single source of truth.
+#
+# Everything gaindrive adds to the Subsonic/OpenSubsonic surface is written
+# here and nowhere else, in the same sense that VERSION is the only place the
+# version is written.  html/api.html is generated from this file by
+# doc/gen_api_html.py; never edit that page.  API.md documents the standard
+# endpoints and points here for the rest.
+#
+# Regenerate with:   make api-html
+#
+# ---------------------------------------------------------------------------
+# Two rules that are not style preferences:
+#
+#  * Prose uses TOML *literal* strings — '...' and '''...'''.  A basic
+#    (double-quoted) string processes backslash escapes and a lone \ is a
+#    parse error, and some of the prose below contains one verbatim.  Double
+#    quotes are for identifiers, which never contain a backslash.
+#
+#  * Anything that gets printed is a string, numbers included: default = '50'.
+#    Booleans appear only in `required` and `repeatable`, which are logic and
+#    are never rendered, so Python's True cannot reach the page.
+#
+# ---------------------------------------------------------------------------
+# The markdown subset accepted in `blurb`, `notes` and `doc`.  Nothing else is
+# supported; the generator warns on stderr about a line that looks like it
+# wanted something more.
+#
+#    blank line       paragraph break
+#    * item           star list (a run of them becomes one list)
+#    `code`           inline code
+#    **bold**  *em*
+#    [text](url)      link; http(s), #anchor or *.html only
+#    NOTE: ...        a paragraph opening with this becomes a callout box
+#
+# ---------------------------------------------------------------------------
+# Entry kinds:
+#
+#    kind = 'endpoint'    a gaindrive endpoint, documented in full.
+#                         Requires `name` and `version`.
+#    kind = 'additions'   a standard Subsonic endpoint that carries gaindrive
+#                         parameters or fields.  Requires `applies_to`; only
+#                         the additions are listed, never what the host
+#                         endpoint does.  Everything under such an entry is an
+#                         extension by construction.
+#
+# `applies_to` names hosts as text; a name matching an endpoint defined here
+# is rendered as a link.
+
+[meta]
+extension = "gaindrive"
+# Must agree with src/gaindrive.cc:2311 (JSON) and :2318 (XML).
+versions  = ['1', '2', '3']
+title     = "GainDrive API extensions"
+intro     = '''
+GainDrive speaks the [Subsonic](https://opensubsonic.netlify.app/) API, and
+this page documents only what it *adds* to it: the endpoints Subsonic does not
+define, and the extra parameters and response fields that standard endpoints
+carry. The standard endpoints themselves behave as specified and are not
+repeated here.
+
+Everything is served at `/rest/<name>.view` unless stated otherwise, answers
+in XML or in JSON (`f=json`), and requires authentication — either `u` and `p`
+or the token scheme `u`, `t` and `s`. A parameter marked with a `*` is
+required.
+
+Clients discover this whole surface through `getOpenSubsonicExtensions`, which
+advertises an extension named `gaindrive`.
+'''
+
+
+# ===========================================================================
+# Sections.  File order is page order and sidebar order.
+# ===========================================================================
+
+[[section]]
+id    = "extension"
+title = "The gaindrive extension"
+group = "Overview"
+blurb = '''
+`getOpenSubsonicExtensions` advertises an extension named `gaindrive` at
+versions 1, 2 and 3. No authentication is needed for that call, so a client
+can negotiate before login.
+
+* **Version 1** is `getRecentSongs`, the album text and image endpoints,
+  `updateSong`, `renameAlbum`, `castRole` on the user endpoints, the server
+  settings endpoints, upload and `promoteAlbum`, and the seven cast endpoints.
+* **Version 2** is version 1 plus the four URL-fetch endpoints:
+  `getUrlHandlers`, `fetchUrl`, `getFetchJobs` and `cancelFetch`.
+* **Version 3** is version 2 plus `deleteUpload`.
+
+Each is a separate version rather than a widening of the one before it. A
+client that negotiated version 1 was told what that meant, and silently
+redefining it would make the number worth nothing.
+
+Note what does **not** earn a version of its own: new *optional parameters* on
+an endpoint an existing version already named — `/upload`'s `artist` and
+`album`, or `personal=*` on the two listing endpoints. A client that ignores
+them gets exactly what it got before, so nothing it was told has been
+redefined. A new endpoint is different, because a client cannot discover one
+without being told.
+
+`promoteAlbum`'s `musicFolderId` and `folder` are the exception that proves
+it: they are *required*, so a version-1 client calling it now gets error 10
+where it used to get a move. Nothing has shipped, so nobody is holding that
+promise — but were this a released API it would have wanted a version of its
+own, or better, a different endpoint name.
+
+A client that does not know the extension will not call any of these, so there
+is no conformance risk in advertising it. Nothing in the standard endpoints
+changes when the extension is present.
+'''
+
+[[section]]
+id    = "browsing"
+title = "Browsing"
+group = "Library"
+
+[[section]]
+id    = "playback"
+title = "Playback"
+group = "Library"
+
+[[section]]
+id    = "video"
+title = "Video"
+group = "Library"
+
+[[section]]
+id    = "albumtext"
+title = "Album text and images"
+group = "Library"
+blurb = '''
+Liner notes and scans that sit alongside the audio as ordinary files.
+'''
+
+[[section]]
+id    = "metadata"
+title = "Metadata editing"
+group = "Editing"
+
+[[section]]
+id    = "settings"
+title = "Server settings"
+group = "Editing"
+blurb = '''
+Admin only, and JSON only — these carry credentials for third-party services
+and have no XML representation.
+'''
+
+[[section]]
+id    = "users"
+title = "Users"
+group = "Editing"
+
+[[section]]
+id    = "upload"
+title = "Upload"
+group = "Personal files"
+blurb = '''
+Each upload is extracted into `<uploads root>/<username>/<uuid>/` so that
+archives with a missing or messy artist/album structure stay isolated and the
+scanner always has a stable artist-level root to work from.
+
+**That isolation ends when the upload succeeds.** Each artist directory is
+then merged into the one the account already has under an earlier batch, and
+the emptied batch is removed. So uploading two archives that name the same
+artist gives one artist holding both albums, and fetching several tracks into
+one album adds them to it rather than making a second album of the same name.
+Colliding files are suffixed, never overwritten. `fetchUrl` shares this step,
+which is why `artist` and `album` behave identically on both: a blank or
+absent value keeps what the source supplied, and a value holding nothing
+usable once sanitised is refused rather than silently ignored.
+'''
+
+[[section]]
+id    = "urlfetch"
+title = "Fetching from a URL"
+group = "Personal files"
+blurb = '''
+The second way something reaches a personal folder: instead of uploading an
+archive, paste a URL and let the server fetch it with an external tool. All
+four endpoints require `uploadRole` or admin and return error 50 without it.
+
+The server matches the URL against a table of handlers configured by the
+operator. **A URL matching no handler is refused, and that refusal is the
+security boundary** — without it, any account allowed to upload could make the
+server issue outbound requests to anywhere it can reach, including hosts
+unreachable from outside the network. Only `http` and `https` URLs are
+considered at all.
+
+A fetch runs in the background, one at a time, and the request returns
+immediately with a job id. The job's state is one of `queued`, `running`,
+`scanning`, `done`, `error` or `cancelled`; **the library scan happens before
+`done`**, so a client seeing `done` can re-read the listing with no further
+wait. A failed, timed-out or cancelled job deletes its batch directory.
+'''
+
+[[section]]
+id    = "cast"
+title = "Chromecast"
+group = "Casting"
+blurb = '''
+Casting is server-driven: the browser asks gaindrive to load a URL onto the
+Chromecast, and the device then fetches the media from `stream` itself using a
+per-session token. All seven endpoints require `castRole` in addition to
+authentication, and return error 50 without it. `stream` is exempt when called
+with a valid `castToken`, since only `castLoad` ever issues one.
+'''
+
+
+# ===========================================================================
+# Overview
+# ===========================================================================
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["getOpenSubsonicExtensions"]
+section    = "extension"
+auth       = 'none'
+summary    = 'Advertises the gaindrive extension and the versions this server implements.'
+
+  [[endpoint.field]]
+  name = "openSubsonicExtensions.name"
+  type = "string"
+  doc  = 'Always `gaindrive`.'
+
+  [[endpoint.field]]
+  name = "openSubsonicExtensions.versions"
+  type = "int[]"
+  doc  = 'Currently `[1, 2, 3]`. In XML, a comma-separated `versions` attribute.'
+
+
+# ===========================================================================
+# Browsing
+# ===========================================================================
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "getRecentSongs"
+section = "browsing"
+version = '1'
+summary = 'Recently played tracks for the authenticated user, newest first.'
+
+  [[endpoint.param]]
+  name    = "size"
+  type    = "int"
+  default = '50'
+  doc     = 'How many to return. Clamped to 1..500.'
+
+  [[endpoint.param]]
+  name    = "offset"
+  type    = "int"
+  default = '0'
+  doc     = 'How many to skip.'
+
+  [[endpoint.field]]
+  name = "recentSongs.song"
+  type = "Child[]"
+  doc  = 'Ordinary song entries, newest first.'
+
+  [[endpoint.field]]
+  name = "lastPlayed"
+  type = "string"
+  on   = "song"
+  doc  = 'When the play this entry reports happened.'
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["getMusicFolders"]
+section    = "browsing"
+summary    = 'Each root says which of the two library layouts it holds.'
+
+  [[endpoint.field]]
+  name  = "contentType"
+  type  = "string"
+  on    = "musicFolder"
+  doc   = '`artists` or `categories`.'
+  notes = '''
+Artist and category roots cannot be told apart by shape — both are
+`L1/L2/[L3]/files` — so which one a root is has to be configured, and a client
+that wants to draw them differently has to be told.
+
+The uploads root, if configured, is never listed: it holds per-user personal
+files rather than shared library content.
+'''
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["getIndexes", "getArtists"]
+section    = "browsing"
+summary    = 'Narrow the listing to one kind of root, or replace it with the uploads area.'
+notes      = '''
+Root folders themselves never appear as artists. Both endpoints return the
+*level-1 entries* of every root flattened into one list — musicians from
+artist roots and sections such as Film or Series from category roots.
+
+Nothing below the top level is affected: `getArtist`, `getAlbum` and
+`getMusicDirectory` take plain ids and neither know nor need to know which
+side of the library one came from.
+'''
+
+  [[endpoint.param]]
+  name   = "contentType"
+  type   = "string"
+  values = ["artists", "categories"]
+  doc    = 'Restrict to roots of one kind.'
+  notes  = '''
+It complements `musicFolderId` rather than replacing it: a kind may span
+several roots — two artist roots must list together — which a single folder id
+cannot express.
+
+Omitting it returns every root's children mixed, which is what a client with
+no concept of categories should get. The sections browse perfectly well as
+pseudo-artists.
+'''
+
+  [[endpoint.param]]
+  name   = "personal"
+  type   = "string"
+  values = ["true", "*"]
+  doc    = 'Replace the shared library with the uploads area.'
+  notes  = '''
+* `personal=true` — the calling account's own uploads.
+* `personal=*` — **every** account's, and **admin only**; anything else gets
+  error 50. An admin is the only account that can `promoteAlbum` an upload
+  into the shared library, so without this a non-admin's upload is visible to
+  its owner and to nobody able to act on it.
+
+**`personal=*` groups the response by owner rather than by first letter**, so
+the `index` labels come back as usernames instead of `A`, `B`, `#`. That is
+what makes two accounts' identically named folders tellable apart — grouped by
+letter they would interleave under one heading with nothing saying whose is
+whose — and it needs nothing new from a client, since an index label was
+always an arbitrary string.
+
+NOTE: A client drawing an alphabet scrubber from those labels will want to
+suppress it when they are not letters.
+'''
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["getAlbumList", "getAlbumList2", "search2", "search3"]
+section    = "browsing"
+summary    = 'Search and list within the uploads area instead of the shared library.'
+
+  [[endpoint.param]]
+  name   = "personal"
+  type   = "bool"
+  values = ["true"]
+  doc    = "The calling account's own uploads. Unlike on `getIndexes`, `personal=*` is not accepted here."
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["getCoverArt"]
+section    = "browsing"
+summary    = 'Reach the extra images in an album folder, beyond the cover.'
+
+  [[endpoint.param]]
+  name    = "index"
+  type    = "int"
+  default = '0'
+  doc     = '0 is the main cover; 1 and up select the extras `getAlbumImages` counted.'
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["getArtistInfo", "getArtistInfo2"]
+section    = "browsing"
+summary    = 'Re-ask the metadata providers for an artist rather than answering from cache.'
+
+  [[endpoint.param]]
+  name  = "force"
+  type  = "bool"
+  doc   = 'Bypass the cached `artist_info_cache` row and query the providers again.'
+  notes = '''
+The chain is MusicBrainz, then Wikidata, Wikipedia, TheAudioDB and Discogs,
+paced against MusicBrainz's rate limit, so a forced lookup is not instant.
+'''
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["any endpoint returning song entries"]
+section    = "browsing"
+summary    = 'One extra field on every song entry.'
+
+  [[endpoint.field]]
+  name  = "transcodedBitRate"
+  type  = "int"
+  on    = "Child"
+  doc   = 'The bitrate the stream would carry, in kbps, when this entry would be transcoded.'
+  notes = '''
+Subsonic defines `transcodedContentType` and `transcodedSuffix` but no
+bitrate, so a client could see that a track would be converted without being
+able to say to what. It is computed the same way `stream` decides, including
+the account's own ceiling, so the two cannot disagree.
+'''
+
+
+# ===========================================================================
+# Playback
+# ===========================================================================
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["stream"]
+section    = "playback"
+summary    = 'Four gaindrive parameters on the standard streaming endpoint.'
+
+  [[endpoint.param]]
+  name  = "pace"
+  type  = "bool"
+  doc   = 'Deliver at roughly 1x playback rate rather than as fast as the socket takes it.'
+  notes = '''
+Send it when the URL is being handed to something that will play it in real
+time and cannot be recognised from the request — a Cast receiver fetching for
+itself is the case it exists for. Without it such a receiver is sent the whole
+track at once, stops reading when its buffer fills, and the connection is then
+idle until its own 60-second no-data timeout, or a reverse proxy's, kills it
+mid-track.
+
+**Never send it on a download or a prefetch**: that would make the transfer
+take as long as the music. A browser is paced already, by its User-Agent, and
+video is never paced.
+'''
+
+  [[endpoint.param]]
+  name  = "castToken"
+  type  = "string"
+  doc   = 'The per-session token from `startCast`, accepted in place of credentials.'
+  notes = '''
+A Chromecast fetches the media for itself and has no account, so the token is
+what authorises it. It is issued once when the user selects a device and lasts
+the whole session — it is not single-use per request. A request carrying a
+valid token also skips the `castRole` check, since only `castLoad` ever issues
+one, and skips the account bitrate ceiling.
+'''
+
+  [[endpoint.param]]
+  name  = "size"
+  type  = "string"
+  doc   = 'Video only. A cap on the output frame size, as `WxH` — `640x480`.'
+  notes = '''
+Any value here disqualifies the direct and remux tiers, so the video is
+re-encoded on the fly and the response is chunked with no `Content-Length`.
+'''
+
+  [[endpoint.param]]
+  name = "duration"
+  type = "int"
+  doc  = 'Video only. Bound the output to this many seconds from `timeOffset`, and switch the container to MPEG-TS. That is one HLS segment.'
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["hls.m3u8"]
+section    = "playback"
+path       = "/rest/hls.m3u8"
+summary    = 'A frame size may ride along with the variant bitrate.'
+notes      = '''
+Note the path: this is the one endpoint not spelled `<name>.view`.
+
+The playlist is stateless — it is arithmetic over the stored duration, and
+every segment is an ordinary `stream` request bounded by `timeOffset` and
+`duration`. Nothing is written to disk and nothing needs cleaning up if a
+client stops mid-playlist.
+'''
+
+  [[endpoint.param]]
+  name = "bitRate"
+  type = "string"
+  doc  = 'May carry an `@WxH` suffix naming the frame size for that variant — `1000@640x480`.'
+
+
+# ===========================================================================
+# Video
+# ===========================================================================
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["getAlbum", "getMusicDirectory", "getVideos", "getSong"]
+section    = "video"
+summary    = 'Two fields on a video entry, from the four endpoints that populate them.'
+notes      = '''
+NOTE: Only these four queries select the underlying columns. A video reached
+through `getStarred`, `getPlaylist`, `getPlayQueue`, `getBookmarks` or
+`search` reports neither field. That is the safe direction — it plays
+correctly and seeks by re-request — but such a video re-encodes on every seek
+even when it could have been remuxed.
+'''
+
+  [[endpoint.field]]
+  name  = "nativeSeek"
+  type  = "bool"
+  on    = "Child"
+  doc   = 'Whether the stream this entry would produce carries a `Content-Length` and answers `Range` requests.'
+  notes = '''
+A client can let its media element seek by itself instead of re-requesting
+with `timeOffset`.
+
+It is **not** the same question as "will ffmpeg run": the remux tier runs
+ffmpeg but writes a real file, so it seeks as well as an untouched original.
+Only a re-encode is unseekable. `transcodedSuffix` cannot be used for this —
+it is present for both the remux and re-encode tiers, which differ precisely
+here.
+
+A client that sends `timeOffset` for a remuxable file demotes it from a
+`-c copy` remux to a full re-encode.
+'''
+
+  [[endpoint.field]]
+  name  = "season"
+  type  = "int"
+  on    = "Child"
+  doc   = 'The season an episode belongs to; present only when the entry is one.'
+  notes = '''
+`discNumber` already carries the same number — that is the field every
+Subsonic client groups and sorts by, and none of them knows what a season is —
+so a client that ignores `season` groups a series correctly and simply calls
+the groups discs. A client that reads it can head them "Series 2" instead.
+
+The number comes from an `S02E03`-style marker or from a folder naming its
+season. A `Disc 2` or `CD1` folder is deliberately not one, and neither is an
+unnumbered `Specials` folder, so both of those keep reporting a disc.
+'''
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["getCaptions"]
+section    = "video"
+summary    = 'A Chromecast fetches its own subtitle track and has no credentials.'
+
+  [[endpoint.param]]
+  name  = "castToken"
+  type  = "string"
+  doc   = 'The per-session token from `startCast`, accepted in place of credentials.'
+  notes = '''
+The converted result is cached, because ffmpeg has to demux the whole
+container to collect one subtitle stream and the receiver fetches the track
+the moment it is switched on.
+'''
+
+
+# ===========================================================================
+# Album text and images
+# ===========================================================================
+
+[[endpoint]]
+kind     = 'endpoint'
+name     = "getAlbumTexts"
+section  = "albumtext"
+version  = '1'
+response = 'subsonic-json'
+summary  = 'Lists the `.txt` files in an album folder, sorted by name.'
+notes    = '''
+Utility files that are not human-readable notes — currently
+`fingerprints.txt` — are excluded.
+'''
+
+  [[endpoint.param]]
+  name     = "id"
+  type     = "string"
+  required = true
+  doc      = 'Album folder id.'
+
+  [[endpoint.field]]
+  name = "albumTexts.textFile.name"
+  type = "string"
+  doc  = 'Filename, to be handed back to `getAlbumText`.'
+
+[[endpoint]]
+kind         = 'endpoint'
+name         = "getAlbumText"
+section      = "albumtext"
+version      = '1'
+response     = 'raw'
+content_type = "text/plain; charset=utf-8"
+summary      = 'Serves one of those files. The response is the file itself, not a Subsonic envelope.'
+
+  [[endpoint.param]]
+  name     = "id"
+  type     = "string"
+  required = true
+  doc      = 'Album folder id.'
+
+  [[endpoint.param]]
+  name     = "name"
+  type     = "string"
+  required = true
+  doc      = 'Filename from `getAlbumTexts`. Must end in `.txt` and may not contain `/`, `\` or `..`.'
+
+  [[endpoint.error]]
+  http = '400'
+  when = 'The name fails either rule above.'
+
+[[endpoint]]
+kind     = 'endpoint'
+name     = "getAlbumImages"
+section  = "albumtext"
+version  = '1'
+response = 'subsonic-json'
+summary  = 'How many images an album folder holds — the cover plus any extras.'
+notes    = '''
+Use it to drive the `index` parameter of `getCoverArt`.
+'''
+
+  [[endpoint.param]]
+  name     = "id"
+  type     = "string"
+  required = true
+  doc      = 'Album folder id.'
+
+  [[endpoint.field]]
+  name = "albumImages.count"
+  type = "int"
+  doc  = 'Total image count, so valid `index` values are 0 to count-1.'
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "setCoverArt"
+section = "albumtext"
+version = '1'
+method  = 'POST'
+summary = 'Writes `cover.jpg` or `cover.png` into an album folder, whichever the uploaded bytes actually are.'
+notes   = '''
+Supply exactly one of `file` or `url`.
+
+**JPEG and PNG only** — the format is taken from the magic bytes, not from the
+declared content type, and anything else is rejected. That is not a new
+restriction so much as the removal of a trap: the scanner indexes only
+`.jpg`, `.jpeg` and `.png`, so a WebP written as `cover.jpg` used to become a
+cover nothing could decode.
+
+If the upload changes the format, the file it replaces is removed, since
+`cover.jpg` outranks `cover.png` when the scanner looks for a cover.
+
+A cover set this way is marked as chosen by a person and is never overwritten
+by a scan — which for a film is the only way to correct a wrong TMDB match.
+'''
+see = ["getAlbumImages"]
+
+  [[endpoint.param]]
+  name     = "id"
+  type     = "string"
+  required = true
+  doc      = 'Album folder id. Required in both cases.'
+
+  [[endpoint.param]]
+  name = "file"
+  type = "multipart"
+  doc  = 'A multipart part whose content type must begin with `image/`.'
+
+  [[endpoint.param]]
+  name = "url"
+  type = "string"
+  doc  = 'An `http://` or `https://` URL, fetched server-side; the response must have an `image/` content type.'
+
+
+# ===========================================================================
+# Metadata editing
+# ===========================================================================
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "updateSong"
+section = "metadata"
+version = '1'
+summary = 'Updates the tags of a single track.'
+notes   = '''
+Tags are written to the audio file first via TagLib and mirrored into the
+database only if that succeeds, so a failed write leaves both in their
+original state.
+
+NOTE: For a video there is no tag to write — TagLib cannot open those
+containers — so the edit lives only in the database, and the scanner is
+careful not to clobber it on a later pass.
+'''
+
+  [[endpoint.param]]
+  name     = "id"
+  type     = "string"
+  required = true
+  doc      = 'Song id.'
+
+  [[endpoint.param]]
+  name = "title"
+  type = "string"
+  doc  = 'Omitted fields are left untouched.'
+
+  [[endpoint.param]]
+  name = "track"
+  type = "int"
+  doc  = 'Track number.'
+
+  [[endpoint.param]]
+  name = "year"
+  type = "int"
+  doc  = 'Year.'
+
+  [[endpoint.param]]
+  name = "disc"
+  type = "int"
+  doc  = "Disc number, written through TagLib's `PropertyMap` as `DISCNUMBER` since the generic tag API has no disc setter."
+
+[[endpoint]]
+kind      = 'endpoint'
+name      = "renameAlbum"
+section   = "metadata"
+version   = '1'
+auth_note = 'Your own upload batch, or admin anywhere.'
+summary   = 'Renames an album, and optionally re-files it under a different artist, by moving the directory on disk.'
+notes     = '''
+This re-files **only the album it is given**: renaming the artist here moves
+that one album under a new artist directory and leaves the artist's other
+albums alone. A whole-artist rename is deliberately not offered — an album
+edit screen silently rewriting other albums is too easy to do by accident.
+
+Everything above the artist level is untouched: the library root, and for an
+upload the owner and the batch id.
+
+The directory move happens first and is the authoritative act; the database
+rows are then repaired to carry the new paths, so stars, play counts, playlist
+entries, the queue and bookmarks all survive. Tags are rewritten afterwards
+and a file TagLib will not write is counted in `tagFailures` rather than
+failing the call — the opposite order to `updateSong`, where the database
+mirrors the tag rather than the directory.
+
+An emptied artist directory is removed, so it does not linger in the listing
+reading "0 albums".
+'''
+see = ["updateSong", "promoteAlbum"]
+
+  [[endpoint.param]]
+  name     = "id"
+  type     = "string"
+  required = true
+  doc      = 'Album folder id.'
+
+  [[endpoint.param]]
+  name = "album"
+  type = "string"
+  doc  = 'New album name. Omitted keeps the current one.'
+
+  [[endpoint.param]]
+  name = "artist"
+  type = "string"
+  doc  = 'New artist name. Omitted keeps the current one; a name not already present is created.'
+
+  [[endpoint.field]]
+  name = "renamedAlbum.id"
+  type = "string"
+  doc  = 'The album folder id afterwards. Usually unchanged, but a re-file into a brand new artist folder mints one.'
+
+  [[endpoint.field]]
+  name = "renamedAlbum.parent"
+  type = "string"
+  doc  = 'The artist folder id afterwards.'
+
+  [[endpoint.field]]
+  name = "renamedAlbum.album"
+  type = "string"
+  doc  = 'The name as it was applied, after sanitising.'
+
+  [[endpoint.field]]
+  name = "renamedAlbum.artist"
+  type = "string"
+  doc  = 'Likewise for the artist.'
+
+  [[endpoint.field]]
+  name = "renamedAlbum.tagFailures"
+  type = "int"
+  doc  = 'How many files could not have their tags rewritten. The move still happened.'
+
+  [[endpoint.error]]
+  code = '10'
+  when = '`id` missing or not a number, or both names sanitise to empty.'
+
+  [[endpoint.error]]
+  code = '50'
+  when = 'Renaming outside your own uploads without admin.'
+
+  [[endpoint.error]]
+  code = '70'
+  when = 'No album with that id.'
+
+  [[endpoint.error]]
+  code = '0'
+  when = 'The folder is its own artist and has no artist level above it; the target already exists; or the target would fall outside every configured root.'
+
+
+# ===========================================================================
+# Server settings
+# ===========================================================================
+
+[[endpoint]]
+kind     = 'endpoint'
+name     = "getServerSettings"
+section  = "settings"
+version  = '1'
+auth     = 'admin'
+response = 'subsonic-json'
+summary  = 'Returns the third-party API credentials the server holds.'
+
+  [[endpoint.field]]
+  name = "serverSettings.discogsToken"
+  type = "string"
+  doc  = 'Discogs personal access token, used in the artist-portrait chain. Empty when unset.'
+
+  [[endpoint.field]]
+  name = "serverSettings.tmdbKey"
+  type = "string"
+  doc  = 'TMDB API key, used to identify films and series during the scan. Empty when unset.'
+
+  [[endpoint.error]]
+  code = '50'
+  when = 'The caller is not an admin.'
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "saveServerSettings"
+section = "settings"
+version = '1'
+auth    = 'admin'
+summary = 'Sets one or both of those credentials.'
+notes   = '''
+**Only the settings the caller actually sent are written**, so omitting one
+preserves it. With a single field that distinction did not exist; with two, a
+client saving just one of them would otherwise blank the other.
+
+Send an empty value to clear a setting.
+'''
+
+  [[endpoint.param]]
+  name = "discogsToken"
+  type = "string"
+  doc  = 'New Discogs token. Omit to leave unchanged.'
+
+  [[endpoint.param]]
+  name = "tmdbKey"
+  type = "string"
+  doc  = 'New TMDB key. Omit to leave unchanged. Re-read at the top of every scan.'
+
+  [[endpoint.error]]
+  code = '50'
+  when = 'The caller is not an admin.'
+
+
+# ===========================================================================
+# Users
+# ===========================================================================
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["getUser", "getUsers", "createUser", "updateUser"]
+section    = "users"
+summary    = 'One role Subsonic does not define.'
+notes      = '''
+Roles gaindrive does not implement are still reported, with fixed values, so
+that clients expecting them do not break. That behaviour is standard-shaped
+and documented with the endpoints themselves.
+'''
+
+  [[endpoint.field]]
+  name = "castRole"
+  type = "bool"
+  on   = "user"
+  doc  = 'Whether the account may use the cast endpoints. New accounts default to false.'
+
+  [[endpoint.param]]
+  name  = "castRole"
+  type  = "bool"
+  doc   = 'On `createUser` and `updateUser`, the literal string `true` enables; anything else means false.'
+  notes = '''
+On `updateUser`, as with every other field there, omitting the parameter keeps
+the account's existing value.
+'''
+
+
+# ===========================================================================
+# Upload
+# ===========================================================================
+
+[[endpoint]]
+kind     = 'endpoint'
+name     = "upload"
+section  = "upload"
+version  = '1'
+method   = 'POST'
+path     = "/upload"
+auth     = 'uploadRole'
+response = 'plain-json'
+summary  = "Uploads an archive of audio or video into the calling account's personal area."
+notes    = '''
+Note the path: this is **not** under `/rest/`, and it answers with a bare
+`{"status": ..., "message": ...}` object rather than a Subsonic envelope. A
+refusal arrives as `{"status": "error", ...}` with HTTP 400, not as a Subsonic
+error code.
+
+With no uploads root configured the endpoint refuses rather than writing into
+a library root.
+'''
+see = ["fetchUrl", "promoteAlbum", "deleteUpload"]
+
+  [[endpoint.param]]
+  name     = "file"
+  type     = "multipart"
+  required = true
+  doc      = 'A multipart part named `file`, with a `.zip`, `.tar`, `.tar.gz` or `.tgz` filename.'
+
+  [[endpoint.param]]
+  name = "artist"
+  type = "string"
+  doc  = "Files the batch under this name instead of whatever the archive's own folders and the files' tags say."
+
+  [[endpoint.param]]
+  name = "album"
+  type = "string"
+  doc  = 'The same for the level below.'
+
+  [[endpoint.field]]
+  name = "status"
+  type = "string"
+  doc  = '`ok` or `error`.'
+
+  [[endpoint.field]]
+  name = "files"
+  type = "int"
+  doc  = 'How many media files the archive yielded.'
+
+  [[endpoint.field]]
+  name = "batch"
+  type = "string"
+  doc  = 'The batch id the upload landed in.'
+
+  [[endpoint.error]]
+  http = '400'
+  when = 'No uploads root, an unsupported archive type, or a supplied name holding nothing usable once sanitised.'
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "promoteAlbum"
+section = "upload"
+version = '1'
+auth    = 'admin'
+summary = 'Moves an uploaded album out of a personal folder and into the shared library.'
+notes   = '''
+From `<uploads root>/<username>/<uuid>/<artist>/<album>` to `<folder>/<album>`
+under a library root. Error 0 if the id does not resolve to a path of exactly
+that shape.
+
+The destination is a root and one level, which is the whole of it: both
+layouts are `L1/L2/[L3]/files`, L2 is the album being moved, and L3 is only
+ever a disc or season directory inside it.
+
+**All three parameters are required.** Each destination half was briefly
+optional, defaulting to the first `artists`-type root declared and to the
+batch's own artist name, and both defaults were guesses that put things in the
+wrong place. The root one could not reach a `categories` root at all, so a
+film went into the music library and was then looked up as a musical artist;
+the folder one filed a documentary under whatever the source called it, which
+for a fetched video is a channel name and never a category. A caller that does
+not know where something belongs should be made to decide rather than have it
+decided badly for them.
+'''
+see = ["renameAlbum", "deleteUpload"]
+
+  [[endpoint.param]]
+  name     = "id"
+  type     = "string"
+  required = true
+  doc      = 'Album folder id.'
+
+  [[endpoint.param]]
+  name     = "musicFolderId"
+  type     = "string"
+  required = true
+  doc      = 'The destination root as `getMusicFolders` reports it.'
+  notes    = '''
+Error 70 if it names anything that is not a browsable library root —
+including the uploads root, which that listing excludes and which is never a
+destination.
+'''
+
+  [[endpoint.param]]
+  name     = "folder"
+  type     = "string"
+  required = true
+  doc      = 'The level under that root: an artist under an `artists` root, a category under a `categories` one.'
+  notes    = '''
+A name not already present is created, so there is no separate operation for
+adding an artist or a category.
+'''
+
+  [[endpoint.error]]
+  code = '10'
+  when = 'Any of the three parameters is missing.'
+
+  [[endpoint.error]]
+  code = '70'
+  when = '`musicFolderId` does not name a browsable library root.'
+
+  [[endpoint.error]]
+  code = '0'
+  when = 'The id does not resolve to a five-component uploads path.'
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "deleteUpload"
+section = "upload"
+version = '3'
+auth    = 'uploadRole'
+summary = 'Removes an uploaded album, files and all. Irreversible — there is no trash behind it.'
+notes   = '''
+The id must resolve to a path of exactly the shape
+`<uploads root>/<owner>/<batch>/<artist>/<album>`, and the owner must be the
+calling account **unless the caller is an admin**.
+
+**That shape check is the security boundary**, not a validation nicety —
+without it this is "delete the folder with this id", which is "delete any
+folder on the server", reachable by any account with upload rights guessing
+integers. One message covers both "not an upload" and "not yours", since
+telling them apart is only useful to somebody probing ids.
+
+An admin may delete anybody's because an admin is who approves them: with
+`personal=*` they can see everyone's, and being able to see junk without being
+able to clear it would leave them asking its owner to do it.
+
+It tidies upwards. An artist directory left empty by the deletion is removed
+too, or it would remain in the listing as an artist showing no albums; the
+batch directory goes after it. Stars, play counts, playlist entries, the queue
+and bookmarks naming the deleted files are deleted with them — those live in
+the client database, which no scan has ever touched.
+'''
+
+  [[endpoint.param]]
+  name     = "id"
+  type     = "string"
+  required = true
+  doc      = 'Album folder id.'
+
+  [[endpoint.error]]
+  code = '0'
+  when = 'Not an upload, or not yours — "Item is not in your uploads."'
+
+
+# ===========================================================================
+# Fetching from a URL
+# ===========================================================================
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "getUrlHandlers"
+section = "urlfetch"
+version = '2'
+auth    = 'uploadRole'
+summary = 'What this server can fetch.'
+notes   = '''
+An empty list means the feature is unavailable, either because no handlers are
+configured or because the tool they name is not installed; a client should
+then not offer the option at all.
+
+The pattern and the command line are deliberately not reported — a handler's
+argv can carry cookies, a proxy credential or an API key.
+'''
+
+  [[endpoint.field]]
+  name = "urlHandlers.urlHandler.name"
+  type = "string"
+  doc  = 'A label for the handler, for showing the user what is supported.'
+
+  [[endpoint.field]]
+  name = "urlHandlers.urlHandler.audio"
+  type = "bool"
+  doc  = 'Whether this handler can fetch in `audio` mode.'
+
+  [[endpoint.field]]
+  name = "urlHandlers.urlHandler.video"
+  type = "bool"
+  doc  = 'Likewise for `video`.'
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "fetchUrl"
+section = "urlfetch"
+version = '2'
+auth    = 'uploadRole'
+summary = 'Queue a fetch. Returns immediately with a job id; the work happens in the background.'
+notes   = '''
+The names are applied by renaming the batch's two directory levels after the
+tool exits and before the library scan, so they cost nothing and can never be
+seen half-applied. Three consequences are worth stating because none of them
+is guessable:
+
+* Where a fetch produced several directories at a level — a playlist, or a
+  handler that splits by uploader — they are **merged** into the one name
+  given, and files that then collide are suffixed rather than overwritten.
+* Giving only `artist` keeps the handler's album names; giving only `album`
+  applies that name inside *every* artist directory.
+* A third directory level, if the handler wrote one, is left alone. That is a
+  disc directory to the scanner, and renaming it would fuse two discs.
+
+Note also that the duplicate guard keys on the URL alone, so the same URL
+cannot be fetched twice under two different names while one is in flight.
+'''
+see = ["getUrlHandlers", "getFetchJobs", "cancelFetch"]
+
+  [[endpoint.param]]
+  name     = "url"
+  type     = "string"
+  required = true
+  doc      = 'The URL to fetch.'
+  notes    = '''
+It travels as a query parameter, so it is subject to the server's request-line
+length limit of about 8 kB.
+'''
+
+  [[endpoint.param]]
+  name    = "mode"
+  type    = "string"
+  values  = ["audio", "video"]
+  default = 'audio'
+  doc     = 'Which one a handler supports is what `getUrlHandlers` reports.'
+
+  [[endpoint.param]]
+  name = "artist"
+  type = "string"
+  doc  = "The artist directory the batch is filed under, replacing whatever the handler would have chosen. Absent or blank keeps the handler's own choice."
+
+  [[endpoint.param]]
+  name = "album"
+  type = "string"
+  doc  = 'Likewise for the album directory.'
+
+  [[endpoint.field]]
+  name = "fetchJob.id"
+  type = "string"
+  doc  = 'The job id, for `getFetchJobs` and `cancelFetch`.'
+
+  [[endpoint.field]]
+  name = "fetchJob.batch"
+  type = "string"
+  doc  = 'The batch directory the fetch will write into, in stored form.'
+
+  [[endpoint.field]]
+  name = "fetchJob.handler"
+  type = "string"
+  doc  = 'Which handler matched the URL.'
+
+  [[endpoint.field]]
+  name = "fetchJob.mode"
+  type = "string"
+  doc  = '`audio` or `video`, as requested.'
+
+  [[endpoint.field]]
+  name = "fetchJob.artist"
+  type = "string"
+  doc  = 'The name that will be applied, or empty.'
+
+  [[endpoint.field]]
+  name = "fetchJob.album"
+  type = "string"
+  doc  = 'Likewise.'
+
+  [[endpoint.field]]
+  name = "fetchJob.state"
+  type = "string"
+  doc  = 'One of `queued`, `running`, `scanning`, `done`, `error`, `cancelled`.'
+
+  [[endpoint.error]]
+  code = '10'
+  when = '`url` missing, or `artist` or `album` given but containing nothing usable as a directory name.'
+
+  [[endpoint.error]]
+  code = '0'
+  when = 'No uploads root; the scheme is not http(s); no handler matches; the matched handler cannot do the requested mode; the same URL is already being fetched for this user; or the queue is full.'
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "getFetchJobs"
+section = "urlfetch"
+version = '2'
+auth    = 'uploadRole'
+summary = "The calling user's own jobs, newest first."
+notes   = '''
+Admins see their own and nobody else's: this is a progress display, not an
+audit log.
+
+Finished jobs are kept for fifteen minutes, or the last ten per user.
+'''
+
+  [[endpoint.field]]
+  name = "fetchJobs.fetchJob"
+  type = "object[]"
+  doc  = 'Everything `fetchUrl` returns, plus the fields below.'
+
+  [[endpoint.field]]
+  name = "url"
+  type = "string"
+  on   = "fetchJob"
+  doc  = 'The URL as submitted.'
+
+  [[endpoint.field]]
+  name = "percent"
+  type = "int"
+  on   = "fetchJob"
+  doc  = "Progress, parsed from the tool's output. A line carrying no percentage keeps the previous value rather than resetting to zero."
+
+  [[endpoint.field]]
+  name  = "detail"
+  type  = "string"
+  on    = "fetchJob"
+  doc   = "The tool's last output line."
+  notes = '''
+Paths in it are rewritten to their stored form — a root path is never
+surfaced in an API response.
+'''
+
+  [[endpoint.field]]
+  name = "error"
+  type = "string"
+  on   = "fetchJob"
+  doc  = 'Why the job failed, when its state is `error`.'
+
+  [[endpoint.field]]
+  name = "files"
+  type = "int"
+  on   = "fetchJob"
+  doc  = 'How many media files the fetch produced.'
+
+  [[endpoint.field]]
+  name = "started"
+  type = "string"
+  on   = "fetchJob"
+  doc  = 'When the job began.'
+
+  [[endpoint.field]]
+  name = "finished"
+  type = "string"
+  on   = "fetchJob"
+  doc  = 'When it ended, if it has.'
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "cancelFetch"
+section = "urlfetch"
+version = '2'
+auth    = 'uploadRole'
+summary = 'Stop a queued or running fetch and delete its batch.'
+
+  [[endpoint.param]]
+  name     = "id"
+  type     = "string"
+  required = true
+  doc      = 'The job id.'
+
+  [[endpoint.error]]
+  code = '10'
+  when = '`id` missing.'
+
+  [[endpoint.error]]
+  code = '70'
+  when = 'No such job belongs to the caller.'
+
+
+# ===========================================================================
+# Chromecast
+# ===========================================================================
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "listCastDevices"
+section = "cast"
+version = '1'
+auth    = 'castRole'
+summary = 'Chromecast devices on the LAN: those discovered over mDNS, plus any named in the server configuration.'
+notes   = '''
+Discovery assembles a device only from records belonging to
+`_googlecast._tcp`, and returns one entry per Cast id, so a device announcing
+several services or several spellings of its name still appears once.
+
+A configured device whose address and port were also discovered appears once,
+as the discovered one, since that carries the device's own name and Cast id.
+The port belongs in that comparison because a Cast multizone group lives at
+its leader's address on a different one.
+
+Configured devices exist because discovery can fail for reasons no client can
+fix — a device that answers TLS on 8009 while its mDNS responder has stopped
+replying even to a direct unicast query. The address must be an IP literal; a
+hostname is refused at startup.
+'''
+
+  [[endpoint.field]]
+  name = "castDevices.castDevice.id"
+  type = "string"
+  doc  = 'Hand this to `startCast`. For a configured device it is `manual:<address>:<port>`, derived rather than random so it survives a server restart.'
+
+  [[endpoint.field]]
+  name = "castDevices.castDevice.name"
+  type = "string"
+  doc  = "The device's friendly name, from its `fn` record. A device sending none is named by its instance label, so a row is never labelled by its IP."
+
+  [[endpoint.field]]
+  name = "castDevices.castDevice.model"
+  type = "string"
+  doc  = "The device's own model string, from its `md` record. Empty for a configured device, which has no announcement to read."
+
+  [[endpoint.field]]
+  name = "castDevices.castDevice.address"
+  type = "string"
+  doc  = 'IP address.'
+
+  [[endpoint.field]]
+  name = "castDevices.castDevice.port"
+  type = "int"
+  doc  = 'Usually 8009; a multizone group gets a dynamic one.'
+
+  [[endpoint.field]]
+  name = "castDevices.castDevice.manual"
+  type = "bool"
+  doc  = 'True for a configured device.'
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "startCast"
+section = "cast"
+version = '1'
+auth    = 'castRole'
+summary = 'Activates cast mode, targeting one device.'
+notes   = '''
+This is where the stream token is generated. It lasts for the whole session
+and is not single-use per request.
+
+While cast mode is active, `stream` answers HTTP 204 to any caller that is not
+the Chromecast, so a client does not end up playing the same track twice.
+'''
+see = ["stopCast", "castLoad"]
+
+  [[endpoint.param]]
+  name     = "id"
+  type     = "string"
+  required = true
+  doc      = 'Device id from `listCastDevices`.'
+
+  [[endpoint.error]]
+  code = '70'
+  when = 'No device with that id.'
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "stopCast"
+section = "cast"
+version = '1'
+auth    = 'castRole'
+summary = 'Deactivates cast mode and stops playback on the device.'
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "castLoad"
+section = "cast"
+version = '1'
+auth    = 'castRole'
+summary = 'Tells the Chromecast to fetch and play a track.'
+notes   = '''
+**Seeking is also a `castLoad`**, not a `castControl` with `action=seek` —
+every seek is a full reload. The server returns as soon as the load is queued;
+the actual Cast message goes out on a background connection.
+
+Subtitle tracks are declared to the receiver in **every** load, whether or not
+one is switched on, because `castControl` with `action=captions` can only
+activate a track the load already declared. Emitting them only when a caption
+is already chosen works when the viewer picks before playing and never when
+they pick during, which reads as an intermittent fault rather than a missing
+feature.
+'''
+# `see` may only name endpoints defined in this file, so that a typo is caught
+# rather than silently dropping a cross-reference; getVideoInfo is standard and
+# is named in the prose above instead.
+see = ["castControl", "castSession"]
+
+  [[endpoint.param]]
+  name     = "id"
+  type     = "string"
+  required = true
+  doc      = 'Song id.'
+
+  [[endpoint.param]]
+  name = "timeOffset"
+  type = "float"
+  doc  = 'Seek position in seconds, sent to the receiver as `currentTime`.'
+
+  [[endpoint.param]]
+  name    = "trackId"
+  type    = "int"
+  default = '0'
+  doc     = 'Subtitle track to start with, numbered from 1 in the order `getVideoInfo` lists captions. 0 or absent means none.'
+  notes   = '''
+`trackId`, not `captionId`: the cast API numbers tracks 1..n by position, and
+0 means off. `captionId` cannot express "off" — the sidecar caption index and
+a missing parameter are both -1, so "no subtitles" and "the sidecar file"
+would be one value.
+'''
+
+  [[endpoint.error]]
+  code = '0'
+  when = 'No cast session is active.'
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "castControl"
+section = "cast"
+version = '1'
+auth    = 'castRole'
+summary = 'Transport control for the active session.'
+
+  [[endpoint.param]]
+  name     = "action"
+  type     = "string"
+  required = true
+  values   = ["play", "pause", "seek", "captions"]
+  doc      = 'What to do.'
+  notes    = '''
+* `play` resumes a paused session. If the session has gone `IDLE` — the
+  receiver times out during long pauses — this instead re-issues a full load
+  from the last known position.
+* `seek` is only for in-session seeks; the web client seeks via `castLoad`,
+  which is a full reload.
+* `captions` silently does nothing when the receiver has no media session yet.
+  The track belongs on the `castLoad` in that case.
+'''
+
+  [[endpoint.param]]
+  name = "time"
+  type = "float"
+  doc  = 'Seconds, for `action=seek`.'
+
+  [[endpoint.param]]
+  name = "trackId"
+  type = "int"
+  doc  = 'For `action=captions`, numbered as for `castLoad`. 0 or absent turns subtitles off.'
+
+[[endpoint]]
+kind     = 'endpoint'
+name     = "castSession"
+section  = "cast"
+version  = '1'
+auth     = 'castRole'
+response = 'subsonic-json'
+summary  = 'A non-blocking snapshot of the current session, for restoring the UI after a page reload.'
+
+  [[endpoint.field]]
+  name = "castSession.active"
+  type = "bool"
+  doc  = 'Whether a session exists. The remaining fields are present only when it does.'
+
+  [[endpoint.field]]
+  name = "castSession.deviceId"
+  type = "string"
+  doc  = 'The device being cast to, as `listCastDevices` reports it.'
+
+  [[endpoint.field]]
+  name = "castSession.deviceName"
+  type = "string"
+  doc  = 'Its friendly name.'
+
+  [[endpoint.field]]
+  name = "castSession.songId"
+  type = "string"
+  doc  = 'What is loaded.'
+
+  [[endpoint.field]]
+  name = "castSession.startOffset"
+  type = "float"
+  doc  = "Add this to the receiver's reported `currentTime` to get the absolute position in the track. Zero under native seek, which is every codec today."
+
+  [[endpoint.field]]
+  name = "castSession.playerState"
+  type = "string"
+  doc  = 'As the receiver reports it: `PLAYING`, `PAUSED`, `BUFFERING`, `IDLE`.'
+
+  [[endpoint.field]]
+  name = "castSession.currentTime"
+  type = "float"
+  doc  = "The receiver's reported position."
+
+  [[endpoint.field]]
+  name = "castSession.duration"
+  type = "float"
+  doc  = 'Duration as the receiver understands it.'
+
+  [[endpoint.field]]
+  name = "castSession.songDuration"
+  type = "float"
+  doc  = 'Duration as the library has it, which is the one to trust for a progress bar.'
+
+  [[endpoint.field]]
+  name = "castSession.trackId"
+  type = "int"
+  doc  = 'The subtitle track currently showing, or 0.'
+
+[[endpoint]]
+kind         = 'endpoint'
+name         = "castEvents"
+section      = "cast"
+version      = '1'
+auth         = 'castRole'
+response     = 'sse'
+content_type = "text/event-stream"
+summary      = "Server-sent events carrying the receiver's status as it changes."
+notes        = '''
+An event is emitted whenever the receiver pushes a status change, and at least
+every 15 seconds otherwise. Each `data:` payload is a JSON object with
+`playerState`, `currentTime`, `duration`, `idleReason` and `startOffset`.
+
+NOTE: The SSE connection doubles as the liveness signal for the cast session.
+Once the last listener disconnects, casting is torn down automatically after
+30 seconds — so a client that wants the session to survive must keep this open.
+'''
+see = ["castSession"]
+
+  [[endpoint.error]]
+  http = '204'
+  when = 'No cast session is active. There is nothing to stream, so no event stream is opened.'

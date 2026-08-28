@@ -4,6 +4,10 @@
 INKSCAPE ?= inkscape
 MAGICK   ?= magick
 
+API_TOML := doc/api.toml
+API_GEN  := doc/gen_api_html.py
+API_HTML := html/api.html
+
 LOGO      := graphics/gaindrive.svg
 FEATURE   := graphics/play-feature.svg
 PLAY_DIR  := graphics/play
@@ -12,13 +16,29 @@ PLAY_FEAT := $(PLAY_DIR)/feature-1024x500.png
 PLAY_RAW  := $(PLAY_DIR)/.icon-raw.png
 FEAT_RAW  := $(PLAY_DIR)/.feature-raw.png
 
-.PHONY: help upload-web create-play-assets
+.PHONY: help upload-web api-html create-play-assets
 
 help:
 	@echo "upload-web:          Upload web pages to server."
+	@echo "api-html:            Regenerate html/api.html from doc/api.toml."
 	@echo "create-play-assets:  Convert original assets to play store png files."
 
-upload-web:
+api-html: $(API_HTML)
+
+# Generated but checked in, unlike the Play assets below, and the difference is
+# in what consumes them: those are uploaded by hand through the Play Console,
+# so nothing in the repo reads them and a binary diff is worthless. This is a
+# page of the site, `upload-web` ships whatever html/ holds, and a gitignored
+# api.html would publish a dead link from a fresh clone. It is also text, so
+# the diff is the review — which is the only check a mistake in api.toml gets.
+#
+# html/docs.html is a prerequisite because the page's <head>, nav and footer
+# are lifted from it rather than kept as a ninth copy, so a restyle of the site
+# regenerates this page instead of leaving it behind.
+$(API_HTML): $(API_TOML) $(API_GEN) html/docs.html
+	python3 $(API_GEN) --out $@
+
+upload-web: $(API_HTML)
 	rsync -r html/ gaindrive-html:/var/www/gaindrive/
 
 # The Google Play listing assets, derived from graphics/gaindrive.svg rather
