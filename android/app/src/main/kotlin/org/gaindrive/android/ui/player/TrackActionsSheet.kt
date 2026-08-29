@@ -92,11 +92,10 @@ fun TrackActionsSheet(
 	ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
 		Column(modifier = Modifier.padding(bottom = 24.dp)) {
 			Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
+				// The sheet grows, so the title it is naming need not be cut.
 				Text(
 					text = song.title,
 					style = MaterialTheme.typography.titleMedium,
-					maxLines = 1,
-					overflow = TextOverflow.Ellipsis,
 				)
 				Text(
 					text = listOf(song.artistName, song.albumTitle)

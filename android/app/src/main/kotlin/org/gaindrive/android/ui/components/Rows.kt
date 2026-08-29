@@ -245,6 +245,9 @@ fun TrackRow(
 				}
 			}
 		}
+		// Wrapped rather than ellipsised: a row is free to grow, and what a
+		// long title truncates away is usually the part that tells two takes of
+		// one piece apart. The number and the duration stay centred against it.
 		Text(
 			text = song.title,
 			style = MaterialTheme.typography.bodyLarge,
@@ -253,8 +256,6 @@ fun TrackRow(
 			} else {
 				MaterialTheme.colorScheme.primary
 			},
-			maxLines = 1,
-			overflow = TextOverflow.Ellipsis,
 			modifier = Modifier.weight(1f),
 		)
 		VideoMark(song)
@@ -332,6 +333,8 @@ fun SongRow(
 			}
 		}
 		Column(modifier = Modifier.weight(1f)) {
+			// Wraps, as in [TrackRow]. The line below it does not: an artist and
+			// album are context, and two of them wrapping would bury the title.
 			Text(
 				text = song.title,
 				style = MaterialTheme.typography.bodyLarge,
@@ -340,8 +343,6 @@ fun SongRow(
 				} else {
 					MaterialTheme.colorScheme.primary
 				},
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
 			)
 			Text(
 				text = listOf(song.artistName, song.albumTitle)

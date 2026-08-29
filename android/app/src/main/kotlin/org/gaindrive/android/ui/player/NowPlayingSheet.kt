@@ -271,6 +271,7 @@ fun NowPlayingSheet(
 					) {
 						CoverThumb(entry.artworkUrl, entry.album, size = 32.dp)
 						Column(modifier = Modifier.weight(1f)) {
+							// Wraps, as the track rows in the listings do.
 							Text(
 								text = entry.title,
 								style = MaterialTheme.typography.bodyMedium,
@@ -279,8 +280,6 @@ fun NowPlayingSheet(
 								} else {
 									MaterialTheme.colorScheme.onSurface
 								},
-								maxLines = 1,
-								overflow = TextOverflow.Ellipsis,
 							)
 							Text(
 								text = entry.artist,
