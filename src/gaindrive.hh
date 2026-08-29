@@ -187,6 +187,10 @@ class GainDrive {
 			};
 		void portrait_worker();
 		void portrait_seed();
+		// Ask the worker to re-seed now rather than when its timer next
+		// expires.  Called when a scan finishes, which is the only event that
+		// can turn an empty seed into a full one.
+		void portrait_wake();
 		void portrait_request_front(int folder_id, const std::string& path,
 		                            const std::string& name);
 		// Downloads one portrait URL and normalises it to something storable.
@@ -199,6 +203,12 @@ class GainDrive {
 		std::deque<PortraitJob> portrait_queue_;
 		std::set<std::string>   portrait_queued_;
 		std::atomic<bool>       portrait_stop_{false};
+		// Set by portrait_wake(), cleared by the worker when it acts on it.
+		// A plain bool under portrait_mu_ rather than an atomic, because it is
+		// read inside the condition variable's predicate and so must be part
+		// of what the lock protects — a notify that races the predicate is a
+		// wake-up the worker sleeps straight through.
+		bool                    portrait_reseed_ = false;
 
 		// ---- URL fetch ----
 		//

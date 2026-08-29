@@ -7255,6 +7255,25 @@ void GainDrive::portrait_seed()
 		          << " to resolve" << std::endl;
 	}
 
+// The start-up seed runs at the same moment the scan thread is detached, so on
+// a first scan of an empty library it asks a database with no artists in it,
+// finds nothing, and sleeps.  Nothing in the scanner knew this thread existed,
+// so the first portrait was fetched up to fifteen minutes after the artists it
+// wanted had appeared — on a cold start, always.
+//
+// This is the notification the scanner owes it.  Deliberately only "look
+// again", not a queue: what needs looking up is a database question that
+// portrait_seed() already answers, and duplicating that here would be a second
+// definition of which artists want art.
+void GainDrive::portrait_wake()
+	{
+	{
+	std::lock_guard<std::mutex> lock(portrait_mu_);
+	portrait_reseed_ = true;
+	}
+	portrait_cv_.notify_one();
+	}
+
 void GainDrive::portrait_request_front(int folder_id, const std::string& path,
                                         const std::string& name)
 	{
@@ -7373,12 +7392,27 @@ void GainDrive::portrait_worker()
 			{
 			std::unique_lock<std::mutex> lk(portrait_mu_);
 			if (portrait_queue_.empty()) {
-				// Nothing to do: sleep, then look again. That is also how an
-				// artist added by a scan since the last pass is found.
+				// Nothing to do: sleep, then look again. That is how an artist
+				// added by a scan since the last pass is found, and the timer
+				// is the fallback for a scan nothing told us about — the folder
+				// watcher's, an upload's, a URL fetch's.
+				//
+				// portrait_reseed_ is in the predicate because the queue is
+				// still empty when a scan finishes: waking on
+				// !portrait_queue_.empty() alone would re-evaluate to false and
+				// go straight back to sleep for the rest of the fifteen
+				// minutes, which is precisely the wait being removed.
 				portrait_cv_.wait_for(lk, std::chrono::minutes(15),
-					[this] { return portrait_stop_ || !portrait_queue_.empty(); });
+					[this] { return portrait_stop_ || portrait_reseed_
+					              || !portrait_queue_.empty(); });
 				if (portrait_stop_) break;
 				if (portrait_queue_.empty()) {
+					// Cleared here, where it is acted on, and not on every
+					// wake: a scan finishing while this thread was waking for
+					// a queued request would otherwise clear the flag without
+					// ever re-seeding, and the artists that scan added would
+					// wait for the timer after all.
+					portrait_reseed_ = false;
 					lk.unlock();
 					portrait_seed();
 					continue;
@@ -7717,6 +7751,12 @@ bool GainDrive::listen(const std::string& host, int port)
 				std::cout << stamp() << "Scan aborted: unknown exception"
 				          << std::endl;
 				}
+			// Outside the try, and on every path: an aborted scan still added
+			// whatever it got through, and those artists want portraits as
+			// much as any others.  Safe before the worker below has started —
+			// it sets a flag the worker's first wait tests, so an early wake
+			// costs one extra seed rather than being lost.
+			portrait_wake();
 			}).detach();
 	cast_manager_.discover_background();
 	probe_cast_devices_background();
