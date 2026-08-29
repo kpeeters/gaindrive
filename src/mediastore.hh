@@ -824,13 +824,59 @@ class MediaStore {
 		std::atomic<int>       scans_active_{0};
 		std::atomic<long long> scan_items_{0};
 
+		// Where a scan's time went: one microsecond accumulator per phase of
+		// scan_artist_dir(), reported on the "Scan complete" line.  Purely
+		// diagnostic, and it exists because a first scan of a cold library is
+		// minutes of work with nothing anywhere saying which phase they were
+		// spent in — so every judgement about scan cost was a guess, including
+		// the obvious ones.
+		//
+		// Atomic for the reason scan_items_ is, and for one more: the phases
+		// timed here are exactly the ones a parallel scan would thread, and an
+		// accumulator that had to be revisited then would be the wrong shape.
+		//
+		// They inherit scan_items_' caveat.  scans_active_ is a depth count and
+		// not an exclusion lock — the folder watcher can start a rescan while
+		// the start-up scan is still running — so two overlapping scans add
+		// into one set of figures.  That is acceptable for a diagnostic, but it
+		// is worth knowing before reading a surprising number.
+		struct ScanTimes {
+			std::atomic<long long> walk  {0};  // Phase 1: the disk walk
+			std::atomic<long long> known {0};  // Phase 2: the known-mtime read
+			std::atomic<long long> meta  {0};  // Phase 3: TagLib and ffprobe
+			std::atomic<long long> art   {0};  // Phase 3b: video cover art
+			std::atomic<long long> tmdb  {0};  // Phase 3c: the online lookups
+			std::atomic<long long> write {0};  // Phase 4: the album transactions
+			std::atomic<long long> prune {0};  // Phase 4: the mark and the prune
+			std::atomic<long long> files {0};  // files whose metadata was read
+			std::atomic<long long> videos{0};  // of those, the ffprobe forks
+			std::atomic<long long> albums{0};  // albums committed
+			void reset()
+				{
+				walk.store(0);   known.store(0);  meta.store(0);
+				art.store(0);    tmdb.store(0);   write.store(0);
+				prune.store(0);  files.store(0);  videos.store(0);
+				albums.store(0);
+				}
+			};
+		ScanTimes scan_times_;
+
+		// The breakdown as one wrapped log line.  wall_s is passed in rather
+		// than measured here because a nested scan_dirs() has its own.
+		std::string scan_times_report(double wall_s) const;
+
 		// Increments scans_active_ for its lifetime, and zeroes the item count
-		// on the transition into a scan so `count` means "this scan" rather
-		// than "since start-up".
+		// and the phase timings on the transition into a scan so both mean
+		// "this scan" rather than "since start-up".
 		struct ScanGuard {
 			MediaStore& s;
 			explicit ScanGuard(MediaStore& st) : s(st)
-				{ if (s.scans_active_.fetch_add(1) == 0) s.scan_items_.store(0); }
+				{
+				if (s.scans_active_.fetch_add(1) == 0) {
+					s.scan_items_.store(0);
+					s.scan_times_.reset();
+					}
+				}
 			~ScanGuard() { s.scans_active_.fetch_sub(1); }
 			};
 

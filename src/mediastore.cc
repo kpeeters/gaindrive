@@ -6,9 +6,11 @@
 #include <algorithm>
 #include <chrono>
 #include <ctime>
+#include <iomanip>
 #include <map>
 #include <regex>
 #include <set>
+#include <sstream>
 #include <unordered_map>
 
 #include <taglib/fileref.h>
@@ -32,6 +34,21 @@ namespace fs = std::filesystem;
 // enough that a writer which is genuinely stuck gets reported rather than
 // hanging the scan indefinitely.
 static constexpr int DB_BUSY_TIMEOUT_MS = 10000;
+
+// Adds its lifetime, in microseconds, to one of MediaStore::scan_times_'
+// accumulators.  Declared at the top of a phase's scope so the timing is one
+// line rather than a pair of statements the next edit can separate.
+struct PhaseTimer {
+	std::atomic<long long>&               sink;
+	std::chrono::steady_clock::time_point t0;
+	explicit PhaseTimer(std::atomic<long long>& s)
+		: sink(s), t0(std::chrono::steady_clock::now()) {}
+	~PhaseTimer()
+		{
+		sink.fetch_add(std::chrono::duration_cast<std::chrono::microseconds>(
+			std::chrono::steady_clock::now() - t0).count());
+		}
+	};
 
 static const std::set<std::string> AUDIO_EXTENSIONS = {
 	".flac", ".mp3", ".ogg", ".oga", ".m4a", ".aac", ".wav", ".opus", ".wma"
@@ -987,9 +1004,45 @@ MediaStore::ScanStatus MediaStore::scan_status() const
 	return { scans_active_.load() > 0, scan_items_.load() };
 	}
 
+// One phase's accumulated microseconds as seconds, to one decimal.
+static std::string phase_secs(const std::atomic<long long>& us)
+	{
+	std::ostringstream ss;
+	ss << std::fixed << std::setprecision(1) << (double)us.load() / 1e6;
+	return ss.str();
+	}
+
+// The breakdown, as the second line of a scan's completion message.
+//
+// The phases deliberately do not sum to the wall time and are not meant to:
+// they are the timed parts of scan_artist_dir(), and everything between them —
+// the per-song diff, the log lines, scan()'s own enumeration of level-1
+// directories — is not attributed anywhere.  A large gap is itself a finding.
+//
+// Reported as one string so the whole breakdown reaches the log as a single
+// line even when another thread is logging beside it.
+std::string MediaStore::scan_times_report(double wall_s) const
+	{
+	std::ostringstream ss;
+	ss << std::fixed << std::setprecision(1)
+	   << scan_times_.files.load() << " files read ("
+	   << scan_times_.videos.load() << " video), "
+	   << scan_times_.albums.load() << " albums, "
+	   << scan_items_.load() << " songs written in " << wall_s << "s"
+	   << "\n  walk "  << phase_secs(scan_times_.walk)
+	   << "  known "    << phase_secs(scan_times_.known)
+	   << "  meta "     << phase_secs(scan_times_.meta)
+	   << "  art "      << phase_secs(scan_times_.art)
+	   << "  tmdb "     << phase_secs(scan_times_.tmdb)
+	   << "  write "    << phase_secs(scan_times_.write)
+	   << "  prune "    << phase_secs(scan_times_.prune);
+	return ss.str();
+	}
+
 void MediaStore::scan()
 	{
 	ScanGuard guard(*this);
+	auto      t0 = std::chrono::steady_clock::now();
 
 	// The API key is a stored setting, not a start-up argument, so it is read
 	// here rather than in the constructor: entering it in the client takes
@@ -1051,12 +1104,16 @@ void MediaStore::scan()
 		scan_root_files(root);
 		}
 
-	std::cout << stamp() << "Scan complete" << std::endl;
+	double wall = std::chrono::duration<double>(
+		std::chrono::steady_clock::now() - t0).count();
+	std::cout << stamp() << "Scan complete: " << scan_times_report(wall)
+	          << std::endl;
 	}
 
 void MediaStore::scan_dirs(const std::set<std::string>& dirs)
 	{
 	ScanGuard guard(*this);
+	auto      t0 = std::chrono::steady_clock::now();
 
 	tmdb_.set_api_key(get_setting("tmdb_key"));
 
@@ -1095,6 +1152,15 @@ void MediaStore::scan_dirs(const std::set<std::string>& dirs)
 			}
 		scan_artist_dir(abs);
 		}
+
+	// The same breakdown a full scan prints.  A live rescan is normally a
+	// handful of files, so this is mostly noise — but it is the only way to
+	// see the cost of the watcher's own work, and it is what makes an upload
+	// or a URL fetch say how long its scan took rather than only that it ran.
+	double wall = std::chrono::duration<double>(
+		std::chrono::steady_clock::now() - t0).count();
+	std::cout << stamp() << "Rescan totals: " << scan_times_report(wall)
+	          << std::endl;
 	}
 
 // Per-song data collected in Phases 1–3, consumed in Phase 4.
@@ -1915,6 +1981,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	std::vector<AlbumReadData> albums;
 	bool had_loose = false;   // media files directly in the artist folder
 	if (exists) {
+		PhaseTimer pt(scan_times_.walk);
 		for (auto& album_entry : fs::directory_iterator(artist_path)) {
 			if (!album_entry.is_directory()) continue;
 
@@ -2019,6 +2086,9 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// absolute via join_root() on the way in.
 	std::unordered_map<std::string, KnownSong> known;
 	{
+	// The lock wait is inside the timing on purpose: queueing behind an API
+	// thread is as much a cost of this phase as the query itself.
+	PhaseTimer pt(scan_times_.known);
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	// is_video is asked for here rather than tested in C++ below: a video is
 	// never opened with TagLib, so its artist column stays NULL for ever, and
@@ -2045,6 +2115,8 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// Changed files get the full read.  An unchanged one is opened only to
 	// back-fill an ARTIST tag its row has never held, which happens once per
 	// file over the life of the library.
+	{
+	PhaseTimer pt(scan_times_.meta);
 	for (auto& adat : albums)
 		for (auto& sdat : adat.songs) {
 			// Defence-in-depth: refuse to open any file that — after symlink
@@ -2055,14 +2127,20 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 				          << sdat.path << std::endl;
 				continue;
 				}
-			if (sdat.changed)
+			if (sdat.changed) {
 				read_song_metadata(sdat);
+				scan_times_.files.fetch_add(1);
+				if (sdat.is_video) scan_times_.videos.fetch_add(1);
+				}
 			// An unchanged audio file whose row predates songs.artist: one
 			// narrow read, once, so an existing library gains the tag without
 			// every file having to be touched.
-			else if (sdat.artist_missing && !sdat.is_video)
+			else if (sdat.artist_missing && !sdat.is_video) {
 				read_song_artist_tag(sdat);
+				scan_times_.files.fetch_add(1);
+				}
 			}
+	}
 
 	for (auto& adat : albums) renumber_unseasoned(adat.songs);
 
@@ -2070,21 +2148,29 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// enabled(), not just video_art_: with every tier off this phase would
 	// still query video_art and ffprobe every video that has no cover, on
 	// every scan, to be told each time that there is nothing to take.
-	if (video_art_ && video_art_->enabled())
+	if (video_art_ && video_art_->enabled()) {
+		PhaseTimer pt(scan_times_.art);
 		make_video_art(*this, *video_art_, albums, prefix);
+		}
 
 	// ---- Phase 3c: identify films and series online (no lock) ----
 	// Only under a categories root. A concert or a music video sitting under a
 	// performer stays local: both layouts are L1/L2/files and the scanner
 	// cannot tell a concert film from a documentary by shape, which is the
 	// same reason is_category_folder() exists — pointed the other way.
-	if (tmdb_.configured() && root->cfg.type == "categories")
+	if (tmdb_.configured() && root->cfg.type == "categories") {
+		PhaseTimer pt(scan_times_.tmdb);
 		lookup_video_meta(*this, tmdb_, albums, artist_path.string());
+		}
 
 	// ---- Phase 4: short write txns ----
 	// Mark this artist's subfolders as unvisited.  Folders not re-stamped
 	// by an album commit below are pruned at the end of the artist.
 	{
+	// Counted as prune rather than write: it is the mark half of the mark and
+	// sweep the prune below is the other half of, and the two share the LIKE
+	// that makes them cost what they cost.
+	PhaseTimer pt(scan_times_.prune);
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Transaction txn(db_music_);
 	SQLite::Statement s(db_music_,
@@ -2102,6 +2188,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	if (exists) {
 		int root_id, artist_folder_id, artist_id;
 		{
+		PhaseTimer pt(scan_times_.write);
 		std::lock_guard<std::mutex> lock(db_mutex_);
 		SQLite::Transaction txn(db_music_);
 		root_id          = upsert_folder(fs::path(root_path), -1);
@@ -2120,6 +2207,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			// unvisited, and pruning on incomplete information would delete an
 			// album that is present on disk.
 			try {
+			PhaseTimer pt(scan_times_.write);
 			{
 			std::lock_guard<std::mutex> lock(db_mutex_);
 			SQLite::Transaction txn(db_music_);
@@ -2208,6 +2296,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			}
 
 			txn.commit();
+			scan_times_.albums.fetch_add(1);
 			}
 			std::cout << stamp() << "  " << fs::path(adat.path).filename().string() << std::endl;
 			}
@@ -2238,6 +2327,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// into scan(), which abandons every root after this one: a stale folder is
 	// a wrong listing, an abandoned scan is a library that stops updating.
 	try {
+	PhaseTimer pt(scan_times_.prune);
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Transaction txn(db_music_);
@@ -2456,12 +2546,15 @@ void MediaStore::scan_root_files(const RootRec& root)
 	// ---- Phase 1: walk the root itself (no lock) ----
 	std::vector<SongReadData> songs;
 	std::error_code ec;
+	{
+	PhaseTimer pt(scan_times_.walk);
 	for (auto& e : fs::directory_iterator(root.cfg.path, ec)) {
 		if (!e.is_regular_file() || !is_media_file(e.path())) continue;
 		auto name = e.path().filename().string();
 		if (!name.empty() && name.front() == '.') continue;
 		songs.push_back(read_song_file(e.path(), root.cfg.path, 0));
 		}
+	}
 	if (ec) return;   // scan() has already reported the unreadable root
 
 	// ---- Phase 2: brief read lock — identify changed files ----
@@ -2469,6 +2562,7 @@ void MediaStore::scan_root_files(const RootRec& root)
 	// root, and only the files directly in it belong to this album.
 	std::unordered_map<std::string, KnownSong> known_songs;
 	{
+	PhaseTimer pt(scan_times_.known);
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	// See scan_artist_dir(): is_video is filtered here so a video, which has
 	// no readable tag and never will, cannot sit in the back-fill set for ever.
@@ -2490,6 +2584,8 @@ void MediaStore::scan_root_files(const RootRec& root)
 		}
 
 	// ---- Phase 3: metadata reads (no lock); see scan_artist_dir() ----
+	{
+	PhaseTimer pt(scan_times_.meta);
 	for (auto& sdat : songs) {
 		if ((sdat.changed || sdat.artist_missing)
 		    && !path_is_within_root(sdat.path)) {
@@ -2497,11 +2593,17 @@ void MediaStore::scan_root_files(const RootRec& root)
 			          << sdat.path << std::endl;
 			continue;
 			}
-		if (sdat.changed)
+		if (sdat.changed) {
 			read_song_metadata(sdat);
-		else if (sdat.artist_missing && !sdat.is_video)
+			scan_times_.files.fetch_add(1);
+			if (sdat.is_video) scan_times_.videos.fetch_add(1);
+			}
+		else if (sdat.artist_missing && !sdat.is_video) {
 			read_song_artist_tag(sdat);
+			scan_times_.files.fetch_add(1);
+			}
 		}
+	}
 
 	renumber_unseasoned(songs);
 
@@ -2512,6 +2614,7 @@ void MediaStore::scan_root_files(const RootRec& root)
 	// which is the same reason this function exists at all.
 	std::string root_art;
 	if (video_art_ && video_art_->enabled()) {
+		PhaseTimer pt(scan_times_.art);
 		auto known = load_video_art_keys(root.cfg.name + "/%");
 		root_art   = make_video_art_songs(*this, *video_art_, songs, known);
 		}
@@ -2522,6 +2625,7 @@ void MediaStore::scan_root_files(const RootRec& root)
 	// rather than repeating it. The root itself plays artist and album, so its
 	// path is what marks the album as the loose one.
 	if (tmdb_.configured() && root.cfg.type == "categories") {
+		PhaseTimer pt(scan_times_.tmdb);
 		std::vector<AlbumReadData> one;
 		one.push_back(AlbumReadData{});
 		one.front().path  = root.cfg.path;
@@ -2534,6 +2638,7 @@ void MediaStore::scan_root_files(const RootRec& root)
 	// A contended commit must not take the rest of the scan with it; the next
 	// pass redoes this root's loose files from scratch anyway.
 	try {
+	PhaseTimer pt(scan_times_.write);
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Transaction txn(db_music_);
 
@@ -2624,6 +2729,10 @@ void MediaStore::scan_root_files(const RootRec& root)
 	                " AND NOT EXISTS (SELECT 1 FROM songs"
 	                " WHERE songs.album_id = albums.id)").c_str());
 	txn.commit();
+	// Guarded, unlike the album loop's: this transaction runs for every root,
+	// and a root with no loose files at all commits a deletion rather than an
+	// album.  Counting it would report an album that is not there.
+	if (!songs.empty()) scan_times_.albums.fetch_add(1);
 	}
 	catch (const std::exception& e) {
 		std::cout << stamp() << "Scan: loose files in " << root.cfg.name
