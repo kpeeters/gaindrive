@@ -54,6 +54,13 @@ data class SongEntity(
 	val id: String,
 	val title: String,
 	val artistName: String,
+	/**
+	 * Deliberately without a default, unlike isVideo and season below: a
+	 * missing assignment in the round trip is then a compile error rather than
+	 * a silently blank column, which would read as "this album has one artist"
+	 * for the whole mirror.
+	 */
+	val albumArtistName: String,
 	val albumTitle: String,
 	val albumId: String?,
 	val track: Int?,

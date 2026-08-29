@@ -550,6 +550,14 @@ void MediaStore::create_schema()
 			disc_number         INTEGER DEFAULT 1,
 			year                INTEGER,
 			genre               TEXT,
+			-- The file's own ARTIST tag, which is a different fact from the
+			-- folder-derived artist in song_artists: on a compilation every
+			-- track has a real artist while the folder says "Various Artists".
+			--
+			-- NULL means "never read" and '' means "read, no tag".  The
+			-- distinction is what terminates the back-fill pass in Phase 3;
+			-- collapsing the two makes it repeat for ever.
+			artist              TEXT,
 			duration            REAL NOT NULL DEFAULT 0,
 			bitrate             INTEGER,
 			sample_rate         INTEGER,
@@ -922,6 +930,13 @@ void MediaStore::create_schema()
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE songs ADD COLUMN season INTEGER DEFAULT 0"); }
 	catch (const SQLite::Exception&) {}
+	// Deliberately no DEFAULT '', unlike most of its neighbours: an existing
+	// row must come out NULL, meaning "the tag was never read", so the
+	// back-fill in Phase 3 picks it up.  A default would mark the whole
+	// library as already read and the feature would do nothing on any upgraded
+	// install, with a clean scan log saying so.
+	try { db_music_.exec("ALTER TABLE songs ADD COLUMN artist TEXT"); }
+	catch (const SQLite::Exception&) {}
 
 	// One-time: the hand-picked-cover flag used to be albums.cover_manual, in
 	// the music DB -- which a rebuild would have thrown away, taking with it
@@ -1098,6 +1113,13 @@ struct SongReadData {
 	// group and sort by it, and read by Phase 3c to know whether to ask TMDB
 	// about a film or about a series.
 	int         season      = 0;
+	// The file's ARTIST tag.  Read in Phase 3 for a changed file, and also for
+	// an *unchanged* file whose row has never had it read (artist_missing) --
+	// that is the back-fill.  artist_read is what says the read happened, so a
+	// file with no tag is stored as '' and never asked again.
+	std::string artist_tag;
+	bool        artist_missing = false;   // set in Phase 2
+	bool        artist_read    = false;
 	// populated in Phase 3 only when changed == true:
 	std::string title;
 	int         track_nr    = 0;
@@ -1116,6 +1138,13 @@ struct SongReadData {
 	// so Phase 3 does not have to rediscover them. `path` is the first of
 	// these. Empty for everything else, which is what marks a row as ordinary.
 	std::vector<std::string> parts;
+	};
+
+// What Phase 2 already knows about a row in the database, for the songs the
+// walk just found on disk.
+struct KnownSong {
+	int64_t mtime       = 0;
+	bool    artist_null = false;   // its ARTIST tag has never been read
 	};
 
 struct AlbumReadData {
@@ -1272,10 +1301,20 @@ static void read_song_metadata(SongReadData& sdat)
 	TagLib::FileRef    f(&stream);
 	sdat.title = fs::path(sdat.path).stem().string();
 
+	// Set even when TagLib could not open the file: '' then means "asked, and
+	// there is nothing there", which is what keeps the back-fill from
+	// re-opening an unreadable file on every scan for ever.
+	sdat.artist_read = true;
+
 	if (!f.isNull() && f.tag()) {
 		auto* t = f.tag();
 		if (!t->title().isEmpty())
 			sdat.title = t->title().toCString(true);
+		// Kept apart from the folder-derived artist rather than replacing it:
+		// which of the two a client is shown is decided at the API boundary,
+		// where both are in hand.
+		if (!t->artist().isEmpty())
+			sdat.artist_tag = t->artist().toCString(true);
 		// Guarded, because a file with no track tag reads back as 0 and
 		// would otherwise wipe the number Phase 1 took from the filename.
 		if (t->track() > 0) sdat.track_nr = static_cast<int>(t->track());
@@ -1298,6 +1337,22 @@ static void read_song_metadata(SongReadData& sdat)
 		sdat.sr       = ap->sampleRate();
 		sdat.channels = ap->channels();
 		}
+	}
+
+// Phase 3 for an *unchanged* file whose row predates songs.artist: read that
+// one tag and nothing else.  The whole library goes through this once, so
+// audio properties are switched off -- scanning an MP3 for its length is most
+// of what a full read costs, and nothing here wants it.
+//
+// A file this cannot open still counts as read, for the reason above: '' is an
+// answer, and only NULL brings the file back next scan.
+static void read_song_artist_tag(SongReadData& sdat)
+	{
+	sdat.artist_read = true;
+	TagLib::FileStream stream(sdat.path.c_str(), true /* readOnly */);
+	TagLib::FileRef    f(&stream, false /* readAudioProperties */);
+	if (!f.isNull() && f.tag() && !f.tag()->artist().isEmpty())
+		sdat.artist_tag = f.tag()->artist().toCString(true);
 	}
 
 // A film's title is as often on the folder as on the file — "The.Third.Man.
@@ -1729,6 +1784,19 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 		upd.bind(7, rel_path);
 		upd.exec();
 
+		// The back-fill: songs.artist is NULL on every row scanned before the
+		// column existed, and those files have not changed, so Phase 3 would
+		// never re-read them.  Written whenever the read happened, empty tag
+		// included — guarding this on a non-empty tag would leave an untagged
+		// file NULL and put it back in the pass on every scan for ever.
+		if (sdat.artist_read) {
+			SQLite::Statement a(db,
+				"UPDATE songs SET artist = ? WHERE path = ?");
+			a.bind(1, sdat.artist_tag);
+			a.bind(2, rel_path);
+			a.exec();
+			}
+
 		// A video's title is derived from its filename, so it can improve
 		// without the file changing — which is how a library scanned before
 		// the parser existed gets back-filled.  Unguarded, unlike the version
@@ -1760,13 +1828,19 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 	std::string title = sdat.is_video
 	    ? sdat.title : strip_track_prefix(sdat.title);
 
+	// `artist` sits at the end of the list rather than beside `genre` where it
+	// belongs by subject: the binds below are hand-numbered and positional, so
+	// inserting a column mid-list means renumbering fifteen of them — an edit
+	// that neither fails to compile nor throws when it goes wrong, it just
+	// writes bitrate into duration.  The order of an INSERT's column list
+	// carries no meaning, so this costs nothing.
 	SQLite::Statement ins(db,
 		"INSERT OR REPLACE INTO songs"
 		" (album_id, folder_id, path, filename, title, track_number, disc_number,"
 		"  year, genre, duration, bitrate, sample_rate, channels, codec,"
 		"  file_size, file_modified, is_video, width, height, video_codec,"
-		"  audio_codec, season, cover_path, last_scanned)"
-		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
+		"  audio_codec, season, cover_path, artist, last_scanned)"
+		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
 	ins.bind(1,  album_id);
 	ins.bind(2,  folder_id);
 	ins.bind(3,  rel_path);
@@ -1790,6 +1864,10 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 	ins.bind(21, sdat.audio_codec);
 	ins.bind(22, sdat.season);
 	ins.bind(23, rel_cover);
+	// Bound even when empty, and for video, where it is always empty: '' is
+	// "read, no tag", and a NULL here would put the row into the back-fill
+	// pass on every future scan.
+	ins.bind(24, sdat.artist_tag);
 	ins.exec();
 
 	int song_id = static_cast<int>(db.getLastInsertRowid());
@@ -1936,39 +2014,54 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		}
 
 	// ---- Phase 2: brief read lock — identify changed files ----
-	// known_mtimes is keyed by the same absolute-path form as sdat.path so the
-	// per-song lookup below stays a direct comparison. The DB column is
-	// relative; compose absolute via join_root() on the way in.
-	std::unordered_map<std::string, int64_t> known_mtimes;
+	// Keyed by the same absolute-path form as sdat.path so the per-song lookup
+	// below stays a direct comparison. The DB column is relative; compose
+	// absolute via join_root() on the way in.
+	std::unordered_map<std::string, KnownSong> known;
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
+	// is_video is asked for here rather than tested in C++ below: a video is
+	// never opened with TagLib, so its artist column stays NULL for ever, and
+	// without this it would be offered to the back-fill on every scan, skipped,
+	// and leave nothing in the log to say why the pass never ends.
 	SQLite::Statement q(db_music_,
-		"SELECT path, file_modified FROM songs WHERE path LIKE ?");
+		"SELECT path, file_modified, artist, is_video FROM songs"
+		" WHERE path LIKE ?");
 	q.bind(1, prefix);
 	while (q.executeStep())
-		known_mtimes[join_root(q.getColumn(0).getString())]
-			= q.getColumn(1).getInt64();
+		known[join_root(q.getColumn(0).getString())] =
+			{ q.getColumn(1).getInt64(),
+			  q.getColumn(2).isNull() && q.getColumn(3).getInt() == 0 };
 	}
 
 	for (auto& adat : albums)
 		for (auto& sdat : adat.songs) {
-			auto it = known_mtimes.find(sdat.path);
-			sdat.changed = (it == known_mtimes.end() || it->second != sdat.mtime);
+			auto it = known.find(sdat.path);
+			sdat.changed = (it == known.end() || it->second.mtime != sdat.mtime);
+			sdat.artist_missing = (it != known.end() && it->second.artist_null);
 			}
 
-	// ---- Phase 3: TagLib reads for changed files only (no lock) ----
+	// ---- Phase 3: TagLib reads (no lock) ----
+	// Changed files get the full read.  An unchanged one is opened only to
+	// back-fill an ARTIST tag its row has never held, which happens once per
+	// file over the life of the library.
 	for (auto& adat : albums)
 		for (auto& sdat : adat.songs) {
-			if (!sdat.changed) continue;
-
 			// Defence-in-depth: refuse to open any file that — after symlink
 			// resolution — sits outside every root.
-			if (!path_is_within_root(sdat.path)) {
+			if ((sdat.changed || sdat.artist_missing)
+			    && !path_is_within_root(sdat.path)) {
 				std::cout << stamp() << "scan: skipping file outside every root: "
 				          << sdat.path << std::endl;
 				continue;
 				}
-			read_song_metadata(sdat);
+			if (sdat.changed)
+				read_song_metadata(sdat);
+			// An unchanged audio file whose row predates songs.artist: one
+			// narrow read, once, so an existing library gains the tag without
+			// every file having to be touched.
+			else if (sdat.artist_missing && !sdat.is_video)
+				read_song_artist_tag(sdat);
 			}
 
 	for (auto& adat : albums) renumber_unseasoned(adat.songs);
@@ -2374,33 +2467,40 @@ void MediaStore::scan_root_files(const RootRec& root)
 	// ---- Phase 2: brief read lock — identify changed files ----
 	// Keyed by folder rather than by path prefix: "<root>/%" is the entire
 	// root, and only the files directly in it belong to this album.
-	std::unordered_map<std::string, int64_t> known_mtimes;
+	std::unordered_map<std::string, KnownSong> known_songs;
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
+	// See scan_artist_dir(): is_video is filtered here so a video, which has
+	// no readable tag and never will, cannot sit in the back-fill set for ever.
 	SQLite::Statement q(db_music_,
-		"SELECT s.path, s.file_modified FROM songs s"
+		"SELECT s.path, s.file_modified, s.artist, s.is_video FROM songs s"
 		" JOIN folders f ON f.id = s.folder_id WHERE f.path = ?");
 	q.bind(1, root.cfg.name);
 	while (q.executeStep())
-		known_mtimes[join_root(q.getColumn(0).getString())]
-			= q.getColumn(1).getInt64();
+		known_songs[join_root(q.getColumn(0).getString())] =
+			{ q.getColumn(1).getInt64(),
+			  q.getColumn(2).isNull() && q.getColumn(3).getInt() == 0 };
 	}
-	if (songs.empty() && known_mtimes.empty()) return;
+	if (songs.empty() && known_songs.empty()) return;
 
 	for (auto& sdat : songs) {
-		auto it = known_mtimes.find(sdat.path);
-		sdat.changed = (it == known_mtimes.end() || it->second != sdat.mtime);
+		auto it = known_songs.find(sdat.path);
+		sdat.changed = (it == known_songs.end() || it->second.mtime != sdat.mtime);
+		sdat.artist_missing = (it != known_songs.end() && it->second.artist_null);
 		}
 
-	// ---- Phase 3: metadata for changed files only (no lock) ----
+	// ---- Phase 3: metadata reads (no lock); see scan_artist_dir() ----
 	for (auto& sdat : songs) {
-		if (!sdat.changed) continue;
-		if (!path_is_within_root(sdat.path)) {
+		if ((sdat.changed || sdat.artist_missing)
+		    && !path_is_within_root(sdat.path)) {
 			std::cout << stamp() << "scan: skipping file outside every root: "
 			          << sdat.path << std::endl;
 			continue;
 			}
-		read_song_metadata(sdat);
+		if (sdat.changed)
+			read_song_metadata(sdat);
+		else if (sdat.artist_missing && !sdat.is_video)
+			read_song_artist_tag(sdat);
 		}
 
 	renumber_unseasoned(songs);
@@ -3382,7 +3482,7 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_videos()
 		"       COALESCE(al.title,'') AS album,"
 		+ SONG_COVER_ART_SQL +
 		"       s.path, s.width, s.height, s.video_codec, s.audio_codec,"
-		"       s.season"
+		"       s.season, COALESCE(s.artist,'') AS track_artist"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -3414,6 +3514,7 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_videos()
 		e.video_codec  = q.getColumn(17).isNull() ? "" : q.getColumn(17).getString();
 		e.audio_codec  = q.getColumn(18).isNull() ? "" : q.getColumn(18).getString();
 		e.season       = q.getColumn(19).getInt();
+		e.track_artist = q.getColumn(20).getString();
 		result.push_back(std::move(e));
 		}
 	return result;
@@ -3727,7 +3828,8 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name, '') AS artist,"
 		"       COALESCE(al.title, '') AS album, s.width, s.height,"
-		"       s.video_codec, s.audio_codec, s.cover_path, s.season"
+		"       s.video_codec, s.audio_codec, s.cover_path, s.season,"
+		"       COALESCE(s.artist,'') AS track_artist"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -3742,7 +3844,8 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		"       s.file_size, s.codec, s.folder_id,"
 		"       COALESCE(a.name, '') AS artist,"
 		"       COALESCE(al.title, '') AS album, s.width, s.height,"
-		"       s.video_codec, s.audio_codec, s.cover_path, s.season"
+		"       s.video_codec, s.audio_codec, s.cover_path, s.season,"
+		"       COALESCE(s.artist,'') AS track_artist"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -3782,6 +3885,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		else if (dir.cover_art_id >= 0)
 			e.cover_art_id = dir.cover_art_id;
 		e.season       = ssel.getColumn(18).getInt();
+		e.track_artist = ssel.getColumn(19).getString();
 		dir.children.push_back(std::move(e));
 		}
 
@@ -3917,7 +4021,7 @@ std::vector<MediaStore::RecentSongEntry> MediaStore::get_recent_songs(
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN al.folder_id ELSE -1 END AS cover_art_id,"
 		"       f.parent_id,"
-		"       pc.last_played"
+		"       pc.last_played, COALESCE(s.artist,'') AS track_artist"
 		" FROM client.play_counts pc"
 		" JOIN client.users u ON u.id = pc.user_id"
 		" JOIN songs s ON s.path = pc.song_path"
@@ -3952,6 +4056,7 @@ std::vector<MediaStore::RecentSongEntry> MediaStore::get_recent_songs(
 		e.song.cover_art_id = q.getColumn(13).getInt();
 		// column 14 (f.parent_id) unused — parent_id is already the album folder
 		e.last_played       = q.getColumn(15).isNull() ? "" : q.getColumn(15).getString();
+		e.song.track_artist = q.getColumn(16).getString();
 		result.push_back(std::move(e));
 		}
 	return result;
@@ -4088,7 +4193,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		"       COALESCE(al.title, '') AS album"
 		+ star_col +
 		", s.width, s.height, s.video_codec, s.audio_codec, s.cover_path"
-		", s.season"
+		", s.season, COALESCE(s.artist,'') AS track_artist"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -4106,7 +4211,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		"       COALESCE(al.title, '') AS album"
 		+ star_col +
 		", s.width, s.height, s.video_codec, s.audio_codec, s.cover_path"
-		", s.season"
+		", s.season, COALESCE(s.artist,'') AS track_artist"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -4163,6 +4268,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		else if (info.album.cover_art_id >= 0)
 			e.cover_art_id = info.album.cover_art_id;
 		e.season       = ssel.getColumn(19).getInt();
+		e.track_artist = ssel.getColumn(20).getString();
 		info.songs.push_back(std::move(e));
 		}
 
@@ -4223,7 +4329,8 @@ std::optional<MediaStore::PlayQueue> MediaStore::get_play_queue(
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
-		"       pq.is_current, pq.offset_ms, pq.client, pq.updated"
+		"       pq.is_current, pq.offset_ms, pq.client, pq.updated,"
+		"       COALESCE(s.artist,'') AS track_artist"
 		" FROM client.play_queue pq"
 		" JOIN client.users u ON u.id = pq.user_id"
 		" JOIN songs s ON s.path = pq.song_path"
@@ -4262,6 +4369,7 @@ std::optional<MediaStore::PlayQueue> MediaStore::get_play_queue(
 			}
 		if (pq.client.empty())  pq.client  = q.getColumn(16).isNull() ? "" : q.getColumn(16).getString();
 		if (pq.changed.empty()) pq.changed = q.getColumn(17).isNull() ? "" : q.getColumn(17).getString();
+		e.track_artist = q.getColumn(18).getString();
 
 		pq.songs.push_back(std::move(e));
 		}
@@ -4400,7 +4508,8 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id"
+		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
+		"       COALESCE(s.artist,'') AS track_artist"
 		" FROM client.stars st"
 		" JOIN client.users u ON u.id = st.user_id"
 		" JOIN songs s ON s.path = st.song_path"
@@ -4427,6 +4536,7 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 		e.artist       = sq.getColumn(11).getString();
 		e.album        = sq.getColumn(12).getString();
 		e.cover_art_id = sq.getColumn(13).getInt();
+		e.track_artist = sq.getColumn(14).getString();
 		result.songs.push_back(std::move(e));
 		}
 
@@ -4533,7 +4643,8 @@ MediaStore::PlaylistInfo MediaStore::create_playlist(const std::string& username
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id"
+		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
+		"       COALESCE(s.artist,'') AS track_artist"
 		" FROM client.playlist_songs ps"
 		" JOIN songs s ON s.path = ps.song_path"
 		" LEFT JOIN albums al ON al.id = s.album_id"
@@ -4560,6 +4671,7 @@ MediaStore::PlaylistInfo MediaStore::create_playlist(const std::string& username
 		e.artist       = sq.getColumn(11).getString();
 		e.album        = sq.getColumn(12).getString();
 		e.cover_art_id = sq.getColumn(13).getInt();
+		e.track_artist = sq.getColumn(14).getString();
 		total_duration += (int)e.duration;
 		pl.songs.push_back(std::move(e));
 		}
@@ -4997,7 +5109,8 @@ std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
 		+ SONG_COVER_ART_SQL +
-		"       s.width, s.height, s.video_codec, s.audio_codec, s.season"
+		"       s.width, s.height, s.video_codec, s.audio_codec, s.season,"
+		"       COALESCE(s.artist,'') AS track_artist"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -5027,6 +5140,7 @@ std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
 	e.video_codec  = q.getColumn(16).isNull() ? "" : q.getColumn(16).getString();
 	e.audio_codec  = q.getColumn(17).isNull() ? "" : q.getColumn(17).getString();
 	e.season       = q.getColumn(18).getInt();
+	e.track_artist = q.getColumn(19).getString();
 	return e;
 	}
 
@@ -5134,7 +5248,8 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id"
+		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
+		"       COALESCE(s.artist,'') AS track_artist"
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -5165,6 +5280,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		e.artist       = sq.getColumn(11).getString();
 		e.album        = sq.getColumn(12).getString();
 		e.cover_art_id = sq.getColumn(13).getInt();
+		e.track_artist = sq.getColumn(14).getString();
 		result.songs.push_back(std::move(e));
 		}
 
@@ -5186,7 +5302,7 @@ std::vector<MediaStore::BookmarkInfo> MediaStore::get_bookmarks(
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
 		"       b.position, COALESCE(b.comment,''), b.created, b.changed,"
-		"       u.username"
+		"       u.username, COALESCE(s.artist,'') AS track_artist"
 		" FROM client.bookmarks b"
 		" JOIN client.users u ON u.id = b.user_id"
 		" JOIN songs s ON s.path = b.song_path"
@@ -5220,6 +5336,7 @@ std::vector<MediaStore::BookmarkInfo> MediaStore::get_bookmarks(
 		bm.created            = q.getColumn(16).getString();
 		bm.changed            = q.getColumn(17).getString();
 		bm.username           = q.getColumn(18).getString();
+		bm.entry.track_artist = q.getColumn(19).getString();
 		result.push_back(std::move(bm));
 		}
 	return result;
@@ -5399,6 +5516,7 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id"
 		+ star_col +
+		", COALESCE(s.artist,'') AS track_artist"
 		" FROM client.playlist_songs ps"
 		" JOIN songs s ON s.path = ps.song_path"
 		" LEFT JOIN albums al ON al.id = s.album_id"
@@ -5432,6 +5550,7 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 		e.album        = sq.getColumn(12).getString();
 		e.cover_art_id = sq.getColumn(13).getInt();
 		e.starred      = sq.getColumn(14).getString();
+		e.track_artist = sq.getColumn(15).getString();
 		total_duration += (int)e.duration;
 		pl.songs.push_back(std::move(e));
 		}

@@ -117,6 +117,101 @@ def test_get_music_directory_album():
           f"'{adirectory.get('name')}'")
 
 
+def _artist_fields_ok(song, where):
+    """Every song entry carries all three artist fields, and they agree
+    with the rule the server applies to them."""
+    for f in ("artist", "displayArtist", "displayAlbumArtist"):
+        assert song.get(f) is not None, (
+            f"{where}: song {song.get('id')} has no {f} attribute — "
+            "OpenSubsonic requires a supported field to be sent even when empty"
+        )
+    assert song.get("displayArtist") == song.get("artist"), (
+        f"{where}: displayArtist {song.get('displayArtist')!r} != "
+        f"artist {song.get('artist')!r}"
+    )
+    # artist falls back to the folder's artist, so it is empty only when that
+    # is too — never merely because the file carries no tag.
+    if song.get("displayAlbumArtist"):
+        assert song.get("artist"), (
+            f"{where}: song {song.get('id')} has an album artist but no artist"
+        )
+
+
+def _first_album_songs():
+    """The songs of the first album the library offers, however it is shaped."""
+    root = _get("getIndexes.view")
+    first_artist = root.find(f".//{{{NS}}}artist")
+    assert first_artist is not None, "No artists found — run scan first"
+    droot = _get("getMusicDirectory.view", {"id": first_artist.get("id")})
+    directory = droot.find(f"{{{NS}}}directory")
+    album = next(
+        (c for c in directory.findall(f"{{{NS}}}child") if c.get("isDir") == "true"),
+        None,
+    )
+    # A section holding loose files is its own album, so the artist listing may
+    # already be the songs.
+    target = album.get("id") if album is not None else first_artist.get("id")
+    aroot = _get("getMusicDirectory.view", {"id": target})
+    adir = aroot.find(f"{{{NS}}}directory")
+    return target, [c for c in adir.findall(f"{{{NS}}}child")
+                    if c.get("isDir") == "false"]
+
+
+def test_song_artist_fields():
+    """The three artist fields, across the endpoints that return songs.
+
+    This is the contract of artist_of() seen from outside: displayAlbumArtist
+    is the folder-derived artist, artist is the file's own when it names
+    somebody else, and both OpenSubsonic fields are always present. Checked on
+    more than one endpoint deliberately — the columns are selected by thirteen
+    separate queries, and one of them forgetting is exactly the failure this
+    catches.
+    """
+    album_id, songs = _first_album_songs()
+    assert songs, "No songs found — run scan first"
+    for s in songs:
+        _artist_fields_ok(s, "getMusicDirectory")
+
+    checked = ["getMusicDirectory"]
+
+    # Reported only when it actually returned something: the id above is an
+    # album folder unless the library's first artist holds loose files, and a
+    # silently empty check is worse than a missing one.
+    aroot = _get("getAlbum.view", {"id": album_id})
+    found = aroot.findall(f".//{{{NS}}}song")
+    for s in found:
+        _artist_fields_ok(s, "getAlbum")
+    if found:
+        checked.append("getAlbum")
+
+    sroot = _get("getSong.view", {"id": songs[0].get("id")})
+    found = sroot.findall(f".//{{{NS}}}song")
+    for s in found:
+        _artist_fields_ok(s, "getSong")
+    if found:
+        checked.append("getSong")
+
+    # A query with no results proves nothing, so search on a title we know.
+    title = songs[0].get("title") or ""
+    if title:
+        qroot = _get("search3.view", {"query": title, "artistCount": "0",
+                                      "albumCount": "0", "songCount": "20"})
+        found = qroot.findall(f".//{{{NS}}}song")
+        for s in found:
+            _artist_fields_ok(s, "search3")
+        if found:
+            checked.append("search3")
+
+    # These two are empty on a fresh install; check whatever is there.
+    for endpoint, tag in (("getStarred.view", "song"), ("getBookmarks.view", "entry")):
+        root = _get(endpoint)
+        for s in root.findall(f".//{{{NS}}}{tag}"):
+            _artist_fields_ok(s, endpoint)
+
+    print(f"PASS  song artist fields — {len(songs)} songs, "
+          f"endpoints: {', '.join(checked)}")
+
+
 def test_get_music_directory_not_found():
     root = _get("getMusicDirectory.view", {"id": "999999"})
     _check(root, status="failed")
@@ -138,6 +233,7 @@ TESTS = [
     test_get_indexes_ignoredArticles,
     test_get_music_directory_artist,
     test_get_music_directory_album,
+    test_song_artist_fields,
     test_get_music_directory_not_found,
     test_get_music_directory_missing_id,
 ]

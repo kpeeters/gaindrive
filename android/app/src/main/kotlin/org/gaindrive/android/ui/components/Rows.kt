@@ -245,19 +245,36 @@ fun TrackRow(
 				}
 			}
 		}
-		// Wrapped rather than ellipsised: a row is free to grow, and what a
-		// long title truncates away is usually the part that tells two takes of
-		// one piece apart. The number and the duration stay centred against it.
-		Text(
-			text = song.title,
-			style = MaterialTheme.typography.bodyLarge,
-			color = if (playback == TrackState.IDLE) {
-				MaterialTheme.colorScheme.onSurface
-			} else {
-				MaterialTheme.colorScheme.primary
-			},
-			modifier = Modifier.weight(1f),
-		)
+		// A Column holding one child lays out exactly as the bare Text did, so
+		// a track whose artist is its album's is pixel-unchanged; the number,
+		// the marks and the duration stay centred against whichever height it
+		// comes to.
+		Column(modifier = Modifier.weight(1f)) {
+			// Wrapped rather than ellipsised: a row is free to grow, and what
+			// a long title truncates away is usually the part that tells two
+			// takes of one piece apart.
+			Text(
+				text = song.title,
+				style = MaterialTheme.typography.bodyLarge,
+				color = if (playback == TrackState.IDLE) {
+					MaterialTheme.colorScheme.onSurface
+				} else {
+					MaterialTheme.colorScheme.primary
+				},
+			)
+			// Only where it says something the album heading does not — a
+			// guest, or every track of a compilation. The server decides what
+			// counts as a difference; see Song.differingArtist.
+			song.differingArtist?.let {
+				Text(
+					text = it,
+					style = MaterialTheme.typography.bodySmall,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis,
+				)
+			}
+		}
 		VideoMark(song)
 		TrackDownloadMark(song.ref)
 		Text(

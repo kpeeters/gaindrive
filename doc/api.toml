@@ -800,6 +800,13 @@ NOTE: **The artist tag is only rewritten under an `artists` root.** Under a
 into an artist tag would stamp "Film" across every file of a promoted
 documentary. The album tag is rewritten whenever `album` changes.
 
+NOTE: **An artist tag naming somebody other than the old folder is left
+alone.** Only a tag that already held the old folder's name is rewritten,
+because anything else is a real credit — every track of a compilation has
+one — and overwriting it would report the whole album as by one artist ever
+after. The comparison ignores case and punctuation, the same rule that decides
+a song entry's `artist`.
+
 An emptied source directory is removed, so it does not linger in the listing
 reading "0 albums", and an upload's batch directory goes with it.
 '''

@@ -352,7 +352,16 @@ class MediaStore {
 			int         parent_id;
 			bool        is_dir;
 			std::string title;    // folder name or song title
-			std::string artist;
+			std::string artist;   // the folder-derived artist
+			// The file's own ARTIST tag, raw and undecided.  Whether it
+			// differs from `artist` above is a presentation question, answered
+			// in one place — the song entry writers in gaindrive.cc, which are
+			// the only code holding both facts at once.
+			//
+			// Unlike video_codec/season, *every* ChildEntry query selects it:
+			// the ones those skip (getStarred, search, getPlaylist) are exactly
+			// where a track is shown away from its album and most needs it.
+			std::string track_artist;
 			std::string album;
 			int         cover_art_id = -1;  // folder_id for getCoverArt; -1 = none
 			int         year         = 0;  // populated for both songs and album dirs

@@ -1341,7 +1341,9 @@ body {
    font-size: 0.95rem;
 }
 
-/* Shown in playlist track rows where the artist differs per row. */
+/* The track's own artist, under its title. Always in a playlist, where every
+   row may be by someone else; in an album listing only where the file's tag
+   names someone other than the folder — a guest, or a whole compilation. */
 .track-artist {
    font-size: 0.75rem;
    color: var(--text-dim);

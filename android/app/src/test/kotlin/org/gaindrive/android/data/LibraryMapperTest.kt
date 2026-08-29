@@ -108,6 +108,50 @@ class LibraryMapperTest {
 		assertNull(zeroed.season)
 	}
 
+	/**
+	 * The whole point of the field: a compilation track names its own artist,
+	 * an ordinary one draws nothing, and a server too old to send an album
+	 * artist at all draws nothing either rather than labelling every row.
+	 */
+	@Test
+	fun `a track artist shows only when the album is by someone else`() {
+		val guest = SongDto(
+			id = "1", title = "Angels",
+			artist = "Robbie Williams", displayAlbumArtist = "Various Artists",
+		).toDomain(server)
+		assertEquals("Robbie Williams", guest.artistName)
+		assertEquals("Various Artists", guest.albumArtistName)
+		assertEquals("Robbie Williams", guest.differingArtist)
+
+		val ordinary = SongDto(
+			id = "2", title = "Time",
+			artist = "Pink Floyd", displayAlbumArtist = "Pink Floyd",
+		).toDomain(server)
+		assertNull(ordinary.differingArtist)
+
+		val oldServer = SongDto(id = "3", title = "x", artist = "Someone").toDomain(server)
+		assertEquals("", oldServer.albumArtistName)
+		assertNull(oldServer.differingArtist)
+	}
+
+	/**
+	 * A folder-browsed album has no artist of its own, so it takes one from its
+	 * tracks — the *album* artist, not the first track's own, or a compilation
+	 * would be headed by whoever happens to sort first.
+	 */
+	@Test
+	fun `a folder album takes its artist from the album artist of its tracks`() {
+		val songs = listOf(
+			SongDto(id = "1", title = "a",
+			        artist = "Robbie Williams", displayAlbumArtist = "Various Artists"),
+			SongDto(id = "2", title = "b",
+			        artist = "Blur", displayAlbumArtist = "Various Artists"),
+		).map { it.toDomain(server) }
+
+		val album = DirectoryDto(id = "9", name = "Now 42").toAlbum(server, songs)
+		assertEquals("Various Artists", album.artistName)
+	}
+
 	@Test
 	fun `blank optional strings become null`() {
 		val album = AlbumDto(id = "1", name = "x", genre = "").toDomain(server)

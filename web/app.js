@@ -4149,9 +4149,28 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       num.className = 'track-num';
       num.textContent = useSeq ? (i + 1) : (song.track ?? '');
 
+      // Title and, when the file disagrees with its folder, the track's own
+      // artist stacked under it — the same shape the playlist listing uses.
+      // The wrap is the row's grid cell, not the title: edit mode swaps this
+      // element for an <input>, and replaceChild only reaches a direct child.
+      const titleWrap = document.createElement('span');
+      titleWrap.className = 'track-title-wrap';
       const title = document.createElement('span');
       title.className = 'track-title';
       title.textContent = song.title;
+      titleWrap.appendChild(title);
+      // The server decided what counts as a difference — it sends the folder's
+      // spelling in `artist` when the tag is merely another way of writing the
+      // same name — so this is an exact comparison and nothing more.
+      row.dataset.trackArtist =
+         (song.displayAlbumArtist && song.artist !== song.displayAlbumArtist)
+            ? song.artist : '';
+      if (row.dataset.trackArtist) {
+         const artistEl = document.createElement('span');
+         artistEl.className = 'track-artist';
+         artistEl.textContent = row.dataset.trackArtist;
+         titleWrap.appendChild(artistEl);
+         }
 
       const dur = document.createElement('span');
       dur.className = 'track-dur';
@@ -4170,7 +4189,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       const [starBtn, listBtn] = makeTrackActions(song);
       row.appendChild(icon);
       row.appendChild(num);
-      row.appendChild(title);
+      row.appendChild(titleWrap);
       row.appendChild(starBtn);
       row.appendChild(listBtn);
       row.appendChild(dur);
@@ -4270,6 +4289,11 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       // Replace track num/title spans with inputs; swap dur span for year input.
       pane.querySelectorAll('.track-row').forEach(row => {
          const numSpan   = row.querySelector('.track-num');
+         // The wrap, not the title: the title is nested inside it so a track
+         // artist can sit under it, and replaceChild below needs the row's own
+         // child. Its text is read from the title span, which is the only part
+         // being edited.
+         const titleWrap = row.querySelector('.track-title-wrap');
          const titleSpan = row.querySelector('.track-title');
          const durSpan   = row.querySelector('.track-dur');
 
@@ -4302,7 +4326,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
          yearInput.dataset.orig = row.dataset.year;
 
          row.replaceChild(numInput,   numSpan);
-         row.replaceChild(titleInput, titleSpan);
+         row.replaceChild(titleInput, titleWrap);
          row.replaceChild(yearInput,  durSpan);
          row.insertBefore(discInput, yearInput);
 
@@ -4552,9 +4576,21 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
          numSpan.className = 'track-num';
          numSpan.textContent = keepValues ? numInput.value : numInput.dataset.orig;
 
+         // Rebuilt rather than kept aside, so a saved title is what comes
+         // back. The artist is redrawn from the row's dataset: it is not
+         // editable here, and nothing in this pass can have changed it.
+         const titleWrap = document.createElement('span');
+         titleWrap.className = 'track-title-wrap';
          const titleSpan = document.createElement('span');
          titleSpan.className = 'track-title';
          titleSpan.textContent = keepValues ? titleInput.value : titleInput.dataset.orig;
+         titleWrap.appendChild(titleSpan);
+         if (row.dataset.trackArtist) {
+            const artistEl = document.createElement('span');
+            artistEl.className = 'track-artist';
+            artistEl.textContent = row.dataset.trackArtist;
+            titleWrap.appendChild(artistEl);
+            }
 
          const durSpan = document.createElement('span');
          durSpan.className = 'track-dur';
@@ -4566,7 +4602,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
 
          discInput?.remove();
          row.replaceChild(numSpan,   numInput);
-         row.replaceChild(titleSpan, titleInput);
+         row.replaceChild(titleWrap, titleInput);
          row.replaceChild(durSpan,   yearInput);
          row.classList.remove('editing');
          });

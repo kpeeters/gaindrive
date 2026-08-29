@@ -149,6 +149,16 @@ CREATE TABLE songs (
     disc_number   INTEGER DEFAULT 1,
     year          INTEGER,
     genre         TEXT,
+    -- The file's own ARTIST tag, which is a different fact from the
+    -- folder-derived artist reached through song_artists: on a compilation
+    -- every track has a real artist while the folder says "Various Artists".
+    -- Which of the two a client is shown is decided at the API boundary.
+    --
+    -- NULL means "never read" and '' means "read, no tag". The distinction is
+    -- what terminates the back-fill pass in the scanner's Phase 3, which is
+    -- how a library scanned before this column existed acquires the tag
+    -- without every file having to be touched.
+    artist        TEXT,
     duration      REAL NOT NULL DEFAULT 0,
     -- audio properties
     bitrate       INTEGER,   -- kbps

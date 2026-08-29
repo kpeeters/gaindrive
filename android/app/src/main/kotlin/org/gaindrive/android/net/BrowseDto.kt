@@ -67,6 +67,13 @@ data class SongDto(
 	val isDir: Boolean = false,
 	val title: String = "",
 	val artist: String? = null,
+	/**
+	 * The album's own artist, which for a compilation is not [artist]. An
+	 * OpenSubsonic field the server always sends, empty included, so a null
+	 * here means a server too old to know about it rather than an album by
+	 * one artist.
+	 */
+	val displayAlbumArtist: String? = null,
 	val album: String? = null,
 	val track: Int? = null,
 	val discNumber: Int? = null,

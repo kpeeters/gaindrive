@@ -89,6 +89,7 @@ fun SongDto.toDomain(server: ServerId, albumRef: ItemRef? = null) = Song(
 	ref = ItemRef(server, id),
 	title = title,
 	artistName = artist.orEmpty(),
+	albumArtistName = displayAlbumArtist.orEmpty(),
 	albumTitle = album.orEmpty(),
 	albumRef = albumRef ?: server.ref(albumId ?: parent),
 	track = track?.takeIf { it > 0 },
@@ -188,9 +189,14 @@ fun DirectoryDto.toArtist(server: ServerId) = Artist(
 fun DirectoryDto.toAlbum(server: ServerId, songs: List<Song>) = Album(
 	ref = ItemRef(server, id),
 	title = name,
-	// The folder says nothing about who made the record; its tracks do, and on
-	// a well-ordered library they agree with each other.
-	artistName = songs.firstOrNull()?.artistName.orEmpty(),
+	// The folder says nothing about who made the record; its tracks do — but
+	// the album's artist, not the first one's own. On a compilation those
+	// differ, and taking `artistName` here headed the whole album with whoever
+	// track 1 happened to be. Falling back to it covers a server too old to
+	// send the album artist at all.
+	artistName = songs.firstOrNull()
+		?.let { it.albumArtistName.ifBlank { it.artistName } }
+		.orEmpty(),
 	artistRef = server.ref(parent),
 	songCount = songs.size,
 	duration = songs.sumOf { it.duration },

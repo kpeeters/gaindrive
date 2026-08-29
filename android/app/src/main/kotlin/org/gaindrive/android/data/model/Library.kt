@@ -79,7 +79,14 @@ data class Album(
 data class Song(
 	val ref: ItemRef,
 	val title: String,
+	/** Who made this track, which on a compilation is not [albumArtistName]. */
 	val artistName: String,
+	/**
+	 * Who the album is by. Blank when the server did not say — an older one, or
+	 * a listing built offline before this was mirrored — which is why
+	 * [differingArtist] insists on having it before drawing anything.
+	 */
+	val albumArtistName: String = "",
 	val albumTitle: String,
 	val albumRef: ItemRef?,
 	val track: Int?,
@@ -123,6 +130,20 @@ data class Song(
 	val height: Int? = null,
 ) {
 	val isStarred: Boolean get() = starredAt != null
+
+	/**
+	 * The track's own artist when the album is not by them, and null otherwise
+	 * — so a row can draw it without deciding anything.
+	 *
+	 * An exact comparison on purpose. The server already answered the hard
+	 * half: it sends the folder's spelling in [artistName] whenever the file's
+	 * tag is merely a different way of writing the same name, so "AC/DC"
+	 * against a folder called "AC-DC" never reaches here as a difference.
+	 */
+	val differingArtist: String?
+		get() = artistName.takeIf {
+			it.isNotBlank() && albumArtistName.isNotBlank() && it != albumArtistName
+		}
 
 	/** The frame's aspect, or null when the dimensions are unknown. */
 	val aspectRatio: Float?

@@ -539,6 +539,64 @@ static std::optional<TranscodeInfo> transcode_target(
 	return TranscodeInfo{ "audio/mpeg", "mp3", max_bitrate };
 	}
 
+// Comparison key for "does this file's ARTIST tag name someone the folder does
+// not".  Deliberately loose about case, punctuation and underscores: an artist
+// folder is a *filename*, so "AC/DC" is on disk as "AC-DC" and "Pink_Floyd" is
+// a legal spelling of Pink Floyd.  Without this the commonest visible effect of
+// the whole feature would be a redundant second line on every track by such an
+// artist.
+//
+// Every byte from 0x80 up is copied through untouched, and that is the part to
+// leave alone: classifying a UTF-8 continuation byte with isalnum() and
+// dropping it would make "Sigur Rós" key as "sigur rs" while a folder spelled
+// the same way keys as "sigur rs" too -- fine -- but "Sigur Ros" would then
+// match it as well, and worse, a name written entirely in a non-Latin script
+// would key as the empty string, so two unrelated artists would compare equal
+// and neither would ever show its own name.  Accents survive on every
+// filesystem that matters, so an exact comparison outside ASCII is right, and
+// it is what lets this avoid an ICU dependency.
+//
+// No article stripping ("The Beatles" against "Beatles").  The two failure
+// directions are not symmetric: over-normalising hides a real difference, which
+// is invisible and unreportable, while under-normalising shows a redundant line
+// that anyone can see and fix in the tag or the folder name.  ignoredArticles
+// exists for *sorting*, which may guess; identity may not.
+static std::string artist_key(const std::string& s)
+	{
+	std::string r;
+	for (unsigned char c : s) {
+		if (c >= 0x80)                          r += static_cast<char>(c);
+		else if (c == '_' || std::isspace(c))   r += ' ';
+		else if (std::isalnum(c))               r += static_cast<char>(std::tolower(c));
+		}
+	// Collapse runs of space, and trim.
+	std::string out;
+	for (char c : r)
+		if (c != ' ' || (!out.empty() && out.back() != ' ')) out += c;
+	while (!out.empty() && out.back() == ' ') out.pop_back();
+	return out;
+	}
+
+// The artist to report for a song: the file's own tag when it is a different
+// claim from the folder it sits in, the folder's artist otherwise.
+//
+// This is the only place both facts are in hand -- a query has just one of
+// them, and a client cannot normalise without a second copy of the rule above
+// in every language it is written in.  Falling back to the folder rather than
+// to nothing also keeps an untagged file from reporting no artist at all,
+// which is what a client sees from every other server in that case.
+static std::string artist_of(const MediaStore::ChildEntry& c)
+	{
+	if (c.track_artist.empty()) return c.artist;
+	std::string tag_key = artist_key(c.track_artist);
+	std::string dir_key = artist_key(c.artist);
+	// A name made entirely of punctuation keys as nothing; comparing two empty
+	// keys would call unrelated artists equal, so fall back to the raw strings.
+	if (tag_key.empty() || dir_key.empty())
+		return c.track_artist == c.artist ? c.artist : c.track_artist;
+	return tag_key == dir_key ? c.artist : c.track_artist;
+	}
+
 // Serialises a song ChildEntry into a JSON object.  When max_bitrate causes a
 // transcode, also emits transcodedContentType / transcodedSuffix (standard
 // Subsonic) and transcodedBitRate (gaindrive extension; ignored by clients
@@ -551,6 +609,7 @@ static nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
 	// queries; the extension is what distinguishes them, so codecs.hh answers
 	// this without a dedicated column travelling through every query.
 	bool is_video = is_video_ext(c.codec);
+	std::string track_artist = artist_of(c);
 	nlohmann::json s = {
 		{"id",          sid(c.id)},
 		{"parent",      sid(c.parent_id)},
@@ -561,7 +620,19 @@ static nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
 		{"type",        is_video ? "video" : "music"},
 		{"isVideo",     is_video},
 		{"title",       c.title},
-		{"artist",      c.artist},
+		// The track's own artist, as every other Subsonic server reports it;
+		// see artist_of().  displayArtist repeats it and displayAlbumArtist
+		// carries the folder-derived artist, which is what makes
+		// `artist != displayAlbumArtist` a client's whole test for "this track
+		// is not by the album's artist".
+		//
+		// Both OpenSubsonic fields are sent unconditionally, empty included:
+		// the spec's rule is that a server supporting an optional field must
+		// always return it, so a client can tell "these agree" from "this
+		// server does not know about the field".
+		{"artist",            track_artist},
+		{"displayArtist",     track_artist},
+		{"displayAlbumArtist", c.artist},
 		{"album",       c.album},
 		{"track",       c.track_number},
 		{"discNumber",  c.disc_number},
@@ -615,7 +686,12 @@ static XMLElement* song_entry_xml(XMLDocument& doc,
 	el->SetAttribute("parent",      c.parent_id);
 	el->SetAttribute("isDir",       false);
 	el->SetAttribute("title",       c.title.c_str());
-	el->SetAttribute("artist",      c.artist.c_str());
+	// See the JSON entry: the track's own artist, with the folder-derived one
+	// beside it, both OpenSubsonic fields always present.
+	std::string track_artist = artist_of(c);
+	el->SetAttribute("artist",            track_artist.c_str());
+	el->SetAttribute("displayArtist",     track_artist.c_str());
+	el->SetAttribute("displayAlbumArtist", c.artist.c_str());
 	el->SetAttribute("album",       c.album.c_str());
 	if (c.cover_art_id >= 0) el->SetAttribute("coverArt", c.cover_art_id);
 	el->SetAttribute("track",       c.track_number);
@@ -6318,8 +6394,19 @@ GainDrive::GainDrive(const std::string& db_path,
 					if (f.isNull() || !f.tag()) continue;   // not a taggable file
 					if (write_album)
 						f.tag()->setAlbum(TagLib::String(new_album, TagLib::String::UTF8));
-					if (write_artist)
-						f.tag()->setArtist(TagLib::String(new_folder, TagLib::String::UTF8));
+					// Only overwrite an artist tag that was the old folder's
+					// name anyway.  A tag naming somebody else is a real
+					// credit — every track of a compilation has one — and this
+					// used to flatten the lot to "Various Artists" on a move.
+					// Worse, saving bumps the mtime, so the next scan re-read
+					// the value it had just destroyed and the library
+					// converged on it with nothing left to recover from.
+					if (write_artist) {
+						std::string cur = f.tag()->artist().to8Bit(true);
+						if (cur.empty() || artist_key(cur) == artist_key(old_folder))
+							f.tag()->setArtist(
+								TagLib::String(new_folder, TagLib::String::UTF8));
+						}
 					if (!f.save()) {
 						++tag_failures;
 						std::cout << stamp() << "Move: could not write tags to "
