@@ -1,9 +1,12 @@
 #pragma once
 
 #include <chrono>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+
+namespace httplib { class SSLClient; }
 
 // A film or series identified on The Movie Database.
 //
@@ -40,6 +43,9 @@ class Tmdb
 	{
 	public:
 		explicit Tmdb(std::string api_key);
+		// Out of line, because the members below are unique_ptrs to a
+		// forward-declared type and the destructor has to see it complete.
+		~Tmdb();
 
 		// The key is a stored setting rather than a start-up argument, so it
 		// can be entered in the client and take effect on the next scan. This
@@ -78,9 +84,25 @@ class Tmdb
 		// runs in the background so the wait costs nothing.
 		void pace() const;
 
-		// Guards both the key (settable while a scan may be reading it) and
-		// the pacing clock.
+		// Guards the key (settable while a scan may be reading it), the pacing
+		// clock, and the two clients below.
 		mutable std::mutex                            mu_;
 		std::string                                   api_key_;
 		mutable std::chrono::steady_clock::time_point last_request_{};
+
+		// One client per host, held for the object's lifetime so the socket
+		// survives between requests.
+		//
+		// An album costs two requests, one to each host, and building a client
+		// per request meant a DNS lookup, a TCP handshake and a TLS handshake
+		// for each of them — comparable to REQUEST_GAP itself, and paid a few
+		// thousand times over a first scan. httplib keeps the connection alive
+		// across Get() calls on one client, so holding them is the whole fix.
+		//
+		// unique_ptr to a forward-declared type so httplib.h stays out of this
+		// header: it is a large header, and tmdb.hh is included by mediastore.
+		// Created on first use, because a client is only worth a socket once
+		// there is a key configured.
+		mutable std::unique_ptr<httplib::SSLClient>   api_;
+		mutable std::unique_ptr<httplib::SSLClient>   img_;
 	};

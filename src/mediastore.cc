@@ -8,9 +8,11 @@
 #include <ctime>
 #include <iomanip>
 #include <map>
+#include <exception>
 #include <regex>
 #include <set>
 #include <sstream>
+#include <thread>
 #include <unordered_map>
 
 #include <taglib/fileref.h>
@@ -2191,6 +2193,54 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			sdat.artist_missing = (it != known.end() && it->second.artist_null);
 			}
 
+	// ---- Phase 3c: identify films and series online (no lock) ----
+	// Only under a categories root. A concert or a music video sitting under a
+	// performer stays local: both layouts are L1/L2/files and the scanner
+	// cannot tell a concert film from a documentary by shape, which is the
+	// same reason is_category_folder() exists — pointed the other way.
+	//
+	// **Started here, before Phase 3, and joined after it.**  This is the only
+	// phase whose cost is not the disk's — 250 ms of deliberate pacing plus a
+	// round trip, twice per album — so it is the only one that overlapping can
+	// hide, and it measured 213 s of a 1660 s scan spent waiting on a socket
+	// with the disk idle.
+	//
+	// It reads what Phase 1 produced and writes adat.tmdb_title, tmdb_year,
+	// overview and cover, plus title/year/cover on the loose branch's songs.
+	// Phase 3 writes duration, bitrate, dimensions and codecs. The two sets are
+	// disjoint — but only because read_song_metadata() returns before its
+	// TagLib block for a video, and 3c touches nothing else. **Teaching the
+	// video branch to read a title out of the container would break this
+	// silently**, so it is said here rather than left to be rediscovered.
+	//
+	// Not overlapped when Phase 3b is on, and that is not only about the race.
+	// 3b and 3c both write sdat.cover, and each skips work the other has
+	// already done — so running 3c first does not merely reorder two writes, it
+	// changes which tier ends up owning the art on an album holding more than
+	// one video. Both tiers are off by default, so the common case overlaps and
+	// the configured case keeps exactly the behaviour it had.
+	const bool art_on   = video_art_ && video_art_->enabled();
+	const bool want_tmdb = tmdb_.configured() && root->cfg.type == "categories";
+
+	std::thread        tmdb_thread;
+	std::exception_ptr tmdb_err;
+	// Joins however this function leaves, because Phase 3 can throw and a
+	// std::thread destroyed while still joinable is std::terminate — a dead
+	// server rather than a failed scan.
+	struct Joiner {
+		std::thread& t;
+		~Joiner() { if (t.joinable()) t.join(); }
+		} tmdb_joiner{tmdb_thread};
+
+	if (want_tmdb && !art_on)
+		tmdb_thread = std::thread([&]{
+			// Caught rather than allowed to escape: this is a thread's
+			// top-level function, so a contended store_video_meta() would be
+			// std::terminate instead of the "Scan aborted" it is today.
+			try { lookup_video_meta(*this, tmdb_, albums, artist_path.string()); }
+			catch (...) { tmdb_err = std::current_exception(); }
+			});
+
 	// ---- Phase 3: TagLib reads (scan_jobs_ wide, no lock) ----
 	// Changed files get the full read.  An unchanged one is opened only to
 	// back-fill an ARTIST tag its row has never held, which happens once per
@@ -2221,6 +2271,16 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		});
 	}
 
+	if (tmdb_thread.joinable()) {
+		// Timed at the join rather than around the thread's own life, so the
+		// figure means "how much of the online tier failed to hide behind the
+		// disk". Near zero is the healthy reading; close to the whole scan
+		// means Phase 3 had nothing left to do.
+		PhaseTimer pt(scan_times_.tmdb);
+		tmdb_thread.join();
+		}
+	if (tmdb_err) std::rethrow_exception(tmdb_err);
+
 	for (auto& adat : albums) renumber_unseasoned(adat.songs);
 
 	// ---- Phase 3b: cover art for videos that have none (no lock) ----
@@ -2232,12 +2292,9 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		make_video_art(*this, *video_art_, albums, prefix);
 		}
 
-	// ---- Phase 3c: identify films and series online (no lock) ----
-	// Only under a categories root. A concert or a music video sitting under a
-	// performer stays local: both layouts are L1/L2/files and the scanner
-	// cannot tell a concert film from a documentary by shape, which is the
-	// same reason is_category_folder() exists — pointed the other way.
-	if (tmdb_.configured() && root->cfg.type == "categories") {
+	// Phase 3c's serial path: reached only when Phase 3b is on, so the two keep
+	// the order they have always had. See the note above Phase 3.
+	if (want_tmdb && art_on) {
 		PhaseTimer pt(scan_times_.tmdb);
 		lookup_video_meta(*this, tmdb_, albums, artist_path.string());
 		}

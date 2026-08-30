@@ -6,6 +6,7 @@
 #include <cctype>
 #include <exception>
 #include <iostream>
+#include <memory>
 #include <thread>
 
 #include <nlohmann/json.hpp>
@@ -34,6 +35,36 @@ static constexpr auto REQUEST_GAP = std::chrono::milliseconds(250);
 // per-request; the caller records the failure and moves on to the next file.
 static constexpr time_t CONNECT_TIMEOUT_S = 10;
 static constexpr time_t READ_TIMEOUT_S    = 20;
+
+// The client for one host, built on first use and then kept.
+//
+// **set_keep_alive(true) is the whole of this**, and its absence would have
+// made holding a client do nothing at all: httplib's keep_alive_ defaults to
+// false, in which case it puts `Connection: close` on every request and the
+// server hangs up after each one.  Holding the object would then have kept a
+// socket that was already dead and reconnected anyway, which looks identical
+// from here and costs exactly what it cost before.
+//
+// A keep-alive socket does die — the peer or something between it and us can
+// close it while nothing is in flight — and httplib handles that itself: it
+// polls the socket before writing, and closes and reconnects when it finds it
+// gone.  So there is no retry to add here.
+//
+// Must be called with mu_ held.  The reference stays valid after the lock is
+// released because a slot is filled once and never reset, which is what lets
+// the request itself happen outside the lock.
+static httplib::SSLClient& client_for(
+	std::unique_ptr<httplib::SSLClient>& slot, const char* host)
+	{
+	if (!slot) {
+		slot = std::make_unique<httplib::SSLClient>(host);
+		slot->set_keep_alive(true);
+		slot->set_default_headers({ { "User-Agent", TMDB_USER_AGENT } });
+		slot->set_connection_timeout(CONNECT_TIMEOUT_S);
+		slot->set_read_timeout(READ_TIMEOUT_S);
+		}
+	return *slot;
+	}
 
 // How many search results to consider before giving up. TMDB sorts by
 // popularity, and the right answer for a badly named file is regularly not
@@ -90,6 +121,10 @@ Tmdb::Tmdb(std::string api_key)
 	{
 	}
 
+// Out of line so httplib::SSLClient is complete where the unique_ptrs are
+// destroyed; there is nothing else for it to do.
+Tmdb::~Tmdb() = default;
+
 void Tmdb::set_api_key(std::string api_key)
 	{
 	std::lock_guard<std::mutex> lock(mu_);
@@ -118,19 +153,16 @@ std::optional<std::string> Tmdb::get(const std::string& path,
 	{
 	pace();
 
-	httplib::SSLClient cli(TMDB_HOST);
-	cli.set_default_headers({ { "User-Agent", TMDB_USER_AGENT } });
-	cli.set_connection_timeout(CONNECT_TIMEOUT_S);
-	cli.set_read_timeout(READ_TIMEOUT_S);
-
-	std::string key;
+	std::string         key;
+	httplib::SSLClient* cli = nullptr;
 	{
 	std::lock_guard<std::mutex> lock(mu_);
 	key = api_key_;
+	cli = &client_for(api_, TMDB_HOST);
 	}
 	std::string url = path + "?api_key=" + key
 	                + (query.empty() ? "" : "&" + query);
-	auto r = cli.Get(url.c_str());
+	auto r = cli->Get(url.c_str());
 	if (!r) {
 		std::cout << stamp() << "tmdb: no response for " << path << std::endl;
 		return std::nullopt;
@@ -254,13 +286,15 @@ std::optional<std::string> Tmdb::poster(const std::string& poster_path) const
 	if (!configured() || poster_path.empty()) return std::nullopt;
 
 	pace();
-	httplib::SSLClient cli(IMAGE_HOST);
-	cli.set_default_headers({ { "User-Agent", TMDB_USER_AGENT } });
-	cli.set_connection_timeout(CONNECT_TIMEOUT_S);
-	cli.set_read_timeout(READ_TIMEOUT_S);
+
+	httplib::SSLClient* cli = nullptr;
+	{
+	std::lock_guard<std::mutex> lock(mu_);
+	cli = &client_for(img_, IMAGE_HOST);
+	}
 
 	std::string url = std::string("/t/p/") + POSTER_SIZE + poster_path;
-	auto r = cli.Get(url.c_str());
+	auto r = cli->Get(url.c_str());
 	if (!r || r->status != 200 || r->body.empty()) {
 		std::cout << stamp() << "tmdb: poster fetch failed for " << poster_path
 		          << (r ? " (HTTP " + std::to_string(r->status) + ")" : "")
