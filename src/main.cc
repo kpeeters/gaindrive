@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cctype>
 #include <csignal>
 #include <cstdlib>
@@ -486,6 +487,7 @@ int main(int argc, char* argv[])
 		("transcode-cache",    "Directory for cached transcodes (default: alongside --db)", cxxopts::value<std::string>())
 		("transcode-cache-mb", "Transcode cache size in MB (0 disables)", cxxopts::value<int>()->default_value("1024"))
 		("transcode-jobs",     "Max concurrent ffmpeg transcodes (0 = half the cores)", cxxopts::value<int>()->default_value("0"))
+		("scan-jobs",          "Files a scan reads metadata from at once (1 = sequential)", cxxopts::value<int>()->default_value("4"))
 		("no-video-art",  "Do not manufacture cover art for videos that have none")
 		("video-art-px",  "Long edge of manufactured video cover art", cxxopts::value<int>()->default_value("640"))
 		("video-art-frames", "Fall back to an extracted frame when a video has no embedded cover")
@@ -672,6 +674,7 @@ int main(int argc, char* argv[])
 	    ? args["transcode-cache"].as<std::string>() : "";
 	int         transcode_cache_mb  = args["transcode-cache-mb"].as<int>();
 	int         transcode_jobs      = args["transcode-jobs"].as<int>();
+	int         scan_jobs           = args["scan-jobs"].as<int>();
 	// 0 switches the whole thing off, which is what --no-video-art means.
 	int         video_art_px        = args.count("no-video-art")
 	    ? 0 : args["video-art-px"].as<int>();
@@ -751,6 +754,8 @@ int main(int argc, char* argv[])
 				transcode_cache_mb = cfg["transcode_cache_mb"].get<int>();
 			if (cfg.contains("transcode_jobs") && !args.count("transcode-jobs"))
 				transcode_jobs = cfg["transcode_jobs"].get<int>();
+			if (cfg.contains("scan_jobs") && !args.count("scan-jobs"))
+				scan_jobs = cfg["scan_jobs"].get<int>();
 			// Same key for both flags: --no-video-art is just 0 px, so a
 			// config that sets 0 turns it off exactly as the flag does.
 			if (cfg.contains("video_art_px") && !args.count("video-art-px")
@@ -840,6 +845,18 @@ int main(int argc, char* argv[])
 		}
 	}
 
+	// Clamped rather than rejected: a number out of range is a typo, most
+	// likely in a config file whose author may not be reading this log, and
+	// refusing to start over it is worse than starting sensibly and saying so.
+	// The upper bound is about the disk, not the machine — see
+	// MediaStore::scan_jobs_.
+	if (scan_jobs < 1 || scan_jobs > 16) {
+		int clamped = std::clamp(scan_jobs, 1, 16);
+		std::cerr << "Warning: --scan-jobs " << scan_jobs
+		          << " is outside 1..16; using " << clamped << "\n";
+		scan_jobs = clamped;
+		}
+
 	// --add-user: create a user in the DB and exit without starting the server.
 	// Opening the database writes — the journal_mode pragma, the ATTACH, the
 	// schema DDL, the root reconciliation — so a database locked by another
@@ -921,7 +938,7 @@ int main(int argc, char* argv[])
 		             user_db_path, transcode_cache_dir, transcode_cache_mb,
 		             transcode_jobs, video_art_px, video_art_frames,
 		             video_art_embedded, cast_devices, url_handlers,
-		             url_fetch_timeout);
+		             url_fetch_timeout, scan_jobs);
 		// Non-zero on a failed bind, so a supervisor restarts rather than
 		// recording a clean shutdown for a server that never served anything.
 		return gd.listen(host, port) ? 0 : 1;

@@ -24,6 +24,7 @@
 #include <reproc++/drain.hpp>
 
 #include "dvd.hh"
+#include "parallel.hh"
 #include "tmdb.hh"
 #include "videoname.hh"
 
@@ -34,6 +35,12 @@ namespace fs = std::filesystem;
 // enough that a writer which is genuinely stuck gets reported rather than
 // hanging the scan indefinitely.
 static constexpr int DB_BUSY_TIMEOUT_MS = 10000;
+
+// How long one ffprobe of one file may take before the scan gives up on it.
+// Generous, because a feature-length container on a spinning disk is seconds;
+// a probe that times out leaves the row without duration or dimensions, which
+// is what a probe failure has always meant.
+static constexpr reproc::milliseconds PROBE_TIMEOUT(60000);
 
 // Adds its lifetime, in microseconds, to one of MediaStore::scan_times_'
 // accumulators.  Declared at the top of a phase's scope so the timing is one
@@ -244,6 +251,11 @@ static std::optional<VideoProbe> probe_video(const std::string& path)
 	reproc::process proc;
 	reproc::options opts;
 	opts.redirect.err.type = reproc::redirect::type::discard;
+	// A deadline, for the reason VideoArt::run() has one: this runs inside a
+	// scan, and a corrupt file — or one on a mount that has gone away — must
+	// not stall it.  Parallelising Phase 3 downgraded that from "the scan
+	// stops" to "one worker stops", which is better and still wrong.
+	opts.deadline = PROBE_TIMEOUT;
 	if (proc.start(args, opts)) return std::nullopt;
 
 	std::string          out;
@@ -380,7 +392,8 @@ static std::string derive_path(const std::string& base, const std::string& suffi
 
 MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& roots,
                        const std::string& user_db_path, int video_art_px,
-                       bool video_art_frames, bool video_art_embedded)
+                       bool video_art_frames, bool video_art_embedded,
+                       int scan_jobs)
 	// The third argument is the busy timeout, and it defaults to 0 — meaning
 	// SQLite gives up on a contended write *immediately* and SQLiteCpp turns
 	// that into a throw.  Any external writer (a second gaindrive, or sqlite3
@@ -398,6 +411,10 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	            SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE,
 	            DB_BUSY_TIMEOUT_MS)
 	{
+	// Clamped here as well as in main(), because this is public API and main
+	// is not its only possible caller.
+	scan_jobs_ = std::clamp(scan_jobs, 1, 16);
+
 	// Emplaced even when every tier is off, because purge_disabled_video_art()
 	// below asks it which ones are. Phase 3b is guarded on enabled(), not on
 	// this being set.
@@ -1328,8 +1345,7 @@ static void read_song_metadata(SongReadData& sdat)
 		for (const auto& part : sdat.parts) {
 			auto vp = probe_video(part);
 			if (!vp) {
-				std::cout << stamp() << "scan: ffprobe failed for "
-				          << part << std::endl;
+				log_line("scan: ffprobe failed for " + part);
 				continue;
 				}
 			sdat.duration += vp->duration;
@@ -1358,8 +1374,7 @@ static void read_song_metadata(SongReadData& sdat)
 			sdat.audio_codec = vp->audio_codec;
 			}
 		else
-			std::cout << stamp() << "scan: ffprobe failed for "
-			          << sdat.path << std::endl;
+			log_line("scan: ffprobe failed for " + sdat.path);
 		return;
 		}
 
@@ -1419,6 +1434,47 @@ static void read_song_artist_tag(SongReadData& sdat)
 	TagLib::FileRef    f(&stream, false /* readAudioProperties */);
 	if (!f.isNull() && f.tag() && !f.tag()->artist().isEmpty())
 		sdat.artist_tag = f.tag()->artist().toCString(true);
+	}
+
+// One file's whole Phase 3, factored out so scan_artist_dir() and
+// scan_root_files() dispatch an identical body rather than two copies of a rule
+// about which files count as read.
+//
+// **Runs on a parallel_for worker**, so everything it reaches has to be safe
+// from several threads at once, and is: path_is_within_root() reads only
+// roots_, which is written in the constructor and nowhere else; TagLib is used
+// through per-call FileStream and FileRef objects and nothing in gaindrive
+// registers a file-type resolver, string handler or debug listener;
+// probe_video() forks through reproc, which closes inherited descriptors in the
+// child, and catches its own JSON. The counters are atomic, and the log line
+// goes through log_line() — a bare std::cout would splice two workers' paths
+// together, and a path is the entire content of that message.
+//
+// The caller has already filtered to `changed || artist_missing`, so within
+// this set !changed implies artist_missing and the second branch needs only the
+// video test.
+static void read_one_song(const MediaStore& store, SongReadData& sdat,
+                          std::atomic<long long>& files,
+                          std::atomic<long long>& videos)
+	{
+	// Defence-in-depth: refuse to open any file that — after symlink
+	// resolution — sits outside every root.
+	if (!store.path_is_within_root(sdat.path)) {
+		log_line("scan: skipping file outside every root: " + sdat.path);
+		return;
+		}
+	if (sdat.changed) {
+		read_song_metadata(sdat);
+		files.fetch_add(1);
+		if (sdat.is_video) videos.fetch_add(1);
+		}
+	// An unchanged audio file whose row predates songs.artist: one narrow
+	// read, once, so an existing library gains the tag without every file
+	// having to be touched.
+	else if (!sdat.is_video) {
+		read_song_artist_tag(sdat);
+		files.fetch_add(1);
+		}
 	}
 
 // A film's title is as often on the folder as on the file — "The.Third.Man.
@@ -2111,35 +2167,34 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			sdat.artist_missing = (it != known.end() && it->second.artist_null);
 			}
 
-	// ---- Phase 3: TagLib reads (no lock) ----
+	// ---- Phase 3: TagLib reads (scan_jobs_ wide, no lock) ----
 	// Changed files get the full read.  An unchanged one is opened only to
 	// back-fill an ARTIST tag its row has never held, which happens once per
 	// file over the life of the library.
+	//
+	// This is the phase a cold scan is made of — measured at 80% of it — and
+	// what it costs is seeks: the open, the tag at the head of the file and the
+	// ID3v1/APE trailer at the tail, two or three of them per file with nothing
+	// else in flight.  Run one at a time that is a queue one deep, which is the
+	// one thing a spinning disk cannot make up for.
+	//
+	// Flattened to pointers rather than dispatched per album, because an artist
+	// is a few albums of a dozen files each and a per-album dispatch would
+	// leave every thread but one idle on the last album.  The pointers are
+	// stable for the whole phase: **nothing appends to `albums`, or to any
+	// adat.songs, between Phase 1 and Phase 4** — that is the invariant this
+	// rests on.
 	{
 	PhaseTimer pt(scan_times_.meta);
+	std::vector<SongReadData*> work;
 	for (auto& adat : albums)
-		for (auto& sdat : adat.songs) {
-			// Defence-in-depth: refuse to open any file that — after symlink
-			// resolution — sits outside every root.
-			if ((sdat.changed || sdat.artist_missing)
-			    && !path_is_within_root(sdat.path)) {
-				std::cout << stamp() << "scan: skipping file outside every root: "
-				          << sdat.path << std::endl;
-				continue;
-				}
-			if (sdat.changed) {
-				read_song_metadata(sdat);
-				scan_times_.files.fetch_add(1);
-				if (sdat.is_video) scan_times_.videos.fetch_add(1);
-				}
-			// An unchanged audio file whose row predates songs.artist: one
-			// narrow read, once, so an existing library gains the tag without
-			// every file having to be touched.
-			else if (sdat.artist_missing && !sdat.is_video) {
-				read_song_artist_tag(sdat);
-				scan_times_.files.fetch_add(1);
-				}
-			}
+		for (auto& sdat : adat.songs)
+			if (sdat.changed || sdat.artist_missing) work.push_back(&sdat);
+
+	parallel_for(work.size(), scan_jobs_, [&](std::size_t i) {
+		read_one_song(*this, *work[i],
+		               scan_times_.files, scan_times_.videos);
+		});
 	}
 
 	for (auto& adat : albums) renumber_unseasoned(adat.songs);
@@ -2586,23 +2641,14 @@ void MediaStore::scan_root_files(const RootRec& root)
 	// ---- Phase 3: metadata reads (no lock); see scan_artist_dir() ----
 	{
 	PhaseTimer pt(scan_times_.meta);
-	for (auto& sdat : songs) {
-		if ((sdat.changed || sdat.artist_missing)
-		    && !path_is_within_root(sdat.path)) {
-			std::cout << stamp() << "scan: skipping file outside every root: "
-			          << sdat.path << std::endl;
-			continue;
-			}
-		if (sdat.changed) {
-			read_song_metadata(sdat);
-			scan_times_.files.fetch_add(1);
-			if (sdat.is_video) scan_times_.videos.fetch_add(1);
-			}
-		else if (sdat.artist_missing && !sdat.is_video) {
-			read_song_artist_tag(sdat);
-			scan_times_.files.fetch_add(1);
-			}
-		}
+	std::vector<SongReadData*> work;
+	for (auto& sdat : songs)
+		if (sdat.changed || sdat.artist_missing) work.push_back(&sdat);
+
+	parallel_for(work.size(), scan_jobs_, [&](std::size_t i) {
+		read_one_song(*this, *work[i],
+		               scan_times_.files, scan_times_.videos);
+		});
 	}
 
 	renumber_unseasoned(songs);

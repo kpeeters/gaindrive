@@ -145,6 +145,7 @@
             <tr><td><code>--transcode-cache</code></td><td>path</td><td>Directory for cached transcodes. Placed alongside <code>--db</code> if not given.</td></tr>
             <tr><td><code>--transcode-cache-mb</code></td><td>number</td><td>Transcode cache size in MB; <code>0</code> disables caching. Default <code>1024</code>.</td></tr>
             <tr><td><code>--transcode-jobs</code></td><td>number</td><td>Maximum concurrent ffmpeg transcodes; <code>0</code> uses half the available cores. Default <code>0</code>.</td></tr>
+            <tr><td><code>--scan-jobs</code></td><td>number</td><td>How many files a library scan reads metadata from at once; <code>1</code> scans sequentially. Raise it only for solid-state storage. Default <code>4</code>.</td></tr>
             <tr><td><code>--no-scan</code></td><td>n/a</td><td>Skip the filesystem scan at startup.</td></tr>
             <tr><td><code>--debug</code></td><td>n/a</td><td>Print all API responses to stdout.</td></tr>
             <tr><td><code>--add-user</code></td><td>name</td><td>Create a user account and exit.</td></tr>
@@ -172,7 +173,8 @@
   "flat_multi_disc": false,
   "transcode_cache_dir": "/var/cache/gaindrive",
   "transcode_cache_mb": 1024,
-  "transcode_jobs": 0
+  "transcode_jobs": 0,
+  "scan_jobs": 4
 }</span>
 </pre>
         </div>

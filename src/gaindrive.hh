@@ -57,7 +57,11 @@ class GainDrive {
 		          // could not express both.
 		          const std::optional<std::vector<UrlHandler>>& url_handlers
 		              = std::nullopt,
-		          int url_fetch_timeout_s = 2 * 60 * 60);
+		          int url_fetch_timeout_s = 2 * 60 * 60,
+		          // How wide the scan reads file metadata; see
+		          // MediaStore::scan_jobs_. Appended, not inserted: every
+		          // argument here is passed positionally.
+		          int scan_jobs = 4);
 		~GainDrive();
 		// Binds and serves. Returns false without serving if the port could
 		// not be acquired, so the caller can exit non-zero rather than treat a

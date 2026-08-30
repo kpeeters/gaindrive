@@ -2650,10 +2650,11 @@ GainDrive::GainDrive(const std::string& db_path,
                      bool video_art_embedded,
                      const std::vector<CastManager::CastDevice>& cast_devices,
                      const std::optional<std::vector<UrlHandler>>& url_handlers,
-                     int url_fetch_timeout_s)
+                     int url_fetch_timeout_s,
+                     int scan_jobs)
 	: debug_(debug), flat_multi_disc_(flat_multi_disc), upload_dir_(upload_dir),
 	  store_(db_path, roots, user_db_path, video_art_px, video_art_frames,
-	         video_art_embedded),
+	         video_art_embedded, scan_jobs),
 	  transcode_cache_(
 	      transcode_cache_dir.empty()
 	          ? std::filesystem::path(db_path).parent_path() / "transcodes"
