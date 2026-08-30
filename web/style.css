@@ -579,7 +579,14 @@ body {
    justify-content: center;
    gap: 0.5rem;
    background: #000;
-   color: var(--text-dim);
+   /* Not var(--text-dim), and this is the whole reason the three rules below
+      spell their colours out.  This panel paints its own black background
+      whatever the page's theme is, so a theme token is the wrong colour by
+      construction: in the light theme --text-dim is #666, which is dark grey
+      on black and all but invisible.  Even in the dark theme #888 on #000 is
+      thin.  Anything drawn on the video surface is drawn on black and must be
+      light. */
+   color: rgba(255, 255, 255, 0.92);
    font-size: 0.9rem;
    text-align: center;
    padding: 0.5rem;
@@ -587,17 +594,25 @@ body {
 
 #video-cast-panel .mi {
    font-size: 2.5rem;
-   color: var(--accent);
+   /* The dark-theme accent, unconditionally, by the rule above: this panel is
+      black in both themes, and the light theme's #a31623 on it is a dark red
+      on black.  The token's own comment calls #c9202f "brighter on dark bg for
+      contrast", which is exactly the background this is on. */
+   color: #c9202f;
 }
 
 /* No room for the icon beside the name in a 280x158 thumbnail. */
 #video-surface[data-state="minimised"] #video-cast-panel .mi { display: none; }
 
-/* The second line of the panel, saying why there is no picture. Dimmer than
-   the device name above it: it is the explanation, not the heading. */
+/* The second line of the panel, saying why there is no picture.  A shade below
+   the device name above it, because it is the explanation and not the heading
+   — but only a shade: it was 0.75 opacity on top of an already dim colour,
+   which compounded to roughly #666 on black and was the least readable thing
+   on screen.  Stated as a colour rather than an opacity so the two cannot
+   multiply again. */
 #video-cast-note {
    font-size: 0.8rem;
-   opacity: 0.75;
+   color: rgba(255, 255, 255, 0.8);
    max-width: 26rem;
 }
 
@@ -610,7 +625,11 @@ body {
    display: flex;
    align-items: center;
    justify-content: center;
-   color: var(--text-dim);
+   /* On black like the panel, and for the same reason not a theme token.  The
+      shadow is for the one case that is not black: while the sound is casting
+      the picture is here and paused, so this can land on a bright frame. */
+   color: rgba(255, 255, 255, 0.92);
+   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
    font-size: 0.9rem;
    pointer-events: none;
 }
