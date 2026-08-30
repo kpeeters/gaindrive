@@ -700,7 +700,8 @@ body {
    background: var(--border);
 }
 
-#video-captions-wrap {
+#video-captions-wrap,
+#video-sync-wrap {
    position: relative;
    display: flex;
 }
@@ -737,6 +738,34 @@ body {
 }
 
 #video-captions-menu button.current { color: var(--accent); }
+
+/* Same anchoring as the captions menu — this bar is the bottom edge, so both
+   open upward — but a panel rather than a list. */
+#video-sync-menu {
+   position: absolute;
+   right: 0;
+   bottom: 100%;
+   margin-bottom: 0.3rem;
+   z-index: 3;
+   width: 15rem;
+   padding: 0.6rem;
+   display: flex;
+   flex-direction: column;
+   gap: 0.35rem;
+   background: var(--surface);
+   border: 1px solid var(--border);
+   border-radius: 6px;
+   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+   font-size: 0.85rem;
+}
+
+#video-sync-menu.hidden { display: none; }
+#video-sync-menu input[type="range"] { width: 100%; }
+/* Tabular so the readout does not jitter under the thumb as it is dragged. */
+#video-sync-value {
+   font-variant-numeric: tabular-nums;
+   color: var(--text-dim);
+}
 
 @media (max-width: 649px) {
    /* No sidebar, and the bottom nav sits below the player bar. */

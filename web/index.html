@@ -108,6 +108,19 @@
             <button id="video-captions" class="mi" title="Subtitles" aria-label="Subtitles">closed_caption</button>
             <div id="video-captions-menu" class="hidden"></div>
          </span>
+         <!-- Shown only while the picture is here and the sound is on a
+              receiver. It calibrates the one thing nothing can measure — how
+              far behind its reported position a device actually makes a
+              sound — so it has to be adjustable while watching, which is why
+              it is here rather than in Settings. -->
+         <span id="video-sync-wrap" hidden>
+            <button id="video-sync" class="mi" title="Audio/video sync" aria-label="Audio/video sync">av_timer</button>
+            <div id="video-sync-menu" class="hidden">
+               <label for="video-sync-range">Delay picture</label>
+               <input id="video-sync-range" type="range" min="-1000" max="3000" step="25" value="0">
+               <span id="video-sync-value">0 ms</span>
+            </div>
+         </span>
          <button id="video-minimise" class="mi" title="Minimise">close_fullscreen</button>
          <button id="video-fullscreen" class="mi" title="Fullscreen">fullscreen</button>
       </div>

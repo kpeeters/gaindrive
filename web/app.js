@@ -215,6 +215,36 @@ function pickStreamFormat(song) {
 // would land on mp3 by accident rather than by decision.  Opus is the better
 // answer where it decodes — a film's soundtrack is long, and this is a
 // re-encode either way, so the container is a free choice.
+// Keep the picture in this player when the sound is going to a receiver that
+// cannot show it.  Default **on**: the alternative is a black panel, the film
+// is being read off the server's disk either way, and the one cost — a second
+// stream to this browser — is the thing the setting exists to decline.
+const castLocalVideo = {
+   get()   { return localStorage.getItem('gd_cast_local_video') !== '0'; },
+   set(on) {
+      if (on) localStorage.removeItem('gd_cast_local_video');
+      else    localStorage.setItem('gd_cast_local_video', '0');
+      },
+   };
+
+// How far the picture is held back from the receiver's reported position, in
+// milliseconds, per device.
+//
+// This is the one quantity nothing here can compute.  What a receiver reports
+// is where its *decoder* is, and the sound leaves the speakers some unknown
+// time later — a Chromecast's own output buffer plus, on an amplifier, its
+// DSP.  It is a constant for a given device, so it is calibrated once by the
+// person watching and kept against that device's id.  Everything else about
+// the drift is measured and corrected continuously; see castSyncTick().
+const castSyncDelay = {
+   get(id)     { return id ? +(localStorage.getItem(`gd_cast_sync_${id}`) || 0) : 0; },
+   set(id, ms) {
+      if (!id) return;
+      if (ms) localStorage.setItem(`gd_cast_sync_${id}`, String(ms));
+      else    localStorage.removeItem(`gd_cast_sync_${id}`);
+      },
+   };
+
 function audioOnlyFormat() {
    return _canPlayProbe.canPlayType('audio/ogg; codecs=opus') === 'probably'
       ? 'opus' : 'mp3';
@@ -663,6 +693,29 @@ async function viewSettings() {
       'Streams the soundtrack instead of the picture, which is a fraction of '
       + 'the data. Takes effect on the next track.';
    playbackSection.appendChild(audioOnlyHint);
+
+   const localVidRow   = document.createElement('div');
+   localVidRow.className = 'form-row';
+   const localVidLabel = document.createElement('label');
+   const localVidBox   = document.createElement('input');
+   localVidBox.type    = 'checkbox';
+   localVidBox.checked = castLocalVideo.get();
+   localVidBox.addEventListener('change',
+      () => castLocalVideo.set(localVidBox.checked));
+   localVidLabel.appendChild(localVidBox);
+   localVidLabel.appendChild(
+      document.createTextNode('Keep video here when casting to a speaker'));
+   localVidRow.appendChild(localVidLabel);
+   playbackSection.appendChild(localVidRow);
+
+   const localVidHint = document.createElement('p');
+   localVidHint.className = 'admin-hint';
+   localVidHint.textContent =
+      'A speaker or amplifier that cannot show a picture is sent the '
+      + 'soundtrack. With this on the film also plays here, muted and kept in '
+      + 'step with it — which means streaming it to this device as well. '
+      + 'Takes effect on the next track.';
+   playbackSection.appendChild(localVidHint);
 
    pane.appendChild(playbackSection);
 
@@ -2459,6 +2512,14 @@ let castEndStallTime    = null;   // Date.now() when BUFFERING-at-end stall star
 // and reports it; this is only the last answer it gave, kept so the panel can
 // be drawn before the next castLoad replies.
 let castAudioOnly       = false;
+// True while this session is showing the film here, muted, slaved to the
+// receiver's clock — the mode castSyncTick() below drives.  Distinct from
+// castAudioOnly, which says what the *receiver* was sent: the picture can be
+// declined by setting, and cannot be shown at all for an audio track.
+let castVideoLocal      = false;
+// Logged once per load rather than ten times a second, for the one case the
+// loop cannot fix: a chunked stream that has drifted past what it has buffered.
+let castSyncWarned      = false;
 let castExpectedPosition = null;  // absolute position we asked the receiver to
                                   // seek to via the most recent LOAD; cleared
                                   // once the receiver reports playback near it
@@ -2595,6 +2656,170 @@ function startCastEvents() {
       };
    }
 
+// ── Picture here, sound on the receiver ──────────────────────────────────────
+//
+// When the receiver cannot show a film (see castAudioOnly) it is sent the
+// soundtrack, and the picture can stay in this player instead of being lost.
+// The two then have to be kept together, and the reason that is tractable at
+// all is that **the local element is muted**: the correction knob is
+// playbackRate, and a few percent on a picture with no sound is invisible.
+// Rate-matching audio is what makes this hard everywhere else, and there is no
+// audio here to pitch-shift.
+//
+// The receiver is the clock and the picture is the follower, never the other
+// way round.  Nothing here can ask a Chromecast to speed up, and would not want
+// to: the sound is what a listener notices.
+
+const SYNC_DEAD = 0.03;   // s — inside this, leave the rate alone
+const SYNC_HARD = 1.00;   // s — beyond this, jump rather than crawl
+const SYNC_GAIN = 0.20;   // rate change per second of error
+const SYNC_MAX  = 0.05;   // ±5%, comfortably below what an eye can see
+
+// Whether the element can be moved to `t` at all.  A Range-capable stream can:
+// the browser re-requests whatever it needs.  A re-encoded one is chunked with
+// no Range support, so a seek outside what is already buffered does nothing —
+// silently, which is why this is a test and not an attempt.
+function castSyncCanSeek(el, t) {
+   if (!player.streamIsTranscoded) return true;
+   for (let i = 0; i < el.buffered.length; i++)
+      if (t >= el.buffered.start(i) && t <= el.buffered.end(i)) return true;
+   return false;
+}
+
+// One step of the loop, off the interpolation timer below.  `absCurrent` is
+// the receiver's extrapolated position — the same value the seek bar is drawn
+// from, so there is one clock here and not two.
+function castSyncTick(absCurrent) {
+   if (!castVideoLocal) return;
+   const el = player.videoEl;
+   if (!el || !el.currentSrc) return;
+
+   // The delay is the one quantity nothing can measure: what the receiver
+   // reports is where its decoder is, and the sound leaves the speakers some
+   // unknown time later.  Positive holds the picture back.
+   const target = absCurrent - castSyncDelay.get(castDeviceId) / 1000;
+
+   // Anything but PLAYING and there is no clock to follow.  This is also what
+   // holds the picture still through the soundtrack transcode, which for a
+   // feature film is the first minute of the session.
+   if (castPlayerState !== 'PLAYING') {
+      if (!el.paused) el.pause();
+      return;
+      }
+
+   const localOffset = player.localOffset || 0;
+
+   if (el.paused) {
+      // Not `ended`: play() on a finished element restarts it from zero, and
+      // the picture always runs out while the receiver is still reporting
+      // PLAYING through the last seconds of the soundtrack.  The film would
+      // begin again under it.  The receiver owns the advance either way.
+      if (el.ended) return;
+      // The receiver has started, or resumed. Jump to it and go.
+      const want = Math.max(0, target - localOffset);
+      if (castSyncCanSeek(el, want)) el.currentTime = want;
+      el.playbackRate = 1;
+      castSyncWarned = false;
+      el.play().catch(err => console.warn('[cast] local picture', err));
+      return;
+      }
+
+   const err = target - (el.currentTime + localOffset);
+
+   if (Math.abs(err) > SYNC_HARD) {
+      const want = Math.max(0, target - localOffset);
+      if (castSyncCanSeek(el, want)) {
+         console.log('[cast] resync', err.toFixed(2), 's');
+         el.currentTime  = want;
+         el.playbackRate = 1;
+         return;
+         }
+      // Nothing to do but let the rate close it, which at ±5% takes twenty
+      // seconds per second of error.  Said once, because the alternative is
+      // ten lines a second for as long as it lasts.
+      if (!castSyncWarned) {
+         castSyncWarned = true;
+         console.warn('[cast] picture', err.toFixed(2),
+                      's out and cannot seek — this stream is chunked');
+         }
+      }
+
+   const rate = Math.abs(err) < SYNC_DEAD
+      ? 1
+      : 1 + Math.max(-SYNC_MAX, Math.min(SYNC_MAX, err * SYNC_GAIN));
+   // Ten times a second, so only when it has actually moved.
+   if (Math.abs(el.playbackRate - rate) > 0.002) el.playbackRate = rate;
+}
+
+// Which of the two things a cast video does with its picture: keep it here, or
+// show the panel saying where the sound went.  One function because the load
+// reply and the page-reload restore have to reach the same state, and they had
+// no way of agreeing on it other than repeating the condition.
+function castApplyLocalVideo(song, offset) {
+   const local = castAudioOnly && castLocalVideo.get();
+   if (local) {
+      videoCastPanel(false);
+      castLocalVideoStart(song, offset);
+      // The picture is here, so the subtitles are ours to draw again — and the
+      // receiver was never sent any, having no screen to put them on.
+      videoLoadCaptions(song);
+      videoPreparing(true, 'Preparing sound…');
+      } else {
+      castLocalVideoStop();
+      videoCastPanel(true, castAudioOnly);
+      // No picture anywhere means no subtitles to offer, and an unselected
+      // <track> costs a request either way — so the picker is not drawn rather
+      // than drawn and inert.
+      if (castAudioOnly) videoClearCaptions(song);
+      else               videoLoadCaptions(song);
+      }
+}
+
+// Loads the film into the local element without starting it: castSyncTick()
+// does that when the receiver reports PLAYING, which for a soundtrack is after
+// a transcode that can take a minute.
+//
+// Everything about the stream is decided exactly as playerPlay()'s local
+// branch decides it, because it *is* that stream — a divergence here would be
+// a second answer to "which tier does this video take".
+function castLocalVideoStart(song, offset) {
+   const streamParams = {id: song.id};
+   const chunked = song.nativeSeek === false;
+   if (chunked && offset > 0) streamParams.timeOffset = Math.floor(offset);
+   player.streamIsTranscoded = chunked;
+   player.streamFormat       = null;
+   player.localOffset        = (chunked && offset > 0) ? offset : 0;
+
+   castVideoLocal = true;
+   castSyncWarned = false;
+   playerSelectMedia(true);
+   // Not a courtesy to the room: this element and the amplifier are playing
+   // the same film, and the whole design rests on only one of them being
+   // audible — muting is what makes playbackRate a free correction.
+   player.videoEl.muted = true;
+   player.videoEl.playbackRate = 1;
+   player.videoEl.src = apiUrl('stream', streamParams);
+   if (offset > 0 && !chunked) player.videoEl.currentTime = offset;
+   videoSyncButton();
+}
+
+// Called wherever the mode ends: the cast stopping, the setting being off for
+// the next track, or the picture failing to decode.  Without the src clear a
+// muted film goes on downloading with nobody watching it.
+function castLocalVideoStop() {
+   if (!castVideoLocal) return;
+   castVideoLocal = false;
+   const el = player.videoEl;
+   if (el) {
+      el.pause();
+      el.removeAttribute('src');   // never src='' — that resolves to GET /
+      el.load();
+      el.playbackRate = 1;
+      el.muted = false;
+      }
+   videoSyncButton();
+}
+
 // Local interpolation timer — keeps the progress bar smooth between SSE pushes.
 // Only active while casting; reads local vars, makes no network requests.
 setInterval(() => {
@@ -2610,6 +2835,8 @@ setInterval(() => {
    const time = document.getElementById('player-time');
    if (!seek.dataset.seeking) seek.value = Math.floor(absCurrent);
    time.textContent = `${fmtDuration(Math.floor(absCurrent))} / ${fmtDuration(totalSecs)}`;
+   // Same clock, one consumer more: the picture follows what the bar draws.
+   castSyncTick(absCurrent);
    }, 100);
 
 async function openInfoModal() {
@@ -2842,6 +3069,10 @@ function castExit() {
    castBaseTime         = 0;
    castBaseAt           = 0;
    castExpectedPosition = null;
+   // Before castAudioOnly is cleared, and before any resume: a muted film left
+   // with a src goes on downloading for nobody.  stopCast({resumeLocal:false})
+   // — the surface's close button — has nothing else that would stop it.
+   castLocalVideoStop();
    castAudioOnly    = false;
    castPlayerState  = 'IDLE';
    castSongDuration = 0;
@@ -3249,8 +3480,24 @@ function videoCastPanel(on, note = false) {
 // The remux tier blocks on ffmpeg copying the whole file into the transcode
 // cache before it sends a byte, which for a feature-length film is tens of
 // seconds.  Show that rather than a black rectangle that looks broken.
-function videoPreparing(on) {
-   document.getElementById('video-preparing').hidden = !on;
+function videoPreparing(on, label = 'Preparing…') {
+   const el = document.getElementById('video-preparing');
+   el.hidden = !on;
+   if (on) el.textContent = label;
+}
+
+// Shows or hides the A/V delay control, and puts the current device's value in
+// it.  Called wherever the mode or the device can change, since the value is
+// per device and a slider showing another one's would be worse than none.
+function videoSyncButton() {
+   document.getElementById('video-sync-wrap').hidden = !castVideoLocal;
+   if (!castVideoLocal) {
+      document.getElementById('video-sync-menu').classList.add('hidden');
+      return;
+      }
+   const ms = castSyncDelay.get(castDeviceId);
+   document.getElementById('video-sync-range').value = String(ms);
+   document.getElementById('video-sync-value').textContent = `${ms} ms`;
 }
 
 // Stops the current stream and returns the transport bar to its idle state.
@@ -3306,6 +3553,17 @@ function setupVideoSurface() {
    document.getElementById('video-captions').addEventListener('click', () =>
       document.getElementById('video-captions-menu').classList.toggle('hidden'));
 
+   document.getElementById('video-sync').addEventListener('click', () =>
+      document.getElementById('video-sync-menu').classList.toggle('hidden'));
+   // 'input', not 'change': the whole point is judging it against a face on
+   // screen, which means it has to move while the thumb does.  castSyncTick()
+   // reads the stored value every 100 ms, so writing it is the whole update.
+   document.getElementById('video-sync-range').addEventListener('input', e => {
+      const ms = +e.target.value || 0;
+      castSyncDelay.set(castDeviceId, ms);
+      document.getElementById('video-sync-value').textContent = `${ms} ms`;
+      });
+
    // The player bar is auto-height on mobile, and the surface is anchored to
    // its top edge.  Measure it rather than trusting --player-h, which is only
    // the desktop value.
@@ -3315,8 +3573,14 @@ function setupVideoSurface() {
    new ResizeObserver(sync).observe(bar);
    sync();
 
-   player.videoEl.addEventListener('loadeddata', () => videoPreparing(false));
-   player.videoEl.addEventListener('error',      () => videoPreparing(false));
+   // Not while casting.  The picture loads in seconds and the soundtrack it is
+   // waiting for takes a minute, so clearing the notice here would clear it
+   // while nothing is audible.  onCastStatus owns it for a cast session, on the
+   // receiver's first status that is not IDLE.
+   player.videoEl.addEventListener('loadeddata',
+      () => { if (castDeviceId === null) videoPreparing(false); });
+   player.videoEl.addEventListener('error',
+      () => { if (castDeviceId === null) videoPreparing(false); });
 }
 
 // Attaches subtitle tracks from getVideoInfo.  Fire-and-forget: captions are a
@@ -3370,11 +3634,13 @@ async function videoLoadCaptions(song) {
       player.captions = caps;
       }
 
-   // No <track> elements while casting: the receiver fetches and renders its
-   // own copy, and an element here would only make the browser download a
-   // subtitle for a video it is not showing.  The menu is still built, because
-   // choosing the track is this client's job either way.
-   if (castDeviceId === null) {
+   // <track> elements only where the picture is.  While casting to a receiver
+   // that shows the film, that is the receiver: it fetches and renders its own
+   // copy, and an element here would download a subtitle for a video this
+   // browser is not showing.  When the picture has stayed here and only the
+   // sound went out, it is us again.  The menu is built either way, because
+   // choosing the track is this client's job whoever draws it.
+   if (castDeviceId === null || castVideoLocal) {
       // Read now rather than in the handler: by the time a track loads, another
       // seek may have moved it, and these elements would then belong to the
       // stream before last.
@@ -3389,7 +3655,9 @@ async function videoLoadCaptions(song) {
          }
       }
    console.log('[captions]', caps.length, 'track(s) for', song.id,
-               castDeviceId !== null ? '(casting)' : '(local)',
+               castDeviceId === null ? '(local)'
+                                     : (castVideoLocal ? '(cast, picture here)'
+                                                       : '(cast)'),
                caps.map(c => `${c.id}:${c.name}`).join(', '));
    // After the elements, so a menu index is a textTracks index.
    videoCaptionsMenu(caps);
@@ -3462,7 +3730,10 @@ function videoCaptionsMenu(captions) {
 // someone asks for it.
 function videoSelectCaption(index, {send = true} = {}) {
    player.captionIndex = index;
-   if (castDeviceId !== null) {
+   // Keyed on where the picture is, not on whether a cast is running: with the
+   // film here and only the sound on the receiver, the cues are ours to draw
+   // and the receiver has no tracks to switch.
+   if (castDeviceId !== null && !castVideoLocal) {
       // The receiver owns the rendering, so the only thing to do here is tell
       // it which track.  trackId numbers the tracks 1..n as getVideoInfo lists
       // them, and 0 is off — captionId could not say "off", since a missing
@@ -3533,6 +3804,11 @@ function playerPlay(offset = 0, forceMp3 = false) {
       // Track the position we asked it to seek to so onCastStatus can
       // discard reports that aren't yet near that position.
       castExpectedPosition = offset;
+      // Synchronously, and for every load rather than only a video one: the
+      // next item may be an audio track, or a film the receiver can show
+      // itself, and neither reaches castApplyLocalVideo below.  A picture left
+      // running would be a muted film downloading for nobody.
+      castLocalVideoStop();
       // castAudioOnly is deliberately *not* reset here.  A device that cannot
       // show video will not start being able to between two tracks, and
       // clearing it would flash the panel back to "Playing on <amp>" for as
@@ -3561,19 +3837,21 @@ function playerPlay(offset = 0, forceMp3 = false) {
       // soundtrack — a device with no video_out gets the latter.  That is the
       // server's decision, taken where both the song and the device are known,
       // and read back here rather than worked out again from the device list.
-      const loadSong = song;
+      const loadSong   = song;
+      const loadOffset = offset;
       apiCall('castLoad', params)
          .then(r => {
             if (player.queue[player.index] !== loadSong) return;
             if (!loadSong.isVideo) return;
             castAudioOnly = !!r?.castLoad?.audioOnly;
             player.streamFormat = castAudioOnly ? 'mp3' : null;
-            videoCastPanel(true, castAudioOnly);
-            // No picture on the television means no subtitles to put on it,
-            // and an unselected <track> costs a request either way — so the
-            // picker is not drawn rather than drawn and inert.
-            if (castAudioOnly) videoClearCaptions(loadSong);
-            else               videoLoadCaptions(loadSong);
+            // The receiver has only the sound, so the picture need not be
+            // lost — it can stay here, muted, following the receiver's clock.
+            // Started from the reply rather than above it because until the
+            // server has answered we do not know the receiver cannot show it,
+            // and fetching a film to find out would be the whole cost of the
+            // feature paid on every cast.
+            castApplyLocalVideo(loadSong, loadOffset);
             })
          .catch(err => {
             videoPreparing(false);
@@ -3593,11 +3871,14 @@ function playerPlay(offset = 0, forceMp3 = false) {
          // which is the only thing that knows the film has actually started.
          // Same wait the remux tier has, same notice.
          videoPreparing(true);
-         // Drawn twice: once now with what the last load decided, so the panel
-         // is not blank while castLoad is in flight, and again above with the
-         // answer.  A soundtrack transcode is warmed before the receiver is
-         // told anything, so that reply can be a minute in coming.
-         videoCastPanel(true, castAudioOnly);
+         // Provisional, from what the *last* load decided, and corrected by
+         // castApplyLocalVideo when the reply lands.  Guessing rather than
+         // waiting because the reply is a round trip away and a surface that
+         // flickers panel-then-picture on every track looks broken; a device
+         // does not gain or lose a screen between two tracks, so the guess is
+         // wrong only on the first load of a session.
+         if (castAudioOnly && castLocalVideo.get()) videoCastPanel(false);
+         else                                       videoCastPanel(true, castAudioOnly);
          } else {
          videoSurfaceSet(null);
          }
@@ -3819,10 +4100,17 @@ el.addEventListener('timeupdate', () => {
    time.textContent = `${fmtDuration(Math.floor(cur))} / ${fmtDuration(Math.floor(dur))}`;
    });
 
+// Guarded like the rest, and it did not used to need to be: while casting the
+// element was paused with no src and so fired nothing.  It fires plenty now —
+// castSyncTick() pauses and plays the local picture to follow the receiver —
+// and every one of those would fight onCastStatus for the glyph, which is
+// supposed to report what the *receiver* is doing.
 el.addEventListener('play',  () => {
+   if (castDeviceId !== null) return;
    document.getElementById('player-playpause').textContent = 'pause';
    });
 el.addEventListener('pause', () => {
+   if (castDeviceId !== null) return;
    document.getElementById('player-playpause').textContent = 'play_arrow';
    });
 
@@ -3833,7 +4121,18 @@ el.addEventListener('pause', () => {
 // know up-front which (browser, container, codec) triples are bad — letting
 // the actual decoder be the source of truth keeps this format-list free.
 el.addEventListener('error', () => {
-   if (castDeviceId !== null) return;
+   if (castDeviceId !== null) {
+      // The sound is on the receiver and is unaffected; only the picture
+      // failed.  Fall back to the panel rather than tearing down the session,
+      // and do not try the mp3 retry below — this element is already silent.
+      if (!castVideoLocal) return;
+      console.warn('[cast] local picture failed, showing the panel instead:',
+                   player.videoEl.error?.message);
+      castLocalVideoStop();
+      videoCastPanel(true, castAudioOnly);
+      videoPreparing(false);
+      return;
+      }
    const err = player.media.error;
    const song = player.queue[player.index];
    if (!err || !song) return;
@@ -5102,11 +5401,12 @@ async function showShell() {
                      player.captionSong = songSr.song.id;
                      videoSurfaceSet('theatre');
                      videoSurfaceCaption(songSr.song);
-                     videoCastPanel(true, castAudioOnly);
-                     // A soundtrack on an audio-only receiver has no picture
-                     // to caption, and the session reports no trackId for one.
-                     if (castAudioOnly) videoClearCaptions(songSr.song);
-                     else               videoLoadCaptions(songSr.song);
+                     // Start the picture where the receiver already is, not
+                     // at zero.  For a Range-capable stream the sync loop
+                     // would seek there anyway; for a chunked one it could
+                     // not, having no way to reach bytes it never asked for.
+                     castApplyLocalVideo(songSr.song,
+                                         castStartOffset + castBaseTime);
                      }
                   }
                } catch (_) {}
