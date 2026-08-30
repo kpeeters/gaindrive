@@ -452,9 +452,33 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	                          ? derive_path(db_path, "-client") : user_db_path;
 	db_music_.exec("PRAGMA journal_mode=WAL");
 	db_music_.exec("PRAGMA foreign_keys=ON");
+	// The two halves are given *different* durability, and the asymmetry is the
+	// point of stating both rather than leaving either to the default.
+	//
+	// Under WAL, synchronous=FULL fsyncs the write-ahead log on every commit.
+	// The scan commits once per album — measured at 33 ms each on a spinning
+	// disk, which is one seek and a platter flush, against maybe a millisecond
+	// of actual inserts — so it was 67 s of a 1660 s scan spent waiting for the
+	// platter.  NORMAL syncs at checkpoints instead, and what it costs is that
+	// a power loss or a kernel panic can lose the last few commits.  The
+	// database is not corrupted by that, and an ordinary process crash loses
+	// nothing at all, since the WAL is already in the page cache.
+	//
+	// That trade is only acceptable because of what this file is: the music DB
+	// is a cache, and DATABASE.md says so as an invariant — delete it, rescan,
+	// and everything comes back.  Losing the last few album commits costs a
+	// rescan and nothing else.
+	db_music_.exec("PRAGMA synchronous=NORMAL");
 	db_music_.exec("ATTACH DATABASE '" + client_path + "' AS client");
 	db_music_.exec("PRAGMA client.journal_mode=WAL");
 	db_music_.exec("PRAGMA client.foreign_keys=ON");
+	// FULL is already the default here; it is written out because the line
+	// above changed the other half, and a reader who finds only that one has to
+	// guess whether the client DB was considered.  It was: this is the half
+	// nothing can rebuild — stars, playlists, play counts, a hand-picked cover,
+	// a typed video title — so it keeps the fsync per commit.  Its writes are
+	// small and rare, and a scan does not touch it.
+	db_music_.exec("PRAGMA client.synchronous=FULL");
 	create_schema();
 	purge_disabled_video_art();
 	sync_roots();
