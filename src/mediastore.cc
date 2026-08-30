@@ -243,7 +243,18 @@ struct VideoProbe
 // A probe failure is deliberately not fatal.  The caller still creates the
 // row: a video that plays but reports duration 0 is a better outcome than a
 // file silently missing from the library, and the next scan retries.
-static std::optional<VideoProbe> probe_video(const std::string& path)
+// How much of a file avformat_find_stream_info() may look at on the first
+// attempt.  The defaults are 5 MB and 5 s of content, and reading them is what a
+// probe actually costs: measured per video, 483 ms in a scan against 111 ms
+// with the file already in page cache and 89 ms for a bare `ffprobe -version`,
+// so ~77% of it is disk.  Across ~2000 films that is 10 GB read to extract a
+// duration, two codec names and a resolution — and 10 GB pushed through the
+// page cache is also what evicts the directory metadata Phase 1 lives on.
+static const char* PROBE_SIZE_FAST     = "1000000";   // bytes
+static const char* PROBE_DURATION_FAST = "1000000";   // microseconds
+
+static std::optional<VideoProbe> probe_video(const std::string& path,
+                                              bool thorough = false)
 	{
 	std::vector<std::string> args = {
 		// -threads 1 because the parallelism belongs at our level, not inside
@@ -264,10 +275,24 @@ static std::optional<VideoProbe> probe_video(const std::string& path)
 		// this function does read comes from somewhere else: duration and
 		// bit_rate from the container header, width, height and the codec
 		// names from the stream parameters.
-		"ffprobe", "-v", "quiet", "-threads", "1", "-fpsprobesize", "0",
-		"-print_format", "json",
-		"-show_format", "-show_streams", path
+		"ffprobe", "-v", "quiet", "-threads", "1", "-fpsprobesize", "0"
 		};
+	// The narrowed window is a *first* attempt, never the only one: see
+	// read_video_probe() below, which re-runs at ffmpeg's defaults whenever the
+	// cheap pass came back without the fields that matter.  That is what makes
+	// this a latency change rather than an accuracy trade — the files a small
+	// window cannot describe pay for two probes, and nothing is quietly lost.
+	if (!thorough) {
+		args.push_back("-probesize");
+		args.push_back(PROBE_SIZE_FAST);
+		args.push_back("-analyzeduration");
+		args.push_back(PROBE_DURATION_FAST);
+		}
+	args.push_back("-print_format");
+	args.push_back("json");
+	args.push_back("-show_format");
+	args.push_back("-show_streams");
+	args.push_back(path);
 
 	reproc::process proc;
 	reproc::options opts;
@@ -326,6 +351,35 @@ static std::optional<VideoProbe> probe_video(const std::string& path)
 		}
 
 	return vp;
+	}
+
+// One file's probe: cheap window first, ffmpeg's defaults only when the cheap
+// one came back unusable.
+//
+// "Unusable" is deliberately narrow — no duration at all, or no stream of
+// either kind found.  Those are the two shapes a probe window that was too
+// small actually takes, and both break something downstream: hls.m3u8 is
+// arithmetic over the duration, and the codec pair is what picks the serving
+// tier in serve_video().  Anything else the small window returns is the same
+// answer the large one would have given, because it comes from the container
+// header or the stream parameters rather than from analysis.
+//
+// Note what is deliberately *not* a retry: a container with audio and no video
+// stream.  Those exist and reach here — a `.webm` holding Opus is filed as a
+// video by extension alone, which is why the URL-fetch handler pins its output
+// format — and re-probing one on every scan would buy nothing, since the wide
+// window would find no video stream either.
+static std::optional<VideoProbe> read_video_probe(const std::string& path)
+	{
+	auto vp = probe_video(path);
+	if (vp && vp->duration > 0
+	       && !(vp->video_codec.empty() && vp->audio_codec.empty()))
+		return vp;
+
+	auto full = probe_video(path, true /* thorough */);
+	// The fast result is kept when the thorough one fails outright, so a
+	// narrowed window can only ever add information here, never remove it.
+	return full ? full : vp;
 	}
 
 // Returns file modification time as Unix seconds.
@@ -1410,7 +1464,7 @@ static void read_song_metadata(SongReadData& sdat)
 	// overwritten by the filename-based rules below.
 	if (!sdat.parts.empty()) {
 		for (const auto& part : sdat.parts) {
-			auto vp = probe_video(part);
+			auto vp = read_video_probe(part);
 			if (!vp) {
 				log_line("scan: ffprobe failed for " + part);
 				continue;
@@ -1432,7 +1486,7 @@ static void read_song_metadata(SongReadData& sdat)
 	// year and episode number came from the filename back in Phase 1 — see
 	// read_song_file().  A probe failure still leaves a usable row.
 	if (sdat.is_video) {
-		if (auto vp = probe_video(sdat.path)) {
+		if (auto vp = read_video_probe(sdat.path)) {
 			sdat.duration    = vp->duration;
 			sdat.bitrate     = vp->bitrate;
 			sdat.width       = vp->width;
