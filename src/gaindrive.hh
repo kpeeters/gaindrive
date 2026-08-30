@@ -61,7 +61,7 @@ class GainDrive {
 		          // How wide the scan reads file metadata; see
 		          // MediaStore::scan_jobs_. Appended, not inserted: every
 		          // argument here is passed positionally.
-		          int scan_jobs = 4);
+		          int scan_jobs = 0);
 		~GainDrive();
 		// Binds and serves. Returns false without serving if the port could
 		// not be acquired, so the caller can exit non-zero rather than treat a

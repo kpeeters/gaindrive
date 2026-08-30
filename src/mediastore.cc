@@ -257,16 +257,6 @@ static std::optional<VideoProbe> probe_video(const std::string& path,
                                               bool thorough = false)
 	{
 	std::vector<std::string> args = {
-		// -threads 1 because the parallelism belongs at our level, not inside
-		// each child.  ffprobe decodes frames in avformat_find_stream_info()
-		// and defaults its decoder thread pool to the core count, so eight
-		// concurrent probes on an eight-core machine ask for sixty-four
-		// threads to do work that is a few frames each.  Measured during the
-		// video half of a scan, that showed up as ~800k context switches a
-		// second and system time equal to user time — scheduler thrash wearing
-		// the shape of a saturated disk.  It changes how a probe computes its
-		// answer, never what the answer is.
-		//
 		// -fpsprobesize 0 because nothing here stores a frame rate.  It is the
 		// AVFormatContext `fps_probe_size` option, the number of frames
 		// avformat_find_stream_info() reads to establish avg_frame_rate, and
@@ -275,7 +265,18 @@ static std::optional<VideoProbe> probe_video(const std::string& path,
 		// this function does read comes from somewhere else: duration and
 		// bit_rate from the container header, width, height and the codec
 		// names from the stream parameters.
-		"ffprobe", "-v", "quiet", "-threads", "1", "-fpsprobesize", "0"
+		//
+		// **No -threads 1 here, and it is not an oversight.**  It was tried,
+		// on the theory that eight concurrent probes each defaulting their
+		// decoder pool to the core count was scheduler thrash.  Two clean runs
+		// either side of it — every other phase matching within 10% — put
+		// `meta` 31 s worse with it than without, so forcing each probe
+		// single-threaded cost more than the oversubscription did.  The
+		// evidence for the theory never appeared either: `ps -eLf` showed 3-4
+		// threads per probe with the flag set, and a bare `ffprobe -version`
+		// uses 1.27 cores with no file open at all, so most of what looked
+		// like decode threads is process start-up.
+		"ffprobe", "-v", "quiet", "-fpsprobesize", "0"
 		};
 	// The narrowed window is a *first* attempt, never the only one: see
 	// read_video_probe() below, which re-runs at ffmpeg's defaults whenever the
@@ -486,9 +487,30 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	            SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE,
 	            DB_BUSY_TIMEOUT_MS)
 	{
-	// Clamped here as well as in main(), because this is public API and main
-	// is not its only possible caller.
-	scan_jobs_ = std::clamp(scan_jobs, 1, 16);
+	// 0 means "decide here", the way --transcode-jobs spells the same thing.
+	// Clamped as well as resolved, because this is public API and main() is not
+	// its only possible caller.
+	//
+	// **Capped, and the cap is about the disk rather than the CPU** — which is
+	// the half a later reader is most likely to "fix". Measured on one library:
+	// the knee was at 8 on an eight-core machine and 16 bought nothing, so the
+	// spindle was already at its limit well below the core count. What was
+	// never separated is whether that knee was the cores or the disk, and this
+	// shape is right either way — if it was the cores, scaling with them is
+	// correct and the cap only bites on large machines where the disk would
+	// bind anyway; if it was the disk, the cap does the work and the scaling
+	// only keeps a two-core NAS from oversubscribing itself.
+	//
+	// hardware_concurrency() returns 0 when it cannot tell, which the lower
+	// bound absorbs, and it reports *host* cores rather than a cgroup quota —
+	// so a CPU-limited container over-reports, and the cap bounds how wrong
+	// that can be.
+	scan_jobs_ = scan_jobs > 0
+	           ? std::clamp(scan_jobs, 1, 16)
+	           : (int)std::max(2u, std::min(8u,
+	                   std::thread::hardware_concurrency()));
+	std::cout << stamp() << "Scan reads metadata from " << scan_jobs_
+	          << " file(s) at a time" << std::endl;
 
 	// Emplaced even when every tier is off, because purge_disabled_video_art()
 	// below asks it which ones are. Phase 3b is guarded on enabled(), not on

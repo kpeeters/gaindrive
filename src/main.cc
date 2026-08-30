@@ -487,7 +487,7 @@ int main(int argc, char* argv[])
 		("transcode-cache",    "Directory for cached transcodes (default: alongside --db)", cxxopts::value<std::string>())
 		("transcode-cache-mb", "Transcode cache size in MB (0 disables)", cxxopts::value<int>()->default_value("1024"))
 		("transcode-jobs",     "Max concurrent ffmpeg transcodes (0 = half the cores)", cxxopts::value<int>()->default_value("0"))
-		("scan-jobs",          "Files a scan reads metadata from at once (1 = sequential)", cxxopts::value<int>()->default_value("4"))
+		("scan-jobs",          "Files a scan reads metadata from at once (0 = up to 8, by core count; 1 = sequential)", cxxopts::value<int>()->default_value("0"))
 		("no-video-art",  "Do not manufacture cover art for videos that have none")
 		("video-art-px",  "Long edge of manufactured video cover art", cxxopts::value<int>()->default_value("640"))
 		("video-art-frames", "Fall back to an extracted frame when a video has no embedded cover")
@@ -849,11 +849,12 @@ int main(int argc, char* argv[])
 	// likely in a config file whose author may not be reading this log, and
 	// refusing to start over it is worse than starting sensibly and saying so.
 	// The upper bound is about the disk, not the machine — see
-	// MediaStore::scan_jobs_.
-	if (scan_jobs < 1 || scan_jobs > 16) {
-		int clamped = std::clamp(scan_jobs, 1, 16);
+	// MediaStore::scan_jobs_, which is also where 0 is resolved, so it must
+	// pass through here rather than being warned up to 1.
+	if (scan_jobs < 0 || scan_jobs > 16) {
+		int clamped = std::clamp(scan_jobs, 0, 16);
 		std::cerr << "Warning: --scan-jobs " << scan_jobs
-		          << " is outside 1..16; using " << clamped << "\n";
+		          << " is outside 0..16; using " << clamped << "\n";
 		scan_jobs = clamped;
 		}
 

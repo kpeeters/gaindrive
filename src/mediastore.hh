@@ -45,12 +45,13 @@ class MediaStore {
 		// earlier run, since leaving those images is indistinguishable from
 		// still having the tier on.
 		// scan_jobs bounds how many files the scan reads metadata from at
-		// once — see scan_jobs_ below for why the number is small. Appended
-		// rather than inserted: the other construction sites pass positionally.
+		// once; 0 derives it from the core count, capped — see scan_jobs_
+		// below for why the cap is about the disk. Appended rather than
+		// inserted: the other construction sites pass positionally.
 		MediaStore(const std::string& db_path, const std::vector<Root>& roots,
 		           const std::string& user_db_path = "",
 		           int video_art_px = 640, bool video_art_frames = false,
-		           bool video_art_embedded = false, int scan_jobs = 4);
+		           bool video_art_embedded = false, int scan_jobs = 0);
 
 		// The configured roots, in the order given.
 		const std::vector<Root>& roots() const;
@@ -902,16 +903,17 @@ class MediaStore {
 			last_access_seen_;
 
 		// How wide Phase 3 of a scan runs — the TagLib and ffprobe reads,
-		// measured at 80% of a cold scan and made almost entirely of seeks.
+		// which measured 80% of a cold scan.
 		//
-		// Small, and deliberately not derived from the core count: what the
-		// parallelism buys is queue depth at one disk head, so the kernel's
-		// elevator and the drive's own queue can reorder by block address
-		// instead of servicing one seek at a time. That window is single
-		// digits, and a sixteen-core machine has the same one head as a
-		// two-core one. CoverArtCache reaches the same conclusion for its
-		// decode pool. 1 takes the sequential path through parallel_for, which
-		// is what makes it a usable answer to "is this bug the parallelism?".
+		// Derived from the core count when the caller passes 0, but **capped
+		// at 8, and the cap is about the disk rather than the CPU**: a
+		// sixteen-core machine has the same one head as a two-core one, and 16
+		// jobs measured no better than 8 on the machine the knee was found on.
+		// The floor of 2 also absorbs hardware_concurrency() returning 0.
+		// CoverArtCache caps its decode pool the same way and for an
+		// analogous reason. 1 takes the sequential path through parallel_for,
+		// which is what makes it a usable answer to "is this bug the
+		// parallelism?".
 		int scan_jobs_ = 4;
 
 		// Empty when cover art for videos is switched off. Held here because

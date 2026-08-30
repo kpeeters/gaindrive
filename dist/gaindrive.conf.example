@@ -29,5 +29,5 @@
 	"transcode_cache_dir": "/var/lib/gaindrive/transcodes",
 	"transcode_cache_mb": 1024,
 	"transcode_jobs": 0,
-	"scan_jobs": 4
+	"scan_jobs": 0
 }
