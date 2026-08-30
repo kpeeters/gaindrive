@@ -13,7 +13,12 @@ because both databases are WAL.
     python3 tests/dump_derived.py /var/lib/gaindrive/gaindrive-music.db > before.tsv
     # rebuild, delete the music DB, rescan
     python3 tests/dump_derived.py /var/lib/gaindrive/gaindrive-music.db > after.tsv
-    python3 tests/dump_derived.py --compare before.tsv after.tsv
+    python3 tests/dump_derived.py --compare before.tsv after.tsv [examples]
+
+`examples` caps how many differing rows are printed per column (default 5); pass
+0 for all of them. **Both dumps must come from the same version of this script**
+— it decides how a tag's control characters are rendered, so comparing across a
+change to that shows differences the library does not have.
 
 **Keyed on path, never on id.** A rowid is reassigned by a rebuild — that is the
 same instability stars and playlists key around — so two dumps of the same
@@ -40,17 +45,25 @@ COLUMNS = [
 # NULL has to survive the round trip as something no value can collide with:
 # songs.artist distinguishes NULL ("never read") from '' ("read, no tag"), and a
 # dump that flattened the two would hide exactly the regression worth catching.
+# It cannot collide with a real value because a real backslash is doubled below.
 NULL = "\\N"
 
-# Every C0 control character plus DEL, flattened to a space. A tag is arbitrary
-# bytes somebody else wrote, and three of these break the format in different
-# ways: \t invents a column, \n invents a row, and \r invents a row only on the
-# way back *in*, because Python's text mode treats a lone \r as a line ending.
-# That last one is why this is a table rather than three replace() calls — it
-# cost a KeyError deep inside compare(), on one row out of 27k, which is exactly
-# the kind of input this script exists to survive.
-CONTROL = {c: " " for c in range(0x20)}
-CONTROL[0x7F] = " "
+# Every C0 control character plus DEL, escaped rather than removed, and
+# backslash doubled so the escaping is reversible.
+#
+# A tag is arbitrary bytes somebody else wrote, and three of these break the
+# format in different ways: \t invents a column, \n invents a row, and \r
+# invents a row only on the way back *in*, because Python's text mode treats a
+# lone \r as a line ending.
+#
+# **Escaped and not flattened to a space**, which is the second lesson. A
+# trailing \r in a genre tag rendered as " " reads in a diff as "Blues" against
+# "Blues " — a difference nobody can see, in a tool whose entire job is showing
+# differences. Real trailing whitespace exists in tags too, so the two must not
+# render alike.
+CONTROL = {c: "\\x%02x" % c for c in range(0x20)}
+CONTROL[0x7F] = "\\x7f"
+CONTROL[ord("\\")] = "\\\\"
 
 
 def render(name, value):
@@ -95,8 +108,11 @@ def load(path):
 	return header, rows
 
 
-def compare(before_path, after_path):
-	"""Per-column mismatch counts, which is what a 27k-line diff cannot show."""
+def compare(before_path, after_path, limit=5):
+	"""Per-column mismatch counts, which is what a 27k-line diff cannot show.
+
+	limit is how many examples to print per column; 0 prints every one.
+	"""
 	header_a, before = load(before_path)
 	header_b, after = load(after_path)
 	if header_a != header_b:
@@ -108,13 +124,15 @@ def compare(before_path, after_path):
 	shared = sorted(set(before) & set(after))
 
 	print("%d rows before, %d after, %d in both" % (len(before), len(after), len(shared)))
+	shown = len(before) if limit == 0 else limit * 2
 	for label, paths in (("only in before", gone), ("only in after", new)):
 		if paths:
 			print("\n%d %s:" % (len(paths), label))
-			for p in paths[:10]:
+			for p in paths[:shown]:
 				print("  " + p)
-			if len(paths) > 10:
-				print("  ... and %d more" % (len(paths) - 10))
+			if len(paths) > shown:
+				print("  ... and %d more (pass 0 to see every one)"
+				      % (len(paths) - shown))
 
 	worst = 0
 	for col in header_a[1:]:
@@ -123,11 +141,12 @@ def compare(before_path, after_path):
 			continue
 		worst = max(worst, len(diffs))
 		print("\n%s: %d of %d differ" % (col, len(diffs), len(shared)))
-		for p in diffs[:5]:
+		for p in (diffs if limit == 0 else diffs[:limit]):
 			print("  %s\n    before %s\n    after  %s"
 			      % (p, before[p][col], after[p][col]))
-		if len(diffs) > 5:
-			print("  ... and %d more" % (len(diffs) - 5))
+		if limit and len(diffs) > limit:
+			print("  ... and %d more (pass 0 to see every one)"
+			      % (len(diffs) - limit))
 
 	if not gone and not new and worst == 0:
 		print("\nidentical: the change cost no accuracy on this library")
@@ -136,8 +155,9 @@ def compare(before_path, after_path):
 
 
 def main():
-	if len(sys.argv) == 4 and sys.argv[1] == "--compare":
-		return compare(sys.argv[2], sys.argv[3])
+	if len(sys.argv) in (4, 5) and sys.argv[1] == "--compare":
+		limit = int(sys.argv[4]) if len(sys.argv) == 5 else 5
+		return compare(sys.argv[2], sys.argv[3], limit)
 	if len(sys.argv) == 2:
 		dump(sys.argv[1], sys.stdout)
 		return 0
