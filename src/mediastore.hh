@@ -854,12 +854,24 @@ class MediaStore {
 			std::atomic<long long> files {0};  // files whose metadata was read
 			std::atomic<long long> videos{0};  // of those, the ffprobe forks
 			std::atomic<long long> albums{0};  // albums committed
+
+			// Phase 3 split by what actually read the file: TagLib in this
+			// process against an ffprobe fork.  Summed per file across the
+			// workers, so these are **thread**-microseconds and do not add up
+			// to `meta`, which is the phase's wall clock — with N jobs
+			// saturated they approach N times it.  That is the point: the
+			// ratio between them says which half of the library the phase is
+			// actually spent on, which one wall-clock figure covering 25k
+			// audio files and 2k videos cannot.
+			std::atomic<long long> meta_audio{0};
+			std::atomic<long long> meta_video{0};
 			void reset()
 				{
 				walk.store(0);   known.store(0);  meta.store(0);
 				art.store(0);    tmdb.store(0);   write.store(0);
 				prune.store(0);  files.store(0);  videos.store(0);
-				albums.store(0);
+				albums.store(0); meta_audio.store(0);
+				meta_video.store(0);
 				}
 			};
 		ScanTimes scan_times_;

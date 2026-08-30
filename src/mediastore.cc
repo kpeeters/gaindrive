@@ -246,7 +246,17 @@ struct VideoProbe
 static std::optional<VideoProbe> probe_video(const std::string& path)
 	{
 	std::vector<std::string> args = {
-		"ffprobe", "-v", "quiet", "-print_format", "json",
+		// -threads 1 because the parallelism belongs at our level, not inside
+		// each child.  ffprobe decodes frames in avformat_find_stream_info()
+		// and defaults its decoder thread pool to the core count, so eight
+		// concurrent probes on an eight-core machine ask for sixty-four
+		// threads to do work that is a few frames each.  Measured during the
+		// video half of a scan, that showed up as ~800k context switches a
+		// second and system time equal to user time — scheduler thrash wearing
+		// the shape of a saturated disk.  It changes how a probe computes its
+		// answer, never what the answer is.
+		"ffprobe", "-v", "quiet", "-threads", "1",
+		"-print_format", "json",
 		"-show_format", "-show_streams", path
 		};
 
@@ -1079,6 +1089,28 @@ std::string MediaStore::scan_times_report(double wall_s) const
 	   << "  tmdb "     << phase_secs(scan_times_.tmdb)
 	   << "  write "    << phase_secs(scan_times_.write)
 	   << "  prune "    << phase_secs(scan_times_.prune);
+
+	// Phase 3 split by what read the file.  Thread-seconds, not wall: these are
+	// summed per file across the workers, so with the jobs saturated they
+	// approach `meta` times the job count rather than adding up to it.  Said on
+	// the line, because a reader comparing them with `meta` above would
+	// otherwise be right to think one of the two numbers was wrong.
+	long long videos = scan_times_.videos.load();
+	long long audio  = scan_times_.files.load() - videos;
+	auto per_file = [](const std::atomic<long long>& us, long long n) {
+		std::ostringstream o;
+		if (n > 0)
+			o << std::fixed << std::setprecision(1)
+			  << (double)us.load() / 1000.0 / (double)n << " ms each";
+		else
+			o << "no files";
+		return o.str();
+		};
+	ss << "\n  meta thread-seconds: audio "
+	   << phase_secs(scan_times_.meta_audio) << " over " << audio << " ("
+	   << per_file(scan_times_.meta_audio, audio) << "), video "
+	   << phase_secs(scan_times_.meta_video) << " over " << videos << " ("
+	   << per_file(scan_times_.meta_video, videos) << ")";
 	return ss.str();
 	}
 
@@ -1462,6 +1494,18 @@ static void read_song_artist_tag(SongReadData& sdat)
 		sdat.artist_tag = f.tag()->artist().toCString(true);
 	}
 
+// What read_one_song() feeds, gathered into one reference so the call site does
+// not grow a parameter per statistic.  References rather than a pointer to
+// ScanTimes because that type is private to MediaStore and this is a free
+// function — which it is so that both scan entry points share one definition of
+// the work rather than two copies of it.
+struct SongReadStats {
+	std::atomic<long long>& files;
+	std::atomic<long long>& videos;
+	std::atomic<long long>& audio_us;
+	std::atomic<long long>& video_us;
+	};
+
 // One file's whole Phase 3, factored out so scan_artist_dir() and
 // scan_root_files() dispatch an identical body rather than two copies of a rule
 // about which files count as read.
@@ -1480,27 +1524,35 @@ static void read_song_artist_tag(SongReadData& sdat)
 // this set !changed implies artist_missing and the second branch needs only the
 // video test.
 static void read_one_song(const MediaStore& store, SongReadData& sdat,
-                          std::atomic<long long>& files,
-                          std::atomic<long long>& videos)
+                          const SongReadStats& st)
 	{
 	// Defence-in-depth: refuse to open any file that — after symlink
-	// resolution — sits outside every root.
+	// resolution — sits outside every root.  Deliberately outside the timing
+	// below, which is meant to say what TagLib and ffprobe cost and nothing
+	// else; the check is charged to `meta` as a whole like the dispatch is.
 	if (!store.path_is_within_root(sdat.path)) {
 		log_line("scan: skipping file outside every root: " + sdat.path);
 		return;
 		}
+
+	auto t0 = std::chrono::steady_clock::now();
 	if (sdat.changed) {
 		read_song_metadata(sdat);
-		files.fetch_add(1);
-		if (sdat.is_video) videos.fetch_add(1);
+		st.files.fetch_add(1);
+		if (sdat.is_video) st.videos.fetch_add(1);
 		}
 	// An unchanged audio file whose row predates songs.artist: one narrow
 	// read, once, so an existing library gains the tag without every file
 	// having to be touched.
 	else if (!sdat.is_video) {
 		read_song_artist_tag(sdat);
-		files.fetch_add(1);
+		st.files.fetch_add(1);
 		}
+	else return;   // nothing was read, so nothing to charge
+
+	auto us = std::chrono::duration_cast<std::chrono::microseconds>(
+		std::chrono::steady_clock::now() - t0).count();
+	(sdat.is_video ? st.video_us : st.audio_us).fetch_add(us);
 	}
 
 // A film's title is as often on the folder as on the file — "The.Third.Man.
@@ -2265,9 +2317,10 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		for (auto& sdat : adat.songs)
 			if (sdat.changed || sdat.artist_missing) work.push_back(&sdat);
 
+	SongReadStats stats{ scan_times_.files,      scan_times_.videos,
+	                      scan_times_.meta_audio, scan_times_.meta_video };
 	parallel_for(work.size(), scan_jobs_, [&](std::size_t i) {
-		read_one_song(*this, *work[i],
-		               scan_times_.files, scan_times_.videos);
+		read_one_song(*this, *work[i], stats);
 		});
 	}
 
@@ -2726,9 +2779,10 @@ void MediaStore::scan_root_files(const RootRec& root)
 	for (auto& sdat : songs)
 		if (sdat.changed || sdat.artist_missing) work.push_back(&sdat);
 
+	SongReadStats stats{ scan_times_.files,      scan_times_.videos,
+	                      scan_times_.meta_audio, scan_times_.meta_video };
 	parallel_for(work.size(), scan_jobs_, [&](std::size_t i) {
-		read_one_song(*this, *work[i],
-		               scan_times_.files, scan_times_.videos);
+		read_one_song(*this, *work[i], stats);
 		});
 	}
 
