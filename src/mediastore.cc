@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <ctime>
 #include <iomanip>
@@ -677,7 +678,13 @@ void MediaStore::create_schema()
 			duration       REAL DEFAULT 0,
 			song_count     INTEGER DEFAULT 0,
 			cover_path     TEXT,                  -- "<root>/<rest>"
-			musicbrainz_id TEXT,
+			-- Derived from this album's songs during the scan, and only when
+			-- every tagged track agrees; a folder whose tracks disagree keeps
+			-- NULL and keeps the online lookup. The release id is what a
+			-- client means by an album's MBID; the release-group id is what
+			-- getAlbumInfo2 can look up.
+			musicbrainz_id              TEXT,
+			musicbrainz_releasegroup_id TEXT,
 			created        DATETIME DEFAULT CURRENT_TIMESTAMP,
 			last_scanned   DATETIME
 		);
@@ -740,7 +747,20 @@ void MediaStore::create_schema()
 			-- to it. Empty for everything that inherits its album's cover.
 			cover_path          TEXT,
 			has_embedded_cover  INTEGER DEFAULT 0,
-			musicbrainz_id      TEXT,
+			-- MusicBrainz identifiers taken from the file's own tags, which
+			-- is the whole point of them: they are the answer the online
+			-- search would have guessed at, written by whoever tagged the
+			-- file.  All four hold a UUID or nothing; see mb_uuid().
+			--
+			-- musicbrainz_id is the *recording*, and the two album columns are
+			-- different entities that must not be confused: ALBUMID is a
+			-- release, RELEASEGROUPID is the group of releases it belongs to,
+			-- and getAlbumInfo2 looks up the latter. Asking /ws/2/release-group
+			-- for a release id is a 404.
+			musicbrainz_id                TEXT,
+			musicbrainz_album_id          TEXT,
+			musicbrainz_releasegroup_id   TEXT,
+			musicbrainz_albumartist_id    TEXT,
 			file_modified       INTEGER,
 			created             DATETIME DEFAULT CURRENT_TIMESTAMP,
 			last_scanned        DATETIME
@@ -1093,6 +1113,23 @@ void MediaStore::create_schema()
 	try { db_music_.exec("ALTER TABLE songs ADD COLUMN artist TEXT"); }
 	catch (const SQLite::Exception&) {}
 
+	// No DEFAULT here either, and for a related but not identical reason.
+	// These are not back-filled -- there is no narrow re-read pass for them,
+	// so a row scanned before they existed keeps NULL until the file changes
+	// or the music DB is rebuilt, which is routine because that DB is a cache.
+	// NULL therefore means "not known", and '' would mean the same thing while
+	// looking like an answer.
+	for (const char* col : { "musicbrainz_album_id",
+	                         "musicbrainz_releasegroup_id",
+	                         "musicbrainz_albumartist_id" }) {
+		try { db_music_.exec(std::string("ALTER TABLE songs ADD COLUMN ")
+		                     + col + " TEXT"); }
+		catch (const SQLite::Exception&) {}
+		}
+	try { db_music_.exec(
+		"ALTER TABLE albums ADD COLUMN musicbrainz_releasegroup_id TEXT"); }
+	catch (const SQLite::Exception&) {}
+
 	// One-time: the hand-picked-cover flag used to be albums.cover_manual, in
 	// the music DB -- which a rebuild would have thrown away, taking with it
 	// the only thing stopping a wrong TMDB match overwriting the cover again.
@@ -1346,6 +1383,16 @@ struct SongReadData {
 	std::string artist_tag;
 	bool        artist_missing = false;   // set in Phase 2
 	bool        artist_read    = false;
+
+	// MusicBrainz identifiers out of the file's own tags. Empty when the tag
+	// is absent, unreadable, or names more than one entity — see mb_uuid().
+	// These are what let getArtistInfo2 and getAlbumInfo2 skip their
+	// search-by-name step, which is the half of the lookup that can silently
+	// attach the wrong artist to a name collision.
+	std::string mb_track_id;         // MUSICBRAINZ_TRACKID, the recording
+	std::string mb_album_id;         // MUSICBRAINZ_ALBUMID, a release
+	std::string mb_releasegroup_id;  // MUSICBRAINZ_RELEASEGROUPID
+	std::string mb_albumartist_id;   // ALBUMARTISTID, or ARTISTID failing that
 	// populated in Phase 3 only when changed == true:
 	std::string title;
 	int         track_nr    = 0;
@@ -1475,6 +1522,29 @@ static SongReadData read_song_file(const fs::path& p,
 	return sdat;
 	}
 
+// One MusicBrainz identifier out of a PropertyMap, or empty.
+//
+// Two rejections, both deliberate. **A multi-valued tag is no answer**:
+// PropertyMap values are StringLists, and a collaboration carries an artist id
+// per performer, which cannot identify the one artist a folder stands for. And
+// **anything that is not shaped like a UUID is discarded**, because these reach
+// a MusicBrainz URL *path* in resolve_artist_info() — checking the shape here is
+// cheaper than having to think about it there, and a tag is arbitrary bytes
+// somebody else wrote.
+static std::string mb_uuid(const TagLib::PropertyMap& props, const char* key)
+	{
+	auto it = props.find(key);
+	if (it == props.end() || it->second.size() != 1) return "";
+	std::string v = it->second.front().toCString(true);
+	if (v.size() != 36) return "";
+	for (size_t i = 0; i < v.size(); ++i) {
+		bool dash = (i == 8 || i == 13 || i == 18 || i == 23);
+		if (dash ? v[i] != '-' : !std::isxdigit((unsigned char)v[i]))
+			return "";
+		}
+	return v;
+	}
+
 // Phase 3 for one changed file: the slow reads, with no lock held.  Shared by
 // scan_artist_dir() and scan_root_files().
 static void read_song_metadata(SongReadData& sdat)
@@ -1546,13 +1616,31 @@ static void read_song_metadata(SongReadData& sdat)
 		if (!t->genre().isEmpty())
 			sdat.genre = t->genre().toCString(true);
 		}
-	if (sdat.disc_number == 0 && !f.isNull()) {
+	// Materialised once and read twice.  It used to sit inside the disc-number
+	// guard; hoisting it costs nothing in practice, because a track outside a
+	// disc subdirectory has disc_number == 0 and so already took this path —
+	// which is most of a library.
+	if (!f.isNull()) {
 		auto props = f.file()->properties();
-		auto it    = props.find("DISCNUMBER");
-		if (it != props.end() && !it->second.isEmpty()) {
-			try { sdat.disc_number = it->second.front().toInt(); }
-			catch (...) {}
+
+		if (sdat.disc_number == 0) {
+			auto it = props.find("DISCNUMBER");
+			if (it != props.end() && !it->second.isEmpty()) {
+				try { sdat.disc_number = it->second.front().toInt(); }
+				catch (...) {}
+				}
 			}
+
+		sdat.mb_track_id        = mb_uuid(props, "MUSICBRAINZ_TRACKID");
+		sdat.mb_album_id        = mb_uuid(props, "MUSICBRAINZ_ALBUMID");
+		sdat.mb_releasegroup_id = mb_uuid(props, "MUSICBRAINZ_RELEASEGROUPID");
+		// The folder an album sits in is an *album artist* folder, so that tag
+		// is the one that describes it. ARTISTID is the fallback rather than
+		// the first choice: on a single-artist release the two agree, and on a
+		// compilation the track artist is precisely not what the folder means.
+		sdat.mb_albumartist_id  = mb_uuid(props, "MUSICBRAINZ_ALBUMARTISTID");
+		if (sdat.mb_albumartist_id.empty())
+			sdat.mb_albumartist_id = mb_uuid(props, "MUSICBRAINZ_ARTISTID");
 		}
 	if (!f.isNull() && f.audioProperties()) {
 		auto* ap      = f.audioProperties();
@@ -1992,6 +2080,85 @@ static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
 		}
 	}
 
+// Set one of an album's MusicBrainz ids from its songs, but only when every
+// tagged track agrees.
+//
+// Derived in SQL from the stored song columns rather than in C++ from
+// SongReadData, and that is the whole reason it is correct: Phase 3 only reads
+// files whose mtime changed, so on an ordinary rescan the in-memory values are
+// empty for most of the album while the columns are still there. Reading the
+// rows means the answer does not depend on which files this particular scan
+// happened to open.
+//
+// The predicate is "one distinct value, and it is on every track that has one".
+// A folder holding two releases, or one whose tags are half filled in with
+// different ids, therefore keeps NULL and keeps the online lookup — which is
+// the right way round: a wrong id is worse than no id, because nothing
+// downstream can tell it is wrong.
+//
+// upsert_album() is INSERT OR IGNORE, so it cannot carry this: after the first
+// scan its insert is silently ignored and the value would never land. Hence an
+// UPDATE, the same shape upsert_song_with_data() uses for track_number.
+//
+// Caller must hold db_mutex_ and an open transaction.
+static void apply_album_mbid(SQLite::Database& db, int album_id,
+                              const char* album_col, const char* song_col)
+	{
+	// Spliced rather than bound, because these are column *names* and SQLite
+	// binds values only. Safe because both come from the two call sites below
+	// as string literals; nothing here is reachable from a request.
+	const std::string c   = song_col;
+	const std::string sql =
+		"UPDATE albums SET " + std::string(album_col) + " = ("
+		"  SELECT s." + c + " FROM songs s"
+		"   WHERE s.album_id = ?1"
+		"     AND s." + c + " IS NOT NULL AND s." + c + " <> ''"
+		"   GROUP BY s." + c +
+		"   HAVING COUNT(*) = (SELECT COUNT(*) FROM songs t"
+		"                       WHERE t.album_id = ?1"
+		"                         AND t." + c + " IS NOT NULL"
+		"                         AND t." + c + " <> '')"
+		") WHERE id = ?1";
+	SQLite::Statement upd(db, sql);
+	upd.bind(1, album_id);
+	upd.exec();
+	}
+
+// The same rule as apply_album_mbid(), one level up: an artist's MBID is set
+// only when every tagged track under it agrees.
+//
+// Joined through album_artists rather than through the folder tree, because
+// that link is what an artist row actually means here. A compilation folder
+// disagrees by construction — that is what a compilation is — so "Various
+// Artists" ends up NULL and keeps the online lookup, which is right.
+//
+// Runs after the album loop rather than in the artist transaction above it:
+// that transaction commits before any song of this artist has been written, so
+// there would be nothing to read.
+//
+// Caller must hold db_mutex_ and an open transaction.
+static void apply_artist_mbid(SQLite::Database& db, int artist_id)
+	{
+	SQLite::Statement upd(db,
+		"UPDATE artists SET musicbrainz_id = ("
+		"  SELECT s.musicbrainz_albumartist_id FROM songs s"
+		"    JOIN album_artists aa ON aa.album_id = s.album_id"
+		"                         AND aa.role = 'albumartist'"
+		"   WHERE aa.artist_id = ?1"
+		"     AND s.musicbrainz_albumartist_id IS NOT NULL"
+		"     AND s.musicbrainz_albumartist_id <> ''"
+		"   GROUP BY s.musicbrainz_albumartist_id"
+		"   HAVING COUNT(*) = (SELECT COUNT(*) FROM songs t"
+		"                        JOIN album_artists aa2 ON aa2.album_id = t.album_id"
+		"                                              AND aa2.role = 'albumartist'"
+		"                       WHERE aa2.artist_id = ?1"
+		"                         AND t.musicbrainz_albumartist_id IS NOT NULL"
+		"                         AND t.musicbrainz_albumartist_id <> '')"
+		") WHERE id = ?1");
+	upd.bind(1, artist_id);
+	upd.exec();
+	}
+
 // Re-assert whatever a person typed for the videos of one album, over the
 // values this scan just derived from their filenames.
 //
@@ -2124,8 +2291,11 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 		" (album_id, folder_id, path, filename, title, track_number, disc_number,"
 		"  year, genre, duration, bitrate, sample_rate, channels, codec,"
 		"  file_size, file_modified, is_video, width, height, video_codec,"
-		"  audio_codec, season, cover_path, artist, last_scanned)"
-		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)");
+		"  audio_codec, season, cover_path, artist,"
+		"  musicbrainz_id, musicbrainz_album_id, musicbrainz_releasegroup_id,"
+		"  musicbrainz_albumartist_id, last_scanned)"
+		" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+		"         CURRENT_TIMESTAMP)");
 	ins.bind(1,  album_id);
 	ins.bind(2,  folder_id);
 	ins.bind(3,  rel_path);
@@ -2153,6 +2323,16 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 	// "read, no tag", and a NULL here would put the row into the back-fill
 	// pass on every future scan.
 	ins.bind(24, sdat.artist_tag);
+	// Appended after `artist` rather than placed beside musicbrainz_id's
+	// neighbours in the schema, for the reason given above: the binds are
+	// positional and hand-numbered, so a column added mid-list renumbers
+	// everything after it — an edit that compiles, does not throw, and writes
+	// the wrong field. Bound even when empty, so a re-tagged file that lost
+	// its ids does not keep the old ones.
+	ins.bind(25, sdat.mb_track_id);
+	ins.bind(26, sdat.mb_album_id);
+	ins.bind(27, sdat.mb_releasegroup_id);
+	ins.bind(28, sdat.mb_albumartist_id);
 	ins.exec();
 
 	int song_id = static_cast<int>(db.getLastInsertRowid());
@@ -2552,6 +2732,14 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			// typed on a track is the one the album inherits.
 			apply_song_meta_overrides(db_music_, album_id);
 
+			// The two ids are different entities and both are wanted: the
+			// release is what a client means by an album's MBID, the release
+			// group is what getAlbumInfo2 can actually look up.
+			apply_album_mbid(db_music_, album_id, "musicbrainz_id",
+			                  "musicbrainz_album_id");
+			apply_album_mbid(db_music_, album_id, "musicbrainz_releasegroup_id",
+			                  "musicbrainz_releasegroup_id");
+
 			if (disc_count > 1) {
 				SQLite::Statement upd(db_music_, "UPDATE albums SET disc_count=? WHERE id=?");
 				upd.bind(1, disc_count);
@@ -2579,6 +2767,27 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 				          << ": skipped, " << e.what() << std::endl;
 				album_failed = true;
 				}
+			}
+
+		// Now that every album of this artist has been committed, the
+		// tag-derived artist id can be settled: it reads the song rows the
+		// loop above wrote, which is why it cannot live in the artist
+		// transaction further up — that commits before any of them exist.
+		//
+		// Its own transaction rather than the prune's, because the prune is
+		// skipped after a failed album and this is unaffected by that; and its
+		// own try, because an artist without an id is a lookup that still
+		// works, which is not worth abandoning a scan over.
+		try {
+			PhaseTimer pt(scan_times_.write);
+			std::lock_guard<std::mutex> lock(db_mutex_);
+			SQLite::Transaction txn(db_music_);
+			apply_artist_mbid(db_music_, artist_id);
+			txn.commit();
+			}
+		catch (const std::exception& e) {
+			std::cout << stamp() << "  artist MusicBrainz id not set: "
+			          << e.what() << std::endl;
 			}
 		}
 
@@ -2940,6 +3149,10 @@ void MediaStore::scan_root_files(const RootRec& root)
 		// Loose files are songs like any other, and are the one place an
 		// override would otherwise be silently dropped.
 		apply_song_meta_overrides(db_music_, album_id);
+		apply_album_mbid(db_music_, album_id, "musicbrainz_id",
+		                  "musicbrainz_album_id");
+		apply_album_mbid(db_music_, album_id, "musicbrainz_releasegroup_id",
+		                  "musicbrainz_releasegroup_id");
 		}
 
 	db_music_.exec(("DELETE FROM songs WHERE last_scanned IS NULL"
@@ -3369,6 +3582,34 @@ std::optional<MediaStore::CachedArtistInfo> MediaStore::get_cached_artist_info(i
 	a.allmusic_url = q.getColumn(5).getString();
 	a.discogs_url  = q.getColumn(6).getString();
 	return a;
+	}
+
+// The artist row for a folder is reached by name, not by a foreign key: an
+// artist folder's basename *is* the artist, which is the same convention
+// get_artist_dirs() and upsert_artist() work by.
+std::string MediaStore::get_artist_tag_mbid(int folder_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT COALESCE(a.musicbrainz_id, '') FROM artists a"
+		"  JOIN folders f ON f.name = a.name"
+		" WHERE f.id = ?");
+	q.bind(1, folder_id);
+	if (!q.executeStep()) return "";
+	return q.getColumn(0).getString();
+	}
+
+// albums.folder_id is UNIQUE, so this is a direct lookup rather than the join
+// above.
+std::string MediaStore::get_album_tag_releasegroup_mbid(int folder_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT COALESCE(musicbrainz_releasegroup_id, '') FROM albums"
+		" WHERE folder_id = ?");
+	q.bind(1, folder_id);
+	if (!q.executeStep()) return "";
+	return q.getColumn(0).getString();
 	}
 
 void MediaStore::cache_artist_info(int folder_id, const CachedArtistInfo& info)

@@ -1292,27 +1292,50 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 		};
 
 	bool mb_ok = false;
-	auto r = mb_get(mb, "/ws/2/artist", params,
-	                "getArtistInfo [" + name + "]");
-	note(r);
-	if (!r) {
+
+	// Step 1 is a *search by name*, and it is the half of this that can be
+	// wrong without anything downstream being able to tell: two artists share
+	// a name, the first hit wins, and the biography and portrait that follow
+	// belong to the other one. When the files themselves carry the id there is
+	// nothing to search for.
+	//
+	// mb_ok has to be set here as well, or the cache write at the end never
+	// runs and every request re-resolves the whole chain for ever. The Last.fm
+	// URL is composed from the name rather than fetched, so it is copied out of
+	// the search branch rather than skipped with it.
+	std::string tag_mbid = store.get_artist_tag_mbid(id);
+	if (!tag_mbid.empty()) {
 		std::cout << stamp() << "getArtistInfo [" << name
-		          << "] MusicBrainz request failed (no response)" << std::endl;
-		}
-	else if (r->status != 200) {
-		std::cout << stamp() << "getArtistInfo [" << name
-		          << "] MusicBrainz HTTP " << r->status
-		          << (mb_rate_limited(r)
-		                  ? " - rate limited; something in this server is asking"
-		                    " MusicBrainz faster than once a second" : "")
+		          << "] MusicBrainz id from the files' tags, skipping search"
 		          << std::endl;
+		info.mbid        = tag_mbid;
+		info.last_fm_url = "https://www.last.fm/music/" + url_encode(name);
+		mb_ok            = true;
 		}
-	else {
-		mb_ok = true;
-		auto j = nlohmann::json::parse(r->body, nullptr, false);
-		info.mbid = jstr(jidx(jsub(j, "artists"), 0), "id");
-		if (!info.mbid.empty())
-			info.last_fm_url = "https://www.last.fm/music/" + url_encode(name);
+
+	if (info.mbid.empty()) {
+		auto r = mb_get(mb, "/ws/2/artist", params,
+		                "getArtistInfo [" + name + "]");
+		note(r);
+		if (!r) {
+			std::cout << stamp() << "getArtistInfo [" << name
+			          << "] MusicBrainz request failed (no response)" << std::endl;
+			}
+		else if (r->status != 200) {
+			std::cout << stamp() << "getArtistInfo [" << name
+			          << "] MusicBrainz HTTP " << r->status
+			          << (mb_rate_limited(r)
+			                  ? " - rate limited; something in this server is asking"
+			                    " MusicBrainz faster than once a second" : "")
+			          << std::endl;
+			}
+		else {
+			mb_ok = true;
+			auto j = nlohmann::json::parse(r->body, nullptr, false);
+			info.mbid = jstr(jidx(jsub(j, "artists"), 0), "id");
+			if (!info.mbid.empty())
+				info.last_fm_url = "https://www.last.fm/music/" + url_encode(name);
+			}
 		}
 
 	// Step 2 — MusicBrainz URL relations → Wikipedia article URL.
@@ -1651,27 +1674,44 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 			{"User-Agent", USER_AGENT}
 			});
 
-		// Step 1 — search for the release-group by title + artist.
-		httplib::Params p1{
-			{"query", "releasegroup:\"" + title + "\" AND artist:\"" + artist + "\""},
-			{"limit", "1"},
-			{"fmt",   "json"}
-			};
-		auto r1 = mb_get(mb, "/ws/2/release-group", p1,
-		                 "getAlbumInfo [" + title + "]");
-		if (!r1) {
+		// Step 1 — search for the release-group by title + artist, unless the
+		// files already said which one it is.
+		//
+		// **The tag that answers this is MUSICBRAINZ_RELEASEGROUPID and not
+		// MUSICBRAINZ_ALBUMID.** The latter is a *release* — one pressing of
+		// one edition — and asking /ws/2/release-group for it is a 404. Both
+		// are stored, on albums.musicbrainz_id and
+		// albums.musicbrainz_releasegroup_id respectively; only the second one
+		// is usable here, so a file tagged with the release alone keeps the
+		// search rather than making a request that cannot work.
+		info.mbid = store.get_album_tag_releasegroup_mbid(id);
+		if (!info.mbid.empty())
 			std::cout << stamp() << "getAlbumInfo [" << title
-			          << "] MusicBrainz request failed (no response)" << std::endl;
-			}
-		else if (r1->status != 200) {
-			std::cout << stamp() << "getAlbumInfo [" << title
-			          << "] MusicBrainz HTTP " << r1->status
-			          << (mb_rate_limited(r1) ? " - rate limited" : "")
-			          << std::endl;
-			}
-		else {
-			auto j1 = nlohmann::json::parse(r1->body, nullptr, false);
-			info.mbid = jstr(jidx(jsub(j1, "release-groups"), 0), "id");
+			          << "] release-group id from the files' tags, skipping"
+			             " search" << std::endl;
+
+		if (info.mbid.empty()) {
+			httplib::Params p1{
+				{"query", "releasegroup:\"" + title + "\" AND artist:\"" + artist + "\""},
+				{"limit", "1"},
+				{"fmt",   "json"}
+				};
+			auto r1 = mb_get(mb, "/ws/2/release-group", p1,
+			                 "getAlbumInfo [" + title + "]");
+			if (!r1) {
+				std::cout << stamp() << "getAlbumInfo [" << title
+				          << "] MusicBrainz request failed (no response)" << std::endl;
+				}
+			else if (r1->status != 200) {
+				std::cout << stamp() << "getAlbumInfo [" << title
+				          << "] MusicBrainz HTTP " << r1->status
+				          << (mb_rate_limited(r1) ? " - rate limited" : "")
+				          << std::endl;
+				}
+			else {
+				auto j1 = nlohmann::json::parse(r1->body, nullptr, false);
+				info.mbid = jstr(jidx(jsub(j1, "release-groups"), 0), "id");
+				}
 			}
 
 		// Step 2 — fetch URL relations for the release-group.

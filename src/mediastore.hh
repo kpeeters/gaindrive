@@ -167,6 +167,20 @@ class MediaStore {
 		std::optional<CachedArtistInfo> get_cached_artist_info(int folder_id);
 		void cache_artist_info(int folder_id, const CachedArtistInfo& info);
 
+		// The MusicBrainz ids the *scan* derived from the files' own tags, as
+		// against the ones in the info caches above, which came from asking
+		// MusicBrainz. Empty when the folder's tracks carried none or did not
+		// agree; both callers then fall back to the online search.
+		//
+		// Keyed on the folder id, which is what every caller has in hand — the
+		// artist and album rows are reached from it, not the other way about.
+		//
+		// The album one returns the *release group*, not the release, because
+		// that is the entity getAlbumInfo2 looks up. They are different things
+		// and asking /ws/2/release-group for a release id is a 404.
+		std::string get_artist_tag_mbid(int folder_id);
+		std::string get_album_tag_releasegroup_mbid(int folder_id);
+
 		// ---- Video cover art (see videoart.hh) ----
 		//
 		// Art derived from a video file by ffmpeg and cached in the music DB,

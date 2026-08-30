@@ -70,6 +70,14 @@ CREATE TABLE artists (
     id          INTEGER PRIMARY KEY,
     name        TEXT NOT NULL,
     sort_name   TEXT,  -- "Beethoven, Ludwig van"
+    -- Derived by the scan from the tracks' own
+    -- MUSICBRAINZ_ALBUMARTISTID, and only when every
+    -- tagged track under this artist agrees; NULL
+    -- otherwise, which is what a compilation gives.
+    -- getArtistInfo2 skips its search-by-name when
+    -- this is set. Not the same thing as
+    -- artist_info_cache.mbid, which is what asking
+    -- MusicBrainz produced.
     musicbrainz_id TEXT,
     image_path  TEXT,
     biography   TEXT,
@@ -99,7 +107,15 @@ CREATE TABLE albums (
     -- client.manual_covers, because a rebuild of this
     -- file threw the flag away and the wrong poster
     -- won all over again.
-    musicbrainz_id TEXT,
+    -- Both derived by the scan from this album's
+    -- songs, and only when every tagged track agrees.
+    -- They are DIFFERENT ENTITIES: a release is one
+    -- pressing of one edition, a release group is the
+    -- album as a work. getAlbumInfo2 looks up the
+    -- second; asking /ws/2/release-group for the first
+    -- is a 404.
+    musicbrainz_id              TEXT,  -- release
+    musicbrainz_releasegroup_id TEXT,  -- release group
     created       DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_scanned  DATETIME
 );
@@ -193,8 +209,18 @@ CREATE TABLE songs (
     cover_path    TEXT,
     -- cover art embedded in file
     has_embedded_cover INTEGER DEFAULT 0,
+    -- MusicBrainz ids out of this file's own tags,
+    -- read in Phase 3 through TagLib's PropertyMap.
+    -- NULL means not known -- there is no back-fill
+    -- pass, so a row scanned before these existed
+    -- keeps NULL until the file changes or this DB is
+    -- rebuilt. A tag naming more than one entity, or
+    -- not shaped like a UUID, is discarded.
+    musicbrainz_id              TEXT,  -- recording
+    musicbrainz_album_id        TEXT,  -- release
+    musicbrainz_releasegroup_id TEXT,
+    musicbrainz_albumartist_id  TEXT,
     -- timestamps
-    musicbrainz_id TEXT,
     file_modified DATETIME,
     created       DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_scanned  DATETIME
