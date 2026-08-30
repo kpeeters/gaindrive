@@ -255,7 +255,16 @@ static std::optional<VideoProbe> probe_video(const std::string& path)
 		// second and system time equal to user time — scheduler thrash wearing
 		// the shape of a saturated disk.  It changes how a probe computes its
 		// answer, never what the answer is.
-		"ffprobe", "-v", "quiet", "-threads", "1",
+		//
+		// -fpsprobesize 0 because nothing here stores a frame rate.  It is the
+		// AVFormatContext `fps_probe_size` option, the number of frames
+		// avformat_find_stream_info() reads to establish avg_frame_rate, and
+		// decoding those frames is a large part of what a probe costs — 491.7
+		// ms a file, measured, against ~86 ms for a TagLib read.  Every field
+		// this function does read comes from somewhere else: duration and
+		// bit_rate from the container header, width, height and the codec
+		// names from the stream parameters.
+		"ffprobe", "-v", "quiet", "-threads", "1", "-fpsprobesize", "0",
 		"-print_format", "json",
 		"-show_format", "-show_streams", path
 		};
