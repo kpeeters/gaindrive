@@ -2783,7 +2783,14 @@ function castApplyLocalVideo(song, offset) {
 // branch decides it, because it *is* that stream — a divergence here would be
 // a second answer to "which tier does this video take".
 function castLocalVideoStart(song, offset) {
-   const streamParams = {id: song.id};
+   // castRedirect=false is not optional here.  apiUrl() puts castController on
+   // every URL, and stream.view answers the owner of a live cast session with
+   // 204 — pushing the track to the receiver instead, on the assumption that
+   // an owner asking for a stream is about to play it a second time.  This
+   // request is the opposite: it is the picture belonging to the soundtrack
+   // the receiver is already playing.  Without the parameter the picture never
+   // arrives, and worse, the 204 path re-issues the LOAD.
+   const streamParams = {id: song.id, castRedirect: 'false'};
    const chunked = song.nativeSeek === false;
    if (chunked && offset > 0) streamParams.timeOffset = Math.floor(offset);
    player.streamIsTranscoded = chunked;

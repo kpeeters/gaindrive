@@ -416,7 +416,7 @@ the account's own ceiling, so the two cannot disagree.
 kind       = 'additions'
 applies_to = ["stream"]
 section    = "playback"
-summary    = 'Four gaindrive parameters on the standard streaming endpoint.'
+summary    = 'Five gaindrive parameters on the standard streaming endpoint.'
 
   [[endpoint.param]]
   name  = "pace"
@@ -465,6 +465,23 @@ served the stream normally.
 Without this the redirect was global: any request in the server was answered
 `204` while anyone was casting, so starting a track on a phone played it on
 whatever receiver a browser had picked earlier.
+'''
+
+  [[endpoint.param]]
+  name    = "castRedirect"
+  type    = "bool"
+  default = 'true'
+  doc     = 'Send `false` to be served the stream even though you own the live cast session.'
+  notes   = '''
+The redirect above assumes that an owner asking for a stream is about to play
+the track a second time. One request is not that: when the receiver cannot
+display video it is sent the film's soundtrack, and the client can keep the
+picture, muted and in step with it. That is one playback in two halves, and the
+half that stays here has to be served rather than answered `204`.
+
+It matters more than a lost picture. The `204` path issues a fresh `castLoad`
+as a side effect, so the request would also restart what the receiver is
+playing.
 '''
 
   [[endpoint.param]]

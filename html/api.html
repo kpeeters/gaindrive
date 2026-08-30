@@ -228,7 +228,7 @@
 <h3 id="ep-stream">stream</h3>
 <p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
 <p>Carried by <code>stream</code>. Only the gaindrive additions are listed here.</p>
-<p>Four gaindrive parameters on the standard streaming endpoint.</p>
+<p>Five gaindrive parameters on the standard streaming endpoint.</p>
 <h4>Parameters</h4>
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
@@ -236,6 +236,7 @@
 <tr><td><code>pace</code></td><td>bool</td><td>Deliver at roughly 1x playback rate rather than as fast as the socket takes it.</td></tr>
 <tr><td><code>castToken</code></td><td>string</td><td>The token minted by <code>castLoad</code>, accepted in place of credentials.</td></tr>
 <tr><td><code>castController</code></td><td>string</td><td>The id given to <code>startCast</code>. Only the owner of a live cast session has its playback redirected to the receiver.</td></tr>
+<tr><td><code>castRedirect</code></td><td>bool</td><td>Send <code>false</code> to be served the stream even though you own the live cast session. default <code>true</code>.</td></tr>
 <tr><td><code>size</code></td><td>string</td><td>Video only. A cap on the output frame size, as <code>WxH</code> — <code>640x480</code>.</td></tr>
 <tr><td><code>duration</code></td><td>int</td><td>Video only. Bound the output to this many seconds from <code>timeOffset</code>, and switch the container to MPEG-TS. That is one HLS segment.</td></tr>
 </tbody>
@@ -249,6 +250,9 @@
 <div class="api-note"><p class="api-note-h"><code>castController</code></p>
 <p>While a cast session is live, a request from the client that <b>owns</b> it is answered <code>204</code> and the track is sent to the Chromecast instead, so that client does not play it a second time itself. Every other caller — a client that sent no <code>castController</code>, one whose id does not match, or a different account — is served the stream normally.</p>
 <p>Without this the redirect was global: any request in the server was answered <code>204</code> while anyone was casting, so starting a track on a phone played it on whatever receiver a browser had picked earlier.</p></div>
+<div class="api-note"><p class="api-note-h"><code>castRedirect</code></p>
+<p>The redirect above assumes that an owner asking for a stream is about to play the track a second time. One request is not that: when the receiver cannot display video it is sent the film&#x27;s soundtrack, and the client can keep the picture, muted and in step with it. That is one playback in two halves, and the half that stays here has to be served rather than answered <code>204</code>.</p>
+<p>It matters more than a lost picture. The <code>204</code> path issues a fresh <code>castLoad</code> as a side effect, so the request would also restart what the receiver is playing.</p></div>
 <div class="api-note"><p class="api-note-h"><code>size</code></p>
 <p>Any value here disqualifies the direct and remux tiers, so the video is re-encoded on the fly and the response is chunked with no <code>Content-Length</code>.</p>
 <p>Strictly <code>WxH</code>, both between 16 and 7680/4320. Anything else is ignored rather than rejected, and means &quot;do not scale&quot; — the same as omitting it.</p></div>

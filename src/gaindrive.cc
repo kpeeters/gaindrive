@@ -4354,7 +4354,17 @@ GainDrive::GainDrive(const std::string& db_path,
 		// recently picked. A client that sent no castController is never the
 		// owner, so it simply plays locally, which is what every client that
 		// does not drive the server's cast endpoints wants.
-		if (cast_manager_.active() && !cast_authed && cast_owned_by(req)) {
+		//
+		// The owner can decline it with castRedirect=false, and one caller
+		// needs to: when the receiver has no screen it is sent the film's
+		// *soundtrack*, and the web client keeps the picture, muted and in
+		// step with it.  That request is not the client about to play the
+		// track a second time — it is the other half of one playback — and
+		// answering it 204 both loses the picture and, through the
+		// cast_load_song() below, re-issues the LOAD as a side effect.
+		if (cast_manager_.active() && !cast_authed
+		    && req.get_param_value("castRedirect") != "false"
+		    && cast_owned_by(req)) {
 			// Native seek: the URL serves the full file, and the LOAD message
 			// tells the receiver where to seek.  No timeOffset in the URL.
 			auto to_it = req.params.find("timeOffset");
