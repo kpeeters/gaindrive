@@ -32,6 +32,71 @@ static constexpr size_t WRITE_CHUNK = 4096;
 
 // ---- Streamer --------------------------------------------------------
 
+Streamer::TranscodePlan Streamer::plan_transcode(const SongInfo& song,
+                                                 const std::string& format,
+                                                 int max_bitrate,
+                                                 int time_offset)
+	{
+	auto source = target_for(song.codec);
+
+	// A format request that resolves to the same muxer and encoder as the
+	// source is not a change: ".oga" and "ogg" are the same thing spelled two
+	// ways, and re-encoding one into the other would lose quality for nothing.
+	std::optional<Target> wanted;
+	if (!format.empty() && format != "raw")
+		wanted = target_for(format);
+	bool format_change = wanted && (!source
+	                     || source->muxer   != wanted->muxer
+	                     || source->encoder != wanted->encoder);
+	bool bitrate_limit = max_bitrate > 0 && song.bitrate > 0 && song.bitrate > max_bitrate;
+
+	TranscodePlan plan;
+	plan.needed = time_offset > 0 || format_change || bitrate_limit;
+
+	// When only a time-offset seek is needed (no format conversion, no bitrate
+	// limit) preserve the original codec via ffmpeg -c:a copy so there is no
+	// quality loss.  bitrate == 0 signals copy mode to serve_transcoded.
+	if (format_change) {
+		plan.target  = wanted;
+		plan.bitrate = (max_bitrate > 0 && max_bitrate < 320) ? max_bitrate : 320;
+		}
+	else if (bitrate_limit) {
+		plan.target  = target_for("mp3");
+		plan.bitrate = max_bitrate;
+		}
+	else {
+		plan.target  = source;
+		plan.bitrate = 0;
+		}
+
+	// No table entry means no ffmpeg muxer for this container.  Passing the
+	// extension through as -f made ffmpeg exit before writing a byte, which the
+	// client saw as a 200 with an empty body.  Serving the raw file instead
+	// ignores the seek, which is a far better failure than silence.
+	if (plan.needed && !plan.target) {
+		std::cout << stamp() << "stream: no muxer for codec '" << song.codec
+		          << "', serving raw" << std::endl;
+		plan.needed = false;
+		}
+	return plan;
+	}
+
+std::shared_ptr<const TranscodeCache::Entry>
+Streamer::cache_entry(const SongInfo& song, TranscodeCache& cache,
+                      const TranscodePlan& plan)
+	{
+	if (!plan.needed || !plan.target) return {};
+	// The mtime in the key is what invalidates a stale transcode after the
+	// source file is re-tagged or replaced.
+	std::string key = std::to_string(song.id) + "-"
+	                + std::to_string(song.file_modified) + "-"
+	                + std::string(plan.target->name)
+	                + std::to_string(plan.bitrate);
+	static const std::string OUT = TranscodeCache::OUT_PLACEHOLDER;
+	auto argv = ffmpeg_argv(song, plan.bitrate, *plan.target, 0, OUT);
+	return cache.get_or_build(key, std::string(plan.target->ext), argv, OUT);
+	}
+
 void Streamer::serve(const httplib::Request& req, httplib::Response& res,
                      const SongInfo& song, TranscodeCache& cache,
                      int max_bitrate,
@@ -78,49 +143,11 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 		return;
 		}
 
-	auto source = target_for(song.codec);
-
-	// A format request that resolves to the same muxer and encoder as the
-	// source is not a change: ".oga" and "ogg" are the same thing spelled two
-	// ways, and re-encoding one into the other would lose quality for nothing.
-	std::optional<Target> wanted;
-	if (!format.empty() && format != "raw")
-		wanted = target_for(format);
-	bool format_change = wanted && (!source
-	                     || source->muxer   != wanted->muxer
-	                     || source->encoder != wanted->encoder);
-	bool bitrate_limit = max_bitrate > 0 && song.bitrate > 0 && song.bitrate > max_bitrate;
-	bool needs_transcode = time_offset > 0 || format_change || bitrate_limit;
-
-	// Determine transcode target.  When only a time-offset seek is needed
-	// (no format conversion, no bitrate limit) preserve the original codec via
-	// ffmpeg -c:a copy so there is no quality loss.  target_bitrate == 0
-	// signals copy mode to serve_transcoded.
-	std::optional<Target> target;
-	int                   target_bitrate;
-	if (format_change) {
-		target         = wanted;
-		target_bitrate = (max_bitrate > 0 && max_bitrate < 320) ? max_bitrate : 320;
-		}
-	else if (bitrate_limit) {
-		target         = target_for("mp3");
-		target_bitrate = max_bitrate;
-		}
-	else {
-		// Seek only: no re-encode.
-		target         = source;
-		target_bitrate = 0;
-		}
-
-	// No table entry means no ffmpeg muxer for this container.  Passing the
-	// extension through as -f made ffmpeg exit before writing a byte, which the
-	// client saw as a 200 with an empty body.  Serving the raw file instead
-	// ignores the seek, which is a far better failure than silence.
-	if (needs_transcode && !target) {
-		std::cout << stamp() << "stream: no muxer for codec '" << song.codec
-		          << "', serving raw" << std::endl;
-		needs_transcode = false;
-		}
+	const TranscodePlan plan = plan_transcode(song, format, max_bitrate,
+	                                          time_offset);
+	bool                  needs_transcode = plan.needed;
+	const auto&           target          = plan.target;
+	const int             target_bitrate  = plan.bitrate;
 
 	// The User-Agent is logged because the process that fetches a stream is
 	// very often not the one that asked for it — a Cast receiver fetches for
@@ -155,13 +182,21 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 		return;
 		}
 
-	// A *server-driven* cast never reaches the cache.  It cannot: the URL
-	// castLoad hands the receiver carries no format and no maxBitRate, and its
-	// time_offset is always 0 under native seek, so needs_transcode is already
-	// false.  The guard is here so that if Cast seeking is ever changed, a
-	// Chromecast cannot end up waiting on a blocking materialise — the receiver
-	// drops the session after ~60 s with no data, which surfaces as error 103
-	// and looks like a metadata bug.
+	// A *server-driven* cast reaches the cache for exactly one kind of request:
+	// a video's soundtrack.  Every other cast URL castLoad builds carries no
+	// format and no maxBitRate, and its time_offset is always 0 under native
+	// seek, so needs_transcode is already false and this branch is not reached.
+	//
+	// **The audio_only exception is only sound because cast_load_song() warms
+	// the entry before the receiver is told anything** — see the `prepare` hook
+	// on CastManager::LoadRequest.  A cold entry answers nothing until ffmpeg
+	// has finished, which for a film's soundtrack is minutes; a receiver drops
+	// the session after ~60 s with no data on the HTTP body, which surfaces as
+	// error 103 and reads as a metadata bug.  Remove the warm and this line
+	// silently becomes that bug.  With the warm in place the lookup here is a
+	// hit, and serving a real file is what gives the receiver a Content-Length
+	// and a XING header — without which a piped MP3 of a two-hour film is the
+	// dur=0 saga in CLAUDE.md all over again.
 	//
 	// It does **not** cover the Android app's direct route, and that is worth
 	// knowing before trusting this guard.  The app runs its own cast session,
@@ -169,25 +204,16 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	// send format+maxBitRate whenever castOriginal is off, the item is a
 	// video's soundtrack, or the type is not one the receiver plays.  Such a
 	// request goes through the cache like any other, and a cold entry answers
-	// nothing until ffmpeg has finished — which is the same >60 s of silence,
-	// arriving before the first byte, where pacing cannot help.  The remedy if
-	// it ever bites is an audio counterpart to CastUrls.warmTranscode, which
-	// already exists on the video side for exactly this reason.
+	// nothing until ffmpeg has finished — the same >60 s of silence, arriving
+	// before the first byte, where pacing cannot help.  The remedy if it ever
+	// bites is CastUrls.warmTranscode for audio, which already exists on the
+	// video side for exactly this reason.
 	//
 	// A seek is not cached either: the web client's local-seek trick needs the
 	// stream to *start* at the offset, and caching one file per offset has no
 	// bound.
-	if (!cast_stream && time_offset == 0) {
-		// The mtime in the key is what invalidates a stale transcode after the
-		// source file is re-tagged or replaced.
-		std::string key = std::to_string(song.id) + "-"
-		                + std::to_string(song.file_modified) + "-"
-		                + std::string(target->name)
-		                + std::to_string(target_bitrate);
-		static const std::string OUT = TranscodeCache::OUT_PLACEHOLDER;
-		auto argv = ffmpeg_argv(song, target_bitrate, *target, 0, OUT);
-		if (auto entry = cache.get_or_build(key, std::string(target->ext),
-		                                    argv, OUT)) {
+	if ((!cast_stream || audio_only) && time_offset == 0) {
+		if (auto entry = cache_entry(song, cache, plan)) {
 			// Serving a real file rather than a pipe is the whole point: it
 			// carries a Content-Length, answers Range requests, and (because
 			// ffmpeg could seek backwards while writing it) actually has a

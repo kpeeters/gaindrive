@@ -1,6 +1,8 @@
 #pragma once
 
 #include <functional>
+#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include <httplib.h>
@@ -31,6 +33,32 @@ class Streamer {
 			std::string video_codec;
 			std::string audio_codec;
 			};
+
+		// What one request resolves to: whether ffmpeg is needed at all, which
+		// target, and at what bitrate (0 means -c:a copy, i.e. a seek with no
+		// re-encode).
+		struct TranscodePlan {
+			bool                  needed  = false;
+			std::optional<Target> target;
+			int                   bitrate = 0;
+			};
+
+		// Resolves format / max_bitrate / time_offset against the source.
+		// Public because the Cast warm-up in gaindrive.cc has to reach the
+		// same answer serve() will: the cache key is built out of this, and
+		// two copies of the negotiation would key one request two ways and
+		// transcode the same file twice.
+		static TranscodePlan plan_transcode(const SongInfo& song,
+		                                    const std::string& format,
+		                                    int max_bitrate, int time_offset);
+
+		// Materialises the cache entry `plan` describes, running ffmpeg first
+		// if it is not already there — so this blocks for the length of a
+		// transcode.  Empty when the cache is disabled, the plan needs no
+		// transcode, or ffmpeg failed; never fatal, the caller streams instead.
+		static std::shared_ptr<const TranscodeCache::Entry>
+			cache_entry(const SongInfo& song, TranscodeCache& cache,
+			            const TranscodePlan& plan);
 
 		// Builds the ffmpeg command line for one transcode.  Shared by the
 		// streaming path and the transcode cache so the two can never drift

@@ -593,6 +593,14 @@ body {
 /* No room for the icon beside the name in a 280x158 thumbnail. */
 #video-surface[data-state="minimised"] #video-cast-panel .mi { display: none; }
 
+/* The second line of the panel, saying why there is no picture. Dimmer than
+   the device name above it: it is the explanation, not the heading. */
+#video-cast-note {
+   font-size: 0.8rem;
+   opacity: 0.75;
+   max-width: 26rem;
+}
+
 /* The remux tier materialises the whole file through the transcode cache
    before the first byte arrives, which for a long film is tens of seconds.
    Without this the surface just sits black and looks hung. */
@@ -605,6 +613,14 @@ body {
    color: var(--text-dim);
    font-size: 0.9rem;
    pointer-events: none;
+}
+
+/* Both are absolute and inset:0, and while casting the panel is the one with
+   a background — so centring the notice too would print it over the device
+   name. It goes below the panel's centred column instead. */
+#video-surface.casting #video-preparing {
+   align-items: flex-end;
+   padding-bottom: 1.25rem;
 }
 
 /* Covers the whole thumbnail in the minimised state so a click anywhere on

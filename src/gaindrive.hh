@@ -11,6 +11,7 @@
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -89,6 +90,19 @@ class GainDrive {
 		CastManager     cast_manager_;
 		std::string     last_cast_song_id_;
 		float           last_cast_offset_ = 0.0f;
+		// Holds the transcode-cache entry a cast LOAD was warmed against, for
+		// as long as that LOAD is the current one.  TranscodeCache::Entry is
+		// an RAII in-use count and prune() skips in-use keys, so dropping it
+		// after the warm would let the file be evicted between the warm and
+		// the receiver's first GET — which is exactly the cold-entry wait the
+		// warm exists to avoid.  Guarded by cast_warm_mu_ because the warm
+		// runs on CastManager's load worker while a teardown can arrive on an
+		// httplib thread.
+		std::mutex      cast_warm_mu_;
+		std::shared_ptr<const TranscodeCache::Entry> cast_warm_entry_;
+		// What the last LOAD decided, for castSession's snapshot — a page
+		// reload has no castLoad response to read it from.
+		bool            last_cast_audio_only_ = false;
 
 		// The cast session's owner: the account *and* the client instance that
 		// called startCast. Both halves are needed. The account alone is what
@@ -158,7 +172,11 @@ class GainDrive {
 		// stream.view's cast redirect — and they had three copies of the URL
 		// construction between them, which is two places for a new query
 		// parameter to be forgotten.
-		void cast_load_song(const httplib::Request& req,
+		// Returns true when the LOAD was for the soundtrack alone, because the
+		// session's device announced no video_out.  castLoad and castSession
+		// report that to the client, which draws it rather than working it out
+		// again from the device list.
+		bool cast_load_song(const httplib::Request& req,
 		                    const MediaStore::SongInfo& song,
 		                    int song_id, float offset, int track_id);
 

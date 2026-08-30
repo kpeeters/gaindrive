@@ -5469,7 +5469,10 @@ GainDrive::GainDrive(const std::string& db_path,
 					arr.push_back({{"id", d.id}, {"name", d.name},
 					               {"model", d.model},
 					               {"address", d.address}, {"port", d.port},
-					               {"manual", d.manual}});
+					               {"manual", d.manual},
+					               // What the device's `ca` TXT record said it
+					               // can do; true when it announced nothing.
+					               {"videoOut", d.video_out()}});
 				r["castDevices"] = arr;
 				});
 			}
@@ -5484,6 +5487,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					dev->SetAttribute("address", d.address.c_str());
 					dev->SetAttribute("port",    d.port);
 					dev->SetAttribute("manual",  d.manual);
+					dev->SetAttribute("videoOut", d.video_out());
 					el->InsertEndChild(dev);
 					}
 				root->InsertEndChild(el);
@@ -5701,6 +5705,9 @@ GainDrive::GainDrive(const std::string& db_path,
 			r["castSession"]["currentTime"]  = st.current_time;
 			r["castSession"]["duration"]     = st.duration;
 			r["castSession"]["songDuration"] = song_duration;
+			// Same field castLoad's reply carries; a reloaded page has no
+			// castLoad response to have read it from.
+			r["castSession"]["audioOnly"]    = last_cast_audio_only_;
 			// Which subtitle track is on, in the same 1..n numbering castLoad
 			// and castControl take, so a client that has just reloaded can
 			// mark its picker without asking the receiver anything.
@@ -5811,10 +5818,22 @@ GainDrive::GainDrive(const std::string& db_path,
 		// cannot say "none" — SIDECAR_CAPTION_INDEX is -1 and so is a missing
 		// parameter, so "off" and "the sidecar file" would be one value.
 		int track_id = to_int(req.get_param_value("trackId"), 0);
-		cast_load_song(req, *song, to_int(it->second, -1), cast_offset,
-		               track_id);
-		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
-		                use_json ? "application/json" : "application/xml");
+		// The reply says whether the receiver was given the picture or only
+		// the soundtrack, so the client draws what happened rather than
+		// deciding it a second time from the device list.
+		bool audio_only = cast_load_song(req, *song, to_int(it->second, -1),
+		                                 cast_offset, track_id);
+		res.set_content(
+			use_json
+			    ? subsonic_ok_json([audio_only](nlohmann::json& r) {
+			          r["castLoad"]["audioOnly"] = audio_only;
+			          })
+			    : subsonic_ok([audio_only](XMLDocument& doc, XMLElement* root) {
+			          auto* e = doc.NewElement("castLoad");
+			          e->SetAttribute("audioOnly", audio_only);
+			          root->InsertEndChild(e);
+			          }),
+			use_json ? "application/json" : "application/xml");
 		});
 
 	// updateSong — update title and/or track number for a single song.
@@ -7569,6 +7588,13 @@ void GainDrive::cast_teardown()
 	cast_manager_.stop();
 	last_cast_song_id_.clear();
 	last_cast_offset_ = 0.0f;
+	last_cast_audio_only_ = false;
+		{
+		// Releasing the in-use count is what lets the transcode cache prune a
+		// soundtrack nobody is listening to any more.
+		std::lock_guard<std::mutex> lk(cast_warm_mu_);
+		cast_warm_entry_.reset();
+		}
 		{
 		std::lock_guard<std::mutex> lk(cast_owner_mu_);
 		cast_owner_user_.clear();
@@ -7601,7 +7627,7 @@ void GainDrive::cast_claim(const std::string& user,
 	++cast_session_gen_;
 	}
 
-void GainDrive::cast_load_song(const httplib::Request& req,
+bool GainDrive::cast_load_song(const httplib::Request& req,
                                const MediaStore::SongInfo& song,
                                int song_id, float offset, int track_id)
 	{
@@ -7616,12 +7642,35 @@ void GainDrive::cast_load_song(const httplib::Request& req,
 	const std::string base = proto + "://" + host + "/rest/";
 	const std::string sid_s = std::to_string(song_id);
 
+	// A receiver that cannot display a picture is sent the film's soundtrack
+	// rather than a video container it will drop the picture out of.  The
+	// decision is made here, in the one place that has both the song and the
+	// device, and reported to the client rather than re-derived there — the
+	// same rule the three callers of the tier predicate follow.
+	//
+	// `video_out()` reports true for a device that announced no capabilities,
+	// which is every configured one: refusing the picture on a guess is worse
+	// than the guess.
+	//
+	// The third term is not belt and braces.  audio_only_request() is what
+	// serve() will actually apply, so this has to reach the same answer or the
+	// LOAD announces audio/mpeg while the video ladder serves MP4, and a
+	// receiver refuses media whose type does not match what arrives.  A
+	// *silent* video is the case that separates the two: it has nothing to
+	// extract, so audio_only_request() keeps it on the video ladder.
+	const bool audio_only = song.is_video
+	                     && !cast_manager_.device_video_out()
+	                     && audio_only_request(true, CAST_AUDIO_ONLY_FORMAT,
+	                                           song.audio_codec);
+
 	// The caption list is resolved before the token is minted, because the
 	// token is scoped to this song *and* to the caption ids this LOAD is about
 	// to declare — getCaptions will accept it for those and nothing else.
+	// Skipped entirely for a soundtrack: there is no picture to caption, and
+	// not collecting them is what leaves the token unable to fetch one.
 	MediaStore::VideoStreams streams;
 	std::vector<int> caption_ids;
-	if (song.is_video) {
+	if (song.is_video && !audio_only) {
 		streams = store_.get_video_streams(song_id);
 		for (const auto& c : streams.captions) caption_ids.push_back(c.index);
 		}
@@ -7634,14 +7683,22 @@ void GainDrive::cast_load_song(const httplib::Request& req,
 	if (token.empty()) {
 		std::cout << stamp() << "Cast: no stream token; refusing to load"
 		          << std::endl;
-		return;
+		return false;
 		}
 	const std::string tok = "&castToken=" + token;
 
 	CastManager::LoadRequest lr;
 	lr.url  = base + "stream.view?id=" + sid_s + tok;
-	lr.mime = std::string(cast_mime_for(song.codec, song.video_codec,
-	                                    song.audio_codec));
+	if (audio_only) {
+		// Naming an audio format for a video *is* the request for its
+		// soundtrack — audio_only_request() in codecs.hh — so this one
+		// parameter is the whole of it on the server side.
+		lr.url += "&format=" + std::string(CAST_AUDIO_ONLY_FORMAT);
+		lr.mime = std::string(codec_to_mime(CAST_AUDIO_ONLY_FORMAT));
+		}
+	else
+		lr.mime = std::string(cast_mime_for(song.codec, song.video_codec,
+		                                    song.audio_codec));
 	// Native seek: the URL serves the whole file and the LOAD says where to
 	// begin, so the receiver's clock is absolute.  That is also why the caption
 	// cues need no shifting here, unlike the browser's own transcoded seek —
@@ -7649,7 +7706,7 @@ void GainDrive::cast_load_song(const httplib::Request& req,
 	lr.current_time = offset;
 	lr.duration     = song.duration;
 
-	if (song.is_video) {
+	if (song.is_video && !audio_only) {
 		int  n = 0;
 		for (const auto& c : streams.captions) {
 			++n;
@@ -7674,13 +7731,50 @@ void GainDrive::cast_load_song(const httplib::Request& req,
 			lr.active_track_ids.push_back(track_id);
 		}
 
+	// The soundtrack of a film is a transcode of a two-hour AC3 track, and
+	// serve() will answer it out of the transcode cache — which materialises
+	// the whole file before the first byte.  A receiver drops a session after
+	// about a minute with no data on the HTTP body, so that wait has to happen
+	// before it is told anything at all.  This runs on CastManager's load
+	// worker, which already treats a newer load_gen_ as a cancellation.
+	//
+	// The entry is kept alive afterwards: it is an RAII in-use count and
+	// prune() skips in-use keys, so releasing it here would let the file be
+	// evicted between the warm and the receiver's first GET.
+	if (audio_only) {
+		Streamer::SongInfo si =
+			streamer_song(song, store_.abs_path(song.path));
+		lr.prepare = [this, si, sid_s]() {
+			auto plan = Streamer::plan_transcode(si, CAST_AUDIO_ONLY_FORMAT,
+			                                     0, 0);
+			auto entry = Streamer::cache_entry(si, transcode_cache_, plan);
+			if (!entry) {
+				// Not fatal: stream.view falls back to a piped transcode, and
+				// the receiver may still cope with a short one.  Logged
+				// because a cast that dies about a minute in is this line.
+				std::cout << stamp()
+				          << "Cast: no cache entry for soundtrack of song="
+				          << sid_s << ", streaming unwarmed" << std::endl;
+				return true;
+				}
+			std::cout << stamp() << "Cast: soundtrack warmed song=" << sid_s
+			          << " " << (entry->hit() ? "hit" : "built")
+			          << " bytes=" << entry->size() << std::endl;
+			std::lock_guard<std::mutex> lk(cast_warm_mu_);
+			cast_warm_entry_ = std::move(entry);
+			return true;
+			};
+		}
+
 	// One line rather than reading it out of the LOAD dump below, which for a
-	// film with several tracks is long enough to scroll past. Says the three
-	// things a "subtitles do not appear" report needs first: whether the server
-	// thinks this is a video at all, how many tracks it offered, and which one
-	// it asked for.
+	// film with several tracks is long enough to scroll past. Says the four
+	// things a "subtitles do not appear" or "no picture" report needs first:
+	// whether the server thinks this is a video at all, whether it decided to
+	// send only the sound, how many tracks it offered, and which one it asked
+	// for.
 	std::cout << stamp() << "Cast: load song=" << sid_s
 	          << " video=" << (song.is_video ? "yes" : "no")
+	          << " audio_only=" << (audio_only ? "yes" : "no")
 	          << " mime=" << lr.mime
 	          << " tracks=" << lr.tracks.size()
 	          << " active=" << (lr.active_track_ids.empty()
@@ -7689,7 +7783,9 @@ void GainDrive::cast_load_song(const httplib::Request& req,
 
 	last_cast_song_id_ = sid_s;
 	last_cast_offset_  = 0.0f;
+	last_cast_audio_only_ = audio_only;
 	cast_manager_.load(lr);
+	return audio_only;
 	}
 
 // A configured cast device is never confirmed by anything: mDNS does not

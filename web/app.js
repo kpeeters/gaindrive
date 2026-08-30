@@ -2454,6 +2454,11 @@ let castBaseTime        = 0;      // s.currentTime from last SSE push
 let castBaseAt          = 0;      // Date.now() (ms) when castBaseTime was recorded
 let castSongDuration    = 0;      // total song duration; fallback when queue is not loaded
 let castEndStallTime    = null;   // Date.now() when BUFFERING-at-end stall started
+// True when the current LOAD sent the receiver a film's soundtrack rather than
+// the film, because the device announced no video_out.  The server decides it
+// and reports it; this is only the last answer it gave, kept so the panel can
+// be drawn before the next castLoad replies.
+let castAudioOnly       = false;
 let castExpectedPosition = null;  // absolute position we asked the receiver to
                                   // seek to via the most recent LOAD; cleared
                                   // once the receiver reports playback near it
@@ -2465,6 +2470,13 @@ function onCastStatus(s) {
    // the seek point so the absolute song position is startOffset + the
    // receiver's reported currentTime.
    if (typeof s.startOffset === 'number') castStartOffset = s.startOffset;
+   // The receiver saying anything but IDLE means it has the stream, which for
+   // an audio-only load is the end of a transcode that ran before the LOAD was
+   // sent.  Cleared here, above the transient gate below: that gate drops the
+   // statuses of the outgoing session, and a load that errors never produces a
+   // matching one — the notice would then sit there for ever.
+   if (s.playerState !== 'IDLE' || s.idleReason === 'ERROR')
+      videoPreparing(false);
    // After every LOAD the receiver emits a transient sequence: an
    // IDLE/INTERRUPTED for the OLD media session (currentTime=0), then
    // BUFFERING/PLAYING with a small t for the NEW session, then finally
@@ -2830,6 +2842,7 @@ function castExit() {
    castBaseTime         = 0;
    castBaseAt           = 0;
    castExpectedPosition = null;
+   castAudioOnly    = false;
    castPlayerState  = 'IDLE';
    castSongDuration = 0;
    castButtonState(false);
@@ -3213,11 +3226,20 @@ function videoSurfaceCaption(song) {
 // television is exactly when someone wants it. It also fixes a stranded state —
 // starting a cast mid-film used to leave the surface up with a <video> whose
 // source had been taken away, showing black under a live-looking title.
-function videoCastPanel(on) {
+// `note` is the receiver's inability to show a picture, which is a different
+// thing from the film not being ready: it is permanent for this device, so it
+// is stated on the panel rather than left to be inferred from a picture that
+// never arrives.
+function videoCastPanel(on, note = false) {
    const surf = document.getElementById('video-surface');
    surf.classList.toggle('casting', on);
    document.getElementById('video-cast-name').textContent =
       castDeviceName ? `Playing on ${castDeviceName}` : 'Playing on your TV';
+   const noteEl = document.getElementById('video-cast-note');
+   noteEl.hidden = !(on && note);
+   noteEl.textContent = castDeviceName
+      ? `${castDeviceName} cannot show video — playing the soundtrack only.`
+      : 'This device cannot show video — playing the soundtrack only.';
    // Fullscreen would ask the browser to blow up an element with no source,
    // and close means "stop the film", which while casting is the television's
    // film and not this element's.
@@ -3305,6 +3327,19 @@ function setupVideoSurface() {
 // only load when the server and the page share an origin.  Fixing that means
 // crossorigin="anonymous" on the video element, which would then also apply to
 // the media request itself — not worth risking playback for subtitles.
+// The other half of videoLoadCaptions: what to do when there are deliberately
+// no captions to offer, i.e. a soundtrack on a receiver with no picture. It
+// has to do the same bookkeeping the film-changed branch below does, or the
+// previous film's picker stays on the bar and its <track> elements stay on an
+// element that is no longer showing anything.
+function videoClearCaptions(song) {
+   player.videoEl.querySelectorAll('track').forEach(t => t.remove());
+   player.captionSong  = song.id;
+   player.captionIndex = null;
+   player.captions     = [];
+   videoCaptionsMenu([]);
+}
+
 async function videoLoadCaptions(song) {
    player.videoEl.querySelectorAll('track').forEach(t => t.remove());
 
@@ -3498,9 +3533,16 @@ function playerPlay(offset = 0, forceMp3 = false) {
       // Track the position we asked it to seek to so onCastStatus can
       // discard reports that aren't yet near that position.
       castExpectedPosition = offset;
-      // Cast endpoint never receives a format param; receiver plays the
-      // source codec.  Clear so the info dialog falls back to server's
-      // bitrate-cap fields (transcodedSuffix/transcodedBitRate).
+      // castAudioOnly is deliberately *not* reset here.  A device that cannot
+      // show video will not start being able to between two tracks, and
+      // clearing it would flash the panel back to "Playing on <amp>" for as
+      // long as the reply takes.  The reply overwrites it either way.
+      //
+      // A cast URL names no format, so the receiver plays the source codec —
+      // except for a soundtrack on a device with no screen, where the server
+      // adds one and the reply below records it.  Clear so the info dialog
+      // falls back to the server's bitrate-cap fields
+      // (transcodedSuffix/transcodedBitRate) meanwhile.
       player.streamFormat = null;
       const params = {id: song.id};
       if (offset > 0) params.timeOffset = Math.floor(offset);
@@ -3514,7 +3556,29 @@ function playerPlay(offset = 0, forceMp3 = false) {
       // Use the dedicated castLoad endpoint rather than setting player.media.src.
       // Setting audio.src would cause the browser to send a Range request, which
       // httplib converts to 416 because the stream endpoint returns 204 (no body).
-      apiCall('castLoad', params).catch(err => console.warn('[cast] load failed', err));
+      //
+      // The reply says whether the receiver was given the film or only its
+      // soundtrack — a device with no video_out gets the latter.  That is the
+      // server's decision, taken where both the song and the device are known,
+      // and read back here rather than worked out again from the device list.
+      const loadSong = song;
+      apiCall('castLoad', params)
+         .then(r => {
+            if (player.queue[player.index] !== loadSong) return;
+            if (!loadSong.isVideo) return;
+            castAudioOnly = !!r?.castLoad?.audioOnly;
+            player.streamFormat = castAudioOnly ? 'mp3' : null;
+            videoCastPanel(true, castAudioOnly);
+            // No picture on the television means no subtitles to put on it,
+            // and an unselected <track> costs a request either way — so the
+            // picker is not drawn rather than drawn and inert.
+            if (castAudioOnly) videoClearCaptions(loadSong);
+            else               videoLoadCaptions(loadSong);
+            })
+         .catch(err => {
+            videoPreparing(false);
+            console.warn('[cast] load failed', err);
+            });
       // The picture is on the television, so the surface shows where it went
       // instead — and it has to be composed at all, because it is the only
       // place the subtitle picker lives.
@@ -3522,9 +3586,18 @@ function playerPlay(offset = 0, forceMp3 = false) {
          const surf = document.getElementById('video-surface');
          videoSurfaceSet(surf.dataset.state || 'theatre');
          videoSurfaceCaption(song);
-         videoPreparing(false);
-         videoCastPanel(true);
-         videoLoadCaptions(song);
+         // castLoad replies at once, but a soundtrack for a screenless
+         // receiver is transcoded in full before the LOAD is even sent — so
+         // the wait is between the reply and the receiver making a sound.
+         // onCastStatus clears this on the first status that is not IDLE,
+         // which is the only thing that knows the film has actually started.
+         // Same wait the remux tier has, same notice.
+         videoPreparing(true);
+         // Drawn twice: once now with what the last load decided, so the panel
+         // is not blank while castLoad is in flight, and again above with the
+         // answer.  A soundtrack transcode is warmed before the receiver is
+         // told anything, so that reply can be a minute in coming.
+         videoCastPanel(true, castAudioOnly);
          } else {
          videoSurfaceSet(null);
          }
@@ -5001,6 +5074,7 @@ async function showShell() {
             castBaseAt       = Date.now();
             castPlayerState  = sess.playerState;
             castSongDuration = sess.songDuration;
+            castAudioOnly    = !!sess.audioOnly;
             // The server numbers caption tracks from 1 and 0 means off; the
             // picker indexes from 0 and null means off.
             player.captionIndex = sess.trackId > 0 ? sess.trackId - 1 : null;
@@ -5028,8 +5102,11 @@ async function showShell() {
                      player.captionSong = songSr.song.id;
                      videoSurfaceSet('theatre');
                      videoSurfaceCaption(songSr.song);
-                     videoCastPanel(true);
-                     videoLoadCaptions(songSr.song);
+                     videoCastPanel(true, castAudioOnly);
+                     // A soundtrack on an audio-only receiver has no picture
+                     // to caption, and the session reports no trackId for one.
+                     if (castAudioOnly) videoClearCaptions(songSr.song);
+                     else               videoLoadCaptions(songSr.song);
                      }
                   }
                } catch (_) {}

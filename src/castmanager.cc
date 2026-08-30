@@ -271,19 +271,30 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 	else if (rtype == MDNS_RECORDTYPE_TXT) {
 		mdns_record_txt_t txt[32];
 		size_t n = mdns_record_parse_txt(data, size, rec_off, rec_len, txt, 32);
-		std::string id, fn, md;
+		std::string id, fn, md, ca;
 		for (size_t i = 0; i < n; i++) {
 			std::string k(txt[i].key.str,   txt[i].key.length);
 			std::string v(txt[i].value.str, txt[i].value.length);
 			if (k == "id") id = v;
 			if (k == "fn") fn = v;
 			if (k == "md") md = v;
+			if (k == "ca") ca = v;
+			}
+		// `ca` is a decimal bitmask; bit 0 is video_out.  Parsed by hand
+		// rather than with std::stoi, which *throws* on a receiver that
+		// announces something unexpected — this runs on the discovery
+		// thread, where that is a dead server rather than an odd device.
+		int caps = -1;
+		if (!ca.empty()
+		    && ca.find_first_not_of("0123456789") == std::string::npos) {
+			try { caps = std::stoi(ca); } catch (...) { caps = -1; }
 			}
 		log << "TXT  from=" << src_ip
 		    << " name=" << raw
 		    << " id=" << id
 		    << " fn=" << fn
-		    << " md=" << md;
+		    << " md=" << md
+		    << " ca=" << (ca.empty() ? "-" : ca);
 		if (!assemble)    { st->ignored++; log << " (ignored: not _googlecast)"; }
 		else if (goodbye) { log << " (ignored: goodbye)"; }
 		else {
@@ -294,6 +305,10 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 			if (!id.empty()) dev.id    = id;
 			if (!fn.empty()) dev.name  = fn;
 			if (!md.empty()) dev.model = md;
+			// Field-wise like the rest: one spelling of an instance may carry
+			// the record and another not, and -1 means "not announced" rather
+			// than "announced as nothing".
+			if (caps >= 0)   dev.capabilities = caps;
 			}
 		say();
 		}
@@ -530,6 +545,10 @@ std::vector<CastManager::CastDevice> CastManager::discover(const DiscoverOpts& o
 		          << " id=" << dev.id
 		          << " fn=" << dev.name
 		          << " md=" << dev.model
+		          << " ca=" << (dev.capabilities < 0
+		                        ? std::string("-")
+		                        : std::to_string(dev.capabilities))
+		          << " video=" << (dev.video_out() ? "yes" : "no")
 		          << " addr=" << dev.address
 		          << " port=" << dev.port << std::endl;
 
@@ -577,6 +596,7 @@ std::vector<CastManager::CastDevice> CastManager::discover(const DiscoverOpts& o
 		CastDevice& into = result[it->second];
 		if (into.name.empty())  into.name  = dev.name;
 		if (into.model.empty()) into.model = dev.model;
+		if (into.capabilities < 0) into.capabilities = dev.capabilities;
 		if (into.address.empty()) into.address = dev.address;
 		// Prefer IPv4, as the address fallbacks above already do — an IPv6
 		// link-local carries a scope suffix that nothing else here matches on.
@@ -1070,6 +1090,33 @@ void CastManager::load_worker(LoadRequest req, int gen)
 	{
 	const std::string& url = req.url;
 	std::string src = "sender-0";
+
+	// Make the URL answerable before anyone is told to fetch it.  A receiver
+	// gives up after about a minute of silence on the HTTP body, and a film's
+	// soundtrack takes longer than that to transcode, so the wait has to
+	// happen here — with nothing yet loaded — rather than on the socket.
+	//
+	// This thread is detached: an exception escaping it is std::terminate, a
+	// dead server rather than a failed load.
+	if (req.prepare) {
+		if (load_gen_.load() != gen) return;
+		bool ready = false;
+		try { ready = req.prepare(); }
+		catch (const std::exception& e) {
+			std::cout << stamp() << "Cast: prepare threw: " << e.what()
+			          << std::endl;
+			}
+		catch (...) {
+			std::cout << stamp() << "Cast: prepare threw" << std::endl;
+			}
+		if (!ready) {
+			std::cout << stamp() << "Cast: prepare failed, not loading " << url
+			          << std::endl;
+			return;
+			}
+		// A prepare that took minutes is exactly when the user has moved on.
+		if (load_gen_.load() != gen) return;
+		}
 
 	std::string tid;
 	{

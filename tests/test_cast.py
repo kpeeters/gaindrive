@@ -47,5 +47,10 @@ print(f"Found {len(devices)} device(s):\n")
 for d in devices:
     print(f"  id      : {d.get('id')}")
     print(f"  name    : {d.get('name')}")
+    print(f"  model   : {d.get('model')}")
     print(f"  address : {d.get('address')}:{d.get('port')}")
+    # false here is what makes castLoad send a film's soundtrack instead of
+    # the film. It comes from bit 0 of the device's `ca` record, so this is
+    # the check that the record was read off the device the way we think.
+    print(f"  videoOut: {d.get('videoOut')}")
     print()

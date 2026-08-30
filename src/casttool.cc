@@ -283,7 +283,16 @@ static int run_discover(const CastManager::DiscoverOpts& opts)
 		std::cout << "  " << d.address << ":" << d.port
 		          << "  id=" << d.id
 		          << "  name=" << d.name
-		          << "  model=" << d.model << std::endl;
+		          << "  model=" << d.model
+		          // The `ca` bitmask and the one bit anything acts on. A
+		          // receiver that cannot show a picture is sent a film's
+		          // soundtrack instead, and this is where that is checked
+		          // against the device in the room rather than assumed.
+		          << "  ca=" << (d.capabilities < 0
+		                         ? std::string("-")
+		                         : std::to_string(d.capabilities))
+		          << "  video=" << (d.video_out() ? "yes" : "no")
+		          << std::endl;
 
 	// Non-zero on an empty result so a shell loop can tell the runs apart.
 	return devs.empty() ? 1 : 0;

@@ -6,6 +6,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <atomic>
+#include <functional>
 
 #include <nlohmann/json.hpp>
 
@@ -25,7 +26,24 @@ class CastManager {
 			// mDNS.  Nothing in the protocol reads it; it exists so the API can
 			// say where an entry came from.
 			bool        manual = false;
+			// The `ca` TXT record, a bitmask of what the receiver can do.
+			// -1 means "not announced", which is every configured device and
+			// any receiver that omits the record — treated as capable, since
+			// refusing the picture on a guess is worse than the guess.
+			int         capabilities = -1;
+
+			// Bit 0 of `ca` is video_out. A WiiM amp clears it; a Chromecast
+			// or a television sets it. This is the whole of what distinguishes
+			// a receiver that can show a film from one that can only play its
+			// soundtrack — nothing in a LOAD's reply says so, and a receiver
+			// that cannot display simply drops the picture.
+			bool video_out() const
+				{
+				return capabilities < 0 || (capabilities & CA_VIDEO_OUT) != 0;
+				}
 			};
+
+		static constexpr int CA_VIDEO_OUT = 0x01;
 
 		// The id given to a configured device, derived from its address rather
 		// than random.  The web client stores the id of the device it is casting
@@ -137,6 +155,14 @@ class CastManager {
 			// client can speak in track numbers without the server having to
 			// re-probe the file to interpret one.
 			std::vector<int> caption_ids;
+			// Run on the worker thread before the LOAD is sent; false aborts
+			// the load.  It exists so a caller can make `url` answerable
+			// *before* the receiver is told to fetch it — materialising a
+			// transcode-cache entry, which takes minutes for a film's
+			// soundtrack and would otherwise happen while a receiver that
+			// gives up after ~60 s of silence is waiting on the socket.
+			// CastManager deliberately does not know what is being prepared.
+			std::function<bool()> prepare;
 			};
 
 		// Connect to the Chromecast, send LOAD, capture initial MEDIA_STATUS, then close.
@@ -178,6 +204,10 @@ class CastManager {
 		bool        active()          const { return active_; }
 		std::string get_device_id()   const { return device_.id; }
 		std::string get_device_name() const { return device_.name; }
+		// What the session's device can do, for callers deciding *what* to
+		// send it rather than how.  cast_load_song() is the one that matters:
+		// a receiver with no video_out gets a film's soundtrack.
+		bool        device_video_out() const { return device_.video_out(); }
 		float       last_known_time() const;
 
 		// ---- The stream token -----------------------------------------

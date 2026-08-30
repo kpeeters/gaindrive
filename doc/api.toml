@@ -1346,6 +1346,11 @@ hostname is refused at startup.
   type = "bool"
   doc  = 'True for a configured device.'
 
+  [[endpoint.field]]
+  name = "castDevices.castDevice.videoOut"
+  type = "bool"
+  doc  = 'Whether the device can display a picture, from bit 0 of its `ca` record. True when it announced nothing, which is every configured device: refusing the picture on a guess is worse than the guess. `castLoad` sends a video to a device with this false as its soundtrack alone.'
+
 [[endpoint]]
 kind    = 'endpoint'
 name    = "startCast"
@@ -1432,6 +1437,19 @@ activate a track the load already declared. Emitting them only when a caption
 is already chosen works when the viewer picks before playing and never when
 they pick during, which reads as an intermittent fault rather than a missing
 feature.
+
+**A video loaded onto a receiver that cannot display one is sent as its
+soundtrack**, and the reply says so in `castLoad.audioOnly`. Which receivers
+those are is bit 0 of the `ca` record `listCastDevices` reports as `videoOut`.
+The decision is made here rather than by the client, so that a client draws
+what happened instead of deciding it a second time from the device list — and
+no subtitle tracks are declared for such a load, there being no picture to put
+them on.
+
+Such a load takes noticeably longer to begin: the soundtrack is transcoded in
+full before the receiver is told anything, because a receiver abandons a
+session after about a minute with no data on the HTTP body and a feature-length
+film takes longer than that to convert.
 '''
 # `see` may only name endpoints defined in this file, so that a typo is caught
 # rather than silently dropping a cross-reference; getVideoInfo is standard and
@@ -1466,6 +1484,11 @@ would be one value.
   name = "castController"
   type = "string"
   doc  = 'The id given to `startCast`. Without a match this caller is treated as having no session.'
+
+  [[endpoint.field]]
+  name = "castLoad.audioOnly"
+  type = "bool"
+  doc  = "True when the receiver was sent the video's soundtrack rather than the video, because it announced no `videoOut`. Always false for an audio track."
 
   [[endpoint.error]]
   code = '0'
@@ -1580,6 +1603,11 @@ load and show itself as casting.
   name = "castSession.trackId"
   type = "int"
   doc  = 'The subtitle track currently showing, or 0.'
+
+  [[endpoint.field]]
+  name = "castSession.audioOnly"
+  type = "bool"
+  doc  = 'The same answer `castLoad` returned for the load now playing. Present here because a client that has just reloaded has no `castLoad` reply to have read it from.'
 
 [[endpoint]]
 kind         = 'endpoint'

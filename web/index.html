@@ -89,6 +89,11 @@
          <div id="video-cast-panel">
             <span class="mi">cast_connected</span>
             <span id="video-cast-name"></span>
+            <!-- Shown only when the receiver announced no video_out, so it is
+                 being sent the soundtrack rather than the film. Without it the
+                 panel says "Playing on <amp>" over a picture that never
+                 arrives, which reads as a fault. -->
+            <span id="video-cast-note" hidden></span>
          </div>
          <div id="video-preparing" hidden>Preparing…</div>
          <button id="video-restore" title="Expand" hidden></button>

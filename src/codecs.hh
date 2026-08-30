@@ -213,6 +213,19 @@ inline std::string_view cast_mime_for(std::string_view container,
 	return codec_to_mime(container);
 	}
 
+// The format a server-driven cast asks for when the receiver cannot show a
+// picture, so it is sent the film's soundtrack instead.
+//
+// mp3 rather than something better, for three reasons that all point one way.
+// Every Cast receiver takes it, and the whole point of this path is a device
+// too limited to display video, which is not a device to be adventurous with.
+// The extraction is a full transcode whatever container it lands in — the
+// source is AC3 or DTS or AAC inside a film — so nothing is preserved by
+// choosing a fancier one.  And CBR mp3 is the one whose length is exactly
+// predictable from bitrate × duration, which is what serve()'s
+// estimate_length path would need if the cache warm ever has to be given up.
+inline constexpr const char* CAST_AUDIO_ONLY_FORMAT = "mp3";
+
 // True when a request naming a video is really a request for its soundtrack.
 //
 // This is the whole audio-only contract, and it is deliberately spelled with

@@ -751,6 +751,7 @@
 <tr><td><code>castDevices.castDevice.address</code></td><td>string</td><td>IP address.</td></tr>
 <tr><td><code>castDevices.castDevice.port</code></td><td>int</td><td>Usually 8009; a multizone group gets a dynamic one.</td></tr>
 <tr><td><code>castDevices.castDevice.manual</code></td><td>bool</td><td>True for a configured device.</td></tr>
+<tr><td><code>castDevices.castDevice.videoOut</code></td><td>bool</td><td>Whether the device can display a picture, from bit 0 of its <code>ca</code> record. True when it announced nothing, which is every configured device: refusing the picture on a guess is worse than the guess. <code>castLoad</code> sends a video to a device with this false as its soundtrack alone.</td></tr>
 </tbody>
 </table>
 <p>Discovery assembles a device only from records belonging to <code>_googlecast._tcp</code>, and returns one entry per Cast id, so a device announcing several services or several spellings of its name still appears once.</p>
@@ -817,6 +818,13 @@
 </table>
 <div class="api-note"><p class="api-note-h"><code>trackId</code></p>
 <p><code>trackId</code>, not <code>captionId</code>: the cast API numbers tracks 1..n by position, and 0 means off. <code>captionId</code> cannot express &quot;off&quot; — the sidecar caption index and a missing parameter are both -1, so &quot;no subtitles&quot; and &quot;the sidecar file&quot; would be one value.</p></div>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>castLoad.audioOnly</code></td><td>bool</td><td>True when the receiver was sent the video&#x27;s soundtrack rather than the video, because it announced no <code>videoOut</code>. Always false for an audio track.</td></tr>
+</tbody>
+</table>
 <h4>Errors</h4>
 <table class="doc-table">
 <thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
@@ -826,6 +834,8 @@
 </table>
 <p><b>Seeking is also a <code>castLoad</code></b>, not a <code>castControl</code> with <code>action=seek</code> — every seek is a full reload. The server returns as soon as the load is queued; the actual Cast message goes out on a background connection.</p>
 <p>Subtitle tracks are declared to the receiver in <b>every</b> load, whether or not one is switched on, because <code>castControl</code> with <code>action=captions</code> can only activate a track the load already declared. Emitting them only when a caption is already chosen works when the viewer picks before playing and never when they pick during, which reads as an intermittent fault rather than a missing feature.</p>
+<p><b>A video loaded onto a receiver that cannot display one is sent as its soundtrack</b>, and the reply says so in <code>castLoad.audioOnly</code>. Which receivers those are is bit 0 of the <code>ca</code> record <code>listCastDevices</code> reports as <code>videoOut</code>. The decision is made here rather than by the client, so that a client draws what happened instead of deciding it a second time from the device list — and no subtitle tracks are declared for such a load, there being no picture to put them on.</p>
+<p>Such a load takes noticeably longer to begin: the soundtrack is transcoded in full before the receiver is told anything, because a receiver abandons a session after about a minute with no data on the HTTP body and a feature-length film takes longer than that to convert.</p>
 <p class="api-see">See also <a href="#ep-castControl"><code>castControl</code></a>, <a href="#ep-castSession"><code>castSession</code></a>.</p>
 </div>
 <div class="api-ep">
@@ -880,6 +890,7 @@
 <tr><td><code>castSession.duration</code></td><td>float</td><td>Duration as the receiver understands it.</td></tr>
 <tr><td><code>castSession.songDuration</code></td><td>float</td><td>Duration as the library has it, which is the one to trust for a progress bar.</td></tr>
 <tr><td><code>castSession.trackId</code></td><td>int</td><td>The subtitle track currently showing, or 0.</td></tr>
+<tr><td><code>castSession.audioOnly</code></td><td>bool</td><td>The same answer <code>castLoad</code> returned for the load now playing. Present here because a client that has just reloaded has no <code>castLoad</code> reply to have read it from.</td></tr>
 </tbody>
 </table>
 <p>Only the caller&#x27;s own session. Another owner&#x27;s is reported as <code>active: false</code> — otherwise a second browser would adopt it wholesale on page load and show itself as casting.</p>
