@@ -42,6 +42,16 @@ COLUMNS = [
 # dump that flattened the two would hide exactly the regression worth catching.
 NULL = "\\N"
 
+# Every C0 control character plus DEL, flattened to a space. A tag is arbitrary
+# bytes somebody else wrote, and three of these break the format in different
+# ways: \t invents a column, \n invents a row, and \r invents a row only on the
+# way back *in*, because Python's text mode treats a lone \r as a line ending.
+# That last one is why this is a table rather than three replace() calls — it
+# cost a KeyError deep inside compare(), on one row out of 27k, which is exactly
+# the kind of input this script exists to survive.
+CONTROL = {c: " " for c in range(0x20)}
+CONTROL[0x7F] = " "
+
 
 def render(name, value):
 	if value is None:
@@ -51,7 +61,7 @@ def render(name, value):
 	# real difference and coarse enough not to invent one.
 	if name == "duration":
 		return "%.3f" % float(value)
-	return str(value).replace("\t", " ").replace("\n", " ")
+	return str(value).translate(CONTROL)
 
 
 def dump(db_path, out):
@@ -66,11 +76,21 @@ def dump(db_path, out):
 
 
 def load(path):
-	with open(path, encoding="utf-8") as f:
+	# newline="\n" and not the default: universal newline mode would split a row
+	# at a bare \r, and dumps taken before render() flattened those still have
+	# them. Note "" does not do this — it keeps universal newline *detection*
+	# and only skips the translation.
+	with open(path, encoding="utf-8", newline="\n") as f:
 		header = f.readline().rstrip("\n").split("\t")
 		rows = {}
-		for line in f:
+		for n, line in enumerate(f, start=2):
 			fields = line.rstrip("\n").split("\t")
+			# Named here rather than left to fail as a KeyError somewhere in
+			# compare(), which says nothing about which line was malformed.
+			if len(fields) != len(header):
+				raise ValueError(
+					"%s line %d: %d fields, expected %d"
+					% (path, n, len(fields), len(header)))
 			rows[fields[0]] = dict(zip(header, fields))
 	return header, rows
 
