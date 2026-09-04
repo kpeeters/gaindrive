@@ -685,6 +685,70 @@ body {
    #video-close { opacity: 1; }
 }
 
+/* Transport over the picture: back 10, play/pause, forward 10.  Revealed by
+   exactly the three rules #video-close uses above, and for the same bargain —
+   nothing is drawn over a film until the pointer says otherwise, and a touch
+   device never hovers so it gets them unconditionally.
+
+   z-index puts it over two siblings that are both absolute and inset:0.
+   #video-restore is hidden in theatre but would otherwise swallow the clicks;
+   #video-cast-panel has no z-index at all and comes earlier in the DOM, and
+   these controls are wanted on top of it — while the sound is on a receiver
+   they still drive it, which is the case where the viewer is looking at this
+   surface rather than at the player bar. */
+#video-controls {
+   position: absolute;
+   left: 50%;
+   bottom: 1rem;
+   transform: translateX(-50%);
+   z-index: 2;
+   display: flex;
+   align-items: center;
+   gap: 0.25rem;
+   padding: 0.25rem;
+   border-radius: 999px;
+   background: rgba(0, 0, 0, 0.55);
+   opacity: 0;
+   transition: opacity 0.15s ease;
+}
+
+#video-controls button {
+   width: 2.5rem;
+   height: 2.5rem;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   border: 0;
+   border-radius: 50%;
+   background: none;
+   /* Literal, not a theme token, by the rule stated twice above: this is drawn
+      on the black the surface paints for itself in either theme. */
+   color: rgba(255, 255, 255, 0.92);
+   font-size: 1.5rem;
+   line-height: 1;
+   cursor: pointer;
+}
+
+#video-controls button:hover { background: rgba(255, 255, 255, 0.15); }
+
+#video-surface:hover #video-controls,
+#video-controls:focus-within {
+   opacity: 1;
+}
+
+@media (hover: none) {
+   #video-controls { opacity: 1; }
+}
+
+/* display, not opacity: a 280x158 thumbnail has no room for them, and an
+   invisible cluster would still take the click that must reach #video-restore
+   and expand the surface. */
+#video-surface[data-state="minimised"] #video-controls { display: none; }
+
+/* Fullscreen is requested on the frame, which has no background of its own —
+   it was showing the surface's until it became the fullscreen element. */
+#video-frame:fullscreen { background: #000; }
+
 #video-bar {
    display: flex;
    align-items: center;

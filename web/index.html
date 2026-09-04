@@ -77,8 +77,9 @@
    <!-- Video playback surface. The <video> element inside is never moved in
         the DOM — some browsers tear down and restart the stream when a media
         element is re-parented — so the two states are purely a CSS change
-        driven by data-state on the container. Transport stays on the bar
-        below; this owns only minimise, fullscreen and the title. -->
+        driven by data-state on the container. Transport is on the picture
+        itself (#video-controls) as well as on the player bar; the bar below
+        owns the title, the subtitle picker, minimise and fullscreen. -->
    <div id="video-surface" class="hidden" data-state="theatre">
       <div id="video-frame">
          <video id="video-el" playsinline></video>
@@ -98,6 +99,19 @@
          <div id="video-preparing" hidden>Preparing…</div>
          <button id="video-restore" title="Expand" hidden></button>
          <button id="video-close" class="mi" title="Stop and close" aria-label="Stop and close">close</button>
+         <!-- Transport over the picture, and after #video-restore because that
+              is a transparent full-frame click target: anything before it in
+              the DOM is swallowed while minimised. It is inside #video-frame
+              rather than on the bar below because fullscreen is requested on
+              the frame, and fullscreen is where the player bar is furthest
+              away. Every button here delegates to the player bar's own
+              handlers, which already know what pause and seek mean while
+              casting. -->
+         <div id="video-controls">
+            <button id="video-back10" class="mi" title="Back 10 seconds"    aria-label="Back 10 seconds">replay_10</button>
+            <button id="video-play"   class="mi" title="Play"               aria-label="Play">play_arrow</button>
+            <button id="video-fwd10"  class="mi" title="Forward 10 seconds" aria-label="Forward 10 seconds">forward_10</button>
+         </div>
       </div>
       <div id="video-bar">
          <span id="video-caption"></span>

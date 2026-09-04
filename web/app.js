@@ -2626,8 +2626,7 @@ function onCastStatus(s) {
       if (totalSecs > 0) seek.max = totalSecs;
       seek.value = Math.floor(absCurrent);
       }
-   document.getElementById('player-playpause').textContent =
-      s.playerState === 'PAUSED' ? 'play_arrow' : 'pause';
+   playerPlayGlyph(s.playerState === 'PAUSED' ? 'play_arrow' : 'pause');
    }
 
 // Open (or re-open) the SSE connection for cast status events.
@@ -3518,6 +3517,13 @@ function playerSelectMedia(isVideo) {
 function videoSurfaceSet(state) {
    const el = document.getElementById('video-surface');
    if (!state) {
+      // #video-close is inside #video-frame and so is reachable in fullscreen,
+      // which it was not while fullscreen was requested on the <video> itself.
+      // display:none on an ancestor does not take the document out of
+      // fullscreen, so without this the viewer is left staring at an empty
+      // black screen with the film stopped behind it.
+      if (document.fullscreenElement && el.contains(document.fullscreenElement))
+         document.exitFullscreen?.().catch(() => {});
       el.classList.add('hidden');
       return;
       }
@@ -3582,6 +3588,93 @@ function videoSyncButton() {
    document.getElementById('video-sync-value').textContent = `${ms} ms`;
 }
 
+// How far one press of the skip buttons, or of an arrow key, moves.
+const SKIP_SECS = 10;
+
+// The two play/pause glyphs are one piece of state, so they are written
+// together.  #player-playpause stays the source of truth — the cast branch of
+// its own click handler reads its textContent back to decide which way to
+// flip — and this only keeps the copy on the picture in step with it.
+function playerPlayGlyph(name) {
+   document.getElementById('player-playpause').textContent = name;
+   const v = document.getElementById('video-play');
+   v.textContent = name;
+   // The ligature is the button's text, so a screen reader would read the glyph
+   // name; the accessible name is the aria-label, and it has to move with the
+   // glyph or it says "Play" over a pause symbol for the whole film.
+   const label = (name === 'pause') ? 'Pause' : 'Play';
+   v.title = label;
+   v.setAttribute('aria-label', label);
+}
+
+// The absolute second the listener is at, wherever the sound is coming from.
+//
+// While casting the receiver is the clock and the local element is either
+// silent or absent, so this is the same extrapolation the 100 ms interpolation
+// timer draws the seek bar from — one clock, one more consumer.  castBaseAt is
+// in the guard as well as the state: it is 0 until the first status arrives,
+// and Date.now() - 0 is fifty-six years of playback.  Locally the element's own
+// clock is rebased whenever the server started ffmpeg at a seek point, which is
+// what localOffset adds back.
+function playerPosition() {
+   if (castDeviceId !== null) {
+      const elapsed = (castPlayerState === 'PLAYING' && castBaseAt)
+         ? (Date.now() - castBaseAt) / 1000
+         : 0;
+      return castStartOffset + castBaseTime + elapsed;
+      }
+   return player.media.currentTime + (player.localOffset || 0);
+}
+
+// One definition of "go to this absolute second", shared by the seek bar, the
+// skip buttons and the arrow keys.  The three branches are not interchangeable:
+//
+//  * Casting, re-LOAD with a server-side timeOffset rather than sending a
+//    Chromecast SEEK.  SEEK relies on the device seeking within its buffered
+//    byte stream, which fails silently for formats without clean seek points
+//    (FLAC without a seektable, etc.).  playerPlay resets cast state and
+//    triggers a fresh stream from the right position.
+//  * A chunked transcode has no Range, so the server has to start ffmpeg at the
+//    seek point instead.  The paused state is preserved, or seeking while
+//    paused would unexpectedly resume playback.
+//  * Anything else is Range-capable and the element can seek itself.
+//
+// The flag to test is player.streamIsTranscoded rather than song.nativeSeek:
+// the latter is undefined for audio and for an audio-only request, which is why
+// playerPlay computes `chunked` instead of reading it.
+function playerSeekTo(target) {
+   if (castDeviceId !== null) {
+      playerPlay(target);
+      } else if (player.streamIsTranscoded) {
+      const wasPaused = player.media.paused;
+      playerPlay(target, true);
+      if (wasPaused) {
+         player.media.addEventListener('canplay',
+            () => player.media.pause(), {once: true});
+         }
+      } else {
+      player.media.currentTime = target;
+      }
+}
+
+// Relative seek, for the buttons on the picture and the arrow keys.
+//
+// Clamped short of the end rather than to it: a timeOffset at the duration
+// produces an empty stream, and a forward skip is not a request to end the
+// track.  The seek bar is written here as well because a chunked seek re-fetches
+// and reports nothing until the new stream starts, so the bar would otherwise
+// sit at the old position for a second after the press.
+function playerSkip(delta) {
+   const song = player.queue[player.index];
+   if (!song) return;
+   const dur = song.duration || castSongDuration || player.media.duration || 0;
+   const target = Math.max(0, Math.min(playerPosition() + delta,
+                                       Math.max(0, dur - 1)));
+   playerSeekTo(target);
+   const seek = document.getElementById('player-seek');
+   if (!seek.dataset.seeking) seek.value = Math.floor(target);
+}
+
 // Stops the current stream and returns the transport bar to its idle state.
 // Closing the surface has to stop playback, not just hide it: a hidden video
 // element still holding a stream would leave the bar offering play, pause and
@@ -3602,7 +3695,7 @@ function playerStop() {
    videoCastPanel(false);
    videoCaptionsMenu([]);
 
-   document.getElementById('player-playpause').textContent = 'play_arrow';
+   playerPlayGlyph('play_arrow');
    document.getElementById('player-title').textContent     = '—';
    document.getElementById('player-artist').textContent    = '';
    document.getElementById('player-info-btn').disabled     = true;
@@ -3625,13 +3718,26 @@ function setupVideoSurface() {
       () => videoSurfaceSet('minimised'));
    document.getElementById('video-restore').addEventListener('click',
       () => videoSurfaceSet('theatre'));
-   // Fullscreen is requested on the video element itself, so this bar — and
-   // with it the picker — is out of reach while it lasts.  Cues keep drawing:
-   // the browser paints them, not us.  Choose the track before going in.
+   // Requested on #video-frame rather than on the video element, so everything
+   // absolutely positioned inside the frame goes fullscreen with the picture:
+   // the transport cluster and the close button.  #video-bar is outside the
+   // frame and so is still out of reach — the subtitle picker included, so
+   // choose the track before going in.  Cues keep drawing either way: the
+   // browser paints them into the video box, not us.
    document.getElementById('video-fullscreen').addEventListener('click', () => {
-      player.videoEl.requestFullscreen?.()
+      document.getElementById('video-frame').requestFullscreen?.()
          .catch(err => console.warn('[video] fullscreen refused', err));
       });
+
+   // Delegating rather than repeating: #player-playpause's own handler is the
+   // one place that knows a pause while casting is castControl and not
+   // player.media.pause(), and it is what the space bar already clicks.
+   document.getElementById('video-play').addEventListener('click',
+      () => document.getElementById('player-playpause').click());
+   document.getElementById('video-back10').addEventListener('click',
+      () => playerSkip(-SKIP_SECS));
+   document.getElementById('video-fwd10').addEventListener('click',
+      () => playerSkip(SKIP_SECS));
    document.getElementById('video-captions').addEventListener('click', () =>
       document.getElementById('video-captions-menu').classList.toggle('hidden'));
 
@@ -4198,11 +4304,11 @@ el.addEventListener('timeupdate', () => {
 // supposed to report what the *receiver* is doing.
 el.addEventListener('play',  () => {
    if (castDeviceId !== null) return;
-   document.getElementById('player-playpause').textContent = 'pause';
+   playerPlayGlyph('pause');
    });
 el.addEventListener('pause', () => {
    if (castDeviceId !== null) return;
-   document.getElementById('player-playpause').textContent = 'play_arrow';
+   playerPlayGlyph('play_arrow');
    });
 
 // canPlayType() lies in some browser/codec pairings — Firefox claims it can
@@ -4272,10 +4378,10 @@ function setupPlayer() {
          const btn = document.getElementById('player-playpause');
          // Flip immediately so the UI responds without waiting for the next poll.
          if (btn.textContent === 'play_arrow') {
-            btn.textContent = 'pause';
+            playerPlayGlyph('pause');
             apiCall('castControl', {action: 'play'}).catch(() => {});
             } else {
-            btn.textContent = 'play_arrow';
+            playerPlayGlyph('play_arrow');
             apiCall('castControl', {action: 'pause'}).catch(() => {});
             }
          return;
@@ -4313,27 +4419,7 @@ function setupPlayer() {
    seek.addEventListener('mousedown',  () => { seek.dataset.seeking = '1'; });
    seek.addEventListener('touchstart', () => { seek.dataset.seeking = '1'; });
    seek.addEventListener('change', () => {
-      const target = Number(seek.value);
-      if (castDeviceId !== null) {
-         // Re-LOAD with a server-side timeOffset rather than sending a Chromecast
-         // SEEK command.  SEEK relies on the device seeking within its buffered
-         // byte stream, which fails silently for formats without clean seek points
-         // (FLAC without a seektable, etc.).  playerPlay resets cast state and
-         // triggers a fresh transcoded stream from the right position.
-         playerPlay(target);
-         } else if (player.streamIsTranscoded) {
-         // Chunked transcoded stream has no Range — re-fetch from the server
-         // starting at the seek point.  Preserve paused state so seeking
-         // while paused doesn't unexpectedly resume playback.
-         const wasPaused = player.media.paused;
-         playerPlay(target, true);
-         if (wasPaused) {
-            player.media.addEventListener('canplay',
-               () => player.media.pause(), {once: true});
-            }
-         } else {
-         player.media.currentTime = target;
-         }
+      playerSeekTo(Number(seek.value));
       delete seek.dataset.seeking;
       });
 
@@ -5423,6 +5509,17 @@ function setupSearch() {
       if (!inInput && e.key === ' ') {
          e.preventDefault();
          document.getElementById('player-playpause').click();
+         return;
+         }
+
+      // Before the catch-all below, which would not have matched anyway — an
+      // arrow key's name is longer than one character — but the intent is that
+      // these are handled and not merely unclaimed.  preventDefault stops the
+      // pane scrolling under them as well.  A focused range input keeps its own
+      // arrow behaviour, since inInput is true for it.
+      if (!inInput && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+         e.preventDefault();
+         playerSkip(e.key === 'ArrowLeft' ? -SKIP_SECS : SKIP_SECS);
          return;
          }
 
