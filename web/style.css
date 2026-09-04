@@ -690,46 +690,64 @@ body {
    nothing is drawn over a film until the pointer says otherwise, and a touch
    device never hovers so it gets them unconditionally.
 
-   z-index puts it over two siblings that are both absolute and inset:0.
-   #video-restore is hidden in theatre but would otherwise swallow the clicks;
-   #video-cast-panel has no z-index at all and comes earlier in the DOM, and
-   these controls are wanted on top of it — while the sound is on a receiver
-   they still drive it, which is the case where the viewer is looking at this
+   Centred rather than parked along the bottom edge, which is where this
+   started: at the bottom it lands in the letterbox bar on most films, which is
+   the one part of the frame a viewer does not expect to be a control, and it
+   is also the strip every other overlay in this file competes for.  The centre
+   is where a transport is looked for, and it is the one region of the picture
+   that is never a black bar.
+
+   z-index puts it over three siblings that are all absolute and inset:0 —
+   #video-restore, #video-preparing and #video-cast-panel, none of which
+   declares one.  The panel matters: while the sound is on a receiver these
+   still drive it, which is the case where the viewer is looking at this
    surface rather than at the player bar. */
 #video-controls {
    position: absolute;
+   top: 50%;
    left: 50%;
-   bottom: 1rem;
-   transform: translateX(-50%);
+   transform: translate(-50%, -50%);
    z-index: 2;
    display: flex;
    align-items: center;
-   gap: 0.25rem;
-   padding: 0.25rem;
-   border-radius: 999px;
-   background: rgba(0, 0, 0, 0.55);
+   gap: 1rem;
    opacity: 0;
    transition: opacity 0.15s ease;
 }
 
+/* No pill behind the row: at this size one would be a black band across the
+   middle of the picture.  Each button carries its own disc instead, so the
+   film goes on showing between them. */
 #video-controls button {
-   width: 2.5rem;
-   height: 2.5rem;
+   width: 4.5rem;
+   height: 4.5rem;
    display: flex;
    align-items: center;
    justify-content: center;
    border: 0;
    border-radius: 50%;
-   background: none;
+   background: rgba(0, 0, 0, 0.55);
    /* Literal, not a theme token, by the rule stated twice above: this is drawn
       on the black the surface paints for itself in either theme. */
    color: rgba(255, 255, 255, 0.92);
-   font-size: 1.5rem;
+   font-size: 2.75rem;
    line-height: 1;
    cursor: pointer;
 }
 
-#video-controls button:hover { background: rgba(255, 255, 255, 0.15); }
+#video-controls button:hover { background: rgba(0, 0, 0, 0.75); }
+
+/* The thumbnail is 160x90 on a phone and the theatre surface is not much
+   taller, so a 4.5rem disc three times over would fill it.  Only the sizes
+   change; the centring and the reveal are the same. */
+@media (max-width: 649px) {
+   #video-controls { gap: 0.6rem; }
+   #video-controls button {
+      width: 3rem;
+      height: 3rem;
+      font-size: 1.8rem;
+      }
+}
 
 #video-surface:hover #video-controls,
 #video-controls:focus-within {
