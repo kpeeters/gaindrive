@@ -21,10 +21,12 @@ class SubsonicClient(
 	 * Carries the same auth parameters the interceptor would have added — this
 	 * is the one place they are constructed by hand.
 	 *
-	 * [suffix] exists for `hls.m3u8`, the one endpoint in the API that is not
-	 * spelled `<name>.view`. Passing an empty string leaves the endpoint name
-	 * alone; ExoPlayer also infers HLS from that trailing `.m3u8`, which is a
-	 * happy accident rather than something to rely on.
+	 * [suffix] exists for `hls.m3u8`, the one endpoint the spec does not spell
+	 * `<name>.view`. Passing an empty string leaves the endpoint name alone.
+	 * The server now answers `hls.view` too, so this is no longer what makes
+	 * the playlist reachable — the reason to keep it is the extension itself,
+	 * which is what lets ExoPlayer recognise a playlist it was handed without
+	 * being told.
 	 */
 	fun url(
 		endpoint: String,

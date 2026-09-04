@@ -506,20 +506,40 @@ kind       = 'additions'
 applies_to = ["hls.m3u8"]
 section    = "playback"
 path       = "/rest/hls.m3u8"
-summary    = 'A frame size may ride along with the variant bitrate.'
+summary    = 'Also served at `hls.view`, and a frame size may ride along with each variant bitrate.'
 notes      = '''
-Note the path: this is the one endpoint not spelled `<name>.view`.
+The spec spells this endpoint `hls.m3u8`, and that spelling is the one to
+prefer — a player often infers HLS from the `.m3u8` extension alone. But a
+client that composes every URL as `<name>.view` would otherwise be unable to
+reach it at all, so the same playlist is served at `/rest/hls.view`, and at
+`/rest/hls`, which the server rewrites to the latter.
 
 The playlist is stateless — it is arithmetic over the stored duration, and
 every segment is an ordinary `stream` request bounded by `timeOffset` and
 `duration`. Nothing is written to disk and nothing needs cleaning up if a
 client stops mid-playlist.
+
+Every URI in the body is relative, so it resolves against `/rest/` whichever
+of the three paths was fetched. A variant URI names this endpoint again, and
+names it with the spelling the request arrived on.
 '''
 
   [[endpoint.param]]
-  name = "bitRate"
-  type = "string"
-  doc  = 'May carry an `@WxH` suffix naming the frame size for that variant — `1000@640x480`.'
+  name       = "bitRate"
+  type       = "string"
+  repeatable = true
+  doc        = 'May carry an `@WxH` suffix naming the frame size for that variant — `1000@640x480`.'
+  notes      = '''
+Given once, it caps the segments of an ordinary media playlist. Given twice or
+more, the answer is a master playlist instead: one `EXT-X-STREAM-INF` per
+distinct bitrate, ascending, each naming this endpoint again with that one
+bitrate. `RESOLUTION` is announced only for a variant that supplied `@WxH`.
+
+A value that names no bitrate — `0`, or anything unparseable — cannot be a
+variant, since `BANDWIDTH` is required of one. `0@640x480` is still honoured
+on a media playlist, where `0` is the spec's "no limit" and the frame size
+governs on its own.
+'''
 
 
 # ===========================================================================

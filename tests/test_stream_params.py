@@ -12,7 +12,9 @@ absorbed by ending an injected chain with another scale, so the concatenation
 offered no accidental protection.
 
 The same value is echoed into the hls.m3u8 **body**, which is neither a URL
-nor XML, so nothing downstream would have caught a newline in it either.
+nor XML, so nothing downstream would have caught a newline in it either — into
+a segment's query string, and, when bitRate is repeated, into a master
+playlist's BANDWIDTH and RESOLUTION attributes and its variant URIs.
 
 Needs a library containing at least one video. Start the server first, then:
     python3 tests/test_stream_params.py
@@ -124,6 +126,44 @@ def test_m3u8_body_has_no_injected_lines():
     print("PASS  hls.m3u8 body cannot be injected through bitRate or size")
 
 
+def test_master_playlist_body_has_no_injected_lines():
+    """A repeated bitRate opens a second body sink for the same two values.
+
+    A master playlist writes the bitrate into a BANDWIDTH attribute and a
+    variant URI, and the frame size into a RESOLUTION attribute — none of which
+    the media-playlist test above can reach, since it never sends bitRate twice.
+    """
+    vid = _a_video_id()
+    hostile = [
+        ("500@640x480\nhttp://evil.example/x.ts\n#EXTINF:10.0,", "900"),
+        ("500\n#EXT-X-ENDLIST", "900@640x480"),
+        ("500@640x480,movie=/etc/passwd", "900,RESOLUTION=1x1"),
+    ]
+    for a, b in hostile:
+        url = (_url("hls.m3u8", {"id": vid})
+               + "&bitRate=" + urllib.parse.quote(a, safe="")
+               + "&bitRate=" + urllib.parse.quote(b, safe=""))
+        try:
+            with urllib.request.urlopen(url) as r:
+                body = r.read(1 << 20)
+                status = r.status
+        except urllib.error.HTTPError as e:
+            status, body = e.code, e.read(1 << 20)
+        assert status == 200, f"hls.m3u8 returned HTTP {status}"
+        text = body.decode("utf-8", "replace")
+        assert "evil.example" not in text, (
+            f"a URL was injected into the playlist body: {text[:300]!r}"
+        )
+        assert "/etc/passwd" not in text, text[:300]
+        for line in text.splitlines():
+            assert (line.startswith("#")
+                    or line.startswith("stream.view?")
+                    or line.startswith("hls.m3u8?")), (
+                f"unexpected playlist line {line!r} for bitRate={a!r},{b!r}"
+            )
+    print("PASS  a master playlist cannot be injected through bitRate or size")
+
+
 def test_m3u8_is_not_cacheable():
     """The playlist body carries the caller's credentials once per segment."""
     vid = _a_video_id()
@@ -153,6 +193,7 @@ TESTS = [
     test_hostile_size_is_not_a_500,
     test_valid_size_still_works,
     test_m3u8_body_has_no_injected_lines,
+    test_master_playlist_body_has_no_injected_lines,
     test_m3u8_is_not_cacheable,
     test_credentials_are_not_echoed_unencoded,
 ]

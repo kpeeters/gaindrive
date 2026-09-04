@@ -53,8 +53,9 @@ struct SubsonicClient: Sendable {
 	/// stream URLs handed to the image loader and to `AVPlayer` — which is why
 	/// it is public rather than an implementation detail of `perform`.
 	///
-	/// The `suffix` exists for `hls.m3u8`, the one endpoint not spelled
-	/// `<name>.view`.
+	/// The `suffix` exists for `hls.m3u8`, the one endpoint the spec does not
+	/// spell `<name>.view`. The server answers `hls.view` too, so the reason to
+	/// keep the extension is that AVFoundation infers HLS from it.
 	///
 	/// Parameters are sorted by name so the same logical request always
 	/// produces the same URL. A URL-keyed image cache depends on that, and a

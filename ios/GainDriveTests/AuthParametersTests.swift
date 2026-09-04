@@ -100,7 +100,9 @@ struct AuthParametersTests {
 
 	@Test func buildsTheEndpointPath() {
 		#expect(client().url("ping").path() == "/rest/ping.view")
-		// The suffix exists for hls.m3u8, the one endpoint not spelled .view.
+		// The suffix exists for hls.m3u8, the one endpoint the spec does not
+		// spell .view. The server answers hls.view too; the extension is kept
+		// because AVFoundation infers HLS from it.
 		#expect(client().url("hls", suffix: ".m3u8").path() == "/rest/hls.m3u8")
 	}
 

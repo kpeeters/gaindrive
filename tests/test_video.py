@@ -3,7 +3,8 @@
 
 Covers the tier ladder (direct / remux / re-encode), the Child fields that
 mark an entry as video, and the stateless HLS playlist — every segment URL it
-emits must resolve, because nothing materialises them in advance.
+emits must resolve, because nothing materialises them in advance. The playlist
+answers at three paths and, given a repeated bitRate, as a master playlist.
 
 Start the server first, against a collection containing at least one video:
     ./build/gaindrive --db /tmp/gd_test.db --music-root /music
@@ -342,6 +343,73 @@ def test_hls_segments_carry_absolute_timestamps():
     print(f"PASS  HLS segments advance ({gap:.1f}s across two segments)")
 
 
+def test_hls_is_served_at_every_spelling():
+    """The spec spells it .m3u8; a client composing <name>.view needs both.
+
+    One handler is registered at hls.m3u8 and hls.view, and bare `hls` reaches
+    the latter through the pre-routing rewrite. All three must produce the same
+    playlist, which they can only do because every URI in the body is relative.
+    """
+    _need_video()
+    vid = _video()["id"]
+    bodies = {}
+    for path in ("hls.m3u8", "hls.view", "hls"):
+        status, hdrs, body = _raw(path, {"id": vid})
+        assert status == 200, f"{path}: HTTP {status}"
+        assert body.startswith(b"#EXTM3U"), f"{path}: {body[:40]!r}"
+        assert hdrs.get("Content-Type", "") == "application/vnd.apple.mpegurl", \
+            f"{path}: {hdrs.get('Content-Type')!r}"
+        assert "no-store" in hdrs.get("Cache-Control", ""), \
+            f"{path}: {hdrs.get('Cache-Control')!r}"
+        bodies[path] = body
+    assert bodies["hls.m3u8"] == bodies["hls.view"] == bodies["hls"], \
+        "the three paths disagree about the playlist"
+    print("PASS  hls.m3u8, hls.view and hls all serve the same playlist")
+
+
+def test_hls_variant_playlist():
+    """A repeated bitRate is the spec's request for a master playlist."""
+    _need_video()
+    vid = _video()["id"]
+    for path in ("hls.m3u8", "hls.view"):
+        url = _url(path, {"id": vid}) + "&bitRate=2000@1280x720&bitRate=800"
+        with urllib.request.urlopen(url) as r:
+            text = r.read().decode()
+            cc = r.headers.get("Cache-Control", "")
+        assert text.startswith("#EXTM3U"), text[:40]
+        assert "no-store" in cc, f"{path}: master is cacheable ({cc!r})"
+        # A master holds no segments, so it must not be terminated like one.
+        assert "#EXT-X-ENDLIST" not in text, "master carries EXT-X-ENDLIST"
+        assert "#EXTINF" not in text, "master carries segments"
+
+        infs = [l for l in text.splitlines() if l.startswith("#EXT-X-STREAM-INF")]
+        uris = [l for l in text.splitlines() if not l.startswith("#")]
+        assert len(infs) == 2, f"{len(infs)} variants, expected 2"
+        assert len(uris) == 2, f"{len(uris)} variant URIs, expected 2"
+
+        bws = [int(l.split("BANDWIDTH=")[1].split(",")[0]) for l in infs]
+        assert bws == [800_000, 2_000_000], f"bandwidths {bws}, expected ascending"
+        # RESOLUTION belongs only to the variant that supplied @WxH.
+        assert "RESOLUTION" not in infs[0], infs[0]
+        assert "RESOLUTION=1280x720" in infs[1], infs[1]
+
+        # Each URI names this endpoint again, on the spelling that was fetched,
+        # carrying exactly one bitRate.
+        for u, want in zip(uris, ("bitRate=800", "bitRate=2000@1280x720")):
+            assert u.startswith(f"{path}?id="), u
+            assert u.count("bitRate=") == 1, u
+            assert f"&{want}&" in u or u.endswith(f"&{want}"), u
+
+        # And a variant URI resolves to an ordinary media playlist.
+        with urllib.request.urlopen(f"{BASE}/{uris[0]}") as r:
+            media = r.read().decode()
+        assert "#EXT-X-ENDLIST" in media, "variant is not a media playlist"
+        segs = [l for l in media.splitlines() if l.startswith("stream.view")]
+        assert segs, "variant playlist had no segments"
+        assert all("maxBitRate=800" in s for s in segs), segs[0]
+    print("PASS  a repeated bitRate yields a master playlist on both paths")
+
+
 def test_hls_rejects_audio():
     r = _json("search3.view", {"query": "", "songCount": "5",
                                "artistCount": "0", "albumCount": "0"})
@@ -402,11 +470,11 @@ def test_captions_are_webvtt_or_absent():
 
 def test_missing_id_is_a_subsonic_error():
     """A bare 500 from an unguarded stoi would fail this."""
-    for ep in ("getVideoInfo.view", "getCaptions.view", "hls.m3u8"):
+    for ep in ("getVideoInfo.view", "getCaptions.view", "hls.m3u8", "hls.view"):
         status, _, body = _raw(ep)
         assert status == 200, f"{ep}: HTTP {status}"
         assert b"error" in body.lower(), f"{ep}: {body[:120]}"
-    for ep in ("getVideoInfo.view", "hls.m3u8"):
+    for ep in ("getVideoInfo.view", "hls.m3u8", "hls.view"):
         status, _, body = _raw(ep, {"id": "not-a-number"})
         assert status == 200, f"{ep}: HTTP {status}"
         assert b"error" in body.lower(), f"{ep}: {body[:120]}"
@@ -429,6 +497,8 @@ TESTS = [
     test_hls_segments_resolve,
     test_hls_segments_carry_absolute_timestamps,
     test_hls_rejects_audio,
+    test_hls_is_served_at_every_spelling,
+    test_hls_variant_playlist,
     test_video_info_lists_tracks,
     test_video_info_rejects_audio,
     test_captions_are_webvtt_or_absent,
