@@ -823,7 +823,11 @@ body {
 #video-chapters-msg   { flex: 1; color: var(--text-dim);
                         font-size: 0.78rem; }
 
-#video-chapters button {
+/* Scoped to .mi so it covers the icon buttons only. The footer's Save and
+   Cancel wear .edit-save-btn/.edit-cancel-btn, the same pair album edit mode
+   uses, and those are plain classes -- an unscoped `#video-chapters button`
+   rule is an id selector and would outrank them. */
+#video-chapters button.mi {
    background: none;
    border: 0;
    color: var(--text-dim);
@@ -833,25 +837,15 @@ body {
    font-size: 1.1rem;
 }
 
-#video-chapters button:hover:not(:disabled) {
+#video-chapters button.mi:hover:not(:disabled) {
    color: var(--text);
    background: var(--border);
 }
 
-#video-chapters button:disabled { opacity: 0.4; cursor: default; }
-#video-chapters button[hidden]  { display: none; }
+#video-chapters button.mi:disabled { opacity: 0.4; cursor: default; }
+#video-chapters button[hidden]     { display: none; }
 
 #video-chapters-edit.on { color: var(--accent); }
-
-/* The two text buttons in the footer are not icons and must not inherit the
-   icon size above. */
-#video-chapters-cancel,
-#video-chapters-save {
-   font-size: 0.8rem;
-   padding: 0.25rem 0.6rem;
-   border: 1px solid var(--border);
-   color: var(--text);
-}
 
 #video-chapters-list {
    flex: 1;
