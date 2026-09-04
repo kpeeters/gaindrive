@@ -1543,10 +1543,10 @@ input.chapter-time.bad { border-color: #e06c6c; }
    justify-content: space-between;
 }
 
-/* A chaptered video heads its own group, and its markers are the rows beneath.
+/* A chaptered track heads its own group, and its markers are the rows beneath.
    Shaped like .disc-heading but not the same class: edit mode appends an "all"
-   button to every .disc-heading, and a video heading has nothing to put there. */
-.video-heading {
+   button to every .disc-heading, and this heading has nothing to put there. */
+.chapters-heading {
    font-size: 0.75rem;
    font-weight: 700;
    letter-spacing: 0.06em;
@@ -1562,7 +1562,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 .track-row.has-chapters                 { display: none; }
 .editing-tracks .track-row.has-chapters { display: grid; }
 .editing-tracks .track-row.chapter-track,
-.editing-tracks .video-heading          { display: none; }
+.editing-tracks .chapters-heading          { display: none; }
 
 /* Dimmed until it is the one playing, so the list reads as positions inside a
    film rather than as tracks of their own. */

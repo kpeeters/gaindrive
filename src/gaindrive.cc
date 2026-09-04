@@ -2373,6 +2373,147 @@ static void write_chapters_response(httplib::Response& res, int song_id,
 	res.set_content(body, use_json ? "application/json" : "application/xml");
 	}
 
+// Splits a filename into the part a sibling shares and the part that names its
+// kind, treating a sidecar's double extension as one suffix.
+//
+// std::filesystem splits on the *last* dot, so "Track.chapters.txt" has stem
+// "Track.chapters" -- and that separates it from "Track.opus" in two different
+// places downstream. reparent_loose_media() would file it under an album called
+// "Track.chapters" while the media went to "Track"; and batch_merge_into()'s
+// collision suffixing would produce "Track.chapters (2).txt", a name that no
+// longer ends in CHAPTERS_SUFFIX, so it stops being a sidecar at all *and*
+// starts appearing in getAlbumTexts as liner notes.
+//
+// Both were latent while nothing put a sidecar in a batch. A fetch that writes
+// one from the tool's metadata makes them reachable.
+static std::pair<std::string, std::string> split_sidecar_name(
+	const std::filesystem::path& p)
+	{
+	const std::string name(p.filename().string());
+	const std::string suffix(MediaStore::CHAPTERS_SUFFIX);
+	if (name.size() > suffix.size()
+	        && name.compare(name.size() - suffix.size(), suffix.size(),
+	                        suffix) == 0)
+		return { name.substr(0, name.size() - suffix.size()), suffix };
+	return { p.stem().string(), p.extension().string() };
+	}
+
+// Turns a fetch tool's own metadata into the sidecar gaindrive indexes.
+//
+// yt-dlp writes <name>.info.json beside each download when asked, and its
+// `chapters` array is the site's own parse of the timestamps the uploader
+// wrote. That is the whole reason a fetched concert or DJ set can list its
+// songs with nobody marking them up by hand.
+//
+// Keyed on the *file* rather than on which handler ran, so it serves an
+// uploaded archive that happens to contain one, and a handler somebody
+// configured with the flag themselves, without special-casing yt-dlp.
+//
+// **It must run before anything else in the pipeline renames a file**, which
+// is why scan_batch() calls it first. std::filesystem splits on the last dot,
+// so "Track.info.json" has stem "Track.info": reparent_loose_media() would
+// file it under an album of that name and batch_merge_into() would suffix it
+// "Track.info (2).json", either of which separates it from the media it
+// describes. Running first also means the sidecar it writes travels the rest
+// of the pipeline as an ordinary file, which split_sidecar_name() is what
+// makes safe.
+static void convert_tool_sidecars(const std::filesystem::path& batch_root)
+	{
+	namespace fs = std::filesystem;
+	static constexpr std::string_view INFO_SUFFIX = ".info.json";
+	auto ends_with = [](const std::string& s, std::string_view suf) {
+		return s.size() > suf.size()
+		    && s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
+		};
+
+	// Collected before anything is removed: mutating the tree under a
+	// recursive_directory_iterator is undefined.
+	std::error_code ec;
+	std::vector<fs::path> found;
+	for (auto& e : fs::recursive_directory_iterator(
+	         batch_root, fs::directory_options::skip_permission_denied, ec)) {
+		if (!e.is_regular_file()) continue;
+		if (ends_with(e.path().filename().string(), INFO_SUFFIX))
+			found.push_back(e.path());
+		}
+
+	for (const auto& info : found) {
+		std::vector<Chapter> chapters;
+		try {
+			std::ifstream f(info, std::ios::binary);
+			if (f) {
+				std::string text((std::istreambuf_iterator<char>(f)),
+				                  std::istreambuf_iterator<char>());
+				// Through jsonread, never value(): this is third-party JSON
+				// reached from fetch_worker()'s own thread, where an escaping
+				// exception is std::terminate rather than a failed request --
+				// and a video with no chapters sends "chapters": null, which
+				// is exactly the shape value() throws on. A discarded parse is
+				// not null either, and jsub() answers for that too.
+				auto j = nlohmann::json::parse(text, nullptr, false);
+				for (const auto& c : jsub(j, "chapters")) {
+					if (chapters.size() >= MediaStore::MAX_CHAPTERS) break;
+					const auto& st = jsub(c, "start_time");
+					if (!st.is_number()) continue;
+					Chapter ch;
+					ch.start = st.get<double>();
+					// Rejects a negative and, because the test is written the
+					// positive way round, a NaN.
+					if (!(ch.start >= 0)) continue;
+					ch.name = chapter_clean_name(jstr(c, "title"));
+					chapters.push_back(std::move(ch));
+					}
+				}
+			}
+		catch (const std::exception& ex) {
+			std::cout << stamp() << "batch sidecars: cannot read " << info
+			          << ": " << ex.what() << std::endl;
+			}
+
+		// Removed whether or not it yielded anything: it is the tool's
+		// exhaust, and the library keeps the media and the sidecar.
+		std::error_code rec;
+		fs::remove(info, rec);
+
+		// No chapters is not the same as *no* chapters: an empty sidecar is
+		// the tombstone that overrules a container's own list, and a fetch has
+		// no business asserting that on someone's behalf.
+		if (chapters.empty()) continue;
+
+		const std::string name = info.filename().string();
+		fs::path target = info.parent_path()
+		    / (name.substr(0, name.size() - INFO_SUFFIX.size())
+		       + std::string(MediaStore::CHAPTERS_SUFFIX));
+
+		// Never over a file that is already there: on a re-fetch that would
+		// destroy markers somebody had corrected by hand.
+		std::error_code xec;
+		if (fs::exists(target, xec)) {
+			std::cout << stamp() << "batch sidecars: keeping the existing "
+			          << target.filename() << std::endl;
+			continue;
+			}
+
+		std::ofstream out(target, std::ios::binary | std::ios::trunc);
+		if (!out) {
+			std::cout << stamp() << "batch sidecars: cannot write " << target
+			          << std::endl;
+			continue;
+			}
+		const std::string body = format_chapters(chapters);
+		out.write(body.data(), static_cast<std::streamsize>(body.size()));
+		out.close();
+		if (!out) {
+			std::cout << stamp() << "batch sidecars: write failed for "
+			          << target << std::endl;
+			fs::remove(target, rec);
+			continue;
+			}
+		std::cout << stamp() << "batch sidecars: " << chapters.size()
+		          << " chapter(s) -> " << target.filename() << std::endl;
+		}
+	}
+
 // Pushes anything still loose in a batch down to <artist>/<album>/file.
 //
 // Two invariants downstream want exactly that depth and neither of them says so
@@ -2412,7 +2553,10 @@ static int reparent_loose_media(const std::filesystem::path& batch_root,
 
 	int moved = 0;
 	for (const auto& p : loose) {
-		std::string album = sanitise_component(p.stem().string());
+		// split_sidecar_name, not stem(): a loose "Track.chapters.txt" belongs
+		// to the album "Track", beside the media it describes, not to one
+		// called "Track.chapters" of its own.
+		std::string album = sanitise_component(split_sidecar_name(p).first);
 		if (album.empty()) album = "Unknown Album";
 		fs::path parent = p.parent_path() == batch_root
 		    ? batch_root / artist : p.parent_path();
@@ -2476,8 +2620,11 @@ static void batch_merge_into(const std::filesystem::path& src,
 		for (int n = 2; n < 100; n++) {
 			std::error_code xec;
 			if (!fs::exists(target, xec)) break;
-			target = dst / (p.stem().string() + " (" + std::to_string(n) + ")"
-			                + p.extension().string());
+			// The number goes *before* a sidecar's double extension, so
+			// "Track.chapters.txt" becomes "Track (2).chapters.txt" and stays
+			// paired with the "Track (2).opus" beside it.
+			auto [base, ext] = split_sidecar_name(p);
+			target = dst / (base + " (" + std::to_string(n) + ")" + ext);
 			}
 		std::error_code rec;
 		fs::rename(p, target, rec);
@@ -5285,7 +5432,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 		int  song_id = to_int(it->second, -1);
 		auto song    = store_.get_song(song_id);
-		if (!song || !song->is_video) { err(70, "Video not found."); return; }
+		if (!song) { err(70, "Song not found."); return; }
 		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
 		                          song->path, use_json)) return;
 
@@ -5343,8 +5490,8 @@ GainDrive::GainDrive(const std::string& db_path,
 						{"chapter", chapter_array_json(v.chapters, v.duration)}
 						});
 				r["albumChapters"] = {
-					{"id",    sid(folder_id)},
-					{"video", list}
+					{"id",   sid(folder_id)},
+					{"song", list}
 					};
 				});
 		else
@@ -5352,7 +5499,7 @@ GainDrive::GainDrive(const std::string& db_path,
 				auto* parent = doc.NewElement("albumChapters");
 				parent->SetAttribute("id", folder_id);
 				for (const auto& v : vids) {
-					auto* el = doc.NewElement("video");
+					auto* el = doc.NewElement("song");
 					el->SetAttribute("id",    v.song_id);
 					el->SetAttribute("title", v.title.c_str());
 					chapter_array_xml(doc, el, v.chapters, v.duration);
@@ -5398,7 +5545,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 		int  song_id = to_int(it->second, -1);
 		auto song    = store_.get_song(song_id);
-		if (!song || !song->is_video) { err(70, "Video not found."); return; }
+		if (!song) { err(70, "Song not found."); return; }
 		if (!check_item_write_perm(req, res, store_, uploads_root_name_,
 		                           song->path, use_json)) return;
 
@@ -5623,7 +5770,7 @@ GainDrive::GainDrive(const std::string& db_path,
 						{"index",    h.index},
 						{"start",    std::llround(h.start * 1000.0) / 1000.0},
 						{"name",     h.name},
-						{"video",    h.video},
+						{"track",    h.track},
 						{"album",    h.album},
 						{"artist",   h.artist} });
 
@@ -5670,7 +5817,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					              std::llround(h.start * 1000.0) / 1000.0);
 					el->SetAttribute("start",  buf);
 					el->SetAttribute("name",   h.name.c_str());
-					el->SetAttribute("video",  h.video.c_str());
+					el->SetAttribute("track",  h.track.c_str());
 					el->SetAttribute("album",  h.album.c_str());
 					el->SetAttribute("artist", h.artist.c_str());
 					result->InsertEndChild(el);
@@ -7423,6 +7570,10 @@ void GainDrive::scan_batch(const std::string& rel_batch,
                            const std::string& album_override)
 	{
 	try {
+		// First, while every file is still exactly where the tool's own -o
+		// template put it: this pairs a .info.json with its media by name, and
+		// every step below may rename one of them.
+		convert_tool_sidecars(dest);
 		// Tags first, and never skipped even when both names were typed: this
 		// is what derives an album from a file's own metadata, drags a sibling
 		// cover along with the audio it belongs to, and prunes what it empties.

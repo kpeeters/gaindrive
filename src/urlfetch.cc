@@ -118,9 +118,24 @@ std::vector<UrlHandler> UrlFetcher::default_handlers()
 	// The thumbnail output costs nothing and gains a cover: cover.jpg is the
 	// first name in MediaStore's COVER_FILENAMES, so find_cover() picks it up
 	// with no new code at all.
+	//
+	// --write-info-json is there for the same kind of reason, and buys the
+	// chapter list. A concert or a DJ set arrives as one track; the uploader
+	// wrote the timestamps and the site parsed them, and this is the only way
+	// to be told. The batch pipeline converts the file's `chapters` array into
+	// the sidecar gaindrive indexes and then deletes it -- see
+	// convert_tool_sidecars() in gaindrive.cc.
+	//
+	// Not --embed-chapters: that writes them into the container, and only
+	// sidecars are indexed, so the album view would never see them. And not
+	// --write-description with our own parser, tempting though it is, since
+	// parse_chapters() reads exactly the "13:35 Title" form a description
+	// carries -- a description also carries timestamps in links and in quoted
+	// comments, where `chapters` is the site's own parse.
 	std::vector<std::string> common = {
 		"--newline", "--progress", "--no-playlist",
-		"--write-thumbnail", "--convert-thumbnails", "jpg", "-P", "%DIR%" };
+		"--write-thumbnail", "--convert-thumbnails", "jpg",
+		"--write-info-json", "-P", "%DIR%" };
 
 	// Reading "Eric Clapton - I Shot The Sheriff (Live at Budokan 2009)" as
 	// three fields rather than as one channel name.

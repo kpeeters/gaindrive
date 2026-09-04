@@ -5172,7 +5172,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
    const chaptersByVideo = new Map();
    try {
       const cr = await apiCall('getAlbumChapters', {id: albumId});
-      for (const v of cr.albumChapters?.video ?? [])
+      for (const v of cr.albumChapters?.song ?? [])
          chaptersByVideo.set(v.id, v.chapter ?? []);
       }
    catch (e) { console.warn('[chapters] album index unavailable', e); }
@@ -5266,7 +5266,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
       if (chapters?.length) {
          row.classList.add('has-chapters');
          const vh = document.createElement('div');
-         vh.className = 'video-heading';
+         vh.className = 'chapters-heading';
          vh.textContent = song.title;
          frag.appendChild(vh);
          for (const c of chapters)
@@ -6021,7 +6021,7 @@ function renderSearchResults(res) {
    if (chapters.length > 0) {
       const h = document.createElement('h2');
       h.className = 'index-heading';
-      h.textContent = 'In videos';
+      h.textContent = 'Chapters';
       frag.appendChild(h);
 
       for (const c of chapters) {
@@ -6037,13 +6037,13 @@ function renderSearchResults(res) {
 
          const sub = document.createElement('span');
          sub.className = 'search-song-sub';
-         // Artist, album, then the film itself: a marker means nothing without
-         // knowing which concert it is in, and the album is what the folder is
-         // called while the video is what the file is called. They coincide
-         // often enough -- a folder holding one film named after it -- that an
-         // exact duplicate is dropped rather than printed twice.
+         // Artist, album, then the track itself: a marker means nothing
+         // without knowing which concert it is in, and the album is what the
+         // folder is called while the track is what the file is called. They
+         // coincide often enough -- a folder holding one recording named after
+         // it -- that an exact duplicate is dropped rather than printed twice.
          const where = [c.artist, c.album];
-         if (c.video && c.video !== c.album) where.push(c.video);
+         if (c.track && c.track !== c.album) where.push(c.track);
          sub.textContent = where.filter(Boolean).join(' · ');
 
          info.append(titleEl, sub);

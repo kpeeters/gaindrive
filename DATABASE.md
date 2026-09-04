@@ -459,9 +459,16 @@ CREATE TABLE video_meta (
 -- Read in scan Phase 1, beside the sidecar cover,
 -- and deliberately not in Phase 3: that phase sees
 -- only files whose mtime changed, and a sidecar is
--- written without touching the video's, so an edit
--- would never be noticed -- nor would a library
+-- written without touching the media file's, so an
+-- edit would never be noticed -- nor would a library
 -- scanned before this existed ever be back-filled.
+--
+-- Audio as well as video. A DJ set or a mixtape is
+-- one file holding a dozen songs for exactly the
+-- reason a concert film is. load_chapter_keys() is
+-- what keeps that affordable: without it every audio
+-- row would issue a DELETE here on every scan to
+-- discover it has no markers.
 --
 -- Only sidecars are indexed. A container's own
 -- chapters still reach the player through

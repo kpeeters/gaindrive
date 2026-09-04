@@ -205,6 +205,15 @@ class MediaStore {
 		// known-mtimes fetch the scan already does.
 		std::unordered_map<std::string, int64_t> load_video_art_keys(
 			const std::string& path_prefix);
+
+		// The paths under `path_prefix` that already have chapter rows, one
+		// query per artist, exactly as load_video_art_keys() above works.
+		//
+		// It exists to keep the scan's inner loop free: without it, every
+		// audio row in the library would execute a DELETE against `chapters`
+		// on every scan just in case it had some. With it, a song is touched
+		// only when it has markers now or had them before.
+		std::set<std::string> load_chapter_keys(const std::string& path_prefix);
 		void store_video_art(const std::string& rel_path, int64_t mtime,
 		                     const std::string& mime, const std::string& source,
 		                     const std::string& bytes);
@@ -586,21 +595,24 @@ class MediaStore {
 		// reappear. False means nothing was written and the old file stands.
 		bool save_chapters(int song_id, const std::vector<Chapter>& chapters);
 
-		// Every chaptered video in one album folder, from the `chapters`
+		// Every chaptered item in one album folder, from the `chapters`
 		// index, in the order the album lists its tracks.
+		//
+		// Not "video": a two-hour DJ set fetched as audio carries markers for
+		// exactly the same reason a concert film does.
 		//
 		// The index, not the files: this is a browse path, and reading a
 		// sidecar per video -- or worse, running ffprobe for one without --
 		// every time somebody opens an album is the cost the table exists to
 		// remove. get_chapters() above stays the authority for playback.
-		struct AlbumChapterVideo {
+		struct AlbumChapterItem {
 			int                  song_id;
 			std::string          title;
 			double               duration;   // the video's, for the last span
 			std::vector<Chapter> chapters;
 			};
 
-		std::vector<AlbumChapterVideo> get_album_chapters(int folder_id);
+		std::vector<AlbumChapterItem> get_album_chapters(int folder_id);
 
 		// The most markers one file may hold, in both directions. A hand-written
 		// file goes straight into a JSON document, so the ceiling is as much a
@@ -669,7 +681,7 @@ class MediaStore {
 			int         index;        // 1-based, as getChapters numbers them
 			double      start;
 			std::string name;
-			std::string video;        // the video's title
+			std::string track;        // the title of the song or film it is in
 			std::string album;
 			std::string artist;
 			};

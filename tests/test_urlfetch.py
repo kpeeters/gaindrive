@@ -20,12 +20,14 @@ fetch, a promote and a cancel. It is None by default because it downloads,
 takes minutes and needs yt-dlp installed on the server.
 """
 
+import io
 import json
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 
 BASE   = "http://localhost:4040/rest"
 USER   = "admin"
@@ -370,6 +372,151 @@ def test_duplicate_refused():
         _get("cancelFetch.view", {"id": job["id"]})
 
 
+# ---- Tool sidecars (no network) ---------------------------------------
+#
+# A fetch asks yt-dlp for a .info.json and the batch pipeline turns its
+# `chapters` array into the sidecar gaindrive indexes. That conversion is keyed
+# on the *file* rather than on which handler ran, so an uploaded archive takes
+# the identical path — which is what makes it testable with no network, no
+# yt-dlp and no waiting for a download.
+#
+# Not asserted here: that the .info.json is deleted afterwards. Nothing in the
+# API lists arbitrary files in a folder, so that one is checked by hand.
+
+UPLOAD_URL = BASE.rsplit("/rest", 1)[0] + "/upload"
+
+
+def _upload_zip(entries):
+    """POSTs a zip of {name: bytes|str} and returns the reply object."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, data in entries.items():
+            z.writestr(name, data)
+
+    boundary = "----gaindrivetestboundary"
+    body = (f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="file"; filename="b.zip"\r\n'
+            "Content-Type: application/zip\r\n\r\n").encode()
+    body += buf.getvalue()
+    body += f"\r\n--{boundary}--\r\n".encode()
+
+    p = {"u": USER, "p": PASS, "v": VER, "c": CLIENT}
+    req = urllib.request.Request(
+        f"{UPLOAD_URL}?{urllib.parse.urlencode(p)}", data=body)
+    req.add_header("Content-Type",
+                   f"multipart/form-data; boundary={boundary}")
+    try:
+        with urllib.request.urlopen(req) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise Skip(f"/upload returned HTTP {e.code} — is an uploads root "
+                   f"configured and does {USER} have upload rights?") from None
+
+
+def _await_song(title, timeout=30):
+    """/upload answers before the scan finishes, so the listing lags."""
+    for _ in range(timeout * 2):
+        sr = _get("search3.view", {"query": title, "songCount": "20",
+                                   "artistCount": "0", "albumCount": "0",
+                                   "personal": "true"})
+        for s in sr.get("searchResult3", {}).get("song", []):
+            if s.get("title") == title:
+                return s
+        time.sleep(0.5)
+    return None
+
+
+def _chapter_pairs(song_id):
+    sr = _get("getChapters.view", {"id": song_id})
+    return ([(c["start"], c.get("name", ""))
+             for c in sr.get("chapters", {}).get("chapter", [])],
+            sr.get("chapters", {}).get("source"))
+
+
+def _cleanup(song):
+    """Best effort — the album folder, which is what deleteUpload accepts."""
+    try:
+        _get("deleteUpload.view", {"id": song["parent"]})
+    except Exception:                                    # noqa: BLE001
+        pass
+
+
+def test_info_json_becomes_a_chapter_sidecar():
+    """The whole point: a fetched set lists its songs with no manual step."""
+    tag  = str(int(time.time()))
+    name = f"Zqx Set {tag}"
+    info = json.dumps({"title": name, "chapters": [
+        {"start_time": 0.0,   "end_time": 815.0,  "title": "Opener"},
+        {"start_time": 815.0, "end_time": 1142.0, "title": "Second Song"},
+        {"start_time": 1142.0,                    "title": "Encore"}]})
+    r = _upload_zip({f"Zqx Artist/{name}/{name}.opus": b"\0" * 4096,
+                     f"Zqx Artist/{name}/{name}.info.json": info})
+    assert r.get("status") == "ok", r
+
+    song = _await_song(name)
+    assert song, f"{name!r} never appeared in the personal listing"
+    try:
+        pairs, source = _chapter_pairs(song["id"])
+        assert source == "sidecar", source
+        assert pairs == [(0.0, "Opener"), (815.0, "Second Song"),
+                         (1142.0, "Encore")], pairs
+
+        # And it reached the browse index, which is what the album view reads.
+        sr = _get("getAlbumChapters.view", {"id": song["parent"]})
+        vids = sr.get("albumChapters", {}).get("song", [])
+        assert any(v["id"] == song["id"] for v in vids), vids
+        print(f"PASS  an info.json became {len(pairs)} chapters, indexed")
+    finally:
+        _cleanup(song)
+
+
+def test_info_json_without_chapters_writes_nothing():
+    """A video with none sends "chapters": null — the shape value() throws on,
+    and an empty sidecar would be a tombstone the fetch has no right to set."""
+    tag  = str(int(time.time())) + "b"
+    name = f"Zqx Plain {tag}"
+    info = json.dumps({"title": name, "chapters": None})
+    r = _upload_zip({f"Zqx Artist/{name}/{name}.opus": b"\0" * 4096,
+                     f"Zqx Artist/{name}/{name}.info.json": info})
+    assert r.get("status") == "ok", r
+
+    song = _await_song(name)
+    assert song, f"{name!r} never appeared"
+    try:
+        pairs, source = _chapter_pairs(song["id"])
+        assert pairs == [], pairs
+        assert source == "none", f"source={source} — a tombstone was written"
+        print("PASS  chapters:null writes no sidecar, not an empty one")
+    finally:
+        _cleanup(song)
+
+
+def test_loose_sidecar_follows_its_media():
+    """A sidecar's double extension must not strand it in an album of its own.
+
+    std::filesystem splits on the last dot, so without split_sidecar_name()
+    "Clip.chapters.txt" is filed under an album called "Clip.chapters" while
+    "Clip.mp4" goes to "Clip", and the markers are never found. A video is used
+    because reorganise_by_tags() claims loose *audio* before this runs.
+    """
+    tag  = str(int(time.time())) + "c"
+    name = f"Zqx Clip {tag}"
+    r = _upload_zip({f"{name}.mp4": b"\0" * 4096,
+                     f"{name}.chapters.txt": "0:00 One\n5:00 Two\n"})
+    assert r.get("status") == "ok", r
+
+    song = _await_song(name)
+    assert song, f"{name!r} never appeared"
+    try:
+        pairs, source = _chapter_pairs(song["id"])
+        assert source == "sidecar", \
+            f"source={source} — the sidecar did not follow its media"
+        assert pairs == [(0.0, "One"), (300.0, "Two")], pairs
+        print("PASS  a loose sidecar is filed with the media it describes")
+    finally:
+        _cleanup(song)
+
+
 TESTS = [
     test_handlers_well_formed,
     test_missing_url,
@@ -382,6 +529,9 @@ TESTS = [
     test_cancel_unknown_id,
     test_jobs_list_shape,
     test_permission_and_isolation,
+    test_info_json_becomes_a_chapter_sidecar,
+    test_info_json_without_chapters_writes_nothing,
+    test_loose_sidecar_follows_its_media,
     test_live_fetch,
     test_live_fetch_with_names,
     test_duplicate_refused,

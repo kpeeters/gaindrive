@@ -135,17 +135,32 @@ def test_get_chapters_shape():
           f"{len(c.get('chapter', []))} marker(s)")
 
 
-def test_get_chapters_rejects_non_video():
-    """A song id must not answer here; 70 rather than an empty list."""
+def test_get_chapters_accepts_audio():
+    """Chapters are not a video feature.
+
+    A DJ set or a mixtape is one file holding a dozen songs for exactly the
+    reason a concert film is. An audio track with no sidecar answers with an
+    empty list and source "none" -- and, importantly, without an ffprobe: the
+    container fallback stays video-only, because a process spawn per call is
+    affordable once per film and not once per audio track.
+    """
     r = _json("getRandomSongs.view", {"size": "50"})
     songs = [s for s in r.get("randomSongs", {}).get("song", [])
              if not s.get("isVideo")]
     if not songs:
-        print("SKIP  non-video rejection: no audio songs found")
+        print("SKIP  audio chapters: no audio songs found")
         return
     sr = _get(songs[0]["id"])
+    assert sr["status"] == "ok", sr
+    assert sr["chapters"]["source"] in ("sidecar", "none"), sr["chapters"]
+    print(f"PASS  getChapters accepts an audio song "
+          f"(source={sr['chapters']['source']})")
+
+
+def test_get_chapters_rejects_unknown_id():
+    sr = _get("999999999")
     assert sr["status"] == "failed" and sr["error"]["code"] == 70, sr
-    print("PASS  getChapters refuses an audio song with error 70")
+    print("PASS  getChapters on an unknown id is error 70")
 
 
 def test_missing_id():
@@ -402,7 +417,8 @@ def test_search_omits_chapters_when_not_asked():
 TESTS = [
     test_get_chapters_shape,
     test_missing_id,
-    test_get_chapters_rejects_non_video,
+    test_get_chapters_accepts_audio,
+    test_get_chapters_rejects_unknown_id,
     test_save_and_read_back,
     test_round_trip_is_a_fixed_point,
     test_duplicate_names_both_survive,

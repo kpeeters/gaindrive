@@ -1447,10 +1447,10 @@ struct SongReadData {
 	// so Phase 3 does not have to rediscover them. `path` is the first of
 	// these. Empty for everything else, which is what marks a row as ordinary.
 	std::vector<std::string> parts;
-	// Video only: the sidecar's markers, read in Phase 1 for the `chapters`
-	// index. Read there and not in Phase 3 for the reason the filename parse
-	// is -- Phase 3 sees only changed files, and a sidecar is written without
-	// touching the video's mtime, so an edit would never be noticed.
+	// The sidecar's markers, read in Phase 1 for the `chapters` index. Read
+	// there and not in Phase 3 for the reason the filename parse is -- Phase 3
+	// sees only changed files, and a sidecar is written without touching the
+	// media file's mtime, so an edit would never be noticed.
 	std::vector<Chapter> chapters;
 	};
 
@@ -1569,7 +1569,6 @@ static SongReadData read_song_file(const fs::path& p,
 		// count, and one with ten season folders sorts "Season 10" second.
 		// Only the parsed number can be trusted, and only videos have one.
 		if (vn.season > 0) sdat.disc_number = vn.season;
-		sdat.chapters = read_sidecar_chapters(p);
 		}
 	else {
 		// An untagged audio file's only track number is the one in its
@@ -1580,6 +1579,13 @@ static SongReadData read_song_file(const fs::path& p,
 		// non-zero track().
 		sdat.track_nr = track_prefix_number(p.stem().string());
 		}
+
+	// Audio as well as video: a two-hour DJ set or a mixtape fetched as audio
+	// wants a song list exactly as much as a concert film does. Outside the
+	// branch above rather than repeated in both, and here in Phase 1 rather
+	// than Phase 3 because that phase sees only files whose mtime changed --
+	// and a sidecar is written without touching the media file's.
+	sdat.chapters = read_sidecar_chapters(p);
 	return sdat;
 	}
 
@@ -2289,14 +2295,21 @@ static void apply_song_chapters(SQLite::Database& db,
 static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat,
                                    int album_id, int folder_id, int artist_id,
                                    const std::string& rel_path,
-                                   const std::string& rel_cover)
+                                   const std::string& rel_cover,
+                                   const std::set<std::string>& chapter_keys)
 	{
 	// Before the changed/unchanged split, deliberately, because it belongs to
-	// neither: sdat.changed compares the *video's* mtime and a sidecar is
+	// neither: sdat.changed compares the *media file's* mtime, and a sidecar is
 	// written without touching that, so a chapter edit is invisible to it.
-	// Gated on is_video only to keep 25k audio rows from paying a DELETE each
-	// per scan for a table that can never hold them.
-	if (sdat.is_video) apply_song_chapters(db, rel_path, sdat.chapters);
+	//
+	// Touched only when the file has markers now or had them before. The
+	// alternative is a DELETE per song per scan on the off-chance, which for a
+	// library of 25k audio files is 25k prepared write statements inside the
+	// album transactions to discover that almost none of them has any.
+	// `chapter_keys` is one query per artist, the same bargain
+	// load_video_art_keys() strikes.
+	if (!sdat.chapters.empty() || chapter_keys.count(rel_path))
+		apply_song_chapters(db, rel_path, sdat.chapters);
 
 	if (!sdat.changed) {
 		// An unchanged song still has to say it was seen: the per-album prune
@@ -2609,6 +2622,11 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			sdat.artist_missing = (it != known.end() && it->second.artist_null);
 			}
 
+	// Which songs under this artist already have chapter rows. One query, so
+	// that Phase 4 can leave the other 25,000 alone -- see the note over
+	// upsert_song_with_data()'s call to apply_song_chapters().
+	const std::set<std::string> chapter_keys = load_chapter_keys(prefix);
+
 	// ---- Phase 3c: identify films and series online (no lock) ----
 	// Only under a categories root. A concert or a music video sitting under a
 	// performer stays local: both layouts are L1/L2/files and the scanner
@@ -2812,7 +2830,8 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 				int  fid = (fit != fid_map.end()) ? fit->second : album_folder_id;
 				upsert_song_with_data(db_music_, sdat, album_id, fid, artist_id,
 				                       strip_root(sdat.path),
-				                       sdat.cover.empty() ? "" : strip_root(sdat.cover));
+				                       sdat.cover.empty() ? "" : strip_root(sdat.cover),
+				                       chapter_keys);
 				// getScanStatus's `count`.  Counted here rather than after the
 				// commit below so the number moves while a large album is
 				// still being written; an album whose transaction then fails
@@ -3177,6 +3196,12 @@ void MediaStore::scan_root_files(const RootRec& root)
 		sdat.artist_missing = (it != known_songs.end() && it->second.artist_null);
 		}
 
+	// As in scan_artist_dir(). The prefix is the whole root here, which is
+	// wider than the loose files this function owns, but a superset only costs
+	// memory and the alternative is a second spelling of the predicate.
+	const std::set<std::string> chapter_keys =
+		load_chapter_keys(root.cfg.name + "/%");
+
 	// ---- Phase 3: metadata reads (no lock); see scan_artist_dir() ----
 	{
 	PhaseTimer pt(scan_times_.meta);
@@ -3255,7 +3280,8 @@ void MediaStore::scan_root_files(const RootRec& root)
 		for (auto& sdat : songs)
 			upsert_song_with_data(db_music_, sdat, album_id, folder_id, artist_id,
 			                       strip_root(sdat.path),
-			                       sdat.cover.empty() ? "" : strip_root(sdat.cover));
+			                       sdat.cover.empty() ? "" : strip_root(sdat.cover),
+			                       chapter_keys);
 
 		// Loose files are songs like any other, and are the one place an
 		// override would otherwise be silently dropped.
@@ -3762,6 +3788,18 @@ MediaStore::load_video_art_keys(const std::string& path_prefix)
 	q.bind(1, path_prefix);
 	while (q.executeStep())
 		result[q.getColumn(0).getString()] = q.getColumn(1).getInt64();
+	return result;
+	}
+
+std::set<std::string> MediaStore::load_chapter_keys(
+	const std::string& path_prefix)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	std::set<std::string> result;
+	SQLite::Statement q(db_music_,
+		"SELECT DISTINCT path FROM chapters WHERE path LIKE ?");
+	q.bind(1, path_prefix);
+	while (q.executeStep()) result.insert(q.getColumn(0).getString());
 	return result;
 	}
 
@@ -4289,7 +4327,7 @@ MediaStore::VideoChapters MediaStore::get_chapters(int song_id)
 	vc.source = "none";
 
 	auto song = get_song(song_id);   // takes db_mutex_ itself; don't hold it here
-	if (!song || !song->is_video) return vc;
+	if (!song) return vc;
 
 	std::string abs = abs_path(song->path);
 	if (!path_is_within_root(abs)) return vc;
@@ -4317,6 +4355,16 @@ MediaStore::VideoChapters MediaStore::get_chapters(int song_id)
 	// Failing that, whatever the container says.  Read-only: nothing here ever
 	// writes chapters back into a media file, because for MP4 that is a track
 	// inside the container and so a full rewrite of every byte.
+	//
+	// **Video only, and this is the one gate that must not be lifted.** The
+	// sidecar branch above is a file that is nearly always absent, which costs
+	// a failed open; this is an ffprobe. Videos are a small minority of a
+	// library, so asking about each one is affordable — asking about every
+	// audio track that has no sidecar, which is essentially all of them, is a
+	// process spawn per getChapters call. An M4B audiobook is the audio format
+	// that genuinely does carry container chapters; see ISSUES.md.
+	if (!song->is_video) return vc;
+
 	std::vector<std::string> args = {
 		"ffprobe", "-v", "quiet", "-print_format", "json", "-show_chapters", abs
 		};
@@ -4352,20 +4400,23 @@ MediaStore::VideoChapters MediaStore::get_chapters(int song_id)
 	return vc;
 	}
 
-std::vector<MediaStore::AlbumChapterVideo>
+std::vector<MediaStore::AlbumChapterItem>
 MediaStore::get_album_chapters(int folder_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	std::vector<AlbumChapterVideo> out;
+	std::vector<AlbumChapterItem> out;
 
 	// The same folder predicate get_album()'s flat listing uses -- the album
 	// folder, or a disc subdirectory of it -- and the same ordering, so the
-	// videos come back in the order the tracks are already drawn in.
+	// items come back in the order the tracks are already drawn in.
+	//
+	// No is_video predicate: the EXISTS below is the real narrowing, and a
+	// two-hour DJ set fetched as audio wants this exactly as much as a concert
+	// film does.
 	SQLite::Statement q(db_music_,
 		"SELECT s.id, s.title, s.duration, s.path"
 		" FROM songs s"
-		" WHERE s.is_video = 1"
-		"   AND (s.folder_id = ?"
+		" WHERE (s.folder_id = ?"
 		"        OR s.folder_id IN (SELECT id FROM folders WHERE parent_id = ?))"
 		"   AND EXISTS (SELECT 1 FROM chapters c WHERE c.path = s.path)"
 		" ORDER BY s.disc_number, s.track_number, s.filename");
@@ -4373,7 +4424,7 @@ MediaStore::get_album_chapters(int folder_id)
 	q.bind(2, folder_id);
 
 	while (q.executeStep()) {
-		AlbumChapterVideo v;
+		AlbumChapterItem v;
 		v.song_id  = q.getColumn(0).getInt();
 		v.title    = q.getColumn(1).getString();
 		v.duration = q.getColumn(2).getDouble();
@@ -4402,7 +4453,7 @@ MediaStore::get_album_chapters(int folder_id)
 bool MediaStore::save_chapters(int song_id, const std::vector<Chapter>& chapters)
 	{
 	auto song = get_song(song_id);
-	if (!song || !song->is_video) return false;
+	if (!song) return false;
 
 	std::string abs = abs_path(song->path);
 	if (!path_is_within_root(abs)) return false;
@@ -6265,7 +6316,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		h.start     = cq.getColumn(1).getDouble();
 		h.name      = cq.getColumn(2).getString();
 		h.song_id   = cq.getColumn(3).getInt();
-		h.video     = cq.getColumn(4).getString();
+		h.track     = cq.getColumn(4).getString();
 		h.parent_id = cq.getColumn(5).getInt();
 		h.album     = cq.getColumn(6).getString();
 		h.artist    = cq.getColumn(7).getString();
