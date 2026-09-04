@@ -2296,10 +2296,11 @@ static std::string utf8_clean(const std::string& s, size_t max_bytes)
 // through a JSON document and an XML attribute.
 static constexpr size_t MAX_CHAPTER_NAME_BYTES = 500;
 
-// The one place a chapter list becomes a response, shared by getChapters and
-// saveChapters so the two cannot describe the same file differently — the
-// panel is redrawn from the save's reply, so a disagreement would show as the
-// list changing under the user for no reason.
+// The one place a chapter list becomes a response. Shared by getChapters,
+// saveChapters and getAlbumChapters, so none of the three can describe the
+// same markers differently — the panel is redrawn from the save's reply, and
+// the album view from a fourth query, so a disagreement would show as the list
+// changing under the user for no reason.
 //
 // `start` carries milliseconds because a save is a round trip: a client reads
 // this list, edits one marker and writes the rest back, so truncating to whole
@@ -2308,35 +2309,56 @@ static constexpr size_t MAX_CHAPTER_NAME_BYTES = 500;
 // which is what a chapter row would become if these are ever listed as tracks.
 // It is derived rather than stored — the next marker's start, or the video's
 // own duration for the last, which only the server knows.
+static nlohmann::json chapter_array_json(const std::vector<Chapter>& ch,
+                                          double song_duration)
+	{
+	nlohmann::json list = nlohmann::json::array();
+	for (size_t i = 0; i < ch.size(); i++) {
+		double next = (i + 1 < ch.size()) ? ch[i + 1].start : song_duration;
+		double d    = next - ch[i].start;
+		list.push_back({
+			{"index",    static_cast<int>(i + 1)},
+			{"start",    std::llround(ch[i].start * 1000.0) / 1000.0},
+			{"duration", d > 0 ? static_cast<int>(std::llround(d)) : 0},
+			{"name",     ch[i].name} });
+		}
+	return list;
+	}
+
+static void chapter_array_xml(XMLDocument& doc, XMLElement* parent,
+                               const std::vector<Chapter>& ch,
+                               double song_duration)
+	{
+	for (size_t i = 0; i < ch.size(); i++) {
+		double next = (i + 1 < ch.size()) ? ch[i + 1].start : song_duration;
+		double d    = next - ch[i].start;
+		auto* el = doc.NewElement("chapter");
+		el->SetAttribute("index", static_cast<int>(i + 1));
+		// Preformatted rather than handed to tinyxml2 as a double: its %.17g
+		// would render 13.2 as 13.199999999999999.
+		char buf[32];
+		std::snprintf(buf, sizeof buf, "%.3f",
+		              std::llround(ch[i].start * 1000.0) / 1000.0);
+		el->SetAttribute("start",    buf);
+		el->SetAttribute("duration", d > 0 ? static_cast<int>(std::llround(d)) : 0);
+		el->SetAttribute("name",     ch[i].name.c_str());
+		parent->InsertEndChild(el);
+		}
+	}
+
 static void write_chapters_response(httplib::Response& res, int song_id,
                                      const MediaStore::VideoChapters& vc,
                                      double song_duration, bool writable,
                                      bool use_json)
 	{
-	const size_t n = vc.chapters.size();
-	auto span = [&](size_t i) {
-		double next = (i + 1 < n) ? vc.chapters[i + 1].start : song_duration;
-		double d    = next - vc.chapters[i].start;
-		return d > 0 ? static_cast<int>(std::llround(d)) : 0;
-		};
-	auto start_ms = [&](size_t i) {
-		return std::llround(vc.chapters[i].start * 1000.0) / 1000.0;
-		};
-
 	std::string body;
 	if (use_json)
 		body = subsonic_ok_json([&](nlohmann::json& r) {
-			nlohmann::json list = nlohmann::json::array();
-			for (size_t i = 0; i < n; i++)
-				list.push_back({ {"index",    static_cast<int>(i + 1)},
-				                 {"start",    start_ms(i)},
-				                 {"duration", span(i)},
-				                 {"name",     vc.chapters[i].name} });
 			r["chapters"] = {
 				{"id",       sid(song_id)},
 				{"source",   vc.source},
 				{"writable", writable},
-				{"chapter",  list}
+				{"chapter",  chapter_array_json(vc.chapters, song_duration)}
 				};
 			});
 	else
@@ -2345,18 +2367,7 @@ static void write_chapters_response(httplib::Response& res, int song_id,
 			parent->SetAttribute("id",       song_id);
 			parent->SetAttribute("source",   vc.source.c_str());
 			parent->SetAttribute("writable", writable);
-			for (size_t i = 0; i < n; i++) {
-				auto* el = doc.NewElement("chapter");
-				el->SetAttribute("index", static_cast<int>(i + 1));
-				// Preformatted rather than handed to tinyxml2 as a double:
-				// its %.17g would render 13.2 as 13.199999999999999.
-				char buf[32];
-				std::snprintf(buf, sizeof buf, "%.3f", start_ms(i));
-				el->SetAttribute("start",    buf);
-				el->SetAttribute("duration", span(i));
-				el->SetAttribute("name",     vc.chapters[i].name.c_str());
-				parent->InsertEndChild(el);
-				}
+			chapter_array_xml(doc, parent, vc.chapters, song_duration);
 			root->InsertEndChild(parent);
 			});
 	res.set_content(body, use_json ? "application/json" : "application/xml");
@@ -5285,6 +5296,73 @@ GainDrive::GainDrive(const std::string& db_path,
 		                        use_json);
 		});
 
+	// getAlbumChapters — every chaptered video in one album folder.
+	//
+	// A second endpoint rather than an albumId mode on getChapters, because
+	// the two read different things and the difference is the point:
+	// getChapters reads the sidecar and is therefore always right, which is
+	// what a playback path needs; this reads the `chapters` index the scan
+	// maintains, which is what a browse path needs. Listing a concert's songs
+	// must not cost a file read per video — or, for a rip with no sidecar, an
+	// ffprobe.
+	//
+	// The consequence, stated because it looks like a bug: a video whose
+	// markers live only in its container appears in the panel and *not* here,
+	// until somebody saves them, which writes the sidecar the scan indexes.
+	server_.Get("/rest/getAlbumChapters.view", [this](const httplib::Request& req,
+	                                                   httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			err(10, "Required parameter missing: id."); return;
+			}
+		int folder_id = to_int(it->second, -1);
+
+		std::string folder_rel = store_.get_folder_path(folder_id);
+		if (folder_rel.empty()) { err(70, "Album folder not found."); return; }
+		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		                          folder_rel, use_json)) return;
+
+		auto vids = store_.get_album_chapters(folder_id);
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&](nlohmann::json& r) {
+				nlohmann::json list = nlohmann::json::array();
+				for (const auto& v : vids)
+					list.push_back({
+						{"id",      sid(v.song_id)},
+						{"title",   v.title},
+						{"chapter", chapter_array_json(v.chapters, v.duration)}
+						});
+				r["albumChapters"] = {
+					{"id",    sid(folder_id)},
+					{"video", list}
+					};
+				});
+		else
+			body = subsonic_ok([&](XMLDocument& doc, XMLElement* root) {
+				auto* parent = doc.NewElement("albumChapters");
+				parent->SetAttribute("id", folder_id);
+				for (const auto& v : vids) {
+					auto* el = doc.NewElement("video");
+					el->SetAttribute("id",    v.song_id);
+					el->SetAttribute("title", v.title.c_str());
+					chapter_array_xml(doc, el, v.chapters, v.duration);
+					parent->InsertEndChild(el);
+					}
+				root->InsertEndChild(parent);
+				});
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	// The body is the chapter file itself, as text/plain, and it goes through
 	// the same parse_chapters() that reads one off disk.  That is one
 	// definition of the format rather than two, and it makes the round trip
@@ -5492,6 +5570,12 @@ GainDrive::GainDrive(const std::string& db_path,
 		int album_offset  = offset_param("albumOffset");
 		int song_count    = count_param("songCount");
 		int song_offset   = offset_param("songOffset");
+		// Defaults to 0, unlike its three siblings: a client that does not
+		// know about chapters must not be made to pay for a fourth scan, and
+		// one that does asks for them by name.
+		int chapter_count  = std::clamp(to_int(qp("chapterCount", "0"), 0),
+		                                0, MAX_SEARCH_COUNT);
+		int chapter_offset = offset_param("chapterOffset");
 
 		bool personal = qp("personal") == "true";
 		std::string pu = personal ? qp("u") : "";
@@ -5499,6 +5583,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		                        artist_count, artist_offset,
 		                        album_count,  album_offset,
 		                        song_count,   song_offset,
+		                        chapter_count, chapter_offset,
 		                        pu);
 		int mbr = request_max_bitrate(req, store_);
 
@@ -5527,7 +5612,27 @@ GainDrive::GainDrive(const std::string& db_path,
 				for (auto& s : sr.songs)
 					songs.push_back(song_entry_json(s, mbr));
 
-				r[key] = {{"artist", artists}, {"album", albums}, {"song", songs}};
+				// A list of its own, never entries in `song`. A chapter has
+				// no id anything can stream, star or queue, so a client told
+				// it was a song would be handed a track that does not work.
+				nlohmann::json chapters = nlohmann::json::array();
+				for (auto& h : sr.chapters)
+					chapters.push_back({
+						{"songId",   sid(h.song_id)},
+						{"parent",   sid(h.parent_id)},
+						{"index",    h.index},
+						{"start",    std::llround(h.start * 1000.0) / 1000.0},
+						{"name",     h.name},
+						{"video",    h.video},
+						{"album",    h.album},
+						{"artist",   h.artist} });
+
+				r[key] = {{"artist", artists}, {"album", albums},
+				          {"song", songs}};
+				// Absent rather than empty when it was not asked for, so a
+				// client that never sends chapterCount sees the response it
+				// has always seen.
+				if (!sr.chapters.empty()) r[key]["chapter"] = chapters;
 				});
 		else
 			body = subsonic_ok([&sr, key, mbr](XMLDocument& doc, XMLElement* root) {
@@ -5554,6 +5659,22 @@ GainDrive::GainDrive(const std::string& db_path,
 
 				for (auto& s : sr.songs)
 					result->InsertEndChild(song_entry_xml(doc, s, "song", mbr));
+
+				for (auto& h : sr.chapters) {
+					auto* el = doc.NewElement("chapter");
+					el->SetAttribute("songId", h.song_id);
+					el->SetAttribute("parent", h.parent_id);
+					el->SetAttribute("index",  h.index);
+					char buf[32];
+					std::snprintf(buf, sizeof buf, "%.3f",
+					              std::llround(h.start * 1000.0) / 1000.0);
+					el->SetAttribute("start",  buf);
+					el->SetAttribute("name",   h.name.c_str());
+					el->SetAttribute("video",  h.video.c_str());
+					el->SetAttribute("album",  h.album.c_str());
+					el->SetAttribute("artist", h.artist.c_str());
+					result->InsertEndChild(el);
+					}
 
 				root->InsertEndChild(result);
 				});

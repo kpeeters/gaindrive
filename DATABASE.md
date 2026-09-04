@@ -426,6 +426,57 @@ CREATE TABLE video_meta (
     fetched_at  INTEGER NOT NULL
                   DEFAULT (strftime('%s','now'))
 );
+
+-- The song markers inside one video, as an
+-- *index*.
+--
+-- The sidecar <stem>.chapters.txt beside the video
+-- is the authority and always has been:
+-- getChapters reads that file on every call,
+-- because it is a per-playback lookup that has to
+-- be right. This table is what lets *browsing*
+-- avoid it -- the album view lists a concert's
+-- songs from one query, and search can match a
+-- chapter title, neither of which could afford a
+-- file read (or, for a rip with no sidecar, an
+-- ffprobe) per video per request.
+--
+-- It passes the test at the top of this file:
+-- every row is re-derived from a file on disk, so
+-- deleting this database and rescanning puts all
+-- of it back. Nothing a person typed lives only
+-- here -- what they typed is in the sidecar, which
+-- sits in the library tree and travels with it.
+--
+-- Keyed on the stored path rather than songs.id,
+-- like video_art and for the reason stars are: a
+-- rowid does not survive a rescan. And with no
+-- foreign key, also like video_art --
+-- album_info_cache's FK to folders(id) with no
+-- cascade is what once made DELETE FROM folders
+-- fail and roll an entire scan back.
+--
+-- Read in scan Phase 1, beside the sidecar cover,
+-- and deliberately not in Phase 3: that phase sees
+-- only files whose mtime changed, and a sidecar is
+-- written without touching the video's, so an edit
+-- would never be noticed -- nor would a library
+-- scanned before this existed ever be back-filled.
+--
+-- Only sidecars are indexed. A container's own
+-- chapters still reach the player through
+-- getChapters, but indexing them would mean
+-- -show_chapters on every probe, which
+-- read_video_probe()'s "unusable" retry test does
+-- not cover, so a list a narrow -probesize missed
+-- would be recorded silently as none.
+CREATE TABLE chapters (
+    path  TEXT    NOT NULL,   -- "<root>/<rest>"
+    idx   INTEGER NOT NULL,   -- 1-based, by start
+    start REAL    NOT NULL,   -- seconds
+    title TEXT    NOT NULL,   -- may be empty
+    PRIMARY KEY (path, idx)
+);
 ```
 
 # User-facing and API state tables

@@ -930,6 +930,40 @@ void MediaStore::create_schema()
 			status     TEXT NOT NULL,      -- matched | unmatched | error
 			fetched_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 		);
+
+		-- The song markers inside one video, as an *index*.
+		--
+		-- The sidecar <stem>.chapters.txt beside the video is the authority
+		-- and always has been: getChapters reads that file on every call,
+		-- because it is a per-playback lookup that has to be right. This table
+		-- exists so *browsing* need not -- the album view lists a concert's
+		-- songs from one query, and search can match a chapter title, neither
+		-- of which could afford a file read (or, for a rip with no sidecar, an
+		-- ffprobe) per video per request.
+		--
+		-- It is a cache in the strict sense DATABASE.md means: every row is
+		-- re-derived from a file on disk, so deleting this database and
+		-- rescanning puts all of it back. Nothing a person typed lives only
+		-- here.
+		--
+		-- Keyed on the stored path rather than songs.id, like video_art and
+		-- for the same reason: a rowid does not survive a rescan. And with no
+		-- foreign key to anything, also like video_art -- album_info_cache's
+		-- FK to folders(id) with no cascade is what once made DELETE FROM
+		-- folders fail and roll an entire scan back.
+		--
+		-- Only sidecars are indexed. A container's own chapters still reach
+		-- the player through getChapters, but reading them here would mean
+		-- -show_chapters on every probe, which read_video_probe()'s "unusable"
+		-- retry test does not cover -- so a list a narrow -probesize missed
+		-- would be recorded silently as none.
+		CREATE TABLE IF NOT EXISTS chapters (
+			path  TEXT    NOT NULL,   -- "<root>/<rest>", the video
+			idx   INTEGER NOT NULL,   -- 1-based, in start order
+			start REAL    NOT NULL,   -- seconds from the start of the file
+			title TEXT    NOT NULL,   -- may be empty; the client draws its own
+			PRIMARY KEY (path, idx)
+		);
 	)");
 
 	// Client/user data tables (gaindrive-client.db, attached as "client" schema).
@@ -1413,6 +1447,11 @@ struct SongReadData {
 	// so Phase 3 does not have to rediscover them. `path` is the first of
 	// these. Empty for everything else, which is what marks a row as ordinary.
 	std::vector<std::string> parts;
+	// Video only: the sidecar's markers, read in Phase 1 for the `chapters`
+	// index. Read there and not in Phase 3 for the reason the filename parse
+	// is -- Phase 3 sees only changed files, and a sidecar is written without
+	// touching the video's mtime, so an edit would never be noticed.
+	std::vector<Chapter> chapters;
 	};
 
 // What Phase 2 already knows about a row in the database, for the songs the
@@ -1464,6 +1503,25 @@ static int track_prefix_number(const std::string& stem)
 	return (n >= 1 && n <= 999) ? n : 0;
 	}
 
+// The markers beside a video, for the scan's index. Empty for a file with no
+// sidecar, which is nearly all of them.
+//
+// Opened rather than tested for: fs::exists() followed by an open is two
+// syscalls where one answers the same question, and this runs for every video
+// on every scan.
+static std::vector<Chapter> read_sidecar_chapters(const fs::path& p)
+	{
+	std::ifstream f(MediaStore::sidecar_chapters_path(p.string()),
+	                std::ios::binary);
+	if (!f) return {};
+	std::string text((std::istreambuf_iterator<char>(f)),
+	                  std::istreambuf_iterator<char>());
+	auto parsed = parse_chapters(text);
+	if (parsed.chapters.size() > MediaStore::MAX_CHAPTERS)
+		parsed.chapters.resize(MediaStore::MAX_CHAPTERS);
+	return std::move(parsed.chapters);
+	}
+
 // One media file → everything Phase 1 can learn about it without a lock.
 static SongReadData read_song_file(const fs::path& p,
                                     const std::string& folder_path,
@@ -1511,6 +1569,7 @@ static SongReadData read_song_file(const fs::path& p,
 		// count, and one with ten season folders sorts "Season 10" second.
 		// Only the parsed number can be trusted, and only videos have one.
 		if (vn.season > 0) sdat.disc_number = vn.season;
+		sdat.chapters = read_sidecar_chapters(p);
 		}
 	else {
 		// An untagged audio file's only track number is the one in its
@@ -2201,11 +2260,44 @@ static void apply_song_meta_overrides(SQLite::Database& db, int album_id)
 // Caller must hold db_mutex_ and an open transaction. sdat.path is absolute
 // (Phase 1/3 use it for TagLib I/O); rel_path is its stored form, which the
 // caller computes because strip_root() is a member and this is not.
+// The chapter index for one video, rewritten wholesale.
+//
+// Delete-then-insert rather than an upsert, because a list that got *shorter*
+// would otherwise keep its tail for ever -- the rows past the new end match no
+// incoming idx and nothing else would reach them.
+static void apply_song_chapters(SQLite::Database& db,
+                                 const std::string& rel_path,
+                                 const std::vector<Chapter>& chapters)
+	{
+	SQLite::Statement del(db, "DELETE FROM chapters WHERE path = ?");
+	del.bind(1, rel_path);
+	del.exec();
+	if (chapters.empty()) return;
+
+	SQLite::Statement ins(db,
+		"INSERT INTO chapters (path, idx, start, title) VALUES (?, ?, ?, ?)");
+	for (size_t i = 0; i < chapters.size(); i++) {
+		ins.reset();
+		ins.bind(1, rel_path);
+		ins.bind(2, static_cast<int>(i + 1));
+		ins.bind(3, chapters[i].start);
+		ins.bind(4, chapters[i].name);
+		ins.exec();
+		}
+	}
+
 static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat,
                                    int album_id, int folder_id, int artist_id,
                                    const std::string& rel_path,
                                    const std::string& rel_cover)
 	{
+	// Before the changed/unchanged split, deliberately, because it belongs to
+	// neither: sdat.changed compares the *video's* mtime and a sidecar is
+	// written without touching that, so a chapter edit is invisible to it.
+	// Gated on is_video only to keep 25k audio rows from paying a DELETE each
+	// per scan for a table that can never hold them.
+	if (sdat.is_video) apply_song_chapters(db, rel_path, sdat.chapters);
+
 	if (!sdat.changed) {
 		// An unchanged song still has to say it was seen: the per-album prune
 		// below deletes whatever is left marked unvisited.  Disc number, season
@@ -2421,6 +2513,11 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 					// DVD titles carry no names, only numbers.
 					sdat.title       = "Title " + std::to_string(ts);
 					sdat.track_nr    = ts;
+					// This branch builds its own SongReadData and never calls
+					// read_song_file(), so anything Phase 1 learns there has
+					// to be repeated here -- the gap sdat.cover already has.
+					// A concert DVD is exactly the thing someone marks up.
+					sdat.chapters    = read_sidecar_chapters(vobs.front());
 					for (auto& v : vobs) sdat.parts.push_back(v.string());
 					adat.songs.push_back(std::move(sdat));
 					}
@@ -3011,6 +3108,18 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	s.bind(1, prefix);
 	s.exec();
 	}
+	{
+	// The chapter index of a video that has gone. Keyed on songs alone, unlike
+	// video_meta above: a chapter row is always a song's, never a folder's.
+	// Here with the other derived sweeps for the reason stated above them --
+	// it asks whether a song still has this path, so every DELETE FROM songs
+	// must already have run.
+	SQLite::Statement s(db_music_,
+		"DELETE FROM chapters WHERE path LIKE ?"
+		"  AND path NOT IN (SELECT path FROM songs)");
+	s.bind(1, prefix);
+	s.exec();
+	}
 	txn.commit();
 	}
 	}
@@ -3179,6 +3288,14 @@ void MediaStore::scan_root_files(const RootRec& root)
 		"DELETE FROM video_meta WHERE path LIKE ?"
 		"  AND path NOT IN (SELECT path FROM songs)"
 		"  AND path NOT IN (SELECT path FROM folders)");
+	s.bind(1, root.cfg.name + "/%");
+	s.exec();
+	}
+	{
+	// The chapter index, as in scan_artist_dir()'s prune above.
+	SQLite::Statement s(db_music_,
+		"DELETE FROM chapters WHERE path LIKE ?"
+		"  AND path NOT IN (SELECT path FROM songs)");
 	s.bind(1, root.cfg.name + "/%");
 	s.exec();
 	}
@@ -4155,7 +4272,7 @@ std::string MediaStore::sidecar_captions(const std::string& abs) const
 	return {};
 	}
 
-std::string MediaStore::sidecar_chapters_path(const std::string& abs) const
+std::string MediaStore::sidecar_chapters_path(const std::string& abs)
 	{
 	// Not replace_extension(), unlike sidecar_captions() above: a plain
 	// <stem>.txt is exactly what liner notes look like, and getAlbumTexts
@@ -4235,6 +4352,53 @@ MediaStore::VideoChapters MediaStore::get_chapters(int song_id)
 	return vc;
 	}
 
+std::vector<MediaStore::AlbumChapterVideo>
+MediaStore::get_album_chapters(int folder_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	std::vector<AlbumChapterVideo> out;
+
+	// The same folder predicate get_album()'s flat listing uses -- the album
+	// folder, or a disc subdirectory of it -- and the same ordering, so the
+	// videos come back in the order the tracks are already drawn in.
+	SQLite::Statement q(db_music_,
+		"SELECT s.id, s.title, s.duration, s.path"
+		" FROM songs s"
+		" WHERE s.is_video = 1"
+		"   AND (s.folder_id = ?"
+		"        OR s.folder_id IN (SELECT id FROM folders WHERE parent_id = ?))"
+		"   AND EXISTS (SELECT 1 FROM chapters c WHERE c.path = s.path)"
+		" ORDER BY s.disc_number, s.track_number, s.filename");
+	q.bind(1, folder_id);
+	q.bind(2, folder_id);
+
+	while (q.executeStep()) {
+		AlbumChapterVideo v;
+		v.song_id  = q.getColumn(0).getInt();
+		v.title    = q.getColumn(1).getString();
+		v.duration = q.getColumn(2).getDouble();
+		out.push_back(std::move(v));
+		}
+
+	// A second pass rather than a join, because one statement cannot be
+	// stepped while another is open on the same connection here without the
+	// rows interleaving.
+	SQLite::Statement c(db_music_,
+		"SELECT start, title FROM chapters WHERE path ="
+		" (SELECT path FROM songs WHERE id = ?) ORDER BY idx");
+	for (auto& v : out) {
+		c.reset();
+		c.bind(1, v.song_id);
+		while (c.executeStep()) {
+			Chapter ch;
+			ch.start = c.getColumn(0).getDouble();
+			ch.name  = c.getColumn(1).getString();
+			v.chapters.push_back(std::move(ch));
+			}
+		}
+	return out;
+	}
+
 bool MediaStore::save_chapters(int song_id, const std::vector<Chapter>& chapters)
 	{
 	auto song = get_song(song_id);
@@ -4281,6 +4445,26 @@ bool MediaStore::save_chapters(int song_id, const std::vector<Chapter>& chapters
 		fs::remove(part, fec);
 		return false;
 		}
+	// Keep the browse index in step with the file we just published, so the
+	// album view is right immediately rather than after FolderWatcher's
+	// debounce. The scanner would repair it eventually -- that is what makes a
+	// hand-edited sidecar work -- but "eventually" is the wrong answer to a
+	// save the user just pressed. The direct analogue of store_video_art()
+	// dropping the thumbnails it invalidated.
+	try {
+		std::lock_guard<std::mutex> lock(db_mutex_);
+		SQLite::Transaction txn(db_music_);
+		apply_song_chapters(db_music_, song->path, chapters);
+		txn.commit();
+		}
+	catch (const std::exception& e) {
+		// Not a failure of the save: the file is written and is the authority,
+		// so the worst case is a browse listing that is one scan out of date.
+		std::cout << stamp() << "save_chapters: wrote " << side
+		          << " but could not update the index: " << e.what()
+		          << std::endl;
+		}
+
 	std::cout << stamp() << "save_chapters: wrote " << chapters.size()
 	          << " marker(s) to " << side << std::endl;
 	return true;
@@ -5567,6 +5751,17 @@ void MediaStore::sync_roots()
 		s.bind(1, name + "/%");
 		s.exec();
 		}
+		{
+		// Same shape, same reason. Note video_art and video_meta are *not*
+		// torn down here and should be -- see ISSUES.md; a de-configured root
+		// leaves its posters and TMDB answers behind with nothing able to
+		// reach them. Matching that gap rather than fixing it would only have
+		// made it wider.
+		SQLite::Statement s(db_music_,
+			"DELETE FROM chapters WHERE path LIKE ?");
+		s.bind(1, name + "/%");
+		s.exec();
+		}
 		}
 
 	txn.commit();
@@ -5684,6 +5879,7 @@ bool MediaStore::relocate_prefix(const std::string& old_rel,
 		rewrite("artist_art",   "folder_path");
 		rewrite("cover_thumbs", "source_key");
 		rewrite("video_meta",   "path");
+		rewrite("chapters",     "path");
 
 		// The three things below are what a following rescan will NOT repair,
 		// because every upsert in the scanner is INSERT OR IGNORE and so only
@@ -5897,6 +6093,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
                                              int artist_count, int artist_offset,
                                              int album_count,  int album_offset,
                                              int song_count,   int song_offset,
+                                             int chapter_count, int chapter_offset,
                                              const std::string& personal_user)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
@@ -6032,6 +6229,49 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		e.track_artist = sq.getColumn(14).getString();
 		result.songs.push_back(std::move(e));
 		}
+
+	// Chapters. A fourth scan, over a table far smaller than songs — and the
+	// cost model is unchanged either way, since there is no index on
+	// songs.title and every search here is already a full scan.
+	//
+	// The uploads filter is on the *video's* path, which is the only path a
+	// chapter has: the row is keyed on it.
+	if (chapter_count > 0) {
+	std::string sql =
+		"SELECT c.idx, c.start, c.title, s.id, s.title,"
+		"       COALESCE(al.folder_id, s.folder_id),"
+		"       COALESCE(al.title, ''), COALESCE(a.name, '')"
+		" FROM chapters c"
+		" JOIN songs s ON s.path = c.path"
+		" LEFT JOIN albums al ON al.id = s.album_id"
+		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
+		" LEFT JOIN artists a ON a.id = sa.artist_id"
+		" WHERE LOWER(c.title) LIKE LOWER(?) ESCAPE '\\'";
+	if (personal_user.empty()) sql += not_uploads("s.path");
+	else                       sql += " AND s.path LIKE ?";
+	sql += " ORDER BY c.title COLLATE NOCASE LIMIT ? OFFSET ?";
+
+	SQLite::Statement cq(db_music_, sql);
+	int b = 1;
+	cq.bind(b++, pattern);
+	if (!personal_user.empty())
+		cq.bind(b++, uploads_prefix_ + personal_user + "/%");
+	cq.bind(b++, chapter_count);
+	cq.bind(b++, chapter_offset);
+
+	while (cq.executeStep()) {
+		ChapterHit h;
+		h.index     = cq.getColumn(0).getInt();
+		h.start     = cq.getColumn(1).getDouble();
+		h.name      = cq.getColumn(2).getString();
+		h.song_id   = cq.getColumn(3).getInt();
+		h.video     = cq.getColumn(4).getString();
+		h.parent_id = cq.getColumn(5).getInt();
+		h.album     = cq.getColumn(6).getString();
+		h.artist    = cq.getColumn(7).getString();
+		result.chapters.push_back(std::move(h));
+		}
+	}
 
 	return result;
 	}

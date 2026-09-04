@@ -1543,6 +1543,36 @@ input.chapter-time.bad { border-color: #e06c6c; }
    justify-content: space-between;
 }
 
+/* A chaptered video heads its own group, and its markers are the rows beneath.
+   Shaped like .disc-heading but not the same class: edit mode appends an "all"
+   button to every .disc-heading, and a video heading has nothing to put there. */
+.video-heading {
+   font-size: 0.75rem;
+   font-weight: 700;
+   letter-spacing: 0.06em;
+   color: var(--text);
+   padding: 1.2rem 0.4rem 0.3rem;
+   border-bottom: 1px solid var(--divider);
+   margin-bottom: 0.2rem;
+}
+
+/* The film's own row is hidden while its chapters stand in for it, and comes
+   back in edit mode -- editing works on the songs the folder holds, and a
+   heading with no row would leave a concert's title and year uneditable. */
+.track-row.has-chapters                 { display: none; }
+.editing-tracks .track-row.has-chapters { display: grid; }
+.editing-tracks .track-row.chapter-track,
+.editing-tracks .video-heading          { display: none; }
+
+/* Dimmed until it is the one playing, so the list reads as positions inside a
+   film rather than as tracks of their own. */
+.track-row.chapter-track .track-title       { color: var(--text-dim); }
+.track-row.chapter-track.current .track-num { color: var(--accent); }
+.track-row.chapter-track.current .track-title {
+   color: var(--accent);
+   font-weight: 600;
+}
+
 .album-hero {
    display: block;
    width: min(100%, 320px);

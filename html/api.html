@@ -390,6 +390,74 @@
 <div class="note"><p>An empty body writes an <em>empty</em> file rather than deleting it. That empty file is what says &quot;this video has no chapters&quot; -- without it, clearing the markers of a rip whose container carries its own would simply make those reappear, and there would be no way to overrule them.</p></div>
 <p class="api-see">See also <a href="#ep-getChapters"><code>getChapters</code></a>.</p>
 </div>
+<div class="api-ep">
+<h3 id="ep-getAlbumChapters">getAlbumChapters</h3>
+<p class="api-meta"><code>GET /rest/getAlbumChapters.view</code></p>
+<p>Every chaptered video in one album folder, with its markers.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>An album folder id, as <code>getAlbum</code> takes.</td></tr>
+</tbody>
+</table>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>albumChapters.video</code></td><td>Video[]</td><td>One entry per chaptered video, in the order the album lists its tracks. Videos with no markers are absent.</td></tr>
+<tr><td><code>id</code> <span class="api-on">on Video</span></td><td>string</td><td>The song id of the video.</td></tr>
+<tr><td><code>title</code> <span class="api-on">on Video</span></td><td>string</td><td>The video&#x27;s own title, for use as a group heading.</td></tr>
+<tr><td><code>chapter</code> <span class="api-on">on Video</span></td><td>Chapter[]</td><td>Its markers, in the same shape <code>getChapters</code> returns.</td></tr>
+</tbody>
+</table>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>10</code></td><td>Subsonic</td><td><code>id</code> missing.</td></tr>
+<tr><td><code>70</code></td><td>Subsonic</td><td>No such album folder.</td></tr>
+</tbody>
+</table>
+<p>What a concert folder needs to list its <em>songs</em> rather than one row named after the file. A folder holding several videos returns each of them.</p>
+<p>This reads the index the scan maintains, where <code>getChapters</code> reads the sidecar file. That difference is the point rather than an implementation detail: a playback lookup has to be right, so it reads the file; a browse listing has to be cheap, and reading a sidecar for every video in a folder -- or running <code>ffprobe</code> for one that has none -- every time somebody opens an album is exactly the cost the index removes.</p>
+<div class="note"><p>Only sidecars are indexed. A video whose markers live solely in its container appears in <code>getChapters</code> and <b>not</b> here, until they are saved -- which writes the sidecar the scan then indexes.</p></div>
+<p class="api-see">See also <a href="#ep-getChapters"><code>getChapters</code></a>, <a href="#ep-saveChapters"><code>saveChapters</code></a>.</p>
+</div>
+<div class="api-ep">
+<h3 id="ep-search2-search3">search2 / search3</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>search2</code>, <code>search3</code>. Only the gaindrive additions are listed here.</p>
+<p>Matching the song titles inside a video, as well as the library.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>chapterCount</code></td><td>int</td><td>How many chapter matches to return. Clamped to 1..500. default <code>0</code>.</td></tr>
+<tr><td><code>chapterOffset</code></td><td>int</td><td>How many to skip. default <code>0</code>.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>chapterCount</code></p>
+<p>Defaults to <b>0</b>, unlike <code>artistCount</code>, <code>albumCount</code> and <code>songCount</code>, which default to 20. A client that does not know about chapters should not be made to pay for the extra query, and one that does asks for them by name.</p></div>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>searchResult.chapter</code></td><td>Chapter[]</td><td>Chapters whose title matched. Absent when none did, or when <code>chapterCount</code> was not sent.</td></tr>
+<tr><td><code>songId</code> <span class="api-on">on Chapter</span></td><td>string</td><td>The video this marker is inside. Stream <em>that</em> and seek to <code>start</code>.</td></tr>
+<tr><td><code>parent</code> <span class="api-on">on Chapter</span></td><td>string</td><td>The video&#x27;s album folder id, so a client can open the listing it sits in.</td></tr>
+<tr><td><code>start</code> <span class="api-on">on Chapter</span></td><td>float</td><td>Seconds into the video, to the millisecond.</td></tr>
+<tr><td><code>index</code> <span class="api-on">on Chapter</span></td><td>int</td><td>Its position in that video, from 1.</td></tr>
+<tr><td><code>name</code> <span class="api-on">on Chapter</span></td><td>string</td><td>The marker title that matched.</td></tr>
+<tr><td><code>video</code> <span class="api-on">on Chapter</span></td><td>string</td><td>The video&#x27;s title, for context in a result row.</td></tr>
+<tr><td><code>album</code> <span class="api-on">on Chapter</span></td><td>string</td><td>Its album title.</td></tr>
+<tr><td><code>artist</code> <span class="api-on">on Chapter</span></td><td>string</td><td>Its artist name.</td></tr>
+</tbody>
+</table>
+<p>A whole concert is one file, so without this the songs in it cannot be found at all.</p>
+<div class="note"><p>Matches come back in an array of their own and <b>never</b> as <code>song</code> entries. A chapter has no id anything can stream, star or queue, so reporting one as a song would hand a client a track that does not work.</p></div>
+<p class="api-see">See also <a href="#ep-getChapters"><code>getChapters</code></a>.</p>
+</div>
 </div>
 <div class="doc-sec" id="albumtext">
 <h2>Album text and images</h2>

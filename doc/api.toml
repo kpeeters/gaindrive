@@ -760,6 +760,152 @@ see          = ["getChapters"]
   when = 'More than 1000 markers, or the file could not be written.'
 
 
+[[endpoint]]
+kind    = 'endpoint'
+name    = "getAlbumChapters"
+section = "video"
+summary = 'Every chaptered video in one album folder, with its markers.'
+notes   = '''
+What a concert folder needs to list its *songs* rather than one row named after
+the file. A folder holding several videos returns each of them.
+
+This reads the index the scan maintains, where `getChapters` reads the
+sidecar file. That difference is the point rather than an
+implementation detail: a playback lookup has to be right, so it reads the file;
+a browse listing has to be cheap, and reading a sidecar for every video in a
+folder -- or running `ffprobe` for one that has none -- every time somebody
+opens an album is exactly the cost the index removes.
+
+NOTE: Only sidecars are indexed. A video whose markers live solely in its
+container appears in `getChapters` and **not** here, until they are saved --
+which writes the sidecar the scan then indexes.
+'''
+see     = ["getChapters", "saveChapters"]
+
+  [[endpoint.param]]
+  name     = "id"
+  type     = "string"
+  required = true
+  doc      = 'An album folder id, as `getAlbum` takes.'
+
+  [[endpoint.field]]
+  name = "albumChapters.video"
+  type = "Video[]"
+  doc  = 'One entry per chaptered video, in the order the album lists its tracks. Videos with no markers are absent.'
+
+  [[endpoint.field]]
+  name = "id"
+  type = "string"
+  on   = "Video"
+  doc  = 'The song id of the video.'
+
+  [[endpoint.field]]
+  name = "title"
+  type = "string"
+  on   = "Video"
+  doc  = "The video's own title, for use as a group heading."
+
+  [[endpoint.field]]
+  name = "chapter"
+  type = "Chapter[]"
+  on   = "Video"
+  doc  = 'Its markers, in the same shape `getChapters` returns.'
+
+  [[endpoint.error]]
+  code = '10'
+  when = '`id` missing.'
+
+  [[endpoint.error]]
+  code = '70'
+  when = 'No such album folder.'
+
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["search2", "search3"]
+section    = "video"
+summary    = 'Matching the song titles inside a video, as well as the library.'
+notes      = '''
+A whole concert is one file, so without this the songs in it cannot be found at
+all.
+
+NOTE: Matches come back in an array of their own and **never** as `song`
+entries. A chapter has no id anything can stream, star or queue, so reporting
+one as a song would hand a client a track that does not work.
+'''
+see        = ["getChapters"]
+
+  [[endpoint.param]]
+  name    = "chapterCount"
+  type    = "int"
+  default = '0'
+  doc     = 'How many chapter matches to return. Clamped to 1..500.'
+  notes   = '''
+Defaults to **0**, unlike `artistCount`, `albumCount` and `songCount`, which
+default to 20. A client that does not know about chapters should not be made to
+pay for the extra query, and one that does asks for them by name.
+'''
+
+  [[endpoint.param]]
+  name    = "chapterOffset"
+  type    = "int"
+  default = '0'
+  doc     = 'How many to skip.'
+
+  [[endpoint.field]]
+  name  = "searchResult.chapter"
+  type  = "Chapter[]"
+  doc   = 'Chapters whose title matched. Absent when none did, or when `chapterCount` was not sent.'
+
+  [[endpoint.field]]
+  name = "songId"
+  type = "string"
+  on   = "Chapter"
+  doc  = 'The video this marker is inside. Stream *that* and seek to `start`.'
+
+  [[endpoint.field]]
+  name = "parent"
+  type = "string"
+  on   = "Chapter"
+  doc  = "The video's album folder id, so a client can open the listing it sits in."
+
+  [[endpoint.field]]
+  name = "start"
+  type = "float"
+  on   = "Chapter"
+  doc  = 'Seconds into the video, to the millisecond.'
+
+  [[endpoint.field]]
+  name = "index"
+  type = "int"
+  on   = "Chapter"
+  doc  = 'Its position in that video, from 1.'
+
+  [[endpoint.field]]
+  name = "name"
+  type = "string"
+  on   = "Chapter"
+  doc  = 'The marker title that matched.'
+
+  [[endpoint.field]]
+  name = "video"
+  type = "string"
+  on   = "Chapter"
+  doc  = "The video's title, for context in a result row."
+
+  [[endpoint.field]]
+  name = "album"
+  type = "string"
+  on   = "Chapter"
+  doc  = 'Its album title.'
+
+  [[endpoint.field]]
+  name = "artist"
+  type = "string"
+  on   = "Chapter"
+  doc  = 'Its artist name.'
+
+
 
 # ===========================================================================
 # Album text and images

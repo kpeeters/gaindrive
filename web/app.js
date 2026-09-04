@@ -4315,6 +4315,21 @@ function videoChapterTick(abs) {
    document.querySelectorAll('.chapter-row.current')
       .forEach(r => r.classList.remove('current'));
    document.querySelector(`.chapter-row[data-i="${i}"]`)?.classList.add('current');
+
+   // The album listing's rows too, when the film being played is the one on
+   // screen. They are numbered 1..n as getChapters numbers them, while the
+   // panel's are 0-based -- the panel draws the draft, which is an array.
+   //
+   // This is why chapter rows carry no data-id: playerUpdateUI() marks the
+   // playing track by that attribute and would otherwise put `.playing` on the
+   // first chapter of a film rather than on the film's own row.
+   const song = player.queue[player.index];
+   document.querySelectorAll('.track-row.chapter-track.current')
+      .forEach(r => r.classList.remove('current'));
+   if (song && i >= 0)
+      document.querySelector(
+         `.track-row.chapter-track[data-chapter-of="${song.id}"]` +
+         `[data-chapter="${i + 1}"]`)?.classList.add('current');
 }
 
 function videoChaptersCancel() {
@@ -4376,12 +4391,68 @@ async function videoChaptersSave() {
       }
 }
 
-function playerLoad(songs, startIndex) {
+// One song inside a video, drawn as a track row.
+//
+// It shares `.track-row` so the grid, the hover and the icon styling are the
+// listing's rather than a second copy -- but it carries **no `data-id`**, and
+// that absence is load-bearing: playerUpdateUI() marks the playing track with
+// `.track-row[data-id="..."]` and takes the first match, so a chapter row
+// carrying its video's id would steal the highlight from the row that owns it.
+// Which chapter is playing is a different question, answered by
+// videoChapterTick() through `.current`.
+function makeChapterRow(song, chapter, songs, songIndex, ctx) {
+   const row = document.createElement('div');
+   row.className = 'track-row chapter-track';
+   row.dataset.chapterOf = song.id;
+   row.dataset.chapter   = chapter.index;
+
+   const icon = document.createElement('span');
+   icon.className = 'track-icon';
+
+   const num = document.createElement('span');
+   num.className = 'track-num';
+   num.textContent = chapter.index;
+
+   const titleWrap = document.createElement('span');
+   titleWrap.className = 'track-title-wrap';
+   const title = document.createElement('span');
+   title.className = 'track-title';
+   // The server reports an empty name as empty rather than inventing one, so
+   // that a save cannot write a placeholder into a line left deliberately
+   // bare. Drawing one here costs nothing.
+   title.textContent = chapter.name || `Chapter ${chapter.index}`;
+   titleWrap.appendChild(title);
+
+   const dur = document.createElement('span');
+   dur.className = 'track-dur';
+   dur.textContent = chapter.duration ? fmtDuration(chapter.duration) : '';
+
+   // No star and no playlist button: both address a song id, and a chapter is
+   // not one. The video's own row still carries them.
+   const spacer1 = document.createElement('span');
+   const spacer2 = document.createElement('span');
+
+   row.addEventListener('click', () => {
+      if (row.classList.contains('editing')) return;
+      player.albumCtx = ctx;
+      playerLoad(songs, songIndex, chapter.start);
+      });
+
+   row.append(icon, num, titleWrap, spacer1, spacer2, dur);
+   return row;
+}
+
+// `offset` starts playback partway in, which is what a chapter row asks for.
+// It is forwarded rather than followed by a seek because playerPlay() already
+// knows all three answers -- a cast LOAD carries it, a chunked stream puts it
+// in timeOffset, and a Range-capable one gets `currentTime = offset` once the
+// source is set.
+function playerLoad(songs, startIndex, offset = 0) {
    document.querySelectorAll('.track-row.queued').forEach(r => r.classList.remove('queued'));
    player.queue    = [...songs];
    player.index    = startIndex;
    player.autoFrom = startIndex + 1;   // everything after current track is auto
-   playerPlay();
+   playerPlay(offset);
 }
 
 // Append song to the queue after trimming any auto-generated tail.
@@ -4972,7 +5043,8 @@ function setupPlayer() {
       });
 }
 
-async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId = null) {
+async function viewTracks(albumId, albumTitle, artistId, artistName,
+                           autoPlayId = null, autoPlayOffset = 0) {
    console.log('[tracks] loading album', albumId, albumTitle);
    const pane = document.getElementById('pane-tracks');
    pane.innerHTML = '';
@@ -5090,6 +5162,21 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
    infoSlot.className = 'album-notes-loading';
    pane.appendChild(infoSlot);
 
+   // The chapter index for this folder, keyed by video id. From the scan's
+   // table rather than from getChapters per video: this is a browse path, and
+   // reading a sidecar -- or worse, running ffprobe for a video without one --
+   // every time somebody opens an album is the cost that table removes.
+   //
+   // Failure is a non-event: an album simply lists its videos the way it
+   // always did. This is decoration over a listing that already works.
+   const chaptersByVideo = new Map();
+   try {
+      const cr = await apiCall('getAlbumChapters', {id: albumId});
+      for (const v of cr.albumChapters?.video ?? [])
+         chaptersByVideo.set(v.id, v.chapter ?? []);
+      }
+   catch (e) { console.warn('[chapters] album index unavailable', e); }
+
    const frag = document.createDocumentFragment();
    const multiDisc = new Set(songs.map(s => s.discNumber ?? 1)).size > 1;
    // If every track number is 0 or 1 the tags are useless; number sequentially.
@@ -5170,6 +5257,22 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       row.appendChild(listBtn);
       row.appendChild(dur);
       frag.appendChild(row);
+
+      // A chaptered video stands in for itself: a heading naming the film,
+      // then one row per song inside it. The film's own row stays in the DOM
+      // but hidden, because edit mode needs something to edit -- a heading
+      // alone would make a concert's title and year uneditable.
+      const chapters = chaptersByVideo.get(song.id);
+      if (chapters?.length) {
+         row.classList.add('has-chapters');
+         const vh = document.createElement('div');
+         vh.className = 'video-heading';
+         vh.textContent = song.title;
+         frag.appendChild(vh);
+         for (const c of chapters)
+            frag.appendChild(makeChapterRow(song, c, songs, i,
+               {albumId, albumTitle, artistId, artistName}));
+         }
       }
 
    pane.appendChild(frag);
@@ -5179,7 +5282,9 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       const idx = songs.findIndex(s => s.id === autoPlayId);
       if (idx !== -1) {
          player.albumCtx = {albumId, albumTitle, artistId, artistName};
-         playerLoad(songs, idx);
+         // The offset is how a chapter hit in search lands on its song rather
+         // than at the start of a two-hour concert.
+         playerLoad(songs, idx, autoPlayOffset);
          }
       }
 
@@ -5262,8 +5367,20 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
       heroWrap.appendChild(pencilBtn);
       heroWrap.classList.add('editing');
 
+      // The listing swaps back to its plain form: every video's own row, no
+      // chapter rows and no video headings. One class on the pane rather than
+      // per-element hiding, so exitEditMode is a single removal.
+      pane.classList.add('editing-tracks');
+
       // Replace track num/title spans with inputs; swap dur span for year input.
-      pane.querySelectorAll('.track-row').forEach(row => {
+      //
+      // Chapter rows are excluded, and not merely for tidiness: they carry no
+      // .track-year-input and no track number of their own, so the assignments
+      // below would throw on the first one. Editing works on the songs the
+      // folder holds, and a chapter is a position inside one -- which is why
+      // the video's own row is only *hidden* while its chapters are shown, and
+      // comes back here.
+      pane.querySelectorAll('.track-row:not(.chapter-track)').forEach(row => {
          const numSpan   = row.querySelector('.track-num');
          // The wrap, not the title: the title is nested inside it so a track
          // artist can sit under it, and replaceChild below needs the row's own
@@ -5541,7 +5658,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId 
          });
 
       // Replace inputs back to spans; restore dur column.
-      pane.querySelectorAll('.track-row').forEach(row => {
+      pane.classList.remove('editing-tracks');
+      pane.querySelectorAll('.track-row:not(.chapter-track)').forEach(row => {
          const numInput   = row.querySelector('.track-num-input');
          const titleInput = row.querySelector('.track-title-input');
          const discInput  = row.querySelector('.track-disc-input');
@@ -5749,6 +5867,10 @@ async function runSearch() {
          artistCount: wantArtists ? 20 : 0,
          albumCount:  wantAlbums  ? 20 : 0,
          songCount:   wantSongs   ? 20 : 0,
+         // Rides with the Songs filter: a chapter is a song inside a video,
+         // so somebody who has turned songs off is not looking for one. The
+         // server defaults this to 0, so an older client costs nothing.
+         chapterCount: wantSongs  ? 20 : 0,
          });
       }
    catch {
@@ -5891,6 +6013,46 @@ function renderSearchResults(res) {
          }
       }
 
+   // Songs inside a video — a section of their own, because that is how the
+   // server reports them. A chapter has no id anything can stream or star, so
+   // it is not a song entry and must not be drawn as one; what it does have is
+   // a film and a position in it, which is enough to play from.
+   const chapters = res.chapter ?? [];
+   if (chapters.length > 0) {
+      const h = document.createElement('h2');
+      h.className = 'index-heading';
+      h.textContent = 'In videos';
+      frag.appendChild(h);
+
+      for (const c of chapters) {
+         const row = document.createElement('div');
+         row.className = 'search-song-row';
+
+         const info = document.createElement('div');
+         info.className = 'search-song-info';
+
+         const titleEl = document.createElement('span');
+         titleEl.className = 'search-song-title';
+         titleEl.textContent = c.name || `Chapter ${c.index}`;
+
+         const sub = document.createElement('span');
+         sub.className = 'search-song-sub';
+         sub.textContent = [c.artist, c.video].filter(Boolean).join(' · ');
+
+         info.append(titleEl, sub);
+         row.appendChild(info);
+
+         const at = document.createElement('span');
+         at.className = 'search-song-dur';
+         at.textContent = fmtChapterTime(c.start);
+         row.appendChild(at);
+
+         row.addEventListener('click', () => viewTracksFromSearch(
+            c.parent, c.album, null, c.artist, c.songId, c.start));
+         frag.appendChild(row);
+         }
+      }
+
    pane.replaceChildren(frag);
 }
 
@@ -5898,8 +6060,10 @@ function renderSearchResults(res) {
 // On a 2-pane layout, viewTracks slides to depth 2, which pushes pane 0
 // (search results) off-screen. Instead we move the rendered content into
 // pane 1 and stay at depth 1, keeping search visible on the left.
-async function viewTracksFromSearch(albumId, albumTitle, artistId, artistName, autoPlayId) {
-   await viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId);
+async function viewTracksFromSearch(albumId, albumTitle, artistId, artistName,
+                                     autoPlayId, autoPlayOffset = 0) {
+   await viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId,
+                    autoPlayOffset);
    if (document.getElementById('search-bar').classList.contains('open')
          && paneNav._visiblePanes() === 2) {
       const p1 = document.getElementById('pane-albums');

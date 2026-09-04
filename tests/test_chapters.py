@@ -306,6 +306,99 @@ def test_album_texts_does_not_list_the_sidecar():
     print(f"PASS  getAlbumTexts hides chapter sidecars ({len(names)} text file(s))")
 
 
+# ---- getAlbumChapters and search (the index) --------------------------
+
+def test_album_chapters_agrees_with_get_chapters():
+    """The index and the file must describe the same markers.
+
+    They are read from different places on purpose -- getChapters from the
+    sidecar, this from the scan's table -- so a disagreement is exactly the
+    failure that split can produce.
+    """
+    if not _original()["chapters"]["writable"]:
+        print("SKIP  getAlbumChapters: not writable")
+        return
+    _save(_vid(), "0:00 First\n13:35 Second\n")
+    v = _video()
+    sr = _json("getAlbumChapters.view", {"id": v["parent"]})
+    vids = sr.get("albumChapters", {}).get("video", [])
+    mine = [x for x in vids if x["id"] == _vid()]
+    assert mine, f"video {_vid()} absent from {[x['id'] for x in vids]}"
+    got = [(c["start"], c.get("name", "")) for c in mine[0].get("chapter", [])]
+    assert got == _pairs(_get(_vid())), f"{got} != {_pairs(_get(_vid()))}"
+    print(f"PASS  getAlbumChapters agrees with getChapters ({len(got)} marker(s))")
+
+
+def test_album_chapters_updates_without_a_rescan():
+    """A save writes the index too, or the album view is a scan behind."""
+    if not _original()["chapters"]["writable"]:
+        print("SKIP  index freshness: not writable")
+        return
+    _save(_vid(), "0:00 Before\n")
+    _save(_vid(), "0:00 After\n30:00 Later\n")
+    sr = _json("getAlbumChapters.view", {"id": _video()["parent"]})
+    mine = [x for x in sr.get("albumChapters", {}).get("video", [])
+            if x["id"] == _vid()]
+    got = [c.get("name", "") for c in mine[0].get("chapter", [])] if mine else []
+    assert got == ["After", "Later"], got
+    print("PASS  a save is visible to getAlbumChapters with no rescan")
+
+
+def test_album_chapters_omits_videos_without_markers():
+    sr = _json("getAlbumChapters.view", {"id": _video()["parent"]})
+    for v in sr.get("albumChapters", {}).get("video", []):
+        assert v.get("chapter"), f"{v['id']} listed with no chapters"
+    print("PASS  getAlbumChapters lists only videos that have markers")
+
+
+def test_album_chapters_rejects_missing_id():
+    sr = _json("getAlbumChapters.view")
+    assert sr["status"] == "failed" and sr["error"]["code"] == 10, sr
+    print("PASS  getAlbumChapters without id is error 10")
+
+
+def test_search_finds_a_chapter():
+    if not _original()["chapters"]["writable"]:
+        print("SKIP  search: not writable")
+        return
+    needle = "Zzqx Marker Test"
+    _save(_vid(), f"7:00 {needle}\n")
+    sr = _json("search3.view", {"query": needle, "chapterCount": "20",
+                                "artistCount": "0", "albumCount": "0"})
+    hits = sr.get("searchResult3", {}).get("chapter", [])
+    assert any(h.get("name") == needle for h in hits), hits
+    h = next(h for h in hits if h.get("name") == needle)
+    assert h["songId"] == _vid(), h
+    assert float(h["start"]) == 420.0, h
+    assert h.get("parent"), h
+    print(f"PASS  search finds a chapter: {h['name']!r} at {h['start']}s "
+          f"in {h.get('video')!r}")
+
+
+def test_search_does_not_report_chapters_as_songs():
+    """A chapter has no id anything can stream, star or queue."""
+    if not _original()["chapters"]["writable"]:
+        print("SKIP  search shape: not writable")
+        return
+    needle = "Zzqx Marker Test"
+    _save(_vid(), f"7:00 {needle}\n")
+    sr = _json("search3.view", {"query": needle, "chapterCount": "20"})
+    songs = sr.get("searchResult3", {}).get("song", [])
+    assert not [s for s in songs if s.get("title") == needle], songs
+    print("PASS  a chapter match never appears in song[]")
+
+
+def test_search_omits_chapters_when_not_asked():
+    """An older client must see the response it has always seen."""
+    if not _original()["chapters"]["writable"]:
+        print("SKIP  search default: not writable")
+        return
+    _save(_vid(), "7:00 Zzqx Marker Test\n")
+    sr = _json("search3.view", {"query": "Zzqx Marker Test"})
+    assert "chapter" not in sr.get("searchResult3", {}), sr["searchResult3"]
+    print("PASS  chapterCount defaults to 0 and the array is absent")
+
+
 TESTS = [
     test_get_chapters_shape,
     test_missing_id,
@@ -321,6 +414,13 @@ TESTS = [
     test_empty_body_is_a_tombstone,
     test_xml_and_json_agree,
     test_album_texts_does_not_list_the_sidecar,
+    test_album_chapters_agrees_with_get_chapters,
+    test_album_chapters_updates_without_a_rescan,
+    test_album_chapters_omits_videos_without_markers,
+    test_album_chapters_rejects_missing_id,
+    test_search_finds_a_chapter,
+    test_search_does_not_report_chapters_as_songs,
+    test_search_omits_chapters_when_not_asked,
 ]
 
 
