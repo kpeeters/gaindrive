@@ -100,9 +100,21 @@ class GainDrive {
 		// httplib thread.
 		std::mutex      cast_warm_mu_;
 		std::shared_ptr<const TranscodeCache::Entry> cast_warm_entry_;
-		// What the last LOAD decided, for castSession's snapshot — a page
-		// reload has no castLoad response to read it from.
-		bool            last_cast_audio_only_ = false;
+		// What the last LOAD decided — reported to the client rather than
+		// left for it to re-derive, for the reason cast_load_song() gives
+		// about audioOnly: the ladder these come off lives in codecs.hh, and
+		// a second copy of it in JavaScript is a copy that will drift.
+		//
+		// Held for castSession's snapshot as well as castLoad's reply, because
+		// a page reload has no castLoad response to have read it from.
+		struct CastStreamInfo {
+			bool        audio_only = false;
+			std::string mime;    // the contentType the LOAD declared
+			std::string suffix;  // container the receiver actually receives
+			int         bitrate = 0;  // kbps; 0 when not a fixed-rate encode
+			std::string tier;    // direct | remux | encode
+			};
+		CastStreamInfo  last_cast_stream_;
 
 		// The cast session's owner: the account *and* the client instance that
 		// called startCast. Both halves are needed. The account alone is what
@@ -172,13 +184,15 @@ class GainDrive {
 		// stream.view's cast redirect — and they had three copies of the URL
 		// construction between them, which is two places for a new query
 		// parameter to be forgotten.
-		// Returns true when the LOAD was for the soundtrack alone, because the
-		// session's device announced no video_out.  castLoad and castSession
-		// report that to the client, which draws it rather than working it out
-		// again from the device list.
-		bool cast_load_song(const httplib::Request& req,
-		                    const MediaStore::SongInfo& song,
-		                    int song_id, float offset, int track_id);
+		// Returns the description of what was sent — whether it was the
+		// soundtrack alone (the session's device announced no video_out), the
+		// contentType declared, and the container, bitrate and tier the
+		// receiver will actually get.  castLoad and castSession report all of
+		// it to the client, which draws it rather than working it out again
+		// from the device list and the codec pair.
+		CastStreamInfo cast_load_song(const httplib::Request& req,
+		                              const MediaStore::SongInfo& song,
+		                              int song_id, float offset, int track_id);
 
 		// Probe each configured cast device once at startup and log the result,
 		// so a wrong address is reported rather than only failing later.

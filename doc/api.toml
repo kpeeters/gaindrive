@@ -1507,6 +1507,32 @@ would be one value.
   type = "bool"
   doc  = "True when the receiver was sent the video's soundtrack rather than the video, because it announced no `videoOut`. Always false for an audio track."
 
+  [[endpoint.field]]
+  name = "castLoad.contentType"
+  type = "string"
+  doc  = 'The `contentType` declared in the Cast `LOAD`, which is what the receiver picks its decode pipeline from. Not the source container: everything the remux or re-encode tier touches is announced as `video/mp4`, and a VP9/Opus `.mkv` is announced as `video/webm` although its bytes go out untouched.'
+
+  [[endpoint.field]]
+  name = "castLoad.sentSuffix"
+  type = "string"
+  doc  = 'The container the receiver actually receives. The source extension on the `direct` tier, `mp4` on the other two, and `mp3` for a soundtrack.'
+
+  [[endpoint.field]]
+  name = "castLoad.sentBitRate"
+  type = "int"
+  doc  = '''
+Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
+file byte-ranged — no `format`, no `maxBitRate`, and the account ceiling is
+exempt for a cast token — so this is the file's own bitrate rather than anything
+the `transcoded*` fields describe. A video remux keeps the source's rate and a
+re-encode is not fixed-rate, so both report 0.
+'''
+
+  [[endpoint.field]]
+  name = "castLoad.tier"
+  type = "string"
+  doc  = 'Which of the three delivery tiers this fetch lands on: `direct` (the file as it stands, byte-ranged), `remux` (`-c copy` into MP4 through the transcode cache, still seekable), or `encode` (re-encoded as it plays). A soundtrack is always `encode`.'
+
   [[endpoint.error]]
   code = '0'
   when = 'No cast session is active, or the caller does not own it.'
@@ -1625,6 +1651,32 @@ load and show itself as casting.
   name = "castSession.audioOnly"
   type = "bool"
   doc  = 'The same answer `castLoad` returned for the load now playing. Present here because a client that has just reloaded has no `castLoad` reply to have read it from.'
+
+  [[endpoint.field]]
+  name = "castSession.contentType"
+  type = "string"
+  doc  = 'The `contentType` declared in the Cast `LOAD`, which is what the receiver picks its decode pipeline from. Not the source container: everything the remux or re-encode tier touches is announced as `video/mp4`, and a VP9/Opus `.mkv` is announced as `video/webm` although its bytes go out untouched.'
+
+  [[endpoint.field]]
+  name = "castSession.sentSuffix"
+  type = "string"
+  doc  = 'The container the receiver actually receives. The source extension on the `direct` tier, `mp4` on the other two, and `mp3` for a soundtrack.'
+
+  [[endpoint.field]]
+  name = "castSession.sentBitRate"
+  type = "int"
+  doc  = '''
+Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
+file byte-ranged — no `format`, no `maxBitRate`, and the account ceiling is
+exempt for a cast token — so this is the file's own bitrate rather than anything
+the `transcoded*` fields describe. A video remux keeps the source's rate and a
+re-encode is not fixed-rate, so both report 0.
+'''
+
+  [[endpoint.field]]
+  name = "castSession.tier"
+  type = "string"
+  doc  = 'Which of the three delivery tiers this fetch lands on: `direct` (the file as it stands, byte-ranged), `remux` (`-c copy` into MP4 through the transcode cache, still seekable), or `encode` (re-encoded as it plays). A soundtrack is always `encode`.'
 
 [[endpoint]]
 kind         = 'endpoint'

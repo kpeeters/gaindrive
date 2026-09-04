@@ -2512,6 +2512,16 @@ let castEndStallTime    = null;   // Date.now() when BUFFERING-at-end stall star
 // and reports it; this is only the last answer it gave, kept so the panel can
 // be drawn before the next castLoad replies.
 let castAudioOnly       = false;
+// What the server said the receiver is actually being sent: contentType,
+// container, bitrate and tier, as castLoad and castSession both report them.
+// Null when nothing has been loaded this session.
+//
+// Held rather than recomputed because the decision is the server's — it is the
+// one place holding both the song and the device, and the tier ladder it comes
+// off lives in src/codecs.hh.  Working it out again here from the device list
+// and the codec pair would be a second copy of that ladder in another
+// language, which is the drift every predicate in codecs.hh warns about.
+let castStream          = null;
 // True while this session is showing the film here, muted, slaved to the
 // receiver's clock — the mode castSyncTick() below drives.  Distinct from
 // castAudioOnly, which says what the *receiver* was sent: the picture can be
@@ -2850,8 +2860,10 @@ async function openInfoModal() {
    const cur = player.queue[player.index];
    if (!cur) return;
    const list  = document.getElementById('info-modal-list');
+   const play  = document.getElementById('info-playback-list');
    const modal = document.getElementById('info-modal');
    list.innerHTML = '';
+   play.innerHTML = '';
    modal.classList.remove('hidden');
 
    // Re-fetch via getSong so transcoded* fields reflect the user's current
@@ -2862,27 +2874,6 @@ async function openInfoModal() {
       if (sr.song) song = sr.song;
       } catch { /* keep cached song */ }
 
-   // Compute the format/bitrate the server is actually sending.  Two
-   // independent transcode triggers exist: (a) the server caps bitrate per
-   // user — reflected in song.transcodedSuffix/transcodedBitRate from the
-   // server; (b) the browser asked for format=mp3 because it can't decode
-   // the source codec (or fell back after a decode error) — only the client
-   // knows about that.  player.streamFormat is the format the player asked
-   // the server for on the most recent local playerPlay() call (null when
-   // the source is served as-is, or while casting).
-   let sentSuffix, sentBitRate;
-   if (player.streamFormat) {
-      // Streamer's format_change branch: target bitrate is max_bitrate when
-      // the user has one set and it's below 320, else 320 kbps.
-      sentSuffix  = player.streamFormat;
-      const cap   = currentUser?.maxBitRate || 0;
-      sentBitRate = (cap > 0 && cap < 320) ? cap : 320;
-      }
-   else {
-      sentSuffix  = song.transcodedSuffix  ?? song.suffix;
-      sentBitRate = song.transcodedBitRate ?? song.bitRate;
-      }
-
    const rows = [
       ['Title',              song.title],
       ['Artist',             song.artist],
@@ -2891,20 +2882,95 @@ async function openInfoModal() {
       ['Year',               song.year],
       ['Server file format', song.suffix],
       ['Server bitrate',     song.bitRate ? `${song.bitRate} kbps` : null],
-      ['Sent file format',   sentSuffix],
-      ['Sent bitrate',       sentBitRate ? `${sentBitRate} kbps` : null],
       ['Length',             song.duration ? fmtDuration(song.duration) : null],
       ['Starred',            song.starred ? 'Yes' : 'No'],
       ];
-   for (const [label, value] of rows) {
-      if (value === null || value === undefined || value === '') continue;
-      const dt = document.createElement('dt');
-      dt.textContent = label;
-      const dd = document.createElement('dd');
-      dd.textContent = value;
-      list.appendChild(dt);
-      list.appendChild(dd);
+
+   // Second section: how the sound is reaching the speaker, which is a
+   // different question from what the file is.  Matches the Android app's
+   // track info dialog, which has had it since the cast route became
+   // something a session could get wrong silently.
+   const casting = castDeviceId !== null;
+   const dev     = castDeviceName || 'the receiver';
+   let output;
+   if (!casting)
+      output = 'This browser';
+   else if (castVideoLocal)
+      // The one case where the two halves of a playback are in two places,
+      // and the only reason this row is not a constant.  Android spells it as
+      // a separate Route row because a phone can also relay or serve a
+      // downloaded copy; the server-driven path has none of those, so a row
+      // of its own would read the same sentence on every cast.
+      output = `Chromecast “${dev}” — sound fetched from this `
+             + 'server, picture playing in this browser';
+   else
+      output = `Chromecast “${dev}” — fetching from this server`;
+
+   // What is actually going out.  While casting that is the server's answer,
+   // read back rather than worked out again here: a cast URL carries no
+   // format, no maxBitRate and no timeOffset, and the account ceiling is
+   // exempt for a cast token, so none of the transcoded* fields describe it.
+   let sent = null;
+   if (casting && castStream) {
+      const kbps = castStream.sentBitRate > 0
+         ? `${castStream.sentSuffix?.toUpperCase() ?? ''} ${castStream.sentBitRate} kbps`.trim()
+         : (castStream.sentSuffix?.toUpperCase() ?? '');
+      const how = castStream.audioOnly    ? 'soundtrack only'
+                : castStream.tier === 'remux'  ? 'remuxed to MP4'
+                : castStream.tier === 'encode' ? 're-encoded as it plays'
+                :                                'as stored';
+      sent = kbps ? `${kbps} — ${how}` : how;
       }
+   else {
+      // Local playback.  Two independent transcode triggers exist: (a) the
+      // server caps bitrate per user — reflected in the transcoded* fields;
+      // (b) the browser asked for format=mp3 because it cannot decode the
+      // source codec (or fell back after a decode error), which only the
+      // client knows about.  player.streamFormat is the format the player
+      // asked for on the most recent playerPlay() call.
+      let suffix, bitRate;
+      if (player.streamFormat) {
+         // Streamer's format_change branch: target bitrate is max_bitrate when
+         // the user has one set and it is below 320, else 320 kbps.
+         suffix  = player.streamFormat;
+         const cap = currentUser?.maxBitRate || 0;
+         bitRate = (cap > 0 && cap < 320) ? cap : 320;
+         }
+      else {
+         suffix  = song.transcodedSuffix  ?? song.suffix;
+         bitRate = song.transcodedBitRate ?? song.bitRate;
+         }
+      if (suffix || bitRate)
+         sent = bitRate ? `${(suffix ?? '').toUpperCase()} ${bitRate} kbps`.trim()
+                        : (suffix ?? '').toUpperCase();
+      }
+
+   const playRows = [
+      ['Output',        output],
+      ['Sent',          sent],
+      // What the receiver picks its decode pipeline from, and not the same
+      // thing as the container: everything the remux or encode tier touches
+      // is announced as video/mp4.
+      ['Declared type', casting ? castStream?.contentType : null],
+      ];
+
+   const fill = (dl, pairs) => {
+      for (const [label, value] of pairs) {
+         if (value === null || value === undefined || value === '') continue;
+         const dt = document.createElement('dt');
+         dt.textContent = label;
+         const dd = document.createElement('dd');
+         dd.textContent = value;
+         dl.appendChild(dt);
+         dl.appendChild(dd);
+         }
+      };
+   fill(list, rows);
+   // The section is unconditional, and so is its heading: the modal opens only
+   // with a current track, and Output always has an answer for one — "this
+   // browser" is as much a fact as a device name. The other two rows drop
+   // themselves when empty, as every row in the first list does.
+   fill(play, playRows);
    }
 
 // One row of the cast picker, laid out as the Android sheet lays it out: the
@@ -2927,7 +2993,15 @@ function castDeviceButton(dev) {
    primary.textContent = label;
    text.appendChild(primary);
 
-   const sub = [dev.model, dev.address].filter(Boolean).join(' · ');
+   // "Sound only" on a receiver that announced no screen, so a film cast to
+   // an amplifier is a known choice rather than a surprise after the first
+   // load — which is the only place it showed before.  Tested against an
+   // explicit false: video_out() reports true for a device that announced
+   // nothing, which is every manually configured one, and marking those would
+   // be a guess presented as a fact.
+   const sub = [dev.model, dev.address,
+                dev.videoOut === false ? 'sound only' : null]
+      .filter(Boolean).join(' · ');
    if (sub) {
       const secondary = document.createElement('span');
       secondary.className = 'cast-row-sub';
@@ -3081,6 +3155,7 @@ function castExit() {
    // — the surface's close button — has nothing else that would stop it.
    castLocalVideoStop();
    castAudioOnly    = false;
+   castStream       = null;
    castPlayerState  = 'IDLE';
    castSongDuration = 0;
    castButtonState(false);
@@ -3823,9 +3898,13 @@ function playerPlay(offset = 0, forceMp3 = false) {
       //
       // A cast URL names no format, so the receiver plays the source codec —
       // except for a soundtrack on a device with no screen, where the server
-      // adds one and the reply below records it.  Clear so the info dialog
-      // falls back to the server's bitrate-cap fields
-      // (transcodedSuffix/transcodedBitRate) meanwhile.
+      // adds one.  Cleared because it describes the *local* element's stream
+      // and there is no local stream while casting; the info dialog reads
+      // castStream instead, which the reply below fills in.  It used to fall
+      // back to the server's transcodedSuffix/transcodedBitRate here, and that
+      // was wrong: those describe the account bitrate ceiling, which
+      // stream.view exempts for a cast token, so the dialog reported a
+      // conversion that was not happening.
       player.streamFormat = null;
       const params = {id: song.id};
       if (offset > 0) params.timeOffset = Math.floor(offset);
@@ -3849,9 +3928,14 @@ function playerPlay(offset = 0, forceMp3 = false) {
       apiCall('castLoad', params)
          .then(r => {
             if (player.queue[player.index] !== loadSong) return;
+            // Read for every load, audio included.  Guarding this on isVideo
+            // was a bug rather than an economy: castAudioOnly then carried
+            // over from the last film into an audio track, and with the
+            // reply now also describing the stream the info dialog would
+            // have shown one track's figures against another's.
+            castStream    = r?.castLoad ?? null;
+            castAudioOnly = !!castStream?.audioOnly;
             if (!loadSong.isVideo) return;
-            castAudioOnly = !!r?.castLoad?.audioOnly;
-            player.streamFormat = castAudioOnly ? 'mp3' : null;
             // The receiver has only the sound, so the picture need not be
             // lost — it can stay here, muted, following the receiver's clock.
             // Started from the reply rather than above it because until the
@@ -5381,6 +5465,10 @@ async function showShell() {
             castPlayerState  = sess.playerState;
             castSongDuration = sess.songDuration;
             castAudioOnly    = !!sess.audioOnly;
+            // The same description castLoad's reply carries, for the load
+            // that is already playing — this reload has no castLoad reply to
+            // have read it from, which is why castSession repeats it.
+            castStream       = sess;
             // The server numbers caption tracks from 1 and 0 means off; the
             // picker indexes from 0 and null means off.
             player.captionIndex = sess.trackId > 0 ? sess.trackId - 1 : null;

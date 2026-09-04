@@ -171,6 +171,12 @@
    <div class="modal-box">
       <h3>Track info</h3>
       <dl id="info-modal-list"></dl>
+      <!-- How the sound is reaching the speaker, which is a different
+           question from what the file is. Its own list because a heading
+           cannot live inside a &lt;dl&gt;, and unconditional because "this
+           browser" is as much an answer as a device name. -->
+      <h4 id="info-playback-head">Playback</h4>
+      <dl id="info-playback-list"></dl>
       <button id="info-close-btn">Close</button>
    </div>
 </div>

@@ -2048,7 +2048,8 @@ body {
    max-width: 480px;
 }
 
-#info-modal-list {
+#info-modal-list,
+#info-playback-list {
    margin: 0;
    display: grid;
    grid-template-columns: max-content 1fr;
@@ -2057,14 +2058,25 @@ body {
    font-size: 0.9rem;
 }
 
-#info-modal-list dt {
+#info-modal-list dt,
+#info-playback-list dt {
    color: var(--text-dim);
    font-weight: normal;
 }
 
-#info-modal-list dd {
+#info-modal-list dd,
+#info-playback-list dd {
    margin: 0;
    word-break: break-word;
+}
+
+#info-playback-head {
+   margin: 1.1rem 0 0.5rem;
+   font-size: 0.85rem;
+   font-weight: 600;
+   letter-spacing: 0.04em;
+   text-transform: uppercase;
+   color: var(--text-dim);
 }
 
 #cast-stop-row button,

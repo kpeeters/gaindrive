@@ -827,6 +827,15 @@
 <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
 <tr><td><code>castLoad.audioOnly</code></td><td>bool</td><td>True when the receiver was sent the video&#x27;s soundtrack rather than the video, because it announced no <code>videoOut</code>. Always false for an audio track.</td></tr>
+<tr><td><code>castLoad.contentType</code></td><td>string</td><td>The <code>contentType</code> declared in the Cast <code>LOAD</code>, which is what the receiver picks its decode pipeline from. Not the source container: everything the remux or re-encode tier touches is announced as <code>video/mp4</code>, and a VP9/Opus <code>.mkv</code> is announced as <code>video/webm</code> although its bytes go out untouched.</td></tr>
+<tr><td><code>castLoad.sentSuffix</code></td><td>string</td><td>The container the receiver actually receives. The source extension on the <code>direct</code> tier, <code>mp4</code> on the other two, and <code>mp3</code> for a soundtrack.</td></tr>
+<tr><td><code>castLoad.sentBitRate</code></td><td>int</td><td>Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
+file byte-ranged — no <code>format</code>, no <code>maxBitRate</code>, and the account ceiling is
+exempt for a cast token — so this is the file&#x27;s own bitrate rather than anything
+the <code>transcoded*</code> fields describe. A video remux keeps the source&#x27;s rate and a
+re-encode is not fixed-rate, so both report 0.
+</td></tr>
+<tr><td><code>castLoad.tier</code></td><td>string</td><td>Which of the three delivery tiers this fetch lands on: <code>direct</code> (the file as it stands, byte-ranged), <code>remux</code> (<code>-c copy</code> into MP4 through the transcode cache, still seekable), or <code>encode</code> (re-encoded as it plays). A soundtrack is always <code>encode</code>.</td></tr>
 </tbody>
 </table>
 <h4>Errors</h4>
@@ -895,6 +904,15 @@
 <tr><td><code>castSession.songDuration</code></td><td>float</td><td>Duration as the library has it, which is the one to trust for a progress bar.</td></tr>
 <tr><td><code>castSession.trackId</code></td><td>int</td><td>The subtitle track currently showing, or 0.</td></tr>
 <tr><td><code>castSession.audioOnly</code></td><td>bool</td><td>The same answer <code>castLoad</code> returned for the load now playing. Present here because a client that has just reloaded has no <code>castLoad</code> reply to have read it from.</td></tr>
+<tr><td><code>castSession.contentType</code></td><td>string</td><td>The <code>contentType</code> declared in the Cast <code>LOAD</code>, which is what the receiver picks its decode pipeline from. Not the source container: everything the remux or re-encode tier touches is announced as <code>video/mp4</code>, and a VP9/Opus <code>.mkv</code> is announced as <code>video/webm</code> although its bytes go out untouched.</td></tr>
+<tr><td><code>castSession.sentSuffix</code></td><td>string</td><td>The container the receiver actually receives. The source extension on the <code>direct</code> tier, <code>mp4</code> on the other two, and <code>mp3</code> for a soundtrack.</td></tr>
+<tr><td><code>castSession.sentBitRate</code></td><td>int</td><td>Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
+file byte-ranged — no <code>format</code>, no <code>maxBitRate</code>, and the account ceiling is
+exempt for a cast token — so this is the file&#x27;s own bitrate rather than anything
+the <code>transcoded*</code> fields describe. A video remux keeps the source&#x27;s rate and a
+re-encode is not fixed-rate, so both report 0.
+</td></tr>
+<tr><td><code>castSession.tier</code></td><td>string</td><td>Which of the three delivery tiers this fetch lands on: <code>direct</code> (the file as it stands, byte-ranged), <code>remux</code> (<code>-c copy</code> into MP4 through the transcode cache, still seekable), or <code>encode</code> (re-encoded as it plays). A soundtrack is always <code>encode</code>.</td></tr>
 </tbody>
 </table>
 <p>Only the caller&#x27;s own session. Another owner&#x27;s is reported as <code>active: false</code> — otherwise a second browser would adopt it wholesale on page load and show itself as casting.</p>
