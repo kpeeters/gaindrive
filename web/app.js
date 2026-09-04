@@ -6037,7 +6037,14 @@ function renderSearchResults(res) {
 
          const sub = document.createElement('span');
          sub.className = 'search-song-sub';
-         sub.textContent = [c.artist, c.video].filter(Boolean).join(' · ');
+         // Artist, album, then the film itself: a marker means nothing without
+         // knowing which concert it is in, and the album is what the folder is
+         // called while the video is what the file is called. They coincide
+         // often enough -- a folder holding one film named after it -- that an
+         // exact duplicate is dropped rather than printed twice.
+         const where = [c.artist, c.album];
+         if (c.video && c.video !== c.album) where.push(c.video);
+         sub.textContent = where.filter(Boolean).join(' · ');
 
          info.append(titleEl, sub);
          row.appendChild(info);
