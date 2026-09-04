@@ -107,6 +107,55 @@ title = "Video"
 group = "Library"
 
 [[section]]
+id    = "chapters"
+title = "Chapters"
+group = "Library"
+blurb = '''
+A concert, a DJ set, a mixtape and a lecture recording are each one file
+holding a dozen items, and chapter markers are what let a client say where
+each one starts, jump between them and show which one is playing. Nothing
+here is restricted to video: an audio file carries them for exactly the same
+reason, and every endpoint below takes either.
+
+Markers live in a **sidecar text file beside the media**,
+`<stem>.chapters.txt` -- `Concert.chapters.txt` beside `Concert.mkv` -- in the
+format `mp4chaps --export` writes, which means `mp4chaps --import` will move
+them into the container for anyone who wants them there. The double extension
+is deliberate: a plain `<stem>.txt` is indistinguishable from liner notes,
+which `getAlbumTexts` lists, and that listing skips anything ending
+`.chapters.txt` for the same reason.
+
+gaindrive never writes markers *into* a container. MP4 chapters are a track
+inside the file, so a save would be an `ffmpeg -c copy` rewrite of every byte
+of a multi-gigabyte concert, needing that much free space as well as the time.
+A container's own chapters are *read*, as a fallback, and only for video.
+
+Nothing about a marker is durable in either database. The file on disk is the
+only copy, so a rebuilt library still has them, a moved directory carries them
+with it, and a sidecar written by hand or by another tool needs no API call to
+take effect. What the databases do hold is an **index**, rebuilt by the scan
+from those same files, and the split between the two is the thing to know
+before building on any of this:
+
+* `getChapters` reads the **file**, on every call. A playback lookup has to be
+  right, and it is the only endpoint that can see a container's own markers.
+* `getAlbumChapters` and the `search2`/`search3` additions read the **index**.
+  A browse listing has to be cheap, and reading a sidecar per item -- or
+  running `ffprobe` for a video without one -- every time somebody opens an
+  album is exactly the cost the index removes.
+* `saveChapters` writes the file and updates the index in the same call, so a
+  save is visible everywhere before it returns. A sidecar changed *outside*
+  gaindrive reaches `getChapters` at once and the other two only after the
+  next scan of that folder.
+
+NOTE: A chapter is not a song and has no id of its own. It cannot be streamed,
+starred, queued or bookmarked; a client acts on one by streaming the song it
+is inside and seeking to `start`. That is a decision rather than an omission,
+and the reason is durability -- a synthetic id would have to encode a path,
+and a folder rename would then orphan every star keyed on one.
+'''
+
+[[section]]
 id    = "albumtext"
 title = "Album text and images"
 group = "Library"
@@ -614,44 +663,51 @@ container to collect one subtitle stream and the receiver fetches the track
 the moment it is switched on.
 '''
 
+
+# ===========================================================================
+# Chapters
+# ===========================================================================
+
 [[endpoint]]
 kind    = 'endpoint'
 name    = "getChapters"
-section = "video"
-summary = 'The song markers inside one long recording.'
+section = "chapters"
+summary = 'The markers inside one recording, read from the file itself.'
 notes   = '''
-A whole concert is usually one file, and these are what let a client say where
-each song starts, jump between them and show which one is playing. A DJ set or
-a mixtape fetched as *audio* carries them for the same reason, so this is not
-restricted to video.
+The authority, and the only endpoint that reads the media rather than the
+index. Use it for playback: a client that is about to jump between the songs
+in a concert needs the list that is actually on disk, including one somebody
+edited a moment ago in another window.
 
-They live in a sidecar text file beside the media, `<stem>.chapters.txt`, in
-the format `mp4chaps --export` writes -- `HH:MM:SS.mmm Title`, one marker a
-line. gaindrive never writes them into the container: MP4 chapters are a track
-*inside* the file, so a save would be an `ffmpeg -c copy` rewrite of every byte
-of a multi-gigabyte concert, needing that much free space as well as the time.
+The sidecar leads, and does so **even when it is empty**. An empty file is a
+tombstone reported as `source: sidecar` with no markers at all, which is the
+only way to say "this one has no chapters" about a rip whose container
+disagrees.
 
-NOTE: `source: container` is reachable for a **video** only. Reading a
-container's own chapters costs an `ffprobe`, which is affordable once per film
-and not once per audio track in a library; an audio file's markers come from
-its sidecar or not at all.
-
-Nothing about them is held in either database. The file on disk is the only
-copy, so a rebuilt library still has them and a moved directory carries them
-with it.
+NOTE: `source: container` is reachable for a **video** only, and only when the
+container actually yielded a marker. Reading a container costs an `ffprobe`,
+which is affordable once per film and not once per audio track in a library;
+an audio file's markers come from its sidecar or not at all. An M4B audiobook
+is the case this shuts out, and it is a known gap rather than a decision about
+audiobooks.
 
 NOTE: A marker's `name` is reported exactly as the file holds it, empty
 included. Draw your own placeholder for a bare marker; the server will not
 invent one, because a client that saved back what it read would then write the
 placeholder into a line somebody deliberately left blank.
 '''
-see     = ["saveChapters"]
+see     = ["saveChapters", "getAlbumChapters"]
 
   [[endpoint.param]]
   name     = "id"
   type     = "string"
   required = true
   doc      = 'A song id, audio or video.'
+
+  [[endpoint.field]]
+  name = "chapters.id"
+  type = "string"
+  doc  = 'The song id that was asked for, echoed back.'
 
   [[endpoint.field]]
   name = "chapters.source"
@@ -662,8 +718,14 @@ A sidecar wins outright when both exist, because somebody put it there
 deliberately -- the same rule a sidecar subtitle follows.
 
 `container` means the markers were read out of the file with
-`ffprobe -show_chapters` and are read-only in the sense that editing them
-writes a sidecar which shadows them. Deleting that sidecar brings them back.
+`ffprobe -show_chapters`, and they are read-only in the sense that editing
+them writes a sidecar which shadows them. Deleting that sidecar brings them
+back.
+
+`none` covers every remaining case as one answer: no sidecar and an audio
+file, no sidecar and a video whose container carries nothing, an unreadable
+file, or a failed probe. It is not a distinction a client can act on, so it is
+not reported as several.
 '''
 
   [[endpoint.field]]
@@ -674,39 +736,53 @@ writes a sidecar which shadows them. Deleting that sidecar brings them back.
 The same rule every other library edit follows: an admin anywhere, or the
 owner of the item inside their own uploads. Offered as a field so a client can
 draw a jump list rather than a form it cannot submit.
+
+It is about permission alone. A `container` list is writable in this sense --
+saving one writes the sidecar that shadows it.
 '''
 
   [[endpoint.field]]
   name = "chapters.chapter"
   type = "Chapter[]"
-  doc  = 'The markers, earliest first.'
+  doc  = 'The markers, earliest first. At most 1000; see the notes on `saveChapters`.'
 
   [[endpoint.field]]
   name = "index"
   type = "int"
   on   = "Chapter"
   doc  = 'Position in the list, from 1.'
+  notes = '''
+Assigned after the sort, so it numbers the list as returned and is not
+whatever order the file happened to be in. It is a position and not an
+identity: inserting a marker renumbers every one after it.
+'''
 
   [[endpoint.field]]
   name  = "start"
   type  = "float"
   on    = "Chapter"
-  doc   = 'Seconds from the start of the file, to the millisecond.'
+  doc   = 'Seconds from the start of the file, rounded to the millisecond.'
   notes = '''
 Not whole seconds, because a save is a round trip: a client reads this list,
 changes one marker and writes the rest back, so truncating here would flatten
-every fractional timestamp in a hand-written file.
+every fractional timestamp in a hand-written file. A millisecond is also
+exactly what the file format holds, so the round trip is a fixed point.
 '''
 
   [[endpoint.field]]
   name  = "duration"
   type  = "int"
   on    = "Chapter"
-  doc   = 'Seconds until the next marker, or until the end of the file.'
+  doc   = 'Whole seconds until the next marker, or until the end of the file.'
   notes = '''
 Derived rather than stored -- the file records only where each marker begins.
-The last one is measured against the song's own duration, which is why the
+The last one is measured against the item's own duration, which is why the
 server computes this rather than leaving each client to.
+
+`0` when that span is not positive, which is what a marker past the end of the
+file gives, and what two markers on the same timestamp give. Neither is an
+error and neither is rejected on save: a hand-typed file is allowed to be
+wrong, and dropping a line would be data loss.
 '''
 
   [[endpoint.field]]
@@ -721,48 +797,84 @@ server computes this rather than leaving each client to.
 
   [[endpoint.error]]
   code = '70'
-  when = 'No such song.'
+  when = 'No such song, or one inside the uploads of another user.'
 
 
 [[endpoint]]
 kind         = 'endpoint'
 name         = "saveChapters"
-section      = "video"
+section      = "chapters"
 method       = 'POST'
 auth_note    = 'Admin anywhere, or your own upload.'
-summary      = 'Replaces the marker list for one song. The request body is the chapter file itself.'
+summary      = 'Replaces the marker list for one item. The request body is the chapter file itself.'
 notes        = '''
 `id` goes in the query string; the **body** is the contents of the sidecar,
 sent as `text/plain; charset=utf-8` and parsed by the same code that reads one
 off disk. That is one definition of the format rather than two that can drift,
-and it makes a round trip a fixed point.
+and it makes a round trip a fixed point. Repeated `start=`/`name=` parameters
+were the obvious shape and do not work here: the server drops an exact
+duplicate pair, so two chapters both called `Encore` would lose one, and the
+urlencoded body limit is 8 kB whatever the configured payload limit says.
 
 The parse is deliberately liberal, so a block pasted out of a video
 description works as it stands:
 
-* `MM:SS`, `H:MM:SS` and `HH:MM:SS.mmm`, with `,` accepted as the decimal point
-* a `-`, `|`, en dash or em dash between the time and the title is dropped
+* `MM:SS`, `H:MM:SS` and `HH:MM:SS.mmm`, with `,` accepted as the decimal
+  point
+* a `-`, `|`, en dash or em dash between the time and the title is dropped,
+  but only when whitespace follows it, so a title that genuinely begins with a
+  dash keeps it
 * blank lines, `#` comments, a UTF-8 BOM and CRLF endings are all tolerated
 * everything after the first run of whitespace is the title, verbatim -- so a
-  colon or a leading digit in a title needs no escaping, and there is no escape
-  syntax to learn
+  colon, a leading digit or a second timestamp in a title needs no escaping,
+  and there is no escape syntax to learn
 * a line carrying no timestamp is skipped; it never fails the whole file
 
-Minutes above 59 are accepted in the two-field form, because `90:00` is
-ordinary in a hand-typed list, but not in the three-field form, where they are
-a typo.
+Four rules inside that are decisions rather than arithmetic, and each is the
+one a client is most likely to get wrong:
+
+* **The fraction is a decimal fraction, not a count of milliseconds.**
+  `00:00.5` is half a second, not five thousandths of one.
+* **A bare number is not a timestamp.** `90` is a track index in every list
+  that has one, so at least two colon-separated fields are required and a line
+  holding one number is skipped.
+* **Minutes above 59 are accepted in the two-field form only**, because
+  `90:00 Encore` is ordinary in a hand-typed list while `13:99:00` is a typo.
+  Seconds are always below 60.
+* **The timestamp must end at whitespace or end of line**, which is what stops
+  `13:35abc` from parsing as a time followed by a title.
+
+Lone-CR line endings -- classic Mac -- are not supported, and saying so is the
+point: an invisible CR would otherwise travel into a JSON string, an XML
+attribute and back out into the file again.
+
+A title is trimmed, has its control characters **dropped** rather than
+escaped, is cleaned of invalid UTF-8, and is truncated at 500 bytes. Dropping
+is not a style choice: the format is line-based and has no escape syntax, so a
+newline inside a title would silently become another marker.
+
+The file is rewritten in canonical form -- markers sorted by start, one
+`HH:MM:SS.mmm Title` line each, LF endings. **Comments, blank lines, the
+original spelling of every timestamp and any line the parse skipped are not
+preserved.** A save is a replacement of the file, not an edit of it. Markers
+sharing a timestamp keep the order the body gave them and are not merged.
 
 The reply is the saved list in the shape `getChapters` returns, re-read from
 disk. **Adopt it rather than what you sent**: the server sorts, sanitises and
 may drop a line it could not read, so anything else leaves the client
-describing a file that is not the one on disk.
+describing a file that is not the one on disk. The index behind
+`getAlbumChapters` and the search additions is updated in the same call, so
+the save is visible to every endpoint before it returns.
+
+The write publishes by rename, so no reader -- including the person with the
+file open in an editor -- ever sees half a save.
 
 NOTE: An empty body writes an *empty* file rather than deleting it. That empty
 file is what says "this one has no chapters" -- without it, clearing the
 markers of a rip whose container carries its own would simply make those
 reappear, and there would be no way to overrule them.
 '''
-see          = ["getChapters"]
+see          = ["getChapters", "getAlbumChapters"]
 
   [[endpoint.param]]
   name     = "id"
@@ -776,7 +888,7 @@ see          = ["getChapters"]
 
   [[endpoint.error]]
   code = '70'
-  when = 'No such song.'
+  when = 'No such song, or one inside the uploads of another user.'
 
   [[endpoint.error]]
   code = '50'
@@ -790,23 +902,26 @@ see          = ["getChapters"]
 [[endpoint]]
 kind    = 'endpoint'
 name    = "getAlbumChapters"
-section = "video"
+section = "chapters"
 summary = 'Every chaptered item in one album folder, with its markers.'
 notes   = '''
-What a concert folder needs to list its *songs* rather than one row named after
-the file. A folder holding several recordings returns each of them, audio or
-video alike.
+What a concert folder needs to list its *songs* rather than one row named
+after the file. A folder holding several recordings returns each of them,
+audio or video alike, and a client can draw the markers as the album's tracks
+under a heading naming the recording they came from.
 
-This reads the index the scan maintains, where `getChapters` reads the
-sidecar file. That difference is the point rather than an
-implementation detail: a playback lookup has to be right, so it reads the file;
-a browse listing has to be cheap, and reading a sidecar for every item in a
-folder -- or running `ffprobe` for a video that has none -- every time somebody
-opens an album is exactly the cost the index removes.
+This reads the index, where `getChapters` reads the file. It covers the album
+folder and its disc subdirectories -- the same scope the album listing itself
+uses -- and returns them in the order that listing already draws, so the two
+can be zipped together without re-sorting.
 
 NOTE: Only sidecars are indexed. A video whose markers live solely in its
 container appears in `getChapters` and **not** here, until they are saved --
 which writes the sidecar the scan then indexes.
+
+NOTE: An item whose sidecar is the empty tombstone has no markers and is
+therefore absent, exactly as one with no sidecar at all. The distinction the
+two carry in `getChapters` has nothing to add to a listing.
 '''
 see     = ["getChapters", "saveChapters"]
 
@@ -817,6 +932,11 @@ see     = ["getChapters", "saveChapters"]
   doc      = 'An album folder id, as `getAlbum` takes.'
 
   [[endpoint.field]]
+  name = "albumChapters.id"
+  type = "string"
+  doc  = 'The album folder id that was asked for, echoed back.'
+
+  [[endpoint.field]]
   name = "albumChapters.song"
   type = "Song[]"
   doc  = 'One entry per chaptered item, in the order the album lists its tracks. Anything with no markers is absent.'
@@ -825,7 +945,7 @@ see     = ["getChapters", "saveChapters"]
   name = "id"
   type = "string"
   on   = "Song"
-  doc  = 'The song id.'
+  doc  = 'The song id. Stream *this* and seek to a marker; a chapter has no id of its own.'
 
   [[endpoint.field]]
   name = "title"
@@ -845,33 +965,40 @@ see     = ["getChapters", "saveChapters"]
 
   [[endpoint.error]]
   code = '70'
-  when = 'No such album folder.'
+  when = 'No such album folder, or one inside the uploads of another user.'
 
 
 [[endpoint]]
 kind       = 'additions'
 applies_to = ["search2", "search3"]
-section    = "video"
-summary    = 'Matching the song titles inside a video, as well as the library.'
+section    = "chapters"
+summary    = 'Matching the song titles inside a recording, as well as the library.'
 notes      = '''
-A whole concert is one file, so without this the songs in it cannot be found at
-all.
+A whole concert is one file, so without this the songs in it cannot be found
+at all.
+
+Matching is on the **marker title only**, as a case-insensitive substring, and
+the results are ordered by that title rather than by any measure of relevance.
+That ordering is global and stable, which is what makes `chapterOffset` paging
+meaningful. It reads the index, so a video whose markers live only in its
+container is not searchable until they are saved.
 
 NOTE: Matches come back in an array of their own and **never** as `song`
 entries. A chapter has no id anything can stream, star or queue, so reporting
-one as a song would hand a client a track that does not work.
+one as a song would hand a client a track that does not work. Act on one by
+streaming `songId` and seeking to `start`.
 '''
-see        = ["getChapters"]
+see        = ["getChapters", "getAlbumChapters"]
 
   [[endpoint.param]]
   name    = "chapterCount"
   type    = "int"
   default = '0'
-  doc     = 'How many chapter matches to return. Clamped to 1..500.'
+  doc     = 'How many chapter matches to return. Clamped to 0..500, where 0 asks for none.'
   notes   = '''
 Defaults to **0**, unlike `artistCount`, `albumCount` and `songCount`, which
-default to 20. A client that does not know about chapters should not be made to
-pay for the extra query, and one that does asks for them by name.
+default to 20. A client that does not know about chapters should not be made
+to pay for the extra query, and one that does asks for them by name.
 '''
 
   [[endpoint.param]]
@@ -884,6 +1011,11 @@ pay for the extra query, and one that does asks for them by name.
   name  = "searchResult.chapter"
   type  = "Chapter[]"
   doc   = 'Chapters whose title matched. Absent when none did, or when `chapterCount` was not sent.'
+  notes = '''
+A different shape from the `Chapter` the other three endpoints return: it
+carries the context needed to draw a result row, and it has no `duration`,
+which cannot be known without the rest of the list.
+'''
 
   [[endpoint.field]]
   name = "songId"
@@ -901,7 +1033,7 @@ pay for the extra query, and one that does asks for them by name.
   name = "start"
   type = "float"
   on   = "Chapter"
-  doc  = 'Seconds into that song, to the millisecond.'
+  doc  = 'Seconds into that song, rounded to the millisecond.'
 
   [[endpoint.field]]
   name = "index"
@@ -946,8 +1078,10 @@ section  = "albumtext"
 response = 'subsonic-json'
 summary  = 'Lists the `.txt` files in an album folder, sorted by name.'
 notes    = '''
-Utility files that are not human-readable notes — currently
-`fingerprints.txt` — are excluded.
+Utility files that are not human-readable notes are excluded: currently
+`fingerprints.txt` by name, and **anything ending `.chapters.txt`** by suffix,
+since that is a chapter sidecar rather than prose. The suffix is matched
+rather than the whole name because the rest of it is the media file's stem.
 '''
 
   [[endpoint.param]]
@@ -1488,6 +1622,12 @@ is guessable:
 
 Note also that the duplicate guard keys on the URL alone, so the same URL
 cannot be fetched twice under two different names while one is in flight.
+
+Where the handler reports chapter markers of its own -- the built-in one asks
+for them -- they are written out as a sidecar beside the media, so a fetched
+concert or DJ set arrives with its markers already in place. An existing
+sidecar is never overwritten, and a fetch that reports no markers writes
+nothing rather than the empty file that would assert there are none.
 '''
 see = ["getUrlHandlers", "getFetchJobs", "cancelFetch"]
 
