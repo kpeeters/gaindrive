@@ -5179,6 +5179,12 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
 
    const frag = document.createDocumentFragment();
    const multiDisc = new Set(songs.map(s => s.discNumber ?? 1)).size > 1;
+   // The same rule multiDisc follows, and for the same reason: a heading is
+   // there to say *which* group a row belongs to, so a folder holding one
+   // chaptered recording needs none. Counted over what will actually be drawn
+   // rather than over the map, so a stray empty entry cannot conjure one.
+   const multiChaptered =
+      [...chaptersByVideo.values()].filter(c => c?.length).length > 1;
    // If every track number is 0 or 1 the tags are useless; number sequentially.
    const useSeq = songs.every(s => (s.track ?? 0) <= 1);
    let currentDisc = null;
@@ -5258,17 +5264,20 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
       row.appendChild(dur);
       frag.appendChild(row);
 
-      // A chaptered video stands in for itself: a heading naming the film,
-      // then one row per song inside it. The film's own row stays in the DOM
-      // but hidden, because edit mode needs something to edit -- a heading
-      // alone would make a concert's title and year uneditable.
+      // A chaptered recording stands in for itself: its markers become the
+      // rows, under a heading naming it when the folder holds more than one.
+      // Its own row stays in the DOM but hidden, because edit mode needs
+      // something to edit -- chapter rows alone would leave a concert's title
+      // and year uneditable.
       const chapters = chaptersByVideo.get(song.id);
       if (chapters?.length) {
          row.classList.add('has-chapters');
-         const vh = document.createElement('div');
-         vh.className = 'chapters-heading';
-         vh.textContent = song.title;
-         frag.appendChild(vh);
+         if (multiChaptered) {
+            const vh = document.createElement('div');
+            vh.className = 'chapters-heading';
+            vh.textContent = song.title;
+            frag.appendChild(vh);
+            }
          for (const c of chapters)
             frag.appendChild(makeChapterRow(song, c, songs, i,
                {albumId, albumTitle, artistId, artistName}));
