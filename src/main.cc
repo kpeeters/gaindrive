@@ -19,6 +19,7 @@
 #include <cxxopts.hpp>
 #include <nlohmann/json.hpp>
 
+#include "chapters.hh"
 #include "codecs.hh"
 #include "gaindrive.hh"
 #include "imagescale.hh"
@@ -296,6 +297,38 @@ static void print_video_name(const std::filesystem::path& p,
 	          << v.series_title << '\n';
 	}
 
+// --chapters-test: what the sidecar parser makes of a chapter file, with no
+// database, no scan and no server.
+//
+// It takes a *file*, and deliberately not the "-" stdin seam --video-name-test
+// uses: that reads one name per line, and a chapter file is inherently
+// multi-line, so the two could not mean the same thing. The regression table in
+// tests/test_chapters_parse.py drives this with one fixture file per case.
+static int run_chapters_test(const std::string& target)
+	{
+	std::ifstream f(target, std::ios::binary);
+	if (!f) {
+		std::cerr << "Cannot read " << target << "\n";
+		return 1;
+		}
+	std::string text((std::istreambuf_iterator<char>(f)),
+	                  std::istreambuf_iterator<char>());
+
+	auto p = parse_chapters(text);
+	// Tab separated, one line per marker -- index, time, title -- then a
+	// summary on stderr so stdout stays exactly the parse. The time is printed
+	// through format_chapter_time() rather than as a raw double so that what
+	// the test compares is what would be written back to the file, which is
+	// where a truncating round-trip would show up.
+	for (size_t i = 0; i < p.chapters.size(); i++)
+		std::cout << (i + 1) << '\t'
+		          << format_chapter_time(p.chapters[i].start) << '\t'
+		          << p.chapters[i].name << '\n';
+	std::cerr << p.chapters.size() << " chapter(s), "
+	          << p.skipped << " line(s) skipped\n";
+	return 0;
+	}
+
 // --video-name-test: what the filename parser makes of a name, with no
 // database, no scan and no server. A directory is walked; "-" reads names on
 // stdin, one per line, which is the seam the regression test drives.
@@ -495,6 +528,7 @@ int main(int argc, char* argv[])
 		("video-art-test","Write cover art for one video file and exit", cxxopts::value<std::string>())
 		("image-scale-test","Scale one image file at each cover size and exit", cxxopts::value<std::string>())
 		("video-name-test","Parse video filenames and exit; takes a file, a directory, or - for stdin", cxxopts::value<std::string>())
+		("chapters-test", "Parse one .chapters.txt file and exit", cxxopts::value<std::string>())
 		("tmdb-test",     "Look one title up on TMDB and exit", cxxopts::value<std::string>())
 		("tmdb-year",     "Year for --tmdb-test", cxxopts::value<int>()->default_value("0"))
 		("tmdb-key",      "API key for --tmdb-test (default: the stored setting)", cxxopts::value<std::string>())
@@ -520,6 +554,9 @@ int main(int argc, char* argv[])
 
 	if (args.count("video-name-test"))
 		return run_video_name_test(args["video-name-test"].as<std::string>());
+
+	if (args.count("chapters-test"))
+		return run_chapters_test(args["chapters-test"].as<std::string>());
 
 	// Also before any database or root: asking one device whether it is there
 	// needs neither, and this is the check that says whether an address put in

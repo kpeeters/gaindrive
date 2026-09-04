@@ -594,6 +594,172 @@ container to collect one subtitle stream and the receiver fetches the track
 the moment it is switched on.
 '''
 
+[[endpoint]]
+kind    = 'endpoint'
+name    = "getChapters"
+section = "video"
+summary = 'The song markers inside one video.'
+notes   = '''
+A whole concert is usually one file, and these are what let a client say where
+each song starts, jump between them and show which one is playing.
+
+They live in a sidecar text file beside the video, `<stem>.chapters.txt`, in
+the format `mp4chaps --export` writes -- `HH:MM:SS.mmm Title`, one marker a
+line. gaindrive never writes them into the container: MP4 chapters are a track
+*inside* the file, so a save would be an `ffmpeg -c copy` rewrite of every byte
+of a multi-gigabyte concert, needing that much free space as well as the time.
+
+Nothing about them is held in either database. The file on disk is the only
+copy, so a rebuilt library still has them and a moved directory carries them
+with it.
+
+NOTE: A marker's `name` is reported exactly as the file holds it, empty
+included. Draw your own placeholder for a bare marker; the server will not
+invent one, because a client that saved back what it read would then write the
+placeholder into a line somebody deliberately left blank.
+'''
+see     = ["saveChapters"]
+
+  [[endpoint.param]]
+  name     = "id"
+  type     = "string"
+  required = true
+  doc      = 'A video song id.'
+
+  [[endpoint.field]]
+  name = "chapters.source"
+  type = "string"
+  doc  = 'Where the list came from: `sidecar`, `container` or `none`.'
+  notes = '''
+A sidecar wins outright when both exist, because somebody put it there
+deliberately -- the same rule a sidecar subtitle follows.
+
+`container` means the markers were read out of the file with
+`ffprobe -show_chapters` and are read-only in the sense that editing them
+writes a sidecar which shadows them. Deleting that sidecar brings them back.
+'''
+
+  [[endpoint.field]]
+  name = "chapters.writable"
+  type = "bool"
+  doc  = 'Whether this caller may save markers for this item.'
+  notes = '''
+The same rule every other library edit follows: an admin anywhere, or the
+owner of the item inside their own uploads. Offered as a field so a client can
+draw a jump list rather than a form it cannot submit.
+'''
+
+  [[endpoint.field]]
+  name = "chapters.chapter"
+  type = "Chapter[]"
+  doc  = 'The markers, earliest first.'
+
+  [[endpoint.field]]
+  name = "index"
+  type = "int"
+  on   = "Chapter"
+  doc  = 'Position in the list, from 1.'
+
+  [[endpoint.field]]
+  name  = "start"
+  type  = "float"
+  on    = "Chapter"
+  doc   = 'Seconds from the start of the file, to the millisecond.'
+  notes = '''
+Not whole seconds, because a save is a round trip: a client reads this list,
+changes one marker and writes the rest back, so truncating here would flatten
+every fractional timestamp in a hand-written file.
+'''
+
+  [[endpoint.field]]
+  name  = "duration"
+  type  = "int"
+  on    = "Chapter"
+  doc   = 'Seconds until the next marker, or until the end of the video.'
+  notes = '''
+Derived rather than stored -- the file records only where each marker begins.
+The last one is measured against the video's own duration, which is why the
+server computes this rather than leaving each client to.
+'''
+
+  [[endpoint.field]]
+  name = "name"
+  type = "string"
+  on   = "Chapter"
+  doc  = 'The title on that line, which may be empty.'
+
+  [[endpoint.error]]
+  code = '10'
+  when = '`id` missing.'
+
+  [[endpoint.error]]
+  code = '70'
+  when = 'No such song, or it is not a video.'
+
+
+[[endpoint]]
+kind         = 'endpoint'
+name         = "saveChapters"
+section      = "video"
+method       = 'POST'
+auth_note    = 'Admin anywhere, or your own upload.'
+summary      = 'Replaces the marker list for one video. The request body is the chapter file itself.'
+notes        = '''
+`id` goes in the query string; the **body** is the contents of the sidecar,
+sent as `text/plain; charset=utf-8` and parsed by the same code that reads one
+off disk. That is one definition of the format rather than two that can drift,
+and it makes a round trip a fixed point.
+
+The parse is deliberately liberal, so a block pasted out of a video
+description works as it stands:
+
+* `MM:SS`, `H:MM:SS` and `HH:MM:SS.mmm`, with `,` accepted as the decimal point
+* a `-`, `|`, en dash or em dash between the time and the title is dropped
+* blank lines, `#` comments, a UTF-8 BOM and CRLF endings are all tolerated
+* everything after the first run of whitespace is the title, verbatim -- so a
+  colon or a leading digit in a title needs no escaping, and there is no escape
+  syntax to learn
+* a line carrying no timestamp is skipped; it never fails the whole file
+
+Minutes above 59 are accepted in the two-field form, because `90:00` is
+ordinary in a hand-typed list, but not in the three-field form, where they are
+a typo.
+
+The reply is the saved list in the shape `getChapters` returns, re-read from
+disk. **Adopt it rather than what you sent**: the server sorts, sanitises and
+may drop a line it could not read, so anything else leaves the client
+describing a file that is not the one on disk.
+
+NOTE: An empty body writes an *empty* file rather than deleting it. That empty
+file is what says "this video has no chapters" -- without it, clearing the
+markers of a rip whose container carries its own would simply make those
+reappear, and there would be no way to overrule them.
+'''
+see          = ["getChapters"]
+
+  [[endpoint.param]]
+  name     = "id"
+  type     = "string"
+  required = true
+  doc      = 'A video song id. Query string, not the body.'
+
+  [[endpoint.error]]
+  code = '10'
+  when = '`id` missing.'
+
+  [[endpoint.error]]
+  code = '70'
+  when = 'No such song, or it is not a video.'
+
+  [[endpoint.error]]
+  code = '50'
+  when = 'The caller may not modify this item.'
+
+  [[endpoint.error]]
+  code = '0'
+  when = 'More than 1000 markers, or the file could not be written.'
+
+
 
 # ===========================================================================
 # Album text and images

@@ -2772,6 +2772,7 @@ function castApplyLocalVideo(song, offset) {
       // The picture is here, so the subtitles are ours to draw again — and the
       // receiver was never sent any, having no screen to put them on.
       videoLoadCaptions(song);
+      videoLoadChapters(song);
       videoPreparing(true, 'Preparing sound…');
       } else {
       castLocalVideoStop();
@@ -2781,6 +2782,11 @@ function castApplyLocalVideo(song, offset) {
       // than drawn and inert.
       if (castAudioOnly) videoClearCaptions(song);
       else               videoLoadCaptions(song);
+      // Chapters are wanted here even when captions are not, and the two part
+      // company deliberately: a screenless receiver has nowhere to draw a
+      // subtitle, but a concert playing through an amplifier is precisely when
+      // "which song is this" is the whole point of the feature.
+      videoLoadChapters(song);
       }
 }
 
@@ -2851,8 +2857,11 @@ setInterval(() => {
    const time = document.getElementById('player-time');
    if (!seek.dataset.seeking) seek.value = Math.floor(absCurrent);
    time.textContent = `${fmtDuration(Math.floor(absCurrent))} / ${fmtDuration(totalSecs)}`;
-   // Same clock, one consumer more: the picture follows what the bar draws.
+   // Same clock, two consumers more: the picture follows what the bar draws,
+   // and so does the chapter label -- the local timeupdate handler returns
+   // early while casting, so without this the label freezes when a cast starts.
    castSyncTick(absCurrent);
+   videoChapterTick(absCurrent);
    }, 100);
 
 async function openInfoModal() {
@@ -3493,6 +3502,13 @@ const player = {
    // turned back into the server's own caption id. The cast API numbers these
    // 1..n in this order.
    captions: [],
+   // The marker list getChapters returned, and the song it belongs to. Held
+   // across a re-fetch for the same reason the caption list is: a seek on a
+   // transcoded stream comes back through playerPlay, and asking the server
+   // again on every seek would be a file read per seek for a list that cannot
+   // have changed. This is also what Cancel restores to.
+   chapters: [],
+   chapterSong: null,
 };
 player.media = player.audioEl;
 
@@ -3692,6 +3708,9 @@ function playerStop() {
    player.captionSong  = null;
    player.captionIndex = null;
    player.captions     = [];
+   // Same reasoning for the markers: the film has ended, so the next one must
+   // not start under this one's song list.
+   videoClearChapters();
    videoCastPanel(false);
    videoCaptionsMenu([]);
 
@@ -3740,6 +3759,29 @@ function setupVideoSurface() {
       () => playerSkip(SKIP_SECS));
    document.getElementById('video-captions').addEventListener('click', () =>
       document.getElementById('video-captions-menu').classList.toggle('hidden'));
+
+   // Two toggles for one panel: the bar's, and a second inside #video-controls
+   // because the bar is outside the element fullscreen is requested on. The
+   // subtitle picker can live with that -- a track is chosen before the film
+   // starts -- but markers are placed during it.
+   document.getElementById('video-chapters-btn').addEventListener('click',
+      videoChaptersToggle);
+   document.getElementById('video-chapters-btn2').addEventListener('click',
+      videoChaptersToggle);
+   document.getElementById('video-chapters-close').addEventListener('click',
+      videoChaptersToggle);
+   document.getElementById('video-chapter-add').addEventListener('click',
+      videoChapterAdd);
+   // Deliberately not the player's own previous/next, which move through the
+   // queue: inside a concert those still mean "the film before this one".
+   document.getElementById('video-chapter-prev').addEventListener('click',
+      videoChapterPrev);
+   document.getElementById('video-chapter-next').addEventListener('click',
+      videoChapterNext);
+   document.getElementById('video-chapters-save').addEventListener('click',
+      videoChaptersSave);
+   document.getElementById('video-chapters-cancel').addEventListener('click',
+      videoChaptersCancel);
 
    document.getElementById('video-sync').addEventListener('click', () =>
       document.getElementById('video-sync-menu').classList.toggle('hidden'));
@@ -3951,6 +3993,342 @@ function videoSelectCaption(index, {send = true} = {}) {
       .classList.toggle('on', index !== null);
 }
 
+// ── Chapter markers ─────────────────────────────────────────────────────────
+//
+// The song boundaries inside one long video, from a sidecar text file beside
+// it.  Editing is in-place in a panel over the picture rather than in a modal,
+// because placing a marker means watching for the moment a song starts.
+//
+// Three pieces of state.  `player.chapters` is what the server last gave us,
+// which is also what Cancel restores to and what the dirty test compares
+// against — the role dataset.orig plays in album edit mode.  `chapterDraft` is
+// the working copy.  `chapterPanelOpen` survives a track change so the panel
+// does not shut itself every time the film advances.
+let chapterDraft     = [];
+let chapterWritable  = false;
+let chapterSource    = 'none';
+let chapterPanelOpen = false;
+let chapterCurrent   = -1;   // index into chapterDraft, or -1
+
+// H:MM:SS once past an hour, M:SS below it.  fmtDuration() is not reusable
+// here: it prints 5400 seconds as "90:00", which is unreadable as a position
+// in a two-hour concert.
+function fmtChapterTime(secs) {
+   const t = Math.max(0, Math.floor(secs));
+   const h = Math.floor(t / 3600);
+   const m = Math.floor((t % 3600) / 60);
+   const s = String(t % 60).padStart(2, '0');
+   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+}
+
+// The inverse, accepting either shape and a bare number of seconds.  Returns
+// null for anything it cannot read, which is what puts the red border on the
+// field rather than silently moving the marker somewhere else.
+function parseChapterTime(str) {
+   const parts = String(str).trim().split(':');
+   if (parts.length === 0 || parts.length > 3) return null;
+   let total = 0;
+   for (const part of parts) {
+      if (!/^\d*\.?\d*$/.test(part) || part === '') return null;
+      total = total * 60 + parseFloat(part);
+      }
+   return Number.isFinite(total) && total >= 0 ? total : null;
+}
+
+// The file itself is the wire format: the server parses this body with the
+// same code that reads the sidecar off disk, so there is one definition of
+// what a chapter file means rather than two that can drift.
+function chapterFileText(list) {
+   return list.map(c => {
+      const ms  = Math.round(c.start * 1000);
+      const h   = Math.floor(ms / 3600000);
+      const m   = Math.floor((ms % 3600000) / 60000);
+      const s   = Math.floor((ms % 60000) / 1000);
+      const f   = ms % 1000;
+      const pad = (n, w) => String(n).padStart(w, '0');
+      const t = `${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)}.${pad(f, 3)}`;
+      return c.name ? `${t} ${c.name}` : t;
+      }).join('\n') + (list.length ? '\n' : '');
+}
+
+function chapterDirty() {
+   const norm = l => JSON.stringify(l.map(c => [Math.round(c.start * 1000),
+                                                c.name]));
+   return norm(chapterDraft) !== norm(player.chapters);
+}
+
+// Loads the marker list for a song, once per song.
+//
+// Shaped like videoLoadCaptions(), including the guard after the await: the
+// list arrives asynchronously, so by the time it does the viewer may have
+// moved on, and drawing it then would put one film's songs over another's.
+async function videoLoadChapters(song) {
+   if (player.chapterSong === song.id) { videoChaptersRender(); return; }
+
+   player.chapterSong = song.id;
+   player.chapters    = [];
+   chapterDraft       = [];
+   chapterSource      = 'none';
+   chapterWritable    = false;
+   chapterCurrent     = -1;
+   videoChaptersRender();
+
+   let sr;
+   try { sr = await apiCall('getChapters', {id: song.id}); }
+   catch { return; }
+   if (player.queue[player.index]?.id !== song.id) return;
+
+   const c = sr.chapters ?? {};
+   player.chapters = (c.chapter ?? []).map(x => ({start: Number(x.start) || 0,
+                                                  name:  x.name ?? ''}));
+   chapterSource   = c.source ?? 'none';
+   chapterWritable = !!c.writable;
+   chapterDraft    = player.chapters.map(x => ({...x}));
+   videoChaptersRender();
+}
+
+function videoClearChapters() {
+   player.chapterSong = null;
+   player.chapters    = [];
+   chapterDraft       = [];
+   chapterSource      = 'none';
+   chapterWritable    = false;
+   chapterCurrent     = -1;
+   videoChaptersRender();
+}
+
+// Both toggles and the panel itself.  The button is offered whenever there is
+// something to show *or* something the viewer could add, so a concert with no
+// markers yet still has a way in; a film nobody may edit and that carries none
+// shows nothing at all, matching how the subtitle picker disappears.
+function videoChaptersRender() {
+   const have    = chapterDraft.length > 0;
+   const offer   = have || chapterWritable;
+   const panel   = document.getElementById('video-chapters');
+   const list    = document.getElementById('video-chapters-list');
+   const btn     = document.getElementById('video-chapters-btn');
+   const btn2    = document.getElementById('video-chapters-btn2');
+   const now     = document.getElementById('video-chapter-now');
+   const dirty   = chapterDirty();
+
+   // Cleared before it is read, or the toggle keeps its lit state over a film
+   // that no longer offers a panel.
+   if (!offer) chapterPanelOpen = false;
+   btn.hidden  = !offer;
+   btn2.hidden = !offer;
+   btn.classList.toggle('on', chapterPanelOpen);
+   panel.hidden = !chapterPanelOpen;
+   now.hidden   = !have;
+
+   document.getElementById('video-chapter-add').hidden    = !chapterWritable;
+   document.getElementById('video-chapters-save').hidden   = !dirty;
+   document.getElementById('video-chapters-cancel').hidden = !dirty;
+   document.getElementById('video-chapters-msg').textContent =
+      dirty ? 'Unsaved changes'
+            : (chapterSource === 'container' ? 'From the video file' : '');
+
+   list.replaceChildren();
+   chapterDraft.forEach((c, i) => {
+      const row = document.createElement('div');
+      row.className = 'chapter-row' + (chapterWritable ? '' : ' readonly');
+      row.dataset.i = i;
+      if (i === chapterCurrent) row.classList.add('current');
+
+      const jump = document.createElement('button');
+      jump.className   = 'mi';
+      jump.textContent = 'play_arrow';
+      jump.title       = 'Play from here';
+      jump.addEventListener('click', () => videoChapterJump(i));
+
+      const time = document.createElement('input');
+      time.className = 'chapter-time';
+      time.value     = fmtChapterTime(c.start);
+      time.readOnly  = !chapterWritable;
+      // On change rather than on input: the list re-sorts when a time moves,
+      // and re-rendering on every keystroke would take the focus away
+      // mid-edit.
+      time.addEventListener('change', () => {
+         const t = parseChapterTime(time.value);
+         if (t === null) { time.classList.add('bad'); return; }
+         time.classList.remove('bad');
+         chapterDraft[i].start = t;
+         chapterDraft.sort((a, b) => a.start - b.start);
+         videoChaptersRender();
+         });
+
+      const name = document.createElement('input');
+      name.className   = 'chapter-name';
+      // The server reports an empty name as empty rather than inventing
+      // "Chapter 3", so that a client saving what it read cannot write the
+      // placeholder into a line somebody deliberately left bare.  Drawing one
+      // here is free and costs nothing on the way back.
+      name.placeholder = `Chapter ${i + 1}`;
+      name.value       = c.name;
+      name.readOnly    = !chapterWritable;
+      name.addEventListener('input', () => {
+         chapterDraft[i].name = name.value;
+         videoChaptersButtons();
+         });
+
+      row.append(jump, time, name);
+
+      if (chapterWritable) {
+         const here = document.createElement('button');
+         here.className   = 'mi';
+         here.textContent = 'my_location';
+         here.title       = 'Move to the current position';
+         here.addEventListener('click', () => {
+            chapterDraft[i].start = Math.max(0, playerPosition());
+            chapterDraft.sort((a, b) => a.start - b.start);
+            videoChaptersRender();
+            });
+
+         const del = document.createElement('button');
+         del.className   = 'mi';
+         del.textContent = 'delete';
+         del.title       = 'Remove this marker';
+         del.addEventListener('click', () => {
+            chapterDraft.splice(i, 1);
+            videoChaptersRender();
+            });
+         row.append(here, del);
+         }
+
+      list.appendChild(row);
+      });
+}
+
+// The subset of the render that a keystroke in a name field needs: rebuilding
+// the rows there would move the caret to the end of the field on every letter.
+function videoChaptersButtons() {
+   const dirty = chapterDirty();
+   document.getElementById('video-chapters-save').hidden   = !dirty;
+   document.getElementById('video-chapters-cancel').hidden = !dirty;
+   document.getElementById('video-chapters-msg').textContent =
+      dirty ? 'Unsaved changes' : '';
+}
+
+function videoChaptersToggle() {
+   const surf = document.getElementById('video-surface');
+   // The panel is hidden while minimised, so opening it there would be a
+   // button that appears to do nothing.
+   if (surf.dataset.state === 'minimised') videoSurfaceSet('theatre');
+   chapterPanelOpen = !chapterPanelOpen;
+   videoChaptersRender();
+}
+
+function videoChapterAdd() {
+   // Read the clock once: it moves between two calls, so finding the row again
+   // by comparing against a second reading is a race with the film.
+   const at = Math.max(0, playerPosition());
+   const marker = {start: at, name: ''};
+   chapterDraft.push(marker);
+   chapterDraft.sort((a, b) => a.start - b.start);
+   videoChaptersRender();
+   // Focus the marker just added, wherever the sort put it. Identity, not
+   // value: two markers may legitimately sit at the same second.
+   const i = chapterDraft.indexOf(marker);
+   document.querySelector(`.chapter-row[data-i="${i}"] .chapter-name`)?.focus();
+}
+
+function videoChapterJump(i) {
+   const c = chapterDraft[i];
+   if (c) playerSeekTo(c.start);
+}
+
+// "Previous" means the start of the chapter being played, unless we are
+// already at it — the behaviour every physical transport has, and the reason
+// a viewer can press it twice to go back one song.
+function videoChapterPrev() {
+   const pos = playerPosition();
+   let i = -1;
+   chapterDraft.forEach((c, n) => { if (c.start <= pos + 0.25) i = n; });
+   if (i < 0) { playerSeekTo(0); return; }
+   if (pos - chapterDraft[i].start > 3 || i === 0) playerSeekTo(chapterDraft[i].start);
+   else playerSeekTo(chapterDraft[i - 1].start);
+}
+
+function videoChapterNext() {
+   const pos  = playerPosition();
+   const next = chapterDraft.find(c => c.start > pos + 0.25);
+   if (next) playerSeekTo(next.start);
+}
+
+// Called from both clocks — the local timeupdate handler and the 100 ms cast
+// interval — because neither knows about the other and the label would
+// otherwise freeze the moment a cast starts.  Nothing here writes to a field:
+// a marker being typed in must not be rewritten underneath the caret.
+function videoChapterTick(abs) {
+   if (!chapterDraft.length) return;
+   let i = -1;
+   for (let n = 0; n < chapterDraft.length; n++)
+      if (chapterDraft[n].start <= abs + 0.25) i = n; else break;
+   if (i === chapterCurrent) return;
+   chapterCurrent = i;
+
+   const now = document.getElementById('video-chapter-now');
+   now.textContent = i >= 0
+      ? (chapterDraft[i].name || `Chapter ${i + 1}`) : '';
+   document.querySelectorAll('.chapter-row.current')
+      .forEach(r => r.classList.remove('current'));
+   document.querySelector(`.chapter-row[data-i="${i}"]`)?.classList.add('current');
+}
+
+function videoChaptersCancel() {
+   chapterDraft = player.chapters.map(c => ({...c}));
+   videoChaptersRender();
+}
+
+async function videoChaptersSave() {
+   const song = player.queue[player.index];
+   if (!song) return;
+   const save   = document.getElementById('video-chapters-save');
+   const cancel = document.getElementById('video-chapters-cancel');
+   const msg    = document.getElementById('video-chapters-msg');
+   save.disabled = cancel.disabled = true;
+   msg.textContent = 'Saving…';
+
+   try {
+      // A raw fetch because apiCall() takes an object of query parameters and
+      // cannot express a request body.  The id stays in the query string; the
+      // body is the chapter file itself.
+      const {server} = creds.load();
+      const p = new URLSearchParams({...authParams(),
+         v: '1.16.1', c: 'gaindrive-web', f: 'json', id: song.id});
+      const resp = await fetch(`${server}/rest/saveChapters.view?${p}`, {
+         method:  'POST',
+         headers: {'Content-Type': 'text/plain; charset=utf-8'},
+         body:    chapterFileText(chapterDraft),
+         });
+      // Checked before .json(): a payload rejected by the server's size limit
+      // comes back as a bare HTTP error with no Subsonic envelope in it, and
+      // parsing that would report a syntax error rather than the real cause.
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const sr = (await resp.json())['subsonic-response'];
+      if (sr.status !== 'ok') throw new Error(sr.error?.message ?? 'Unknown error');
+
+      // Adopt the reply rather than the draft: the server sorts, sanitises and
+      // may drop a line it could not read, so anything else leaves the panel
+      // describing a file that is not what is on disk.
+      const c = sr.chapters ?? {};
+      player.chapters = (c.chapter ?? []).map(x => ({start: Number(x.start) || 0,
+                                                     name:  x.name ?? ''}));
+      chapterSource   = c.source ?? 'none';
+      chapterWritable = !!c.writable;
+      chapterDraft    = player.chapters.map(x => ({...x}));
+      chapterCurrent  = -1;
+      videoChaptersRender();
+      videoChapterTick(playerPosition());
+      }
+   catch (e) {
+      console.error('[chapters] save failed', e);
+      showError(`Could not save the chapters: ${e.message}`);
+      }
+   finally {
+      save.disabled = cancel.disabled = false;
+      }
+}
+
 function playerLoad(songs, startIndex) {
    document.querySelectorAll('.track-row.queued').forEach(r => r.classList.remove('queued'));
    player.queue    = [...songs];
@@ -4130,6 +4508,7 @@ function playerPlay(offset = 0, forceMp3 = false) {
       videoSurfaceCaption(song);
       videoPreparing(true);
       videoLoadCaptions(song);
+      videoLoadChapters(song);
       } else {
       videoSurfaceSet(null);
       }
@@ -4295,6 +4674,7 @@ el.addEventListener('timeupdate', () => {
       seek.value = Math.floor(cur);
       }
    time.textContent = `${fmtDuration(Math.floor(cur))} / ${fmtDuration(Math.floor(dur))}`;
+   videoChapterTick(cur);
    });
 
 // Guarded like the rest, and it did not used to need to be: while casting the

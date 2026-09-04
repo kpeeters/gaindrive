@@ -1080,10 +1080,13 @@ static bool check_upload_perm(const httplib::Request& req,
 // "delete any folder by guessing an integer". Here the item already exists and
 // has been resolved from an id, so ownership alone is the question, and a
 // stricter depth would refuse a cover on the user's own artist folder.
-static bool check_item_write_perm(const httplib::Request& req,
-                                   httplib::Response& res, MediaStore& store,
-                                   const std::string& uploads_root_name,
-                                   const std::string& rel_path, bool use_json)
+// Split from the reporting wrapper below because getChapters answers the same
+// question as a *field* -- whether to offer the client a Save button -- and a
+// second copy of the admin-or-own-uploads rule is exactly what that wrapper
+// exists to prevent.
+static bool item_write_allowed(const httplib::Request& req, MediaStore& store,
+                                const std::string& uploads_root_name,
+                                const std::string& rel_path)
 	{
 	const std::string uname = req.get_param_value("u");
 	auto info = store.get_user(uname);
@@ -1093,12 +1096,19 @@ static bool check_item_write_perm(const httplib::Request& req,
 	for (const auto& c : std::filesystem::path(rel_path))
 		parts.push_back(c.string());
 
-	const bool own_upload = info && info->upload_allowed
-	                        && !uploads_root_name.empty()
-	                        && parts.size() >= 2
-	                        && parts[0] == uploads_root_name
-	                        && !uname.empty() && parts[1] == uname;
-	if (own_upload) return true;
+	return info && info->upload_allowed
+	    && !uploads_root_name.empty()
+	    && parts.size() >= 2
+	    && parts[0] == uploads_root_name
+	    && !uname.empty() && parts[1] == uname;
+	}
+
+static bool check_item_write_perm(const httplib::Request& req,
+                                   httplib::Response& res, MediaStore& store,
+                                   const std::string& uploads_root_name,
+                                   const std::string& rel_path, bool use_json)
+	{
+	if (item_write_allowed(req, store, uploads_root_name, rel_path)) return true;
 
 	const char* msg = "Modifying the shared library requires admin role.";
 	res.set_content(use_json ? subsonic_error_json(50, msg)
@@ -2279,6 +2289,77 @@ static std::string utf8_clean(const std::string& s, size_t max_bytes)
 		i += len;
 		}
 	return out;
+	}
+
+// The longest a single chapter title may be. A bound rather than a guess: the
+// list is arbitrary text a client posted, and it comes straight back out
+// through a JSON document and an XML attribute.
+static constexpr size_t MAX_CHAPTER_NAME_BYTES = 500;
+
+// The one place a chapter list becomes a response, shared by getChapters and
+// saveChapters so the two cannot describe the same file differently — the
+// panel is redrawn from the save's reply, so a disagreement would show as the
+// list changing under the user for no reason.
+//
+// `start` carries milliseconds because a save is a round trip: a client reads
+// this list, edits one marker and writes the rest back, so truncating to whole
+// seconds here would quietly flatten every fractional timestamp in a
+// hand-written file. `duration` is whole seconds, matching Subsonic's Child,
+// which is what a chapter row would become if these are ever listed as tracks.
+// It is derived rather than stored — the next marker's start, or the video's
+// own duration for the last, which only the server knows.
+static void write_chapters_response(httplib::Response& res, int song_id,
+                                     const MediaStore::VideoChapters& vc,
+                                     double song_duration, bool writable,
+                                     bool use_json)
+	{
+	const size_t n = vc.chapters.size();
+	auto span = [&](size_t i) {
+		double next = (i + 1 < n) ? vc.chapters[i + 1].start : song_duration;
+		double d    = next - vc.chapters[i].start;
+		return d > 0 ? static_cast<int>(std::llround(d)) : 0;
+		};
+	auto start_ms = [&](size_t i) {
+		return std::llround(vc.chapters[i].start * 1000.0) / 1000.0;
+		};
+
+	std::string body;
+	if (use_json)
+		body = subsonic_ok_json([&](nlohmann::json& r) {
+			nlohmann::json list = nlohmann::json::array();
+			for (size_t i = 0; i < n; i++)
+				list.push_back({ {"index",    static_cast<int>(i + 1)},
+				                 {"start",    start_ms(i)},
+				                 {"duration", span(i)},
+				                 {"name",     vc.chapters[i].name} });
+			r["chapters"] = {
+				{"id",       sid(song_id)},
+				{"source",   vc.source},
+				{"writable", writable},
+				{"chapter",  list}
+				};
+			});
+	else
+		body = subsonic_ok([&](XMLDocument& doc, XMLElement* root) {
+			auto* parent = doc.NewElement("chapters");
+			parent->SetAttribute("id",       song_id);
+			parent->SetAttribute("source",   vc.source.c_str());
+			parent->SetAttribute("writable", writable);
+			for (size_t i = 0; i < n; i++) {
+				auto* el = doc.NewElement("chapter");
+				el->SetAttribute("index", static_cast<int>(i + 1));
+				// Preformatted rather than handed to tinyxml2 as a double:
+				// its %.17g would render 13.2 as 13.199999999999999.
+				char buf[32];
+				std::snprintf(buf, sizeof buf, "%.3f", start_ms(i));
+				el->SetAttribute("start",    buf);
+				el->SetAttribute("duration", span(i));
+				el->SetAttribute("name",     vc.chapters[i].name.c_str());
+				parent->InsertEndChild(el);
+				}
+			root->InsertEndChild(parent);
+			});
+	res.set_content(body, use_json ? "application/json" : "application/xml");
 	}
 
 // Pushes anything still loose in a batch down to <artist>/<album>/file.
@@ -4067,13 +4148,29 @@ GainDrive::GainDrive(const std::string& db_path,
 		static const std::set<std::string> excluded = {
 			"fingerprints.txt",
 			};
+		// Chapter sidecars are matched by suffix rather than by name, since
+		// the stem is the video's. The constant is MediaStore's so there is
+		// one spelling of it: this listing and sidecar_chapters_path() are the
+		// two places that know the name, and the day they disagreed chapter
+		// files would silently start appearing as prose.
+		//
+		// Note the ".part" a save writes first needs no entry -- it fails the
+		// ".txt" extension test below. That is luck rather than design, so do
+		// not lean on it if that test ever loosens.
+		const std::string chapters_suffix(MediaStore::CHAPTERS_SUFFIX);
 
 		namespace fs = std::filesystem;
 		nlohmann::json files = nlohmann::json::array();
 		try {
 			for (auto& entry : fs::directory_iterator(folder)) {
 				if (!entry.is_regular_file() || entry.path().extension() != ".txt") continue;
-				if (excluded.count(entry.path().filename().string())) continue;
+				const std::string fname = entry.path().filename().string();
+				if (excluded.count(fname)) continue;
+				if (fname.size() > chapters_suffix.size()
+				        && fname.compare(fname.size() - chapters_suffix.size(),
+				                         chapters_suffix.size(),
+				                         chapters_suffix) == 0)
+					continue;
 				files.push_back({{"name", entry.path().filename().string()}});
 				}
 			}
@@ -5144,6 +5241,118 @@ GainDrive::GainDrive(const std::string& db_path,
 		          << (cast_authed ? " (cast token)" : "")
 		          << " to " << client_addr(req) << std::endl;
 		res.set_content(vtt, "text/vtt");
+		});
+
+	// getChapters / saveChapters — the song markers inside one video.
+	//
+	// A full concert is one file, and these are what let a client say where
+	// each song starts.  They live in a sidecar `<stem>.chapters.txt` beside
+	// the video, never inside the container: MP4 chapters are a track within
+	// the file, so writing one would be an `ffmpeg -c copy` rewrite of every
+	// byte of a multi-gigabyte concert on every save.  Nothing about them is
+	// stored in either database — the file on disk is the only copy, which is
+	// what keeps the music DB a cache and relocate_prefix() unchanged.
+	//
+	// `name` is reported exactly as the file holds it, empty included.  A
+	// client draws its own "Chapter 3" placeholder for a bare marker; filling
+	// one in here would look harmless and is not, because a client that saved
+	// what it read would write the placeholder into a line somebody had
+	// deliberately left blank, and the next save would find it real.
+	server_.Get("/rest/getChapters.view", [this](const httplib::Request& req,
+	                                              httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			err(10, "Required parameter missing: id."); return;
+			}
+		int  song_id = to_int(it->second, -1);
+		auto song    = store_.get_song(song_id);
+		if (!song || !song->is_video) { err(70, "Video not found."); return; }
+		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		                          song->path, use_json)) return;
+
+		auto vc = store_.get_chapters(song_id);
+		bool writable = item_write_allowed(req, store_, uploads_root_name_,
+		                                   song->path);
+		write_chapters_response(res, song_id, vc, song->duration, writable,
+		                        use_json);
+		});
+
+	// The body is the chapter file itself, as text/plain, and it goes through
+	// the same parse_chapters() that reads one off disk.  That is one
+	// definition of the format rather than two, and it makes the round trip
+	// trivially a fixed point — but it is also the only shape that works here.
+	// Repeated start=/name= parameters cannot be used:
+	//
+	//  * httplib's parse_query_text() keeps a set of each whole "key=value"
+	//    token and silently drops an exact repeat, so two chapters both called
+	//    "Encore" would lose one name= and rename every marker after it.
+	//  * CPPHTTPLIB_FORM_URL_ENCODED_PAYLOAD_MAX_LENGTH is 8192 for urlencoded
+	//    bodies specifically, and set_payload_max_length() does not raise it.
+	//
+	// Both are undocumented behaviour of a pinned vendored copy, which is the
+	// failure class third_party/README.md pins that copy to avoid.
+	//
+	// An empty body writes an empty file rather than removing it.  That empty
+	// file is a tombstone: without it, clearing the markers of a rip whose
+	// container carries its own would make the container's list come back, and
+	// there would be no way to say "this film has no chapters" at all.
+	server_.Post("/rest/saveChapters.view", [this](const httplib::Request& req,
+	                                                httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			err(10, "Required parameter missing: id."); return;
+			}
+		int  song_id = to_int(it->second, -1);
+		auto song    = store_.get_song(song_id);
+		if (!song || !song->is_video) { err(70, "Video not found."); return; }
+		if (!check_item_write_perm(req, res, store_, uploads_root_name_,
+		                           song->path, use_json)) return;
+
+		auto parsed = parse_chapters(req.body);
+		if (parsed.chapters.size() > MediaStore::MAX_CHAPTERS) {
+			err(0, "Too many chapters."); return;
+			}
+
+		// utf8_clean is not the same job as the control-character strip
+		// parse_chapters already did: that one keeps the file's line format
+		// intact, this one keeps invalid UTF-8 out of a JSON document, where
+		// dump() throws.  Both are needed, and this is the boundary the other
+		// arbitrary strings are cleaned at.
+		for (auto& c : parsed.chapters)
+			c.name = utf8_clean(c.name, MAX_CHAPTER_NAME_BYTES);
+
+		if (!store_.save_chapters(song_id, parsed.chapters)) {
+			err(0, "Could not write the chapter file."); return;
+			}
+		std::cout << stamp() << "saveChapters: id=" << song_id << " "
+		          << parsed.chapters.size() << " marker(s), "
+		          << parsed.skipped << " line(s) skipped, from "
+		          << client_addr(req) << std::endl;
+
+		// Re-read rather than echo: the server sorts, sanitises and may skip
+		// lines, so the client must adopt what was actually written or the
+		// panel and the file disagree until the next load.  Same rule as
+		// castLoad's reply reporting the decision instead of letting the
+		// client re-derive it.
+		auto vc = store_.get_chapters(song_id);
+		write_chapters_response(res, song_id, vc, song->duration, true,
+		                        use_json);
 		});
 
 	// hls.m3u8 — a playlist computed from the stored duration.  Deliberately

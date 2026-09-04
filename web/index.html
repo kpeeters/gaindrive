@@ -111,10 +111,39 @@
             <button id="video-back10" class="mi" title="Back 10 seconds"    aria-label="Back 10 seconds">replay_10</button>
             <button id="video-play"   class="mi" title="Play"               aria-label="Play">play_arrow</button>
             <button id="video-fwd10"  class="mi" title="Forward 10 seconds" aria-label="Forward 10 seconds">forward_10</button>
+            <!-- The bar below is outside the element fullscreen is requested
+                 on, so its chapter button is unreachable there. The subtitle
+                 picker accepts that because a track is chosen before the film
+                 starts; markers are placed *during* it, so the toggle needs a
+                 second home here. -->
+            <button id="video-chapters-btn2" class="mi" title="Chapters" aria-label="Chapters">toc</button>
+         </div>
+         <!-- After #video-restore, like #video-controls and for the same
+              reason: that is a transparent full-frame click target and
+              swallows anything before it in the DOM. Inside #video-frame so
+              the panel survives fullscreen. -->
+         <div id="video-chapters" hidden>
+            <div id="video-chapters-head">
+               <button id="video-chapter-prev" class="mi" title="Previous chapter" aria-label="Previous chapter">skip_previous</button>
+               <span id="video-chapters-title">Chapters</span>
+               <button id="video-chapter-next" class="mi" title="Next chapter" aria-label="Next chapter">skip_next</button>
+               <button id="video-chapters-close" class="mi" title="Close" aria-label="Close">close</button>
+            </div>
+            <div id="video-chapters-list"></div>
+            <div id="video-chapters-foot">
+               <button id="video-chapter-add" class="mi" title="Add a marker here" aria-label="Add a marker here">add</button>
+               <span id="video-chapters-msg"></span>
+               <button id="video-chapters-cancel" hidden>Cancel</button>
+               <button id="video-chapters-save" hidden>Save</button>
+            </div>
          </div>
       </div>
       <div id="video-bar">
          <span id="video-caption"></span>
+         <!-- Which song is playing inside the film. Absent until a chapter
+              list exists, so an ordinary film's bar is unchanged. -->
+         <span id="video-chapter-now" hidden></span>
+         <button id="video-chapters-btn" class="mi" title="Chapters" aria-label="Chapters" hidden>toc</button>
          <!-- Absent rather than disabled when the film offers nothing: most do
               not, and an inert button on every one of them says less than no
               button at all. Opens upward, since this bar is the bottom edge. -->

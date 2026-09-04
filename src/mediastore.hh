@@ -11,6 +11,7 @@
 #include <mutex>
 #include <SQLiteCpp/SQLiteCpp.h>
 
+#include "chapters.hh"
 #include "tmdb.hh"
 #include "videoart.hh"
 
@@ -555,6 +556,49 @@ class MediaStore {
 
 		VideoStreams get_video_streams(int song_id);
 
+		// Chapter markers for one video: the sidecar beside it, or failing that
+		// whatever its container carries.
+		//
+		// `source` says which, because they are not the same fact. A sidecar was
+		// put there deliberately and so wins outright -- the rule
+		// sidecar_captions() already follows -- while a container's own chapters
+		// are read-only: editing a rip writes a sidecar that shadows them, and
+		// deleting that file restores them. An *empty* sidecar is therefore a
+		// tombstone rather than a missing one, which is the only way to say "this
+		// film has no chapters" about a rip whose container disagrees.
+		//
+		// Not cached, for the reason get_video_streams() gives: a per-playback
+		// lookup, not a browse path. In particular do not cache on song_id -- a
+		// rebuild reassigns every rowid.
+		struct VideoChapters {
+			std::vector<Chapter> chapters;
+			std::string          source;   // "sidecar", "container" or "none"
+			};
+
+		VideoChapters get_chapters(int song_id);
+
+		// Writes the sidecar for one video, replacing whatever was there. The
+		// caller is responsible for sanitising the titles -- utf8_clean() lives
+		// at the API boundary, where the other arbitrary strings are cleaned.
+		//
+		// An empty list writes an empty file rather than removing it, so that
+		// clearing the markers of a rip does not make its container chapters
+		// reappear. False means nothing was written and the old file stands.
+		bool save_chapters(int song_id, const std::vector<Chapter>& chapters);
+
+		// The most markers one file may hold, in both directions. A hand-written
+		// file goes straight into a JSON document, so the ceiling is as much a
+		// read-path bound as a write-path one.
+		static constexpr size_t MAX_CHAPTERS = 1000;
+
+		// The sidecar's name is <stem> + this, and it is a constant rather than a
+		// literal because getAlbumTexts has to skip these files: it lists every
+		// .txt in an album folder as liner notes, and it cannot use
+		// sidecar_chapters_path() because it works from a folder rather than from
+		// a song. Two spellings of the name would mean chapter files silently
+		// reappearing as prose the day it changed.
+		static constexpr std::string_view CHAPTERS_SUFFIX = ".chapters.txt";
+
 		// WebVTT for one caption source. stream_index < 0 means "the sidecar
 		// subtitle file next to the video"; otherwise it is the absolute
 		// ffprobe stream index of an embedded subtitle track. Conversion goes
@@ -757,6 +801,16 @@ class MediaStore {
 		// serves it, go through here, and a listing that disagreed with the
 		// server would be a caption track that 404s when selected.
 		std::string sidecar_captions(const std::string& abs) const;
+
+		// The chapter file beside the video at `abs`. The single place that knows
+		// what "beside" means for chapters, as sidecar_captions() is for
+		// subtitles: both get_chapters() and save_chapters() go through it, so a
+		// list that disagreed with what a save wrote cannot arise.
+		//
+		// Unlike sidecar_captions() this is not replace_extension(): a plain
+		// <stem>.txt would be indistinguishable from liner notes, which is a file
+		// people really do put in album folders.
+		std::string sidecar_chapters_path(const std::string& abs) const;
 
 		// Rewrite every stored path at or under old_rel to sit under new_rel,
 		// in both databases. This is what makes renaming a directory on disk

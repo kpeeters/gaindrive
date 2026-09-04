@@ -313,6 +313,83 @@
 <p>Scoped as it is on <code>stream</code>, and additionally to the caption ids the LOAD declared: a track that LOAD did not offer is one the receiver has no reason to ask for, so the token does not authorise it.</p>
 <p>The converted result is cached, because ffmpeg has to demux the whole container to collect one subtitle stream and the receiver fetches the track the moment it is switched on.</p></div>
 </div>
+<div class="api-ep">
+<h3 id="ep-getChapters">getChapters</h3>
+<p class="api-meta"><code>GET /rest/getChapters.view</code></p>
+<p>The song markers inside one video.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>A video song id.</td></tr>
+</tbody>
+</table>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>chapters.source</code></td><td>string</td><td>Where the list came from: <code>sidecar</code>, <code>container</code> or <code>none</code>.</td></tr>
+<tr><td><code>chapters.writable</code></td><td>bool</td><td>Whether this caller may save markers for this item.</td></tr>
+<tr><td><code>chapters.chapter</code></td><td>Chapter[]</td><td>The markers, earliest first.</td></tr>
+<tr><td><code>index</code> <span class="api-on">on Chapter</span></td><td>int</td><td>Position in the list, from 1.</td></tr>
+<tr><td><code>start</code> <span class="api-on">on Chapter</span></td><td>float</td><td>Seconds from the start of the file, to the millisecond.</td></tr>
+<tr><td><code>duration</code> <span class="api-on">on Chapter</span></td><td>int</td><td>Seconds until the next marker, or until the end of the video.</td></tr>
+<tr><td><code>name</code> <span class="api-on">on Chapter</span></td><td>string</td><td>The title on that line, which may be empty.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>chapters.source</code></p>
+<p>A sidecar wins outright when both exist, because somebody put it there deliberately -- the same rule a sidecar subtitle follows.</p>
+<p><code>container</code> means the markers were read out of the file with <code>ffprobe -show_chapters</code> and are read-only in the sense that editing them writes a sidecar which shadows them. Deleting that sidecar brings them back.</p></div>
+<div class="api-note"><p class="api-note-h"><code>chapters.writable</code></p>
+<p>The same rule every other library edit follows: an admin anywhere, or the owner of the item inside their own uploads. Offered as a field so a client can draw a jump list rather than a form it cannot submit.</p></div>
+<div class="api-note"><p class="api-note-h"><code>start</code></p>
+<p>Not whole seconds, because a save is a round trip: a client reads this list, changes one marker and writes the rest back, so truncating here would flatten every fractional timestamp in a hand-written file.</p></div>
+<div class="api-note"><p class="api-note-h"><code>duration</code></p>
+<p>Derived rather than stored -- the file records only where each marker begins. The last one is measured against the video&#x27;s own duration, which is why the server computes this rather than leaving each client to.</p></div>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>10</code></td><td>Subsonic</td><td><code>id</code> missing.</td></tr>
+<tr><td><code>70</code></td><td>Subsonic</td><td>No such song, or it is not a video.</td></tr>
+</tbody>
+</table>
+<p>A whole concert is usually one file, and these are what let a client say where each song starts, jump between them and show which one is playing.</p>
+<p>They live in a sidecar text file beside the video, <code>&lt;stem&gt;.chapters.txt</code>, in the format <code>mp4chaps --export</code> writes -- <code>HH:MM:SS.mmm Title</code>, one marker a line. gaindrive never writes them into the container: MP4 chapters are a track <em>inside</em> the file, so a save would be an <code>ffmpeg -c copy</code> rewrite of every byte of a multi-gigabyte concert, needing that much free space as well as the time.</p>
+<p>Nothing about them is held in either database. The file on disk is the only copy, so a rebuilt library still has them and a moved directory carries them with it.</p>
+<div class="note"><p>A marker&#x27;s <code>name</code> is reported exactly as the file holds it, empty included. Draw your own placeholder for a bare marker; the server will not invent one, because a client that saved back what it read would then write the placeholder into a line somebody deliberately left blank.</p></div>
+<p class="api-see">See also <a href="#ep-saveChapters"><code>saveChapters</code></a>.</p>
+</div>
+<div class="api-ep">
+<h3 id="ep-saveChapters">saveChapters</h3>
+<p class="api-meta"><code>POST /rest/saveChapters.view</code></p>
+<p>Replaces the marker list for one video. The request body is the chapter file itself.</p>
+<p>Permission: Admin anywhere, or your own upload.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>A video song id. Query string, not the body.</td></tr>
+</tbody>
+</table>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>10</code></td><td>Subsonic</td><td><code>id</code> missing.</td></tr>
+<tr><td><code>70</code></td><td>Subsonic</td><td>No such song, or it is not a video.</td></tr>
+<tr><td><code>50</code></td><td>Subsonic</td><td>The caller may not modify this item.</td></tr>
+<tr><td><code>0</code></td><td>Subsonic</td><td>More than 1000 markers, or the file could not be written.</td></tr>
+</tbody>
+</table>
+<p><code>id</code> goes in the query string; the <b>body</b> is the contents of the sidecar, sent as <code>text/plain; charset=utf-8</code> and parsed by the same code that reads one off disk. That is one definition of the format rather than two that can drift, and it makes a round trip a fixed point.</p>
+<p>The parse is deliberately liberal, so a block pasted out of a video description works as it stands:</p>
+<ul class="doc-list"><li><code>MM:SS</code>, <code>H:MM:SS</code> and <code>HH:MM:SS.mmm</code>, with <code>,</code> accepted as the decimal point</li><li>a <code>-</code>, <code>|</code>, en dash or em dash between the time and the title is dropped</li><li>blank lines, <code>#</code> comments, a UTF-8 BOM and CRLF endings are all tolerated</li><li>everything after the first run of whitespace is the title, verbatim -- so a colon or a leading digit in a title needs no escaping, and there is no escape syntax to learn</li><li>a line carrying no timestamp is skipped; it never fails the whole file</li></ul>
+<p>Minutes above 59 are accepted in the two-field form, because <code>90:00</code> is ordinary in a hand-typed list, but not in the three-field form, where they are a typo.</p>
+<p>The reply is the saved list in the shape <code>getChapters</code> returns, re-read from disk. <b>Adopt it rather than what you sent</b>: the server sorts, sanitises and may drop a line it could not read, so anything else leaves the client describing a file that is not the one on disk.</p>
+<div class="note"><p>An empty body writes an <em>empty</em> file rather than deleting it. That empty file is what says &quot;this video has no chapters&quot; -- without it, clearing the markers of a rip whose container carries its own would simply make those reappear, and there would be no way to overrule them.</p></div>
+<p class="api-see">See also <a href="#ep-getChapters"><code>getChapters</code></a>.</p>
+</div>
 </div>
 <div class="doc-sec" id="albumtext">
 <h2>Album text and images</h2>

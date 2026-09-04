@@ -10,6 +10,8 @@
 #include <iomanip>
 #include <map>
 #include <exception>
+#include <fstream>
+#include <iterator>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -4151,6 +4153,137 @@ std::string MediaStore::sidecar_captions(const std::string& abs) const
 			return cand.string();
 		}
 	return {};
+	}
+
+std::string MediaStore::sidecar_chapters_path(const std::string& abs) const
+	{
+	// Not replace_extension(), unlike sidecar_captions() above: a plain
+	// <stem>.txt is exactly what liner notes look like, and getAlbumTexts
+	// lists every .txt in an album folder as prose.  The double extension is
+	// what keeps the two apart.
+	fs::path base = fs::path(abs);
+	base.replace_extension("");
+	return base.string() + std::string(CHAPTERS_SUFFIX);
+	}
+
+MediaStore::VideoChapters MediaStore::get_chapters(int song_id)
+	{
+	VideoChapters vc;
+	vc.source = "none";
+
+	auto song = get_song(song_id);   // takes db_mutex_ itself; don't hold it here
+	if (!song || !song->is_video) return vc;
+
+	std::string abs = abs_path(song->path);
+	if (!path_is_within_root(abs)) return vc;
+
+	// The sidecar leads, and does so even when it is empty.  That is the
+	// tombstone: without it, clearing the markers of a rip whose container
+	// carries its own would make the container's list reappear, and there
+	// would be no way at all to say "this film has no chapters".
+	std::string side = sidecar_chapters_path(abs);
+	std::error_code fec;
+	if (fs::exists(side, fec) && path_is_within_root(side)) {
+		std::ifstream f(side, std::ios::binary);
+		if (f) {
+			std::string text((std::istreambuf_iterator<char>(f)),
+			                  std::istreambuf_iterator<char>());
+			auto p    = parse_chapters(text);
+			vc.source = "sidecar";
+			vc.chapters = std::move(p.chapters);
+			if (vc.chapters.size() > MAX_CHAPTERS)
+				vc.chapters.resize(MAX_CHAPTERS);
+			return vc;
+			}
+		}
+
+	// Failing that, whatever the container says.  Read-only: nothing here ever
+	// writes chapters back into a media file, because for MP4 that is a track
+	// inside the container and so a full rewrite of every byte.
+	std::vector<std::string> args = {
+		"ffprobe", "-v", "quiet", "-print_format", "json", "-show_chapters", abs
+		};
+	reproc::process proc;
+	reproc::options opts;
+	opts.redirect.err.type = reproc::redirect::type::discard;
+	if (proc.start(args, opts)) return vc;
+
+	std::string          out;
+	reproc::sink::string sink(out);
+	auto ec            = reproc::drain(proc, sink, reproc::sink::null);
+	auto [status, wec] = proc.wait(reproc::infinite);
+	if (ec || wec || status != 0) return vc;
+
+	try {
+		auto j    = nlohmann::json::parse(out);
+		auto arr  = j.find("chapters");
+		if (arr == j.end() || !arr->is_array()) return vc;
+		for (const auto& c : *arr) {
+			if (vc.chapters.size() >= MAX_CHAPTERS) break;
+			Chapter ch;
+			ch.start = probe_num(c, "start_time");
+			if (auto tags = c.find("tags"); tags != c.end())
+				ch.name = chapter_clean_name(tags->value("title", std::string()));
+			vc.chapters.push_back(std::move(ch));
+			}
+		if (!vc.chapters.empty()) vc.source = "container";
+		}
+	catch (const std::exception& e) {
+		std::cout << stamp() << "get_chapters: cannot read chapters of " << abs
+		          << ": " << e.what() << std::endl;
+		}
+	return vc;
+	}
+
+bool MediaStore::save_chapters(int song_id, const std::vector<Chapter>& chapters)
+	{
+	auto song = get_song(song_id);
+	if (!song || !song->is_video) return false;
+
+	std::string abs = abs_path(song->path);
+	if (!path_is_within_root(abs)) return false;
+
+	std::string side = sidecar_chapters_path(abs);
+	std::string part = side + ".part";
+	// Checked before either is created.  weakly_canonical() is what makes this
+	// meaningful for a file that does not exist yet, which is the same reason
+	// moveAlbum can validate a destination before moving anything to it.
+	if (!path_is_within_root(side) || !path_is_within_root(part)) return false;
+
+	std::string text = format_chapters(chapters);
+
+	// The rename is the only publish, as in TranscodeCache: a reader -- or the
+	// person editing this file in vi -- must never see half a save.  The .part
+	// name is also what keeps the intermediate out of getAlbumTexts, since that
+	// tests for a .txt extension.
+	std::error_code fec;
+	{
+	std::ofstream f(part, std::ios::binary | std::ios::trunc);
+	if (!f) {
+		std::cout << stamp() << "save_chapters: cannot write " << part
+		          << std::endl;
+		return false;
+		}
+	f.write(text.data(), static_cast<std::streamsize>(text.size()));
+	f.close();
+	if (!f) {
+		std::cout << stamp() << "save_chapters: write failed for " << part
+		          << std::endl;
+		fs::remove(part, fec);
+		return false;
+		}
+	}
+
+	fs::rename(part, side, fec);
+	if (fec) {
+		std::cout << stamp() << "save_chapters: cannot publish " << side
+		          << ": " << fec.message() << std::endl;
+		fs::remove(part, fec);
+		return false;
+		}
+	std::cout << stamp() << "save_chapters: wrote " << chapters.size()
+	          << " marker(s) to " << side << std::endl;
+	return true;
 	}
 
 std::string MediaStore::get_captions_vtt(int song_id, int stream_index)
