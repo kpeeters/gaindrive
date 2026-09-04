@@ -3770,6 +3770,8 @@ function setupVideoSurface() {
       videoChaptersToggle);
    document.getElementById('video-chapters-close').addEventListener('click',
       videoChaptersToggle);
+   document.getElementById('video-chapters-edit').addEventListener('click',
+      videoChaptersEditToggle);
    document.getElementById('video-chapter-add').addEventListener('click',
       videoChapterAdd);
    // Deliberately not the player's own previous/next, which move through the
@@ -4008,6 +4010,7 @@ let chapterDraft     = [];
 let chapterWritable  = false;
 let chapterSource    = 'none';
 let chapterPanelOpen = false;
+let chapterEditing   = false;
 let chapterCurrent   = -1;   // index into chapterDraft, or -1
 
 // H:MM:SS once past an hour, M:SS below it.  fmtDuration() is not reusable
@@ -4070,6 +4073,7 @@ async function videoLoadChapters(song) {
    chapterDraft       = [];
    chapterSource      = 'none';
    chapterWritable    = false;
+   chapterEditing     = false;
    chapterCurrent     = -1;
    videoChaptersRender();
 
@@ -4093,6 +4097,7 @@ function videoClearChapters() {
    chapterDraft       = [];
    chapterSource      = 'none';
    chapterWritable    = false;
+   chapterEditing     = false;
    chapterCurrent     = -1;
    videoChaptersRender();
 }
@@ -4101,28 +4106,43 @@ function videoClearChapters() {
 // something to show *or* something the viewer could add, so a concert with no
 // markers yet still has a way in; a film nobody may edit and that carries none
 // shows nothing at all, matching how the subtitle picker disappears.
+//
+// Reading and editing are two modes, as they are for an album: outside edit
+// mode a row is text you can jump from, and only the Edit button turns the
+// rows into fields.  The list is read far more often than it is changed, and a
+// panel of live inputs over a playing film invites a marker dragged somewhere
+// by a stray click.
 function videoChaptersRender() {
-   const have    = chapterDraft.length > 0;
-   const offer   = have || chapterWritable;
-   const panel   = document.getElementById('video-chapters');
-   const list    = document.getElementById('video-chapters-list');
-   const btn     = document.getElementById('video-chapters-btn');
-   const btn2    = document.getElementById('video-chapters-btn2');
-   const now     = document.getElementById('video-chapter-now');
-   const dirty   = chapterDirty();
+   const have  = chapterDraft.length > 0;
+   const offer = have || chapterWritable;
+   const panel = document.getElementById('video-chapters');
+   const list  = document.getElementById('video-chapters-list');
+   const btn   = document.getElementById('video-chapters-btn');
+   const btn2  = document.getElementById('video-chapters-btn2');
+   const now   = document.getElementById('video-chapter-now');
+   const edit  = document.getElementById('video-chapters-edit');
+   const dirty = chapterDirty();
 
+   // Editing something nobody may write is not a state to be in -- a film can
+   // stop being writable between loads, and the mode must not survive it.
+   if (!chapterWritable) chapterEditing = false;
    // Cleared before it is read, or the toggle keeps its lit state over a film
    // that no longer offers a panel.
    if (!offer) chapterPanelOpen = false;
+
    btn.hidden  = !offer;
    btn2.hidden = !offer;
    btn.classList.toggle('on', chapterPanelOpen);
    panel.hidden = !chapterPanelOpen;
    now.hidden   = !have;
 
-   document.getElementById('video-chapter-add').hidden    = !chapterWritable;
-   document.getElementById('video-chapters-save').hidden   = !dirty;
-   document.getElementById('video-chapters-cancel').hidden = !dirty;
+   edit.hidden = !chapterWritable;
+   edit.classList.toggle('on', chapterEditing);
+   edit.title  = chapterEditing ? 'Stop editing' : 'Edit chapters';
+
+   document.getElementById('video-chapters-foot').hidden = !chapterEditing;
+   document.getElementById('video-chapters-save').disabled   = !dirty;
+   document.getElementById('video-chapters-cancel').disabled = !dirty;
    document.getElementById('video-chapters-msg').textContent =
       dirty ? 'Unsaved changes'
             : (chapterSource === 'container' ? 'From the video file' : '');
@@ -4130,7 +4150,7 @@ function videoChaptersRender() {
    list.replaceChildren();
    chapterDraft.forEach((c, i) => {
       const row = document.createElement('div');
-      row.className = 'chapter-row' + (chapterWritable ? '' : ' readonly');
+      row.className = 'chapter-row' + (chapterEditing ? ' editing' : '');
       row.dataset.i = i;
       if (i === chapterCurrent) row.classList.add('current');
 
@@ -4139,11 +4159,29 @@ function videoChaptersRender() {
       jump.textContent = 'play_arrow';
       jump.title       = 'Play from here';
       jump.addEventListener('click', () => videoChapterJump(i));
+      row.appendChild(jump);
+
+      if (!chapterEditing) {
+         const time = document.createElement('span');
+         time.className   = 'chapter-time';
+         time.textContent = fmtChapterTime(c.start);
+         const name = document.createElement('span');
+         name.className   = 'chapter-name';
+         // An empty name is reported as empty by the server rather than filled
+         // in, so that a save cannot write a placeholder into a line somebody
+         // deliberately left bare. Drawing one here costs nothing.
+         name.textContent = c.name || `Chapter ${i + 1}`;
+         // The whole row jumps, not just the button: reading, there is nothing
+         // else a click on it could sensibly mean.
+         row.addEventListener('click', () => videoChapterJump(i));
+         row.append(time, name);
+         list.appendChild(row);
+         return;
+         }
 
       const time = document.createElement('input');
       time.className = 'chapter-time';
       time.value     = fmtChapterTime(c.start);
-      time.readOnly  = !chapterWritable;
       // On change rather than on input: the list re-sorts when a time moves,
       // and re-rendering on every keystroke would take the focus away
       // mid-edit.
@@ -4158,42 +4196,33 @@ function videoChaptersRender() {
 
       const name = document.createElement('input');
       name.className   = 'chapter-name';
-      // The server reports an empty name as empty rather than inventing
-      // "Chapter 3", so that a client saving what it read cannot write the
-      // placeholder into a line somebody deliberately left bare.  Drawing one
-      // here is free and costs nothing on the way back.
       name.placeholder = `Chapter ${i + 1}`;
       name.value       = c.name;
-      name.readOnly    = !chapterWritable;
       name.addEventListener('input', () => {
          chapterDraft[i].name = name.value;
          videoChaptersButtons();
          });
 
-      row.append(jump, time, name);
+      const here = document.createElement('button');
+      here.className   = 'mi';
+      here.textContent = 'my_location';
+      here.title       = 'Move to the current position';
+      here.addEventListener('click', () => {
+         chapterDraft[i].start = Math.max(0, playerPosition());
+         chapterDraft.sort((a, b) => a.start - b.start);
+         videoChaptersRender();
+         });
 
-      if (chapterWritable) {
-         const here = document.createElement('button');
-         here.className   = 'mi';
-         here.textContent = 'my_location';
-         here.title       = 'Move to the current position';
-         here.addEventListener('click', () => {
-            chapterDraft[i].start = Math.max(0, playerPosition());
-            chapterDraft.sort((a, b) => a.start - b.start);
-            videoChaptersRender();
-            });
+      const del = document.createElement('button');
+      del.className   = 'mi';
+      del.textContent = 'delete';
+      del.title       = 'Remove this marker';
+      del.addEventListener('click', () => {
+         chapterDraft.splice(i, 1);
+         videoChaptersRender();
+         });
 
-         const del = document.createElement('button');
-         del.className   = 'mi';
-         del.textContent = 'delete';
-         del.title       = 'Remove this marker';
-         del.addEventListener('click', () => {
-            chapterDraft.splice(i, 1);
-            videoChaptersRender();
-            });
-         row.append(here, del);
-         }
-
+      row.append(time, name, here, del);
       list.appendChild(row);
       });
 }
@@ -4202,8 +4231,8 @@ function videoChaptersRender() {
 // the rows there would move the caret to the end of the field on every letter.
 function videoChaptersButtons() {
    const dirty = chapterDirty();
-   document.getElementById('video-chapters-save').hidden   = !dirty;
-   document.getElementById('video-chapters-cancel').hidden = !dirty;
+   document.getElementById('video-chapters-save').disabled   = !dirty;
+   document.getElementById('video-chapters-cancel').disabled = !dirty;
    document.getElementById('video-chapters-msg').textContent =
       dirty ? 'Unsaved changes' : '';
 }
@@ -4214,6 +4243,20 @@ function videoChaptersToggle() {
    // button that appears to do nothing.
    if (surf.dataset.state === 'minimised') videoSurfaceSet('theatre');
    chapterPanelOpen = !chapterPanelOpen;
+   videoChaptersRender();
+}
+
+// Leaving edit mode discards, as Cancel does — but never silently: the panel
+// can be several minutes of marking up a concert, and the Edit button is
+// directly beside the close button.
+function videoChaptersEditToggle() {
+   if (chapterEditing && chapterDirty()) {
+      showConfirm('Discard the unsaved chapter changes?',
+                  () => { videoChaptersCancel(); },
+                  {title: 'Unsaved changes', yes: 'Discard', no: 'Keep editing'});
+      return;
+      }
+   chapterEditing = !chapterEditing;
    videoChaptersRender();
 }
 
@@ -4275,7 +4318,8 @@ function videoChapterTick(abs) {
 }
 
 function videoChaptersCancel() {
-   chapterDraft = player.chapters.map(c => ({...c}));
+   chapterDraft   = player.chapters.map(c => ({...c}));
+   chapterEditing = false;
    videoChaptersRender();
 }
 
@@ -4317,6 +4361,9 @@ async function videoChaptersSave() {
       chapterWritable = !!c.writable;
       chapterDraft    = player.chapters.map(x => ({...x}));
       chapterCurrent  = -1;
+      // Back to reading, as exitEditMode does for an album: the save is the
+      // end of the edit, and leaving the fields up suggests it was not.
+      chapterEditing  = false;
       videoChaptersRender();
       videoChapterTick(playerPosition());
       }

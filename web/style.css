@@ -772,7 +772,13 @@ body {
    in a modal: placing one means watching for the moment a song starts, so the
    picture has to stay visible while the list is open.
 
-   z-index 3 because #video-controls declares 2 and precedes this in the DOM —
+   Themed like #video-bar rather than painted onto the picture in translucent
+   black -- it is a panel of the application that happens to sit over a video,
+   and a dark-only one would be the single surface in the client that ignores
+   light mode.  Opaque for the same reason: text over a moving picture is hard
+   to read at any tint.
+
+   z-index 3 because #video-controls declares 2 and precedes this in the DOM --
    without it the transport would paint over the panel and every button under
    the middle of the picture would be dead. */
 #video-chapters {
@@ -784,9 +790,9 @@ body {
    width: min(22rem, 60%);
    display: flex;
    flex-direction: column;
-   background: rgba(0, 0, 0, 0.82);
-   color: #fff;
-   border-left: 1px solid var(--divider);
+   background: var(--surface);
+   color: var(--text);
+   border-left: 1px solid var(--border);
    font-size: 0.85rem;
 }
 
@@ -806,17 +812,21 @@ body {
    flex: none;
 }
 
-#video-chapters-head { border-bottom: 1px solid rgba(255, 255, 255, 0.15); }
-#video-chapters-foot { border-top:    1px solid rgba(255, 255, 255, 0.15); }
+#video-chapters-head { border-bottom: 1px solid var(--border); }
+#video-chapters-foot { border-top:    1px solid var(--border); }
+
+/* The footer is only ever drawn in edit mode, so an empty strip must not sit
+   under the list the rest of the time. */
+#video-chapters-foot[hidden] { display: none; }
 
 #video-chapters-title { flex: 1; font-weight: 600; }
-#video-chapters-msg   { flex: 1; color: rgba(255, 255, 255, 0.7);
+#video-chapters-msg   { flex: 1; color: var(--text-dim);
                         font-size: 0.78rem; }
 
 #video-chapters button {
    background: none;
    border: 0;
-   color: rgba(255, 255, 255, 0.75);
+   color: var(--text-dim);
    cursor: pointer;
    padding: 0.1rem 0.35rem;
    border-radius: 4px;
@@ -824,11 +834,14 @@ body {
 }
 
 #video-chapters button:hover:not(:disabled) {
-   color: #fff;
-   background: rgba(255, 255, 255, 0.15);
+   color: var(--text);
+   background: var(--border);
 }
 
 #video-chapters button:disabled { opacity: 0.4; cursor: default; }
+#video-chapters button[hidden]  { display: none; }
+
+#video-chapters-edit.on { color: var(--accent); }
 
 /* The two text buttons in the footer are not icons and must not inherit the
    icon size above. */
@@ -836,7 +849,8 @@ body {
 #video-chapters-save {
    font-size: 0.8rem;
    padding: 0.25rem 0.6rem;
-   border: 1px solid rgba(255, 255, 255, 0.3) !important;
+   border: 1px solid var(--border);
+   color: var(--text);
 }
 
 #video-chapters-list {
@@ -845,45 +859,53 @@ body {
    overflow-y: auto;
 }
 
+/* Three columns reading, five editing -- the two extra are the "move here" and
+   delete buttons, which exist only in edit mode. */
 .chapter-row {
    display: grid;
-   grid-template-columns: 1.6rem 5.5rem 1fr auto auto;
+   grid-template-columns: 1.6rem 5.5rem 1fr;
    align-items: center;
    gap: 0.25rem;
    padding: 0.15rem 0.35rem;
-   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+   border-bottom: 1px solid var(--border);
 }
 
-.chapter-row.current { background: rgba(255, 255, 255, 0.14); }
+.chapter-row.editing {
+   grid-template-columns: 1.6rem 5.5rem 1fr auto auto;
+}
+
+.chapter-row.current { background: var(--border); }
+.chapter-row.current .chapter-name { color: var(--accent); font-weight: 600; }
 
 .chapter-time,
 .chapter-name {
-   background: rgba(255, 255, 255, 0.08);
-   border: 1px solid transparent;
-   border-radius: 3px;
-   color: inherit;
    font: inherit;
+   color: inherit;
    padding: 0.15rem 0.3rem;
    min-width: 0;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
 }
 
-.chapter-time { font-variant-numeric: tabular-nums; }
+.chapter-time { font-variant-numeric: tabular-nums; color: var(--text-dim); }
 
-.chapter-time:focus,
-.chapter-name:focus {
+/* Only the editable form carries a field's chrome; reading, these are spans
+   and must look like a list rather than like a form nobody may submit. */
+input.chapter-time,
+input.chapter-name {
+   background: var(--bg);
+   border: 1px solid var(--border);
+   border-radius: 3px;
+}
+
+input.chapter-time:focus,
+input.chapter-name:focus {
    border-color: var(--accent);
    outline: none;
 }
 
-.chapter-time.bad { border-color: #e06c6c; }
-
-/* Read-only rows: no inputs at all, so a viewer without write permission gets
-   a jump list rather than a form that cannot be submitted. */
-.chapter-row.readonly .chapter-time,
-.chapter-row.readonly .chapter-name {
-   background: none;
-   border-color: transparent;
-}
+input.chapter-time.bad { border-color: #e06c6c; }
 
 #video-chapter-now {
    max-width: 40%;

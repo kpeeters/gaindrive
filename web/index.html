@@ -125,16 +125,23 @@
          <div id="video-chapters" hidden>
             <div id="video-chapters-head">
                <button id="video-chapter-prev" class="mi" title="Previous chapter" aria-label="Previous chapter">skip_previous</button>
-               <span id="video-chapters-title">Chapters</span>
                <button id="video-chapter-next" class="mi" title="Next chapter" aria-label="Next chapter">skip_next</button>
+               <span id="video-chapters-title">Chapters</span>
+               <!-- Editing is a mode you ask for, as it is for an album: the
+                    list is read far more often than it is changed, and a panel
+                    of live input fields invites a marker moved by a stray
+                    click. -->
+               <button id="video-chapters-edit" class="mi" title="Edit chapters" aria-label="Edit chapters" hidden>edit</button>
                <button id="video-chapters-close" class="mi" title="Close" aria-label="Close">close</button>
             </div>
             <div id="video-chapters-list"></div>
-            <div id="video-chapters-foot">
+            <!-- Edit mode only, so no empty strip sits under the list while
+                 the panel is merely being read. -->
+            <div id="video-chapters-foot" hidden>
                <button id="video-chapter-add" class="mi" title="Add a marker here" aria-label="Add a marker here">add</button>
                <span id="video-chapters-msg"></span>
-               <button id="video-chapters-cancel" hidden>Cancel</button>
-               <button id="video-chapters-save" hidden>Save</button>
+               <button id="video-chapters-cancel">Cancel</button>
+               <button id="video-chapters-save">Save</button>
             </div>
          </div>
       </div>
