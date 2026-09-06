@@ -2335,12 +2335,8 @@ arrives as 200 and a page of HTML.
 
 **Browsing, lists and similarity.**
 
-* `getRandomSongs`.
 * `getNowPlaying`. `scrobble` records a now-playing event and nothing reads it
   back.
-* `getSimilarSongs` and `getSimilarSongs2`, and `findSonicPath` and
-  `getSonicSimilarTracks` of the OpenSubsonic `sonicSimilarity` extension.
-  Nothing here fetches or computes similarity.
 * `getAlbumInfo`. Only `getAlbumInfo2` is registered. The two would be the
   same call in GainDrive, since an album id *is* a folder id — there is no
   separate id3 album to look up — so the older name is missing rather than
@@ -2356,12 +2352,6 @@ arrives as 200 and a page of HTML.
 * `getLyrics`, and `getLyricsBySongId` of the OpenSubsonic `songLyrics`
   extension. No lyric tag and no `.lrc` sidecar is read.
 * `getAvatar`. An account carries no picture.
-* `setRating`. There is no rating column: `star` and `unstar` are the whole
-  annotation surface, and no entry carries `userRating` or `averageRating`.
-* `getTranscodeDecision` and `getTranscodeStream` of the OpenSubsonic
-  `transcoding` extension. GainDrive decides what to transcode itself, from
-  the request and the codecs recorded at scan time, so there is nothing here
-  that would read a client's capability payload.
 
 **The play queue.**
 
@@ -2377,19 +2367,9 @@ the roles GainDrive already reports say so: `shareRole`, `podcastRole`,
 `jukeboxRole` and `commentRole` are false on every account, so a client that
 reads them need not probe.
 
-* Sharing — `getShares`, `createShare`, `updateShare` and `deleteShare`.
-* Podcasts — `getPodcasts`, `getNewestPodcasts`, `refreshPodcasts`,
-  `createPodcastChannel`, `deletePodcastChannel`, `deletePodcastEpisode`,
-  `downloadPodcastEpisode`, and `getPodcastEpisode` of the OpenSubsonic
-  extension of the same name. Fetching a URL into personal files is the
-  nearest thing GainDrive has, and it is not a subscription.
 * The jukebox — `jukeboxControl`, which plays through the sound card of the
   machine running the server. Casting is GainDrive's answer to playing
   somewhere other than the client.
-* Internet radio — `getInternetRadioStations`, `createInternetRadioStation`,
-  `updateInternetRadioStation` and `deleteInternetRadioStation`. A station is
-  not a library file, so it would need storage of its own.
-* Chat — `getChatMessages` and `addChatMessage`.
 
 **Users and system.**
 
@@ -2407,4 +2387,47 @@ more than that `stream` honours `timeOffset` for music, which it does.
 `topSongsByArtistId` is one parameter away, but `getTopSongs` answers an
 empty list here, so advertising it would promise data that does not exist.
 `formPost` is not supported — every standard endpoint is `GET`.
+'''
+
+[[section]]
+id    = "wontimplement"
+title = "Outside scope"
+group = "Reference"
+blurb = '''
+Finally, there are some endpoints which GainDrive intentionally does
+not and will not implement. Apart from the ones listed here, these
+also include (some of the) deprecated endpoints of the OpenSubsonic
+specification.
+
+**Browsing, lists and similarity.**
+
+* `getRandomSongs`.
+* `getSimilarSongs` and `getSimilarSongs2`, and `findSonicPath` and
+  `getSonicSimilarTracks` of the OpenSubsonic `sonicSimilarity` extension.
+  Nothing here fetches or computes similarity.
+  
+**Retrieval and annotation.**
+
+* `getAvatar`. An account carries no picture.
+* `setRating`. There is no rating column: `star` and `unstar` are the whole
+  annotation surface, and no entry carries `userRating` or `averageRating`.
+* `getTranscodeDecision` and `getTranscodeStream` of the OpenSubsonic
+  `transcoding` extension. GainDrive decides what to transcode itself, from
+  the request and the codecs recorded at scan time, so there is nothing here
+  that would read a client's capability payload.
+
+
+**Whole subsystems.**
+
+* Sharing — `getShares`, `createShare`, `updateShare` and `deleteShare`.
+* Podcasts — `getPodcasts`, `getNewestPodcasts`, `refreshPodcasts`,
+  `createPodcastChannel`, `deletePodcastChannel`, `deletePodcastEpisode`,
+  `downloadPodcastEpisode`, and `getPodcastEpisode` of the OpenSubsonic
+  extension of the same name. Fetching a URL into personal files is the
+  nearest thing GainDrive has, and it is not a subscription.
+* Internet radio — `getInternetRadioStations`, `createInternetRadioStation`,
+  `updateInternetRadioStation` and `deleteInternetRadioStation`. A station is
+  not a library file, so it would need storage of its own.
+* Chat — `getChatMessages` and `addChatMessage`.
+
 '''

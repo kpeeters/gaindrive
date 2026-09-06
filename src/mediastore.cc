@@ -644,6 +644,18 @@ void MediaStore::create_schema()
 	{
 	SQLite::Transaction txn(db_music_);
 
+	// Asked before the CREATEs below, because afterwards it is unanswerable.
+	// See the seed at the end of this function: song_genres has to be filled
+	// from what the database already knows the first time it appears, or an
+	// upgraded install shows no genres at all until every file is re-read.
+	bool song_genres_is_new = true;
+		{
+		SQLite::Statement q(db_music_,
+			"SELECT 1 FROM sqlite_master"
+			" WHERE type = 'table' AND name = 'song_genres'");
+		song_genres_is_new = !q.executeStep();
+		}
+
 	// Music library tables (gaindrive-music.db, main schema).
 	db_music_.exec(R"(
 		CREATE TABLE IF NOT EXISTS folders (
@@ -928,6 +940,17 @@ void MediaStore::create_schema()
 			-- this is again: art and identity expire for different reasons.
 			poster_path TEXT,
 			status     TEXT NOT NULL,      -- matched | unmatched | error
+			-- TMDB's genres for this title, joined with '|'.  Our own
+			-- encoding rather than a tag, so the separator is safe: no TMDB
+			-- genre contains one.
+			--
+			-- NULL means "asked before this column existed" and '' means
+			-- "asked, TMDB had none".  Conflating them breaks one of two
+			-- ways, exactly as songs.artist documents: with no distinction
+			-- either every already-matched film is re-asked on every scan for
+			-- ever, or none of them ever is and the feature does nothing on
+			-- an upgraded install.
+			genre      TEXT,
 			fetched_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 		);
 
@@ -957,6 +980,41 @@ void MediaStore::create_schema()
 		-- -show_chapters on every probe, which read_video_probe()'s "unusable"
 		-- retry test does not cover -- so a list a narrow -probesize missed
 		-- would be recorded silently as none.
+		-- Every genre a song carries, in source order.
+		--
+		-- songs.genre survives beside this and holds the *first* of them: it
+		-- is the single-valued Subsonic `genre` field, and what albums.genre
+		-- rolls up from, so keeping it is what leaves the eleven ChildEntry
+		-- queries untouched. This table is the full list, and it is what
+		-- getGenres, getSongsByGenre and getAlbumList type=byGenre read.
+		--
+		-- Multi-value is not a nicety for video: a film is normally two or
+		-- three genres (Alien is Horror *and* Science Fiction), and filing it
+		-- under only the first is precisely the loss this exists to prevent.
+		-- Audio reaches it too, from a multi-valued Vorbis GENRE.
+		--
+		-- Keyed on the stored path, not songs.id, for the reason chapters and
+		-- video_art are: INSERT OR REPLACE reassigns a rowid, so an id-keyed
+		-- row would dangle after any rescan that touched the file. No foreign
+		-- key either -- album_info_cache's FK to folders(id) with no cascade
+		-- is what once made DELETE FROM folders fail and roll a whole scan
+		-- back.
+		--
+		-- It is a cache in the strict DATABASE.md sense: every row is
+		-- re-derived from a file's tag or from TMDB, so deleting this
+		-- database and rescanning puts all of it back.
+		--
+		-- Names are trimmed on write, so readers fold case alone and an
+		-- ordinary NOCASE index serves rather than an expression index.
+		CREATE TABLE IF NOT EXISTS song_genres (
+			path TEXT    NOT NULL,   -- "<root>/<rest>"
+			idx  INTEGER NOT NULL,   -- 1-based; 1 is the primary genre
+			name TEXT    NOT NULL,
+			PRIMARY KEY (path, idx)
+		);
+		CREATE INDEX IF NOT EXISTS idx_song_genres_name
+			ON song_genres(name COLLATE NOCASE);
+
 		CREATE TABLE IF NOT EXISTS chapters (
 			path  TEXT    NOT NULL,   -- "<root>/<rest>", the video
 			idx   INTEGER NOT NULL,   -- 1-based, in start order
@@ -1104,6 +1162,25 @@ void MediaStore::create_schema()
 		);
 	)");
 
+	// Seed song_genres from what songs.genre already holds, the one time the
+	// table appears.
+	//
+	// Without this an upgraded install has an empty genre table and every
+	// genre listing goes blank, because Phase 3 only opens files whose mtime
+	// changed and would never re-read the other 25 000. With it nothing
+	// regresses on the first scan after an upgrade, and the *multi*-value each
+	// file may carry arrives per file as files change or on a rebuild -- which
+	// is routine, since this database is a cache.
+	//
+	// Inside the same transaction as the CREATE, so a crash between the two
+	// cannot leave a table that exists, is empty, and will never be seeded
+	// again.
+	if (song_genres_is_new)
+		db_music_.exec(
+			"INSERT INTO song_genres (path, idx, name)"
+			" SELECT path, 1, TRIM(genre) FROM songs"
+			"  WHERE TRIM(COALESCE(genre,'')) <> ''");
+
 	txn.commit();
 
 	// Migrations for existing databases: add columns if they don't exist yet.
@@ -1164,6 +1241,12 @@ void MediaStore::create_schema()
 		}
 	try { db_music_.exec(
 		"ALTER TABLE albums ADD COLUMN musicbrainz_releasegroup_id TEXT"); }
+	catch (const SQLite::Exception&) {}
+	// No DEFAULT, for the reason songs.artist gives above: an existing row has
+	// to read back NULL so tmdb_lookup() knows it predates the column and asks
+	// once more. A default would mark every already-matched film as "asked,
+	// no genres" and no film in an existing library would ever get one.
+	try { db_music_.exec("ALTER TABLE video_meta ADD COLUMN genre TEXT"); }
 	catch (const SQLite::Exception&) {}
 
 	// One-time: the hand-picked-cover flag used to be albums.cover_manual, in
@@ -1433,7 +1516,18 @@ struct SongReadData {
 	std::string title;
 	int         track_nr    = 0;
 	int         year        = 0;
+	// The primary genre, which is what songs.genre and the Subsonic `genre`
+	// field hold. The full list is `genres`, written to the song_genres table.
 	std::string genre;
+	// Every genre this song carries, primary first: a multi-valued GENRE tag
+	// for audio, TMDB's list for video. `genres_read` is load-bearing and not
+	// a convenience -- it says an answer was *obtained*, which an empty
+	// `genres` cannot, and apply_song_genres() deletes a song's rows whenever
+	// it is called. Without it every unchanged audio row, whose list is empty
+	// only because Phase 3 never opened the file, would lose its genres on the
+	// next scan. Same distinction artist_read draws, for the same reason.
+	std::vector<std::string> genres;
+	bool                     genres_read = false;
 	double      duration    = 0.0;
 	int         bitrate     = 0;
 	int         sr          = 0;
@@ -1689,6 +1783,35 @@ static void read_song_metadata(SongReadData& sdat)
 	// which is most of a library.
 	if (!f.isNull()) {
 		auto props = f.file()->properties();
+
+		// The whole GENRE tag, not just Tag::genre()'s first value. A Vorbis
+		// comment may carry the field several times and an ID3v2 TCON may hold
+		// a multi-value frame, and those are the container *stating* two
+		// genres -- which is a different thing from a "Rock/Pop" string, where
+		// the separator is a guess about someone else's intent and gaindrive
+		// deliberately does not guess.
+		//
+		// genres_read is set whenever the file opened, empty tag included: a
+		// file whose genre was deleted must lose its rows, and guarding on a
+		// non-empty list would leave them behind for ever.
+		sdat.genres_read = true;
+		if (auto it = props.find("GENRE"); it != props.end())
+			for (const auto& g : it->second) {
+				std::string one = g.toCString(true);
+				size_t b = one.find_first_not_of(" \t\r\n");
+				size_t e = one.find_last_not_of(" \t\r\n");
+				if (b != std::string::npos)
+					sdat.genres.push_back(one.substr(b, e - b + 1));
+				}
+		// Tag::genre() and the PropertyMap can disagree -- the former reads
+		// ID3v1 where the latter does not -- so the single field keeps its own
+		// answer and only falls back to the list, rather than the reverse.
+		if (sdat.genre.empty() && !sdat.genres.empty())
+			sdat.genre = sdat.genres.front();
+		// And the list falls back to the single field, so a tag only
+		// Tag::genre() could read still reaches the table.
+		if (sdat.genres.empty() && !sdat.genre.empty())
+			sdat.genres.push_back(sdat.genre);
 
 		if (sdat.disc_number == 0) {
 			auto it = props.find("DISCNUMBER");
@@ -1950,6 +2073,46 @@ static std::string make_video_art_songs(
 	return album_art;
 	}
 
+// TMDB's genre list, to and from the single video_meta column that holds it.
+//
+// '|' rather than a comma because this is *our* encoding of a list, not a tag
+// somebody else wrote, so the separator can simply be one no value contains --
+// and no TMDB genre does, while several ("Action & Adventure") would make a
+// comma or an ampersand ambiguous. This is the whole reason the music side
+// refuses to split a `Rock/Pop` tag and this one may split freely: there the
+// separator is a guess about someone else's intent, here it is a fact about a
+// string we wrote ourselves.
+//
+// Values are trimmed and empties dropped on the way out, so the table only
+// ever holds usable names and the readers fold case alone.
+static std::string join_genres(const std::vector<std::string>& genres)
+	{
+	std::string out;
+	for (const auto& g : genres) {
+		if (g.empty()) continue;
+		if (!out.empty()) out += '|';
+		out += g;
+		}
+	return out;
+	}
+
+static std::vector<std::string> split_genres(const std::string& joined)
+	{
+	std::vector<std::string> out;
+	size_t pos = 0;
+	while (pos <= joined.size()) {
+		size_t next = joined.find('|', pos);
+		if (next == std::string::npos) next = joined.size();
+		std::string one = joined.substr(pos, next - pos);
+		size_t b = one.find_first_not_of(" \t\r\n");
+		size_t e = one.find_last_not_of(" \t\r\n");
+		if (b != std::string::npos) out.push_back(one.substr(b, e - b + 1));
+		if (next == joined.size()) break;
+		pos = next + 1;
+		}
+	return out;
+	}
+
 // The whole of Phase 3b for one artist.  Shared with scan_root_files(), which
 // has no AlbumReadData and calls make_video_art_songs() directly.
 static void make_video_art(MediaStore& store, const VideoArt& art,
@@ -1991,7 +2154,15 @@ static MediaStore::VideoMetaRow tmdb_lookup(
 	if (auto cached = store.get_video_meta(rel_key)) {
 		bool stale = cached->status == "error"
 		    && std::time(nullptr) - cached->fetched_at > TMDB_ERROR_RETRY_S;
-		if (cached->query == query && !stale) return *cached;
+		// A matched row written before the genre column existed is owed one
+		// more question, once. This is the *only* thing that re-asks about a
+		// title the cache has already answered, and it terminates because the
+		// answer is stored even when it is empty — genre_known, not a
+		// non-empty genre, is the test. Without it the feature would do
+		// nothing at all on an existing library, which is the failure mode
+		// the songs.artist back-fill exists to avoid.
+		bool wants_genre = cached->status == "matched" && !cached->genre_known;
+		if (cached->query == query && !stale && !wants_genre) return *cached;
 		}
 
 	MediaStore::VideoMetaRow row;
@@ -2009,6 +2180,8 @@ static MediaStore::VideoMetaRow tmdb_lookup(
 		row.year        = m->year;
 		row.overview    = m->overview;
 		row.poster_path = m->poster_path;
+		row.genre       = join_genres(m->genres);
+		row.genre_known = true;
 		std::cout << stamp() << "tmdb: " << rel_key << " -> " << m->title
 		          << " (" << m->year << ") id=" << m->id << std::endl;
 		}
@@ -2107,6 +2280,23 @@ static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
 			adat.tmdb_title = row.title;
 			adat.tmdb_year  = row.year;
 			adat.overview   = row.overview;
+
+			// A film is one work however many parts or episodes it is split
+			// into, so its genres belong to every video in the folder. Audio
+			// in the same folder is left alone: none of this reasoning applies
+			// to it, and a concert's soundtrack keeps whatever its tags say.
+			//
+			// Set for every video rather than only the changed ones, which is
+			// what back-fills a library scanned before this existed -- the
+			// same reason the video title is re-derived unconditionally.
+			if (std::vector<std::string> gs = split_genres(row.genre);
+			        !gs.empty())
+				for (auto& sdat : adat.songs) {
+					if (!sdat.is_video) continue;
+					sdat.genres      = gs;
+					sdat.genre       = gs.front();
+					sdat.genres_read = true;
+					}
 			// The title and the plot apply either way; only the cover is held
 			// back for a hand-uploaded one.
 			if (!store.cover_is_manual(store.rel_path(adat.path))
@@ -2137,6 +2327,12 @@ static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
 			if (!row.title.empty()) {
 				sdat.title = row.title;
 				if (row.year > 0) sdat.year = row.year;
+				}
+			if (std::vector<std::string> gs = split_genres(row.genre);
+			        !gs.empty()) {
+				sdat.genres      = gs;
+				sdat.genre       = gs.front();
+				sdat.genres_read = true;
 				}
 			// No manual check here: setCoverArt is folder-level, so an upload
 			// on a section marks the section's own album row and each film in
@@ -2271,6 +2467,39 @@ static void apply_song_meta_overrides(SQLite::Database& db, int album_id)
 // Delete-then-insert rather than an upsert, because a list that got *shorter*
 // would otherwise keep its tail for ever -- the rows past the new end match no
 // incoming idx and nothing else would reach them.
+// A song's genres, replaced wholesale. Same shape as apply_song_chapters()
+// below and for the same reasons.
+//
+// Called only when the caller actually has an answer for this file --
+// SongReadData::genres_read -- which is what keeps an unchanged audio row,
+// whose in-memory genre list is empty because Phase 3 never opened the file,
+// from having its rows deleted. That guard is why this needs no equivalent of
+// load_chapter_keys(): chapters are read for every file in Phase 1, so that
+// pass had to discover cheaply which files were worth touching, while this one
+// is only ever handed the changed audio and the matched video.
+static void apply_song_genres(SQLite::Database& db,
+                               const std::string& rel_path,
+                               const std::vector<std::string>& genres)
+	{
+	SQLite::Statement del(db, "DELETE FROM song_genres WHERE path = ?");
+	del.bind(1, rel_path);
+	del.exec();
+	if (genres.empty()) return;
+
+	SQLite::Statement ins(db,
+		"INSERT OR IGNORE INTO song_genres (path, idx, name)"
+		" VALUES (?, ?, ?)");
+	int idx = 0;
+	for (const auto& g : genres) {
+		if (g.empty()) continue;
+		ins.reset();
+		ins.bind(1, rel_path);
+		ins.bind(2, ++idx);
+		ins.bind(3, g);
+		ins.exec();
+		}
+	}
+
 static void apply_song_chapters(SQLite::Database& db,
                                  const std::string& rel_path,
                                  const std::vector<Chapter>& chapters)
@@ -2310,6 +2539,13 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 	// load_video_art_keys() strikes.
 	if (!sdat.chapters.empty() || chapter_keys.count(rel_path))
 		apply_song_chapters(db, rel_path, sdat.chapters);
+
+	// Also before the split, and for a related but distinct reason: a video's
+	// genres come from Phase 3c rather than from the file, so they arrive for
+	// an unchanged row too. The guard is genres_read and never `!empty()` --
+	// see SongReadData::genres_read.
+	if (sdat.genres_read)
+		apply_song_genres(db, rel_path, sdat.genres);
 
 	if (!sdat.changed) {
 		// An unchanged song still has to say it was seen: the per-album prune
@@ -2368,13 +2604,19 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 				"UPDATE songs SET title = ?,"
 				"                 year = CASE WHEN year = 0 THEN ? ELSE year END,"
 				"                 track_number = CASE WHEN ? > 0 THEN ?"
-				"                                ELSE track_number END"
+				"                                ELSE track_number END,"
+				// Guarded on being non-empty, unlike the title beside it: a
+				// film TMDB could not identify has no genre to offer and must
+				// not wipe one an earlier scan found.
+				"                 genre = CASE WHEN ? <> '' THEN ? ELSE genre END"
 				" WHERE path = ?");
 			t.bind(1, sdat.title);
 			t.bind(2, sdat.year);
 			t.bind(3, sdat.track_nr);
 			t.bind(4, sdat.track_nr);
-			t.bind(5, rel_path);
+			t.bind(5, sdat.genre);
+			t.bind(6, sdat.genre);
+			t.bind(7, rel_path);
 			t.exec();
 			}
 		return;
@@ -3185,6 +3427,16 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	s.bind(1, prefix);
 	s.exec();
 	}
+	{
+	// The genres of a song that has gone. Here with the other derived sweeps
+	// and last for the same reason: it asks whether a song still has this
+	// path, so every DELETE FROM songs above must already have run.
+	SQLite::Statement s(db_music_,
+		"DELETE FROM song_genres WHERE path LIKE ?"
+		"  AND path NOT IN (SELECT path FROM songs)");
+	s.bind(1, prefix);
+	s.exec();
+	}
 	txn.commit();
 	}
 	}
@@ -3367,6 +3619,14 @@ void MediaStore::scan_root_files(const RootRec& root)
 	// The chapter index, as in scan_artist_dir()'s prune above.
 	SQLite::Statement s(db_music_,
 		"DELETE FROM chapters WHERE path LIKE ?"
+		"  AND path NOT IN (SELECT path FROM songs)");
+	s.bind(1, root.cfg.name + "/%");
+	s.exec();
+	}
+	{
+	// The genres, likewise.
+	SQLite::Statement s(db_music_,
+		"DELETE FROM song_genres WHERE path LIKE ?"
 		"  AND path NOT IN (SELECT path FROM songs)");
 	s.bind(1, root.cfg.name + "/%");
 	s.exec();
@@ -4097,7 +4357,7 @@ MediaStore::get_video_meta(const std::string& rel_path)
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement q(db_music_,
 		"SELECT query, media_type, tmdb_id, title, year, overview, status,"
-		"       fetched_at, poster_path"
+		"       fetched_at, poster_path, genre"
 		" FROM video_meta WHERE path = ?");
 	q.bind(1, rel_path);
 	if (!q.executeStep()) return std::nullopt;
@@ -4111,6 +4371,11 @@ MediaStore::get_video_meta(const std::string& rel_path)
 	r.status      = q.getColumn(6).getString();
 	r.fetched_at  = q.getColumn(7).getInt64();
 	r.poster_path = q.getColumn(8).isNull() ? "" : q.getColumn(8).getString();
+	// The NULL is the whole point here and must not be flattened to "": it is
+	// what tells tmdb_lookup() this row predates the column and is owed one
+	// more question. See VideoMetaRow::genre_known.
+	r.genre_known = !q.getColumn(9).isNull();
+	r.genre       = r.genre_known ? q.getColumn(9).getString() : "";
 	return r;
 	}
 
@@ -4121,8 +4386,8 @@ void MediaStore::store_video_meta(const std::string& rel_path,
 	SQLite::Statement ins(db_music_,
 		"INSERT OR REPLACE INTO video_meta"
 		" (path, query, media_type, tmdb_id, title, year, overview, status,"
-		"  poster_path, fetched_at)"
-		" VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'))");
+		"  poster_path, genre, fetched_at)"
+		" VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'))");
 	ins.bind(1, rel_path);
 	ins.bind(2, row.query);
 	ins.bind(3, row.media_type);
@@ -4132,6 +4397,10 @@ void MediaStore::store_video_meta(const std::string& rel_path,
 	ins.bind(7, row.overview);
 	ins.bind(8, row.status);
 	ins.bind(9, row.poster_path);
+	// Always written, empty included: '' is "asked, TMDB had none", and
+	// leaving it NULL would put the film back in the back-fill on every scan
+	// for ever -- the same trap songs.artist's bind documents.
+	ins.bind(10, row.genre);
 	ins.exec();
 	}
 
@@ -4343,41 +4612,50 @@ std::vector<MediaStore::GenreEntry> MediaStore::get_genres()
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
-	// Everything groups on the folded spelling; the name reported for a group
-	// is the commonest raw spelling within it, which is a correlated subquery
-	// rather than a MIN() because MIN() answers by ASCII order and would
-	// report "ROCK" for a library that writes "Rock" nine times out of ten.
+	// Sourced from song_genres, so a film filed as Horror *and* Science
+	// Fiction is counted under both. Names are trimmed on write, so the fold
+	// here is case alone.
 	//
-	// Both counts mean "how many things you get if you ask for this genre",
-	// which is why albumCount is over albums.genre rather than a
-	// COUNT(DISTINCT s.album_id). The two differ: an album of eleven Rock
-	// tracks and one Blues track *contains* Blues but is not a Blues album,
-	// and getAlbumList type=byGenre -- the thing a client calls next -- filters
-	// on the rolled-up album genre. Counting containment here would promise
-	// albums that the very next request does not return. The visible
-	// consequence is that a genre appearing only as a minority tag reports
-	// songCount without albumCount, which is the honest reading of it.
+	// The name reported for a group is its commonest spelling, which is a
+	// correlated subquery rather than a MIN() because MIN() answers by ASCII
+	// order and would report "ROCK" for a library that writes "Rock" nine
+	// times out of ten.
+	//
+	// **Both counts mean "how many things you get if you ask for this
+	// genre"**, which is the property the two browse endpoints are then
+	// written to satisfy: songCount is what getSongsByGenre returns and
+	// albumCount is what getAlbumList type=byGenre returns. So albumCount is
+	// albums *having* a song of this genre, matching that filter's EXISTS --
+	// counting only albums whose rolled-up albums.genre matched would leave a
+	// mostly-Horror film out of Science Fiction, which is the loss this whole
+	// table exists to prevent.
 	//
 	// Ordered by song count because that is what makes the list usable: real
 	// libraries have a short head and a tail of one-off tags, and a client
 	// that would rather sort alphabetically still can.
 	SQLite::Statement q(db_music_,
-		"SELECT (SELECT s2.genre FROM songs s2"
-		"         WHERE LOWER(TRIM(s2.genre)) = fold"
-		+ not_uploads("s2.path") +
-		"         GROUP BY s2.genre"
-		"         ORDER BY COUNT(*) DESC, s2.genre LIMIT 1) AS name,"
+		"SELECT (SELECT g2.name FROM song_genres g2"
+		"         WHERE LOWER(g2.name) = fold"
+		+ not_uploads("g2.path") +
+		"         GROUP BY g2.name"
+		"         ORDER BY COUNT(*) DESC, g2.name LIMIT 1) AS name,"
 		"       songs,"
-		"       (SELECT COUNT(*) FROM albums al"
-		"          JOIN folders f ON f.id = al.folder_id"
-		"         WHERE LOWER(TRIM(COALESCE(al.genre,''))) = fold"
-		+ not_uploads("f.path") +
+		"       (SELECT COUNT(DISTINCT s.album_id) FROM song_genres g3"
+		"          JOIN songs s ON s.path = g3.path"
+		"         WHERE LOWER(g3.name) = fold"
+		+ not_uploads("g3.path") +
 		"       ) AS albums"
-		"  FROM (SELECT LOWER(TRIM(s.genre)) AS fold,"
-		"               COUNT(*) AS songs"
-		"          FROM songs s"
-		"         WHERE TRIM(COALESCE(s.genre,'')) <> ''"
-		+ not_uploads("s.path") +
+		// Joined to songs, not counted off song_genres alone: the counts are
+		// a contract with the two browse endpoints, and both of those return
+		// rows that exist. A genre row outliving its song is transient -- the
+		// scan prune sweeps it -- but between prunes it would inflate a count
+		// that is supposed to predict a result set exactly.
+		"  FROM (SELECT LOWER(g.name) AS fold,"
+		"               COUNT(DISTINCT g.path) AS songs"
+		"          FROM song_genres g"
+		"          JOIN songs s0 ON s0.path = g.path"
+		"         WHERE TRIM(g.name) <> ''"
+		+ not_uploads("g.path") +
 		"         GROUP BY fold)"
 		" ORDER BY songs DESC, fold");
 
@@ -4413,7 +4691,8 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_songs_by_genre(
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
-		" WHERE LOWER(TRIM(COALESCE(s.genre,''))) = LOWER(TRIM(?))"
+		" WHERE EXISTS (SELECT 1 FROM song_genres g"
+		"                WHERE g.path = s.path AND LOWER(g.name) = LOWER(TRIM(?)))"
 		+ not_uploads("s.path") +
 		" ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE,"
 		"          s.disc_number, s.track_number, s.title COLLATE NOCASE"
@@ -5079,11 +5358,14 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 		has_where = true;
 		};
 	if      (type == "byYear")  add_where("al.year BETWEEN ? AND ?");
-	// TRIM as well as LOWER, matching how get_genres() folds: the list a
-	// client picked this string out of is folded, so the filter has to be too
-	// or a genre with a trailing space is listed and then matches nothing.
+	// "This album has a song of that genre", not "this album's own genre is
+	// that" -- the same rule get_genres() counts albumCount by, so the count
+	// and this filter cannot disagree. albums.genre still exists and is still
+	// reported as the album's single genre; it is simply not what selects one,
+	// because a mostly-Horror film would then be missing from Science Fiction.
 	else if (type == "byGenre") add_where(
-		"LOWER(TRIM(COALESCE(al.genre,''))) = LOWER(TRIM(?))");
+		"EXISTS (SELECT 1 FROM song_genres g JOIN songs s2 ON s2.path = g.path"
+		"         WHERE s2.album_id = al.id AND LOWER(g.name) = LOWER(TRIM(?)))");
 	else if (type == "starred") add_where("sa.album_folder_path IS NOT NULL");
 
 	// Braces are load-bearing: without them the else binds to the inner if,
@@ -5971,6 +6253,13 @@ void MediaStore::sync_roots()
 		s.bind(1, name + "/%");
 		s.exec();
 		}
+		{
+		// Same shape, same reason.
+		SQLite::Statement s(db_music_,
+			"DELETE FROM song_genres WHERE path LIKE ?");
+		s.bind(1, name + "/%");
+		s.exec();
+		}
 		}
 
 	txn.commit();
@@ -6089,6 +6378,7 @@ bool MediaStore::relocate_prefix(const std::string& old_rel,
 		rewrite("cover_thumbs", "source_key");
 		rewrite("video_meta",   "path");
 		rewrite("chapters",     "path");
+		rewrite("song_genres",  "path");
 
 		// The three things below are what a following rescan will NOT repair,
 		// because every upsert in the scanner is INSERT OR IGNORE and so only

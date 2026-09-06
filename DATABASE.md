@@ -423,6 +423,19 @@ CREATE TABLE video_meta (
     -- who this is a second time
     poster_path TEXT,
     status      TEXT NOT NULL,
+    -- TMDB's genres, joined with '|'. Our own
+    -- encoding rather than a tag, so the separator
+    -- is safe: no TMDB genre contains one.
+    --
+    -- NULL means "asked before this column existed"
+    -- and '' means "asked, TMDB had none". The
+    -- distinction is what makes the one-time
+    -- back-fill terminate -- with the two conflated
+    -- either every matched film is re-asked on every
+    -- scan for ever, or no film in an existing
+    -- library ever gets a genre. Same rule, and same
+    -- reason, as songs.artist.
+    genre       TEXT,
     fetched_at  INTEGER NOT NULL
                   DEFAULT (strftime('%s','now'))
 );
@@ -482,6 +495,55 @@ CREATE TABLE chapters (
     idx   INTEGER NOT NULL,   -- 1-based, by start
     start REAL    NOT NULL,   -- seconds
     title TEXT    NOT NULL,   -- may be empty
+    PRIMARY KEY (path, idx)
+);
+
+-- Every genre a song carries, in source order.
+--
+-- songs.genre survives beside this and holds the
+-- *first* of them: it is the single-valued Subsonic
+-- `genre` field, and what albums.genre rolls up
+-- from, so keeping it is what leaves the eleven
+-- ChildEntry queries untouched. This table is the
+-- full list, and it is what getGenres,
+-- getSongsByGenre and getAlbumList type=byGenre
+-- read.
+--
+-- Multi-value is not a nicety for video: a film is
+-- normally two or three genres -- Alien is Horror
+-- *and* Science Fiction -- and filing it under only
+-- the first is the loss this exists to prevent.
+-- Audio reaches it too, from a multi-valued Vorbis
+-- GENRE or ID3v2 TCON. A "Rock/Pop" *string* is
+-- still one genre: there the separator is a guess
+-- about somebody else's intent, and gaindrive does
+-- not guess.
+--
+-- Two counts follow from it and must agree, which
+-- is why they are defined as each other:
+-- getGenres' albumCount is albums *having* a song
+-- of the genre, exactly what type=byGenre's EXISTS
+-- returns. Counting albums whose own albums.genre
+-- matched would leave a mostly-Horror film out of
+-- Science Fiction.
+--
+-- Keyed on the stored path, no foreign key, for the
+-- reasons chapters and video_art give above.
+--
+-- Names are trimmed on write, so readers fold case
+-- alone and a plain NOCASE index serves.
+--
+-- Seeded once from songs.genre the first time the
+-- table appears. Without that an upgraded install
+-- shows no genres at all, because Phase 3 only
+-- opens files whose mtime changed and would never
+-- re-read the rest; the multi-value each file may
+-- carry then arrives per file as files change, or
+-- on a rebuild.
+CREATE TABLE song_genres (
+    path TEXT    NOT NULL,   -- "<root>/<rest>"
+    idx  INTEGER NOT NULL,   -- 1-based; 1 is primary
+    name TEXT    NOT NULL,   -- trimmed on write
     PRIMARY KEY (path, idx)
 );
 ```

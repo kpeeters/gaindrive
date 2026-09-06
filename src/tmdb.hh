@@ -1,10 +1,12 @@
 #pragma once
 
 #include <chrono>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace httplib { class SSLClient; }
 
@@ -28,6 +30,21 @@ struct TmdbMatch
 	int         year    = 0;
 	std::string overview;
 	std::string poster_path;   // TMDB-relative, e.g. "/abc123.jpg"
+
+	// A film is normally two or three genres -- Alien is Horror *and* Science
+	// Fiction -- so this is a list and not a string. Order is TMDB's own,
+	// which puts the primary one first; that is the one that reaches the
+	// single-valued Subsonic `genre` field.
+	//
+	// The two forms exist because the two endpoints answer differently. A
+	// *search* result carries `genre_ids` and no names; the *detail* endpoint
+	// by_id() uses carries `genres` with names. Anything leaving this class
+	// has `genres` filled -- Tmdb::search() resolves the ids through the
+	// id->name map before returning -- so no caller ever sees a bare id.
+	// `genre_ids` is public only because tmdb_pick() is, and that is where a
+	// search result is parsed.
+	std::vector<int>         genre_ids;
+	std::vector<std::string> genres;
 	};
 
 // The rule that decides which search result, if any, is the answer, split out
@@ -84,11 +101,39 @@ class Tmdb
 		// runs in the background so the wait costs nothing.
 		void pace() const;
 
+		// Fills genre_names_ from /3/genre/movie/list and /3/genre/tv/list if
+		// it has not been done yet. Two requests per object, not per film --
+		// which is the whole reason the map exists rather than fetching the
+		// detail endpoint for every match just to read names off it.
+		//
+		// A failure is not cached as an answer: the map stays unloaded and the
+		// next lookup tries again, so a moment of network trouble costs this
+		// scan its genres rather than recording wrong ones for ever.
+		void load_genre_names() const;
+
+		// Turns a search result's genre_ids into names, through the map above.
+		// Kept off tmdb_pick() so that function needs neither the network nor
+		// this object -- which is the property that makes the matching rule
+		// testable against canned JSON. A no-op when names are already there
+		// (the detail endpoint supplies them) or when there is nothing to
+		// resolve.
+		void resolve_genres(TmdbMatch& m) const;
+
 		// Guards the key (settable while a scan may be reading it), the pacing
-		// clock, and the two clients below.
+		// clock, the genre map and the two clients below.
 		mutable std::mutex                            mu_;
 		std::string                                   api_key_;
 		mutable std::chrono::steady_clock::time_point last_request_{};
+
+		// TMDB genre id -> name, for both media types in one map. The two
+		// lists share an id space (28 is Action in both), and where they do
+		// not overlap the ids are simply distinct, so one map is enough and a
+		// per-type one would only make the lookup need a type it does not
+		// have. Cleared by set_api_key(), since a different key is a
+		// different account and the fetch may not have succeeded under the
+		// old one.
+		mutable std::map<int, std::string>            genre_names_;
+		mutable bool                                  genre_names_loaded_ = false;
 
 		// One client per host, held for the object's lifetime so the socket
 		// survives between requests.

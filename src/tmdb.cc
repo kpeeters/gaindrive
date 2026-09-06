@@ -113,6 +113,26 @@ static TmdbMatch match_from(const nlohmann::json& j, bool tv)
 	                           : jstr(j, "release_date"));
 	m.overview    = jstr(j, "overview");
 	m.poster_path = jstr(j, "poster_path");
+
+	// Two shapes, because the two endpoints answer differently: a search
+	// result carries `genre_ids` (bare integers) and the detail endpoint
+	// carries `genres` ([{id,name}]). Read whichever is there. Only the
+	// detail form yields names here; a search result's ids are resolved by
+	// Tmdb::search() through the id->name map, which this function cannot
+	// reach because it is deliberately free of the object.
+	//
+	// The is_array() guards are not belt-and-braces: iterating a nlohmann
+	// scalar yields that one scalar, so a malformed `genre_ids` arriving as a
+	// bare number would be read as a genre id and resolve to somebody else's
+	// genre. A null is an empty range and would be harmless, which is exactly
+	// why the dangerous case is easy to miss.
+	if (const auto& gs = jsub(j, "genres"); gs.is_array())
+		for (const auto& g : gs)
+			if (std::string n = jstr(g, "name"); !n.empty())
+				m.genres.push_back(n);
+	if (const auto& ids = jsub(j, "genre_ids"); ids.is_array())
+		for (const auto& id : ids)
+			if (id.is_number_integer()) m.genre_ids.push_back(id.get<int>());
 	return m;
 	}
 
@@ -129,6 +149,11 @@ void Tmdb::set_api_key(std::string api_key)
 	{
 	std::lock_guard<std::mutex> lock(mu_);
 	api_key_ = std::move(api_key);
+	// A different key is a different account, and the map may never have been
+	// fetched successfully under the old one — an empty map that believes it
+	// is loaded would silently drop every genre for the rest of the run.
+	genre_names_.clear();
+	genre_names_loaded_ = false;
 	}
 
 bool Tmdb::configured() const
@@ -239,6 +264,75 @@ std::optional<TmdbMatch> tmdb_pick(const std::string& results_json,
 		}
 	}
 
+// The id->name lists, fetched once. Both types go into one map: they share an
+// id space where they overlap (28 is Action in either) and are distinct where
+// they do not, so a per-type map would only make the lookup need a media type
+// that resolve_genres() does not have to hand.
+//
+// Not called with mu_ held — get() takes it itself, and pace() sleeps while
+// holding it. The flag is set only after both requests have been attempted,
+// and only when at least one produced names: an empty map marked loaded would
+// silently drop every genre for the life of the object, which is the failure
+// this is most likely to have.
+void Tmdb::load_genre_names() const
+	{
+		{
+		std::lock_guard<std::mutex> lock(mu_);
+		if (genre_names_loaded_) return;
+		}
+
+	std::map<int, std::string> found;
+	for (const char* kind : { "movie", "tv" }) {
+		auto body = get(std::string("/3/genre/") + kind + "/list", "");
+		if (!body) continue;
+		try {
+			auto j = nlohmann::json::parse(*body, nullptr, false);
+			if (const auto& gs = jsub(j, "genres"); gs.is_array())
+				for (const auto& g : gs) {
+					int id = jint(g, "id");
+					std::string name = jstr(g, "name");
+					if (id > 0 && !name.empty()) found.emplace(id, name);
+					}
+			}
+		catch (const std::exception& e) {
+			std::cout << stamp() << "tmdb: unreadable " << kind
+			          << " genre list: " << e.what() << std::endl;
+			}
+		}
+
+	if (found.empty()) {
+		std::cout << stamp() << "tmdb: no genre names available; "
+		             "films will be filed without a genre this scan"
+		          << std::endl;
+		return;
+		}
+
+	std::lock_guard<std::mutex> lock(mu_);
+	genre_names_        = std::move(found);
+	genre_names_loaded_ = true;
+	std::cout << stamp() << "tmdb: " << genre_names_.size()
+	          << " genre names loaded" << std::endl;
+	}
+
+// Search results name no genres, only ids. Resolving them here rather than in
+// match_from() is what keeps tmdb_pick() free of the network and of this
+// object, which is the property that makes the matching rule testable.
+//
+// An id with no name is dropped rather than rendered as a number: a genre list
+// is a browse vocabulary, and "878" in it is worse than one film missing from
+// Science Fiction.
+void Tmdb::resolve_genres(TmdbMatch& m) const
+	{
+	if (!m.genres.empty() || m.genre_ids.empty()) return;
+	load_genre_names();
+
+	std::lock_guard<std::mutex> lock(mu_);
+	for (int id : m.genre_ids) {
+		auto it = genre_names_.find(id);
+		if (it != genre_names_.end()) m.genres.push_back(it->second);
+		}
+	}
+
 std::optional<TmdbMatch> Tmdb::search(const std::string& title, int year,
                                        bool tv) const
 	{
@@ -258,7 +352,9 @@ std::optional<TmdbMatch> Tmdb::search(const std::string& title, int year,
 	auto body = get(std::string("/3/search/") + (tv ? "tv" : "movie"), q);
 	if (!body) return std::nullopt;
 
-	return tmdb_pick(*body, title, year, tv);
+	auto m = tmdb_pick(*body, title, year, tv);
+	if (m) resolve_genres(*m);
+	return m;
 	}
 
 std::optional<TmdbMatch> Tmdb::by_id(int id, bool tv) const

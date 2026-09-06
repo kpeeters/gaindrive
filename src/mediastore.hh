@@ -320,6 +320,19 @@ class MediaStore {
 			int64_t     fetched_at = 0;
 			std::string poster_path;  // TMDB-relative; lets the poster be
 			                          // re-fetched without a second lookup
+			// TMDB's genres, joined with '|'. Empty is a real answer -- some
+			// titles have none -- which is why it needs the flag below rather
+			// than being its own signal.
+			std::string genre;
+			// False when the stored column is NULL, meaning the row was
+			// written before genres were asked for at all. That is a
+			// different thing from "asked, none", and the difference is what
+			// makes the one-time back-fill terminate: without it either every
+			// matched film is re-asked on every scan, or no film in an
+			// existing library ever gets a genre. Set only by
+			// get_video_meta(); a freshly built row leaves it false and is
+			// about to be filled in anyway.
+			bool        genre_known = false;
 			};
 		std::optional<VideoMetaRow> get_video_meta(const std::string& rel_path);
 		void store_video_meta(const std::string& rel_path,

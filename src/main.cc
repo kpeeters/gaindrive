@@ -394,7 +394,15 @@ static int run_tmdb_test(const std::string& title, int year, bool tv,
 		}
 	std::cout << m->title << " (" << m->year << ")  tmdb id " << m->id
 	          << (m->poster_path.empty() ? "  [no poster]" : "")
-	          << "\n" << m->overview << "\n";
+	          << "\n";
+	// The genres are the reason this prints more than it used to: they are
+	// resolved through a second pair of requests, so seeing them here is the
+	// cheapest proof that the id->name map loaded at all.
+	std::cout << "genres: ";
+	if (m->genres.empty()) std::cout << "(none)";
+	for (size_t i = 0; i < m->genres.size(); ++i)
+		std::cout << (i ? ", " : "") << m->genres[i];
+	std::cout << "\n" << m->overview << "\n";
 	return 0;
 	}
 

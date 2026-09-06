@@ -168,6 +168,50 @@ def test_matched_titles_are_not_release_names():
 
 # ---- the settings round trip -------------------------------------------
 
+# ---- genres ------------------------------------------------------------
+
+def test_matched_video_has_a_genre():
+    """A video container carries no genre tag anything reads, so a genre on a
+    film can only have come from TMDB. That makes this the one check that the
+    lookup, the video_meta cache column and the song_genres table are all
+    wired together."""
+    _need_match()
+    genred = [v for v in _videos() if v.get("genre")]
+    if not genred:
+        raise Skip("no video carries a genre — if films are otherwise matched, "
+                   "the genre back-fill may not have run yet; rescan and look "
+                   "for 'tmdb:' lines in the log")
+    print(f"PASS  {len(genred)} of {len(_videos())} videos carry a genre, "
+          f"e.g. {genred[0].get('title')!r} -> {genred[0]['genre']!r}")
+
+
+def test_video_genre_is_browsable():
+    """The genre a film got must appear in getGenres and lead back to it —
+    the single-valued `genre` field on the entry and the song_genres table the
+    browse endpoints read are two different paths to the same fact."""
+    _need_match()
+    genred = [v for v in _videos() if v.get("genre")]
+    if not genred:
+        raise Skip("no video carries a genre")
+
+    listed = {g.get("value", "").lower()
+              for g in _json("getGenres.view")
+                        .get("genres", {}).get("genre", [])}
+    assert listed, "getGenres returned nothing while videos carry genres"
+
+    v = genred[0]
+    assert v["genre"].lower() in listed, \
+        f"video genre {v['genre']!r} is missing from getGenres"
+
+    r = _json("getSongsByGenre.view", {"genre": v["genre"], "count": "500"})
+    ids = {s.get("id") for s in r.get("songsByGenre", {}).get("song", [])}
+    assert v.get("id") in ids, \
+        f"{v.get('title')!r} is genre {v['genre']!r} but getSongsByGenre " \
+        "does not return it"
+    print(f"PASS  {v.get('title')!r} is reachable through genre "
+          f"{v['genre']!r}")
+
+
 def test_saving_one_setting_keeps_the_other():
     """saveServerSettings writes only what it is given. With one field that
     distinction did not exist; with two, saving the TMDB key must not blank
@@ -190,6 +234,8 @@ TESTS = [
     test_matched_album_has_notes,
     test_matched_album_serves_a_poster,
     test_matched_titles_are_not_release_names,
+    test_matched_video_has_a_genre,
+    test_video_genre_is_browsable,
     test_saving_one_setting_keeps_the_other,
 ]
 

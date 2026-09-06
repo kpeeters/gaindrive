@@ -308,6 +308,51 @@ def test_get_songs_by_genre():
           "case/padding folded, offset pages")
 
 
+def test_genre_multi_value():
+    """A song may carry several genres and must be reachable under each.
+
+    This is the property the song_genres table exists for: a film is normally
+    two or three genres, and filing it under only the first is exactly the
+    loss the single songs.genre column caused."""
+    genres = _genres()
+    if not genres:
+        print("SKIP  multi-genre: nothing in the library carries a genre")
+        return
+
+    # Find a song listed under two different genres. Cheap enough: walk the
+    # genres by size and collect song ids until one repeats.
+    seen, shared = {}, None
+    for g in genres[:25]:
+        root = _get("getSongsByGenre.view", {"genre": g.text, "count": "200"})
+        _check(root)
+        el = root.find(f"{{{NS}}}songsByGenre")
+        for s in (el.findall(f"{{{NS}}}song") if el is not None else []):
+            sid = s.get("id")
+            if sid in seen and seen[sid] != g.text:
+                shared = (sid, seen[sid], g.text)
+                break
+            seen[sid] = g.text
+        if shared:
+            break
+
+    if not shared:
+        print("SKIP  multi-genre: no song in this library carries two genres "
+              "(expected without a TMDB key, or before a rescan)")
+        return
+
+    sid, g1, g2 = shared
+    # Both genres must also reach it through the album filter, which is the
+    # half that used to lose it.
+    for g in (g1, g2):
+        r = _get("getAlbumList.view",
+                 {"type": "byGenre", "genre": g, "size": "500"})
+        _check(r)
+        el = r.find(f"{{{NS}}}albumList")
+        assert el is not None and el.findall(f"{{{NS}}}album"), \
+            f"song {sid} is listed under {g!r} but byGenre returns no albums"
+    print(f"PASS  song {sid} reachable under both {g1!r} and {g2!r}")
+
+
 def test_get_songs_by_genre_missing_genre():
     root = _get("getSongsByGenre.view")
     _check(root, status="failed")
@@ -354,6 +399,7 @@ TESTS = [
     test_get_music_directory_missing_id,
     test_get_genres,
     test_get_songs_by_genre,
+    test_genre_multi_value,
     test_get_songs_by_genre_missing_genre,
     test_album_list_by_genre,
 ]
