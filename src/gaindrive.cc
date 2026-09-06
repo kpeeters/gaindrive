@@ -1435,6 +1435,15 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 							std::cout << stamp() << "getArtistInfo [" << name
 							          << "] Wikipedia (via Wikidata): "
 							          << wiki_title << std::endl;
+						else
+							// The step that most often ends the bio chain, and it
+							// used to end it in silence: a log line only for the
+							// sitelink that was found says nothing about the one
+							// that was not. A MusicBrainz *group* commonly has no
+							// article of its own while the person does.
+							std::cout << stamp() << "getArtistInfo [" << name
+							          << "] no English Wikipedia article for "
+							          << entity << std::endl;
 
 						// Wikidata P18 (image) as fallback when no Wikipedia article.
 						const auto& p18 =
@@ -1490,7 +1499,24 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 				          << "] image from Wikidata P18: " << wd_image_url << std::endl;
 				}
 
-			if (info.image_url.empty()) {
+			// TheAudioDB is the fallback for the *biography* as well as for
+			// the portrait, and is therefore asked whenever either is still
+			// missing rather than only when the image is. The two do not
+			// fail together: Wikipedia supplies both or neither, so an
+			// artist with an article but no thumbnail reaches here for a
+			// picture, and one with no article at all reaches here for both.
+			//
+			// That second case is not exotic. A folder tagged with a
+			// MusicBrainz *group* id — "Stevie Ray Vaughan and Double
+			// Trouble" rather than the person — commonly reaches a Wikidata
+			// item with no enwiki sitelink, and Wikipedia being the only bio
+			// tier meant such an artist could never have one. The tag id is
+			// still the authority and the name search is still not retried;
+			// it is the provider chain that was one tier short.
+			//
+			// Each field is taken independently and only when empty, so
+			// Wikipedia goes on winning wherever it answered.
+			if (info.image_url.empty() || info.biography.empty()) {
 				std::this_thread::sleep_for(std::chrono::seconds(1));
 				httplib::SSLClient tadb("www.theaudiodb.com");
 				tadb.set_default_headers({
@@ -1503,12 +1529,29 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 				if (rt && rt->status == 200) {
 					// A miss here is "artists": null, not an empty array.
 					auto jt = nlohmann::json::parse(rt->body, nullptr, false);
-					info.image_url =
-						jstr(jidx(jsub(jt, "artists"), 0), "strArtistThumb");
-					if (!info.image_url.empty())
-						std::cout << stamp() << "getArtistInfo [" << name
-						          << "] image from TheAudioDB: "
-						          << info.image_url << std::endl;
+					const auto& ta = jidx(jsub(jt, "artists"), 0);
+					if (info.image_url.empty()) {
+						info.image_url = jstr(ta, "strArtistThumb");
+						if (!info.image_url.empty())
+							std::cout << stamp() << "getArtistInfo [" << name
+							          << "] image from TheAudioDB: "
+							          << info.image_url << std::endl;
+						}
+					if (info.biography.empty()) {
+						// Both spellings, in this order. strBiographyEN is the
+						// language-tagged field and the one to prefer, but
+						// records exist where it is null while strBiography
+						// holds the English prose — reading only the tagged
+						// name yields nothing for those.
+						info.biography = jstr(ta, "strBiographyEN");
+						if (info.biography.empty())
+							info.biography = jstr(ta, "strBiography");
+						if (!info.biography.empty())
+							std::cout << stamp() << "getArtistInfo [" << name
+							          << "] bio from TheAudioDB: "
+							          << info.biography.size() << " chars"
+							          << std::endl;
+						}
 					}
 				}
 
@@ -1565,6 +1608,9 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 			if (info.image_url.empty())
 				std::cout << stamp() << "getArtistInfo [" << name
 				          << "] no image found" << std::endl;
+			if (info.biography.empty())
+				std::cout << stamp() << "getArtistInfo [" << name
+				          << "] no biography found" << std::endl;
 			}
 		}
 
