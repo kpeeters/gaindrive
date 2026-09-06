@@ -954,6 +954,7 @@
 </table>
 <p>A device&#x27;s <code>ca</code> record is not always the last word. A Chromecast-built-in amplifier announces no video output and plays a video file&#x27;s sound perfectly well anyway, while a configured device announces nothing at all and so reads as capable even when it has no screen.</p>
 <p>The setting is held by the server rather than by each client, because it is a fact about the device: the answer is the same in every browser and on a phone.</p>
+<p><code>send</code> does not give the device a screen, and is not meant to: the picture is still not shown there, and <code>castLoad</code> goes on reporting <code>receiverShowsVideo</code> false so a client keeps its own copy of the picture exactly as it does for a soundtrack. What it buys is that nothing has to be demuxed first.</p>
 <p><code>send</code> only ever <em>raises</em> a device that announced no screen, and only for a file that can be sent untouched. Anything needing a remux or a re-encode falls back to the soundtrack — a remux reads and writes the whole film, and a re-encode re-encodes a picture nobody can see, so both are worse than extracting the sound. So this cannot be used to force a re-encode, and on a DVD rip or an HEVC film it will appear to do nothing, which is the intended behaviour rather than a failure.</p>
 <p><code>sound</code> is the other direction: it forces the soundtrack for a device that announced a screen, or announced nothing.</p>
 <p class="api-see">See also <a href="#ep-listCastDevices"><code>listCastDevices</code></a>, <a href="#ep-castLoad"><code>castLoad</code></a>.</p>
@@ -1023,6 +1024,14 @@
 <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
 <tr><td><code>castLoad.audioOnly</code></td><td>bool</td><td>True when the receiver was sent the video&#x27;s soundtrack rather than the video, because it announced no <code>videoOut</code>. Always false for an audio track.</td></tr>
+<tr><td><code>castLoad.receiverShowsVideo</code></td><td>bool</td><td>Whether a picture will actually appear on the receiver. <b>Not</b> the negation of
+<code>audioOnly</code>: a device whose <code>videoPref</code> is <code>send</code> is handed the whole film to
+save extracting its soundtrack and displays none of it, so there the file goes
+out as video and this is still false. A client deciding where to draw the
+picture — keeping its own copy locally, muted, or showing a &quot;playing on the
+television&quot; panel — keys on this. <code>audioOnly</code> describes the bytes on the wire
+and is the info-panel&#x27;s business, not the picture&#x27;s.
+</td></tr>
 <tr><td><code>castLoad.contentType</code></td><td>string</td><td>The <code>contentType</code> declared in the Cast <code>LOAD</code>, which is what the receiver picks its decode pipeline from. Not the source container: everything the remux or re-encode tier touches is announced as <code>video/mp4</code>, and a VP9/Opus <code>.mkv</code> is announced as <code>video/webm</code> although its bytes go out untouched.</td></tr>
 <tr><td><code>castLoad.sentSuffix</code></td><td>string</td><td>The container the receiver actually receives. The source extension on the <code>direct</code> tier, <code>mp4</code> on the other two. A soundtrack reports whatever it was put in: <code>m4a</code>, <code>mp3</code>, <code>flac</code>, <code>opus</code> or <code>ogg</code> when the track was copied, and <code>mp3</code> when it had to be encoded.</td></tr>
 <tr><td><code>castLoad.sentBitRate</code></td><td>int</td><td>Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
@@ -1102,6 +1111,7 @@ thing a diagnostic can be.
 <tr><td><code>castSession.songDuration</code></td><td>float</td><td>Duration as the library has it, which is the one to trust for a progress bar.</td></tr>
 <tr><td><code>castSession.trackId</code></td><td>int</td><td>The subtitle track currently showing, or 0.</td></tr>
 <tr><td><code>castSession.audioOnly</code></td><td>bool</td><td>The same answer <code>castLoad</code> returned for the load now playing. Present here because a client that has just reloaded has no <code>castLoad</code> reply to have read it from.</td></tr>
+<tr><td><code>castSession.receiverShowsVideo</code></td><td>bool</td><td>The same answer <code>castLoad</code> returned for the load now playing. Whether a picture is appearing on the receiver, which is not the negation of <code>audioOnly</code> — see there.</td></tr>
 <tr><td><code>castSession.contentType</code></td><td>string</td><td>The <code>contentType</code> declared in the Cast <code>LOAD</code>, which is what the receiver picks its decode pipeline from. Not the source container: everything the remux or re-encode tier touches is announced as <code>video/mp4</code>, and a VP9/Opus <code>.mkv</code> is announced as <code>video/webm</code> although its bytes go out untouched.</td></tr>
 <tr><td><code>castSession.sentSuffix</code></td><td>string</td><td>The container the receiver actually receives. The source extension on the <code>direct</code> tier, <code>mp4</code> on the other two. A soundtrack reports whatever it was put in: <code>m4a</code>, <code>mp3</code>, <code>flac</code>, <code>opus</code> or <code>ogg</code> when the track was copied, and <code>mp3</code> when it had to be encoded.</td></tr>
 <tr><td><code>castSession.sentBitRate</code></td><td>int</td><td>Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw

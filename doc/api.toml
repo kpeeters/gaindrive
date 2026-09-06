@@ -1868,6 +1868,11 @@ capable even when it has no screen.
 The setting is held by the server rather than by each client, because it is a
 fact about the device: the answer is the same in every browser and on a phone.
 
+`send` does not give the device a screen, and is not meant to: the picture is
+still not shown there, and `castLoad` goes on reporting `receiverShowsVideo`
+false so a client keeps its own copy of the picture exactly as it does for a
+soundtrack. What it buys is that nothing has to be demuxed first.
+
 `send` only ever *raises* a device that announced no screen, and only for a
 file that can be sent untouched. Anything needing a remux or a re-encode falls
 back to the soundtrack — a remux reads and writes the whole film, and a
@@ -2038,6 +2043,19 @@ would be one value.
   doc  = "True when the receiver was sent the video's soundtrack rather than the video, because it announced no `videoOut`. Always false for an audio track."
 
   [[endpoint.field]]
+  name = "castLoad.receiverShowsVideo"
+  type = "bool"
+  doc  = '''
+Whether a picture will actually appear on the receiver. **Not** the negation of
+`audioOnly`: a device whose `videoPref` is `send` is handed the whole film to
+save extracting its soundtrack and displays none of it, so there the file goes
+out as video and this is still false. A client deciding where to draw the
+picture — keeping its own copy locally, muted, or showing a "playing on the
+television" panel — keys on this. `audioOnly` describes the bytes on the wire
+and is the info-panel's business, not the picture's.
+'''
+
+  [[endpoint.field]]
   name = "castLoad.contentType"
   type = "string"
   doc  = 'The `contentType` declared in the Cast `LOAD`, which is what the receiver picks its decode pipeline from. Not the source container: everything the remux or re-encode tier touches is announced as `video/mp4`, and a VP9/Opus `.mkv` is announced as `video/webm` although its bytes go out untouched.'
@@ -2183,6 +2201,11 @@ load and show itself as casting.
   name = "castSession.audioOnly"
   type = "bool"
   doc  = 'The same answer `castLoad` returned for the load now playing. Present here because a client that has just reloaded has no `castLoad` reply to have read it from.'
+
+  [[endpoint.field]]
+  name = "castSession.receiverShowsVideo"
+  type = "bool"
+  doc  = 'The same answer `castLoad` returned for the load now playing. Whether a picture is appearing on the receiver, which is not the negation of `audioOnly` — see there.'
 
   [[endpoint.field]]
   name = "castSession.contentType"

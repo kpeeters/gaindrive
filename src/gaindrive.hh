@@ -109,6 +109,13 @@ class GainDrive {
 		// a page reload has no castLoad response to have read it from.
 		struct CastStreamInfo {
 			bool        audio_only = false;
+			// Whether a picture is going to appear on the receiver, which is
+			// **not** !audio_only.  The two came apart when a screenless
+			// device gained the option of being sent the film anyway: there
+			// the whole video goes out and the receiver still shows nothing.
+			// A client keeps its own muted picture on this, never on
+			// audio_only, which describes the bytes rather than the screen.
+			bool        receiver_video = false;
 			std::string mime;    // the contentType the LOAD declared
 			std::string suffix;  // container the receiver actually receives
 			int         bitrate = 0;  // kbps; 0 when not a fixed-rate encode

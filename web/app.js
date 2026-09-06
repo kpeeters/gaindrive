@@ -2508,10 +2508,20 @@ let castBaseAt          = 0;      // Date.now() (ms) when castBaseTime was recor
 let castSongDuration    = 0;      // total song duration; fallback when queue is not loaded
 let castEndStallTime    = null;   // Date.now() when BUFFERING-at-end stall started
 // True when the current LOAD sent the receiver a film's soundtrack rather than
-// the film, because the device announced no video_out.  The server decides it
-// and reports it; this is only the last answer it gave, kept so the panel can
-// be drawn before the next castLoad replies.
+// the film.  Purely a statement about the bytes on the wire — the info dialog
+// and the "Preparing sound…" label are all that read it, since a screenless
+// device may equally be sent the whole file.  Where the picture goes is
+// castReceiverVideo below.
 let castAudioOnly       = false;
+// Whether a picture is appearing on the receiver.  Deliberately not
+// !castAudioOnly: a screenless device set to `videoPref = send` is sent the
+// whole film and shows none of it, so the two facts came apart.  Everything
+// about *where the picture is* keys on this; castAudioOnly describes only what
+// the server put on the wire, which is the info dialog's business.
+//
+// Defaults true so the first load of a session provisionally draws the panel,
+// exactly as castAudioOnly = false used to.
+let castReceiverVideo   = true;
 // What the server said the receiver is actually being sent: contentType,
 // container, bitrate and tier, as castLoad and castSession both report them.
 // Null when nothing has been loaded this session.
@@ -2524,8 +2534,8 @@ let castAudioOnly       = false;
 let castStream          = null;
 // True while this session is showing the film here, muted, slaved to the
 // receiver's clock — the mode castSyncTick() below drives.  Distinct from
-// castAudioOnly, which says what the *receiver* was sent: the picture can be
-// declined by setting, and cannot be shown at all for an audio track.
+// castReceiverVideo, which says whether a picture is appearing over there:
+// this one can be declined by setting, and is impossible for an audio track.
 let castVideoLocal      = false;
 // Logged once per load rather than ten times a second, for the one case the
 // loop cannot fix: a chunked stream that has drifted past what it has buffered.
@@ -2667,10 +2677,11 @@ function startCastEvents() {
 
 // ── Picture here, sound on the receiver ──────────────────────────────────────
 //
-// When the receiver cannot show a film (see castAudioOnly) it is sent the
-// soundtrack, and the picture can stay in this player instead of being lost.
-// The two then have to be kept together, and the reason that is tractable at
-// all is that **the local element is muted**: the correction knob is
+// When the receiver cannot show a film (see castReceiverVideo) the picture can
+// stay in this player instead of being lost — whether the receiver was sent
+// the soundtrack alone or the whole file it can only hear.  The two then have
+// to be kept together, and the reason that is tractable at all is that **the
+// local element is muted**: the correction knob is
 // playbackRate, and a few percent on a picture with no sound is invisible.
 // Rate-matching audio is what makes this hard everywhere else, and there is no
 // audio here to pitch-shift.
@@ -2765,23 +2776,29 @@ function castSyncTick(absCurrent) {
 // reply and the page-reload restore have to reach the same state, and they had
 // no way of agreeing on it other than repeating the condition.
 function castApplyLocalVideo(song, offset) {
-   const local = castAudioOnly && castLocalVideo.get();
+   // "Is a picture appearing over there", never "was only sound sent".  A
+   // screenless device set to `videoPref = send` is handed the whole film to
+   // save extracting its soundtrack, and shows none of it — so keying this on
+   // audioOnly threw the picture away precisely where it was still wanted.
+   const local = !castReceiverVideo && castLocalVideo.get();
    if (local) {
       videoCastPanel(false);
       castLocalVideoStart(song, offset);
-      // The picture is here, so the subtitles are ours to draw again — and the
-      // receiver was never sent any, having no screen to put them on.
+      // The picture is here, so the subtitles are ours to draw again.  Any
+      // tracks the receiver was declared are inert, having no screen to put
+      // them on, and videoSelectCaption() keys on castVideoLocal so it never
+      // tries to switch one.
       videoLoadCaptions(song);
       videoLoadChapters(song);
-      videoPreparing(true, 'Preparing sound…');
+      videoPreparing(true, castAudioOnly ? 'Preparing sound…' : 'Preparing…');
       } else {
       castLocalVideoStop();
-      videoCastPanel(true, castAudioOnly);
+      videoCastPanel(true, !castReceiverVideo);
       // No picture anywhere means no subtitles to offer, and an unselected
       // <track> costs a request either way — so the picker is not drawn rather
       // than drawn and inert.
-      if (castAudioOnly) videoClearCaptions(song);
-      else               videoLoadCaptions(song);
+      if (!castReceiverVideo) videoClearCaptions(song);
+      else                    videoLoadCaptions(song);
       // Chapters are wanted here even when captions are not, and the two part
       // company deliberately: a screenless receiver has nowhere to draw a
       // subtitle, but a concert playing through an amplifier is precisely when
@@ -3016,14 +3033,13 @@ function castDeviceButton(dev) {
    // nothing, which is every manually configured one, and marking those would
    // be a guess presented as a fact.
    //
-   // What it says is the *effective* answer, not the announcement, since a
-   // person may have overruled it below.
-   const shows = dev.videoPref === 'send' ? true
-               : dev.videoPref === 'sound' ? false
-               : dev.videoOut;
+   // `send` is deliberately absent from this: it changes what the device is
+   // sent, not what it can show, so a row marked "sound only" stays marked
+   // that way.  Only `sound` changes the answer, by saying a device that
+   // announced a screen has not got one.
+   const shows = dev.videoPref === 'sound' ? false : dev.videoOut;
    const sub = [dev.model, dev.address,
-                shows === false ? 'sound only'
-                : dev.videoPref === 'send' ? 'sends video' : null]
+                shows === false ? 'sound only' : null]
       .filter(Boolean).join(' · ');
    if (sub) {
       const secondary = document.createElement('span');
@@ -3050,13 +3066,15 @@ function castDeviceButton(dev) {
    // is: only one of "send" and "sound" can change anything for it, and
    // offering the inert one would invite the question of what it does.
    //
-   // "if possible" is not hedging.  The server sends the file only when it can
-   // be sent untouched and falls back to the soundtrack otherwise, so on a DVD
-   // rip or an HEVC film this genuinely does nothing — which reads as a broken
-   // setting unless the label says so.
+   // The label says what is *saved*, not what is shown.  A screenless device
+   // cannot show a picture whichever of these is chosen — the difference is
+   // that "send" hands it the file and lets it ignore the picture, instead of
+   // demuxing the soundtrack out first and making the listener wait for it.
+   // And "if it can" is not hedging: the file goes out untouched or not at
+   // all, so on a DVD rip or an HEVC film this genuinely does nothing.
    const opts = dev.videoOut === false
-      ? [['auto', 'Soundtrack'], ['send',  'Video if possible']]
-      : [['auto', 'Video'],      ['sound', 'Soundtrack only']];
+      ? [['auto', 'Extract the sound'], ['send', 'Send the file if it can']]
+      : [['auto', 'Video'],             ['sound', 'Soundtrack only']];
    const sel = document.createElement('select');
    sel.className = 'cast-row-pref';
    for (const [value, text] of opts) {
@@ -3227,6 +3245,7 @@ function castExit() {
    // — the surface's close button — has nothing else that would stop it.
    castLocalVideoStop();
    castAudioOnly    = false;
+   castReceiverVideo = true;
    castStream       = null;
    castPlayerState  = 'IDLE';
    castSongDuration = 0;
@@ -4557,10 +4576,11 @@ function playerPlay(offset = 0, forceMp3 = false) {
       // itself, and neither reaches castApplyLocalVideo below.  A picture left
       // running would be a muted film downloading for nobody.
       castLocalVideoStop();
-      // castAudioOnly is deliberately *not* reset here.  A device that cannot
-      // show video will not start being able to between two tracks, and
-      // clearing it would flash the panel back to "Playing on <amp>" for as
-      // long as the reply takes.  The reply overwrites it either way.
+      // castAudioOnly and castReceiverVideo are deliberately *not* reset
+      // here.  A device that cannot show video will not start being able to
+      // between two tracks, and clearing them would flash the panel back to
+      // "Playing on <amp>" for as long as the reply takes.  The reply
+      // overwrites both either way.
       //
       // A cast URL names no format, so the receiver plays the source codec —
       // except for a soundtrack on a device with no screen, where the server
@@ -4601,13 +4621,14 @@ function playerPlay(offset = 0, forceMp3 = false) {
             // have shown one track's figures against another's.
             castStream    = r?.castLoad ?? null;
             castAudioOnly = !!castStream?.audioOnly;
+            castReceiverVideo = !!castStream?.receiverShowsVideo;
             if (!loadSong.isVideo) return;
-            // The receiver has only the sound, so the picture need not be
-            // lost — it can stay here, muted, following the receiver's clock.
-            // Started from the reply rather than above it because until the
-            // server has answered we do not know the receiver cannot show it,
-            // and fetching a film to find out would be the whole cost of the
-            // feature paid on every cast.
+            // The receiver is not showing the film, so the picture need not
+            // be lost — it can stay here, muted, following the receiver's
+            // clock.  Started from the reply rather than above it because
+            // until the server has answered we do not know the receiver
+            // cannot show it, and fetching a film to find out would be the
+            // whole cost of the feature paid on every cast.
             castApplyLocalVideo(loadSong, loadOffset);
             })
          .catch(err => {
@@ -4634,8 +4655,8 @@ function playerPlay(offset = 0, forceMp3 = false) {
          // flickers panel-then-picture on every track looks broken; a device
          // does not gain or lose a screen between two tracks, so the guess is
          // wrong only on the first load of a session.
-         if (castAudioOnly && castLocalVideo.get()) videoCastPanel(false);
-         else                                       videoCastPanel(true, castAudioOnly);
+         if (!castReceiverVideo && castLocalVideo.get()) videoCastPanel(false);
+         else videoCastPanel(true, !castReceiverVideo);
          } else {
          videoSurfaceSet(null);
          }
@@ -4888,7 +4909,7 @@ el.addEventListener('error', () => {
       console.warn('[cast] local picture failed, showing the panel instead:',
                    player.videoEl.error?.message);
       castLocalVideoStop();
-      videoCastPanel(true, castAudioOnly);
+      videoCastPanel(true, !castReceiverVideo);
       videoPreparing(false);
       return;
       }
@@ -6233,6 +6254,7 @@ async function showShell() {
             castPlayerState  = sess.playerState;
             castSongDuration = sess.songDuration;
             castAudioOnly    = !!sess.audioOnly;
+            castReceiverVideo = !!sess.receiverShowsVideo;
             // The same description castLoad's reply carries, for the load
             // that is already playing — this reload has no castLoad reply to
             // have read it from, which is why castSession repeats it.

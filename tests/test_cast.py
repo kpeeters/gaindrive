@@ -123,7 +123,8 @@ if before is not None:
 # first to have read. Nothing else checks that, and a client drawing one thing
 # before a reload and another after would be reporting the reload rather than
 # the stream. So compare them here rather than by eye in a browser.
-FIELDS = ("audioOnly", "contentType", "sentSuffix", "sentBitRate", "tier")
+FIELDS = ("audioOnly", "receiverShowsVideo", "contentType", "sentSuffix",
+          "sentBitRate", "tier")
 
 get_json("startCast", id=DEVICE, castController=CONTROLLER)
 # Both read as JSON. castSession is JSON-only whatever f= says, and comparing
@@ -145,4 +146,4 @@ if bad:
     for f in bad:
         print(f"  {f}: castLoad {load.get(f)!r} vs castSession {sess.get(f)!r}")
     sys.exit(1)
-print("\ncastSession agrees with castLoad on all five fields.")
+print("\ncastSession agrees with castLoad on every field.")

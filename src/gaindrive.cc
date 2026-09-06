@@ -6355,6 +6355,8 @@ GainDrive::GainDrive(const std::string& db_path,
 			// another after would be reporting the reload rather than the
 			// stream.
 			r["castSession"]["audioOnly"]   = last_cast_stream_.audio_only;
+			r["castSession"]["receiverShowsVideo"] =
+				last_cast_stream_.receiver_video;
 			r["castSession"]["contentType"] = last_cast_stream_.mime;
 			r["castSession"]["sentSuffix"]  = last_cast_stream_.suffix;
 			r["castSession"]["sentBitRate"] = last_cast_stream_.bitrate;
@@ -6481,6 +6483,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			use_json
 			    ? subsonic_ok_json([&sent](nlohmann::json& r) {
 			          r["castLoad"]["audioOnly"]   = sent.audio_only;
+			          r["castLoad"]["receiverShowsVideo"] = sent.receiver_video;
 			          r["castLoad"]["contentType"] = sent.mime;
 			          r["castLoad"]["sentSuffix"]  = sent.suffix;
 			          r["castLoad"]["sentBitRate"] = sent.bitrate;
@@ -6489,6 +6492,8 @@ GainDrive::GainDrive(const std::string& db_path,
 			    : subsonic_ok([&sent](XMLDocument& doc, XMLElement* root) {
 			          auto* e = doc.NewElement("castLoad");
 			          e->SetAttribute("audioOnly",   sent.audio_only);
+			          e->SetAttribute("receiverShowsVideo",
+			                          sent.receiver_video);
 			          e->SetAttribute("contentType", sent.mime.c_str());
 			          e->SetAttribute("sentSuffix",  sent.suffix.c_str());
 			          e->SetAttribute("sentBitRate", sent.bitrate);
@@ -8416,6 +8421,15 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	// necessarily the figure encoded.
 	CastStreamInfo stream;
 	stream.audio_only = audio_only;
+	// Whether the receiver will actually *show* the film, which is a different
+	// question from whether it was sent one.  Under `send` a screenless device
+	// gets the whole video and displays none of it, so !audio_only would tell
+	// a client to drop its own picture exactly where it is most wanted — the
+	// bug that made this a separate field.  device_video_out() is the raw
+	// announcement here on purpose: the preference decides what to send, and
+	// no preference gives a receiver a screen.
+	stream.receiver_video = song.is_video && !audio_only
+	                     && cast_manager_.device_video_out();
 	stream.mime       = lr.mime;
 	if (audio_only) {
 		stream.suffix = cast_fmt;
@@ -8540,6 +8554,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	          << " video=" << (song.is_video ? "yes" : "no")
 	          << " audio_only=" << (audio_only ? "yes" : "no")
 	          << (video_pref.empty() ? "" : " pref=" + video_pref)
+	          << " screen=" << (stream.receiver_video ? "yes" : "no")
 	          << " mime=" << lr.mime
 	          << " tier=" << stream.tier
 	          << " sent=" << stream.suffix
