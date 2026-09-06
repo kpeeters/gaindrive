@@ -17,7 +17,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -33,6 +32,11 @@ import org.gaindrive.android.ui.components.CoverThumb
  * rather than in the NavHost, so it survives navigation the way the web
  * client's fixed footer does — above the navigation bar on a phone, and beside
  * the rail on a tablet, which is where the web client's `#player` sits too.
+ *
+ * It draws no surface of its own and applies no window insets. Both belong to
+ * the shell, which wraps this and the offline note in one surface and pads that
+ * clear of the system bars — see the bottom bar in `GainDriveApp`. A second
+ * tonal surface here would only double the tint.
  *
  * It has two forms, and it decides between them with [paneCount] — the same
  * threshold the pane strip uses, since "is there room for a second pane" and
@@ -58,93 +62,91 @@ fun MiniPlayer(
 ) {
 	val current = state.current ?: return
 
-	Surface(tonalElevation = 3.dp) {
-		BoxWithConstraints {
-			val wide = paneCount(maxWidth) > 1
+	BoxWithConstraints {
+		val wide = paneCount(maxWidth) > 1
 
-			Column {
-				// The thin line is the compact bar's only sense of position.
-				// The wide one has a real scrub bar a few dp away, so drawing
-				// both would be two readings of the same thing.
-				if (!wide) {
-					// Indeterminate while filling the buffer: a progress bar
-					// frozen at zero looks like a stall rather than like work
-					// in progress.
-					if (state.isBuffering) {
-						LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+		Column {
+			// The thin line is the compact bar's only sense of position.
+			// The wide one has a real scrub bar a few dp away, so drawing
+			// both would be two readings of the same thing.
+			if (!wide) {
+				// Indeterminate while filling the buffer: a progress bar
+				// frozen at zero looks like a stall rather than like work
+				// in progress.
+				if (state.isBuffering) {
+					LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+				} else {
+					LinearProgressIndicator(
+						progress = { progressOf(state) },
+						modifier = Modifier.fillMaxWidth(),
+					)
+				}
+			}
+			Row(
+				modifier = Modifier
+					.fillMaxWidth()
+					.clickable(onClick = onExpand)
+					.padding(horizontal = 12.dp, vertical = 8.dp),
+				verticalAlignment = Alignment.CenterVertically,
+				horizontalArrangement = Arrangement.spacedBy(12.dp),
+			) {
+				CoverThumb(current.artworkUrl, current.album, size = 40.dp)
+
+				Column(
+					// Fixed once there is a scrub bar to share the row
+					// with, so the bar gets the slack rather than the
+					// title taking all of it.
+					modifier = if (wide) {
+						Modifier.width(WIDE_TITLE_WIDTH)
 					} else {
-						LinearProgressIndicator(
-							progress = { progressOf(state) },
-							modifier = Modifier.fillMaxWidth(),
+						Modifier.weight(1f)
+					},
+				) {
+					Text(
+						text = current.title,
+						style = MaterialTheme.typography.bodyMedium,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+					Text(
+						text = current.artist,
+						style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.onSurfaceVariant,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+				}
+
+				if (wide) {
+					IconButton(onClick = onPrevious, enabled = state.hasPrevious) {
+						Icon(
+							Icons.Default.SkipPrevious,
+							contentDescription = "Previous",
 						)
 					}
 				}
-				Row(
-					modifier = Modifier
-						.fillMaxWidth()
-						.clickable(onClick = onExpand)
-						.padding(horizontal = 12.dp, vertical = 8.dp),
-					verticalAlignment = Alignment.CenterVertically,
-					horizontalArrangement = Arrangement.spacedBy(12.dp),
-				) {
-					CoverThumb(current.artworkUrl, current.album, size = 40.dp)
-
-					Column(
-						// Fixed once there is a scrub bar to share the row
-						// with, so the bar gets the slack rather than the
-						// title taking all of it.
-						modifier = if (wide) {
-							Modifier.width(WIDE_TITLE_WIDTH)
+				IconButton(onClick = onTogglePlay) {
+					Icon(
+						imageVector = if (state.isPlaying) {
+							Icons.Default.Pause
 						} else {
-							Modifier.weight(1f)
+							Icons.Default.PlayArrow
 						},
-					) {
-						Text(
-							text = current.title,
-							style = MaterialTheme.typography.bodyMedium,
-							maxLines = 1,
-							overflow = TextOverflow.Ellipsis,
-						)
-						Text(
-							text = current.artist,
-							style = MaterialTheme.typography.bodySmall,
-							color = MaterialTheme.colorScheme.onSurfaceVariant,
-							maxLines = 1,
-							overflow = TextOverflow.Ellipsis,
-						)
-					}
+						contentDescription = if (state.isPlaying) "Pause" else "Play",
+					)
+				}
+				IconButton(onClick = onNext, enabled = state.hasNext) {
+					Icon(Icons.Default.SkipNext, contentDescription = "Next")
+				}
 
-					if (wide) {
-						IconButton(onClick = onPrevious, enabled = state.hasPrevious) {
-							Icon(
-								Icons.Default.SkipPrevious,
-								contentDescription = "Previous",
-							)
-						}
-					}
-					IconButton(onClick = onTogglePlay) {
-						Icon(
-							imageVector = if (state.isPlaying) {
-								Icons.Default.Pause
-							} else {
-								Icons.Default.PlayArrow
-							},
-							contentDescription = if (state.isPlaying) "Pause" else "Play",
-						)
-					}
-					IconButton(onClick = onNext, enabled = state.hasNext) {
-						Icon(Icons.Default.SkipNext, contentDescription = "Next")
-					}
-
-					if (wide) {
-						SeekBar(
-							state = state,
-							onSeek = onSeek,
-							// The row already pads its ends; the stock
-							// modifier's own 24dp would double it.
-							modifier = Modifier.weight(1f),
-						)
-					}
+				if (wide) {
+					SeekBar(
+						state = state,
+						onSeek = onSeek,
+						// The row already pads its ends; the stock
+						// modifier's own 24dp would double it.
+						modifier = Modifier.weight(1f),
+					)
 				}
 			}
 		}

@@ -8,11 +8,19 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
@@ -28,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination
@@ -119,6 +128,10 @@ fun GainDriveApp(
 			}
 		},
 	)
+
+	// Read here rather than in the bottom bar: whether there is a bar at all
+	// depends on it, and that decision is made before the bar is composed.
+	val availability = LocalAvailability.current
 
 	val playerViewModel: PlayerViewModel = hiltViewModel()
 	val playerState by playerViewModel.state.collectAsStateWithLifecycle()
@@ -256,38 +269,72 @@ fun GainDriveApp(
 	) {
 		Scaffold(
 			bottomBar = {
-				if (showNavAndPlayer) {
-					Column {
-						// Sits with the player rather than in each screen's app bar:
-						// having no network is a fact about the whole app, and one
-						// banner is better than five that have to agree.
-						OfflineNote(
-							online = LocalAvailability.current.online,
-							byChoice = LocalAvailability.current.offlineByChoice,
-						)
-						// The bottom of the *content* column, not of the window —
-						// which at compact width is above the navigation bar, as
-						// before, and beside the rail at medium and expanded. Both
-						// match the web client, where #player is a grid row that
-						// the full-height sidebar sits next to. Outside the NavHost
-						// either way, so it persists across navigation.
-						MiniPlayer(
-							state = playerState,
-							// A film's bar leads back to the film. Opening the
-							// audio-shaped sheet instead would make the user find
-							// the way back to the picture from inside it.
-							onExpand = {
-								if (playerState.isVideo) {
-									navController.navigate(Route.Video)
-								} else {
-									nowPlayingOpen = true
-								}
-							},
-							onTogglePlay = playerViewModel::togglePlayPause,
-							onNext = playerViewModel::next,
-							onPrevious = playerViewModel::previous,
-							onSeek = playerViewModel::seekTo,
-						)
+				// Absent, not empty. Scaffold measures the bar to decide the
+				// body's bottom padding, and a bar holding nothing but an inset
+				// is a zero-height placeable — which fallback it then takes is
+				// a question not worth having. Before the navigation bar moved
+				// into the suite this could not arise, because the bar was
+				// always there.
+				if (showNavAndPlayer && (!availability.online || playerState.current != null)) {
+					// One surface for the whole strip, with the window inset
+					// applied *inside* it, which is how NavigationBar is built
+					// and is not optional here: Scaffold pads its body by the
+					// bar's height and leaves the bar itself to clear the
+					// system bars. NavigationBar used to do that for this
+					// column and cannot any more, having moved into the
+					// navigation suite — without this the player is drawn
+					// behind the system navigation bar, visible only as a
+					// sliver. Inside the surface rather than around it so the
+					// bar's own colour continues behind the gesture pill.
+					//
+					// windowInsetsPadding adds only what an ancestor has not
+					// already consumed, so at compact width — where the suite
+					// consumes the bottom inset for its own bar — this
+					// correctly contributes nothing, and the rail layout,
+					// which consumes only the leading edge, gets the whole of
+					// it. The insets are named rather than taken from
+					// safeDrawing because that includes the IME, and a player
+					// bar climbing over the keyboard on the search screen is
+					// not wanted.
+					Surface(tonalElevation = 3.dp) {
+						Column(
+							modifier = Modifier.windowInsetsPadding(
+								WindowInsets.systemBars
+									.union(WindowInsets.displayCutout)
+									.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+							),
+						) {
+							// Sits with the player rather than in each screen's app bar:
+							// having no network is a fact about the whole app, and one
+							// banner is better than five that have to agree.
+							OfflineNote(
+								online = availability.online,
+								byChoice = availability.offlineByChoice,
+							)
+							// The bottom of the *content* column, not of the window —
+							// which at compact width is above the navigation bar, as
+							// before, and beside the rail at medium and expanded. Both
+							// match the web client, where #player is a grid row that
+							// the full-height sidebar sits next to. Outside the NavHost
+							// either way, so it persists across navigation.
+							MiniPlayer(
+								state = playerState,
+								// A film's bar leads back to the film. Opening the
+								// audio-shaped sheet instead would make the user find
+								// the way back to the picture from inside it.
+								onExpand = {
+									if (playerState.isVideo) {
+										navController.navigate(Route.Video)
+									} else {
+										nowPlayingOpen = true
+									}
+								},
+								onTogglePlay = playerViewModel::togglePlayPause,
+								onNext = playerViewModel::next,
+								onPrevious = playerViewModel::previous,
+								onSeek = playerViewModel::seekTo,
+							)
+						}
 					}
 				}
 			},
