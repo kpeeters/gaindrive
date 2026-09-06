@@ -3242,7 +3242,9 @@ function castExit() {
    castExpectedPosition = null;
    // Before castAudioOnly is cleared, and before any resume: a muted film left
    // with a src goes on downloading for nobody.  stopCast({resumeLocal:false})
-   // — the surface's close button — has nothing else that would stop it.
+   // — logging out — has nothing else that would stop it.  The surface's own
+   // close button calls castLocalVideoStop() directly, since it no longer
+   // comes through here.
    castLocalVideoStop();
    castAudioOnly    = false;
    castReceiverVideo = true;
@@ -3629,6 +3631,15 @@ function videoSurfaceSet(state) {
    el.classList.remove('hidden');
    el.dataset.state = state;
    document.getElementById('video-restore').hidden = (state !== 'minimised');
+   // The button does two different things and must not claim otherwise: it
+   // stops local playback, but while casting it only puts the picture away.
+   // Set here rather than in the handler because a title is read before the
+   // click, and this runs on every load and on the reload restore — which is
+   // every path that can change which of the two is in force.
+   const close = document.getElementById('video-close');
+   const label = castDeviceId !== null ? 'Close' : 'Stop and close';
+   close.title = label;
+   close.setAttribute('aria-label', label);
 }
 
 function videoSurfaceCaption(song) {
@@ -3854,11 +3865,29 @@ function setupVideoSurface() {
    surf.addEventListener('pointerdown', videoControlsWake);
    surf.addEventListener('pointerleave', videoControlsSleep);
 
-   // While casting, the film is the television's: playerStop would stop the
-   // local element, which is not playing anything, hide the surface, and leave
-   // the Chromecast running with no way back to it.
-   document.getElementById('video-close').addEventListener('click',
-      () => (castDeviceId !== null ? stopCast({resumeLocal: false}) : playerStop()));
+   // Closing the surface dismisses the picture; it does not stop the cast.
+   //
+   // It used to, on the reasoning that playerStop() would stop a local element
+   // that was not playing anything and leave the Chromecast running "with no
+   // way back to it".  The second half of that was never true — the cast
+   // button's Stop row is shown whenever a session is active — and the first
+   // half stopped being true when the picture began staying here, muted, while
+   // the sound went to an amplifier.  Closing that is a request to stop
+   // watching, not to stop listening, and answering it by killing the sound in
+   // another room is the one thing it cannot have meant.
+   //
+   // The local element still has to be stopped, or a hidden <video> goes on
+   // downloading a film for nobody — the same reason castExit() calls this.
+   // castLocalVideoStop() returns immediately when no picture is running, so
+   // the panel case needs no branch of its own.
+   document.getElementById('video-close').addEventListener('click', () => {
+      if (castDeviceId !== null) {
+         castLocalVideoStop();
+         videoSurfaceSet(null);
+         return;
+         }
+      playerStop();
+      });
    document.getElementById('video-minimise').addEventListener('click',
       () => videoSurfaceSet('minimised'));
    document.getElementById('video-restore').addEventListener('click',

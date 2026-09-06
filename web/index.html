@@ -98,6 +98,10 @@
          </div>
          <div id="video-preparing" hidden>Preparing…</div>
          <button id="video-restore" title="Expand" hidden></button>
+         <!-- "Stop and close" is the local-playback meaning; while casting it
+              only puts the picture away and the label is swapped for "Close"
+              in videoSurfaceSet(), because closing a picture is not a request
+              to stop the sound in another room. -->
          <button id="video-close" class="mi" title="Stop and close" aria-label="Stop and close">close</button>
          <!-- Transport over the picture, and after #video-restore because that
               is a transparent full-frame click target: anything before it in
