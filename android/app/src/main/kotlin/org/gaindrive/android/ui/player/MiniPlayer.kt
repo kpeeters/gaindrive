@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.CastConnected
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
@@ -16,6 +19,7 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,10 +50,11 @@ import org.gaindrive.android.ui.components.CoverThumb
  * dp of the threshold, with a cutout or gesture inset in landscape, the two can
  * disagree by one pane. Cosmetic, and not worth a second measurement to fix.)
  *
- * A phone keeps the one-line row it always had. Above that the bar grows a
- * previous button and the same [SeekBar] the Now Playing sheet and the video
- * screen use — which is what the web client's player bar shows at that width,
- * and what stops a phone-shaped row sitting in 1200dp of nothing.
+ * A phone keeps the one-line row it always had, and reaches everything else
+ * through the Now Playing sheet a tap away. Above that the bar grows what the
+ * web client's own player bar has always carried: a previous button, the track
+ * info and cast buttons, and the same [SeekBar] the sheet and the video screen
+ * use. That is also what stops a phone-shaped row sitting in 1200dp of nothing.
  */
 @Composable
 fun MiniPlayer(
@@ -59,6 +64,9 @@ fun MiniPlayer(
 	onNext: () -> Unit,
 	onPrevious: () -> Unit,
 	onSeek: (Long) -> Unit,
+	casting: Boolean,
+	onCast: () -> Unit,
+	onInfo: () -> Unit,
 ) {
 	val current = state.current ?: return
 
@@ -137,6 +145,39 @@ fun MiniPlayer(
 				}
 				IconButton(onClick = onNext, enabled = state.hasNext) {
 					Icon(Icons.Default.SkipNext, contentDescription = "Next")
+				}
+
+				// Info before cast, as in the Now Playing sheet and for the
+				// same reason: cast comes and goes with what is playing, so
+				// the button that is always there is the one that must not
+				// move. The scrub bar after them takes up the slack, so
+				// nothing to the left of it shifts either.
+				if (wide) {
+					IconButton(onClick = onInfo) {
+						Icon(Icons.Default.Info, contentDescription = "Track info")
+					}
+					// The sheet's rule, not a second one: a receiver is
+					// offered a video only when the server can hand it over as
+					// a seekable MP4, since a button whose only outcome is a
+					// refusal is worse than no button — but it stays while
+					// casting, so the way to disconnect does not move either.
+					if (!state.isVideo || state.nativeSeek || casting) {
+						IconButton(onClick = onCast) {
+							Icon(
+								imageVector = if (casting) {
+									Icons.Default.CastConnected
+								} else {
+									Icons.Default.Cast
+								},
+								contentDescription = if (casting) "Casting" else "Cast",
+								tint = if (casting) {
+									MaterialTheme.colorScheme.primary
+								} else {
+									LocalContentColor.current
+								},
+							)
+						}
+					}
 				}
 
 				if (wide) {

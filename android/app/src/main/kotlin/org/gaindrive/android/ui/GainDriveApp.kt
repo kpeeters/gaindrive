@@ -333,6 +333,14 @@ fun GainDriveApp(
 								onNext = playerViewModel::next,
 								onPrevious = playerViewModel::previous,
 								onSeek = playerViewModel::seekTo,
+								// The same two the Now Playing sheet opens, and
+								// the same state behind them — the bar only
+								// draws them where there is room, which is
+								// where the web client's own player bar has
+								// carried them all along.
+								casting = castDevice != null,
+								onCast = { castPickerOpen = true },
+								onInfo = { trackInfoOpen = true },
 							)
 						}
 					}
