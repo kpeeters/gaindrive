@@ -47,6 +47,24 @@ androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling
 androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
 androidx-compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
 
+# Adaptive layouts for large screens. All three are managed by the Compose BOM
+# above — the adaptive pair at 1.0.0, the navigation suite at 1.3.1 — so they
+# carry no version of their own, exactly like material3 beside them.
+#
+# Do not pin the adaptive pair to 1.1.x on this BOM. Its floor is Compose 1.8,
+# and Gradle resolves highest-wins between a platform *constraint* (the BOM's
+# 1.7.6) and a hard *requirement*, so compose-ui would silently jump to 1.8
+# while material3 stayed at 1.3.1. Predictive back for panes
+# (NavigableListDetailPaneScaffold, added in adaptive 1.1.0-alpha04) therefore
+# waits for a BOM bump, as its own change.
+#
+# adaptive-navigation is deliberately absent: it exists for
+# ThreePaneScaffoldNavigator, and the pane layout keeps its own List<Route>
+# instead. See ARCHITECTURE.md on why a second back stack is not wanted.
+androidx-compose-material3-adaptive-navigation-suite = { module = "androidx.compose.material3:material3-adaptive-navigation-suite" }
+androidx-compose-adaptive = { module = "androidx.compose.material3.adaptive:adaptive" }
+androidx-compose-adaptive-layout = { module = "androidx.compose.material3.adaptive:adaptive-layout" }
+
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }

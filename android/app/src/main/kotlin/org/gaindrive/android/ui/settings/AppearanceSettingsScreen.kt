@@ -13,7 +13,7 @@ import org.gaindrive.android.data.model.ThemeMode
 
 @Composable
 fun AppearanceSettingsScreen(
-	onBack: () -> Unit,
+	onBack: (() -> Unit)?,
 	viewModel: SettingsViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()

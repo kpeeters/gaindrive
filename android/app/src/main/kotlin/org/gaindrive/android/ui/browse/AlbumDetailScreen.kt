@@ -8,11 +8,11 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -50,6 +51,7 @@ import org.gaindrive.android.data.model.currentAt
 import org.gaindrive.android.ui.components.ChapterRow
 import org.gaindrive.android.ui.components.CoverHero
 import org.gaindrive.android.ui.components.ExternalLink
+import org.gaindrive.android.ui.components.PaneBackIcon
 import org.gaindrive.android.ui.components.PinAction
 import org.gaindrive.android.ui.components.RefreshableLoadBox
 import org.gaindrive.android.ui.components.NotesSection
@@ -61,13 +63,17 @@ import org.gaindrive.android.ui.player.TrackActionsSheet
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumDetailScreen(
-	onBack: () -> Unit,
+	/**
+	 * Null when the level above is already on screen in the pane beside this
+	 * one, which is the ordinary case on a tablet. See [PaneBackIcon].
+	 */
+	onBack: (() -> Unit)?,
 	/**
 	 * Where to go once an album has been moved into the shared library. Not
 	 * [onBack]: the album's own artist folder under uploads may have gone with
 	 * it, so one level up is a list that may no longer exist.
 	 */
-	onPromoted: () -> Unit = onBack,
+	onPromoted: () -> Unit,
 	viewModel: AlbumDetailViewModel = hiltViewModel(),
 	player: PlayerViewModel = hiltViewModel(),
 ) {
@@ -173,11 +179,7 @@ fun AlbumDetailScreen(
 				title = {
 					Text(viewModel.albumTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
 				},
-				navigationIcon = {
-					IconButton(onClick = onBack) {
-						Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-					}
-				},
+				navigationIcon = { PaneBackIcon(onBack) },
 				actions = {
 					PinAction(ref = viewModel.albumRef, kind = PinKind.ALBUM)
 					// An overflow rather than icons of their own: both are rare
@@ -283,14 +285,25 @@ fun AlbumDetailScreen(
 				// The placeholder already occupies the full square, so the
 				// artwork arriving later does not move anything below it.
 				item(key = "hero") {
-					CoverHero(
-						url = extras.heroUrl,
-						contentDescription = detail.album.title,
-						modifier = Modifier
-							.fillMaxWidth()
-							.aspectRatio(1f)
-							.padding(16.dp),
-					)
+					// Capped and centred rather than simply filling the width.
+					// A 1:1 ratio over fillMaxWidth makes the cover as tall as
+					// its pane is wide, so on a wide one — or on the
+					// full-window album the Now Playing sheet opens — it pushes
+					// the entire track list below the fold.
+					Box(
+						modifier = Modifier.fillMaxWidth(),
+						contentAlignment = Alignment.TopCenter,
+					) {
+						CoverHero(
+							url = extras.heroUrl,
+							contentDescription = detail.album.title,
+							modifier = Modifier
+								.widthIn(max = HERO_MAX_WIDTH)
+								.fillMaxWidth()
+								.aspectRatio(1f)
+								.padding(16.dp),
+						)
+					}
 				}
 
 				item(key = "heading") {
@@ -518,3 +531,9 @@ private fun PromoteDialog(
 
 /** Enough to be useful in a dialog, few enough not to cover the field. */
 private const val SUGGESTION_LIMIT = 6
+
+/**
+ * About what the cover occupies on a phone today, which is as large as it
+ * wants to be — beyond this it is only crowding the tracks out.
+ */
+private val HERO_MAX_WIDTH = 400.dp

@@ -24,6 +24,14 @@
 	     works off ACCESS_NETWORK_STATE, declared above. -->
 	<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
+	<!-- Declared not-required, or Play filters the app off Chromebooks and
+	     every other large-screen device without one. Nothing in the app needs
+	     a touchscreen: the panes, the rail and the transport are all ordinary
+	     clickable Compose. -->
+	<uses-feature
+		android:name="android.hardware.touchscreen"
+		android:required="false" />
+
 	<!-- Self-hosted servers are commonly plain HTTP on a LAN, so cleartext is
 	     permitted. See network_security_config.xml. -->
 	<application
@@ -47,12 +55,25 @@
 			singleTask would also fix that, and costs more than it is worth
 			here: it rules out multi-window for good and adds task-clearing
 			semantics that mean nothing to a single-activity app.
+
+			resizeableActivity is already the default at this targetSdk; it is
+			written out because the layout now depends on it, and a reader
+			should not have to know the default to be sure multi-window is
+			allowed.
+
+			smallestScreenSize|density are in configChanges for a reason that
+			only shows on a foldable or in split-screen: unfolding, and some
+			multi-window resizes, change smallestScreenWidthDp, which without
+			them *recreates* the activity. The pane strip is derived from state
+			the activity holds, so that would be a visible reset in the one
+			gesture large-screen support exists for.
 		-->
 		<activity
 			android:name=".MainActivity"
 			android:exported="true"
 			android:launchMode="singleTop"
-			android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+			android:resizeableActivity="true"
+			android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboardHidden|uiMode"
 			android:theme="@style/Theme.GainDrive">
 			<intent-filter>
 				<action android:name="android.intent.action.MAIN" />

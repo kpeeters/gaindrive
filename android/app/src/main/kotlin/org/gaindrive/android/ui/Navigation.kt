@@ -12,11 +12,17 @@ import kotlinx.serialization.Serializable
 /**
  * Type-safe navigation routes.
  *
+ * The interface itself is `@Serializable`, not only its members: the pane
+ * strip stores a tab's path as a list of routes and needs the sealed
+ * hierarchy's polymorphic serializer to write it. Navigation is unaffected —
+ * it has always resolved each concrete member's own serializer.
+ *
  * Detail routes carry an encoded [org.gaindrive.android.data.model.ItemRef]
  * rather than a bare id — a bare id would be ambiguous the moment a second
  * server is configured. The display name travels alongside so the app bar has
  * something to show before the body has loaded.
  */
+@Serializable
 sealed interface Route {
 
 	@Serializable

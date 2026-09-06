@@ -47,7 +47,7 @@ import org.gaindrive.android.data.model.ServerId
  */
 @Composable
 fun ServersSettingsScreen(
-	onBack: () -> Unit,
+	onBack: (() -> Unit)?,
 	onEditServer: (ServerId?) -> Unit,
 	viewModel: SettingsViewModel = hiltViewModel(),
 ) {

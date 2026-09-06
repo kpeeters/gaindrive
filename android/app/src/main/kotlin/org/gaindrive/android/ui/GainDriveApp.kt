@@ -12,10 +12,13 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,13 +39,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.flow.StateFlow
-import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.playback.cast.CastDeviceKind
 import org.gaindrive.android.playback.cast.kind
+import org.gaindrive.android.ui.adaptive.rememberPaneStack
 import org.gaindrive.android.ui.browse.AlbumDetailScreen
-import org.gaindrive.android.ui.browse.AlbumsScreen
-import org.gaindrive.android.ui.browse.ArtistsScreen
 import org.gaindrive.android.ui.components.OfflineNote
 import org.gaindrive.android.ui.fetch.FetchUrlScreen
 import org.gaindrive.android.ui.player.CastDeviceSheet
@@ -53,24 +54,22 @@ import org.gaindrive.android.ui.player.PlayerViewModel
 import org.gaindrive.android.ui.player.TrackInfoDialog
 import org.gaindrive.android.ui.player.VideoScreen
 import org.gaindrive.android.ui.player.WiiMControlsSheet
-import org.gaindrive.android.ui.playlists.PlaylistDetailScreen
-import org.gaindrive.android.ui.playlists.PlaylistsScreen
-import org.gaindrive.android.ui.recents.RecentsScreen
-import org.gaindrive.android.ui.search.SearchScreen
-import org.gaindrive.android.ui.settings.AppearanceSettingsScreen
-import org.gaindrive.android.ui.settings.CastSettingsScreen
-import org.gaindrive.android.ui.settings.LibrarySettingsScreen
 import org.gaindrive.android.ui.settings.ServerEditScreen
-import org.gaindrive.android.ui.settings.ServersSettingsScreen
-import org.gaindrive.android.ui.settings.SettingsScreen
 import org.gaindrive.android.ui.settings.SettingsViewModel
-import org.gaindrive.android.ui.settings.StorageSettingsScreen
+import org.gaindrive.android.ui.tabs.LibraryTab
+import org.gaindrive.android.ui.tabs.PlaylistsTab
+import org.gaindrive.android.ui.tabs.RecentsTab
+import org.gaindrive.android.ui.tabs.SearchTab
+import org.gaindrive.android.ui.tabs.SettingsTab
 
 /**
  * [sharedUrl] carries a URL another app sent us, and [onSharedUrlHandled] says
  * it has been acted on. They are parameters rather than another view model
  * because the value comes from an `Intent`, which only the activity sees.
  */
+// currentWindowAdaptiveInfo() is the only experimental thing here;
+// NavigationSuiteScaffold itself is stable at material3 1.3.1.
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
 fun GainDriveApp(
 	settingsViewModel: SettingsViewModel = hiltViewModel(),
@@ -92,11 +91,34 @@ fun GainDriveApp(
 	// changes, which would reset the back stack the moment the first server is
 	// saved — throwing the user out of Settings just as they finish adding it.
 	val startDestination: Route = remember {
-		// Straight to Servers, not the Settings list: with nothing configured
-		// there is exactly one useful thing to do and this is where its button
-		// lives.
-		if (settings.servers.isEmpty()) Route.SettingsServers else Route.Artists
+		// Straight to Settings, whose own path starts at Servers when nothing
+		// is configured — see `stacks` below. There is exactly one useful
+		// thing to do on a first run and that is where its button lives.
+		if (settings.servers.isEmpty()) Route.Settings else Route.Artists
 	}
+
+	// One path per tab — see PaneStack. Held here rather than inside each tab
+	// for two reasons: a tab keeps its drill-down while the user is away from
+	// it without depending on the navigation library's saveState/restoreState
+	// bookkeeping, and tapping the tab you are already in can shed that
+	// drill-down, which the tab itself has no way to reach.
+	val stacks = mapOf(
+		TopLevel.ARTISTS to rememberPaneStack { listOf(Route.Artists) },
+		TopLevel.PLAYLISTS to rememberPaneStack { listOf(Route.Playlists) },
+		TopLevel.RECENTS to rememberPaneStack { listOf(Route.Recents) },
+		TopLevel.SEARCH to rememberPaneStack { listOf(Route.Search) },
+		TopLevel.SETTINGS to rememberPaneStack {
+			// First run: with nothing configured there is exactly one useful
+			// thing to do, so the tab opens on Servers rather than on the
+			// category list. Evaluated once, so a path restored after process
+			// death is not overruled by the check firing again.
+			if (settings.servers.isEmpty()) {
+				listOf(Route.Settings, Route.SettingsServers)
+			} else {
+				listOf(Route.Settings)
+			}
+		},
+	)
 
 	val playerViewModel: PlayerViewModel = hiltViewModel()
 	val playerState by playerViewModel.state.collectAsStateWithLifecycle()
@@ -115,9 +137,10 @@ fun GainDriveApp(
 	val destination = backStackEntry?.destination
 
 	// Which tab is lit. Tracked rather than derived from the current route,
-	// because Albums and Album can be reached from either Artists or Search —
-	// matching on route class would jump the highlight to Artists when you open
-	// an album from a search result.
+	// because four destinations are not tab roots and belong to no tab: the
+	// album the Now Playing sheet opens, the server editor, the fetch panel and
+	// the picture. A tab's own drill-down no longer comes into it — that is
+	// inside the tab, which is why the effect below can be as narrow as it is.
 	var selectedTab by rememberSaveable {
 		mutableStateOf(if (settings.servers.isEmpty()) TopLevel.SETTINGS else TopLevel.ARTISTS)
 	}
@@ -138,10 +161,11 @@ fun GainDriveApp(
 			?.let { selectedTab = it }
 	}
 
-	// The bar is for switching top-level sections; it has no meaning on a
-	// form that the user is expected to finish or cancel, nor over a picture
-	// that wants the whole screen.
-	val showBottomBar = destination?.hasRoute(Route.ServerEdit::class) != true &&
+	// The navigation surface is for switching top-level sections; it has no
+	// meaning on a form that the user is expected to finish or cancel, nor over
+	// a picture that wants the whole screen. The player bar goes with it, as it
+	// always has.
+	val showNavAndPlayer = destination?.hasRoute(Route.ServerEdit::class) != true &&
 		destination?.hasRoute(Route.FetchUrl::class) != true &&
 		destination?.hasRoute(Route.Video::class) != true
 
@@ -185,251 +209,207 @@ fun GainDriveApp(
 		navController.navigate(Route.FetchUrl(url))
 	}
 
-	Scaffold(
-		bottomBar = {
-			if (showBottomBar) {
-				Column {
-					// Sits with the player rather than in each screen's app bar:
-					// having no network is a fact about the whole app, and one
-					// banner is better than five that have to agree.
-					OfflineNote(
-						online = LocalAvailability.current.online,
-						byChoice = LocalAvailability.current.offlineByChoice,
-					)
-					// Above the navigation bar, and outside the NavHost, so it
-					// persists across navigation the way the web client's fixed
-					// footer does.
-					MiniPlayer(
-						state = playerState,
-						// A film's bar leads back to the film. Opening the
-						// audio-shaped sheet instead would make the user find
-						// the way back to the picture from inside it.
-						onExpand = {
-							if (playerState.isVideo) {
-								navController.navigate(Route.Video)
-							} else {
-								nowPlayingOpen = true
-							}
-						},
-						onTogglePlay = playerViewModel::togglePlayPause,
-						onNext = playerViewModel::next,
-					)
-					NavigationBar {
-						TopLevel.entries.forEach { item ->
-							NavigationBarItem(
-								selected = item == selectedTab,
-								onClick = {
-									// Tapping the tab you are already in sheds
-									// its drill-down. Without it, a tab that
-									// restored to an album screen has no way
-									// back to its own list except walking the
-									// back gesture up the hierarchy.
-									if (item == selectedTab) {
-										navController.popToTabRoot()
-									} else {
-										selectedTab = item
-										navController.switchTo(item.route)
-									}
-								},
-								icon = { Icon(item.icon, contentDescription = item.label) },
-								label = { Text(item.label) },
-							)
+	// Compact windows get a bottom bar, medium and expanded a navigation rail.
+	// That is what Material 3's adaptive navigation guidance asks for, and it
+	// lands within 50dp of the web client's own 650px sidebar boundary. The
+	// default rule also keeps a *landscape phone* on the bottom bar — it tests
+	// compact height as well as compact width — which is right, since a rail
+	// there would take width from the one orientation that has least of it.
+	//
+	// None is how the full-window destinations are spelled. As a layout type
+	// rather than as a bar simply not drawn, the suite keeps one description of
+	// the shell instead of two — and it is also why ARCHITECTURE.md's "no
+	// navigation drawer" rule is untouched by any of this: the rule rejects the
+	// drawer, and the suite is never asked for one.
+	val layoutType = if (showNavAndPlayer) {
+		NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
+	} else {
+		NavigationSuiteType.None
+	}
+
+	NavigationSuiteScaffold(
+		layoutType = layoutType,
+		navigationSuiteItems = {
+			// `tab`, not `item`: the loop variable would otherwise shadow this
+			// scope's own `item` function at every call below.
+			TopLevel.entries.forEach { tab ->
+				item(
+					selected = tab == selectedTab,
+					onClick = {
+						// Tapping the tab you are already in sheds its
+						// drill-down. Without it, a tab that restored to an
+						// album screen has no way back to its own list except
+						// walking the back gesture up the hierarchy.
+						if (tab == selectedTab) {
+							stacks.getValue(tab).reset()
+							navController.popToTabRoot()
+						} else {
+							selectedTab = tab
+							navController.switchTo(tab.route)
 						}
-					}
-				}
+					},
+					icon = { Icon(tab.icon, contentDescription = tab.label) },
+					label = { Text(tab.label) },
+				)
 			}
 		},
-	) { insets ->
-		NavHost(
-			navController = navController,
-			startDestination = startDestination,
-			// Drilling in slides left, going back slides right, which makes the
-			// Artists → Albums → Album hierarchy visible the way the web
-			// client's sliding panes do. Switching tabs is a lateral move, not
-			// a descent, so it cross-fades instead.
-			// slideInHorizontally rather than slideIntoContainer: the latter
-			// derives its distance from the difference in container sizes, which
-			// between two full-screen destinations is nearly nothing — hence a
-			// slide you can barely see. These offsets are explicit multiples of
-			// the screen width.
-			enterTransition = {
-				if (targetState.destination.isDetail()) {
-					slideInHorizontally(tween(TRANSITION_MS)) { width -> width }
-				} else {
-					fadeIn(tween(TRANSITION_MS))
-				}
-			},
-			exitTransition = {
-				if (targetState.destination.isDetail()) {
-					// The outgoing screen travels a third of the way. That reads
-					// as depth, and moves far fewer pixels than sliding both
-					// screens the full width would.
-					slideOutHorizontally(tween(TRANSITION_MS)) { width -> -width / 3 }
-				} else {
-					fadeOut(tween(TRANSITION_MS))
-				}
-			},
-			// On the way back the roles reverse: what matters is whether the
-			// screen being left was a detail, not the one being returned to.
-			popEnterTransition = {
-				if (initialState.destination.isDetail()) {
-					slideInHorizontally(tween(TRANSITION_MS)) { width -> -width / 3 }
-				} else {
-					fadeIn(tween(TRANSITION_MS))
-				}
-			},
-			popExitTransition = {
-				if (initialState.destination.isDetail()) {
-					slideOutHorizontally(tween(TRANSITION_MS)) { width -> width }
-				} else {
-					fadeOut(tween(TRANSITION_MS))
-				}
-			},
-			// padding() positions the content; consumeWindowInsets() tells the
-			// screens' own Scaffolds and TopAppBars that these insets are
-			// already accounted for. Without the second call each screen adds
-			// the status bar and navigation bar a second time — a doubled gap
-			// under the status bar, and a dead strip above the mini-player.
-			modifier = Modifier
-				.padding(insets)
-				.consumeWindowInsets(insets),
-		) {
-			composable<Route.Artists> {
-				ArtistsScreen(
-					onOpenArtist = { refs, name, fromUploads ->
-						navController.navigate(
-							Route.Albums(ItemRef.encodeAll(refs), name, fromUploads)
+	) {
+		Scaffold(
+			bottomBar = {
+				if (showNavAndPlayer) {
+					Column {
+						// Sits with the player rather than in each screen's app bar:
+						// having no network is a fact about the whole app, and one
+						// banner is better than five that have to agree.
+						OfflineNote(
+							online = LocalAvailability.current.online,
+							byChoice = LocalAvailability.current.offlineByChoice,
 						)
-					},
-					// The same panel a shared URL opens, with nothing in its URL
-					// field. Pushed onto the Library tab's stack, so backing out
-					// of it returns to the uploads listing it was started from.
-					onFetchUrl = { navController.navigate(Route.FetchUrl("")) },
-				)
-			}
+						// The bottom of the *content* column, not of the window —
+						// which at compact width is above the navigation bar, as
+						// before, and beside the rail at medium and expanded. Both
+						// match the web client, where #player is a grid row that
+						// the full-height sidebar sits next to. Outside the NavHost
+						// either way, so it persists across navigation.
+						MiniPlayer(
+							state = playerState,
+							// A film's bar leads back to the film. Opening the
+							// audio-shaped sheet instead would make the user find
+							// the way back to the picture from inside it.
+							onExpand = {
+								if (playerState.isVideo) {
+									navController.navigate(Route.Video)
+								} else {
+									nowPlayingOpen = true
+								}
+							},
+							onTogglePlay = playerViewModel::togglePlayPause,
+							onNext = playerViewModel::next,
+							onPrevious = playerViewModel::previous,
+							onSeek = playerViewModel::seekTo,
+						)
+					}
+				}
+			},
+		) { insets ->
+			NavHost(
+				navController = navController,
+				startDestination = startDestination,
+				// Drilling in slides left, going back slides right, which makes the
+				// Artists → Albums → Album hierarchy visible the way the web
+				// client's sliding panes do. Switching tabs is a lateral move, not
+				// a descent, so it cross-fades instead.
+				// slideInHorizontally rather than slideIntoContainer: the latter
+				// derives its distance from the difference in container sizes, which
+				// between two full-screen destinations is nearly nothing — hence a
+				// slide you can barely see. These offsets are explicit multiples of
+				// the screen width.
+				enterTransition = {
+					if (targetState.destination.isDetail()) {
+						slideInHorizontally(tween(TRANSITION_MS)) { width -> width }
+					} else {
+						fadeIn(tween(TRANSITION_MS))
+					}
+				},
+				exitTransition = {
+					if (targetState.destination.isDetail()) {
+						// The outgoing screen travels a third of the way. That reads
+						// as depth, and moves far fewer pixels than sliding both
+						// screens the full width would.
+						slideOutHorizontally(tween(TRANSITION_MS)) { width -> -width / 3 }
+					} else {
+						fadeOut(tween(TRANSITION_MS))
+					}
+				},
+				// On the way back the roles reverse: what matters is whether the
+				// screen being left was a detail, not the one being returned to.
+				popEnterTransition = {
+					if (initialState.destination.isDetail()) {
+						slideInHorizontally(tween(TRANSITION_MS)) { width -> -width / 3 }
+					} else {
+						fadeIn(tween(TRANSITION_MS))
+					}
+				},
+				popExitTransition = {
+					if (initialState.destination.isDetail()) {
+						slideOutHorizontally(tween(TRANSITION_MS)) { width -> width }
+					} else {
+						fadeOut(tween(TRANSITION_MS))
+					}
+				},
+				// padding() positions the content; consumeWindowInsets() tells the
+				// screens' own Scaffolds and TopAppBars that these insets are
+				// already accounted for. Without the second call each screen adds
+				// the status bar and navigation bar a second time — a doubled gap
+				// under the status bar, and a dead strip above the mini-player.
+				modifier = Modifier
+					.padding(insets)
+					.consumeWindowInsets(insets),
+			) {
+				composable<Route.Artists> {
+					LibraryTab(
+						stack = stacks.getValue(TopLevel.ARTISTS),
+						// The same panel a shared URL opens, with nothing in its URL
+						// field. A form wants the whole window, so it is pushed onto
+						// the shell's own host rather than into a pane.
+						onFetchUrl = { navController.navigate(Route.FetchUrl("")) },
+					)
+				}
 
-			composable<Route.Albums> {
-				AlbumsScreen(
-					onBack = { navController.popBackStack() },
-					onOpenAlbum = { ref, title, fromUploads ->
-						navController.navigate(Route.Album(ref.encode(), title, fromUploads))
-					},
-				)
-			}
+				composable<Route.Playlists> {
+					PlaylistsTab(stacks.getValue(TopLevel.PLAYLISTS))
+				}
 
-			composable<Route.Album> {
-				AlbumDetailScreen(
-					onBack = { navController.popBackStack() },
-					// Back to the Library tab's own list, shedding the artist
-					// folder in between: a promoted album takes its uploads
-					// artist folder with it when it was the only one there, so
-					// the screen one level up may name nothing at all. Promote
-					// is only offered on the Artists → Albums → Album path, so
-					// that root is always on the stack.
-					onPromoted = { navController.popBackStack(Route.Artists, inclusive = false) },
-				)
-			}
+				composable<Route.Recents> {
+					RecentsTab(stacks.getValue(TopLevel.RECENTS))
+				}
 
-			composable<Route.Playlists> {
-				PlaylistsScreen(
-					onOpenPlaylist = { ref, name ->
-						navController.navigate(Route.Playlist(ref.encode(), name))
-					},
-				)
-			}
+				composable<Route.Search> {
+					SearchTab(stacks.getValue(TopLevel.SEARCH))
+				}
 
-			composable<Route.Playlist> {
-				PlaylistDetailScreen(onBack = { navController.popBackStack() })
-			}
+				composable<Route.Settings> {
+					SettingsTab(
+						stack = stacks.getValue(TopLevel.SETTINGS),
+						// A form with a validating action, so it takes the window
+						// rather than a pane — see SettingsTab.
+						onEditServer = { id: ServerId? ->
+							navController.navigate(Route.ServerEdit(id?.value))
+						},
+					)
+				}
 
-			composable<Route.Recents> {
-				RecentsScreen(
-					onOpenAlbum = { ref, title ->
-						navController.navigate(Route.Album(ref.encode(), title))
-					},
-				)
-			}
+				// The one album that is not a pane of some tab. It is reached only
+				// from the Now Playing sheet, where there is no list beside it to
+				// go back to and no tab whose strip it belongs in — the sheet
+				// covers whatever the user was doing, and Back should return them
+				// to exactly that. Leaving this path on the shell's own host is
+				// what keeps that true, and unchanged.
+				composable<Route.Album> {
+					AlbumDetailScreen(
+						onBack = { navController.popBackStack() },
+						onPromoted = { navController.popBackStack() },
+					)
+				}
 
-			composable<Route.Search> {
-				SearchScreen(
-					onOpenArtist = { refs, name ->
-						navController.navigate(Route.Albums(ItemRef.encodeAll(refs), name))
-					},
-					onOpenAlbum = { ref, title ->
-						navController.navigate(Route.Album(ref.encode(), title))
-					},
-					// A marker is played by opening the recording's album and
-					// starting it partway in — see Route.Album for why that beats
-					// playing it from here. A hit inside a film then lands on the
-					// video screen by itself, through the same rule that sends any
-					// video there, with the album left on the back stack.
-					onOpenChapter = { hit ->
-						hit.albumRef?.let { album ->
-							navController.navigate(
-								Route.Album(
-									albumRef = album.encode(),
-									albumTitle = hit.albumTitle,
-									autoPlayRef = hit.songRef.encode(),
-									autoPlayMs = hit.startMs,
-								)
-							)
-						}
-					},
-				)
-			}
+				composable<Route.ServerEdit> {
+					ServerEditScreen(onDone = { navController.popBackStack() })
+				}
 
-			composable<Route.Settings> {
-				SettingsScreen(
-					onOpenServers = { navController.navigate(Route.SettingsServers) },
-					onOpenLibrary = { navController.navigate(Route.SettingsLibrary) },
-					onOpenStorage = { navController.navigate(Route.SettingsStorage) },
-					onOpenCasting = { navController.navigate(Route.SettingsCasting) },
-					onOpenAppearance = { navController.navigate(Route.SettingsAppearance) },
-				)
-			}
+				// Always navigated *onto* the start destination, never the start
+				// destination itself, so there is something to pop back to even when
+				// a share is what launched the app.
+				composable<Route.FetchUrl> {
+					FetchUrlScreen(onDone = { navController.popBackStack() })
+				}
 
-			composable<Route.SettingsServers> {
-				ServersSettingsScreen(
-					onBack = { navController.popBackStack() },
-					onEditServer = { id: ServerId? ->
-						navController.navigate(Route.ServerEdit(id?.value))
-					},
-				)
-			}
-
-			composable<Route.SettingsLibrary> {
-				LibrarySettingsScreen(onBack = { navController.popBackStack() })
-			}
-
-			composable<Route.SettingsStorage> {
-				StorageSettingsScreen(onBack = { navController.popBackStack() })
-			}
-
-			composable<Route.SettingsCasting> {
-				CastSettingsScreen(onBack = { navController.popBackStack() })
-			}
-
-			composable<Route.SettingsAppearance> {
-				AppearanceSettingsScreen(onBack = { navController.popBackStack() })
-			}
-
-			composable<Route.ServerEdit> {
-				ServerEditScreen(onDone = { navController.popBackStack() })
-			}
-
-			// Always navigated *onto* the start destination, never the start
-			// destination itself, so there is something to pop back to even when
-			// a share is what launched the app.
-			composable<Route.FetchUrl> {
-				FetchUrlScreen(onDone = { navController.popBackStack() })
-			}
-
-			composable<Route.Video> {
-				VideoScreen(
-					onBack = { navController.popBackStack() },
-					onCast = { castPickerOpen = true },
-					onInfo = { trackInfoOpen = true },
-				)
+				composable<Route.Video> {
+					VideoScreen(
+						onBack = { navController.popBackStack() },
+						onCast = { castPickerOpen = true },
+						onInfo = { trackInfoOpen = true },
+					)
+				}
 			}
 		}
 	}
@@ -444,8 +424,8 @@ fun GainDriveApp(
 				// Closed first: the sheet sits on top of the screen it is
 				// sending the user to.
 				nowPlayingOpen = false
-				// Pushed onto whichever tab's stack is current, so Back returns
-				// to the search results the track was found in. selectedTab is
+				// The shell's own album, above whichever tab is current, so
+				// Back returns to what the sheet was covering. selectedTab is
 				// deliberately left alone for the same reason.
 				navController.navigate(Route.Album(ref.encode(), title))
 			},
@@ -497,23 +477,15 @@ fun GainDriveApp(
  */
 private fun NavDestination?.isDetail(): Boolean =
 	this != null && (
-		hasRoute(Route.Albums::class) ||
-			hasRoute(Route.Album::class) ||
-			hasRoute(Route.Playlist::class) ||
+		// Reached only from the Now Playing sheet; every other album is a pane.
+		hasRoute(Route.Album::class) ||
 			hasRoute(Route.ServerEdit::class) ||
-				// Reached from outside the app entirely, but shed by back and by
-				// the tap-the-current-tab gesture like any other drill-down.
-				hasRoute(Route.FetchUrl::class) ||
+			// Reached from outside the app entirely, but shed by back and by
+			// the tap-the-current-tab gesture like any other drill-down.
+			hasRoute(Route.FetchUrl::class) ||
 			// Listed so back and the tap-the-current-tab gesture shed it like
 			// any other drill-down; leaving it does not stop the film.
-			hasRoute(Route.Video::class) ||
-			// The settings categories drill down like anything else, and being
-			// listed here is also what makes tapping the Settings tab shed them.
-			hasRoute(Route.SettingsServers::class) ||
-			hasRoute(Route.SettingsLibrary::class) ||
-			hasRoute(Route.SettingsStorage::class) ||
-			hasRoute(Route.SettingsCasting::class) ||
-			hasRoute(Route.SettingsAppearance::class)
+			hasRoute(Route.Video::class)
 		)
 
 /** Long enough to read as a direction, short enough not to be in the way. */
@@ -528,10 +500,14 @@ private const val TRANSITION_MS = 280
  * definition of "reached by drilling down". Both pops land in the same frame,
  * so the user sees one transition, not one per level.
  *
- * The [previousBackStackEntry] test is not the same as the pop's own return
- * value: with no servers configured the start destination *is* a detail
- * (Servers), and popping the only entry leaves the NavHost with nothing to
- * draw — a blank screen no gesture recovers from.
+ * Only the four destinations that are not panes of a tab — the album the Now
+ * Playing sheet opens, the server editor, the fetch panel and the picture.
+ * A tab's own drill-down is its own `PaneStack`'s, and the caller resets that
+ * beside this call.
+ *
+ * The [previousBackStackEntry] test is belt and braces: popping the only entry
+ * would leave the NavHost with nothing to draw, which is a blank screen no
+ * gesture recovers from, and every start destination is now a tab root.
  */
 private fun NavHostController.popToTabRoot() {
 	while (currentBackStackEntry?.destination.isDetail() && previousBackStackEntry != null) {

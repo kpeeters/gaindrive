@@ -36,7 +36,7 @@ import org.gaindrive.android.data.ManualCastDevice
 /** What a Chromecast is sent, which is not always what this phone would play. */
 @Composable
 fun CastSettingsScreen(
-	onBack: () -> Unit,
+	onBack: (() -> Unit)?,
 	viewModel: SettingsViewModel = hiltViewModel(),
 	devicesViewModel: CastDevicesViewModel = hiltViewModel(),
 ) {

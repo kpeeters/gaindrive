@@ -44,7 +44,7 @@ import org.gaindrive.android.ui.components.formatBytes
  */
 @Composable
 fun StorageSettingsScreen(
-	onBack: () -> Unit,
+	onBack: (() -> Unit)?,
 	viewModel: SettingsViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()

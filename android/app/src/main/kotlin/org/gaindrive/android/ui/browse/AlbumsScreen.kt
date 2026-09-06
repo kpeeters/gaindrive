@@ -8,12 +8,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -32,6 +28,7 @@ import org.gaindrive.android.ui.components.AlbumRow
 import org.gaindrive.android.ui.components.ArtistAvatar
 import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.components.ExternalLink
+import org.gaindrive.android.ui.components.PaneBackIcon
 import org.gaindrive.android.ui.components.PartialFailureNote
 import org.gaindrive.android.ui.components.RefreshableLoadBox
 import org.gaindrive.android.ui.components.NotesSection
@@ -39,7 +36,8 @@ import org.gaindrive.android.ui.components.NotesSection
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumsScreen(
-	onBack: () -> Unit,
+	/** Null while the artist list is on screen beside this pane. */
+	onBack: (() -> Unit)?,
 	/** The third argument carries "this album is a personal upload" downwards. */
 	onOpenAlbum: (ItemRef, String, Boolean) -> Unit,
 	viewModel: AlbumsViewModel = hiltViewModel(),
@@ -59,11 +57,7 @@ fun AlbumsScreen(
 						overflow = TextOverflow.Ellipsis,
 					)
 				},
-				navigationIcon = {
-					IconButton(onClick = onBack) {
-						Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-					}
-				},
+				navigationIcon = { PaneBackIcon(onBack) },
 			)
 		},
 	) { insets ->

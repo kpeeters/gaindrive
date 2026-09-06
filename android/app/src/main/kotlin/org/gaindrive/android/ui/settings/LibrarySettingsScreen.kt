@@ -8,7 +8,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 /** How the browse screens present what the servers return. */
 @Composable
 fun LibrarySettingsScreen(
-	onBack: () -> Unit,
+	onBack: (() -> Unit)?,
 	viewModel: SettingsViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()

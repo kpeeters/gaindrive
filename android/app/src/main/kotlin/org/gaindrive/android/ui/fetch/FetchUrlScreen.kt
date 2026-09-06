@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -81,71 +82,79 @@ fun FetchUrlScreen(
 			)
 		},
 	) { insets ->
-		Column(
-			modifier = Modifier
-				.fillMaxSize()
-				.padding(insets)
-				.padding(16.dp)
-				// The keyboard plus a running job is taller than a phone, and
-				// the job is the part that must not be pushed out of reach.
-				.verticalScroll(rememberScrollState()),
-			verticalArrangement = Arrangement.spacedBy(12.dp),
+		Box(
+			// The cap and the centring are on the inner column; the scroll is
+			// too, so the gesture follows the content rather than the empty
+			// margins beside it.
+			modifier = Modifier.fillMaxSize().padding(insets),
+			contentAlignment = Alignment.TopCenter,
 		) {
-			// Editable, and pre-filled when a share supplied it. Two entry points
-			// share this screen — a share sheet, and the uploads listing's own
-			// row, which opens it with nothing — and the second needs a field
-			// here whatever the first would have preferred.
-			OutlinedTextField(
-				value = state.url,
-				onValueChange = viewModel::onUrl,
-				label = { Text("URL") },
-				placeholder = { Text("https://…") },
-				singleLine = true,
-				enabled = !state.live && !state.submitting,
-				keyboardOptions = KeyboardOptions(
-					keyboardType = KeyboardType.Uri,
-					imeAction = ImeAction.Next,
-				),
-				modifier = Modifier.fillMaxWidth(),
-			)
-
-			when {
-				// Only the probe's own outcome is reported here. Being offline is
-				// already said by the shell's banner, but it is also the reason
-				// the list below is empty, so it has to be said again in terms of
-				// what cannot be done.
-				!online -> Note(
-					"You are offline. Nothing can be fetched until you have a connection.",
-					error = true,
+			Column(
+				modifier = Modifier
+					.widthIn(max = FORM_MAX_WIDTH)
+					.fillMaxWidth()
+					.padding(16.dp)
+					// The keyboard plus a running job is taller than a phone, and
+					// the job is the part that must not be pushed out of reach.
+					.verticalScroll(rememberScrollState()),
+				verticalArrangement = Arrangement.spacedBy(12.dp),
+			) {
+				// Editable, and pre-filled when a share supplied it. Two entry points
+				// share this screen — a share sheet, and the uploads listing's own
+				// row, which opens it with nothing — and the second needs a field
+				// here whatever the first would have preferred.
+				OutlinedTextField(
+					value = state.url,
+					onValueChange = viewModel::onUrl,
+					label = { Text("URL") },
+					placeholder = { Text("https://…") },
+					singleLine = true,
+					enabled = !state.live && !state.submitting,
+					keyboardOptions = KeyboardOptions(
+						keyboardType = KeyboardType.Uri,
+						imeAction = ImeAction.Next,
+					),
+					modifier = Modifier.fillMaxWidth(),
 				)
 
-				state.targets == null -> Row(
-					horizontalArrangement = Arrangement.spacedBy(12.dp),
-					verticalAlignment = Alignment.CenterVertically,
-				) {
-					CircularProgressIndicator(
-						modifier = Modifier.size(16.dp),
-						strokeWidth = 2.dp,
+				when {
+					// Only the probe's own outcome is reported here. Being offline is
+					// already said by the shell's banner, but it is also the reason
+					// the list below is empty, so it has to be said again in terms of
+					// what cannot be done.
+					!online -> Note(
+						"You are offline. Nothing can be fetched until you have a connection.",
+						error = true,
 					)
-					Text("Looking for a server that can fetch this…")
-				}
 
-				state.targets.orEmpty().isEmpty() -> Note(
-					"No configured server can fetch a URL. It needs a gaindrive server " +
-						"with a fetch handler set up, and an account allowed to upload.",
-					error = true,
-				)
+					state.targets == null -> Row(
+						horizontalArrangement = Arrangement.spacedBy(12.dp),
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						CircularProgressIndicator(
+							modifier = Modifier.size(16.dp),
+							strokeWidth = 2.dp,
+						)
+						Text("Looking for a server that can fetch this…")
+					}
 
-				else -> {
-					FetchForm(state, viewModel)
-					state.job?.let {
-						HorizontalDivider()
-						JobPanel(state, onCancel = viewModel::cancel)
+					state.targets.orEmpty().isEmpty() -> Note(
+						"No configured server can fetch a URL. It needs a gaindrive server " +
+							"with a fetch handler set up, and an account allowed to upload.",
+						error = true,
+					)
+
+					else -> {
+						FetchForm(state, viewModel)
+						state.job?.let {
+							HorizontalDivider()
+							JobPanel(state, onCancel = viewModel::cancel)
+						}
 					}
 				}
-			}
 
-			state.error?.let { Note(it, error = true) }
+				state.error?.let { Note(it, error = true) }
+			}
 		}
 	}
 }
@@ -449,3 +458,9 @@ private fun Note(text: String, error: Boolean = false) {
 
 /** Enough to be useful, few enough not to bury the field being typed into. */
 private const val SUGGESTION_LIMIT = 6
+
+/**
+ * As on the server editor: a full-window form is the one place left where the
+ * content is not already bounded by a pane.
+ */
+private val FORM_MAX_WIDTH = 640.dp
