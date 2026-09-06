@@ -51,7 +51,8 @@ object Id3Source : BrowseSource {
 		artistCount: Int,
 		albumCount: Int,
 		songCount: Int,
+		chapterCount: Int,
 	): LibrarySelection =
-		api.search3(query, artistCount, albumCount, songCount)
+		api.search3(query, artistCount, albumCount, songCount, chapterCount)
 			.requireOk().searchResult3?.toDomain(server) ?: LibrarySelection()
 }

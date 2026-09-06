@@ -232,8 +232,21 @@ class PlayerConnection @Inject constructor(
 		return true
 	}
 
-	/** Replaces the queue and starts at [startIndex]. */
-	fun play(songs: List<Song>, startIndex: Int) = scope.launch {
+	/**
+	 * Replaces the queue and starts at [startIndex], optionally partway in.
+	 *
+	 * [startPositionMs] is what a chapter marker asks for: play this recording,
+	 * but from the song inside it that was tapped. Defaulted, so every caller
+	 * that means "from the beginning" is unchanged.
+	 *
+	 * Handed to the player rather than followed by a `seekTo`, which both
+	 * implementations already accept: `CastPlayer` forwards it into the LOAD it
+	 * sends, and locally ExoPlayer applies it as it prepares. On a film the
+	 * server can only re-encode, playback goes through `hls.m3u8` and the seek
+	 * lands once the playlist has loaded, so the first frame is slower — that is
+	 * the tier, not the offset.
+	 */
+	fun play(songs: List<Song>, startIndex: Int, startPositionMs: Long = 0L) = scope.launch {
 		if (refuseIfCasting(songs)) return@launch
 		markPending(songs.getOrNull(startIndex)?.ref)
 		// Publish before awaiting the controller: on the very first tap the
@@ -243,7 +256,7 @@ class PlayerConnection @Inject constructor(
 		val controller = awaitController() ?: return@launch
 		val covers: CoverUrls = library.coverUrls()
 		val items = songs.map { it.toMediaItem(covers.url(it.coverArt, ARTWORK_PX)) }
-		controller.setMediaItems(items, startIndex, 0L)
+		controller.setMediaItems(items, startIndex, startPositionMs)
 		autoFrom = autoFrom.afterPlay(startIndex)
 		controller.prepare()
 		controller.play()

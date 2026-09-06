@@ -34,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.Artist
+import org.gaindrive.android.data.model.ChapterHit
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Playlist
 import org.gaindrive.android.data.model.Song
@@ -386,6 +387,123 @@ fun SongRow(
 }
 
 /**
+ * One marker inside a recording, drawn as a row of the album it sits in.
+ *
+ * Shaped like [TrackRow] — the same number box, the same title weight, the same
+ * trailing duration — because in a listing that is exactly what it stands for:
+ * a chaptered concert's markers replace its single row, so they have to read as
+ * the album's tracks and not as an annotation on one.
+ *
+ * What it deliberately lacks is everything that addresses a song id. There is
+ * no star, no download mark and no video mark, because a chapter has no id of
+ * its own to star, download or play on its own. Its long-press reaches the
+ * recording's actions instead, which is the only handle on the file left once
+ * its own row has been replaced.
+ *
+ * Dimmed until it is the marker being played, so the list reads as positions
+ * inside one recording rather than as tracks in their own right.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun ChapterRow(
+	number: Int,
+	title: String,
+	duration: Int,
+	playing: Boolean,
+	onClick: () -> Unit,
+	onLongClick: (() -> Unit)? = null,
+) {
+	Row(
+		modifier = Modifier
+			.fillMaxWidth()
+			.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+			.padding(horizontal = 16.dp, vertical = 12.dp),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(12.dp),
+	) {
+		Box(modifier = Modifier.width(24.dp), contentAlignment = Alignment.Center) {
+			Text(
+				text = number.toString(),
+				style = MaterialTheme.typography.bodySmall,
+				color = if (playing) {
+					MaterialTheme.colorScheme.primary
+				} else {
+					MaterialTheme.colorScheme.onSurfaceVariant
+				},
+			)
+		}
+		Text(
+			text = title,
+			style = MaterialTheme.typography.bodyLarge,
+			color = if (playing) {
+				MaterialTheme.colorScheme.primary
+			} else {
+				MaterialTheme.colorScheme.onSurfaceVariant
+			},
+			modifier = Modifier.weight(1f),
+		)
+		Text(
+			text = formatDuration(duration),
+			style = MaterialTheme.typography.bodySmall,
+			color = MaterialTheme.colorScheme.onSurfaceVariant,
+		)
+	}
+}
+
+/**
+ * A chapter match in a search listing.
+ *
+ * Shaped like [SongRow] minus the artwork, which a marker has none of — its
+ * recording's cover is the album's, and drawing it on every row would say the
+ * hits were albums.
+ *
+ * The trailing column carries *where in the recording* the marker is, where a
+ * song row carries how long it is. That is the one fact a search hit has and a
+ * listing row does not, and it is what tells two takes of one song apart.
+ */
+@Composable
+fun ChapterHitRow(hit: ChapterHit, onClick: () -> Unit) {
+	Row(
+		modifier = Modifier
+			.fillMaxWidth()
+			.clickable(onClick = onClick)
+			.padding(horizontal = 16.dp, vertical = 8.dp),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(12.dp),
+	) {
+		Column(modifier = Modifier.weight(1f)) {
+			Text(
+				text = hit.displayName,
+				style = MaterialTheme.typography.bodyLarge,
+				color = MaterialTheme.colorScheme.onSurface,
+			)
+			Text(
+				// Artist, album, then the recording itself: a marker means
+				// nothing without knowing which concert it is in. The album is
+				// what the folder is called and the track what the file is
+				// called, and they coincide often enough — a folder holding one
+				// recording named after it — that an exact duplicate is dropped
+				// rather than printed twice.
+				text = buildList {
+					add(hit.artistName)
+					add(hit.albumTitle)
+					if (hit.trackTitle != hit.albumTitle) add(hit.trackTitle)
+				}.filter { it.isNotBlank() }.joinToString(" · "),
+				style = MaterialTheme.typography.bodySmall,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
+		}
+		Text(
+			text = formatChapterTime(hit.startSeconds),
+			style = MaterialTheme.typography.bodySmall,
+			color = MaterialTheme.colorScheme.onSurfaceVariant,
+		)
+	}
+}
+
+/**
  * Where a track stands with respect to being downloaded: waiting its turn, being
  * fetched, or here.
  *
@@ -474,4 +592,27 @@ fun formatDuration(seconds: Int): String {
 	val minutes = seconds / 60
 	val remainder = seconds % 60
 	return "%d:%02d".format(minutes, remainder)
+}
+
+/**
+ * A *position* inside a recording: `H:MM:SS` past an hour, `M:SS` below it.
+ *
+ * [formatDuration] is not reusable here, twice over. It has no hour rollover,
+ * so it prints 5400 seconds as "90:00" — unreadable as a place in a two-hour
+ * concert. And it returns "" for zero, which is right for a length and wrong
+ * for a position: 0:00 is a real one, and the first marker is usually at it.
+ *
+ * Floors rather than rounds, matching `fmtChapterTime` in `web/app.js`, so the
+ * two clients name the same second for the same marker.
+ */
+fun formatChapterTime(seconds: Double): String {
+	val total = seconds.coerceAtLeast(0.0).toLong()
+	val hours = total / 3600
+	val minutes = (total % 3600) / 60
+	val remainder = total % 60
+	return if (hours > 0) {
+		"%d:%02d:%02d".format(hours, minutes, remainder)
+	} else {
+		"%d:%02d".format(minutes, remainder)
+	}
 }

@@ -316,11 +316,102 @@ data class GetVideoInfoBody(
 	val videoInfo: VideoInfoDto? = null,
 ) : SubsonicBody
 
+// ── Chapters ────────────────────────────────────────────────────────────────
+//
+// The song boundaries inside one long recording. Three endpoints report them
+// and they are deliberately not one shape: `getChapters` and
+// `getAlbumChapters` describe markers inside an item the caller already holds,
+// while a search hit has to carry its own context and cannot know a duration.
+
+/**
+ * One marker, as `getChapters` and `getAlbumChapters` report it.
+ *
+ * [start] is a JSON number in seconds carrying milliseconds, not a count of
+ * milliseconds and not a string. [name] may be empty and is left that way —
+ * the placeholder is drawn by the client.
+ */
+@Serializable
+data class ChapterDto(
+	val index: Int = 0,
+	val start: Double = 0.0,
+	val duration: Int = 0,
+	val name: String = "",
+)
+
+/**
+ * `writable` is parsed so the shape matches the endpoint, and goes no further:
+ * this client cannot save markers, so nothing downstream has a use for it.
+ */
+@Serializable
+data class ChaptersDto(
+	val id: String = "",
+	val source: String = "none",
+	val writable: Boolean = false,
+	val chapter: List<ChapterDto> = emptyList(),
+)
+
+@Serializable
+data class GetChaptersBody(
+	override val status: String = "failed",
+	override val error: SubsonicError? = null,
+	val chapters: ChaptersDto? = null,
+) : SubsonicBody
+
+@Serializable
+data class AlbumChapterSongDto(
+	val id: String = "",
+	val title: String = "",
+	val chapter: List<ChapterDto> = emptyList(),
+)
+
+@Serializable
+data class AlbumChaptersDto(
+	val id: String = "",
+	val song: List<AlbumChapterSongDto> = emptyList(),
+)
+
+@Serializable
+data class GetAlbumChaptersBody(
+	override val status: String = "failed",
+	override val error: SubsonicError? = null,
+	val albumChapters: AlbumChaptersDto? = null,
+) : SubsonicBody
+
+/**
+ * A marker whose title matched a search.
+ *
+ * A separate type from [ChapterDto] rather than the same one with the extra
+ * fields nullable: mapping either to its domain model is then total, with no
+ * field that must be present in one context and absent in the other.
+ *
+ * [songId] is what to stream and [parent] is its album folder. There is no id
+ * for the marker itself, which is why these matches never arrive as `song`
+ * entries — a client told one was a song would be handed a track that does not
+ * work.
+ */
+@Serializable
+data class ChapterHitDto(
+	val songId: String = "",
+	val parent: String = "",
+	val index: Int = 0,
+	val start: Double = 0.0,
+	val name: String = "",
+	val track: String = "",
+	val album: String = "",
+	val artist: String = "",
+)
+
+/**
+ * Shared by `search3`, `search2` **and** `starred2`, which is why [chapter]
+ * defaults rather than being required: only the two search endpoints ever send
+ * it, and only when `chapterCount` was asked for.
+ */
 @Serializable
 data class SearchResultDto(
 	val artist: List<ArtistDto> = emptyList(),
 	val album: List<AlbumDto> = emptyList(),
 	val song: List<SongDto> = emptyList(),
+	val chapter: List<ChapterHitDto> = emptyList(),
 )
 
 @Serializable

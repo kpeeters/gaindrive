@@ -154,7 +154,7 @@ class BrowseApiTest {
 			   "album":[{"id":"77","name":"Aja"}],
 			   "song":[{"id":"501","title":"Peg"}]}}}"""
 		)
-		val result = api.search3("steely", 20, 20, 50).requireOk().searchResult3!!
+		val result = api.search3("steely", 20, 20, 50, 0).requireOk().searchResult3!!
 		assertEquals(1, result.artist.size)
 		assertEquals(1, result.album.size)
 		assertEquals(1, result.song.size)
@@ -164,7 +164,7 @@ class BrowseApiTest {
 	@Test
 	fun `search3 with no matches parses`() = runTest {
 		respond("""{"subsonic-response":{"status":"ok","searchResult3":{}}}""")
-		val result = api.search3("zzz", 20, 20, 50).requireOk().searchResult3!!
+		val result = api.search3("zzz", 20, 20, 50, 0).requireOk().searchResult3!!
 		assertTrue(result.artist.isEmpty() && result.album.isEmpty() && result.song.isEmpty())
 	}
 
@@ -295,7 +295,7 @@ class BrowseApiTest {
 			"""{"subsonic-response":{"status":"ok","searchResult3":{"song":[
 			   {"id":"900","title":"The Third Man","isVideo":true}]}}}"""
 		)
-		val song = api.search3("third", 0, 0, 20).requireOk().searchResult3!!.song[0]
+		val song = api.search3("third", 0, 0, 20, 0).requireOk().searchResult3!!.song[0]
 		assertTrue(song.isVideo)
 		assertFalse(song.nativeSeek)
 	}
@@ -395,7 +395,7 @@ class BrowseApiTest {
 			   "album":[{"id":"77","parent":"12","title":"Aja","artist":"Steely Dan"}],
 			   "song":[{"id":"501","parent":"77","title":"Peg"}]}}}"""
 		)
-		val found = api.search2("aja", 5, 5, 5).requireOk().searchResult2!!
+		val found = api.search2("aja", 5, 5, 5, 0).requireOk().searchResult2!!
 		assertEquals("77", found.album[0].id)
 		// Folder-shaped: the title arrives as `title`, and the parent stands in
 		// for artistId.

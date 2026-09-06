@@ -12,6 +12,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -20,12 +22,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Toc
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.ClosedCaption
@@ -51,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,6 +73,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.ui.SubtitleView
 import kotlinx.coroutines.delay
+import org.gaindrive.android.data.model.currentAt
+import org.gaindrive.android.data.model.nextAfter
+import org.gaindrive.android.data.model.previousTargetMs
 import org.gaindrive.android.playback.PlayerState
 import org.gaindrive.android.ui.components.CoverArt
 
@@ -89,12 +98,24 @@ fun VideoScreen(
 	onInfo: () -> Unit,
 	viewModel: PlayerViewModel = hiltViewModel(),
 	castViewModel: CastViewModel = hiltViewModel(),
+	chapterViewModel: VideoChaptersViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
 	val decodedAspect by viewModel.videoAspectRatio.collectAsStateWithLifecycle()
 	val castDevice by castViewModel.connected.collectAsStateWithLifecycle()
+	val chapterList by chapterViewModel.state.collectAsStateWithLifecycle()
 	val current = state.current
 	val error = state.error
+
+	val chapters = chapterList.chapters
+	val currentChapter = chapters.currentAt(state.positionMs)
+	// Saveable because this screen is rotated constantly, and because the web
+	// client's panel likewise survives the film advancing to the next item.
+	var chaptersOpen by rememberSaveable { mutableStateOf(false) }
+	// A recording that offers nothing must not leave the panel open behind it.
+	LaunchedEffect(chapters.isEmpty()) {
+		if (chapters.isEmpty()) chaptersOpen = false
+	}
 
 	var controlsVisible by remember { mutableStateOf(true) }
 	// Bumped on every touch; the auto-hide effect restarts with it, so a tap
@@ -164,8 +185,11 @@ fun VideoScreen(
 	}
 
 	// Back is the same gesture as the button, and both mean "leave the picture",
-	// not "stop the film".
-	BackHandler(onBack = onBack)
+	// not "stop the film". The panel takes it first, though: a viewer who has
+	// opened a jump list means to close that, not to walk out of the film.
+	BackHandler {
+		if (chaptersOpen) chaptersOpen = false else onBack()
+	}
 
 	Box(
 		modifier = Modifier
@@ -243,6 +267,38 @@ fun VideoScreen(
 				onSelectTextTrack = viewModel::selectTextTrack,
 				onCast = onCast,
 				onInfo = onInfo,
+				chapterName = chapters.getOrNull(currentChapter)?.displayName,
+				hasChapters = chapters.isNotEmpty(),
+				chaptersOpen = chaptersOpen,
+				onToggleChapters = { chaptersOpen = !chaptersOpen },
+			)
+		}
+
+		// Last child, so it draws over the controls' scrim rather than under it,
+		// and outside their AnimatedVisibility so it does not auto-hide with
+		// them. See ChapterPanel.
+		AnimatedVisibility(
+			visible = chaptersOpen,
+			enter = slideInHorizontally { it },
+			exit = slideOutHorizontally { it },
+			modifier = Modifier.align(Alignment.CenterEnd),
+		) {
+			ChapterPanel(
+				chapters = chapters,
+				source = chapterList.source,
+				currentIndex = currentChapter,
+				onSeek = viewModel::seekTo,
+				// "Previous" restarts the marker being played unless we are
+				// already at it, which is what every physical transport does and
+				// what lets it be pressed twice to go back a song.
+				onPrevious = { viewModel.seekTo(chapters.previousTargetMs(state.positionMs)) },
+				onNext = {
+					chapters.nextAfter(state.positionMs)?.let { viewModel.seekTo(it.startMs) }
+				},
+				onClose = { chaptersOpen = false },
+				modifier = Modifier
+					.fillMaxHeight()
+					.widthIn(max = CHAPTER_PANEL_MAX_WIDTH),
 			)
 		}
 	}
@@ -375,6 +431,10 @@ private fun Controls(
 	onSelectTextTrack: (Int?) -> Unit,
 	onCast: () -> Unit,
 	onInfo: () -> Unit,
+	chapterName: String?,
+	hasChapters: Boolean,
+	chaptersOpen: Boolean,
+	onToggleChapters: () -> Unit,
 ) {
 	Box(
 		modifier = Modifier
@@ -411,6 +471,36 @@ private fun Controls(
 						color = Color.White.copy(alpha = 0.7f),
 						maxLines = 1,
 						overflow = TextOverflow.Ellipsis,
+					)
+				}
+				// Which song inside the recording is playing — the web client's
+				// video bar says the same thing. A line of its own rather than
+				// folded into the subtitle, so nothing is lost on a recording
+				// whose markers happen to be unnamed, and tinted because it
+				// says where you are rather than what this is.
+				chapterName?.let {
+					Text(
+						text = it,
+						style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.primary,
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+					)
+				}
+			}
+			// Absent rather than disabled when nothing has markers, which is
+			// almost every film — the same rule the subtitle picker below
+			// follows, and for the same reason.
+			if (hasChapters) {
+				IconButton(onClick = onToggleChapters) {
+					Icon(
+						imageVector = Icons.AutoMirrored.Filled.Toc,
+						contentDescription = "Chapters",
+						tint = if (chaptersOpen) {
+							MaterialTheme.colorScheme.primary
+						} else {
+							Color.White
+						},
 					)
 				}
 			}
@@ -575,3 +665,10 @@ private fun View.activityWindow(): Window? =
 private const val SWAP_GRACE_MS = 500L
 
 private const val CONTROLS_SCRIM = 0.4f
+
+/**
+ * Wide enough for a marker title, narrow enough to leave the picture readable.
+ * One rule for both orientations: in portrait the film is letterboxed with room
+ * to spare, so the panel covers black rather than picture.
+ */
+private val CHAPTER_PANEL_MAX_WIDTH = 320.dp

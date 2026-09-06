@@ -25,6 +25,7 @@ import org.gaindrive.android.data.ServerFailure
 import org.gaindrive.android.data.ServerSelection
 import org.gaindrive.android.data.model.Artist
 import org.gaindrive.android.data.model.BrowseScope
+import org.gaindrive.android.data.model.ChapterHit
 import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.net.userMessage
@@ -45,8 +46,19 @@ data class SearchResults(
 	val artists: List<Artist> = emptyList(),
 	val albums: List<AlbumUi> = emptyList(),
 	val songs: List<SongUi> = emptyList(),
+	/**
+	 * Chapter markers whose titles matched — the songs inside a concert, a
+	 * DJ set or a mixtape, which is one file and would otherwise be one
+	 * unsearchable row.
+	 *
+	 * No `ChapterUi` beside [AlbumUi] and [SongUi]: the row draws no
+	 * artwork, so there is no cover URL to resolve and nothing to wrap.
+	 */
+	val chapters: List<ChapterHit> = emptyList(),
 ) {
-	val isEmpty: Boolean get() = artists.isEmpty() && albums.isEmpty() && songs.isEmpty()
+	val isEmpty: Boolean
+		get() = artists.isEmpty() && albums.isEmpty() && songs.isEmpty() &&
+			chapters.isEmpty()
 }
 
 /**
@@ -144,6 +156,11 @@ class SearchViewModel @Inject constructor(
 			artistCount = if (search.filters.artists) ARTIST_LIMIT else 0,
 			albumCount = if (search.filters.albums) ALBUM_LIMIT else 0,
 			songCount = if (search.filters.songs) SONG_LIMIT else 0,
+			// Rides with the Tracks filter rather than having a chip of its own:
+			// a chapter is a song inside a recording, so somebody who has turned
+			// tracks off is not looking for one. The server defaults this to 0,
+			// so it costs an older one nothing.
+			chapterCount = if (search.filters.songs) CHAPTER_LIMIT else 0,
 		).collect { merged ->
 			answered++
 			_isRefreshing.value = false
@@ -157,6 +174,7 @@ class SearchViewModel @Inject constructor(
 						songs = merged.items.songs.map {
 							SongUi(it, covers.url(it.coverArt, COVER_PX))
 						},
+						chapters = merged.items.chapters,
 					),
 					failures = merged.failures,
 					outstanding = answered < search.serverCount,
@@ -221,6 +239,7 @@ class SearchViewModel @Inject constructor(
 		const val ARTIST_LIMIT = 20
 		const val ALBUM_LIMIT = 30
 		const val SONG_LIMIT = 60
+		const val CHAPTER_LIMIT = 20
 		const val COVER_PX = 144
 	}
 }

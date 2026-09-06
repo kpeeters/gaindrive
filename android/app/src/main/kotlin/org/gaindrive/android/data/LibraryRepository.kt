@@ -29,6 +29,7 @@ import org.gaindrive.android.data.model.Artist
 import org.gaindrive.android.data.model.ArtistIndex
 import org.gaindrive.android.data.model.ArtistInfo
 import org.gaindrive.android.data.model.BrowseScope
+import org.gaindrive.android.data.model.Chapter
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.LibraryMode
 import org.gaindrive.android.data.model.LibrarySelection
@@ -245,6 +246,36 @@ class LibraryRepository @Inject constructor(
 	}
 
 	/**
+	 * The chapter markers of every chaptered item in one album folder, keyed by
+	 * the item they belong to.
+	 *
+	 * Read from the scan's index rather than from each file, which is what
+	 * makes it affordable on a browse path: `getChapters` per item would be a
+	 * file read — or an `ffprobe` for a video without a sidecar — every time
+	 * somebody opens an album. The playback path uses the file instead; see
+	 * [ChapterTracks].
+	 *
+	 * Not mirrored, like the notes above: a marker has no id Room could key on,
+	 * and the mirror answers "what can I still reach offline", which a position
+	 * inside a partly cached file is not. So this is empty offline and the
+	 * album lists its tracks exactly as it did before chapters existed.
+	 *
+	 * Throws like [albumNotes] — the caller's `runCatchingCancellable` is what
+	 * makes a failure cost only the chapter rows.
+	 */
+	suspend fun albumChapters(album: ItemRef): Map<ItemRef, List<Chapter>> {
+		if (offline) return emptyMap()
+		val found = onServer(album.server) { client ->
+			client.getAlbumChapters(album.id).requireOk().albumChapters?.song.orEmpty()
+				.map { it.toDomain(album.server) }
+		}
+		// An entry with no markers cannot happen — the server omits those — but
+		// dropping one here is what lets every caller treat "in the map" and
+		// "has chapters" as the same question.
+		return found.filter { it.chapters.isNotEmpty() }.associate { it.ref to it.chapters }
+	}
+
+	/**
 	 * Bumped whenever a playlist is created, changed or deleted. The playlists
 	 * screen watches it, so a playlist made from a track's action sheet three
 	 * screens away is there when the user arrives rather than waiting for a
@@ -299,12 +330,15 @@ class LibraryRepository @Inject constructor(
 		artistCount: Int,
 		albumCount: Int,
 		songCount: Int,
+		chapterCount: Int,
 	): LibrarySelection = withServer(server) { client, config ->
 		// Which search endpoint is asked follows the browse mode, because a
 		// result is only useful if the id it carries is one the rest of the mode
 		// can open — see BrowseSource.search.
 		val found = config.browseSource
-			.search(client, server, query, artistCount, albumCount, songCount)
+			.search(client, server, query, artistCount, albumCount, songCount, chapterCount)
+		// Any chapter hits ride along in `found` and are dropped here: the
+		// mirror stores nothing for them, a marker having no id to key a row on.
 		local.saveSelection(server, found)
 		found
 	}
@@ -324,6 +358,7 @@ class LibraryRepository @Inject constructor(
 		artistCount: Int,
 		albumCount: Int,
 		songCount: Int,
+		chapterCount: Int,
 	): Flow<MergedResult<LibrarySelection>> = channelFlow {
 		val servers = serversIn(scope)
 		if (servers.isEmpty()) {
@@ -348,7 +383,7 @@ class LibraryRepository @Inject constructor(
 					)
 				} else {
 					runCatchingCancellable {
-						search(config.id, query, artistCount, albumCount, songCount)
+						search(config.id, query, artistCount, albumCount, songCount, chapterCount)
 					}
 				}
 				// Resolved before taking the lock: this reads a database, and
@@ -376,6 +411,11 @@ class LibraryRepository @Inject constructor(
 								albums = arrived.flatMap { it.albums }
 									.let { if (collapse) mergeAlbums(it) else it },
 								songs = arrived.flatMap { it.songs },
+								// Concatenated in registry order like songs and
+								// never merged: a marker has no id to dedupe on,
+								// and two servers holding the same concert hold
+								// two different files either way.
+								chapters = arrived.flatMap { it.chapters },
 							),
 							failures = failures.filterNotNull(),
 						)

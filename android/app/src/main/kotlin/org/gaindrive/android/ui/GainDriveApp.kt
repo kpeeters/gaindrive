@@ -358,6 +358,23 @@ fun GainDriveApp(
 					onOpenAlbum = { ref, title ->
 						navController.navigate(Route.Album(ref.encode(), title))
 					},
+					// A marker is played by opening the recording's album and
+					// starting it partway in — see Route.Album for why that beats
+					// playing it from here. A hit inside a film then lands on the
+					// video screen by itself, through the same rule that sends any
+					// video there, with the album left on the back stack.
+					onOpenChapter = { hit ->
+						hit.albumRef?.let { album ->
+							navController.navigate(
+								Route.Album(
+									albumRef = album.encode(),
+									albumTitle = hit.albumTitle,
+									autoPlayRef = hit.songRef.encode(),
+									autoPlayMs = hit.startMs,
+								)
+							)
+						}
+					},
 				)
 			}
 

@@ -248,7 +248,7 @@ class FolderSourceTest {
 			"""{"subsonic-response":{"status":"ok","searchResult2":{
 			   "album":[{"id":"77","parent":"12","title":"Aja"}]}}}"""
 		)
-		val found = FolderSource.search(api, serverId, "aja", 5, 5, 5)
+		val found = FolderSource.search(api, serverId, "aja", 5, 5, 5, 0)
 		assertEquals("77", found.albums[0].ref.id)
 		assertEquals("/rest/search2.view", server.takeRequest().path?.substringBefore('?'))
 	}

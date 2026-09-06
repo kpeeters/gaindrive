@@ -5,17 +5,26 @@ import org.gaindrive.android.data.model.AlbumNotes
 import org.gaindrive.android.data.model.Artist
 import org.gaindrive.android.data.model.ArtistInfo
 import org.gaindrive.android.data.model.ArtistIndex
+import org.gaindrive.android.data.model.Chapter
+import org.gaindrive.android.data.model.ChapterHit
+import org.gaindrive.android.data.model.ChapterList
+import org.gaindrive.android.data.model.ChapterSource
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.LibrarySelection
 import org.gaindrive.android.data.model.MusicRoot
 import org.gaindrive.android.data.model.Playlist
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.data.model.Song
+import org.gaindrive.android.data.model.SongChapters
+import org.gaindrive.android.net.AlbumChapterSongDto
 import org.gaindrive.android.net.AlbumDto
 import org.gaindrive.android.net.AlbumInfoDto
 import org.gaindrive.android.net.ArtistDto
 import org.gaindrive.android.net.ArtistInfoDto
 import org.gaindrive.android.net.ArtistWithAlbums
+import org.gaindrive.android.net.ChapterDto
+import org.gaindrive.android.net.ChapterHitDto
+import org.gaindrive.android.net.ChaptersDto
 import org.gaindrive.android.net.DirectoryDto
 import org.gaindrive.android.net.IndexDto
 import org.gaindrive.android.net.MusicFolderDto
@@ -140,6 +149,40 @@ fun SearchResultDto.toDomain(server: ServerId) = LibrarySelection(
 	artists = artist.map { it.toDomain(server) },
 	albums = album.map { it.toDomain(server) },
 	songs = song.map { it.toDomain(server) },
+	chapters = chapter.map { it.toDomain(server) },
+)
+
+// ── Chapters ────────────────────────────────────────────────────────────────
+
+fun ChapterDto.toDomain() = Chapter(
+	index = index,
+	startSeconds = start,
+	duration = duration,
+	name = name,
+)
+
+fun AlbumChapterSongDto.toDomain(server: ServerId) = SongChapters(
+	ref = ItemRef(server, id),
+	title = title,
+	chapters = chapter.map { it.toDomain() },
+)
+
+fun ChaptersDto.toDomain() = ChapterList(
+	chapters = chapter.map { it.toDomain() },
+	source = ChapterSource.from(source),
+)
+
+fun ChapterHitDto.toDomain(server: ServerId) = ChapterHit(
+	songRef = ItemRef(server, songId),
+	// Nullable rather than assumed: without it there is no listing to open, and
+	// the row then only plays. Every gaindrive server sends it.
+	albumRef = server.ref(parent),
+	index = index,
+	startSeconds = start,
+	name = name,
+	trackTitle = track,
+	albumTitle = album,
+	artistName = artist,
 )
 
 fun MusicFolderDto.toDomain() = MusicRoot(id = id, name = name, contentType = contentType)

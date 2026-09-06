@@ -41,12 +41,32 @@ sealed interface Route {
 		val fromUploads: Boolean = false,
 	) : Route
 
-	/** [fromUploads] as on [Albums], which is where it is passed down from. */
+	/**
+	 * [fromUploads] as on [Albums], which is where it is passed down from.
+	 *
+	 * [autoPlayRef] and [autoPlayMs] start a track as soon as the listing has
+	 * loaded, and exist for one caller: a chapter match in search. A marker has
+	 * no id anything can stream, so acting on one means opening the album its
+	 * recording sits in and starting that recording partway through.
+	 *
+	 * Opening the album rather than playing the track from the search screen is
+	 * not only about there being no `getSong` here. `nativeSeek` is false on
+	 * every search result — only `getAlbum`, `getMusicDirectory`, `getVideos`
+	 * and `getSong` select the codec columns it is computed from — so playing a
+	 * hit directly would send a perfectly remuxable concert down the re-encode
+	 * path every time. Reading the entry again through the album listing is
+	 * what puts it on the right tier, and it gives the queue the rest of the
+	 * recording's album besides.
+	 *
+	 * Both defaulted, so the four existing call sites are unchanged.
+	 */
 	@Serializable
 	data class Album(
 		val albumRef: String,
 		val albumTitle: String,
 		val fromUploads: Boolean = false,
+		val autoPlayRef: String? = null,
+		val autoPlayMs: Long = 0,
 	) : Route
 
 	@Serializable

@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -43,8 +43,11 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.cache.PinKind
+import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.MusicRoot
 import org.gaindrive.android.data.model.Song
+import org.gaindrive.android.data.model.currentAt
+import org.gaindrive.android.ui.components.ChapterRow
 import org.gaindrive.android.ui.components.CoverHero
 import org.gaindrive.android.ui.components.ExternalLink
 import org.gaindrive.android.ui.components.PinAction
@@ -72,6 +75,7 @@ fun AlbumDetailScreen(
 	val extras by viewModel.extras.collectAsStateWithLifecycle()
 	val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 	val playerState by player.state.collectAsStateWithLifecycle()
+	val autoPlay by viewModel.autoPlay.collectAsStateWithLifecycle()
 	var actionsFor by remember { mutableStateOf<Song?>(null) }
 
 	val canPromote by viewModel.canPromote.collectAsStateWithLifecycle()
@@ -227,6 +231,48 @@ fun AlbumDetailScreen(
 			onRetry = viewModel::load,
 			modifier = Modifier.padding(insets),
 		) { detail ->
+			// One entry per row, not per song: a chaptered recording is replaced
+			// by its markers, so the two are no longer the same count. The disc,
+			// numbering and heading rules live in albumListRows, where they can
+			// be tested. Computed here rather than inside the LazyColumn, whose
+			// builder is not a composable scope.
+			val rows = remember(detail.songs, extras.chapters) {
+				albumListRows(detail.songs, extras.chapters)
+			}
+
+			// Which marker is playing, computed once for the whole list rather
+			// than per row. It cannot come from trackStateOf, which answers
+			// about a song: every marker of a playing concert would be current
+			// at once.
+			//
+			// The empty branch is what keeps an album with no chapters — nearly
+			// every album — costing exactly what it did before: the position is
+			// never read there, so the twice-a-second tick does not recompose a
+			// listing that has nothing to highlight.
+			val playingMarker: Pair<ItemRef, Int>? = if (extras.chapters.isEmpty()) {
+				null
+			} else {
+				remember(
+					playerState.current?.ref,
+					playerState.positionMs,
+					extras.chapters,
+				) {
+					val ref = playerState.current?.ref
+					val markers = ref?.let { extras.chapters[it] }.orEmpty()
+					val at = markers.currentAt(playerState.positionMs)
+					if (ref != null && at >= 0) ref to markers[at].index else null
+				}
+			}
+
+			// Fired here rather than in the view model, which holds no player.
+			// One-shot: consuming it is what stops a rotation replaying it.
+			LaunchedEffect(autoPlay) {
+				autoPlay?.let {
+					player.play(detail.songs, it.songIndex, it.positionMs)
+					viewModel.consumeAutoPlay()
+				}
+			}
+
 			LazyColumn(
 				modifier = Modifier.fillMaxSize(),
 				// contentPadding rather than a spacer item: it scrolls with the
@@ -280,52 +326,44 @@ fun AlbumDetailScreen(
 					}
 				}
 
-				// A "Disc 1" banner on an album that has only one disc says
-				// nothing, so the headings appear only where they separate
-				// something. The songs already arrive ordered by disc.
-				val multiDisc =
-					detail.songs.mapTo(mutableSetOf()) { it.discNumber ?: 1 }.size > 1
-
-				// An album ripped with no tags, or with every track tagged 1,
-				// carries no usable numbering — number the rows by position
-				// instead of leaving the column blank. The server derives a
-				// number from a numbered filename, so this is the remainder:
-				// files named without one. Matches web/app.js, album-wide index
-				// included, so the two clients read the same.
-				val useSeq = detail.songs.all { (it.track ?: 0) <= 1 }
-
-				itemsIndexed(
-					items = detail.songs,
-					key = { _, song -> song.ref.encode() },
-				) { index, song ->
-					// The heading rides along with the first track of its disc
-					// rather than being an item of its own, so the list keys
-					// stay one per song.
+				items(items = rows, key = { it.key }) { row ->
+					// The headings ride along with the row beneath them rather
+					// than being items of their own, so the list keys stay one
+					// per row.
 					Column {
-						if (multiDisc) {
-							val disc = song.discNumber ?: 1
-							val previous = detail.songs.getOrNull(index - 1)
-							if (previous == null || (previous.discNumber ?: 1) != disc) {
-								// season carries the same number as discNumber
-								// and is set only when the group really is a
-								// season, so a show reads "Series 2" while a
-								// two-disc film still reads "Disc 2". Per group
-								// rather than per album: a show's unnumbered
-								// Specials folder is a disc.
-								val kind = if (song.season != null) "Series" else "Disc"
-								SectionHeading("$kind $disc")
-							}
+						row.headings.forEach { SectionHeading(it) }
+						when (row) {
+							is AlbumListRow.Track -> TrackRow(
+								song = row.song,
+								// Queues the whole album and starts here, which
+								// is what tapping a track in an album listing
+								// should mean.
+								onClick = { player.play(detail.songs, row.queueIndex) },
+								onLongClick = { actionsFor = row.song },
+								playback = playerState.trackStateOf(row.song.ref),
+								number = row.number,
+							)
+
+							is AlbumListRow.Marker -> ChapterRow(
+								number = row.chapter.index,
+								title = row.chapter.displayName,
+								duration = row.chapter.duration,
+								playing = playingMarker ==
+									(row.song.ref to row.chapter.index),
+								// The album queue, starting at the recording,
+								// positioned at the marker.
+								onClick = {
+									player.play(
+										detail.songs,
+										row.queueIndex,
+										row.chapter.startMs,
+									)
+								},
+								// The recording's own row is gone, so this is
+								// the only way left to reach its actions.
+								onLongClick = { actionsFor = row.song },
+							)
 						}
-						TrackRow(
-							song = song,
-							// Queues the whole album and starts here, which is
-							// what tapping a track in an album listing should
-							// mean.
-							onClick = { player.play(detail.songs, index) },
-							onLongClick = { actionsFor = song },
-							playback = playerState.trackStateOf(song.ref),
-							number = if (useSeq) index + 1 else song.track,
-						)
 					}
 				}
 			}

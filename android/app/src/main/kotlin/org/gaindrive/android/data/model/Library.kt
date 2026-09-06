@@ -204,8 +204,18 @@ data class LibrarySelection(
 	val artists: List<Artist> = emptyList(),
 	val albums: List<Album> = emptyList(),
 	val songs: List<Song> = emptyList(),
+	/**
+	 * Chapter markers whose titles matched, which only a search fills in.
+	 *
+	 * Defaulted because the starred list shares this type and never has any,
+	 * and because nothing mirrors them: a marker has no id Room could key on,
+	 * so the offline branch and the stored fallback both leave this empty and
+	 * the Chapters section simply does not appear.
+	 */
+	val chapters: List<ChapterHit> = emptyList(),
 ) {
-	val isEmpty: Boolean get() = artists.isEmpty() && albums.isEmpty() && songs.isEmpty()
+	val isEmpty: Boolean
+		get() = artists.isEmpty() && albums.isEmpty() && songs.isEmpty() && chapters.isEmpty()
 }
 
 /** What `star`/`unstar` is being applied to; each takes a different parameter. */

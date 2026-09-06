@@ -60,6 +60,7 @@ interface BrowseSource {
 		artistCount: Int,
 		albumCount: Int,
 		songCount: Int,
+		chapterCount: Int,
 	): LibrarySelection
 }
 

@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.model.BrowseScope
+import org.gaindrive.android.data.model.ChapterHit
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
@@ -49,6 +50,7 @@ import org.gaindrive.android.playback.TrackState
 import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.components.AlbumRow
 import org.gaindrive.android.ui.components.ArtistRow
+import org.gaindrive.android.ui.components.ChapterHitRow
 import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.components.PartialFailureNote
 import org.gaindrive.android.ui.components.SectionHeading
@@ -62,6 +64,12 @@ import org.gaindrive.android.ui.player.TrackActionsSheet
 fun SearchScreen(
 	onOpenArtist: (List<ItemRef>, String) -> Unit,
 	onOpenAlbum: (ItemRef, String) -> Unit,
+	/**
+	 * Opens the album a matched marker sits in and starts its recording at
+	 * that point. Not a plain play, unlike a track hit: see [onOpenChapter]
+	 * at the call site in `GainDriveApp`.
+	 */
+	onOpenChapter: (ChapterHit) -> Unit,
 	viewModel: SearchViewModel = hiltViewModel(),
 	player: PlayerViewModel = hiltViewModel(),
 ) {
@@ -161,6 +169,7 @@ fun SearchScreen(
 							onOpenArtist = onOpenArtist,
 							onOpenAlbum = onOpenAlbum,
 							onPlaySong = { song -> player.play(listOf(song), 0) },
+							onOpenChapter = onOpenChapter,
 							onSongActions = { song -> actionsFor = song },
 							playbackOf = playerState::trackStateOf,
 						)
@@ -266,6 +275,7 @@ private fun Results(
 	onOpenArtist: (List<ItemRef>, String) -> Unit,
 	onOpenAlbum: (ItemRef, String) -> Unit,
 	onPlaySong: (Song) -> Unit,
+	onOpenChapter: (ChapterHit) -> Unit,
 	onSongActions: (Song) -> Unit,
 	playbackOf: (ItemRef) -> TrackState,
 ) {
@@ -304,6 +314,22 @@ private fun Results(
 					playback = playbackOf(row.song.ref),
 					badge = badgeNames[row.song.ref.server],
 				)
+			}
+		}
+
+		// Last, and a section of its own because that is how the server reports
+		// them. A chapter has no id anything can stream, star or queue, so one
+		// drawn as a track would be a row that does not work; what it does have
+		// is a recording and a place in it, which is enough to play from.
+		if (results.chapters.isNotEmpty()) {
+			item(key = "h-chapters") { SectionHeading("Chapters") }
+			items(
+				results.chapters,
+				// The marker has no id of its own, so the song it is inside plus
+				// its position in that song is what identifies it.
+				key = { "c-${it.songRef.encode()}-${it.index}" },
+			) { hit ->
+				ChapterHitRow(hit = hit, onClick = { onOpenChapter(hit) })
 			}
 		}
 	}

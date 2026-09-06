@@ -90,8 +90,9 @@ object FolderSource : BrowseSource {
 		artistCount: Int,
 		albumCount: Int,
 		songCount: Int,
+		chapterCount: Int,
 	): LibrarySelection =
-		api.search2(query, artistCount, albumCount, songCount)
+		api.search2(query, artistCount, albumCount, songCount, chapterCount)
 			.requireOk().searchResult2?.toDomain(server) ?: LibrarySelection()
 
 	/**

@@ -34,8 +34,8 @@ class PlayerViewModel @Inject constructor(
 		player.connect()
 	}
 
-	fun play(songs: List<Song>, startIndex: Int) {
-		player.play(songs, startIndex)
+	fun play(songs: List<Song>, startIndex: Int, startPositionMs: Long = 0L) {
+		player.play(songs, startIndex, startPositionMs)
 	}
 
 	fun addToQueue(song: Song) {

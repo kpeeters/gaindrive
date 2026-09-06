@@ -107,14 +107,52 @@ interface SubsonicApi {
 	@GET("rest/getVideoInfo.view")
 	suspend fun getVideoInfo(@Query("id") id: String): SubsonicEnvelope<GetVideoInfoBody>
 
+	// ── Chapters ────────────────────────────────────────────────────────
+	//
+	// A gaindrive extension. The song boundaries inside one long recording — a
+	// concert, a DJ set, a mixtape — which are what let a listing name the
+	// songs rather than the file. Neither endpoint is video-only: an audio
+	// track carries markers for exactly the same reason a film does.
+
+	/**
+	 * The markers inside one recording, read from the file itself.
+	 *
+	 * The authority, and the one that costs a file read — use it on the
+	 * playback path, where the list has to be right, and not in a listing.
+	 * It is also the only one that can see a video's *container* chapters,
+	 * which the scan does not index.
+	 */
+	@GET("rest/getChapters.view")
+	suspend fun getChapters(@Query("id") id: String): SubsonicEnvelope<GetChaptersBody>
+
+	/**
+	 * Every chaptered item in one album folder, from the scan's index.
+	 *
+	 * The browse counterpart of [getChapters]: cheap enough to ask on every
+	 * album open, and returned in the order the album listing already draws, so
+	 * the two zip together without re-sorting. Only sidecars are indexed, so a
+	 * video whose markers live solely in its container is absent here and
+	 * present there.
+	 */
+	@GET("rest/getAlbumChapters.view")
+	suspend fun getAlbumChapters(@Query("id") id: String): SubsonicEnvelope<GetAlbumChaptersBody>
+
 	// ── Searching ───────────────────────────────────────────────────────
 
+	/**
+	 * [chapterCount] is a gaindrive extension and the server defaults it to 0,
+	 * unlike its three siblings — so asking for chapter matches is opt-in and a
+	 * client that does not want them pays for no extra query. `chapterOffset`
+	 * exists too and is deliberately not declared: nothing here pages a search,
+	 * and an unused parameter would suggest otherwise.
+	 */
 	@GET("rest/search3.view")
 	suspend fun search3(
 		@Query("query") query: String,
 		@Query("artistCount") artistCount: Int,
 		@Query("albumCount") albumCount: Int,
 		@Query("songCount") songCount: Int,
+		@Query("chapterCount") chapterCount: Int,
 	): SubsonicEnvelope<Search3Body>
 
 	/**
@@ -131,6 +169,7 @@ interface SubsonicApi {
 		@Query("artistCount") artistCount: Int,
 		@Query("albumCount") albumCount: Int,
 		@Query("songCount") songCount: Int,
+		@Query("chapterCount") chapterCount: Int,
 	): SubsonicEnvelope<Search2Body>
 
 	// ── Playlists ───────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.model.AlbumDetail
 import org.gaindrive.android.data.model.AlbumNotes
+import org.gaindrive.android.data.model.Chapter
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.MusicRoot
 import org.gaindrive.android.net.runCatchingCancellable
@@ -32,7 +33,27 @@ import javax.inject.Inject
 data class AlbumExtrasUi(
 	val heroUrl: String? = null,
 	val notes: AlbumNotes? = null,
+	/**
+	 * The chapter markers of any chaptered recording in this folder, keyed by
+	 * the recording. Empty for almost every album, and empty offline.
+	 *
+	 * An extra rather than part of the track list, on the same reasoning as the
+	 * notes: it reads an endpoint older servers do not implement, and a failure
+	 * must cost the chapter rows and not the tracks. It is requested alongside
+	 * `getAlbum` rather than after it, since it normally answers first and the
+	 * rows are then in place before anything is drawn.
+	 */
+	val chapters: Map<ItemRef, List<Chapter>> = emptyMap(),
 )
+
+/**
+ * A track to start once the listing has loaded, and where in it.
+ *
+ * Only a chapter search hit produces one: a marker has no id anything can
+ * stream, so acting on one means opening the recording's album and starting the
+ * recording at that point. Consumed once — see [AlbumDetailViewModel.autoPlay].
+ */
+data class AutoPlay(val songIndex: Int, val positionMs: Long)
 
 @HiltViewModel
 class AlbumDetailViewModel @Inject constructor(
@@ -113,6 +134,24 @@ class AlbumDetailViewModel @Inject constructor(
 
 	private val _extras = MutableStateFlow(AlbumExtrasUi())
 	val extras: StateFlow<AlbumExtrasUi> = _extras.asStateFlow()
+
+	/**
+	 * Set once, after the first successful load, when the route asked for a
+	 * track to be started.
+	 *
+	 * Published rather than acted on here: this class holds no reference to the
+	 * player, and the screen already watches [promoted] the same way. The
+	 * one-shot guard is what stops a pull to refresh, a rotation or a return to
+	 * the screen restarting a recording the user has since moved on from.
+	 */
+	private val _autoPlay = MutableStateFlow<AutoPlay?>(null)
+	val autoPlay: StateFlow<AutoPlay?> = _autoPlay.asStateFlow()
+
+	private var autoPlayDone = false
+
+	fun consumeAutoPlay() {
+		_autoPlay.value = null
+	}
 
 	/** True only for a user-initiated pull, which drives the pull indicator. */
 	private val _isRefreshing = MutableStateFlow(false)
@@ -241,6 +280,14 @@ class AlbumDetailViewModel @Inject constructor(
 			// needed once the tracks are already on screen.
 			val covers = async { runCatchingCancellable { library.coverUrls() }.getOrNull() }
 
+			// Started here too, and for the opposite reason: it is a request
+			// the tracks must not wait on, but it reads an index and normally
+			// answers before getAlbum does, so launching it in parallel is
+			// what keeps its rows from appearing under the user's finger.
+			val chapters = async {
+				runCatchingCancellable { library.albumChapters(albumRef) }.getOrNull()
+			}
+
 			val loaded: Load<AlbumDetail> =
 				runCatchingCancellable { library.albumDetail(albumRef) }.fold(
 					onSuccess = { detail ->
@@ -255,13 +302,29 @@ class AlbumDetailViewModel @Inject constructor(
 			val detail = loaded.valueOrNull()
 			if (detail == null) {
 				covers.cancel()
+				chapters.cancel()
 				return@launch
+			}
+
+			// First of everything below, because it is the only one the user is
+			// waiting to *hear*: a search tap must not be silent for as long as
+			// the cover URL and the chapter index take.
+			if (!autoPlayDone) {
+				autoPlayDone = true
+				ItemRef.decode(route.autoPlayRef.orEmpty())?.let { wanted ->
+					val index = detail.songs.indexOfFirst { it.ref == wanted }
+					if (index >= 0) _autoPlay.value = AutoPlay(index, route.autoPlayMs)
+				}
 			}
 
 			// Tracks are visible from here on; each extra fills in as it
 			// arrives and a failure costs only that one piece.
 			covers.await()?.url(detail.album.coverArt, HERO_PX)
 				?.let { url -> _extras.update { it.copy(heroUrl = url) } }
+
+			// Before the notes, which can send the server off to MusicBrainz.
+			chapters.await()?.takeIf { it.isNotEmpty() }
+				?.let { found -> _extras.update { it.copy(chapters = found) } }
 
 			// Absent album notes are entirely normal and never worth an error.
 			runCatchingCancellable { library.albumNotes(albumRef) }
