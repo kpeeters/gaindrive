@@ -3810,7 +3810,50 @@ function playerStop() {
    document.querySelector('.track-row.playing')?.classList.remove('playing');
 }
 
+// How long the overlay transport and the close button stay up after the
+// pointer stops moving.  Long enough to aim at one of them from anywhere on
+// the surface, short enough that a film is not watched through them.
+const VIDEO_CONTROLS_IDLE = 3000;
+let videoControlsTimer = null;
+
+// Shown on movement, hidden after a pause — which is what :hover alone could
+// not express.  A pointer resting anywhere over the picture counts as hovering
+// it for as long as it sits there, and after using the transport that is
+// precisely where it is, so the controls stayed drawn over the film for the
+// rest of the film.
+//
+// The class goes on #video-surface rather than on the two clusters because
+// that is the element the CSS already descended from, and because fullscreen
+// is requested on #video-frame *inside* it — an ancestor keeps matching, and
+// pointer events from the frame keep bubbling here, so neither state needs a
+// case of its own.
+function videoControlsWake() {
+   const surf = document.getElementById('video-surface');
+   surf.classList.add('controls-on');
+   clearTimeout(videoControlsTimer);
+   videoControlsTimer = setTimeout(
+      () => surf.classList.remove('controls-on'), VIDEO_CONTROLS_IDLE);
+   }
+
+function videoControlsSleep() {
+   clearTimeout(videoControlsTimer);
+   videoControlsTimer = null;
+   document.getElementById('video-surface').classList.remove('controls-on');
+   }
+
 function setupVideoSurface() {
+   // pointermove rather than mousemove so a pen counts too.  Touch needs
+   // nothing from this: the (hover: none) rules in style.css keep both
+   // clusters drawn unconditionally, and the class merely re-asserts what is
+   // already true there.
+   //
+   // Leaving the surface hides them at once, which is what :hover did and is
+   // still the right answer — the pointer has gone somewhere else entirely.
+   const surf = document.getElementById('video-surface');
+   surf.addEventListener('pointermove', videoControlsWake);
+   surf.addEventListener('pointerdown', videoControlsWake);
+   surf.addEventListener('pointerleave', videoControlsSleep);
+
    // While casting, the film is the television's: playerStop would stop the
    // local element, which is not playing anything, hide the surface, and leave
    // the Chromecast running with no way back to it.

@@ -675,7 +675,17 @@ body {
    transition: opacity 0.15s ease;
 }
 
-#video-surface:hover #video-close,
+/* Revealed by pointer movement over the surface and hidden again once it has
+   been still for a moment -- videoControlsWake() in app.js puts the class on.
+   This was :hover, which has no idle state: a pointer left anywhere over the
+   picture, which is exactly where it lands after using these, kept them drawn
+   over the film indefinitely.
+
+   Its own :hover is kept, and is not redundant with the class.  Resting the
+   pointer on a button generates no further movement, so the idle timer would
+   otherwise fade the thing being aimed at out from under it. */
+#video-surface.controls-on #video-close,
+#video-close:hover,
 #video-close:focus-visible {
    opacity: 1;
 }
@@ -686,7 +696,7 @@ body {
 }
 
 /* Transport over the picture: back 10, play/pause, forward 10.  Revealed by
-   exactly the three rules #video-close uses above, and for the same bargain —
+   exactly the four rules #video-close uses above, and for the same bargain —
    nothing is drawn over a film until the pointer says otherwise, and a touch
    device never hovers so it gets them unconditionally.
 
@@ -749,7 +759,14 @@ body {
       }
 }
 
-#video-surface:hover #video-controls,
+/* :has(button:hover), not :hover on the cluster.  The cluster's box spans the
+   gaps between the discs and a good part of the middle of the picture, so
+   :hover would hold the controls up for a pointer merely resting near them --
+   the thing the idle timer exists to stop.  This way only a pointer actually
+   on a disc does, which is also what keeps an invisible button from ever being
+   clicked: the one under the pointer is never the one that faded. */
+#video-surface.controls-on #video-controls,
+#video-controls:has(button:hover),
 #video-controls:focus-within {
    opacity: 1;
 }
