@@ -284,7 +284,7 @@ class FetchUrlViewModel @Inject constructor(
 		// on the album, that being the distinctive string.
 		if (album.length < MIN_SEARCH_LENGTH) return null
 		val found = runCatchingCancellable {
-			library.searchProgressively(BrowseScope.AllServers, album, 0, 3, 0).last()
+			library.searchProgressively(BrowseScope.AllServers, album, 0, 3, 0, 0).last()
 		}.getOrNull()?.items?.albums.orEmpty()
 		val first = found.firstOrNull() ?: return null
 		return buildString {

@@ -53,6 +53,11 @@ data class StoredFilter(
 	fun filterPlaylists(playlists: List<Playlist>): List<Playlist> =
 		playlists.filter { it.ref.encode() in this.playlists }
 
+	// Rebuilt field by field rather than copied, so a new one is dropped unless
+	// it is named here. `chapters` is the case that exists today and the omission
+	// is deliberate: nothing mirrors a marker — it has no id to key a row on — so
+	// there are never any to filter, and the section simply does not appear
+	// offline. Anything that changes that has to add a line here.
 	fun filterSelection(selection: LibrarySelection): LibrarySelection = LibrarySelection(
 		artists = selection.artists.mapNotNull(::keep),
 		albums = filterAlbums(selection.albums),
