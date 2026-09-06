@@ -931,12 +931,32 @@
 <tr><td><code>castDevices.castDevice.address</code></td><td>string</td><td>IP address.</td></tr>
 <tr><td><code>castDevices.castDevice.port</code></td><td>int</td><td>Usually 8009; a multizone group gets a dynamic one.</td></tr>
 <tr><td><code>castDevices.castDevice.manual</code></td><td>bool</td><td>True for a configured device.</td></tr>
-<tr><td><code>castDevices.castDevice.videoOut</code></td><td>bool</td><td>Whether the device can display a picture, from bit 0 of its <code>ca</code> record. True when it announced nothing, which is every configured device: refusing the picture on a guess is worse than the guess. <code>castLoad</code> sends a video to a device with this false as its soundtrack alone.</td></tr>
+<tr><td><code>castDevices.castDevice.videoOut</code></td><td>bool</td><td>Whether the device can display a picture, from bit 0 of its <code>ca</code> record. True when it announced nothing, which is every configured device: refusing the picture on a guess is worse than the guess. <code>castLoad</code> sends a video to a device with this false as its soundtrack alone, unless <code>videoPref</code> overrules it.</td></tr>
+<tr><td><code>castDevices.castDevice.videoPref</code></td><td>string</td><td><code>auto</code>, <code>send</code> or <code>sound</code> — what a person decided about this device with <code>setCastDevicePref</code>, which overrides <code>videoOut</code>. <code>auto</code> when nobody has.</td></tr>
 </tbody>
 </table>
 <p>Discovery assembles a device only from records belonging to <code>_googlecast._tcp</code>, and returns one entry per Cast id, so a device announcing several services or several spellings of its name still appears once.</p>
 <p>A configured device whose address and port were also discovered appears once, as the discovered one, since that carries the device&#x27;s own name and Cast id. The port belongs in that comparison because a Cast multizone group lives at its leader&#x27;s address on a different one.</p>
 <p>Configured devices exist because discovery can fail for reasons no client can fix — a device that answers TLS on 8009 while its mDNS responder has stopped replying even to a direct unicast query. The address must be an IP literal; a hostname is refused at startup.</p>
+</div>
+<div class="api-ep">
+<h3 id="ep-setCastDevicePref">setCastDevicePref</h3>
+<p class="api-meta"><code>GET /rest/setCastDevicePref.view</code>
+<span class="api-badge">castRole</span></p>
+<p>Records what a person decided about one cast device, overriding what it announced about itself.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>deviceId</code> <b class="api-req">*</b></td><td>string</td><td>Device id from <code>listCastDevices</code>. Must name a device currently in that list.</td></tr>
+<tr><td><code>videoPref</code> <b class="api-req">*</b></td><td>string</td><td><code>auto</code>, <code>send</code> or <code>sound</code>. Anything else is rejected rather than stored, since an unrecognised value would read back as <code>auto</code> with nothing saying the setting had not taken.</td></tr>
+</tbody>
+</table>
+<p>A device&#x27;s <code>ca</code> record is not always the last word. A Chromecast-built-in amplifier announces no video output and plays a video file&#x27;s sound perfectly well anyway, while a configured device announces nothing at all and so reads as capable even when it has no screen.</p>
+<p>The setting is held by the server rather than by each client, because it is a fact about the device: the answer is the same in every browser and on a phone.</p>
+<p><code>send</code> only ever <em>raises</em> a device that announced no screen, and only for a file that can be sent untouched. Anything needing a remux or a re-encode falls back to the soundtrack — a remux reads and writes the whole film, and a re-encode re-encodes a picture nobody can see, so both are worse than extracting the sound. So this cannot be used to force a re-encode, and on a DVD rip or an HEVC film it will appear to do nothing, which is the intended behaviour rather than a failure.</p>
+<p><code>sound</code> is the other direction: it forces the soundtrack for a device that announced a screen, or announced nothing.</p>
+<p class="api-see">See also <a href="#ep-listCastDevices"><code>listCastDevices</code></a>, <a href="#ep-castLoad"><code>castLoad</code></a>.</p>
 </div>
 <div class="api-ep">
 <h3 id="ep-startCast">startCast</h3>
@@ -1004,14 +1024,16 @@
 <tbody>
 <tr><td><code>castLoad.audioOnly</code></td><td>bool</td><td>True when the receiver was sent the video&#x27;s soundtrack rather than the video, because it announced no <code>videoOut</code>. Always false for an audio track.</td></tr>
 <tr><td><code>castLoad.contentType</code></td><td>string</td><td>The <code>contentType</code> declared in the Cast <code>LOAD</code>, which is what the receiver picks its decode pipeline from. Not the source container: everything the remux or re-encode tier touches is announced as <code>video/mp4</code>, and a VP9/Opus <code>.mkv</code> is announced as <code>video/webm</code> although its bytes go out untouched.</td></tr>
-<tr><td><code>castLoad.sentSuffix</code></td><td>string</td><td>The container the receiver actually receives. The source extension on the <code>direct</code> tier, <code>mp4</code> on the other two, and <code>mp3</code> for a soundtrack.</td></tr>
+<tr><td><code>castLoad.sentSuffix</code></td><td>string</td><td>The container the receiver actually receives. The source extension on the <code>direct</code> tier, <code>mp4</code> on the other two. A soundtrack reports whatever it was put in: <code>m4a</code>, <code>mp3</code>, <code>flac</code>, <code>opus</code> or <code>ogg</code> when the track was copied, and <code>mp3</code> when it had to be encoded.</td></tr>
 <tr><td><code>castLoad.sentBitRate</code></td><td>int</td><td>Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
 file byte-ranged — no <code>format</code>, no <code>maxBitRate</code>, and the account ceiling is
 exempt for a cast token — so this is the file&#x27;s own bitrate rather than anything
 the <code>transcoded*</code> fields describe. A video remux keeps the source&#x27;s rate and a
-re-encode is not fixed-rate, so both report 0.
+re-encode is not fixed-rate, so both report 0, and so does a copied soundtrack:
+the track&#x27;s own rate is not the container&#x27;s, and nearly right is the worst
+thing a diagnostic can be.
 </td></tr>
-<tr><td><code>castLoad.tier</code></td><td>string</td><td>Which of the three delivery tiers this fetch lands on: <code>direct</code> (the file as it stands, byte-ranged), <code>remux</code> (<code>-c copy</code> into MP4 through the transcode cache, still seekable), or <code>encode</code> (re-encoded as it plays). A soundtrack is always <code>encode</code>.</td></tr>
+<tr><td><code>castLoad.tier</code></td><td>string</td><td>Which of the three delivery tiers this fetch lands on: <code>direct</code> (the file as it stands, byte-ranged), <code>remux</code> (<code>-c copy</code> through the transcode cache, still seekable), or <code>encode</code> (re-encoded). The same two words apply to a soundtrack, and there they are the answer to &quot;why does this sound worse&quot;: <code>remux</code> is the track copied out of the film untouched, <code>encode</code> a 320 kbps MP3 of it.</td></tr>
 </tbody>
 </table>
 <h4>Errors</h4>
@@ -1023,8 +1045,8 @@ re-encode is not fixed-rate, so both report 0.
 </table>
 <p><b>Seeking is also a <code>castLoad</code></b>, not a <code>castControl</code> with <code>action=seek</code> — every seek is a full reload. The server returns as soon as the load is queued; the actual Cast message goes out on a background connection.</p>
 <p>Subtitle tracks are declared to the receiver in <b>every</b> load, whether or not one is switched on, because <code>castControl</code> with <code>action=captions</code> can only activate a track the load already declared. Emitting them only when a caption is already chosen works when the viewer picks before playing and never when they pick during, which reads as an intermittent fault rather than a missing feature.</p>
-<p><b>A video loaded onto a receiver that cannot display one is sent as its soundtrack</b>, and the reply says so in <code>castLoad.audioOnly</code>. Which receivers those are is bit 0 of the <code>ca</code> record <code>listCastDevices</code> reports as <code>videoOut</code>. The decision is made here rather than by the client, so that a client draws what happened instead of deciding it a second time from the device list — and no subtitle tracks are declared for such a load, there being no picture to put them on.</p>
-<p>Such a load takes noticeably longer to begin: the soundtrack is transcoded in full before the receiver is told anything, because a receiver abandons a session after about a minute with no data on the HTTP body and a feature-length film takes longer than that to convert.</p>
+<p><b>A video loaded onto a receiver that cannot display one is sent as its soundtrack</b>, and the reply says so in <code>castLoad.audioOnly</code>. Which receivers those are is bit 0 of the <code>ca</code> record <code>listCastDevices</code> reports as <code>videoOut</code>, overridden by whatever <code>setCastDevicePref</code> recorded for that device. The decision is made here rather than by the client, so that a client draws what happened instead of deciding it a second time from the device list — and no subtitle tracks are declared for such a load, there being no picture to put them on.</p>
+<p>Such a load does not begin immediately: the soundtrack is produced in full before the receiver is told anything, because a receiver abandons a session after about a minute with no data on the HTTP body and a feature-length film takes longer than that to convert. How long that is depends on <code>tier</code>. A track already in a codec the receiver decodes — AAC, MP3, FLAC, Opus or Vorbis — is copied out of the container, which is <code>remux</code> and costs one pass over the file. Anything else (AC3, DTS, TrueHD, PCM, so most disc rips) is decoded and re-encoded, which is <code>encode</code> and is several times slower.</p>
 <p class="api-see">See also <a href="#ep-castControl"><code>castControl</code></a>, <a href="#ep-castSession"><code>castSession</code></a>.</p>
 </div>
 <div class="api-ep">
@@ -1081,14 +1103,16 @@ re-encode is not fixed-rate, so both report 0.
 <tr><td><code>castSession.trackId</code></td><td>int</td><td>The subtitle track currently showing, or 0.</td></tr>
 <tr><td><code>castSession.audioOnly</code></td><td>bool</td><td>The same answer <code>castLoad</code> returned for the load now playing. Present here because a client that has just reloaded has no <code>castLoad</code> reply to have read it from.</td></tr>
 <tr><td><code>castSession.contentType</code></td><td>string</td><td>The <code>contentType</code> declared in the Cast <code>LOAD</code>, which is what the receiver picks its decode pipeline from. Not the source container: everything the remux or re-encode tier touches is announced as <code>video/mp4</code>, and a VP9/Opus <code>.mkv</code> is announced as <code>video/webm</code> although its bytes go out untouched.</td></tr>
-<tr><td><code>castSession.sentSuffix</code></td><td>string</td><td>The container the receiver actually receives. The source extension on the <code>direct</code> tier, <code>mp4</code> on the other two, and <code>mp3</code> for a soundtrack.</td></tr>
+<tr><td><code>castSession.sentSuffix</code></td><td>string</td><td>The container the receiver actually receives. The source extension on the <code>direct</code> tier, <code>mp4</code> on the other two. A soundtrack reports whatever it was put in: <code>m4a</code>, <code>mp3</code>, <code>flac</code>, <code>opus</code> or <code>ogg</code> when the track was copied, and <code>mp3</code> when it had to be encoded.</td></tr>
 <tr><td><code>castSession.sentBitRate</code></td><td>int</td><td>Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
 file byte-ranged — no <code>format</code>, no <code>maxBitRate</code>, and the account ceiling is
 exempt for a cast token — so this is the file&#x27;s own bitrate rather than anything
 the <code>transcoded*</code> fields describe. A video remux keeps the source&#x27;s rate and a
-re-encode is not fixed-rate, so both report 0.
+re-encode is not fixed-rate, so both report 0, and so does a copied soundtrack:
+the track&#x27;s own rate is not the container&#x27;s, and nearly right is the worst
+thing a diagnostic can be.
 </td></tr>
-<tr><td><code>castSession.tier</code></td><td>string</td><td>Which of the three delivery tiers this fetch lands on: <code>direct</code> (the file as it stands, byte-ranged), <code>remux</code> (<code>-c copy</code> into MP4 through the transcode cache, still seekable), or <code>encode</code> (re-encoded as it plays). A soundtrack is always <code>encode</code>.</td></tr>
+<tr><td><code>castSession.tier</code></td><td>string</td><td>Which of the three delivery tiers this fetch lands on: <code>direct</code> (the file as it stands, byte-ranged), <code>remux</code> (<code>-c copy</code> through the transcode cache, still seekable), or <code>encode</code> (re-encoded). The same two words apply to a soundtrack, and there they are the answer to &quot;why does this sound worse&quot;: <code>remux</code> is the track copied out of the film untouched, <code>encode</code> a 320 kbps MP3 of it.</td></tr>
 </tbody>
 </table>
 <p>Only the caller&#x27;s own session. Another owner&#x27;s is reported as <code>active: false</code> — otherwise a second browser would adopt it wholesale on page load and show itself as casting.</p>

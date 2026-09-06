@@ -62,6 +62,8 @@ for d in devices:
     # the film. It comes from bit 0 of the device's `ca` record, so this is
     # the check that the record was read off the device the way we think.
     print(f"  videoOut: {d.get('videoOut')}")
+    # What a person decided about the device, which overrides videoOut.
+    print(f"  videoPref: {d.get('videoPref')}")
     print()
 
 if len(sys.argv) < 3:
@@ -81,6 +83,41 @@ def get_json(endpoint, **params):
         return json.loads(r.read())["subsonic-response"]
 
 
+# The per-device preference is server-side precisely so every client agrees
+# about a device, which means the only way to see it is to write one and read
+# it back. Restored afterwards, since this is a real device somebody has
+# probably configured deliberately.
+found  = [d for d in devices if d.get("id") == DEVICE]
+if not found:
+    print(f"Device {DEVICE} is not in the list.")
+    sys.exit(1)
+before = found[0].get("videoPref")
+if before is None:
+    print("This server does not report videoPref; skipping that check.\n")
+
+for want in ("send", "sound", "auto") if before is not None else ():
+    get_json("setCastDevicePref", deviceId=DEVICE, videoPref=want)
+    got = None
+    for d in get_json("listCastDevices")["castDevices"]:
+        if d["id"] == DEVICE:
+            got = d["videoPref"]
+    if got != want:
+        print(f"videoPref did not round-trip: set {want!r}, read back {got!r}")
+        sys.exit(1)
+if before is not None:
+    print("videoPref round-trips through setCastDevicePref for all three "
+          "values.")
+
+    # An unrecognised value must be refused rather than stored, or it would
+    # read back as neither and behave as auto with nothing saying so.
+    bad = get_json("setCastDevicePref", deviceId=DEVICE, videoPref="maybe")
+    if bad.get("status") != "failed":
+        print("setCastDevicePref accepted an unknown videoPref.")
+        sys.exit(1)
+
+    get_json("setCastDevicePref", deviceId=DEVICE, videoPref=before)
+    print(f"videoPref restored to {before!r}.\n")
+
 # castLoad's reply and castSession's snapshot describe the same load and are
 # required to agree — the second exists only because a reloaded page has no
 # first to have read. Nothing else checks that, and a client drawing one thing
@@ -94,6 +131,10 @@ get_json("startCast", id=DEVICE, castController=CONTROLLER)
 load = get_json("castLoad", id=SONG, castController=CONTROLLER)["castLoad"]
 sess = get_json("castSession", castController=CONTROLLER)["castSession"]
 
+# `tier` and `sentSuffix` are the two worth reading by eye for a video: a
+# soundtrack reporting remux was copied out of the container, one reporting
+# encode was decoded and re-encoded, and the second takes several times as
+# long to appear.
 print(f"castLoad for song {SONG}:")
 for f in FIELDS:
     print(f"  {f:12}: {load.get(f)!r}")

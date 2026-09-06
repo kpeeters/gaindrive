@@ -261,6 +261,38 @@ inline std::string_view cast_mime_for(std::string_view container,
 // estimate_length path would need if the cache warm ever has to be given up.
 inline constexpr const char* CAST_AUDIO_ONLY_FORMAT = "mp3";
 
+// The container to stream-copy a soundtrack into, keyed on the *codec* rather
+// than on the source container.  nullopt means it has to be encoded.
+//
+// This is what makes a film's soundtrack cheap.  Extracting it is otherwise a
+// demux plus a decode plus a LAME encode of a two-hour track, materialised in
+// full before the receiver is told anything — minutes, on a path whose whole
+// purpose is that the wait happens before the LOAD.  When the track is already
+// in a codec the receiver decodes, `-c:a copy` reduces that to the demux.
+//
+// The codec set is the one browser_audio_codec() lists, and for the same
+// reason — a Cast receiver is a Chrome media stack — but written out here
+// rather than reused, because this has to name a container per codec and that
+// predicate has no notion of one.  Everything else (AC3, DTS, TrueHD, PCM, so
+// most DVD and Blu-ray rips) falls back to CAST_AUDIO_ONLY_FORMAT.
+//
+// The containers are chosen for what ffmpeg will actually mux the codec into
+// with a seekable output: `ipod` writes a normal MP4 whose moov lands at the
+// end, `mp3` still writes its Xing/Info header under -c:a copy, and both Ogg
+// forms carry their own granule positions.  So a copied soundtrack is as
+// seekable as an encoded one, which native cast seek needs.
+inline std::optional<Target> audio_copy_target(std::string_view audio_codec)
+	{
+	std::string_view name;
+	if      (audio_codec == "aac")    name = "m4a";
+	else if (audio_codec == "mp3")    name = "mp3";
+	else if (audio_codec == "flac")   name = "flac";
+	else if (audio_codec == "opus")   name = "opus";
+	else if (audio_codec == "vorbis") name = "ogg";
+	else return std::nullopt;
+	return target_for(name);
+	}
+
 // True when a request naming a video is really a request for its soundtrack.
 //
 // This is the whole audio-only contract, and it is deliberately spelled with

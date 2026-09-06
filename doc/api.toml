@@ -1846,7 +1846,52 @@ hostname is refused at startup.
   [[endpoint.field]]
   name = "castDevices.castDevice.videoOut"
   type = "bool"
-  doc  = 'Whether the device can display a picture, from bit 0 of its `ca` record. True when it announced nothing, which is every configured device: refusing the picture on a guess is worse than the guess. `castLoad` sends a video to a device with this false as its soundtrack alone.'
+  doc  = 'Whether the device can display a picture, from bit 0 of its `ca` record. True when it announced nothing, which is every configured device: refusing the picture on a guess is worse than the guess. `castLoad` sends a video to a device with this false as its soundtrack alone, unless `videoPref` overrules it.'
+
+  [[endpoint.field]]
+  name = "castDevices.castDevice.videoPref"
+  type = "string"
+  doc  = '`auto`, `send` or `sound` — what a person decided about this device with `setCastDevicePref`, which overrides `videoOut`. `auto` when nobody has.'
+
+[[endpoint]]
+kind    = 'endpoint'
+name    = "setCastDevicePref"
+section = "cast"
+auth    = 'castRole'
+summary = 'Records what a person decided about one cast device, overriding what it announced about itself.'
+notes   = '''
+A device's `ca` record is not always the last word. A Chromecast-built-in
+amplifier announces no video output and plays a video file's sound perfectly
+well anyway, while a configured device announces nothing at all and so reads as
+capable even when it has no screen.
+
+The setting is held by the server rather than by each client, because it is a
+fact about the device: the answer is the same in every browser and on a phone.
+
+`send` only ever *raises* a device that announced no screen, and only for a
+file that can be sent untouched. Anything needing a remux or a re-encode falls
+back to the soundtrack — a remux reads and writes the whole film, and a
+re-encode re-encodes a picture nobody can see, so both are worse than
+extracting the sound. So this cannot be used to force a re-encode, and on a DVD
+rip or an HEVC film it will appear to do nothing, which is the intended
+behaviour rather than a failure.
+
+`sound` is the other direction: it forces the soundtrack for a device that
+announced a screen, or announced nothing.
+'''
+see = ["listCastDevices", "castLoad"]
+
+  [[endpoint.param]]
+  name     = "deviceId"
+  type     = "string"
+  required = true
+  doc      = 'Device id from `listCastDevices`. Must name a device currently in that list.'
+
+  [[endpoint.param]]
+  name     = "videoPref"
+  type     = "string"
+  required = true
+  doc      = '`auto`, `send` or `sound`. Anything else is rejected rather than stored, since an unrecognised value would read back as `auto` with nothing saying the setting had not taken.'
 
 [[endpoint]]
 kind    = 'endpoint'
@@ -1937,16 +1982,21 @@ feature.
 
 **A video loaded onto a receiver that cannot display one is sent as its
 soundtrack**, and the reply says so in `castLoad.audioOnly`. Which receivers
-those are is bit 0 of the `ca` record `listCastDevices` reports as `videoOut`.
-The decision is made here rather than by the client, so that a client draws
-what happened instead of deciding it a second time from the device list — and
-no subtitle tracks are declared for such a load, there being no picture to put
+those are is bit 0 of the `ca` record `listCastDevices` reports as `videoOut`,
+overridden by whatever `setCastDevicePref` recorded for that device. The
+decision is made here rather than by the client, so that a client draws what
+happened instead of deciding it a second time from the device list — and no
+subtitle tracks are declared for such a load, there being no picture to put
 them on.
 
-Such a load takes noticeably longer to begin: the soundtrack is transcoded in
-full before the receiver is told anything, because a receiver abandons a
-session after about a minute with no data on the HTTP body and a feature-length
-film takes longer than that to convert.
+Such a load does not begin immediately: the soundtrack is produced in full
+before the receiver is told anything, because a receiver abandons a session
+after about a minute with no data on the HTTP body and a feature-length film
+takes longer than that to convert. How long that is depends on `tier`. A track
+already in a codec the receiver decodes — AAC, MP3, FLAC, Opus or Vorbis — is
+copied out of the container, which is `remux` and costs one pass over the file.
+Anything else (AC3, DTS, TrueHD, PCM, so most disc rips) is decoded and
+re-encoded, which is `encode` and is several times slower.
 '''
 # `see` may only name endpoints defined in this file, so that a typo is caught
 # rather than silently dropping a cross-reference; getVideoInfo is standard and
@@ -1995,7 +2045,7 @@ would be one value.
   [[endpoint.field]]
   name = "castLoad.sentSuffix"
   type = "string"
-  doc  = 'The container the receiver actually receives. The source extension on the `direct` tier, `mp4` on the other two, and `mp3` for a soundtrack.'
+  doc  = 'The container the receiver actually receives. The source extension on the `direct` tier, `mp4` on the other two. A soundtrack reports whatever it was put in: `m4a`, `mp3`, `flac`, `opus` or `ogg` when the track was copied, and `mp3` when it had to be encoded.'
 
   [[endpoint.field]]
   name = "castLoad.sentBitRate"
@@ -2005,13 +2055,15 @@ Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
 file byte-ranged — no `format`, no `maxBitRate`, and the account ceiling is
 exempt for a cast token — so this is the file's own bitrate rather than anything
 the `transcoded*` fields describe. A video remux keeps the source's rate and a
-re-encode is not fixed-rate, so both report 0.
+re-encode is not fixed-rate, so both report 0, and so does a copied soundtrack:
+the track's own rate is not the container's, and nearly right is the worst
+thing a diagnostic can be.
 '''
 
   [[endpoint.field]]
   name = "castLoad.tier"
   type = "string"
-  doc  = 'Which of the three delivery tiers this fetch lands on: `direct` (the file as it stands, byte-ranged), `remux` (`-c copy` into MP4 through the transcode cache, still seekable), or `encode` (re-encoded as it plays). A soundtrack is always `encode`.'
+  doc  = 'Which of the three delivery tiers this fetch lands on: `direct` (the file as it stands, byte-ranged), `remux` (`-c copy` through the transcode cache, still seekable), or `encode` (re-encoded). The same two words apply to a soundtrack, and there they are the answer to "why does this sound worse": `remux` is the track copied out of the film untouched, `encode` a 320 kbps MP3 of it.'
 
   [[endpoint.error]]
   code = '0'
@@ -2140,7 +2192,7 @@ load and show itself as casting.
   [[endpoint.field]]
   name = "castSession.sentSuffix"
   type = "string"
-  doc  = 'The container the receiver actually receives. The source extension on the `direct` tier, `mp4` on the other two, and `mp3` for a soundtrack.'
+  doc  = 'The container the receiver actually receives. The source extension on the `direct` tier, `mp4` on the other two. A soundtrack reports whatever it was put in: `m4a`, `mp3`, `flac`, `opus` or `ogg` when the track was copied, and `mp3` when it had to be encoded.'
 
   [[endpoint.field]]
   name = "castSession.sentBitRate"
@@ -2150,13 +2202,15 @@ Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
 file byte-ranged — no `format`, no `maxBitRate`, and the account ceiling is
 exempt for a cast token — so this is the file's own bitrate rather than anything
 the `transcoded*` fields describe. A video remux keeps the source's rate and a
-re-encode is not fixed-rate, so both report 0.
+re-encode is not fixed-rate, so both report 0, and so does a copied soundtrack:
+the track's own rate is not the container's, and nearly right is the worst
+thing a diagnostic can be.
 '''
 
   [[endpoint.field]]
   name = "castSession.tier"
   type = "string"
-  doc  = 'Which of the three delivery tiers this fetch lands on: `direct` (the file as it stands, byte-ranged), `remux` (`-c copy` into MP4 through the transcode cache, still seekable), or `encode` (re-encoded as it plays). A soundtrack is always `encode`.'
+  doc  = 'Which of the three delivery tiers this fetch lands on: `direct` (the file as it stands, byte-ranged), `remux` (`-c copy` through the transcode cache, still seekable), or `encode` (re-encoded). The same two words apply to a soundtrack, and there they are the answer to "why does this sound worse": `remux` is the track copied out of the film untouched, `encode` a 320 kbps MP3 of it.'
 
 [[endpoint]]
 kind         = 'endpoint'

@@ -2923,7 +2923,15 @@ async function openInfoModal() {
       const kbps = castStream.sentBitRate > 0
          ? `${castStream.sentSuffix?.toUpperCase() ?? ''} ${castStream.sentBitRate} kbps`.trim()
          : (castStream.sentSuffix?.toUpperCase() ?? '');
-      const how = castStream.audioOnly    ? 'soundtrack only'
+      // A soundtrack still says which tier produced it.  That is the whole
+      // question this row exists to answer — "why does this sound worse on
+      // the television" — and a copied track and a 320 kbps re-encode are
+      // exactly the two answers, so collapsing them into one phrase would
+      // leave the row unable to say the thing it is for.
+      const how = castStream.audioOnly
+                     ? (castStream.tier === 'remux'
+                           ? 'soundtrack only, copied'
+                           : 'soundtrack only, re-encoded')
                 : castStream.tier === 'remux'  ? 'remuxed to MP4'
                 : castStream.tier === 'encode' ? 're-encoded as it plays'
                 :                                'as stored';
@@ -3007,8 +3015,15 @@ function castDeviceButton(dev) {
    // explicit false: video_out() reports true for a device that announced
    // nothing, which is every manually configured one, and marking those would
    // be a guess presented as a fact.
+   //
+   // What it says is the *effective* answer, not the announcement, since a
+   // person may have overruled it below.
+   const shows = dev.videoPref === 'send' ? true
+               : dev.videoPref === 'sound' ? false
+               : dev.videoOut;
    const sub = [dev.model, dev.address,
-                dev.videoOut === false ? 'sound only' : null]
+                shows === false ? 'sound only'
+                : dev.videoPref === 'send' ? 'sends video' : null]
       .filter(Boolean).join(' · ');
    if (sub) {
       const secondary = document.createElement('span');
@@ -3021,11 +3036,60 @@ function castDeviceButton(dev) {
    btn.appendChild(icon);
    btn.appendChild(text);
    btn.addEventListener('click', () => selectCastDevice(dev.id, label));
-   return btn;
+
+   // The row is a wrapper rather than the button itself, so the picker can
+   // carry a control beside the name.  A <select> inside a <button> is invalid
+   // and behaves unpredictably, and the whole button is a "start casting"
+   // target — as a sibling the menu cannot start a cast by being clicked.
+   const row = document.createElement('div');
+   row.className = 'cast-row';
+   row.appendChild(btn);
+
+   // What to do with a video on this device.  Two options rather than three,
+   // and which two depends on which side of its own announcement the device
+   // is: only one of "send" and "sound" can change anything for it, and
+   // offering the inert one would invite the question of what it does.
+   //
+   // "if possible" is not hedging.  The server sends the file only when it can
+   // be sent untouched and falls back to the soundtrack otherwise, so on a DVD
+   // rip or an HEVC film this genuinely does nothing — which reads as a broken
+   // setting unless the label says so.
+   const opts = dev.videoOut === false
+      ? [['auto', 'Soundtrack'], ['send',  'Video if possible']]
+      : [['auto', 'Video'],      ['sound', 'Soundtrack only']];
+   const sel = document.createElement('select');
+   sel.className = 'cast-row-pref';
+   for (const [value, text] of opts) {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = text;
+      sel.appendChild(opt);
+      }
+   // Anything the two options above cannot express reads as auto, which is
+   // also what the server does with a value it does not recognise.
+   sel.value = opts.some(o => o[0] === dev.videoPref) ? dev.videoPref : 'auto';
+   sel.addEventListener('change', async () => {
+      try {
+         await apiCall('setCastDevicePref',
+                       {deviceId: dev.id, videoPref: sel.value});
+         dev.videoPref = sel.value;
+         // Redraw: the sub-line now says something different.
+         renderCastDevices(castDeviceCache);
+         }
+      catch (err) { showError(err.message); }
+      });
+   row.appendChild(sel);
+
+   return row;
    }
+
+// The list last drawn, kept so a per-device control can redraw the rows after
+// changing one without re-asking the server for a list it just supplied.
+let castDeviceCache = [];
 
 function renderCastDevices(devices) {
    const list = document.getElementById('cast-device-list');
+   castDeviceCache = devices;
    list.textContent = '';
 
    // Discovered first, sorted by name, then the configured ones under a

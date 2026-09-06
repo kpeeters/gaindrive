@@ -2206,6 +2206,30 @@ input.chapter-time.bad { border-color: #e06c6c; }
    gap: 0.4rem;
 }
 
+/* One row: the device button takes the width, a per-device control sits beside
+   it.  The button keeps its own border, so the row itself draws nothing. */
+.cast-row {
+   display: flex;
+   align-items: center;
+   gap: 0.4rem;
+}
+
+.cast-row > button {
+   flex: 1;
+   min-width: 0;
+}
+
+.cast-row-pref {
+   flex-shrink: 0;
+   background: var(--bg);
+   color: var(--text);
+   border: 1px solid var(--border);
+   border-radius: 4px;
+   padding: 0.3rem 0.4rem;
+   font-size: 0.85em;
+   cursor: pointer;
+}
+
 #cast-device-list button {
    display: flex;
    align-items: center;

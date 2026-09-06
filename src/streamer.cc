@@ -50,13 +50,36 @@ Streamer::TranscodePlan Streamer::plan_transcode(const SongInfo& song,
 	                     || source->encoder != wanted->encoder);
 	bool bitrate_limit = max_bitrate > 0 && song.bitrate > 0 && song.bitrate > max_bitrate;
 
+	// A video's soundtrack already in a codec the requested container can hold
+	// is a remux, not an encode — see audio_copy_target() in codecs.hh for
+	// what that saves.  Two things about the shape of this test:
+	//
+	//  * It is expressible from `format` alone, and has to be.  A Chromecast
+	//    fetches stream.view for itself and runs this function again; if it
+	//    reached a different plan it would build a second cache entry under a
+	//    different key while the one cast_load_song() warmed sat unused.  So
+	//    the *decision* is which format goes on the URL, and this only agrees
+	//    with it.
+	//  * max_bitrate == 0 is a guard rather than an accident.  songs.bitrate on
+	//    a video is the *container's* rate, so it cannot honestly be compared
+	//    against an audio ceiling; a client that named one gets the encode.
+	std::optional<Target> copy_t;
+	if (song.is_video) copy_t = audio_copy_target(song.audio_codec);
+	bool copy_audio = wanted && copy_t && max_bitrate == 0
+	               && copy_t->name == wanted->name;
+
 	TranscodePlan plan;
 	plan.needed = time_offset > 0 || format_change || bitrate_limit;
 
 	// When only a time-offset seek is needed (no format conversion, no bitrate
 	// limit) preserve the original codec via ffmpeg -c:a copy so there is no
-	// quality loss.  bitrate == 0 signals copy mode to serve_transcoded.
-	if (format_change) {
+	// quality loss.  bitrate == 0 signals copy mode to serve_transcoded, and is
+	// what the soundtrack copy above rides on too.
+	if (copy_audio) {
+		plan.target  = wanted;
+		plan.bitrate = 0;
+		}
+	else if (format_change) {
 		plan.target  = wanted;
 		plan.bitrate = (max_bitrate > 0 && max_bitrate < 320) ? max_bitrate : 320;
 		}
@@ -508,8 +531,18 @@ std::vector<std::string> Streamer::ffmpeg_argv(const SongInfo& song,
 		// AC3 or DTS track encoded as surround costs several times the
 		// bitrate the audio-quality setting is asking for, and phones and
 		// browsers play the stereo mix regardless.
-		args.push_back("-ac");
-		args.push_back("2");
+		//
+		// Only when something is being encoded.  -ac is an encoder option and
+		// a stream copy has no encoder to give it to — ffmpeg accepts it and
+		// ignores it, so leaving it here would only make the argv claim a
+		// downmix that is not happening.  Nothing is lost by that: decoding a
+		// multichannel track purely to fold it down is the entire cost the
+		// copy exists to avoid, and a receiver decoding it downmixes to
+		// whatever its output actually has.
+		if (target_bitrate > 0) {
+			args.push_back("-ac");
+			args.push_back("2");
+			}
 		}
 	args.push_back("-map_metadata");
 	args.push_back("-1");

@@ -6033,25 +6033,42 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto devices = cast_manager_.cached_devices();
 		cast_manager_.discover_background();
 
+		// Read here rather than inside the two rendering arms so JSON and XML
+		// cannot disagree about a device, and so the settings lookups happen
+		// once each.
+		std::vector<std::string> prefs;
+		prefs.reserve(devices.size());
+		for (auto& d : devices) {
+			std::string p = store_.get_setting("cast_video:" + d.id);
+			prefs.push_back(p.empty() ? "auto" : p);
+			}
+
 		std::string body;
 		if (use_json) {
-			body = subsonic_ok_json([&devices](nlohmann::json& r) {
+			body = subsonic_ok_json([&devices, &prefs](nlohmann::json& r) {
 				nlohmann::json arr = nlohmann::json::array();
-				for (auto& d : devices)
+				for (size_t i = 0; i < devices.size(); i++) {
+					auto& d = devices[i];
 					arr.push_back({{"id", d.id}, {"name", d.name},
 					               {"model", d.model},
 					               {"address", d.address}, {"port", d.port},
 					               {"manual", d.manual},
 					               // What the device's `ca` TXT record said it
 					               // can do; true when it announced nothing.
-					               {"videoOut", d.video_out()}});
+					               {"videoOut", d.video_out()},
+					               // What a person decided about it, which
+					               // overrides the record above.
+					               {"videoPref", prefs[i]}});
+					}
 				r["castDevices"] = arr;
 				});
 			}
 		else {
-			body = subsonic_ok([&devices](XMLDocument& doc, XMLElement* root) {
+			body = subsonic_ok([&devices, &prefs](XMLDocument& doc,
+			                                      XMLElement* root) {
 				auto* el = doc.NewElement("castDevices");
-				for (auto& d : devices) {
+				for (size_t i = 0; i < devices.size(); i++) {
+					auto& d = devices[i];
 					auto* dev = doc.NewElement("castDevice");
 					dev->SetAttribute("id",      d.id.c_str());
 					dev->SetAttribute("name",    d.name.c_str());
@@ -6060,6 +6077,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					dev->SetAttribute("port",    d.port);
 					dev->SetAttribute("manual",  d.manual);
 					dev->SetAttribute("videoOut", d.video_out());
+					dev->SetAttribute("videoPref", prefs[i].c_str());
 					el->InsertEndChild(dev);
 					}
 				root->InsertEndChild(el);
@@ -6067,6 +6085,60 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 
 		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// setCastDevicePref — record what a person decided about one device.
+	//
+	// Server-side rather than in each client's storage because it is a fact
+	// about the device, not about the viewer: whether a WiiM plays a video
+	// file's sound is the same answer in every browser and on the phone.  The
+	// per-viewer knob next to it in spirit, castSyncDelay, is client-side for
+	// exactly the opposite reason — it is about the screen you are watching.
+	server_.Get("/rest/setCastDevicePref.view", [this](const httplib::Request& req,
+	                                                   httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		if (!check_cast_perm(req, res, store_, use_json)) return;
+
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+
+		std::string id   = req.get_param_value("deviceId");
+		std::string pref = req.get_param_value("videoPref");
+		if (id.empty())   { err(10, "Required parameter missing: deviceId."); return; }
+		if (pref.empty()) { err(10, "Required parameter missing: videoPref."); return; }
+
+		// Refused rather than stored, because an unrecognised value would be
+		// written, read back as neither "send" nor "sound", and so behave as
+		// `auto` with nothing anywhere saying the setting had not taken.
+		if (pref != "auto" && pref != "send" && pref != "sound") {
+			err(10, "videoPref must be auto, send or sound.");
+			return;
+			}
+
+		// The id has to name a device we know about.  Not for authorisation —
+		// there is nothing to authorise — but because the key is composed from
+		// it, and an unvalidated one is an unbounded write into client.settings
+		// by any account with cast permission.  Same bound ladder_size() puts
+		// on the thumbnail table, for the same reason.
+		auto devices = cast_manager_.cached_devices();
+		bool known = false;
+		for (auto& d : devices) if (d.id == id) { known = true; break; }
+		if (!known) { err(70, "Cast device not found."); return; }
+
+		// `auto` is stored as an empty value, which get_setting() cannot tell
+		// from an absent row — which is the point: a device nobody has decided
+		// about and one reset to auto read the same, so `auto` needs no
+		// spelling of its own on the way back out.
+		store_.set_setting("cast_video:" + id, pref == "auto" ? "" : pref);
+		std::cout << stamp() << "Cast: device " << id << " videoPref=" << pref
+		          << std::endl;
+
+		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
+		                use_json ? "application/json" : "application/xml");
 		});
 
 	// startCast — enter cast mode: subsequent stream requests go to the Chromecast.
@@ -8253,9 +8325,46 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	// receiver refuses media whose type does not match what arrives.  A
 	// *silent* video is the case that separates the two: it has nothing to
 	// extract, so audio_only_request() keeps it on the video ladder.
+	//
+	// What "cannot display a picture" means is not quite the `ca` record on its
+	// own any more.  A per-device preference, held server-side under the cast
+	// device's id so every client agrees about a device, can override it in
+	// either direction, and the two directions are deliberately not
+	// symmetrical:
+	//
+	//  * `send` only ever *raises* a device that announced no screen, and only
+	//    for a file the Direct tier sends untouched.  A WiiM plays a video
+	//    file's sound perfectly well whatever the Cast documentation says, and
+	//    the raw file byte-ranged off disk costs nothing at all — no ffmpeg,
+	//    no wait before the LOAD.  It stops at the Direct tier because the
+	//    other two are worse than extracting the sound: a remux reads and
+	//    writes the whole film through the cache, and a re-encode re-encodes a
+	//    picture nobody can see.  Never applied to a device that *does*
+	//    announce a screen, or it would demote a remuxable film to audio.
+	//  * `sound` closes the other half of the gap.  A configured device has
+	//    capabilities == -1 and so reads as capable, which means a screenless
+	//    device named in the config could not be told it has no screen.
+	const std::string video_pref =
+		store_.get_setting("cast_video:" + cast_manager_.get_device_id());
+	bool shows_video = cast_manager_.device_video_out();
+	if (video_pref == "sound")
+		shows_video = false;
+	else if (video_pref == "send" && !shows_video)
+		shows_video = cast_tier_for(song.codec, song.video_codec,
+		                            song.audio_codec) == CastTier::Direct;
+
+	// Which audio format the soundtrack is asked for in, decided here so the
+	// URL, the announced mime, the reported container and the plan that warms
+	// the cache are one answer rather than four.  A copy is a remux of the
+	// track already in the file and is what makes this affordable; see
+	// audio_copy_target() in codecs.hh.
+	auto copy_t = audio_copy_target(song.audio_codec);
+	const std::string cast_fmt = copy_t ? std::string(copy_t->name)
+	                                    : std::string(CAST_AUDIO_ONLY_FORMAT);
+
 	const bool audio_only = song.is_video
-	                     && !cast_manager_.device_video_out()
-	                     && audio_only_request(true, CAST_AUDIO_ONLY_FORMAT,
+	                     && !shows_video
+	                     && audio_only_request(true, cast_fmt,
 	                                           song.audio_codec);
 
 	// The caption list is resolved before the token is minted, because the
@@ -8291,8 +8400,8 @@ GainDrive::cast_load_song(const httplib::Request& req,
 		// Naming an audio format for a video *is* the request for its
 		// soundtrack — audio_only_request() in codecs.hh — so this one
 		// parameter is the whole of it on the server side.
-		lr.url += "&format=" + std::string(CAST_AUDIO_ONLY_FORMAT);
-		lr.mime = std::string(codec_to_mime(CAST_AUDIO_ONLY_FORMAT));
+		lr.url += "&format=" + cast_fmt;
+		lr.mime = std::string(codec_to_mime(cast_fmt));
 		}
 	else
 		lr.mime = std::string(cast_mime_for(song.codec, song.video_codec,
@@ -8309,8 +8418,13 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	stream.audio_only = audio_only;
 	stream.mime       = lr.mime;
 	if (audio_only) {
-		stream.suffix = CAST_AUDIO_ONLY_FORMAT;
-		stream.tier   = "encode";
+		stream.suffix = cast_fmt;
+		// The same two words the video ladder uses, and they mean the same
+		// thing here: "remux" is -c:a copy of the track the file already
+		// holds, "encode" is a decode and a re-encode.  It is the answer to
+		// "why does this sound worse on the television", which is the whole
+		// reason these fields are reported rather than re-derived.
+		stream.tier   = copy_t ? "remux" : "encode";
 		}
 	else {
 		CastTier t  = cast_tier_for(song.codec, song.video_codec,
@@ -8379,18 +8493,30 @@ GainDrive::cast_load_song(const httplib::Request& req,
 		// to the client is the one the warm actually encodes at.  It is pure
 		// negotiation against the source — no I/O — so hoisting it costs
 		// nothing and two copies of it could disagree.
-		auto plan = Streamer::plan_transcode(si, CAST_AUDIO_ONLY_FORMAT, 0, 0);
+		auto plan = Streamer::plan_transcode(si, cast_fmt, 0, 0);
 		stream.bitrate = plan.bitrate;
-		lr.prepare = [this, si, sid_s, plan]() {
+		// A copy plan is exactly the one whose bitrate is 0 — which is also
+		// what gets reported, matching the video remux tier and for the same
+		// reason: the track's own rate is not the container's rate, and nearly
+		// right is the worst thing a diagnostic can be.
+		const bool copying = plan.bitrate == 0;
+		lr.prepare = [this, si, sid_s, plan, copying]() {
 			auto entry = Streamer::cache_entry(si, transcode_cache_, plan);
 			if (!entry) {
-				// Not fatal: stream.view falls back to a piped transcode, and
-				// the receiver may still cope with a short one.  Logged
-				// because a cast that dies about a minute in is this line.
+				// Logged because a cast that dies about a minute in is this
+				// line.  Whether it is fatal depends on which plan failed, and
+				// the asymmetry is the point: an *encode* that could not be
+				// cached may still play as a piped mp3, so the LOAD goes out.
+				// A *copy* that could not be cached means the argv itself
+				// failed, and serve() would run the identical argv down the
+				// piped path and fail identically — so pointing the receiver
+				// at that URL buys a dead session with nothing to explain it.
 				std::cout << stamp()
 				          << "Cast: no cache entry for soundtrack of song="
-				          << sid_s << ", streaming unwarmed" << std::endl;
-				return true;
+				          << sid_s
+				          << (copying ? ", copy failed; not loading"
+				                      : ", streaming unwarmed") << std::endl;
+				return !copying;
 				}
 			std::cout << stamp() << "Cast: soundtrack warmed song=" << sid_s
 			          << " " << (entry->hit() ? "hit" : "built")
@@ -8413,6 +8539,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	std::cout << stamp() << "Cast: load song=" << sid_s
 	          << " video=" << (song.is_video ? "yes" : "no")
 	          << " audio_only=" << (audio_only ? "yes" : "no")
+	          << (video_pref.empty() ? "" : " pref=" + video_pref)
 	          << " mime=" << lr.mime
 	          << " tier=" << stream.tier
 	          << " sent=" << stream.suffix
