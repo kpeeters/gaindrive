@@ -27,6 +27,7 @@
 	"upload_dir": "/tmp/gaindrive-uploads",
 	"flat_multi_disc": true,
 	"transcode_cache_dir": "/var/lib/gaindrive/transcodes",
+	"//transcode_cache_mb": "Raise this if you cast films to a speaker or an amplifier. Such a receiver is sent the film's soundtrack, and where that has to be re-encoded it is re-encoded losslessly -- roughly 600-800 MB for a 90-minute film -- so one of them very nearly fills the 1024 MB default and a second evicts the first. Nothing breaks; the conversion is simply paid again next time.",
 	"transcode_cache_mb": 1024,
 	"transcode_jobs": 0,
 	"scan_jobs": 0

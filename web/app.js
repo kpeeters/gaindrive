@@ -2551,6 +2551,17 @@ function onCastStatus(s) {
    // the seek point so the absolute song position is startOffset + the
    // receiver's reported currentTime.
    if (typeof s.startOffset === 'number') castStartOffset = s.startOffset;
+   // The stream description, repeated on every push.  castLoad's reply is the
+   // *attempt*, and a receiver that refuses it gets a second, different load —
+   // a film becoming its soundtrack — so the reply the client read can already
+   // be describing something that is not playing.  Read unconditionally rather
+   // than only on a change: it costs an assignment, and a version test would be
+   // one more thing able to drift.
+   if (typeof s.audioOnly === 'boolean') {
+      castStream        = s;
+      castAudioOnly     = s.audioOnly;
+      castReceiverVideo = !!s.receiverShowsVideo;
+      }
    // The receiver saying anything but IDLE means it has the stream, which for
    // an audio-only load is the end of a transcode that ran before the LOAD was
    // sent.  Cleared here, above the transient gate below: that gate drops the

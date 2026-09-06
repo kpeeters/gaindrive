@@ -729,6 +729,12 @@ static XMLElement* song_entry_xml(XMLDocument& doc,
 // dropped is_video sends a video down the audio ladder, where TARGETS has no
 // entry for its container and the whole tier decision is skipped.
 // size_override exists for the Cast probe, which deliberately serves a slice.
+// A comma-joined set, because there are only ever a handful of codec pairs and
+// a table would be a schema change for a fact that is pure cache: worst case a
+// forgotten refusal costs one failed LOAD again.  Neither codec name can
+// contain a comma, so the join needs no escaping.
+static const char* CAST_NOVIDEO_KEY = "cast_novideo:";
+
 static Streamer::SongInfo streamer_song(const MediaStore::SongInfo& s,
                                          const std::string& abs,
                                          int64_t size_override = 0)
@@ -6134,8 +6140,14 @@ GainDrive::GainDrive(const std::string& db_path,
 		// about and one reset to auto read the same, so `auto` needs no
 		// spelling of its own on the way back out.
 		store_.set_setting("cast_video:" + id, pref == "auto" ? "" : pref);
+		// Changing your mind about a device is the natural place to make it
+		// reconsider, and the only one: a codec pair recorded as refused is
+		// never re-tried otherwise, so new firmware — or a different device
+		// that inherited the address, and with it the id — would be judged for
+		// ever on what its predecessor could not play.
+		store_.set_setting(CAST_NOVIDEO_KEY + id, "");
 		std::cout << stamp() << "Cast: device " << id << " videoPref=" << pref
-		          << std::endl;
+		          << " (any refused codecs forgotten)" << std::endl;
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
@@ -6305,12 +6317,28 @@ GainDrive::GainDrive(const std::string& db_path,
 				auto s = cast_manager_.wait_status(15000);
 				if (!cast_manager_.active())                 return false;
 				if (cast_session_gen_.load() != session_gen) return false;
+				// The same description castLoad's reply carried, repeated on
+				// every push.  Not redundancy: a LOAD that was refused is
+				// retried one rung down the ladder — a film becoming its
+				// soundtrack — and the reply the client read describes the
+				// attempt that failed.  Without this the info panel goes on
+				// claiming "as stored, MP4" over a FLAC soundtrack until the
+				// page is reloaded, which is precisely the "reporting the
+				// reload rather than the stream" that castSession exists to
+				// prevent.
+				const CastStreamInfo st = cast_stream();
 				std::string event = "data: " + nlohmann::json({
 					{"playerState", s.player_state},
 					{"currentTime", s.current_time},
 					{"duration",    s.duration},
 					{"idleReason",  s.idle_reason},
-					{"startOffset", last_cast_offset_}}).dump() + "\n\n";
+					{"startOffset", last_cast_offset_},
+					{"audioOnly",          st.audio_only},
+					{"receiverShowsVideo", st.receiver_video},
+					{"contentType",        st.mime},
+					{"sentSuffix",         st.suffix},
+					{"sentBitRate",        st.bitrate},
+					{"tier",               st.tier}}).dump() + "\n\n";
 				return sink.write(event.data(), event.size());
 				});
 		});
@@ -6354,13 +6382,13 @@ GainDrive::GainDrive(const std::string& db_path,
 			// it from, and a client that drew one thing before the reload and
 			// another after would be reporting the reload rather than the
 			// stream.
-			r["castSession"]["audioOnly"]   = last_cast_stream_.audio_only;
-			r["castSession"]["receiverShowsVideo"] =
-				last_cast_stream_.receiver_video;
-			r["castSession"]["contentType"] = last_cast_stream_.mime;
-			r["castSession"]["sentSuffix"]  = last_cast_stream_.suffix;
-			r["castSession"]["sentBitRate"] = last_cast_stream_.bitrate;
-			r["castSession"]["tier"]        = last_cast_stream_.tier;
+			const CastStreamInfo st = cast_stream();
+			r["castSession"]["audioOnly"]          = st.audio_only;
+			r["castSession"]["receiverShowsVideo"] = st.receiver_video;
+			r["castSession"]["contentType"]        = st.mime;
+			r["castSession"]["sentSuffix"]         = st.suffix;
+			r["castSession"]["sentBitRate"]        = st.bitrate;
+			r["castSession"]["tier"]               = st.tier;
 			// Which subtitle track is on, in the same 1..n numbering castLoad
 			// and castControl take, so a client that has just reloaded can
 			// mark its picker without asking the receiver anything.
@@ -8259,7 +8287,7 @@ void GainDrive::cast_teardown()
 	cast_manager_.stop();
 	last_cast_song_id_.clear();
 	last_cast_offset_ = 0.0f;
-	last_cast_stream_ = {};
+	set_cast_stream({});
 		{
 		// Releasing the in-use count is what lets the transcode cache prune a
 		// soundtrack nobody is listening to any more.
@@ -8296,6 +8324,142 @@ void GainDrive::cast_claim(const std::string& user,
 		cast_owner_controller_ = controller;
 		}
 	++cast_session_gen_;
+	}
+
+bool GainDrive::cast_video_refused(const std::string& device_id,
+                                   const std::string& codec_pair)
+	{
+	if (device_id.empty() || codec_pair.empty()) return false;
+	std::string list = store_.get_setting(CAST_NOVIDEO_KEY + device_id);
+	// Wrapped in commas both sides so "h264/aac" cannot match inside
+	// "h264/aac_latm".
+	return ("," + list + ",").find("," + codec_pair + ",") != std::string::npos;
+	}
+
+void GainDrive::cast_note_video_refused(const std::string& device_id,
+                                        const std::string& codec_pair)
+	{
+	if (device_id.empty() || codec_pair.empty()) return;
+	if (cast_video_refused(device_id, codec_pair)) return;
+	std::string list = store_.get_setting(CAST_NOVIDEO_KEY + device_id);
+	if (!list.empty()) list += ",";
+	list += codec_pair;
+	store_.set_setting(CAST_NOVIDEO_KEY + device_id, list);
+	std::cout << stamp() << "Cast: device " << device_id << " refused "
+	          << codec_pair << "; sending the soundtrack for it from now on"
+	          << std::endl;
+	}
+
+CastManager::LoadRequest
+GainDrive::soundtrack_load(const std::string& base,
+                           const MediaStore::SongInfo& song, int song_id,
+                           float offset, bool is_fallback,
+                           CastStreamInfo& desc)
+	{
+	CastManager::LoadRequest lr;
+	desc = CastStreamInfo{};
+
+	// The same answer cast_load_song() reached when it decided this was worth
+	// doing at all — one definition, in codecs.hh, for the reason stated there.
+	const std::string fmt = cast_soundtrack_format(song.audio_codec);
+	if (fmt.empty()) return lr;
+
+	// No captions collected, which is not an omission: there is no picture to
+	// put them on, and an empty list is what leaves the minted token unable to
+	// fetch one at all.
+	const std::string token = cast_manager_.mint_token(song_id, {});
+	if (token.empty()) return lr;
+
+	const std::string sid_s = std::to_string(song_id);
+	// Naming an audio format for a video *is* the request for its soundtrack —
+	// audio_only_request() in codecs.hh — so this one parameter is the whole of
+	// it on the server side.
+	lr.url  = base + "stream.view?id=" + sid_s + "&castToken=" + token
+	        + "&format=" + fmt;
+	lr.mime = std::string(codec_to_mime(fmt));
+	// Native seek: the URL serves the whole file and the LOAD says where to
+	// begin, so the receiver's clock is absolute.
+	lr.current_time = offset;
+	lr.duration     = song.duration;
+
+	desc.audio_only     = true;
+	// No picture reaches the receiver on this route, by construction.  A client
+	// keeps its own copy of the picture on this, never on audio_only.
+	desc.receiver_video = false;
+	desc.mime           = lr.mime;
+	desc.suffix         = fmt;
+
+	Streamer::SongInfo si = streamer_song(song, store_.abs_path(song.path));
+	// Resolved here rather than inside the lambda so the figures reported to
+	// the client are the ones the warm actually produces.  It is pure
+	// negotiation against the source — no I/O — so hoisting it costs nothing
+	// and two copies of it could disagree.
+	auto plan = Streamer::plan_transcode(si, fmt, 0, 0);
+	// A copy plan is exactly the one whose bitrate is 0.
+	const bool copying = plan.bitrate == 0;
+	// The same two words the video ladder uses, and they mean the same thing
+	// here: "remux" is -c:a copy of the track the file already holds, "encode"
+	// is a decode and a lossless re-encode.  It is the answer to "why does this
+	// sound worse on the television", which is the whole reason these fields
+	// are reported rather than re-derived by the client.
+	desc.tier = copying ? "remux" : "encode";
+	// 0 for anything that is not a fixed-rate encode, which is two cases: a
+	// copy, and a *lossless* encode, where plan.bitrate is only the non-zero
+	// marker meaning "encode" and describes nothing about the bytes.
+	desc.bitrate = (plan.target && plan.target->lossy) ? plan.bitrate : 0;
+
+	// Captured now: by the time prepare runs, the session's device is still the
+	// same one, but reading it on that thread would be a second answer to a
+	// question already settled here.
+	const std::string dev  = cast_manager_.get_device_id();
+	const std::string pair = song.video_codec + "/" + song.audio_codec;
+
+	// The soundtrack of a film is a transcode of a two-hour AC3 track, and
+	// serve() answers it out of the transcode cache — which materialises the
+	// whole file before the first byte.  A receiver drops a session after about
+	// a minute with no data on the HTTP body, so that wait has to happen before
+	// it is told anything at all.  This runs on CastManager's load worker,
+	// which already treats a newer load_gen_ as a cancellation.
+	//
+	// The entry is kept alive afterwards: it is an RAII in-use count and
+	// prune() skips in-use keys, so releasing it here would let the file be
+	// evicted between the warm and the receiver's first GET.
+	lr.prepare = [this, si, sid_s, plan, copying, is_fallback, desc, dev,
+	              pair]() {
+		// Before the warm, not after: a client asking castSession during the
+		// minute ffmpeg takes should already be told what it is waiting for.
+		// This hook running at all is the proof that the first attempt was
+		// refused — CastManager only reaches a fallback down that path — which
+		// is why both of these live here and nowhere else.
+		if (is_fallback) {
+			cast_note_video_refused(dev, pair);
+			set_cast_stream(desc);
+			}
+		auto entry = Streamer::cache_entry(si, transcode_cache_, plan);
+		if (!entry) {
+			// Logged because a cast that dies about a minute in is this line.
+			// Whether it is fatal depends on which plan failed, and the
+			// asymmetry is the point: an *encode* that could not be cached may
+			// still play as a pipe, so the LOAD goes out.  A *copy* that could
+			// not be cached means the argv itself failed, and serve() would run
+			// the identical argv down the piped path and fail identically — so
+			// pointing the receiver at that URL buys a dead session with
+			// nothing to explain it.
+			std::cout << stamp()
+			          << "Cast: no cache entry for soundtrack of song="
+			          << sid_s
+			          << (copying ? ", copy failed; not loading"
+			                      : ", streaming unwarmed") << std::endl;
+			return !copying;
+			}
+		std::cout << stamp() << "Cast: soundtrack warmed song=" << sid_s
+		          << " " << (entry->hit() ? "hit" : "built")
+		          << " bytes=" << entry->size() << std::endl;
+		std::lock_guard<std::mutex> lk(cast_warm_mu_);
+		cast_warm_entry_ = std::move(entry);
+		return true;
+		};
+	return lr;
 	}
 
 GainDrive::CastStreamInfo
@@ -8352,193 +8516,157 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	const std::string video_pref =
 		store_.get_setting("cast_video:" + cast_manager_.get_device_id());
 	bool shows_video = cast_manager_.device_video_out();
+	const std::string codec_pair = song.video_codec + "/" + song.audio_codec;
 	if (video_pref == "sound")
 		shows_video = false;
 	else if (video_pref == "send" && !shows_video)
+		// The tier says the file can go out untouched; the second test says
+		// this device has not already proved it cannot decode it.  The Direct
+		// tier is built from *browser* predicates, and a Cast receiver's codec
+		// support is narrower — an AV1/Opus MP4 passes it and no amplifier
+		// plays it — so the tier alone is a hopeful answer rather than a
+		// reliable one.  Being refused once is what makes it reliable.
 		shows_video = cast_tier_for(song.codec, song.video_codec,
-		                            song.audio_codec) == CastTier::Direct;
+		                            song.audio_codec) == CastTier::Direct
+		           && !cast_video_refused(cast_manager_.get_device_id(),
+		                                  codec_pair);
 
-	// Which audio format the soundtrack is asked for in, decided here so the
-	// URL, the announced mime, the reported container and the plan that warms
-	// the cache are one answer rather than four.  A copy is a remux of the
-	// track already in the file and is what makes this affordable; see
-	// audio_copy_target() in codecs.hh.
-	auto copy_t = audio_copy_target(song.audio_codec);
-	const std::string cast_fmt = copy_t ? std::string(copy_t->name)
-	                                    : std::string(CAST_AUDIO_ONLY_FORMAT);
+	// Empty when there is nothing to extract — a silent film, or one the
+	// scanner could not probe.  Such a video stays on the video ladder, which
+	// is what keeps this predicate agreeing with the one Streamer::serve()
+	// applies: a LOAD announcing audio/flac while MP4 goes out is media a
+	// receiver refuses on the type alone.
+	const std::string cast_fmt = cast_soundtrack_format(song.audio_codec);
 
-	const bool audio_only = song.is_video
-	                     && !shows_video
-	                     && audio_only_request(true, cast_fmt,
-	                                           song.audio_codec);
+	const bool audio_only = song.is_video && !shows_video && !cast_fmt.empty();
 
-	// The caption list is resolved before the token is minted, because the
-	// token is scoped to this song *and* to the caption ids this LOAD is about
-	// to declare — getCaptions will accept it for those and nothing else.
-	// Skipped entirely for a soundtrack: there is no picture to caption, and
-	// not collecting them is what leaves the token unable to fetch one.
-	MediaStore::VideoStreams streams;
-	std::vector<int> caption_ids;
-	if (song.is_video && !audio_only) {
-		streams = store_.get_video_streams(song_id);
-		for (const auto& c : streams.captions) caption_ids.push_back(c.index);
-		}
-
-	// Minted per LOAD rather than per session. Everything the receiver fetches
-	// carries this rather than the account's credentials — a television is not
-	// a place to leave a password — so what it is worth is what a leak costs:
-	// one song, for as long as this LOAD is current.
-	const std::string token = cast_manager_.mint_token(song_id, caption_ids);
-	if (token.empty()) {
-		std::cout << stamp() << "Cast: no stream token; refusing to load"
-		          << std::endl;
-		// Nothing was loaded, so nothing is being sent: an empty description.
-		// The client hides a row it has no value for, which is the right
-		// showing for a load that did not happen.
-		return {};
-		}
-	const std::string tok = "&castToken=" + token;
-
+	// Two shapes, and they share only the description they produce.  The
+	// soundtrack is built by soundtrack_load(), which the fallback below builds
+	// again — that is why it is a function rather than a branch.
 	CastManager::LoadRequest lr;
-	lr.url  = base + "stream.view?id=" + sid_s + tok;
-	if (audio_only) {
-		// Naming an audio format for a video *is* the request for its
-		// soundtrack — audio_only_request() in codecs.hh — so this one
-		// parameter is the whole of it on the server side.
-		lr.url += "&format=" + cast_fmt;
-		lr.mime = std::string(codec_to_mime(cast_fmt));
-		}
-	else
-		lr.mime = std::string(cast_mime_for(song.codec, song.video_codec,
-		                                    song.audio_codec));
-
-	// What the receiver will actually get, worked out here and reported back
-	// for the same reason audio_only is: this is the one place holding both
-	// the song and the device, and the ladder it comes off lives in codecs.hh.
-	//
-	// The audio-only bitrate is filled in below, from the transcode plan that
-	// warms the cache — one negotiation, not two, so the figure reported is
-	// necessarily the figure encoded.
 	CastStreamInfo stream;
-	stream.audio_only = audio_only;
-	// Whether the receiver will actually *show* the film, which is a different
-	// question from whether it was sent one.  Under `send` a screenless device
-	// gets the whole video and displays none of it, so !audio_only would tell
-	// a client to drop its own picture exactly where it is most wanted — the
-	// bug that made this a separate field.  device_video_out() is the raw
-	// announcement here on purpose: the preference decides what to send, and
-	// no preference gives a receiver a screen.
-	stream.receiver_video = song.is_video && !audio_only
-	                     && cast_manager_.device_video_out();
-	stream.mime       = lr.mime;
+
 	if (audio_only) {
-		stream.suffix = cast_fmt;
-		// The same two words the video ladder uses, and they mean the same
-		// thing here: "remux" is -c:a copy of the track the file already
-		// holds, "encode" is a decode and a re-encode.  It is the answer to
-		// "why does this sound worse on the television", which is the whole
-		// reason these fields are reported rather than re-derived.
-		stream.tier   = copy_t ? "remux" : "encode";
+		lr = soundtrack_load(base, song, song_id, offset, false, stream);
+		if (lr.url.empty()) {
+			std::cout << stamp() << "Cast: no soundtrack load for song=" << sid_s
+			          << "; refusing to load" << std::endl;
+			// Nothing was loaded, so nothing is being sent: an empty description.
+			// The client hides a row it has no value for, which is the right
+			// showing for a load that did not happen.
+			return {};
+			}
 		}
 	else {
+		// The caption list is resolved before the token is minted, because the
+		// token is scoped to this song *and* to the caption ids this LOAD is
+		// about to declare — getCaptions will accept it for those and nothing
+		// else.
+		MediaStore::VideoStreams streams;
+		std::vector<int> caption_ids;
+		if (song.is_video) {
+			streams = store_.get_video_streams(song_id);
+			for (const auto& c : streams.captions)
+				caption_ids.push_back(c.index);
+			}
+
+		// Minted per LOAD rather than per session. Everything the receiver
+		// fetches carries this rather than the account's credentials — a
+		// television is not a place to leave a password — so what it is worth is
+		// what a leak costs: one song, for as long as this LOAD is current.
+		const std::string token = cast_manager_.mint_token(song_id, caption_ids);
+		if (token.empty()) {
+			std::cout << stamp() << "Cast: no stream token; refusing to load"
+			          << std::endl;
+			return {};
+			}
+		const std::string tok = "&castToken=" + token;
+
+		lr.url  = base + "stream.view?id=" + sid_s + tok;
+		lr.mime = std::string(cast_mime_for(song.codec, song.video_codec,
+		                                    song.audio_codec));
+		// Native seek: the URL serves the whole file and the LOAD says where to
+		// begin, so the receiver's clock is absolute.  That is also why the
+		// caption cues need no shifting here, unlike the browser's own transcoded
+		// seek — see videoShiftCues() in web/app.js for the case where they do.
+		lr.current_time = offset;
+		lr.duration     = song.duration;
+
+		stream.mime = lr.mime;
+		// Whether the receiver will actually *show* the film, which is a
+		// different question from whether it was sent one.  Under `send` a
+		// screenless device gets the whole video and displays none of it, so
+		// !audio_only would tell a client to drop its own picture exactly where
+		// it is most wanted — the bug that made this a separate field.
+		// device_video_out() is the raw announcement here on purpose: the
+		// preference decides what to send, and no preference gives a receiver a
+		// screen.
+		stream.receiver_video = song.is_video
+		                     && cast_manager_.device_video_out();
 		CastTier t  = cast_tier_for(song.codec, song.video_codec,
 		                            song.audio_codec);
 		stream.tier = std::string(cast_tier_name(t));
-		// A remux and a re-encode both arrive as MP4; only the direct tier
-		// sends the file as it stands, so only there is the file's own bitrate
-		// the one going over the wire.  That is the fact a client cannot get
-		// from anywhere else: the transcoded* fields describe the account
-		// ceiling, which stream.view exempts for a cast token, so they
-		// describe a conversion that is not happening.
+		// A remux and a re-encode both arrive as MP4; only the direct tier sends
+		// the file as it stands, so only there is the file's own bitrate the one
+		// going over the wire.  That is the fact a client cannot get from
+		// anywhere else: the transcoded* fields describe the account ceiling,
+		// which stream.view exempts for a cast token, so they describe a
+		// conversion that is not happening.
 		//
-		// 0 on the other two tiers rather than the source's figure.  A -c copy
-		// is close enough to it that quoting it would be nearly right, and
-		// nearly right is the worst thing a diagnostic can be; a re-encode is
-		// not fixed-rate at all.
+		// 0 on the other two tiers rather than the source's figure.  A -c copy is
+		// close enough to it that quoting it would be nearly right, and nearly
+		// right is the worst thing a diagnostic can be; a re-encode is not
+		// fixed-rate at all.
 		stream.suffix  = t == CastTier::Direct ? song.codec : "mp4";
 		stream.bitrate = t == CastTier::Direct ? song.bitrate : 0;
-		}
-	// Native seek: the URL serves the whole file and the LOAD says where to
-	// begin, so the receiver's clock is absolute.  That is also why the caption
-	// cues need no shifting here, unlike the browser's own transcoded seek —
-	// see videoShiftCues() in web/app.js for the case where they do.
-	lr.current_time = offset;
-	lr.duration     = song.duration;
 
-	if (song.is_video && !audio_only) {
-		int  n = 0;
-		for (const auto& c : streams.captions) {
-			++n;
-			lr.caption_ids.push_back(c.index);
-			lr.tracks.push_back({
-				{"trackId",          n},
-				{"type",             "TEXT"},
-				{"subtype",          "SUBTITLES"},
-				{"trackContentId",   base + "getCaptions.view?id=" + sid_s
-				                     + "&captionId=" + std::to_string(c.index)
-				                     + tok},
-				{"trackContentType", "text/vtt"},
-				// Required for a subtitle track, and one without it can be
-				// dropped by the receiver with no diagnostic anywhere.  A
-				// sidecar file has no language to report, so it gets the
-				// ISO 639-2 code that means exactly that.
-				{"language",         c.language.empty() ? "und" : c.language},
-				{"name",             c.title.empty() ? "Subtitles" : c.title}
-				});
-			}
-		if (track_id > 0 && track_id <= n)
-			lr.active_track_ids.push_back(track_id);
-		}
-
-	// The soundtrack of a film is a transcode of a two-hour AC3 track, and
-	// serve() will answer it out of the transcode cache — which materialises
-	// the whole file before the first byte.  A receiver drops a session after
-	// about a minute with no data on the HTTP body, so that wait has to happen
-	// before it is told anything at all.  This runs on CastManager's load
-	// worker, which already treats a newer load_gen_ as a cancellation.
-	//
-	// The entry is kept alive afterwards: it is an RAII in-use count and
-	// prune() skips in-use keys, so releasing it here would let the file be
-	// evicted between the warm and the receiver's first GET.
-	if (audio_only) {
-		Streamer::SongInfo si =
-			streamer_song(song, store_.abs_path(song.path));
-		// Resolved here rather than inside the lambda so the bitrate reported
-		// to the client is the one the warm actually encodes at.  It is pure
-		// negotiation against the source — no I/O — so hoisting it costs
-		// nothing and two copies of it could disagree.
-		auto plan = Streamer::plan_transcode(si, cast_fmt, 0, 0);
-		stream.bitrate = plan.bitrate;
-		// A copy plan is exactly the one whose bitrate is 0 — which is also
-		// what gets reported, matching the video remux tier and for the same
-		// reason: the track's own rate is not the container's rate, and nearly
-		// right is the worst thing a diagnostic can be.
-		const bool copying = plan.bitrate == 0;
-		lr.prepare = [this, si, sid_s, plan, copying]() {
-			auto entry = Streamer::cache_entry(si, transcode_cache_, plan);
-			if (!entry) {
-				// Logged because a cast that dies about a minute in is this
-				// line.  Whether it is fatal depends on which plan failed, and
-				// the asymmetry is the point: an *encode* that could not be
-				// cached may still play as a piped mp3, so the LOAD goes out.
-				// A *copy* that could not be cached means the argv itself
-				// failed, and serve() would run the identical argv down the
-				// piped path and fail identically — so pointing the receiver
-				// at that URL buys a dead session with nothing to explain it.
-				std::cout << stamp()
-				          << "Cast: no cache entry for soundtrack of song="
-				          << sid_s
-				          << (copying ? ", copy failed; not loading"
-				                      : ", streaming unwarmed") << std::endl;
-				return !copying;
+		if (song.is_video) {
+			int  n = 0;
+			for (const auto& c : streams.captions) {
+				++n;
+				lr.caption_ids.push_back(c.index);
+				lr.tracks.push_back({
+					{"trackId",          n},
+					{"type",             "TEXT"},
+					{"subtype",          "SUBTITLES"},
+					{"trackContentId",   base + "getCaptions.view?id=" + sid_s
+					                     + "&captionId=" + std::to_string(c.index)
+					                     + tok},
+					{"trackContentType", "text/vtt"},
+					// Required for a subtitle track, and one without it can be
+					// dropped by the receiver with no diagnostic anywhere.  A
+					// sidecar file has no language to report, so it gets the
+					// ISO 639-2 code that means exactly that.
+					{"language",         c.language.empty() ? "und" : c.language},
+					{"name",             c.title.empty() ? "Subtitles" : c.title}
+					});
 				}
-			std::cout << stamp() << "Cast: soundtrack warmed song=" << sid_s
-			          << " " << (entry->hit() ? "hit" : "built")
-			          << " bytes=" << entry->size() << std::endl;
-			std::lock_guard<std::mutex> lk(cast_warm_mu_);
-			cast_warm_entry_ = std::move(entry);
-			return true;
-			};
+			if (track_id > 0 && track_id <= n)
+				lr.active_track_ids.push_back(track_id);
+			}
+
+		// What to do when the receiver refuses this outright.
+		//
+		// Only for the one case where the answer is unambiguous: the `send`
+		// preference has put a picture on a device that announced no screen, so
+		// the picture was never going to be seen there and the browser is very
+		// likely holding its own copy already.  Dropping to the soundtrack costs
+		// nothing anyone was looking at.
+		//
+		// Deliberately not offered for a device that *did* announce a screen.
+		// There the soundtrack is not obviously wanted, no client is holding the
+		// picture to fall back to, and the panel would go on saying "Playing on
+		// your TV" over sound alone.  That case is a known gap: an AV1 film cast
+		// to a receiver that cannot decode it still fails, and the tier ladder
+		// has nothing better to offer it — a remux is -c copy, so it would send
+		// the identical codecs a second time.
+		if (song.is_video && !cast_manager_.device_video_out()) {
+			CastStreamInfo fb;
+			auto fb_req = soundtrack_load(base, song, song_id, offset, true, fb);
+			if (!fb_req.url.empty())
+				lr.fallback = std::make_shared<CastManager::LoadRequest>(
+				                  std::move(fb_req));
+			}
 		}
 
 	// One line rather than reading it out of the LOAD dump below, which for a
@@ -8555,6 +8683,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	          << " audio_only=" << (audio_only ? "yes" : "no")
 	          << (video_pref.empty() ? "" : " pref=" + video_pref)
 	          << " screen=" << (stream.receiver_video ? "yes" : "no")
+	          << (lr.fallback ? " fallback=soundtrack" : "")
 	          << " mime=" << lr.mime
 	          << " tier=" << stream.tier
 	          << " sent=" << stream.suffix
@@ -8566,7 +8695,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 
 	last_cast_song_id_ = sid_s;
 	last_cast_offset_  = 0.0f;
-	last_cast_stream_ = stream;
+	set_cast_stream(stream);
 	cast_manager_.load(lr);
 	return stream;
 	}

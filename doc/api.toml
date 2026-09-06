@@ -1883,6 +1883,13 @@ behaviour rather than a failure.
 
 `sound` is the other direction: it forces the soundtrack for a device that
 announced a screen, or announced nothing.
+
+Calling this also **clears what the device has been recorded as refusing**. A
+LOAD the receiver rejects is remembered per codec pair so it is not attempted
+again, and changing your mind about a device is the only place that judgement
+is reconsidered — otherwise new firmware, or a different device that inherited
+the address and with it the id, would be judged for ever on what its
+predecessor could not play.
 '''
 see = ["listCastDevices", "castLoad"]
 
@@ -1994,6 +2001,24 @@ happened instead of deciding it a second time from the device list — and no
 subtitle tracks are declared for such a load, there being no picture to put
 them on.
 
+**A LOAD the receiver refuses outright is retried one rung down**, rather than
+replayed. The first rung drops the subtitle tracks, since one unreachable track
+URL fails the whole thing. The second applies only where the picture was sent
+to a device that announced no screen — `videoPref = send` — and replaces the
+film with its soundtrack: the picture was never going to be seen there, so
+nothing anyone was looking at is lost. Watch `castEvents` for the description
+that results.
+
+That second rung exists because the Direct tier is decided by *browser* codec
+support, which is wider than a Cast receiver's: an AV1/Opus MP4 passes it and no
+amplifier plays it. The refusal is remembered per device and codec pair, so the
+same film goes straight to its soundtrack next time; `setCastDevicePref` clears
+what a device has refused.
+
+A video sent to a receiver that *did* announce a screen has no such fallback,
+and a film it cannot decode simply fails. There is nothing better to offer it:
+the remux tier is `-c copy`, so it would send the identical codecs again.
+
 Such a load does not begin immediately: the soundtrack is produced in full
 before the receiver is told anything, because a receiver abandons a session
 after about a minute with no data on the HTTP body and a feature-length film
@@ -2063,7 +2088,7 @@ and is the info-panel's business, not the picture's.
   [[endpoint.field]]
   name = "castLoad.sentSuffix"
   type = "string"
-  doc  = 'The container the receiver actually receives. The source extension on the `direct` tier, `mp4` on the other two. A soundtrack reports whatever it was put in: `m4a`, `mp3`, `flac`, `opus` or `ogg` when the track was copied, and `mp3` when it had to be encoded.'
+  doc  = 'The container the receiver actually receives. The source extension on the `direct` tier, `mp4` on the other two. A soundtrack reports whatever it was put in: `m4a`, `mp3`, `flac`, `opus` or `ogg` when the track was copied, and `flac` when it had to be encoded.'
 
   [[endpoint.field]]
   name = "castLoad.sentBitRate"
@@ -2073,15 +2098,16 @@ Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
 file byte-ranged — no `format`, no `maxBitRate`, and the account ceiling is
 exempt for a cast token — so this is the file's own bitrate rather than anything
 the `transcoded*` fields describe. A video remux keeps the source's rate and a
-re-encode is not fixed-rate, so both report 0, and so does a copied soundtrack:
-the track's own rate is not the container's, and nearly right is the worst
-thing a diagnostic can be.
+re-encode is not fixed-rate, so both report 0. So does a copied soundtrack — the
+track's own rate is not the container's, and nearly right is the worst thing a
+diagnostic can be — and so does an encoded one, FLAC having no target rate at
+all.
 '''
 
   [[endpoint.field]]
   name = "castLoad.tier"
   type = "string"
-  doc  = 'Which of the three delivery tiers this fetch lands on: `direct` (the file as it stands, byte-ranged), `remux` (`-c copy` through the transcode cache, still seekable), or `encode` (re-encoded). The same two words apply to a soundtrack, and there they are the answer to "why does this sound worse": `remux` is the track copied out of the film untouched, `encode` a 320 kbps MP3 of it.'
+  doc  = 'Which of the three delivery tiers this fetch lands on: `direct` (the file as it stands, byte-ranged), `remux` (`-c copy` through the transcode cache, still seekable), or `encode` (re-encoded). The same two words apply to a soundtrack, and there they are the answer to "why does this sound worse": `remux` is the track copied out of the film untouched, `encode` a lossless FLAC of it. A soundtrack is never re-encoded lossily — the source is already lossy, and this is the one route with no choice about transcoding.'
 
   [[endpoint.error]]
   code = '0'
@@ -2215,7 +2241,7 @@ load and show itself as casting.
   [[endpoint.field]]
   name = "castSession.sentSuffix"
   type = "string"
-  doc  = 'The container the receiver actually receives. The source extension on the `direct` tier, `mp4` on the other two. A soundtrack reports whatever it was put in: `m4a`, `mp3`, `flac`, `opus` or `ogg` when the track was copied, and `mp3` when it had to be encoded.'
+  doc  = 'The container the receiver actually receives. The source extension on the `direct` tier, `mp4` on the other two. A soundtrack reports whatever it was put in: `m4a`, `mp3`, `flac`, `opus` or `ogg` when the track was copied, and `flac` when it had to be encoded.'
 
   [[endpoint.field]]
   name = "castSession.sentBitRate"
@@ -2225,15 +2251,16 @@ Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
 file byte-ranged — no `format`, no `maxBitRate`, and the account ceiling is
 exempt for a cast token — so this is the file's own bitrate rather than anything
 the `transcoded*` fields describe. A video remux keeps the source's rate and a
-re-encode is not fixed-rate, so both report 0, and so does a copied soundtrack:
-the track's own rate is not the container's, and nearly right is the worst
-thing a diagnostic can be.
+re-encode is not fixed-rate, so both report 0. So does a copied soundtrack — the
+track's own rate is not the container's, and nearly right is the worst thing a
+diagnostic can be — and so does an encoded one, FLAC having no target rate at
+all.
 '''
 
   [[endpoint.field]]
   name = "castSession.tier"
   type = "string"
-  doc  = 'Which of the three delivery tiers this fetch lands on: `direct` (the file as it stands, byte-ranged), `remux` (`-c copy` through the transcode cache, still seekable), or `encode` (re-encoded). The same two words apply to a soundtrack, and there they are the answer to "why does this sound worse": `remux` is the track copied out of the film untouched, `encode` a 320 kbps MP3 of it.'
+  doc  = 'Which of the three delivery tiers this fetch lands on: `direct` (the file as it stands, byte-ranged), `remux` (`-c copy` through the transcode cache, still seekable), or `encode` (re-encoded). The same two words apply to a soundtrack, and there they are the answer to "why does this sound worse": `remux` is the track copied out of the film untouched, `encode` a lossless FLAC of it. A soundtrack is never re-encoded lossily — the source is already lossy, and this is the one route with no choice about transcoding.'
 
 [[endpoint]]
 kind         = 'endpoint'
@@ -2246,7 +2273,16 @@ summary      = "Server-sent events carrying the receiver's status as it changes.
 notes        = '''
 An event is emitted whenever the receiver pushes a status change, and at least
 every 15 seconds otherwise. Each `data:` payload is a JSON object with
-`playerState`, `currentTime`, `duration`, `idleReason` and `startOffset`.
+`playerState`, `currentTime`, `duration`, `idleReason` and `startOffset`, plus
+the same stream description `castLoad` and `castSession` carry: `audioOnly`,
+`receiverShowsVideo`, `contentType`, `sentSuffix`, `sentBitRate` and `tier`.
+
+Those six are repeated here rather than left to the `castLoad` reply because
+that reply describes an *attempt*. A receiver that refuses a LOAD is sent a
+degraded one instead — a film it cannot decode becomes its soundtrack — so the
+description a client read when it issued the load can already be describing
+something that is not playing. Reading them from each event is what keeps a
+client from having to reload the page to find out.
 
 NOTE: The SSE connection doubles as the liveness signal for the cast session.
 Once the last listener disconnects, casting is torn down automatically after

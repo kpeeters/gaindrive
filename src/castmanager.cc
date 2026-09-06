@@ -1200,7 +1200,8 @@ void CastManager::update_status(const nlohmann::json& msg)
 	// reads as "keep the duration we already had".
 	cs.duration         = static_cast<float>(jnum(jsub(s, "media"), "duration"));
 
-	bool        do_retry = false;
+	bool        do_retry  = false;
+	const char* retry_how = nullptr;
 	LoadRequest retry_req;
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
@@ -1221,15 +1222,23 @@ void CastManager::update_status(const nlohmann::json& msg)
 	if (retry_pending_ && cs.media_session_id != last_load_old_msid_) {
 		if (cs.player_state == "IDLE" && cs.idle_reason == "ERROR") {
 			retry_pending_ = false;
-			do_retry       = true;
 			retry_req      = last_load_;
-			// Degrade rather than repeat.  Once a LOAD carries side-loaded
-			// subtitle tracks, one unreachable track URL is enough to fail
-			// the whole thing — and replaying it identically then loses the
-			// film to a subtitle, twice.  Dropping the tracks costs the
-			// captions for this load and nothing else.
-			retry_req.tracks = nlohmann::json::array();
-			retry_req.active_track_ids.clear();
+			// Degrade rather than repeat: replaying a LOAD the receiver has
+			// already rejected only fails again.  Which rung, and why each
+			// exists, is in degrade_load().
+			retry_how      = degrade_load(retry_req);
+			do_retry       = retry_how != nullptr;
+			// Re-armed, and it has to be: without this only the first rung is
+			// ever observed, because spawn_retry() goes straight to
+			// load_worker() rather than back through load().  Bounded by the
+			// ladder running out, and cleared below the moment the receiver
+			// reports it is playing — which is what the note about a stale
+			// flag being consumed by an unrelated status minutes later relies
+			// on, and why it is set only when there is a further rung.
+			if (do_retry) {
+				retry_pending_ = true;
+				last_load_     = retry_req;
+				}
 			}
 		else if (cs.player_state == "PLAYING"
 		      || cs.player_state == "BUFFERING"
@@ -1251,17 +1260,38 @@ void CastManager::update_status(const nlohmann::json& msg)
 	status_cv_.notify_all();  // wake any SSE handlers waiting for the next push
 
 	if (do_retry)
-		spawn_retry(retry_req, "receiver went IDLE/ERROR after first attempt");
+		spawn_retry(retry_req, "receiver went IDLE/ERROR after the last attempt",
+		            retry_how);
 	}
 
-void CastManager::spawn_retry(const LoadRequest& req, const char* why)
+const char* CastManager::degrade_load(LoadRequest& req)
+	{
+	if (!req.tracks.empty()) {
+		req.tracks = nlohmann::json::array();
+		req.active_track_ids.clear();
+		return "retrying without subtitle tracks";
+		}
+	if (req.fallback) {
+		// A reference-counted copy of the pointer first.  `req = *req.fallback`
+		// would destroy the pointee — through the member being overwritten —
+		// partway through reading it.  The fallback's own `fallback`, usually
+		// null, is what bounds the ladder.
+		auto next = req.fallback;
+		req = *next;
+		return "retrying with the caller's fallback stream";
+		}
+	return nullptr;
+	}
+
+void CastManager::spawn_retry(const LoadRequest& req, const char* why,
+                              const char* how)
 	{
 	// The same gen we're already on.  load_worker self-aborts if a fresh
 	// user-driven load() has bumped load_gen_ in the meantime, so an unwanted
 	// retry can never race with a newer LOAD the user just clicked.
 	int gen = load_gen_.load();
 	std::cout << stamp() << "Cast: auto-retry LOAD (gen=" << gen << ") — "
-	          << why << " (retrying without subtitle tracks)" << std::endl;
+	          << why << " (" << how << ")" << std::endl;
 	std::thread([this, req, gen]{
 		if (load_gen_.load() != gen) return;
 		load_worker(req, gen);
@@ -1278,15 +1308,15 @@ void CastManager::note_load_failure(int media_session_id)
 	// what stops update_status below either firing a second attempt or
 	// swallowing the flag.
 	LoadRequest retry_req;
-	bool        do_retry = false;
+	bool        do_retry  = false;
+	const char* retry_how = nullptr;
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
 	if (retry_pending_) {
-		retry_pending_   = false;
-		do_retry         = true;
-		retry_req        = last_load_;
-		retry_req.tracks = nlohmann::json::array();
-		retry_req.active_track_ids.clear();
+		retry_pending_ = false;
+		retry_req      = last_load_;
+		retry_how      = degrade_load(retry_req);
+		do_retry       = retry_how != nullptr;
 		}
 	}
 
@@ -1303,7 +1333,22 @@ void CastManager::note_load_failure(int media_session_id)
 			})}
 		});
 
-	if (do_retry) spawn_retry(retry_req, "receiver refused the LOAD");
+	// Re-armed only *after* update_status has run, and that ordering is the
+	// whole reason this is a second critical section rather than part of the
+	// one above.  The synthetic status published there is an IDLE/ERROR, so a
+	// flag already re-armed would be consumed by it — degrading a second rung
+	// and firing a second load for one refusal.  It is the same hazard the
+	// note at the top of this function describes, one step further along:
+	// claiming the flag first is what stops update_status acting on it, and
+	// re-arming early would hand it straight back.
+	if (do_retry) {
+		{
+		std::lock_guard<std::mutex> lk(status_mutex_);
+		retry_pending_ = true;
+		last_load_     = retry_req;
+		}
+		spawn_retry(retry_req, "receiver refused the LOAD", retry_how);
+		}
 	}
 
 float CastManager::last_known_time() const

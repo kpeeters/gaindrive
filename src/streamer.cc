@@ -80,8 +80,17 @@ Streamer::TranscodePlan Streamer::plan_transcode(const SongInfo& song,
 		plan.bitrate = 0;
 		}
 	else if (format_change) {
-		plan.target  = wanted;
-		plan.bitrate = (max_bitrate > 0 && max_bitrate < 320) ? max_bitrate : 320;
+		plan.target = wanted;
+		// For a *lossless* target this is not a bitrate at all.  -b:a is
+		// meaningless there and ffmpeg_argv() does not pass it; the figure only
+		// has to be non-zero, which is what tells that function to encode
+		// rather than copy.  Pinned rather than following the account ceiling,
+		// so a given file has one cache key whoever asks for it — and reported
+		// to clients as 0, since a number that describes nothing is worse than
+		// no number.
+		plan.bitrate = wanted->lossy
+		    ? ((max_bitrate > 0 && max_bitrate < 320) ? max_bitrate : 320)
+		    : 320;
 		}
 	else if (bitrate_limit) {
 		plan.target  = target_for("mp3");
@@ -241,8 +250,16 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 			// carries a Content-Length, answers Range requests, and (because
 			// ffmpeg could seek backwards while writing it) actually has a
 			// XING header or seektable to seek with.
+			// Bitrate 0 deliberately, and not because there is none: a cache
+			// entry has a known size and a known duration, so serve_direct's
+			// size/duration fallback is *exact* and beats any nominal figure.
+			// It is also the only correct answer for a lossless target, where
+			// target_bitrate is a marker rather than a rate — pacing a ~1000
+			// kbps FLAC at the 320 that marker holds feeds a receiver at a
+			// third of real time, which drains its buffer and ends as the ~60 s
+			// no-data timeout every cast failure in CLAUDE.md turns out to be.
 			SongInfo cached{ entry->path().string(), std::string(target->name),
-			                 target_bitrate, song.duration, entry->size(),
+			                 0, song.duration, entry->size(),
 			                 song.id, song.file_modified };
 			// Hold the entry for as long as the response lives so prune()
 			// cannot delete the file mid-send.

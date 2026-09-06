@@ -2,6 +2,7 @@
 
 #include <array>
 #include <optional>
+#include <string>
 #include <string_view>
 
 // Audio format table — the single source of truth for "what is this format
@@ -249,17 +250,34 @@ inline std::string_view cast_mime_for(std::string_view container,
 	}
 
 // The format a server-driven cast asks for when the receiver cannot show a
-// picture, so it is sent the film's soundtrack instead.
+// picture and the soundtrack cannot be copied out as it stands — see
+// audio_copy_target() below, which is tried first and covers AAC, MP3, FLAC,
+// Opus and Vorbis.  So this is reached only for AC3, DTS, TrueHD and PCM,
+// which is to say most disc rips.
 //
-// mp3 rather than something better, for three reasons that all point one way.
-// Every Cast receiver takes it, and the whole point of this path is a device
-// too limited to display video, which is not a device to be adventurous with.
-// The extraction is a full transcode whatever container it lands in — the
-// source is AC3 or DTS or AAC inside a film — so nothing is preserved by
-// choosing a fancier one.  And CBR mp3 is the one whose length is exactly
-// predictable from bitrate × duration, which is what serve()'s
-// estimate_length path would need if the cache warm ever has to be given up.
-inline constexpr const char* CAST_AUDIO_ONLY_FORMAT = "mp3";
+// **FLAC, because this is the one path that must re-encode.**  The source is
+// already lossy, and encoding it again imposes a second generation of loss on
+// the only route that had no choice about transcoding.  Everything that argued
+// for mp3 here has since stopped applying:
+//
+//  * "every receiver takes mp3" — FLAC is in Google Cast's baseline audio
+//    support (documented to 96 kHz / 24-bit; a film's track is 48 kHz), so it
+//    no longer selects for the least capable device.
+//  * "the extraction is a full transcode whatever it lands in, so nothing is
+//    preserved by choosing a fancier one" — true before the copy tier existed
+//    and false now.  This constant is what is left *after* copying has been
+//    ruled out, which is exactly when the choice of encoder decides how much
+//    is thrown away.
+//  * "CBR mp3's length is predictable, which serve()'s estimate_length path
+//    would need if the cache warm were given up" — a cast URL never sets
+//    estimateContentLength, so that was hypothetical.  What it points at is
+//    real and worth knowing: an unwarmed FLAC pipe carries no Content-Length
+//    and no seek table, so a failed warm degrades further than it used to.
+//    Not fatal, since the LOAD announces the duration itself.
+//
+// It also costs less time, not more: FLAC encodes several times faster than
+// LAME, and on this path the wait before the LOAD is the whole problem.
+inline constexpr const char* CAST_AUDIO_ONLY_FORMAT = "flac";
 
 // The container to stream-copy a soundtrack into, keyed on the *codec* rather
 // than on the source container.  nullopt means it has to be encoded.
@@ -319,4 +337,22 @@ inline bool audio_only_request(bool is_video, std::string_view format,
 	if (format.empty() || format == "raw") return false;
 	auto t = target_for(format);
 	return t && !t->encoder.empty();
+	}
+
+// Which audio format a cast soundtrack is asked for, or empty when the film
+// has nothing to extract — a silent video, or one the scanner could not probe.
+//
+// One definition because two callers must agree exactly: cast_load_song()
+// decides *whether* the receiver gets the soundtrack, and soundtrack_load()
+// builds the URL that asks for it.  A disagreement there is a LOAD announcing
+// one content type while another arrives, which a receiver refuses outright.
+//
+// Copy first, encode second.  Everything about that choice is in
+// audio_copy_target() and CAST_AUDIO_ONLY_FORMAT above.
+inline std::string cast_soundtrack_format(std::string_view audio_codec)
+	{
+	auto t = audio_copy_target(audio_codec);
+	std::string fmt = t ? std::string(t->name)
+	                    : std::string(CAST_AUDIO_ONLY_FORMAT);
+	return audio_only_request(true, fmt, audio_codec) ? fmt : std::string();
 	}

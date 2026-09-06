@@ -121,7 +121,26 @@ class GainDrive {
 			int         bitrate = 0;  // kbps; 0 when not a fixed-rate encode
 			std::string tier;    // direct | remux | encode
 			};
-		CastStreamInfo  last_cast_stream_;
+		// Guarded, unlike last_cast_song_id_ and last_cast_offset_ beside it,
+		// and the reason is the reason caption_ids is guarded: this holds three
+		// std::strings, so a torn read is not a wrong number but undefined
+		// behaviour.  It is written from httplib threads *and* from
+		// CastManager's load worker — the fallback's prepare hook swaps it when
+		// a refused film becomes its soundtrack — and read from the SSE thread
+		// on every push.
+		mutable std::mutex cast_stream_mu_;
+		CastStreamInfo     last_cast_stream_;
+
+		CastStreamInfo cast_stream() const
+			{
+			std::lock_guard<std::mutex> lk(cast_stream_mu_);
+			return last_cast_stream_;
+			}
+		void set_cast_stream(const CastStreamInfo& s)
+			{
+			std::lock_guard<std::mutex> lk(cast_stream_mu_);
+			last_cast_stream_ = s;
+			}
 
 		// The cast session's owner: the account *and* the client instance that
 		// called startCast. Both halves are needed. The account alone is what
@@ -200,6 +219,43 @@ class GainDrive {
 		CastStreamInfo cast_load_song(const httplib::Request& req,
 		                              const MediaStore::SongInfo& song,
 		                              int song_id, float offset, int track_id);
+
+		// One LOAD carrying a film's soundtrack rather than the film.
+		//
+		// Extracted because it is now built twice: as the load itself, when the
+		// receiver announced no screen, and as the **fallback** hung off a
+		// video load a screenless receiver may refuse outright.  Two copies of
+		// the format choice, the token minting and the cache warm would be two
+		// copies of something that has to agree with Streamer::serve() exactly.
+		//
+		// `url` comes back empty when there is nothing to send — no token, or a
+		// silent film with no audio stream to extract — and the caller decides
+		// what that means.  `desc` is filled with what a client should be told.
+		//
+		// is_fallback does two extra things, and both are only knowable here:
+		// it swaps last_cast_stream_ so castSession stops describing the
+		// attempt that failed, and it records the refusal so the next play of
+		// the same film on the same device does not repeat it.
+		CastManager::LoadRequest
+		    soundtrack_load(const std::string& base,
+		                    const MediaStore::SongInfo& song, int song_id,
+		                    float offset, bool is_fallback,
+		                    CastStreamInfo& desc);
+
+		// Codec pairs a device has already refused when handed the whole file,
+		// held in client.settings under "cast_novideo:<device id>" beside the
+		// "cast_video:<device id>" preference that allowed the attempt.
+		//
+		// Without it every play of an undecodable film pays the failed LOAD
+		// again; with it the failure happens once, ever.  setCastDevicePref
+		// clears the row, since changing your mind about a device is the
+		// natural place to make it reconsider — and the only way a negative
+		// that has gone stale (new firmware, a different device at the same
+		// address) is ever forgotten.
+		bool cast_video_refused(const std::string& device_id,
+		                        const std::string& codec_pair);
+		void cast_note_video_refused(const std::string& device_id,
+		                             const std::string& codec_pair);
 
 		// Probe each configured cast device once at startup and log the result,
 		// so a wrong address is reported rather than only failing later.

@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <functional>
+#include <memory>
 
 #include <nlohmann/json.hpp>
 
@@ -163,6 +164,17 @@ class CastManager {
 			// gives up after ~60 s of silence is waiting on the socket.
 			// CastManager deliberately does not know what is being prepared.
 			std::function<bool()> prepare;
+			// What to try instead when this LOAD is refused outright, one rung
+			// further down the ladder degrade_load() walks — see there.  A
+			// shared_ptr because the type cannot contain itself, and because
+			// both failure sites copy the whole request out under
+			// status_mutex_ before acting on it.
+			//
+			// CastManager knows no more about what the alternative *is* than it
+			// knows what `prepare` prepares.  A caller builds both; today the
+			// only one is a film's soundtrack, attached when the picture was
+			// sent to a receiver that announced no screen.
+			std::shared_ptr<LoadRequest> fallback;
 			};
 
 		// Connect to the Chromecast, send LOAD, capture initial MEDIA_STATUS, then close.
@@ -302,9 +314,28 @@ class CastManager {
 		// the receiver did not send and consumes the retry.
 		void note_load_failure(int media_session_id);
 
+		// One rung down after a refused LOAD, rewriting `req` in place.  The
+		// rungs, in order, and each is "degrade rather than repeat" — replaying
+		// a LOAD the receiver has already rejected only fails again:
+		//
+		//   1. drop the subtitle tracks.  One unreachable track URL fails the
+		//      whole LOAD, and this costs the captions and nothing else.
+		//   2. become `fallback`, which is how a film the receiver cannot
+		//      decode becomes its soundtrack.
+		//
+		// Returns the reason, for the log, or an empty string when nothing is
+		// left to try.  Static and free of member state so both failure sites
+		// share one definition of the ladder; a second copy of it is exactly
+		// how the two would come to disagree about what a failure means.
+		static const char* degrade_load(LoadRequest& req);
+
 		// Re-send a LOAD on a detached thread, abandoning it if the user has
 		// asked for something else in the meantime.
-		void spawn_retry(const LoadRequest& req, const char* why);
+		// `why` is what the receiver did; `how` is the rung degrade_load()
+		// chose. Both are logged, because a retry that keeps happening and a
+		// retry that keeps changing shape are different faults.
+		void spawn_retry(const LoadRequest& req, const char* why,
+		                 const char* how);
 
 		// Open a fresh connection and send one media-namespace command.
 		void send_media_cmd(const nlohmann::json& payload);
