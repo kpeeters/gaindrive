@@ -2486,6 +2486,8 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// ---- Phase 1: walk disk (no lock) ----
 	std::vector<AlbumReadData> albums;
 	bool had_loose = false;   // media files directly in the artist folder
+	// A candidate disc subdirectory, with the media it was found to hold.
+	struct DiscDir { fs::path path; std::vector<fs::path> files; };
 	if (exists) {
 		PhaseTimer pt(scan_times_.walk);
 		for (auto& album_entry : fs::directory_iterator(artist_path)) {
@@ -2538,27 +2540,41 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 				continue;
 				}
 
-			std::vector<fs::directory_entry> disc_dirs;
-			std::vector<fs::path>            direct_files;
+			// A subdirectory is a disc only if it holds media of its own.  An
+			// album's Artwork or Scans folder is not disc 1, and counting it
+			// pushes every real disc up by one -- which is what a client is told
+			// the disc number is, so the headings and the sort order both go
+			// wrong.  The media is collected here rather than in the numbering
+			// loop below so each directory is still enumerated exactly once.
+			std::vector<DiscDir>  disc_dirs;
+			std::vector<fs::path> direct_files;
 			for (auto& e : fs::directory_iterator(album_entry.path())) {
-				if      (e.is_directory())                               disc_dirs.push_back(e);
-				else if (e.is_regular_file() && is_media_file(e.path())) direct_files.push_back(e.path());
+				if (e.is_regular_file()) {
+					if (is_media_file(e.path())) direct_files.push_back(e.path());
+					continue;
+					}
+				if (!e.is_directory()) continue;
+				DiscDir dd;
+				dd.path = e.path();
+				for (auto& te : fs::directory_iterator(e.path())) {
+					if (te.is_regular_file() && is_media_file(te.path()))
+						dd.files.push_back(te.path());
+					}
+				if (!dd.files.empty()) disc_dirs.push_back(std::move(dd));
 				}
 			std::sort(disc_dirs.begin(), disc_dirs.end(),
-				[](const fs::directory_entry& a, const fs::directory_entry& b) {
-					return a.path().filename() < b.path().filename();
+				[](const DiscDir& a, const DiscDir& b) {
+					return a.path.filename() < b.path.filename();
 					});
 
-			for (auto& de : disc_dirs)
-				adat.disc_paths.push_back(de.path().string());
+			for (auto& dd : disc_dirs)
+				adat.disc_paths.push_back(dd.path.string());
 
 			int disc_count = (int)disc_dirs.size();
 			for (int dn = 0; dn < disc_count; ++dn) {
-				for (auto& te : fs::directory_iterator(disc_dirs[dn].path())) {
-					if (!te.is_regular_file() || !is_media_file(te.path())) continue;
+				for (auto& f : disc_dirs[dn].files)
 					adat.songs.push_back(read_song_file(
-						te.path(), disc_dirs[dn].path().string(), dn + 1));
-					}
+						f, disc_dirs[dn].path.string(), dn + 1));
 				}
 			for (auto& p : direct_files)
 				adat.songs.push_back(read_song_file(p, adat.path, 0));
