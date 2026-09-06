@@ -2890,6 +2890,36 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			upd.bind(2, album_id);
 			upd.exec();
 			}
+			{
+			// The album's genre is the commonest one among its tracks.
+			//
+			// upsert_album() could not carry this: it is INSERT OR IGNORE, so
+			// after the first scan its insert is silently ignored and the
+			// value would never land -- the same trap apply_album_mbid() and
+			// track_number document. Both call sites in fact pass "", so
+			// albums.genre was empty for every album ever scanned and
+			// getAlbumList type=byGenre -- which filters on it -- could match
+			// nothing but the empty string.
+			//
+			// Commonest rather than apply_album_mbid()'s "one distinct value
+			// on every track": disagreement there means a wrong MBID and is
+			// worth refusing, while an album whose tracks are nine Rock and
+			// one Pop is a Rock album, not an ungenred one. Grouped on the
+			// folded spelling so "Rock" and "rock" count once, and MIN() picks
+			// a representative from within a group whose members differ only
+			// in case and padding. Ordering by the fold after the count makes
+			// a tie deterministic rather than whatever the query plan left.
+			SQLite::Statement upd(db_music_,
+				"UPDATE albums SET genre = ("
+				"  SELECT MIN(TRIM(s.genre)) FROM songs s"
+				"   WHERE s.album_id = ?1 AND TRIM(COALESCE(s.genre,'')) <> ''"
+				"   GROUP BY LOWER(TRIM(s.genre))"
+				"   ORDER BY COUNT(*) DESC, LOWER(TRIM(s.genre))"
+				"   LIMIT 1"
+				") WHERE id = ?1");
+			upd.bind(1, album_id);
+			upd.exec();
+			}
 
 			txn.commit();
 			scan_times_.albums.fetch_add(1);
@@ -4309,6 +4339,114 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_videos()
 	return result;
 	}
 
+std::vector<MediaStore::GenreEntry> MediaStore::get_genres()
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	// Everything groups on the folded spelling; the name reported for a group
+	// is the commonest raw spelling within it, which is a correlated subquery
+	// rather than a MIN() because MIN() answers by ASCII order and would
+	// report "ROCK" for a library that writes "Rock" nine times out of ten.
+	//
+	// Both counts mean "how many things you get if you ask for this genre",
+	// which is why albumCount is over albums.genre rather than a
+	// COUNT(DISTINCT s.album_id). The two differ: an album of eleven Rock
+	// tracks and one Blues track *contains* Blues but is not a Blues album,
+	// and getAlbumList type=byGenre -- the thing a client calls next -- filters
+	// on the rolled-up album genre. Counting containment here would promise
+	// albums that the very next request does not return. The visible
+	// consequence is that a genre appearing only as a minority tag reports
+	// songCount without albumCount, which is the honest reading of it.
+	//
+	// Ordered by song count because that is what makes the list usable: real
+	// libraries have a short head and a tail of one-off tags, and a client
+	// that would rather sort alphabetically still can.
+	SQLite::Statement q(db_music_,
+		"SELECT (SELECT s2.genre FROM songs s2"
+		"         WHERE LOWER(TRIM(s2.genre)) = fold"
+		+ not_uploads("s2.path") +
+		"         GROUP BY s2.genre"
+		"         ORDER BY COUNT(*) DESC, s2.genre LIMIT 1) AS name,"
+		"       songs,"
+		"       (SELECT COUNT(*) FROM albums al"
+		"          JOIN folders f ON f.id = al.folder_id"
+		"         WHERE LOWER(TRIM(COALESCE(al.genre,''))) = fold"
+		+ not_uploads("f.path") +
+		"       ) AS albums"
+		"  FROM (SELECT LOWER(TRIM(s.genre)) AS fold,"
+		"               COUNT(*) AS songs"
+		"          FROM songs s"
+		"         WHERE TRIM(COALESCE(s.genre,'')) <> ''"
+		+ not_uploads("s.path") +
+		"         GROUP BY fold)"
+		" ORDER BY songs DESC, fold");
+
+	std::vector<GenreEntry> result;
+	while (q.executeStep()) {
+		GenreEntry g;
+		// The subquery cannot miss -- the fold came from a row it can see --
+		// but a NULL here would reach a tinyxml2 attribute, so it is guarded.
+		g.name        = q.getColumn(0).isNull() ? "" : q.getColumn(0).getString();
+		g.song_count  = q.getColumn(1).getInt();
+		g.album_count = q.getColumn(2).getInt();
+		if (!g.name.empty()) result.push_back(std::move(g));
+		}
+	return result;
+	}
+
+std::vector<MediaStore::ChildEntry> MediaStore::get_songs_by_genre(
+	const std::string& genre, int count, int offset)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	// Same shape as get_videos(); see the COALESCE note there for why the
+	// album's folder answers parent and cover art rather than the song's own.
+	SQLite::Statement q(db_music_,
+		"SELECT s.id, s.title, s.track_number, s.disc_number,"
+		"       s.year, s.genre, s.duration, s.bitrate,"
+		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
+		"       COALESCE(a.name,'') AS artist,"
+		"       COALESCE(al.title,'') AS album,"
+		+ SONG_COVER_ART_SQL +
+		"       s.path, COALESCE(s.artist,'') AS track_artist"
+		" FROM songs s"
+		" LEFT JOIN albums al ON al.id = s.album_id"
+		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
+		" LEFT JOIN artists a ON a.id = sa.artist_id"
+		" WHERE LOWER(TRIM(COALESCE(s.genre,''))) = LOWER(TRIM(?))"
+		+ not_uploads("s.path") +
+		" ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE,"
+		"          s.disc_number, s.track_number, s.title COLLATE NOCASE"
+		" LIMIT ? OFFSET ?");
+	q.bind(1, genre);
+	q.bind(2, count);
+	q.bind(3, offset);
+
+	std::vector<ChildEntry> result;
+	while (q.executeStep()) {
+		ChildEntry e;
+		e.id           = q.getColumn(0).getInt();
+		e.is_dir       = false;
+		e.title        = q.getColumn(1).getString();
+		e.track_number = q.getColumn(2).getInt();
+		e.disc_number  = q.getColumn(3).getInt();
+		e.year         = q.getColumn(4).getInt();
+		e.genre        = q.getColumn(5).isNull() ? "" : q.getColumn(5).getString();
+		e.duration     = q.getColumn(6).getDouble();
+		e.bitrate      = q.getColumn(7).getInt();
+		e.file_size    = q.getColumn(8).getInt64();
+		e.codec        = q.getColumn(9).isNull() ? "" : q.getColumn(9).getString();
+		e.parent_id    = q.getColumn(10).getInt();
+		e.artist       = q.getColumn(11).getString();
+		e.album        = q.getColumn(12).getString();
+		e.cover_art_id = q.getColumn(13).getInt();
+		e.path         = q.getColumn(14).getString();
+		e.track_artist = q.getColumn(15).getString();
+		result.push_back(std::move(e));
+		}
+	return result;
+	}
+
 std::string MediaStore::sidecar_captions(const std::string& abs) const
 	{
 	// Preference order, not merely a list: a .vtt is what the endpoint answers
@@ -4941,7 +5079,11 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 		has_where = true;
 		};
 	if      (type == "byYear")  add_where("al.year BETWEEN ? AND ?");
-	else if (type == "byGenre") add_where("LOWER(COALESCE(al.genre,'')) = LOWER(?)");
+	// TRIM as well as LOWER, matching how get_genres() folds: the list a
+	// client picked this string out of is folded, so the filter has to be too
+	// or a genre with a trailing space is listed and then matches nothing.
+	else if (type == "byGenre") add_where(
+		"LOWER(TRIM(COALESCE(al.genre,''))) = LOWER(TRIM(?))");
 	else if (type == "starred") add_where("sa.album_folder_path IS NOT NULL");
 
 	// Braces are load-bearing: without them the else binds to the inner if,

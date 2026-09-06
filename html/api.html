@@ -75,6 +75,10 @@
     <div class="h">Casting</div>
     <a href="#cast">Chromecast</a>
   </div>
+  <div class="dn-grp">
+    <div class="h">Reference</div>
+    <a href="#unimplemented">Not implemented</a>
+  </div>
 </aside>
 
     <div class="docs-main api-main">
@@ -1160,6 +1164,24 @@ all.
 <div class="note"><p>The stream also ends when another client takes the session over. A client should treat that as having left cast mode rather than as a transport error — the retry is answered 204, so <code>EventSource</code> reaches <code>CLOSED</code> and stops.</p></div>
 <p class="api-see">See also <a href="#ep-castSession"><code>castSession</code></a>.</p>
 </div>
+</div>
+<div class="doc-sec" id="unimplemented">
+<h2>Not implemented</h2>
+<p>Everything above is what GainDrive <b>adds</b> to Subsonic. This last section is the other side of the same question: the Subsonic and OpenSubsonic endpoints GainDrive does <b>not</b> answer. They are listed so that a client author can tell a deliberate gap from a server too old for a feature, and so that nobody has to discover one by calling it.</p>
+<p>A <code>GET</code> for any of them reaches a catch-all and is answered <b>HTTP 200 carrying Subsonic error 0, <code>Not implemented.</code></b> — always as XML, whatever <code>f</code> asked for. A <code>POST</code> matches no route at all and gets a bare 404 with no body, which behind a reverse proxy configured to serve a single-page client on 404 arrives as 200 and a page of HTML.</p>
+<p><b>Browsing, lists and similarity.</b></p>
+<ul class="doc-list"><li><code>getRandomSongs</code>.</li><li><code>getNowPlaying</code>. <code>scrobble</code> records a now-playing event and nothing reads it back.</li><li><code>getSimilarSongs</code> and <code>getSimilarSongs2</code>, and <code>findSonicPath</code> and <code>getSonicSimilarTracks</code> of the OpenSubsonic <code>sonicSimilarity</code> extension. Nothing here fetches or computes similarity.</li><li><code>getAlbumInfo</code>. Only <code>getAlbumInfo2</code> is registered. The two would be the same call in GainDrive, since an album id <em>is</em> a folder id — there is no separate id3 album to look up — so the older name is missing rather than meaningfully absent.</li></ul>
+<p><b>Searching.</b></p>
+<ul class="doc-list"><li><code>search</code>, the Subsonic 1.0 search that the specification itself deprecates in favour of <code>search2</code>. Both <code>search2</code> and <code>search3</code> are implemented.</li></ul>
+<p><b>Retrieval and annotation.</b></p>
+<ul class="doc-list"><li><code>getLyrics</code>, and <code>getLyricsBySongId</code> of the OpenSubsonic <code>songLyrics</code> extension. No lyric tag and no <code>.lrc</code> sidecar is read.</li><li><code>getAvatar</code>. An account carries no picture.</li><li><code>setRating</code>. There is no rating column: <code>star</code> and <code>unstar</code> are the whole annotation surface, and no entry carries <code>userRating</code> or <code>averageRating</code>.</li><li><code>getTranscodeDecision</code> and <code>getTranscodeStream</code> of the OpenSubsonic <code>transcoding</code> extension. GainDrive decides what to transcode itself, from the request and the codecs recorded at scan time, so there is nothing here that would read a client&#x27;s capability payload.</li></ul>
+<p><b>The play queue.</b></p>
+<ul class="doc-list"><li><code>getPlayQueueByIndex</code> and <code>savePlayQueueByIndex</code> of the OpenSubsonic <code>indexBasedQueue</code> extension. The by-id pair is implemented; the index pair exists so a queue may hold the same track twice, which the by-id form cannot express.</li><li><code>reportPlayback</code> of the OpenSubsonic <code>playbackReport</code> extension. <code>scrobble</code> is the implemented equivalent, and it carries no playback timeline.</li></ul>
+<p><b>Whole subsystems.</b> Each of these is a feature rather than an endpoint, and the roles GainDrive already reports say so: <code>shareRole</code>, <code>podcastRole</code>, <code>jukeboxRole</code> and <code>commentRole</code> are false on every account, so a client that reads them need not probe.</p>
+<ul class="doc-list"><li>Sharing — <code>getShares</code>, <code>createShare</code>, <code>updateShare</code> and <code>deleteShare</code>.</li><li>Podcasts — <code>getPodcasts</code>, <code>getNewestPodcasts</code>, <code>refreshPodcasts</code>, <code>createPodcastChannel</code>, <code>deletePodcastChannel</code>, <code>deletePodcastEpisode</code>, <code>downloadPodcastEpisode</code>, and <code>getPodcastEpisode</code> of the OpenSubsonic extension of the same name. Fetching a URL into personal files is the nearest thing GainDrive has, and it is not a subscription.</li><li>The jukebox — <code>jukeboxControl</code>, which plays through the sound card of the machine running the server. Casting is GainDrive&#x27;s answer to playing somewhere other than the client.</li><li>Internet radio — <code>getInternetRadioStations</code>, <code>createInternetRadioStation</code>, <code>updateInternetRadioStation</code> and <code>deleteInternetRadioStation</code>. A station is not a library file, so it would need storage of its own.</li><li>Chat — <code>getChatMessages</code> and <code>addChatMessage</code>.</li></ul>
+<p><b>Users and system.</b></p>
+<ul class="doc-list"><li><code>deleteUser</code>, the only one of the six user endpoints missing. Removing an account means deciding what becomes of its stars, playlists, queue, bookmarks and uploaded files, every one of which is keyed on it.</li><li><code>tokenInfo</code> of the OpenSubsonic <code>apiKeyAuthentication</code> extension. GainDrive issues no API keys; <code>u</code> and <code>p</code>, or the token scheme, are the whole of authentication.</li></ul>
+<p><b>Extensions GainDrive could advertise and does not.</b> <code>getOpenSubsonicExtensions</code> names <code>gaindrive</code> alone. One standard extension name already describes behaviour that is present: <code>transcodeOffset</code> means no more than that <code>stream</code> honours <code>timeOffset</code> for music, which it does. <code>topSongsByArtistId</code> is one parameter away, but <code>getTopSongs</code> answers an empty list here, so advertising it would promise data that does not exist. <code>formPost</code> is not supported — every standard endpoint is <code>GET</code>.</p>
 </div>
 
     </div>

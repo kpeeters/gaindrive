@@ -5245,6 +5245,89 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
+	// getGenres — every distinct genre in the shared library, with counts.
+	//
+	// The tags are reported as they are, typos and "unknown" included: this
+	// endpoint is the only view anyone gets of their own tagging, and a list
+	// filtered down to the plausible entries would hide the very thing that
+	// needs fixing. Only case and padding are folded away, which loses
+	// nothing. See MediaStore::get_genres().
+	server_.Get("/rest/getGenres.view", [this](const httplib::Request& req,
+	                                            httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto genres   = store_.get_genres();
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&genres](nlohmann::json& r) {
+				nlohmann::json arr = nlohmann::json::array();
+				for (auto& g : genres)
+					arr.push_back({{"value",      g.name},
+					               {"songCount",  g.song_count},
+					               {"albumCount", g.album_count}});
+				r["genres"] = {{ "genre", arr }};
+				});
+		else
+			body = subsonic_ok([&genres](XMLDocument& doc, XMLElement* root) {
+				auto* el = doc.NewElement("genres");
+				for (auto& g : genres) {
+					auto* ge = doc.NewElement("genre");
+					ge->SetAttribute("songCount",  g.song_count);
+					ge->SetAttribute("albumCount", g.album_count);
+					// The name is the element's text, not an attribute --
+					// Subsonic spells this one differently from every other
+					// listing, and a client reading it as `name` gets nothing.
+					ge->SetText(g.name.c_str());
+					el->InsertEndChild(ge);
+					}
+				root->InsertEndChild(el);
+				});
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// getSongsByGenre — the songs carrying one genre.
+	server_.Get("/rest/getSongsByGenre.view", [this](const httplib::Request& req,
+	                                                  httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			if (use_json)
+				res.set_content(subsonic_error_json(code, msg), "application/json");
+			else
+				res.set_content(subsonic_error(code, msg),      "application/xml");
+			};
+
+		std::string genre = req.get_param_value("genre");
+		if (genre.empty()) { err(10, "Required parameter missing: genre."); return; }
+
+		// Clamped like search: count is an unvalidated client integer and the
+		// whole response is built in memory as one document.
+		int count  = std::clamp(to_int(req.get_param_value("count"), 10),
+		                        1, MAX_SEARCH_COUNT);
+		int offset = std::max(0, to_int(req.get_param_value("offset"), 0));
+
+		auto songs = store_.get_songs_by_genre(genre, count, offset);
+		int  mbr   = request_max_bitrate(req, store_);
+
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&songs, mbr](nlohmann::json& r) {
+				nlohmann::json entries = nlohmann::json::array();
+				for (auto& s : songs)
+					entries.push_back(song_entry_json(s, mbr));
+				r["songsByGenre"] = {{ "song", entries }};
+				});
+		else
+			body = subsonic_ok([&songs, mbr](XMLDocument& doc, XMLElement* root) {
+				auto* el = doc.NewElement("songsByGenre");
+				for (auto& s : songs)
+					el->InsertEndChild(song_entry_xml(doc, s, "song", mbr));
+				root->InsertEndChild(el);
+				});
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	// getVideos — every video in the library, as Child entries.  Videos share
 	// the songs table with audio, so this is the ordinary song serialiser with
 	// a different envelope key; isVideo and type are derived from the codec.

@@ -2302,3 +2302,109 @@ see = ["castSession"]
   [[endpoint.error]]
   http = '204'
   when = 'No cast session is active, or the caller does not own it. There is nothing to stream, so no event stream is opened.'
+
+
+# ===========================================================================
+# What is *not* here.  This is the one section of the page that documents
+# standard endpoints rather than gaindrive's own, and it earns its place: a
+# client author otherwise finds a gap by calling into it, and an "error 0,
+# Not implemented" is indistinguishable from a server too old for a feature.
+#
+# Keep it in step with the endpoint index at
+# https://opensubsonic.netlify.app/docs/endpoints/ — an endpoint that starts
+# being answered must be struck from here in the same commit, or the page
+# says gaindrive cannot do something it does.
+# ===========================================================================
+
+[[section]]
+id    = "unimplemented"
+title = "Not implemented"
+group = "Reference"
+blurb = '''
+Everything above is what GainDrive **adds** to Subsonic. This last section is
+the other side of the same question: the Subsonic and OpenSubsonic endpoints
+GainDrive does **not** answer. They are listed so that a client author can
+tell a deliberate gap from a server too old for a feature, and so that nobody
+has to discover one by calling it.
+
+A `GET` for any of them reaches a catch-all and is answered **HTTP 200
+carrying Subsonic error 0, `Not implemented.`** — always as XML, whatever `f`
+asked for. A `POST` matches no route at all and gets a bare 404 with no body,
+which behind a reverse proxy configured to serve a single-page client on 404
+arrives as 200 and a page of HTML.
+
+**Browsing, lists and similarity.**
+
+* `getRandomSongs`.
+* `getNowPlaying`. `scrobble` records a now-playing event and nothing reads it
+  back.
+* `getSimilarSongs` and `getSimilarSongs2`, and `findSonicPath` and
+  `getSonicSimilarTracks` of the OpenSubsonic `sonicSimilarity` extension.
+  Nothing here fetches or computes similarity.
+* `getAlbumInfo`. Only `getAlbumInfo2` is registered. The two would be the
+  same call in GainDrive, since an album id *is* a folder id — there is no
+  separate id3 album to look up — so the older name is missing rather than
+  meaningfully absent.
+
+**Searching.**
+
+* `search`, the Subsonic 1.0 search that the specification itself deprecates
+  in favour of `search2`. Both `search2` and `search3` are implemented.
+
+**Retrieval and annotation.**
+
+* `getLyrics`, and `getLyricsBySongId` of the OpenSubsonic `songLyrics`
+  extension. No lyric tag and no `.lrc` sidecar is read.
+* `getAvatar`. An account carries no picture.
+* `setRating`. There is no rating column: `star` and `unstar` are the whole
+  annotation surface, and no entry carries `userRating` or `averageRating`.
+* `getTranscodeDecision` and `getTranscodeStream` of the OpenSubsonic
+  `transcoding` extension. GainDrive decides what to transcode itself, from
+  the request and the codecs recorded at scan time, so there is nothing here
+  that would read a client's capability payload.
+
+**The play queue.**
+
+* `getPlayQueueByIndex` and `savePlayQueueByIndex` of the OpenSubsonic
+  `indexBasedQueue` extension. The by-id pair is implemented; the index pair
+  exists so a queue may hold the same track twice, which the by-id form
+  cannot express.
+* `reportPlayback` of the OpenSubsonic `playbackReport` extension. `scrobble`
+  is the implemented equivalent, and it carries no playback timeline.
+
+**Whole subsystems.** Each of these is a feature rather than an endpoint, and
+the roles GainDrive already reports say so: `shareRole`, `podcastRole`,
+`jukeboxRole` and `commentRole` are false on every account, so a client that
+reads them need not probe.
+
+* Sharing — `getShares`, `createShare`, `updateShare` and `deleteShare`.
+* Podcasts — `getPodcasts`, `getNewestPodcasts`, `refreshPodcasts`,
+  `createPodcastChannel`, `deletePodcastChannel`, `deletePodcastEpisode`,
+  `downloadPodcastEpisode`, and `getPodcastEpisode` of the OpenSubsonic
+  extension of the same name. Fetching a URL into personal files is the
+  nearest thing GainDrive has, and it is not a subscription.
+* The jukebox — `jukeboxControl`, which plays through the sound card of the
+  machine running the server. Casting is GainDrive's answer to playing
+  somewhere other than the client.
+* Internet radio — `getInternetRadioStations`, `createInternetRadioStation`,
+  `updateInternetRadioStation` and `deleteInternetRadioStation`. A station is
+  not a library file, so it would need storage of its own.
+* Chat — `getChatMessages` and `addChatMessage`.
+
+**Users and system.**
+
+* `deleteUser`, the only one of the six user endpoints missing. Removing an
+  account means deciding what becomes of its stars, playlists, queue,
+  bookmarks and uploaded files, every one of which is keyed on it.
+* `tokenInfo` of the OpenSubsonic `apiKeyAuthentication` extension. GainDrive
+  issues no API keys; `u` and `p`, or the token scheme, are the whole of
+  authentication.
+
+**Extensions GainDrive could advertise and does not.**
+`getOpenSubsonicExtensions` names `gaindrive` alone. One standard extension
+name already describes behaviour that is present: `transcodeOffset` means no
+more than that `stream` honours `timeOffset` for music, which it does.
+`topSongsByArtistId` is one parameter away, but `getTopSongs` answers an
+empty list here, so advertising it would promise data that does not exist.
+`formPost` is not supported — every standard endpoint is `GET`.
+'''

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Browsing endpoint tests: getIndexes, getMusicDirectory.
+"""Browsing endpoint tests: getIndexes, getMusicDirectory, genres.
+
+The genre tests skip rather than fail when nothing in the library carries a
+genre tag: coverage is a property of the collection, not of the server, and a
+library with none is a legitimate one.
 
 Start the server first (with a scanned music collection):
     ./build/gaindrive --db /tmp/gd_test.db --music-root /music
@@ -228,6 +232,118 @@ def test_get_music_directory_missing_id():
     print("PASS  getMusicDirectory with missing id returns error 10")
 
 
+def _genres():
+    root = _get("getGenres.view")
+    _check(root)
+    el = root.find(f"{{{NS}}}genres")
+    assert el is not None, "no <genres> element"
+    return el.findall(f"{{{NS}}}genre")
+
+
+def test_get_genres():
+    genres = _genres()
+    if not genres:
+        print("SKIP  getGenres: no song in the library carries a genre tag")
+        return
+    for g in genres:
+        # The name is the element's TEXT, not an attribute. Subsonic spells
+        # this one differently from every other listing, and getting it wrong
+        # yields a list of blanks rather than an error.
+        assert (g.text or "").strip(), \
+            f"genre with no text: {ET.tostring(g).decode()}"
+        assert int(g.get("songCount") or 0) > 0, \
+            f"songCount={g.get('songCount')!r} on genre {g.text!r}"
+        # albumCount may legitimately be 0: it counts albums whose rolled-up
+        # genre is this one, so a genre carried by a single track of an album
+        # that is mostly something else has songs but no albums.
+        assert int(g.get("albumCount") or -1) >= 0, \
+            f"albumCount={g.get('albumCount')!r} on genre {g.text!r}"
+    # Counts are ordered commonest first, which is what makes the list usable.
+    counts = [int(g.get("songCount")) for g in genres]
+    assert counts == sorted(counts, reverse=True), \
+        f"getGenres not ordered by songCount: {counts[:10]}"
+    # Folding means a genre can appear once only, case and padding ignored.
+    folded = [(g.text or "").strip().lower() for g in genres]
+    assert len(folded) == len(set(folded)), \
+        "getGenres returned the same genre twice under different spellings"
+    print(f"PASS  getGenres returned {len(genres)} folded genres, "
+          f"commonest {genres[0].text!r} ({counts[0]} songs)")
+
+
+def test_get_songs_by_genre():
+    genres = _genres()
+    if not genres:
+        print("SKIP  getSongsByGenre: nothing in the library carries a genre")
+        return
+    name  = genres[0].text
+    total = int(genres[0].get("songCount"))
+
+    root = _get("getSongsByGenre.view", {"genre": name, "count": "10"})
+    _check(root)
+    el = root.find(f"{{{NS}}}songsByGenre")
+    assert el is not None, "no <songsByGenre> element"
+    songs = el.findall(f"{{{NS}}}song")
+    assert songs, f"no songs for genre {name!r} which claims {total}"
+    assert len(songs) <= 10, f"count=10 ignored, got {len(songs)}"
+
+    # The match folds case and padding, so anything getGenres reported has to
+    # come back whatever spelling the client sends it in.
+    for variant in (name.upper(), name.lower(), f"  {name}  "):
+        r2 = _get("getSongsByGenre.view", {"genre": variant, "count": "10"})
+        _check(r2)
+        n2 = len(r2.find(f"{{{NS}}}songsByGenre").findall(f"{{{NS}}}song"))
+        assert n2 == len(songs), \
+            f"genre={variant!r} gave {n2} songs, {name!r} gave {len(songs)}"
+
+    # offset pages rather than repeating the first result.
+    if len(songs) > 1:
+        r3 = _get("getSongsByGenre.view",
+                  {"genre": name, "count": "10", "offset": "1"})
+        _check(r3)
+        s3 = r3.find(f"{{{NS}}}songsByGenre").findall(f"{{{NS}}}song")
+        if s3:
+            assert s3[0].get("id") != songs[0].get("id"), \
+                "offset=1 returned the same first song"
+    print(f"PASS  getSongsByGenre {name!r} -> {len(songs)} songs, "
+          "case/padding folded, offset pages")
+
+
+def test_get_songs_by_genre_missing_genre():
+    root = _get("getSongsByGenre.view")
+    _check(root, status="failed")
+    err = root.find(f"{{{NS}}}error")
+    assert err is not None and err.get("code") == "10"
+    print("PASS  getSongsByGenre with no genre returns error 10")
+
+
+def test_album_list_by_genre():
+    """albums.genre was empty for every album ever scanned, so this filter
+    could match nothing but the empty string. Guard against the regression,
+    and against getGenres and getAlbumList disagreeing about what a genre
+    contains: albumCount is defined as exactly what byGenre returns."""
+    genres = _genres()
+    if not genres:
+        print("SKIP  getAlbumList byGenre: nothing carries a genre")
+        return
+    withalbums = [g for g in genres if int(g.get("albumCount") or 0) > 0]
+    if not withalbums:
+        raise AssertionError(
+            "every genre reports albumCount=0 -- albums.genre is probably "
+            "empty again, which is what made type=byGenre match nothing")
+
+    g     = withalbums[0]
+    want  = int(g.get("albumCount"))
+    root  = _get("getAlbumList.view",
+                 {"type": "byGenre", "genre": g.text, "size": "500"})
+    _check(root)
+    el = root.find(f"{{{NS}}}albumList")
+    got = len(el.findall(f"{{{NS}}}album")) if el is not None else 0
+    assert got == min(want, 500), \
+        f"getGenres says {g.text!r} has {want} albums, byGenre returned {got}"
+    print(f"PASS  getAlbumList type=byGenre {g.text!r} returned "
+          f"{got} albums, matching albumCount")
+
+
 TESTS = [
     test_get_indexes,
     test_get_indexes_ignoredArticles,
@@ -236,6 +352,10 @@ TESTS = [
     test_song_artist_fields,
     test_get_music_directory_not_found,
     test_get_music_directory_missing_id,
+    test_get_genres,
+    test_get_songs_by_genre,
+    test_get_songs_by_genre_missing_genre,
+    test_album_list_by_genre,
 ]
 
 if __name__ == "__main__":

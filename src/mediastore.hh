@@ -539,6 +539,31 @@ class MediaStore {
 		// All video rows, ordered by folder then disc/track, for getVideos.
 		std::vector<ChildEntry> get_videos();
 
+		// One row of getGenres. `name` is the commonest raw spelling of the
+		// tag; the counts are over the folded form, so "Rock" and "rock" are
+		// one genre with one set of counts.
+		struct GenreEntry {
+			std::string name;
+			int         song_count  = 0;
+			int         album_count = 0;
+			};
+
+		// Every distinct genre in the shared library, commonest first.
+		//
+		// Deliberately reports the tags as they are, including "unknown",
+		// "other" and outright typos: this is the only view that shows a
+		// person their own tagging, and a list quietly filtered to the
+		// plausible entries would hide exactly what needs correcting. Folding
+		// case and padding is not the same thing -- those spellings are the
+		// same tag by anyone's account, and no information is lost by
+		// counting them together.
+		std::vector<GenreEntry> get_genres();
+
+		// The songs carrying one genre, matched on the folded spelling so the
+		// value taken from get_genres() always matches.
+		std::vector<ChildEntry> get_songs_by_genre(const std::string& genre,
+		                                            int count, int offset);
+
 		// One selectable caption source. index is the absolute ffprobe stream
 		// index for `ffmpeg -map 0:<index>`, or SIDECAR_CAPTION_INDEX for the
 		// subtitle file sitting beside the video.
