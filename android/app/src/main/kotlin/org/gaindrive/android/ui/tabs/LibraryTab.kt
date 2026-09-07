@@ -3,6 +3,7 @@ package org.gaindrive.android.ui.tabs
 import androidx.compose.runtime.Composable
 import androidx.navigation.compose.composable
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.data.model.LibraryMode
 import org.gaindrive.android.ui.Route
 import org.gaindrive.android.ui.adaptive.LocalPaneBack
 import org.gaindrive.android.ui.adaptive.PaneBackHandler
@@ -42,8 +43,16 @@ fun LibraryTab(stack: PaneStack, onFetchUrl: () -> Unit) {
 		PaneHost(route) {
 			composable<Route.Artists> {
 				ArtistsScreen(
-					onOpenArtist = { refs, name, fromUploads ->
-						stack.show(1, Route.Albums(ItemRef.encodeAll(refs), name, fromUploads))
+					onOpenArtist = { refs, name, mode ->
+						stack.show(
+							1,
+							Route.Albums(
+								artistRefs = ItemRef.encodeAll(refs),
+								artistName = name,
+								fromUploads = mode == LibraryMode.UPLOADS,
+								fromCategories = mode == LibraryMode.CATEGORIES,
+							),
+						)
 					},
 					onFetchUrl = onFetchUrl,
 				)

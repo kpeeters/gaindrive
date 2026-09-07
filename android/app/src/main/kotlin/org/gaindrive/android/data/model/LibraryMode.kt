@@ -50,6 +50,14 @@ value class LibraryMode(val id: String) {
 		val ARTISTS = LibraryMode("artists")
 
 		/**
+		 * Sections rather than performers — Film, Series. A content type like
+		 * any other; named here because the artist header keys on it: a
+		 * section has no portrait and no biography, and the server refuses to
+		 * look one up.
+		 */
+		val CATEGORIES = LibraryMode("categories")
+
+		/**
 		 * The account's own upload area.
 		 *
 		 * Looks like a content type and is not one: the server deliberately

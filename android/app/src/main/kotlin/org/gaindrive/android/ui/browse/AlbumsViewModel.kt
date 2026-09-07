@@ -67,6 +67,13 @@ class AlbumsViewModel @Inject constructor(
 	/** Passed down to each album, and only ever true when browsing Uploads. */
 	val fromUploads: Boolean = route.fromUploads
 
+	/**
+	 * True when this "artist" is a section of a categories root. It has no
+	 * portrait and no biography — `is_category_folder()` on the server refuses
+	 * the lookup — so the header draws neither, and neither is asked for.
+	 */
+	val isCategory: Boolean = route.fromCategories
+
 	private val _albums = MutableStateFlow<Load<List<AlbumUi>>>(Load.Loading)
 
 	val sort: StateFlow<AlbumSort> = settings.albumSort
@@ -177,6 +184,11 @@ class AlbumsViewModel @Inject constructor(
 	 * that can see whether the image actually loaded.
 	 */
 	private fun loadHeader() = viewModelScope.launch {
+		// Nothing to fill in for a section, and nothing to wait for: the
+		// portrait would 404 for as long as ArtistAvatar kept retrying it, and
+		// getArtistInfo2 answers empty by design.
+		if (isCategory) return@launch
+
 		runCatchingCancellable {
 			val covers = library.coverUrls()
 			covers.url(primaryRef, PORTRAIT_PX)

@@ -39,12 +39,20 @@ sealed interface Route {
 	 * sits, and the same album is reachable from search, starred and the play
 	 * queue where the answer would be no. Defaulted, so every one of those call
 	 * sites is unchanged and gets the safe answer.
+	 *
+	 * [fromCategories] is the same bargain for the Categories slice, and says
+	 * the artist is a *section* — Film, Series — rather than a performer. It
+	 * decides whether the header has a portrait and a biography to wait for:
+	 * a section has neither by construction, since the server refuses the
+	 * lookup for one. Defaulted for the same reason, so a section reached from
+	 * search merely keeps the placeholder it has today.
 	 */
 	@Serializable
 	data class Albums(
 		val artistRefs: String,
 		val artistName: String,
 		val fromUploads: Boolean = false,
+		val fromCategories: Boolean = false,
 	) : Route
 
 	/**

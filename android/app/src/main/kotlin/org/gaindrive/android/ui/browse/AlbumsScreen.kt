@@ -94,6 +94,7 @@ fun AlbumsScreen(
 							name = viewModel.artistName,
 							header = header,
 							albumCount = albums.size,
+							showPortrait = !viewModel.isCategory,
 						)
 					}
 
@@ -164,12 +165,18 @@ private fun SortAction(current: AlbumSort, onSelect: (AlbumSort) -> Unit) {
  * Portrait, name and biography. Appears immediately with the placeholder
  * avatar and fills in as the pieces arrive, rather than making the album list
  * wait for a lookup that may never succeed.
+ *
+ * [showPortrait] is false for a section of a categories root, which has no
+ * performer behind it: the avatar would stay a placeholder for ever, and
+ * reserving 96dp for it says a picture is coming. The biography needs no such
+ * flag — it is drawn only once one has arrived.
  */
 @Composable
 private fun ArtistHeader(
 	name: String,
 	header: ArtistHeaderUi,
 	albumCount: Int,
+	showPortrait: Boolean,
 ) {
 	Column(
 		modifier = Modifier
@@ -181,7 +188,9 @@ private fun ArtistHeader(
 			verticalAlignment = Alignment.CenterVertically,
 			horizontalArrangement = Arrangement.spacedBy(16.dp),
 		) {
-			ArtistAvatar(url = header.portraitUrl, contentDescription = name)
+			if (showPortrait) {
+				ArtistAvatar(url = header.portraitUrl, contentDescription = name)
+			}
 			Column {
 				Text(text = name, style = MaterialTheme.typography.headlineSmall)
 				Text(

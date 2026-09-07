@@ -1868,9 +1868,11 @@ async function viewArtists() {
             document.querySelectorAll('#pane-artists .artist-row.selected')
                .forEach(r => r.classList.remove('selected'));
             row.classList.add('selected');
+            const isCategory = libraryMode === 'categories';
             if (paneNav.willSlide(1))
-               history.pushState({view: 'albums', artistId: artist.id, artistName: artist.name}, '');
-            viewAlbums(artist.id, artist.name);
+               history.pushState({view: 'albums', artistId: artist.id,
+                                  artistName: artist.name, isCategory}, '');
+            viewAlbums(artist.id, artist.name, isCategory);
             });
          frag.appendChild(row);
          }
@@ -2242,7 +2244,17 @@ async function viewPlaylistTracks(playlistId, playlistName) {
       });
 }
 
-async function viewAlbums(artistId, artistName) {
+// isCategory says this level-1 folder is a section of a categories root —
+// Film, Series — rather than a performer. Such a folder has no biography and
+// no portrait by construction: is_category_folder() on the server refuses the
+// MusicBrainz lookup, so asking anyway only reserves a shimmer and an empty
+// circle that never fill in.
+//
+// Passed in rather than read from libraryMode, for the reason Route.Albums on
+// Android takes fromUploads: an artist id says which folder, never which
+// section it was reached through. Search, and the sideways entries into
+// viewTracks(), leave it defaulted and behave exactly as before.
+async function viewAlbums(artistId, artistName, isCategory = false) {
    console.log('[albums] loading artist', artistId, artistName);
    const pane = document.getElementById('pane-albums');
    pane.innerHTML = '';
@@ -2286,7 +2298,7 @@ async function viewAlbums(artistId, artistName) {
    header.appendChild(back);
    header.appendChild(heading);
    header.appendChild(sortBtn);
-   header.appendChild(refreshBtn);
+   if (!isCategory) header.appendChild(refreshBtn);
    pane.appendChild(header);
 
    // Placeholder filled asynchronously once getArtistInfo2 responds.
@@ -2294,9 +2306,13 @@ async function viewAlbums(artistId, artistName) {
    // the album list does not jump when the bio arrives.
    // Kept as a detached-node reference so a stale callback can't corrupt a
    // pane that has already been reused for a different artist.
-   const bioSlot = document.createElement('div');
-   bioSlot.className = 'artist-bio-loading';
-   pane.appendChild(bioSlot);
+   // Not made at all for a category, which is the space this reserves and
+   // nothing ever fills.
+   const bioSlot = isCategory ? null : document.createElement('div');
+   if (bioSlot) {
+      bioSlot.className = 'artist-bio-loading';
+      pane.appendChild(bioSlot);
+      }
 
    // The rows are rebuilt in place when the sort is toggled, so the whole loop
    // lives in renderRows() rather than inline: each row carries the uploads-
@@ -2391,7 +2407,8 @@ async function viewAlbums(artistId, artistName) {
                         libraryMode = destType;
                         localStorage.setItem('gd_library_mode', destType);
                         await viewArtists();
-                        await viewAlbums(moved.parent, moved.artist);
+                        await viewAlbums(moved.parent, moved.artist,
+                                         destType === 'categories');
                         await viewTracks(moved.id, moved.album, moved.parent,
                                          moved.artist);
                         }
@@ -2586,8 +2603,10 @@ async function viewAlbums(artistId, artistName) {
             refreshBtn.disabled = false;
             });   // server may not support getArtistInfo2
       }
-   refreshBtn.addEventListener('click', () => loadBio(true));
-   loadBio(false);
+   if (!isCategory) {
+      refreshBtn.addEventListener('click', () => loadBio(true));
+      loadBio(false);
+      }
 }
 
 function fmtDuration(secs) {
@@ -6099,7 +6118,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
             // patch in place — re-render all three panes against the new ones.
             // Pane 0 too: re-filing may have created an artist or emptied one.
             await viewArtists();
-            await viewAlbums(renamed.parent, renamed.artist);
+            await viewAlbums(renamed.parent, renamed.artist,
+                             libraryMode === 'categories');
             await viewTracks(renamed.id, renamed.album, renamed.parent, renamed.artist);
             return;
             }
@@ -6720,7 +6740,7 @@ async function showShell() {
          if (document.getElementById('pane-albums').children.length > 0)
             paneNav.slideTo(1);
          else
-            await viewAlbums(s.artistId, s.artistName);
+            await viewAlbums(s.artistId, s.artistName, s.isCategory === true);
          } else if (s.view === 'tracks') {
          if (document.getElementById('pane-tracks').children.length > 0)
             paneNav.slideTo(2);

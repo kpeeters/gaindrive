@@ -50,8 +50,14 @@ import org.gaindrive.android.ui.components.LibrarySelector
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ArtistsScreen(
-	/** The third argument says the artist was opened from the Uploads slice. */
-	onOpenArtist: (List<ItemRef>, String, Boolean) -> Unit,
+	/**
+	 * The third argument is the slice the artist was opened from. The mode
+	 * itself rather than a bool per slice: two of them are now interesting
+	 * below — Uploads decides what may be deleted, Categories decides whether
+	 * there is a performer to draw a portrait and a biography for — and a pair
+	 * of unlabelled booleans at a call site says neither.
+	 */
+	onOpenArtist: (List<ItemRef>, String, LibraryMode) -> Unit,
 	onFetchUrl: () -> Unit,
 	viewModel: ArtistsViewModel = hiltViewModel(),
 ) {
@@ -203,11 +209,7 @@ fun ArtistsScreen(
 								ArtistRow(
 									artist = artist,
 									onClick = {
-										onOpenArtist(
-											artist.refs,
-											artist.name,
-											mode == LibraryMode.UPLOADS,
-										)
+										onOpenArtist(artist.refs, artist.name, mode)
 									},
 									badges = artist.sources.mapNotNull { badgeNames[it] },
 								)
