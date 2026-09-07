@@ -19,6 +19,9 @@ struct RootView: View {
 
 	@Environment(PlayerConnection.self) private var player
 	@State private var tab: Destination
+	/// Raised by any tab's mini player, and owned here so there is exactly one
+	/// of it — see `miniPlayerInset`.
+	@State private var showingPlayer = false
 	/// The tab-root view model is built here rather than inside `ArtistsView`
 	/// because a `@State` initial value cannot read `@Environment`, and the
 	/// usual workaround — an optional filled in from `.task` — puts a spinner
@@ -63,25 +66,26 @@ struct RootView: View {
 		TabView(selection: $tab) {
 			Tab("Artists", systemImage: "music.mic", value: Destination.artists) {
 				ArtistsView(model: artists)
+					.miniPlayerInset { showingPlayer = true }
 			}
 			Tab("Playlists", systemImage: "music.note.list", value: Destination.playlists) {
 				PlaylistsView(model: playlists)
+					.miniPlayerInset { showingPlayer = true }
 			}
 			Tab("Recents", systemImage: "clock.arrow.circlepath", value: Destination.recents) {
 				RecentsView(model: recents)
+					.miniPlayerInset { showingPlayer = true }
 			}
 			Tab("Search", systemImage: "magnifyingglass", value: Destination.search) {
 				SearchView(model: search)
+					.miniPlayerInset { showingPlayer = true }
 			}
 			Tab("Settings", systemImage: "gearshape", value: Destination.settings) {
 				SettingsView(startOnServers: firstRun)
+					.miniPlayerInset { showingPlayer = true }
 			}
 		}
-		// `safeAreaInset` rather than an overlay, so every list's content inset
-		// grows by the bar's height and the last row is still reachable.
-		.safeAreaInset(edge: .bottom, spacing: 0) {
-			MiniPlayer()
-		}
+		.sheet(isPresented: $showingPlayer) { NowPlayingView() }
 		// **Playback errors belong to the shell, not to a screen.** They arrive
 		// from the audio session, from an item that failed to load and from the
 		// watchdog, none of which is any one screen's business — and a track

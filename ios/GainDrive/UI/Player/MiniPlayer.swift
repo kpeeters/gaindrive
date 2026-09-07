@@ -10,11 +10,15 @@ import SwiftUI
 
 /// The bar above the tab bar.
 ///
-/// It lives in the shell rather than in any navigation stack, so it survives
-/// navigation the way the web client's fixed footer does.
+/// It is applied to a tab's *content* rather than to any navigation stack
+/// inside it, so it survives navigation the way the web client's fixed footer
+/// does — `miniPlayerInset` is the only thing that should attach it.
 struct MiniPlayer: View {
+	/// Raising the Now Playing sheet is the **shell's** job. There is one bar
+	/// per tab, and there must be only one sheet.
+	let onExpand: () -> Void
+
 	@Environment(PlayerConnection.self) private var player
-	@State private var expanded = false
 
 	var body: some View {
 		if let song = player.current {
@@ -38,7 +42,7 @@ struct MiniPlayer: View {
 						Spacer(minLength: 0)
 					}
 					.contentShape(.rect)
-					.onTapGesture { expanded = true }
+					.onTapGesture { onExpand() }
 					.accessibilityAddTraits(.isButton)
 					.accessibilityHint("Opens the player")
 
@@ -66,7 +70,6 @@ struct MiniPlayer: View {
 				Divider()
 			}
 			.accessibilityElement(children: .contain)
-			.sheet(isPresented: $expanded) { NowPlayingView() }
 		}
 	}
 
@@ -90,5 +93,29 @@ struct MiniPlayer: View {
 
 	private func cover(for song: Song) -> CoverSource? {
 		player.coverSource(for: song, size: CoverSize.thumb)
+	}
+}
+
+extension View {
+	/// The mini player, above the tab bar.
+	///
+	/// **Applied to each tab's content, never to the `TabView`.** That is the
+	/// whole point of this modifier existing, and the trap it exists to
+	/// document: a bottom `safeAreaInset` on a `TabView` is inserted at the
+	/// bottom of the *TabView's own frame*, which is where the tab bar is — so
+	/// the bar lands on top of the navigation icons and hides them completely.
+	/// Applied to a tab's content it lands above the tab bar, which is where a
+	/// mini player belongs.
+	///
+	/// `safeAreaInset` rather than an overlay, so every list's content inset
+	/// grows by the bar's height and the last row is still reachable.
+	///
+	/// The cost is one `MiniPlayer` per tab. They are pure presentation —
+	/// each reads the same `PlayerConnection`, and the sheet they raise belongs
+	/// to the shell — so the copies cannot disagree with one another.
+	func miniPlayerInset(onExpand: @escaping () -> Void) -> some View {
+		safeAreaInset(edge: .bottom, spacing: 0) {
+			MiniPlayer(onExpand: onExpand)
+		}
 	}
 }
