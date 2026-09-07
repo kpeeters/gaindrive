@@ -42,7 +42,9 @@ struct GainDriveApp: App {
 		// Built here, never in `RootView.init`, which re-runs on every
 		// re-evaluation of this body — `@State` would keep the first player and
 		// silently discard the rest, each with its own audio session.
-		_player = State(initialValue: PlayerConnection(registry: registry, settings: settings))
+		_player = State(
+			initialValue: PlayerConnection(
+				registry: registry, settings: settings, library: library))
 	}
 
 	var body: some Scene {

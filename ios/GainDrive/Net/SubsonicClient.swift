@@ -23,6 +23,28 @@ enum HTTP {
 		config.waitsForConnectivity = false
 		return URLSession(configuration: config)
 	}()
+
+	/// For requests whose whole purpose is to **wait out work the server is
+	/// doing**, which today means `TranscodePrewarmer`.
+	///
+	/// gaindrive transcodes a whole track to a file before sending any of it,
+	/// and for a long track that outlasts `shared`'s 20 s by a wide margin. A
+	/// warm that times out is not a slow warm: the claim is dropped, so it is a
+	/// warm that never happens and is then attempted again on the next
+	/// transition. Android needed the same thing and spells it `@MediaHttp`.
+	///
+	/// Playback is unaffected either way — `AVURLAsset` does its own
+	/// networking and never touches a `URLSession` of ours.
+	static let media: URLSession = {
+		let config = URLSessionConfiguration.default
+		// No caching: the body is discarded, and a partial response to a range
+		// request is not something to keep.
+		config.urlCache = nil
+		config.requestCachePolicy = .reloadIgnoringLocalCacheData
+		config.timeoutIntervalForRequest = 300
+		config.waitsForConnectivity = false
+		return URLSession(configuration: config)
+	}()
 }
 
 /// Talks to exactly one configured server.

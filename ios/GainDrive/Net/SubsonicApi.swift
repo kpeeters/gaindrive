@@ -160,6 +160,22 @@ extension SubsonicClient {
 		_ = try await perform("deletePlaylist", parameters: ["id": id], expecting: EmptyBody.self)
 	}
 
+	// MARK: - Playback reporting
+
+	/// Tells the server a track is being, or has been, played.
+	///
+	/// `submission=false` is a now-playing notification. `submission=true`
+	/// records a **completed** play, and is what increments the play count and
+	/// sets `last_played` — which is therefore what makes `getRecentSongs`
+	/// non-empty, in this app and in the other two clients, which read the same
+	/// server-side state.
+	func scrobble(id: String, submission: Bool) async throws {
+		_ = try await perform(
+			"scrobble",
+			parameters: ["id": id, "submission": submission ? "true" : "false"],
+			expecting: EmptyBody.self)
+	}
+
 	// MARK: - Recents
 
 	/// A gaindrive extension. A server without it answers an error, which the

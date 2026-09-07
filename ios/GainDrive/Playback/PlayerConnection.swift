@@ -65,6 +65,12 @@ final class PlayerConnection {
 	@ObservationIgnored private let limits = AccountLimits()
 	@ObservationIgnored private let session = AudioSessionController()
 	@ObservationIgnored private let nowPlaying = NowPlayingCenter()
+	// The three that attach to the **role** rather than to the player: phase 9
+	// swaps the player for a cast one and none of them may notice. `PLAN.md`
+	// states the rule; Android is where it was learned.
+	@ObservationIgnored private let scrobbler: Scrobbler
+	@ObservationIgnored private let watchdog = PlaybackWatchdog()
+	@ObservationIgnored private let prewarmer = TranscodePrewarmer()
 
 	@ObservationIgnored private var observations: [NSKeyValueObservation] = []
 	@ObservationIgnored private var timeObserver: Any?
@@ -82,9 +88,10 @@ final class PlayerConnection {
 	/// must be removed before the player is deallocated or the process traps,
 	/// so if this type ever becomes something with a shorter life, that is the
 	/// first thing to add.
-	init(registry: ServerRegistry, settings: SettingsStore) {
+	init(registry: ServerRegistry, settings: SettingsStore, library: LibraryRepository) {
 		self.registry = registry
 		self.settings = settings
+		self.scrobbler = Scrobbler(library: library)
 		// Observers and command handlers only. No session activation and no
 		// fetching: this initialiser starts no work, for the same reason the
 		// view models' do not.
@@ -188,6 +195,9 @@ final class PlayerConnection {
 	}
 
 	func stop() {
+		// Explicitly, because `publishTransport` is not on this path and the
+		// timer would otherwise outlive the queue it was armed against.
+		watchdog.disarm()
 		applyEdit {
 			player.pause()
 			player.removeAllItems()
@@ -367,6 +377,10 @@ final class PlayerConnection {
 			MainActor.assumeIsolated {
 				guard let self, !time.seconds.isNaN else { return }
 				self.position = time.seconds
+				// Here rather than on a timer of its own: this fires only while
+				// the timeline is advancing, which is exactly when a play is
+				// accruing.
+				self.scrobbler.tick(position: time.seconds, duration: self.duration)
 			}
 		}
 	}
@@ -385,6 +399,26 @@ final class PlayerConnection {
 		nowPlaying.onNext = { [weak self] in self?.next() }
 		nowPlaying.onPrevious = { [weak self] in self?.previous() }
 		nowPlaying.onSeek = { [weak self] in self?.seek(to: $0) }
+
+		watchdog.sample = { [weak self] in
+			guard let self else { return PlaybackWatchdog.Sample(stalled: false, position: 0) }
+			// `isBuffering` is already "waiting to play in order to minimise
+			// stalls", which is buffering *and* wanting to play — the pair the
+			// watchdog needs, and the same predicate Android spells as
+			// `STATE_BUFFERING && playWhenReady`.
+			return PlaybackWatchdog.Sample(stalled: self.isBuffering, position: self.position)
+		}
+		watchdog.onStall = { [weak self] in
+			guard let self else { return }
+			// **Pause, not `stop()`.** Android stops because a wedged player
+			// still counted as wanting to play, so its foreground service
+			// survived a swipe away and re-opening re-bound to the same wedge.
+			// There is no such service here, and `stop()` would additionally
+			// throw the queue away. Pausing keeps it, and pressing play is the
+			// retry.
+			self.pause()
+			self.errorMessage = "Playback stalled and was paused."
+		}
 	}
 
 	private func currentItemChanged() {
@@ -425,6 +459,13 @@ final class PlayerConnection {
 		current = song
 		duration = Double(song?.duration ?? 0)
 
+		// The one place in the class that means "a different track is current
+		// now", which is what both of these hang off.
+		if changed {
+			scrobbler.trackChanged(to: song?.ref)
+			prewarmNext()
+		}
+
 		guard let song else {
 			nowPlaying.clear()
 			return
@@ -461,6 +502,33 @@ final class PlayerConnection {
 		}
 		nowPlaying.setPlayback(isPlaying: isPlaying, position: position)
 		nowPlaying.setAvailability(hasNext: model.hasNext, canSeek: canSeek)
+		// **The watchdog is armed from here and nowhere else.** A poll over
+		// `position` would compile and never fire: the periodic time observer
+		// runs as the timeline advances, so during a stall — the one case that
+		// matters — there is no tick to poll on. This is driven by the
+		// `timeControlStatus` KVO instead.
+		watchdog.update()
+	}
+
+	/// Asks the server to build the **next** track's transcode while this one
+	/// plays, so the wait for it lands somewhere nobody is looking.
+	///
+	/// The first transition fires when playback begins, so the second track of
+	/// a queue is prepared while the first plays — the case that matters.
+	///
+	/// A video reaching here is warmed too, and today that is right:
+	/// `StreamUrls.target` sends an audio `format` for every track, which is
+	/// the server's audio-only switch, so what is warmed is the soundtrack
+	/// extraction — a blocking transcode of a multi-gigabyte source, and the
+	/// case Android says needs this most. Phase 6 gives video its own URL, and
+	/// the guard goes in with it.
+	private func prewarmNext() {
+		guard model.hasNext else { return }
+		let next = model.songs[model.index + 1]
+		Task { [weak self] in
+			guard let self, let target = await self.streamTarget(for: next) else { return }
+			await self.prewarmer.warm(target)
+		}
 	}
 
 	// MARK: - Loading

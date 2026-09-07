@@ -253,6 +253,15 @@ final class LibraryRepository: Sendable {
 
 	// MARK: - Writes
 
+	/// **The one write that swallows**, which the rule at the head of this file
+	/// allows only because it is stated: a scrobble is not something the user
+	/// asked for, so a failed one has no screen to report to and nothing to
+	/// retry. Android's `runCatchingCancellable` says the same.
+	func scrobble(_ ref: ItemRef, submission: Bool) async {
+		guard let client = await client(for: ref.server) else { return }
+		try? await client.scrobble(id: ref.id, submission: submission)
+	}
+
 	func setStarred(_ ref: ItemRef, kind: StarKind, starred: Bool) async throws {
 		guard let client = await client(for: ref.server) else { return }
 		let songs = kind == .song ? [ref.id] : []

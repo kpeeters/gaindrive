@@ -17,6 +17,7 @@ struct RootView: View {
 	/// their first server, resetting the navigation stack mid-task.
 	let firstRun: Bool
 
+	@Environment(PlayerConnection.self) private var player
 	@State private var tab: Destination
 	/// The tab-root view model is built here rather than inside `ArtistsView`
 	/// because a `@State` initial value cannot read `@Environment`, and the
@@ -79,6 +80,21 @@ struct RootView: View {
 		// grows by the bar's height and the last row is still reachable.
 		.safeAreaInset(edge: .bottom, spacing: 0) {
 			MiniPlayer()
+		}
+		// **Playback errors belong to the shell, not to a screen.** They arrive
+		// from the audio session, from an item that failed to load and from the
+		// watchdog, none of which is any one screen's business — and a track
+		// that could not be played leaves no mini player to hang an alert on,
+		// which is exactly when there is something to say.
+		.alert(
+			"Playback problem",
+			isPresented: Binding(
+				get: { player.errorMessage != nil },
+				set: { if !$0 { player.clearError() } })
+		) {
+			Button("OK") { player.clearError() }
+		} message: {
+			Text(player.errorMessage ?? "")
 		}
 	}
 }
