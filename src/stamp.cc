@@ -54,13 +54,12 @@ static bool stdout_is_journal()
 
 std::string stamp(std::string label)
 	{
-	// On the journal an unlabelled line gets no prefix at all, rather than the
-	// bare label column: that column is sixteen spaces wide, and leading every
-	// message with it would trade a duplicated timestamp for an indent. The
-	// column survives for a labelled line, which is what keeps the addresses in
-	// the access log aligned with each other -- the only reason it exists.
-	if (stdout_is_journal() && label.empty()) return {};
-
+	// The label column is emitted either way, including for the unlabelled
+	// lines that are almost all of them. Sixteen spaces in front of every
+	// message looks like waste until you see it without them: the column is
+	// what keeps the addresses in the access log a column, and a log where
+	// those lines start in the same place as the prose is harder to scan than
+	// one that is uniformly indented.
 	std::ostringstream ss;
 	if (!stdout_is_journal()) {
 		std::time_t t = std::time(nullptr);
