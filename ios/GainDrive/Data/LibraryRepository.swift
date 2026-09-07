@@ -86,7 +86,11 @@ final class LibraryRepository: Sendable {
 				let request = LibraryRoots.request(
 					roots: known, mode: mode,
 					canUpload: facts.canUpload, isAdmin: facts.isAdmin)
-			else { return [] }
+			// **Typed, not `[]`.** This closure's return type is inferred, and
+			// an untyped empty literal unifies with the real return below as
+			// `[Any]` — which then fails `gather`'s `Sendable` bound several
+			// lines away, naming neither this line nor the reason.
+			else { return [ArtistIndex]() }
 
 			return try await client.artists(
 				personal: request.personal.parameter,
