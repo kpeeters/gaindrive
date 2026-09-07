@@ -36,10 +36,22 @@ extension SubsonicClient {
 	/// that does not simply ignores it and answers with its whole library, and
 	/// filtering the reply is too late because nothing in it says which rows to
 	/// discard. `MusicFolderTypes` is what decides.
-	func artists(personal: Bool = false, contentType: String? = nil) async throws -> [IndexDto] {
+	/// Plain strings rather than the `RootRequest` that composes them, because
+	/// that type lives in `Data` and `Net` may not reach up into it. The
+	/// repository unpacks it, which is also the only place that knows the
+	/// three are alternatives rather than a combination.
+	///
+	/// `personal` is `"true"` for this account's uploads and `"*"` for every
+	/// account's, which the server allows only an admin. It switches to a
+	/// different library altogether, so the other two are ignored while it is
+	/// set.
+	func artists(
+		personal: String? = nil, contentType: String? = nil, musicFolderId: String? = nil
+	) async throws -> [IndexDto] {
 		var parameters: [String: String] = [:]
-		if personal { parameters["personal"] = "true" }
+		if let personal { parameters["personal"] = personal }
 		if let contentType { parameters["contentType"] = contentType }
+		if let musicFolderId { parameters["musicFolderId"] = musicFolderId }
 		return try await perform("getArtists", parameters: parameters, expecting: GetArtistsBody.self)
 			.artists?.index ?? []
 	}

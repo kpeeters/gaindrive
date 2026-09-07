@@ -18,6 +18,23 @@ import Foundation
 //	Every identifier here is an `ItemRef`. Nothing in this file holds a bare
 //	`String` id, and nothing above it should either.
 
+/// One of a server's configured library roots.
+///
+/// **`id` is a bare `String`, and that is not a lapse in the composite-id
+/// rule.** A root id is only meaningful to the server that issued it, and this
+/// one never travels: it is read from that server's `getMusicFolders` and put
+/// straight back into a request to the same server. Nothing above `Data` ever
+/// sees it — the chip row speaks in `LibraryMode`, which is keyed by name for
+/// exactly that reason.
+struct MusicRoot: Hashable, Sendable {
+	let id: String
+	let name: String
+	/// A gaindrive extension: `artists` or `categories`. Absent on a server
+	/// with no concept of root kinds — which is **not** the same as having no
+	/// roots of that kind.
+	let contentType: String?
+}
+
 /// An artist, possibly standing for the same artist on several servers.
 struct Artist: Identifiable, Hashable, Sendable {
 	let ref: ItemRef
@@ -61,6 +78,16 @@ struct Album: Identifiable, Hashable, Sendable {
 	let artistName: String
 	let artistRef: ItemRef?
 	let songCount: Int
+	/// How many of this album's tracks are video, which is the only thing that
+	/// tells a season or a film from a record before its tracks are fetched —
+	/// `isVideo` is a per-song field.
+	///
+	/// **Zero does not mean "no video".** The server does not carry it on the
+	/// directory-shaped listings, so an album reached through search or starred
+	/// reports zero whatever it holds. That is why the mark is only ever added
+	/// and there is no "audio" counterpart: a wrong positive would be a lie,
+	/// and a missing one is silence.
+	let videoCount: Int
 	let duration: Int
 	let year: Int?
 	let genre: String?
@@ -72,14 +99,16 @@ struct Album: Identifiable, Hashable, Sendable {
 
 	init(
 		ref: ItemRef, title: String, artistName: String, artistRef: ItemRef? = nil,
-		songCount: Int = 0, duration: Int = 0, year: Int? = nil, genre: String? = nil,
-		coverArt: ItemRef? = nil, starredAt: String? = nil, refs: [ItemRef]? = nil
+		songCount: Int = 0, videoCount: Int = 0, duration: Int = 0, year: Int? = nil,
+		genre: String? = nil, coverArt: ItemRef? = nil, starredAt: String? = nil,
+		refs: [ItemRef]? = nil
 	) {
 		self.ref = ref
 		self.title = title
 		self.artistName = artistName
 		self.artistRef = artistRef
 		self.songCount = songCount
+		self.videoCount = videoCount
 		self.duration = duration
 		self.year = year
 		self.genre = genre

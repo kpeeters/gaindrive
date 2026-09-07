@@ -62,7 +62,9 @@ final class PlayerConnection {
 
 	@ObservationIgnored private let registry: ServerRegistry
 	@ObservationIgnored private let settings: SettingsStore
-	@ObservationIgnored private let limits = AccountLimits()
+	/// Shared with `LibraryRepository`: the ceiling a stream URL needs and the
+	/// roles the chip row needs come from the same one `getUser` per server.
+	@ObservationIgnored private let accounts: Accounts
 	@ObservationIgnored private let session = AudioSessionController()
 	@ObservationIgnored private let nowPlaying = NowPlayingCenter()
 	// The three that attach to the **role** rather than to the player: phase 9
@@ -88,9 +90,13 @@ final class PlayerConnection {
 	/// must be removed before the player is deallocated or the process traps,
 	/// so if this type ever becomes something with a shorter life, that is the
 	/// first thing to add.
-	init(registry: ServerRegistry, settings: SettingsStore, library: LibraryRepository) {
+	init(
+		registry: ServerRegistry, settings: SettingsStore, library: LibraryRepository,
+		accounts: Accounts
+	) {
 		self.registry = registry
 		self.settings = settings
+		self.accounts = accounts
 		self.scrobbler = Scrobbler(library: library)
 		// Observers and command handlers only. No session activation and no
 		// fetching: this initialiser starts no work, for the same reason the
@@ -337,7 +343,7 @@ final class PlayerConnection {
 	private func streamTarget(for song: Song) async -> StreamTarget? {
 		let clients = registry.clientsSnapshot()
 		guard let client = clients.client(for: song.ref.server) else { return nil }
-		let cap = await limits.cap(for: song.ref.server, using: clients)
+		let cap = await accounts.cap(for: song.ref.server, using: clients)
 		return StreamUrls.target(
 			for: song.ref, client: client, wanted: settings.audioQuality, accountCap: cap)
 	}

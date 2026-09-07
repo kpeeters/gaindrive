@@ -43,6 +43,31 @@ final class SettingsStore {
 		didSet { defaults.set(audioQuality.tag, forKey: Self.audioQualityKey) }
 	}
 
+	/// Which slice of the library was last showing, as `LibraryMode.id`.
+	///
+	/// Stored as the raw string rather than as a `LibraryMode`, so a value
+	/// written by a build that knew a kind this one does not still parses —
+	/// which is the same reason `LibraryMode` wraps a string at all. An
+	/// unrecognised one falls back when the chip row is read.
+	var libraryMode: String? {
+		didSet { defaults.set(libraryMode, forKey: Self.libraryModeKey) }
+	}
+
+	/// Album order, **per slice**, so films can sit A–Z while a musician's
+	/// albums stay chronological. A single global setting would make one of
+	/// those two wrong every time the other was set.
+	private(set) var albumSorts: [String: String] {
+		didSet { defaults.set(albumSorts, forKey: Self.albumSortsKey) }
+	}
+
+	func albumSort(for mode: LibraryMode) -> AlbumSort {
+		AlbumSort.parse(albumSorts[mode.id])
+	}
+
+	func setAlbumSort(_ sort: AlbumSort, for mode: LibraryMode) {
+		albumSorts[mode.id] = sort.rawValue
+	}
+
 	@ObservationIgnored private let defaults: UserDefaults
 	// Spelled as Android spells them in its DataStore, so the two apps
 	// describe the same settings by the same names.
@@ -50,6 +75,8 @@ final class SettingsStore {
 	private static let selectedServerKey = "selected_server"
 	private static let mergeAlbumsKey = "merge_duplicate_albums"
 	private static let audioQualityKey = "audio_quality"
+	private static let libraryModeKey = "library_mode"
+	private static let albumSortsKey = "album_sort"
 
 	init(defaults: UserDefaults = .standard) {
 		self.defaults = defaults
@@ -65,5 +92,7 @@ final class SettingsStore {
 		// that could disagree would be two settings pretending to be one.
 		audioQuality =
 			defaults.string(forKey: Self.audioQualityKey).flatMap(AudioQuality.parse) ?? .default
+		libraryMode = defaults.string(forKey: Self.libraryModeKey)
+		albumSorts = defaults.dictionary(forKey: Self.albumSortsKey) as? [String: String] ?? [:]
 	}
 }

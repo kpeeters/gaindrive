@@ -30,17 +30,42 @@ final class ArtistsViewModel {
 	private(set) var isRefreshing = false
 	private(set) var badgeNames: [ServerId: String] = [:]
 
+	/// The slices on offer, and which one is showing.
+	///
+	/// **The floor lives here, not in the repository**, which answers with
+	/// nothing when no server did: keeping the row already on screen is better
+	/// than losing the chips to one timeout, and a fresh launch needs something
+	/// selectable regardless. `[.artists]` is that something.
+	private(set) var modes: [LibraryMode] = [.artists]
+	private(set) var mode: LibraryMode
+
 	@ObservationIgnored private let library: LibraryRepository
 	@ObservationIgnored private let selection: ServerSelection
+	@ObservationIgnored private let settings: SettingsStore
 	/// What is currently on screen. Leaving for an album and coming back is not
 	/// a reason to re-read the library: the list has not changed while the user
 	/// was two screens deep.
 	@ObservationIgnored private var loadedFor: BrowseScope?
 	@ObservationIgnored private var task: Task<Void, Never>?
 
-	init(library: LibraryRepository, selection: ServerSelection) {
+	init(library: LibraryRepository, selection: ServerSelection, settings: SettingsStore) {
 		self.library = library
 		self.selection = selection
+		self.settings = settings
+		// Read here rather than in the first load, so the first list drawn is
+		// already the right kind rather than artists flashing past on the way
+		// to categories. A stored read is not work, which is what the rule
+		// about initialisers is really about.
+		self.mode = settings.libraryMode.map(LibraryMode.init) ?? .artists
+	}
+
+	/// A different slice is a different library, so the list goes rather than
+	/// lingering under a spinner.
+	func select(_ next: LibraryMode) {
+		guard next != mode else { return }
+		mode = next
+		settings.libraryMode = next.id
+		start(clearFirst: true)
 	}
 
 	/// Called from `.task(id:)`, which fires on appearance *and* on a scope
@@ -77,11 +102,35 @@ final class ArtistsViewModel {
 		// screen on `.loading` forever. The view's `.task` closure only kicks
 		// this off and returns.
 		task = Task { [library] in
-			let merged = await library.artistIndexes(scope: scope)
+			// **Awaited before the load, never alongside it.** It may *change*
+			// the selected chip — a scope whose only server offers categories
+			// has no "artists" among them — and loading first would then query
+			// a chip nothing answers for, with the correction arriving too late
+			// to have a reload behind it. It costs nothing to wait: both this
+			// and the load below read the same per-session root cache, so only
+			// one of them reaches the network.
+			await self.refreshModes(scope: scope)
+			guard !Task.isCancelled else { return }
+			let merged = await library.artistIndexes(scope: scope, mode: self.mode)
 			guard !Task.isCancelled else { return }
 			self.state = merged.load
 			self.failures = merged.failures
 		}
+	}
+
+	/// Re-reads which slices this scope offers, and falls back when the stored
+	/// one has gone — a server may have been removed since it was chosen.
+	///
+	/// An empty answer means no server replied, and leaves everything alone:
+	/// the chips are navigation, and losing them because one server timed out
+	/// would be worse than showing a stale set.
+	private func refreshModes(scope: BrowseScope) async {
+		let available = await library.availableModes(scope: scope)
+		guard !available.isEmpty else { return }
+		modes = available
+		guard !available.contains(mode), let fallback = available.first else { return }
+		mode = fallback
+		settings.libraryMode = fallback.id
 	}
 
 	func dismissFailures() {

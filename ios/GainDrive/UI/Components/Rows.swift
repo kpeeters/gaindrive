@@ -64,8 +64,27 @@ struct AlbumRow: View {
 		HStack(spacing: 12) {
 			CoverThumb(source: item.cover)
 			VStack(alignment: .leading, spacing: 2) {
-				Text(item.album.title)
-					.lineLimit(1)
+				HStack(spacing: 6) {
+					// The same glyph a video track carries in a listing: a
+					// folder of films and a film's one track are the same
+					// warning at two levels, and two icons would read as two
+					// different things.
+					//
+					// **Only ever added.** `videoCount` is absent on the
+					// directory-shaped listings, so no icon does not mean no
+					// video — a wrong positive would be a lie, a missing one is
+					// silence, and there is deliberately no audio counterpart.
+					if item.album.videoCount > 0 {
+						Image(systemName: "film")
+							.font(.caption)
+							.foregroundStyle(.secondary)
+							.accessibilityLabel(
+								item.album.videoCount == 1
+									? "1 video" : "\(item.album.videoCount) videos")
+					}
+					Text(item.album.title)
+						.lineLimit(1)
+				}
 				HStack(spacing: 6) {
 					Text(subtitle)
 						.font(.footnote)

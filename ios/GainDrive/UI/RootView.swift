@@ -35,12 +35,13 @@ struct RootView: View {
 
 	init(
 		firstRun: Bool, library: LibraryRepository, selection: ServerSelection,
-		events: LibraryEvents
+		events: LibraryEvents, settings: SettingsStore
 	) {
 		self.firstRun = firstRun
 		_tab = State(initialValue: firstRun ? .settings : .artists)
 		_artists = State(
-			initialValue: ArtistsViewModel(library: library, selection: selection))
+			initialValue: ArtistsViewModel(
+				library: library, selection: selection, settings: settings))
 		_playlists = State(
 			initialValue: PlaylistsViewModel(
 				library: library, selection: selection, events: events))

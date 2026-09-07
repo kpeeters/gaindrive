@@ -24,6 +24,15 @@ struct ArtistsView: View {
 			LoadStateBox(state: model.state, onRetry: { model.retry() }) { indexes in
 				content(indexes)
 			}
+			// Outside the list rather than a row in it, so the chips are there
+			// while the slice is loading, when the load failed, and when there
+			// is nothing in it yet — which is exactly when somebody wants to be
+			// somewhere else.
+			.safeAreaInset(edge: .top, spacing: 0) {
+				LibraryModeChips(
+					modes: model.modes, selected: model.mode,
+					onSelect: { model.select($0) })
+			}
 			.navigationTitle("Artists")
 			.navigationDestination(for: Route.self) { route in
 				destination(route)
@@ -55,7 +64,7 @@ struct ArtistsView: View {
 	@ViewBuilder
 	private func content(_ indexes: [ArtistIndex]) -> some View {
 		if indexes.isEmpty {
-			EmptyMessage(text: selection.hasNoServers ? "No servers configured" : "No artists")
+			EmptyMessage(text: emptyText)
 		} else {
 			ScrollViewReader { proxy in
 				List {
@@ -71,7 +80,9 @@ struct ArtistsView: View {
 						Section {
 							ForEach(bucket.artists) { artist in
 								NavigationLink(
-									value: Route.albums(artists: artist.refs, name: artist.name)
+									value: Route.albums(
+										artists: artist.refs, name: artist.name,
+										fromCategories: model.mode == .categories)
 								) {
 									ArtistRow(item: model.artistUi(artist))
 								}
@@ -85,24 +96,40 @@ struct ArtistsView: View {
 				.refreshable { await model.refresh() }
 				// Long names would otherwise slide underneath the rail rather
 				// than being clipped short of it.
-				.safeAreaPadding(.trailing, 20)
+				.safeAreaPadding(.trailing, showsRail(indexes) ? 20 : 0)
 				.overlay(alignment: .trailing) {
-					AlphabetRail(labels: indexes.map(\.label)) { label in
-						// Not animated: scrubbing the rail issues these in
-						// quick succession, and animations queue up and lag
-						// behind the finger.
-						proxy.scrollTo(label, anchor: .top)
+					if showsRail(indexes) {
+						AlphabetRail(labels: indexes.map(\.label)) { label in
+							// Not animated: scrubbing the rail issues these in
+							// quick succession, and animations queue up and lag
+							// behind the finger.
+							proxy.scrollTo(label, anchor: .top)
+						}
 					}
 				}
 			}
 		}
 	}
 
+	/// "No artists" would read as a fault in the uploads slice, where an empty
+	/// list is the ordinary state of somewhere nothing has been put yet.
+	private var emptyText: String {
+		if selection.hasNoServers { return "No servers configured" }
+		return model.mode == .uploads ? "Nothing in your uploads yet" : "No artists"
+	}
+
+	/// The rail is for scrubbing a long alphabetical list, not for jumping
+	/// between four people. An admin's Uploads slice comes back bucketed by
+	/// **username**, and a vertical strip of those reads as a mistake.
+	private func showsRail(_ indexes: [ArtistIndex]) -> Bool {
+		indexes.count > 1 && indexes.allSatisfy { $0.label.count == 1 }
+	}
+
 	@ViewBuilder
 	private func destination(_ route: Route) -> some View {
 		switch route {
-		case .albums(let artists, let name):
-			AlbumsView(refs: artists, artistName: name)
+		case .albums(let artists, let name, let fromCategories):
+			AlbumsView(refs: artists, artistName: name, fromCategories: fromCategories)
 		case .album(let ref, let title, let autoPlay):
 			AlbumDetailView(ref: ref, albumTitle: title, autoPlay: autoPlay)
 		case .playlist:

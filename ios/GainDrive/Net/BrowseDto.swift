@@ -68,6 +68,10 @@ struct AlbumDto: Decodable, Sendable {
 	@Loose var artist: String?
 	@Loose var album: String?
 	@Loose var songCount: Int?
+	/// A gaindrive extension, and **absent on the directory-shaped listings**
+	/// — search, starred, playlists — where it must be read as "not said"
+	/// rather than as zero.
+	@Loose var videoCount: Int?
 	@Loose var duration: Int?
 	@Loose var created: String?
 	@Loose var coverArt: String?

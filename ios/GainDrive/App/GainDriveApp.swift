@@ -34,7 +34,14 @@ struct GainDriveApp: App {
 		_registry = State(initialValue: registry)
 		_settings = State(initialValue: settings)
 		let events = LibraryEvents()
-		let library = LibraryRepository(registry: registry, settings: settings, events: events)
+		// Shared rather than private to either: the same `getUser` answers the
+		// bitrate ceiling a stream URL needs and the roles the chip row needs,
+		// and asking twice would be two requests for one fact.
+		let accounts = Accounts()
+		let roots = MusicRoots()
+		let library = LibraryRepository(
+			registry: registry, settings: settings, events: events,
+			accounts: accounts, roots: roots)
 		_selection = State(initialValue: ServerSelection(registry: registry, settings: settings))
 		_events = State(initialValue: events)
 		_library = State(initialValue: library)
@@ -44,13 +51,22 @@ struct GainDriveApp: App {
 		// silently discard the rest, each with its own audio session.
 		_player = State(
 			initialValue: PlayerConnection(
-				registry: registry, settings: settings, library: library))
+				registry: registry, settings: settings, library: library,
+				accounts: accounts))
+		// Editing a server may have pointed it at a different account, whose
+		// ceiling and roles are otherwise cached from the old one for the rest
+		// of the session.
+		registry.onServerInvalidated = { id in
+			Task { await accounts.forget(id) }
+			Task { await roots.forget(id) }
+		}
 	}
 
 	var body: some Scene {
 		WindowGroup {
 			RootView(
-				firstRun: firstRun, library: library, selection: selection, events: events
+				firstRun: firstRun, library: library, selection: selection, events: events,
+				settings: settings
 			)
 			.environment(registry)
 			.environment(settings)

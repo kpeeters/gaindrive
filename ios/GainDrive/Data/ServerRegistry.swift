@@ -57,6 +57,25 @@ final class ServerRegistry {
 		return config
 	}
 
+	/// Called when a server is edited or removed, so the per-session caches
+	/// keyed on its id are dropped with its client.
+	///
+	/// A callback rather than references to `Accounts` and `MusicRoots`,
+	/// because the registry is built **before** either of them — it is what
+	/// `LibraryRepository` is built from, and they are built alongside it. It
+	/// is also what keeps `Data`'s one stateless type stateless: the registry
+	/// knows that something wants telling, not what.
+	///
+	/// What it fixes is narrow and real: editing a server to point at a
+	/// different account leaves that account's ceiling and roles cached from
+	/// the old one for the rest of the session, so a chip appears or does not
+	/// for reasons nothing on screen explains.
+	var onServerInvalidated: (@MainActor (ServerId) -> Void)?
+
+	private func invalidate(_ id: ServerId) {
+		onServerInvalidated?(id)
+	}
+
 	/// `newPassword` is `nil` when the user did not touch the password field,
 	/// which must leave the stored one alone — an editor that saved an empty
 	/// field as an empty password would lock the user out of a server they
@@ -68,6 +87,7 @@ final class ServerRegistry {
 			Keychain.setPassword(newPassword.trimmingCharacters(in: .whitespacesAndNewlines), for: config.id)
 		}
 		clients[config.id] = nil
+		invalidate(config.id)
 		persist()
 	}
 
@@ -80,6 +100,7 @@ final class ServerRegistry {
 	func remove(id: ServerId) {
 		servers.removeAll { $0.id == id }
 		clients[id] = nil
+		invalidate(id)
 		Keychain.removePassword(for: id)
 		persist()
 	}

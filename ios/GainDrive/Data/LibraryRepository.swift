@@ -30,24 +30,96 @@ final class LibraryRepository: Sendable {
 	private let registry: ServerRegistry
 	private let settings: SettingsStore
 	private let events: LibraryEvents
+	private let accounts: Accounts
+	private let roots: MusicRoots
 
-	init(registry: ServerRegistry, settings: SettingsStore, events: LibraryEvents) {
+	init(
+		registry: ServerRegistry, settings: SettingsStore, events: LibraryEvents,
+		accounts: Accounts, roots: MusicRoots
+	) {
 		self.registry = registry
 		self.settings = settings
 		self.events = events
+		self.accounts = accounts
+		self.roots = roots
 	}
 
 	// MARK: - Fan-out reads
 
-	func artistIndexes(scope: BrowseScope) async -> MergedResult<[ArtistIndex]> {
+	/// Which slices this scope offers, as one chip row.
+	///
+	/// **Empty when nothing answered**, which is not the same as "this library
+	/// has only Artists" and must not be flattened into it here: the caller
+	/// keeps the row it already has, because losing the chips to one server's
+	/// timeout would be worse than showing a stale set. The floor lives in the
+	/// view model, which is the only place that knows what is currently on
+	/// screen.
+	func availableModes(scope: BrowseScope) async -> [LibraryMode] {
 		let clients = await registry.clientsSnapshot()
 		let gathered = await gather(over: clients.servers(in: scope), clients: clients) {
-			client, config in
-			try await client.artists().map { LibraryMapper.index($0, server: config.id) }
+			[accounts, roots] client, config in
+			let facts = await accounts.facts(for: config.id, using: clients)
+			let known = try await Self.rootsOf(client, config.id, cache: roots)
+			return LibraryRoots.chips(roots: known, canUpload: facts.canUpload)
 		}
+		return LibraryRoots.mergeChips(perServer: gathered.answers.map(\.1))
+	}
+
+	func artistIndexes(scope: BrowseScope, mode: LibraryMode = .artists) async -> MergedResult<
+		[ArtistIndex]
+	> {
+		let clients = await registry.clientsSnapshot()
+		let gathered = await gather(over: clients.servers(in: scope), clients: clients) {
+			[accounts, roots] client, config in
+			// **A server that cannot answer for this chip is not asked at
+			// all.** Not asking is the whole point: one predating library roots
+			// ignores an unknown `contentType` and answers with its entire
+			// library, so the request itself is what would put the same artists
+			// under every chip. Filtering the reply would be too late — nothing
+			// in it says which rows to discard.
+			//
+			// Both facts come from the one cached `getUser` per server, so the
+			// second costs no request.
+			let facts = await accounts.facts(for: config.id, using: clients)
+			let known = try await Self.rootsOf(client, config.id, cache: roots)
+			guard
+				let request = LibraryRoots.request(
+					roots: known, mode: mode,
+					canUpload: facts.canUpload, isAdmin: facts.isAdmin)
+			else { return [] }
+
+			return try await client.artists(
+				personal: request.personal.parameter,
+				contentType: request.contentType,
+				musicFolderId: request.musicFolderId
+			).map { LibraryMapper.index($0, server: config.id) }
+		}
+		let perServer = gathered.answers.map(\.1)
 		return MergedResult(
-			items: Merge.artistIndexes(perServer: gathered.answers.map(\.1)),
+			// **Not merged in the uploads slice.** Everywhere else, two servers
+			// holding an artist of the same name are holding the same artist.
+			// In uploads they are two people's folders, and the owner buckets
+			// exist to keep them apart — merging by name would file one
+			// person's upload under another's heading.
+			items: mode == .uploads
+				? Merge.concatenatedIndexes(perServer: perServer)
+				: Merge.artistIndexes(perServer: perServer),
 			failures: gathered.failures)
+	}
+
+	/// One server's roots, fetched once per session.
+	///
+	/// A failure propagates rather than resolving to "no roots": that reaches
+	/// the caller's `catch` and is reported as a server that did not answer,
+	/// which is true — whereas an empty list would silently mean "this server
+	/// offers only Artists" and would be indistinguishable from a real answer.
+	private static func rootsOf(
+		_ client: SubsonicClient, _ server: ServerId, cache: MusicRoots
+	) async throws -> [MusicRoot] {
+		if let cached = await cache.cached(server) { return cached }
+		let fetched = try await client.musicFolders().compactMap(LibraryMapper.musicRoot)
+		await cache.store(fetched, for: server)
+		return fetched
 	}
 
 	/// Takes a *list* of refs because a merged artist row stands for the same

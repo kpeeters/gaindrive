@@ -67,12 +67,19 @@ enum LibraryMapper {
 			// Directory-shaped results carry no count, so fall back to what
 			// arrived rather than showing a confident zero.
 			songCount: positive(dto.songCount) ?? dto.song.count,
+			videoCount: positive(dto.videoCount) ?? 0,
 			duration: dto.duration ?? 0,
 			year: positive(dto.year),
 			genre: nonEmpty(dto.genre),
 			coverArt: server.ref(dto.coverArt) ?? ref,
 			starredAt: dto.starred
 		)
+	}
+
+	static func musicRoot(_ dto: MusicFolderDto) -> MusicRoot? {
+		guard let id = nonEmpty(dto.id) else { return nil }
+		return MusicRoot(
+			id: id, name: dto.name ?? id, contentType: nonEmpty(dto.contentType))
 	}
 
 	// MARK: - Songs

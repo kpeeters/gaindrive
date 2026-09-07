@@ -164,8 +164,8 @@ struct NowPlayingView: View {
 	@ViewBuilder
 	private func destination(_ route: Route) -> some View {
 		switch route {
-		case .albums(let artists, let name):
-			AlbumsView(refs: artists, artistName: name)
+		case .albums(let artists, let name, let fromCategories):
+			AlbumsView(refs: artists, artistName: name, fromCategories: fromCategories)
 		case .album(let ref, let title, let autoPlay):
 			AlbumDetailView(ref: ref, albumTitle: title, autoPlay: autoPlay)
 		case .playlist(let ref, let name):

@@ -11,9 +11,13 @@ import SwiftUI
 struct AlbumsView: View {
 	let refs: [ItemRef]
 	let artistName: String
+	/// See `Route.albums`. Defaulted, so a section reached from search keeps
+	/// today's placeholder rather than having the answer guessed.
+	var fromCategories = false
 
 	@Environment(\.library) private var library
 	@Environment(ServerSelection.self) private var selection
+	@Environment(SettingsStore.self) private var settings
 	@State private var model: AlbumsViewModel?
 	@State private var notesDismissed = false
 
@@ -29,14 +33,40 @@ struct AlbumsView: View {
 		}
 		.navigationTitle(artistName)
 		.navigationBarTitleDisplayMode(.inline)
+		.toolbar {
+			if let model {
+				ToolbarItem(placement: .topBarTrailing) { sortMenu(model) }
+			}
+		}
 		.task {
 			// Built here rather than in an initialiser because a `@State`
 			// initial value cannot read `@Environment`. Assigned once, so the
 			// model survives every re-evaluation of this body.
 			if model == nil, let library {
-				model = AlbumsViewModel(library: library, selection: selection, refs: refs)
+				model = AlbumsViewModel(
+					library: library, selection: selection, settings: settings,
+					refs: refs, fromCategories: fromCategories)
 			}
 			model?.appear()
+		}
+	}
+
+	/// The server answers in year order alone (`ORDER BY al.year, al.title`),
+	/// which is right for a discography and useless for a film category, where
+	/// the only thing anyone knows about an item is its name.
+	private func sortMenu(_ model: AlbumsViewModel) -> some View {
+		Menu {
+			ForEach(AlbumSort.allCases, id: \.self) { option in
+				Button {
+					model.setSort(option)
+				} label: {
+					Label(
+						option.label,
+						systemImage: model.sort == option ? "checkmark" : "")
+				}
+			}
+		} label: {
+			Label("Sort", systemImage: "arrow.up.arrow.down")
 		}
 	}
 

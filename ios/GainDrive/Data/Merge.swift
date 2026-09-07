@@ -131,6 +131,10 @@ enum Merge {
 				artistName: existing.artistName,
 				artistRef: existing.artistRef ?? album.artistRef,
 				songCount: max(existing.songCount, album.songCount),
+				// `max`, not "the winner's": the field is absent on some
+				// listings, so a zero means "not said" and must never
+				// overwrite a real count from the other copy.
+				videoCount: max(existing.videoCount, album.videoCount),
 				duration: max(existing.duration, album.duration),
 				year: existing.year ?? album.year,
 				genre: existing.genre ?? album.genre,
@@ -147,6 +151,31 @@ enum Merge {
 	///
 	/// A title made entirely of punctuation keeps its raw form, or every such
 	/// title would collapse into one row.
+	/// The same buckets, **without merging the artists inside them**.
+	///
+	/// For the uploads slice, where two accounts' identically named folders are
+	/// not the same artist. The owner buckets exist precisely to keep them
+	/// apart — `personal=*` groups the response by username rather than by
+	/// first letter — so collapsing rows by name across servers would file one
+	/// person's upload under another's heading, which is the one thing that
+	/// listing has to get right.
+	static func concatenatedIndexes(perServer: [[ArtistIndex]]) -> [ArtistIndex] {
+		if perServer.count == 1 { return perServer[0] }
+
+		var grouped: [String: [Artist]] = [:]
+		for bucket in perServer.flatMap({ $0 }) {
+			grouped[bucket.label, default: []] += bucket.artists
+		}
+		return grouped.keys.sorted(by: labelPrecedes).map { label in
+			ArtistIndex(
+				label: label,
+				// Concatenating two already-sorted lists is not sorted.
+				artists: grouped[label, default: []].sorted {
+					matchKey($0.name) < matchKey($1.name)
+				})
+		}
+	}
+
 	static func matchKey(_ raw: String) -> String {
 		let stripped = raw.lowercased().unicodeScalars
 			.filter { CharacterSet.alphanumerics.contains($0) }

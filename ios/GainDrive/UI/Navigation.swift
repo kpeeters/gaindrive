@@ -23,7 +23,17 @@ enum Route: Hashable {
 	///
 	/// The name travels alongside so the title bar has something to show before
 	/// the body has loaded.
-	case albums(artists: [ItemRef], name: String)
+	/// `fromCategories` says the row was tapped in a **categories** slice, in
+	/// which case the header draws no portrait and expects no biography: Film
+	/// and Series are not performers, and the server knows it — see
+	/// `is_category_folder()`. Without it the avatar sits as a placeholder for
+	/// ever while the fetch retries a 404.
+	///
+	/// It travels on the route rather than being read from the current chip
+	/// because **an artist reference says which folder, never which slice it
+	/// was reached through** — and it is defaulted, so a section reached from
+	/// search keeps today's placeholder rather than having the answer guessed.
+	case albums(artists: [ItemRef], name: String, fromCategories: Bool)
 	/// `autoPlay` names a track to start once the listing has arrived, which is
 	/// how a hit in Recents or Search is played.
 	///
@@ -36,6 +46,11 @@ enum Route: Hashable {
 	/// Android's `Route.Album.autoPlayRef` exists for the same reason.
 	case album(ItemRef, title: String, autoPlay: ItemRef?)
 	case playlist(ItemRef, name: String)
+
+	/// The ordinary way in, from a slice that is not categories.
+	static func albums(artists: [ItemRef], name: String) -> Route {
+		.albums(artists: artists, name: name, fromCategories: false)
+	}
 
 	/// Open the album and start nothing — every browse screen's way in.
 	///
