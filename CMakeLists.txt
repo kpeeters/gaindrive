@@ -189,6 +189,31 @@ if(GAINDRIVE_STATIC)
 	add_compile_options($<$<CONFIG:Release,MinSizeRel>:-fdata-sections>)
 endif()
 
+# Deliberately here, and deliberately at top level.
+#
+# Nothing in gaindrive uses zlib directly; taglib and libarchive do. But taglib
+# hands ZLIB::ZLIB to its consumers and does not guarantee anyone has defined
+# it, which breaks in two different ways depending on where taglib came from:
+#
+#   * built from source here, taglib's own find_package("ZLIB") runs in its
+#     subdirectory, and its static build then OVERWRITES tag's whole
+#     INTERFACE_LINK_LIBRARIES with the bare string ZLIB::ZLIB;
+#   * installed, taglib-config.cmake includes taglib-targets.cmake -- which
+#     carries that same INTERFACE_LINK_LIBRARIES -- and never calls
+#     find_dependency(ZLIB), so nothing defines the target at all.
+#
+# Either way the failure lands on OUR add_executable, as "Target gaindrive
+# links to target ZLIB::ZLIB but the target was not found. Perhaps a
+# find_package() call is missing" -- which names no dependency and points at a
+# line that has nothing to do with it. Defining the target here satisfies both.
+#
+# Not REQUIRED: without zlib, a bundled taglib sets HAVE_ZLIB false and never
+# names the target, so a machine that would have built happily must not be
+# refused. And it must come AFTER the block above, for the reason that block
+# already gives -- FindZLIB fixes shared-vs-static on its first run, so running
+# it here is what stops the answer depending on which subproject asked first.
+find_package(ZLIB)
+
 set(GD_FETCH "")     # FetchContent names to make available
 set(GD_SYSTEM "")    # resolved from a system package
 set(_gd_missing "")  # wanted from the system, not found there
@@ -311,11 +336,46 @@ if(GD_BUNDLED)
 	set(FETCHCONTENT_TRY_FIND_PACKAGE_MODE NEVER)
 endif()
 
+# A bundled dependency must not install itself.
+#
+# FetchContent adds each one with add_subdirectory(), so its install() rules are
+# ours by adoption and `sudo cmake --install build` scatters SQLiteCpp, taglib,
+# tinyxml2 and reproc++ across the prefix -- headers, static libraries, pkgconfig
+# and cmake package files. That is not merely untidy. The next configure then
+# FINDS those copies, so the build silently stops using the pinned versions this
+# file chose and starts using whatever it installed last time; and an installed
+# taglib brings the ZLIB::ZLIB fault documented above with it.
+#
+# EXCLUDE_FROM_ALL on the declaration is what suppresses those rules. The
+# targets are still built -- an inter-target dependency supersedes the exclusion,
+# and gaindrive links every one of them -- so nothing is lost but the installing.
+#
+# It is 3.28 or newer, hence the variable rather than the keyword at seven call
+# sites: an unquoted empty variable expands to no argument at all, while passing
+# the keyword to an older FetchContent_Declare would hand it to
+# ExternalProject_Add, which does not know it. The per-project switches below
+# are what cover the older CMake this floor still admits; three of these
+# projects offer none, and for those, older CMake still installs them. The
+# `uninstall` target exists partly for that.
+set(GD_FETCH_EXCLUDE "")
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
+	set(GD_FETCH_EXCLUDE EXCLUDE_FROM_ALL)
+elseif(GD_BUNDLED)
+	message(STATUS
+		"gaindrive: CMake ${CMAKE_VERSION} predates FetchContent's "
+		"EXCLUDE_FROM_ALL (3.28); a bundled SQLiteCpp, taglib or tinyxml2 will "
+		"still install itself. Undo with --target uninstall.")
+endif()
+
 # ---- Bundled dependency declarations ---------------------------------------
 # Each is declared only when it is actually being built, so an unrelated
 # dependency's options never reach a build that does not include it.
 
 if("cxxopts" IN_LIST GD_BUNDLED)
+	# Already off for a sub-project -- it defaults to CXXOPTS_STANDALONE_PROJECT
+	# -- but set explicitly, because "we depend on somebody's default" is the
+	# kind of thing that stops being true in a version bump without a word.
+	set(CXXOPTS_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 	# v3.3.1 rather than v3.2.1 only because the older tag declares
 	# cmake_minimum_required(VERSION 3.1...3.19), and CMake 4 rejects a <min>
 	# below 3.5 even in the range form.
@@ -323,19 +383,29 @@ if("cxxopts" IN_LIST GD_BUNDLED)
 		cxxopts
 		GIT_REPOSITORY https://github.com/jarro2783/cxxopts.git
 		GIT_TAG        v3.3.1
+		${GD_FETCH_EXCLUDE}
 	)
 endif()
 
 if("nlohmann_json" IN_LIST GD_BUNDLED)
+	# As with cxxopts: already off for a sub-project (it follows MAIN_PROJECT),
+	# and pinned here so it stays that way.
+	set(JSON_Install OFF CACHE BOOL "" FORCE)
 	# Likewise: 3.11.3 declares 3.1...3.14, 3.12.0 declares 3.5...4.0.
 	FetchContent_Declare(
 		nlohmann_json
 		GIT_REPOSITORY https://github.com/nlohmann/json.git
 		GIT_TAG        v3.12.0
+		${GD_FETCH_EXCLUDE}
 	)
 endif()
 
 if("SQLiteCpp" IN_LIST GD_BUNDLED)
+	# SQLiteCpp, taglib and tinyxml2 offer no "do not install" option of any
+	# kind -- their install() calls are unconditional -- so EXCLUDE_FROM_ALL is
+	# the only thing that stops them, and on CMake older than 3.28 nothing does.
+	# Do not go looking for a switch to set here; there is none to find.
+	#
 	# SQLiteCpp bundles and builds sqlite3 from source (SQLITECPP_INTERNAL_SQLITE
 	# defaults ON), which is what we want for a single self-contained binary.
 	# Disable cpplint so it never searches for Python.
@@ -344,6 +414,7 @@ if("SQLiteCpp" IN_LIST GD_BUNDLED)
 		SQLiteCpp
 		GIT_REPOSITORY https://github.com/SRombauts/SQLiteCpp.git
 		GIT_TAG        3.3.2
+		${GD_FETCH_EXCLUDE}
 	)
 endif()
 
@@ -357,6 +428,7 @@ if("TagLib" IN_LIST GD_BUNDLED)
 		taglib
 		GIT_REPOSITORY https://github.com/taglib/taglib.git
 		GIT_TAG        v2.0.2
+		${GD_FETCH_EXCLUDE}
 	)
 endif()
 
@@ -365,16 +437,24 @@ if("tinyxml2" IN_LIST GD_BUNDLED)
 		tinyxml2
 		GIT_REPOSITORY https://github.com/leethomason/tinyxml2.git
 		GIT_TAG        10.0.0
+		${GD_FETCH_EXCLUDE}
 	)
 endif()
 
 if("reproc++" IN_LIST GD_BUNDLED)
 	# reproc++ for spawning ffmpeg child processes.
 	set(REPROC++ ON CACHE BOOL "" FORCE)
+	# Unlike cxxopts and nlohmann_json, reproc's REPROC_INSTALL defaults to ON
+	# whenever it is not building object libraries, so as a sub-project it
+	# really does install itself -- headers, the static library, its cmake
+	# package and a pkg-config file. This is the one of the four switches that
+	# changes anything on its own.
+	set(REPROC_INSTALL OFF CACHE BOOL "" FORCE)
 	FetchContent_Declare(
 		reproc
 		GIT_REPOSITORY https://github.com/DaanDeMeyer/reproc.git
 		GIT_TAG        v14.2.5
+		${GD_FETCH_EXCLUDE}
 	)
 endif()
 
@@ -383,11 +463,14 @@ if("LibArchive" IN_LIST GD_BUNDLED)
 	# than v3.7.4, whose CMAKE_MINIMUM_REQUIRED(VERSION 2.8.12) CMake 4 refuses;
 	# 3.8.x declares 3.17.
 	set(ENABLE_TEST    OFF CACHE BOOL "" FORCE)
+	# The original of the four, and for a while the only one -- which is why
+	# every other bundled dependency was installing itself.
 	set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 	FetchContent_Declare(
 		libarchive
 		GIT_REPOSITORY https://github.com/libarchive/libarchive.git
 		GIT_TAG        v3.8.9
+		${GD_FETCH_EXCLUDE}
 	)
 
 	# Trim optional backends gaindrive never uses. This only applies when we
@@ -420,6 +503,45 @@ else()
 endif()
 message(STATUS "gaindrive: system packages: ${_s}")
 message(STATUS "gaindrive: built from source: ${_b}")
+
+# ---- Uninstall -------------------------------------------------------------
+#
+# Defined HERE, above FetchContent_MakeAvailable, and that position is
+# load-bearing rather than tidy: taglib declares an uninstall target of its own,
+# guarded by `if(NOT TARGET uninstall)`. Below the fetch, taglib wins the race
+# and the configure fails outright with "another target with the same name
+# already exists"; above it, taglib sees ours and skips its own -- which is also
+# the outcome we want, since taglib's would run taglib's uninstall script rather
+# than gaindrive's. Moving these two calls back down to the install section,
+# where they otherwise belong, breaks every build with a bundled taglib.
+#
+# CMake generates no uninstall rule of its own, and here that is not a nicety:
+# a bundled dependency is a subproject, so its own install() rules run as part
+# of ours and `sudo cmake --install build` scatters SQLiteCpp, reproc++,
+# taglib, tinyxml2 and their cmake package files across the prefix. Undoing
+# that by hand means reading install_manifest.txt and trusting yourself with
+# rm as root, which is exactly the thing to automate rather than document.
+#
+# The dry run exists because this is normally run as root on a server. See
+# cmake/uninstall.cmake for what the manifest can and cannot account for.
+add_custom_target(uninstall
+	COMMAND ${CMAKE_COMMAND}
+		-DMANIFEST=${CMAKE_BINARY_DIR}/install_manifest.txt
+		-DPREFIX=${CMAKE_INSTALL_PREFIX}
+		-DBUILD_DIR=${CMAKE_BINARY_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/uninstall.cmake
+	USES_TERMINAL
+	COMMENT "Removing everything the last install of this build wrote")
+
+add_custom_target(uninstall-dry-run
+	COMMAND ${CMAKE_COMMAND}
+		-DMANIFEST=${CMAKE_BINARY_DIR}/install_manifest.txt
+		-DPREFIX=${CMAKE_INSTALL_PREFIX}
+		-DBUILD_DIR=${CMAKE_BINARY_DIR}
+		-DDRY_RUN=ON
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/uninstall.cmake
+	USES_TERMINAL
+	COMMENT "Listing what an uninstall would remove")
 
 if(GD_FETCH)
 	FetchContent_MakeAvailable(${GD_FETCH})
@@ -683,36 +805,6 @@ install(TARGETS gaindrive RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 # dist/gaindrive.service.in survives as the single source of the unit text --
 # embedded into the binary, filled in at install time -- and is what a
 # distribution packager should start from to get the system-account shape back.
-
-# ---- Uninstall -------------------------------------------------------------
-
-# CMake generates no uninstall rule of its own, and here that is not a nicety:
-# a bundled dependency is a subproject, so its own install() rules run as part
-# of ours and `sudo cmake --install build` scatters SQLiteCpp, reproc++,
-# taglib, tinyxml2 and their cmake package files across the prefix. Undoing
-# that by hand means reading install_manifest.txt and trusting yourself with
-# rm as root, which is exactly the thing to automate rather than document.
-#
-# The dry run exists because this is normally run as root on a server. See
-# cmake/uninstall.cmake for what the manifest can and cannot account for.
-add_custom_target(uninstall
-	COMMAND ${CMAKE_COMMAND}
-		-DMANIFEST=${CMAKE_BINARY_DIR}/install_manifest.txt
-		-DPREFIX=${CMAKE_INSTALL_PREFIX}
-		-DBUILD_DIR=${CMAKE_BINARY_DIR}
-		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/uninstall.cmake
-	USES_TERMINAL
-	COMMENT "Removing everything the last install of this build wrote")
-
-add_custom_target(uninstall-dry-run
-	COMMAND ${CMAKE_COMMAND}
-		-DMANIFEST=${CMAKE_BINARY_DIR}/install_manifest.txt
-		-DPREFIX=${CMAKE_INSTALL_PREFIX}
-		-DBUILD_DIR=${CMAKE_BINARY_DIR}
-		-DDRY_RUN=ON
-		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/uninstall.cmake
-	USES_TERMINAL
-	COMMENT "Listing what an uninstall would remove")
 
 # Example config installs next to the config the binary actually reads, which is
 # GAINDRIVE_SYSCONFDIR and not CMAKE_INSTALL_SYSCONFDIR: on Linux that stays
