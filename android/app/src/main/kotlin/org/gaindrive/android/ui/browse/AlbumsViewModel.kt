@@ -6,15 +6,21 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.gaindrive.android.data.CoverUrls
 import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.ServerFailure
+import org.gaindrive.android.data.SettingsStore
+import org.gaindrive.android.data.model.AlbumSort
 import org.gaindrive.android.data.model.ArtistInfo
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.data.model.comparator
 import org.gaindrive.android.net.runCatchingCancellable
 import org.gaindrive.android.net.userMessage
 import org.gaindrive.android.ui.AlbumUi
@@ -35,6 +41,7 @@ data class ArtistHeaderUi(
 @HiltViewModel
 class AlbumsViewModel @Inject constructor(
 	private val library: LibraryRepository,
+	private val settings: SettingsStore,
 	savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -59,8 +66,32 @@ class AlbumsViewModel @Inject constructor(
 	/** Passed down to each album, and only ever true when browsing Uploads. */
 	val fromUploads: Boolean = route.fromUploads
 
-	private val _state = MutableStateFlow<Load<List<AlbumUi>>>(Load.Loading)
-	val state: StateFlow<Load<List<AlbumUi>>> = _state.asStateFlow()
+	private val _albums = MutableStateFlow<Load<List<AlbumUi>>>(Load.Loading)
+
+	val sort: StateFlow<AlbumSort> = settings.albumSort
+		.stateIn(viewModelScope, SharingStarted.Lazily, AlbumSort.DEFAULT)
+
+	/**
+	 * The listing, in the order chosen for this library slice.
+	 *
+	 * Sorted here rather than in [loadAlbums] so changing the order costs
+	 * nothing on the wire: the whole list is already in hand, and re-reading it
+	 * to reorder it would put a spinner over a decision that should be
+	 * instant. It also fixes the order of a *merged* artist, whose albums
+	 * arrive as one server's list concatenated with the next's.
+	 */
+	val state: StateFlow<Load<List<AlbumUi>>> =
+		combine(_albums, sort) { load, order ->
+			if (load is Load.Ready) {
+				Load.Ready(
+					load.value.sortedWith(compareBy<AlbumUi>(order.comparator) { it.album })
+				)
+			} else {
+				load
+			}
+		}.stateIn(viewModelScope, SharingStarted.Lazily, Load.Loading)
+
+	fun setSort(order: AlbumSort) = viewModelScope.launch { settings.setAlbumSort(order) }
 
 	private val _header = MutableStateFlow(ArtistHeaderUi())
 	val header: StateFlow<ArtistHeaderUi> = _header.asStateFlow()
@@ -78,7 +109,7 @@ class AlbumsViewModel @Inject constructor(
 
 	/** Initial load and retry: there is nothing worth keeping on screen. */
 	fun load() {
-		_state.value = Load.Loading
+		_albums.value = Load.Loading
 		loadAlbums()
 		loadHeader()
 	}
@@ -117,14 +148,14 @@ class AlbumsViewModel @Inject constructor(
 		}.fold(
 			onSuccess = { merged ->
 				if (merged.items.isEmpty() && merged.isPartial) {
-					_state.value = Load.Failed(merged.failures.first().message)
+					_albums.value = Load.Failed(merged.failures.first().message)
 				} else {
-					_state.value = Load.Ready(merged.items)
+					_albums.value = Load.Ready(merged.items)
 				}
 				_failures.value = merged.failures
 			},
 			onFailure = {
-				_state.value = Load.Failed(it.userMessage())
+				_albums.value = Load.Failed(it.userMessage())
 				_failures.value = emptyList()
 			},
 		)

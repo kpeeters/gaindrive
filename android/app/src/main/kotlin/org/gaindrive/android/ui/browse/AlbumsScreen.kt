@@ -1,6 +1,7 @@
 package org.gaindrive.android.ui.browse
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,20 +9,31 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.gaindrive.android.data.model.AlbumSort
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.components.AlbumRow
@@ -46,6 +58,7 @@ fun AlbumsScreen(
 	val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 	val header by viewModel.header.collectAsStateWithLifecycle()
 	val failures by viewModel.failures.collectAsStateWithLifecycle()
+	val sort by viewModel.sort.collectAsStateWithLifecycle()
 
 	Scaffold(
 		topBar = {
@@ -58,6 +71,7 @@ fun AlbumsScreen(
 					)
 				},
 				navigationIcon = { PaneBackIcon(onBack) },
+				actions = { SortAction(current = sort, onSelect = viewModel::setSort) },
 			)
 		},
 	) { insets ->
@@ -107,6 +121,40 @@ fun AlbumsScreen(
 						)
 					}
 				}
+			}
+		}
+	}
+}
+
+/**
+ * Which order the albums are listed in.
+ *
+ * A menu rather than a button that cycles: there are two orders now and the
+ * radio says which one is showing, where a single icon would only say that
+ * *something* can be sorted. The Albums pane is reached from Search as well as
+ * from the Library, so this appears in both.
+ */
+@Composable
+private fun SortAction(current: AlbumSort, onSelect: (AlbumSort) -> Unit) {
+	var open by remember { mutableStateOf(false) }
+
+	Box {
+		IconButton(onClick = { open = true }) {
+			Icon(
+				imageVector = Icons.AutoMirrored.Filled.Sort,
+				contentDescription = "Sort albums, currently by ${current.label.lowercase()}",
+			)
+		}
+		DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+			AlbumSort.entries.forEach { order ->
+				DropdownMenuItem(
+					leadingIcon = { RadioButton(selected = order == current, onClick = null) },
+					text = { Text(order.label) },
+					onClick = {
+						open = false
+						onSelect(order)
+					},
+				)
 			}
 		}
 	}
