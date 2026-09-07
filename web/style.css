@@ -1491,6 +1491,15 @@ input.chapter-time.bad { border-color: #e06c6c; }
    color: var(--text-dim);
 }
 
+/* Sized down from .mi's 1.25rem to sit with the meta line's 0.75rem text, and
+   nudged off the baseline because the glyph fills its em box where a letter
+   does not. */
+.album-meta .album-video {
+   font-size: 1rem;
+   vertical-align: -0.2em;
+   margin-right: 0.25rem;
+}
+
 /* ── Album notes (track pane) ───────────────────────────── */
 
 .album-notes-loading {

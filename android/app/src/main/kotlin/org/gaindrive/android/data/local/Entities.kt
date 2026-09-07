@@ -41,6 +41,8 @@ data class AlbumEntity(
 	val artistName: String,
 	val artistId: String?,
 	val songCount: Int,
+	/** See [org.gaindrive.android.data.model.Album.videoCount]. */
+	val videoCount: Int,
 	val duration: Int,
 	val year: Int?,
 	val genre: String?,

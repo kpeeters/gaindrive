@@ -124,8 +124,30 @@ fun AlbumRow(
 				overflow = TextOverflow.Ellipsis,
 			)
 		}
+		AlbumVideoMark(album)
 		ServerBadges(badges)
 	}
+}
+
+/**
+ * The album-list counterpart of [VideoMark], and the same glyph deliberately: a
+ * folder of films and a film's one track are the same warning at two levels, and
+ * two icons for it would read as two different things.
+ *
+ * Absent rather than zero on the listings the server does not carry the count
+ * in — folder browsing, starred, search — so a missing mark is not a promise
+ * that an album has no video. See `API-CLIENT.md`.
+ */
+@Composable
+private fun AlbumVideoMark(album: Album) {
+	if (album.videoCount <= 0) return
+	Icon(
+		imageVector = Icons.Default.Movie,
+		contentDescription = if (album.videoCount == 1) "1 video"
+			else "${album.videoCount} videos",
+		tint = MaterialTheme.colorScheme.onSurfaceVariant,
+		modifier = Modifier.size(16.dp),
+	)
 }
 
 private fun albumSubtitle(album: Album): String {

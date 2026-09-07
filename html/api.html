@@ -214,6 +214,22 @@
 <p>The chain is MusicBrainz, then Wikidata, Wikipedia, TheAudioDB and Discogs, paced against MusicBrainz&#x27;s rate limit, so a forced lookup is not instant.</p></div>
 </div>
 <div class="api-ep">
+<h3 id="ep-getalbumlist-getalbumlist2-getartist-getalbum">getAlbumList / getAlbumList2 / getArtist / getAlbum</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>getAlbumList</code>, <code>getAlbumList2</code>, <code>getArtist</code>, <code>getAlbum</code>. Only the gaindrive additions are listed here.</p>
+<p>Say how much of an album is video, before its tracks are fetched.</p>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>videoCount</code> <span class="api-on">on Album</span></td><td>int</td><td>How many of the album&#x27;s songs are video. 0 for an ordinary record.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>videoCount</code></p>
+<p><code>isVideo</code> is a property of a <em>song</em>, so nothing on an album entry otherwise says that opening it will start a film — a client would have to fetch every album&#x27;s tracks to find out. A count rather than a flag because the two cases differ: a folder holding one bonus documentary beside its songs is not a folder of films, and <code>videoCount</code> equal to <code>songCount</code> is what a season of a series or a film looks like.</p>
+<div class="note"><p>The album entries returned by <code>getMusicDirectory</code>, <code>getStarred</code>, <code>getStarred2</code>, <code>search2</code> and <code>search3</code> do <b>not</b> carry it, so its absence there is not a claim that an album has no video.</p></div></div>
+</div>
+<div class="api-ep">
 <h3 id="ep-any-endpoint-returning-song-entries">any endpoint returning song entries</h3>
 <p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
 <p>Carried by <code>any endpoint returning song entries</code>. Only the gaindrive additions are listed here.</p>

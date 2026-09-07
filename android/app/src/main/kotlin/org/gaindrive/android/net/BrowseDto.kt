@@ -38,6 +38,8 @@ data class AlbumDto(
 	val title: String? = null,
 	val artist: String? = null,
 	val songCount: Int = 0,
+	/** A gaindrive extension; absent on other servers, and then zero. */
+	val videoCount: Int = 0,
 	val duration: Int = 0,
 	val created: String? = null,
 	val coverArt: String? = null,

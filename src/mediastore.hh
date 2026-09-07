@@ -478,6 +478,11 @@ class MediaStore {
 			std::string created;
 			// Empty when not starred; otherwise the timestamp of the star.
 			std::string starred;             // per-user (album-level star)
+			// How many of this album's songs are video. Nothing else on an
+			// album says so -- isVideo is a song field, derived from the
+			// codec extension -- so without it a client cannot tell a season
+			// of a series from a record without fetching its tracks.
+			int         video_count  = 0;
 			};
 
 		// type: newest | random | alphabeticalByName | alphabeticalByArtist |

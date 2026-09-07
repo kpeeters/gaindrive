@@ -444,6 +444,30 @@ paced against MusicBrainz's rate limit, so a forced lookup is not instant.
 
 [[endpoint]]
 kind       = 'additions'
+applies_to = ["getAlbumList", "getAlbumList2", "getArtist", "getAlbum"]
+section    = "browsing"
+summary    = 'Say how much of an album is video, before its tracks are fetched.'
+
+  [[endpoint.field]]
+  name  = "videoCount"
+  type  = "int"
+  on    = "Album"
+  doc   = "How many of the album's songs are video. 0 for an ordinary record."
+  notes = '''
+`isVideo` is a property of a *song*, so nothing on an album entry otherwise
+says that opening it will start a film — a client would have to fetch every
+album's tracks to find out. A count rather than a flag because the two cases
+differ: a folder holding one bonus documentary beside its songs is not a
+folder of films, and `videoCount` equal to `songCount` is what a season of a
+series or a film looks like.
+
+NOTE: The album entries returned by `getMusicDirectory`, `getStarred`,
+`getStarred2`, `search2` and `search3` do **not** carry it, so its absence
+there is not a claim that an album has no video.
+'''
+
+[[endpoint]]
+kind       = 'additions'
 applies_to = ["any endpoint returning song entries"]
 section    = "browsing"
 summary    = 'One extra field on every song entry.'

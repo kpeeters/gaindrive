@@ -1970,7 +1970,8 @@ static void handle_album_list(const httplib::Request& req, httplib::Response& re
 					{"name",      al.title},
 					{"artist",    al.artist},
 					{"songCount", al.song_count},
-					{"duration",  al.duration}
+					{"duration",  al.duration},
+					{"videoCount", al.video_count}
 					};
 				if (!al.created.empty()) entry["created"] = iso8601(al.created);
 				if (al.cover_art_id >= 0) entry["coverArt"] = sid(al.cover_art_id);
@@ -1996,6 +1997,7 @@ static void handle_album_list(const httplib::Request& req, httplib::Response& re
 					el->SetAttribute("coverArt", al.cover_art_id);
 				el->SetAttribute("songCount", al.song_count);
 				el->SetAttribute("duration",  al.duration);
+				el->SetAttribute("videoCount", al.video_count);
 				if (!al.created.empty()) el->SetAttribute("created", iso8601(al.created).c_str());
 				if (al.year > 0)         el->SetAttribute("year",    al.year);
 				if (!al.genre.empty())   el->SetAttribute("genre",   al.genre.c_str());
@@ -3878,7 +3880,8 @@ GainDrive::GainDrive(const std::string& db_path,
 						{"name",      al.title},
 						{"artist",    al.artist},
 						{"songCount", al.song_count},
-						{"duration",  al.duration}
+						{"duration",  al.duration},
+						{"videoCount", al.video_count}
 						};
 					if (!al.created.empty()) entry["created"] = iso8601(al.created);
 					if (al.cover_art_id >= 0) entry["coverArt"] = sid(al.cover_art_id);
@@ -3912,6 +3915,7 @@ GainDrive::GainDrive(const std::string& db_path,
 						el->SetAttribute("coverArt", al.cover_art_id);
 					el->SetAttribute("songCount", al.song_count);
 					el->SetAttribute("duration",  al.duration);
+					el->SetAttribute("videoCount", al.video_count);
 					if (!al.created.empty()) el->SetAttribute("created", iso8601(al.created).c_str());
 					if (al.year > 0)         el->SetAttribute("year",    al.year);
 					if (!al.genre.empty())   el->SetAttribute("genre",   al.genre.c_str());
@@ -5212,6 +5216,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					{"artist",    al.artist},
 					{"songCount", al.song_count},
 					{"duration",  al.duration},
+					{"videoCount", al.video_count},
 					{"song",      songs}
 					};
 				if (!al.created.empty()) entry["created"] = iso8601(al.created);
@@ -5231,6 +5236,7 @@ GainDrive::GainDrive(const std::string& db_path,
 				el->SetAttribute("artist",    al.artist.c_str());
 				el->SetAttribute("songCount", al.song_count);
 				el->SetAttribute("duration",  al.duration);
+				el->SetAttribute("videoCount", al.video_count);
 				if (al.cover_art_id >= 0) el->SetAttribute("coverArt", al.cover_art_id);
 				if (!al.created.empty())  el->SetAttribute("created",  iso8601(al.created).c_str());
 				if (al.year > 0)          el->SetAttribute("year",     al.year);

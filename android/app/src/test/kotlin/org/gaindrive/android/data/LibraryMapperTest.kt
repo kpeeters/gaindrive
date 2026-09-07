@@ -235,6 +235,17 @@ class LibraryMapperTest {
 	}
 
 	@Test
+	fun `an album carries the server's video count, and zero without one`() {
+		assertEquals(
+			12,
+			AlbumDto(id = "1", name = "Series 2", videoCount = 12).toDomain(server).videoCount,
+		)
+		// A server that does not send it must read as "no videos here", which is
+		// what suppresses the mark rather than drawing a zero.
+		assertEquals(0, AlbumDto(id = "1", name = "Aja").toDomain(server).videoCount)
+	}
+
+	@Test
 	fun `a child directory becomes an album with no counts`() {
 		val album = SongDto(
 			id = "77",

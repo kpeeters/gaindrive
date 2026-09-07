@@ -76,6 +76,7 @@ fun AlbumDto.toDomain(server: ServerId) = Album(
 	// holds the same value on this server. Prefer the former, accept the latter.
 	artistRef = server.ref(artistId ?: parent),
 	songCount = if (songCount > 0) songCount else song.size,
+	videoCount = videoCount,
 	duration = duration,
 	year = year?.takeIf { it > 0 },
 	genre = genre?.takeIf { it.isNotBlank() },

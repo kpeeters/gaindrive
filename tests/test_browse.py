@@ -216,6 +216,72 @@ def test_song_artist_fields():
           f"endpoints: {', '.join(checked)}")
 
 
+def test_album_video_count():
+    """videoCount agrees with the album's own tracks, on all three endpoints.
+
+    The field is emitted from three separate queries, so the failure this
+    catches is one of them forgetting the column — which looks like "some
+    albums have no icon" rather than like an error.
+
+    Videos are a property of the collection, so a library with none skips
+    rather than fails; the zero half is still checked everywhere.
+
+    Assumes the default `flat_multi_disc`: the count is over every song of the
+    album, which is what getAlbum returns only when it flattens disc subfolders
+    into the listing.
+    """
+    checked = 0
+    with_video = 0
+
+    videos = _get("getVideos.view").findall(f".//{{{NS}}}video")
+
+    # Whichever albums we can reach, video or not: getAlbum is the one endpoint
+    # that returns the album and its songs together, so it is the only place the
+    # count can be verified against what it counts.
+    album_ids = []
+    for v in videos[:5]:
+        if v.get("parent"):
+            album_ids.append(v.get("parent"))
+    root = _get("getAlbumList.view", {"type": "alphabeticalByName", "size": "5"})
+    album_ids += [a.get("id") for a in root.findall(f".//{{{NS}}}album")]
+
+    for aid in dict.fromkeys(album_ids):
+        al = _get("getAlbum.view", {"id": aid}).find(f"{{{NS}}}album")
+        if al is None:
+            continue
+        got = al.get("videoCount")
+        assert got is not None, f"getAlbum album {aid} has no videoCount"
+        songs = al.findall(f"{{{NS}}}song")
+        want = sum(1 for s in songs if s.get("isVideo") == "true")
+        assert int(got) == want, \
+            f"album {aid}: videoCount={got} but {want} of {len(songs)} songs are video"
+        checked += 1
+        if want:
+            with_video += 1
+
+        # The same album through the other two, which read it from their own
+        # queries.
+        parent = al.get("parent")
+        if parent:
+            arts = _get("getArtist.view", {"id": parent})
+            for a in arts.findall(f".//{{{NS}}}album"):
+                if a.get("id") == aid:
+                    assert a.get("videoCount") == got, \
+                        f"album {aid}: getArtist says {a.get('videoCount')!r}, " \
+                        f"getAlbum says {got!r}"
+
+    lst = _get("getAlbumList.view", {"type": "alphabeticalByName", "size": "20"})
+    for a in lst.findall(f".//{{{NS}}}album"):
+        assert a.get("videoCount") is not None, \
+            f"getAlbumList album {a.get('id')} has no videoCount"
+
+    if not checked:
+        print("SKIP  album videoCount — no albums found")
+        return
+    print(f"PASS  album videoCount — {checked} albums checked, "
+          f"{with_video} holding video")
+
+
 def test_get_music_directory_not_found():
     root = _get("getMusicDirectory.view", {"id": "999999"})
     _check(root, status="failed")
@@ -395,6 +461,7 @@ TESTS = [
     test_get_music_directory_artist,
     test_get_music_directory_album,
     test_song_artist_fields,
+    test_album_video_count,
     test_get_music_directory_not_found,
     test_get_music_directory_missing_id,
     test_get_genres,

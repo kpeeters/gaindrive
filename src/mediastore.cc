@@ -166,6 +166,23 @@ static const std::string ALBUM_ARTIST_ID_SQL =
 	"                 IS NULL"
 	"            THEN f.id ELSE f.parent_id END,";
 
+// How many of an album's songs are video, appended as the trailing column of
+// the three AlbumEntry queries.
+//
+// A count rather than a flag because it costs the same and says more: a folder
+// holding one bonus documentary beside its songs is not a folder of films, and
+// a client can label the row from it.
+//
+// Computed here rather than stored on the album row, unlike every other album
+// aggregate. albums.song_count and albums.duration are written by no scan path
+// at all -- there is one INSERT INTO albums and it names neither, and no UPDATE
+// touches them -- so both have always read 0, and a stored video_count would be
+// a third column waiting for a write that never comes. songs.album_id is
+// indexed, so this is one seek per listed album.
+static const std::string ALBUM_VIDEO_COUNT_SQL =
+	",      (SELECT COUNT(*) FROM songs sv"
+	"         WHERE sv.album_id = al.id AND sv.is_video = 1)";
+
 // Returns sorted list of image paths in dir, excluding cover_path.  Recursive
 // unless the caller says otherwise — see get_extra_image_paths(), where a
 // folder with subfolders is a section whose albums' images are not its own.
@@ -5336,6 +5353,7 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 		"       COALESCE(al.genre,''),"
 		"       COALESCE(al.created,''),"
 		"       COALESCE(sa.created, '') AS starred"
+		+ ALBUM_VIDEO_COUNT_SQL +
 		" FROM albums al"
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
@@ -5422,6 +5440,7 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 		e.genre        = q.getColumn(8).isNull() ? "" : q.getColumn(8).getString();
 		e.created      = q.getColumn(9).isNull() ? "" : q.getColumn(9).getString();
 		e.starred      = q.getColumn(10).getString();
+		e.video_count  = q.getColumn(11).getInt();
 		result.push_back(std::move(e));
 		}
 	return result;
@@ -5521,6 +5540,7 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id,
 		"       COALESCE(al.genre,''),"
 		"       COALESCE(al.created,''),"
 		"       COALESCE(sa.created, '') AS starred"
+		+ ALBUM_VIDEO_COUNT_SQL +
 		" FROM albums al"
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
@@ -5546,6 +5566,7 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id,
 		e.genre        = asel.getColumn(8).isNull() ? "" : asel.getColumn(8).getString();
 		e.created      = asel.getColumn(9).isNull() ? "" : asel.getColumn(9).getString();
 		e.starred      = asel.getColumn(10).getString();
+		e.video_count  = asel.getColumn(11).getInt();
 		info.albums.push_back(std::move(e));
 		}
 
@@ -5573,6 +5594,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		"       COALESCE(al.genre,''),"
 		"       COALESCE(al.created,''),"
 		"       COALESCE(sa.created, '') AS starred"
+		+ ALBUM_VIDEO_COUNT_SQL +
 		" FROM albums al"
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
@@ -5596,6 +5618,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 	info.album.genre        = msel.getColumn(8).isNull() ? "" : msel.getColumn(8).getString();
 	info.album.created      = msel.getColumn(9).isNull() ? "" : msel.getColumn(9).getString();
 	info.album.starred      = msel.getColumn(10).getString();
+	info.album.video_count  = msel.getColumn(11).getInt();
 
 	// Fetch songs, flattening disc subfolders when flat_multi_disc is set.
 	// The starred LEFT JOIN is added only when a username is provided.

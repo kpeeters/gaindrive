@@ -57,6 +57,14 @@ data class Album(
 	val artistName: String,
 	val artistRef: ItemRef?,
 	val songCount: Int,
+	/**
+	 * How many of this album's tracks are video, which is the only thing that
+	 * distinguishes a season or a film from a record before its tracks are
+	 * fetched: `isVideo` is a per-song field. Zero on a server that does not
+	 * send it, and on the listings gaindrive does not carry it in — see
+	 * `API-CLIENT.md`.
+	 */
+	val videoCount: Int = 0,
 	val duration: Int,
 	val year: Int?,
 	val genre: String?,

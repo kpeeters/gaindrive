@@ -2324,10 +2324,23 @@ async function viewAlbums(artistId, artistName) {
 
          const meta = document.createElement('span');
          meta.className = 'album-meta';
+         // A film or a season sits in the same list as a record, and the only
+         // other warning is the picture taking over the screen. The count is in
+         // the tooltip rather than the line: a folder with one bonus
+         // documentary is not a folder of films, and the icon should not claim
+         // it is.
+         if (album.videoCount > 0) {
+            const mark = document.createElement('span');
+            mark.className = 'mi album-video';
+            mark.textContent = 'movie';
+            mark.title = album.videoCount === 1
+               ? '1 video' : `${album.videoCount} videos`;
+            meta.appendChild(mark);
+            }
          const parts = [];
          if (album.year)      parts.push(album.year);
          if (album.songCount) parts.push(`${album.songCount} tracks`);
-         meta.textContent = parts.join(' · ');
+         if (parts.length) meta.appendChild(document.createTextNode(parts.join(' · ')));
 
          info.appendChild(title);
          info.appendChild(meta);
