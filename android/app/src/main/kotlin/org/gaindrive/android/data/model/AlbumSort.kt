@@ -50,6 +50,6 @@ val AlbumSort.comparator: Comparator<Album>
 			compareBy<Album> { it.year ?: 0 }
 				.thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
 		AlbumSort.NAME ->
-			compareBy<Album>(String.CASE_INSENSITIVE_ORDER) { it.title }
+			compareBy<Album, String>(String.CASE_INSENSITIVE_ORDER) { it.title }
 				.thenBy { it.year ?: 0 }
 	}

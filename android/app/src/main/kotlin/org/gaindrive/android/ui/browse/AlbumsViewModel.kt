@@ -17,6 +17,7 @@ import org.gaindrive.android.data.CoverUrls
 import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.ServerFailure
 import org.gaindrive.android.data.SettingsStore
+import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.AlbumSort
 import org.gaindrive.android.data.model.ArtistInfo
 import org.gaindrive.android.data.model.ItemRef
@@ -84,7 +85,7 @@ class AlbumsViewModel @Inject constructor(
 		combine(_albums, sort) { load, order ->
 			if (load is Load.Ready) {
 				Load.Ready(
-					load.value.sortedWith(compareBy<AlbumUi>(order.comparator) { it.album })
+					load.value.sortedWith(compareBy<AlbumUi, Album>(order.comparator) { it.album })
 				)
 			} else {
 				load
