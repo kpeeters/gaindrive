@@ -47,6 +47,25 @@ static constexpr int DB_BUSY_TIMEOUT_MS = 10000;
 // is what a probe failure has always meant.
 static constexpr reproc::milliseconds PROBE_TIMEOUT(60000);
 
+// The music DB's cache-scheme version, in PRAGMA user_version.
+//
+// It is not a schema version -- new columns arrive through the ALTER TABLE
+// migrations below and need nothing here. It covers the other kind of change:
+// one that alters the *bytes* a derived row holds without altering anything
+// the row keys on, so nothing already stored can ever be recognised as stale.
+// cover_thumbs is the case it was written for -- keyed (source_key, size)
+// with staleness checked against source_stamp, none of which a change to the
+// scaler moves. A quality change, a ladder change or a new encoder are the
+// same shape.
+//
+//   1 -- thumbnails fit the short edge, not the long one
+//
+// Dropping the rows is safe because the music DB is a cache by invariant: the
+// cost of being wrong here is one re-scale per image per size. This is the
+// server-side twin of the "t2-" ETag marker in gaindrive.cc, which does the
+// same job for the copies clients hold; the two want bumping together.
+static constexpr int MUSIC_CACHE_VERSION = 1;
+
 // Adds its lifetime, in microseconds, to one of MediaStore::scan_times_'
 // accumulators.  Declared at the top of a phase's scope so the timing is one
 // line rather than a pair of statements the next edit can separate.
@@ -927,7 +946,7 @@ void MediaStore::create_schema()
 		-- result is a result, the same reasoning as video_meta's 'unmatched'.
 		CREATE TABLE IF NOT EXISTS cover_thumbs (
 			source_key   TEXT    NOT NULL,   -- "<root>/<rest>"
-			size         INTEGER NOT NULL,   -- long edge, already quantised
+			size         INTEGER NOT NULL,   -- short edge, already quantised
 			source_stamp INTEGER NOT NULL,
 			status       TEXT    NOT NULL,   -- ok | unscalable
 			mime         TEXT    NOT NULL,
@@ -1315,6 +1334,29 @@ void MediaStore::create_schema()
 		" FROM songs s"
 		" JOIN album_artists aa ON aa.album_id = s.album_id AND aa.role = 'albumartist'"
 		);
+
+	// See MUSIC_CACHE_VERSION. A database created by this build reports 0 and
+	// holds nothing, so the delete is a no-op and only the pragma is written;
+	// the log line is therefore about an upgrade, and says how much work the
+	// next album grid is being asked to redo.
+	//
+	// PRAGMA user_version takes no bound parameter, which is why the value is
+	// pasted in -- it is an integer constant in this file and never anything
+	// a caller supplies.
+	{
+	SQLite::Statement ver(db_music_, "PRAGMA user_version");
+	const int have = ver.executeStep() ? ver.getColumn(0).getInt() : 0;
+	if (have < MUSIC_CACHE_VERSION) {
+		db_music_.exec("DELETE FROM cover_thumbs");
+		const int n = db_music_.getChanges();
+		db_music_.exec("PRAGMA user_version = "
+		               + std::to_string(MUSIC_CACHE_VERSION));
+		if (n > 0)
+			std::cout << stamp() << "Cache scheme " << have << " -> "
+			          << MUSIC_CACHE_VERSION << ": dropped " << n
+			          << " cover thumbnail(s) for re-scaling" << std::endl;
+		}
+	}
 	}
 
 MediaStore::ScanStatus MediaStore::scan_status() const

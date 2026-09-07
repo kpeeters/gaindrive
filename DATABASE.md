@@ -336,13 +336,21 @@ CREATE TABLE video_art (
 -- eviction policy, so without the ladder any
 -- account could write a row per pixel value.
 --
+-- It is the SHORT edge, so the long one overshoots
+-- it. Every surface that asks for a size crops the
+-- result to a square, and fitting the long edge
+-- leaves the client upscaling a 2:3 poster to fill
+-- its cell. Nothing in the key says which rule
+-- made a row, so changing it means dropping them
+-- all -- see MUSIC_CACHE_VERSION in mediastore.cc.
+--
 -- status 'unscalable' records an image neither stb
 -- nor ffmpeg could decode, with a zero-length blob,
 -- so it is not retried on every request. Same
 -- reasoning as video_meta's 'unmatched'.
 CREATE TABLE cover_thumbs (
     source_key   TEXT    NOT NULL,   -- "<root>/<rest>"
-    size         INTEGER NOT NULL,   -- long edge, quantised
+    size         INTEGER NOT NULL,   -- short edge, quantised
     source_stamp INTEGER NOT NULL,
     status       TEXT    NOT NULL,   -- ok | unscalable
     mime         TEXT    NOT NULL,

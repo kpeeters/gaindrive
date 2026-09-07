@@ -343,6 +343,34 @@ function apiUrl(endpoint, extra = {}) {
    return `${server}/rest/${endpoint}.view?${p}`;
 }
 
+// getCoverArt's `size` is a count of pixels, and a CSS pixel is not a pixel:
+// a 2x screen draws an 80px thumbnail into 160 physical ones and stretches an
+// 80px image over the lot. So every call site names the CSS box it is filling
+// -- a number a reader can check against style.css -- and this turns it into
+// what the screen will actually draw.
+//
+// Quantised to 1x or 2x rather than following the ratio, because each distinct
+// value is another blob in the server's cover_thumbs, which has no eviction;
+// and capped at 2 because a 3x phone cannot show the difference at these sizes
+// and would be paying 2.5x the bytes for it over a mobile link.
+//
+// Note the server fits the *short* edge, which is what makes this exact: at
+// size=160 a 2:3 poster arrives 160x240, and the 80px square cell crops it to
+// 160x160 device pixels with no scaling at all.
+function coverPx(css) {
+   return css * (window.devicePixelRatio > 1 ? 2 : 1);
+}
+
+// The CSS box .album-cover draws in, which is no longer what is fetched for
+// it. The width/height attributes are the layout hint before the image lands
+// and so are the box; dataset.coverSize is what to re-request and so is the
+// device figure. They were one number until covers went 2x, and the
+// cover-art-changed listener reads both.
+const ALBUM_COVER_BOX = 80;
+
+// .cover-hero-wrap's width: min(100%, 320px), which the hero image fills.
+const HERO_BOX = 320;
+
 // ---- Artist portraits -------------------------------------------------
 //
 // An artist portrait is not a file on the server, it is something the server
@@ -1985,6 +2013,10 @@ async function viewRecents() {
          const row = document.createElement('div');
          row.className = 'search-song-row';
 
+         // .recent-cover shrinks the box to 40px, so this over-fetches by a
+         // factor of two on top of coverPx's. Left alone: the list is a
+         // handful of rows and the cost of splitting makeAlbumCover in two is
+         // more than the bytes.
          const cover = makeAlbumCover({id: song.parent, coverArt: song.coverArt});
          cover.classList.add('recent-cover');
          row.appendChild(cover);
@@ -2520,7 +2552,8 @@ async function viewAlbums(artistId, artistName, isCategory = false) {
          const block = document.createElement('div');
          block.className = 'artist-bio';
          block.appendChild(
-            artistPortrait(artistId, 240, 'artist-bio-img', artistName));
+            artistPortrait(artistId, coverPx(120), 'artist-bio-img',
+                           artistName));
 
          if (!bio && !wikiUrl && !allMusicUrl) {
             bioSlot.appendChild(block);   // the picture, with nothing to say
@@ -3663,8 +3696,9 @@ document.addEventListener('cover-art-changed', e => {
       img.dataset.albumId   = albumId;
       img.dataset.coverSize = size;
       if (!isHero) {
-         img.width  = parseInt(size, 10);
-         img.height = parseInt(size, 10);
+         // The box, not the fetched size — those parted company at 2x.
+         img.width  = ALBUM_COVER_BOX;
+         img.height = ALBUM_COVER_BOX;
          }
       img.alt = '';
       img.src = src;
@@ -3763,17 +3797,18 @@ function makeAlbumCover(album) {
       const img = document.createElement('img');
       img.className = 'album-cover';
       img.dataset.albumId   = album.id;
-      img.dataset.coverSize = 80;
-      img.width  = 80;
-      img.height = 80;
+      img.dataset.coverSize = coverPx(ALBUM_COVER_BOX);
+      img.width  = ALBUM_COVER_BOX;
+      img.height = ALBUM_COVER_BOX;
       img.alt    = '';
-      img.src = apiUrl('getCoverArt', {id: album.coverArt, size: 80});
+      img.src = apiUrl('getCoverArt',
+                       {id: album.coverArt, size: coverPx(ALBUM_COVER_BOX)});
       return img;
       }
    const div = document.createElement('div');
    div.className = 'album-cover album-cover-placeholder mi';
    div.dataset.albumId   = album.id;
-   div.dataset.coverSize = 80;
+   div.dataset.coverSize = coverPx(ALBUM_COVER_BOX);
    div.textContent = 'music_note';
    return div;
    }
@@ -5156,11 +5191,13 @@ function playerUpdateUI() {
    document.getElementById('player-artist').textContent = song.artist ?? '';
    document.getElementById('player-info-btn').disabled  = false;
 
+   // 48 is #player-cover's box, set by the width/height attributes in
+   // index.html — its CSS rule gives it no dimensions of its own.
    const cover = document.getElementById('player-cover');
    cover.dataset.albumId   = song.albumId ?? song.coverArt ?? '';
-   cover.dataset.coverSize = 64;
+   cover.dataset.coverSize = coverPx(48);
    if (song.coverArt)
-      cover.src = apiUrl('getCoverArt', {id: song.coverArt, size: 64});
+      cover.src = apiUrl('getCoverArt', {id: song.coverArt, size: coverPx(48)});
    else
       cover.removeAttribute('src');   // '' resolves to GET / and must never be assigned
 
@@ -5617,11 +5654,13 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
       prevBtn.textContent = '\u2039';
       prevBtn.style.display = 'none';
 
+      // 320 is .cover-hero-wrap's own max width; the image is 100% of it.
       heroImg = document.createElement('img');
       heroImg.className = 'album-hero';
       heroImg.dataset.albumId   = album.id;
-      heroImg.dataset.coverSize = 400;
-      heroImg.src = apiUrl('getCoverArt', {id: album.coverArt, size: 400});
+      heroImg.dataset.coverSize = coverPx(HERO_BOX);
+      heroImg.src = apiUrl('getCoverArt',
+                           {id: album.coverArt, size: coverPx(HERO_BOX)});
       heroImg.alt = albumTitle;
       heroImg.addEventListener('click', () => {
          if (heroWrap.classList.contains('editing')) return;
@@ -5642,7 +5681,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
 
       function showCarouselImage(idx) {
          carouselIdx = idx;
-         heroImg.src = apiUrl('getCoverArt', {id: album.coverArt, size: 400, index: idx});
+         heroImg.src = apiUrl('getCoverArt',
+            {id: album.coverArt, size: coverPx(HERO_BOX), index: idx});
          prevBtn.disabled = idx === 0;
          nextBtn.disabled = idx === carouselCount - 1;
          }
@@ -5846,7 +5886,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
          placeholder = document.createElement('div');
          placeholder.className = 'album-hero album-hero-placeholder mi';
          placeholder.dataset.albumId   = album.id;
-         placeholder.dataset.coverSize = 400;
+         placeholder.dataset.coverSize = coverPx(HERO_BOX);
          placeholder.textContent = 'music_note';
          heroWrap.appendChild(placeholder);
          }
@@ -5862,7 +5902,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
                heroImg = document.createElement('img');
                heroImg.className = 'album-hero';
                heroImg.dataset.albumId   = album.id;
-               heroImg.dataset.coverSize = 400;
+               heroImg.dataset.coverSize = coverPx(HERO_BOX);
                heroImg.alt = albumTitle;
                heroWrap.insertBefore(heroImg, pencilBtn);
                placeholder?.remove();
@@ -6157,7 +6197,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
       // If cancelled, restore original cover state.
       if (!keepValues) {
          if (album.coverArt && heroImg) {
-            heroImg.src = apiUrl('getCoverArt', {id: album.coverArt, size: 400});
+            heroImg.src = apiUrl('getCoverArt',
+                                 {id: album.coverArt, size: coverPx(HERO_BOX)});
             }
          else if (!album.coverArt && heroImg) {
             // A new image was previewed but the upload was cancelled — remove it.
@@ -6440,7 +6481,8 @@ function renderSearchResults(res) {
          // straight from the internet — slow on a LAN, impossible offline,
          // and one getArtistInfo2 round trip per row on top. Same argument
          // that put the icon font in the binary.
-         const img = artistPortrait(artist.id, 160, 'search-artist-img');
+         const img = artistPortrait(artist.id, coverPx(80),
+                                    'search-artist-img');
          row.appendChild(img);
 
          const name = document.createElement('span');

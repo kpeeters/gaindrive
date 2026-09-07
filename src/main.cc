@@ -642,10 +642,15 @@ int main(int argc, char* argv[])
 		else
 			std::cout << "header not parsable by stb\n";
 
-		// The sizes gaindrive's own clients ask for: the web player row and
-		// grid, Android, the web hero, Android artwork, the iOS hero.
-		for (int px : {64, 80, 144, 256, 288, 400, 512, 800}) {
-			auto s = imagescale::scale_to_fit(raw, px);
+		// The sizes gaindrive's own clients ask for: the web client's player
+		// thumbnail, grid cell, mediaSession artwork and hero, each on a 1x
+		// and a 2x screen, plus Android's and iOS's.
+		//
+		// Fit::Short, because that is what getCoverArt asks for and the
+		// question this flag exists to answer is what getCoverArt would send.
+		// So a non-square source reports a long edge past the size given.
+		for (int px : {64, 80, 96, 128, 144, 160, 256, 288, 320, 512, 640, 800}) {
+			auto s = imagescale::scale_to_fit(raw, px, imagescale::Fit::Short);
 			std::cout << "  size=" << px << ": ";
 			if (!s.ok) { std::cout << "FAILED — " << s.error << "\n"; continue; }
 			std::cout << s.width << "x" << s.height << ", " << s.bytes.size()
@@ -653,9 +658,9 @@ int main(int argc, char* argv[])
 			          << (s.bytes.size() == raw.size()
 			                  ? "  (source returned unchanged)" : "")
 			          << "\n";
-			if (px != 400) continue;
+			if (px != 640) continue;
 			std::string out = std::filesystem::path(in).stem().string()
-			    + "-400" + (s.mime == "image/png" ? ".png" : ".jpg");
+			    + "-640" + (s.mime == "image/png" ? ".png" : ".jpg");
 			std::ofstream o(out, std::ios::binary);
 			o.write(s.bytes.data(), static_cast<std::streamsize>(s.bytes.size()));
 			if (o) std::cout << "  wrote " << out << "\n";

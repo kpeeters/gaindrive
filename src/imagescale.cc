@@ -188,7 +188,7 @@ std::optional<Dims> probe(std::string_view b)
 	return d;
 	}
 
-Scaled scale_to_fit(std::string_view b, int max_px, int quality)
+Scaled scale_to_fit(std::string_view b, int max_px, Fit fit, int quality)
 	{
 	if (b.empty())  return fail("empty input");
 	if (max_px < 1) return fail("bad target size");
@@ -211,7 +211,13 @@ Scaled scale_to_fit(std::string_view b, int max_px, int quality)
 	// Already small enough and the right way up: hand back what we were given.
 	// Re-encoding here would cost a decode and lose quality to buy nothing,
 	// and it is what keeps a small PNG cover a PNG.
-	if (orient == 1 && sw <= max_px && sh <= max_px) {
+	//
+	// The edge tested has to be the edge Fit names, or the two disagree about
+	// what "small enough" means.  Under Fit::Short a 1000x100 banner asked for
+	// at 160 cannot reach 160 on its short edge without being enlarged, so it
+	// is returned untouched — which is what the no-upscale rule says anyway.
+	const int fitted = (fit == Fit::Short) ? std::min(sw, sh) : std::max(sw, sh);
+	if (orient == 1 && fitted <= max_px) {
 		Scaled s;
 		s.ok          = true;
 		s.from_source = true;
@@ -255,8 +261,18 @@ Scaled scale_to_fit(std::string_view b, int max_px, int quality)
 
 	apply_orientation(px, sw, sh, orient);
 
-	const double f  = std::min(1.0, static_cast<double>(max_px)
-	                                / std::max(sw, sh));
+	// stbi_load_from_memory re-reads the dimensions, and apply_orientation
+	// swaps them for a sideways EXIF tag, so the edge has to be picked again
+	// here rather than reused from the early-return test above.
+	double f = std::min(1.0, static_cast<double>(max_px)
+	                         / ((fit == Fit::Short) ? std::min(sw, sh)
+	                                                : std::max(sw, sh)));
+	// See LONG_EDGE_LIMIT in the header: Fit::Short is bounded by the aspect
+	// ratio and so by nothing, unless the long edge is bounded too.
+	if (fit == Fit::Short)
+		f = std::min(f, static_cast<double>(LONG_EDGE_LIMIT) * max_px
+		                / std::max(sw, sh));
+
 	const int    dw = std::max(1, static_cast<int>(std::lround(sw * f)));
 	const int    dh = std::max(1, static_cast<int>(std::lround(sh * f)));
 
@@ -286,8 +302,8 @@ Scaled scale_to_fit(std::string_view b, int max_px, int quality)
 	return out;
 	}
 
-Scaled scale_file_to_fit(const std::string& path, int max_px, int quality,
-                         std::size_t max_bytes)
+Scaled scale_file_to_fit(const std::string& path, int max_px, Fit fit,
+                         int quality, std::size_t max_bytes)
 	{
 	namespace fs = std::filesystem;
 	std::error_code ec;
@@ -302,7 +318,7 @@ Scaled scale_file_to_fit(const std::string& path, int max_px, int quality,
 	f.read(buf.data(), static_cast<std::streamsize>(sz));
 	if (static_cast<size_t>(f.gcount()) != sz) return fail("short read on " + path);
 
-	return scale_to_fit(buf, max_px, quality);
+	return scale_to_fit(buf, max_px, fit, quality);
 	}
 
 }   // namespace imagescale

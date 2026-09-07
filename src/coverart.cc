@@ -15,10 +15,14 @@
 
 namespace {
 
-// Every size gaindrive's own clients ask for is a rung: 64 and 256 and 400
-// from the web client, 80 from its album grid, 144/288/512 from Android,
-// 144/288/800 from iOS. The rest fill the gaps closely enough that rounding
-// up is never a visible loss.
+// Nearly every size gaindrive's own clients ask for is a rung. The web client
+// asks in *device* pixels, so each of its boxes contributes two: a 48px
+// player thumbnail, an 80px grid cell, an 80px and a 120px artist portrait
+// and a 320px hero give 64/80/128/320 on a 1x screen and 96/160/640 on a 2x
+// one, the 2x portrait's 240 being the one that rounds — on to 256, which is
+// also its mediaSession artwork (an OS hint rather than a box, so it is not
+// doubled). Android adds 144/288/512 and iOS 144/288/800. The rest fill the
+// gaps closely enough that rounding up is never a visible loss.
 constexpr int LADDER[] = {32,  64,  80,  96,  128, 144, 160, 192, 256,
                           288, 320, 400, 512, 640, 800, 1024, 1600};
 
@@ -36,10 +40,25 @@ constexpr reproc::milliseconds FFMPEG_TIMEOUT(30 * 1000);
 // a multi-megabyte scan to an 80px grid cell, on every request, for ever.
 std::optional<std::string> scale_with_ffmpeg(const std::string& path, int size)
 	{
+	// The short edge becomes `size` and the long one follows, matching
+	// imagescale's Fit::Short — the two paths produce bytes under the same
+	// cache key, so a rung has to mean the same thing in both.
+	//
+	// force_original_aspect_ratio=increase says that in one word and is not
+	// usable: it enlarges a source smaller than the box, and never upscaling
+	// is the other half of the contract. So the orientation is branched on by
+	// hand and each edge clamped to the source's own. -2 rather than -1 keeps
+	// the derived edge even, which the mjpeg encoder wants.
+	//
+	// LONG_EDGE_LIMIT is deliberately not mirrored here. Expressing it costs
+	// a nested min in both branches, and this path is reached only for an
+	// image stb cannot decode at all — so a wider-than-4:1 one of those is a
+	// case that has never occurred rather than one being tolerated.
+	const std::string px = std::to_string(size);
 	std::vector<std::string> args = {
 		"ffmpeg", "-v", "quiet", "-i", path,
-		"-vf", "scale=" + std::to_string(size) + ":" + std::to_string(size)
-		       + ":force_original_aspect_ratio=decrease",
+		"-vf", "scale=w='if(gt(iw,ih),-2,min(iw," + px + "))'"
+		       ":h='if(gt(iw,ih),min(ih," + px + "),-2)'",
 		"-frames:v", "1", "-f", "mjpeg", "pipe:1"
 		};
 
@@ -253,7 +272,13 @@ std::optional<CoverArtCache::Result> CoverArtCache::build(const Source& src,
 		}
 	if (raw.empty()) return std::nullopt;
 
-	auto s = imagescale::scale_to_fit(raw, size);
+	// Fit::Short, because every surface that asks for a size crops the result
+	// to a square: the album row, the hero, the player bar and both artist
+	// portraits in the web client, and the same shapes on Android and iOS.
+	// The long edge overshoots and the crop throws it away, which is the point
+	// — fitting the long edge instead leaves the *client* upscaling a poster
+	// to fill its cell, however sharp what we sent it was.
+	auto s = imagescale::scale_to_fit(raw, size, imagescale::Fit::Short);
 
 	// Already small enough. Not stored: a copy of the source under a thumbnail
 	// key would duplicate the file in the database to save a stat and a header

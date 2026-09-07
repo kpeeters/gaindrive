@@ -4294,16 +4294,22 @@ GainDrive::GainDrive(const std::string& db_path,
 		// keeps showing the previous album's art with no way to notice.
 		// "no-cache" means "keep it, but check first", so this stays fast.
 		//
-		// The "t1-" is a scheme marker, and it is not decoration: every client
-		// out there holds ETags for images ffmpeg produced, and the same URL
-		// now answers with bytes from stb. Without a marker a browser would
-		// 304 its way into keeping the old thumbnail for ever. Bump it if the
-		// encoder, the quality or the ladder changes again.
+		// The "t2-" is a scheme marker, and it is not decoration: a client
+		// holds ETags for bytes made under the *previous* scaling rule, and
+		// the same URL now answers with different ones. Without a marker a
+		// browser would 304 its way into keeping the old thumbnail for ever.
+		// Bump it if the encoder, the quality, the ladder or the fit rule
+		// changes again. t1- was ffmpeg's output, then stb fitting the long
+		// edge; t2- is stb fitting the short one.
+		//
+		// This is the client half. The server holds its own copies in
+		// cover_thumbs, keyed on nothing the fit rule moves, so they are
+		// dropped by the cache-scheme user_version in MediaStore instead.
 		//
 		// The *ladder* value goes in, not what the client asked for: two
 		// requests that round to the same rung are the same bytes and must
 		// share a validator.
-		std::string etag = "\"t1-" + std::to_string(src.stamp)
+		std::string etag = "\"t2-" + std::to_string(src.stamp)
 		    + "-" + std::to_string(orig_len)
 		    + "-" + (ladder > 0 ? std::to_string(ladder) : std::string("full"))
 		    + "-" + (idx_it != req.params.end() ? idx_it->second
@@ -8495,7 +8501,13 @@ MediaStore::ArtistArtRow GainDrive::portrait_fetch(const std::string& url)
 		// Normalise. Whatever a provider sent becomes one predictable thing at
 		// a known bound, so scaling it later needs no second download and no
 		// second guess about the format.
-		auto s = imagescale::scale_to_fit(r->body, PORTRAIT_PX);
+		//
+		// Fit::Long, unlike every thumbnail: this is not one. It bounds the
+		// *stored* original, and "neither edge past 800" is what bounds bytes
+		// somebody else chose the shape of. The square crops happen later, on
+		// the way out through CoverArtCache, which asks for Fit::Short.
+		auto s = imagescale::scale_to_fit(r->body, PORTRAIT_PX,
+		                                  imagescale::Fit::Long);
 		if (!s.ok) {
 			std::cout << stamp() << "Artist portrait: cannot decode " << url
 			          << " (" << s.error << ")" << std::endl;

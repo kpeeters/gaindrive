@@ -63,23 +63,51 @@ struct Scaled
 	bool        from_source = false;
 	};
 
-// Scales so neither edge exceeds max_px, preserving the aspect ratio.
+// Which edge max_px applies to.  There is no default, because the two
+// callers want opposite things and a default would hide that.
 //
-// **Never upscales.**  An image already inside max_px is returned unchanged,
-// with its own MIME — so a 60x60 cover asked for at size=400 comes back as
-// the original 60x60 PNG rather than a blurred JPEG.  That is the same answer
-// ffmpeg's force_original_aspect_ratio=decrease gave, and it also means a
-// small cover costs no decode at all.
+//   Long  — neither edge exceeds max_px.  The bound for *storing* an image
+//           whose shape nobody has chosen: the artist portrait normalisation
+//           wants "no bigger than 800 either way".
+//
+//   Short — the *short* edge becomes max_px, so the long one overshoots.
+//           The bound for a thumbnail that will be cropped to a square, which
+//           is every cover surface in every gaindrive client.  Fitting the
+//           long edge there hands back a 2:3 poster as 107x160 for a 160
+//           request, and the client then upscales it to fill the square — the
+//           picture is blurred by the *client* however sharp what we sent was.
+enum class Fit { Long, Short };
+
+// How far past max_px the long edge may run under Fit::Short.  Fit::Long
+// bounds the output at max_px squared; Fit::Short bounds it at max_px squared
+// times the aspect ratio, which is bounded by nothing but MAX_PIXELS — an
+// 8000x1000 gatefold scan asked for at 800 would otherwise come back as five
+// megapixels of "thumbnail".  Past 4:1 a square crop is showing an eighth of
+// the picture and nobody is judging its sharpness, so the clamp costs only
+// what the long-edge rule cost anyway.
+constexpr int LONG_EDGE_LIMIT = 4;
+
+// Scales to max_px on the edge Fit names, preserving the aspect ratio.
+//
+// **Never upscales.**  An image already inside max_px on that edge is
+// returned unchanged, with its own MIME — so a 60x60 cover asked for at
+// size=400 comes back as the original 60x60 PNG rather than a blurred JPEG,
+// and it also means a small cover costs no decode at all.
+//
+// Under Fit::Short the long edge is additionally capped at LONG_EDGE_LIMIT
+// times max_px, so the result can be shorter than max_px on its short edge.
 //
 // Does not throw and does not log.  Callers are httplib worker threads and
 // detached background threads, and on the latter an escaping exception is
 // std::terminate; the caller owns the log line, because only the caller knows
 // which file this was.
-Scaled scale_to_fit(std::string_view bytes, int max_px, int quality = 85);
+Scaled scale_to_fit(std::string_view bytes, int max_px, Fit fit,
+                    int quality = 85);
 
 // The same, reading the file itself.  A file larger than max_bytes is refused
 // on its size alone, without being opened.
-Scaled scale_file_to_fit(const std::string& path, int max_px, int quality = 85,
+Scaled scale_file_to_fit(const std::string& path, int max_px, Fit fit,
+                         int quality = 85,
                          std::size_t max_bytes = 64u * 1024 * 1024);
 
 }   // namespace imagescale

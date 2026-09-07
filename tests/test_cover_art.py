@@ -134,7 +134,10 @@ def _albums():
 
 
 def _cover_id():
-    """An album cover id whose source is comfortably bigger than a thumbnail."""
+    """An album cover id whose source is comfortably bigger than a thumbnail.
+
+    Measured on the SHORT edge, because that is the edge `size` names.
+    """
     if "cover" in _CACHE:
         return _CACHE["cover"]
     for a in _albums():
@@ -148,25 +151,37 @@ def _cover_id():
             w, h = _image_size(body)
         except AssertionError:
             continue
-        if max(w, h) >= 200:
+        if min(w, h) >= 200:
             _CACHE["cover"] = (cid, w, h)
             return _CACHE["cover"]
-    raise Skip("no album in the library has a cover larger than 200px")
+    raise Skip("no album in the library has a cover 200px on its short edge")
 
 
 # ---- scaling -----------------------------------------------------------
 
-def test_scaled_cover_has_the_requested_long_edge():
+def test_scaled_cover_has_the_requested_short_edge():
+    """`size` is the SHORT edge, so a non-square source overshoots on the
+    other one. That is the whole point: every client crops a cover to a
+    square, and fitting the long edge instead leaves it enlarging a 2:3 poster
+    to fill its cell — blurred by the client however sharp what we sent was.
+
+    LONG_EDGE_LIMIT caps the other edge at four times `size`, so a source wider
+    than 4:1 legitimately comes back short of what was asked. Skipped here
+    rather than special-cased: no cover is that shape, and `_cover_id` would
+    have to go looking for one.
+    """
     cid, sw, sh = _cover_id()
+    if max(sw, sh) > 4 * min(sw, sh):
+        raise Skip(f"the cover found is {sw}x{sh}, past the 4:1 clamp")
     for want in (64, 80, 144, 400):
         status, _, body = _raw("getCoverArt.view", {"id": cid, "size": want})
         assert status == 200, f"size={want} returned HTTP {status}"
         w, h = _image_size(body)
-        expect = min(want, max(sw, sh))
-        assert max(w, h) == expect, \
-            f"size={want} on a {sw}x{sh} source gave {w}x{h}, wanted a long " \
+        expect = min(want, min(sw, sh))
+        assert min(w, h) == expect, \
+            f"size={want} on a {sw}x{sh} source gave {w}x{h}, wanted a short " \
             f"edge of {expect}"
-    print("PASS  size= produces an image of that size")
+    print("PASS  size= produces an image of that size on its short edge")
 
 
 def test_aspect_ratio_is_preserved():
@@ -193,13 +208,15 @@ def test_never_upscales():
 def test_odd_size_rounds_up_and_is_not_smaller_than_asked():
     """The ladder rounds up, so a client never gets less than it asked for."""
     cid, sw, sh = _cover_id()
+    if max(sw, sh) > 4 * min(sw, sh):
+        raise Skip(f"the cover found is {sw}x{sh}, past the 4:1 clamp")
     for want in (100, 137, 201):
         status, _, body = _raw("getCoverArt.view", {"id": cid, "size": want})
         assert status == 200, f"size={want} returned HTTP {status}"
         w, h = _image_size(body)
-        if max(sw, sh) <= want:
+        if min(sw, sh) <= want:
             continue                     # source smaller than asked; fine
-        assert max(w, h) >= want, \
+        assert min(w, h) >= want, \
             f"size={want} came back {w}x{h}, smaller than requested"
     print("PASS  an off-ladder size rounds up, never down")
 
@@ -368,7 +385,7 @@ def test_unknown_id_is_not_a_server_error():
 
 
 TESTS = [
-    test_scaled_cover_has_the_requested_long_edge,
+    test_scaled_cover_has_the_requested_short_edge,
     test_aspect_ratio_is_preserved,
     test_never_upscales,
     test_odd_size_rounds_up_and_is_not_smaller_than_asked,
