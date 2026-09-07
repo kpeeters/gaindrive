@@ -684,6 +684,36 @@ install(TARGETS gaindrive RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 # embedded into the binary, filled in at install time -- and is what a
 # distribution packager should start from to get the system-account shape back.
 
+# ---- Uninstall -------------------------------------------------------------
+
+# CMake generates no uninstall rule of its own, and here that is not a nicety:
+# a bundled dependency is a subproject, so its own install() rules run as part
+# of ours and `sudo cmake --install build` scatters SQLiteCpp, reproc++,
+# taglib, tinyxml2 and their cmake package files across the prefix. Undoing
+# that by hand means reading install_manifest.txt and trusting yourself with
+# rm as root, which is exactly the thing to automate rather than document.
+#
+# The dry run exists because this is normally run as root on a server. See
+# cmake/uninstall.cmake for what the manifest can and cannot account for.
+add_custom_target(uninstall
+	COMMAND ${CMAKE_COMMAND}
+		-DMANIFEST=${CMAKE_BINARY_DIR}/install_manifest.txt
+		-DPREFIX=${CMAKE_INSTALL_PREFIX}
+		-DBUILD_DIR=${CMAKE_BINARY_DIR}
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/uninstall.cmake
+	USES_TERMINAL
+	COMMENT "Removing everything the last install of this build wrote")
+
+add_custom_target(uninstall-dry-run
+	COMMAND ${CMAKE_COMMAND}
+		-DMANIFEST=${CMAKE_BINARY_DIR}/install_manifest.txt
+		-DPREFIX=${CMAKE_INSTALL_PREFIX}
+		-DBUILD_DIR=${CMAKE_BINARY_DIR}
+		-DDRY_RUN=ON
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/uninstall.cmake
+	USES_TERMINAL
+	COMMENT "Listing what an uninstall would remove")
+
 # Example config installs next to the config the binary actually reads, which is
 # GAINDRIVE_SYSCONFDIR and not CMAKE_INSTALL_SYSCONFDIR: on Linux that stays
 # /etc regardless of prefix, exactly as before, while a Homebrew build redirects
