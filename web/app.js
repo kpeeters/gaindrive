@@ -245,6 +245,45 @@ const castSyncDelay = {
       },
    };
 
+// The staircase behind the two adjustment buttons, and the interlock that keeps
+// a person from adjusting into a picture that has not finished moving.
+//
+// Declared here rather than beside SYNC_DEAD and the rest of the loop's
+// constants, although they read as one family: castSyncStep is initialised at
+// module load and those sit two thousand lines below, which is a temporal dead
+// zone and a ReferenceError before the client has drawn anything.  The split is
+// honest anyway — these describe the control, those describe the loop.
+//
+// castSyncPhase is what the buttons read:
+//
+//   'idle'      nothing in flight, the picture is where the setting says
+//   'moving'    a step is being performed by the element; the loop stands off
+//   'settling'  the step landed (or could not be made) and the loop is closing
+//               the remainder; the buttons stay disabled until |err| is back
+//               inside SYNC_DEAD
+//
+// The last state is the signal that was missing entirely.  The loop takes 5-15 s
+// to absorb anything it is given, and nothing anywhere said so — so the natural
+// thing to do was adjust again, and overshoot.  castSyncTick() is the settle
+// detector because it is the only thing that knows.
+// A press moves this far, halving on every reversal.  400 ms is big enough to
+// be unmistakable on the first press and still only three presses from the
+// floor; 25 ms is below one frame at any sane rate and below what an eye can
+// judge, so refining past it would be asking for a decision nobody can make.
+const SYNC_STEP_START = 400;
+const SYNC_STEP_MIN   = 25;
+// A settle that never completes must not leave the buttons dead for ever.
+const SYNC_SETTLE_CAP = 20000;
+
+let castSyncStep    = SYNC_STEP_START;
+let castSyncLastDir = 0;
+let castSyncRun     = 0;
+let castSyncPhase   = 'idle';
+// Latched per stream: a chunked re-encode cannot be seeked outside what it has
+// buffered, and a refused seek is silent — no 'seeked' event, no error.
+let castSyncNoSeek  = false;
+let castSyncSettleAt = 0;
+
 function audioOnlyFormat() {
    return _canPlayProbe.canPlayType('audio/ogg; codecs=opus') === 'probably'
       ? 'opus' : 'mp3';
@@ -2708,13 +2747,169 @@ const SYNC_MAX  = 0.05;   // ±5%, comfortably below what an eye can see
 
 // Whether the element can be moved to `t` at all.  A Range-capable stream can:
 // the browser re-requests whatever it needs.  A re-encoded one is chunked with
-// no Range support, so a seek outside what is already buffered does nothing —
+// no Range support, so a seek outside what it can reach does nothing —
 // silently, which is why this is a test and not an attempt.
+//
+// The test is `seekable` and not `buffered`, which is not a distinction without
+// a difference: `seekable` is what the browser will honour, and for a chunked
+// response of unknown duration it can be empty while `buffered` holds seconds
+// of decoded video.  Asking the wrong one reports yes where the seek is then
+// refused — and a refused seek fires no event and raises nothing, so it was
+// invisible from here.  castSyncNoSeek latches on the read-back check in
+// castSyncStepMove(), which is the only thing that ever finds out.
 function castSyncCanSeek(el, t) {
+   if (castSyncNoSeek) return false;
    if (!player.streamIsTranscoded) return true;
-   for (let i = 0; i < el.buffered.length; i++)
-      if (t >= el.buffered.start(i) && t <= el.buffered.end(i)) return true;
+   for (let i = 0; i < el.seekable.length; i++)
+      if (t >= el.seekable.start(i) && t <= el.seekable.end(i)) return true;
    return false;
+}
+
+// ---- The two adjustment buttons ---------------------------------------
+//
+// What this replaced was a slider feeding the loop's setpoint, and it could not
+// be used.  Moving it changed `target` and nothing else, so a 25 ms move — the
+// slider's own step — sat inside SYNC_DEAD and was discarded for ever, anything
+// under a second crawled in over 5-15 s at ±5%, and only a move past SYNC_HARD
+// produced the jump the control appeared to promise.  Nothing distinguished
+// "settled" from "still moving", so the natural response to seeing nothing was
+// to move it again, and overshoot.
+//
+// Two things fix it.  An adjustment is applied as a *step*, by the element,
+// leaving the rate loop the job it was written for — absorbing drift over the
+// length of a film — rather than being the mechanism by which a person's input
+// arrives.  And the buttons are disabled until the picture has actually got
+// there, so adjusting into an unsettled picture is not possible.
+
+// Phase changes go through here, so the panel can never disagree with the
+// machinery: videoSyncButton() is what greys the buttons out.
+function castSyncSetPhase(phase) {
+   castSyncPhase = phase;
+   if (phase === 'settling') castSyncSettleAt = Date.now();
+   videoSyncButton();
+}
+
+function castSyncDone() {
+   if (castSyncPhase !== 'idle') castSyncSetPhase('idle');
+}
+
+// One press.  `dir` is +1 for "the sound is late" and -1 for "the sound is
+// early" — the symptom, never the correction.  A positive delay holds the
+// picture back, so late sound *increases* it; wired the other way round the
+// control diverges under someone who is pressing correctly.
+//
+// A staircase rather than a bisection.  Bisection needs a bracket nobody has,
+// so its first move would be a jump to the middle of the whole range, and one
+// mistaken press near the end is unrecoverable.  Halving the step on every
+// change of direction needs no bracket, converges in six to eight presses from
+// anywhere, and a mistake is undone by the next press — which also refines it.
+function castSyncAdjust(dir) {
+   if (!castVideoLocal || castSyncPhase !== 'idle') return;
+   if (castSyncLastDir && dir !== castSyncLastDir) {
+      castSyncStep = Math.max(castSyncStep / 2, SYNC_STEP_MIN);
+      castSyncRun  = 0;
+      }
+   else if (++castSyncRun >= 3) {
+      // Halving alone is a one-way ratchet, so one mistaken press early on
+      // would cap the step for the rest of the calibration and leave a long
+      // haul to be walked in 25 ms increments.  Three presses the same way is
+      // not homing in on anything — it is travelling — so let it coarsen again.
+      castSyncStep = Math.min(castSyncStep * 2, SYNC_STEP_START);
+      castSyncRun  = 0;
+      }
+   castSyncLastDir = dir;
+
+   const was = castSyncDelay.get(castDeviceId);
+   // The bounds the slider carried.  An amplifier's DSP puts the useful range
+   // well to the positive side of zero.
+   const want = Math.max(-1000, Math.min(3000, was + dir * castSyncStep));
+   if (want === was) return;
+   castSyncDelay.set(castDeviceId, want);
+   videoSyncButton();
+   console.log(`[cast] sync ${want} ms (step ${castSyncStep} ms)`);
+
+   const el = player.videoEl;
+   // Nothing is running, so there is nothing to step: castSyncTick()'s resume
+   // branch plants the picture at the setting when the receiver next reports
+   // PLAYING, which applies the adjustment by the other route.
+   if (!el || !el.currentSrc || castPlayerState !== 'PLAYING' || el.paused)
+      return;
+   castSyncStepMove(el, (want - was) / 1000);
+}
+
+// Add `delta` seconds of delay to the picture, now, by moving the element.
+//
+// Self-consistent with the loop by construction: the setting moved `target` by
+// -delta and this moves currentTime by -delta, so `err` is unchanged and there
+// is nothing to undo when the loop resumes.
+function castSyncStepMove(el, delta) {
+   const to = Math.max(0, el.currentTime - delta);
+
+   if (castSyncCanSeek(el, to)) {
+      castSyncSetPhase('moving');
+      let done = false;
+      const finish = (ok) => {
+         if (done) return;
+         done = true;
+         // A step outlives its stream if the cast ends mid-seek, and the
+         // element has had its src removed by then.
+         if (!castVideoLocal) { castSyncPhase = 'idle'; return; }
+         el.removeEventListener('seeking', onSeeking);
+         el.removeEventListener('seeked',  onSeeked);
+         if (ok) { castSyncSetPhase('settling'); return; }
+         // A seek the browser will not perform raises nothing and fires
+         // nothing — the failure this control had no way of noticing.  Latch
+         // it so the next press does not pay the timeout again, and take the
+         // route that needs no seek.
+         castSyncNoSeek = true;
+         console.warn('[cast] sync: seek refused, falling back');
+         castSyncPhase = 'idle';
+         castSyncStepMove(el, delta);
+         };
+      // `seeking` is the acknowledgement and `seeked` the completion.  Waiting
+      // for `seeked` alone would call a slow seek a refusal, since it does not
+      // fire until the data is there.
+      let accepted = false;
+      const onSeeking = () => { accepted = true; };
+      const onSeeked  = () => finish(Math.abs(el.currentTime - to) < 0.5);
+      el.addEventListener('seeking', onSeeking);
+      el.addEventListener('seeked',  onSeeked);
+      setTimeout(() => { if (!accepted) finish(false); }, 200);
+      // And a cap, or a seek that is accepted and never completes leaves the
+      // buttons disabled for the rest of the film.
+      setTimeout(() => finish(true), 5000);
+      el.currentTime = to;
+      return;
+      }
+
+   if (delta > 0) {
+      // No seek available, but holding the picture still while the receiver
+      // plays on *is* delaying it by that much: exact, and asking nothing of
+      // the stream.  It is also what a viewer expects a positive adjustment to
+      // look like — a brief freeze.
+      castSyncSetPhase('moving');
+      const from = el.currentTime;
+      const at   = Date.now();
+      el.pause();
+      setTimeout(() => {
+         if (!castVideoLocal) { castSyncPhase = 'idle'; return; }
+         // What the freeze achieved, rather than what the timer was asked for.
+         // setTimeout jitter and decode-resume latency are a few ms each; the
+         // loop closes the remainder, so this only has to be reported.
+         const got = (Date.now() - at) / 1000 - (el.currentTime - from);
+         if (Math.abs(got - delta) > 0.005)
+            console.log(`[cast] sync hold ${got.toFixed(3)} of ` +
+                        `${delta.toFixed(3)} s`);
+         el.play().catch(e => console.warn('[cast] local picture', e));
+         castSyncSetPhase('settling');
+         }, delta * 1000);
+      return;
+      }
+
+   // Negative, on a stream that will not seek: there is nothing but the rate
+   // loop, and it is allowed to be slow.  What it is not allowed to be is
+   // invisible, which is the whole of what 'settling' buys.
+   castSyncSetPhase('settling');
 }
 
 // One step of the loop, off the interpolation timer below.  `absCurrent` is
@@ -2724,6 +2919,10 @@ function castSyncTick(absCurrent) {
    if (!castVideoLocal) return;
    const el = player.videoEl;
    if (!el || !el.currentSrc) return;
+
+   // A deliberate step owns the element: it is mid-seek, or being held still to
+   // add delay.  The loop must not touch playbackRate or call play() under it.
+   if (castSyncPhase === 'moving') return;
 
    // The delay is the one quantity nothing can measure: what the receiver
    // reports is where its decoder is, and the sound leaves the speakers some
@@ -2735,6 +2934,10 @@ function castSyncTick(absCurrent) {
    // feature film is the first minute of the session.
    if (castPlayerState !== 'PLAYING') {
       if (!el.paused) el.pause();
+      // Nothing is advancing, so there is no error to close and nothing for the
+      // buttons to wait on.  The resume branch below plants the picture at the
+      // setting, which is the adjustment applied by another route.
+      castSyncDone();
       return;
       }
 
@@ -2751,11 +2954,23 @@ function castSyncTick(absCurrent) {
       if (castSyncCanSeek(el, want)) el.currentTime = want;
       el.playbackRate = 1;
       castSyncWarned = false;
+      castSyncDone();
       el.play().catch(err => console.warn('[cast] local picture', err));
       return;
       }
 
    const err = target - (el.currentTime + localOffset);
+
+   // The loop is the settle detector, and that is the signal the control never
+   // had.  A change takes 5-15 s to be absorbed when it cannot be stepped, and
+   // nothing said so — so the natural thing to do was change it again.  The
+   // buttons stay disabled until the picture is actually where the setting
+   // says, or until the cap, because a settle that never converges must not
+   // leave them dead.
+   if (castSyncPhase === 'settling' &&
+       (Math.abs(err) < SYNC_DEAD ||
+        Date.now() - castSyncSettleAt > SYNC_SETTLE_CAP))
+      castSyncDone();
 
    if (Math.abs(err) > SYNC_HARD) {
       const want = Math.max(0, target - localOffset);
@@ -2842,6 +3057,15 @@ function castLocalVideoStart(song, offset) {
 
    castVideoLocal = true;
    castSyncWarned = false;
+   // Per stream, not per device: whether a seek lands is a property of the tier
+   // this film is being served at, and the staircase starts coarse again for a
+   // fresh calibration.  The delay itself is deliberately kept — it is the
+   // device's, and lives in gd_cast_sync_<id>.
+   castSyncNoSeek  = false;
+   castSyncStep    = SYNC_STEP_START;
+   castSyncLastDir = 0;
+   castSyncRun     = 0;
+   castSyncPhase   = 'idle';
    playerSelectMedia(true);
    // Not a courtesy to the room: this element and the amplifier are playing
    // the same film, and the whole design rests on only one of them being
@@ -2859,6 +3083,9 @@ function castLocalVideoStart(song, offset) {
 function castLocalVideoStop() {
    if (!castVideoLocal) return;
    castVideoLocal = false;
+   // Clearing this first is what makes the guards in castSyncStepMove()'s
+   // timers work: a step in flight has no element to finish against.
+   castSyncPhase  = 'idle';
    const el = player.videoEl;
    if (el) {
       el.pause();
@@ -3704,9 +3931,15 @@ function videoSyncButton() {
       document.getElementById('video-sync-menu').classList.add('hidden');
       return;
       }
-   const ms = castSyncDelay.get(castDeviceId);
-   document.getElementById('video-sync-range').value = String(ms);
+   const ms   = castSyncDelay.get(castDeviceId);
+   const busy = castSyncPhase !== 'idle';
    document.getElementById('video-sync-value').textContent = `${ms} ms`;
+   // Disabled *is* the feedback: it says the picture has not finished moving,
+   // which is the one thing the operator could not previously tell and the
+   // reason the old control was impossible to calibrate with.
+   document.getElementById('video-sync-later').disabled   = busy;
+   document.getElementById('video-sync-earlier').disabled = busy;
+   document.getElementById('video-sync-busy').hidden      = !busy;
 }
 
 // How far one press of the skip buttons, or of an arrow key, moves.
@@ -3953,14 +4186,12 @@ function setupVideoSurface() {
 
    document.getElementById('video-sync').addEventListener('click', () =>
       document.getElementById('video-sync-menu').classList.toggle('hidden'));
-   // 'input', not 'change': the whole point is judging it against a face on
-   // screen, which means it has to move while the thumb does.  castSyncTick()
-   // reads the stored value every 100 ms, so writing it is the whole update.
-   document.getElementById('video-sync-range').addEventListener('input', e => {
-      const ms = +e.target.value || 0;
-      castSyncDelay.set(castDeviceId, ms);
-      document.getElementById('video-sync-value').textContent = `${ms} ms`;
-      });
+   // Discrete presses rather than a drag, which is also why there is nothing to
+   // debounce here: each one is a single, atomic, confirmable step.
+   document.getElementById('video-sync-later').addEventListener('click',
+      () => castSyncAdjust(1));
+   document.getElementById('video-sync-earlier').addEventListener('click',
+      () => castSyncAdjust(-1));
 
    // The player bar is auto-height on mobile, and the surface is anchored to
    // its top edge.  Measure it rather than trusting --player-h, which is only

@@ -1697,10 +1697,11 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 // ---- Album info helper -----------------------------------------------
 
 // Shared implementation for getAlbumInfo and getAlbumInfo2.
+// key is "albumInfo" or "albumInfo2" — controls the XML element / JSON key.
 // Searches MusicBrainz for the release-group, then resolves a Wikipedia
 // article via Wikidata if needed. Results are cached in album_info_cache.
 static void handle_album_info(const httplib::Request& req, httplib::Response& res,
-                               MediaStore& store)
+                               MediaStore& store, const char* key)
 	{
 	bool use_json = (fmt_of(req) == "json");
 	auto err = [&](int code, const char* msg) {
@@ -1895,13 +1896,13 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 
 	std::string body;
 	if (use_json)
-		body = subsonic_ok_json([&info](nlohmann::json& r) {
+		body = subsonic_ok_json([&info, key](nlohmann::json& r) {
 			nlohmann::json ai = nlohmann::json::object();
 			if (!info.mbid.empty())           ai["musicBrainzId"] = info.mbid;
 			if (!info.notes.empty())          ai["notes"]         = info.notes;
 			if (!info.wiki_url.empty())       ai["wikiUrl"]       = info.wiki_url;
 			if (!info.allmusic_url.empty())   ai["allMusicUrl"]   = info.allmusic_url;
-			r["albumInfo2"] = ai;
+			r[key] = ai;
 			});
 	else {
 		auto add_text_el = [](XMLDocument& doc, XMLElement* parent,
@@ -1911,8 +1912,8 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 			el->SetText(val.c_str());
 			parent->InsertEndChild(el);
 			};
-		body = subsonic_ok([&info, &add_text_el](XMLDocument& doc, XMLElement* root) {
-			auto* ai = doc.NewElement("albumInfo2");
+		body = subsonic_ok([&info, &add_text_el, key](XMLDocument& doc, XMLElement* root) {
+			auto* ai = doc.NewElement(key);
 			add_text_el(doc, ai, "musicBrainzId", info.mbid);
 			add_text_el(doc, ai, "notes",         info.notes);
 			add_text_el(doc, ai, "wikiUrl",       info.wiki_url);
@@ -3245,16 +3246,25 @@ GainDrive::GainDrive(const std::string& db_path,
 				// version already names will not, since a client that ignores
 				// it gets exactly what it got before. doc/api.toml is the
 				// contract.
-				r["openSubsonicExtensions"] = {{{"name", "gaindrive"},
-					{"versions", nlohmann::json::array({1})}}};
+				//
+				// transcodeOffset is the standard extension meaning no more
+				// than that stream honours timeOffset for audio, which it has
+				// always done — so it names behaviour rather than adding any.
+				r["openSubsonicExtensions"] = {
+					{{"name", "gaindrive"},
+					 {"versions", nlohmann::json::array({1})}},
+					{{"name", "transcodeOffset"},
+					 {"versions", nlohmann::json::array({1})}}};
 				});
 		else
 			body = subsonic_ok([](XMLDocument& doc, XMLElement* root) {
 				auto* exts = doc.NewElement("openSubsonicExtensions");
-				auto* ext  = doc.NewElement("extension");
-				ext->SetAttribute("name", "gaindrive");
-				ext->SetAttribute("versions", "1");
-				exts->InsertEndChild(ext);
+				for (const char* name : {"gaindrive", "transcodeOffset"}) {
+					auto* ext = doc.NewElement("extension");
+					ext->SetAttribute("name", name);
+					ext->SetAttribute("versions", "1");
+					exts->InsertEndChild(ext);
+					}
 				root->InsertEndChild(exts);
 				});
 		res.set_content(body, use_json ? "application/json" : "application/xml");
@@ -5234,10 +5244,19 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
+	// getAlbumInfo / getAlbumInfo2 — MusicBrainz lookup, result cached in DB.
+	// Both endpoints share identical logic; only the response key name differs.
+	// An album id here *is* a folder id, so there is no id3 album to look up
+	// separately and the older name answers the same question as the newer.
+	server_.Get("/rest/getAlbumInfo.view", [this](const httplib::Request& req,
+	                                              httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		handle_album_info(req, res, store_, "albumInfo");
+		});
 	server_.Get("/rest/getAlbumInfo2.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		handle_album_info(req, res, store_);
+		handle_album_info(req, res, store_, "albumInfo2");
 		});
 
 	// getTopSongs — play-count tracking not implemented; return empty list.

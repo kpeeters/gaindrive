@@ -81,6 +81,10 @@ blurb = '''
 version 1. No authentication is needed for that call, so a client can negotiate
 before login. Everything on this page is version 1.
 
+Beside it the standard `transcodeOffset` is advertised, also at version 1. It
+names behaviour rather than adding any — `stream` honours `timeOffset` for
+audio, and always has — so nothing on this page depends on it.
+
 A new *endpoint* will earn a new version, because a client cannot discover one
 without being told. A new *optional parameter* on an endpoint an existing
 version already names will not — a client that ignores it gets exactly what it
@@ -280,12 +284,12 @@ kind       = 'additions'
 applies_to = ["getOpenSubsonicExtensions"]
 section    = "extension"
 auth       = 'none'
-summary    = 'Advertises the gaindrive extension and the versions this server implements.'
+summary    = 'Advertises the gaindrive extension, and the standard `transcodeOffset` beside it, with the versions this server implements.'
 
   [[endpoint.field]]
   name = "openSubsonicExtensions.name"
   type = "string"
-  doc  = 'Always `gaindrive`.'
+  doc  = '`gaindrive` for this page. `transcodeOffset` is advertised beside it and is the standard extension of that name.'
 
   [[endpoint.field]]
   name = "openSubsonicExtensions.versions"
@@ -2337,15 +2341,6 @@ arrives as 200 and a page of HTML.
 
 * `getNowPlaying`. `scrobble` records a now-playing event and nothing reads it
   back.
-* `getAlbumInfo`. Only `getAlbumInfo2` is registered. The two would be the
-  same call in GainDrive, since an album id *is* a folder id — there is no
-  separate id3 album to look up — so the older name is missing rather than
-  meaningfully absent.
-
-**Searching.**
-
-* `search`, the Subsonic 1.0 search that the specification itself deprecates
-  in favour of `search2`. Both `search2` and `search3` are implemented.
 
 **Retrieval and annotation.**
 
@@ -2381,9 +2376,7 @@ reads them need not probe.
   authentication.
 
 **Extensions GainDrive could advertise and does not.**
-`getOpenSubsonicExtensions` names `gaindrive` alone. One standard extension
-name already describes behaviour that is present: `transcodeOffset` means no
-more than that `stream` honours `timeOffset` for music, which it does.
+`getOpenSubsonicExtensions` names `gaindrive` and `transcodeOffset`.
 `topSongsByArtistId` is one parameter away, but `getTopSongs` answers an
 empty list here, so advertising it would promise data that does not exist.
 `formPost` is not supported — every standard endpoint is `GET`.

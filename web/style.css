@@ -1025,11 +1025,33 @@ input.chapter-time.bad { border-color: #e06c6c; }
 }
 
 #video-sync-menu.hidden { display: none; }
-#video-sync-menu input[type="range"] { width: 100%; }
-/* Tabular so the readout does not jitter under the thumb as it is dragged. */
+
+.video-sync-title { color: var(--text-dim); }
+
+#video-sync-menu button {
+   width: 100%;
+   padding: 0.35rem 0.6rem;
+   font-size: 0.85rem;
+   text-align: left;
+   white-space: nowrap;
+}
+
+/* Disabled means "the picture has not finished moving yet", which is the whole
+   point of the control -- so it has to be unmistakable rather than subtle. */
+#video-sync-menu button:disabled {
+   opacity: 0.45;
+   cursor: default;
+}
+
+/* Tabular so the readout does not jitter as the value steps. */
 #video-sync-value {
    font-variant-numeric: tabular-nums;
    color: var(--text-dim);
+}
+
+#video-sync-busy {
+   color: var(--accent);
+   font-size: 0.8rem;
 }
 
 @media (max-width: 649px) {

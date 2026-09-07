@@ -91,6 +91,7 @@
 <div class="doc-sec" id="extension">
 <h2>The gaindrive extension</h2>
 <p><code>getOpenSubsonicExtensions</code> advertises an extension named <code>gaindrive</code> at version 1. No authentication is needed for that call, so a client can negotiate before login. Everything on this page is version 1.</p>
+<p>Beside it the standard <code>transcodeOffset</code> is advertised, also at version 1. It names behaviour rather than adding any — <code>stream</code> honours <code>timeOffset</code> for audio, and always has — so nothing on this page depends on it.</p>
 <p>A new <em>endpoint</em> will earn a new version, because a client cannot discover one without being told. A new <em>optional parameter</em> on an endpoint an existing version already names will not — a client that ignores it gets exactly what it got before, so nothing it was told has been redefined.</p>
 <p>A client that does not know the extension will not call any of these, so there is no conformance risk in advertising it. Nothing in the standard endpoints changes when the extension is present.</p>
 <div class="api-ep">
@@ -98,12 +99,12 @@
 <p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span>
 <span class="api-badge">no auth</span></p>
 <p>Carried by <code>getOpenSubsonicExtensions</code>. Only the gaindrive additions are listed here.</p>
-<p>Advertises the gaindrive extension and the versions this server implements.</p>
+<p>Advertises the gaindrive extension, and the standard <code>transcodeOffset</code> beside it, with the versions this server implements.</p>
 <h4>Response</h4>
 <table class="doc-table">
 <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
-<tr><td><code>openSubsonicExtensions.name</code></td><td>string</td><td>Always <code>gaindrive</code>.</td></tr>
+<tr><td><code>openSubsonicExtensions.name</code></td><td>string</td><td><code>gaindrive</code> for this page. <code>transcodeOffset</code> is advertised beside it and is the standard extension of that name.</td></tr>
 <tr><td><code>openSubsonicExtensions.versions</code></td><td>int[]</td><td>In XML, a comma-separated <code>versions</code> attribute.</td></tr>
 </tbody>
 </table>
@@ -1171,9 +1172,7 @@ all.
 <p>Everything above is what GainDrive <b>adds</b> to Subsonic. This last section is the other side of the same question: the Subsonic and OpenSubsonic endpoints GainDrive does <b>not</b> answer. They are listed so that a client author can tell a deliberate gap from a server too old for a feature, and so that nobody has to discover one by calling it.</p>
 <p>A <code>GET</code> for any of them reaches a catch-all and is answered <b>HTTP 200 carrying Subsonic error 0, <code>Not implemented.</code></b> — always as XML, whatever <code>f</code> asked for. A <code>POST</code> matches no route at all and gets a bare 404 with no body, which behind a reverse proxy configured to serve a single-page client on 404 arrives as 200 and a page of HTML.</p>
 <p><b>Browsing, lists and similarity.</b></p>
-<ul class="doc-list"><li><code>getNowPlaying</code>. <code>scrobble</code> records a now-playing event and nothing reads it back.</li><li><code>getAlbumInfo</code>. Only <code>getAlbumInfo2</code> is registered. The two would be the same call in GainDrive, since an album id <em>is</em> a folder id — there is no separate id3 album to look up — so the older name is missing rather than meaningfully absent.</li></ul>
-<p><b>Searching.</b></p>
-<ul class="doc-list"><li><code>search</code>, the Subsonic 1.0 search that the specification itself deprecates in favour of <code>search2</code>. Both <code>search2</code> and <code>search3</code> are implemented.</li></ul>
+<ul class="doc-list"><li><code>getNowPlaying</code>. <code>scrobble</code> records a now-playing event and nothing reads it back.</li></ul>
 <p><b>Retrieval and annotation.</b></p>
 <ul class="doc-list"><li><code>getLyrics</code>, and <code>getLyricsBySongId</code> of the OpenSubsonic <code>songLyrics</code> extension. No lyric tag and no <code>.lrc</code> sidecar is read.</li><li><code>getAvatar</code>. An account carries no picture.</li></ul>
 <p><b>The play queue.</b></p>
@@ -1182,7 +1181,7 @@ all.
 <ul class="doc-list"><li>The jukebox — <code>jukeboxControl</code>, which plays through the sound card of the machine running the server. Casting is GainDrive&#x27;s answer to playing somewhere other than the client.</li></ul>
 <p><b>Users and system.</b></p>
 <ul class="doc-list"><li><code>deleteUser</code>, the only one of the six user endpoints missing. Removing an account means deciding what becomes of its stars, playlists, queue, bookmarks and uploaded files, every one of which is keyed on it.</li><li><code>tokenInfo</code> of the OpenSubsonic <code>apiKeyAuthentication</code> extension. GainDrive issues no API keys; <code>u</code> and <code>p</code>, or the token scheme, are the whole of authentication.</li></ul>
-<p><b>Extensions GainDrive could advertise and does not.</b> <code>getOpenSubsonicExtensions</code> names <code>gaindrive</code> alone. One standard extension name already describes behaviour that is present: <code>transcodeOffset</code> means no more than that <code>stream</code> honours <code>timeOffset</code> for music, which it does. <code>topSongsByArtistId</code> is one parameter away, but <code>getTopSongs</code> answers an empty list here, so advertising it would promise data that does not exist. <code>formPost</code> is not supported — every standard endpoint is <code>GET</code>.</p>
+<p><b>Extensions GainDrive could advertise and does not.</b> <code>getOpenSubsonicExtensions</code> names <code>gaindrive</code> and <code>transcodeOffset</code>. <code>topSongsByArtistId</code> is one parameter away, but <code>getTopSongs</code> answers an empty list here, so advertising it would promise data that does not exist. <code>formPost</code> is not supported — every standard endpoint is <code>GET</code>.</p>
 </div>
 <div class="doc-sec" id="wontimplement">
 <h2>Outside scope</h2>

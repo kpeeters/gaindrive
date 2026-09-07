@@ -169,10 +169,20 @@
               it is here rather than in Settings. -->
          <span id="video-sync-wrap" hidden>
             <button id="video-sync" class="mi" title="Audio/video sync" aria-label="Audio/video sync">av_timer</button>
+            <!-- Two buttons and not a slider, because sign is the only
+                 judgement a person can actually make here: "the sound is 340 ms
+                 late" is not something anyone can see, while "the sound is
+                 late" is.  They are labelled by the symptom the viewer
+                 perceives and never by the correction -- a positive delay holds
+                 the picture back, so "sound is late" *increases* it, and
+                 labelling these the other way round makes the control diverge
+                 instead of converge. -->
             <div id="video-sync-menu" class="hidden">
-               <label for="video-sync-range">Delay picture</label>
-               <input id="video-sync-range" type="range" min="-1000" max="3000" step="25" value="0">
+               <span class="video-sync-title">Press what you hear</span>
+               <button id="video-sync-later" type="button">Sound is late</button>
+               <button id="video-sync-earlier" type="button">Sound is early</button>
                <span id="video-sync-value">0 ms</span>
+               <span id="video-sync-busy" hidden>adjusting&hellip;</span>
             </div>
          </span>
          <button id="video-minimise" class="mi" title="Minimise">close_fullscreen</button>
