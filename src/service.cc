@@ -157,20 +157,54 @@ bool resolve_user(const std::string& want, Target& t, std::string& err)
 // then setgid before setuid, because the reverse loses the privilege needed to
 // change the group.  Without this the first sign of trouble is a service that
 // starts and serves an empty library.
-bool reachable_as(const std::string& path, const Target& t, bool want_write)
+//
+// X_OK is added for a DIRECTORY and never for a file.  On a directory it is
+// search permission, which is what reaching anything inside it needs; on a file
+// it asks whether the file may be executed, which for a database is false for
+// everybody -- so asking it of one reports "you cannot read your own database"
+// about a file the owner is reading happily.  That was a real bug here.
+//
+// The reason comes back rather than a bare bool, because the three ways this
+// can fail want three different answers from the reader and rendering all of
+// them as "not readable" sent somebody looking at file modes that were fine.
+bool reachable_as(const std::string& path, const Target& t, bool want_write,
+                  std::string& why)
 	{
 	pid_t pid = ::fork();
 	if (pid < 0) return true;              // cannot tell; do not block the install
 	if (pid == 0) {
-		if (::initgroups(t.user.c_str(), t.gid) != 0) ::_exit(2);
-		if (::setgid(t.gid) != 0)                     ::_exit(2);
-		if (::setuid(t.uid) != 0)                     ::_exit(2);
-		int mode = want_write ? (R_OK | W_OK | X_OK) : (R_OK | X_OK);
-		::_exit(::access(path.c_str(), mode) == 0 ? 0 : 1);
+		// 120-122 are distinguishable from any errno, which is capped below.
+		if (::initgroups(t.user.c_str(), t.gid) != 0) ::_exit(120);
+		if (::setgid(t.gid) != 0)                     ::_exit(121);
+		if (::setuid(t.uid) != 0)                     ::_exit(122);
+		// Directory-or-not is decided here, after the drop, rather than in the
+		// parent: on an NFS mount exported with root_squash, root is the one
+		// identity that may not stat the path at all, so asking as root can
+		// give the wrong answer about a library the owner reads every day.
+		// A stat that fails leaves is_dir false, and access() below then
+		// reports the real reason rather than this guess.
+		std::error_code ec;
+		bool is_dir = fs::is_directory(path, ec);
+		int  mode   = R_OK | (want_write ? W_OK : 0) | (is_dir ? X_OK : 0);
+		if (::access(path.c_str(), mode) == 0)        ::_exit(0);
+		::_exit(errno > 119 ? 119 : errno);
 		}
 	int status = 0;
 	while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
-	return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+	if (!WIFEXITED(status)) {
+		why = "the permission check did not complete";
+		return false;
+		}
+
+	int code = WEXITSTATUS(status);
+	if (code == 0) return true;
+	switch (code) {
+		case 120: why = "cannot look up the groups of '" + t.user + "'"; break;
+		case 121: why = "cannot switch to group " + t.group;             break;
+		case 122: why = "cannot switch to user " + t.user;               break;
+		default:  why = std::strerror(code);                             break;
+		}
+	return false;
 	}
 
 // Is this file one we wrote?  Cheap and deliberately shallow: it says the file
@@ -410,22 +444,23 @@ int install(const InstallRequest& req)
 		          << " first, to create the first account.\n";
 		return 1;
 		}
-	if (!req.dry_run && !reachable_as(req.client_db_path, t, false)) {
-		std::cerr << "Error: " << req.client_db_path << " is not readable by "
-		          << t.user << "; the service could not open it.\n";
+	std::string why;
+	if (!req.dry_run && !reachable_as(req.client_db_path, t, false, why)) {
+		std::cerr << "Error: " << t.user << " cannot read " << req.client_db_path
+		          << ": " << why << ".\n       The service could not open it.\n";
 		return 1;
 		}
-	if (!req.dry_run && !reachable_as(req.db_dir, t, true)) {
-		std::cerr << "Error: " << req.db_dir << " is not writable by " << t.user
-		          << "; SQLite creates the -wal and -shm\n"
-		             "       files beside the database, and creates no "
-		             "directories.\n";
+	if (!req.dry_run && !reachable_as(req.db_dir, t, true, why)) {
+		std::cerr << "Error: " << t.user << " cannot write " << req.db_dir
+		          << ": " << why << ".\n       SQLite creates the -wal and -shm "
+		             "files beside the database, and creates no\n"
+		             "       directories.\n";
 		return 1;
 		}
 	for (const auto& r : req.root_paths)
-		if (!req.dry_run && !reachable_as(r, t, false)) {
-			std::cerr << "Error: library root " << r << " is not readable by "
-			          << t.user << ".\n       Grant access, or pass "
+		if (!req.dry_run && !reachable_as(r, t, false, why)) {
+			std::cerr << "Error: " << t.user << " cannot read library root "
+			          << r << ": " << why << ".\n       Grant access, or pass "
 			             "--service-user naming an account that has it; the\n"
 			             "       shared-group recipe is in README.md under "
 			             "\"Install as a service\".\n";
