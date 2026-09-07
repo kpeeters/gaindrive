@@ -89,6 +89,13 @@ class MediaStore {
 		// check compares against, so it cannot be an arbitrary string.
 		static bool valid_username(const std::string& u);
 
+		// The user/state database this db_path implies.  Public because
+		// --install-service has to check that file exists before writing a unit
+		// that runs as somebody who may not be able to create it, and a second
+		// copy of the rule would be a check aimed at a file nothing ever opens --
+		// note --db itself names no file that is opened.
+		static std::string client_db_path(const std::string& db_path);
+
 		// Returns false if the username already exists or is not valid.
 		bool add_user(const std::string& username, const std::string& password,
 		              bool is_admin = false);

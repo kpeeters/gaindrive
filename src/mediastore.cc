@@ -512,6 +512,11 @@ static std::string derive_path(const std::string& base, const std::string& suffi
 	return base + suffix;
 	}
 
+std::string MediaStore::client_db_path(const std::string& db_path)
+	{
+	return derive_path(db_path, "-client");
+	}
+
 MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& roots,
                        const std::string& user_db_path, int video_art_px,
                        bool video_art_frames, bool video_art_embedded,
@@ -592,7 +597,7 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 
 	// User/state DB: explicit override if given, else derived from db_path.
 	std::string client_path = user_db_path.empty()
-	                          ? derive_path(db_path, "-client") : user_db_path;
+	                          ? client_db_path(db_path) : user_db_path;
 	db_music_.exec("PRAGMA journal_mode=WAL");
 	db_music_.exec("PRAGMA foreign_keys=ON");
 	// The two halves are given *different* durability, and the asymmetry is the

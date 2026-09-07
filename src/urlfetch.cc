@@ -58,29 +58,6 @@ std::vector<std::string> urlfetch_expand(const std::vector<std::string>& tmpl,
 	return out;
 	}
 
-// Is this executable reachable?  A handler whose tool is not installed is
-// dropped at startup rather than failing on every request, which is what makes
-// "no yt-dlp on this machine" show up as a client that does not offer the row.
-static bool on_path(const std::string& prog)
-	{
-	if (prog.empty()) return false;
-	if (prog.find('/') != std::string::npos)
-		return ::access(prog.c_str(), X_OK) == 0;
-	const char* path = std::getenv("PATH");
-	if (!path) return false;
-	std::string p(path);
-	size_t start = 0;
-	while (start <= p.size()) {
-		size_t end = p.find(':', start);
-		if (end == std::string::npos) end = p.size();
-		std::string dir = p.substr(start, end - start);
-		if (dir.empty()) dir = ".";
-		if (::access((dir + "/" + prog).c_str(), X_OK) == 0) return true;
-		start = end + 1;
-		}
-	return false;
-	}
-
 // ---- the table --------------------------------------------------------
 
 std::vector<UrlHandler> UrlFetcher::default_handlers()

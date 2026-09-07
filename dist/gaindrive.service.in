@@ -1,20 +1,71 @@
+# The systemd unit gaindrive installs for itself.
+#
+# This file has exactly one consumer: cmake/embed_text.cmake compiles it into
+# the binary as a raw string literal, and service::install() fills its
+# placeholders in when `--install-service` runs.  Nothing runs configure_file
+# over it, which is why a placeholder is written between percent signs rather
+# than at signs -- the same spelling urlfetch_expand() uses, and one that cannot
+# be mistaken for a CMake substitution that is not happening.
+#
+# The vocabulary is HEADER, CONFIG, MOUNTS, USER, GROUP, EXEC and EXEC_ARGS.
+# A placeholder this file names and service.cc cannot fill is a hard error
+# rather than an empty line, because configure_file's habit of quietly
+# substituting nothing is exactly how a unit ships with a directive missing and
+# nothing anywhere to say so.  For that check to mean anything, every
+# percent-delimited name below has to be a real placeholder -- so this comment
+# spells them bare, and must go on doing that.
+#
+# Everything above the HEADER placeholder is this file's own documentation and
+# is dropped when the unit is written; HEADER itself becomes a line saying which
+# command generated the result.  So the notes below, which an administrator
+# reading /etc/systemd/system/gaindrive.service wants, are kept, and the notes
+# here, which only a reader of this repository wants, are not.
+#
+# It is also what a distribution packager should start from.  Such a package
+# wants a system account instead, which means User= and Group= naming it and a
+# StateDirectory= line -- see the note beside ExecStart.
+%HEADER%
 [Unit]
 Description=GainDrive music server
 After=network-online.target
 Wants=network-online.target
 
+# Dormant rather than broken until the config exists.  This is what rsync.service
+# and postfix.service do (ConditionPathExists=/etc/rsyncd.conf and
+# /etc/postfix/main.cf), and the reason to prefer Condition over Assert is that
+# Condition *skips* -- the unit stays inactive with no failed state and
+# `systemctl status` says "Condition check resulted in ... being skipped".  That
+# is what lets a unit be enabled before it is configured, which a package
+# installing this file would need and which is worth having here too: a config
+# moved aside stops the service instead of crash-looping it.
+ConditionPathExists=%CONFIG%
+
+# Wait for the library to be mounted.  Not cosmetic: validate_roots() only
+# checks is_directory, so a library on a NAS or an external disk passes
+# validation as an empty-but-present directory tree, and the startup scan's
+# prune then deletes every album under it.  Nothing is lost permanently -- the
+# music DB is a cache -- but the symptom is "my library vanished" followed by a
+# multi-hour cold rescan, on every boot that wins the race against the mount.
+# After=network-online.target does nothing about this.
+RequiresMountsFor=%MOUNTS%
+
 [Service]
 Type=simple
-User=gaindrive
-Group=gaindrive
-# No arguments: gaindrive reads /etc/gaindrive.conf by default.
-ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/gaindrive
+User=%USER%
+Group=%GROUP%
+# Settings come from the config file; see gaindrive.conf.example for every key.
+# --config is passed only when it is not the path compiled into this binary.
+#
+# A package installing this for a system account wants StateDirectory=gaindrive
+# here, which creates /var/lib/gaindrive 0750 before start.  A unit written by
+# --install-service deliberately has none: the database lives wherever --db
+# said, systemd would create the wrong directory, and nothing else creates the
+# right one -- SQLite makes files, never their parent.  What covers that is the
+# precondition in service.cc that refuses to install until the database is
+# already there, which is the same check that catches a skipped first run.
+ExecStart=%EXEC%%EXEC_ARGS%
 Restart=on-failure
 RestartSec=5
-
-# Creates /var/lib/gaindrive (0750, gaindrive:gaindrive) before start;
-# matches the default db_path /var/lib/gaindrive/gaindrive.db.
-StateDirectory=gaindrive
 
 # Hardening. ProtectSystem=full (not strict) keeps /usr, /boot and /etc
 # read-only while leaving the music tree writable. PrivateTmp gives the
@@ -37,12 +88,17 @@ SystemCallFilter=@system-service
 # an archive read into memory, so both the memory and the process count are
 # things a client can push on; without a ceiling the failure is the whole
 # machine rather than this service. Raise them if a large library needs it --
-# these are sized for a home server, not measured.
+# these are sized for a home server, not measured. `systemctl edit gaindrive`
+# is the way, since this file is rewritten by every --install-service.
 MemoryMax=4G
 TasksMax=512
 
-# NOTE: do NOT add ProtectHome if your music lives under /home -- it must
-# stay writable. Tighten with `systemctl edit gaindrive` if desired.
+# NOTE: do NOT add ProtectHome. A unit written by --install-service runs as a
+# person rather than a system account, so its database is under a home
+# directory essentially always and its music very often -- both must stay
+# readable and writable. The temptation is to tighten this for a packaged
+# variant, where the service user has no business in /home; doing it here
+# breaks every deployment this file actually has.
 #
 # AF_NETLINK is in RestrictAddressFamilies because getaddrinfo() needs it on
 # glibc, and the outbound-fetch guard resolves every host it is asked to

@@ -24,6 +24,7 @@
 #include "gaindrive.hh"
 #include "imagescale.hh"
 #include "mediastore.hh"
+#include "service.hh"
 #include "stamp.hh"
 #include "tmdb.hh"
 #include "videoart.hh"
@@ -39,6 +40,20 @@
 #ifndef GAINDRIVE_DEFAULT_DB
 #define GAINDRIVE_DEFAULT_DB "/var/lib/gaindrive/gaindrive.db"
 #endif
+
+// Absolute and tidied, but with symlinks left alone.
+//
+// Used by both the generated config and the checks --install-service runs
+// against it, so the two cannot disagree about what path was tested versus what
+// path was written.  Deliberately not weakly_canonical: resolving symlinks
+// would rewrite a root that somebody spelled through a stable symlink into
+// whatever mount it happens to point at today, and a root's stored name is
+// permanent.  (The binary's own path in ExecStart *is* canonicalised, for the
+// opposite reason -- see self_exe() in service.cc.)
+static std::string abs_path(const std::string& p)
+	{
+	return std::filesystem::absolute(p).lexically_normal().string();
+	}
 
 // Parses one "name=path" root argument. Splits on the FIRST '=' so a path
 // containing '=' still works; a name never can, since it is restricted below.
@@ -546,6 +561,11 @@ int main(int argc, char* argv[])
 		("debug",      "Print all API responses to stdout")
 		("add-user",   "Create a user and exit",      cxxopts::value<std::string>())
 		("password",   "Password for --add-user",     cxxopts::value<std::string>())
+		("install-service",   "Write the config and a systemd unit from these options, enable it, and exit")
+		("uninstall-service", "Stop, disable and remove the unit written by --install-service, and exit")
+		("service-user",      "Account the service runs as (default: the user who invoked sudo)", cxxopts::value<std::string>())
+		("service-force",     "Replace a config or unit that --install-service did not write")
+		("service-dry-run",   "Print what --install-service would write, write nothing, and exit")
 		("h,help",     "Show help")
 		("version",    "Show version and exit")
 		;
@@ -758,8 +778,18 @@ int main(int argc, char* argv[])
 		}
 		try {
 			nlohmann::json cfg = nlohmann::json::parse(cfg_file);
-			if (cfg.contains("host"))       host       = cfg["host"];
-			if (cfg.contains("db_path"))    db_path    = cfg["db_path"];
+			// CLI wins over config, the same rule as --user-db and --port
+			// below.  These three carried no guard, so with any config file
+			// present `--host 0.0.0.0` was read, accepted and silently
+			// discarded -- which also contradicted what README.md said.
+			// --install-service is what turned that from annoying into fatal:
+			// run against an existing config it would serialise the config's
+			// own host straight back into the config and report having written
+			// what you asked for.
+			if (cfg.contains("host") && !args.count("host"))
+				host = cfg["host"];
+			if (cfg.contains("db_path") && !args.count("db"))
+				db_path = cfg["db_path"];
 			// CLI --user-db takes precedence over config user_db_path.
 			if (cfg.contains("user_db_path") && !args.count("user-db")) user_db_path = cfg["user_db_path"];
 			// Roots from the config only when none were given on the command
@@ -793,7 +823,8 @@ int main(int argc, char* argv[])
 			if (cfg.contains("trusted_proxies") && trusted_proxies.empty())
 				for (const auto& a : cfg["trusted_proxies"])
 					trusted_proxies.push_back(a.get<std::string>());
-			if (cfg.contains("upload_dir"))  upload_dir  = cfg["upload_dir"];
+			if (cfg.contains("upload_dir") && !args.count("upload-dir"))
+				upload_dir = cfg["upload_dir"];
 			// CLI flags take precedence over config for port.
 			if (cfg.contains("port") && !args.count("port")) port = cfg["port"];
 			if (cfg.contains("flat_multi_disc")) flat_multi_disc = cfg["flat_multi_disc"].get<bool>();
@@ -851,6 +882,80 @@ int main(int argc, char* argv[])
 			}
 		}
 
+	// The writer sits immediately below the reader deliberately.  These key
+	// names are the same fact twice, and the way that fact goes wrong is not a
+	// crash: a renamed key on one side produces a file the other side parses,
+	// ignores, and starts on defaults from -- with a clean log saying
+	// everything is fine.  In one screen the miss is a review comment.  It is
+	// also why service.cc takes the config already serialised and never builds
+	// one: it would be a third place that knew these names.
+	//
+	// ordered_json rather than json: nlohmann's default object is a sorted
+	// std::map, so a plain json would emit the file alphabetically and nothing
+	// generated could be read beside dist/gaindrive.conf.example.  Insertion
+	// order here is that file's order, and dump(1, '\t') is its indentation.
+	//
+	// A key whose value this invocation does not have is left out rather than
+	// written empty, because for three of them absent and present differ in
+	// meaning: url_handlers absent is "use the built-in yt-dlp table" (writing
+	// today's table into every generated config would freeze a copy of it),
+	// user_db_path absent is "derive it from db_path", and transcode_cache_dir
+	// absent is "beside the database".  Everything else is written even at its
+	// default, since a generated config is meant to be read and edited and a
+	// key that is not there cannot be discovered.
+	auto effective_config = [&]() {
+		nlohmann::ordered_json c;
+		c["//generated"] =
+		    "Written by gaindrive --install-service. Re-running that command "
+		    "replaces this file. Every key is explained in "
+		    "gaindrive.conf.example, installed beside it.";
+		c["host"]    = host;
+		c["port"]    = port;
+		c["db_path"] = db_path;
+		if (!user_db_path.empty()) c["user_db_path"] = user_db_path;
+		if (!trusted_proxies.empty()) c["trusted_proxies"] = trusted_proxies;
+
+		nlohmann::ordered_json rs = nlohmann::ordered_json::array();
+		for (const auto& r : roots)
+			rs.push_back({ { "name", r.name }, { "type", r.type },
+			               { "path", abs_path(r.path) } });
+		c["roots"] = rs;
+
+		if (!cast_devices.empty()) {
+			nlohmann::ordered_json ds = nlohmann::ordered_json::array();
+			for (const auto& d : cast_devices)
+				ds.push_back({ { "name", d.name }, { "address", d.address },
+				               { "port", d.port } });
+			c["cast_devices"] = ds;
+			}
+
+		// Only when the optional holds one.  nullopt means "use the built-in
+		// table" and an explicit [] means "no fetching from a URL on this
+		// server"; writing [] for nullopt would silently turn the feature off.
+		// The same NULL-versus-empty distinction songs.artist draws.
+		if (url_handlers) {
+			nlohmann::ordered_json hs = nlohmann::ordered_json::array();
+			for (const auto& h : *url_handlers)
+				hs.push_back({ { "name", h.name }, { "match", h.pattern },
+				               { "audio", h.audio_argv },
+				               { "video", h.video_argv } });
+			c["url_handlers"] = hs;
+			}
+		c["url_fetch_timeout"] = url_fetch_timeout;
+
+		c["upload_dir"]         = upload_dir;
+		c["flat_multi_disc"]    = flat_multi_disc;
+		if (!transcode_cache_dir.empty())
+			c["transcode_cache_dir"] = transcode_cache_dir;
+		c["transcode_cache_mb"]  = transcode_cache_mb;
+		c["transcode_jobs"]      = transcode_jobs;
+		c["scan_jobs"]           = scan_jobs;
+		c["video_art_px"]        = video_art_px;
+		c["video_art_frames"]    = video_art_frames;
+		c["video_art_embedded"]  = video_art_embedded;
+		return c;
+		};
+
 	// --tmdb-test needs the database only to read the stored API key, and no
 	// roots at all, so it runs before the library is validated.
 	if (args.count("tmdb-test")) {
@@ -880,6 +985,24 @@ int main(int argc, char* argv[])
 		return run_url_fetch_test(args["url-fetch-test"].as<std::string>(),
 		                           url_handlers);
 
+	// Before validate_roots(), unlike --install-service: a root since unmounted
+	// or deleted must not be what stops somebody removing the service that
+	// points at it.  Nothing here needs a root, a database or even a config --
+	// the two paths are printed, never opened.
+	if (args.count("uninstall-service")) {
+		if (args.count("install-service")) {
+			std::cerr << "Error: --install-service and --uninstall-service "
+			             "cannot be combined.\n";
+			return 1;
+			}
+		service::UninstallRequest req;
+		req.config_path = config_path;
+		req.db_path     = db_path;
+		req.force       = args.count("service-force")   > 0;
+		req.dry_run     = args.count("service-dry-run") > 0;
+		return service::uninstall(req);
+		}
+
 	// Only the shape of what was configured is checked here. Whether a library
 	// root is *required* is decided further down, once it is known whether this
 	// process is going to serve a library at all.
@@ -906,6 +1029,62 @@ int main(int argc, char* argv[])
 		std::cerr << "Warning: --scan-jobs " << scan_jobs
 		          << " is outside 0..16; using " << clamped << "\n";
 		scan_jobs = clamped;
+		}
+
+	// After the config merge and the validation above, so what is written is
+	// the effective configuration this invocation would have served rather than
+	// whatever happened to be typed; before the try below, because that opens
+	// the database and this process is root -- a root-owned
+	// gaindrive-music.db-wal beside the user's database is a service that
+	// starts once and never again.
+	if (args.count("install-service")) {
+		if (args.count("add-user")) {
+			std::cerr << "Error: --add-user and --install-service cannot be "
+			             "combined; create the account\n       first, then "
+			             "install the service.\n";
+			return 1;
+			}
+		// Checked here rather than left to the try below, which this must not
+		// reach: a service with nothing to serve is not worth installing, and
+		// the message down there assumes a terminal that is about to be given
+		// a library.
+		if (!has_library_root(roots)) {
+			std::cerr << "Error: no library root configured; pass at least one "
+			             "--artist-root or\n       --category-root, the same "
+			             "ones you want the service to use.\n";
+			return 1;
+			}
+		// Neither is a config key, so neither survives into the unit.  Saying
+		// so is the point: --no-scan in particular looks like it would be kept.
+		for (const char* f : { "no-scan", "debug" })
+			if (args.count(f))
+				std::cerr << "Warning: --" << f << " is not a config-file "
+				             "setting and is not written; the\n         service "
+				             "will run without it.\n";
+
+		service::InstallRequest req;
+		req.config_path = config_path;
+		req.config_text = effective_config().dump(1, '\t') + "\n";
+		// Only when it is not the path compiled into this binary, so the
+		// common unit takes no arguments -- as the packaged one always did.
+		if (config_path != std::string(GAINDRIVE_DEFAULT_CONFIG))
+			req.exec_args = { "--config", config_path };
+		req.client_db_path = user_db_path.empty()
+		    ? MediaStore::client_db_path(db_path) : user_db_path;
+		req.db_dir = std::filesystem::path(abs_path(db_path)).parent_path().string();
+		req.mount_paths.push_back(req.db_dir);
+		for (const auto& r : roots) {
+			req.root_paths.push_back(abs_path(r.path));
+			req.mount_paths.push_back(abs_path(r.path));
+			}
+		req.host       = host;
+		req.port       = port;
+		req.upload_dir = upload_dir;
+		req.user_name  = args.count("service-user")
+		    ? args["service-user"].as<std::string>() : "";
+		req.force      = args.count("service-force")   > 0;
+		req.dry_run    = args.count("service-dry-run") > 0;
+		return service::install(req);
 		}
 
 	// --add-user: create a user in the DB and exit without starting the server.

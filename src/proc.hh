@@ -1,7 +1,10 @@
 #pragma once
 
 #include <cstdio>
+#include <cstdlib>
 #include <string>
+
+#include <unistd.h>
 
 // Reads the tail of a captured stderr stream for logging.  A child process says
 // nothing useful on success and prints the reason on the last line or two when
@@ -29,4 +32,32 @@ inline std::string stderr_tail(FILE* f, size_t max_bytes = 4096)
 	for (auto& c : buf)
 		if (c == '\n' || c == '\r') c = ' ';
 	return buf;
+	}
+
+// Is this executable reachable?
+//
+// Here beside stderr_tail() for the same reason that one is: two unrelated
+// subsystems want the identical small answer.  UrlFetcher drops a handler whose
+// tool is not installed at startup rather than failing on every request, which
+// is what makes "no yt-dlp on this machine" show up as a client that does not
+// offer the row; --install-service refuses before writing anything when there is
+// no systemctl to enable the unit with.
+inline bool on_path(const std::string& prog)
+	{
+	if (prog.empty()) return false;
+	if (prog.find('/') != std::string::npos)
+		return ::access(prog.c_str(), X_OK) == 0;
+	const char* path = std::getenv("PATH");
+	if (!path) return false;
+	std::string p(path);
+	size_t start = 0;
+	while (start <= p.size()) {
+		size_t end = p.find(':', start);
+		if (end == std::string::npos) end = p.size();
+		std::string dir = p.substr(start, end - start);
+		if (dir.empty()) dir = ".";
+		if (::access((dir + "/" + prog).c_str(), X_OK) == 0) return true;
+		start = end + 1;
+		}
+	return false;
 	}

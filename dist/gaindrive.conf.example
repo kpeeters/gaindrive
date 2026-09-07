@@ -1,4 +1,5 @@
 {
+	"//": "This is the annotated reference for every key, not a file to edit in place. `sudo gaindrive <your options> --install-service` writes a real /etc/gaindrive.conf for you, from options you have already watched work, and installs a systemd unit that reads it. Copy this one instead if you would rather write it by hand.",
 	"host": "127.0.0.1",
 	"port": 4040,
 	"db_path": "/var/lib/gaindrive/gaindrive.db",

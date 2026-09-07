@@ -505,6 +505,26 @@ add_custom_command(
 	COMMENT "Embedding web client files"
 )
 
+# The systemd unit template, compiled in so --install-service works from a build
+# tree -- which is where it is normally run, step (c) following step (b).  Its
+# own script rather than another entry in embed_web.cmake's TEXT_FILES: that one
+# is keyed to a single WEB_DIR and carries filename -> identifier and
+# filename -> MIME maps that a unit file has no place in.  Both the template and
+# the script belong in DEPENDS, or editing either will not rebuild.
+add_custom_command(
+	OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/embedded_unit.cc
+	COMMAND ${CMAKE_COMMAND}
+		-DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/dist/gaindrive.service.in
+		-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/embedded_unit.cc
+		-DHEADER=embedded_unit.hh
+		-DVAR=service_unit
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_text.cmake
+	DEPENDS
+		${CMAKE_CURRENT_SOURCE_DIR}/dist/gaindrive.service.in
+		${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_text.cmake
+	COMMENT "Embedding systemd unit template"
+)
+
 # ---- Install locations -----------------------------------------------------
 
 # Where the config file and the database live. These are compiled into the
@@ -518,6 +538,8 @@ set(GAINDRIVE_LOCALSTATEDIR "/var/lib" CACHE PATH "Parent directory of gaindrive
 
 add_executable(gaindrive
 	src/main.cc
+	src/service.cc
+	${CMAKE_CURRENT_BINARY_DIR}/embedded_unit.cc
 	src/gaindrive.cc
 	src/mediastore.cc
 	src/streamer.cc
@@ -650,48 +672,17 @@ include(GNUInstallDirs)
 
 install(TARGETS gaindrive RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-# systemd integration: unit file + declarative user creation. Defaults OFF off
-# Linux — the block below falls back to /lib/systemd/system when pkg-config finds
-# no systemd, so leaving it ON would have a macOS install write units into
-# directories that do not exist. macOS gets a launchd job from the Homebrew
-# formula's `service` block instead.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-	set(_gd_systemd_default ON)
-else()
-	set(_gd_systemd_default OFF)
-endif()
-option(GAINDRIVE_INSTALL_SYSTEMD "Install systemd unit and sysusers.d file"
-       ${_gd_systemd_default})
-
-if(GAINDRIVE_INSTALL_SYSTEMD)
-	# Resolve systemd's real directories from its pkg-config file. These live
-	# OUTSIDE CMAKE_INSTALL_PREFIX on purpose: systemd does not search
-	# /usr/local/lib/systemd, so units installed under a /usr/local prefix would
-	# never be found. The cache variables let packagers override (e.g. for
-	# DESTDIR staging).
-	find_package(PkgConfig)
-	if(PkgConfig_FOUND)
-		pkg_get_variable(_sd_unit_dir    systemd systemdsystemunitdir)
-		pkg_get_variable(_sd_sysusers_dir systemd sysusersdir)
-	endif()
-	if(NOT _sd_unit_dir)
-		set(_sd_unit_dir "/lib/systemd/system")
-	endif()
-	if(NOT _sd_sysusers_dir)
-		set(_sd_sysusers_dir "/usr/lib/sysusers.d")
-	endif()
-	set(SYSTEMD_UNIT_DIR "${_sd_unit_dir}" CACHE PATH "systemd system unit directory")
-	set(SYSTEMD_SYSUSERS_DIR "${_sd_sysusers_dir}" CACHE PATH "systemd sysusers.d directory")
-
-	# Substitute the installed binary path into ExecStart.
-	configure_file(dist/gaindrive.service.in
-	               ${CMAKE_CURRENT_BINARY_DIR}/gaindrive.service @ONLY)
-
-	install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gaindrive.service
-	        DESTINATION ${SYSTEMD_UNIT_DIR})
-	install(FILES dist/gaindrive.sysusers
-	        DESTINATION ${SYSTEMD_SYSUSERS_DIR} RENAME gaindrive.conf)
-endif()
+# No systemd unit is installed here, and that is deliberate rather than an
+# omission.  gaindrive writes its own with `sudo gaindrive <options>
+# --install-service`, which is the documented route because it reaches everyone:
+# the release pipeline's only artifact is a static binary, so `cmake --install`
+# never served most users at all.  The unit it writes runs as the person who ran
+# sudo rather than as a system account, which is what makes the recursive
+# chgrp/chmod over the music tree that the old instructions needed unnecessary.
+#
+# dist/gaindrive.service.in survives as the single source of the unit text --
+# embedded into the binary, filled in at install time -- and is what a
+# distribution packager should start from to get the system-account shape back.
 
 # Example config installs next to the config the binary actually reads, which is
 # GAINDRIVE_SYSCONFDIR and not CMAKE_INSTALL_SYSCONFDIR: on Linux that stays
