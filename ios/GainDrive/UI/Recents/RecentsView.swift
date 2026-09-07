@@ -22,8 +22,8 @@ struct RecentsView: View {
 			}
 			.navigationTitle("Recents")
 			.navigationDestination(for: Route.self) { route in
-				if case .album(let ref, let title) = route {
-					AlbumDetailView(ref: ref, albumTitle: title)
+				if case .album(let ref, let title, let autoPlay) = route {
+					AlbumDetailView(ref: ref, albumTitle: title, autoPlay: autoPlay)
 				}
 			}
 			.toolbar {
@@ -74,10 +74,17 @@ struct RecentsView: View {
 		}
 	}
 
+	/// Opens the song's album **and starts it there**, which is what the web
+	/// client's `viewTracksFromSearch` does and what Android does. A row with no
+	/// album to open stays inert rather than playing in place; see
+	/// `Route.album` for why playing a hit where it stands is the wrong tier.
 	@ViewBuilder
 	private func row(_ item: SongUi) -> some View {
 		if let album = item.song.albumRef {
-			NavigationLink(value: Route.album(album, title: item.song.albumTitle)) {
+			NavigationLink(
+				value: Route.album(
+					album, title: item.song.albumTitle, autoPlay: item.song.ref)
+			) {
 				SongRow(item: item, trailingText: relativeTime(item.song.lastPlayedAt))
 			}
 			.trackActions(for: item.song)

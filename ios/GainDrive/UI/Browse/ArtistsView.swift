@@ -103,8 +103,8 @@ struct ArtistsView: View {
 		switch route {
 		case .albums(let artists, let name):
 			AlbumsView(refs: artists, artistName: name)
-		case .album(let ref, let title):
-			AlbumDetailView(ref: ref, albumTitle: title)
+		case .album(let ref, let title, let autoPlay):
+			AlbumDetailView(ref: ref, albumTitle: title, autoPlay: autoPlay)
 		case .playlist:
 			// Playlists are reached from their own tab; this arm exists so the
 			// switch is exhaustive rather than because it can happen.

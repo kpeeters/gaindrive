@@ -14,23 +14,34 @@ import SwiftUI
 /// navigation the way the web client's fixed footer does.
 struct MiniPlayer: View {
 	@Environment(PlayerConnection.self) private var player
+	@State private var expanded = false
 
 	var body: some View {
 		if let song = player.current {
 			VStack(spacing: 0) {
 				progress
 				HStack(spacing: 12) {
-					CoverThumb(source: cover(for: song), size: 40)
-					VStack(alignment: .leading, spacing: 1) {
-						Text(song.title)
-							.font(.footnote.weight(.medium))
-							.lineLimit(1)
-						Text(song.artistName)
-							.font(.caption)
-							.foregroundStyle(.secondary)
-							.lineLimit(1)
+					// The tap target is the cover and the text, not the whole
+					// bar: wrapping the row in a `Button` would swallow the
+					// transport buttons inside it.
+					HStack(spacing: 12) {
+						CoverThumb(source: cover(for: song), size: 40)
+						VStack(alignment: .leading, spacing: 1) {
+							Text(song.title)
+								.font(.footnote.weight(.medium))
+								.lineLimit(1)
+							Text(song.artistName)
+								.font(.caption)
+								.foregroundStyle(.secondary)
+								.lineLimit(1)
+						}
+						Spacer(minLength: 0)
 					}
-					Spacer(minLength: 0)
+					.contentShape(.rect)
+					.onTapGesture { expanded = true }
+					.accessibilityAddTraits(.isButton)
+					.accessibilityHint("Opens the player")
+
 					Button {
 						player.togglePlayPause()
 					} label: {
@@ -55,6 +66,7 @@ struct MiniPlayer: View {
 				Divider()
 			}
 			.accessibilityElement(children: .contain)
+			.sheet(isPresented: $expanded) { NowPlayingView() }
 		}
 	}
 

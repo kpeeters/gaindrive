@@ -11,10 +11,15 @@ import SwiftUI
 struct AlbumDetailView: View {
 	let ref: ItemRef
 	let albumTitle: String
+	/// A track to start once the listing has loaded — see `Route.album`.
+	var autoPlay: ItemRef?
 
 	@Environment(\.library) private var library
 	@Environment(PlayerConnection.self) private var player
 	@State private var model: AlbumDetailViewModel?
+	/// Once per screen, not once per load: a pull-to-refresh must not restart
+	/// the track the user has since navigated away from inside.
+	@State private var autoPlayed = false
 
 	var body: some View {
 		Group {
@@ -74,6 +79,17 @@ struct AlbumDetailView: View {
 		}
 		.listStyle(.plain)
 		.refreshable { await model.refresh() }
+		.task(id: detail) { startAutoPlay(detail) }
+	}
+
+	/// A ref naming a track this album no longer holds does nothing, silently.
+	/// The listing is the newer fact, and a hit that has gone is not an error
+	/// worth a dialog over.
+	private func startAutoPlay(_ detail: AlbumDetail) {
+		guard let autoPlay, !autoPlayed else { return }
+		autoPlayed = true
+		guard let index = detail.songs.firstIndex(where: { $0.ref == autoPlay }) else { return }
+		player.play(detail.songs, startIndex: index)
 	}
 
 	private func header(_ detail: AlbumDetail, model: AlbumDetailViewModel) -> some View {

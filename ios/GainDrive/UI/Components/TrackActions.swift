@@ -8,22 +8,43 @@
 
 import SwiftUI
 
-/// Star, and add to a playlist, on any track row.
+/// Queue, star, and add to a playlist, on any track row.
 ///
 /// A context menu rather than Android's long-press sheet: it is what iOS users
 /// reach for, it needs no state of its own to present, and the same gesture
 /// works on Mac Catalyst as a right-click. Attached as a modifier so the four
 /// screens that show tracks cannot each grow a slightly different menu — which
 /// is the same reason `Rows.swift` exists.
+///
+/// The queue pair comes first, matching `ui/player/TrackActionsSheet.kt`'s
+/// order. The star has no Android counterpart — that app has no starring UI at
+/// all — and neither does "Go to artist", which is *not* an omission here:
+/// `Song` carries an album ref and no artist one, because `SongDto` does not
+/// decode `artistId`.
 struct TrackActions: ViewModifier {
 	let song: Song
 
+	@Environment(PlayerConnection.self) private var player
 	@Environment(StarStore.self) private var stars
 	@State private var addingTo: Song?
 
 	func body(content: Content) -> some View {
 		content
 			.contextMenu {
+				Button {
+					player.playNext(song)
+				} label: {
+					Label("Play next", systemImage: "text.line.first.and.arrowtriangle.forward")
+				}
+				// Truncates the automatic tail before appending, so a track
+				// added here is not buried behind the rest of an album. That
+				// is `PlayQueue.addToQueue`'s rule, not this menu's.
+				Button {
+					player.addToQueue(song)
+				} label: {
+					Label("Add to queue", systemImage: "text.badge.plus")
+				}
+				Divider()
 				Button {
 					Task { await stars.toggle(song.ref, kind: .song, currently: song.isStarred) }
 				} label: {
@@ -32,7 +53,7 @@ struct TrackActions: ViewModifier {
 				Button {
 					addingTo = song
 				} label: {
-					Label("Add to playlist…", systemImage: "text.badge.plus")
+					Label("Add to playlist…", systemImage: "music.note.list")
 				}
 			}
 			.sheet(item: $addingTo) { song in

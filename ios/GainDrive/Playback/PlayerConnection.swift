@@ -213,6 +213,16 @@ final class PlayerConnection {
 		registry.clientsSnapshot().coverUrls.source(song.coverArt, size: size)
 	}
 
+	/// What was, or would be, asked of that track's own server.
+	///
+	/// Exposed for the track-info view, which answers "why does this sound
+	/// different here" and cannot answer it without the *capped* quality — the
+	/// account ceiling belongs to that track's server and is not a setting
+	/// anyone can read off the Settings screen.
+	func streamQuality(for song: Song) async -> AudioQuality? {
+		await streamTarget(for: song)?.quality
+	}
+
 	/// Reads `loadingRef`, `current` and `isBuffering` — and deliberately not
 	/// `position`.
 	func trackState(of ref: ItemRef) -> TrackState {

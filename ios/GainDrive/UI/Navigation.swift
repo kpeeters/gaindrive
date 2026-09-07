@@ -24,6 +24,25 @@ enum Route: Hashable {
 	/// The name travels alongside so the title bar has something to show before
 	/// the body has loaded.
 	case albums(artists: [ItemRef], name: String)
-	case album(ItemRef, title: String)
+	/// `autoPlay` names a track to start once the listing has arrived, which is
+	/// how a hit in Recents or Search is played.
+	///
+	/// **Going through the album is not a detour.** `nativeSeek` is false on
+	/// every song `search3`, `getStarred2`, `getPlaylist` and `getRecentSongs`
+	/// return, because those queries do not select the codec columns the server
+	/// computes it from — so playing such a hit where it stands would send a
+	/// perfectly remuxable film down the re-encode path every time. Read again
+	/// through `getAlbum` it carries the flag, and lands on the right tier.
+	/// Android's `Route.Album.autoPlayRef` exists for the same reason.
+	case album(ItemRef, title: String, autoPlay: ItemRef?)
 	case playlist(ItemRef, name: String)
+
+	/// Open the album and start nothing — every browse screen's way in.
+	///
+	/// A static member rather than a default on the associated value, which
+	/// Swift does not allow. The two differ in argument labels, so they are
+	/// distinct signatures and no existing call site had to change.
+	static func album(_ ref: ItemRef, title: String) -> Route {
+		.album(ref, title: title, autoPlay: nil)
+	}
 }

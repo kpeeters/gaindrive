@@ -13,6 +13,7 @@ struct PlaylistDetailView: View {
 	let playlistName: String
 
 	@Environment(\.library) private var library
+	@Environment(PlayerConnection.self) private var player
 	@State private var model: PlaylistDetailViewModel?
 
 	var body: some View {
@@ -55,15 +56,25 @@ struct PlaylistDetailView: View {
 				// where it sits, not just what it is. A track added twice
 				// appears twice, so the id alone would not be unique either.
 				ForEach(Array(songs.enumerated()), id: \.offset) { index, item in
-					SongRow(item: item)
-						.trackActions(for: item.song)
-						.swipeActions(edge: .trailing) {
-							Button(role: .destructive) {
-								Task { await model.remove(at: index) }
-							} label: {
-								Label("Remove", systemImage: "minus.circle")
-							}
+					// **The one listing that plays in place.** Recents and
+					// search route through the album so the server's codec
+					// columns are read (see `Route.album`); a playlist has no
+					// album to route through and *is* a queue already, so
+					// playing it here is both possible and what is meant.
+					Button {
+						player.play(songs.map(\.song), startIndex: index)
+					} label: {
+						SongRow(item: item)
+					}
+					.buttonStyle(.plain)
+					.trackActions(for: item.song)
+					.swipeActions(edge: .trailing) {
+						Button(role: .destructive) {
+							Task { await model.remove(at: index) }
+						} label: {
+							Label("Remove", systemImage: "minus.circle")
 						}
+					}
 				}
 			}
 			.listStyle(.plain)

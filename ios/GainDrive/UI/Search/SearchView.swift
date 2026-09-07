@@ -97,8 +97,7 @@ struct SearchView: View {
 			if !results.songs.isEmpty {
 				Section {
 					ForEach(results.songs) { item in
-						SongRow(item: item)
-							.trackActions(for: item.song)
+						songRow(item)
 					}
 				} header: {
 					SectionHeading(text: "Tracks")
@@ -113,6 +112,25 @@ struct SearchView: View {
 			if results.outstanding {
 				ProgressView().progressViewStyle(.linear)
 			}
+		}
+	}
+
+	/// As in Recents: a hit opens its album and starts there rather than
+	/// playing in place. `Route.album` records why, and it is not cosmetic —
+	/// a video hit played where it stands is re-encoded rather than remuxed.
+	@ViewBuilder
+	private func songRow(_ item: SongUi) -> some View {
+		if let album = item.song.albumRef {
+			NavigationLink(
+				value: Route.album(
+					album, title: item.song.albumTitle, autoPlay: item.song.ref)
+			) {
+				SongRow(item: item)
+			}
+			.trackActions(for: item.song)
+		} else {
+			SongRow(item: item)
+				.trackActions(for: item.song)
 		}
 	}
 
@@ -133,8 +151,8 @@ struct SearchView: View {
 		switch route {
 		case .albums(let artists, let name):
 			AlbumsView(refs: artists, artistName: name)
-		case .album(let ref, let title):
-			AlbumDetailView(ref: ref, albumTitle: title)
+		case .album(let ref, let title, let autoPlay):
+			AlbumDetailView(ref: ref, albumTitle: title, autoPlay: autoPlay)
 		case .playlist(let ref, let name):
 			PlaylistDetailView(ref: ref, playlistName: name)
 		}

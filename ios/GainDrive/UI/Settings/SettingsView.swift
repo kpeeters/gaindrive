@@ -31,7 +31,7 @@ struct SettingsView: View {
 	}
 
 	enum Route: Hashable {
-		case servers, library, appearance
+		case servers, library, playback, appearance
 	}
 
 	var body: some View {
@@ -43,6 +43,9 @@ struct SettingsView: View {
 					}
 					NavigationLink(value: Route.library) {
 						LabeledContent("Library", value: librarySummary)
+					}
+					NavigationLink(value: Route.playback) {
+						LabeledContent("Playback", value: settings.audioQuality.label)
 					}
 					NavigationLink(value: Route.appearance) {
 						LabeledContent("Appearance", value: settings.themeMode.label)
@@ -75,6 +78,7 @@ struct SettingsView: View {
 				switch route {
 				case .servers: ServersSettingsView(startAdding: startOnServers)
 				case .library: LibrarySettingsView()
+				case .playback: PlaybackSettingsView()
 				case .appearance: AppearanceSettingsView()
 				}
 			}

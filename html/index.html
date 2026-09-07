@@ -116,35 +116,44 @@
       rel="noopener">Subsonic</a> server together with
       the <a href="https://f-droid.org/packages/github.daneren2005.dsub/"
       target="_blank" rel="noopener">DSub Android app</a> for many
-      years, but have always missed various features (e.g. video
-      playing on Android). None of the (many) alternatives was a perfect
-      fit either. GainDrive was started as a summer holiday experiment
-      to use AI to do most of the tedious work of writing both server
-      and client apps from the ground up, using modern techniques and
-      libraries, and adding the features I always wanted in an
-      audio/video server and player.</p>
-      <p>GainDrive Server came first. The bulk of it was written over
-      the course of 3-4 weeks, with most of it going into thinking
-      about what I really wanted it to do (e.g. the cast-from-server
-      functionality, or the auto-rescan logic). The Android app then
-      followed, in about 2 weeks worth of work. The iOS app was
-      built to mirror the Android app, and took only a few days.
+      years, but have always missed various features (e.g. unified
+      treatment of audio and video, or casting from Firefox, or a
+      flexible upload mechanism). None of the (many) alternatives was
+      a perfect fit for me either. GainDrive was started as a summer
+      holiday experiment to use AI to do most of the tedious work of
+      writing both server and client apps from the ground up, using
+      modern techniques and libraries, and adding the features I
+      always wanted in an audio/video server and player.</p>
+      <p>AI was great to get things off the ground quickly. A
+	reasonably working server took about 3-4 weeks, most of which
+	was due to me requiring time to think about the design. The
+	Android app similarly was in a usable state within a week, and
+	the iOS app is essentially an automated rewrite.
       </p>
       <p>Nevertheless, getting all details fixed was substantially
-      more work. For some problems AI can create great one-shot
-      solutions, but others, which are clearly not as well-represented
-      in the training set, often take a lot of careful testing and
-      pushing back against what the AI wants to do. I have
-      occasionally written some of the source by hand when that would
-      get me to a bug fix or feature quicker (more so in the server
-      than the clients), but the vast majority of it was written
-      by <a href="https://claude.ai" target="_blank"
-      rel="noopener">Claude</a> under my supervision.</p>
-      <p>GainDrive is what I need to self-host all the audio and video
-      that I listen to and watch, without the things I never use (your
-      mileage will vary). Creating it with AI was a different kind of
-      “fun” than doing it by hand, but without AI, I would most likely
-      never have had the time to finish it.</p>
+	more work. For some problems AI can create great one-shot
+	solutions, but others, which are clearly not as well-represented
+	in the training set, often take a lot of careful testing and
+	pushing back against what the AI wants to do. I went back on
+	earlier choices several times because I did not attempt to
+	fully internalise the AI-written plan before approval, and
+	found that we had painted ourselves into a corner.
+      <p>
+      <p>I did occasionally write some of the source by hand when that
+	would get me to a bug fix or feature quicker (more so in the
+	server than the clients), but the vast majority of it was
+	written by <a href="https://claude.ai" target="_blank"
+		      rel="noopener">Claude</a> under my supervision.
+	It cranks out enormous amounts of code, often more than I would
+	like, and I did need to force it several times into a refactoring
+	mode to avoid things from becoming unreadable by humans.
+      </p>
+      <p>In any case, GainDrive is what I need to self-host all the
+	audio and video that I listen to and watch, without the things
+	I never use (your mileage will vary). Creating it with AI was
+	a different kind of “fun” than doing it by hand, but without
+	AI, I would most likely never have had the time to finish
+	it.</p>
       <p class="signoff">— Kasper Peeters, August 2026</p>
     </div>
   </div>
