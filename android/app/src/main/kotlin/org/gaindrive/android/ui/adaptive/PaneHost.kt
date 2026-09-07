@@ -40,6 +40,13 @@ import org.gaindrive.android.ui.Route
  * throws the host away and builds a fresh entry with the new arguments rather
  * than trying to re-argue an existing one.
  *
+ * A host is also thrown away when the *window* slides past its pane, which on
+ * a phone is every drill-down — and there it must come back with everything it
+ * had. That is [PaneRetention]'s job, not this one's: it provides the saveable
+ * state `rememberNavController` restores from and the view model store the
+ * restored entry's models are found in, so the host rebuilt here is the same
+ * host rather than a new one wearing the same route.
+ *
  * [destinations] may declare every route the tab uses; only [route] is ever
  * built, because it is the start destination and nothing navigates. One graph
  * per tab rather than one per pane is simply less to keep in step.

@@ -134,6 +134,10 @@ fun PaneStrip(
 	// The pane area, not the window: the navigation rail is already outside
 	// this. Subcomposition, but once per tab and only for the tab on screen.
 	val levels = titles.size
+	// Outside the subcomposition on purpose: what a hidden level keeps is a
+	// fact about the tab, and must not be thrown away by a resize that changes
+	// how many levels are drawn. See PaneRetention.
+	val retention = rememberPaneRetention(stack.path)
 	BoxWithConstraints(modifier) {
 		val panes = min(paneCount(maxWidth), levels)
 		val assigned = slots(stack.depth, panes, levels)
@@ -156,17 +160,17 @@ fun PaneStrip(
 			value = assigned.scaffoldValue(),
 			listPane = {
 				AnimatedPane(modifier = Modifier.paneName(titles, 0)) {
-					Slot(assigned.list, 0, backAt, back, path, waiting, pane)
+					Slot(assigned.list, 0, backAt, back, path, retention, waiting, pane)
 				}
 			},
 			detailPane = {
 				AnimatedPane(modifier = Modifier.paneName(titles, 1)) {
-					Slot(assigned.detail, 1, backAt, back, path, waiting, pane)
+					Slot(assigned.detail, 1, backAt, back, path, retention, waiting, pane)
 				}
 			},
 			extraPane = {
 				AnimatedPane(modifier = Modifier.paneName(titles, 2)) {
-					Slot(assigned.extra, 2, backAt, back, path, waiting, pane)
+					Slot(assigned.extra, 2, backAt, back, path, retention, waiting, pane)
 				}
 			},
 		)
@@ -180,6 +184,7 @@ private fun Slot(
 	backAt: Int?,
 	back: () -> Unit,
 	path: List<Route>,
+	retention: PaneRetention,
 	waiting: @Composable (level: Int) -> Unit,
 	pane: @Composable (Route) -> Unit,
 ) {
@@ -191,7 +196,7 @@ private fun Slot(
 		// the right answer is an empty pane a moment early.
 		is Pane.At -> path.getOrNull(content.index)?.let { route ->
 			CompositionLocalProvider(LocalPaneBack provides back.takeIf { level == backAt }) {
-				pane(route)
+				retention.Retained(route) { pane(route) }
 			}
 		}
 	}
