@@ -152,9 +152,10 @@ def _first_album_songs():
         (c for c in directory.findall(f"{{{NS}}}child") if c.get("isDir") == "true"),
         None,
     )
-    # A section holding loose files is its own album, so the artist listing may
-    # already be the songs.
-    target = album.get("id") if album is not None else first_artist.get("id")
+    # Every album is a child directory now, a loose file's own album included,
+    # so an artist with nothing under it has nothing to test.
+    assert album is not None, "First artist holds no albums — run scan first"
+    target = album.get("id")
     aroot = _get("getMusicDirectory.view", {"id": target})
     adir = aroot.find(f"{{{NS}}}directory")
     return target, [c for c in adir.findall(f"{{{NS}}}child")
@@ -178,9 +179,8 @@ def test_song_artist_fields():
 
     checked = ["getMusicDirectory"]
 
-    # Reported only when it actually returned something: the id above is an
-    # album folder unless the library's first artist holds loose files, and a
-    # silently empty check is worse than a missing one.
+    # Reported only when it actually returned something: a silently empty check
+    # is worse than a missing one.
     aroot = _get("getAlbum.view", {"id": album_id})
     found = aroot.findall(f".//{{{NS}}}song")
     for s in found:

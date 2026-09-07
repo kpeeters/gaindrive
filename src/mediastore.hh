@@ -15,6 +15,11 @@
 #include "tmdb.hh"
 #include "videoart.hh"
 
+// One album as Phase 1 read it off the disk. Defined in mediastore.cc, because
+// it is the scanner's own working type and nothing outside the scan needs it;
+// declared here only so commit_album() can take one.
+struct AlbumReadData;
+
 class MediaStore {
 	public:
 		// One configured library root. `name` is the identifier the user chose
@@ -462,11 +467,12 @@ class MediaStore {
 
 		struct AlbumEntry {
 			int         id;           // folder_id (used as Subsonic album id)
-			// Artist folder_id, which is the album's own folder when that
-			// folder is also an artist folder — a section holding loose files
-			// is both. Emitted as `parent` and `artistId`; folder-model
-			// navigation uses DirInfo::parent_id instead, which stays the
-			// folder above.
+			// Artist folder_id: the folder above the album, always. A loose
+			// file is its own album and its parent is the section, so the
+			// case this used to carry — a folder that was an album *and* an
+			// artist folder — no longer exists. Emitted as `parent` and
+			// `artistId`; folder-model navigation uses DirInfo::parent_id
+			// instead, which is the same folder here.
 			int         parent_id;
 			std::string title;
 			std::string artist;
@@ -514,10 +520,15 @@ class MediaStore {
 		                                    const std::string& username = "");
 
 		// A cover art id is a folder id, except above this base, where it is
-		// SONG_COVER_ID_BASE + song id: a loose file with a sidecar image of
-		// its own, whose folder cover belongs to a whole section instead. The
-		// wire format is an integer, so the two id spaces are separated by an
-		// offset rather than by a prefix.
+		// SONG_COVER_ID_BASE + song id: a song carrying a sidecar image of its
+		// own, whose album's cover is somebody else's. The wire format is an
+		// integer, so the two id spaces are separated by an offset rather than
+		// by a prefix.
+		//
+		// Still needed now that a loose file is its own album and reaches its
+		// sidecar through that album's cover_path: read_song_file() calls
+		// find_song_cover() for *every* song, so "01 song.jpg" beside
+		// "01 song.flac" inside an ordinary album folder still lands here.
 		static constexpr int SONG_COVER_ID_BASE = 1'000'000'000;
 
 		// Returns the stored-form cover image path, or "" if none.
@@ -686,6 +697,21 @@ class MediaStore {
 		// speaks in them -- the stored-path convention is about what leaves
 		// the API, and nothing here does.
 		static std::string sidecar_chapters_path(const std::string& abs);
+
+		// The liner-note sidecar of a file-album: <stem>.txt, beside the media
+		// file. Absolute in and out, as sidecar_chapters_path() is.
+		static std::string sidecar_text_path(const std::string& abs);
+
+		// Every sidecar belonging to one media file -- cover, poster,
+		// subtitles, chapters, liner notes -- absolute, and only the ones that
+		// exist. Used by moveAlbum and deleteUpload, which move or remove a
+		// single-file album and must take its companions with it.
+		std::vector<std::string> sidecars_of(const std::string& abs) const;
+
+		// Whether this folder row has an albums row of its own. The question
+		// getCoverArt has to ask before treating a coverless folder as an
+		// artist and asking MusicBrainz about its name.
+		bool folder_is_album(int folder_id);
 
 		// WebVTT for one caption source. stream_index < 0 means "the sidecar
 		// subtitle file next to the video"; otherwise it is the absolute
@@ -1148,12 +1174,34 @@ class MediaStore {
 		void scan_artist_dir(const std::filesystem::path& path);
 
 		// Media files sitting directly in a root, with no section folder above
-		// them. scan_artist_dir() cannot do this job: its prune prefix is
+		// them -- each one an album of its own, as it would be in a section.
+		// scan_artist_dir() cannot do this job: its prune prefix is
 		// "<root>/%", which is the whole root.
+		//
+		// It is also the *only* owner of those albums, and scan() and
+		// scan_dirs() both keep them away from scan_artist_dir() for that
+		// reason: their folder rows name files, so that function's
+		// fs::is_directory() test would read every one of them as deleted.
 		void scan_root_files(const RootRec& root);
 
+		// One album's whole commit: its folder row, its album row, its songs,
+		// the per-album song sweep and everything derived from those. Takes
+		// db_mutex_ and runs its own transaction, so the caller supplies only
+		// the try/catch that keeps one failed album from costing the scan.
+		//
+		// Shared by scan_artist_dir() and scan_root_files() because a loose
+		// file directly in a root is an album in exactly the way a loose file
+		// in a section is, and the copy this replaced in scan_root_files()
+		// quietly skipped apply_album_video_name() and the year and genre
+		// roll-ups — so a film in a flat library was the one film that never
+		// got its parsed title.
+		void commit_album(const AlbumReadData& adat, int parent_folder_id,
+		                   int artist_id,
+		                   const std::set<std::string>& chapter_keys);
+
 		// Helpers used by scan(); all called within a single transaction.
-		int  upsert_folder(const std::filesystem::path& path, int parent_id);
+		int  upsert_folder(const std::filesystem::path& path, int parent_id,
+		                   const std::string& name_override = "");
 		int  upsert_artist(const std::string& name);
 		int  upsert_album (int folder_id, const std::string& title,
 		                   int artist_id, int year, const std::string& genre);

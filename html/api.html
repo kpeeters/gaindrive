@@ -534,6 +534,7 @@
 </tbody>
 </table>
 <p>Utility files that are not human-readable notes are excluded: currently <code>fingerprints.txt</code> by name, and <b>anything ending <code>.chapters.txt</code></b> by suffix, since that is a chapter sidecar rather than prose. The suffix is matched rather than the whole name because the rest of it is the media file&#x27;s stem.</p>
+<div class="note"><p><b>An album that is a single media file has no folder to list.</b> Its notes are the sidecar named after it — <code>makingcheese.txt</code> beside <code>makingcheese.mp4</code> — and that one file is what this returns, if it is there. The chapter sidecar cannot be confused with it: that is <code>makingcheese.chapters.txt</code>, a different name.</p></div>
 </div>
 <div class="api-ep">
 <h3 id="ep-getAlbumText">getAlbumText</h3>
@@ -561,7 +562,7 @@
 <h3 id="ep-getAlbumImages">getAlbumImages</h3>
 <p class="api-meta"><code>GET /rest/getAlbumImages.view</code>
 <span class="api-badge">JSON only</span></p>
-<p>How many images an album folder holds — the cover plus any extras.</p>
+<p>How many images an album holds — the cover plus any extras.</p>
 <h4>Parameters</h4>
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
@@ -577,11 +578,12 @@
 </tbody>
 </table>
 <p>Use it to drive the <code>index</code> parameter of <code>getCoverArt</code>.</p>
+<p>For an album that is a single media file the extras are the images sitting beside it and named after it, rather than the contents of a directory.</p>
 </div>
 <div class="api-ep">
 <h3 id="ep-setCoverArt">setCoverArt</h3>
 <p class="api-meta"><code>POST /rest/setCoverArt.view</code></p>
-<p>Writes <code>cover.jpg</code> or <code>cover.png</code> into an album folder, whichever the uploaded bytes actually are.</p>
+<p>Writes the album its cover image, whichever of JPEG or PNG the uploaded bytes actually are.</p>
 <p>Permission: Your own upload batch, or admin anywhere.</p>
 <h4>Parameters</h4>
 <table class="doc-table">
@@ -597,6 +599,8 @@
 <p><b>JPEG and PNG only</b> — the format is taken from the magic bytes, not from the declared content type, and anything else is rejected. That is not a new restriction so much as the removal of a trap: the scanner indexes only <code>.jpg</code>, <code>.jpeg</code> and <code>.png</code>, so a WebP written as <code>cover.jpg</code> used to become a cover nothing could decode.</p>
 <p>If the upload changes the format, the file it replaces is removed, since <code>cover.jpg</code> outranks <code>cover.png</code> when the scanner looks for a cover.</p>
 <p>A cover set this way is marked as chosen by a person and is never overwritten by a scan — which for a film is the only way to correct a wrong TMDB match.</p>
+<div class="note"><p><b>Where it is written depends on what the album is.</b> An ordinary album is a directory and gets <code>cover.jpg</code> or <code>cover.png</code> inside it. An album that is a single media file gets the sidecar named after it — <code>makingcheese.jpg</code> beside <code>makingcheese.mp4</code> — because there is no inside. For the sidecar the scanner&#x27;s preference order is <code>.jpg</code>, <code>.jpeg</code>, <code>.png</code>, so uploading a PNG removes both earlier spellings; the <code>-poster.*</code> forms rank below all three and are left alone.</p></div>
+<p>This is what makes the note above true of a loose film at all. Under the rule this replaced, a media file sitting directly in a section was not an album, so an upload here reached only the section&#x27;s own cover — and a wrongly matched film could not be given the right poster by any means.</p>
 <p class="api-see">See also <a href="#ep-getAlbumImages"><code>getAlbumImages</code></a>.</p>
 </div>
 </div>
@@ -675,6 +679,8 @@
 <div class="note"><p><b>The artist tag is only rewritten under an <code>artists</code> root.</b> Under a <code>categories</code> root the level is a category — Film, Series — and writing that into an artist tag would stamp &quot;Film&quot; across every file of a promoted documentary. The album tag is rewritten whenever <code>album</code> changes.</p></div>
 <div class="note"><p><b>An artist tag naming somebody other than the old folder is left alone.</b> Only a tag that already held the old folder&#x27;s name is rewritten, because anything else is a real credit — every track of a compilation has one — and overwriting it would report the whole album as by one artist ever after. The comparison ignores case and punctuation, the same rule that decides a song entry&#x27;s <code>artist</code>.</p></div>
 <p>An emptied source directory is removed, so it does not linger in the listing reading &quot;0 albums&quot;, and an upload&#x27;s batch directory goes with it.</p>
+<div class="note"><p><b>An album may be a single media file.</b> A media file sitting directly in an artist or category folder is an album of its own, and this endpoint moves and renames it like any other. Three things follow. The file keeps its extension: <code>album</code> is a <em>name</em>, so the source&#x27;s extension is put back, and a name that already ends in it does not acquire a second one. The <code>album</code> field in the response is the name without the extension, and it is that name — not the on-disk leaf — that is written into the album tag. And the file&#x27;s sidecars travel with it: its cover and poster, its subtitle files, its chapter markers and its liner notes.</p></div>
+<div class="note"><p><b>A single file sitting directly in a library root can be renamed in place</b>, with no <code>musicFolderId</code>. Such an item has no artist directory of its own — the root plays that part — so <code>folder</code>, if given, must name that root. A directory in the same position still cannot: there is no artist level to change, and the error says so.</p></div>
 <p class="api-see">See also <a href="#ep-updateSong"><code>updateSong</code></a>, <a href="#ep-deleteUpload"><code>deleteUpload</code></a>.</p>
 </div>
 </div>

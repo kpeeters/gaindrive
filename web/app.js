@@ -2339,7 +2339,11 @@ async function viewAlbums(artistId, artistName) {
             }
          const parts = [];
          if (album.year)      parts.push(album.year);
-         if (album.songCount) parts.push(`${album.songCount} tracks`);
+         // Pluralised like the artist row above, because a one-track album is
+         // ordinary now: a loose file is its own album.
+         if (album.songCount)
+            parts.push(album.songCount === 1
+               ? '1 track' : `${album.songCount} tracks`);
          if (parts.length) meta.appendChild(document.createTextNode(parts.join(' · ')));
 
          info.appendChild(title);

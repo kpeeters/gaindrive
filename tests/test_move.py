@@ -33,9 +33,10 @@ CLIENT = "test"
 
 NS = "http://subsonic.org/restapi"
 
-# The album to exercise. Must exist in the scanned collection and must NOT be a
-# loose-file section (a folder that directly holds media is its own album, and
-# moveAlbum refuses to rename one in place — there is no artist level to change).
+# The album to exercise. Must exist in the scanned collection. A single-file
+# album is a valid target now — a media file sitting directly in an artist or
+# category folder is an album of its own, and _first_album() may well pick one,
+# since it reports isDir=true like any other album.
 ALBUM_TITLE = None   # None = use the first album of the first artist
 
 

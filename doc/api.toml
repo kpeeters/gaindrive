@@ -1110,6 +1110,12 @@ Utility files that are not human-readable notes are excluded: currently
 `fingerprints.txt` by name, and **anything ending `.chapters.txt`** by suffix,
 since that is a chapter sidecar rather than prose. The suffix is matched
 rather than the whole name because the rest of it is the media file's stem.
+
+NOTE: **An album that is a single media file has no folder to list.** Its notes
+are the sidecar named after it — `makingcheese.txt` beside `makingcheese.mp4` —
+and that one file is what this returns, if it is there. The chapter sidecar
+cannot be confused with it: that is `makingcheese.chapters.txt`, a different
+name.
 '''
 
   [[endpoint.param]]
@@ -1152,9 +1158,12 @@ kind     = 'endpoint'
 name     = "getAlbumImages"
 section  = "albumtext"
 response = 'subsonic-json'
-summary  = 'How many images an album folder holds — the cover plus any extras.'
+summary  = 'How many images an album holds — the cover plus any extras.'
 notes    = '''
 Use it to drive the `index` parameter of `getCoverArt`.
+
+For an album that is a single media file the extras are the images sitting
+beside it and named after it, rather than the contents of a directory.
 '''
 
   [[endpoint.param]]
@@ -1174,7 +1183,7 @@ name      = "setCoverArt"
 section   = "albumtext"
 method    = 'POST'
 auth_note = 'Your own upload batch, or admin anywhere.'
-summary   = 'Writes `cover.jpg` or `cover.png` into an album folder, whichever the uploaded bytes actually are.'
+summary   = 'Writes the album its cover image, whichever of JPEG or PNG the uploaded bytes actually are.'
 notes     = '''
 Supply exactly one of `file` or `url`.
 
@@ -1197,6 +1206,19 @@ If the upload changes the format, the file it replaces is removed, since
 
 A cover set this way is marked as chosen by a person and is never overwritten
 by a scan — which for a film is the only way to correct a wrong TMDB match.
+
+NOTE: **Where it is written depends on what the album is.** An ordinary album
+is a directory and gets `cover.jpg` or `cover.png` inside it. An album that is
+a single media file gets the sidecar named after it — `makingcheese.jpg` beside
+`makingcheese.mp4` — because there is no inside. For the sidecar the scanner's
+preference order is `.jpg`, `.jpeg`, `.png`, so uploading a PNG removes both
+earlier spellings; the `-poster.*` forms rank below all three and are left
+alone.
+
+This is what makes the note above true of a loose film at all. Under the rule
+this replaced, a media file sitting directly in a section was not an album, so
+an upload here reached only the section's own cover — and a wrongly matched
+film could not be given the right poster by any means.
 '''
 see = ["getAlbumImages"]
 
@@ -1328,6 +1350,22 @@ a song entry's `artist`.
 
 An emptied source directory is removed, so it does not linger in the listing
 reading "0 albums", and an upload's batch directory goes with it.
+
+NOTE: **An album may be a single media file.** A media file sitting directly in
+an artist or category folder is an album of its own, and this endpoint moves
+and renames it like any other. Three things follow. The file keeps its
+extension: `album` is a *name*, so the source's extension is put back, and a
+name that already ends in it does not acquire a second one. The `album` field
+in the response is the name without the extension, and it is that name — not
+the on-disk leaf — that is written into the album tag. And the file's sidecars
+travel with it: its cover and poster, its subtitle files, its chapter markers
+and its liner notes.
+
+NOTE: **A single file sitting directly in a library root can be renamed in
+place**, with no `musicFolderId`. Such an item has no artist directory of its
+own — the root plays that part — so `folder`, if given, must name that root.
+A directory in the same position still cannot: there is no artist level to
+change, and the error says so.
 '''
 see = ["updateSong", "deleteUpload"]
 

@@ -2214,6 +2214,19 @@ static int extract_archive_to_dir(const std::string& content,
 // raw C0 byte is not well-formed XML and nothing escapes it. Neither mattered
 // while every component came from yt-dlp or from TagLib; a typed one is the
 // first arbitrary string here to become a path component.
+// Case-insensitively, because a filesystem extension is not case-sensitive to
+// a person: someone renaming a film to "The Third Man.MKV" has already typed
+// the extension and must not be given a second one.
+static bool ends_with_ci(const std::string& s, const std::string& suffix)
+	{
+	if (suffix.size() > s.size()) return false;
+	return std::equal(suffix.rbegin(), suffix.rend(), s.rbegin(),
+	                   [](char a, char b) {
+		return std::tolower(static_cast<unsigned char>(a))
+		     == std::tolower(static_cast<unsigned char>(b));
+		});
+	}
+
 static std::string sanitise_component(const std::string& s)
    {
    std::string r;
@@ -4152,6 +4165,23 @@ GainDrive::GainDrive(const std::string& db_path,
 				res.status = 404;
 				return;
 				}
+			// **An album is not an artist, even when it has no cover.**  This
+			// branch is reached whenever get_cover_path() came back empty, and
+			// an album folder with no image at all lands here as readily as a
+			// real artist folder does — so a coverless album has always been
+			// answered with an artist portrait and pushed onto the MusicBrainz
+			// queue under its own title.  A pre-existing bug, but one this had
+			// to grow a guard for: a loose file is its own album now, so every
+			// loose track without a sidecar image would ask MusicBrainz about
+			// "Track.mp4".
+			//
+			// The extra lookup is affordable because it is inside the already
+			// cold empty-cover branch, which does two of its own; the album
+			// grid's hot path never reaches it.
+			if (store_.folder_is_album(folder_id)) {
+				res.status = 404;
+				return;
+				}
 			auto state = store_.get_artist_art_state(fpath);
 
 			if (!state || state->status == "error") {
@@ -4385,7 +4415,22 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		namespace fs = std::filesystem;
 		nlohmann::json files = nlohmann::json::array();
-		try {
+		std::error_code fec;
+		if (fs::is_regular_file(folder, fec)) {
+			// A file-album: its liner notes are the sidecar named after it,
+			// <stem>.txt, and there is no directory to list.  Handled
+			// explicitly rather than left to the directory_iterator below
+			// throwing into the catch — which returns the right answer for the
+			// wrong reason, and returns *nothing* where a real note exists.
+			//
+			// It cannot collide with the chapter sidecar: that is
+			// <stem>.chapters.txt, a different filename, which is the whole
+			// point of sidecar_chapters_path() not being replace_extension().
+			std::string note = MediaStore::sidecar_text_path(folder);
+			if (fs::exists(note, fec))
+				files.push_back({{"name", fs::path(note).filename().string()}});
+			}
+		else try {
 			for (auto& entry : fs::directory_iterator(folder)) {
 				if (!entry.is_regular_file() || entry.path().extension() != ".txt") continue;
 				const std::string fname = entry.path().filename().string();
@@ -4464,7 +4509,24 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 
 		namespace fs = std::filesystem;
-		fs::path full = fs::path(store_.abs_path(folder_rel)) / name;
+		// A file-album has no directory to compose against, so the note is
+		// taken from beside the media file — and `name` has to *be* that
+		// sidecar's filename.  Composing from the parent directory instead
+		// would let this endpoint read any album's notes out of the section
+		// the file happens to sit in, which is a different album's content.
+		std::string album_abs = store_.abs_path(folder_rel);
+		std::error_code fec;
+		fs::path full;
+		if (fs::is_regular_file(album_abs, fec)) {
+			fs::path note = MediaStore::sidecar_text_path(album_abs);
+			if (note.filename().string() != name) {
+				res.status = 404;
+				return;
+				}
+			full = note;
+			}
+		else
+			full = fs::path(album_abs) / name;
 		if (!store_.path_is_within_root(full)) {
 			std::cout << stamp() << "getAlbumText: refusing path outside every root: "
 			          << full.string() << std::endl;
@@ -6899,9 +6961,28 @@ GainDrive::GainDrive(const std::string& db_path,
 		const bool is_png = (up_mime == "image/png");
 
 		namespace fs = std::filesystem;
-		fs::path cover_rel = fs::path(folder_rel)
-		    / (is_png ? "cover.png" : "cover.jpg");
-		fs::path cover_abs = fs::path(store_.abs_path(cover_rel.string()));
+		// **A file-album's cover is the sidecar named after it**, not
+		// cover.jpg inside it — there is no inside.  This is the whole point
+		// of the endpoint for a loose film: under the rule where a section
+		// holding loose films was itself the album, an upload here could only
+		// ever set the *section's* cover, so a film TMDB had matched wrongly
+		// could not be given the right poster at all. setCoverArt is the only
+		// remedy for a bad match, so that gap had no way round it.
+		//
+		// The names are find_song_cover()'s first two, which is what makes the
+		// next scan pick this up.
+		std::error_code fec;
+		const bool file_album =
+			fs::is_regular_file(store_.abs_path(folder_rel), fec);
+		auto beside = [&](const char* suffix) {
+			fs::path p(folder_rel);
+			p.replace_extension("");
+			return p.string() + suffix;
+			};
+		std::string cover_rel = file_album
+		    ? beside(is_png ? ".png" : ".jpg")
+		    : (fs::path(folder_rel) / (is_png ? "cover.png" : "cover.jpg")).string();
+		fs::path cover_abs = fs::path(store_.abs_path(cover_rel));
 		if (!store_.path_is_within_root(cover_abs)) {
 			std::cout << stamp() << "setCoverArt: refusing path outside every root: "
 			          << cover_abs.string() << std::endl;
@@ -6916,23 +6997,39 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		// find_cover() prefers cover.jpg over cover.png, so uploading a PNG
 		// beside an existing cover.jpg would leave the old one winning on the
-		// next scan and the upload apparently ignored.  Only the name this
-		// upload replaces is removed — it is the file the write above would
-		// have overwritten had the format not changed.
-		{
-		fs::path other_rel = fs::path(folder_rel)
-		    / (is_png ? "cover.jpg" : "cover.png");
-		fs::path other_abs = fs::path(store_.abs_path(other_rel.string()));
-		std::error_code rec;
-		if (store_.path_is_within_root(other_abs) && fs::exists(other_abs, rec)) {
-			fs::remove(other_abs, rec);
-			store_.drop_cover_thumbs(other_rel.string());
-			cover_cache_.invalidate(other_rel.string());
+		// next scan and the upload apparently ignored.  Only the names this
+		// upload outranks are removed.
+		//
+		// For a file-album the list is one longer, because find_song_cover()'s
+		// order is .jpg, .jpeg, .png: writing the .png has to clear *both*
+		// earlier spellings or the stale one keeps winning, which is the same
+		// bug one rung further along.  The "-poster.*" forms are never touched
+		// — they rank below all three, so they cannot win anyway.
+		std::vector<std::string> outranked;
+		if (file_album) {
+			if (is_png) { outranked.push_back(beside(".jpg"));
+			              outranked.push_back(beside(".jpeg")); }
 			}
-		}
+		else
+			outranked.push_back(
+				(fs::path(folder_rel) / (is_png ? "cover.jpg" : "cover.png")).string());
+		for (auto& other_rel : outranked) {
+			fs::path other_abs = fs::path(store_.abs_path(other_rel));
+			std::error_code rec;
+			if (store_.path_is_within_root(other_abs) && fs::exists(other_abs, rec)) {
+				fs::remove(other_abs, rec);
+				store_.drop_cover_thumbs(other_rel);
+				cover_cache_.invalidate(other_rel);
+				}
+			}
 
-		store_.set_cover_art_path(folder_rel, cover_rel.string());
-		cover_cache_.invalidate(cover_rel.string());
+		// Unchanged, and it is what closes the gap above: the manual_covers row
+		// is keyed on `folder_rel`, which for a file-album is the media file's
+		// own stored path — the very string lookup_video_meta() passes to
+		// cover_is_manual() before it fetches a poster.  So a poster chosen
+		// here now survives every later scan.
+		store_.set_cover_art_path(folder_rel, cover_rel);
+		cover_cache_.invalidate(cover_rel);
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
@@ -7109,11 +7206,27 @@ GainDrive::GainDrive(const std::string& db_path,
 		for (const auto& c : fs::path(old_rel)) parts.push_back(c.string());
 		if (parts.size() < 2) { err(0, "Could not resolve the library path."); return; }
 
-		const std::string old_album  = parts.back();
-		// The album's own directory level.  For a folder that directly holds
-		// media — its own album, with no artist above it — there is none.
-		const std::string old_folder =
-			(parts.size() >= 3) ? parts[parts.size() - 2] : std::string{};
+		// **The album may be a single media file.**  A loose file is its own
+		// album, so its folder row's path names the file — and every step
+		// below that assumes a directory has to be told.  The filesystem is
+		// asked rather than the database because what follows is filesystem
+		// work: what matters is what is actually there to move.
+		std::error_code sec;
+		const bool file_album =
+			fs::is_regular_file(store_.abs_path(old_rel), sec);
+
+		const std::string old_album = parts.back();
+		// The name, as opposed to the on-disk leaf: for a file-album they
+		// differ by the extension, which is nobody's idea of part of a title
+		// and must not reach an album tag.
+		const std::string src_ext =
+			file_album ? fs::path(old_album).extension().string() : std::string{};
+		const std::string old_album_name =
+			file_album ? fs::path(old_album).stem().string() : old_album;
+		// The artist level above the album.  A level-1 file-album has none of
+		// its own and the root plays the part, which is what parts[0] is here
+		// — the same thing ALBUM_ARTIST_ID_SQL reports as its artist.
+		const std::string old_folder = parts[parts.size() - 2];
 
 		// ---- Where it lands -------------------------------------------
 		std::string new_parent_dir;   // the artist/category directory it goes in
@@ -7149,16 +7262,33 @@ GainDrive::GainDrive(const std::string& db_path,
 		else {
 			// Staying put: everything above the artist level is untouched — the
 			// library root, and for an upload the owner and the batch id.
-			if (parts.size() < 3) {
+			//
+			// A level-1 file-album is the exception: a loose film in a root
+			// used as one flat library has no artist directory, the root
+			// itself plays that part, and renaming such a film in place is the
+			// commonest thing this endpoint gets asked to do.  Its parent is
+			// the root, which is a real directory, so there is nothing here
+			// that needs one to be invented.
+			if (parts.size() < 3 && !file_album) {
 				err(0, "This folder is its own artist; move it to a named root, "
 				       "or rename it on the server.");
 				return;
 				}
+			if (parts.size() < 3 && !new_folder.empty() && new_folder != parts[0]) {
+				err(0, "This item sits directly in a library root; name a root "
+				       "with musicFolderId to file it under a folder.");
+				return;
+				}
 			if (new_folder.empty()) new_folder = old_folder;
-			std::string above;
-			for (size_t i = 0; i + 2 < parts.size(); ++i)
-				above += (i ? "/" : "") + parts[i];
-			new_parent_dir = above + "/" + new_folder;
+			if (parts.size() < 3)
+				// The root is the parent; there is no level above it to keep.
+				new_parent_dir = parts[0];
+			else {
+				std::string above;
+				for (size_t i = 0; i + 2 < parts.size(); ++i)
+					above += (i ? "/" : "") + parts[i];
+				new_parent_dir = above + "/" + new_folder;
+				}
 			// The uploads root is not in get_music_folders() by design, so it
 			// matches nothing here and falls through to "artists" — which is
 			// what an upload's level-1 directory is.
@@ -7167,7 +7297,7 @@ GainDrive::GainDrive(const std::string& db_path,
 				if (f.name == parts[0]) { dest_root_type = f.type; break; }
 			}
 
-		std::string new_album = old_album;
+		std::string new_album = old_album_name;
 		if (req.params.count("album")) {
 			new_album = sanitise_component(
 				utf8_clean(req.params.find("album")->second, 200));
@@ -7176,7 +7306,19 @@ GainDrive::GainDrive(const std::string& db_path,
 				}
 			}
 
-		const std::string new_rel = new_parent_dir + "/" + new_album;
+		// **The on-disk leaf carries the source's extension back.**
+		// sanitise_component() strips nothing but it is handed a *name*, and a
+		// file-album renamed to that name alone lands on disk with no
+		// extension — at which point is_media_file() stops recognising it and
+		// the next scan prunes the film out of the library entirely.  A caller
+		// that typed the extension is not made to type it twice.
+		std::string new_leaf = new_album;
+		if (file_album && !src_ext.empty()
+		        && !(new_leaf.size() > src_ext.size()
+		             && ends_with_ci(new_leaf, src_ext)))
+			new_leaf += src_ext;
+
+		const std::string new_rel = new_parent_dir + "/" + new_leaf;
 		// Everything above the album, as it stands now.
 		std::string old_parent_dir;
 		for (size_t i = 0; i + 1 < parts.size(); ++i)
@@ -7254,6 +7396,15 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 
 		std::error_code ec;
+		// Collected before the rename, since they are named after the file
+		// where it is now.  A file-album's cover, poster, subtitles, chapter
+		// markers and liner notes are separate files beside it, and a move
+		// that left them behind would strand every one of them somewhere
+		// nothing will ever reconnect them from.
+		const std::vector<std::string> sidecars =
+			file_album ? store_.sidecars_of(abs_src.string())
+			           : std::vector<std::string>{};
+
 		// Creating the destination is what makes "type a name that is not in
 		// the list" the way to add an artist or a category, with no separate
 		// operation for it.
@@ -7276,6 +7427,39 @@ GainDrive::GainDrive(const std::string& db_path,
 		// cover and any typed video title, and the derived art caches.
 		store_.relocate_prefix(old_rel, new_rel);
 
+		// The sidecars follow, each one its own tiny relocate.  The media
+		// file's own move above already carried songs.path, chapters.path and
+		// the rest; what these calls are for is the columns that name the
+		// *image*: cover_thumbs.source_key, songs.cover_path,
+		// albums.cover_path.  A rescan would repair the last two and never the
+		// first, so the thumbnails would go on being keyed on a path with no
+		// file at it.
+		//
+		// The suffix is whatever follows the old stem — ".jpg", but equally
+		// "-poster.jpg" or ".chapters.txt", which is why it is taken by length
+		// rather than by extension().
+		if (file_album) {
+			const std::string old_stem = fs::path(abs_src).stem().string();
+			const fs::path    new_stem =
+				abs_target.parent_path() / abs_target.stem();
+			for (const auto& s : sidecars) {
+				std::string fname = fs::path(s).filename().string();
+				if (fname.size() <= old_stem.size()) continue;
+				std::string suffix = fname.substr(old_stem.size());
+				fs::path    dest   = fs::path(new_stem.string() + suffix);
+				std::error_code sc;
+				if (fs::exists(dest, sc)) continue;   // never overwrite
+				fs::rename(s, dest, sc);
+				if (sc) {
+					std::cout << stamp() << "Move: could not move sidecar " << s
+					          << ": " << sc.message() << std::endl;
+					continue;
+					}
+				store_.relocate_prefix(store_.rel_path(s),
+				                        store_.rel_path(dest.string()));
+				}
+			}
+
 		// ---- Then the tags ---------------------------------------------
 		//
 		// The opposite order to updateSong, which writes tags first so that a
@@ -7291,48 +7475,60 @@ GainDrive::GainDrive(const std::string& db_path,
 		// promote wrote no tags at all, so a promoted film kept its channel
 		// name, and rename wrote both unconditionally, which was safe only
 		// because it could never reach a categories root.
-		const bool write_album  = (new_album  != old_album);
+		// Compared as *names*, so a file-album's extension does not make every
+		// rename look like an album change — and never reaches a tag.
+		const bool write_album  = (new_album  != old_album_name);
 		const bool write_artist = (new_folder != old_folder)
 		                          && dest_root_type == "artists";
 		int tag_failures = 0;
-		if (write_album || write_artist) {
-			for (auto& e : fs::recursive_directory_iterator(abs_target, ec)) {
-				if (!e.is_regular_file()) continue;
-				try {
-					TagLib::FileRef f(e.path().c_str());
-					if (f.isNull() || !f.tag()) continue;   // not a taggable file
-					if (write_album)
-						f.tag()->setAlbum(TagLib::String(new_album, TagLib::String::UTF8));
-					// Only overwrite an artist tag that was the old folder's
-					// name anyway.  A tag naming somebody else is a real
-					// credit — every track of a compilation has one — and this
-					// used to flatten the lot to "Various Artists" on a move.
-					// Worse, saving bumps the mtime, so the next scan re-read
-					// the value it had just destroyed and the library
-					// converged on it with nothing left to recover from.
-					if (write_artist) {
-						std::string cur = f.tag()->artist().to8Bit(true);
-						if (cur.empty() || artist_key(cur) == artist_key(old_folder))
-							f.tag()->setArtist(
-								TagLib::String(new_folder, TagLib::String::UTF8));
-						}
-					if (!f.save()) {
-						++tag_failures;
-						std::cout << stamp() << "Move: could not write tags to "
-						          << e.path() << std::endl;
-						}
+		auto tag_one = [&](const fs::path& p) {
+			try {
+				TagLib::FileRef f(p.c_str());
+				if (f.isNull() || !f.tag()) return;   // not a taggable file
+				if (write_album)
+					f.tag()->setAlbum(TagLib::String(new_album, TagLib::String::UTF8));
+				// Only overwrite an artist tag that was the old folder's
+				// name anyway.  A tag naming somebody else is a real
+				// credit — every track of a compilation has one — and this
+				// used to flatten the lot to "Various Artists" on a move.
+				// Worse, saving bumps the mtime, so the next scan re-read
+				// the value it had just destroyed and the library
+				// converged on it with nothing left to recover from.
+				if (write_artist) {
+					std::string cur = f.tag()->artist().to8Bit(true);
+					if (cur.empty() || artist_key(cur) == artist_key(old_folder))
+						f.tag()->setArtist(
+							TagLib::String(new_folder, TagLib::String::UTF8));
 					}
-				catch (const std::exception& ex) {
+				if (!f.save()) {
 					++tag_failures;
-					std::cout << stamp() << "Move: exception tagging " << e.path()
-					          << ": " << ex.what() << std::endl;
-					}
-				catch (...) {
-					++tag_failures;
-					std::cout << stamp() << "Move: unknown exception tagging "
-					          << e.path() << std::endl;
+					std::cout << stamp() << "Move: could not write tags to "
+					          << p << std::endl;
 					}
 				}
+			catch (const std::exception& ex) {
+				++tag_failures;
+				std::cout << stamp() << "Move: exception tagging " << p
+				          << ": " << ex.what() << std::endl;
+				}
+			catch (...) {
+				++tag_failures;
+				std::cout << stamp() << "Move: unknown exception tagging "
+				          << p << std::endl;
+				}
+			};
+		if (write_album || write_artist) {
+			// One file or a directory of them.  The walk is not merely
+			// unnecessary for a file-album: recursive_directory_iterator on a
+			// regular file sets `ec` and iterates zero times, so the rename
+			// would report tagFailures 0 having written nothing at all.
+			if (file_album)
+				tag_one(abs_target);
+			else
+				for (auto& e : fs::recursive_directory_iterator(abs_target, ec)) {
+					if (!e.is_regular_file()) continue;
+					tag_one(e.path());
+					}
 			}
 
 		// An emptied source directory is gone as far as the library is
@@ -7340,11 +7536,13 @@ GainDrive::GainDrive(const std::string& db_path,
 		// Left in place it is an artist reading "0 albums", which is the shape
 		// every stranding here takes.
 		//
-		// **Only when there was an artist level to empty.**  A loose-file
-		// section moved out of a root leaves parts.size() == 2, and its "parent"
-		// is the root itself — which fs::is_empty would happily report on, and
-		// fs::remove would then delete the configured library root out from
-		// under the server.
+		// **Only when there was an artist level to empty.**  A level-1
+		// file-album — a loose film in a root used as one flat library — leaves
+		// parts.size() == 2, and its "parent" is the root itself, which
+		// fs::is_empty would happily report on and fs::remove would then delete
+		// out from under the server.  (Before a loose file became its own
+		// album, the case was a loose-file *section* moved out of a root; the
+		// arithmetic and the hazard are the same.)
 		fs::path old_parent_abs = store_.abs_path(old_parent_dir);
 		bool old_parent_gone = false;
 		if (parts.size() >= 3
@@ -7384,14 +7582,30 @@ GainDrive::GainDrive(const std::string& db_path,
 		// the prune catches. Scanning the destination first re-points
 		// parent_id, and the source then deletes cleanly.
 		//
-		// Moving a loose-file section out of a root makes old_parent_dir the
-		// bare root name, which scan_dirs() deliberately escalates to a full
-		// scan(). That is the right answer — the whole root has to be walked
-		// again — and it is why this is the slow case rather than a broken one.
+		// **A level-1 file-album is rescanned by its own path, not its
+		// parent's.** Its parent is the bare root name, which scan_dirs()
+		// deliberately escalates to a full scan() — minutes of work to settle
+		// a rename. Handing it the file path instead lands in the file-album
+		// branch of scan_dirs(), which calls scan_root_files() for that root
+		// and nothing else. Both ends are checked separately because a move
+		// can be level-1 at one end only.
+		//
+		// The ordering rule is unaffected: for such a move both ends are in
+		// the same root and neither re-parents anything, so there is no
+		// dangling parent_id for the source pass to trip over.
+		auto components = [](const std::string& rel) {
+			int n = 0;
+			for (const auto& c : fs::path(rel)) { (void)c; ++n; }
+			return n;
+			};
+		const std::string scan_dest = (components(new_rel) < 3) ? new_rel
+		                                                        : new_parent_dir;
+		const std::string scan_src  = (parts.size() < 3) ? old_rel
+		                                                 : old_parent_dir;
 		try {
-			store_.scan_dirs({new_parent_dir});
-			if (old_parent_dir != new_parent_dir)
-				store_.scan_dirs({old_parent_dir});
+			store_.scan_dirs({scan_dest});
+			if (scan_src != scan_dest)
+				store_.scan_dirs({scan_src});
 			}
 		catch (const std::exception& e) {
 			std::cout << stamp() << "Move: rescan failed: " << e.what() << std::endl;
@@ -7507,8 +7721,22 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 
 		std::error_code ec;
+		// A file-album's companions go with it.  remove_all() on a directory
+		// takes everything inside; on a single media file it takes the file
+		// and leaves the cover, poster, subtitles, chapter markers and liner
+		// notes sitting in the section, where nothing afterwards will ever
+		// remove them and nothing will ever use them again.  Collected before
+		// the delete, since they are found by the file's own name.
+		std::vector<std::string> sidecars;
+		if (fs::is_regular_file(abs, ec)) sidecars = store_.sidecars_of(abs.string());
+
 		fs::remove_all(abs, ec);
 		if (ec) { err(0, ("Failed to delete item: " + ec.message()).c_str()); return; }
+		for (const auto& s : sidecars) {
+			std::error_code sc;
+			fs::remove(s, sc);
+			store_.forget_prefix(store_.rel_path(s));
+			}
 
 		// Before the rescan, and it is the half the rescan will not do: the
 		// scanner prunes the music DB and its derived caches but has never

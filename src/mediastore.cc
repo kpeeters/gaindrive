@@ -88,10 +88,14 @@ static bool iends_with(const std::string& s, const std::string& suffix)
 	return lo.compare(lo.size() - suffix.size(), suffix.size(), suffix) == 0;
 	}
 
-// recurse=false is for a folder that is an album *and* a parent of albums —
-// a section holding loose files next to its subfolders.  Pass 5 would then
-// hand the section one of its own albums' covers.
-static std::string find_cover(const fs::path& dir, bool recurse = true)
+// Only ever called for a folder that is an album and nothing else, which is
+// why pass 5 may recurse freely.  It used to take a `recurse` flag, for the
+// one folder that was an album *and* a parent of albums — a section holding
+// loose files beside its subfolders, under the rule where such a folder was
+// itself an album.  Pass 5 would have handed that section one of its own
+// albums' covers.  A loose file is its own album now, so no such folder
+// exists and the flag had no callers left.
+static std::string find_cover(const fs::path& dir)
 	{
 	// Pass 1: exact well-known names.
 	for (auto& name : COVER_FILENAMES) {
@@ -114,7 +118,6 @@ static std::string find_cover(const fs::path& dir, bool recurse = true)
 	if (!jpg_fallback.empty()) return jpg_fallback;
 	if (!any_img_fallback.empty()) return any_img_fallback;
 	// Pass 5: recurse into subdirectories for any image.
-	if (!recurse) return "";
 	for (auto& entry : fs::recursive_directory_iterator(dir)) {
 		if (!entry.is_regular_file()) continue;
 		std::string fname = entry.path().filename().string();
@@ -154,16 +157,20 @@ static const std::string SONG_COVER_ART_SQL =
 	"            THEN COALESCE(al.folder_id, s.folder_id)"
 	"            ELSE -1 END AS cover_art_id,";
 
-// The artist folder of an album whose folder is aliased `f`.  Normally the
-// folder above it, but a folder that directly contains media is itself an
-// album, and when that folder is a level-1 one (its parent is a root) or a
-// root, it is its own artist — the section holding loose files is both.
-// Reporting the parent there would name the *root*, and a client that anchors
-// its album list on this field lands on the list of sections.
+// The artist folder of an album whose folder is aliased `f`: the folder above
+// it, always.
+//
+// It used to have a second arm, for a folder that was an album *and* its own
+// artist — a section that directly contained media, under the rule where such
+// a folder was itself an album.  Reporting the parent there named the *root*,
+// and a client anchoring its album list on this field landed on the list of
+// sections.  A loose file is its own album now and its parent is the section,
+// which is a real artist folder, so the case cannot arise.
+//
+// The root arm survives as insurance for a database not yet rescanned under
+// the new rule, where a section still carries its old albums row.
 static const std::string ALBUM_ARTIST_ID_SQL =
 	"       CASE WHEN f.parent_id IS NULL"
-	"              OR (SELECT p.parent_id FROM folders p WHERE p.id = f.parent_id)"
-	"                 IS NULL"
 	"            THEN f.id ELSE f.parent_id END,";
 
 // How many of an album's songs are video, appended as the trailing column of
@@ -1421,9 +1428,21 @@ void MediaStore::scan()
 			          << ": " << ec.message() << std::endl;
 		{
 		std::lock_guard<std::mutex> lock(db_mutex_);
+		// **Not the file-albums.** A loose file directly in a root is an album
+		// of its own, so it has a level-1 folder row whose path names a file —
+		// and scan_root_files() owns it.  Handed to scan_artist_dir() instead,
+		// its fs::is_directory() test fails, the row is read as deleted, and
+		// every root-level album is pruned on every full scan.
+		//
+		// The test is `folders.path` being a `songs.path`, which is
+		// definitional: a folder row naming a media file is exactly a
+		// file-album.  "Has an albums row" is true of one too, but it is also
+		// true of a *section* on a database not yet rescanned under this rule,
+		// and skipping a section here would stop it ever being pruned.
 		SQLite::Statement s(db_music_,
 			"SELECT path FROM folders"
-			" WHERE parent_id = (SELECT id FROM folders WHERE path = ?)");
+			" WHERE parent_id = (SELECT id FROM folders WHERE path = ?)"
+			"   AND NOT EXISTS (SELECT 1 FROM songs s WHERE s.path = folders.path)");
 		s.bind(1, root.cfg.name);
 		while (s.executeStep())
 			to_scan.insert(fs::path(join_root(s.getColumn(0).getString())));
@@ -1468,14 +1487,33 @@ void MediaStore::scan_dirs(const std::set<std::string>& dirs)
 		q.bind(1, rel);
 		return q.executeStep();
 		};
+	// A folder row that names a media file: a loose file, which is its own
+	// album.  Same definitional test scan() uses, and for the same reason.
+	auto is_file_album = [&](const std::string& rel) {
+		std::lock_guard<std::mutex> lock(db_mutex_);
+		SQLite::Statement q(db_music_,
+			"SELECT 1 FROM folders f"
+			" WHERE f.path = ?"
+			"   AND EXISTS (SELECT 1 FROM songs s WHERE s.path = f.path)");
+		q.bind(1, rel);
+		return q.executeStep();
+		};
 
 	for (auto& d : dirs) {
 		fs::path abs(join_root(d));
-		// A depth-1 entry that is neither a directory now nor a folder in the
-		// DB is a loose file sitting in the root itself — added, changed or
-		// deleted.  The watcher reports the file, since there is no directory
-		// between it and the root.
-		if (!fs::is_directory(abs) && !is_known_folder(d)) {
+		// A depth-1 entry that is not a directory is a loose file sitting in
+		// the root itself — added, changed or deleted.  The watcher reports
+		// the file, since there is no directory between it and the root.
+		//
+		// Three cases have to be told apart, and the folder row alone cannot
+		// do it now that a loose file has one.  Unknown: a file that has never
+		// been scanned.  Known and a file-album: a loose file that already has
+		// its own album, present or just deleted.  Both belong to
+		// scan_root_files(), which walks the root and re-stamps or prunes.
+		// Known and *not* a file-album: a section directory that has just been
+		// deleted, which must still reach scan_artist_dir() to be pruned —
+		// nothing else will ever remove it.
+		if (!fs::is_directory(abs) && (!is_known_folder(d) || is_file_album(d))) {
 			const RootRec* r = root_for_rel(d);
 			// The uploads root is per-user space, never library content, and
 			// scan() does not walk it either.
@@ -1578,6 +1616,11 @@ struct AlbumReadData {
 	std::string               cover;
 	std::vector<std::string>  disc_paths;  // sorted; index+1 = disc number
 	std::vector<SongReadData> songs;
+	// A loose media file, which is its own album: `path` names the file rather
+	// than a directory.  Carried as a flag because several steps have to know
+	// not to treat that path as a directory, and re-deriving it by testing the
+	// extension would answer wrongly for a directory called "Best of 1999.mp3".
+	bool                      loose = false;
 	// Filled by Phase 3c when TMDB identified this album, consumed by the
 	// album transaction in Phase 4 — which is where the folder id, and so the
 	// row to attach a description to, finally exists.
@@ -1612,6 +1655,22 @@ static int track_prefix_number(const std::string& stem)
 	if (digits.size() > 9) return 0;
 	const int n = std::stoi(digits);
 	return (n >= 1 && n <= 999) ? n : 0;
+	}
+
+// The album title for a loose media file, which is its own album.  The stem,
+// because the extension is not part of anyone's title, and then the same
+// treatment a directory name gets one level up.
+//
+// A video's stem is handed over raw: apply_album_video_name() runs
+// parse_video_name() over whatever is stored here, and that already reads '_'
+// as a separator, so normalising it first would only hide the separator from
+// the parser that knows what to do with it.
+static std::string loose_album_title(const fs::path& p)
+	{
+	std::string t = p.stem().string();
+	if (is_video_file(p)) return t;
+	std::replace(t.begin(), t.end(), '_', ' ');
+	return strip_track_prefix(t);
 	}
 
 // The markers beside a video, for the scan's index. Empty for a file with no
@@ -2245,12 +2304,17 @@ static bool tmdb_fetch_poster(MediaStore& store, const Tmdb& tmdb,
 
 // Phase 3c for one artist or root.
 //
-// **One lookup per album, not per file.** A film is a folder, so
-// "Movies/The Third Man (1949)/" is one question however many parts the film
-// was split into. The exception is the loose-file album — the section holding
-// makingcheese.mp4 next to other films — where each file is its own work; that
-// album is the one whose path is the artist folder's, the same test the
-// folder-parenting rule uses.
+// **One lookup per album, not per file, with no exception left.** A film is a
+// folder, so "Movies/The Third Man (1949)/" is one question however many parts
+// the film was split into — and a loose file is an album of its own now, so
+// "each loose file in a section is its own work" says the same thing rather
+// than contradicting it. The per-file branch this replaced was the only reason
+// this function needed to know which album was the section's.
+//
+// Unifying them is also what gives a loose film the cover_is_manual() check
+// the per-file branch deliberately skipped: setCoverArt used to be able to
+// reach only the section, so there was no per-film choice to respect. There
+// is now, and it is the only remedy for a wrong match.
 //
 // **The poster outranks whatever local art the scan found**, which is the one
 // place video inverts the rule the rest of gaindrive follows. For an album a
@@ -2266,8 +2330,7 @@ static bool tmdb_fetch_poster(MediaStore& store, const Tmdb& tmdb,
 // beside the album because the music DB is a cache: a rebuild would otherwise
 // throw the choice away and let the wrong poster win all over again.
 static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
-                              std::vector<AlbumReadData>& albums,
-                              const std::string& artist_path)
+                              std::vector<AlbumReadData>& albums)
 	{
 	for (auto& adat : albums) {
 		// The first video in sort order: the one whose path carries the album's
@@ -2281,22 +2344,50 @@ static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
 			}
 		if (!first) continue;
 
-		bool loose = adat.path == artist_path;
-
-		if (!loose) {
+		{
 			VideoName vn = parse_video_name(adat.title);
-			std::string title = vn.title.empty() ? adat.title : vn.title;
+			// **A file-album asks the question its *song* already resolved**,
+			// not the one this album title parses to. read_song_file() runs
+			// resolve_video_name() over the stem *with the folder and the one
+			// above it*, so for an uninformative name it has an answer this
+			// parse of the bare stem does not — and, more importantly, it is
+			// the same string the per-file lookup this replaced composed. The
+			// stored `query` is what decides whether a cached answer still
+			// applies, so asking differently would re-ask TMDB about every
+			// loose film in the library to arrive back where it started.
+			//
+			// The explicit [tmdbid=] marker is still read from the stem: it is
+			// not part of tmdb_query_key(), so it invalidates nothing, and the
+			// per-file lookup never supported it.
+			std::string title = adat.loose ? first->title
+			                  : (vn.title.empty() ? adat.title : vn.title);
+			int         year  = adat.loose ? first->year : vn.year;
 			int explicit_id = 0;
 			if (!vn.tmdb_id.empty()) { try { explicit_id = std::stoi(vn.tmdb_id); }
 			                           catch (...) {} }
 
+			// The key stays adat.path, which for a file-album is the media
+			// file's own path — the very key the per-file lookup used, so
+			// every cached match and every cached rejection survives.
 			auto row = tmdb_lookup(store, tmdb, store.rel_path(adat.path),
-			                        title, vn.year, is_tv, explicit_id);
+			                        title, year, is_tv, explicit_id);
 			if (row.status != "matched") continue;
 
 			adat.tmdb_title = row.title;
 			adat.tmdb_year  = row.year;
 			adat.overview   = row.overview;
+
+			// A loose file *is* its album, so the answer is about the track as
+			// much as about the album and both carry it. A directory album is
+			// the opposite case and must not do this: stamping a film's title
+			// on every row would rename each episode of a season after the
+			// show.
+			if (adat.loose && !row.title.empty())
+				for (auto& sdat : adat.songs) {
+					if (!sdat.is_video) continue;
+					sdat.title = row.title;
+					if (row.year > 0) sdat.year = row.year;
+					}
 
 			// A film is one work however many parts or episodes it is split
 			// into, so its genres belong to every video in the folder. Audio
@@ -2331,31 +2422,6 @@ static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
 				for (auto& sdat : adat.songs)
 					if (sdat.is_video) sdat.cover.clear();
 				}
-			continue;
-			}
-
-		// Loose files: each is its own work, so each is its own question.
-		for (auto& sdat : adat.songs) {
-			if (!sdat.is_video) continue;
-			std::string rel = store.rel_path(sdat.path);
-			auto row = tmdb_lookup(store, tmdb, rel, sdat.title, sdat.year,
-			                        sdat.season > 0, 0);
-			if (row.status != "matched") continue;
-			if (!row.title.empty()) {
-				sdat.title = row.title;
-				if (row.year > 0) sdat.year = row.year;
-				}
-			if (std::vector<std::string> gs = split_genres(row.genre);
-			        !gs.empty()) {
-				sdat.genres      = gs;
-				sdat.genre       = gs.front();
-				sdat.genres_read = true;
-				}
-			// No manual check here: setCoverArt is folder-level, so an upload
-			// on a section marks the section's own album row and each film in
-			// it still takes its own poster.
-			if (tmdb_fetch_poster(store, tmdb, row, rel, sdat.mtime))
-				sdat.cover = sdat.path;
 			}
 		}
 	}
@@ -2572,6 +2638,15 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 		// does not — and a library scanned before any of them existed is
 		// back-filled here rather than needing every file touched.
 		//
+		// **Which album a song belongs to is the same kind of fact**, and it
+		// is written here for the same reason.  A loose file is its own album
+		// now; before that it belonged to one album on the whole section, so
+		// on an upgrade every loose row in the library has to move — and none
+		// of those files has changed, so this is the only branch that will
+		// ever see them.  Omitting it leaves the songs on the old section
+		// album and every new file-album empty, on a library that reports a
+		// clean scan.
+		//
 		// The track number is the same kind of thing, and is back-filled only
 		// into a row that has none: unlike the video title below, a tag is the
 		// authority here and the row is already holding it, so only an untagged
@@ -2585,7 +2660,9 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 			"                                     AND ? > 0"
 			"                                THEN ? ELSE track_number END,"
 			"                 season = ?,"
-			"                 cover_path = ?"
+			"                 cover_path = ?,"
+			"                 album_id = ?,"
+			"                 folder_id = ?"
 			" WHERE path = ?");
 		upd.bind(1, sdat.disc_number);
 		upd.bind(2, sdat.disc_number);
@@ -2593,7 +2670,9 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 		upd.bind(4, sdat.track_nr);
 		upd.bind(5, sdat.season);
 		upd.bind(6, rel_cover);
-		upd.bind(7, rel_path);
+		upd.bind(7, album_id);
+		upd.bind(8, folder_id);
+		upd.bind(9, rel_path);
 		upd.exec();
 
 		// The back-fill: songs.artist is NULL on every row scanned before the
@@ -2721,6 +2800,148 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 //   4. Short write txns: one per album, plus the unvisited-mark and the
 //      artist-level prune.  Per-album commits keep the mutex hold time
 //      bounded so REST handlers stay responsive during the scan.
+void MediaStore::commit_album(const AlbumReadData& adat, int parent_folder_id,
+                               int artist_id,
+                               const std::set<std::string>& chapter_keys)
+	{
+	PhaseTimer pt(scan_times_.write);
+		{
+		std::lock_guard<std::mutex> lock(db_mutex_);
+		SQLite::Transaction txn(db_music_);
+
+		// Every album gets its own folder row under the folder above it,
+		// including a loose file's — whose row names the file itself, and
+		// so needs the title passed in rather than derived from
+		// "film.mp4".  What this replaced special-cased the loose album,
+		// whose folder *was* the artist folder and could not be upserted
+		// with itself as its parent.
+		int album_folder_id = upsert_folder(fs::path(adat.path),
+		                                     parent_folder_id,
+		                                     adat.loose ? adat.title : "");
+		int album_id        = upsert_album(album_folder_id, adat.title, artist_id, 0, "");
+		apply_album_video_name(db_music_, album_id, adat.title, adat.songs,
+		                        adat.tmdb_title, adat.tmdb_year);
+		apply_album_overview(db_music_, album_folder_id, adat.overview);
+
+		if (!adat.cover.empty()) {
+			SQLite::Statement upd(db_music_,
+				"UPDATE albums SET cover_path = ? WHERE id = ?");
+			upd.bind(1, strip_root(adat.cover));
+			upd.bind(2, album_id);
+			upd.exec();
+			}
+
+		// Build path→folder_id map for this album's disc dirs.
+		std::unordered_map<std::string, int> fid_map;
+		fid_map[adat.path] = album_folder_id;
+		int disc_count = (int)adat.disc_paths.size();
+		for (int dn = 0; dn < disc_count; ++dn) {
+			int disc_fid = upsert_folder(fs::path(adat.disc_paths[dn]), album_folder_id);
+			fid_map[adat.disc_paths[dn]] = disc_fid;
+			}
+
+		// Songs get the same mark→sweep the folders get, scoped to exactly
+		// this album's folders, because the caller's folder-level prune
+		// cannot reach a track deleted from an album that still exists.
+		//
+		// It is an id list rather than "parent_id = album_folder_id"
+		// because a disc folder is a child and an album's other children
+		// are not its own.  That mattered more under the rule this
+		// replaced, where the loose-file album's children were the
+		// section's *other* albums; a file-album has no children at all.
+		std::string fid_list;
+		for (auto& [_, fid] : fid_map) {
+			if (!fid_list.empty()) fid_list += ",";
+			fid_list += std::to_string(fid);
+			}
+		db_music_.exec(("UPDATE songs SET last_scanned = NULL"
+		                " WHERE folder_id IN (" + fid_list + ")").c_str());
+
+		for (auto& sdat : adat.songs) {
+			auto fit = fid_map.find(sdat.folder_path);
+			int  fid = (fit != fid_map.end()) ? fit->second : album_folder_id;
+			upsert_song_with_data(db_music_, sdat, album_id, fid, artist_id,
+			                       strip_root(sdat.path),
+			                       sdat.cover.empty() ? "" : strip_root(sdat.cover),
+			                       chapter_keys);
+			// getScanStatus's `count`.  Counted here rather than after the
+			// commit below so the number moves while a large album is
+			// still being written; an album whose transaction then fails
+			// leaves it a little high, which is the right way round for a
+			// progress figure.
+			scan_items_.fetch_add(1);
+			}
+
+		db_music_.exec(("DELETE FROM songs WHERE last_scanned IS NULL"
+		                " AND folder_id IN (" + fid_list + ")").c_str());
+		if (int n = db_music_.getChanges(); n > 0)
+			std::cout << stamp() << "  pruned " << n << " songs from "
+			          << fs::path(adat.path).filename().string() << std::endl;
+
+		// Before the album's year is aggregated below, so a year a person
+		// typed on a track is the one the album inherits.
+		apply_song_meta_overrides(db_music_, album_id);
+
+		// The two ids are different entities and both are wanted: the
+		// release is what a client means by an album's MBID, the release
+		// group is what getAlbumInfo2 can actually look up.
+		apply_album_mbid(db_music_, album_id, "musicbrainz_id",
+		                  "musicbrainz_album_id");
+		apply_album_mbid(db_music_, album_id, "musicbrainz_releasegroup_id",
+		                  "musicbrainz_releasegroup_id");
+
+		if (disc_count > 1) {
+			SQLite::Statement upd(db_music_, "UPDATE albums SET disc_count=? WHERE id=?");
+			upd.bind(1, disc_count);
+			upd.bind(2, album_id);
+			upd.exec();
+			}
+		{
+		SQLite::Statement upd(db_music_,
+			"UPDATE albums SET year = ("
+			"  SELECT year FROM songs WHERE album_id = ? AND year > 0"
+			"  ORDER BY disc_number, track_number LIMIT 1"
+			") WHERE id = ?");
+		upd.bind(1, album_id);
+		upd.bind(2, album_id);
+		upd.exec();
+		}
+		{
+		// The album's genre is the commonest one among its tracks.
+		//
+		// upsert_album() could not carry this: it is INSERT OR IGNORE, so
+		// after the first scan its insert is silently ignored and the
+		// value would never land -- the same trap apply_album_mbid() and
+		// track_number document. Both call sites in fact pass "", so
+		// albums.genre was empty for every album ever scanned and
+		// getAlbumList type=byGenre -- which filters on it -- could match
+		// nothing but the empty string.
+		//
+		// Commonest rather than apply_album_mbid()'s "one distinct value
+		// on every track": disagreement there means a wrong MBID and is
+		// worth refusing, while an album whose tracks are nine Rock and
+		// one Pop is a Rock album, not an ungenred one. Grouped on the
+		// folded spelling so "Rock" and "rock" count once, and MIN() picks
+		// a representative from within a group whose members differ only
+		// in case and padding. Ordering by the fold after the count makes
+		// a tie deterministic rather than whatever the query plan left.
+		SQLite::Statement upd(db_music_,
+			"UPDATE albums SET genre = ("
+			"  SELECT MIN(TRIM(s.genre)) FROM songs s"
+			"   WHERE s.album_id = ?1 AND TRIM(COALESCE(s.genre,'')) <> ''"
+			"   GROUP BY LOWER(TRIM(s.genre))"
+			"   ORDER BY COUNT(*) DESC, LOWER(TRIM(s.genre))"
+			"   LIMIT 1"
+			") WHERE id = ?1");
+		upd.bind(1, album_id);
+		upd.exec();
+		}
+
+		txn.commit();
+		scan_times_.albums.fetch_add(1);
+		}
+	}
+
 void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	{
 	// SQL `path LIKE ?` queries below compare against the stored-form column,
@@ -2744,7 +2965,6 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 
 	// ---- Phase 1: walk disk (no lock) ----
 	std::vector<AlbumReadData> albums;
-	bool had_loose = false;   // media files directly in the artist folder
 	// A candidate disc subdirectory, with the media it was found to hold.
 	struct DiscDir { fs::path path; std::vector<fs::path> files; };
 	if (exists) {
@@ -2843,26 +3063,39 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 
 		// Media files sitting directly in the artist/section folder, with no
 		// folder of their own — one documentary, one home video, one clip.
-		// The rule is Subsonic's and Airsonic's: a folder that directly
-		// contains media is itself an album.  So the section becomes an album
-		// alongside the albums below it, and does not stop being their parent.
-		AlbumReadData loose;
+		// **Each is an album of its own, holding that one track**, whose
+		// `folders` row is the media file's own path.  A file can never
+		// collide with a directory, so folders.path stays UNIQUE and
+		// albums.folder_id needs no schema change; the section itself is left
+		// as a pure parent with no albums row.
+		//
+		// What this replaced was Subsonic's and Airsonic's rule — a folder
+		// that directly contains media is itself an album — under which every
+		// loose file in a section collapsed into one album named after the
+		// section.  That made the section its own album *and* the parent of
+		// the albums below it, which is where the parenting, prune and
+		// flattening special cases all came from, and it left a loose film
+		// with no id of its own to star, move or set art on.  setCoverArt is
+		// folder-level, so a wrongly matched film could not be given the right
+		// poster at all — and setCoverArt is the only remedy for a bad TMDB
+		// match.
 		for (auto& e : fs::directory_iterator(artist_path)) {
 			if (!e.is_regular_file() || !is_media_file(e.path())) continue;
 			// "._movie.mp4" is an AppleDouble resource fork, not a film.
 			auto name = e.path().filename().string();
 			if (!name.empty() && name.front() == '.') continue;
-			loose.songs.push_back(read_song_file(e.path(), artist_path.string(), 0));
-			}
-		if (!loose.songs.empty()) {
-			loose.path  = artist_path.string();
-			loose.title = artist_path.filename().string();
-			std::replace(loose.title.begin(), loose.title.end(), '_', ' ');
-			// Non-recursive: this folder's subdirectories are other albums,
-			// and their covers are not this one's.
-			loose.cover = find_cover(artist_path, false);
+
+			AlbumReadData loose;
+			loose.loose = true;
+			loose.path  = e.path().string();
+			loose.title = loose_album_title(e.path());
+			// The file's own sidecar image, never find_cover(): a folder cover
+			// belongs to the whole section, and find_cover()'s
+			// directory_iterator is uncaught, so handing it a file would throw
+			// out of Phase 1.
+			loose.cover = find_song_cover(e.path());
+			loose.songs.push_back(read_song_file(e.path(), loose.path, 0));
 			albums.push_back(std::move(loose));
-			had_loose = true;
 			}
 		}
 
@@ -2946,7 +3179,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			// Caught rather than allowed to escape: this is a thread's
 			// top-level function, so a contended store_video_meta() would be
 			// std::terminate instead of the "Scan aborted" it is today.
-			try { lookup_video_meta(*this, tmdb_, albums, artist_path.string()); }
+			try { lookup_video_meta(*this, tmdb_, albums); }
 			catch (...) { tmdb_err = std::current_exception(); }
 			});
 
@@ -3006,7 +3239,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// the order they have always had. See the note above Phase 3.
 	if (want_tmdb && art_on) {
 		PhaseTimer pt(scan_times_.tmdb);
-		lookup_video_meta(*this, tmdb_, albums, artist_path.string());
+		lookup_video_meta(*this, tmdb_, albums);
 		}
 
 	// ---- Phase 4: short write txns ----
@@ -3053,136 +3286,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			// unvisited, and pruning on incomplete information would delete an
 			// album that is present on disk.
 			try {
-			PhaseTimer pt(scan_times_.write);
-			{
-			std::lock_guard<std::mutex> lock(db_mutex_);
-			SQLite::Transaction txn(db_music_);
-
-			// The loose-file album *is* the artist folder, so it must not be
-			// upserted with itself as its parent.
-			int album_folder_id = adat.path == artist_path.string()
-			                    ? artist_folder_id
-			                    : upsert_folder(fs::path(adat.path), artist_folder_id);
-			int album_id        = upsert_album(album_folder_id, adat.title, artist_id, 0, "");
-			apply_album_video_name(db_music_, album_id, adat.title, adat.songs,
-			                        adat.tmdb_title, adat.tmdb_year);
-			apply_album_overview(db_music_, album_folder_id, adat.overview);
-
-			if (!adat.cover.empty()) {
-				SQLite::Statement upd(db_music_,
-					"UPDATE albums SET cover_path = ? WHERE id = ?");
-				upd.bind(1, strip_root(adat.cover));
-				upd.bind(2, album_id);
-				upd.exec();
-				}
-
-			// Build path→folder_id map for this album's disc dirs.
-			std::unordered_map<std::string, int> fid_map;
-			fid_map[adat.path] = album_folder_id;
-			int disc_count = (int)adat.disc_paths.size();
-			for (int dn = 0; dn < disc_count; ++dn) {
-				int disc_fid = upsert_folder(fs::path(adat.disc_paths[dn]), album_folder_id);
-				fid_map[adat.disc_paths[dn]] = disc_fid;
-				}
-
-			// Songs get the same mark→sweep the folders get, scoped to exactly
-			// this album's folders.  The folder-level prune below cannot reach
-			// a track deleted from an album that still exists, and it can
-			// never reach the loose-file album at all, whose folder is the
-			// artist folder and is always re-stamped.  Listing the ids rather
-			// than "parent_id = album_folder_id" matters for that album: its
-			// child folders are the section's *other* albums.
-			std::string fid_list;
-			for (auto& [_, fid] : fid_map) {
-				if (!fid_list.empty()) fid_list += ",";
-				fid_list += std::to_string(fid);
-				}
-			db_music_.exec(("UPDATE songs SET last_scanned = NULL"
-			                " WHERE folder_id IN (" + fid_list + ")").c_str());
-
-			for (auto& sdat : adat.songs) {
-				auto fit = fid_map.find(sdat.folder_path);
-				int  fid = (fit != fid_map.end()) ? fit->second : album_folder_id;
-				upsert_song_with_data(db_music_, sdat, album_id, fid, artist_id,
-				                       strip_root(sdat.path),
-				                       sdat.cover.empty() ? "" : strip_root(sdat.cover),
-				                       chapter_keys);
-				// getScanStatus's `count`.  Counted here rather than after the
-				// commit below so the number moves while a large album is
-				// still being written; an album whose transaction then fails
-				// leaves it a little high, which is the right way round for a
-				// progress figure.
-				scan_items_.fetch_add(1);
-				}
-
-			db_music_.exec(("DELETE FROM songs WHERE last_scanned IS NULL"
-			                " AND folder_id IN (" + fid_list + ")").c_str());
-			if (int n = db_music_.getChanges(); n > 0)
-				std::cout << stamp() << "  pruned " << n << " songs from "
-				          << fs::path(adat.path).filename().string() << std::endl;
-
-			// Before the album's year is aggregated below, so a year a person
-			// typed on a track is the one the album inherits.
-			apply_song_meta_overrides(db_music_, album_id);
-
-			// The two ids are different entities and both are wanted: the
-			// release is what a client means by an album's MBID, the release
-			// group is what getAlbumInfo2 can actually look up.
-			apply_album_mbid(db_music_, album_id, "musicbrainz_id",
-			                  "musicbrainz_album_id");
-			apply_album_mbid(db_music_, album_id, "musicbrainz_releasegroup_id",
-			                  "musicbrainz_releasegroup_id");
-
-			if (disc_count > 1) {
-				SQLite::Statement upd(db_music_, "UPDATE albums SET disc_count=? WHERE id=?");
-				upd.bind(1, disc_count);
-				upd.bind(2, album_id);
-				upd.exec();
-				}
-			{
-			SQLite::Statement upd(db_music_,
-				"UPDATE albums SET year = ("
-				"  SELECT year FROM songs WHERE album_id = ? AND year > 0"
-				"  ORDER BY disc_number, track_number LIMIT 1"
-				") WHERE id = ?");
-			upd.bind(1, album_id);
-			upd.bind(2, album_id);
-			upd.exec();
-			}
-			{
-			// The album's genre is the commonest one among its tracks.
-			//
-			// upsert_album() could not carry this: it is INSERT OR IGNORE, so
-			// after the first scan its insert is silently ignored and the
-			// value would never land -- the same trap apply_album_mbid() and
-			// track_number document. Both call sites in fact pass "", so
-			// albums.genre was empty for every album ever scanned and
-			// getAlbumList type=byGenre -- which filters on it -- could match
-			// nothing but the empty string.
-			//
-			// Commonest rather than apply_album_mbid()'s "one distinct value
-			// on every track": disagreement there means a wrong MBID and is
-			// worth refusing, while an album whose tracks are nine Rock and
-			// one Pop is a Rock album, not an ungenred one. Grouped on the
-			// folded spelling so "Rock" and "rock" count once, and MIN() picks
-			// a representative from within a group whose members differ only
-			// in case and padding. Ordering by the fold after the count makes
-			// a tie deterministic rather than whatever the query plan left.
-			SQLite::Statement upd(db_music_,
-				"UPDATE albums SET genre = ("
-				"  SELECT MIN(TRIM(s.genre)) FROM songs s"
-				"   WHERE s.album_id = ?1 AND TRIM(COALESCE(s.genre,'')) <> ''"
-				"   GROUP BY LOWER(TRIM(s.genre))"
-				"   ORDER BY COUNT(*) DESC, LOWER(TRIM(s.genre))"
-				"   LIMIT 1"
-				") WHERE id = ?1");
-			upd.bind(1, album_id);
-			upd.exec();
-			}
-
-			txn.commit();
-			scan_times_.albums.fetch_add(1);
-			}
+			commit_album(adat, artist_folder_id, artist_id, chapter_keys);
 			std::cout << stamp() << "  " << fs::path(adat.path).filename().string() << std::endl;
 			}
 			catch (const std::exception& e) {
@@ -3308,25 +3412,33 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	if (n > 0)
 		std::cout << stamp() << "  pruned " << n << " folders" << std::endl;
 	}
-	// The loose-file album hangs off the artist folder itself, which is never
-	// marked unvisited, so nothing above can reach it.  When the walk found no
-	// loose files at all no album transaction ran for it either, so its songs
-	// have to go from here; otherwise that transaction has already swept them.
+	// **The section folder is a parent and nothing else**, since a loose file
+	// is its own album now.  So no song may point at it and it may not carry
+	// an albums row, and both deletes are unconditional rather than guarded on
+	// anything this scan observed.
+	//
+	// They are the whole of the upgrade path, and they cannot be reached by
+	// the prefix prune above: the mark is `path LIKE '<section>/%'`, which by
+	// construction does not match `<section>` itself.  A library scanned under
+	// the old rule has one album on every section holding loose files, and its
+	// songs have already been re-pointed to their own file-albums by the
+	// unchanged branch of upsert_song_with_data() a few lines above — so what
+	// is left here is an empty album row and, for any loose file deleted from
+	// disk since, its orphaned song.
 	std::string artist_rel = strip_root(artist_path.string());
-	if (!had_loose) {
-		SQLite::Statement s(db_music_,
-			"DELETE FROM songs"
-			" WHERE folder_id = (SELECT id FROM folders WHERE path = ?)");
-		s.bind(1, artist_rel);
-		s.exec();
-		if (int n = db_music_.getChanges(); n > 0)
-			std::cout << stamp() << "  pruned " << n << " loose songs" << std::endl;
-		}
+	{
+	SQLite::Statement s(db_music_,
+		"DELETE FROM songs"
+		" WHERE folder_id = (SELECT id FROM folders WHERE path = ?)");
+	s.bind(1, artist_rel);
+	s.exec();
+	if (int n = db_music_.getChanges(); n > 0)
+		std::cout << stamp() << "  pruned " << n << " loose songs" << std::endl;
+	}
 	{
 	SQLite::Statement s(db_music_,
 		"DELETE FROM albums"
-		" WHERE folder_id = (SELECT id FROM folders WHERE path = ?)"
-		"   AND NOT EXISTS (SELECT 1 FROM songs WHERE songs.album_id = albums.id)");
+		" WHERE folder_id = (SELECT id FROM folders WHERE path = ?)");
 	s.bind(1, artist_rel);
 	s.exec();
 	}
@@ -3472,7 +3584,10 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 void MediaStore::scan_root_files(const RootRec& root)
 	{
 	// ---- Phase 1: walk the root itself (no lock) ----
-	std::vector<SongReadData> songs;
+	// One album per file, exactly as scan_artist_dir() builds them for a
+	// section: a loose file is its own album whatever it is loose in.  The
+	// root plays the artist, and the file-albums are its level-1 children.
+	std::vector<AlbumReadData> albums;
 	std::error_code ec;
 	{
 	PhaseTimer pt(scan_times_.walk);
@@ -3480,14 +3595,34 @@ void MediaStore::scan_root_files(const RootRec& root)
 		if (!e.is_regular_file() || !is_media_file(e.path())) continue;
 		auto name = e.path().filename().string();
 		if (!name.empty() && name.front() == '.') continue;
-		songs.push_back(read_song_file(e.path(), root.cfg.path, 0));
+		AlbumReadData adat;
+		adat.loose = true;
+		adat.path  = e.path().string();
+		adat.title = loose_album_title(e.path());
+		adat.cover = find_song_cover(e.path());
+		adat.songs.push_back(read_song_file(e.path(), adat.path, 0));
+		albums.push_back(std::move(adat));
 		}
 	}
 	if (ec) return;   // scan() has already reported the unreadable root
 
+	// A flat view of the same songs, for the phases that do not care which
+	// album a file belongs to.  Valid because nothing appends to `albums`, or
+	// to any adat.songs, between here and Phase 4 — the same invariant
+	// scan_artist_dir()'s Phase 3 work list depends on.
+	std::vector<SongReadData*> all_songs;
+	for (auto& adat : albums)
+		for (auto& sdat : adat.songs) all_songs.push_back(&sdat);
+
 	// ---- Phase 2: brief read lock — identify changed files ----
-	// Keyed by folder rather than by path prefix: "<root>/%" is the entire
-	// root, and only the files directly in it belong to this album.
+	// Keyed on the *path shape* — directly in the root and not below a
+	// subdirectory — rather than on the folder id, which is what it used to
+	// be.  Under the old rule every such song hung off the root's own folder
+	// row and "f.path = <root>" found them all; each now hangs off its own
+	// file-album instead, so a folder-keyed query would return nothing, take
+	// the songs.empty() && known.empty() early return, and never prune a
+	// stale file-album again.  The shape covers both spellings, which is what
+	// makes an upgrade work.
 	std::unordered_map<std::string, KnownSong> known_songs;
 	{
 	PhaseTimer pt(scan_times_.known);
@@ -3496,19 +3631,20 @@ void MediaStore::scan_root_files(const RootRec& root)
 	// no readable tag and never will, cannot sit in the back-fill set for ever.
 	SQLite::Statement q(db_music_,
 		"SELECT s.path, s.file_modified, s.artist, s.is_video FROM songs s"
-		" JOIN folders f ON f.id = s.folder_id WHERE f.path = ?");
-	q.bind(1, root.cfg.name);
+		" WHERE s.path LIKE ? AND s.path NOT LIKE ?");
+	q.bind(1, root.cfg.name + "/%");
+	q.bind(2, root.cfg.name + "/%/%");
 	while (q.executeStep())
 		known_songs[join_root(q.getColumn(0).getString())] =
 			{ q.getColumn(1).getInt64(),
 			  q.getColumn(2).isNull() && q.getColumn(3).getInt() == 0 };
 	}
-	if (songs.empty() && known_songs.empty()) return;
+	if (albums.empty() && known_songs.empty()) return;
 
-	for (auto& sdat : songs) {
-		auto it = known_songs.find(sdat.path);
-		sdat.changed = (it == known_songs.end() || it->second.mtime != sdat.mtime);
-		sdat.artist_missing = (it != known_songs.end() && it->second.artist_null);
+	for (auto* sdat : all_songs) {
+		auto it = known_songs.find(sdat->path);
+		sdat->changed = (it == known_songs.end() || it->second.mtime != sdat->mtime);
+		sdat->artist_missing = (it != known_songs.end() && it->second.artist_null);
 		}
 
 	// As in scan_artist_dir(). The prefix is the whole root here, which is
@@ -3521,8 +3657,8 @@ void MediaStore::scan_root_files(const RootRec& root)
 	{
 	PhaseTimer pt(scan_times_.meta);
 	std::vector<SongReadData*> work;
-	for (auto& sdat : songs)
-		if (sdat.changed || sdat.artist_missing) work.push_back(&sdat);
+	for (auto* sdat : all_songs)
+		if (sdat->changed || sdat->artist_missing) work.push_back(sdat);
 
 	SongReadStats stats{ scan_times_.files,      scan_times_.videos,
 	                      scan_times_.meta_audio, scan_times_.meta_video };
@@ -3531,89 +3667,150 @@ void MediaStore::scan_root_files(const RootRec& root)
 		});
 	}
 
-	renumber_unseasoned(songs);
+	for (auto& adat : albums) renumber_unseasoned(adat.songs);
 
 	// ---- Phase 3b: cover art for videos that have none (no lock) ----
 	// The prefix takes in the whole root rather than just its loose files.
 	// That over-fetches (path, mtime) pairs for the sections below, which is
 	// cheap, and there is no narrower LIKE — "<root>/%" is the entire root,
 	// which is the same reason this function exists at all.
-	std::string root_art;
 	if (video_art_ && video_art_->enabled()) {
 		PhaseTimer pt(scan_times_.art);
-		auto known = load_video_art_keys(root.cfg.name + "/%");
-		root_art   = make_video_art_songs(*this, *video_art_, songs, known);
+		make_video_art(*this, *video_art_, albums, root.cfg.name + "/%");
 		}
 
 	// ---- Phase 3c: identify films online (no lock) ----
-	// Every file directly in a root is a loose file, so this is always the
-	// per-song case; wrapping them in a one-album vector reuses that branch
-	// rather than repeating it. The root itself plays artist and album, so its
-	// path is what marks the album as the loose one.
+	// No wrapping and no special case left: these *are* albums, and every one
+	// of them is a file-album, which is the case lookup_video_meta() now
+	// handles as its ordinary one.
 	if (tmdb_.configured() && root.cfg.type == "categories") {
 		PhaseTimer pt(scan_times_.tmdb);
-		std::vector<AlbumReadData> one;
-		one.push_back(AlbumReadData{});
-		one.front().path  = root.cfg.path;
-		one.front().songs = std::move(songs);
-		lookup_video_meta(*this, tmdb_, one, root.cfg.path);
-		songs = std::move(one.front().songs);
+		lookup_video_meta(*this, tmdb_, albums);
 		}
 
-	// ---- Phase 4: one write txn ----
-	// A contended commit must not take the rest of the scan with it; the next
-	// pass redoes this root's loose files from scratch anyway.
+	// ---- Phase 4: write ----
+	// One transaction per album, as in scan_artist_dir(), rather than the
+	// single one this used to be: commit_album() owns its own, and a
+	// contended commit must not take the whole root with it.
+	bool album_failed = false;
+	int  folder_id    = -1;
+	int  artist_id    = -1;
 	try {
-	PhaseTimer pt(scan_times_.write);
+		PhaseTimer pt(scan_times_.write);
+		std::lock_guard<std::mutex> lock(db_mutex_);
+		SQLite::Transaction txn(db_music_);
+		folder_id = upsert_folder(fs::path(root.cfg.path), -1);
+		artist_id = upsert_artist(root.cfg.name);
+
+		// Two marks, and they cover the two shapes a loose file can be in.
+		//
+		// The songs one is the upgrade path: under the old rule every loose
+		// file in a root hung off the root's own folder row, and after this
+		// pass none may.  Whatever is still marked at the end was not
+		// re-homed, which means its file is gone.
+		//
+		// The folders one is the ordinary mark→sweep, restricted to level-1
+		// rows that name a media file.  **That test is `folders.path` being a
+		// `songs.path`, not "has an albums row"** — the latter is true of a
+		// file-album but it is also true of a *section* on a database scanned
+		// under the old rule, and marking a section here would sweep a folder
+		// that still has children.  folders.parent_id has no ON DELETE
+		// CASCADE, so that is FOREIGN KEY constraint failed and a rolled-back
+		// prune: the exact failure the album_info_cache note in
+		// scan_artist_dir() records.
+		db_music_.exec(("UPDATE songs SET last_scanned = NULL WHERE folder_id = "
+		                + std::to_string(folder_id)).c_str());
+		SQLite::Statement m(db_music_,
+			"UPDATE folders SET last_scanned = NULL"
+			" WHERE parent_id = ?"
+			"   AND EXISTS (SELECT 1 FROM songs s WHERE s.path = folders.path)");
+		m.bind(1, folder_id);
+		m.exec();
+		txn.commit();
+		}
+	catch (const std::exception& e) {
+		std::cout << stamp() << "Scan: loose files in " << root.cfg.name
+		          << ": skipped, " << e.what() << std::endl;
+		return;
+		}
+
+	for (auto& adat : albums) {
+		try {
+			commit_album(adat, folder_id, artist_id, chapter_keys);
+			}
+		catch (const std::exception& e) {
+			std::cout << stamp() << "  " << fs::path(adat.path).filename().string()
+			          << ": skipped, " << e.what() << std::endl;
+			album_failed = true;
+			}
+		}
+
+	// Same rule as scan_artist_dir()'s prune: a failed album leaves rows
+	// marked unvisited that are not in fact gone, and pruning on that would
+	// delete a file that is sitting right there.
+	if (album_failed) {
+		std::cout << stamp() << "  prune skipped: an album failed to commit"
+		          << std::endl;
+		return;
+		}
+
+	try {
+	PhaseTimer pt(scan_times_.prune);
+	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Transaction txn(db_music_);
+	std::string fid = std::to_string(folder_id);
 
-	int         folder_id = upsert_folder(fs::path(root.cfg.path), -1);
-	std::string fid       = std::to_string(folder_id);
-
-	db_music_.exec(("UPDATE songs SET last_scanned = NULL WHERE folder_id = "
-	                + fid).c_str());
-
-	if (!songs.empty()) {
-		int artist_id = upsert_artist(root.cfg.name);
-		// No apply_album_video_name() here, unlike the album commit in
-		// scan_artist_dir(): this album's title is the *root's name*, which is
-		// configuration the user chose and a durable identifier, not a
-		// filename that might be carrying release junk.
-		int album_id  = upsert_album(folder_id, root.cfg.name, artist_id, 0, "");
-		// Non-recursive: the subdirectories of a root are its sections, and
-		// their covers are not this album's.
-		std::string cover = find_cover(fs::path(root.cfg.path), false);
-		if (cover.empty()) cover = root_art;
-		if (!cover.empty()) {
-			SQLite::Statement upd(db_music_,
-				"UPDATE albums SET cover_path = ? WHERE id = ?");
-			upd.bind(1, strip_root(cover));
-			upd.bind(2, album_id);
-			upd.exec();
-			}
-		for (auto& sdat : songs)
-			upsert_song_with_data(db_music_, sdat, album_id, folder_id, artist_id,
-			                       strip_root(sdat.path),
-			                       sdat.cover.empty() ? "" : strip_root(sdat.cover),
-			                       chapter_keys);
-
-		// Loose files are songs like any other, and are the one place an
-		// override would otherwise be silently dropped.
-		apply_song_meta_overrides(db_music_, album_id);
-		apply_album_mbid(db_music_, album_id, "musicbrainz_id",
-		                  "musicbrainz_album_id");
-		apply_album_mbid(db_music_, album_id, "musicbrainz_releasegroup_id",
-		                  "musicbrainz_releasegroup_id");
+	// The file-albums that have gone.  Collected as ids first, because the
+	// predicate that identifies them — the folder's path is a song's path —
+	// stops holding the moment the songs are deleted.
+	std::string dead;
+	{
+	SQLite::Statement q(db_music_,
+		"SELECT id FROM folders WHERE parent_id = ? AND last_scanned IS NULL"
+		"   AND EXISTS (SELECT 1 FROM songs s WHERE s.path = folders.path)");
+	q.bind(1, folder_id);
+	while (q.executeStep()) {
+		if (!dead.empty()) dead += ",";
+		dead += std::to_string(q.getColumn(0).getInt());
+		}
+	}
+	if (!dead.empty()) {
+		// Ordered exactly as scan_artist_dir()'s prefix prune is, and for the
+		// same reason: both info caches REFERENCE folders(id) with no cascade,
+		// so a leftover row makes the folder delete throw and rolls the whole
+		// transaction back.
+		db_music_.exec(("DELETE FROM songs WHERE folder_id IN (" + dead + ")").c_str());
+		db_music_.exec(("DELETE FROM albums WHERE folder_id IN (" + dead + ")").c_str());
+		db_music_.exec(("DELETE FROM album_info_cache WHERE folder_id IN (" + dead + ")").c_str());
+		db_music_.exec(("DELETE FROM artist_info_cache WHERE folder_id IN (" + dead + ")").c_str());
+		db_music_.exec(("DELETE FROM cover_thumbs WHERE EXISTS ("
+		                "  SELECT 1 FROM folders f WHERE f.id IN (" + dead + ")"
+		                "    AND (cover_thumbs.source_key = f.path"
+		                "      OR cover_thumbs.source_key LIKE f.path || '/%'))").c_str());
+		db_music_.exec(("DELETE FROM folders WHERE id IN (" + dead + ")").c_str());
+		std::cout << stamp() << "  pruned loose albums from "
+		          << root.cfg.name << std::endl;
 		}
 
+	// What is left marked on the root's own folder row is a song an old-rule
+	// scan put there and this pass did not re-home — its file is gone.  The
+	// album row beside it is the old rule's one-album-per-root, which goes as
+	// soon as nothing points at it.  Together they are the upgrade.
 	db_music_.exec(("DELETE FROM songs WHERE last_scanned IS NULL"
 	                " AND folder_id = " + fid).c_str());
 	if (int n = db_music_.getChanges(); n > 0)
 		std::cout << stamp() << "  pruned " << n << " loose songs from "
 		          << root.cfg.name << std::endl;
-	// Same rule as the artist prune: an image outlives its file only until the
-	// next scan notices there is no song at that path any more.
+	db_music_.exec(("DELETE FROM albums WHERE folder_id = " + fid +
+	                " AND NOT EXISTS (SELECT 1 FROM songs"
+	                " WHERE songs.album_id = albums.id)").c_str());
+
+	// The derived caches go last, after every DELETE FROM songs *and* every
+	// DELETE FROM folders above — they ask whether anything still owns a path,
+	// so a sweep that ran earlier would keep rows whose owner was about to go.
+	// video_meta's folders clause is load-bearing here now, unlike before: a
+	// file-album's path is a folders.path as well as a songs.path.
 	{
 	SQLite::Statement s(db_music_,
 		"DELETE FROM video_art WHERE path LIKE ?"
@@ -3622,9 +3819,6 @@ void MediaStore::scan_root_files(const RootRec& root)
 	s.exec();
 	}
 	{
-	// Loose files in a root are looked up per song, so unlike the artist
-	// prune there are no folder-keyed rows in this prefix — but the folders
-	// clause costs nothing and keeps the two prunes reading the same way.
 	SQLite::Statement s(db_music_,
 		"DELETE FROM video_meta WHERE path LIKE ?"
 		"  AND path NOT IN (SELECT path FROM songs)"
@@ -3670,32 +3864,32 @@ void MediaStore::scan_root_files(const RootRec& root)
 	s.bind(2, root.cfg.name + "/%/%");
 	s.exec();
 	}
-	// A root's album can only ever be the loose-file one, so it goes when the
-	// last loose file does.
-	db_music_.exec(("DELETE FROM albums WHERE folder_id = " + fid +
-	                " AND NOT EXISTS (SELECT 1 FROM songs"
-	                " WHERE songs.album_id = albums.id)").c_str());
 	txn.commit();
-	// Guarded, unlike the album loop's: this transaction runs for every root,
-	// and a root with no loose files at all commits a deletion rather than an
-	// album.  Counting it would report an album that is not there.
-	if (!songs.empty()) scan_times_.albums.fetch_add(1);
+	}
 	}
 	catch (const std::exception& e) {
-		std::cout << stamp() << "Scan: loose files in " << root.cfg.name
-		          << ": skipped, " << e.what() << std::endl;
+		std::cout << stamp() << "Scan: prune of loose files in " << root.cfg.name
+		          << " failed, left as it was: " << e.what() << std::endl;
 		}
 	}
 
 // ---- upsert helpers ---------------------------------------------------
 
-int MediaStore::upsert_folder(const fs::path& path, int parent_id)
+int MediaStore::upsert_folder(const fs::path& path, int parent_id,
+                               const std::string& name_override)
 	{
 	// Caller passes an absolute path (from fs walks); strip to stored form.
 	// A root's own path strips to just its name, which is how a root row ends
 	// up with path == name and no parent.
 	std::string path_str = strip_root(path.string());
-	std::string name     = path.filename().string();
+	// The name is the last component, except where the caller knows better.
+	// A folder row may name a *media file* — a loose file is its own album —
+	// and "film.mp4" is nobody's title.  The caller passes the name rather
+	// than it being derived here, because only the caller knows whether this
+	// path is a file; a directory legitimately named "Best of 1999.mp3" would
+	// otherwise be renamed by an extension test.
+	std::string name     = name_override.empty()
+	                     ? path.filename().string() : name_override;
 	if (name.empty()) name = path.string();  // trailing-slash paths
 
 	if (parent_id < 0) {
@@ -4520,6 +4714,25 @@ std::vector<std::string> MediaStore::get_extra_image_paths(int folder_id)
 	std::string folder = get_folder_path(folder_id);
 	if (cover.empty() || folder.empty()) return {};
 
+	// A file-album: the folder row names the media file itself, so its extras
+	// are the images sitting beside that file rather than the contents of a
+	// directory.  Answered explicitly instead of being left to
+	// find_extra_images(), whose directory_iterator would throw and be
+	// swallowed — the right answer by accident, and only for as long as that
+	// catch stays.
+	std::string abs_folder = abs_path(folder);
+	std::error_code fec;
+	if (fs::is_regular_file(abs_folder, fec)) {
+		std::vector<std::string> result;
+		for (auto& p : sidecars_of(abs_folder)) {
+			std::string ext = lower_ext(p);
+			if (ext != ".jpg" && ext != ".jpeg" && ext != ".png") continue;
+			if (p == abs_path(cover)) continue;
+			result.push_back(strip_root(p));
+			}
+		return result;
+		}
+
 	// A folder with subfolders is a section that also holds loose files: the
 	// subfolders are its albums, and their images are not this one's extras.
 	bool recurse;
@@ -4769,6 +4982,52 @@ std::string MediaStore::sidecar_chapters_path(const std::string& abs)
 	fs::path base = fs::path(abs);
 	base.replace_extension("");
 	return base.string() + std::string(CHAPTERS_SUFFIX);
+	}
+
+std::string MediaStore::sidecar_text_path(const std::string& abs)
+	{
+	// The liner notes of a file-album.  A plain <stem>.txt, which is exactly
+	// what sidecar_chapters_path() goes out of its way *not* to be — see the
+	// note there.  The two cannot collide: ".chapters.txt" is a different
+	// filename, and getAlbumTexts() excludes it by suffix in the folder case
+	// for the same reason.
+	fs::path base = fs::path(abs);
+	base.replace_extension(".txt");
+	return base.string();
+	}
+
+std::vector<std::string> MediaStore::sidecars_of(const std::string& abs) const
+	{
+	// Everything that lives beside a media file and belongs to it, absolute
+	// and existing only.  One definition, because CLAUDE.md's rule is that one
+	// place knows what "beside" means — and because a mover that misses one
+	// leaves a poster or a subtitle track orphaned in the old directory, which
+	// nothing afterwards will ever reconnect.
+	std::vector<std::string> out;
+	auto add = [&](const fs::path& p) {
+		std::error_code fec;
+		if (!p.empty() && fs::exists(p, fec) && fs::is_regular_file(p, fec))
+			out.push_back(p.string());
+		};
+
+	// find_song_cover()'s SUFFIXES, in its order.
+	fs::path stem = fs::path(abs).parent_path() / fs::path(abs).stem();
+	for (const char* suffix : { ".jpg", ".jpeg", ".png",
+	                             "-poster.jpg", "-poster.jpeg", "-poster.png" })
+		add(fs::path(stem.string() + suffix));
+
+	// The caption formats sidecar_captions() knows, all of them rather than
+	// its first hit: a move must carry every one, not the one that would be
+	// served.
+	for (const char* ext : { ".vtt", ".srt", ".ass", ".ssa" }) {
+		fs::path cand = fs::path(abs);
+		cand.replace_extension(ext);
+		add(cand);
+		}
+
+	add(fs::path(sidecar_chapters_path(abs)));
+	add(fs::path(sidecar_text_path(abs)));
+	return out;
 	}
 
 MediaStore::VideoChapters MediaStore::get_chapters(int song_id)
@@ -5102,21 +5361,31 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
 	const std::string& content_type)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	// Count albums per artist via the child folders (album folders are one level
-	// down), plus an album on the folder itself for loose files sitting beside
-	// them.
+	// Count albums per artist via the child folders: an album folder is always
+	// one level down, a loose file's own album included.  The extra term this
+	// used to carry — an album on the folder *itself*, for loose files sitting
+	// beside its subdirectories — is gone with the rule that put one there.
+	//
 	// "IN (…roots…)" rather than "= root": level-1 entries now come from every
 	// configured root, and which root a folder belongs to is visible in its
 	// path prefix rather than in a column.
-	// A root row joins the list only when it carries loose files of its own.
-	// Its name comes from `path`, not `name`: for a root those differ, and
-	// `name` is the directory basename, which is never exposed.
+	// A root row joins the list only when it carries loose files of its own,
+	// which is now visible as a level-1 *child* with an albums row rather than
+	// as an albums row on the root.  Its name comes from `path`, not `name`:
+	// for a root those differ, and `name` is the directory basename, which is
+	// never exposed.
+	//
+	// **A level-1 folder that has an albums row is excluded**, because under
+	// the new rule it is a loose file in a root used as one flat library — an
+	// album, not an artist.  No level-1 *directory* can satisfy that test: its
+	// files are their own albums and its subdirectories are albums, so it
+	// never acquires an albums row of its own.  Without the exclusion such a
+	// file appears in the artist list called "Track.mp4".
 	const bool all_users = (personal_user == PERSONAL_ALL_USERS);
 	std::string sql =
 		"SELECT f.id,"
 		"       CASE WHEN f.parent_id IS NULL THEN f.path ELSE f.name END AS name,"
-		"       COUNT(al.id) + (SELECT COUNT(*) FROM albums own"
-		"                        WHERE own.folder_id = f.id) AS album_count,"
+		"       COUNT(al.id) AS album_count,"
 		// Selected always, used only under all_users. The owner is derived from
 		// the path here rather than in a handler because this file is the only
 		// place that knows the uploads layout on the read side.
@@ -5132,10 +5401,13 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
 	if (!content_type.empty())
 		sql += " AND COALESCE(content_type, 'artists') = ?";
 	sql += ")";
+	sql += "        AND NOT EXISTS (SELECT 1 FROM albums own"
+	       "                         WHERE own.folder_id = f.id)";
 	sql += " OR (f.parent_id IS NULL";
 	if (!content_type.empty())
 		sql += " AND COALESCE(f.content_type, 'artists') = ?";
-	sql += "     AND EXISTS (SELECT 1 FROM albums own WHERE own.folder_id = f.id)))";
+	sql += "     AND EXISTS (SELECT 1 FROM folders c JOIN albums a2"
+	       "                   ON a2.folder_id = c.id WHERE c.parent_id = f.id)))";
 	if (music_folder_id > 0)
 		sql += " AND (f.parent_id = ? OR f.id = ?)";
 	if (personal_user.empty())
@@ -6150,6 +6422,15 @@ std::string MediaStore::rel_path(const std::string& abs) const
 	return strip_root(abs);
 	}
 
+bool MediaStore::folder_is_album(int folder_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT 1 FROM albums WHERE folder_id = ?");
+	q.bind(1, folder_id);
+	return q.executeStep();
+	}
+
 bool MediaStore::is_category_folder(int folder_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
@@ -6408,7 +6689,16 @@ bool MediaStore::relocate_prefix(const std::string& old_rel,
 		// ever populates a row that did not exist. Relocating rather than
 		// rebuilding is what preserves the row — and therefore also what makes
 		// its derived columns our problem.
-		const std::string leaf = fs::path(new_rel).filename().string();
+		// The leaf, minus a media extension: a folder row may name a media
+		// file, because a loose file is its own album, and neither
+		// "The Third Man.mkv" nor anything else with an extension on it is a
+		// title.  Tested on the extension rather than on the filesystem
+		// because these two UPDATEs match nothing at all when new_rel names a
+		// sidecar — which is exactly what makes moveAlbum's per-sidecar calls
+		// safe — so there would be no file to stat in that case anyway.
+		std::string leaf = fs::path(new_rel).filename().string();
+		if (is_media_file(fs::path(new_rel)))
+			leaf = fs::path(new_rel).stem().string();
 		{
 		// upsert_folder() updates only parent_id and last_scanned on an
 		// existing row, so the name would keep its old spelling for ever.
