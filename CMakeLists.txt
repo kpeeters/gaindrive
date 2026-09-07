@@ -350,21 +350,24 @@ endif()
 # targets are still built -- an inter-target dependency supersedes the exclusion,
 # and gaindrive links every one of them -- so nothing is lost but the installing.
 #
-# It is 3.28 or newer, hence the variable rather than the keyword at seven call
-# sites: an unquoted empty variable expands to no argument at all, while passing
-# the keyword to an older FetchContent_Declare would hand it to
-# ExternalProject_Add, which does not know it. The per-project switches below
-# are what cover the older CMake this floor still admits; three of these
-# projects offer none, and for those, older CMake still installs them. The
-# `uninstall` target exists partly for that.
+# Two spellings of that, because the FetchContent_Declare option is 3.28 or
+# newer and this project's floor is 3.20 -- Ubuntu 22.04 ships CMake 3.22, and
+# there the option is silently no option at all. What suppresses the rules is
+# add_subdirectory()'s EXCLUDE_FROM_ALL, which has done so for far longer; 3.28
+# only added a way to reach it through FetchContent. So old CMake gets the same
+# effect by doing FetchContent's last step by hand. Verified on 3.22.1: with the
+# declaration option alone a bundled taglib installs its library, its headers
+# and its whole cmake package; through add_subdirectory it installs nothing.
+#
+# The split is by version rather than one path for both because
+# FetchContent_Populate(<name>) is deprecated from 3.30 (CMP0169) -- each half
+# uses the API of its own era, so neither warns.
+#
+# Three of the seven offer no install switch of their own, so this is not
+# belt-and-braces for them: it is the only thing that works.
 set(GD_FETCH_EXCLUDE "")
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
 	set(GD_FETCH_EXCLUDE EXCLUDE_FROM_ALL)
-elseif(GD_BUNDLED)
-	message(STATUS
-		"gaindrive: CMake ${CMAKE_VERSION} predates FetchContent's "
-		"EXCLUDE_FROM_ALL (3.28); a bundled SQLiteCpp, taglib or tinyxml2 will "
-		"still install itself. Undo with --target uninstall.")
 endif()
 
 # ---- Bundled dependency declarations ---------------------------------------
@@ -544,7 +547,26 @@ add_custom_target(uninstall-dry-run
 	COMMENT "Listing what an uninstall would remove")
 
 if(GD_FETCH)
-	FetchContent_MakeAvailable(${GD_FETCH})
+	if(GD_FETCH_EXCLUDE)
+		FetchContent_MakeAvailable(${GD_FETCH})
+	else()
+		# FetchContent_MakeAvailable() with the pre-3.28 API: populate, then
+		# add the subdirectory ourselves so EXCLUDE_FROM_ALL can be passed.
+		# Everything MakeAvailable would otherwise do that matters here is
+		# these two calls; the find_package redirect bookkeeping it also does
+		# on 3.24+ is not used, because a bundled dependency is never looked up
+		# with find_package -- FETCHCONTENT_TRY_FIND_PACKAGE_MODE is NEVER and
+		# the probe above excludes it from the find_package loop entirely.
+		foreach(_gd_dep IN LISTS GD_FETCH)
+			string(TOLOWER "${_gd_dep}" _gd_lc)
+			FetchContent_GetProperties(${_gd_dep})
+			if(NOT ${_gd_lc}_POPULATED)
+				FetchContent_Populate(${_gd_dep})
+				add_subdirectory("${${_gd_lc}_SOURCE_DIR}"
+				                 "${${_gd_lc}_BINARY_DIR}" EXCLUDE_FROM_ALL)
+			endif()
+		endforeach()
+	endif()
 endif()
 
 if("TagLib" IN_LIST GD_BUNDLED)
