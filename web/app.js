@@ -168,6 +168,41 @@ const videoAudioOnly = {
       },
    };
 
+// ── Library preferences ────────────────────────────────────
+
+// Which order the album pane lists an artist's albums in.  The server answers
+// in year order and that is the default here, spelled as the *absent* key the
+// way castLocalVideo's default is.
+//
+// Kept per library mode, because the two libraries are browsed for different
+// reasons: a discography is chronological, while a film category is findable
+// only by name.  libraryMode is declared further down the file — that is fine,
+// it is read at call time and never at load time.
+const albumSort = {
+   get()  {
+      return localStorage.getItem(`gd_album_sort_${libraryMode}`) === 'name'
+         ? 'name' : 'year';
+      },
+   set(v) {
+      const k = `gd_album_sort_${libraryMode}`;
+      if (v === 'name') localStorage.setItem(k, 'name');
+      else              localStorage.removeItem(k);
+      },
+   };
+
+// The year arm reproduces the server's own ORDER BY exactly — year, then title
+// case-insensitively — so toggling back to Year restores the list the server
+// sent rather than a subtly different one.  Sorts a copy, leaving the fetched
+// array as the server's answer.
+function sortedAlbums(list, mode) {
+   const name    = a => a.title ?? a.name ?? '';
+   const cmpName = (a, b) =>
+      name(a).localeCompare(name(b), undefined, {sensitivity: 'base'});
+   return [...list].sort(mode === 'name'
+      ? (a, b) => cmpName(a, b) || (a.year ?? 0) - (b.year ?? 0)
+      : (a, b) => (a.year ?? 0) - (b.year ?? 0) || cmpName(a, b));
+}
+
 // ── Theme ────────────────────────────────────────────────────────────────────
 
 // Cycles: auto (system preference) → light → dark → auto.
@@ -2235,12 +2270,22 @@ async function viewAlbums(artistId, artistName) {
    const heading = document.createElement('h1');
    heading.className = 'view-title';
    heading.textContent = artistName;
+   // The label says the state, the tooltip says what pressing it does.
+   const sortBtn = document.createElement('button');
+   sortBtn.className = 'sort-btn';
+   const labelSort = () => {
+      const byName = albumSort.get() === 'name';
+      sortBtn.textContent = byName ? 'Name' : 'Year';
+      sortBtn.title = byName ? 'Sort by year' : 'Sort by name';
+      };
+   labelSort();
    const refreshBtn = document.createElement('button');
    refreshBtn.className = 'refresh-btn mi';
    refreshBtn.title = 'Reload artist info from MusicBrainz';
    refreshBtn.textContent = 'refresh';
    header.appendChild(back);
    header.appendChild(heading);
+   header.appendChild(sortBtn);
    header.appendChild(refreshBtn);
    pane.appendChild(header);
 
@@ -2253,140 +2298,165 @@ async function viewAlbums(artistId, artistName) {
    bioSlot.className = 'artist-bio-loading';
    pane.appendChild(bioSlot);
 
-   const frag = document.createDocumentFragment();
-   for (const album of albums) {
-      const row = document.createElement('div');
-      row.className = 'album-row';
-      row.dataset.id = album.id;
+   // The rows are rebuilt in place when the sort is toggled, so the whole loop
+   // lives in renderRows() rather than inline: each row carries the uploads-
+   // mode Promote and Delete buttons and their handlers, and rows rebuilt any
+   // other way would lose them.
+   const list = document.createElement('div');
+   list.className = 'album-list';
+   pane.appendChild(list);
 
-      const cover = makeAlbumCover(album);
+   function renderRows() {
+      const frag = document.createDocumentFragment();
+      for (const album of sortedAlbums(albums, albumSort.get())) {
+         const row = document.createElement('div');
+         row.className = 'album-row';
+         row.dataset.id = album.id;
 
-      const info = document.createElement('div');
-      info.className = 'album-info';
+         const cover = makeAlbumCover(album);
 
-      const title = document.createElement('span');
-      title.className = 'album-title';
-      title.textContent = album.title;
+         const info = document.createElement('div');
+         info.className = 'album-info';
 
-      const meta = document.createElement('span');
-      meta.className = 'album-meta';
-      const parts = [];
-      if (album.year)      parts.push(album.year);
-      if (album.songCount) parts.push(`${album.songCount} tracks`);
-      meta.textContent = parts.join(' · ');
+         const title = document.createElement('span');
+         title.className = 'album-title';
+         title.textContent = album.title;
 
-      info.appendChild(title);
-      info.appendChild(meta);
-      row.appendChild(cover);
-      row.appendChild(info);
-      row.appendChild(makeAlbumStar(album));
+         const meta = document.createElement('span');
+         meta.className = 'album-meta';
+         const parts = [];
+         if (album.year)      parts.push(album.year);
+         if (album.songCount) parts.push(`${album.songCount} tracks`);
+         meta.textContent = parts.join(' · ');
 
-      // Promote-to-library button (admin only, uploads mode only).
-      if (libraryMode === 'uploads' && currentUser?.adminRole) {
-         const promoteBtn = document.createElement('button');
-         promoteBtn.className = 'promote-btn';
-         promoteBtn.title = 'Move to shared library';
-         promoteBtn.textContent = '→ Library';
-         promoteBtn.addEventListener('click', e => {
-            e.stopPropagation();
-            // The dialog rather than a one-click move: the server requires a
-            // destination root and folder, and there is nothing in an upload
-            // that says which. It used to guess — the first artists root
-            // declared, under the batch's own name — which could not reach a
-            // categories root at all, so a film went into the music library and
-            // was then looked up as a musical artist.
-            //
-            // artistName is the batch's own level-1 name, which the dialog
-            // offers as the default under an artists root and leaves out under
-            // a categories one, where it would be the channel rather than a
-            // category.
-            showPromoteDialog(album.title, artistName, async (rootId, folder) => {
-               promoteBtn.disabled = true;
-               promoteBtn.textContent = '…';
-               try {
-                  // moveAlbum is the server's one mover; naming a root is what
-                  // makes this a promote rather than a rename in place.
-                  const sr = await apiCall('moveAlbum',
-                     {id: album.id, musicFolderId: rootId, folder});
-                  const moved = sr.movedAlbum ?? null;
-                  // It is in the shared library now, so staying in Uploads
-                  // would leave the user looking at the listing it just left.
-                  // Switch to the destination root's own mode and walk in to
-                  // where it landed — the ids to do that are what moveAlbum
-                  // returns and promoteAlbum never did.
-                  const destType = (musicFolders ?? [])
-                     .find(f => String(f.id) === String(rootId))?.contentType;
-                  if (moved?.id && moved?.parent && destType) {
-                     libraryMode = destType;
-                     localStorage.setItem('gd_library_mode', destType);
-                     await viewArtists();
-                     await viewAlbums(moved.parent, moved.artist);
-                     await viewTracks(moved.id, moved.album, moved.parent,
-                                      moved.artist);
-                     }
-                  else
-                     viewArtists();
-                  }
-               catch (err) {
-                  promoteBtn.disabled = false;
-                  promoteBtn.textContent = '→ Library';
-                  // The server's own words: "already in that folder" and
-                  // "outside the library" need different fixes, and a flat
-                  // "Promote failed" told the user neither.
-                  showError(err.message ?? 'Promote failed.');
-                  }
-               });
-            });
-         row.appendChild(promoteBtn);
-         }
+         info.appendChild(title);
+         info.appendChild(meta);
+         row.appendChild(cover);
+         row.appendChild(info);
+         row.appendChild(makeAlbumStar(album));
 
-      // Delete-from-uploads button. Uploads mode only, but *not* admin only,
-      // unlike promote beside it: clearing out your own staging area after a
-      // fetch went wrong is not an administrative act, and before this the only
-      // way out of the uploads area was to promote into the shared library.
-      if (libraryMode === 'uploads') {
-         const deleteBtn = document.createElement('button');
-         deleteBtn.className = 'promote-btn delete-btn';
-         deleteBtn.title = 'Delete from your uploads';
-         deleteBtn.textContent = 'Delete';
-         deleteBtn.addEventListener('click', e => {
-            e.stopPropagation();
-            showConfirm(
-               `“${album.title}” and its files are removed from the server. `
-               + 'This cannot be undone.',
-               async () => {
-                  deleteBtn.disabled = true;
-                  deleteBtn.textContent = '…';
+         // Promote-to-library button (admin only, uploads mode only).
+         if (libraryMode === 'uploads' && currentUser?.adminRole) {
+            const promoteBtn = document.createElement('button');
+            promoteBtn.className = 'promote-btn';
+            promoteBtn.title = 'Move to shared library';
+            promoteBtn.textContent = '→ Library';
+            promoteBtn.addEventListener('click', e => {
+               e.stopPropagation();
+               // The dialog rather than a one-click move: the server requires a
+               // destination root and folder, and there is nothing in an upload
+               // that says which. It used to guess — the first artists root
+               // declared, under the batch's own name — which could not reach a
+               // categories root at all, so a film went into the music library and
+               // was then looked up as a musical artist.
+               //
+               // artistName is the batch's own level-1 name, which the dialog
+               // offers as the default under an artists root and leaves out under
+               // a categories one, where it would be the channel rather than a
+               // category.
+               showPromoteDialog(album.title, artistName, async (rootId, folder) => {
+                  promoteBtn.disabled = true;
+                  promoteBtn.textContent = '…';
                   try {
-                     await apiCall('deleteUpload', {id: album.id});
-                     viewArtists();
+                     // moveAlbum is the server's one mover; naming a root is what
+                     // makes this a promote rather than a rename in place.
+                     const sr = await apiCall('moveAlbum',
+                        {id: album.id, musicFolderId: rootId, folder});
+                     const moved = sr.movedAlbum ?? null;
+                     // It is in the shared library now, so staying in Uploads
+                     // would leave the user looking at the listing it just left.
+                     // Switch to the destination root's own mode and walk in to
+                     // where it landed — the ids to do that are what moveAlbum
+                     // returns and promoteAlbum never did.
+                     const destType = (musicFolders ?? [])
+                        .find(f => String(f.id) === String(rootId))?.contentType;
+                     if (moved?.id && moved?.parent && destType) {
+                        libraryMode = destType;
+                        localStorage.setItem('gd_library_mode', destType);
+                        await viewArtists();
+                        await viewAlbums(moved.parent, moved.artist);
+                        await viewTracks(moved.id, moved.album, moved.parent,
+                                         moved.artist);
+                        }
+                     else
+                        viewArtists();
                      }
                   catch (err) {
-                     deleteBtn.disabled = false;
-                     deleteBtn.textContent = 'Delete';
-                     // The server's own words. "Item is not in your uploads"
-                     // and a transport failure want different reactions, and a
-                     // flat "Delete failed" distinguishes neither.
-                     showError(err.message ?? 'Delete failed.');
+                     promoteBtn.disabled = false;
+                     promoteBtn.textContent = '→ Library';
+                     // The server's own words: "already in that folder" and
+                     // "outside the library" need different fixes, and a flat
+                     // "Promote failed" told the user neither.
+                     showError(err.message ?? 'Promote failed.');
                      }
-                  },
-               {title: 'Delete from uploads?', yes: 'Delete'},
-               );
-            });
-         row.appendChild(deleteBtn);
-         }
+                  });
+               });
+            row.appendChild(promoteBtn);
+            }
 
-      row.addEventListener('click', () => {
-         document.querySelectorAll('#pane-albums .album-row.selected')
-            .forEach(r => r.classList.remove('selected'));
-         row.classList.add('selected');
-         if (paneNav.willSlide(2))
-            history.pushState({view: 'tracks', albumId: album.id, albumTitle: album.title, artistId, artistName}, '');
-         viewTracks(album.id, album.title, artistId, artistName);
-         });
-      frag.appendChild(row);
+         // Delete-from-uploads button. Uploads mode only, but *not* admin only,
+         // unlike promote beside it: clearing out your own staging area after a
+         // fetch went wrong is not an administrative act, and before this the only
+         // way out of the uploads area was to promote into the shared library.
+         if (libraryMode === 'uploads') {
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'promote-btn delete-btn';
+            deleteBtn.title = 'Delete from your uploads';
+            deleteBtn.textContent = 'Delete';
+            deleteBtn.addEventListener('click', e => {
+               e.stopPropagation();
+               showConfirm(
+                  `“${album.title}” and its files are removed from the server. `
+                  + 'This cannot be undone.',
+                  async () => {
+                     deleteBtn.disabled = true;
+                     deleteBtn.textContent = '…';
+                     try {
+                        await apiCall('deleteUpload', {id: album.id});
+                        viewArtists();
+                        }
+                     catch (err) {
+                        deleteBtn.disabled = false;
+                        deleteBtn.textContent = 'Delete';
+                        // The server's own words. "Item is not in your uploads"
+                        // and a transport failure want different reactions, and a
+                        // flat "Delete failed" distinguishes neither.
+                        showError(err.message ?? 'Delete failed.');
+                        }
+                     },
+                  {title: 'Delete from uploads?', yes: 'Delete'},
+                  );
+               });
+            row.appendChild(deleteBtn);
+            }
+
+         row.addEventListener('click', () => {
+            document.querySelectorAll('#pane-albums .album-row.selected')
+               .forEach(r => r.classList.remove('selected'));
+            row.classList.add('selected');
+            if (paneNav.willSlide(2))
+               history.pushState({view: 'tracks', albumId: album.id, albumTitle: album.title, artistId, artistName}, '');
+            viewTracks(album.id, album.title, artistId, artistName);
+            });
+         frag.appendChild(row);
+         }
+      list.replaceChildren(frag);
       }
-   pane.appendChild(frag);
+   renderRows();
+
+   sortBtn.addEventListener('click', () => {
+      // Which album pane 2 is showing has to survive the reorder — the rows
+      // are new nodes, so the highlight would otherwise be dropped on a
+      // listing whose tracks are still on screen beside it.
+      const sel = list.querySelector('.album-row.selected')?.dataset.id;
+      albumSort.set(albumSort.get() === 'name' ? 'year' : 'name');
+      labelSort();
+      renderRows();
+      if (sel)
+         list.querySelector(`.album-row[data-id="${CSS.escape(sel)}"]`)
+            ?.classList.add('selected');
+      });
+
    // Marker so viewTracks() can tell whether pane 1 already shows this artist
    // and skip a redundant re-render when navigating artists → albums → tracks.
    pane.dataset.artistId = String(artistId);

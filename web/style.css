@@ -1335,6 +1335,23 @@ input.chapter-time.bad { border-color: #e06c6c; }
 .refresh-btn:hover    { opacity: 1; }
 .refresh-btn:disabled { opacity: 0.2; cursor: default; }
 
+/* Album-pane sort toggle. It carries the margin-left:auto that pushes the
+   header's right-hand group over, and .refresh-btn's own must then be
+   cancelled: two auto margins in one flex row *split* the free space rather
+   than stacking, which would leave the pair floating apart. */
+.sort-btn {
+   margin-left: auto;
+   background: none;
+   border: 1px solid var(--text-muted, #888);
+   border-radius: 4px;
+   cursor: pointer;
+   color: var(--text-muted, #888);
+   font-size: 0.8rem;
+   padding: 0.2rem 0.6rem;
+}
+.sort-btn:hover { color: var(--text, #eee); border-color: var(--text, #eee); }
+.sort-btn + .refresh-btn { margin-left: 0; }
+
 .personal-toggle-btn {
    margin-left: auto;
    background: none;
