@@ -61,6 +61,9 @@ final class CachingResourceLoader: NSObject, @unchecked Sendable {
 	private var contentLength: Int?
 	private var contentUTI: String?
 	private var started = false
+	/// The fetch finished and the file was renamed into place. The handles stay
+	/// open — see `didCompleteWithError`.
+	private var adopted = false
 	/// Set when this resource cannot be cached, after which every request is
 	/// handed back to AVFoundation to fetch for itself. See `giveUp`.
 	private var redirecting = false
@@ -93,7 +96,10 @@ final class CachingResourceLoader: NSObject, @unchecked Sendable {
 	/// and dropping a window entry is what gets here.
 	deinit {
 		task?.cancel()
-		part?.discard()
+		// Discarded only if it never completed. After adoption the same file is
+		// a stored track, and deleting it here would throw away what was just
+		// cached the moment the track stopped playing.
+		if adopted { part?.close() } else { part?.discard() }
 	}
 }
 
@@ -257,23 +263,31 @@ extension CachingResourceLoader: URLSessionDataDelegate {
 	) {
 		guard !redirecting else { return }
 		guard let part else { return }
-		defer { self.part = nil }
 
 		guard error == nil, let length = contentLength, part.received >= length else {
 			// **Nothing incomplete is ever adopted.** A cancelled or failed
-			// fetch leaves a part file, and a half a track that claims to be
+			// fetch leaves a part file, and half a track that claims to be
 			// whole is worse than no track at all.
+			self.part = nil
 			part.discard()
 			if let error { failAll(error) }
 			return
 		}
 
-		part.close()
-		// Adopted under the same key a pinned download uses, so pinning
-		// something already cached by playing it fetches nothing.
+		// **Answer everything before the file moves, and keep answering
+		// after.** This is the step whose absence hung playback: the server
+		// writes MP4 with its index at the end, so AVFoundation's early read is
+		// for the *tail* — a request that is necessarily still pending when the
+		// last byte arrives. Dropping the file here left it unanswered for
+		// ever, and the spinner never stopped.
+		serve()
+		adopted = true
 		try? store.adopt(
 			part.url, for: ref, quality: quality,
 			fileExtension: DownloadQueue.fileExtension(for: task.response, quality: quality))
+		// **The handles stay open across the rename**, which POSIX allows: a
+		// descriptor follows the inode, not the name. So a seek later in the
+		// same playback is still served from here rather than finding nothing.
 		Task { [store] in await store.finishedAdopting() }
 	}
 

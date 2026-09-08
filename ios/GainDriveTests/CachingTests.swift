@@ -36,6 +36,20 @@ struct PartialReadTests {
 		#expect(PartialRead.chunk(currentOffset: 100, end: 200, received: 100) == nil)
 	}
 
+	/// **The read the whole thing hung on.** The server writes MP4 with its
+	/// index at the end, so AVFoundation asks for the tail early and that
+	/// request cannot be answered until the last byte lands — it has to become
+	/// satisfiable the moment it does.
+	///
+	/// Worth being clear that this test would not have caught the bug: the
+	/// arithmetic was right, and what was wrong is that the loader stopped
+	/// serving when the download finished. It is here because the case is the
+	/// one to think about first when this stalls again.
+	@Test func theTailBecomesReadableOnceEverythingHasArrived() {
+		#expect(PartialRead.chunk(currentOffset: 990, end: 1000, received: 500) == nil)
+		#expect(PartialRead.chunk(currentOffset: 990, end: 1000, received: 1000) == 990..<1000)
+	}
+
 	@Test func aReadAlreadyAnsweredAsksForNothing() {
 		#expect(PartialRead.chunk(currentOffset: 50, end: 50, received: 100) == nil)
 		#expect(PartialRead.isSatisfied(currentOffset: 50, end: 50))
