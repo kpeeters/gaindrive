@@ -14,11 +14,24 @@ import SwiftUI
 /// inside it, so it survives navigation the way the web client's fixed footer
 /// does — `miniPlayerInset` is the only thing that should attach it.
 struct MiniPlayer: View {
-	/// Raising the Now Playing sheet is the **shell's** job. There is one bar
-	/// per tab, and there must be only one sheet.
-	let onExpand: () -> Void
-
 	@Environment(PlayerConnection.self) private var player
+	/// **The sheet is raised from here, not from the shell.**
+	///
+	/// It was on the `TabView` for a while, on the reasoning that one bar per
+	/// tab should not mean one sheet per tab. That reasoning was tidiness and
+	/// it crashed: `.sidebarAdaptable` hands presentation to UIKit, and a sheet
+	/// presented from the `TabView` does not carry the SwiftUI environment into
+	/// its content — so `NowPlayingView`'s own `@Environment` lookup found no
+	/// `PlayerConnection` and trapped.
+	///
+	/// The two alerts still on the shell are safe for a reason worth knowing:
+	/// their content closures capture values already resolved in `RootView`'s
+	/// scope, so nothing looks anything up at presentation time. A sheet whose
+	/// content is a *view* does.
+	///
+	/// One sheet per bar is not one sheet on screen: only the selected tab's
+	/// bar is in the hierarchy, so only one of them can ever be tapped.
+	@State private var expanded = false
 
 	var body: some View {
 		if let song = player.current {
@@ -43,7 +56,7 @@ struct MiniPlayer: View {
 						Spacer(minLength: 0)
 					}
 					.contentShape(.rect)
-					.onTapGesture { onExpand() }
+					.onTapGesture { expanded = true }
 					.accessibilityAddTraits(.isButton)
 					.accessibilityHint("Opens the player")
 
@@ -73,6 +86,7 @@ struct MiniPlayer: View {
 				Divider()
 			}
 			.accessibilityElement(children: .contain)
+			.sheet(isPresented: $expanded) { NowPlayingView() }
 		}
 	}
 
@@ -116,12 +130,13 @@ extension View {
 	/// `safeAreaInset` rather than an overlay, so every list's content inset
 	/// grows by the bar's height and the last row is still reachable.
 	///
-	/// The cost is one `MiniPlayer` per tab. They are pure presentation —
-	/// each reads the same `PlayerConnection`, and the sheet they raise belongs
-	/// to the shell — so the copies cannot disagree with one another.
-	func miniPlayerInset(onExpand: @escaping () -> Void) -> some View {
+	/// The cost is one `MiniPlayer` per tab, each with its own Now Playing
+	/// sheet. They are pure presentation — every one reads the same
+	/// `PlayerConnection` — and only the selected tab's bar is in the
+	/// hierarchy, so the copies can neither disagree nor both present.
+	func miniPlayerInset() -> some View {
 		safeAreaInset(edge: .bottom, spacing: 0) {
-			MiniPlayer(onExpand: onExpand)
+			MiniPlayer()
 		}
 	}
 }

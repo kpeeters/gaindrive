@@ -20,9 +20,6 @@ struct RootView: View {
 	@Environment(PlayerConnection.self) private var player
 	@Environment(PinRepository.self) private var pins
 	@State private var tab: Destination
-	/// Raised by any tab's mini player, and owned here so there is exactly one
-	/// of it — see `miniPlayerInset`.
-	@State private var showingPlayer = false
 	/// The tab-root view model is built here rather than inside `ArtistsView`
 	/// because a `@State` initial value cannot read `@Environment`, and the
 	/// usual workaround — an optional filled in from `.task` — puts a spinner
@@ -67,23 +64,23 @@ struct RootView: View {
 		TabView(selection: $tab) {
 			Tab("Artists", systemImage: "music.mic", value: Destination.artists) {
 				ArtistsView(model: artists)
-					.miniPlayerInset { showingPlayer = true }
+					.miniPlayerInset()
 			}
 			Tab("Playlists", systemImage: "music.note.list", value: Destination.playlists) {
 				PlaylistsView(model: playlists)
-					.miniPlayerInset { showingPlayer = true }
+					.miniPlayerInset()
 			}
 			Tab("Recents", systemImage: "clock.arrow.circlepath", value: Destination.recents) {
 				RecentsView(model: recents)
-					.miniPlayerInset { showingPlayer = true }
+					.miniPlayerInset()
 			}
 			Tab("Search", systemImage: "magnifyingglass", value: Destination.search) {
 				SearchView(model: search)
-					.miniPlayerInset { showingPlayer = true }
+					.miniPlayerInset()
 			}
 			Tab("Settings", systemImage: "gearshape", value: Destination.settings) {
 				SettingsView(startOnServers: firstRun)
-					.miniPlayerInset { showingPlayer = true }
+					.miniPlayerInset()
 			}
 		}
 		// The iOS 18 idiom for a tabbed app on a wide screen: the tab bar
@@ -92,7 +89,14 @@ struct RootView: View {
 		// rather than a stretched phone, which `PLAN.md` lists as the whole
 		// point of taking the Catalyst destination.
 		.tabViewStyle(.sidebarAdaptable)
-		.sheet(isPresented: $showingPlayer) { NowPlayingView() }
+		// **These are alerts and not a sheet, and that is why they may live
+		// here.** Their content closures capture `player` and `pins` already
+		// resolved in this view's scope, so nothing performs an environment
+		// lookup at presentation time. A sheet whose content is a *view* does,
+		// and one presented from a `TabView` under `.sidebarAdaptable` is not
+		// given the environment to look in — which is why the Now Playing sheet
+		// is raised from `MiniPlayer` instead.
+		//
 		// **Playback errors belong to the shell, not to a screen.** They arrive
 		// from the audio session, from an item that failed to load and from the
 		// watchdog, none of which is any one screen's business — and a track
