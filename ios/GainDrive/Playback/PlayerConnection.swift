@@ -76,6 +76,17 @@ final class PlayerConnection {
 	/// local: the video surface, which attaches to an `AVPlayer`. Nothing else
 	/// may reach through it.
 	@ObservationIgnored private let local: LocalEngine
+	/// Non-nil only while casting. Built when a device is chosen and dropped
+	/// when it is left, rather than kept alive: it holds a control channel, and
+	/// one that outlived its session would go on reconnecting to a receiver
+	/// nobody is using.
+	@ObservationIgnored private var cast: CastEngine?
+	@ObservationIgnored private let castUrls: CastUrls
+	@ObservationIgnored let castSession = CastSession()
+
+	/// The receiver being cast to, or nil when playing here.
+	var castDevice: CastDevice? { castSession.device }
+	var isCasting: Bool { cast != nil }
 
 	/// Only for cover art: the stream URL belongs to the engine, which knows
 	/// what kind of URL it can consume.
@@ -99,6 +110,7 @@ final class PlayerConnection {
 	) {
 		self.registry = registry
 		self.scrobbler = Scrobbler(library: library)
+		self.castUrls = CastUrls(targets: targets, registry: registry)
 		let local = LocalEngine(targets: targets, store: store)
 		self.local = local
 		self.engine = local
@@ -109,23 +121,62 @@ final class PlayerConnection {
 		adopt(local)
 	}
 
+	// MARK: - Casting
+
+	/// Hands playback to a receiver, carrying the queue and the position.
+	///
+	/// **The queue is not transferred, because it was never the engine's.** That
+	/// is the whole return on the seam: what moves across is a position and a
+	/// play/pause state, and `reconcile` builds the new engine's window out of
+	/// the queue this object has held all along.
+	func startCasting(to device: CastDevice) {
+		guard castSession.device != device || cast == nil else { return }
+		let resumeAt = position
+		let engine = CastEngine(session: castSession, urls: castUrls)
+		cast = engine
+		castSession.connect(to: device)
+		adopt(engine)
+		// **It plays, whatever was happening here.** A LOAD autoplays by
+		// construction, so preserving a paused state would mean sending a PAUSE
+		// chasing after it — and choosing a device is in any case an act that
+		// means "play this over there".
+		Task { await reconcile(thenPlay: true, forceRebuild: true, offset: resumeAt) }
+	}
+
+	/// Takes playback back, at the position the receiver had reached.
+	///
+	/// Deliberately does **not** resume: coming off a device is usually the end
+	/// of listening, and a phone that starts playing out loud because a
+	/// television was switched off is the worse mistake. Android's `goLocal()`
+	/// makes the same choice.
+	func stopCasting() {
+		guard cast != nil else { return }
+		let resumeAt = position
+		cast = nil
+		// The engine is a closure on the session's status callback, so without
+		// this the one just discarded stays alive being told about a receiver
+		// nobody is listening to.
+		castSession.onStatus = nil
+		castSession.disconnect()
+		adopt(local)
+		Task { await reconcile(thenPlay: false, forceRebuild: true, offset: resumeAt) }
+	}
+
 	/// Makes `next` the engine, and the only place that ever does.
 	///
-	/// **The old engine is unwired first.** Its callbacks are closures over this
-	/// object, so an engine left connected goes on advancing a queue it is no
-	/// longer playing — which is the shape of every "two players at once" bug.
-	///
-	/// Called once today, from `init`. When there is a second engine it is also
-	/// where the handover happens, and two things will have to happen with it:
-	/// the outgoing engine has to be stopped, and the queue re-applied to the
-	/// incoming one at the position the outgoing one had reached. The queue
-	/// itself needs no carrying — it never belonged to either.
+	/// **The old engine is unwired and stopped first.** Its callbacks are
+	/// closures over this object, so an engine left connected goes on advancing
+	/// a queue it is no longer playing — which is the shape of every "two
+	/// players at once" bug, and here it would be two things making noise in two
+	/// rooms.
 	private func adopt(_ next: any PlaybackEngine) {
-		engine.onStateChange = nil
-		engine.onProgress = nil
-		engine.onAdvanced = nil
-		engine.onEnded = nil
-		engine.onReset = nil
+		let previous = engine
+		previous.onStateChange = nil
+		previous.onProgress = nil
+		previous.onAdvanced = nil
+		previous.onEnded = nil
+		previous.onReset = nil
+		if previous !== next { previous.stop() }
 		engine = next
 		wireEngine()
 	}
@@ -307,8 +358,12 @@ final class PlayerConnection {
 
 		guard await engine.apply(resolve(refEdit), startingAt: offset > 0 ? offset : nil) else {
 			// Only the head failing gets here, and it is the one worth a
-			// message: the user asked for that track.
-			errorMessage = "That track could not be played."
+			// message: the user asked for that track. **The engine's own words
+			// win** where it has any — "this video has to be converted as it
+			// plays, which a Cast device cannot do" tells somebody what to do,
+			// and the generic sentence does not.
+			errorMessage = engine.failure ?? "That track could not be played."
+			engine.clearFailure()
 			clearLoading()
 			return
 		}

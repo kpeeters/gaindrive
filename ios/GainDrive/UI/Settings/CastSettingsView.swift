@@ -19,6 +19,7 @@ import SwiftUI
 /// permanently, not a debug screen to be removed.
 struct CastSettingsView: View {
 	@Environment(CastDeviceStore.self) private var store
+	@Environment(PlayerConnection.self) private var player
 
 	/// Owned here rather than injected, because **browsing runs only while
 	/// something is looking**. Multicast is not free and the picker is the only
@@ -35,6 +36,7 @@ struct CastSettingsView: View {
 
 	var body: some View {
 		Form {
+			castingSection
 			discoveredSection
 			manualSection
 		}
@@ -57,6 +59,22 @@ struct CastSettingsView: View {
 		.onChange(of: scenePhase) { _, phase in
 			guard phase == .active else { return }
 			discovery.restart()
+		}
+	}
+
+	// MARK: - The live session
+
+	/// **Provisional, and the proper home for this is the player.** A cast
+	/// button in the mini player and a device sheet are the next stage's work;
+	/// this row exists so that casting is reachable at all, the same reason the
+	/// rest of this pane exists a stage before anything uses it.
+	@ViewBuilder
+	private var castingSection: some View {
+		if let device = player.castDevice {
+			Section {
+				LabeledContent("Casting to", value: device.name)
+				Button("Stop casting", role: .destructive) { player.stopCasting() }
+			}
 		}
 	}
 
@@ -166,9 +184,18 @@ struct CastSettingsView: View {
 				if probing.contains(id) {
 					ProgressView().controlSize(.small)
 				} else {
+					// Two buttons rather than a row tap: "test this address" and
+					// "send the music there" are different enough acts that a
+					// single gesture meaning one of them would sometimes mean
+					// the other. `CastProbe` exists precisely so the first
+					// cannot become the second by accident.
 					Button("Test") { test(device) }
 						.buttonStyle(.bordered)
 						.controlSize(.small)
+					Button("Cast") { player.startCasting(to: device) }
+						.buttonStyle(.borderedProminent)
+						.controlSize(.small)
+						.disabled(player.castDevice == device)
 				}
 			}
 			if let result = results[id] {

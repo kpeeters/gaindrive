@@ -36,10 +36,24 @@ struct StreamTargets {
 	}
 
 	func target(for ref: ItemRef) async -> StreamTarget? {
+		await target(for: ref, wanted: settings.audioQuality)
+	}
+
+	/// A target at a stated quality rather than the configured one.
+	///
+	/// **The ceiling still applies**, which is the whole reason this is here
+	/// rather than at the call site: the account's `maxBitRate` belongs to that
+	/// track's server, and `AudioQuality.cappedBy` models what the server would
+	/// actually send — including turning a request for the original into MP3 at
+	/// the cap. A caller that skipped this would build a cache key claiming
+	/// bytes it is not going to receive.
+	///
+	/// One caller: the cast route, which must not send a container a receiver
+	/// cannot decode however the local setting is spelled.
+	func target(for ref: ItemRef, wanted: AudioQuality) async -> StreamTarget? {
 		let clients = registry.clientsSnapshot()
 		guard let client = clients.client(for: ref.server) else { return nil }
 		let cap = await accounts.cap(for: ref.server, using: clients)
-		return StreamUrls.target(
-			for: ref, client: client, wanted: settings.audioQuality, accountCap: cap)
+		return StreamUrls.target(for: ref, client: client, wanted: wanted, accountCap: cap)
 	}
 }
