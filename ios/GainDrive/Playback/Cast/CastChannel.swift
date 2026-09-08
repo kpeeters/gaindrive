@@ -53,11 +53,14 @@ actor CastChannel {
 	/// started from.
 	private(set) var resolvedEndpoint: CastEndpoint?
 
-	/// `NWConnection` is documented thread-safe and delivers its callbacks on the
-	/// queue given to `start(queue:)`. Confining it to this actor is what the
-	/// rest of the file relies on; the annotation says the compiler need not
-	/// prove what the framework already promises.
-	private nonisolated(unsafe) let connection: NWConnection
+	/// Confined to this actor, which is what the rest of the file relies on.
+	///
+	/// **No `nonisolated(unsafe)` is needed**, and that was worth finding out
+	/// rather than assuming: Network.framework annotates `NWConnection` as
+	/// `Sendable`, so the deadline task below can capture it and the compiler
+	/// needs no promise from us. Everything that touches it does so from an
+	/// isolated method regardless.
+	private let connection: NWConnection
 	private var closed = false
 
 	private static let queue = DispatchQueue(label: "org.gaindrive.cast", qos: .userInitiated)
@@ -195,15 +198,16 @@ actor CastChannel {
 			(continuation: CheckedContinuation<Data, any Error>) in
 			let resume = OneShot(continuation)
 			connection.receive(minimumIncompleteLength: count, maximumLength: count) {
-				data, _, isComplete, error in
+				data, _, _, error in
 				if let data, data.count == count, error == nil {
 					resume.succeed(data)
-				} else if isComplete || error != nil {
-					resume.fail(Failure.closed)
 				} else {
-					// Short of the minimum with no error and not complete is not
-					// a state `receive` documents; treating it as a closed
-					// connection beats looping on it.
+					// Three ways to get here and one answer. An error and a
+					// completed stream are both plainly the end; short of the
+					// minimum with neither is a state `receive` does not
+					// document, and treating that as a closed connection beats
+					// looping on it. In every case the stream is out of step
+					// with the length prefix and cannot be resynced.
 					resume.fail(Failure.closed)
 				}
 			}
