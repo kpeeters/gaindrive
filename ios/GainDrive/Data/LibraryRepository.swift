@@ -264,6 +264,15 @@ final class LibraryRepository: Sendable {
 						switch answer {
 						case .ok(_, let selection): arrived[index] = selection
 						case .failed(let failure): failed[index] = failure
+						case .recovered(_, let selection, let failure):
+							// Search is not mirrored — a search of a library
+							// you cannot reach is not a question the mirror can
+							// answer — so this cannot arrive today. Handled as
+							// what it *means* rather than ignored, so if search
+							// ever gains a fallback this arm is already right
+							// instead of silently dropping its rows.
+							arrived[index] = selection
+							failed[index] = failure
 						// A keystroke replaced this query. Recording it would
 						// flash a failure note for something nobody is waiting
 						// for any more.
