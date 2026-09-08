@@ -156,8 +156,10 @@ struct NowPlayingView: View {
 
 	private func secondaryControls(_ song: Song) -> some View {
 		HStack(spacing: 32) {
-			// Only for a film, and only here: leaving the picture does not stop
-			// it, so this is the way back to something that is still playing.
+			// A second way back, the first being the mini player's own button.
+			// This one has to dismiss a sheet before a cover can present, which
+			// is the less reliable of the two — the bar's is one tap with no
+			// modal involved, and is the one to trust.
 			if song.isVideo {
 				Button {
 					player.showingVideo = true

@@ -60,6 +60,28 @@ struct MiniPlayer: View {
 					.accessibilityAddTraits(.isButton)
 					.accessibilityHint("Opens the player")
 
+					// **The way back to the picture**, and it is here because
+					// this is where you are the moment it goes: closing the
+					// video leaves the film playing, and the bar is what is
+					// left on screen. It was reachable only through the Now
+					// Playing sheet before, which is one icon among four and
+					// needs a sheet to hand over to a cover — findable by
+					// nobody, and unreliable when found.
+					//
+					// Before the transport rather than after, so play/pause and
+					// next keep their positions as this one comes and goes —
+					// the rule Android's Now Playing row follows for the same
+					// reason.
+					if song.isVideo {
+						Button {
+							player.showingVideo = true
+						} label: {
+							Image(systemName: "film")
+								.font(.body)
+								.frame(width: 32, height: 32)
+						}
+						.accessibilityLabel("Watch")
+					}
 					Button {
 						player.togglePlayPause()
 					} label: {

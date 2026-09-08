@@ -82,6 +82,7 @@ struct VideoView: View {
 		}
 		.padding()
 		.accessibilityLabel("Hide the picture")
+		.accessibilityHint("The film keeps playing; the bar at the bottom brings it back")
 	}
 
 	/// Drawn only when there is something to choose. A film with no captions
