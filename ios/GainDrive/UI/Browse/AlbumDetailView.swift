@@ -16,6 +16,8 @@ struct AlbumDetailView: View {
 
 	@Environment(\.library) private var library
 	@Environment(PlayerConnection.self) private var player
+	@Environment(PinRepository.self) private var pins
+	@Environment(SettingsStore.self) private var settings
 	@State private var model: AlbumDetailViewModel?
 	/// Once per screen, not once per load: a pull-to-refresh must not restart
 	/// the track the user has since navigated away from inside.
@@ -136,6 +138,11 @@ struct AlbumDetailView: View {
 		-> some View
 	{
 		let index = detail.songs.firstIndex(of: song)
+		// **Dimmed and inert, not hidden.** Inside an album, knowing what is
+		// missing is the useful part — and dropping rows would renumber the
+		// record. `android/CACHING.md` draws the same line between a listing,
+		// which shrinks, and a track list, which does not.
+		let unplayable = settings.offlineMode && !pins.state(for: song.ref).isHere
 		return Button {
 			guard let index else { return }
 			player.play(detail.songs, startIndex: index)
@@ -146,6 +153,8 @@ struct AlbumDetailView: View {
 				number: useSeq ? index.map { $0 + 1 } : song.track)
 		}
 		.buttonStyle(.plain)
+		.disabled(unplayable)
+		.opacity(unplayable ? 0.4 : 1)
 		.trackActions(for: song)
 	}
 

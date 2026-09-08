@@ -70,6 +70,44 @@ actor LibraryMirror {
 		}
 	}
 
+	/// The way **up** the tree, recorded on the way down.
+	///
+	/// Offline, the question is "which albums have any stored audio", and the
+	/// cheap way to answer it is to start from the files that are actually
+	/// here — a few hundred at most — and walk up, rather than walking down
+	/// through every album the mirror holds asking whether any of its tracks
+	/// landed. Going up needs a reverse map, and the moment to build one is
+	/// while the album is being mirrored anyway.
+	///
+	/// Keyed by `ItemRef.encoded` rather than by `ItemRef`, because a
+	/// dictionary whose key is not a `String` encodes as an unkeyed array of
+	/// alternating keys and values — which round-trips, and is unreadable.
+	struct Availability: Codable, Sendable {
+		var albumOfSong: [String: ItemRef] = [:]
+		var artistOfAlbum: [String: ItemRef] = [:]
+
+		/// Everything reachable from what is on disk.
+		///
+		/// Two dictionary lookups per stored file and nothing else — no album
+		/// is opened, and an album whose tracks were never mirrored simply does
+		/// not appear, which is right: it cannot be listed either.
+		func reachable(from held: Set<ItemRef>) -> (albums: Set<ItemRef>, artists: Set<ItemRef>) {
+			var albums: Set<ItemRef> = []
+			var artists: Set<ItemRef> = []
+			for song in held {
+				guard let album = albumOfSong[song.encoded] else { continue }
+				albums.insert(album)
+				if let artist = artistOfAlbum[album.encoded] { artists.insert(artist) }
+			}
+			return (albums, artists)
+		}
+
+		mutating func merge(_ other: Availability) {
+			albumOfSong.merge(other.albumOfSong) { _, new in new }
+			artistOfAlbum.merge(other.artistOfAlbum) { _, new in new }
+		}
+	}
+
 	private let root: URL
 
 	init(root: URL? = nil) {
@@ -104,6 +142,65 @@ actor LibraryMirror {
 	func load<Value: Decodable & Sendable>(_ type: Value.Type, at key: Key) -> Value? {
 		guard let data = try? Data(contentsOf: url(for: key)) else { return nil }
 		return try? JSONDecoder().decode(Value.self, from: data)
+	}
+
+	/// An album and its tracks, plus the step up that offline availability
+	/// needs.
+	///
+	/// A method of its own rather than the generic `store`, so the blob and the
+	/// index cannot be written apart — a stored album whose tracks are not in
+	/// the index is an album that never appears offline, silently.
+	func storeAlbum(_ detail: AlbumDetail, for ref: ItemRef) {
+		store(detail, at: .album(ref))
+		var index = availability(for: ref.server)
+		for song in detail.songs {
+			index.albumOfSong[song.ref.encoded] = ref
+		}
+		if let artist = detail.album.artistRef {
+			index.artistOfAlbum[ref.encoded] = artist
+		}
+		write(index, for: ref.server)
+	}
+
+	/// An artist's albums, and the step up from each of them.
+	///
+	/// The artist ref is taken from the *request* rather than from
+	/// `Album.artistRef`: the directory-shaped listings carry only `parent`,
+	/// and an album reached that way would otherwise record a step up to
+	/// nothing.
+	func storeAlbums(_ albums: [Album], for artist: ItemRef) {
+		store(albums, at: .albums(artist))
+		var index = availability(for: artist.server)
+		for album in albums {
+			index.artistOfAlbum[album.ref.encoded] = artist
+		}
+		write(index, for: artist.server)
+	}
+
+	func availability(for server: ServerId) -> Availability {
+		guard let data = try? Data(contentsOf: availabilityURL(for: server)),
+			let index = try? JSONDecoder().decode(Availability.self, from: data)
+		else { return Availability() }
+		return index
+	}
+
+	/// Across every server, which is what a merged listing is filtered against.
+	func availability(for servers: [ServerId]) -> Availability {
+		var merged = Availability()
+		for server in servers { merged.merge(availability(for: server)) }
+		return merged
+	}
+
+	private func write(_ index: Availability, for server: ServerId) {
+		guard let data = try? JSONEncoder().encode(index) else { return }
+		let url = availabilityURL(for: server)
+		try? FileManager.default.createDirectory(
+			at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+		try? data.write(to: url, options: .atomic)
+	}
+
+	private func availabilityURL(for server: ServerId) -> URL {
+		directory(for: server).appending(path: "availability.json")
 	}
 
 	/// Removing a server drops its rows, which is a directory removal because

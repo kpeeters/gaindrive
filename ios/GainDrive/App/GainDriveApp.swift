@@ -47,9 +47,12 @@ struct GainDriveApp: App {
 		// What each browse query last answered, so a server that is not there
 		// can still be read. See `LibraryMirror`.
 		let mirror = LibraryMirror()
+		// Above the repository, which needs it: offline availability starts
+		// from what is on disk and walks up.
+		let store = AudioStore()
 		let library = LibraryRepository(
 			registry: registry, settings: settings, events: events,
-			accounts: accounts, roots: roots, mirror: mirror)
+			accounts: accounts, roots: roots, mirror: mirror, store: store)
 		_selection = State(initialValue: ServerSelection(registry: registry, settings: settings))
 		_events = State(initialValue: events)
 		_library = State(initialValue: library)
@@ -59,7 +62,6 @@ struct GainDriveApp: App {
 		// a download that asked for different bytes than a play would store
 		// them under a key nothing looks for.
 		let targets = StreamTargets(registry: registry, settings: settings, accounts: accounts)
-		let store = AudioStore()
 		let queue = DownloadQueue(store: store)
 		let pins = PinRepository(
 			library: library, store: store, queue: queue, targets: targets, settings: settings)

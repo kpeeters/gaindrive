@@ -12,6 +12,7 @@ struct PlaylistsView: View {
 	let model: PlaylistsViewModel
 
 	@Environment(ServerSelection.self) private var selection
+	@Environment(SettingsStore.self) private var settings
 	@Environment(LibraryEvents.self) private var events
 	@State private var path: [Route] = []
 	@State private var confirmingDelete: Playlist?
@@ -40,6 +41,7 @@ struct PlaylistsView: View {
 			}
 		}
 		.task(id: selection.scope) { model.appear() }
+		.onChange(of: settings.offlineMode) { model.retry() }
 		// A playlist edited from an album three screens away has to show up
 		// here without a manual refresh.
 		.task(id: events.playlistRevision) { model.appear() }

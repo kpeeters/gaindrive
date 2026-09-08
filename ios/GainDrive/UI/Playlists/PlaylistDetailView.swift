@@ -14,6 +14,8 @@ struct PlaylistDetailView: View {
 
 	@Environment(\.library) private var library
 	@Environment(PlayerConnection.self) private var player
+	@Environment(PinRepository.self) private var pins
+	@Environment(SettingsStore.self) private var settings
 	@State private var model: PlaylistDetailViewModel?
 
 	var body: some View {
@@ -61,12 +63,19 @@ struct PlaylistDetailView: View {
 					// columns are read (see `Route.album`); a playlist has no
 					// album to route through and *is* a queue already, so
 					// playing it here is both possible and what is meant.
+					// A playlist is kept whole offline even when only some of
+					// it is here — it is a list somebody made, not a record —
+					// so the rows that cannot be played are dimmed rather than
+					// dropped.
 					Button {
 						player.play(songs.map(\.song), startIndex: index)
 					} label: {
 						SongRow(item: item)
 					}
 					.buttonStyle(.plain)
+					.disabled(settings.offlineMode && !pins.state(for: item.song.ref).isHere)
+					.opacity(
+						settings.offlineMode && !pins.state(for: item.song.ref).isHere ? 0.4 : 1)
 					.trackActions(for: item.song)
 					.swipeActions(edge: .trailing) {
 						Button(role: .destructive) {

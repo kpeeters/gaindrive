@@ -84,7 +84,7 @@ struct AlbumsView: View {
 	@ViewBuilder
 	private func list(_ albums: [AlbumUi], model: AlbumsViewModel) -> some View {
 		if albums.isEmpty {
-			EmptyMessage(text: "No albums")
+			EmptyMessage(text: settings.offlineMode ? "Nothing downloaded yet" : "No albums")
 		} else {
 			List(selection: selection) {
 				// The header and the note are untagged, and so not selectable.

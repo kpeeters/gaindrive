@@ -33,10 +33,11 @@ final class LibraryRepository: Sendable {
 	private let accounts: Accounts
 	private let roots: MusicRoots
 	private let mirror: LibraryMirror
+	private let store: AudioStore
 
 	init(
 		registry: ServerRegistry, settings: SettingsStore, events: LibraryEvents,
-		accounts: Accounts, roots: MusicRoots, mirror: LibraryMirror
+		accounts: Accounts, roots: MusicRoots, mirror: LibraryMirror, store: AudioStore
 	) {
 		self.registry = registry
 		self.settings = settings
@@ -44,6 +45,34 @@ final class LibraryRepository: Sendable {
 		self.accounts = accounts
 		self.roots = roots
 		self.mirror = mirror
+		self.store = store
+	}
+
+	// MARK: - Offline
+
+	/// **What can be played, walked upwards from what is on disk.**
+	///
+	/// The obvious direction is down — every mirrored album, asked whether any
+	/// of its tracks landed — and it is `O(library)`. This is `O(files you
+	/// have)`, which in practice is a few hundred: everything starts
+	/// unavailable and the walk is what enables an album and its artist.
+	///
+	/// An album whose tracks were never mirrored lights up nothing, and that is
+	/// right rather than a gap — it has no stored listing either, so it could
+	/// not be shown. A track pinned from a playlist whose album was never
+	/// opened is therefore playable from that playlist and absent from the
+	/// artist tree.
+	private func reachable(in scope: BrowseScope) async -> (
+		albums: Set<ItemRef>, artists: Set<ItemRef>
+	) {
+		let clients = await registry.clientsSnapshot()
+		let servers = clients.servers(in: scope).map(\.id)
+		let index = await mirror.availability(for: servers)
+		return index.reachable(from: await store.heldRefs())
+	}
+
+	private var offline: Bool {
+		get async { await settings.offlineMode }
 	}
 
 	// MARK: - Fan-out reads
@@ -58,6 +87,16 @@ final class LibraryRepository: Sendable {
 	/// screen.
 	func availableModes(scope: BrowseScope) async -> [LibraryMode] {
 		let clients = await registry.clientsSnapshot()
+		if await offline {
+			// Scoped like every other read: the mirror still holds the rows of
+			// a server that has since been disabled, and offering its chips
+			// would be a slice with nothing behind it.
+			var stored: [[LibraryMode]] = []
+			for config in clients.servers(in: scope) {
+				stored.append(await mirror.load([LibraryMode].self, at: .chips(config.id)) ?? [])
+			}
+			return LibraryRoots.mergeChips(perServer: stored)
+		}
 		let gathered = await gather(
 			over: clients.servers(in: scope), clients: clients,
 			stored: { [mirror] config in
@@ -77,6 +116,19 @@ final class LibraryRepository: Sendable {
 		[ArtistIndex]
 	> {
 		let clients = await registry.clientsSnapshot()
+		if await offline {
+			let reach = await reachable(in: scope)
+			var perServer: [[ArtistIndex]] = []
+			for config in clients.servers(in: scope) {
+				let stored =
+					await mirror.load([ArtistIndex].self, at: .indexes(config.id, mode)) ?? []
+				perServer.append(Self.keepingReachable(stored, artists: reach.artists))
+			}
+			return MergedResult(
+				items: mode == .uploads
+					? Merge.concatenatedIndexes(perServer: perServer)
+					: Merge.artistIndexes(perServer: perServer))
+		}
 		let gathered = await gather(
 			over: clients.servers(in: scope), clients: clients,
 			stored: { [mirror] config in
@@ -128,6 +180,20 @@ final class LibraryRepository: Sendable {
 			failures: gathered.failures)
 	}
 
+	/// Drops artists the walk did not reach, and buckets that empty as a
+	/// result — a heading over nothing is noise.
+	private static func keepingReachable(
+		_ indexes: [ArtistIndex], artists: Set<ItemRef>
+	) -> [ArtistIndex] {
+		indexes.compactMap { bucket in
+			// **Any** of a merged row's refs is enough: the row stands for the
+			// same artist on several servers, and one of them having stored
+			// audio is the row being playable.
+			let kept = bucket.artists.filter { !$0.refs.allSatisfy { !artists.contains($0) } }
+			return kept.isEmpty ? nil : ArtistIndex(label: bucket.label, artists: kept)
+		}
+	}
+
 	/// One server's roots, fetched once per session.
 	///
 	/// A failure propagates rather than resolving to "no roots": that reaches
@@ -151,6 +217,15 @@ final class LibraryRepository: Sendable {
 		// Read before the fan-out, so the transform below stays synchronous.
 		let collapse = await settings.mergeDuplicateAlbums
 
+		if await offline {
+			let reach = await reachable(in: .allServers)
+			var albums: [Album] = []
+			for ref in refs {
+				albums += (await mirror.load([Album].self, at: .albums(ref)) ?? [])
+					.filter { reach.albums.contains($0.ref) }
+			}
+			return MergedResult(items: collapse ? Merge.albums(albums) : albums)
+		}
 		let gathered = await gather(
 			over: refs, clients: clients,
 			stored: { [mirror] ref in await mirror.load([Album].self, at: .albums(ref)) }
@@ -159,7 +234,7 @@ final class LibraryRepository: Sendable {
 			let albums = (artist?.album ?? []).compactMap {
 				LibraryMapper.album($0, server: ref.server)
 			}
-			await mirror.store(albums, at: .albums(ref))
+			await mirror.storeAlbums(albums, for: ref)
 			return albums
 		}
 		let albums = gathered.answers.flatMap(\.1)
@@ -170,6 +245,18 @@ final class LibraryRepository: Sendable {
 
 	func playlists(scope: BrowseScope) async -> MergedResult<[ServerSection<Playlist>]> {
 		let clients = await registry.clientsSnapshot()
+		if await offline {
+			var sections: [ServerSection<Playlist>] = []
+			for config in clients.servers(in: scope) {
+				let stored = await mirror.load([Playlist].self, at: .playlists(config.id)) ?? []
+				// A playlist is kept whole even when only some of it is here:
+				// unlike an album it is a list somebody made, and one that
+				// vanished because two of its tracks are missing would be a
+				// worse answer than one with dimmed rows.
+				if !stored.isEmpty { sections.append(ServerSection(server: config, items: stored)) }
+			}
+			return MergedResult(items: sections)
+		}
 		let gathered = await gather(
 			over: clients.servers(in: scope), clients: clients,
 			stored: { [mirror] config in
@@ -185,7 +272,11 @@ final class LibraryRepository: Sendable {
 		return MergedResult(items: sections(gathered), failures: gathered.failures)
 	}
 
+	/// **Not mirrored, and empty offline.** What was recently played is state
+	/// the *server* keeps, per account; a stored copy would be a list frozen at
+	/// whenever it was last fetched, presented as though it were current.
 	func recentSongs(scope: BrowseScope, size: Int = 50) async -> MergedResult<[ServerSection<Song>]> {
+		if await offline { return MergedResult(items: []) }
 		let clients = await registry.clientsSnapshot()
 		let gathered = await gather(over: clients.servers(in: scope), clients: clients) {
 			client, config in
@@ -225,6 +316,15 @@ final class LibraryRepository: Sendable {
 				let clients = await registry.clientsSnapshot()
 				let servers = clients.servers(in: scope)
 				let collapse = await settings.mergeDuplicateAlbums
+				// **Nothing to search offline.** The mirror stores answers to
+				// browse queries, not an index; searching it would answer over
+				// whatever happened to have been opened, which is a worse
+				// answer than none because there is no way to tell.
+				guard await !self.offline else {
+					continuation.yield(MergedResult(items: LibrarySelection()))
+					continuation.finish()
+					return
+				}
 				guard !servers.isEmpty else {
 					continuation.yield(MergedResult(items: LibrarySelection()))
 					continuation.finish()
@@ -314,6 +414,7 @@ final class LibraryRepository: Sendable {
 	/// screen over an album whose tracks are stored and playable would be the
 	/// worse answer.
 	func albumDetail(_ ref: ItemRef) async throws -> AlbumDetail? {
+		if await offline { return await mirror.load(AlbumDetail.self, at: .album(ref)) }
 		do {
 			return try await liveAlbumDetail(ref)
 		} catch {
@@ -335,7 +436,7 @@ final class LibraryRepository: Sendable {
 		let detail = AlbumDetail(
 			album: album,
 			songs: dto.song.compactMap { LibraryMapper.song($0, server: ref.server) })
-		await mirror.store(detail, at: .album(ref))
+		await mirror.storeAlbum(detail, for: ref)
 		return detail
 	}
 
@@ -355,7 +456,10 @@ final class LibraryRepository: Sendable {
 		return try await client.playlists().compactMap { LibraryMapper.playlist($0, server: server) }
 	}
 
+	/// Empty offline, for the reason recents are: the stars are the server's
+	/// record, and `StarStore` is already the client's own.
 	func starred(server: ServerId) async throws -> LibrarySelection {
+		if await offline { return LibrarySelection() }
 		guard let client = await client(for: server) else { return LibrarySelection() }
 		return LibraryMapper.selection(try await client.starred2(), server: server)
 	}

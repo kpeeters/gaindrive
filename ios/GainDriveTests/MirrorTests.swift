@@ -108,3 +108,82 @@ struct StoredFailureTests {
 		#expect(stored.serverName == failure.serverName)
 	}
 }
+
+/// Which library is reachable from what is on disk.
+///
+/// **The walk goes up, not down.** Asking every mirrored album whether any of
+/// its tracks landed is `O(library)`; starting from the files that are actually
+/// here — a few hundred at most — and walking song → album → artist is
+/// `O(files you have)`. Everything is unavailable until the walk reaches it,
+/// which is what makes the direction safe: a gap in the index hides something
+/// rather than offering something that will not play.
+struct AvailabilityTests {
+	private let server = ServerId()
+
+	private func ref(_ id: String) -> ItemRef {
+		ItemRef(server: server, id: id)
+	}
+
+	/// One album, two tracks, one artist.
+	private var index: LibraryMirror.Availability {
+		LibraryMirror.Availability(
+			albumOfSong: [
+				ref("10").encoded: ref("1"),
+				ref("11").encoded: ref("1"),
+				ref("20").encoded: ref("2"),
+			],
+			artistOfAlbum: [
+				ref("1").encoded: ref("100"),
+				ref("2").encoded: ref("200"),
+			])
+	}
+
+	@Test func aStoredTrackReachesItsAlbumAndItsArtist() {
+		let reach = index.reachable(from: [ref("10")])
+		#expect(reach.albums == [ref("1")])
+		#expect(reach.artists == [ref("100")])
+	}
+
+	/// An album is one album however much of it is here — the listing asks
+	/// "is there anything for me", not "how much".
+	@Test func twoTracksOfOneAlbumReachOneAlbum() {
+		let reach = index.reachable(from: [ref("10"), ref("11")])
+		#expect(reach.albums == [ref("1")])
+		#expect(reach.artists == [ref("100")])
+	}
+
+	/// **The case the filter exists for.** An album with nothing stored is not
+	/// reached, so it does not appear — a shelf you cannot take anything down
+	/// from is worse than a short shelf.
+	@Test func anAlbumWithNothingStoredIsNotReached() {
+		let reach = index.reachable(from: [ref("10")])
+		#expect(!reach.albums.contains(ref("2")))
+		#expect(!reach.artists.contains(ref("200")))
+	}
+
+	/// A track pinned from a playlist whose album was never opened. It is
+	/// playable from that playlist and invisible in the artist tree, which is
+	/// right rather than a gap: the album has no stored listing either.
+	@Test func aTrackWhoseAlbumWasNeverMirroredReachesNothing() {
+		let reach = index.reachable(from: [ref("999")])
+		#expect(reach.albums.isEmpty)
+		#expect(reach.artists.isEmpty)
+	}
+
+	/// An album mirrored through a directory-shaped listing has no artist
+	/// recorded, and must still light up as an album rather than being lost
+	/// because the step above it is missing.
+	@Test func anAlbumWithNoArtistRecordedStillCounts() {
+		let partial = LibraryMirror.Availability(
+			albumOfSong: [ref("10").encoded: ref("1")], artistOfAlbum: [:])
+		let reach = partial.reachable(from: [ref("10")])
+		#expect(reach.albums == [ref("1")])
+		#expect(reach.artists.isEmpty)
+	}
+
+	@Test func nothingStoredReachesNothing() {
+		let reach = index.reachable(from: [])
+		#expect(reach.albums.isEmpty)
+		#expect(reach.artists.isEmpty)
+	}
+}

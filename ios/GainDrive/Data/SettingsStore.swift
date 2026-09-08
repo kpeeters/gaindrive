@@ -43,6 +43,20 @@ final class SettingsStore {
 		didSet { defaults.set(audioQuality.tag, forKey: Self.audioQualityKey) }
 	}
 
+	/// Stored music only — no server is contacted at all.
+	///
+	/// **A mode, not a display filter.** The repository skips the request
+	/// rather than making it and hiding the answer: a manual offline mode on a
+	/// flaky connection would otherwise be worse than useless, waiting out a
+	/// full timeout before showing the mirror it could have shown at once.
+	///
+	/// It lives in the library picker rather than in Settings because it
+	/// answers the same question the scope does, and because it is flipped
+	/// before a flight rather than configured once.
+	var offlineMode: Bool {
+		didSet { defaults.set(offlineMode, forKey: Self.offlineKey) }
+	}
+
 	/// Which slice of the library was last showing, as `LibraryMode.id`.
 	///
 	/// Stored as the raw string rather than as a `LibraryMode`, so a value
@@ -102,6 +116,7 @@ final class SettingsStore {
 	private static let libraryModeKey = "library_mode"
 	private static let albumSortsKey = "album_sort"
 	private static let cacheCapKey = "cache_max_bytes"
+	private static let offlineKey = "offline_mode"
 
 	init(defaults: UserDefaults = .standard) {
 		self.defaults = defaults
@@ -122,6 +137,7 @@ final class SettingsStore {
 		// `double(forKey:)` answers 0 for an absent key, which would be a cap
 		// of nothing rather than the default — the same trap the merge switch
 		// above avoids with `object(forKey:)`.
+		offlineMode = defaults.bool(forKey: Self.offlineKey)
 		let storedCap = defaults.object(forKey: Self.cacheCapKey) as? Double
 		cacheCapBytes = storedCap.map { Int64($0) } ?? Self.defaultCacheCapBytes
 	}

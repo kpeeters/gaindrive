@@ -26,6 +26,7 @@ struct ArtistsView: View {
 	let model: ArtistsViewModel
 
 	@Environment(ServerSelection.self) private var servers
+	@Environment(SettingsStore.self) private var settings
 	@State private var columns = NavigationSplitViewVisibility.all
 	/// **The selections carry the domain values, not ids.** A `List` would
 	/// default to the element's `id`, which here is an `ItemRef` — and both
@@ -50,6 +51,9 @@ struct ArtistsView: View {
 		// screen the user can act on.
 		.onChange(of: servers.scope) { clearSelection() }
 		.onChange(of: model.mode) { clearSelection() }
+		// Going offline is a different library, so what was chosen in the other
+		// one is not a screen the user can act on.
+		.onChange(of: settings.offlineMode) { clearSelection() }
 		// A different artist cannot still have the same album showing.
 		.onChange(of: selectedArtist) { selectedAlbum = nil }
 	}
@@ -104,6 +108,7 @@ private struct ArtistsList: View {
 	@Binding var selection: Artist?
 
 	@Environment(ServerSelection.self) private var servers
+	@Environment(SettingsStore.self) private var settings
 	/// Held in the *view*, not the view model: dismissing a note must not cost
 	/// a second fan-out across every server.
 	@State private var notesDismissed = false
@@ -139,6 +144,9 @@ private struct ArtistsList: View {
 			notesDismissed = false
 			model.appear()
 		}
+		// The listing is a different one offline, and nothing else would ask
+		// for it: `appear` is keyed on the scope, which has not changed.
+		.onChange(of: settings.offlineMode) { model.retry() }
 	}
 
 	@ViewBuilder
@@ -193,6 +201,10 @@ private struct ArtistsList: View {
 	/// list is the ordinary state of somewhere nothing has been put yet.
 	private var emptyText: String {
 		if servers.hasNoServers { return "No servers configured" }
+		// Offline, an empty list is not a library with no artists in it — it is
+		// a library with nothing downloaded. "No artists" would send somebody
+		// looking for a server problem that is not there.
+		if settings.offlineMode { return "Nothing downloaded yet" }
 		return model.mode == .uploads ? "Nothing in your uploads yet" : "No artists"
 	}
 

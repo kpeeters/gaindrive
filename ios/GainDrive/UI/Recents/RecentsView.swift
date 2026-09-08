@@ -12,6 +12,7 @@ struct RecentsView: View {
 	let model: RecentsViewModel
 
 	@Environment(ServerSelection.self) private var selection
+	@Environment(SettingsStore.self) private var settings
 	@State private var path: [Route] = []
 	@State private var notesDismissed = false
 
@@ -38,13 +39,18 @@ struct RecentsView: View {
 			}
 		}
 		.task(id: selection.scope) { model.appear() }
+		.onChange(of: settings.offlineMode) { model.retry() }
 		.onChange(of: selection.scope) { path.removeAll() }
 	}
 
 	@ViewBuilder
 	private func content(_ sections: [ServerSection<SongUi>]) -> some View {
 		if sections.isEmpty {
-			EmptyMessage(text: "Nothing played yet", symbol: "clock.arrow.circlepath")
+			// Recents is the server's record, so offline there is nothing to
+			// show rather than nothing to have played.
+			EmptyMessage(
+				text: settings.offlineMode ? "Not available offline" : "Nothing played yet",
+				symbol: "clock.arrow.circlepath")
 		} else {
 			List {
 				if !model.failures.isEmpty, !notesDismissed {
