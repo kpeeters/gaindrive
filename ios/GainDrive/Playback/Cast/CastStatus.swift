@@ -42,10 +42,12 @@ struct CastDevice: Identifiable, Hashable, Sendable {
 	/// The server treats that as *true* — refusing the picture on a guess is
 	/// worse than the guess — and so must anything here that acts on it.
 	///
-	/// Nothing acts on it yet; it is read now because the parser is the natural
-	/// place for it and a second pass over the TXT record later is not. See
-	/// "Casting a video to a receiver that cannot show one" in the root
-	/// `CLAUDE.md` for what the server does with the same bit.
+	/// `CastEngine` acts on it: a film going to a device with no screen is sent
+	/// as its **soundtrack** instead, which is what the server does with the
+	/// same bit — see "Casting a video to a receiver that cannot show one" in
+	/// the root `CLAUDE.md`. What that prevents is not a lost picture but a
+	/// receiver that fetches a film it cannot decode, resets, and asks again,
+	/// for as long as the session stands.
 	var videoOut: Bool? = nil
 	/// Filled in once something has actually connected — `NWBrowser` reports a
 	/// service, not an address. It is diagnostic rather than functional: nothing

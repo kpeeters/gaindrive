@@ -117,17 +117,42 @@ final class CastEngine: PlaybackEngine {
 	}
 
 	private func load(_ song: Song, at offset: Double) async -> Bool {
+		// **A picture is never sent to a receiver that says it has no screen.**
+		// Its soundtrack is, which is what the server does — see "Casting a
+		// video to a receiver that cannot show one" in the root `CLAUDE.md` —
+		// and it is what `CastDiscovery` reads bit 0 of the `ca` record for.
+		//
+		// Getting this wrong is not merely a lost picture. A WiiM amplifier
+		// handed a 2.5 GB AV1 film fetched it, failed to decode it, reset the
+		// connection, and asked again from a different offset — thousands of
+		// times, filling the server's log and saturating the link, with the app
+		// meanwhile reporting a session that was simply loading. Android cannot
+		// make this decision at all and `android/CAST.md` names that as a gap;
+		// this is the one place the iOS client is ahead.
+		//
+		// `videoOut` nil means the device announced nothing, and is read as
+		// *capable* — the server's rule, because refusing the picture on a
+		// guess is worse than the guess.
+		let showsPicture = session.device?.videoOut ?? true
+		let asSound = song.isVideo && !showsPicture
+
 		// **A film the server can only re-encode is refused rather than sent.**
 		// That tier is a chunked response with no length and no index, which a
 		// receiver cannot seek and frequently cannot start; `nativeSeek` is the
 		// server's own word for "this arrives as a real MP4". Saying so is far
-		// better than a LOAD that fails a minute in.
-		if song.isVideo, !song.nativeSeek {
+		// better than a LOAD that fails a minute in. It does not apply to a
+		// soundtrack, which is an ordinary audio stream whatever the film's
+		// tier.
+		if song.isVideo, !asSound, !song.nativeSeek {
 			failure = "This video has to be converted as it plays, which a Cast device cannot do."
 			onStateChange?()
 			return false
 		}
-		guard let target = song.isVideo ? urls.video(for: song) : await urls.audio(for: song)
+		let sendsVideo = song.isVideo && !asSound
+		guard
+			let target = sendsVideo
+				? urls.video(for: song)
+				: await (song.isVideo ? urls.soundtrack(for: song) : urls.audio(for: song))
 		else {
 			return false
 		}
@@ -141,7 +166,10 @@ final class CastEngine: PlaybackEngine {
 		// not warmed: the tiers a receiver will take are served off disk or
 		// remuxed, and a remux of a multi-gigabyte file is minutes in which
 		// nothing could be shown anyway.
-		if !song.isVideo {
+		// A soundtrack is a transcode like any other and wants warming; the
+		// picture tiers are served off disk or remuxed, and a remux of a
+		// multi-gigabyte film is minutes in which nothing could be shown anyway.
+		if !sendsVideo {
 			// Said explicitly rather than left to the next status push: nothing
 			// arrives from the receiver during the warm, so a client would
 			// otherwise show whatever it was showing before — which after a
@@ -161,8 +189,12 @@ final class CastEngine: PlaybackEngine {
 				artist: song.artistName.isEmpty ? nil : song.artistName,
 				album: song.albumTitle.isEmpty ? nil : song.albumTitle,
 				artwork: urls.artwork(for: song),
-				isVideo: song.isVideo,
-				quality: song.isVideo ? nil : target.quality))
+				// What is being *sent*, not what the library calls it: a
+				// soundtrack wants the music metadata block, or the television —
+				// or the amp's app — is given a movie's fields and shows
+				// nothing.
+				isVideo: sendsVideo,
+				quality: sendsVideo ? nil : target.quality))
 		startTicking()
 		return true
 	}

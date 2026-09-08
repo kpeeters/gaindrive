@@ -126,6 +126,18 @@ struct CastUrls {
 			contentType: target.contentType ?? song.contentType)
 	}
 
+	/// A film's **soundtrack**, for a receiver with no screen.
+	///
+	/// **The mechanism is one query parameter**, and `audio(for:)` already
+	/// produces it: naming an audio `format` for a video *is* the server's
+	/// request for its soundtrack, and `CLAUDE.md` says so in those words. So
+	/// this is a name rather than an implementation — the call site should read
+	/// as the decision it is making, and "ask for the audio of a video" is not
+	/// obviously that.
+	func soundtrack(for song: Song) async -> StreamTarget? {
+		await audio(for: song)
+	}
+
 	/// The sleeve the television shows. An ordinary cover URL — the receiver
 	/// fetches it from the same server as the audio, so if it can reach one it
 	/// can reach the other.

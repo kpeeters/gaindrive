@@ -76,6 +76,10 @@ final class CastSession {
 	/// abandons itself. **A retry deliberately does not bump it** — a retry is
 	/// the same intent as the load it repeats.
 	@ObservationIgnored private var loadGen = 0
+	/// The media session already given up on, so a receiver's repeated idle
+	/// pushes produce one STOP rather than a stream of them. The same shape as
+	/// `CastEngine.advancedFrom`, and for the same reason.
+	@ObservationIgnored private var gaveUpOn = 0
 	@ObservationIgnored private var requestId = 1
 
 	private static let log = Logger(subsystem: "org.gaindrive.ios", category: "cast")
@@ -148,6 +152,7 @@ final class CastSession {
 		transportId = nil
 		status = CastStatus()
 		retry.disarm()
+		gaveUpOn = 0
 		loaded = nil
 		failure = nil
 	}
@@ -352,6 +357,28 @@ final class CastSession {
 			let generation = loadGen
 			Self.log.warning("cast auto-retry LOAD (gen=\(generation)) — receiver went IDLE/ERROR")
 			Task { await sendLoad(media, generation: generation) }
+		} else if merged.isIdleError, merged.mediaSessionId != 0,
+			merged.mediaSessionId != gaveUpOn
+		{
+			// **Give up out loud, once, and tell the receiver to stop.**
+			//
+			// The retry above is for the Default Media Receiver's habit of
+			// failing the first LOAD that lands while another session is
+			// playing; a second error is a different thing and repeating the
+			// LOAD will not fix it. What matters is that leaving it alone is not
+			// neutral: a receiver that cannot decode what it was given goes on
+			// fetching by itself, resetting the connection and asking again from
+			// a fresh offset, for as long as the session stands. Measured
+			// against a WiiM handed an AV1 film — thousands of ranged GETs, a
+			// saturated link, and an app that reported only "loading".
+			//
+			// So the session is stopped rather than abandoned, and the failure
+			// is stated. Guarded on the media session so the receiver's repeated
+			// idle pushes produce one STOP rather than a stream of them.
+			gaveUpOn = merged.mediaSessionId
+			Self.log.warning("cast receiver failed the LOAD twice; stopping")
+			failure = "That track would not play on this device."
+			stopPlayback()
 		}
 		onStatus?(merged)
 	}
