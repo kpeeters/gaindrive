@@ -58,7 +58,9 @@
 	<!-- `audio` only. Anything else is a review risk for no benefit while the
 	     app merely plays music. Note that this mode does not keep the app
 	     alive while casting, since the phone is then not playing audio —
-	     see PLAN.md, phase 7. -->
+	     see PLAN.md, phase 7, and ios/CAST.md for what that costs. Nothing in
+	     the cast work adds a mode here: a direct cast keeps playing when the
+	     app is suspended, because the receiver pulls from the server itself. -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
@@ -81,10 +83,26 @@
 
 	<!-- Denial of this permission is a state to explain, not to time out on:
 	     a LAN server with the permission refused must say so rather than
-	     report itself unreachable. NSBonjourServices is deliberately absent —
-	     it arrives with casting, phase 7, not speculatively. -->
+	     report itself unreachable, and Settings > Casting says so rather than
+	     showing an empty list. -->
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>GainDrive connects to your own music server on your local network.</string>
+	<string>GainDrive connects to your own music server and finds Cast receivers on your local network.</string>
+
+	<!-- Browsing for Cast receivers. The string must match
+	     CastDiscovery.serviceType exactly: a browser for a service not listed
+	     here finds nothing and reports no error, which is indistinguishable
+	     from a network with no receivers on it.
+
+	     Note this is all that Bonjour discovery needs. The restricted
+	     com.apple.developer.networking.multicast entitlement — which requires a
+	     written request to Apple and is often refused — covers *raw* multicast,
+	     NWConnectionGroup or a socket joining a group by hand. NWBrowser goes
+	     through the system's mDNSResponder, which does the multicast on the
+	     app's behalf. -->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_googlecast._tcp</string>
+	</array>
 
 	<!-- The app uses only the standard HTTPS and cryptography the system
 	     provides, which is exempt. Declaring it here answers the export

@@ -27,6 +27,11 @@ struct GainDriveApp: App {
 	@State private var stars: StarStore
 	@State private var pins: PinRepository
 	@State private var player: PlayerConnection
+	/// The configured receivers, not the discovered ones. `CastDiscovery` is
+	/// deliberately **not** here: browsing runs only while something is looking
+	/// at a list, and an object in the environment would browse for the life of
+	/// the app.
+	@State private var castDevices: CastDeviceStore
 
 	/// Read once, here, before any view exists. `RootView` explains why this
 	/// cannot be derived inside the view hierarchy.
@@ -73,6 +78,7 @@ struct GainDriveApp: App {
 		// Built here, never in `RootView.init`, which re-runs on every
 		// re-evaluation of this body — `@State` would keep the first player and
 		// silently discard the rest, each with its own audio session.
+		_castDevices = State(initialValue: CastDeviceStore())
 		_player = State(
 			initialValue: PlayerConnection(
 				registry: registry, library: library, targets: targets, store: store))
@@ -101,6 +107,7 @@ struct GainDriveApp: App {
 			.environment(stars)
 			.environment(pins)
 			.environment(player)
+			.environment(castDevices)
 			.environment(\.library, library)
 			.preferredColorScheme(settings.themeMode.colorScheme)
 			// Re-reads what each pin covers and fetches anything missing, which

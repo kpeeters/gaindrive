@@ -24,6 +24,7 @@ struct SettingsView: View {
 	@Environment(ServerRegistry.self) private var registry
 	@Environment(SettingsStore.self) private var settings
 	@Environment(PinRepository.self) private var pins
+	@Environment(CastDeviceStore.self) private var castDevices
 	@State private var path: [Route]
 
 	init(startOnServers: Bool = false) {
@@ -32,7 +33,7 @@ struct SettingsView: View {
 	}
 
 	enum Route: Hashable {
-		case servers, library, playback, storage, appearance
+		case servers, library, playback, casting, storage, appearance
 	}
 
 	var body: some View {
@@ -47,6 +48,9 @@ struct SettingsView: View {
 					}
 					NavigationLink(value: Route.playback) {
 						LabeledContent("Playback", value: settings.audioQuality.label)
+					}
+					NavigationLink(value: Route.casting) {
+						LabeledContent("Casting", value: castingSummary)
 					}
 					NavigationLink(value: Route.storage) {
 						LabeledContent("Storage", value: storageSummary)
@@ -83,6 +87,7 @@ struct SettingsView: View {
 				case .servers: ServersSettingsView(startAdding: startOnServers)
 				case .library: LibrarySettingsView()
 				case .playback: PlaybackSettingsView()
+				case .casting: CastSettingsView()
 				case .storage: StorageSettingsView()
 				case .appearance: AppearanceSettingsView()
 				}
@@ -96,6 +101,15 @@ struct SettingsView: View {
 		let disabled = total - registry.enabled.count
 		let configured = "\(total) configured"
 		return disabled > 0 ? "\(configured), \(disabled) disabled" : configured
+	}
+
+	/// Configured devices only. What discovery has found is not summarised here:
+	/// browsing runs only while the pane is open, so any figure would be a
+	/// count from whenever it last was.
+	private var castingSummary: String {
+		let total = castDevices.devices.count
+		guard total > 0 else { return "Discovering" }
+		return total == 1 ? "1 device added" : "\(total) devices added"
 	}
 
 	/// The figure, not the word "Storage" said twice — a summary line states
