@@ -175,6 +175,13 @@ private struct VideoSurface: UIViewControllerRepresentable {
 
 	/// Holds the label so `updateUIViewController` can find it again without
 	/// searching the view hierarchy for it.
+	///
+	/// **`@MainActor` because `UILabel()` is.** A stored default value is
+	/// initialised in the enclosing type's isolation, and a plain class has
+	/// none — so the property would be constructing a main-actor type from
+	/// nowhere. Both methods that touch it, `makeCoordinator` and
+	/// `updateUIViewController`, are main-actor already, so nothing else moves.
+	@MainActor
 	final class Coordinator {
 		let label = UILabel()
 	}
