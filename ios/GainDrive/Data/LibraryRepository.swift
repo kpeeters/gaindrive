@@ -220,10 +220,31 @@ final class LibraryRepository: Sendable {
 		if await offline {
 			let reach = await reachable(in: .allServers)
 			var albums: [Album] = []
+			var seen: Set<ItemRef> = []
+
+			// The artist's own list, where one was stored.
 			for ref in refs {
-				albums += (await mirror.load([Album].self, at: .albums(ref)) ?? [])
-					.filter { reach.albums.contains($0.ref) }
+				let stored = await mirror.load([Album].self, at: .albums(ref)) ?? []
+				for album in stored where reach.albums.contains(album.ref) {
+					guard seen.insert(album.ref).inserted else { continue }
+					albums.append(album)
+				}
 			}
+
+			// **And anything reachable the list did not mention.** An artist
+			// can be reachable without its album list ever having been
+			// mirrored: reach an album through search or recents and
+			// `storeAlbum` records the way up — which is what puts the artist
+			// on screen — while `storeAlbums` never runs. Building this screen
+			// from the list alone left exactly that artist with no albums.
+			let index = await mirror.availability(for: refs.map(\.server))
+			for albumRef in index.albums(of: Set(refs), within: reach.albums) {
+				guard seen.insert(albumRef).inserted,
+					let detail = await mirror.load(AlbumDetail.self, at: .album(albumRef))
+				else { continue }
+				albums.append(detail.album)
+			}
+
 			return MergedResult(items: collapse ? Merge.albums(albums) : albums)
 		}
 		let gathered = await gather(

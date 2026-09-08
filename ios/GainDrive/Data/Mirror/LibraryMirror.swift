@@ -102,6 +102,28 @@ actor LibraryMirror {
 			return (albums, artists)
 		}
 
+		/// The reachable albums belonging to any of these artists.
+		///
+		/// **Needed because the two halves are written at different moments.**
+		/// `storeAlbums` records an artist's album *list* when that screen is
+		/// opened; `storeAlbum` records the way up when an album is. Reach an
+		/// album from search or recents and only the second runs — so the
+		/// artist becomes reachable while its list was never stored, and an
+		/// offline album screen built from the list alone would be empty.
+		///
+		/// A walk over one entry per mirrored album, which is the same order of
+		/// size as the walk up itself.
+		func albums(of artists: Set<ItemRef>, within reachable: Set<ItemRef>) -> Set<ItemRef> {
+			var found: Set<ItemRef> = []
+			for (album, artist) in artistOfAlbum {
+				guard artists.contains(artist), let ref = ItemRef(encoded: album),
+					reachable.contains(ref)
+				else { continue }
+				found.insert(ref)
+			}
+			return found
+		}
+
 		mutating func merge(_ other: Availability) {
 			albumOfSong.merge(other.albumOfSong) { _, new in new }
 			artistOfAlbum.merge(other.artistOfAlbum) { _, new in new }

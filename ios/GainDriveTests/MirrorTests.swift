@@ -181,6 +181,27 @@ struct AvailabilityTests {
 		#expect(reach.artists.isEmpty)
 	}
 
+	/// **The bug this method exists for.** Reach an album from search or
+	/// recents and `storeAlbum` records the way up — which is what puts the
+	/// artist on screen — while `storeAlbums` never runs, so there is no album
+	/// list to read. The artist screen has to be answerable from the index
+	/// alone, or exactly that artist shows nothing.
+	@Test func anArtistsAlbumsAreAnswerableWithoutAStoredList() {
+		let reach = index.reachable(from: [ref("10")])
+		#expect(index.albums(of: [ref("100")], within: reach.albums) == [ref("1")])
+	}
+
+	/// Only what is here: an album belonging to the artist but with nothing
+	/// stored is not one of its offline albums.
+	@Test func anArtistsUnstoredAlbumsAreNotOffered() {
+		let reach = index.reachable(from: [ref("10")])
+		#expect(index.albums(of: [ref("200")], within: reach.albums).isEmpty)
+	}
+
+	@Test func anArtistWithNothingAtAllHasNoAlbums() {
+		#expect(index.albums(of: [ref("999")], within: [ref("1")]).isEmpty)
+	}
+
 	@Test func nothingStoredReachesNothing() {
 		let reach = index.reachable(from: [])
 		#expect(reach.albums.isEmpty)
