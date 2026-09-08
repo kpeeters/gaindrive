@@ -304,7 +304,43 @@ class PlayerConnection @Inject constructor(
 	}
 
 	fun next() = controller?.seekToNextMediaItem()
-	fun previous() = controller?.seekToPreviousMediaItem()
+
+	/**
+	 * Restart the current track when more than [MAX_SEEK_TO_PREVIOUS_MS] in,
+	 * otherwise go to the one before — the convention every physical transport
+	 * and every music app on both platforms follows, and the reason "previous"
+	 * pressed twice reaches the previous track.
+	 *
+	 * **This used to be `seekToPreviousMediaItem()`, which always goes back**,
+	 * and the divergence went unnoticed because the two methods are named a
+	 * character apart and neither reads as the odd one out. `web/app.js` and the
+	 * iOS client have both had the threshold since they were written, so this
+	 * app was the one that disagreed.
+	 *
+	 * **Written out rather than delegated to `seekToPrevious()`**, which is
+	 * Media3's own version of exactly this rule and would otherwise be the right
+	 * call. It differs in one case that matters: `getPreviousMediaItemIndex()`
+	 * is `INDEX_UNSET` on the first item of a queue with repeat off, and
+	 * `seekToPrevious()` returns immediately on that — so the button would do
+	 * *nothing at all* on the first track of an album, at any position, where
+	 * the other two clients restart it. Spelling the rule out is what makes the
+	 * three agree, which is the whole point of changing it.
+	 *
+	 * Works the same while casting: `CastPlayer` is a `SimpleBasePlayer` whose
+	 * `handleSeek` takes an index and a position, so both branches are ordinary
+	 * seeks it already serves.
+	 */
+	fun previous() {
+		val controller = controller ?: return
+		if (controller.currentPosition > MAX_SEEK_TO_PREVIOUS_MS ||
+			!controller.hasPreviousMediaItem()
+		) {
+			controller.seekTo(0)
+		} else {
+			controller.seekToPreviousMediaItem()
+		}
+	}
+
 	fun seekTo(positionMs: Long) = controller?.seekTo(positionMs)
 
 	/**
@@ -503,5 +539,19 @@ class PlayerConnection @Inject constructor(
 		const val CONNECT_POLL_MS = 50L
 		/** Long enough for a slow link, short enough not to look stuck. */
 		const val PENDING_TIMEOUT_MS = 30_000L
+
+		/**
+		 * How far into a track "previous" stops meaning "go back" and starts
+		 * meaning "start this one again".
+		 *
+		 * Three seconds, matching `web/app.js` and the iOS client — and, as it
+		 * happens, Media3's own `C.DEFAULT_MAX_SEEK_TO_PREVIOUS_POSITION_MS`,
+		 * which is what `seekToPrevious()` would have used. The same number as
+		 * [org.gaindrive.android.data.model.CHAPTER_RESTART_MS], for the same
+		 * reason rather than by coincidence: a chapter marker is a track
+		 * boundary inside a file, and the two controls must not disagree about
+		 * how long "just started" lasts.
+		 */
+		const val MAX_SEEK_TO_PREVIOUS_MS = 3_000L
 	}
 }

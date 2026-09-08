@@ -231,6 +231,10 @@ final class LocalEngine: PlaybackEngine {
 			player.advanceToNextItem()
 			window.removeFirst()
 		}
+		// `applyEdit` suppresses `currentItemChanged`, so nothing else here
+		// republishes — and the position would stay on the track that just
+		// ended until the next periodic tick.
+		republish()
 		return true
 	}
 
@@ -366,6 +370,16 @@ final class LocalEngine: PlaybackEngine {
 	}
 
 	private func republish() {
+		// **Read the clock here, not only on the periodic tick.** That observer
+		// fires twice a second, so between an item change and the next tick the
+		// position still describes the track that just ended — and
+		// `advanceToNextItem()` produces exactly that gap. Anything deciding on
+		// position in that window gets the wrong answer: `previous()` reads
+		// forty-odd seconds half a second into a new track and restarts it
+		// instead of going back, which reads as the control working at random.
+		let now = player.currentTime().seconds
+		if now.isFinite { position = now }
+
 		isPlaying = player.timeControlStatus == .playing
 		// The precise equivalent of Android's `STATE_BUFFERING && playWhenReady`.
 		// `isPlaybackLikelyToKeepUp` is the wrong signal: it answers a different
