@@ -25,6 +25,7 @@ struct TrackActions: ViewModifier {
 	let song: Song
 
 	@Environment(PlayerConnection.self) private var player
+	@Environment(PinRepository.self) private var pins
 	@Environment(StarStore.self) private var stars
 	@State private var addingTo: Song?
 
@@ -55,6 +56,13 @@ struct TrackActions: ViewModifier {
 				} label: {
 					Label("Add to playlist…", systemImage: "music.note.list")
 				}
+				Button {
+					Task { await pins.toggle(pin) }
+				} label: {
+					Label(
+						isPinned ? "Remove download" : "Download",
+						systemImage: isPinned ? "arrow.down.circle.fill" : "arrow.down.circle")
+				}
 			}
 			.sheet(item: $addingTo) { song in
 				AddToPlaylistView(song: song)
@@ -63,6 +71,17 @@ struct TrackActions: ViewModifier {
 
 	private var isStarred: Bool {
 		stars.isStarred(song.ref, fallback: song.isStarred)
+	}
+
+	/// The title is carried on the pin so Settings → Storage can list what was
+	/// pinned without a request per row — which offline, the one time that
+	/// screen matters most, it could not make.
+	private var pin: Pin {
+		Pin(ref: song.ref, kind: .song, name: song.title)
+	}
+
+	private var isPinned: Bool {
+		pins.isPinned(song.ref, kind: .song)
 	}
 }
 

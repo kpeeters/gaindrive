@@ -60,11 +60,11 @@ final class PlayerConnection {
 	/// mapping back to a ref has to be kept alongside.
 	@ObservationIgnored private var window: [(ref: ItemRef, item: AVPlayerItem)] = []
 
+	/// Only for cover art now: the stream URL moved to `StreamTargets`, which
+	/// the downloader shares so the two cannot ask for different bytes.
 	@ObservationIgnored private let registry: ServerRegistry
-	@ObservationIgnored private let settings: SettingsStore
-	/// Shared with `LibraryRepository`: the ceiling a stream URL needs and the
-	/// roles the chip row needs come from the same one `getUser` per server.
-	@ObservationIgnored private let accounts: Accounts
+	@ObservationIgnored private let targets: StreamTargets
+	@ObservationIgnored private let store: AudioStore
 	@ObservationIgnored private let session = AudioSessionController()
 	@ObservationIgnored private let nowPlaying = NowPlayingCenter()
 	// The three that attach to the **role** rather than to the player: phase 9
@@ -91,12 +91,12 @@ final class PlayerConnection {
 	/// so if this type ever becomes something with a shorter life, that is the
 	/// first thing to add.
 	init(
-		registry: ServerRegistry, settings: SettingsStore, library: LibraryRepository,
-		accounts: Accounts
+		registry: ServerRegistry, library: LibraryRepository,
+		targets: StreamTargets, store: AudioStore
 	) {
 		self.registry = registry
-		self.settings = settings
-		self.accounts = accounts
+		self.targets = targets
+		self.store = store
 		self.scrobbler = Scrobbler(library: library)
 		// Observers and command handlers only. No session activation and no
 		// fetching: this initialiser starts no work, for the same reason the
@@ -335,17 +335,26 @@ final class PlayerConnection {
 		return built
 	}
 
-	/// Resolved **per track**, from that track's own server.
+	/// Resolved **per track**, from that track's own server, and served from
+	/// disk when a copy is there.
 	///
 	/// Nothing here closes over a "current server", which is the only reason a
 	/// queue spanning two servers works: it crosses credentials and bitrate
-	/// caps at every boundary.
+	/// caps at every boundary. `StreamTargets` is shared with `PinRepository`
+	/// so a download and a play cannot ask for different bytes.
+	///
+	/// **The stored copy wins whatever quality it is.** A track pinned at one
+	/// setting must not stop being playable because the setting changed later;
+	/// the quality is in the key so two copies can coexist without either being
+	/// mislabelled, but the music is the same music.
 	private func streamTarget(for song: Song) async -> StreamTarget? {
-		let clients = registry.clientsSnapshot()
-		guard let client = clients.client(for: song.ref.server) else { return nil }
-		let cap = await accounts.cap(for: song.ref.server, using: clients)
-		return StreamUrls.target(
-			for: song.ref, client: client, wanted: settings.audioQuality, accountCap: cap)
+		guard var target = await targets.target(for: song.ref) else { return nil }
+		if let local = await store.storedFile(for: song.ref) {
+			target = StreamTarget(
+				url: local, quality: target.quality, cacheKey: target.cacheKey,
+				contentType: target.contentType)
+		}
+		return target
 	}
 
 	private func applyEdit(_ body: () -> Void) {

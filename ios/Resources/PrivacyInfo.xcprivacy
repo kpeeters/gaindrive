@@ -5,11 +5,12 @@
 	GainDrive server, so all three collection keys are empty and stay that way.
 
 	NSPrivacyAccessedAPITypes grows as phases land. UserDefaults (CA92.1) is
-	here from phase 1, which stores the server list and the theme in it. The
-	cache phase (PLAN.md phase 5) adds two more: file timestamps (C617.1) for
-	the LRU eviction, and disk space (E174.1) for the usage readout and the cap
-	check. Each is a few lines here; the point of writing the file early is
-	that it is never a discovery.
+	here from phase 1, which stores the server list and the theme in it. Disk
+	space (E174.1) arrived with downloads, for the usage readout and the cap
+	check. File timestamps (C617.1) are still to come: nothing reads one yet,
+	because the only thing that would is the LRU eviction, and nothing is
+	stored that was not explicitly asked for. Declaring it early would be
+	declaring an access the app does not make.
 
 	Note the Keychain is not a required-reason API and needs no entry, even
 	though it holds the one genuinely sensitive thing the app stores.
@@ -33,6 +34,17 @@
 				     this app. Nothing is shared with an app group or another
 				     process. -->
 				<string>CA92.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<!-- E174.1: shown to the user in Settings, and checked before
+				     accepting a download that would not fit. Nothing is sent
+				     anywhere. -->
+				<string>E174.1</string>
 			</array>
 		</dict>
 	</array>

@@ -109,6 +109,8 @@ struct AlbumRow: View {
 /// A track **inside** its album or playlist: it has a number column and needs
 /// no cover, because the screen above it is already the artwork.
 struct TrackRow: View {
+	@Environment(PinRepository.self) private var pins
+
 	let song: Song
 	var state: TrackState = .idle
 	/// Overrides the song's own track number, so a caller can substitute a
@@ -159,6 +161,7 @@ struct TrackRow: View {
 			}
 			Spacer(minLength: 0)
 			if let trailing { trailing }
+			StoredMark(song: song.ref)
 			Text(formatDuration(song.duration))
 				.font(.footnote.monospacedDigit())
 				.foregroundStyle(.secondary)
@@ -203,6 +206,7 @@ struct SongRow: View {
 				}
 			}
 			Spacer(minLength: 0)
+			StoredMark(song: item.song.ref)
 			if let trailingText {
 				Text(trailingText)
 					.font(.caption)

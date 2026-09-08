@@ -30,6 +30,24 @@ enum CacheKeys {
 	static func of(_ ref: ItemRef, quality: AudioQuality) -> String {
 		"\(ref.encoded)@\(quality.tag)"
 	}
+
+	/// The inverse, which a background download needs.
+	///
+	/// A `URLSessionDownloadTask` outlives the process, and its delegate
+	/// callbacks arrive after a relaunch with nothing but the task — so the key
+	/// travels in `taskDescription` and has to survive the round trip. There is
+	/// no in-memory map that could do this job.
+	///
+	/// Split on the **last** `@`: a quality tag never contains one, while a
+	/// Subsonic id is a string somebody else chose and might.
+	static func parse(_ key: String) -> (ref: ItemRef, quality: AudioQuality)? {
+		guard let at = key.lastIndex(of: "@") else { return nil }
+		guard let ref = ItemRef(encoded: String(key[key.startIndex..<at])) else { return nil }
+		guard let quality = AudioQuality.parse(String(key[key.index(after: at)...])) else {
+			return nil
+		}
+		return (ref, quality)
+	}
 }
 
 /// Builds the URL a track is played from.

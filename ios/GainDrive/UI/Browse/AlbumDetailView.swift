@@ -33,6 +33,11 @@ struct AlbumDetailView: View {
 		}
 		.navigationTitle(albumTitle)
 		.navigationBarTitleDisplayMode(.inline)
+		.toolbar {
+			ToolbarItem(placement: .topBarTrailing) {
+				DownloadControl(pin: Pin(ref: ref, kind: .album, name: albumTitle))
+			}
+		}
 		.task {
 			if model == nil, let library {
 				model = AlbumDetailViewModel(library: library, ref: ref)

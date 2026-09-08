@@ -23,6 +23,7 @@ struct SettingsView: View {
 
 	@Environment(ServerRegistry.self) private var registry
 	@Environment(SettingsStore.self) private var settings
+	@Environment(PinRepository.self) private var pins
 	@State private var path: [Route]
 
 	init(startOnServers: Bool = false) {
@@ -31,7 +32,7 @@ struct SettingsView: View {
 	}
 
 	enum Route: Hashable {
-		case servers, library, playback, appearance
+		case servers, library, playback, storage, appearance
 	}
 
 	var body: some View {
@@ -46,6 +47,9 @@ struct SettingsView: View {
 					}
 					NavigationLink(value: Route.playback) {
 						LabeledContent("Playback", value: settings.audioQuality.label)
+					}
+					NavigationLink(value: Route.storage) {
+						LabeledContent("Storage", value: storageSummary)
 					}
 					NavigationLink(value: Route.appearance) {
 						LabeledContent("Appearance", value: settings.themeMode.label)
@@ -79,6 +83,7 @@ struct SettingsView: View {
 				case .servers: ServersSettingsView(startAdding: startOnServers)
 				case .library: LibrarySettingsView()
 				case .playback: PlaybackSettingsView()
+				case .storage: StorageSettingsView()
 				case .appearance: AppearanceSettingsView()
 				}
 			}
@@ -93,6 +98,12 @@ struct SettingsView: View {
 		return disabled > 0 ? "\(configured), \(disabled) disabled" : configured
 	}
 
+	/// The figure, not the word "Storage" said twice — a summary line states
+	/// the current value, which is the whole reason these rows have one.
+	private var storageSummary: String {
+		PinRepository.readable(pins.usageBytes)
+	}
+
 	private var librarySummary: String {
 		settings.mergeDuplicateAlbums ? "Merging duplicates" : "Showing duplicates"
 	}
@@ -103,10 +114,4 @@ struct SettingsView: View {
 		let build = info?["CFBundleVersion"] as? String ?? "?"
 		return "Version \(version) (\(build))"
 	}
-}
-
-#Preview {
-	SettingsView()
-		.environment(ServerRegistry())
-		.environment(SettingsStore())
 }

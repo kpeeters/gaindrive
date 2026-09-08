@@ -15,12 +15,17 @@ import SwiftUI
 /// composition in all but name, for the same reason.
 @main
 struct GainDriveApp: App {
+	/// Only so a background download finishing while the app is not running
+	/// can be acknowledged — see `AppDelegate`.
+	@UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
 	@State private var registry: ServerRegistry
 	@State private var settings: SettingsStore
 	@State private var selection: ServerSelection
 	@State private var library: LibraryRepository
 	@State private var events: LibraryEvents
 	@State private var stars: StarStore
+	@State private var pins: PinRepository
 	@State private var player: PlayerConnection
 
 	/// Read once, here, before any view exists. `RootView` explains why this
@@ -46,13 +51,23 @@ struct GainDriveApp: App {
 		_events = State(initialValue: events)
 		_library = State(initialValue: library)
 		_stars = State(initialValue: StarStore(library: library))
+
+		// Downloads. `StreamTargets` is shared with the player deliberately:
+		// a download that asked for different bytes than a play would store
+		// them under a key nothing looks for.
+		let targets = StreamTargets(registry: registry, settings: settings, accounts: accounts)
+		let store = AudioStore()
+		let queue = DownloadQueue(store: store)
+		let pins = PinRepository(
+			library: library, store: store, queue: queue, targets: targets, settings: settings)
+		_pins = State(initialValue: pins)
+		AppDelegate.adopt(queue)
 		// Built here, never in `RootView.init`, which re-runs on every
 		// re-evaluation of this body — `@State` would keep the first player and
 		// silently discard the rest, each with its own audio session.
 		_player = State(
 			initialValue: PlayerConnection(
-				registry: registry, settings: settings, library: library,
-				accounts: accounts))
+				registry: registry, library: library, targets: targets, store: store))
 		// Editing a server may have pointed it at a different account, whose
 		// ceiling and roles are otherwise cached from the old one for the rest
 		// of the session.
@@ -73,9 +88,15 @@ struct GainDriveApp: App {
 			.environment(selection)
 			.environment(events)
 			.environment(stars)
+			.environment(pins)
 			.environment(player)
 			.environment(\.library, library)
 			.preferredColorScheme(settings.themeMode.colorScheme)
+			// Re-reads what each pin covers and fetches anything missing, which
+			// is what makes a pinned playlist cover a track added since it was
+			// pinned — and what re-adopts a background download the system
+			// carried on with while the app was not running.
+			.task { await pins.refresh() }
 		}
 	}
 }

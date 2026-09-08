@@ -43,11 +43,14 @@ actor TranscodePrewarmer {
 		// there is no transcode to build and nothing to wait for.
 		guard target.quality.format != .original else { return }
 
-		// Two more skips belong here and have nothing to skip on yet. Phase 5
-		// adds both: offline mode, which means requests are not to be made at
-		// all rather than expected to fail; and a track already in the byte
-		// cache, which playback will read locally so the server has nothing to
-		// prepare.
+		// One more skip belongs here and has nothing to skip on yet: offline
+		// mode, which means requests are not to be made at all rather than
+		// expected to fail.
+		//
+		// The other — a track already on disk — is handled a step earlier, in
+		// `PlayerConnection.streamTarget`: a stored track comes back with a
+		// file URL, and a `file:` URL is not something to warm. That is why
+		// there is no check for it here.
 
 		// Claimed only now that a request is actually going out, and keyed by
 		// the **cache key** rather than the ref: what gets warmed is a track at
@@ -62,6 +65,11 @@ actor TranscodePrewarmer {
 		// cache is warm however little of the response is asked for. The body
 		// is discarded — the point is the work the server does on the way to
 		// producing it.
+		// Belt and braces for the sentence above: a file URL means the bytes
+		// are already here, and asking `URLSession` to range-request one would
+		// be a request that means nothing.
+		guard target.url.isFileURL == false else { return }
+
 		var request = URLRequest(url: target.url)
 		request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
 		do {

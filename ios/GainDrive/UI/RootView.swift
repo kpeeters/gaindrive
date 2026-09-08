@@ -18,6 +18,7 @@ struct RootView: View {
 	let firstRun: Bool
 
 	@Environment(PlayerConnection.self) private var player
+	@Environment(PinRepository.self) private var pins
 	@State private var tab: Destination
 	/// Raised by any tab's mini player, and owned here so there is exactly one
 	/// of it — see `miniPlayerInset`.
@@ -106,6 +107,18 @@ struct RootView: View {
 			Button("OK") { player.clearError() }
 		} message: {
 			Text(player.errorMessage ?? "")
+		}
+		// Pinning is reached from four listings, not only from the album
+		// screen, so a refusal belongs to the shell for the same reason a
+		// playback error does.
+		.alert(
+			"Cannot download that",
+			isPresented: Binding(
+				get: { pins.message != nil }, set: { if !$0 { pins.clearMessage() } })
+		) {
+			Button("OK") { pins.clearMessage() }
+		} message: {
+			Text(pins.message ?? "")
 		}
 	}
 }

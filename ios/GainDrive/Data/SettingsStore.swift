@@ -68,6 +68,30 @@ final class SettingsStore {
 		albumSorts[mode.id] = sort.rawValue
 	}
 
+	/// How much downloaded audio may sit on the device.
+	///
+	/// **A ceiling on a refusal, not on an evictor** — for now. Nothing here is
+	/// cached-on-play yet, so everything stored was explicitly asked for and
+	/// nothing may be reclaimed; pinning past the cap is refused instead. When
+	/// cache-on-play arrives this becomes the evictor's bound as well, and the
+	/// refusal stays, because eviction cannot reclaim pinned bytes.
+	///
+	/// 4 GB to match Android's `DEFAULT_CACHE_BYTES`. Stored as a `Double`
+	/// because `UserDefaults` has no `Int64` accessor and a music library
+	/// passes what an `Int` is guaranteed to hold on a 32-bit device.
+	var cacheCapBytes: Int64 {
+		didSet { defaults.set(Double(cacheCapBytes), forKey: Self.cacheCapKey) }
+	}
+
+	static let defaultCacheCapBytes: Int64 = 4 * 1024 * 1024 * 1024
+	static let cacheCapChoices: [Int64] = [
+		1 * 1024 * 1024 * 1024,
+		2 * 1024 * 1024 * 1024,
+		4 * 1024 * 1024 * 1024,
+		8 * 1024 * 1024 * 1024,
+		16 * 1024 * 1024 * 1024,
+	]
+
 	@ObservationIgnored private let defaults: UserDefaults
 	// Spelled as Android spells them in its DataStore, so the two apps
 	// describe the same settings by the same names.
@@ -77,6 +101,7 @@ final class SettingsStore {
 	private static let audioQualityKey = "audio_quality"
 	private static let libraryModeKey = "library_mode"
 	private static let albumSortsKey = "album_sort"
+	private static let cacheCapKey = "cache_max_bytes"
 
 	init(defaults: UserDefaults = .standard) {
 		self.defaults = defaults
@@ -94,5 +119,10 @@ final class SettingsStore {
 			defaults.string(forKey: Self.audioQualityKey).flatMap(AudioQuality.parse) ?? .default
 		libraryMode = defaults.string(forKey: Self.libraryModeKey)
 		albumSorts = defaults.dictionary(forKey: Self.albumSortsKey) as? [String: String] ?? [:]
+		// `double(forKey:)` answers 0 for an absent key, which would be a cap
+		// of nothing rather than the default — the same trap the merge switch
+		// above avoids with `object(forKey:)`.
+		let storedCap = defaults.object(forKey: Self.cacheCapKey) as? Double
+		cacheCapBytes = storedCap.map { Int64($0) } ?? Self.defaultCacheCapBytes
 	}
 }
