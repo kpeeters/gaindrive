@@ -44,7 +44,13 @@ enum Route: Hashable {
 	/// perfectly remuxable film down the re-encode path every time. Read again
 	/// through `getAlbum` it carries the flag, and lands on the right tier.
 	/// Android's `Route.Album.autoPlayRef` exists for the same reason.
-	case album(ItemRef, title: String, autoPlay: ItemRef?)
+	///
+	/// `autoPlayAt` starts that track partway in, in seconds, and exists for one
+	/// caller: a chapter match in search. A marker has no id anything can
+	/// stream, so acting on one means opening the album its recording sits in
+	/// and starting that recording partway through — which is the same detour
+	/// `autoPlay` already takes, for the same reason, with an offset added.
+	case album(ItemRef, title: String, autoPlay: ItemRef?, autoPlayAt: Double)
 	case playlist(ItemRef, name: String)
 
 	/// The ordinary way in, from a slice that is not categories.
@@ -58,6 +64,12 @@ enum Route: Hashable {
 	/// Swift does not allow. The two differ in argument labels, so they are
 	/// distinct signatures and no existing call site had to change.
 	static func album(_ ref: ItemRef, title: String) -> Route {
-		.album(ref, title: title, autoPlay: nil)
+		.album(ref, title: title, autoPlay: nil, autoPlayAt: 0)
+	}
+
+	/// Open the album and start a track from its beginning — a hit in Recents,
+	/// Search or Starred.
+	static func album(_ ref: ItemRef, title: String, autoPlay: ItemRef?) -> Route {
+		.album(ref, title: title, autoPlay: autoPlay, autoPlayAt: 0)
 	}
 }

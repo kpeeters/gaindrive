@@ -13,6 +13,9 @@ struct AlbumDetailView: View {
 	let albumTitle: String
 	/// A track to start once the listing has loaded — see `Route.album`.
 	var autoPlay: ItemRef?
+	/// Where in that track to start, in seconds. Non-zero for a chapter hit,
+	/// which names a marker inside a recording rather than the recording.
+	var autoPlayAt: Double = 0
 
 	@Environment(\.library) private var library
 	@Environment(PlayerConnection.self) private var player
@@ -49,13 +52,23 @@ struct AlbumDetailView: View {
 	}
 
 	private func list(_ detail: AlbumDetail, model: AlbumDetailViewModel) -> some View {
-		// An album ripped with no tags, or with every track tagged 1, carries
-		// no usable numbering — number the rows by position rather than leave
-		// the column blank. The server derives a number from a numbered
-		// filename, so this is the remainder: files named without one. Matches
-		// web/app.js and the Android client, album-wide index included, so the
-		// three read the same.
-		let useSeq = detail.songs.allSatisfy { ($0.track ?? 0) <= 1 }
+		// One entry per *row*, not per song: a chaptered recording is replaced
+		// by its markers, so the two are no longer the same count. The
+		// numbering and heading rules live in `albumListRows`, where they can
+		// be tested without a screen or a player.
+		let rows = albumListRows(songs: detail.songs, chapters: model.chapters)
+		// Which marker is playing, computed once for the whole list rather than
+		// per row. It cannot come from `trackState(of:)`, which answers about a
+		// song: every marker of a playing concert would be current at once.
+		//
+		// **The empty branch is what keeps an album with no chapters — nearly
+		// every album — costing exactly what it did before.** `position` is
+		// never read there, so the twice-a-second tick does not invalidate a
+		// listing that has nothing to highlight. That is the rule
+		// `PlayerConnection` states about `trackState(of:)`, applied to the one
+		// place that has to break it.
+		let playingMarker: PlayingMarker? =
+			model.chapters.isEmpty ? nil : currentMarker(model.chapters)
 
 		return List {
 			Section {
@@ -67,10 +80,10 @@ struct AlbumDetailView: View {
 			// heading over every track on a single-disc album says nothing and
 			// costs a row.
 			if detail.isMultiDisc {
-				ForEach(discs(detail), id: \.number) { disc in
+				ForEach(discs(rows), id: \.number) { disc in
 					Section {
-						ForEach(disc.songs) { song in
-							trackRow(song, in: detail, useSeq: useSeq)
+						ForEach(disc.rows) { row in
+							listRow(row, in: detail, playing: playingMarker)
 						}
 					} header: {
 						SectionHeading(text: "Disc \(disc.number)")
@@ -78,8 +91,8 @@ struct AlbumDetailView: View {
 				}
 			} else {
 				Section {
-					ForEach(detail.songs) { song in
-						trackRow(song, in: detail, useSeq: useSeq)
+					ForEach(rows) { row in
+						listRow(row, in: detail, playing: playingMarker)
 					}
 				}
 			}
@@ -89,6 +102,63 @@ struct AlbumDetailView: View {
 		.task(id: detail) { startAutoPlay(detail) }
 	}
 
+	/// The recording being played and which of its markers, as a pair, so one
+	/// comparison decides every row.
+	private struct PlayingMarker: Equatable {
+		let song: ItemRef
+		let index: Int
+	}
+
+	private func currentMarker(_ chapters: [ItemRef: [Chapter]]) -> PlayingMarker? {
+		guard let ref = player.current?.ref, let markers = chapters[ref],
+			let at = markers.currentIndex(at: player.position)
+		else {
+			return nil
+		}
+		return PlayingMarker(song: ref, index: markers[at].index)
+	}
+
+	@ViewBuilder
+	private func listRow(_ row: AlbumListRow, in detail: AlbumDetail, playing: PlayingMarker?)
+		-> some View
+	{
+		// A heading naming the recording, drawn inside the row it introduces so
+		// that the list's identity stays one entry per row. `albumListRows`
+		// decides whether there is one at all.
+		if let heading = row.recordingHeading {
+			SectionHeading(text: heading)
+				.padding(.top, 8)
+				.listRowSeparator(.hidden)
+		}
+		switch row.kind {
+		case .track(let number):
+			trackRow(row.song, number: number, in: detail, queueIndex: row.queueIndex)
+		case .marker(let chapter):
+			markerRow(row, chapter: chapter, in: detail, playing: playing)
+		}
+	}
+
+	private func markerRow(
+		_ row: AlbumListRow, chapter: Chapter, in detail: AlbumDetail, playing: PlayingMarker?
+	) -> some View {
+		let unplayable = settings.offlineMode && !pins.state(for: row.song.ref).isHere
+		return Button {
+			// The album queue, starting at the recording, positioned at the
+			// marker — which is what tapping a song of a concert should mean.
+			player.play(detail.songs, startIndex: row.queueIndex, startPosition: chapter.start)
+		} label: {
+			ChapterRow(
+				chapter: chapter,
+				playing: playing == PlayingMarker(song: row.song.ref, index: chapter.index))
+		}
+		.buttonStyle(.plain)
+		.disabled(unplayable)
+		.opacity(unplayable ? 0.4 : 1)
+		// The recording's own row is gone, so this is the only way left to
+		// reach its actions — starring the concert, queueing it, downloading it.
+		.trackActions(for: row.song)
+	}
+
 	/// A ref naming a track this album no longer holds does nothing, silently.
 	/// The listing is the newer fact, and a hit that has gone is not an error
 	/// worth a dialog over.
@@ -96,7 +166,7 @@ struct AlbumDetailView: View {
 		guard let autoPlay, !autoPlayed else { return }
 		autoPlayed = true
 		guard let index = detail.songs.firstIndex(where: { $0.ref == autoPlay }) else { return }
-		player.play(detail.songs, startIndex: index)
+		player.play(detail.songs, startIndex: index, startPosition: autoPlayAt)
 	}
 
 	private func header(_ detail: AlbumDetail, model: AlbumDetailViewModel) -> some View {
@@ -130,27 +200,24 @@ struct AlbumDetailView: View {
 		.padding(.vertical, 4)
 	}
 
-	/// **The index is into the flat `detail.songs`, never into the disc slice.**
-	/// The multi-disc branch renders a grouped slice, and taking the slice index
-	/// would play the wrong track on every disc after the first — silently, and
-	/// invisibly to anyone testing with a single-disc album.
-	private func trackRow(_ song: Song, in detail: AlbumDetail, useSeq: Bool)
+	/// **`queueIndex` is into the flat `detail.songs`, never into the disc
+	/// slice.** The multi-disc branch renders a grouped slice, and taking the
+	/// slice index would play the wrong track on every disc after the first —
+	/// silently, and invisibly to anyone testing with a single-disc album.
+	/// `albumListRows` computes it once, before any grouping, which is what
+	/// makes it right for a marker too.
+	private func trackRow(_ song: Song, number: Int?, in detail: AlbumDetail, queueIndex: Int)
 		-> some View
 	{
-		let index = detail.songs.firstIndex(of: song)
 		// **Dimmed and inert, not hidden.** Inside an album, knowing what is
 		// missing is the useful part — and dropping rows would renumber the
 		// record. `android/CACHING.md` draws the same line between a listing,
 		// which shrinks, and a track list, which does not.
 		let unplayable = settings.offlineMode && !pins.state(for: song.ref).isHere
 		return Button {
-			guard let index else { return }
-			player.play(detail.songs, startIndex: index)
+			player.play(detail.songs, startIndex: queueIndex)
 		} label: {
-			TrackRow(
-				song: song,
-				state: player.trackState(of: song.ref),
-				number: useSeq ? index.map { $0 + 1 } : song.track)
+			TrackRow(song: song, state: player.trackState(of: song.ref), number: number)
 		}
 		.buttonStyle(.plain)
 		.disabled(unplayable)
@@ -169,12 +236,16 @@ struct AlbumDetailView: View {
 
 	private struct Disc {
 		let number: Int
-		let songs: [Song]
+		let rows: [AlbumListRow]
 	}
 
-	private func discs(_ detail: AlbumDetail) -> [Disc] {
-		Dictionary(grouping: detail.songs) { $0.discNumber ?? 1 }
+	/// Grouped from the *flattened* rows, so a chaptered recording's markers
+	/// land under the disc heading its recording belongs to. `Dictionary`'s
+	/// grouping keeps each group in the order it met them, which is album
+	/// order.
+	private func discs(_ rows: [AlbumListRow]) -> [Disc] {
+		Dictionary(grouping: rows, by: \.disc)
 			.sorted { $0.key < $1.key }
-			.map { Disc(number: $0.key, songs: $0.value) }
+			.map { Disc(number: $0.key, rows: $0.value) }
 	}
 }

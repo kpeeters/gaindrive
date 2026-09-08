@@ -158,7 +158,62 @@ enum LibraryMapper {
 		LibrarySelection(
 			artists: dto.artist.compactMap { artist($0, server: server) },
 			albums: dto.album.compactMap { album($0, server: server) },
-			songs: dto.song.compactMap { song($0, server: server) })
+			songs: dto.song.compactMap { song($0, server: server) },
+			chapters: dto.chapter.compactMap { chapterHit($0, server: server) })
+	}
+
+	// MARK: - Chapters
+
+	/// One marker.
+	///
+	/// Nothing here carries the recording's ref, unlike every other mapper in
+	/// this file — a chapter has none, and the caller always holds the item it
+	/// read the list for. `chapterHit` below is the one shape that needs it,
+	/// and it takes it from the payload's own `songId`.
+	static func chapter(_ dto: ChapterDto) -> Chapter? {
+		guard let index = dto.index, index > 0, let start = dto.start else { return nil }
+		return Chapter(
+			index: index,
+			start: start,
+			// Absent on a search hit, which says only where the marker is, and
+			// 0 from the server for a span that is not positive. Both mean the
+			// same thing to every reader: nothing to show.
+			duration: max(0, dto.duration ?? 0),
+			// **Never defaulted.** An empty name is what the file holds, and
+			// inventing "Chapter 3" here would put the placeholder somewhere a
+			// save could write it back. `displayName` draws it instead.
+			name: dto.name ?? "")
+	}
+
+	static func chapterList(_ dto: ChaptersBody.Payload) -> ChapterList {
+		ChapterList(
+			chapters: dto.chapter.compactMap(chapter),
+			source: ChapterSource.from(wire: dto.source))
+	}
+
+	static func recording(_ dto: AlbumChaptersBody.Recording, server: ServerId)
+		-> ChapteredRecording?
+	{
+		guard let ref = server.ref(dto.id) else { return nil }
+		return ChapteredRecording(
+			ref: ref, title: dto.title ?? "", chapters: dto.chapter.compactMap(chapter))
+	}
+
+	private static func chapterHit(_ dto: ChapterDto, server: ServerId) -> ChapterHit? {
+		guard let songRef = server.ref(dto.songId),
+			let index = dto.index, index > 0, let start = dto.start
+		else {
+			return nil
+		}
+		return ChapterHit(
+			songRef: songRef,
+			albumRef: server.ref(dto.parent),
+			index: index,
+			start: start,
+			name: dto.name ?? "",
+			trackTitle: dto.track ?? "",
+			albumTitle: dto.album ?? "",
+			artistName: dto.artist ?? "")
 	}
 
 	// MARK: - Small decisions, made once

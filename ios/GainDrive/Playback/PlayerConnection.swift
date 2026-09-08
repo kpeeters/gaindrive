@@ -122,9 +122,22 @@ final class PlayerConnection {
 
 	/// `startIndex` is an index into `songs`. Callers rendering a grouped list
 	/// must map back to the flat order first — see `AlbumDetailView`.
-	func play(_ songs: [Song], startIndex: Int) {
+	///
+	/// `startPosition` is what a chapter marker asks for: play this recording,
+	/// but from the song inside it that was tapped. Defaulted, so every caller
+	/// meaning "from the beginning" is unchanged.
+	///
+	/// **Deferred rather than seeked immediately**, unlike Android, where
+	/// `setMediaItems` takes the offset. `AVQueuePlayer` has no such parameter
+	/// and seeking an item that is not ready is silently dropped, so the offset
+	/// is held and applied the moment the item reports `readyToPlay` — see
+	/// `applyPendingSeek`.
+	func play(_ songs: [Song], startIndex: Int, startPosition: Double = 0) {
 		guard songs.indices.contains(startIndex) else { return }
 		beginLoading(songs[startIndex].ref)
+		// Armed before the window is built, or a fast local file can be ready
+		// before this returns.
+		pendingSeek = startPosition > 0 ? startPosition : nil
 		model.play(songs, startIndex: startIndex)
 		publishQueue()
 		Task { await reconcile(thenPlay: true) }
@@ -200,6 +213,25 @@ final class PlayerConnection {
 		Task { await reconcile(thenPlay: false) }
 	}
 
+	/// A start offset waiting for the item to become seekable.
+	///
+	/// Cleared by anything that changes what is playing, because an offset into
+	/// one recording means nothing in the next: a queue advance while the first
+	/// item was still loading would otherwise drop the second track a quarter of
+	/// an hour in.
+	@ObservationIgnored private var pendingSeek: Double?
+
+	/// Applied on the item's own `readyToPlay`, which is the first moment a seek
+	/// is honoured rather than dropped. Both entry points call it — the status
+	/// observer and `currentItemChanged` — since an item that was already ready
+	/// when it became current publishes no new status.
+	private func applyPendingSeek() {
+		guard let target = pendingSeek else { return }
+		guard let item = player.currentItem, item.status == .readyToPlay else { return }
+		pendingSeek = nil
+		seek(to: target)
+	}
+
 	func seek(to seconds: Double) {
 		// The completion is delivered on an unspecified queue — unlike the
 		// periodic time observer, which documents `queue: .main` — so this hops
@@ -217,6 +249,7 @@ final class PlayerConnection {
 		// Explicitly, because `publishTransport` is not on this path and the
 		// timer would otherwise outlive the queue it was armed against.
 		watchdog.disarm()
+		pendingSeek = nil
 		applyEdit {
 			player.pause()
 			player.removeAllItems()
@@ -507,6 +540,7 @@ final class PlayerConnection {
 
 	private func currentItemChanged() {
 		guard !applyingEdit else { return }
+		applyPendingSeek()
 
 		guard let item = player.currentItem else {
 			// Ran off the end. The queue is kept and the index parked on the
@@ -519,6 +553,10 @@ final class PlayerConnection {
 		}
 
 		if let advanced = window.firstIndex(where: { $0.item === item }), advanced > 0 {
+			// The queue moved on while an offset was still waiting: it named a
+			// position inside the track that has just ended, and applying it to
+			// the next one would start it somewhere arbitrary.
+			pendingSeek = nil
 			model.advance(by: advanced)
 			window.removeFirst(advanced)
 			publishQueue()
@@ -580,6 +618,7 @@ final class PlayerConnection {
 		// actually offers.
 		canSeek = !(player.currentItem?.seekableTimeRanges.isEmpty ?? true)
 
+		applyPendingSeek()
 		if let item = player.currentItem, item.status == .failed {
 			errorMessage = item.error?.userMessage ?? "That track could not be played."
 			clearLoading()

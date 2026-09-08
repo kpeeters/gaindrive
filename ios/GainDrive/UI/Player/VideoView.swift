@@ -35,12 +35,15 @@ struct VideoView: View {
 	@State private var tracks: [CaptionTrack] = []
 	@State private var chosen: CaptionTrack?
 	@State private var cues: [Cue] = []
+	@State private var chapters = ChapterList()
+	@State private var chaptersOpen = false
 
 	var body: some View {
 		VideoSurface(player: player.videoPlayer, caption: caption)
 			.ignoresSafeArea()
 			.overlay(alignment: .topLeading) { close }
-			.overlay(alignment: .topTrailing) { picker }
+			.overlay(alignment: .topTrailing) { controls }
+			.overlay(alignment: .trailing) { chapterPanel }
 			// Nothing is touching the screen while a film plays, so the system
 			// has no other reason to believe anybody is there.
 			.onAppear { UIApplication.shared.isIdleTimerDisabled = true }
@@ -49,6 +52,23 @@ struct VideoView: View {
 				chosen = nil
 				cues = []
 				tracks = await CaptionTracks(registry: registry).list(for: song.ref)
+			}
+			// **`getChapters`, not the album index.** A jump list has to be
+			// right about a sidecar somebody edited a moment ago, and it is the
+			// only endpoint that can see a video's own container chapters at
+			// all — which the scan does not index, so they appear here and not
+			// in the album listing.
+			//
+			// Cleared first, so one recording's markers are never on screen
+			// beside another's title while the request is in flight. A queue
+			// advance re-runs the task and cancels it, which is the whole of the
+			// staleness story.
+			.task(id: song.ref) {
+				chapters = ChapterList()
+				chapters = await ChapterTracks(registry: registry).chapters(for: song.ref)
+				// A film with no markers must not be left showing an empty
+				// panel somebody opened over the previous one.
+				if chapters.isEmpty { chaptersOpen = false }
 			}
 			// **Nothing is fetched until a track is chosen.** Listing costs one
 			// request; a track costs another, and only then — the same bargain
@@ -83,6 +103,62 @@ struct VideoView: View {
 		.padding()
 		.accessibilityLabel("Hide the picture")
 		.accessibilityHint("The film keeps playing; the bar at the bottom brings it back")
+	}
+
+	/// The markers being played, or nil before the first one.
+	private var currentChapter: Int? {
+		chapters.chapters.currentIndex(at: player.position)
+	}
+
+	private var controls: some View {
+		HStack(spacing: 0) {
+			chaptersButton
+			picker
+		}
+	}
+
+	/// Drawn only when the recording has markers, like the caption picker
+	/// beside it: a control that opens an empty list is a control that lies.
+	@ViewBuilder
+	private var chaptersButton: some View {
+		if !chapters.isEmpty {
+			Button {
+				chaptersOpen.toggle()
+			} label: {
+				Image(systemName: chaptersOpen ? "list.bullet.circle.fill" : "list.bullet.circle")
+					.font(.title3)
+					.padding(12)
+					.background(.thinMaterial, in: Circle())
+			}
+			.padding()
+			.accessibilityLabel("Chapters")
+		}
+	}
+
+	/// The markers inside the recording being played, over the picture.
+	///
+	/// Over it rather than in a sheet, and opaque rather than tinted, for the
+	/// two reasons the web client's panel is: jumping between the songs of a
+	/// concert is something you do *while watching it*, so the picture has to
+	/// stay visible; and text over a moving image is hard to read at any tint,
+	/// so this is a panel of the application that happens to sit over a video
+	/// rather than an overlay painted onto one.
+	///
+	/// It does **not** hide with the transport. Those controls get out of the
+	/// way after a few seconds because they are in front of the film; this is a
+	/// list being read and scrolled, and having it vanish mid-scroll would make
+	/// it unusable. Its own close button and its toggle are what dismiss it.
+	@ViewBuilder
+	private var chapterPanel: some View {
+		if chaptersOpen, !chapters.isEmpty {
+			ChapterPanel(
+				list: chapters,
+				currentIndex: currentChapter,
+				onSeek: { player.seek(to: $0) },
+				onClose: { chaptersOpen = false })
+			.frame(maxWidth: 360)
+			.transition(.move(edge: .trailing))
+		}
 	}
 
 	/// Drawn only when there is something to choose. A film with no captions

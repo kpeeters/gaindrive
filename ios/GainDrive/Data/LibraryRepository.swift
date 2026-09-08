@@ -364,7 +364,8 @@ final class LibraryRepository: Sendable {
 									query: query,
 									artistCount: limits.artists,
 									albumCount: limits.albums,
-									songCount: limits.songs)
+									songCount: limits.songs,
+									chapterCount: limits.chapters)
 								return (
 									index,
 									.ok(config.id, LibraryMapper.selection(found, server: config.id))
@@ -422,7 +423,13 @@ final class LibraryRepository: Sendable {
 			items: LibrarySelection(
 				artists: Merge.artists(perServer: selections.map(\.artists)),
 				albums: collapse ? Merge.albums(albums) : albums,
-				songs: selections.flatMap(\.songs)),
+				songs: selections.flatMap(\.songs),
+				// Not merged across servers the way albums are. Two servers
+				// holding the same concert hold the same *file*, but a marker
+				// is identified by its recording's ref, so collapsing them
+				// would have to pick a server — and the one it dropped might be
+				// the one whose copy is stored on this device.
+				chapters: selections.flatMap(\.chapters)),
 			failures: failures.compactMap { $0 })
 	}
 
@@ -505,6 +512,33 @@ final class LibraryRepository: Sendable {
 		guard let dto = try? await client.albumInfo2(id: ref.id) else { return nil }
 		let notes = LibraryMapper.albumNotes(dto)
 		return notes.isEmpty ? nil : notes
+	}
+
+	/// The chapter markers of every chaptered item in one album folder, keyed by
+	/// the item they belong to.
+	///
+	/// Read from the scan's index rather than from each file, which is what
+	/// makes it affordable on a browse path: `getChapters` per item would be a
+	/// file read — or an `ffprobe` for a video without a sidecar — every time
+	/// somebody opens an album. The playback path uses the file instead; see
+	/// `ChapterTracks`.
+	///
+	/// **Not mirrored**, like the notes above: a marker has no id the mirror
+	/// could key on, and the mirror answers "what can I still reach offline",
+	/// which a position inside a partly cached file is not. So this is empty
+	/// offline and the album lists its tracks exactly as it did before chapters
+	/// existed.
+	func albumChapters(_ ref: ItemRef) async -> [ItemRef: [Chapter]] {
+		if await offline { return [:] }
+		guard let client = await client(for: ref.server) else { return [:] }
+		guard let found = try? await client.albumChapters(id: ref.id) else { return [:] }
+		// An entry with no markers cannot happen — the server omits those — but
+		// dropping one here is what lets every caller treat "in the map" and
+		// "has chapters" as the same question.
+		return found
+			.compactMap { LibraryMapper.recording($0, server: ref.server) }
+			.filter { !$0.chapters.isEmpty }
+			.reduce(into: [:]) { $0[$1.ref] = $1.chapters }
 	}
 
 	/// How many images the album folder holds, cover included. Drives the hero
@@ -756,4 +790,9 @@ struct SearchLimits: Sendable {
 	var artists = 20
 	var albums = 30
 	var songs = 60
+	/// Fewer than the songs, deliberately. A chaptered recording is a rarity in
+	/// most libraries and a whole concert's worth of markers can match one
+	/// word, so a generous limit here would push the songs off the screen for a
+	/// section that is usually empty.
+	var chapters = 20
 }

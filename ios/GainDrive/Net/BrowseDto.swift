@@ -115,6 +115,49 @@ struct SongDto: Decodable, Sendable {
 	@Loose var originalHeight: Int?
 }
 
+struct ChapterDto: Decodable, Sendable {
+	@Loose var index: Int?
+	/// Seconds with milliseconds. **A decimal fraction of a second**, not a
+	/// count of them — the same rule the server's `chapters.hh` states.
+	@Loose var start: Double?
+	/// Whole seconds, derived. Absent on a search hit, which carries only
+	/// where the marker starts.
+	@Loose var duration: Int?
+	/// **May legitimately be empty**, and is then left empty: the placeholder
+	/// is the client's to draw, never to store.
+	@Loose var name: String?
+	/// Search hits only. `track` is the *recording's* title there, not a track
+	/// number — the one field name in this file that means something other
+	/// than what it means on `SongDto`.
+	@Loose var songId: String?
+	@Loose var parent: String?
+	@Loose var album: String?
+	@Loose var artist: String?
+	@Loose var track: String?
+}
+
+struct ChaptersBody: Decodable, Sendable {
+	struct Payload: Decodable, Sendable {
+		@Loose var id: String?
+		@Loose var source: String?
+		@Listed var chapter: [ChapterDto] = []
+	}
+	let chapters: Payload?
+}
+
+struct AlbumChaptersBody: Decodable, Sendable {
+	struct Recording: Decodable, Sendable {
+		@Loose var id: String?
+		@Loose var title: String?
+		@Listed var chapter: [ChapterDto] = []
+	}
+	struct Payload: Decodable, Sendable {
+		@Loose var id: String?
+		@Listed var song: [Recording] = []
+	}
+	let albumChapters: Payload?
+}
+
 /// One subtitle track inside a video.
 ///
 /// **`id` is a string holding a signed integer**, and the negative value is
@@ -169,6 +212,10 @@ struct SearchResultDto: Decodable, Sendable {
 	@Listed var artist: [ArtistDto] = []
 	@Listed var album: [AlbumDto] = []
 	@Listed var song: [SongDto] = []
+	/// **Absent rather than empty when it was not asked for**, which is how the
+	/// server keeps a client that never sends `chapterCount` seeing the reply
+	/// it has always seen. `@Listed` reads either.
+	@Listed var chapter: [ChapterDto] = []
 }
 
 struct ArtistInfoDto: Decodable, Sendable {

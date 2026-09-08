@@ -248,6 +248,90 @@ struct PlaylistRow: View {
 	}
 }
 
+/// A chapter marker standing in for its recording's row.
+///
+/// Shaped like `TrackRow` and deliberately not built from it. Two of that row's
+/// three trailing decorations address a **song id**, which a marker has not: the
+/// stored mark says whether *the file* is on the device, which is one answer for
+/// every marker in a concert, and the playback indicator would light every
+/// marker at once for the same reason. So the number column carries the marker's
+/// index and nothing claims to be about this row that is really about the file
+/// it is inside.
+struct ChapterRow: View {
+	let chapter: Chapter
+	/// Passed in rather than derived: which marker is playing is a question
+	/// about the player's *position*, and answering it per row would make every
+	/// listing redraw twice a second. See `AlbumDetailView`.
+	var playing = false
+
+	@ScaledMetric(relativeTo: .footnote) var numberWidth: CGFloat = 24
+
+	var body: some View {
+		HStack(spacing: 12) {
+			Text(String(chapter.index))
+				.font(.footnote.monospacedDigit())
+				.foregroundStyle(playing ? Color.accentColor : Color.secondary)
+				.frame(width: numberWidth, alignment: .trailing)
+			Text(chapter.displayName)
+				.lineLimit(1)
+				.foregroundStyle(playing ? Color.accentColor : Color.primary)
+			Spacer(minLength: 0)
+			// 0 is what the server sends for a span that is not positive — two
+			// markers on one timestamp, or one past the end of the file — and
+			// `--:--` beside a row that plays perfectly well would read as a
+			// fault rather than as a hand-typed list being allowed to be odd.
+			if chapter.duration > 0 {
+				Text(formatDuration(chapter.duration))
+					.font(.footnote.monospacedDigit())
+					.foregroundStyle(.secondary)
+			}
+		}
+		.contentShape(.rect)
+	}
+}
+
+/// A chapter match in a search listing.
+///
+/// Shaped like `SongRow` minus the artwork, which a marker has none of — its
+/// recording's cover is the album's, and drawing it on every row would say the
+/// hits were albums.
+///
+/// The trailing column carries *where in the recording* the marker is, where a
+/// song row carries how long it is. That is the one fact a search hit has and a
+/// listing row does not, and it is what tells two takes of one song apart.
+struct ChapterHitRow: View {
+	let hit: ChapterHit
+
+	var body: some View {
+		HStack(spacing: 12) {
+			VStack(alignment: .leading, spacing: 2) {
+				Text(hit.displayName).lineLimit(1)
+				Text(subtitle)
+					.font(.footnote)
+					.foregroundStyle(.secondary)
+					.lineLimit(1)
+			}
+			Spacer(minLength: 0)
+			Text(formatChapterTime(hit.start))
+				.font(.footnote.monospacedDigit())
+				.foregroundStyle(.secondary)
+		}
+		.contentShape(.rect)
+	}
+
+	/// Artist, album, then the recording itself: a marker means nothing without
+	/// knowing which concert it is in. The album is what the folder is called
+	/// and the track what the file is called, and they coincide often enough —
+	/// a folder holding one recording named after it — that an exact duplicate
+	/// is dropped rather than printed twice.
+	private var subtitle: String {
+		var parts = [hit.artistName, hit.albumTitle]
+		if hit.trackTitle != hit.albumTitle { parts.append(hit.trackTitle) }
+		return parts.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+			.joined(separator: " · ")
+	}
+}
+
 /// mm:ss, or h:mm:ss once there is an hour to show.
 func formatDuration(_ seconds: Int) -> String {
 	guard seconds > 0 else { return "--:--" }

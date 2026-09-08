@@ -113,6 +113,23 @@ extension Int: LooseScalar {
 	}
 }
 
+/// Added for a chapter's `start`, which is the first fractional number in the
+/// API. It is a **decimal fraction of a second** and the server sends three
+/// places on purpose — reading it as an `Int` would round a marker at 90.4 s to
+/// a minute and a half, and a client that saved back what it read would move
+/// every marker it did not touch.
+extension Double: LooseScalar {
+	init?(loose container: any SingleValueDecodingContainer) {
+		if let value = try? container.decode(Double.self) { self = value; return }
+		if let value = try? container.decode(Int.self) { self = Double(value); return }
+		if let text = try? container.decode(String.self), let value = Double(text) {
+			self = value
+			return
+		}
+		return nil
+	}
+}
+
 extension Bool: LooseScalar {
 	init?(loose container: any SingleValueDecodingContainer) {
 		if let value = try? container.decode(Bool.self) { self = value; return }

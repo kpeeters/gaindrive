@@ -89,19 +89,25 @@ extension SubsonicClient {
 
 	/// A count of zero asks the server to skip that category entirely, which is
 	/// what the filter chips switch off.
+	///
+	/// `chapterCount` is a gaindrive extension, and **is sent only when it is
+	/// non-zero**: the server answers without a `chapter` array at all for a
+	/// client that never asks, which is the reply every other Subsonic client
+	/// sees, so not sending it is the one way to be sure a server that predates
+	/// the extension is asked nothing new.
 	func search3(
-		query: String, artistCount: Int, albumCount: Int, songCount: Int
+		query: String, artistCount: Int, albumCount: Int, songCount: Int,
+		chapterCount: Int = 0
 	) async throws -> SearchResultDto {
-		try await perform(
-			"search3",
-			parameters: [
-				"query": query,
-				"artistCount": String(artistCount),
-				"albumCount": String(albumCount),
-				"songCount": String(songCount),
-			],
-			expecting: Search3Body.self
-		).searchResult3 ?? SearchResultDto()
+		var parameters = [
+			"query": query,
+			"artistCount": String(artistCount),
+			"albumCount": String(albumCount),
+			"songCount": String(songCount),
+		]
+		if chapterCount > 0 { parameters["chapterCount"] = String(chapterCount) }
+		return try await perform("search3", parameters: parameters, expecting: Search3Body.self)
+			.searchResult3 ?? SearchResultDto()
 	}
 
 	func starred2() async throws -> SearchResultDto {
@@ -192,6 +198,33 @@ extension SubsonicClient {
 	/// served verbatim. That is what leaves the client one format to parse.
 	func captions(id: String, captionId: String) async throws -> String {
 		try await text("getCaptions", parameters: ["id": id, "captionId": captionId])
+	}
+
+	// MARK: - Chapters
+
+	/// The markers inside one recording.
+	///
+	/// **Reads the sidecar file on every call**, server-side, because a
+	/// playback lookup has to be right — the indexed copy is what
+	/// `albumChapters` reads. That split is deliberate and the two must not be
+	/// collapsed here either: this is what a hand-edited sidecar shows up in
+	/// immediately.
+	/// The whole payload rather than its array, because `source` is part of the
+	/// answer: markers read out of a video's container are **not** in the scan's
+	/// index, so they appear in the player and not in the album listing, and
+	/// that is worth saying out loud rather than looking like a bug.
+	func chapters(id: String) async throws -> ChaptersBody.Payload? {
+		try await perform("getChapters", parameters: ["id": id], expecting: ChaptersBody.self)
+			.chapters
+	}
+
+	/// Every chaptered recording in one album folder, from the indexed table —
+	/// one query rather than a file read per song, which is what makes drawing
+	/// markers as an album's rows affordable.
+	func albumChapters(id: String) async throws -> [AlbumChaptersBody.Recording] {
+		try await perform(
+			"getAlbumChapters", parameters: ["id": id], expecting: AlbumChaptersBody.self
+		).albumChapters?.song ?? []
 	}
 
 	// MARK: - Playback reporting

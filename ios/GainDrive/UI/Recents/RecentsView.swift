@@ -23,8 +23,8 @@ struct RecentsView: View {
 			}
 			.navigationTitle("Recents")
 			.navigationDestination(for: Route.self) { route in
-				if case .album(let ref, let title, let autoPlay) = route {
-					AlbumDetailView(ref: ref, albumTitle: title, autoPlay: autoPlay)
+				if case .album(let ref, let title, let autoPlay, let at) = route {
+					AlbumDetailView(ref: ref, albumTitle: title, autoPlay: autoPlay, autoPlayAt: at)
 				}
 			}
 			.toolbar {

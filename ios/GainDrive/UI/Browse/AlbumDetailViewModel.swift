@@ -18,6 +18,15 @@ final class AlbumDetailViewModel {
 	/// it as the artist biography.
 	private(set) var notes: AlbumNotes?
 	private(set) var heroes: [CoverSource] = []
+	/// The markers of any chaptered recording in this folder, keyed by the item
+	/// they belong to.
+	///
+	/// An extra, like the notes, and for the sharper version of their reason:
+	/// this is one more request on the *browse* path, and a server that fails it
+	/// must cost the chapter rows and not the tracks. Empty is the ordinary
+	/// case, and produces exactly the listing this screen drew before chapters
+	/// existed.
+	private(set) var chapters: [ItemRef: [Chapter]] = [:]
 
 	@ObservationIgnored private let library: LibraryRepository
 	@ObservationIgnored private let ref: ItemRef
@@ -69,7 +78,15 @@ final class AlbumDetailViewModel {
 			}
 
 			// Extras, after the tracks are on screen. A failure here costs the
-			// carousel and the notes, not the album.
+			// carousel, the notes and the chapter rows, not the album.
+			//
+			// Chapters first among them: they change what the *listing* is,
+			// while the others decorate the header, so arriving after a pause
+			// would redraw the rows under the reader's finger. It is also the
+			// cheapest of the three — one indexed query, against two lookups
+			// that reach MusicBrainz.
+			chapters = await library.albumChapters(ref)
+			guard !Task.isCancelled else { return }
 			let extraCount = await library.albumImageCount(ref)
 			if extraCount > 1 {
 				heroes += (1..<extraCount).compactMap {

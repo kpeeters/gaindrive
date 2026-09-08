@@ -17,11 +17,17 @@ struct SearchFilters: Equatable, Sendable {
 
 	/// Zero for a switched-off category, so the server does no work for
 	/// something the user has said they do not want.
+	///
+	/// Chapters ride with the Tracks filter rather than having a chip of their
+	/// own: a chapter *is* a song inside a recording, so somebody who has turned
+	/// tracks off is not looking for one. The server defaults the count to 0, so
+	/// it costs one too old for the extension nothing.
 	var limits: SearchLimits {
 		SearchLimits(
 			artists: artists ? 20 : 0,
 			albums: albums ? 30 : 0,
-			songs: songs ? 60 : 0)
+			songs: songs ? 60 : 0,
+			chapters: songs ? 20 : 0)
 	}
 }
 
@@ -42,13 +48,19 @@ struct SearchResults: Sendable {
 	var artists: [ArtistUi] = []
 	var albums: [AlbumUi] = []
 	var songs: [SongUi] = []
+	/// Their own list, never folded in among the songs — which is how the
+	/// server sends them and for its reason: a chapter has no id anything can
+	/// stream, star or queue.
+	var chapters: [ChapterHit] = []
 	var failures: [ServerFailure] = []
 	/// True while at least one server has not answered. Drives a quiet
 	/// indicator rather than a blocking one — the results already on screen are
 	/// usable while the slow server is still thinking.
 	var outstanding = false
 
-	var isEmpty: Bool { artists.isEmpty && albums.isEmpty && songs.isEmpty }
+	var isEmpty: Bool {
+		artists.isEmpty && albums.isEmpty && songs.isEmpty && chapters.isEmpty
+	}
 }
 
 @MainActor
@@ -175,6 +187,7 @@ final class SearchViewModel {
 					cover: covers.source($0.coverArt, size: CoverSize.thumb),
 					badge: badges[$0.ref.server])
 			},
+			chapters: merged.items.chapters,
 			failures: merged.failures,
 			outstanding: outstanding)
 	}

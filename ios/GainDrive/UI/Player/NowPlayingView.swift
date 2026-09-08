@@ -198,8 +198,8 @@ struct NowPlayingView: View {
 		switch route {
 		case .albums(let artists, let name, let fromCategories):
 			AlbumsView(refs: artists, artistName: name, fromCategories: fromCategories)
-		case .album(let ref, let title, let autoPlay):
-			AlbumDetailView(ref: ref, albumTitle: title, autoPlay: autoPlay)
+		case .album(let ref, let title, let autoPlay, let at):
+			AlbumDetailView(ref: ref, albumTitle: title, autoPlay: autoPlay, autoPlayAt: at)
 		case .playlist(let ref, let name):
 			PlaylistDetailView(ref: ref, playlistName: name)
 		}

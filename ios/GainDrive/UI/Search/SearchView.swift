@@ -103,6 +103,20 @@ struct SearchView: View {
 					SectionHeading(text: "Tracks")
 				}
 			}
+
+			// Last, and a section of their own. A marker is the least likely
+			// thing somebody was searching for, and folding these in among the
+			// tracks would offer rows that cannot be starred, queued or
+			// downloaded beside rows that can.
+			if !results.chapters.isEmpty {
+				Section {
+					ForEach(results.chapters) { hit in
+						chapterRow(hit)
+					}
+				} header: {
+					SectionHeading(text: "Chapters")
+				}
+			}
 		}
 		.listStyle(.plain)
 		// Quiet rather than blocking: what has arrived is already usable, and
@@ -134,6 +148,29 @@ struct SearchView: View {
 		}
 	}
 
+	/// A marker cannot be played where it stands — it has no id to stream — so
+	/// this opens the album its recording sits in and starts that recording at
+	/// the marker. The same detour `songRow` takes, and it buys the same thing
+	/// besides: read again through `getAlbum`, the recording carries
+	/// `nativeSeek`, so a remuxable concert is not re-encoded to reach one song.
+	///
+	/// A hit whose server did not name the album folder is drawn and inert.
+	/// There is nowhere to send it, and a row that navigated nowhere on tap
+	/// would be worse than one that plainly does not.
+	@ViewBuilder
+	private func chapterRow(_ hit: ChapterHit) -> some View {
+		if let album = hit.albumRef {
+			NavigationLink(
+				value: Route.album(
+					album, title: hit.albumTitle, autoPlay: hit.songRef, autoPlayAt: hit.start)
+			) {
+				ChapterHitRow(hit: hit)
+			}
+		} else {
+			ChapterHitRow(hit: hit)
+		}
+	}
+
 	private var filterChips: some View {
 		HStack(spacing: 8) {
 			Toggle("Artists", isOn: $model.filters.artists)
@@ -151,8 +188,8 @@ struct SearchView: View {
 		switch route {
 		case .albums(let artists, let name, let fromCategories):
 			AlbumsView(refs: artists, artistName: name, fromCategories: fromCategories)
-		case .album(let ref, let title, let autoPlay):
-			AlbumDetailView(ref: ref, albumTitle: title, autoPlay: autoPlay)
+		case .album(let ref, let title, let autoPlay, let at):
+			AlbumDetailView(ref: ref, albumTitle: title, autoPlay: autoPlay, autoPlayAt: at)
 		case .playlist(let ref, let name):
 			PlaylistDetailView(ref: ref, playlistName: name)
 		}

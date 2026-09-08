@@ -215,8 +215,15 @@ struct LibrarySelection: Hashable, Sendable {
 	var artists: [Artist] = []
 	var albums: [Album] = []
 	var songs: [Song] = []
+	/// **A list of its own, never entries among the songs**, which is how the
+	/// server sends it and for its reason: a chapter has no id anything can
+	/// stream, star or queue, so a client told it was a song would be handed a
+	/// track that does not work.
+	var chapters: [ChapterHit] = []
 
-	var isEmpty: Bool { artists.isEmpty && albums.isEmpty && songs.isEmpty }
+	var isEmpty: Bool {
+		artists.isEmpty && albums.isEmpty && songs.isEmpty && chapters.isEmpty
+	}
 }
 
 /// Which parameter name `star`/`unstar` should carry the id under.
