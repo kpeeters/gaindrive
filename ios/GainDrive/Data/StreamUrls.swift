@@ -93,4 +93,37 @@ enum StreamUrls {
 			cacheKey: CacheKeys.of(ref, quality: quality),
 			contentType: quality.format.contentType)
 	}
+
+	/// A film, which is a different question from a track.
+	///
+	/// **Neither `format` nor `maxBitRate` goes on a video URL**, and that is
+	/// not tidiness. `format` is validated against the *audio* target table, so
+	/// naming an audio one is the server's switch for sending the soundtrack
+	/// alone — a film played through `target(for:)` above comes back as sound
+	/// with no picture, which is what happened until this existed. And
+	/// `maxBitRate` sets `constrained` server-side, which disqualifies both the
+	/// direct and the remux tiers and forces a full re-encode of a file that
+	/// could have been served off disk.
+	///
+	/// The transport follows `nativeSeek`, **trusted as given**: it is false on
+	/// a video reached through search, a playlist or starred, because the codec
+	/// columns it is computed from are not selected by those queries. That is
+	/// the safe direction — the film plays and seeks by re-request.
+	static func video(for song: Song, client: SubsonicClient) -> StreamTarget {
+		let url =
+			song.nativeSeek
+			? client.url("stream", parameters: ["id": song.ref.id])
+			// `.m3u8` rather than `.view`: the server answers both, and the
+			// extension is how AVFoundation knows it is a playlist. That is
+			// what `SubsonicClient.url`'s `suffix` has been there for since
+			// phase 1.
+			: client.url("hls", suffix: ".m3u8", parameters: ["id": song.ref.id])
+		return StreamTarget(
+			url: url,
+			// Nothing was asked for and nothing is stored: video is never
+			// cached, so the key names a file that will not exist.
+			quality: .original,
+			cacheKey: CacheKeys.of(song.ref, quality: .original),
+			contentType: nil)
+	}
 }

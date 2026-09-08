@@ -156,6 +156,17 @@ struct NowPlayingView: View {
 
 	private func secondaryControls(_ song: Song) -> some View {
 		HStack(spacing: 32) {
+			// Only for a film, and only here: leaving the picture does not stop
+			// it, so this is the way back to something that is still playing.
+			if song.isVideo {
+				Button {
+					player.showingVideo = true
+					dismiss()
+				} label: {
+					Image(systemName: "film")
+				}
+				.accessibilityLabel("Watch")
+			}
 			StarButton(ref: song.ref, kind: .song, starredAt: song.starredAt)
 			Button {
 				addingTo = song

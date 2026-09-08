@@ -47,6 +47,14 @@ final class PlayerConnection {
 	private(set) var queue: [Song] = []
 	private(set) var queueIndex = 0
 	private(set) var autoFrom = 0
+	/// Whether the picture is on screen.
+	///
+	/// **Owned here because this is where a video becomes current**, whether by
+	/// a tap or by the queue advancing — which is what "entered from one place
+	/// in the shell" means. Leaving does not stop the film: a concert is
+	/// listened to as often as it is watched, so this goes false and playback
+	/// carries on.
+	var showingVideo = false
 
 	var hasNext: Bool { model.hasNext }
 	var hasPrevious: Bool { model.hasPrevious }
@@ -226,6 +234,14 @@ final class PlayerConnection {
 		errorMessage = nil
 	}
 
+	/// **The video surface attaches to this directly**, which is a deliberate
+	/// hole in "the UI's only route to playback" and the same one Android
+	/// punched: its `VideoSurface` attaches to the `ExoPlayer` rather than
+	/// negotiating `COMMAND_SET_VIDEO_SURFACE` through the session. Nothing
+	/// else may reach for it — the queue, the transport and the seek all go
+	/// through this class as before.
+	var videoPlayer: AVPlayer { player }
+
 	/// Cover art for a queue entry. Exposed here so the player surfaces need no
 	/// registry of their own — the connection already holds one, and handing
 	/// them a second route to it would be a second place to get the per-server
@@ -337,7 +353,7 @@ final class PlayerConnection {
 				}
 				break
 			}
-			built.append(item(for: ref, target: target))
+			built.append(item(for: song, target: target))
 		}
 		return built
 	}
@@ -349,17 +365,28 @@ final class PlayerConnection {
 	/// The rewritten scheme is not decoration: AVFoundation handles `http` and
 	/// `https` itself and consults a delegate only for a scheme it does not
 	/// know, so without it the loader is never called and nothing is cached.
-	private func item(for ref: ItemRef, target: StreamTarget)
+	private func item(for song: Song, target: StreamTarget)
 		-> (ref: ItemRef, item: AVPlayerItem, loader: CachingResourceLoader?)
 	{
 		guard !target.url.isFileURL else {
-			return (ref, AVPlayerItem(url: target.url), nil)
+			return (song.ref, AVPlayerItem(url: target.url), nil)
+		}
+		// **Video is never cached**, and the test is the song rather than the
+		// URL. One film evicts the whole stored library, and a re-encoded one
+		// arrives with no `Content-Length` so completeness could never be
+		// established — the rule has held since downloads landed, and routing a
+		// film through the loader would break it silently.
+		//
+		// An HLS playlist is the second reason: the loader fetches one
+		// resource in order, and a playlist is a list of others.
+		guard !song.isVideo else {
+			return (song.ref, AVPlayerItem(url: target.url), nil)
 		}
 		let loader = CachingResourceLoader(
-			source: target.url, ref: ref, quality: target.quality, store: store)
+			source: target.url, ref: song.ref, quality: target.quality, store: store)
 		let asset = AVURLAsset(url: CachingResourceLoader.rewrite(target.url))
 		asset.resourceLoader.setDelegate(loader, queue: loader.queue)
-		return (ref, AVPlayerItem(asset: asset), loader)
+		return (song.ref, AVPlayerItem(asset: asset), loader)
 	}
 
 	/// Resolved **per track**, from that track's own server, and served from
@@ -375,6 +402,9 @@ final class PlayerConnection {
 	/// the quality is in the key so two copies can coexist without either being
 	/// mislabelled, but the music is the same music.
 	private func streamTarget(for song: Song) async -> StreamTarget? {
+		// A film asks a different question: no format, no ceiling, and a
+		// transport chosen by `nativeSeek`. See `StreamUrls.video`.
+		if song.isVideo { return targets.video(for: song) }
 		guard var target = await targets.target(for: song.ref) else { return nil }
 		if let local = await store.storedFile(for: song.ref) {
 			target = StreamTarget(
@@ -518,6 +548,9 @@ final class PlayerConnection {
 		if changed {
 			scrobbler.trackChanged(to: song?.ref)
 			prewarmNext()
+			// The one place a video becomes current, however it got there — a
+			// tap, or the queue reaching it.
+			if song?.isVideo == true { showingVideo = true }
 		}
 
 		guard let song else {
@@ -570,15 +603,15 @@ final class PlayerConnection {
 	/// The first transition fires when playback begins, so the second track of
 	/// a queue is prepared while the first plays — the case that matters.
 	///
-	/// A video reaching here is warmed too, and today that is right:
-	/// `StreamUrls.target` sends an audio `format` for every track, which is
-	/// the server's audio-only switch, so what is warmed is the soundtrack
-	/// extraction — a blocking transcode of a multi-gigabyte source, and the
-	/// case Android says needs this most. Phase 6 gives video its own URL, and
-	/// the guard goes in with it.
 	private func prewarmNext() {
 		guard model.hasNext else { return }
 		let next = model.songs[model.index + 1]
+		// **Not a video.** The comment below used to say a video was warmed
+		// deliberately, and it was right while `StreamUrls` sent an audio
+		// `format` for everything and the URL was therefore a soundtrack. Now
+		// it is a film's own URL, and warming it would ask the server to begin
+		// a re-encode nobody has asked to watch.
+		guard !next.isVideo else { return }
 		Task { [weak self] in
 			guard let self, let target = await self.streamTarget(for: next) else { return }
 			await self.prewarmer.warm(target)

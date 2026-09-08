@@ -115,6 +115,25 @@ struct SongDto: Decodable, Sendable {
 	@Loose var originalHeight: Int?
 }
 
+/// One subtitle track inside a video.
+///
+/// **`id` is a string holding a signed integer**, and the negative value is
+/// real rather than a sentinel for "none": the server uses −1 for the sidecar
+/// file beside the video, and it is as selectable as any stream index.
+struct CaptionDto: Decodable, Sendable {
+	@Loose var id: String?
+	@Loose var name: String?
+}
+
+struct VideoInfoDto: Decodable, Sendable {
+	@Loose var id: String?
+	@Listed var captions: [CaptionDto] = []
+}
+
+struct GetVideoInfoBody: Decodable, Sendable {
+	let videoInfo: VideoInfoDto?
+}
+
 struct PlaylistDto: Decodable, Sendable {
 	@Loose var id: String?
 	@Loose var name: String?

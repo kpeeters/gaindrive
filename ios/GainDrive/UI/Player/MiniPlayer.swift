@@ -134,9 +134,48 @@ extension View {
 	/// sheet. They are pure presentation — every one reads the same
 	/// `PlayerConnection` — and only the selected tab's bar is in the
 	/// hierarchy, so the copies can neither disagree nor both present.
-	func miniPlayerInset() -> some View {
+	/// `active` is whether this is the tab on screen, and it gates the video
+	/// presentation only.
+	///
+	/// The bar itself is drawn in every tab, which is harmless — but the
+	/// picture is raised from a flag on `PlayerConnection` that all five share,
+	/// so without this every tab would try to present the same film at once.
+	/// The Now Playing sheet has no such problem: each bar owns its own
+	/// `@State`, so only the one that was tapped is true.
+	func miniPlayerInset(active: Bool) -> some View {
 		safeAreaInset(edge: .bottom, spacing: 0) {
 			MiniPlayer()
 		}
+		.modifier(VideoPresentation(active: active))
+	}
+}
+
+/// The picture, raised whenever what is playing becomes a video.
+///
+/// **Attached to a tab's content, not to the `TabView`** — for the reason the
+/// Now Playing sheet is: `.sidebarAdaptable` hands presentation to UIKit, and
+/// what is presented from the `TabView` does not carry the SwiftUI environment
+/// into its content.
+///
+/// Entering is the *connection's* decision rather than a row handler's, which
+/// is what makes a video reached by the queue advancing behave like one that
+/// was tapped.
+private struct VideoPresentation: ViewModifier {
+	let active: Bool
+
+	@Environment(PlayerConnection.self) private var player
+
+	func body(content: Content) -> some View {
+		content.fullScreenCover(isPresented: showing) {
+			if let song = player.current, song.isVideo {
+				VideoView(song: song)
+			}
+		}
+	}
+
+	private var showing: Binding<Bool> {
+		Binding(
+			get: { active && player.showingVideo && player.current?.isVideo == true },
+			set: { player.showingVideo = $0 })
 	}
 }

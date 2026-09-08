@@ -253,10 +253,17 @@ final class PinRepository {
 		switch pin.kind {
 		case .song:
 			return []
+		// **Videos are never downloaded**, whatever they are pinned inside. One
+		// film evicts the whole stored library, and a re-encoded one arrives
+		// with no `Content-Length` so completeness could never be established.
+		// Dropped here rather than at the download, so a mostly-audio album
+		// pins cleanly and its film is simply not part of what the pin covers.
 		case .album:
-			return (try? await library.albumDetail(pin.ref))?.songs ?? []
+			return ((try? await library.albumDetail(pin.ref))?.songs ?? [])
+				.filter { !$0.isVideo }
 		case .playlist:
-			return (try? await library.playlist(pin.ref))?.songs ?? []
+			return ((try? await library.playlist(pin.ref))?.songs ?? [])
+				.filter { !$0.isVideo }
 		}
 	}
 

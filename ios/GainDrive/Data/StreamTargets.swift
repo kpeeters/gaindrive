@@ -26,6 +26,15 @@ struct StreamTargets {
 	let settings: SettingsStore
 	let accounts: Accounts
 
+	/// A film. See `StreamUrls.video` for why it carries neither `format` nor
+	/// `maxBitRate`, and why the account ceiling is not applied.
+	func video(for song: Song) -> StreamTarget? {
+		guard let client = registry.clientsSnapshot().client(for: song.ref.server) else {
+			return nil
+		}
+		return StreamUrls.video(for: song, client: client)
+	}
+
 	func target(for ref: ItemRef) async -> StreamTarget? {
 		let clients = registry.clientsSnapshot()
 		guard let client = clients.client(for: ref.server) else { return nil }

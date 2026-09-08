@@ -172,6 +172,28 @@ extension SubsonicClient {
 		_ = try await perform("deletePlaylist", parameters: ["id": id], expecting: EmptyBody.self)
 	}
 
+	// MARK: - Video
+
+	/// The subtitle tracks inside one video.
+	///
+	/// A film with none answers an empty list, and that is the whole of "this
+	/// has no captions" — there is no flag to check and no track invented for
+	/// it, unlike ExoPlayer's HLS extractor, which conjures a CEA-608 entry for
+	/// a playlist declaring none.
+	func videoInfo(id: String) async throws -> VideoInfoDto? {
+		try await perform("getVideoInfo", parameters: ["id": id], expecting: GetVideoInfoBody.self)
+			.videoInfo
+	}
+
+	/// One caption track, as WebVTT.
+	///
+	/// Everything is converted through ffmpeg's webvtt muxer server-side —
+	/// including a file that was already `.vtt`, so a mislabelled one cannot be
+	/// served verbatim. That is what leaves the client one format to parse.
+	func captions(id: String, captionId: String) async throws -> String {
+		try await text("getCaptions", parameters: ["id": id, "captionId": captionId])
+	}
+
 	// MARK: - Playback reporting
 
 	/// Tells the server a track is being, or has been, played.

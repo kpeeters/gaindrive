@@ -64,23 +64,23 @@ struct RootView: View {
 		TabView(selection: $tab) {
 			Tab("Artists", systemImage: "music.mic", value: Destination.artists) {
 				ArtistsView(model: artists)
-					.miniPlayerInset()
+					.miniPlayerInset(active: tab == .artists)
 			}
 			Tab("Playlists", systemImage: "music.note.list", value: Destination.playlists) {
 				PlaylistsView(model: playlists)
-					.miniPlayerInset()
+					.miniPlayerInset(active: tab == .playlists)
 			}
 			Tab("Recents", systemImage: "clock.arrow.circlepath", value: Destination.recents) {
 				RecentsView(model: recents)
-					.miniPlayerInset()
+					.miniPlayerInset(active: tab == .recents)
 			}
 			Tab("Search", systemImage: "magnifyingglass", value: Destination.search) {
 				SearchView(model: search)
-					.miniPlayerInset()
+					.miniPlayerInset(active: tab == .search)
 			}
 			Tab("Settings", systemImage: "gearshape", value: Destination.settings) {
 				SettingsView(startOnServers: firstRun)
-					.miniPlayerInset()
+					.miniPlayerInset(active: tab == .settings)
 			}
 		}
 		// The iOS 18 idiom for a tabbed app on a wide screen: the tab bar

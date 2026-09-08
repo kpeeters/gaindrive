@@ -166,6 +166,25 @@ struct SubsonicClient: Sendable {
 			httpStatus: (response as? HTTPURLResponse)?.statusCode)
 	}
 
+	/// Fetches a body that is **not** an envelope.
+	///
+	/// `getCaptions` answers WebVTT with a `text/vtt` content type and no
+	/// Subsonic wrapper at all, so there is nothing for `perform` to unwrap.
+	/// The only other endpoint shaped like this is `hls.m3u8`, which
+	/// AVFoundation fetches for itself.
+	func text(_ endpoint: String, parameters: [String: String] = [:]) async throws -> String {
+		let (data, response) = try await session.data(from: url(endpoint, parameters: parameters))
+		if let status = (response as? HTTPURLResponse)?.statusCode,
+			!(200..<300).contains(status)
+		{
+			throw SubsonicError.httpStatus(status)
+		}
+		guard let text = String(data: data, encoding: .utf8) else {
+			throw SubsonicError.malformedResponse
+		}
+		return text
+	}
+
 	/// Split out from `perform` so the envelope handling can be tested without
 	/// a network round trip or a stubbed protocol. What is worth testing here
 	/// is the parsing, and that is a pure function of the bytes.
