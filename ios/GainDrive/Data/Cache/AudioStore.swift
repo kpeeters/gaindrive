@@ -38,8 +38,10 @@ actor AudioStore {
 		prepare()
 	}
 
-	/// Where a download at this quality belongs.
-	nonisolated func fileURL(for ref: ItemRef, quality: AudioQuality) -> URL {
+	/// Where a download at this quality belongs, **before its extension**.
+	/// `adopt` adds that; see `AudioFormat.fileExtension` for why a stored file
+	/// must have one.
+	nonisolated private func base(for ref: ItemRef, quality: AudioQuality) -> URL {
 		Self.path(root: root, key: CacheKeys.of(ref, quality: quality))
 	}
 
@@ -76,9 +78,15 @@ actor AudioStore {
 	/// temporary file the moment its delegate returns, so awaiting an actor
 	/// before the rename would reliably lose every download — and only on a
 	/// device slow enough to notice, which is the worst way to find out.
-	nonisolated func adopt(_ temporary: URL, for ref: ItemRef, quality: AudioQuality) throws {
+	nonisolated func adopt(
+		_ temporary: URL, for ref: ItemRef, quality: AudioQuality, fileExtension: String
+	) throws {
 		let manager = FileManager.default
-		let destination = fileURL(for: ref, quality: quality)
+		// **The extension is not decoration.** AVFoundation types a local file
+		// by its path extension and has no header to fall back on, so a file
+		// without one is never reported as unplayable — the player just waits.
+		let destination = base(for: ref, quality: quality)
+			.appendingPathExtension(fileExtension)
 		try manager.createDirectory(
 			at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
 		try? manager.removeItem(at: destination)
@@ -126,12 +134,37 @@ actor AudioStore {
 		return total
 	}
 
+	/// Bumped when the **layout on disk** changes in a way that makes what is
+	/// already there unusable, which drops it once on open.
+	///
+	/// Version 1 stored files with no extension, and every one of them hung the
+	/// player. There is no repairing those in place without knowing what
+	/// container each holds, and re-downloading is cheap — the pins survive, so
+	/// `refresh()` fetches them again. This is the server's
+	/// `MUSIC_CACHE_VERSION` for the same reason: a cache is allowed to be
+	/// thrown away, and being wrong about one costs a re-fetch.
+	private static let layoutVersion = 2
+
 	nonisolated private func prepare() {
 		try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+		migrate()
 		var url = root
 		var values = URLResourceValues()
 		values.isExcludedFromBackup = true
 		try? url.setResourceValues(values)
+	}
+
+	/// Drops everything stored under an older layout, once.
+	nonisolated private func migrate() {
+		let marker = root.appending(path: ".layout")
+		let found = (try? String(contentsOf: marker, encoding: .utf8)).flatMap(Int.init)
+		guard found != Self.layoutVersion else { return }
+		if let contents = try? FileManager.default.contentsOfDirectory(
+			at: root, includingPropertiesForKeys: nil)
+		{
+			for item in contents { try? FileManager.default.removeItem(at: item) }
+		}
+		try? String(Self.layoutVersion).write(to: marker, atomically: true, encoding: .utf8)
 	}
 
 	/// **Percent-encoded per component**, and not because gaindrive needs it:

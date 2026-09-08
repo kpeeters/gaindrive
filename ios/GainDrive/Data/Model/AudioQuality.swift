@@ -29,15 +29,35 @@ enum AudioFormat: String, CaseIterable, Sendable {
 		}
 	}
 
-	/// Carried for the cache key and phase 5, **not** handed to AVFoundation:
-	/// the server sends a correct `Content-Type` on both the cached-file and
-	/// the chunked path, and `AVURLAsset` sniffs it. An out-of-band hint would
-	/// be a second source of truth for something already right.
+	/// Not handed to AVFoundation for a *network* URL: the server sends a
+	/// correct `Content-Type` on both the cached-file and the chunked path, and
+	/// `AVURLAsset` reads it, so an out-of-band hint would be a second source
+	/// of truth for something already right.
+	///
+	/// **A local file has no header**, which is what `fileExtension` is for.
 	var contentType: String? {
 		switch self {
 		case .original: nil
 		case .m4a: "audio/mp4"
 		case .mp3: "audio/mpeg"
+		}
+	}
+
+	/// What a downloaded file of this format must be **named**.
+	///
+	/// AVFoundation determines a local file's type from its path extension —
+	/// there is no header to read — and a file with none is not reported as
+	/// unplayable. The player simply waits, for ever, which reads as a track
+	/// that never starts rather than as a track that failed. That was a real
+	/// bug: downloads landed as `<songId>@m4a160` and every one of them hung.
+	///
+	/// Nil for the original, whose container is whatever the server holds and
+	/// is only known from the response — see `DownloadQueue`.
+	var fileExtension: String? {
+		switch self {
+		case .original: nil
+		case .m4a: "m4a"
+		case .mp3: "mp3"
 		}
 	}
 }

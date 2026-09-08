@@ -7,6 +7,7 @@
 //	full text of the GPL.
 
 import Foundation
+import UniformTypeIdentifiers
 
 /// One track's download, as the UI sees it.
 enum DownloadState: Hashable, Sendable {
@@ -146,7 +147,10 @@ extension DownloadQueue: URLSessionDownloadDelegate {
 		}
 
 		do {
-			try store.adopt(location, for: parsed.ref, quality: parsed.quality)
+			try store.adopt(
+				location, for: parsed.ref, quality: parsed.quality,
+				fileExtension: Self.fileExtension(
+					for: downloadTask.response, quality: parsed.quality))
 		} catch {
 			report { self.onFailed?(parsed.ref) }
 			return
@@ -182,6 +186,29 @@ extension DownloadQueue: URLSessionDownloadDelegate {
 
 	func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
 		report { self.backgroundCompletion?() }
+	}
+
+	/// What to name the stored file.
+	///
+	/// AVFoundation types a local file by its path extension, so this is not
+	/// cosmetic: a file without one is never reported as unplayable, the player
+	/// simply waits, and the symptom is a track that never starts.
+	///
+	/// The format usually says. The original does not — its container is
+	/// whatever the server holds — so the response is asked instead, which is
+	/// the one moment that answer is available.
+	static func fileExtension(for response: URLResponse?, quality: AudioQuality) -> String {
+		if let known = quality.format.fileExtension { return known }
+		if let mime = response?.mimeType, let type = UTType(mimeType: mime),
+			let derived = type.preferredFilenameExtension
+		{
+			return derived
+		}
+		let suggested = (response?.suggestedFilename as NSString?)?.pathExtension ?? ""
+		// `audio` is not a container anything can read, and that is the point:
+		// it is better to store a file AVFoundation refuses outright than one
+		// it silently waits on for ever.
+		return suggested.isEmpty ? "audio" : suggested
 	}
 
 	/// Delegate callbacks arrive on the session's own queue; everything they

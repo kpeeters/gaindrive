@@ -382,6 +382,18 @@ final class PlayerConnection {
 			player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
 				Task { @MainActor in self?.publishTransport() }
 			})
+		// **The item's own status, which nothing else reports.** An item that
+		// cannot be played does not necessarily move `timeControlStatus`: a
+		// player told to play something it cannot type sits in
+		// `waitingToPlayAtSpecifiedRate` indefinitely, so without this the
+		// failure below is only ever noticed if some unrelated event happens to
+		// republish. The symptom is a spinner that never stops and no error
+		// anywhere — which is exactly what a file stored with no extension
+		// produced.
+		observations.append(
+			player.observe(\.currentItem?.status, options: [.new]) { [weak self] _, _ in
+				Task { @MainActor in self?.publishTransport() }
+			})
 
 		// The one place `assumeIsolated` is correct: `queue: .main` is
 		// documented to deliver on the main queue, and hopping twice a second
