@@ -21,6 +21,7 @@ import UIKit
 struct NowPlayingView: View {
 	@Environment(PlayerConnection.self) private var player
 	@Environment(\.dismiss) private var dismiss
+	@Environment(\.verticalSizeClass) private var verticalSizeClass
 
 	@State private var path: [Route] = []
 	@State private var addingTo: Song?
@@ -58,13 +59,15 @@ struct NowPlayingView: View {
 	private func content(_ song: Song) -> some View {
 		List {
 			Section {
-				VStack(spacing: 16) {
+				VStack(spacing: 12) {
 					CoverHero(source: player.coverSource(for: song, size: CoverSize.hero))
+						.frame(width: coverSide, height: coverSide)
 					titles(song)
 					NowPlayingScrubber()
 					transport
 					secondaryControls(song)
 				}
+				.frame(maxWidth: .infinity)
 				.padding(.vertical, 8)
 			}
 			.listRowSeparator(.hidden)
@@ -72,6 +75,22 @@ struct NowPlayingView: View {
 			QueueList()
 		}
 		.listStyle(.plain)
+	}
+
+	/// **Bounded, not full width.** Left to fill, a square cover is as tall as
+	/// the sheet is wide and pushes the queue off the bottom entirely — so the
+	/// screen that exists to show what is playing *next* showed none of it.
+	///
+	/// A fixed size rather than a fraction of the container: a `GeometryReader`
+	/// around a `List` to measure one image is a lot of machinery for a number
+	/// that only has to be roughly right. The size class is what a landscape
+	/// phone needs, where the whole sheet is shorter than the regular cover.
+	///
+	/// The *requested* pixel size is unchanged: `CoverSize.hero` is 800, which
+	/// is still right for 200 points on a 3x screen, and asking for a different
+	/// one per size class would be two cache entries for one image.
+	private var coverSide: CGFloat {
+		verticalSizeClass == .compact ? 110 : 200
 	}
 
 	@ViewBuilder
