@@ -77,6 +77,12 @@ struct CoverArt: View {
 	}
 }
 
+/// Row-sized artwork.
+///
+/// **Hidden from VoiceOver.** It is decoration beside text that already names
+/// the row, and an unlabelled image is announced as "Image" on every one of
+/// them. The hero and the avatar are not hidden: those are the subject of the
+/// screen rather than an ornament on a row.
 struct CoverThumb: View {
 	let source: CoverSource?
 	var size: CGFloat = 48
@@ -84,6 +90,7 @@ struct CoverThumb: View {
 	var body: some View {
 		CoverArt(source: source)
 			.frame(width: size, height: size)
+			.accessibilityHidden(true)
 	}
 }
 

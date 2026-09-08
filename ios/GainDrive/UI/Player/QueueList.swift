@@ -66,6 +66,9 @@ struct QueueList: View {
 		}
 		.contentShape(.rect)
 		.onTapGesture { player.jump(to: index) }
+		// A tap gesture is invisible to VoiceOver, unlike the `NavigationLink`
+		// and `Button` every other listing's rows are built from.
+		.accessibilityAddTraits(.isButton)
 	}
 }
 

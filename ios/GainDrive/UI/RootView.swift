@@ -85,6 +85,12 @@ struct RootView: View {
 					.miniPlayerInset { showingPlayer = true }
 			}
 		}
+		// The iOS 18 idiom for a tabbed app on a wide screen: the tab bar
+		// becomes a sidebar on iPad and under Catalyst, and stays a tab bar on
+		// a phone. It is also what makes the Mac build look like a Mac app
+		// rather than a stretched phone, which `PLAN.md` lists as the whole
+		// point of taking the Catalyst destination.
+		.tabViewStyle(.sidebarAdaptable)
 		.sheet(isPresented: $showingPlayer) { NowPlayingView() }
 		// **Playback errors belong to the shell, not to a screen.** They arrive
 		// from the audio session, from an item that failed to load and from the

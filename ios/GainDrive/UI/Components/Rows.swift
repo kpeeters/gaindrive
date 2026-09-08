@@ -118,6 +118,16 @@ struct TrackRow: View {
 	var number: Int?
 	var showNumber = true
 	var trailing: AnyView?
+	/// The number column scales with Dynamic Type: a fixed 24 pt box clips a
+	/// three-digit track number at the accessibility sizes, and this column
+	/// exists precisely so the row does not reflow — so it has to grow with the
+	/// text rather than crop it.
+	///
+	/// **Not `private`, and declared last.** A private stored property makes
+	/// the whole memberwise initialiser private, which would break every
+	/// `TrackRow(song:…)` in another file; declaring it after the rest keeps
+	/// `song` the first parameter.
+	@ScaledMetric(relativeTo: .footnote) var numberWidth: CGFloat = 24
 
 	var body: some View {
 		HStack(spacing: 12) {
@@ -126,7 +136,7 @@ struct TrackRow: View {
 				// not reflow when the indicator replaces the number — which is
 				// exactly what this column was reserved for.
 				numberOrIndicator
-					.frame(width: 24, alignment: .trailing)
+					.frame(width: numberWidth, alignment: .trailing)
 			}
 			VStack(alignment: .leading, spacing: 2) {
 				HStack(spacing: 6) {
@@ -136,6 +146,7 @@ struct TrackRow: View {
 						Image(systemName: "film")
 							.font(.caption)
 							.foregroundStyle(.secondary)
+							.accessibilityLabel("Video")
 					}
 					Text(song.title).lineLimit(1)
 				}

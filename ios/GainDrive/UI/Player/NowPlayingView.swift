@@ -207,6 +207,10 @@ struct NowPlayingScrubber: View {
 			// work. `canSeek` comes from the item's own `seekableTimeRanges`,
 			// never from a guess about the format.
 			.disabled(!player.canSeek)
+			.accessibilityLabel("Playback position")
+			// Seconds read as a percentage are useless. The value is spoken as
+			// the same clock the labels below show.
+			.accessibilityValue(clock(scrubbing ?? player.position))
 
 			HStack {
 				Text(clock(scrubbing ?? player.position))

@@ -24,6 +24,7 @@ struct MiniPlayer: View {
 		if let song = player.current {
 			VStack(spacing: 0) {
 				progress
+					.accessibilityHidden(true)
 				HStack(spacing: 12) {
 					// The tap target is the cover and the text, not the whole
 					// bar: wrapping the row in a `Button` would swallow the
@@ -53,6 +54,7 @@ struct MiniPlayer: View {
 							.font(.title3)
 							.frame(width: 32, height: 32)
 					}
+					.accessibilityLabel(player.isPlaying ? "Pause" : "Play")
 					Button {
 						player.next()
 					} label: {
@@ -61,6 +63,7 @@ struct MiniPlayer: View {
 							.frame(width: 32, height: 32)
 					}
 					.disabled(!player.hasNext)
+					.accessibilityLabel("Next")
 				}
 				.padding(.horizontal, 12)
 				.padding(.vertical, 8)
@@ -73,6 +76,9 @@ struct MiniPlayer: View {
 		}
 	}
 
+	/// Hidden from VoiceOver by its caller: it is a hairline with no label
+	/// worth reading, and the position it stands for is announced properly by
+	/// the scrubber in the Now Playing sheet.
 	@ViewBuilder
 	private var progress: some View {
 		if player.isBuffering {

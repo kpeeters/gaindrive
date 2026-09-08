@@ -28,6 +28,10 @@ struct ServerBadge: View {
 				.padding(.vertical, 2)
 				.background(.quaternary, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
 				.foregroundStyle(.secondary)
+				// A bare server name read out in the middle of a row says
+				// nothing about what it is; the row is announced as one
+				// utterance, so this has to carry its own preposition.
+				.accessibilityLabel("on \(name)")
 		}
 	}
 }
