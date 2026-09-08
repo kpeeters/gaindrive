@@ -14,9 +14,20 @@ struct AlbumsView: View {
 	/// See `Route.albums`. Defaulted, so a section reached from search keeps
 	/// today's placeholder rather than having the answer guessed.
 	var fromCategories = false
+	/// Non-nil inside the Library tab's split view, where choosing an album
+	/// fills the third column. **Nil everywhere else**: from Search, Recents
+	/// and the Now Playing sheet this list sits in a `NavigationStack` and a
+	/// row is a push.
+	///
+	/// `List` takes an *optional* selection binding, so the list itself needs
+	/// no branch — and the declared type here is what pins its selection type
+	/// when the binding is nil.
+	var selection: Binding<Album?>?
 
 	@Environment(\.library) private var library
-	@Environment(ServerSelection.self) private var selection
+	// `servers`, not `selection`: that name belongs to the album selection
+	// above, which is what `List(selection:)` wants it called.
+	@Environment(ServerSelection.self) private var servers
 	@Environment(SettingsStore.self) private var settings
 	@State private var model: AlbumsViewModel?
 	@State private var notesDismissed = false
@@ -44,7 +55,7 @@ struct AlbumsView: View {
 			// model survives every re-evaluation of this body.
 			if model == nil, let library {
 				model = AlbumsViewModel(
-					library: library, selection: selection, settings: settings,
+					library: library, selection: servers, settings: settings,
 					refs: refs, fromCategories: fromCategories)
 			}
 			model?.appear()
@@ -75,7 +86,8 @@ struct AlbumsView: View {
 		if albums.isEmpty {
 			EmptyMessage(text: "No albums")
 		} else {
-			List {
+			List(selection: selection) {
+				// The header and the note are untagged, and so not selectable.
 				if model.info != nil || model.portrait != nil {
 					header(model)
 						.listRowSeparator(.hidden)
@@ -89,13 +101,29 @@ struct AlbumsView: View {
 					.listRowSeparator(.hidden)
 				}
 				ForEach(albums) { item in
-					NavigationLink(value: Route.album(item.album.ref, title: item.album.title)) {
-						AlbumRow(item: item)
-					}
+					row(item)
 				}
 			}
 			.listStyle(.plain)
 			.refreshable { await model.refresh() }
+		}
+	}
+
+	/// The rows *are* the branch, because the list is not.
+	///
+	/// A `NavigationLink` inside a selectable list would push as well as
+	/// select, so the split view gets a bare row — tagged with the album
+	/// itself rather than left to `AlbumUi.id`, so the column above receives
+	/// enough to title the detail column without a lookup.
+	@ViewBuilder
+	private func row(_ item: AlbumUi) -> some View {
+		if selection != nil {
+			AlbumRow(item: item)
+				.tag(item.album)
+		} else {
+			NavigationLink(value: Route.album(item.album.ref, title: item.album.title)) {
+				AlbumRow(item: item)
+			}
 		}
 	}
 
