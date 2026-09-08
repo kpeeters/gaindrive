@@ -44,6 +44,22 @@ final class CastEngine: PlaybackEngine {
 
 	private let session: CastSession
 	private let urls: CastUrls
+	/// **Warmed before the LOAD, not after it**, and awaited.
+	///
+	/// The server's transcode cache is blocking: it runs ffmpeg over the whole
+	/// track and answers nothing at all until the file is complete. Point a
+	/// receiver at a cold one and it sits with no data for as long as that
+	/// takes, which trips its ~60 s no-data timeout and surfaces as a session
+	/// that says it is loading and never plays — the universal end-state for
+	/// every cast failure in this codebase, arriving long after its cause.
+	///
+	/// `src/gaindrive.cc`'s own cast path does exactly this for exactly this
+	/// reason (see "Casting a video to a receiver that cannot show one" in the
+	/// root `CLAUDE.md`), and `android/CAST.md` lists its absence as an unbuilt
+	/// remedy. Waiting here costs nothing that was not going to be waited for
+	/// anyway; it only moves the wait to a place where the receiver is not
+	/// counting.
+	private let prewarmer = TranscodePrewarmer()
 	/// The song the receiver was last told to play, so a status push can be
 	/// matched to something.
 	private var playing: Song?
@@ -121,6 +137,20 @@ final class CastEngine: PlaybackEngine {
 		reported = offset
 		reportedAt = nil
 		position = offset
+		// Reported as buffering while this runs, which is what it is. A film is
+		// not warmed: the tiers a receiver will take are served off disk or
+		// remuxed, and a remux of a multi-gigabyte file is minutes in which
+		// nothing could be shown anyway.
+		if !song.isVideo {
+			// Said explicitly rather than left to the next status push: nothing
+			// arrives from the receiver during the warm, so a client would
+			// otherwise show whatever it was showing before — which after a
+			// track change is the previous track, playing.
+			isBuffering = true
+			isPlaying = false
+			onStateChange?()
+			await prewarmer.warm(target)
+		}
 		session.load(
 			CastMedia(
 				url: target.url,

@@ -430,6 +430,21 @@ final class PlayerConnection {
 
 		watchdog.sample = { [weak self] in
 			guard let self else { return PlaybackWatchdog.Sample(stalled: false, position: 0) }
+			// **Local playback only.** A receiver cannot stall on a stream this
+			// device is feeding it, because this device is feeding it nothing —
+			// it fetches for itself, and whatever it is doing meanwhile is its
+			// business. Watching it anyway pauses a cast that is merely slow to
+			// start: a receiver reports IDLE/LOADING while it resolves a name
+			// and opens a TLS connection of its own, which is buffering by
+			// every signal this class has, and thirty seconds of that is
+			// ordinary rather than wedged.
+			//
+			// Android reaches the same rule from the other end — its watchdog
+			// is registered against the `ExoPlayer` and never against
+			// `CastPlayer`.
+			guard !self.isCasting else {
+				return PlaybackWatchdog.Sample(stalled: false, position: self.position)
+			}
 			// `isBuffering` is already "waiting to play in order to minimise
 			// stalls", which is buffering *and* wanting to play — the pair the
 			// watchdog needs, and the same predicate Android spells as

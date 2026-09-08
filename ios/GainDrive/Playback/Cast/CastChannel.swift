@@ -42,6 +42,17 @@ actor CastChannel {
 	/// one did I just reach" is the question a half-working device raises.
 	private(set) var remoteAddress: String?
 
+	/// The same thing, as something to connect to again.
+	///
+	/// **A reconnect should not re-resolve a name.** `CastEndpoint.service`
+	/// costs an mDNS lookup every time it is used, and the responders this app
+	/// has to deal with are exactly the ones that answer unreliably — a WiiM's
+	/// had stopped answering even a direct unicast query, which is why
+	/// configured devices exist at all. Once a connection has been made, the
+	/// address it reached is a better thing to reconnect to than the name it
+	/// started from.
+	private(set) var resolvedEndpoint: CastEndpoint?
+
 	/// `NWConnection` is documented thread-safe and delivers its callbacks on the
 	/// queue given to `start(queue:)`. Confining it to this actor is what the
 	/// rest of the file relies on; the annotation says the compiler need not
@@ -106,7 +117,9 @@ actor CastChannel {
 			close()
 			throw error
 		}
-		remoteAddress = Self.address(of: connection)
+		let resolved = Self.resolved(connection)
+		remoteAddress = resolved?.host
+		resolvedEndpoint = resolved.map { .host($0.host, port: $0.port) }
 	}
 
 	private func awaitReady() async throws {
@@ -243,15 +256,16 @@ actor CastChannel {
 		return parameters
 	}
 
-	private static func address(of connection: NWConnection) -> String? {
+	private static func resolved(_ connection: NWConnection) -> (host: String, port: UInt16)? {
 		guard let remote = connection.currentPath?.remoteEndpoint,
-			case .hostPort(let host, _) = remote
+			case .hostPort(let host, let port) = remote
 		else {
 			return nil
 		}
-		// `debugDescription` on an IPv6 host carries a `%en0` zone, which is
-		// noise in a device list and not part of the address.
-		return "\(host)".split(separator: "%").first.map(String.init)
+		// An IPv6 host's description carries a `%en0` zone, which is noise in a
+		// device list and not part of the address.
+		guard let bare = "\(host)".split(separator: "%").first else { return nil }
+		return (String(bare), port.rawValue)
 	}
 }
 

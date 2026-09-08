@@ -117,6 +117,13 @@ final class CastSession {
 		}
 		let msid = status.mediaSessionId
 		let id = nextRequestId()
+		// **Forgotten now, torn down in a moment.** The grace period below is
+		// three hundred milliseconds during which somebody may well choose a
+		// device again, and `connect` refuses a target it believes it is already
+		// connected to — so leaving this set makes the next cast a silent
+		// no-op. The pending teardown checks the channel is still the one it
+		// started with, so it cannot take a newer session down with it.
+		device = nil
 		Task { [weak self] in
 			try? await open.send(
 				namespace: CastNamespace.media, destination: transport,
@@ -170,7 +177,17 @@ final class CastSession {
 		mediaCommand("SEEK", extra: ["currentTime": seconds])
 	}
 
+	/// **Refused while there is no media session**, which is not defensiveness:
+	/// the media namespace requires a valid `mediaSessionId`, and 0 is what
+	/// `load()` resets the status to until the receiver answers with its own. A
+	/// command sent in that window is rejected as an invalid request — and the
+	/// one that lands there by construction is the PLAY that follows a LOAD,
+	/// which the LOAD's own `autoplay` has already made unnecessary.
 	private func mediaCommand(_ type: String, extra: [String: Any] = [:]) {
+		guard status.mediaSessionId != 0 else {
+			Self.log.info("cast \(type, privacy: .public) skipped — no media session yet")
+			return
+		}
 		Task { [weak self] in
 			guard let self, let open = await self.awaitChannel(),
 				let transport = self.transportId
@@ -192,12 +209,23 @@ final class CastSession {
 	// MARK: - The connection
 
 	private func runLoop(_ target: CastDevice) async {
+		// **A reconnect uses the address the last connection reached**, not the
+		// Bonjour name it started from. Every use of a service endpoint is an
+		// mDNS lookup, and the responders that matter here are the ones that
+		// answer unreliably — `nw_resolver … did not receive all answers in
+		// time` in the middle of a session is that, and it turns a reconnect
+		// that should be instant into one that may not happen at all.
+		var endpoint = target.endpoint
 		while !Task.isCancelled {
-			guard let open = try? await CastChannel.open(to: target.endpoint) else {
+			guard let open = try? await CastChannel.open(to: endpoint) else {
 				Self.log.warning("cast connect failed, retrying")
+				// Falling back to the name is what recovers a device that has
+				// changed address — the one case the remembered one is wrong.
+				endpoint = target.endpoint
 				try? await Task.sleep(for: Self.reconnectDelay)
 				continue
 			}
+			if let resolved = await open.resolvedEndpoint { endpoint = resolved }
 			guard !Task.isCancelled else {
 				await open.close()
 				return
