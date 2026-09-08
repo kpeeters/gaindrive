@@ -17,6 +17,12 @@ import Foundation
 //
 //	Every identifier here is an `ItemRef`. Nothing in this file holds a bare
 //	`String` id, and nothing above it should either.
+//
+//	They are `Codable` for the mirror, which stores mapped domain values rather
+//	than raw responses — see `LibraryMirror`. That is also the whole of the
+//	mirror's migration story: a value written by a build with a different shape
+//	fails to decode, which reads as a miss, which is a re-fetch. A cache is
+//	allowed to be thrown away.
 
 /// One of a server's configured library roots.
 ///
@@ -26,7 +32,7 @@ import Foundation
 /// straight back into a request to the same server. Nothing above `Data` ever
 /// sees it — the chip row speaks in `LibraryMode`, which is keyed by name for
 /// exactly that reason.
-struct MusicRoot: Hashable, Sendable {
+struct MusicRoot: Hashable, Sendable, Codable {
 	let id: String
 	let name: String
 	/// A gaindrive extension: `artists` or `categories`. Absent on a server
@@ -36,7 +42,7 @@ struct MusicRoot: Hashable, Sendable {
 }
 
 /// An artist, possibly standing for the same artist on several servers.
-struct Artist: Identifiable, Hashable, Sendable {
+struct Artist: Identifiable, Hashable, Sendable, Codable {
 	let ref: ItemRef
 	let name: String
 	let albumCount: Int
@@ -65,14 +71,14 @@ struct Artist: Identifiable, Hashable, Sendable {
 }
 
 /// One bucket of the index rail: a letter and the artists filed under it.
-struct ArtistIndex: Identifiable, Hashable, Sendable {
+struct ArtistIndex: Identifiable, Hashable, Sendable, Codable {
 	let label: String
 	let artists: [Artist]
 
 	var id: String { label }
 }
 
-struct Album: Identifiable, Hashable, Sendable {
+struct Album: Identifiable, Hashable, Sendable, Codable {
 	let ref: ItemRef
 	let title: String
 	let artistName: String
@@ -124,7 +130,7 @@ struct Album: Identifiable, Hashable, Sendable {
 
 /// A track. **Songs never merge** — a track list always comes from one album on
 /// one server — so there is no `refs` here, and its absence is the rule.
-struct Song: Identifiable, Hashable, Sendable {
+struct Song: Identifiable, Hashable, Sendable, Codable {
 	let ref: ItemRef
 	let title: String
 	let artistName: String
@@ -153,7 +159,7 @@ struct Song: Identifiable, Hashable, Sendable {
 	var isStarred: Bool { starredAt != nil }
 }
 
-struct Playlist: Identifiable, Hashable, Sendable {
+struct Playlist: Identifiable, Hashable, Sendable, Codable {
 	let ref: ItemRef
 	let name: String
 	let comment: String?
@@ -193,7 +199,7 @@ struct AlbumNotes: Hashable, Sendable {
 	}
 }
 
-struct AlbumDetail: Hashable, Sendable {
+struct AlbumDetail: Hashable, Sendable, Codable {
 	let album: Album
 	let songs: [Song]
 

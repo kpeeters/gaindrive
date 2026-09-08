@@ -322,24 +322,11 @@ actor AudioStore {
 		try? String(Self.layoutVersion).write(to: marker, atomically: true, encoding: .utf8)
 	}
 
-	/// **Percent-encoded per component**, and not because gaindrive needs it:
-	/// its ids are integers and its server ids are UUIDs. A Subsonic id is a
-	/// string somebody else chose, and one containing a slash would otherwise
-	/// write outside the directory it was meant for.
-	///
-	/// Hyphens, dots and underscores are left alone so a UUID directory and an
-	/// integer filename read as themselves — an escaped hyphen in every server
-	/// directory would be noise in every `ls` for no gain. What matters is only
-	/// that the transformation is the same on the way in and on the way out.
+	/// Shared with the mirror — see `FileNames`, which says why there is one
+	/// definition of this and not two.
 	static func component(_ raw: String) -> String {
-		raw.addingPercentEncoding(withAllowedCharacters: Self.nameSafe) ?? raw
+		FileNames.component(raw)
 	}
-
-	private static let nameSafe: CharacterSet = {
-		var set = CharacterSet.alphanumerics
-		set.insert(charactersIn: "-._")
-		return set
-	}()
 
 	static func path(root: URL, key: String) -> URL {
 		guard let parsed = CacheKeys.parse(key) else {

@@ -21,6 +21,19 @@ struct ServerFailure: Identifiable, Hashable, Sendable {
 	let message: String
 
 	var id: ServerId { server }
+
+	/// The same failure, said the way it should be said when a stored copy is
+	/// being shown instead.
+	///
+	/// **Carried in the message rather than as a flag on `MergedResult`.** Every
+	/// screen already draws these notes, so putting it here means all of them
+	/// say it without any of them learning what a mirror is — which is the
+	/// reasoning `android/CACHING.md` gives for the same choice.
+	var showingStored: ServerFailure {
+		ServerFailure(
+			server: server, serverName: serverName,
+			message: "\(message) Showing what was stored.")
+	}
 }
 
 /// The result of asking several servers at once: what came back, and who did

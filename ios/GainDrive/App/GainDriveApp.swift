@@ -44,9 +44,12 @@ struct GainDriveApp: App {
 		// and asking twice would be two requests for one fact.
 		let accounts = Accounts()
 		let roots = MusicRoots()
+		// What each browse query last answered, so a server that is not there
+		// can still be read. See `LibraryMirror`.
+		let mirror = LibraryMirror()
 		let library = LibraryRepository(
 			registry: registry, settings: settings, events: events,
-			accounts: accounts, roots: roots)
+			accounts: accounts, roots: roots, mirror: mirror)
 		_selection = State(initialValue: ServerSelection(registry: registry, settings: settings))
 		_events = State(initialValue: events)
 		_library = State(initialValue: library)
@@ -77,6 +80,9 @@ struct GainDriveApp: App {
 		registry.onServerInvalidated = { id in
 			Task { await accounts.forget(id) }
 			Task { await roots.forget(id) }
+			// A removed server's rows go with it, or its library would go on
+			// being browsable under a server that is no longer configured.
+			Task { await mirror.forget(id) }
 		}
 	}
 

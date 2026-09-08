@@ -32,16 +32,18 @@ final class LibraryRepository: Sendable {
 	private let events: LibraryEvents
 	private let accounts: Accounts
 	private let roots: MusicRoots
+	private let mirror: LibraryMirror
 
 	init(
 		registry: ServerRegistry, settings: SettingsStore, events: LibraryEvents,
-		accounts: Accounts, roots: MusicRoots
+		accounts: Accounts, roots: MusicRoots, mirror: LibraryMirror
 	) {
 		self.registry = registry
 		self.settings = settings
 		self.events = events
 		self.accounts = accounts
 		self.roots = roots
+		self.mirror = mirror
 	}
 
 	// MARK: - Fan-out reads
@@ -56,11 +58,17 @@ final class LibraryRepository: Sendable {
 	/// screen.
 	func availableModes(scope: BrowseScope) async -> [LibraryMode] {
 		let clients = await registry.clientsSnapshot()
-		let gathered = await gather(over: clients.servers(in: scope), clients: clients) {
-			[accounts, roots] client, config in
+		let gathered = await gather(
+			over: clients.servers(in: scope), clients: clients,
+			stored: { [mirror] config in
+				await mirror.load([LibraryMode].self, at: .chips(config.id))
+			}
+		) { [accounts, roots, mirror] client, config in
 			let facts = await accounts.facts(for: config.id, using: clients)
 			let known = try await Self.rootsOf(client, config.id, cache: roots)
-			return LibraryRoots.chips(roots: known, canUpload: facts.canUpload)
+			let chips = LibraryRoots.chips(roots: known, canUpload: facts.canUpload)
+			await mirror.store(chips, at: .chips(config.id))
+			return chips
 		}
 		return LibraryRoots.mergeChips(perServer: gathered.answers.map(\.1))
 	}
@@ -69,8 +77,12 @@ final class LibraryRepository: Sendable {
 		[ArtistIndex]
 	> {
 		let clients = await registry.clientsSnapshot()
-		let gathered = await gather(over: clients.servers(in: scope), clients: clients) {
-			[accounts, roots] client, config in
+		let gathered = await gather(
+			over: clients.servers(in: scope), clients: clients,
+			stored: { [mirror] config in
+				await mirror.load([ArtistIndex].self, at: .indexes(config.id, mode))
+			}
+		) { [accounts, roots, mirror] client, config in
 			// **A server that cannot answer for this chip is not asked at
 			// all.** Not asking is the whole point: one predating library roots
 			// ignores an unknown `contentType` and answers with its entire
@@ -92,11 +104,16 @@ final class LibraryRepository: Sendable {
 			// lines away, naming neither this line nor the reason.
 			else { return [ArtistIndex]() }
 
-			return try await client.artists(
+			let indexes = try await client.artists(
 				personal: request.personal.parameter,
 				contentType: request.contentType,
 				musicFolderId: request.musicFolderId
 			).map { LibraryMapper.index($0, server: config.id) }
+			// Written through only on a real answer. A server that could not be
+			// asked for this chip returns early above, so an empty listing here
+			// is a genuine one and is worth storing.
+			await mirror.store(indexes, at: .indexes(config.id, mode))
+			return indexes
 		}
 		let perServer = gathered.answers.map(\.1)
 		return MergedResult(
@@ -134,11 +151,16 @@ final class LibraryRepository: Sendable {
 		// Read before the fan-out, so the transform below stays synchronous.
 		let collapse = await settings.mergeDuplicateAlbums
 
-		let gathered = await gather(over: refs, clients: clients) { client, ref in
+		let gathered = await gather(
+			over: refs, clients: clients,
+			stored: { [mirror] ref in await mirror.load([Album].self, at: .albums(ref)) }
+		) { [mirror] client, ref in
 			let artist = try await client.artist(id: ref.id)
-			return (artist?.album ?? []).compactMap {
+			let albums = (artist?.album ?? []).compactMap {
 				LibraryMapper.album($0, server: ref.server)
 			}
+			await mirror.store(albums, at: .albums(ref))
+			return albums
 		}
 		let albums = gathered.answers.flatMap(\.1)
 		return MergedResult(
@@ -148,11 +170,17 @@ final class LibraryRepository: Sendable {
 
 	func playlists(scope: BrowseScope) async -> MergedResult<[ServerSection<Playlist>]> {
 		let clients = await registry.clientsSnapshot()
-		let gathered = await gather(over: clients.servers(in: scope), clients: clients) {
-			client, config in
-			try await client.playlists().compactMap {
+		let gathered = await gather(
+			over: clients.servers(in: scope), clients: clients,
+			stored: { [mirror] config in
+				await mirror.load([Playlist].self, at: .playlists(config.id))
+			}
+		) { [mirror] client, config in
+			let lists = try await client.playlists().compactMap {
 				LibraryMapper.playlist($0, server: config.id)
 			}
+			await mirror.store(lists, at: .playlists(config.id))
+			return lists
 		}
 		return MergedResult(items: sections(gathered), failures: gathered.failures)
 	}
@@ -270,18 +298,43 @@ final class LibraryRepository: Sendable {
 
 	// MARK: - Single-ref reads
 
+	/// **The one read that falls back without saying so**, and the exception is
+	/// deliberate: this screen has no note to draw. Every fan-out read carries
+	/// its failures to a `PartialFailureNote`; a single-ref read has only the
+	/// load/empty/error triple, and turning "the server is down" into an error
+	/// screen over an album whose tracks are stored and playable would be the
+	/// worse answer.
 	func albumDetail(_ ref: ItemRef) async throws -> AlbumDetail? {
+		do {
+			return try await liveAlbumDetail(ref)
+		} catch {
+			guard !error.isCancellation else { throw error }
+			guard let kept = await mirror.load(AlbumDetail.self, at: .album(ref)) else {
+				throw error
+			}
+			return kept
+		}
+	}
+
+	private func liveAlbumDetail(_ ref: ItemRef) async throws -> AlbumDetail? {
 		guard let client = await client(for: ref.server) else { return nil }
 		guard let dto = try await client.album(id: ref.id),
 			let album = LibraryMapper.album(dto, server: ref.server)
 		else {
 			return nil
 		}
-		return AlbumDetail(
+		let detail = AlbumDetail(
 			album: album,
 			songs: dto.song.compactMap { LibraryMapper.song($0, server: ref.server) })
+		await mirror.store(detail, at: .album(ref))
+		return detail
 	}
 
+	/// Not mirrored, and the reason is that it is not read the way an album is.
+	/// `getPlaylist` is fetched to fill a screen *and* to expand a pin, and a
+	/// pin resolving to a stored membership rather than to nothing is exactly
+	/// the transition `Pins.merging` exists to refuse. The screen keeps its
+	/// stored copy through `playlists(scope:)`, which mirrors the list itself.
 	func playlist(_ ref: ItemRef) async throws -> Playlist? {
 		guard let client = await client(for: ref.server) else { return nil }
 		guard let dto = try await client.playlist(id: ref.id) else { return nil }
@@ -406,6 +459,10 @@ final class LibraryRepository: Sendable {
 	private enum Answer<Value: Sendable>: Sendable {
 		case ok(ServerId, Value)
 		case failed(ServerFailure)
+		/// The server did not answer and the mirror did. **Both halves are
+		/// kept**: the rows so the screen is not blank, and the failure so it
+		/// still says what happened — reworded, not suppressed.
+		case recovered(ServerId, Value, ServerFailure)
 		/// Not a failure. A cancelled branch is the user having moved on, and
 		/// recording it would flash "this server did not answer" over the
 		/// results on every keystroke in search and every change of scope.
@@ -422,9 +479,14 @@ final class LibraryRepository: Sendable {
 	/// In parallel, not in sequence: three servers queried one after another
 	/// would make every browse screen as slow as the sum of them, and one that
 	/// has gone away would hold up the two that are fine until it times out.
+	/// `stored` is consulted **only when the server did not answer**, which is
+	/// what makes this network-first rather than stale-while-revalidate: a
+	/// reachable server is always the answer, and the mirror is what stops a
+	/// screen going blank when there is not one.
 	private func gather<Value: Sendable>(
 		over servers: [ServerConfig],
 		clients: ServerClients,
+		stored: (@Sendable (ServerConfig) async -> Value?)? = nil,
 		work: @Sendable @escaping (SubsonicClient, ServerConfig) async throws -> Value
 	) async -> Gathered<Value> {
 		await withTaskGroup(of: Answer<Value>.self) { group in
@@ -433,12 +495,15 @@ final class LibraryRepository: Sendable {
 					// The configuration is there but the Keychain item is not —
 					// what a restore onto a new device looks like when the
 					// password did not travel with it. A different sentence
-					// from "unreachable", on purpose.
+					// from "unreachable", on purpose — and one the mirror can
+					// still answer around, since the rows were fetched before
+					// the password went missing.
 					group.addTask {
-						.failed(
-							ServerFailure(
-								server: config.id, serverName: config.displayName,
-								message: "No saved password. Open the server in Settings."))
+						let failure = ServerFailure(
+							server: config.id, serverName: config.displayName,
+							message: "No saved password. Open the server in Settings.")
+						guard let kept = await stored?(config) else { return .failed(failure) }
+						return .recovered(config.id, kept, failure.showingStored)
 					}
 					continue
 				}
@@ -447,10 +512,11 @@ final class LibraryRepository: Sendable {
 						return .ok(config.id, try await work(client, config))
 					} catch {
 						guard !error.isCancellation else { return .cancelled }
-						return .failed(
-							ServerFailure(
-								server: config.id, serverName: config.displayName,
-								message: error.userMessage))
+						let failure = ServerFailure(
+							server: config.id, serverName: config.displayName,
+							message: error.userMessage)
+						guard let kept = await stored?(config) else { return .failed(failure) }
+						return .recovered(config.id, kept, failure.showingStored)
 					}
 				}
 			}
@@ -468,6 +534,7 @@ final class LibraryRepository: Sendable {
 	private func gather<Value: Sendable>(
 		over refs: [ItemRef],
 		clients: ServerClients,
+		stored: (@Sendable (ItemRef) async -> Value?)? = nil,
 		work: @Sendable @escaping (SubsonicClient, ItemRef) async throws -> Value
 	) async -> Gathered<Value> {
 		// One branch per server, not per ref: a merged row holds one ref per
@@ -491,10 +558,11 @@ final class LibraryRepository: Sendable {
 						return .ok(config.id, try await work(client, ref))
 					} catch {
 						guard !error.isCancellation else { return .cancelled }
-						return .failed(
-							ServerFailure(
-								server: config.id, serverName: config.displayName,
-								message: error.userMessage))
+						let failure = ServerFailure(
+							server: config.id, serverName: config.displayName,
+							message: error.userMessage)
+						guard let kept = await stored?(ref) else { return .failed(failure) }
+						return .recovered(config.id, kept, failure.showingStored)
 					}
 				}
 			}
@@ -524,6 +592,11 @@ final class LibraryRepository: Sendable {
 			switch answer {
 			case .ok(let id, let value): ok[id] = value
 			case .failed(let failure): bad[failure.server] = failure
+			case .recovered(let id, let value, let failure):
+				// Into both, which is what the two dictionaries make possible:
+				// this server contributed rows *and* is reported.
+				ok[id] = value
+				bad[failure.server] = failure
 			case .cancelled: break
 			}
 		}

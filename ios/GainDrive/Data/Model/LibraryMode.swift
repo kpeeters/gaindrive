@@ -30,7 +30,7 @@ import Foundation
 /// folder. That arrives with folder browsing itself; the string is the reason
 /// it will need no migration when it does, since `SettingsStore` stores this
 /// value as it stands and an unrecognised one already falls back.
-struct LibraryMode: Hashable, Sendable, Identifiable {
+struct LibraryMode: Hashable, Sendable, Identifiable, Codable {
 	let id: String
 
 	init(_ id: String) {
