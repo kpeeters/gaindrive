@@ -109,9 +109,28 @@ enum StreamUrls {
 	/// a video reached through search, a playlist or starred, because the codec
 	/// columns it is computed from are not selected by those queries. That is
 	/// the safe direction — the film plays and seeks by re-request.
-	static func video(for song: Song, client: SubsonicClient) -> StreamTarget {
+	/// `transcoded` forces the HLS transport for a film the server says can be
+	/// served untouched.
+	///
+	/// **Because `nativeSeek` answers a browser's question, not this one.** It
+	/// derives from `video_direct_playable()`, built from `browser_video_codec()`
+	/// — and a browser plays AV1 anywhere because Chrome and Firefox bundle
+	/// dav1d and decode in software. AVFoundation ships **no** software AV1
+	/// decoder: decode is hardware-only, arrived with the M3 family and A17 Pro,
+	/// and there is no fallback on anything older. A yt-dlp download is
+	/// frequently AV1, deliberately — forcing H.264 would cap YouTube at 1080p —
+	/// so this is a common file rather than an exotic one, and the symptom is a
+	/// film that plays its sound over an audio placeholder with nothing
+	/// anywhere saying why.
+	///
+	/// The HLS tier is the server re-encoding to H.264, which always plays. It
+	/// costs a re-encode, so it is only ever reached by `LocalEngine` having
+	/// *asked AVFoundation* and been told the track cannot be decoded.
+	static func video(for song: Song, client: SubsonicClient, transcoded: Bool = false)
+		-> StreamTarget
+	{
 		let url =
-			song.nativeSeek
+			song.nativeSeek && !transcoded
 			? client.url("stream", parameters: ["id": song.ref.id])
 			// `.m3u8` rather than `.view`: the server answers both, and the
 			// extension is how AVFoundation knows it is a playlist. That is

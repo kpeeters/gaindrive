@@ -147,14 +147,18 @@ final class LocalEngine: PlaybackEngine {
 	{
 		var built: [(ref: ItemRef, item: AVPlayerItem, loader: CachingResourceLoader?)] = []
 		for song in songs {
-			guard let target = await target(for: song) else {
+			guard var target = await target(for: song) else {
 				// The head is what the user asked for; failing to resolve it is
 				// an error worth showing. A tail that cannot be resolved just
 				// means no pre-buffering.
 				if built.isEmpty { return nil }
 				break
 			}
-			built.append(item(for: song, target: target))
+			if song.isVideo {
+				built.append(await videoItem(for: song, target: target))
+			} else {
+				built.append(item(for: song, target: target))
+			}
 		}
 		return built
 	}
@@ -180,6 +184,12 @@ final class LocalEngine: PlaybackEngine {
 		//
 		// An HLS playlist is the second reason: the loader fetches one resource
 		// in order, and a playlist is a list of others.
+		//
+		// **Unreachable now**, and kept anyway: `build` sends every film to
+		// `videoItem`, which has a decodability question to settle before it can
+		// name a URL, and `target(for:)` never substitutes a stored file for a
+		// video. The guard stays because the rule it states is about the film
+		// rather than about who happens to call this.
 		guard !song.isVideo else {
 			return (song.ref, AVPlayerItem(url: target.url), nil)
 		}
@@ -188,6 +198,65 @@ final class LocalEngine: PlaybackEngine {
 		let asset = AVURLAsset(url: CachingResourceLoader.rewrite(target.url))
 		asset.resourceLoader.setDelegate(loader, queue: loader.queue)
 		return (song.ref, AVPlayerItem(asset: asset), loader)
+	}
+
+	/// A film, on the direct transport when this device can decode it and on the
+	/// server's re-encode when it cannot.
+	///
+	/// **`nativeSeek` answers a browser's question, and this is not a browser.**
+	/// It derives from the server's `video_direct_playable()`, which is built
+	/// from `browser_video_codec()` — and a browser plays AV1 anywhere because
+	/// Chrome and Firefox bundle dav1d and decode in software. AVFoundation
+	/// ships **no** software AV1 decoder: decode is hardware-only, arrived with
+	/// the M3 family and A17 Pro, and there is no fallback on anything older.
+	/// A yt-dlp download is frequently AV1, deliberately — forcing H.264 would
+	/// cap YouTube at 1080p — so this is a common file rather than an exotic
+	/// one, and the symptom is a film that plays its sound over an audio
+	/// placeholder with nothing anywhere saying why.
+	///
+	/// This is the same mistake the cast path made one level up, where a browser
+	/// predicate was read as a receiver's capability; the root `CLAUDE.md` warns
+	/// about it there in almost these words.
+	///
+	/// **Asked rather than predicted.** A codec allowlist would have to know
+	/// which machine it is running on, and the API does not carry the codec pair
+	/// anyway — only `nativeSeek`. `isDecodable` is the platform answering for
+	/// itself, on this hardware, which is the only form of the question with a
+	/// right answer.
+	///
+	/// The probe costs one metadata load, and the asset it reads is the one the
+	/// item is then built from, so nothing is fetched twice. It is skipped
+	/// entirely for a film already on the HLS transport, which is the re-encode
+	/// and has nothing to fall back to.
+	private func videoItem(for song: Song, target: StreamTarget) async
+		-> (ref: ItemRef, item: AVPlayerItem, loader: CachingResourceLoader?)
+	{
+		let asset = AVURLAsset(url: target.url)
+		guard song.nativeSeek, await Self.cannotDecode(asset),
+			let fallback = targets.video(for: song, transcoded: true)
+		else {
+			return (song.ref, AVPlayerItem(asset: asset), nil)
+		}
+		return (song.ref, AVPlayerItem(url: fallback.url), nil)
+	}
+
+	/// True only when the platform has *said* it cannot.
+	///
+	/// A failure to read the tracks at all is not evidence of anything — the
+	/// network, most likely — and re-encoding a film on a guess is the expensive
+	/// way to be wrong, so anything unclear answers false and the direct
+	/// transport stands.
+	private static func cannotDecode(_ asset: AVURLAsset) async -> Bool {
+		guard let tracks = try? await asset.loadTracks(withMediaType: .video) else {
+			return false
+		}
+		// No video track in something the library calls a video is its own kind
+		// of undecodable: whatever arrives, no picture comes out of it.
+		guard !tracks.isEmpty else { return true }
+		for track in tracks {
+			if let decodable = try? await track.load(.isDecodable), decodable { return false }
+		}
+		return true
 	}
 
 	/// Resolved **per track**, from that track's own server, and served from
