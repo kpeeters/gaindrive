@@ -192,4 +192,31 @@ struct PlayQueueTests {
 	@Test func theWindowIsEmptyWithNoQueue() {
 		#expect(PlayQueue().window.isEmpty)
 	}
+
+	/// **How many entries is the engine's business, not the queue's.** Locally
+	/// it is two, because that is what `AVQueuePlayer` pre-buffers; a Cast
+	/// receiver is told about one track at a time and sent the next when it
+	/// reports the first finished. Both have to come out of the same queue.
+	@Test func theWindowSizeIsTheEnginesToChoose() {
+		var queue = PlayQueue()
+		queue.play(album(5), startIndex: 1)
+		#expect(queue.window(size: 1).map(\.id) == ["1"])
+		#expect(queue.window(size: 2).map(\.id) == ["1", "2"])
+		#expect(queue.window(size: 3).map(\.id) == ["1", "2", "3"])
+	}
+
+	/// Asking for more than is left is not an error, and must not trap: the last
+	/// track of an album is the ordinary case, not an edge one.
+	@Test func theWindowIsClampedAtTheEndOfTheQueue() {
+		var queue = PlayQueue()
+		queue.play(album(3), startIndex: 2)
+		#expect(queue.window(size: 2).map(\.id) == ["2"])
+		#expect(queue.window(size: 9).map(\.id) == ["2"])
+	}
+
+	@Test func aWindowOfNothingIsEmpty() {
+		var queue = PlayQueue()
+		queue.play(album(5), startIndex: 0)
+		#expect(queue.window(size: 0).isEmpty)
+	}
 }

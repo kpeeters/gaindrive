@@ -32,16 +32,25 @@ struct PlayQueue: Equatable, Sendable {
 	var hasNext: Bool { songs.indices.contains(index + 1) }
 	var hasPrevious: Bool { index > 0 }
 
-	/// The refs the player should be holding: the current track and the next.
+	/// The refs the engine should be holding: the current track, and as many
+	/// after it as that engine wants.
 	///
-	/// Two rather than one, because the second is what `AVQueuePlayer`
-	/// pre-buffers, and that pre-buffering is the whole of the gapless story
-	/// available on this platform.
-	var window: [ItemRef] {
-		guard let current else { return [] }
-		guard hasNext else { return [current.ref] }
-		return [current.ref, songs[index + 1].ref]
+	/// **How many is the engine's business, not the queue's.** Locally it is
+	/// two, because the second is what `AVQueuePlayer` pre-buffers and that
+	/// pre-buffering is the whole of the gapless story available on this
+	/// platform. A Cast receiver is told about **one** track at a time and the
+	/// next is sent when it reports the first finished — which is what keeps
+	/// this app the queue's owner, and what makes swapping engines mid-queue
+	/// safe at all.
+	func window(size: Int) -> [ItemRef] {
+		guard size > 0, current != nil else { return [] }
+		let end = Swift.min(index + size, songs.count)
+		return songs[index..<end].map(\.ref)
 	}
+
+	/// The default two, for a caller that has no engine to ask — which in
+	/// practice is the tests.
+	var window: [ItemRef] { window(size: 2) }
 
 	func song(for ref: ItemRef) -> Song? {
 		songs.first { $0.ref == ref }

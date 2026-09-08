@@ -17,13 +17,19 @@ enum TrackState: Sendable {
 ///
 /// On Android that boundary is the framework's — the UI holds a
 /// `MediaController` and cannot reach the player. iOS has no such boundary, so
-/// this type is it. It is also what makes a future cast player a drop-in, so it
-/// is not optional scaffolding.
+/// this type is it.
 ///
-/// `@MainActor` is not a concession to SwiftUI: `AVQueuePlayer`,
-/// `AVPlayerItem` and `AVURLAsset` are not `Sendable`, so this is the only
-/// place they may legally live. Every AVFoundation call in the app happens
-/// here.
+/// **It owns the queue; an engine holds a window onto it.** `PlaybackEngine` is
+/// the seam a cast player drops into, and this class is deliberately the half
+/// that has nothing to do with how the sound is made: the queue, what every
+/// command means, every published property, and the four collaborators that
+/// attach to the **role** rather than to the player — `Scrobbler`,
+/// `PlaybackWatchdog`, `TranscodePrewarmer` and `NowPlayingCenter`. Android
+/// hung two of those off its `ExoPlayer` and had to repair it when the session
+/// swapped; here they never touch an engine.
+///
+/// `@MainActor` because `LocalEngine` is: `AVQueuePlayer`, `AVPlayerItem` and
+/// `AVURLAsset` are not `Sendable`.
 ///
 /// **No `PlayerState` struct.** Android needs one because a `StateFlow` emits a
 /// single value; `@Observable` tracks reads per property, so publishing the
@@ -62,60 +68,66 @@ final class PlayerConnection {
 
 	// MARK: - Machinery
 
-	@ObservationIgnored private let player = AVQueuePlayer()
 	@ObservationIgnored private var model = PlayQueue()
-	/// Mirrors `player.items()`. `AVPlayerItem` carries no user data, so the
-	/// mapping back to a ref has to be kept alongside.
-	/// **The loader is held here and nowhere else.** `AVURLAsset` keeps its
-	/// resource-loader delegate weakly, so nothing but this keeps it alive —
-	/// and dropping a window entry is what cancels the fetch behind a track
-	/// that has been skipped past.
-	@ObservationIgnored private var window:
-		[(ref: ItemRef, item: AVPlayerItem, loader: CachingResourceLoader?)] = []
+	/// Whatever is making the sound. One implementation today; the whole reason
+	/// the protocol exists is that there will be a second.
+	@ObservationIgnored private var engine: any PlaybackEngine
+	/// The same object, held concretely for the one thing that is genuinely
+	/// local: the video surface, which attaches to an `AVPlayer`. Nothing else
+	/// may reach through it.
+	@ObservationIgnored private let local: LocalEngine
 
-	/// Only for cover art now: the stream URL moved to `StreamTargets`, which
-	/// the downloader shares so the two cannot ask for different bytes.
+	/// Only for cover art: the stream URL belongs to the engine, which knows
+	/// what kind of URL it can consume.
 	@ObservationIgnored private let registry: ServerRegistry
-	@ObservationIgnored private let targets: StreamTargets
-	@ObservationIgnored private let store: AudioStore
-	@ObservationIgnored private let session = AudioSessionController()
 	@ObservationIgnored private let nowPlaying = NowPlayingCenter()
-	// The three that attach to the **role** rather than to the player: phase 9
-	// swaps the player for a cast one and none of them may notice. `PLAN.md`
-	// states the rule; Android is where it was learned.
+	// The three that attach to the **role** rather than to the player: swapping
+	// in a cast engine must not silence any of them. `PLAN.md` states the rule;
+	// Android is where it was learned, by breaking it.
 	@ObservationIgnored private let scrobbler: Scrobbler
 	@ObservationIgnored private let watchdog = PlaybackWatchdog()
 	@ObservationIgnored private let prewarmer = TranscodePrewarmer()
 
-	@ObservationIgnored private var observations: [NSKeyValueObservation] = []
-	@ObservationIgnored private var timeObserver: Any?
-	/// Set while we are editing the player's item list. `removeAllItems()`
-	/// makes `currentItem` transiently `nil`, which the observer would
-	/// otherwise read as "ran off the end of the queue".
-	@ObservationIgnored private var applyingEdit = false
 	@ObservationIgnored private var loadingTimeout: Task<Void, Never>?
 
 	private static let loadingTimeoutSeconds: Double = 30
 	private static let restartThreshold: Double = 3
 
-	/// Built once, by the composition root, and never released — which is why
-	/// there is no `deinit` removing the periodic time observer. That token
-	/// must be removed before the player is deallocated or the process traps,
-	/// so if this type ever becomes something with a shorter life, that is the
-	/// first thing to add.
 	init(
 		registry: ServerRegistry, library: LibraryRepository,
 		targets: StreamTargets, store: AudioStore
 	) {
 		self.registry = registry
-		self.targets = targets
-		self.store = store
 		self.scrobbler = Scrobbler(library: library)
+		let local = LocalEngine(targets: targets, store: store)
+		self.local = local
+		self.engine = local
 		// Observers and command handlers only. No session activation and no
 		// fetching: this initialiser starts no work, for the same reason the
 		// view models' do not.
-		observe()
 		wireCallbacks()
+		adopt(local)
+	}
+
+	/// Makes `next` the engine, and the only place that ever does.
+	///
+	/// **The old engine is unwired first.** Its callbacks are closures over this
+	/// object, so an engine left connected goes on advancing a queue it is no
+	/// longer playing — which is the shape of every "two players at once" bug.
+	///
+	/// Called once today, from `init`. When there is a second engine it is also
+	/// where the handover happens, and two things will have to happen with it:
+	/// the outgoing engine has to be stopped, and the queue re-applied to the
+	/// incoming one at the position the outgoing one had reached. The queue
+	/// itself needs no carrying — it never belonged to either.
+	private func adopt(_ next: any PlaybackEngine) {
+		engine.onStateChange = nil
+		engine.onProgress = nil
+		engine.onAdvanced = nil
+		engine.onEnded = nil
+		engine.onReset = nil
+		engine = next
+		wireEngine()
 	}
 
 	// MARK: - Commands
@@ -125,22 +137,15 @@ final class PlayerConnection {
 	///
 	/// `startPosition` is what a chapter marker asks for: play this recording,
 	/// but from the song inside it that was tapped. Defaulted, so every caller
-	/// meaning "from the beginning" is unchanged.
-	///
-	/// **Deferred rather than seeked immediately**, unlike Android, where
-	/// `setMediaItems` takes the offset. `AVQueuePlayer` has no such parameter
-	/// and seeking an item that is not ready is silently dropped, so the offset
-	/// is held and applied the moment the item reports `readyToPlay` — see
-	/// `applyPendingSeek`.
+	/// meaning "from the beginning" is unchanged. How it is honoured is the
+	/// engine's business — locally it waits for the item to become seekable,
+	/// on a receiver it rides in the LOAD.
 	func play(_ songs: [Song], startIndex: Int, startPosition: Double = 0) {
 		guard songs.indices.contains(startIndex) else { return }
 		beginLoading(songs[startIndex].ref)
-		// Armed before the window is built, or a fast local file can be ready
-		// before this returns.
-		pendingSeek = startPosition > 0 ? startPosition : nil
 		model.play(songs, startIndex: startIndex)
 		publishQueue()
-		Task { await reconcile(thenPlay: true) }
+		Task { await reconcile(thenPlay: true, offset: startPosition) }
 	}
 
 	func addToQueue(_ song: Song) {
@@ -166,13 +171,10 @@ final class PlayerConnection {
 		beginLoading(model.songs[model.index + 1].ref)
 		model.advance()
 		publishQueue()
-		// When the window already holds it, this is the pre-buffered item and
-		// the transition is instant. `reconcile` then refills the tail.
-		if window.count > 1 {
-			applyEdit {
-				player.advanceToNextItem()
-				window.removeFirst()
-			}
+		// When the engine already holds it, this is the pre-buffered item and
+		// the transition is instant; `reconcile` then refills the tail. An
+		// engine with a one-entry window always says no, and gets a rebuild.
+		if engine.advanceToNext() {
 			Task { await reconcile(thenPlay: true) }
 		} else {
 			Task { await reconcile(thenPlay: true, forceRebuild: true) }
@@ -213,54 +215,20 @@ final class PlayerConnection {
 		Task { await reconcile(thenPlay: false) }
 	}
 
-	/// A start offset waiting for the item to become seekable.
-	///
-	/// Cleared by anything that changes what is playing, because an offset into
-	/// one recording means nothing in the next: a queue advance while the first
-	/// item was still loading would otherwise drop the second track a quarter of
-	/// an hour in.
-	@ObservationIgnored private var pendingSeek: Double?
-
-	/// Applied on the item's own `readyToPlay`, which is the first moment a seek
-	/// is honoured rather than dropped. Both entry points call it — the status
-	/// observer and `currentItemChanged` — since an item that was already ready
-	/// when it became current publishes no new status.
-	private func applyPendingSeek() {
-		guard let target = pendingSeek else { return }
-		guard let item = player.currentItem, item.status == .readyToPlay else { return }
-		pendingSeek = nil
-		seek(to: target)
-	}
-
 	func seek(to seconds: Double) {
-		// The completion is delivered on an unspecified queue — unlike the
-		// periodic time observer, which documents `queue: .main` — so this hops
-		// rather than assuming.
-		player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) { [weak self] _ in
-			Task { @MainActor in
-				guard let self else { return }
-				self.position = seconds
-				self.nowPlaying.setPlayback(isPlaying: self.isPlaying, position: seconds)
-			}
-		}
+		engine.seek(to: seconds)
 	}
 
 	func stop() {
 		// Explicitly, because `publishTransport` is not on this path and the
 		// timer would otherwise outlive the queue it was armed against.
 		watchdog.disarm()
-		pendingSeek = nil
-		applyEdit {
-			player.pause()
-			player.removeAllItems()
-			window = []
-		}
+		engine.stop()
 		model.clear()
 		clearLoading()
 		errorMessage = nil
 		publishQueue()
 		nowPlaying.clear()
-		session.deactivate()
 	}
 
 	func clearError() {
@@ -273,7 +241,11 @@ final class PlayerConnection {
 	/// negotiating `COMMAND_SET_VIDEO_SURFACE` through the session. Nothing
 	/// else may reach for it — the queue, the transport and the seek all go
 	/// through this class as before.
-	var videoPlayer: AVPlayer { player }
+	///
+	/// It names the **local** engine rather than whatever is playing, and that
+	/// is right rather than a shortcut: a picture on this screen is by
+	/// definition local playback.
+	var videoPlayer: AVPlayer { local.videoPlayer }
 
 	/// Cover art for a queue entry. Exposed here so the player surfaces need no
 	/// registry of their own — the connection already holds one, and handing
@@ -288,9 +260,10 @@ final class PlayerConnection {
 	/// Exposed for the track-info view, which answers "why does this sound
 	/// different here" and cannot answer it without the *capped* quality — the
 	/// account ceiling belongs to that track's server and is not a setting
-	/// anyone can read off the Settings screen.
+	/// anyone can read off the Settings screen. It asks the **current** engine,
+	/// so once there is a second one this answers about the route in use.
 	func streamQuality(for song: Song) async -> AudioQuality? {
-		await streamTarget(for: song)?.quality
+		await engine.target(for: song)?.quality
 	}
 
 	/// Reads `loadingRef`, `current` and `isBuffering` — and deliberately not
@@ -305,61 +278,39 @@ final class PlayerConnection {
 
 	private func resume() {
 		guard !model.isEmpty else { return }
-		do {
-			try session.activate()
-		} catch {
-			// The one case where "I pressed play and nothing happened" has an
-			// explanation the user can act on: another app holds a non-mixable
-			// session, which in practice means a phone call.
-			errorMessage = "Another app is using the audio right now."
-			return
-		}
-		player.play()
+		engine.resume()
 	}
 
 	private func pause() {
-		player.pause()
+		engine.pause()
 	}
 
 	// MARK: - Reconciliation
 
-	/// Brings the player's items in line with the queue.
+	/// Brings the engine's window in line with the queue.
 	///
 	/// `forceRebuild` is for the moves the window cannot express — going
 	/// backwards, jumping, or replacing the track that is playing.
-	private func reconcile(thenPlay: Bool, forceRebuild: Bool = false) async {
-		let desired = model.window
-		let edit =
+	///
+	/// **The window size is the engine's**, which is the whole of what differs
+	/// between playing here and playing on a receiver: two entries locally so
+	/// the next is pre-buffered, one on a receiver, which is told about a single
+	/// track at a time.
+	private func reconcile(
+		thenPlay: Bool, forceRebuild: Bool = false, offset: Double = 0
+	) async {
+		let desired = model.window(size: engine.windowSize)
+		let refEdit =
 			forceRebuild && !desired.isEmpty
 			? WindowEdit.rebuild(desired)
-			: PlayerWindow.plan(current: window.map(\.ref), desired: desired)
+			: PlayerWindow.plan(current: engine.loaded, desired: desired)
 
-		switch edit {
-		case .none:
-			break
-		case .clear:
-			applyEdit {
-				player.removeAllItems()
-				window = []
-			}
-		case .rebuild(let refs):
-			guard let built = await build(refs) else { return }
-			applyEdit {
-				player.removeAllItems()
-				for entry in built { player.insert(entry.item, after: nil) }
-				window = built
-			}
-		case .replaceTail(let refs):
-			guard let built = await build(refs) else { return }
-			applyEdit {
-				for stale in window.dropFirst() { player.remove(stale.item) }
-				var kept = Array(window.prefix(1))
-				for entry in built {
-					player.insert(entry.item, after: player.items().last)
-					kept.append(entry)
-				}
-				window = kept
-			}
+		guard await engine.apply(resolve(refEdit), startingAt: offset > 0 ? offset : nil) else {
+			// Only the head failing gets here, and it is the one worth a
+			// message: the user asked for that track.
+			errorMessage = "That track could not be played."
+			clearLoading()
+			return
 		}
 
 		if thenPlay { resume() }
@@ -367,149 +318,54 @@ final class PlayerConnection {
 		publishTransport()
 	}
 
-	/// Always builds **fresh** `AVPlayerItem`s. A consumed item cannot be
-	/// re-enqueued, and reusing one is the classic `AVQueuePlayer` bug that
-	/// surfaces as silence with nothing in the log.
-	private func build(_ refs: [ItemRef]) async
-		-> [(ref: ItemRef, item: AVPlayerItem, loader: CachingResourceLoader?)]?
-	{
-		var built: [(ref: ItemRef, item: AVPlayerItem, loader: CachingResourceLoader?)] = []
-		for ref in refs {
-			guard let song = model.song(for: ref), let target = await streamTarget(for: song) else {
-				// The head is what the user asked for; failing to resolve it is
-				// an error worth showing. A tail that cannot be resolved just
-				// means no pre-buffering.
-				if built.isEmpty {
-					errorMessage = "That track could not be played."
-					clearLoading()
-					return nil
-				}
-				break
-			}
-			built.append(item(for: song, target: target))
+	private func resolve(_ edit: WindowEdit) -> EngineEdit {
+		switch edit {
+		case .none: return .none
+		case .clear: return .clear
+		case .rebuild(let refs): return .rebuild(refs.compactMap(model.song(for:)))
+		case .replaceTail(let refs): return .replaceTail(refs.compactMap(model.song(for:)))
 		}
-		return built
 	}
 
-	/// A stored track plays from disk. Anything else plays **through the
-	/// caching loader**, which fetches it once at network speed and keeps the
-	/// copy — so hearing a track is what puts it there.
-	///
-	/// The rewritten scheme is not decoration: AVFoundation handles `http` and
-	/// `https` itself and consults a delegate only for a scheme it does not
-	/// know, so without it the loader is never called and nothing is cached.
-	private func item(for song: Song, target: StreamTarget)
-		-> (ref: ItemRef, item: AVPlayerItem, loader: CachingResourceLoader?)
-	{
-		guard !target.url.isFileURL else {
-			return (song.ref, AVPlayerItem(url: target.url), nil)
+	// MARK: - The engine
+
+	/// **Every callback says only "something changed".** No engine pushes a
+	/// value, so there is one copy of the publishing logic whichever is playing
+	/// — which is the rule that stopped this class needing `@unchecked` anywhere
+	/// when the callbacks were KVO blocks, and the reason it will not need a
+	/// second publish path when the callbacks are cast statuses.
+	private func wireEngine() {
+		engine.onStateChange = { [weak self] in self?.publishTransport() }
+		engine.onProgress = { [weak self] seconds in
+			guard let self else { return }
+			self.position = seconds
+			// Here rather than on a timer of its own: this fires only while the
+			// timeline is advancing, which is exactly when a play is accruing.
+			self.scrobbler.tick(position: seconds, duration: self.duration)
 		}
-		// **Video is never cached**, and the test is the song rather than the
-		// URL. One film evicts the whole stored library, and a re-encoded one
-		// arrives with no `Content-Length` so completeness could never be
-		// established — the rule has held since downloads landed, and routing a
-		// film through the loader would break it silently.
-		//
-		// An HLS playlist is the second reason: the loader fetches one
-		// resource in order, and a playlist is a list of others.
-		guard !song.isVideo else {
-			return (song.ref, AVPlayerItem(url: target.url), nil)
+		engine.onAdvanced = { [weak self] steps in
+			guard let self else { return }
+			self.model.advance(by: steps)
+			self.publishQueue()
+			// Refill the tail so the *next* transition is pre-buffered too.
+			Task { await self.reconcile(thenPlay: false) }
 		}
-		let loader = CachingResourceLoader(
-			source: target.url, ref: song.ref, quality: target.quality, store: store)
-		let asset = AVURLAsset(url: CachingResourceLoader.rewrite(target.url))
-		asset.resourceLoader.setDelegate(loader, queue: loader.queue)
-		return (song.ref, AVPlayerItem(asset: asset), loader)
-	}
-
-	/// Resolved **per track**, from that track's own server, and served from
-	/// disk when a copy is there.
-	///
-	/// Nothing here closes over a "current server", which is the only reason a
-	/// queue spanning two servers works: it crosses credentials and bitrate
-	/// caps at every boundary. `StreamTargets` is shared with `PinRepository`
-	/// so a download and a play cannot ask for different bytes.
-	///
-	/// **The stored copy wins whatever quality it is.** A track pinned at one
-	/// setting must not stop being playable because the setting changed later;
-	/// the quality is in the key so two copies can coexist without either being
-	/// mislabelled, but the music is the same music.
-	private func streamTarget(for song: Song) async -> StreamTarget? {
-		// A film asks a different question: no format, no ceiling, and a
-		// transport chosen by `nativeSeek`. See `StreamUrls.video`.
-		if song.isVideo { return targets.video(for: song) }
-		guard var target = await targets.target(for: song.ref) else { return nil }
-		if let local = await store.storedFile(for: song.ref) {
-			target = StreamTarget(
-				url: local, quality: target.quality, cacheKey: target.cacheKey,
-				contentType: target.contentType)
+		engine.onEnded = { [weak self] in
+			guard let self else { return }
+			// Ran off the end. The queue is kept and the index parked on the
+			// last track, so the mini player does not vanish and the track can
+			// be replayed.
+			self.model.parkAtEnd()
+			self.publishQueue()
+			self.publishTransport()
 		}
-		return target
-	}
-
-	private func applyEdit(_ body: () -> Void) {
-		applyingEdit = true
-		body()
-		applyingEdit = false
-	}
-
-	// MARK: - Observation
-
-	/// **Every callback says only "republish".**
-	///
-	/// A KVO block fires synchronously on whatever thread mutated the property
-	/// — not the main actor — and its payload is a non-`Sendable`
-	/// `AVPlayerItem?`. Carrying nothing across and re-reading the state on the
-	/// main actor is what lets this whole class compile under complete
-	/// concurrency checking without a single `@unchecked`. It is also
-	/// structurally what Android does with `onEvents → publish()`.
-	private func observe() {
-		observations.append(
-			player.observe(\.currentItem, options: [.new]) { [weak self] _, _ in
-				Task { @MainActor in self?.currentItemChanged() }
-			})
-		observations.append(
-			player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
-				Task { @MainActor in self?.publishTransport() }
-			})
-		// **The item's own status, which nothing else reports.** An item that
-		// cannot be played does not necessarily move `timeControlStatus`: a
-		// player told to play something it cannot type sits in
-		// `waitingToPlayAtSpecifiedRate` indefinitely, so without this the
-		// failure below is only ever noticed if some unrelated event happens to
-		// republish. The symptom is a spinner that never stops and no error
-		// anywhere — which is exactly what a file stored with no extension
-		// produced.
-		observations.append(
-			player.observe(\.currentItem?.status, options: [.new]) { [weak self] _, _ in
-				Task { @MainActor in self?.publishTransport() }
-			})
-
-		// The one place `assumeIsolated` is correct: `queue: .main` is
-		// documented to deliver on the main queue, and hopping twice a second
-		// for a value we already have would be waste.
-		timeObserver = player.addPeriodicTimeObserver(
-			forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
-		) { [weak self] time in
-			MainActor.assumeIsolated {
-				guard let self, !time.seconds.isNaN else { return }
-				self.position = time.seconds
-				// Here rather than on a timer of its own: this fires only while
-				// the timeline is advancing, which is exactly when a play is
-				// accruing.
-				self.scrobbler.tick(position: time.seconds, duration: self.duration)
-			}
+		engine.onReset = { [weak self] in
+			guard let self else { return }
+			Task { await self.reconcile(thenPlay: false, forceRebuild: true) }
 		}
 	}
 
 	private func wireCallbacks() {
-		session.onPause = { [weak self] in self?.pause() }
-		session.onResume = { [weak self] in self?.resume() }
-		session.onReset = { [weak self] in
-			guard let self else { return }
-			Task { await self.reconcile(thenPlay: false, forceRebuild: true) }
-		}
-
 		nowPlaying.onPlay = { [weak self] in self?.resume() }
 		nowPlaying.onPause = { [weak self] in self?.pause() }
 		nowPlaying.onTogglePlayPause = { [weak self] in self?.togglePlayPause() }
@@ -536,34 +392,6 @@ final class PlayerConnection {
 			self.pause()
 			self.errorMessage = "Playback stalled and was paused."
 		}
-	}
-
-	private func currentItemChanged() {
-		guard !applyingEdit else { return }
-		applyPendingSeek()
-
-		guard let item = player.currentItem else {
-			// Ran off the end. The queue is kept and the index parked on the
-			// last track, so the mini player does not vanish and the track can
-			// be replayed.
-			model.parkAtEnd()
-			publishQueue()
-			publishTransport()
-			return
-		}
-
-		if let advanced = window.firstIndex(where: { $0.item === item }), advanced > 0 {
-			// The queue moved on while an offset was still waiting: it named a
-			// position inside the track that has just ended, and applying it to
-			// the next one would start it somewhere arbitrary.
-			pendingSeek = nil
-			model.advance(by: advanced)
-			window.removeFirst(advanced)
-			publishQueue()
-			// Refill the tail so the *next* transition is pre-buffered too.
-			Task { await reconcile(thenPlay: false) }
-		}
-		publishTrack()
 	}
 
 	// MARK: - Publishing
@@ -605,22 +433,16 @@ final class PlayerConnection {
 	}
 
 	private func publishTransport() {
-		isPlaying = player.timeControlStatus == .playing
-		// The precise equivalent of Android's `STATE_BUFFERING && playWhenReady`.
-		// `isPlaybackLikelyToKeepUp` is the wrong signal: it answers a different
-		// question and is false in states that are not stalls.
-		isBuffering =
-			player.timeControlStatus == .waitingToPlayAtSpecifiedRate
-			&& player.reasonForWaitingToPlay == .toMinimizeStalls
+		isPlaying = engine.isPlaying
+		isBuffering = engine.isBuffering
+		canSeek = engine.canSeek
+		position = engine.position
 
-		// Seeking a chunked, length-less response silently does nothing, so the
-		// scrubber and the lock-screen command are driven from what the item
-		// actually offers.
-		canSeek = !(player.currentItem?.seekableTimeRanges.isEmpty ?? true)
-
-		applyPendingSeek()
-		if let item = player.currentItem, item.status == .failed {
-			errorMessage = item.error?.userMessage ?? "That track could not be played."
+		// The engine states a failure once; the connection owns the words the
+		// UI shows and takes it from there.
+		if let failure = engine.failure {
+			errorMessage = failure
+			engine.clearFailure()
 			clearLoading()
 		}
 		if loadingRef != nil, current?.ref == loadingRef, isPlaying {
@@ -629,10 +451,10 @@ final class PlayerConnection {
 		nowPlaying.setPlayback(isPlaying: isPlaying, position: position)
 		nowPlaying.setAvailability(hasNext: model.hasNext, canSeek: canSeek)
 		// **The watchdog is armed from here and nowhere else.** A poll over
-		// `position` would compile and never fire: the periodic time observer
-		// runs as the timeline advances, so during a stall — the one case that
-		// matters — there is no tick to poll on. This is driven by the
-		// `timeControlStatus` KVO instead.
+		// `position` would compile and never fire: progress is reported as the
+		// timeline advances, so during a stall — the one case that matters —
+		// there is no tick to poll on. This is driven by the engine's transport
+		// notifications instead.
 		watchdog.update()
 	}
 
@@ -641,7 +463,6 @@ final class PlayerConnection {
 	///
 	/// The first transition fires when playback begins, so the second track of
 	/// a queue is prepared while the first plays — the case that matters.
-	///
 	private func prewarmNext() {
 		guard model.hasNext else { return }
 		let next = model.songs[model.index + 1]
@@ -652,7 +473,7 @@ final class PlayerConnection {
 		// a re-encode nobody has asked to watch.
 		guard !next.isVideo else { return }
 		Task { [weak self] in
-			guard let self, let target = await self.streamTarget(for: next) else { return }
+			guard let self, let target = await self.engine.target(for: next) else { return }
 			await self.prewarmer.warm(target)
 		}
 	}
