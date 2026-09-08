@@ -28,6 +28,10 @@ struct CastSettingsView: View {
 	@State private var editing: ManualCastDevice?
 	@State private var probing: Set<String> = []
 	@State private var results: [String: CastProbeResult] = [:]
+	/// iOS tears the browser down when the app is suspended; Mac Catalyst never
+	/// suspends. `onAppear` cannot cover the difference, because it does not
+	/// fire again for a view that never left the screen.
+	@Environment(\.scenePhase) private var scenePhase
 
 	var body: some View {
 		Form {
@@ -50,6 +54,10 @@ struct CastSettingsView: View {
 		}
 		.onAppear { discovery.start() }
 		.onDisappear { discovery.stop() }
+		.onChange(of: scenePhase) { _, phase in
+			guard phase == .active else { return }
+			discovery.restart()
+		}
 	}
 
 	// MARK: - Discovered
@@ -72,6 +80,25 @@ struct CastSettingsView: View {
 					HStack(spacing: 8) {
 						ProgressView().controlSize(.small)
 						Text("Looking for devices…").foregroundStyle(.secondary)
+					}
+					// **What a refused Local Network permission actually looks
+					// like.** There is no API to ask whether it was granted, and
+					// denied, the browser reports zero results rather than
+					// failing — so a silence that has gone on too long is the
+					// only signal there is. It claims nothing: a network with no
+					// receivers on it looks exactly the same, which is why this
+					// says what to check rather than what is wrong.
+					if discovery.quiet {
+						Text(
+							"""
+							Nothing has answered. If there is a receiver on this \
+							network, check that GainDrive is allowed to find \
+							devices on your local network in Settings → Privacy \
+							& Security → Local Network.
+							"""
+						)
+						.font(.footnote)
+						.foregroundStyle(.secondary)
 					}
 				} else {
 					ForEach(discovery.devices) { device in

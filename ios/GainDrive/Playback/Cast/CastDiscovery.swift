@@ -45,15 +45,40 @@ final class CastDiscovery {
 	enum State: Equatable {
 		case idle
 		case browsing
-		/// The browser failed. On iOS the overwhelmingly likely cause is the
-		/// Local Network permission having been refused, which surfaces here
-		/// rather than as a distinguishable error — so the message says so
-		/// without claiming certainty.
+		/// The browser failed outright. On iOS a refused Local Network
+		/// permission *can* arrive this way — as `NWError.dns(-65570)`,
+		/// `kDNSServiceErr_PolicyDenied` — but see `quiet` below: it is not the
+		/// shape that failure usually takes.
 		case failed(String)
 	}
 
+	/// Browsing has been running a while and has found nothing.
+	///
+	/// **This is what a refused Local Network permission actually looks like**,
+	/// and it is why the `failed` state above is not enough on its own. Denied,
+	/// `NWBrowser` generally reaches `.ready` and then reports zero results for
+	/// ever; it sometimes fails with `kDNSServiceErr_PolicyDenied` instead, but
+	/// never while the prompt is still pending, and not dependably afterwards.
+	/// There is **no API to ask whether the permission was granted**, so a
+	/// silence that has gone on too long is the only signal available.
+	///
+	/// It says nothing certain, and must not: a network with no receivers on it
+	/// looks identical. What it does is put the one thing worth checking in
+	/// front of somebody who would otherwise watch a spinner.
+	///
+	/// Neither the simulator nor a Catalyst build launched from Xcode enforces
+	/// the permission — the first not at all, the second under Xcode's own
+	/// grant — so this path is reachable only on a real device.
+	private(set) var quiet = false
+
+	/// How long counts as too long. Generous: a receiver waking from standby is
+	/// slow to announce, and crying wolf at somebody whose device was merely
+	/// asleep is worse than a few more seconds of spinner.
+	static let quietAfter = Duration.seconds(8)
+
 	@ObservationIgnored private var browser: NWBrowser?
 	@ObservationIgnored private var found: [String: CastDevice] = [:]
+	@ObservationIgnored private var quietTimer: Task<Void, Never>?
 
 	/// Bonjour's own spelling. `NSBonjourServices` in `Info.plist` must name the
 	/// same string or the browser finds nothing and says nothing.
@@ -86,15 +111,41 @@ final class CastDiscovery {
 		}
 		self.browser = browser
 		state = .browsing
+		quiet = false
 		browser.start(queue: .main)
+
+		quietTimer = Task { [weak self] in
+			try? await Task.sleep(for: Self.quietAfter)
+			guard !Task.isCancelled else { return }
+			self?.noticeSilence()
+		}
 	}
 
 	func stop() {
+		quietTimer?.cancel()
+		quietTimer = nil
 		browser?.stateUpdateHandler = nil
 		browser?.browseResultsChangedHandler = nil
 		browser?.cancel()
 		browser = nil
 		state = .idle
+		quiet = false
+	}
+
+	/// Tears the browser down and starts it again.
+	///
+	/// **iOS suspends the app and Mac Catalyst does not**, so a browser is dead
+	/// after a background round trip on one platform and fine on the other. The
+	/// view cannot notice with `onAppear`, which does not fire again for a view
+	/// that never left the screen — it watches the scene phase and calls this.
+	func restart() {
+		stop()
+		start()
+	}
+
+	private func noticeSilence() {
+		guard case .browsing = state, devices.isEmpty else { return }
+		quiet = true
 	}
 
 	/// Records the address a connection reached, so a device that has been
@@ -140,6 +191,14 @@ final class CastDiscovery {
 	private func publish() {
 		devices = found.values.sorted {
 			$0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+		}
+		// One device arriving answers the question the hint was raising, and a
+		// list that then empties again — a receiver switched off — must not
+		// bring back a permission warning that has been disproved.
+		if !devices.isEmpty {
+			quiet = false
+			quietTimer?.cancel()
+			quietTimer = nil
 		}
 	}
 
