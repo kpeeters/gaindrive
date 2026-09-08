@@ -13,8 +13,15 @@ import UniformTypeIdentifiers
 enum DownloadState: Hashable, Sendable {
 	case absent
 	case running(fraction: Double)
+	/// Here because it was played, and evictable tonight.
+	case cached
+	/// Here because it was asked for, and safe from eviction.
 	case stored
 	case failed
+
+	var isHere: Bool {
+		self == .cached || self == .stored
+	}
 }
 
 /// Fetches pinned tracks with a **background** `URLSession`.
@@ -155,6 +162,8 @@ extension DownloadQueue: URLSessionDownloadDelegate {
 			report { self.onFailed?(parsed.ref) }
 			return
 		}
+		let store = store
+		Task { await store.finishedAdopting() }
 		report { self.onFinished?(parsed.ref) }
 	}
 

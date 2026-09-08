@@ -45,6 +45,7 @@ struct DownloadControl: View {
 	private var label: String {
 		switch state {
 		case .stored: return "Downloaded. Tap to remove"
+		case .cached: return "Stored. Tap to remove"
 		case .failed: return "Download failed. Tap to remove"
 		case .running(let fraction):
 			return "Downloading, \(Int(fraction * 100)) per cent. Tap to remove"
@@ -76,6 +77,13 @@ struct DownloadStateIcon: View {
 		case .stored:
 			Image(systemName: "arrow.down.circle.fill")
 				.foregroundStyle(Color.accentColor)
+		case .cached:
+			// Reachable only for a track pinned *and* evicted, which cannot
+			// happen — pinned bytes are never victims. Drawn as the dot the
+			// mark uses rather than as an assertion.
+			Image(systemName: "circle.fill")
+				.font(.caption2)
+				.foregroundStyle(.secondary)
 		case .failed:
 			Image(systemName: "exclamationmark.circle")
 				.foregroundStyle(.red)
@@ -83,23 +91,32 @@ struct DownloadStateIcon: View {
 	}
 }
 
-/// The tick on a track row that is here.
+/// Whether a track is here, and on what terms.
 ///
-/// One mark, not two. Android draws a tick for downloaded and a dot for merely
-/// cached from having been played, and collapsing them would promise a
-/// permanence the second does not have — but until cache-on-play exists there
-/// is nothing the dot could mean, so the second mark arrives with it.
+/// **Two marks, and the difference is a promise.** A tick means downloaded:
+/// asked for, and safe from eviction. A dot means merely kept from having been
+/// played, which can go tonight when the cap is reached. Collapsing them would
+/// promise a permanence the dot does not have — which is why stage 1 shipped
+/// one mark and said so rather than drawing a tick for both.
 struct StoredMark: View {
 	let song: ItemRef
 
 	@Environment(PinRepository.self) private var pins
 
 	var body: some View {
-		if case .stored = pins.state(for: song) {
+		switch pins.state(for: song) {
+		case .stored:
 			Image(systemName: "arrow.down.circle.fill")
 				.font(.caption)
 				.foregroundStyle(.secondary)
 				.accessibilityLabel("Downloaded")
+		case .cached:
+			Image(systemName: "circle.fill")
+				.font(.system(size: 5))
+				.foregroundStyle(.secondary)
+				.accessibilityLabel("Stored")
+		default:
+			EmptyView()
 		}
 	}
 }

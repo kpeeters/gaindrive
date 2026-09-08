@@ -62,6 +62,9 @@ struct GainDriveApp: App {
 			library: library, store: store, queue: queue, targets: targets, settings: settings)
 		_pins = State(initialValue: pins)
 		AppDelegate.adopt(queue)
+		// The store is the authority on what is held; this is how a track that
+		// arrived or was evicted reaches the marks on screen.
+		Task { await store.setChangeHandler { Task { @MainActor in pins.storeChanged() } } }
 		// Built here, never in `RootView.init`, which re-runs on every
 		// re-evaluation of this body — `@State` would keep the first player and
 		// silently discard the rest, each with its own audio session.

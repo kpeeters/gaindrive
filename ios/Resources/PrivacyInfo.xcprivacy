@@ -7,10 +7,10 @@
 	NSPrivacyAccessedAPITypes grows as phases land. UserDefaults (CA92.1) is
 	here from phase 1, which stores the server list and the theme in it. Disk
 	space (E174.1) arrived with downloads, for the usage readout and the cap
-	check. File timestamps (C617.1) are still to come: nothing reads one yet,
-	because the only thing that would is the LRU eviction, and nothing is
-	stored that was not explicitly asked for. Declaring it early would be
-	declaring an access the app does not make.
+	check. File timestamps (C617.1) arrived with caching what you play, which
+	is the first thing that stores something nobody asked for and so the first
+	that has to choose what gives way: eviction is least-recently-modified
+	first, and that date is the timestamp being read.
 
 	Note the Keychain is not a required-reason API and needs no entry, even
 	though it holds the one genuinely sensitive thing the app stores.
@@ -45,6 +45,17 @@
 				     accepting a download that would not fit. Nothing is sent
 				     anywhere. -->
 				<string>E174.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<!-- C617.1: the modification date of the app's own cached audio
+				     files, read to decide which gives way when the size limit
+				     is reached. Never displayed and never sent anywhere. -->
+				<string>C617.1</string>
 			</array>
 		</dict>
 	</array>

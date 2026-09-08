@@ -58,7 +58,12 @@ final class PlayerConnection {
 	@ObservationIgnored private var model = PlayQueue()
 	/// Mirrors `player.items()`. `AVPlayerItem` carries no user data, so the
 	/// mapping back to a ref has to be kept alongside.
-	@ObservationIgnored private var window: [(ref: ItemRef, item: AVPlayerItem)] = []
+	/// **The loader is held here and nowhere else.** `AVURLAsset` keeps its
+	/// resource-loader delegate weakly, so nothing but this keeps it alive —
+	/// and dropping a window entry is what cancels the fetch behind a track
+	/// that has been skipped past.
+	@ObservationIgnored private var window:
+		[(ref: ItemRef, item: AVPlayerItem, loader: CachingResourceLoader?)] = []
 
 	/// Only for cover art now: the stream URL moved to `StreamTargets`, which
 	/// the downloader shares so the two cannot ask for different bytes.
@@ -316,8 +321,10 @@ final class PlayerConnection {
 	/// Always builds **fresh** `AVPlayerItem`s. A consumed item cannot be
 	/// re-enqueued, and reusing one is the classic `AVQueuePlayer` bug that
 	/// surfaces as silence with nothing in the log.
-	private func build(_ refs: [ItemRef]) async -> [(ref: ItemRef, item: AVPlayerItem)]? {
-		var built: [(ref: ItemRef, item: AVPlayerItem)] = []
+	private func build(_ refs: [ItemRef]) async
+		-> [(ref: ItemRef, item: AVPlayerItem, loader: CachingResourceLoader?)]?
+	{
+		var built: [(ref: ItemRef, item: AVPlayerItem, loader: CachingResourceLoader?)] = []
 		for ref in refs {
 			guard let song = model.song(for: ref), let target = await streamTarget(for: song) else {
 				// The head is what the user asked for; failing to resolve it is
@@ -330,9 +337,29 @@ final class PlayerConnection {
 				}
 				break
 			}
-			built.append((ref, AVPlayerItem(url: target.url)))
+			built.append(item(for: ref, target: target))
 		}
 		return built
+	}
+
+	/// A stored track plays from disk. Anything else plays **through the
+	/// caching loader**, which fetches it once at network speed and keeps the
+	/// copy — so hearing a track is what puts it there.
+	///
+	/// The rewritten scheme is not decoration: AVFoundation handles `http` and
+	/// `https` itself and consults a delegate only for a scheme it does not
+	/// know, so without it the loader is never called and nothing is cached.
+	private func item(for ref: ItemRef, target: StreamTarget)
+		-> (ref: ItemRef, item: AVPlayerItem, loader: CachingResourceLoader?)
+	{
+		guard !target.url.isFileURL else {
+			return (ref, AVPlayerItem(url: target.url), nil)
+		}
+		let loader = CachingResourceLoader(
+			source: target.url, ref: ref, quality: target.quality, store: store)
+		let asset = AVURLAsset(url: CachingResourceLoader.rewrite(target.url))
+		asset.resourceLoader.setDelegate(loader, queue: loader.queue)
+		return (ref, AVPlayerItem(asset: asset), loader)
 	}
 
 	/// Resolved **per track**, from that track's own server, and served from

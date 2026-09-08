@@ -21,11 +21,30 @@ import Foundation
 /// directory. That keeps one definition of the key rather than a second one
 /// for filenames, and it makes dropping a removed server a directory removal.
 ///
-/// In stage 2 this becomes the backing store of the byte cache as well. Today
-/// nothing is written except a completed download, which is why there is no
-/// eviction here: with nothing unpinned on disk there is no victim to pick.
+/// It backs both halves of the cache: a pinned download, and a track kept
+/// because it was played. Only completed files are ever visible — a `.part`
+/// file belongs to a fetch in flight and is adopted or discarded, never
+/// listed.
 actor AudioStore {
 	private let root: URL
+	/// Pushed in by `PinRepository`, which is the only thing that knows both.
+	///
+	/// **The store is told what is protected; it does not ask.** It knows
+	/// nothing about pins and should not learn — the set is `Pins.expand`,
+	/// computed where pins live, handed over as a plain set.
+	private var cap: Int64 = .max
+	private var protected: Set<ItemRef> = []
+	/// Fired whenever what is held changes, so the marks on screen can follow a
+	/// track that arrived or was evicted while they were being looked at.
+	///
+	/// A callback rather than the store knowing who cares: it is set once, by
+	/// the composition root, for the same reason
+	/// `ServerRegistry.onServerInvalidated` is.
+	private var didChange: (@Sendable () -> Void)?
+
+	func setChangeHandler(_ handler: @escaping @Sendable () -> Void) {
+		didChange = handler
+	}
 
 	init(root: URL? = nil) {
 		if let root {
@@ -43,6 +62,64 @@ actor AudioStore {
 	/// must have one.
 	nonisolated private func base(for ref: ItemRef, quality: AudioQuality) -> URL {
 		Self.path(root: root, key: CacheKeys.of(ref, quality: quality))
+	}
+
+	func setLimits(cap: Int64, protecting refs: Set<ItemRef>) {
+		self.cap = cap
+		protected = refs
+	}
+
+	/// Everything held, whatever put it there.
+	///
+	/// Walked rather than kept as a running set. The set would have to be
+	/// updated from `adopt`, which is `nonisolated` and cannot touch actor
+	/// state, and from eviction — two places to forget. A directory of a few
+	/// hundred files is not worth that.
+	func heldRefs() -> Set<ItemRef> {
+		guard
+			let walk = FileManager.default.enumerator(
+				at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+		else { return [] }
+		var found: Set<ItemRef> = []
+		for case let url as URL in walk where url.pathExtension != "part" {
+			if let ref = Self.ref(of: url) { found.insert(ref) }
+		}
+		return found
+	}
+
+	/// Called after a `nonisolated` adopt, which is the one write that cannot
+	/// do this itself.
+	func finishedAdopting() {
+		evict()
+		didChange?()
+	}
+
+	/// The inverse of the layout: `<serverId>/<songId>@<tag>[.ext]`.
+	///
+	/// Both components were percent-encoded on the way in, so both are decoded
+	/// on the way out — the transformation has to be the same in both
+	/// directions or a track reads as absent the moment its id is anything but
+	/// digits.
+	static func ref(of url: URL) -> ItemRef? {
+		let name = url.deletingPathExtension().lastPathComponent
+		guard let at = name.lastIndex(of: "@") else { return nil }
+		let id = String(name[name.startIndex..<at]).removingPercentEncoding
+		let directory = url.deletingLastPathComponent().lastPathComponent
+		guard let id, !id.isEmpty,
+			let server = directory.removingPercentEncoding,
+			let uuid = UUID(uuidString: server)
+		else { return nil }
+		return ItemRef(server: ServerId(uuid), id: id)
+	}
+
+	/// Where the resource loader writes while a track is arriving.
+	///
+	/// Beside the finished file rather than in a temporary directory, so a
+	/// crash leaves it where the next `PartialFile` for the same track will
+	/// truncate it rather than somewhere nothing will ever look. It is not
+	/// adopted unless it completed, so it can never be mistaken for a track.
+	nonisolated func partURL(for ref: ItemRef, quality: AudioQuality) -> URL {
+		base(for: ref, quality: quality).appendingPathExtension("part")
 	}
 
 	/// **Any stored copy of this song, whatever quality it is.**
@@ -100,6 +177,7 @@ actor AudioStore {
 		for copy in copies(of: ref) {
 			try? FileManager.default.removeItem(at: copy)
 		}
+		didChange?()
 	}
 
 	/// **URLs throughout, never `contentsOfDirectory(atPath:)`.** A file URL's
@@ -119,6 +197,83 @@ actor AudioStore {
 	func removeAll() {
 		try? FileManager.default.removeItem(at: root)
 		prepare()
+		didChange?()
+	}
+
+	/// What eviction cannot reclaim, which is what the pin cap is really
+	/// against: unpinned bytes give way, pinned ones do not.
+	func protectedBytes() -> Int64 {
+		protected.reduce(Int64(0)) { total, ref in
+			total + copies(of: ref).reduce(Int64(0)) { $0 + Self.size(of: $1) }
+		}
+	}
+
+	/// Least recently modified first, pinned never, stop once under the cap.
+	///
+	/// Run after an adopt rather than on a timer: the only thing that grows
+	/// this directory is a file landing in it, so that is the moment to look.
+	func evict() {
+		let protectedFiles = Set(protected.flatMap { copies(of: $0) })
+		var candidates: [Victim] = []
+		var total: Int64 = 0
+		guard
+			let walk = FileManager.default.enumerator(
+				at: root, includingPropertiesForKeys: Self.evictionKeys,
+				options: [.skipsHiddenFiles])
+		else { return }
+		for case let url as URL in walk {
+			// A part file belongs to a fetch in flight. It is not a track and
+			// deleting it underneath the loader writing to it would be the one
+			// way to produce a truncated file that looks whole.
+			guard url.pathExtension != "part" else { continue }
+			let size = Self.size(of: url)
+			total += size
+			guard !protectedFiles.contains(url) else { continue }
+			candidates.append(Victim(url: url, size: size, modified: Self.modified(of: url)))
+		}
+		let losers = Self.victims(candidates, total: total, cap: cap)
+		for url in losers {
+			try? FileManager.default.removeItem(at: url)
+		}
+		if !losers.isEmpty { didChange?() }
+	}
+
+	struct Victim: Sendable {
+		let url: URL
+		let size: Int64
+		let modified: Date
+	}
+
+	/// Pure, so the order can be tested without a disk.
+	static func victims(_ candidates: [Victim], total: Int64, cap: Int64) -> [URL] {
+		guard total > cap else { return [] }
+		var over = total - cap
+		var chosen: [URL] = []
+		for victim in candidates.sorted(by: { $0.modified < $1.modified }) {
+			guard over > 0 else { break }
+			chosen.append(victim.url)
+			over -= victim.size
+		}
+		return chosen
+	}
+
+	private static let evictionKeys: [URLResourceKey] = [
+		.fileSizeKey, .contentModificationDateKey,
+	]
+
+	private static func size(of url: URL) -> Int64 {
+		Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+	}
+
+	/// Modification rather than access: `atime` is unreliable under the
+	/// filesystem's own optimisations, which is the same reason the server's
+	/// `TranscodeCache` evicts by `mtime`. A file is touched when it is
+	/// adopted, so "least recently modified" is "least recently arrived" —
+	/// which is not quite "least recently played", and is the honest
+	/// approximation until something records a play.
+	private static func modified(of url: URL) -> Date {
+		(try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+			?? .distantPast
 	}
 
 	func totalBytes() -> Int64 {

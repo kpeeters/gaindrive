@@ -25,7 +25,17 @@ final class PinRepository {
 	private(set) var message: String?
 
 	private var membership: [Pin.ID: [ItemRef]] = [:]
+	/// Pinned **and** here. Everything else on disk is `cached`, which the
+	/// store answers for directly — there is no list of it, because the list
+	/// would be out of date the moment eviction ran.
 	private var stored: Set<ItemRef> = []
+	/// Everything the store holds, pinned or not — a track kept by playing it
+	/// belongs to no pin, so it is in nothing else this class computes.
+	///
+	/// **Read from the store, never asked for per row.** A row cannot await the
+	/// disk while it is being drawn, and asking during a view update would
+	/// mutate observable state mid-render.
+	private var held: Set<ItemRef> = []
 	private var progress: [ItemRef: Double] = [:]
 	private var failed: Set<ItemRef> = []
 
@@ -58,7 +68,7 @@ final class PinRepository {
 			self.progress[ref] = nil
 			self.failed.remove(ref)
 			self.stored.insert(ref)
-			Task { await self.recount() }
+			Task { await self.reloadHeld() }
 		}
 		queue.onFailed = { [weak self] ref in
 			self?.progress[ref] = nil
@@ -72,13 +82,28 @@ final class PinRepository {
 		pins.contains { $0.ref == ref && $0.kind == kind }
 	}
 
-	/// One track's state. `absent` covers "not asked for", which is what every
-	/// row shows until it is.
+	/// One track's state.
+	///
+	/// **`stored` and `cached` are not the same claim.** A pinned track is safe
+	/// from eviction; one kept because it was played can go tonight, and
+	/// collapsing them would promise a permanence the second does not have.
 	func state(for song: ItemRef) -> DownloadState {
 		if stored.contains(song) { return .stored }
 		if let fraction = progress[song] { return .running(fraction: fraction) }
 		if failed.contains(song) { return .failed }
+		if held.contains(song) { return .cached }
 		return .absent
+	}
+
+	/// The store telling us what it holds has changed — a track finished
+	/// arriving, or eviction took one. Wired in the composition root.
+	func storeChanged() {
+		Task { await reloadHeld() }
+	}
+
+	private func reloadHeld() async {
+		held = await store.heldRefs()
+		usageBytes = await store.totalBytes()
 	}
 
 	/// A whole pin's state, which is what the album screen's control shows.
@@ -136,7 +161,10 @@ final class PinRepository {
 		let needed = songs.filter { !stored.contains($0.ref) }.reduce(Int64(0)) {
 			$0 + Pins.estimatedBytes(of: $1, quality: settings.audioQuality)
 		}
-		let room = settings.cacheCapBytes - usageBytes
+		// **Against the pinned bytes, not the used bytes.** Everything else on
+		// disk was kept because it was played and gives way to eviction, so
+		// counting it would refuse a pin that fits perfectly well.
+		let room = settings.cacheCapBytes - (await store.protectedBytes())
 		guard needed <= room else {
 			message = """
 				Not enough room. That needs about \(Self.readable(needed)) \
@@ -149,6 +177,7 @@ final class PinRepository {
 		pins.append(pin)
 		if pin.kind != .song { membership[pin.id] = refs }
 		persist()
+		await pushLimits()
 		await startMissing(refs)
 	}
 
@@ -163,6 +192,7 @@ final class PinRepository {
 		// songs no *other* pin still covers: an album and a playlist may hold
 		// the same track.
 		let after = Pins.expand(pins, membership: membership)
+		await pushLimits()
 		for ref in before.subtracting(after) {
 			queue.cancel(ref)
 			progress[ref] = nil
@@ -170,7 +200,7 @@ final class PinRepository {
 			stored.remove(ref)
 			await store.remove(ref)
 		}
-		await recount()
+		await reloadHeld()
 	}
 
 	/// Everything, including the pins — there is nothing on disk that is not
@@ -183,11 +213,17 @@ final class PinRepository {
 		failed = []
 		stored = []
 		persist()
+		await pushLimits()
 		await store.removeAll()
-		await recount()
+		await reloadHeld()
 	}
 
 	// MARK: - Refresh
+
+	/// The cap changed in Settings; the store enforces it, so it has to hear.
+	func capChanged() async {
+		await pushLimits()
+	}
 
 	/// Re-reads what each pin covers and fetches anything missing.
 	///
@@ -235,11 +271,18 @@ final class PinRepository {
 	private func syncStored() async {
 		let wanted = Pins.expand(pins, membership: membership)
 		stored = await store.storedRefs(among: wanted)
-		await recount()
+		await pushLimits()
+		await reloadHeld()
 	}
 
-	private func recount() async {
-		usageBytes = await store.totalBytes()
+	/// Tells the store what it may not evict, and how much room it has.
+	///
+	/// Pushed rather than pulled: the store knows nothing about pins and should
+	/// not learn, and this class already computes the set for its own answers.
+	private func pushLimits() async {
+		await store.setLimits(
+			cap: settings.cacheCapBytes,
+			protecting: Pins.expand(pins, membership: membership))
 	}
 
 	// MARK: - Persistence

@@ -35,6 +35,12 @@ struct StorageSettingsView: View {
 						Text(PinRepository.readable(choice)).tag(choice)
 					}
 				}
+				// The store enforces the cap, so lowering it has to reach it —
+				// otherwise the new limit takes effect only after something
+				// else happens to push the limits down.
+				.onChange(of: settings.cacheCapBytes) {
+					Task { await pins.capChanged() }
+				}
 			} footer: {
 				// The cap is a refusal rather than an evictor, and saying so is
 				// what stops it reading as a promise to tidy up on its own.
