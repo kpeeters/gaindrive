@@ -19,6 +19,7 @@
 #include <cxxopts.hpp>
 #include <nlohmann/json.hpp>
 
+#include "artistmatch.hh"
 #include "chapters.hh"
 #include "codecs.hh"
 #include "gaindrive.hh"
@@ -344,6 +345,39 @@ static int run_chapters_test(const std::string& target)
 	return 0;
 	}
 
+// --artist-pick-test: the query that would go to MusicBrainz for an artist
+// name, and which of a search's results the matching rule chooses.
+//
+// It reads the response body on **stdin** and talks to nothing, which is the
+// whole point: the rule that decides whose biography and portrait a folder
+// gets is exercised with no network, no key and no database, and
+// tests/test_artist_pick.py drives it as a regression table the way
+// test_video_names.py drives the filename parser. Feeding it a live body is
+// one curl away, so this needs no online mode of its own:
+//
+//   curl -s 'https://musicbrainz.org/ws/2/artist/?query=...&fmt=json&limit=8' \
+//     | gaindrive --artist-pick-test 'Hiromi Uehara'
+//
+// stdout is exactly the decision, tab separated, so a test can compare it
+// without parsing prose; the query goes to stderr beside it.
+static int run_artist_pick_test(const std::string& name)
+	{
+	std::string body((std::istreambuf_iterator<char>(std::cin)),
+	                  std::istreambuf_iterator<char>());
+
+	std::cerr << "query: " << mb_artist_query(name) << "\n";
+
+	auto pick = mb_pick_artist(body, name);
+	if (!pick) {
+		std::cout << "(no match)\n";
+		return 0;
+		}
+	std::cout << pick->mbid << '\t' << pick->name << '\t'
+	          << pick->score << '\t'
+	          << (pick->exact ? "exact" : "guess") << '\n';
+	return 0;
+	}
+
 // --video-name-test: what the filename parser makes of a name, with no
 // database, no scan and no server. A directory is walked; "-" reads names on
 // stdin, one per line, which is the seam the regression test drives.
@@ -552,6 +586,7 @@ int main(int argc, char* argv[])
 		("image-scale-test","Scale one image file at each cover size and exit", cxxopts::value<std::string>())
 		("video-name-test","Parse video filenames and exit; takes a file, a directory, or - for stdin", cxxopts::value<std::string>())
 		("chapters-test", "Parse one .chapters.txt file and exit", cxxopts::value<std::string>())
+		("artist-pick-test","Pick a MusicBrainz artist from a search response on stdin and exit", cxxopts::value<std::string>())
 		("tmdb-test",     "Look one title up on TMDB and exit", cxxopts::value<std::string>())
 		("tmdb-year",     "Year for --tmdb-test", cxxopts::value<int>()->default_value("0"))
 		("tmdb-key",      "API key for --tmdb-test (default: the stored setting)", cxxopts::value<std::string>())
@@ -585,6 +620,11 @@ int main(int argc, char* argv[])
 
 	if (args.count("chapters-test"))
 		return run_chapters_test(args["chapters-test"].as<std::string>());
+
+	// Beside the other two that need nothing at all: no database, no roots, no
+	// config and no network, since the response body arrives on stdin.
+	if (args.count("artist-pick-test"))
+		return run_artist_pick_test(args["artist-pick-test"].as<std::string>());
 
 	// Also before any database or root: asking one device whether it is there
 	// needs neither, and this is the check that says whether an address put in

@@ -4,6 +4,7 @@
 #include "codecs.hh"
 #include "imagescale.hh"
 #include "jsonread.hh"
+#include "artistmatch.hh"
 #include "embedded_web.hh"
 
 #include <algorithm>
@@ -539,52 +540,15 @@ static std::optional<TranscodeInfo> transcode_target(
 	return TranscodeInfo{ "audio/mpeg", "mp3", max_bitrate };
 	}
 
-// Comparison key for "does this file's ARTIST tag name someone the folder does
-// not".  Deliberately loose about case, punctuation and underscores: an artist
-// folder is a *filename*, so "AC/DC" is on disk as "AC-DC" and "Pink_Floyd" is
-// a legal spelling of Pink Floyd.  Without this the commonest visible effect of
-// the whole feature would be a redundant second line on every track by such an
-// artist.
-//
-// Every byte from 0x80 up is copied through untouched, and that is the part to
-// leave alone: classifying a UTF-8 continuation byte with isalnum() and
-// dropping it would make "Sigur Rós" key as "sigur rs" while a folder spelled
-// the same way keys as "sigur rs" too -- fine -- but "Sigur Ros" would then
-// match it as well, and worse, a name written entirely in a non-Latin script
-// would key as the empty string, so two unrelated artists would compare equal
-// and neither would ever show its own name.  Accents survive on every
-// filesystem that matters, so an exact comparison outside ASCII is right, and
-// it is what lets this avoid an ICU dependency.
-//
-// No article stripping ("The Beatles" against "Beatles").  The two failure
-// directions are not symmetric: over-normalising hides a real difference, which
-// is invisible and unreportable, while under-normalising shows a redundant line
-// that anyone can see and fix in the tag or the folder name.  ignoredArticles
-// exists for *sorting*, which may guess; identity may not.
-static std::string artist_key(const std::string& s)
-	{
-	std::string r;
-	for (unsigned char c : s) {
-		if (c >= 0x80)                          r += static_cast<char>(c);
-		else if (c == '_' || std::isspace(c))   r += ' ';
-		else if (std::isalnum(c))               r += static_cast<char>(std::tolower(c));
-		}
-	// Collapse runs of space, and trim.
-	std::string out;
-	for (char c : r)
-		if (c != ' ' || (!out.empty() && out.back() != ' ')) out += c;
-	while (!out.empty() && out.back() == ' ') out.pop_back();
-	return out;
-	}
-
 // The artist to report for a song: the file's own tag when it is a different
 // claim from the folder it sits in, the folder's artist otherwise.
 //
 // This is the only place both facts are in hand -- a query has just one of
-// them, and a client cannot normalise without a second copy of the rule above
-// in every language it is written in.  Falling back to the folder rather than
-// to nothing also keeps an untagged file from reporting no artist at all,
-// which is what a client sees from every other server in that case.
+// them, and a client cannot normalise without a second copy of artist_key()'s
+// rule (artistmatch.hh) in every language it is written in.  Falling back to
+// the folder rather than to nothing also keeps an untagged file from reporting
+// no artist at all, which is what a client sees from every other server in
+// that case.
 static std::string artist_of(const MediaStore::ChildEntry& c)
 	{
 	if (c.track_artist.empty()) return c.artist;
@@ -1294,9 +1258,13 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 	mb.set_default_headers({
 		{"User-Agent", USER_AGENT}
 		});
+	// Both the name field and the alias field, and more than one candidate:
+	// see mb_artist_query() and mb_pick_artist() in artistmatch.hh. The limit
+	// is a page size on a request that is made either way, so asking for
+	// several costs nothing and is what lets the exact-match rule work at all.
 	httplib::Params params{
-		{"query", "artist:\"" + name + "\""},
-		{"limit", "1"},
+		{"query", mb_artist_query(name)},
+		{"limit", "8"},
 		{"fmt",   "json"}
 		};
 	// 404 is an answer: this artist is not there. Anything else — no response
@@ -1311,9 +1279,12 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 
 	// Step 1 is a *search by name*, and it is the half of this that can be
 	// wrong without anything downstream being able to tell: two artists share
-	// a name, the first hit wins, and the biography and portrait that follow
-	// belong to the other one. When the files themselves carry the id there is
-	// nothing to search for.
+	// a name, one of them wins, and the biography and portrait that follow
+	// belong to the other one. mb_pick_artist() narrows that -- an exact match
+	// on the name or on one of its aliases outranks MusicBrainz's own score,
+	// and nothing at all is preferred to a poor guess -- but it cannot close
+	// it, since two artists really do share a name. When the files themselves
+	// carry the id there is nothing to search for and none of this applies.
 	//
 	// mb_ok has to be set here as well, or the cache write at the end never
 	// runs and every request re-resolves the whole chain for ever. The Last.fm
@@ -1347,10 +1318,28 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 			}
 		else {
 			mb_ok = true;
-			auto j = nlohmann::json::parse(r->body, nullptr, false);
-			info.mbid = jstr(jidx(jsub(j, "artists"), 0), "id");
-			if (!info.mbid.empty())
+			// The chosen artist's own name is logged because it is routinely
+			// *not* the folder's -- 上原ひろみ for a folder called "Hiromi
+			// Uehara" is the case this rule exists for -- so without it a log
+			// cannot show whether a lookup found the right person. Same for
+			// the score and the exactness: they are the whole of why this
+			// candidate won, and a wrong match is otherwise indistinguishable
+			// from a right one until somebody reads the biography.
+			auto pick = mb_pick_artist(r->body, name);
+			if (pick) {
+				info.mbid        = pick->mbid;
 				info.last_fm_url = "https://www.last.fm/music/" + url_encode(name);
+				std::cout << stamp() << "getArtistInfo [" << name
+				          << "] matched [" << pick->name << "] "
+				          << pick->mbid << " score=" << pick->score
+				          << (pick->exact ? " (exact)" : " (best guess)")
+				          << std::endl;
+				}
+			else {
+				std::cout << stamp() << "getArtistInfo [" << name
+				          << "] no MusicBrainz artist matched this name"
+				          << std::endl;
+				}
 			}
 		}
 

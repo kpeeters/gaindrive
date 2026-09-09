@@ -59,12 +59,21 @@ static constexpr reproc::milliseconds PROBE_TIMEOUT(60000);
 // same shape.
 //
 //   1 -- thumbnails fit the short edge, not the long one
+//   2 -- artist lookups searched MusicBrainz's name field only, so an artist
+//        filed under a romanization or any other alias resolved to nothing --
+//        and, the search having returned 200, that nothing was cached as an
+//        answer. See mb_artist_query() in artistmatch.hh.
 //
 // Dropping the rows is safe because the music DB is a cache by invariant: the
-// cost of being wrong here is one re-scale per image per size. This is the
-// server-side twin of the "t2-" ETag marker in gaindrive.cc, which does the
-// same job for the copies clients hold; the two want bumping together.
-static constexpr int MUSIC_CACHE_VERSION = 1;
+// cost of being wrong here is one re-scale per image per size, or one lookup
+// re-made. This is the server-side twin of the "t2-" ETag marker in
+// gaindrive.cc, which does the same job for the copies clients hold; the two
+// want bumping together.
+//
+// The steps are guarded individually rather than run together under
+// `have < MUSIC_CACHE_VERSION`, so an install already at 1 does not re-scale
+// every thumbnail it holds to pick up an unrelated change to step 2.
+static constexpr int MUSIC_CACHE_VERSION = 2;
 
 // Adds its lifetime, in microseconds, to one of MediaStore::scan_times_'
 // accumulators.  Declared at the top of a phase's scope so the timing is one
@@ -1352,14 +1361,37 @@ void MediaStore::create_schema()
 	SQLite::Statement ver(db_music_, "PRAGMA user_version");
 	const int have = ver.executeStep() ? ver.getColumn(0).getInt() : 0;
 	if (have < MUSIC_CACHE_VERSION) {
-		db_music_.exec("DELETE FROM cover_thumbs");
-		const int n = db_music_.getChanges();
+		int thumbs = 0, infos = 0, verdicts = 0;
+
+		if (have < 1) {
+			db_music_.exec("DELETE FROM cover_thumbs");
+			thumbs = db_music_.getChanges();
+			}
+
+		if (have < 2) {
+			// Every row, not only the ones holding no mbid. A search that
+			// picked the wrong artist -- the first hit for "Ryuichi Sakamoto"
+			// is the duo "Alva Noto + Ryuichi Sakamoto" -- left a row that
+			// looks perfectly successful, and it is the case the new rule
+			// exists to fix.
+			db_music_.exec("DELETE FROM artist_info_cache");
+			infos = db_music_.getChanges();
+			// Only the verdicts, never the pictures. A 'none' or an 'error'
+			// is what a failed lookup recorded and is worth re-asking; an
+			// 'ok' is downloaded bytes, and nothing here makes a portrait
+			// that already arrived wrong.
+			db_music_.exec("DELETE FROM artist_art WHERE status <> 'ok'");
+			verdicts = db_music_.getChanges();
+			}
+
 		db_music_.exec("PRAGMA user_version = "
 		               + std::to_string(MUSIC_CACHE_VERSION));
-		if (n > 0)
+		if (thumbs > 0 || infos > 0 || verdicts > 0)
 			std::cout << stamp() << "Cache scheme " << have << " -> "
-			          << MUSIC_CACHE_VERSION << ": dropped " << n
-			          << " cover thumbnail(s) for re-scaling" << std::endl;
+			          << MUSIC_CACHE_VERSION << ": dropped " << thumbs
+			          << " cover thumbnail(s), " << infos
+			          << " artist info row(s), " << verdicts
+			          << " artist portrait verdict(s)" << std::endl;
 		}
 	}
 	}

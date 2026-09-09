@@ -692,6 +692,7 @@ add_executable(gaindrive
 	src/coverart.cc
 	src/videoart.cc
 	src/videoname.cc
+	src/artistmatch.cc
 	src/tmdb.cc
 	src/urlfetch.cc
 	src/stamp.cc
