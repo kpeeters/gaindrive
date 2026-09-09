@@ -15,11 +15,14 @@ import kotlinx.coroutines.flow.last
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.gaindrive.android.data.Connectivity
+import org.gaindrive.android.data.FetchMonitor
+import org.gaindrive.android.data.FetchStatus
 import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.ServerRegistry
 import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.UrlFetchRepository
 import org.gaindrive.android.data.model.BrowseScope
+import org.gaindrive.android.data.model.FetchState
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.LibraryMode
 import org.gaindrive.android.data.model.ServerId
@@ -56,35 +59,6 @@ data class FetchTarget(
 	val handlerNames: List<String>,
 )
 
-/**
- * Where a job has got to.
- *
- * Mapped from the server's string rather than parsed as an enum, so a state a
- * newer server invents shows as [Unknown] instead of failing the response. The
- * three terminal ones are told apart because they need different words and
- * different colours, not because anything branches on them.
- */
-enum class FetchState {
-	QUEUED, RUNNING, SCANNING, DONE, ERROR, CANCELLED, UNKNOWN;
-
-	val isLive: Boolean get() = this == QUEUED || this == RUNNING || this == SCANNING
-
-	/** Only these two may be cancelled; the server refuses the rest. */
-	val isCancellable: Boolean get() = this == QUEUED || this == RUNNING
-
-	companion object {
-		fun of(raw: String): FetchState = when (raw) {
-			"queued" -> QUEUED
-			"running" -> RUNNING
-			"scanning" -> SCANNING
-			"done" -> DONE
-			"error" -> ERROR
-			"cancelled" -> CANCELLED
-			else -> UNKNOWN
-		}
-	}
-}
-
 data class FetchUrlUiState(
 	val url: String = "",
 	/** Null while the servers are still being probed. */
@@ -94,7 +68,15 @@ data class FetchUrlUiState(
 	val album: String = "",
 	val audio: Boolean = true,
 	val submitting: Boolean = false,
-	val job: FetchJobDto? = null,
+	/**
+	 * Every fetch the account has anywhere, straight from [FetchMonitor].
+	 *
+	 * Held whole and narrowed to the chosen server by [jobs] below, rather than
+	 * narrowed on the way in: the server can change after the monitor last
+	 * emitted, and a list filtered at collection time would then describe the
+	 * server the user has just navigated away from.
+	 */
+	val status: FetchStatus = FetchStatus(),
 	val error: String? = null,
 	/**
 	 * The slices the library offers, minus Uploads. Chooses what the two name
@@ -110,10 +92,37 @@ data class FetchUrlUiState(
 ) {
 	val target: FetchTarget? get() = targets?.firstOrNull { it.id == server }
 
-	val state: FetchState get() = job?.let { FetchState.of(it.state) } ?: FetchState.UNKNOWN
+	/**
+	 * What the chosen server is reporting, newest first — not only the job this
+	 * panel submitted.
+	 *
+	 * A list rather than the single slot this used to be, because the panel now
+	 * adopts whatever is already running when it opens. That is the whole fix:
+	 * the slot was filled only by [FetchUrlViewModel.submit], so returning to a
+	 * panel whose fetch was still downloading showed nothing at all.
+	 */
+	val jobs: List<FetchJobDto> get() = status.on(server).map { it.job }
 
-	/** A job still running; the form stays visible but disabled behind it. */
-	val live: Boolean get() = job != null && state.isLive
+	/** The server has stopped answering; the jobs above are the last we knew. */
+	val contactLost: Boolean get() = server != null && server in status.contactLost
+
+	/**
+	 * The job this URL is already, or was recently, being fetched by — a live
+	 * one in preference to a finished one.
+	 *
+	 * **Exact equality after trimming, and no normalisation.** The blocking half
+	 * of this has to agree with `gaindrive.cc:7930`, which compares the URL
+	 * strings as they arrive; a client that refused something the server would
+	 * have accepted is a client lying about the server. Stripping a fragment or
+	 * a tracking parameter is tempting and would break that agreement, so if it
+	 * is ever added it belongs to the advisory wording alone and never to
+	 * [canSubmit].
+	 */
+	val duplicate: FetchJobDto?
+		get() = url.trim().takeIf { it.isNotEmpty() }?.let { u ->
+			val mine = jobs.filter { it.url == u }
+			mine.firstOrNull { FetchState.of(it.state).isLive } ?: mine.firstOrNull()
+		}
 
 	/** Both offered means the choice is worth drawing; one means it is not. */
 	val showModes: Boolean get() = target?.let { it.canAudio && it.canVideo } == true
@@ -127,13 +136,26 @@ data class FetchUrlUiState(
 
 	val albumLabel: String get() = if (filingUnderCategory) "Name" else "Album"
 
+	/**
+	 * Refused only for a URL that is *already* being fetched, which is the one
+	 * refusal the server would issue anyway.
+	 *
+	 * This used to be `!live` — no job of any kind may be running — and that was
+	 * right only while `live` could mean nothing but "a job this panel started".
+	 * Now that the panel adopts whatever the account has running, the same rule
+	 * would let a fetch begun in the web client freeze the form on the phone,
+	 * which is a worse failure than the duplicate this exists to prevent and one
+	 * the person in front of it did nothing to cause.
+	 */
 	val canSubmit: Boolean
-		get() = url.isNotBlank() && server != null && !submitting && !live
+		get() = url.isNotBlank() && server != null && !submitting &&
+			duplicate?.let { FetchState.of(it.state).isLive } != true
 }
 
 @HiltViewModel
 class FetchUrlViewModel @Inject constructor(
 	private val fetches: UrlFetchRepository,
+	private val monitor: FetchMonitor,
 	private val library: LibraryRepository,
 	private val registry: ServerRegistry,
 	private val settings: SettingsStore,
@@ -148,10 +170,31 @@ class FetchUrlViewModel @Inject constructor(
 	private val _state = MutableStateFlow(FetchUrlUiState(url = sharedUrl))
 	val state: StateFlow<FetchUrlUiState> = _state.asStateFlow()
 
-	private var poller: Job? = null
 	private var checker: Job? = null
 
 	init {
+		// The shell keeps the monitor warm, so its last sweep is usually seconds
+		// old and a running job is on screen in the first frame. Asked again
+		// anyway: opening this panel is the one moment where being a minute
+		// behind would put the wrong answer in front of the person about to
+		// paste a URL.
+		monitor.refresh()
+		viewModelScope.launch {
+			monitor.status.collect { s -> _state.update { it.copy(status = s) } }
+		}
+		viewModelScope.launch {
+			// What just landed is now in staging, and the panel stays open for
+			// the next URL. Without this the suggestions are the ones loaded when
+			// the panel opened, so fetching the same thing twice in one sitting
+			// draws no warning at all — which is exactly how a duplicate gets
+			// made. It hangs off the monitor rather than off a poll of our own,
+			// so it still fires for a fetch that finished while this panel was
+			// closed and is only being reopened now.
+			monitor.completions.collect {
+				loadSuggestions()
+				recheck()
+			}
+		}
 		viewModelScope.launch {
 			// The names and the mode before the probe: they are local, and
 			// showing empty fields that fill in a second later reads as the app
@@ -320,7 +363,15 @@ class FetchUrlViewModel @Inject constructor(
 		// The remembered server may have been removed, disabled, or had its
 		// upload rights taken away since it was written.
 		val remembered = settings.fetchServer.first()?.let { ServerId(it) }
-		val chosen = targets.firstOrNull { it.id == remembered }?.id ?: targets.firstOrNull()?.id
+		// A server with something live outranks the remembered one, and is not
+		// written back to settings: the strip in the app's bottom bar leads here,
+		// and it must land on a panel showing the job it was reporting. Where the
+		// user's attention is right now is a stronger statement than a preference
+		// written last week — but only for this visit.
+		val busy = monitor.status.value.live.map { it.server }.toSet()
+		val chosen = targets.firstOrNull { it.id in busy }?.id
+			?: targets.firstOrNull { it.id == remembered }?.id
+			?: targets.firstOrNull()?.id
 
 		_state.update { it.copy(targets = targets, server = chosen) }
 		chosen?.let { alignModeWith(it) }
@@ -403,8 +454,11 @@ class FetchUrlViewModel @Inject constructor(
 				fetches.submit(server, s.url, s.audio, s.artist, s.album)
 			}.fold(
 				onSuccess = { job ->
-					_state.update { it.copy(submitting = false, job = job) }
-					watch(server, job.id)
+					_state.update { it.copy(submitting = false) }
+					// Handed straight to the monitor rather than held here, so
+					// the row says "Queued" in this frame and goes on being
+					// reported by the shell's strip after this panel is closed.
+					monitor.adopt(server, s.target?.name.orEmpty(), job)
 				},
 				onFailure = { e ->
 					_state.update {
@@ -415,98 +469,23 @@ class FetchUrlViewModel @Inject constructor(
 		}
 	}
 
-	fun cancel() {
-		val s = _state.value
-		val server = s.server ?: return
-		val id = s.job?.id ?: return
+	/**
+	 * Takes the id because there can be several rows now, one of which may be a
+	 * fetch this panel never started — which is exactly the one a person who has
+	 * just found it running wants to be able to stop.
+	 */
+	fun cancel(id: String) {
+		val server = _state.value.server ?: return
 		viewModelScope.launch {
-			// The poll reports the new state; a failure here is not worth its
+			// The monitor reports the new state; a failure here is not worth its
 			// own message, since the job either stopped or it did not and the
 			// panel is about to say which.
 			runCatchingCancellable { fetches.cancel(server, id) }
-		}
-	}
-
-	/**
-	 * Follows one job to its end.
-	 *
-	 * Filtered to the id [submit] was given rather than rendering every job the
-	 * account has, which is what the web client's shared upload bar must do.
-	 * Nothing here has to notice a fetch started elsewhere.
-	 *
-	 * Neither kind of bad tick gives up at once, and they are counted apart
-	 * because they mean different things. A poll that *fails* is usually the
-	 * server being busy indexing what it has just downloaded; a poll that
-	 * succeeds but does not mention the job is the job having vanished, which
-	 * the server does not do for some minutes after one ends. So a failure gets
-	 * a long rope and an absence a short one, and the message at the end of each
-	 * says which happened.
-	 *
-	 * Living in [viewModelScope] is what stops it: leaving the panel ends the
-	 * poll and does *not* cancel the fetch, which goes on running on the server.
-	 */
-	private fun watch(server: ServerId, jobId: String) {
-		poller?.cancel()
-		poller = viewModelScope.launch {
-			var absences = 0
-			var failures = 0
-			while (true) {
-				delay(POLL_INTERVAL_MS)
-
-				val jobs = runCatchingCancellable { fetches.jobs(server) }.getOrNull()
-				if (jobs == null) {
-					if (++failures >= MAX_POLL_FAILURES) {
-						_state.update {
-							it.copy(
-								error = "Lost contact with the server. The fetch may " +
-									"still be running; the web client can say.",
-							)
-						}
-						return@launch
-					}
-					continue
-				}
-				failures = 0
-
-				val job = jobs.firstOrNull { it.id == jobId }
-				if (job == null) {
-					if (++absences >= MAX_ABSENCES) {
-						_state.update {
-							it.copy(error = "The server stopped reporting on that fetch.")
-						}
-						return@launch
-					}
-					continue
-				}
-				absences = 0
-
-				_state.update { it.copy(job = job) }
-				if (!FetchState.of(job.state).isLive) {
-					// What just landed is now in staging, and the panel stays
-					// open for the next URL. Without this the suggestions are
-					// the ones loaded when the panel opened, so fetching the
-					// same thing twice in one sitting draws no warning at all —
-					// which is exactly how a duplicate gets made.
-					if (FetchState.of(job.state) == FetchState.DONE) {
-						loadSuggestions()
-						recheck()
-					}
-					return@launch
-				}
-			}
+			monitor.refresh()
 		}
 	}
 
 	private companion object {
-		/** What the web client uses, and fast enough for a progress bar. */
-		const val POLL_INTERVAL_MS = 2_000L
-
-		/** Six seconds of a job the server has never heard of is conclusive. */
-		const val MAX_ABSENCES = 3
-
-		/** Half a minute, which a scan of a large batch can legitimately take. */
-		const val MAX_POLL_FAILURES = 15
-
 		/** Long enough that typing a name is not a request per keystroke. */
 		const val CHECK_DEBOUNCE_MS = 400L
 

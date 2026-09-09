@@ -25,8 +25,8 @@ data class UrlHandlerDto(
  *
  * [state] is left a plain string rather than an enum: the server's set is
  * `queued | running | scanning | done | error | cancelled`, and a newer one
- * adding to it must not fail the whole response. [FetchState] is where it is
- * given meaning.
+ * adding to it must not fail the whole response.
+ * `data.model.FetchState` is where it is given meaning.
  *
  * [percent] is the tool's own progress and is deliberately allowed to stall —
  * the server keeps the last figure rather than resetting to zero for a line

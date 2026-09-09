@@ -66,6 +66,7 @@ fun ArtistsScreen(
 	val servers by viewModel.servers.collectAsStateWithLifecycle()
 	val browseScope by viewModel.browseScope.collectAsStateWithLifecycle()
 	val badgeNames by viewModel.badgeNames.collectAsStateWithLifecycle()
+	val fetches by viewModel.fetches.collectAsStateWithLifecycle()
 	val offline by viewModel.offline.collectAsStateWithLifecycle()
 	val failures by viewModel.failures.collectAsStateWithLifecycle()
 
@@ -130,9 +131,25 @@ fun ArtistsScreen(
 			// to put something there. The Uploads chip is only offered to an
 			// account that may upload, so reaching this means the rights exist.
 			if (mode == LibraryMode.UPLOADS) {
+				// The row says what is happening when something is, because this
+				// is the screen someone comes back to in order to find out. The
+				// shell's strip says the same thing from everywhere else; the two
+				// read the same monitor, so they cannot disagree.
+				val live = fetches.live
 				ListItem(
 					headlineContent = { Text("Fetch from a URL") },
-					supportingContent = { Text("The server downloads it into your uploads") },
+					supportingContent = {
+						Text(
+							when {
+								live.isEmpty() ->
+									"The server downloads it into your uploads"
+								live.size == 1 ->
+									fetches.moving?.let { "Fetching — ${it.job.percent}%" }
+										?: "1 fetch queued"
+								else -> "${live.size} fetches in progress"
+							}
+						)
+					},
 					leadingContent = {
 						Icon(Icons.Default.AddLink, contentDescription = null)
 					},

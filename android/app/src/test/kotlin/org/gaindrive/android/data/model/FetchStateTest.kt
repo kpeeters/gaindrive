@@ -1,4 +1,4 @@
-package org.gaindrive.android.ui.fetch
+package org.gaindrive.android.data.model
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -6,9 +6,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The panel's polling loop and its Cancel button both branch on this, so a
- * mis-mapped state is either a fetch the user cannot stop or a poll that never
- * ends.
+ * `FetchMonitor`'s poll loop, the panel's Cancel button and the shell's fetch
+ * strip all branch on this, so a mis-mapped state is either a fetch the user
+ * cannot stop, a poll that never ends, or a strip that never clears.
  */
 class FetchStateTest {
 

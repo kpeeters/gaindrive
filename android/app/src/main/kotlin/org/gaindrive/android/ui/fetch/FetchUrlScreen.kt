@@ -47,8 +47,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.gaindrive.android.data.model.FetchState
 import org.gaindrive.android.data.model.ServerId
+import org.gaindrive.android.net.FetchJobDto
 import org.gaindrive.android.ui.LocalAvailability
+import org.gaindrive.android.ui.components.relativeTime
 
 /**
  * What a URL shared with the app opens onto: the link, somewhere to put it, and
@@ -56,10 +59,15 @@ import org.gaindrive.android.ui.LocalAvailability
  *
  * The panel stays on screen while the job runs rather than closing behind a
  * confirmation. A fetch is a download and a scan on the far side, so it can take
- * minutes, and this is the only place that reports on it — the app has no
- * notification for one, and the shared URL has by then been consumed.
+ * minutes, and the shared URL has by then been consumed.
  *
- * It does not own the job. Leaving stops the polling, not the fetch.
+ * **It does not own the job — `FetchMonitor` does, and leaving now stops
+ * nothing.** This used to run the poll itself, in its own `viewModelScope`, on a
+ * route that is a drill-down: leaving cancelled the poll and coming back built a
+ * fresh view model with no job in it, so a fetch still downloading looked
+ * exactly like a first visit and pasting the same URL again was the obvious next
+ * move. The panel now adopts whatever the account already has running, and the
+ * shell's own strip reports it from every other screen.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -109,13 +117,21 @@ fun FetchUrlScreen(
 					label = { Text("URL") },
 					placeholder = { Text("https://…") },
 					singleLine = true,
-					enabled = !state.live && !state.submitting,
+					enabled = !state.submitting,
 					keyboardOptions = KeyboardOptions(
 						keyboardType = KeyboardType.Uri,
 						imeAction = ImeAction.Next,
 					),
 					modifier = Modifier.fillMaxWidth(),
 				)
+
+				// Directly under the URL, not down with the names' own note.
+				// That one answers a question about the two name fields and sits
+				// under them; this answers a question about the URL — and unlike
+				// that one it can disable the button, so it has to be beside the
+				// thing it disables rather than stacked into a paragraph the
+				// reader has to sort through.
+				duplicateNote(state.duplicate)?.let { Note(it) }
 
 				when {
 					// Only the probe's own outcome is reported here. Being offline is
@@ -146,9 +162,9 @@ fun FetchUrlScreen(
 
 					else -> {
 						FetchForm(state, viewModel)
-						state.job?.let {
+						if (state.jobs.isNotEmpty()) {
 							HorizontalDivider()
-							JobPanel(state, onCancel = viewModel::cancel)
+							JobList(state, onCancel = viewModel::cancel)
 						}
 					}
 				}
@@ -170,7 +186,7 @@ private fun FetchForm(state: FetchUrlUiState, viewModel: FetchUrlViewModel) {
 		ServerPicker(
 			targets = targets,
 			chosen = state.server,
-			enabled = !state.live && !state.submitting,
+			enabled = !state.submitting,
 			onSelect = viewModel::onServer,
 		)
 	}
@@ -183,7 +199,7 @@ private fun FetchForm(state: FetchUrlUiState, viewModel: FetchUrlViewModel) {
 				FilterChip(
 					selected = kind == state.kind,
 					onClick = { viewModel.onKind(kind) },
-					enabled = !state.live && !state.submitting,
+					enabled = !state.submitting,
 					label = { Text(kind.label) },
 				)
 			}
@@ -198,7 +214,7 @@ private fun FetchForm(state: FetchUrlUiState, viewModel: FetchUrlViewModel) {
 		onValueChange = viewModel::onArtist,
 		label = state.artistLabel,
 		suggestions = state.suggestions,
-		enabled = !state.live && !state.submitting,
+		enabled = !state.submitting,
 		imeAction = ImeAction.Next,
 	)
 
@@ -208,7 +224,7 @@ private fun FetchForm(state: FetchUrlUiState, viewModel: FetchUrlViewModel) {
 		label = { Text(state.albumLabel) },
 		placeholder = { Text("From the title if left blank") },
 		singleLine = true,
-		enabled = !state.live && !state.submitting,
+		enabled = !state.submitting,
 		keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
 		modifier = Modifier.fillMaxWidth(),
 	)
@@ -244,13 +260,13 @@ private fun FetchForm(state: FetchUrlUiState, viewModel: FetchUrlViewModel) {
 			FilterChip(
 				selected = state.audio,
 				onClick = { viewModel.onAudio(true) },
-				enabled = !state.live && !state.submitting,
+				enabled = !state.submitting,
 				label = { Text("Audio") },
 			)
 			FilterChip(
 				selected = !state.audio,
 				onClick = { viewModel.onAudio(false) },
-				enabled = !state.live && !state.submitting,
+				enabled = !state.submitting,
 				label = { Text("Video") },
 			)
 		}
@@ -379,10 +395,34 @@ private fun ServerPicker(
 	}
 }
 
-/** The running job: where it has got to, and the way to stop it. */
+/**
+ * Every job the chosen server is reporting, newest first.
+ *
+ * A list rather than the single panel this replaced, because the screen adopts
+ * whatever the account already has running — including a fetch begun in another
+ * client — and a second one would otherwise be invisible. The web client's own
+ * bar has always drawn a list, for the same reason.
+ */
 @Composable
-private fun JobPanel(state: FetchUrlUiState, onCancel: () -> Unit) {
-	val job = state.job ?: return
+private fun JobList(state: FetchUrlUiState, onCancel: (String) -> Unit) {
+	Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+		if (state.contactLost) {
+			Note(
+				"Lost contact with the server. A fetch below may still be running; " +
+					"what it says is the last thing we heard.",
+				error = true,
+			)
+		}
+		state.jobs.forEach { job ->
+			JobRow(job, onCancel = { onCancel(job.id) })
+		}
+	}
+}
+
+/** One job: where it has got to, and the way to stop it. */
+@Composable
+private fun JobRow(job: FetchJobDto, onCancel: () -> Unit) {
+	val state = FetchState.of(job.state)
 
 	Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 		Row(
@@ -391,7 +431,7 @@ private fun JobPanel(state: FetchUrlUiState, onCancel: () -> Unit) {
 			verticalAlignment = Alignment.CenterVertically,
 		) {
 			Text(
-				text = when (state.state) {
+				text = when (state) {
 					FetchState.QUEUED -> "Queued"
 					FetchState.RUNNING -> "Downloading"
 					// Named for what the user is waiting for rather than for
@@ -408,12 +448,22 @@ private fun JobPanel(state: FetchUrlUiState, onCancel: () -> Unit) {
 				},
 				style = MaterialTheme.typography.titleSmall,
 			)
-			if (state.state.isCancellable) {
+			if (state.isCancellable) {
 				TextButton(onClick = onCancel) { Text("Cancel") }
 			}
 		}
 
-		if (state.state == FetchState.RUNNING || state.state == FetchState.SCANNING) {
+		// What it is, so several rows are told apart — and so a job this panel
+		// did not start says what it is rather than only how far along it is.
+		Text(
+			text = jobLabel(job),
+			style = MaterialTheme.typography.bodySmall,
+			color = MaterialTheme.colorScheme.onSurfaceVariant,
+			maxLines = 1,
+			overflow = TextOverflow.Ellipsis,
+		)
+
+		if (state == FetchState.RUNNING || state == FetchState.SCANNING) {
 			LinearProgressIndicator(
 				progress = { job.percent.coerceIn(0, 100) / 100f },
 				modifier = Modifier.fillMaxWidth(),
@@ -435,7 +485,7 @@ private fun JobPanel(state: FetchUrlUiState, onCancel: () -> Unit) {
 
 		if (job.error.isNotBlank()) Note(job.error, error = true)
 
-		if (state.state == FetchState.DONE) {
+		if (state == FetchState.DONE) {
 			// The names the *server* recorded, which are the typed ones only when
 			// they were typed — otherwise the handler took them from the title
 			// and the phone never saw them.
@@ -443,6 +493,44 @@ private fun JobPanel(state: FetchUrlUiState, onCancel: () -> Unit) {
 			val album = job.album.ifBlank { "the title's album" }
 			Note("In your uploads, under $artist · $album.")
 		}
+	}
+}
+
+/**
+ * How a job is named when it is one of several: the typed names when there were
+ * any, otherwise the tool and the mode. The web client's row says the same
+ * thing, and a queued job has nothing else to identify it by.
+ */
+private fun jobLabel(job: FetchJobDto): String =
+	if (job.artist.isNotBlank() || job.album.isNotBlank())
+		"${job.artist.ifBlank { "…" }} · ${job.album.ifBlank { "…" }}"
+	else
+		"${job.handler} · ${job.mode}"
+
+/**
+ * What to say about a URL that has been fetched before, or is being fetched now.
+ *
+ * **Advisory in every case except the live one**, which is the single refusal
+ * the server would issue anyway — see `FetchUrlUiState.canSubmit`. A finished
+ * fetch is only reported: the panel cannot know that a second copy is not what
+ * was wanted, which is the same rule the names' own note follows.
+ *
+ * A failed or cancelled attempt is phrased as neither a warning nor an
+ * apology. It is a reason to try again, and it also explains why nothing turned
+ * up in uploads — which is otherwise the most confusing outcome of the three.
+ */
+private fun duplicateNote(job: FetchJobDto?): String? {
+	if (job == null) return null
+	val state = FetchState.of(job.state)
+	val when_ = relativeTime(job.finished) ?: "recently"
+	return when {
+		state.isLive -> "You are already fetching this URL — it is listed below."
+		state == FetchState.DONE ->
+			"You fetched this URL $when_, and it produced ${job.files} file(s). " +
+				"Fetching it again makes a second copy."
+		state == FetchState.ERROR -> "The last attempt at this URL failed $when_."
+		state == FetchState.CANCELLED -> "You cancelled this URL $when_."
+		else -> null
 	}
 }
 

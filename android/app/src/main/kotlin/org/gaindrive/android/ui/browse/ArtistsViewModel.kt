@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.gaindrive.android.data.FetchMonitor
+import org.gaindrive.android.data.FetchStatus
 import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.ServerFailure
 import org.gaindrive.android.data.ServerSelection
@@ -31,7 +33,23 @@ class ArtistsViewModel @Inject constructor(
 	private val library: LibraryRepository,
 	private val selection: ServerSelection,
 	private val settings: SettingsStore,
+	monitor: FetchMonitor,
 ) : ViewModel() {
+
+	/**
+	 * What is being fetched, for the Uploads slice's own row.
+	 *
+	 * Here as well as in the shell's strip because this is where somebody looks
+	 * when they wonder whether a fetch is running — the report that prompted all
+	 * of this was "came back to my uploads folder and saw nothing in progress".
+	 * The strip answers it from every screen; this answers it at the place the
+	 * question is actually asked.
+	 *
+	 * The listing itself needs nothing: a finished fetch bumps [LibraryRevision],
+	 * which ServerSelection.browse already folds into the value collected below.
+	 */
+	val fetches: StateFlow<FetchStatus> =
+		monitor.status.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), FetchStatus())
 
 	/**
 	 * A plain held value, not a `stateIn(WhileSubscribed(…))` over the query.

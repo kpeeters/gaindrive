@@ -54,6 +54,8 @@ import org.gaindrive.android.playback.cast.kind
 import org.gaindrive.android.ui.adaptive.rememberPaneStack
 import org.gaindrive.android.ui.browse.AlbumDetailScreen
 import org.gaindrive.android.ui.components.OfflineNote
+import org.gaindrive.android.ui.fetch.FetchStatusViewModel
+import org.gaindrive.android.ui.fetch.FetchStrip
 import org.gaindrive.android.ui.fetch.FetchUrlScreen
 import org.gaindrive.android.ui.player.CastDeviceSheet
 import org.gaindrive.android.ui.player.CastViewModel
@@ -137,6 +139,13 @@ fun GainDriveApp(
 	val playerState by playerViewModel.state.collectAsStateWithLifecycle()
 	var nowPlayingOpen by remember { mutableStateOf(false) }
 	var trackInfoOpen by remember { mutableStateOf(false) }
+
+	// Collecting this is what makes FetchMonitor poll, so the app's own lifecycle
+	// becomes the poll's: backgrounding stops it, and coming back re-runs its
+	// first sweep. That is also what notices a fetch begun in the web client, or
+	// one that outlived the process.
+	val fetchViewModel: FetchStatusViewModel = hiltViewModel()
+	val fetchStatus by fetchViewModel.state.collectAsStateWithLifecycle()
 
 	// Held here rather than inside the picker so the Now Playing sheet can show
 	// whether a device is connected without opening anything. Same view model
@@ -275,7 +284,9 @@ fun GainDriveApp(
 				// a question not worth having. Before the navigation bar moved
 				// into the suite this could not arise, because the bar was
 				// always there.
-				if (showNavAndPlayer && (!availability.online || playerState.current != null)) {
+				if (showNavAndPlayer &&
+					(!availability.online || playerState.current != null ||
+						fetchStatus.showing)) {
 					// One surface for the whole strip, with the window inset
 					// applied *inside* it, which is how NavigationBar is built
 					// and is not optional here: Scaffold pads its body by the
@@ -310,6 +321,15 @@ fun GainDriveApp(
 							OfflineNote(
 								online = availability.online,
 								byChoice = availability.offlineByChoice,
+							)
+							// Beside the offline banner and for its stated
+							// reason: a fetch running is a fact about the whole
+							// app, not about one screen. Above the player, so the
+							// transport stays where the thumb expects it.
+							FetchStrip(
+								state = fetchStatus,
+								onOpen = { navController.navigate(Route.FetchUrl("")) },
+								onDismiss = fetchViewModel::dismiss,
 							)
 							// The bottom of the *content* column, not of the window —
 							// which at compact width is above the navigation bar, as

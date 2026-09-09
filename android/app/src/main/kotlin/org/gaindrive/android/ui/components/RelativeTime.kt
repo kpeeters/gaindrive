@@ -22,6 +22,22 @@ fun relativeTime(timestamp: String?): String? {
 	).toString()
 }
 
+/**
+ * The same, for a Unix epoch **second** — which is what a fetch job's `started`
+ * and `finished` are, being `std::time(nullptr)` rather than a formatted stamp.
+ *
+ * Here rather than at the call site so there is one place that decides what
+ * "3 hours ago" looks like; zero means the server has not set it yet.
+ */
+fun relativeTime(epochSeconds: Long): String? {
+	if (epochSeconds <= 0) return null
+	return DateUtils.getRelativeTimeSpanString(
+		epochSeconds * 1000L,
+		System.currentTimeMillis(),
+		DateUtils.MINUTE_IN_MILLIS,
+	).toString()
+}
+
 private fun epochMillisOf(timestamp: String): Long? {
 	val text = timestamp.trim().ifBlank { return null }
 	return runCatching { OffsetDateTime.parse(text).toInstant().toEpochMilli() }.getOrNull()

@@ -1227,6 +1227,18 @@ let fetchPollTimer = null;
 // The last states seen, keyed by job id, so a job reaching 'done' is noticed
 // once rather than re-triggering a re-render on every tick.
 let fetchLastState = {};
+// Which call to pollFetchJobs() a tick belongs to. One timer slot is shared by
+// every render of the upload bar, and a tick captures its host node *before*
+// awaiting getFetchJobs — so a tick from an earlier render can wake after a
+// newer call has installed its own interval, render into a detached node and
+// then clearInterval the timer it never owned.
+let fetchPollGen   = 0;
+// A fetch finished while the user was reading an album, so the uploads listing
+// on pane 0 is stale. Not redrawn there and then: viewArtists() slides back to
+// pane 0, which would yank the album out from under them. Deferred to the next
+// return to pane 0 rather than to "a later tick" — there is no later tick,
+// because the poll stops on the very tick that sees the last job end.
+let uploadsStale   = false;
 
 // Whose uploads the Uploads mode shows.
 //
@@ -1391,17 +1403,27 @@ function pollForUpload(status, files) {
 // means the library is correct and the listing can simply be re-drawn.
 function pollFetchJobs() {
    clearInterval(fetchPollTimer);
+   // Each call takes a generation, and a tick that finds itself outdated returns
+   // without touching the shared timer. See fetchPollGen.
+   const gen = ++fetchPollGen;
 
    const tick = async () => {
+      if (gen !== fetchPollGen) return;
       // Gone once anything else has rewritten pane 0 — another library mode, or
       // Settings/Playlists/Recents. Same guard pollForUpload() uses, and for the
       // same reason: a re-render then would drag the user back here.
-      const host = document.querySelector('#pane-artists .fetch-jobs');
+      let host = document.querySelector('#pane-artists .fetch-jobs');
       if (!host) { clearInterval(fetchPollTimer); return; }
 
       let r;
       try { r = await apiCall('getFetchJobs'); }
       catch { return; }   // a blip should not end the wait
+      if (gen !== fetchPollGen) return;
+      // Looked up again after the await: a re-render during the request has
+      // replaced the node found above, and writing into the detached one is
+      // silent — the rows are built, appended to nothing, and never seen.
+      host = document.querySelector('#pane-artists .fetch-jobs');
+      if (!host) { clearInterval(fetchPollTimer); return; }
       const jobs = r.fetchJobs?.fetchJob ?? [];
 
       host.innerHTML = '';
@@ -1461,11 +1483,22 @@ function pollFetchJobs() {
          }
 
       // viewArtists() slides back to pane 0, so hold off while the user is
-      // reading an album; the job stays 'done' and this fires on a later tick.
-      if (finished && paneNav.depth === 0) {
-         clearInterval(fetchPollTimer);
-         viewArtists();
-         return;
+      // reading an album.
+      //
+      // Deferred to a flag rather than to a later tick, which is what this used
+      // to claim and could not do: `finished` is derived from fetchLastState,
+      // which the loop above has already overwritten with 'done', and the poll
+      // stops two lines below because nothing is live any more. So the listing
+      // was never redrawn at all for anyone who was deeper in when a fetch
+      // landed. pollForUpload() gets away with the same shape only because its
+      // trigger — a changed listing signature — is not consumed by reading it.
+      if (finished) {
+         if (paneNav.depth === 0) {
+            clearInterval(fetchPollTimer);
+            viewArtists();
+            return;
+            }
+         uploadsStale = true;
          }
       if (!live) clearInterval(fetchPollTimer);
       };
@@ -1476,6 +1509,22 @@ function pollFetchJobs() {
    // stop the interval it just set. A macrotask is enough — the caller appends
    // the fragment before yielding.
    setTimeout(tick, 0);
+   }
+
+// Landing back on pane 0 without re-rendering it — which is what Back does,
+// since viewAlbums() only ever writes pane 1 and the popstate handler slides
+// rather than redraws when pane 0 already has children.
+//
+// Two things the slide alone does not do. A batch that landed while the user
+// was deeper in leaves the listing stale, and the poll that would have noticed
+// a *new* job stopped itself the moment nothing was live — so a fetch started
+// meanwhile, here or in another client, is never picked up. Restarting it costs
+// one getFetchJobs and it stops itself again if there is nothing to watch.
+async function returnedToArtists() {
+   if (uploadsStale) { await viewArtists(); return; }   // which clears the flag
+   if (libraryMode === 'uploads'
+       && document.querySelector('#pane-artists .fetch-jobs'))
+      pollFetchJobs();
    }
 
 // The archive-upload form, drawn at the top of the Uploads listing. Returns the
@@ -1776,6 +1825,9 @@ function makeUploadBar() {
    }
 
 async function viewArtists() {
+   // Whatever a finished fetch left behind is about to be re-read, however the
+   // user got here — so the deferred redraw is owed to nobody any more.
+   uploadsStale = false;
    const pane = document.getElementById('pane-artists');
    pane.innerHTML = '';
    document.getElementById('pane-albums').innerHTML = '';
@@ -6799,8 +6851,10 @@ async function showShell() {
          else
             await viewPlaylists();
          } else {
-         if (document.getElementById('pane-artists').children.length > 0)
+         if (document.getElementById('pane-artists').children.length > 0) {
             paneNav.slideTo(0);
+            await returnedToArtists();
+            }
          else
             await showView('artists');
          }
