@@ -707,6 +707,12 @@ async function showView(name) {
    document.querySelectorAll('#sidebar a, #bottom-nav a').forEach(a => {
       a.classList.toggle('active', a.dataset.view === name);
       });
+   // Every one of these rebuilds pane 0 from scratch and empties the two behind
+   // it, so a row number left over from the previous view describes nothing.
+   // The cursor is clamped and so would be harmless, but landing halfway down
+   // Playlists because that is where you were in Artists is not what anyone
+   // asked for.
+   navForget();
 
    if (name === 'artists') {
       await viewArtists();
@@ -6754,6 +6760,17 @@ function videoOnScreen() {
    return !document.getElementById('video-surface').classList.contains('hidden');
 }
 
+// The picture is over the lists, so the lists are not what the arrow keys are
+// pointed at.  Theatre fills the whole content area and fullscreen fills more
+// than that, while minimised is a thumbnail in the corner with the panes still
+// there and still usable — which is the whole reason this is a state test and
+// not videoOnScreen().
+function videoCovering() {
+   if (document.fullscreenElement) return true;
+   const surf = document.getElementById('video-surface');
+   return !surf.classList.contains('hidden') && surf.dataset.state === 'theatre';
+}
+
 // Fullscreen renders only #video-frame's subtree, so a modal parented on <body>
 // is not drawn at all — the same constraint that put #video-chapters inside
 // the frame and gave the chapter toggle a second home there.  A key that opens
@@ -6763,16 +6780,208 @@ function keyLeaveFullscreen() {
       document.exitFullscreen?.().catch(() => {});
 }
 
+// ── Walking the panes from the keyboard ─────────────────────────────────────
+
+// The active pane is paneNav.depth and deliberately not a second variable: that
+// field already means "the pane the viewer is in", every view maintains it, and
+// a copy here would be a copy to keep in step.
+//
+// What was missing is a cursor *within* a pane, which is all this adds.  It is
+// a layer over the DOM the list builders already produce — not one of them is
+// touched — so a new kind of list becomes navigable by matching the selector
+// rather than by remembering to wire something up.
+
+const NAV_PANES = ['pane-artists', 'pane-albums', 'pane-tracks'];
+
+// Every browsable row and nothing else.  Headings, the view header, the upload
+// bar and the cover hero are simply not matched, so nothing here has to know
+// what a non-row looks like.
+const NAV_ROW_SEL =
+   '.artist-row, .album-row, .playlist-row, .track-row, .search-song-row';
+
+// One cursor per pane; null means "not placed in this pane yet", which is a
+// different thing from 0 and is what lets the first press start somewhere
+// sensible rather than at the top.
+//
+// An index rather than a node, because these lists are rebuilt underneath the
+// viewer — refreshStarredSections() on any star change, the album sort toggle,
+// viewArtists() from the two upload pollers — and an index lands back on the
+// same position where a detached node lands nowhere.  Keying on data-id was the
+// other candidate and cannot work: search rows carry no ids at all.
+const navCursor = [null, null, null];
+
+// Visible rows only, and offsetParent is what decides it.  A track row is
+// hidden by CSS in two directions — .has-chapters outside edit mode and
+// .chapter-track inside it — so asking the layout is the only test that cannot
+// drift from style.css.
+function navRows(depth) {
+   const pane = document.getElementById(NAV_PANES[depth]);
+   if (!pane) return [];
+   return [...pane.querySelectorAll(NAV_ROW_SEL)].filter(r => r.offsetParent !== null);
+}
+
+// Forgets every cursor, for when the panes are about to hold something else.
+function navForget() {
+   navCursor.fill(null);
+   document.querySelectorAll('.row-cursor')
+      .forEach(r => r.classList.remove('row-cursor'));
+}
+
+// Returns the pane's visible rows, having first made its cursor a valid index
+// into them.  Every caller goes through this, so no other code has to think
+// about a list that has been rebuilt shorter underneath it.
+function navSettle(depth) {
+   const rows = navRows(depth);
+   if (!rows.length) { navCursor[depth] = null; return rows; }
+   let i = navCursor[depth];
+   if (i === null) {
+      // Continuing from the row already on show beats jumping to the top:
+      // arrowing down from the artist whose albums are open should carry on
+      // down the list rather than restart at A.
+      const seed = rows.findIndex(r => r.classList.contains('selected'));
+      const play = rows.findIndex(r => r.classList.contains('playing'));
+      i = seed >= 0 ? seed : (play >= 0 ? play : 0);
+      }
+   navCursor[depth] = Math.max(0, Math.min(i, rows.length - 1));
+   return rows;
+}
+
+// Only the active pane draws a cursor.  On a wide screen all three are on show
+// at once, and a mark in each would say nothing about which one the keys are
+// driving.
+function navPaint() {
+   document.querySelectorAll('.row-cursor')
+      .forEach(r => r.classList.remove('row-cursor'));
+   const d    = paneNav.depth;
+   const rows = navSettle(d);
+   const row  = rows[navCursor[d]];
+   if (!row) return;
+   row.classList.add('row-cursor');
+   // .view-header is sticky, so a row scrolled to the top of a pane sits under
+   // it — and the browser counts that as visible, so 'nearest' would decline to
+   // scroll and the cursor would be behind the header.  Measured rather than a
+   // constant because that header wraps at narrow widths.
+   const hdr = document.getElementById(NAV_PANES[d])?.querySelector('.view-header');
+   row.style.scrollMarginTop = hdr ? `${hdr.offsetHeight}px` : '';
+   row.scrollIntoView({block: 'nearest'});
+}
+
+function navMoveRow(delta) {
+   const d     = paneNav.depth;
+   // Asked before settling, which is what places it.
+   const fresh = navCursor[d] === null;
+   const rows  = navSettle(d);
+   if (!rows.length) return;
+   // The first press in a pane places the cursor rather than moving it —
+   // pressing Down on a list that has none should land on the first row, not
+   // silently skip it for the second.
+   //
+   // Clamped rather than wrapped: a list that jumps from its end back to its
+   // start hides which end you were at, and these lists are long.
+   if (!fresh)
+      navCursor[d] = Math.max(0, Math.min(navCursor[d] + delta, rows.length - 1));
+   navPaint();
+}
+
+function navMovePane(delta) {
+   const d = Math.max(0, Math.min(paneNav.depth + delta, NAV_PANES.length - 1));
+   if (d === paneNav.depth) return;
+   // slideTo rather than history.back(), which is what the back links do.  The
+   // panes keep their contents, so moving left is a change of attention and not
+   // a navigation; going through history would re-enter whichever entry happens
+   // to sit behind this one, and that is not reliably one pane to the left.
+   paneNav.slideTo(d);
+   navPaint();
+}
+
+// Enter is the row's own click, which is the whole of it: every list builder
+// puts its handler on the row, and the controls inside one (star, enqueue, add
+// to playlist, promote) all stopPropagation, so a row-level click has exactly
+// one meaning per list.  Album edit mode needs no case here either — the row
+// handler already returns early on .editing.
+function navActivate() {
+   const d = paneNav.depth;
+   if (!navSettle(d).length) return;
+   navRows(d)[navCursor[d]]?.click();
+}
+
+// Right means "go deeper", as it does in a column browser.
+function navDrill() {
+   const d    = paneNav.depth;
+   const rows = navSettle(d);
+   const row  = rows[navCursor[d]];
+   if (!row) return;
+   // A track is a leaf: clicking one plays it, which is what Enter is for and
+   // is not what someone asking to go right meant.
+   if (row.classList.contains('track-row')) return;
+   // .selected already means "this row's children are in the pane to the
+   // right", so there is somewhere to move to and clicking again would only
+   // re-ask the server for what is on screen.
+   if (row.classList.contains('selected') && d < NAV_PANES.length - 1) {
+      navMovePane(1);
+      return;
+      }
+   // Otherwise the click loads that pane and slides to it itself, and the
+   // cursor follows once it has — which is a fetch away, so not now.
+   row.click();
+}
+
+function setupPaneNav() {
+   // One delegated listener serves the mouse and the keys alike, because
+   // row.click() dispatches a real bubbling event: navActivate and navDrill
+   // arrive here too, and neither needs its own copy of this bookkeeping.
+   // Delegated rather than per row because every list is rebuilt often.
+   document.getElementById('pane-strip').addEventListener('click', e => {
+      const row = e.target.closest(NAV_ROW_SEL);
+      if (!row) return;
+      const d = NAV_PANES.indexOf(row.closest('.pane')?.id);
+      if (d < 0) return;
+      const i = navRows(d).indexOf(row);
+      if (i < 0) return;
+      navCursor[d] = i;
+      // Anything deeper is about to be replaced by this row's children, so its
+      // cursor describes a list that is going away.  Forgetting it is what
+      // makes the next pane open at its own top rather than at whichever row
+      // number was left over from the artist before.
+      for (let n = d + 1; n < NAV_PANES.length; n++) navCursor[n] = null;
+      // Painted on a later turn: the handlers above run after this one and may
+      // slide to another pane, so where the cursor belongs is not yet decided.
+      setTimeout(navPaint, 0);
+      });
+}
+
 const SHORTCUTS = [
    {group: 'Playback', key: ' ', show: 'Space', label: 'Play or pause',
     when: () => true,
     run:  () => document.getElementById('player-playpause').click()},
+   // Two meanings for one key, told apart by what is on the screen: over a film
+   // that is covering the panes there is no list to walk and seeking is what
+   // every player does, and with the panes visible the arrows belong to them.
+   // The shifted pair is the seek that is always available, for audio and for a
+   // picture minimised into the corner.
    {group: 'Playback', key: 'ArrowLeft', show: '←',
     label: `Back ${SKIP_SECS} seconds`,
-    when: () => true, run: () => playerSkip(-SKIP_SECS)},
+    when: videoCovering, run: () => playerSkip(-SKIP_SECS)},
    {group: 'Playback', key: 'ArrowRight', show: '→',
     label: `Forward ${SKIP_SECS} seconds`,
+    when: videoCovering, run: () => playerSkip(SKIP_SECS)},
+   {group: 'Playback', key: 'ArrowLeft', show: 'Shift ←', shift: true,
+    label: `Back ${SKIP_SECS} seconds`,
+    when: () => true, run: () => playerSkip(-SKIP_SECS)},
+   {group: 'Playback', key: 'ArrowRight', show: 'Shift →', shift: true,
+    label: `Forward ${SKIP_SECS} seconds`,
     when: () => true, run: () => playerSkip(SKIP_SECS)},
+
+   {group: 'Browsing', key: 'ArrowUp', show: '↑', label: 'Previous row',
+    when: () => !videoCovering(), run: () => navMoveRow(-1)},
+   {group: 'Browsing', key: 'ArrowDown', show: '↓', label: 'Next row',
+    when: () => !videoCovering(), run: () => navMoveRow(1)},
+   {group: 'Browsing', key: 'ArrowLeft', show: '←', label: 'Pane to the left',
+    when: () => !videoCovering(), run: () => navMovePane(-1)},
+   {group: 'Browsing', key: 'ArrowRight', show: '→', label: 'Open, or pane right',
+    when: () => !videoCovering(), run: navDrill},
+   {group: 'Browsing', key: 'Enter', show: 'Enter', label: 'Play or open the row',
+    when: () => !videoCovering(), run: navActivate},
 
    {group: 'Video', key: 'f', show: 'F', label: 'Fullscreen',
     when: () => videoOnScreen() && keyShown('video-fullscreen'),
@@ -6899,8 +7108,17 @@ function setupKeys() {
       // Lowercased so Shift+F works.  ? is Shift+/ on most layouts and arrives
       // as ? already, which is why it is spelled that way in the table.
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-      const sc  = SHORTCUTS.find(s => s.key === key);
-      if (!sc || !sc.when()) return;
+      // Shift is part of a *named* key's identity and never a printable one's.
+      // ArrowLeft is spelled the same either way, so Shift+← has to be told
+      // apart from ← by the flag; a character already encodes it, and testing
+      // shiftKey there would stop ? — which is Shift+/ — from matching at all.
+      const shifted = (e.key.length === 1) ? null : !!e.shiftKey;
+      // when() is part of the match rather than a test after it, so one key can
+      // carry two entries and the applicable one wins: ← seeks over a film that
+      // is covering the panes and moves between them when it is not.
+      const sc = SHORTCUTS.find(s =>
+         s.key === key && (shifted === null || !!s.shift === shifted) && s.when());
+      if (!sc) return;
       // Applied to every match rather than per entry: / would otherwise open
       // Firefox's quick-find, and Space and the arrows would scroll the pane
       // under the film.
@@ -6933,6 +7151,7 @@ async function showShell() {
       setupPlayer();
       setupSearch();
       setupKeys();
+      setupPaneNav();
       }
 
    // Fetch the logged-in user's roles so we can show/hide the cast button.

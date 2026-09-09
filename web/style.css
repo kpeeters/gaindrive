@@ -2427,6 +2427,21 @@ input.chapter-time.bad { border-color: #e06c6c; }
    color: var(--text-dim);
 }
 
+/* The keyboard cursor.  A mark of its own rather than reusing .selected, which
+   already means "this row's children are in the pane to the right", or
+   .playing, which means what it says — the cursor sits on a row that is
+   neither, as often as not, so it has to compose with both instead of
+   competing.  Hence an edge bar rather than a third background fill.
+
+   position: relative on the row would be the obvious way to hang the bar, but
+   these rows are flex and grid containers whose children are positioned
+   already; an inset box-shadow needs no stacking context and cannot disturb
+   the layout, so a long list does not reflow as the cursor moves down it. */
+.row-cursor {
+   box-shadow: inset 3px 0 0 0 var(--accent);
+   border-radius: 4px;
+}
+
 /* Shortcut list.  Same two-column grid as the track-info modal, because it is
    the same shape of content: a short fixed label against prose.  Unavailable
    shortcuts are dimmed rather than dropped — see the note in app.js. */
