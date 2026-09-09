@@ -64,6 +64,18 @@
          <div class="pane" id="pane-albums"></div>
          <div class="pane" id="pane-tracks"></div>
       </div>
+      <!-- The incremental search's minibuffer, and a sibling of the strip
+           rather than an overlay because #pane-viewport is already a flex
+           column: it takes its own height at the bottom and so cannot cover
+           the last row of a list, which is exactly the row someone searching
+           is most likely to have just landed on. The mode's own keys are not
+           in the ? overlay, so the hint here is where they are stated. -->
+      <div id="isearch-bar" hidden>
+         <span id="isearch-label">I-search:</span>
+         <span id="isearch-text"></span>
+         <span id="isearch-note"></span>
+         <span id="isearch-hint">Enter keeps it, Esc goes back</span>
+      </div>
    </div>
 
    <nav id="bottom-nav">

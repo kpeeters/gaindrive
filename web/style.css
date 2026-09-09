@@ -438,6 +438,69 @@ body {
    color: var(--text);
 }
 
+/* ── Incremental search ─────────────────────────────── */
+
+/* Sits below the strip inside #pane-viewport's flex column, so it takes its
+   own height rather than covering a row. flex-shrink keeps it from being
+   squeezed away when a pane is tall. */
+#isearch-bar {
+   display: flex;
+   align-items: baseline;
+   gap: 0.5rem;
+   flex-shrink: 0;
+   padding: 0.4rem 1.5rem;
+   background: var(--surface);
+   border-top: 1px solid var(--divider);
+   font-size: 0.85rem;
+   white-space: nowrap;
+}
+
+#isearch-label {
+   color: var(--text-dim);
+}
+
+/* The typed string is the one thing being read here, so it is the only part
+   at full contrast. */
+#isearch-text {
+   flex: 1;
+   min-width: 0;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   color: var(--text);
+}
+
+#isearch-note {
+   color: var(--text-dim);
+   font-size: 0.8rem;
+}
+
+/* "Failing" is emacs' word for it, and the colour says the same thing to
+   anyone who has never used emacs. */
+#isearch-bar.failing #isearch-label,
+#isearch-bar.failing #isearch-text {
+   color: var(--accent);
+}
+
+#isearch-hint {
+   color: var(--text-dim);
+   font-size: 0.78rem;
+}
+
+@media (max-width: 649px) {
+   /* No room for it beside the string on a phone, and it is the least of the
+      three things this bar says. */
+   #isearch-hint { display: none; }
+}
+
+/* Painted through CSS.highlights, so no element wraps the match and nothing
+   the list builders emit has to be rewritten to show one. Only a handful of
+   properties are honoured on ::highlight, and background and colour are two
+   of them. */
+::highlight(gd-isearch) {
+   background: var(--accent);
+   color: #fff;
+}
+
 /* ── Pane strip ─────────────────────────────────────── */
 
 #pane-strip {

@@ -711,7 +711,10 @@ async function showView(name) {
    // it, so a row number left over from the previous view describes nothing.
    // The cursor is clamped and so would be harmless, but landing halfway down
    // Playlists because that is where you were in Artists is not what anyone
-   // asked for.
+   // asked for.  A search running over the old listing is in the same
+   // position, and worse: its minibuffer would sit under a pane whose rows it
+   // never scanned, still claiming the keyboard.
+   isearchEnd(false);
    navForget();
 
    if (name === 'artists') {
@@ -6961,12 +6964,222 @@ function navDrill() {
    row.click();
 }
 
+// ── Incremental search, emacs style ─────────────────────────────────────────
+
+// Ctrl+S, then type: the cursor walks to the first row in the *active pane*
+// whose text contains what has been typed, and moves again with each further
+// character.  Ctrl+S again advances to the next match, wrapping at the end.
+//
+// It is not the search bar `/` opens.  That one asks the server and replaces
+// pane 0 with the answer; this one never leaves the listing already on screen,
+// which is the whole point — finding a row among the hundreds in front of you
+// should not cost you the listing.
+//
+// `origin` is captured on entry so Escape can put the cursor back, which is
+// what makes an exploratory search free.
+const isearch = {on: false, text: '', origin: null, wrapped: false, failing: false};
+
+const ISEARCH_HL = 'gd-isearch';
+
+// Not row.textContent: an icon span carries its *ligature name* as text
+// (makeTrackActions writes 'star', and 'close' for the remove button), so the
+// plain reading makes "star" match every track row and "close" every row of a
+// playlist.  Skipping .mi subtrees is generic, where a list of per-view title
+// classes would be one more thing to update per new list — the coupling the
+// navigation layer above was deliberately built without.
+//
+// Text nodes rather than a string, because the highlight needs the nodes.
+function isearchNodes(el, out = []) {
+   for (const n of el.childNodes) {
+      if (n.nodeType === Node.TEXT_NODE) out.push(n);
+      else if (n.nodeType === Node.ELEMENT_NODE && !n.classList.contains('mi'))
+         isearchNodes(n, out);
+      }
+   return out;
+}
+
+// Joined with a space so a match may run from one element into the next —
+// an artist name beside a separate album title reads as two words, not one.
+function isearchText(row) {
+   return isearchNodes(row).map(n => n.nodeValue).join(' ').toLowerCase();
+}
+
+function isearchMatches(row, needle) {
+   return needle !== '' && isearchText(row).includes(needle);
+}
+
+// Paints every match in the pane, not only the one under the cursor: the
+// cursor already says which is current, and seeing the rest is what makes a
+// half-typed search worth reading.
+//
+// A range is built only where the match sits inside a single text node, which
+// is the ordinary case — a title is one node.  A match spanning two nodes still
+// counts and still moves the cursor; it simply is not painted, which is a great
+// deal cheaper than mapping an offset in the joined string back through the
+// separators to a pair of nodes.
+function isearchHighlight(rows, needle) {
+   if (typeof Highlight !== 'function' || !CSS?.highlights) return;
+   if (!needle) { CSS.highlights.delete(ISEARCH_HL); return; }
+   const ranges = [];
+   for (const row of rows) {
+      for (const node of isearchNodes(row)) {
+         const raw   = node.nodeValue;
+         const lower = raw.toLowerCase();
+         // Lowercasing is not length-preserving for every character in
+         // Unicode, and an offset off by one paints the wrong span.  Where it
+         // is not, the row keeps its match and loses only the paint.
+         if (lower.length !== raw.length) continue;
+         let from = 0;
+         for (;;) {
+            const at = lower.indexOf(needle, from);
+            if (at < 0) break;
+            const r = document.createRange();
+            r.setStart(node, at);
+            r.setEnd(node, at + needle.length);
+            ranges.push(r);
+            from = at + needle.length;
+            }
+         }
+      }
+   if (ranges.length) CSS.highlights.set(ISEARCH_HL, new Highlight(...ranges));
+   else               CSS.highlights.delete(ISEARCH_HL);
+}
+
+function isearchDraw() {
+   const bar = document.getElementById('isearch-bar');
+   bar.hidden = !isearch.on;
+   if (!isearch.on) return;
+   bar.classList.toggle('failing', isearch.failing);
+   document.getElementById('isearch-label').textContent =
+      isearch.failing ? 'Failing I-search:' : 'I-search:';
+   document.getElementById('isearch-text').textContent = isearch.text;
+   document.getElementById('isearch-note').textContent =
+      isearch.wrapped && !isearch.failing ? 'wrapped' : '';
+}
+
+// Looks forward from `start` for a row matching the current string, wrapping
+// once through the whole pane.  Returns the index, or null when nothing in the
+// pane matches at all — which is what "failing" means, and is deliberately not
+// the same as "no more after here".
+function isearchFind(rows, start) {
+   const n = rows.length;
+   for (let k = 0; k < n; k++) {
+      const i = ((start + k) % n + n) % n;
+      if (isearchMatches(rows[i], isearch.text)) return {i, wrapped: i < start};
+      }
+   return null;
+}
+
+// `from` is where the scan starts.  Typing passes the current row, so a row
+// that still matches the longer string keeps the cursor — the emacs feel, and
+// what stops the cursor bolting away in the middle of a word.  Ctrl+S passes
+// the row after it, which is what makes it "next".
+function isearchStep(from) {
+   const d    = paneNav.depth;
+   const rows = navSettle(d);
+   if (!rows.length) { isearch.failing = isearch.text !== ''; isearchDraw(); return; }
+
+   if (isearch.text === '') {
+      // Nothing typed yet is not a failure, and must not paint the whole pane.
+      isearch.failing = false;
+      isearch.wrapped = false;
+      isearchHighlight(rows, '');
+      isearchDraw();
+      return;
+      }
+
+   const hit = isearchFind(rows, from);
+   isearch.failing = (hit === null);
+   if (hit) {
+      isearch.wrapped = hit.wrapped;
+      navCursor[d]    = hit.i;
+      navPaint();
+      }
+   // Highlighted even when the cursor did not move, so the rows that do match
+   // are visible while a longer string is being typed towards them.
+   isearchHighlight(rows, isearch.text);
+   isearchDraw();
+}
+
+function isearchStart() {
+   const d = paneNav.depth;
+   navSettle(d);
+   isearch.on      = true;
+   isearch.text    = '';
+   isearch.origin  = navCursor[d];
+   isearch.wrapped = false;
+   isearch.failing = false;
+   isearchDraw();
+}
+
+// `restore` puts the cursor back where the search began, which is Escape's job
+// and not Enter's.
+function isearchEnd(restore) {
+   if (!isearch.on) return;
+   isearch.on = false;
+   if (restore && isearch.origin !== null) {
+      navCursor[paneNav.depth] = isearch.origin;
+      navPaint();
+      }
+   isearch.text = '';
+   if (typeof Highlight === 'function' && CSS?.highlights)
+      CSS.highlights.delete(ISEARCH_HL);
+   isearchDraw();
+}
+
+// The mode's whole keyboard.  Returns true when it has claimed the key.
+//
+// Anything it does not claim ends the search and is deliberately *not* claimed,
+// so the key then does its ordinary job in the same press — pressing Down after
+// a search moves the cursor rather than being swallowed, which is what emacs
+// does and needs no case of its own.
+function isearchKey(e) {
+   if (!isearch.on) return false;
+
+   // A caret somewhere else outranks the search: focus can reach an edit field
+   // by mouse while this is running, and a mode that went on eating the
+   // keystrokes there would look like a broken text box.
+   const tag = document.activeElement?.tagName;
+   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+      isearchEnd(false);
+      return false;
+      }
+
+   if (e.key === 'Escape')                 { isearchEnd(true);  return true; }
+   if (e.key === 'Enter')                  { isearchEnd(false); return true; }
+   if (e.ctrlKey && e.key.toLowerCase() === 's') {
+      isearchStep(navCursor[paneNav.depth] + 1);
+      return true;
+      }
+   if (e.ctrlKey || e.metaKey || e.altKey) { isearchEnd(false); return false; }
+   if (e.key === 'Backspace') {
+      // Re-scanned from the origin rather than from here: shortening the
+      // string can only widen what matches, and continuing forward from the
+      // current row would skip the earlier rows it just started matching.
+      isearch.text = isearch.text.slice(0, -1);
+      isearchStep(isearch.origin ?? 0);
+      return true;
+      }
+   if (e.key.length === 1) {
+      isearch.text += e.key.toLowerCase();
+      isearchStep(navCursor[paneNav.depth]);
+      return true;
+      }
+
+   isearchEnd(false);
+   return false;
+}
+
 function setupPaneNav() {
    // One delegated listener serves the mouse and the keys alike, because
    // row.click() dispatches a real bubbling event: navActivate and navDrill
    // arrive here too, and neither needs its own copy of this bookkeeping.
    // Delegated rather than per row because every list is rebuilt often.
    document.getElementById('pane-strip').addEventListener('click', e => {
+      // Reaching for the mouse is a way of saying the search is over, and
+      // leaving it up would strand a minibuffer over a listing nobody is
+      // searching any more.
+      isearchEnd(false);
       const row = e.target.closest(NAV_ROW_SEL);
       if (!row) return;
       const d = NAV_PANES.indexOf(row.closest('.pane')?.id);
@@ -7021,6 +7234,9 @@ const SHORTCUTS = [
     when: () => !videoCovering(), run: navDrill},
    {group: 'Browsing', key: 'Enter', show: 'Enter', label: 'Play or open the row',
     when: () => !videoCovering(), run: navActivate},
+   {group: 'Browsing', key: 's', show: 'Ctrl S', ctrl: true,
+    label: 'Find in this pane',
+    when: () => !videoCovering(), run: isearchStart},
 
    {group: 'Video', key: 'f', show: 'F', label: 'Fullscreen',
     when: () => videoOnScreen() && keyShown('video-fullscreen'),
@@ -7040,7 +7256,7 @@ const SHORTCUTS = [
     when: () => keyShown('player-cast'),
     run:  () => { keyLeaveFullscreen();
                   document.getElementById('player-cast').click(); }},
-   {group: 'Elsewhere', key: '/', show: '/', label: 'Search',
+   {group: 'Elsewhere', key: '/', show: '/', label: 'Search the library',
     when: () => true, run: openSearchBar},
    {group: 'Elsewhere', key: '?', show: '?', label: 'This list',
     when: () => true, run: keysToggle},
@@ -7113,6 +7329,12 @@ function keyDismissModal(modal) {
 
 function setupKeys() {
    document.addEventListener('keydown', e => {
+      // Above everything, because while it is running it owns the keyboard:
+      // f, l, q, c, / and ? are text being typed and not commands.  It claims
+      // only the keys it uses, so anything else ends it and then falls through
+      // to be handled normally in this same press.
+      if (isearchKey(e)) { e.preventDefault(); return; }
+
       // Before the typing guard, deliberately: openSearchBar() focuses the
       // search box, so the box has focus at exactly the moment Escape is
       // wanted.  A dialog outranks the search bar because it is drawn over it.
@@ -7129,7 +7351,12 @@ function setupKeys() {
          return;
          }
 
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // Ctrl is no longer a reason to bail — it is part of a key's identity
+      // below, so only an entry that asks for it matches and every other Ctrl
+      // combination still reaches the browser untouched.  Meta and Alt keep the
+      // blanket return: nothing here wants them, and they carry the window and
+      // application shortcuts that would be worst to swallow.
+      if (e.metaKey || e.altKey) return;
 
       // tagName is still the whole test: there is no contenteditable anywhere
       // in the client.  It covers the chapter time and name fields, the album,
@@ -7156,7 +7383,8 @@ function setupKeys() {
       // carry two entries and the applicable one wins: ← seeks over a film that
       // is covering the panes and moves between them when it is not.
       const sc = SHORTCUTS.find(s =>
-         s.key === key && (shifted === null || !!s.shift === shifted) && s.when());
+         s.key === key && (shifted === null || !!s.shift === shifted)
+         && !!s.ctrl === e.ctrlKey && s.when());
       if (!sc) return;
       // Applied to every match rather than per entry: / would otherwise open
       // Firefox's quick-find, and Space and the arrows would scroll the pane
