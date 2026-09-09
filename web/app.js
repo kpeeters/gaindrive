@@ -4289,6 +4289,29 @@ function videoControlsSleep() {
    document.getElementById('video-surface').classList.remove('controls-on');
    }
 
+// Requested on #video-frame rather than on the video element, so everything
+// absolutely positioned inside the frame goes fullscreen with the picture: the
+// transport cluster and the close button.  #video-bar is outside the frame and
+// so is still out of reach — the subtitle picker included, so choose the track
+// before going in.  Cues keep drawing either way: the browser paints them into
+// the video box, not us.
+//
+// A toggle rather than the one-way request this used to be.  The button had no
+// second meaning, so pressing it again did nothing and the only way out was the
+// browser's own Escape; 'f' is expected to close what 'f' opened, and a button
+// that disagreed with the key would be the odd one out.  videoSurfaceSet(null)
+// keeps its own exit — that one fires when the surface goes away underneath a
+// fullscreen element, which is not a press of anything.
+function videoFullscreenToggle() {
+   const frame = document.getElementById('video-frame');
+   if (document.fullscreenElement === frame) {
+      document.exitFullscreen?.().catch(() => {});
+      return;
+      }
+   frame.requestFullscreen?.()
+      .catch(err => console.warn('[video] fullscreen refused', err));
+}
+
 function setupVideoSurface() {
    // pointermove rather than mousemove so a pen counts too.  Touch needs
    // nothing from this: the (hover: none) rules in style.css keep both
@@ -4329,16 +4352,8 @@ function setupVideoSurface() {
       () => videoSurfaceSet('minimised'));
    document.getElementById('video-restore').addEventListener('click',
       () => videoSurfaceSet('theatre'));
-   // Requested on #video-frame rather than on the video element, so everything
-   // absolutely positioned inside the frame goes fullscreen with the picture:
-   // the transport cluster and the close button.  #video-bar is outside the
-   // frame and so is still out of reach — the subtitle picker included, so
-   // choose the track before going in.  Cues keep drawing either way: the
-   // browser paints them into the video box, not us.
-   document.getElementById('video-fullscreen').addEventListener('click', () => {
-      document.getElementById('video-frame').requestFullscreen?.()
-         .catch(err => console.warn('[video] fullscreen refused', err));
-      });
+   document.getElementById('video-fullscreen').addEventListener('click',
+      videoFullscreenToggle);
 
    // Delegating rather than repeating: #player-playpause's own handler is the
    // one place that knows a pause while casting is castControl and not
@@ -6700,42 +6715,205 @@ function setupSearch() {
 
    for (const id of ['sf-artists', 'sf-albums', 'sf-songs'])
       document.getElementById(id).addEventListener('change', scheduleSearch);
+}
 
+// ── Keyboard ────────────────────────────────────────────────────────────────
+
+// One table drives both the key handler and the ? overlay, so the list a viewer
+// is shown cannot drift from what the keys actually do.  Fields:
+//
+//  * `when` decides whether the shortcut is *applicable*.  It is asked before
+//    the key fires and again when the overlay is drawn, so a shortcut can never
+//    do something the interface is not currently offering, and the overlay
+//    cannot claim it can.
+//  * `run` performs it, delegating to the button it mirrors wherever one
+//    exists.  That is the pattern the client already uses — #video-play clicks
+//    #player-playpause, the Media Session keys click #player-prev/-next — and
+//    it is what makes the gating free: #player-cast is hidden without castRole,
+//    both chapter buttons are hidden on a film with no markers, and
+//    #video-fullscreen is hidden while casting.  Testing the button is
+//    therefore the whole of `when` in three of the four cases.
+//  * `label` may be a function, so `q` can read the live title off
+//    #video-close.  That button already flips between "Stop and close" and
+//    "Close" depending on whether a cast is running, and a second copy of that
+//    distinction here would be a second thing to keep in step.
+//
+// This replaced a rule that opened the search bar on *any* unclaimed printable
+// key.  Every letter promoted to a shortcut was a letter search silently lost,
+// which does not scale to a client meant to be driven from the keyboard, so
+// search now has a key of its own and the alphabet is free.
+
+// True when the element exists and is not hidden — the whole of most `when`
+// predicates, since the shortcut is only offering what the button offers.
+function keyShown(id) {
+   const el = document.getElementById(id);
+   return !!el && !el.hidden;
+}
+
+function videoOnScreen() {
+   return !document.getElementById('video-surface').classList.contains('hidden');
+}
+
+// Fullscreen renders only #video-frame's subtree, so a modal parented on <body>
+// is not drawn at all — the same constraint that put #video-chapters inside
+// the frame and gave the chapter toggle a second home there.  A key that opens
+// a dialog therefore has to leave fullscreen first, or it looks dead.
+function keyLeaveFullscreen() {
+   if (document.fullscreenElement)
+      document.exitFullscreen?.().catch(() => {});
+}
+
+const SHORTCUTS = [
+   {group: 'Playback', key: ' ', show: 'Space', label: 'Play or pause',
+    when: () => true,
+    run:  () => document.getElementById('player-playpause').click()},
+   {group: 'Playback', key: 'ArrowLeft', show: '←',
+    label: `Back ${SKIP_SECS} seconds`,
+    when: () => true, run: () => playerSkip(-SKIP_SECS)},
+   {group: 'Playback', key: 'ArrowRight', show: '→',
+    label: `Forward ${SKIP_SECS} seconds`,
+    when: () => true, run: () => playerSkip(SKIP_SECS)},
+
+   {group: 'Video', key: 'f', show: 'F', label: 'Fullscreen',
+    when: () => videoOnScreen() && keyShown('video-fullscreen'),
+    run:  videoFullscreenToggle},
+   {group: 'Video', key: 'l', show: 'L', label: 'Chapter list',
+    when: () => videoOnScreen() && keyShown('video-chapters-btn2'),
+    run:  videoChaptersToggle},
+   {group: 'Video', key: 'q', show: 'Q',
+    // Whatever the button says it does, which is not the same sentence while
+    // casting: there it only puts the picture away and leaves the sound in the
+    // other room alone.
+    label: () => document.getElementById('video-close').title,
+    when: videoOnScreen,
+    run:  () => document.getElementById('video-close').click()},
+
+   {group: 'Elsewhere', key: 'c', show: 'C', label: 'Cast to a device',
+    when: () => keyShown('player-cast'),
+    run:  () => { keyLeaveFullscreen();
+                  document.getElementById('player-cast').click(); }},
+   {group: 'Elsewhere', key: '/', show: '/', label: 'Search',
+    when: () => true, run: openSearchBar},
+   {group: 'Elsewhere', key: '?', show: '?', label: 'This list',
+    when: () => true, run: keysToggle},
+];
+
+function keysToggle() {
+   const modal = document.getElementById('keys-modal');
+   if (!modal.classList.contains('hidden')) {
+      modal.classList.add('hidden');
+      return;
+      }
+   keyLeaveFullscreen();
+   keysRender();
+   modal.classList.remove('hidden');
+}
+
+// Drawn at open time, so it is a snapshot of what applies now.  Everything is
+// listed and the inapplicable entries are dimmed rather than dropped: hiding
+// them would make the client look like it had three shortcuts whenever no film
+// was playing, and the dimmed row is also the answer to "why did F do nothing".
+function keysRender() {
+   const list = document.getElementById('keys-list');
+   list.replaceChildren();
+   let group = null;
+   for (const sc of SHORTCUTS) {
+      if (sc.group !== group) {
+         group = sc.group;
+         const h = document.createElement('div');
+         h.className   = 'keys-group';
+         h.textContent = group;
+         list.appendChild(h);
+         }
+      const on = sc.when();
+      const dt = document.createElement('dt');
+      const kb = document.createElement('kbd');
+      kb.textContent = sc.show;
+      dt.appendChild(kb);
+      const dd = document.createElement('dd');
+      dd.textContent = (typeof sc.label === 'function') ? sc.label() : sc.label;
+      if (!on) { dt.classList.add('keys-off'); dd.classList.add('keys-off'); }
+      list.append(dt, dd);
+      }
+}
+
+// The topmost open dialog, or null.  Escape is the only way out of one by
+// keyboard, since none of them handles it themselves.  Document order is
+// stacking order here — every .modal shares one z-index — so the last is the
+// one drawn on top.
+function keyOpenModal() {
+   const open = document.querySelectorAll('.modal:not(.hidden)');
+   return open.length ? open[open.length - 1] : null;
+}
+
+// Dismissing is not always just hiding: three of these arm a callback that must
+// not survive to answer whatever asks next, and the lightbox holds a full-size
+// image.  Two already have a close function, so this dispatches to them rather
+// than restating what they do; a dialog with nothing to clean up is hidden
+// directly.  Escape means No on a confirmation, as its No button does.
+function keyDismissModal(modal) {
+   switch (modal.id) {
+      case 'cover-art-modal': _closeCoverArtDialog(); return;
+      case 'promote-modal':   _closePromoteDialog();  return;
+      case 'confirm-modal':   _confirmYes = null;     break;
+      case 'cover-lightbox':
+         document.getElementById('cover-lightbox-img').src = '';
+         break;
+      }
+   modal.classList.add('hidden');
+}
+
+function setupKeys() {
    document.addEventListener('keydown', e => {
-      const tag = document.activeElement?.tagName;
-      const inInput = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT');
-
+      // Before the typing guard, deliberately: openSearchBar() focuses the
+      // search box, so the box has focus at exactly the moment Escape is
+      // wanted.  A dialog outranks the search bar because it is drawn over it.
       if (e.key === 'Escape') {
-         if (document.getElementById('search-bar').classList.contains('open')) {
+         const modal = keyOpenModal();
+         if (modal) {
+            keyDismissModal(modal);
+            e.preventDefault();
+            }
+         else if (document.getElementById('search-bar').classList.contains('open')) {
             closeSearchBar();
             e.preventDefault();
             }
          return;
          }
 
-      if (!inInput && e.key === ' ') {
-         e.preventDefault();
-         document.getElementById('player-playpause').click();
-         return;
-         }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-      // Before the catch-all below, which would not have matched anyway — an
-      // arrow key's name is longer than one character — but the intent is that
-      // these are handled and not merely unclaimed.  preventDefault stops the
-      // pane scrolling under them as well.  A focused range input keeps its own
-      // arrow behaviour, since inInput is true for it.
-      if (!inInput && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-         e.preventDefault();
-         playerSkip(e.key === 'ArrowLeft' ? -SKIP_SECS : SKIP_SECS);
-         return;
-         }
+      // tagName is still the whole test: there is no contenteditable anywhere
+      // in the client.  It covers the chapter time and name fields, the album,
+      // track and playlist edit inputs, and #player-seek — which is a range
+      // input, and so keeps its own arrow-key behaviour for free.
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
-      if (!inInput && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey)
-         openSearchBar();
+      // Nothing but ? reaches past an open dialog.  Otherwise Q would close the
+      // film behind the cast chooser and Space would start playback under a
+      // confirmation prompt — a key changing something the viewer cannot see
+      // is the one result a shortcut set must not produce.
+      if (keyOpenModal() && e.key !== '?') return;
+
+      // Lowercased so Shift+F works.  ? is Shift+/ on most layouts and arrives
+      // as ? already, which is why it is spelled that way in the table.
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      const sc  = SHORTCUTS.find(s => s.key === key);
+      if (!sc || !sc.when()) return;
+      // Applied to every match rather than per entry: / would otherwise open
+      // Firefox's quick-find, and Space and the arrows would scroll the pane
+      // under the film.
+      e.preventDefault();
+      sc.run();
       });
+
+   document.getElementById('keys-close-btn').addEventListener('click', keysToggle);
 }
 
 // ── Shell ───────────────────────────────────────────────────────────────────
+
+let wiredOnce = false;
 
 async function showShell() {
    console.log('[shell] showing main shell');
@@ -6744,8 +6922,18 @@ async function showShell() {
    shell.hidden = false;
    console.log('[shell] app-shell hidden=', shell.hidden, 'display=', getComputedStyle(shell).display);
 
-   setupPlayer();
-   setupSearch();
+   // Once per page load, not once per login: logging out calls showLogin() and
+   // logging back in returns here without a reload, so without the guard every
+   // handler below is bound a second time.  That was survivable while they were
+   // all one-way — a doubled openSearchBar() opens the bar — and stops being so
+   // with keys that toggle, where the second call undoes the first and 'f' and
+   // '?' simply appear dead.  Nothing in these depends on who logged in.
+   if (!wiredOnce) {
+      wiredOnce = true;
+      setupPlayer();
+      setupSearch();
+      setupKeys();
+      }
 
    // Fetch the logged-in user's roles so we can show/hide the cast button.
    try {
