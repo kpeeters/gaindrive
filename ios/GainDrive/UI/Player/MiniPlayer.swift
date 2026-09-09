@@ -32,6 +32,9 @@ struct MiniPlayer: View {
 	/// One sheet per bar is not one sheet on screen: only the selected tab's
 	/// bar is in the hierarchy, so only one of them can ever be tapped.
 	@State private var expanded = false
+	/// Local for the same reason `expanded` is: only the selected tab's bar is
+	/// in the hierarchy, so one sheet per bar is not one sheet on screen.
+	@State private var castPicker = false
 
 	var body: some View {
 		if let song = player.current {
@@ -82,6 +85,18 @@ struct MiniPlayer: View {
 						}
 						.accessibilityLabel("Watch")
 					}
+					// **Only while casting**, and that is the point of it being
+					// here rather than always: this bar is narrow, and the way
+					// *in* to casting is Now Playing, beside AirPlay, where it
+					// belongs. What the bar owes is the state — sound coming out
+					// of another room with nothing on screen saying so is the
+					// one thing about casting that is genuinely confusing — and
+					// a way back out of it in one tap.
+					if player.isCasting {
+						CastButton(showing: $castPicker)
+							.font(.body)
+							.frame(width: 32, height: 32)
+					}
 					Button {
 						player.togglePlayPause()
 					} label: {
@@ -109,6 +124,7 @@ struct MiniPlayer: View {
 			}
 			.accessibilityElement(children: .contain)
 			.sheet(isPresented: $expanded) { NowPlayingView() }
+			.sheet(isPresented: $castPicker) { CastDeviceSheet() }
 		}
 	}
 

@@ -42,17 +42,21 @@ struct TrackInfoView: View {
 
 				Section {
 					row("Stored", stored)
+					// **Where, before what.** With a receiver in the picture
+					// "Sent" is answering a different question — what went over
+					// the network to something else — and reading it without
+					// knowing that is how "why does this sound different"
+					// acquires a wrong answer.
+					row("Playing on", player.castDevice?.name)
 					// nil while the account ceiling is still being asked for,
 					// which is a request to that track's own server and can be
 					// the slow half of a first play.
 					row("Sent", sent?.label)
+					if player.castSendsSoundOnly {
+						row("Picture", "Not sent")
+					}
 				} footer: {
-					Text(
-						"""
-						"Sent" is what this app asked the server for. \
-						Your account's own bitrate limit applies on top.
-						"""
-					)
+					Text(footer)
 				}
 			}
 			.navigationTitle("Track info")
@@ -64,6 +68,19 @@ struct TrackInfoView: View {
 			}
 		}
 		.task { sent = await player.streamQuality(for: song) }
+	}
+
+	/// The last row is the reason the screen exists, so the footer is what makes
+	/// it readable — and while casting there are two facts to state rather than
+	/// one, because the second is the likelier surprise.
+	private var footer: String {
+		let base =
+			"\"Sent\" is what this app asked the server for. "
+			+ "Your account's own bitrate limit applies on top."
+		guard player.castSendsSoundOnly else { return base }
+		return base
+			+ "\n\nThis device has no screen, so the film's soundtrack was sent "
+			+ "instead of the picture."
 	}
 
 	/// The file as the server holds it, which is what "Original" would deliver.

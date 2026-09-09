@@ -10,16 +10,18 @@ import SwiftUI
 
 /// Cast receivers: what is announcing itself, and what has been named by hand.
 ///
-/// **Nothing casts yet.** This is the surface that makes the protocol work
-/// checkable at all: the two assumptions everything downstream rests on — that
-/// `NWBrowser` finds a receiver without a restricted multicast entitlement, and
-/// that Network.framework will complete a TLS handshake with one — are settled
-/// by a real device on a real network rather than by a unit test, and there
-/// would otherwise be no way to reach the code. It is a pane the feature wants
-/// permanently, not a debug screen to be removed.
+/// **Managing devices, not choosing one.** Where to play is the player's
+/// question and is answered by `CastDeviceSheet` behind the cast button; this
+/// screen exists for the devices themselves — seeing what the network offers,
+/// naming one that will not announce itself, and asking whether it answers.
+///
+/// The Test button is what proves the two assumptions everything downstream
+/// rests on, and it is why this pane was built a stage before anything used it:
+/// that `NWBrowser` finds a receiver without a restricted multicast
+/// entitlement, and that Network.framework will complete a TLS handshake with
+/// one. Neither is settled by a unit test.
 struct CastSettingsView: View {
 	@Environment(CastDeviceStore.self) private var store
-	@Environment(PlayerConnection.self) private var player
 
 	/// Owned here rather than injected, because **browsing runs only while
 	/// something is looking**. Multicast is not free and the picker is the only
@@ -36,7 +38,6 @@ struct CastSettingsView: View {
 
 	var body: some View {
 		Form {
-			castingSection
 			discoveredSection
 			manualSection
 		}
@@ -59,22 +60,6 @@ struct CastSettingsView: View {
 		.onChange(of: scenePhase) { _, phase in
 			guard phase == .active else { return }
 			discovery.restart()
-		}
-	}
-
-	// MARK: - The live session
-
-	/// **Provisional, and the proper home for this is the player.** A cast
-	/// button in the mini player and a device sheet are the next stage's work;
-	/// this row exists so that casting is reachable at all, the same reason the
-	/// rest of this pane exists a stage before anything uses it.
-	@ViewBuilder
-	private var castingSection: some View {
-		if let device = player.castDevice {
-			Section {
-				LabeledContent("Casting to", value: device.name)
-				Button("Stop casting", role: .destructive) { player.stopCasting() }
-			}
 		}
 	}
 
@@ -184,18 +169,16 @@ struct CastSettingsView: View {
 				if probing.contains(id) {
 					ProgressView().controlSize(.small)
 				} else {
-					// Two buttons rather than a row tap: "test this address" and
-					// "send the music there" are different enough acts that a
-					// single gesture meaning one of them would sometimes mean
-					// the other. `CastProbe` exists precisely so the first
-					// cannot become the second by accident.
+					// **Test, and only test.** Choosing where to play is the
+					// player's business and lives behind the cast button in Now
+					// Playing; this screen is for the devices themselves. The
+					// two are different enough acts that one gesture meaning
+					// either would sometimes mean the wrong one — which is the
+					// same reason `CastProbe` is a separate type from the
+					// session in the first place.
 					Button("Test") { test(device) }
 						.buttonStyle(.bordered)
 						.controlSize(.small)
-					Button("Cast") { player.startCasting(to: device) }
-						.buttonStyle(.borderedProminent)
-						.controlSize(.small)
-						.disabled(player.castDevice == device)
 				}
 			}
 			if let result = results[id] {

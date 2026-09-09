@@ -88,6 +88,19 @@ final class PlayerConnection {
 	var castDevice: CastDevice? { castSession.device }
 	var isCasting: Bool { cast != nil }
 
+	/// A film whose **sound alone** went to the receiver.
+	///
+	/// Worth surfacing rather than leaving as a surprise: the picture is not
+	/// missing, it was never sent — the device announced no screen, so the
+	/// server's own rule is to extract the soundtrack. Read from what was
+	/// actually loaded rather than re-derived from the device, because the
+	/// decision is `CastEngine`'s and a second copy of it would be a second
+	/// answer.
+	var castSendsSoundOnly: Bool {
+		guard current?.isVideo == true, let media = castSession.loaded else { return false }
+		return !media.isVideo
+	}
+
 	/// Only for cover art: the stream URL belongs to the engine, which knows
 	/// what kind of URL it can consume.
 	@ObservationIgnored private let registry: ServerRegistry
@@ -136,6 +149,13 @@ final class PlayerConnection {
 		cast = engine
 		castSession.connect(to: device)
 		adopt(engine)
+		// **The picture goes with the playback.** `adopt` stops the local
+		// engine, so a surface left up would be a dead rectangle over a film
+		// playing in another room. The web client keeps a muted local copy
+		// slaved to the receiver's clock and Android draws a "casting
+		// elsewhere" panel; neither is built here, so the honest thing is to
+		// close it. See `CAST.md`.
+		showingVideo = false
 		// **It plays, whatever was happening here.** A LOAD autoplays by
 		// construction, so preserving a paused state would mean sending a PAUSE
 		// chasing after it — and choosing a device is in any case an act that
@@ -485,8 +505,10 @@ final class PlayerConnection {
 			scrobbler.trackChanged(to: song?.ref)
 			prewarmNext()
 			// The one place a video becomes current, however it got there — a
-			// tap, or the queue reaching it.
-			if song?.isVideo == true { showingVideo = true }
+			// tap, or the queue reaching it. **Not while casting**, where there
+			// is no local picture to show and raising the surface would cover
+			// the app with a rectangle that never fills in.
+			if song?.isVideo == true, !isCasting { showingVideo = true }
 		}
 
 		guard let song else {

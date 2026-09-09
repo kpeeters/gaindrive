@@ -26,6 +26,7 @@ struct NowPlayingView: View {
 	@State private var path: [Route] = []
 	@State private var addingTo: Song?
 	@State private var showingInfo: Song?
+	@State private var castPicker = false
 
 	var body: some View {
 		NavigationStack(path: $path) {
@@ -54,6 +55,7 @@ struct NowPlayingView: View {
 		}
 		.sheet(item: $addingTo) { AddToPlaylistView(song: $0) }
 		.sheet(item: $showingInfo) { TrackInfoView(song: $0) }
+		.sheet(isPresented: $castPicker) { CastDeviceSheet() }
 	}
 
 	private func content(_ song: Song) -> some View {
@@ -103,6 +105,16 @@ struct NowPlayingView: View {
 				Text(song.artistName)
 					.font(.subheadline)
 					.foregroundStyle(.secondary)
+			}
+			// **Said in words, once, where there is room for them.** The bar's
+			// tinted glyph is the same fact for a surface with no space; here
+			// the question "why is nothing coming out of this phone" deserves a
+			// sentence rather than an icon.
+			if let device = player.castDevice {
+				Label("Playing on \(device.name)", systemImage: "tv.fill")
+					.font(.footnote)
+					.foregroundStyle(Color.accentColor)
+					.padding(.top, 2)
 			}
 			if !song.albumTitle.isEmpty {
 				if let album = song.albumRef {
@@ -185,6 +197,13 @@ struct NowPlayingView: View {
 				Image(systemName: "info.circle")
 			}
 			.accessibilityLabel("Track info")
+			// **Beside AirPlay and distinct from it**, which is the honest
+			// arrangement rather than a tidy one: AirPlay moves *this device's*
+			// output, casting hands a URL to something that fetches for itself
+			// and goes on playing if the phone sleeps. They answer the same
+			// wish and are not the same mechanism, and `AVRoutePickerView` is
+			// UIKit's own and cannot be taught about a third kind of route.
+			CastButton(showing: $castPicker)
 			AirPlayButton()
 				.frame(width: 30, height: 30)
 		}
