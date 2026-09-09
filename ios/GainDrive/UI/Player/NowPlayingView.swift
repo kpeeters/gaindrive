@@ -111,10 +111,14 @@ struct NowPlayingView: View {
 			// the question "why is nothing coming out of this phone" deserves a
 			// sentence rather than an icon.
 			if let device = player.castDevice {
-				Label("Playing on \(device.name)", systemImage: "tv.fill")
-					.font(.footnote)
-					.foregroundStyle(Color.accentColor)
-					.padding(.top, 2)
+				Label {
+					Text("Playing on \(device.name)")
+				} icon: {
+					CastGlyph(connected: true, size: 13)
+				}
+				.font(.footnote)
+				.foregroundStyle(Color.accentColor)
+				.padding(.top, 2)
 			}
 			if !song.albumTitle.isEmpty {
 				if let album = song.albumRef {

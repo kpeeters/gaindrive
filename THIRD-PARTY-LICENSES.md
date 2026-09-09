@@ -57,6 +57,14 @@ rather than `third_party/` because it is embedded into the binary by
   against 537 KB, for the price of a build-time dependency on Python
   fontTools. Not worth it.
 
+  **Two glyphs of it are also in the iOS app**, as
+  `ios/Resources/Assets.xcassets/CastIcon.imageset/cast.svg` and
+  `CastConnectedIcon.imageset/cast_connected.svg` — extracted from this same
+  file rather than vendored again, so there is one copy of the artwork and one
+  licence entry. SF Symbols has no cast icon and will not get one, Cast being
+  Google's mark. `ios/Resources/Assets.xcassets/README.md` says how to
+  regenerate them; fontTools is needed then and not at build time.
+
 
 ## Server — system packages
 

@@ -93,8 +93,7 @@ struct MiniPlayer: View {
 					// one thing about casting that is genuinely confusing — and
 					// a way back out of it in one tap.
 					if player.isCasting {
-						CastButton(showing: $castPicker)
-							.font(.body)
+						CastButton(showing: $castPicker, size: 18)
 							.frame(width: 32, height: 32)
 					}
 					Button {

@@ -141,6 +141,9 @@ struct CastDeviceSheet: View {
 			// `WiiM Pro` says far more about which box this is than a number,
 			// and the address is only known once something has connected.
 			detail: [device.model, device.address].compactMap { $0 }.first,
+			// **The device, not the action.** A row says what kind of box this
+			// is; the cast glyph belongs on the control that starts a session
+			// and would say nothing here, where every row is a receiver.
 			systemImage: device.kind == .wiim ? "hifispeaker" : "tv",
 			selected: player.castDevice == device
 		) {
@@ -175,21 +178,48 @@ struct CastDeviceSheet: View {
 	}
 }
 
-/// The control that opens it.
+/// The Chromecast glyph.
 ///
-/// **Drawn as filled while casting**, which is the whole of the "casting to X"
-/// state on a surface that has no room to say more — the same glyph the system
-/// uses for an active AirPlay route, and the same convention every Cast client
-/// follows.
+/// **Not an SF Symbol, because there is none.** Cast is Google's mark and Apple
+/// ships no third-party trademarks in the symbol set; `AVRoutePickerView` draws
+/// the AirPlay triangle and knows nothing about Cast either. So the artwork is
+/// Material's own, extracted from the very font the web client renders from —
+/// see `Resources/Assets.xcassets/README.md`. This is the one icon in the app
+/// where the shape *is* the meaning: every other platform has trained people to
+/// look for that rectangle with the three waves, and an approximation out of
+/// the symbol set is not recognisable as it.
+///
+/// **The filled screen is what says a session is live**, and it has to be the
+/// glyph rather than only the colour. `web/app.js` records why, having tried
+/// the other way first: a tinted `cast` reads as *an available device* on every
+/// other platform, which is the opposite of what it would mean here.
+///
+/// An SF Symbol takes its size from the font and an image cannot, so the size
+/// is a `@ScaledMetric` and grows with Dynamic Type as a symbol would.
+struct CastGlyph: View {
+	var connected: Bool
+	@ScaledMetric(relativeTo: .body) var size: CGFloat = 20
+
+	var body: some View {
+		Image(connected ? "CastConnectedIcon" : "CastIcon")
+			.renderingMode(.template)
+			.resizable()
+			.scaledToFit()
+			.frame(width: size, height: size)
+	}
+}
+
+/// The control that opens the picker.
 struct CastButton: View {
 	@Environment(PlayerConnection.self) private var player
 	@Binding var showing: Bool
+	var size: CGFloat = 20
 
 	var body: some View {
 		Button {
 			showing = true
 		} label: {
-			Image(systemName: player.isCasting ? "tv.fill" : "tv")
+			CastGlyph(connected: player.isCasting, size: size)
 				.foregroundStyle(player.isCasting ? Color.accentColor : .secondary)
 		}
 		.accessibilityLabel(
