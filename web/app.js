@@ -6846,6 +6846,36 @@ function navSettle(depth) {
    return rows;
 }
 
+// .view-header is sticky inside the pane, so it overlays the top of the scroll
+// area rather than scrolling with it: its height is not usable space.  Measured
+// rather than a constant because it wraps at narrow widths, and shared by the
+// two callers so that fact is stated once.
+function navHeaderH(depth) {
+   const hdr = document.getElementById(NAV_PANES[depth])?.querySelector('.view-header');
+   return hdr ? hdr.offsetHeight : 0;
+}
+
+// How far a page step moves: as many rows as the pane can show, less one kept
+// for context — what stops a page from leaving the reader with nothing they
+// recognise.
+//
+// A division rather than a walk over offsetTop, and that is a fact about these
+// lists rather than an approximation: within one list every row is the same
+// element with the same padding, none of them carries a margin, and .pane is a
+// plain block, so a row's offsetHeight *is* the vertical step.  A list whose
+// rows genuinely differed in height would need the walk; none here does.
+//
+// The pane's own padding-bottom is counted in clientHeight and slightly
+// overstates what fits.  It is a fraction of a row, and the same - 1 absorbs it.
+function navPageStep(depth, rows) {
+   const pane = document.getElementById(NAV_PANES[depth]);
+   // The row being moved from, which is the one whose height the step is in.
+   const row  = rows[navCursor[depth]] ?? rows[0];
+   if (!pane || !row || !row.offsetHeight) return 1;
+   const usable = pane.clientHeight - navHeaderH(depth);
+   return Math.max(1, Math.floor(usable / row.offsetHeight) - 1);
+}
+
 // Only the active pane draws a cursor.  On a wide screen all three are on show
 // at once, and a mark in each would say nothing about which one the keys are
 // driving.
@@ -6857,16 +6887,17 @@ function navPaint() {
    const row  = rows[navCursor[d]];
    if (!row) return;
    row.classList.add('row-cursor');
-   // .view-header is sticky, so a row scrolled to the top of a pane sits under
-   // it — and the browser counts that as visible, so 'nearest' would decline to
-   // scroll and the cursor would be behind the header.  Measured rather than a
-   // constant because that header wraps at narrow widths.
-   const hdr = document.getElementById(NAV_PANES[d])?.querySelector('.view-header');
-   row.style.scrollMarginTop = hdr ? `${hdr.offsetHeight}px` : '';
+   // A row scrolled to the top of a pane sits under the sticky header, and the
+   // browser counts that as visible — so 'nearest' would decline to scroll and
+   // the cursor would be behind it.
+   row.style.scrollMarginTop = `${navHeaderH(d)}px`;
    row.scrollIntoView({block: 'nearest'});
 }
 
-function navMoveRow(delta) {
+// dir is ±1; `page` makes each of those a screenful instead of a row.  One
+// function rather than two because both rules below apply either way, and two
+// copies of them would be two chances to fix only one.
+function navMoveRow(dir, page = false) {
    const d     = paneNav.depth;
    // Asked before settling, which is what places it.
    const fresh = navCursor[d] === null;
@@ -6874,12 +6905,16 @@ function navMoveRow(delta) {
    if (!rows.length) return;
    // The first press in a pane places the cursor rather than moving it —
    // pressing Down on a list that has none should land on the first row, not
-   // silently skip it for the second.
+   // silently skip it for the second.  A page press is no different: it is
+   // still the press that puts the cursor on screen.
    //
    // Clamped rather than wrapped: a list that jumps from its end back to its
    // start hides which end you were at, and these lists are long.
-   if (!fresh)
-      navCursor[d] = Math.max(0, Math.min(navCursor[d] + delta, rows.length - 1));
+   if (!fresh) {
+      const step = page ? navPageStep(d, rows) : 1;
+      navCursor[d] =
+         Math.max(0, Math.min(navCursor[d] + dir * step, rows.length - 1));
+      }
    navPaint();
 }
 
@@ -6976,6 +7011,10 @@ const SHORTCUTS = [
     when: () => !videoCovering(), run: () => navMoveRow(-1)},
    {group: 'Browsing', key: 'ArrowDown', show: '↓', label: 'Next row',
     when: () => !videoCovering(), run: () => navMoveRow(1)},
+   {group: 'Browsing', key: 'PageUp', show: 'PgUp', label: 'Up a screenful',
+    when: () => !videoCovering(), run: () => navMoveRow(-1, true)},
+   {group: 'Browsing', key: 'PageDown', show: 'PgDn', label: 'Down a screenful',
+    when: () => !videoCovering(), run: () => navMoveRow(1, true)},
    {group: 'Browsing', key: 'ArrowLeft', show: '←', label: 'Pane to the left',
     when: () => !videoCovering(), run: () => navMovePane(-1)},
    {group: 'Browsing', key: 'ArrowRight', show: '→', label: 'Open, or pane right',
