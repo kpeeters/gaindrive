@@ -6512,6 +6512,14 @@ function openSearchBar() {
 
 function closeSearchBar() {
    document.getElementById('search-bar').classList.remove('open');
+   // Blurred, or the bar goes on owning the keyboard after it has gone.  It
+   // collapses by animating grid-template-rows to 0fr rather than by being
+   // display:none — which is what makes the transition possible — so nothing
+   // takes focus off the box for us, and the dispatcher's typing guard reads a
+   // focused INPUT and returns on every key that follows.  The symptom is a
+   // client that stops answering the keyboard entirely once search has been
+   // opened and dismissed.
+   document.getElementById('search-input').blur();
    document.getElementById('search-input').value = '';
 }
 
