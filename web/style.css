@@ -290,7 +290,7 @@ body {
 }
 
 #sidebar a .mi {
-    font-size: 1.5rem;
+    font-size: 1.7rem;
 }
 
 #sidebar a:hover,
@@ -316,7 +316,7 @@ body {
    padding: 0 0.3rem;
    border: 1px solid var(--border);
    border-radius: 3px;
-   background: none;
+   background: var(--bg);
    color: var(--text-dim);
    font-family: inherit;   /* kbd defaults to monospace */
    font-size: 0.72rem;
@@ -2603,10 +2603,6 @@ input.chapter-time.bad { border-color: #e06c6c; }
 }
 
 #keys-list .keys-group:first-child { margin-top: 0; }
-
-kdb {
-    background: #eee;
-}
 
 /* A key cap, not a glyph: it has to read as "press this" beside prose. */
 #keys-list kbd {
