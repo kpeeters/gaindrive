@@ -253,6 +253,14 @@ data class GetAlbumBody(
 	val album: AlbumDto? = null,
 ) : SubsonicBody
 
+/** One track, the full entry — the same rows `getAlbum` sends. */
+@Serializable
+data class GetSongBody(
+	override val status: String = "failed",
+	override val error: SubsonicError? = null,
+	val song: SongDto? = null,
+) : SubsonicBody
+
 @Serializable
 data class AlbumInfoDto(
 	val notes: String? = null,

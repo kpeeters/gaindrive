@@ -17,7 +17,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.gaindrive.android.data.TrackLink
 import org.gaindrive.android.data.extractSharedUrl
+import org.gaindrive.android.data.parseTrackLink
 import org.gaindrive.android.ui.AvailabilityViewModel
 import org.gaindrive.android.ui.GainDriveApp
 import org.gaindrive.android.ui.LocalAvailability
@@ -37,6 +39,12 @@ class MainActivity : ComponentActivity() {
 	 */
 	private val sharedUrl = MutableStateFlow<String?>(null)
 
+	/**
+	 * A gaindrive:// track link and not yet acted on, or null. The same
+	 * holder-not-intent bargain as [sharedUrl], for the same reason.
+	 */
+	private val trackLink = MutableStateFlow<TrackLink?>(null)
+
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
 		enableEdgeToEdge()
@@ -46,7 +54,10 @@ class MainActivity : ComponentActivity() {
 		// the navigation back stack has already been restored with the panel on
 		// it — reading the intent again would push a second copy of it, in front
 		// of a user who may have backed out of the first.
-		if (savedInstanceState == null) takeSharedUrl(intent)
+		if (savedInstanceState == null) {
+			takeSharedUrl(intent)
+			takeTrackLink(intent)
+		}
 
 		setContent {
 			// One view model supplies both the theme and the server list, so
@@ -68,6 +79,8 @@ class MainActivity : ComponentActivity() {
 						settingsViewModel = viewModel,
 						sharedUrl = sharedUrl.asStateFlow(),
 						onSharedUrlHandled = { sharedUrl.value = null },
+						trackLink = trackLink.asStateFlow(),
+						onTrackLinkHandled = { trackLink.value = null },
 					)
 				}
 			}
@@ -89,6 +102,7 @@ class MainActivity : ComponentActivity() {
 		// reading it after a configuration change sees the wrong one.
 		setIntent(intent)
 		takeSharedUrl(intent)
+		takeTrackLink(intent)
 	}
 
 	private fun takeSharedUrl(intent: Intent?) {
@@ -99,6 +113,16 @@ class MainActivity : ComponentActivity() {
 		// prose sent here by mistake.
 		extractSharedUrl(intent.getStringExtra(Intent.EXTRA_TEXT))?.let {
 			sharedUrl.value = it
+		}
+	}
+
+	private fun takeTrackLink(intent: Intent?) {
+		if (intent?.action != Intent.ACTION_VIEW) return
+		// The filter admits only the scheme, but an intent is whatever another
+		// app says it is: a URI that does not parse to a track is ignored, the
+		// answer extractSharedUrl gives prose with no link in it.
+		parseTrackLink(intent.data?.toString())?.let {
+			trackLink.value = it
 		}
 	}
 }

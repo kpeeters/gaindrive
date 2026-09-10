@@ -109,6 +109,23 @@ class BrowseApiTest {
 		assertEquals(6710886L, song.size)
 	}
 
+	/** The one consumer is the track-link resolver, which wants these three. */
+	@Test
+	fun `getSong parses one full entry`() = runTest {
+		respond(
+			"""{"subsonic-response":{"status":"ok","song":
+			     {"id":"501","parent":"77","albumId":"77","isDir":false,
+			      "type":"music","isVideo":false,"title":"Kid Charlemagne",
+			      "artist":"Steely Dan","album":"The Royal Scam","track":1,
+			      "year":1976,"size":6710886,"contentType":"audio/flac",
+			      "suffix":"flac","duration":279,"bitRate":961,"coverArt":"77"}}}"""
+		)
+		val song = api.getSong("501").requireOk().song!!
+		assertEquals("501", song.id)
+		assertEquals("77", song.albumId)
+		assertEquals("The Royal Scam", song.album)
+	}
+
 	/**
 	 * `starred` became an ISO 8601 instant rather than a boolean when the
 	 * server was made conformant. Parsing it as a string is the whole point.

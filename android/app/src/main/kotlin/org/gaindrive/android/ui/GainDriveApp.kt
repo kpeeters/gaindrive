@@ -48,6 +48,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.flow.StateFlow
+import org.gaindrive.android.data.TrackLink
+import org.gaindrive.android.data.TrackLinkResult
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.playback.cast.CastDeviceKind
 import org.gaindrive.android.playback.cast.kind
@@ -77,6 +79,8 @@ import org.gaindrive.android.ui.tabs.SettingsTab
  * [sharedUrl] carries a URL another app sent us, and [onSharedUrlHandled] says
  * it has been acted on. They are parameters rather than another view model
  * because the value comes from an `Intent`, which only the activity sees.
+ * [trackLink] and [onTrackLinkHandled] are the same contract for a
+ * `gaindrive://` track link.
  */
 // currentWindowAdaptiveInfo() is the only experimental thing here;
 // NavigationSuiteScaffold itself is stable at material3 1.3.1.
@@ -86,6 +90,8 @@ fun GainDriveApp(
 	settingsViewModel: SettingsViewModel = hiltViewModel(),
 	sharedUrl: StateFlow<String?>,
 	onSharedUrlHandled: () -> Unit,
+	trackLink: StateFlow<TrackLink?>,
+	onTrackLinkHandled: () -> Unit,
 ) {
 	val settings by settingsViewModel.state.collectAsStateWithLifecycle()
 	val navController = rememberNavController()
@@ -229,6 +235,39 @@ fun GainDriveApp(
 		onSharedUrlHandled()
 		nowPlayingOpen = false
 		navController.navigate(Route.FetchUrl(url))
+	}
+
+	// Opens the album a track link names and starts the track — the same
+	// landing a chapter hit in search gets, through Route.Album's autoPlay
+	// parameters. Handing the link to the view model rather than resolving
+	// here is what survives a rotation mid-lookup; the result comes back as a
+	// one-shot, consumed the way playerMessage is above.
+	val trackLinkViewModel: TrackLinkViewModel = hiltViewModel()
+	val pendingTrackLink by trackLink.collectAsStateWithLifecycle()
+	LaunchedEffect(pendingTrackLink) {
+		val link = pendingTrackLink ?: return@LaunchedEffect
+		onTrackLinkHandled()
+		trackLinkViewModel.open(link)
+	}
+	val trackLinkResult by trackLinkViewModel.result.collectAsStateWithLifecycle()
+	LaunchedEffect(trackLinkResult) {
+		when (val r = trackLinkResult) {
+			null -> return@LaunchedEffect
+			is TrackLinkResult.Album -> {
+				nowPlayingOpen = false
+				navController.navigate(
+					Route.Album(
+						albumRef = r.albumRef,
+						albumTitle = r.albumTitle,
+						autoPlayRef = r.songRef,
+						autoPlayMs = r.positionMs,
+					),
+				)
+			}
+			is TrackLinkResult.Error ->
+				Toast.makeText(context, r.message, Toast.LENGTH_LONG).show()
+		}
+		trackLinkViewModel.consumeResult()
 	}
 
 	// Compact windows get a bottom bar, medium and expanded a navigation rail.

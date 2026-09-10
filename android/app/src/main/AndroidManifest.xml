@@ -90,6 +90,23 @@
 				<category android:name="android.intent.category.DEFAULT" />
 				<data android:mimeType="text/plain" />
 			</intent-filter>
+			<!--
+				A track link from the server's chooser page (web/link.html),
+				arriving as gaindrive://<host>/?track=<id>[&t=<s>] through
+				Chrome's intent:// syntax. The app's own scheme rather than
+				https, deliberately: an https filter cannot name a host — no
+				host is known at build time — and a hostless web filter puts
+				this app in the "Open with" chooser for every link on Androids
+				old enough to predate app-link verification. The scheme is
+				dropped, not needed: the configured server the link is matched
+				against already knows its own.
+			-->
+			<intent-filter>
+				<action android:name="android.intent.action.VIEW" />
+				<category android:name="android.intent.category.DEFAULT" />
+				<category android:name="android.intent.category.BROWSABLE" />
+				<data android:scheme="gaindrive" />
+			</intent-filter>
 		</activity>
 
 		<!-- Exported so the system media controls, Bluetooth and any other

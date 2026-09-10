@@ -84,9 +84,16 @@ document.getElementById('open-web').href = web.href;
 // intent, so a phone without the app lands in the web player off the same
 // tap.  (Firefox for Android ignores the attribute; the visible browser
 // link above is what covers it.)
+//
+// The scheme is the app's own, not this page's http(s): the app's intent
+// filter has to name a scheme, and filtering on bare https with no host --
+// no host can be known at the app's build time -- would offer the app for
+// every web link on Androids old enough to predate app-link verification.
+// The app re-finds the server by the authority, which its own configured
+// URL already spells with the right scheme.
 document.getElementById('open-app').href =
    'intent://' + here.host + here.pathname + here.search
- + '#Intent;scheme=' + here.protocol.slice(0, -1)
+ + '#Intent;scheme=gaindrive'
  + ';package=org.gaindrive.android'
  + ';S.browser_fallback_url=' + encodeURIComponent(web.href)
  + ';end';

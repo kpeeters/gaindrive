@@ -58,6 +58,14 @@ interface SubsonicApi {
 	@GET("rest/getAlbum.view")
 	suspend fun getAlbum(@Query("id") id: String): SubsonicEnvelope<GetAlbumBody>
 
+	/**
+	 * One track by id. Browsing never needs it — a listing already carries its
+	 * rows — so its caller is [org.gaindrive.android.data.TrackLinkResolver],
+	 * where a link arrives holding nothing but an id.
+	 */
+	@GET("rest/getSong.view")
+	suspend fun getSong(@Query("id") id: String): SubsonicEnvelope<GetSongBody>
+
 	@GET("rest/getArtistInfo2.view")
 	suspend fun getArtistInfo2(@Query("id") id: String): SubsonicEnvelope<GetArtistInfoBody>
 
