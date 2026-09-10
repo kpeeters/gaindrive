@@ -735,6 +735,7 @@ body {
    line-height: 1;
    cursor: pointer;
    opacity: 0;
+   pointer-events: none;
    transition: opacity 0.15s ease;
 }
 
@@ -744,18 +745,21 @@ body {
    picture, which is exactly where it lands after using these, kept them drawn
    over the film indefinitely.
 
-   Its own :hover is kept, and is not redundant with the class.  Resting the
-   pointer on a button generates no further movement, so the idle timer would
-   otherwise fade the thing being aimed at out from under it. */
+   pointer-events travels with the opacity, and that is what makes a faded
+   control safe on a touchscreen: the tap that reveals the transport passes
+   straight through to the surface instead of pressing whatever it landed on.
+   Without it, tapping the middle of the picture to see the controls would
+   pause the film, since that is where the play button is.
+
+   It is also why :hover is no longer in this list.  A faded control takes no
+   pointer events, so it cannot be hovered, so :hover could never have brought
+   it back -- and once shown, the enter/leave listeners in setupVideoSurface()
+   hold it open far better than :hover did: for the whole cluster rather than
+   for a single disc. */
 #video-surface.controls-on #video-close,
-#video-close:hover,
 #video-close:focus-visible {
    opacity: 1;
-}
-
-/* Touch devices never hover, so the only way out would be unreachable. */
-@media (hover: none) {
-   #video-close { opacity: 1; }
+   pointer-events: auto;
 }
 
 /* Transport over the picture: back 10, play/pause, forward 10.  Revealed by
@@ -785,6 +789,7 @@ body {
    align-items: center;
    gap: 1rem;
    opacity: 0;
+   pointer-events: none;
    transition: opacity 0.15s ease;
 }
 
@@ -822,20 +827,16 @@ body {
       }
 }
 
-/* :has(button:hover), not :hover on the cluster.  The cluster's box spans the
-   gaps between the discs and a good part of the middle of the picture, so
-   :hover would hold the controls up for a pointer merely resting near them --
-   the thing the idle timer exists to stop.  This way only a pointer actually
-   on a disc does, which is also what keeps an invisible button from ever being
-   clicked: the one under the pointer is never the one that faded. */
+/* Held open from JS rather than by a :hover rule here.  This was
+   :has(button:hover) -- not :hover on the cluster, whose box spans the gaps
+   between the discs and a good part of the middle of the picture, so a pointer
+   merely resting near them would have held the controls up.  The enter/leave
+   pair in setupVideoSurface() draws that line at the cluster's real bounds and
+   works for a finger as well as a pointer, which no hover rule does. */
 #video-surface.controls-on #video-controls,
-#video-controls:has(button:hover),
 #video-controls:focus-within {
    opacity: 1;
-}
-
-@media (hover: none) {
-   #video-controls { opacity: 1; }
+   pointer-events: auto;
 }
 
 /* display, not opacity: a 280x158 thumbnail has no room for them, and an

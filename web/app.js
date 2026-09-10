@@ -4298,6 +4298,20 @@ function videoControlsSleep() {
    document.getElementById('video-surface').classList.remove('controls-on');
    }
 
+// A pointer or a finger resting on a control holds it open: entering cancels
+// the idle timer and leaving restarts it.
+//
+// This is what the CSS :hover and :has(button:hover) rules used to do, and it
+// had to move here once a faded control stopped taking pointer events — it
+// cannot be hovered, so hover could never have brought it back.  Doing it from
+// JS is better than what it replaced on two counts: it draws the line at the
+// cluster's real bounds rather than at one disc, and it works for a finger,
+// which no hover rule does.
+function videoControlsHold() {
+   clearTimeout(videoControlsTimer);
+   videoControlsTimer = null;
+   }
+
 // Requested on #video-frame rather than on the video element, so everything
 // absolutely positioned inside the frame goes fullscreen with the picture: the
 // transport cluster and the close button.  #video-bar is outside the frame and
@@ -4322,10 +4336,14 @@ function videoFullscreenToggle() {
 }
 
 function setupVideoSurface() {
-   // pointermove rather than mousemove so a pen counts too.  Touch needs
-   // nothing from this: the (hover: none) rules in style.css keep both
-   // clusters drawn unconditionally, and the class merely re-asserts what is
-   // already true there.
+   // pointermove rather than mousemove so a pen counts too, and pointerdown so
+   // a touchscreen counts as well — which is the whole of what a tablet needs.
+   // It used to need more, because style.css pinned both clusters visible
+   // under (hover: none) on the reasoning that a device which never hovers
+   // could never reveal them.  That was true of hover and false of this: a tap
+   // raises the same class a mouse does, so the idle timer already worked on a
+   // tablet and the override was the only thing keeping the controls drawn
+   // over the film for its whole length.
    //
    // Leaving the surface hides them at once, which is what :hover did and is
    // still the right answer — the pointer has gone somewhere else entirely.
@@ -4333,6 +4351,15 @@ function setupVideoSurface() {
    surf.addEventListener('pointermove', videoControlsWake);
    surf.addEventListener('pointerdown', videoControlsWake);
    surf.addEventListener('pointerleave', videoControlsSleep);
+
+   // Inner before outer, so a pointer leaving a control for somewhere else on
+   // the picture restarts the countdown, and one leaving the surface entirely
+   // still hits the sleep above and goes at once.
+   for (const id of ['video-controls', 'video-close']) {
+      const el = document.getElementById(id);
+      el.addEventListener('pointerenter', videoControlsHold);
+      el.addEventListener('pointerleave', videoControlsWake);
+      }
 
    // Closing the surface dismisses the picture; it does not stop the cast.
    //
@@ -6813,6 +6840,19 @@ const NAV_ROW_SEL =
 // other candidate and cannot work: search rows carry no ids at all.
 const navCursor = [null, null, null];
 
+// Whether the cursor is *drawn*, which is a different question from where it
+// is.  A click keeps navCursor up to date so that the keys carry on from
+// wherever the mouse left off, but it must not put a mark on screen: on a
+// phone, where every row is reached by tapping and no key will ever be
+// pressed, that mark is decoration nobody can act on and it reads as the row
+// having been left in some half-selected state.
+//
+// So it is raised by the things that move the cursor *with a key* and never by
+// the click listener.  Sticky once raised — someone who has reached for the
+// keyboard once is entitled to keep seeing where they are, and blinking the
+// mark out on every click would be worse than either extreme.
+let navShown = false;
+
 // Visible rows only, and offsetParent is what decides it.  A track row is
 // hidden by CSS in two directions — .has-chapters outside edit mode and
 // .chapter-track inside it — so asking the layout is the only test that cannot
@@ -6826,6 +6866,9 @@ function navRows(depth) {
 // Forgets every cursor, for when the panes are about to hold something else.
 function navForget() {
    navCursor.fill(null);
+   // There is no cursor anywhere after this, so there is nothing for the mark
+   // to describe until a key places one again.
+   navShown = false;
    document.querySelectorAll('.row-cursor')
       .forEach(r => r.classList.remove('row-cursor'));
 }
@@ -6885,6 +6928,10 @@ function navPageStep(depth, rows) {
 function navPaint() {
    document.querySelectorAll('.row-cursor')
       .forEach(r => r.classList.remove('row-cursor'));
+   // Clearing happens either way; only the drawing waits for a key.  Skipping
+   // the settle below with it costs nothing: every caller that has not already
+   // settled sets the index itself, and the next key settles anyway.
+   if (!navShown) return;
    const d    = paneNav.depth;
    const rows = navSettle(d);
    const row  = rows[navCursor[d]];
@@ -6901,6 +6948,7 @@ function navPaint() {
 // function rather than two because both rules below apply either way, and two
 // copies of them would be two chances to fix only one.
 function navMoveRow(dir, page = false) {
+   navShown = true;
    const d     = paneNav.depth;
    // Asked before settling, which is what places it.
    const fresh = navCursor[d] === null;
@@ -6922,6 +6970,7 @@ function navMoveRow(dir, page = false) {
 }
 
 function navMovePane(delta) {
+   navShown = true;
    const d = Math.max(0, Math.min(paneNav.depth + delta, NAV_PANES.length - 1));
    if (d === paneNav.depth) return;
    // slideTo rather than history.back(), which is what the back links do.  The
@@ -6938,6 +6987,7 @@ function navMovePane(delta) {
 // one meaning per list.  Album edit mode needs no case here either — the row
 // handler already returns early on .editing.
 function navActivate() {
+   navShown = true;
    const d = paneNav.depth;
    if (!navSettle(d).length) return;
    navRows(d)[navCursor[d]]?.click();
@@ -6945,6 +6995,7 @@ function navActivate() {
 
 // Right means "go deeper", as it does in a column browser.
 function navDrill() {
+   navShown = true;
    const d    = paneNav.depth;
    const rows = navSettle(d);
    const row  = rows[navCursor[d]];
@@ -7102,6 +7153,7 @@ function isearchStep(from) {
 }
 
 function isearchStart() {
+   navShown = true;
    const d = paneNav.depth;
    navSettle(d);
    isearch.on      = true;
