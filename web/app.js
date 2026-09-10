@@ -1227,6 +1227,15 @@ function libraryModes() {
    return seen;
    }
 
+// Choosing a mode, without drawing anything: the caller decides whether that
+// means re-rendering the Library view it is already in or navigating to it.
+// Shared with Shift U so the remembering cannot drift from the segmented
+// control that is the other way in.
+function setLibraryMode(m) {
+   libraryMode = m;
+   localStorage.setItem('gd_library_mode', m);
+   }
+
 // Signature of the personal library as last rendered, and the timer watching
 // for it to change. Both are module-level because viewArtists() destroys the
 // upload bar's DOM when it re-renders, so a timer owned by that node would be
@@ -1552,9 +1561,14 @@ function makeUploadBar() {
    const bar = document.createElement('div');
    bar.className = 'upload-bar';
 
+   // Nothing here appends as it is built.  Every piece is constructed and the
+   // whole panel's order is then stated once, at the foot of this function —
+   // which is the only way to read what the thing looks like without following
+   // a dozen appendChild calls through four hundred lines, and the reason it
+   // came to interleave a producer, its caption, the shared name fields and
+   // then the *other* producer.
    const row = document.createElement('div');
    row.className = 'upload-row';
-   bar.appendChild(row);
 
    const fileInput = document.createElement('input');
    fileInput.type   = 'file';
@@ -1576,13 +1590,11 @@ function makeUploadBar() {
    stagingHint.className   = 'admin-hint';
    stagingHint.textContent =
       'Everything here stays in your own uploads until an admin moves it into '
-      + 'the shared library. The names below apply to both an archive and a URL.';
-   bar.appendChild(stagingHint);
-   bar.appendChild(hint);
+      + 'the shared library. The names below apply to both an archive and a '
+      + 'URL; leave either blank to use what the source supplies.';
 
-   // Created here but appended below the URL row: both producers report through
-   // the same status line, and it reads as belonging to whichever was used last
-   // only if it sits under both of them.
+   // One status line for both producers, which reads as belonging to whichever
+   // was used last only because the order below puts it under both of them.
    const progress = document.createElement('progress');
    progress.value  = 0;
    progress.max    = 100;
@@ -1593,10 +1605,11 @@ function makeUploadBar() {
 
    // ---- The names, which belong to both producers ----
    //
-   // Above the URL row rather than inside it: an archive and a fetched URL are
-   // the same batch by the time the server normalises them, and both take the
-   // same overrides. Having these only under the URL box was the earlier shape
-   // and made an uploaded zip the one thing that could not be named.
+   // Under both producers rather than inside either: an archive and a fetched
+   // URL are the same batch by the time the server normalises them, and both
+   // take the same overrides. Having these only under the URL box was the
+   // earlier shape and made an uploaded zip the one thing that could not be
+   // named.
    //
    // A row of their own rather than two more fields beside the URL: .upload-row
    // is one flex line, and a URL box squeezed between two name boxes and a
@@ -1608,14 +1621,12 @@ function makeUploadBar() {
    // field is marked required.
    const nameRow = document.createElement('div');
    nameRow.className = 'upload-row fetch-names';
-   bar.appendChild(nameRow);
 
    // Completion comes from the whole library, so `list` is shared: the point is
    // to stop a near-duplicate spelling of a name that already exists, and which
    // slice it exists in does not change that.
    const nameList = document.createElement('datalist');
    nameList.id = 'upload-name-list';
-   bar.appendChild(nameList);
 
    // Sticky, unlike the URL: fetching six tracks off one concert should mean
    // typing the names once. That is also why they are not cleared on success —
@@ -1657,7 +1668,6 @@ function makeUploadBar() {
    // whether that will be refused is genuinely unpredictable from here.
    const dupeNote = document.createElement('p');
    dupeNote.className = 'upload-dupe';
-   bar.appendChild(dupeNote);
 
    const known = loadNameSuggestions(nameList);
    // Debounced the way the search box is, with a module-level timer rather than
@@ -1681,10 +1691,26 @@ function makeUploadBar() {
    // empty handler list is the server saying the feature is unavailable — no
    // handlers configured, or the tool they name is not installed — and offering
    // a box that can only be refused would be worse than offering nothing.
+   // Held out here so the order at the foot can place them, and null when the
+   // server cannot fetch anything — which is what makes that list able to skip
+   // the pair without knowing why they are absent.
+   let urlRow  = null;
+   let urlHint = null;
+   let jobs    = null;
+
    if (urlHandlers?.length) {
-      const urlRow = document.createElement('div');
+      urlRow = document.createElement('div');
       urlRow.className = 'upload-row';
-      bar.appendChild(urlRow);
+
+      // The running fetches, drawn at the foot.  Built here with the rest of
+      // the URL half rather than in a second block on the same condition, and
+      // the poll started with it — unconditionally, not only after a Fetch, or
+      // a page reload part-way through a ten-minute download would show
+      // nothing at all.  Starting it while this node is still detached is what
+      // pollFetchJobs() defers its first tick for.
+      jobs = document.createElement('div');
+      jobs.className = 'fetch-jobs';
+      pollFetchJobs();
 
       const urlInput = document.createElement('input');
       urlInput.type        = 'url';
@@ -1726,12 +1752,11 @@ function makeUploadBar() {
       urlRow.appendChild(fetchBtn);
 
       const names = urlHandlers.map(h => h.name).join(', ');
-      const urlHint = document.createElement('p');
+      urlHint = document.createElement('p');
       urlHint.className   = 'admin-hint';
-      urlHint.textContent =
-         `Or paste a URL — handled by: ${names}. `
-         + 'Leave the names above blank to use the ones the site supplies.';
-      bar.appendChild(urlHint);
+      // The names are below this now, so the sentence telling you to leave
+      // them blank went with them, into stagingHint.
+      urlHint.textContent = `Or paste a URL — handled by: ${names}.`;
 
       const submit = async () => {
          const url = urlInput.value.trim();
@@ -1769,8 +1794,21 @@ function makeUploadBar() {
             });
       }
 
-   bar.appendChild(progress);
-   bar.appendChild(uploadStatus);
+   // The panel's order, in one place.  The two producers come first and
+   // adjacent, because they are alternatives — upload an archive, or paste a
+   // URL — and nothing else in here says so: the interleaved order this
+   // replaced put a paragraph, a caption, two name boxes and a duplicate note
+   // between them, so the URL box read as a further step in the upload rather
+   // than the other way of doing it.
+   //
+   // Then their two captions, then what happens to whatever arrives, then the
+   // names that apply to both, then the progress of the one you started.
+   bar.append(row);
+   if (urlRow) bar.append(urlRow);
+   bar.append(hint);
+   if (urlHint) bar.append(urlHint);
+   bar.append(stagingHint, nameRow, nameList, dupeNote, progress, uploadStatus);
+   if (jobs) bar.append(jobs);
 
    uploadBtn.addEventListener('click', () => {
       const file = fileInput.files[0];
@@ -1830,15 +1868,6 @@ function makeUploadBar() {
 
       xhr.send(fd);
       });
-
-   if (urlHandlers?.length) {
-      const jobs = document.createElement('div');
-      jobs.className = 'fetch-jobs';
-      bar.appendChild(jobs);
-      // Unconditionally, not only after a Fetch: a page reload part-way through
-      // a ten-minute download would otherwise show nothing at all.
-      pollFetchJobs();
-      }
 
    return bar;
    }
@@ -1919,8 +1948,7 @@ async function viewArtists() {
             ?? (m.charAt(0).toUpperCase() + m.slice(1));
          btn.addEventListener('click', () => {
             if (m === libraryMode) return;
-            libraryMode = m;
-            localStorage.setItem('gd_library_mode', m);
+            setLibraryMode(m);
             viewArtists();
             });
          seg.appendChild(btn);
@@ -2507,8 +2535,7 @@ async function viewAlbums(artistId, artistName, isCategory = false) {
                      const destType = (musicFolders ?? [])
                         .find(f => String(f.id) === String(rootId))?.contentType;
                      if (moved?.id && moved?.parent && destType) {
-                        libraryMode = destType;
-                        localStorage.setItem('gd_library_mode', destType);
+                        setLibraryMode(destType);
                         await viewArtists();
                         await viewAlbums(moved.parent, moved.artist,
                                          destType === 'categories');
@@ -7357,6 +7384,22 @@ const SHORTCUTS = [
    {group: 'Views', key: 's', show: 'Shift S', shift: true, label: 'Settings',
     nav:  '#sidebar a[data-view="settings"]',
     when: keyCanSwitchView, run() { document.querySelector(this.nav).click(); }},
+   // Uploads is a mode of the Library view rather than a view, so this one sets
+   // the mode and then goes to that view the way the others do — by clicking
+   // the sidebar entry, which keeps the history entry and the .active mark the
+   // mouse's.  It works from anywhere for the same reason: viewArtists() reads
+   // libraryMode when it renders, so the mode is already chosen by the time it
+   // does.  Being a mode is also why it carries no `nav` and so draws no cap:
+   // there is no sidebar row to hang one on, and the segmented control in the
+   // Library header is where it is offered instead.
+   //
+   // Offered on exactly the terms the segment is, by asking the function that
+   // decides them — an account with no upload rights is shown the row dimmed
+   // rather than given a key that lands on a mode it does not have.
+   {group: 'Views', key: 'u', show: 'Shift U', shift: true, label: 'Uploads',
+    when: () => keyCanSwitchView() && libraryModes().includes('uploads'),
+    run:  () => { setLibraryMode('uploads');
+                  document.querySelector('#sidebar a[data-view="artists"]').click(); }},
 
    {group: 'Video', key: 'f', show: 'F', label: 'Fullscreen',
     when: () => videoOnScreen() && keyShown('video-fullscreen'),
