@@ -3487,10 +3487,25 @@ async function openInfoModal() {
 // friendly name, and under it the model and address joined with " · ". The
 // port is deliberately absent — it is never the thing that tells two devices
 // apart, and 8009 on every row is noise.
-function castDeviceButton(dev) {
+// `n` is the row's position in the whole list, counted across both groups —
+// see renderCastDevices.  It is drawn as the key that picks the row, for the
+// first nine only: past that there is no single keystroke to offer, and a cap
+// naming a key that does nothing is worse than no cap.
+function castDeviceButton(dev, n) {
    const btn = document.createElement('button');
    const label = dev.name || dev.address;
    const connected = dev.id === castDeviceId;
+
+   // Leading, unlike the sidebar's caps, which sit at the right margin.  Those
+   // are a hint about a key that is always there; this one *identifies the
+   // row*, the way a numbered menu does, and reading "3" before the name is
+   // what makes the list scannable as a list of choices.
+   if (n <= 9) {
+      const kb = document.createElement('kbd');
+      kb.className   = 'cast-row-key';
+      kb.textContent = String(n);
+      btn.appendChild(kb);
+      }
 
    const icon = document.createElement('span');
    icon.className = 'mi cast-row-icon';
@@ -3550,8 +3565,8 @@ function castDeviceButton(dev) {
    // And "if it can" is not hedging: the file goes out untouched or not at
    // all, so on a DVD rip or an HEVC film this genuinely does nothing.
    const opts = dev.videoOut === false
-      ? [['auto', 'Extract the sound'], ['send', 'Send the file if it can']]
-      : [['auto', 'Video'],             ['sound', 'Soundtrack only']];
+      ? [['auto', 'Extract sound'], ['send',  'Try sending both']]
+      : [['auto', 'Video'],         ['sound', 'Soundtrack only']];
    const sel = document.createElement('select');
    sel.className = 'cast-row-pref';
    for (const [value, text] of opts) {
@@ -3601,14 +3616,19 @@ function renderCastDevices(devices) {
       return;
       }
 
-   for (const dev of found) list.appendChild(castDeviceButton(dev));
+   // One counter across both groups, because the number is "the nth row of
+   // this list" and the heading between them is not a row.  Numbering each
+   // group from 1 would give two rows the same key, and the dispatcher picks
+   // by position in the DOM — so the duplicate would silently be unreachable.
+   let n = 0;
+   for (const dev of found) list.appendChild(castDeviceButton(dev, ++n));
 
    if (manual.length > 0) {
       const heading = document.createElement('div');
       heading.className = 'cast-list-heading';
       heading.textContent = 'Added manually';
       list.appendChild(heading);
-      for (const dev of manual) list.appendChild(castDeviceButton(dev));
+      for (const dev of manual) list.appendChild(castDeviceButton(dev, ++n));
       }
    }
 
@@ -6816,6 +6836,16 @@ function setupSearch() {
 //    both chapter buttons are hidden on a film with no markers, and
 //    #video-fullscreen is hidden while casting.  Testing the button is
 //    therefore the whole of `when` in three of the four cases.
+//  * `keys` is the alternative to `key` for one entry standing for a *range*
+//    of them: a string of the characters it answers to, and `run` is handed
+//    the one that was pressed.  It exists so picking the fourth cast device is
+//    one row in the overlay reading "1…9" rather than nine rows reading "4".
+//  * `modal` names the dialog an entry belongs to, and is what lets a key work
+//    while that dialog is open — everything else is locked out, see the
+//    dispatcher.  It does *not* mean "only there": an entry with no dialog open
+//    is judged on `when` alone, which is what makes X stop a cast from
+//    anywhere while the number keys, whose `when` asks for the picker, work
+//    only in it.  `'*'` is every dialog, and only `?` wants it.
 //  * `nav` is optional and holds the CSS selector of the sidebar entry the
 //    key stands for.  It is one string doing two jobs: `run` clicks it, and
 //    keysNavHints() stamps `show` onto it as a key cap — so the letter printed
@@ -6857,6 +6887,13 @@ function keyShown(id) {
 // attribute rather than a class, which is exactly what keyShown tests.
 function keyCanSwitchView() {
    return keyShown('app-shell') && !videoCovering();
+}
+
+// The cast picker, which the number keys are meaningless without.  Its own
+// test rather than keyOpenModal(), which answers about the topmost dialog and
+// would say yes while something else sat over it.
+function castModalOpen() {
+   return !document.getElementById('cast-modal').classList.contains('hidden');
 }
 
 function videoOnScreen() {
@@ -7470,10 +7507,35 @@ const SHORTCUTS = [
    // this key stands for", not "how it runs", and Search runs what its own
    // button's handler runs.  Without it Search would be the one unhinted entry
    // among four hinted neighbours, which reads as having no key.
+   // One row in the overlay for nine keys.  The number a row answers to is
+   // drawn on the row itself by castDeviceButton(), and both come from the
+   // same place — the order the picker appends them in — so the cap and the
+   // key cannot disagree.  Clicking the row rather than calling
+   // selectCastDevice() keeps one definition of what picking one means.
+   //
+   // Nine and not ten: 0 would have to mean the tenth, which nobody would
+   // guess, and a list that long is a list to use the mouse on.
+   {group: 'Elsewhere', keys: '123456789', show: '1…9',
+    label: 'Pick that cast device',
+    modal: 'cast-modal', when: castModalOpen,
+    run(pressed) {
+       document.querySelectorAll('#cast-device-list .cast-row > button')
+          [Number(pressed) - 1]?.click();
+       }},
+   // Works from anywhere a cast is running, not only in the picker — which is
+   // what `modal` naming the picker buys: with no dialog open the entry is
+   // judged on `when` alone.  Mirrors the button, so it stops a cast by
+   // exactly the path the mouse does, hidden row and all.
+   {group: 'Elsewhere', key: 'x', show: 'X', label: 'Stop casting',
+    modal: 'cast-modal', when: () => castDeviceId !== null,
+    run:  () => document.getElementById('cast-stop-btn').click()},
    {group: 'Elsewhere', key: '/', show: '/', label: 'Search the library',
     nav: '#search-btn', when: () => true, run: openSearchBar},
+   // modal '*' because this one has to be reachable over any dialog: it is
+   // the answer to "why did that key do nothing", and a dialog is exactly
+   // where that gets asked.
    {group: 'Elsewhere', key: '?', show: '?', label: 'This list',
-    when: () => true, run: keysToggle},
+    modal: '*', when: () => true, run: keysToggle},
 ];
 
 function keysToggle() {
@@ -7608,11 +7670,16 @@ function setupKeys() {
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
-      // Nothing but ? reaches past an open dialog.  Otherwise Q would close the
-      // film behind the cast chooser and Space would start playback under a
-      // confirmation prompt — a key changing something the viewer cannot see
-      // is the one result a shortcut set must not produce.
-      if (keyOpenModal() && e.key !== '?') return;
+      // A dialog locks the keyboard to the entries that belong to it, or Q
+      // would close the film behind the cast chooser and Space would start
+      // playback under a confirmation prompt — a key changing something the
+      // viewer cannot see is the one result a shortcut set must not produce.
+      //
+      // Folded into the match below rather than an early return, because the
+      // question is no longer "is a dialog open" but "does this key belong to
+      // the one that is".  An entry naming no dialog simply never matches
+      // while one is up, which is the behaviour the early return had.
+      const open = keyOpenModal();
 
       // Shift is part of the identity of a named key and of a *letter*, and of
       // nothing else.  ArrowLeft is spelled the same either way, so Shift+← has
@@ -7633,14 +7700,18 @@ function setupKeys() {
       // carry two entries and the applicable one wins: ← seeks over a film that
       // is covering the panes and moves between them when it is not.
       const sc = SHORTCUTS.find(s =>
-         s.key === key && (!cased || !!s.shift === !!e.shiftKey)
-         && !!s.ctrl === e.ctrlKey && s.when());
+         (s.keys ? s.keys.includes(key) : s.key === key)
+         && (!cased || !!s.shift === !!e.shiftKey)
+         && !!s.ctrl === e.ctrlKey
+         && (!open || s.modal === '*' || s.modal === open.id)
+         && s.when());
       if (!sc) return;
       // Applied to every match rather than per entry: / would otherwise open
       // Firefox's quick-find, and Space and the arrows would scroll the pane
       // under the film.
       e.preventDefault();
-      sc.run();
+      // The key itself, for the entries that stand for a range of them.
+      sc.run(key);
       });
 
    document.getElementById('keys-close-btn').addEventListener('click', keysToggle);

@@ -2407,6 +2407,25 @@ input.chapter-time.bad { border-color: #e06c6c; }
    color: var(--accent);
 }
 
+/* The number that picks this row.  Outlined and unfilled for the reason the
+   sidebar's caps are: #cast-device-list button:hover fills with var(--bg), so a
+   cap sharing that fill would vanish under the pointer.  It keeps --text-dim on
+   the connected row too, where the name goes accent — the number is not part of
+   what the row says, only of how to reach it. */
+.cast-row-key {
+   flex-shrink: 0;
+   min-width: 1.4em;
+   padding: 0 0.25rem;
+   border: 1px solid var(--border);
+   border-radius: 3px;
+   background: none;
+   color: var(--text-dim);
+   font-family: inherit;
+   font-size: 0.72rem;
+   line-height: 1.5;
+   text-align: center;
+}
+
 .cast-row-icon {
    font-size: 1.3rem;
    flex-shrink: 0;
