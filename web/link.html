@@ -1,0 +1,95 @@
+<!doctype html>
+<!-- The chooser an Android browser is served instead of the SPA when the URL
+     carries ?track= (see the index handler in gaindrive.cc).  Self-contained
+     on purpose: it must not pull in the SPA's stylesheet or icon font for two
+     anchors, and it is served unauthenticated, so it shows no track data. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GainDrive</title>
+<style>
+   :root {
+      --bg:      #f4f4f4;
+      --surface: #ffffff;
+      --border:  #ddd;
+      --accent:  #a31623;
+      --text:    #1a1a1a;
+      --text-dim:#666;
+   }
+   @media (prefers-color-scheme: dark) {
+      :root {
+         --bg:      #1a1a1a;
+         --surface: #242424;
+         --border:  #333;
+         --accent:  #c9202f;
+         --text:    #e0e0e0;
+         --text-dim:#888;
+      }
+   }
+   body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, sans-serif;
+      margin: 0;
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+   }
+   main {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 2rem 1.5rem;
+      margin: 1rem;
+      width: 320px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      text-align: center;
+   }
+   h1   { margin: 0; font-size: 1.2rem; }
+   p    { margin: 0 0 0.75rem; color: var(--text-dim); }
+   a {
+      display: block;
+      padding: 0.7rem;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: 600;
+   }
+   a.primary { background: var(--accent); color: #fff; }
+   a.plain   { border: 1px solid var(--border); color: var(--text); }
+</style>
+</head>
+<body>
+<main>
+   <h1>GainDrive</h1>
+   <p>This link plays a track.</p>
+   <a id="open-app" class="primary">Open in the app</a>
+   <a id="open-web" class="plain">Play in the browser</a>
+</main>
+<script>
+// The browser knows the public URL it opened — scheme, host, any subpath a
+// proxy mounts the client under, and the query — so the anchors are composed
+// here rather than by the server, which behind a proxy knows none of that
+// and would otherwise be splicing an untrusted query string into HTML.
+const here = new URL(location.href);
+const web  = new URL(location.href);
+// The loop-breaker: the server serves the SPA, not this page, for web=1.
+// The SPA's own ?track= reader ignores the extra parameter.
+web.searchParams.set('web', '1');
+document.getElementById('open-web').href = web.href;
+// Chrome follows S.browser_fallback_url by itself when no app answers the
+// intent, so a phone without the app lands in the web player off the same
+// tap.  (Firefox for Android ignores the attribute; the visible browser
+// link above is what covers it.)
+document.getElementById('open-app').href =
+   'intent://' + here.host + here.pathname + here.search
+ + '#Intent;scheme=' + here.protocol.slice(0, -1)
+ + ';package=org.gaindrive.android'
+ + ';S.browser_fallback_url=' + encodeURIComponent(web.href)
+ + ';end';
+</script>
+</body>
+</html>
