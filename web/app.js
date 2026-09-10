@@ -3509,6 +3509,59 @@ setInterval(() => {
    videoChapterTick(absCurrent);
    }, 100);
 
+// The link back to this track, as the info dialog offers it.  Two values
+// rather than one string so ticking the checkbox needs no re-read of anything.
+let shareBase = '';   // the link with no position
+let shareAt   = 0;    // seconds; 0 when there is nothing worth offering
+
+// location.pathname rather than serverBase(): a proxy may mount the client
+// under a subpath and the origin alone would drop it.  It also drops any query
+// string, which is what stops a link made from a page that was itself opened
+// with ?track= from carrying two of them.
+function infoShareSet(songId, seconds) {
+   shareBase = `${window.location.origin}${window.location.pathname}`
+             + `?track=${encodeURIComponent(songId)}`;
+   shareAt   = seconds > 0 ? seconds : 0;
+   const label = document.getElementById('info-share-at-label');
+   label.hidden = shareAt === 0;             // "Start at 0:00" offers nothing
+   document.getElementById('info-share-at-time').textContent = fmtDuration(shareAt);
+   document.getElementById('info-share-at').checked = false;
+   infoShareUpdate();
+   }
+
+function infoShareUpdate() {
+   const at = document.getElementById('info-share-at').checked;
+   document.getElementById('info-share-url').value =
+      (shareAt && at) ? `${shareBase}&t=${shareAt}` : shareBase;
+   // The button reports the last copy until the box changes under it.
+   document.getElementById('info-share-copy').textContent = 'Copy';
+   }
+
+// navigator.clipboard exists only in a secure context, and a gaindrive on a
+// LAN is reached over plain http as often as not -- so here the modern call is
+// the path that may be missing and execCommand is the one that works.  Where
+// even that is refused the text is left selected and the button says so: a
+// Copy button that silently does nothing is worse than one that hands the job
+// back.
+async function infoShareCopy() {
+   const el  = document.getElementById('info-share-url');
+   const btn = document.getElementById('info-share-copy');
+   el.focus();
+   el.setSelectionRange(0, el.value.length);
+   try {
+      if (navigator.clipboard?.writeText) {
+         await navigator.clipboard.writeText(el.value);
+         btn.textContent = 'Copied';
+         return;
+         }
+      }
+   catch (e) { console.warn('[share] clipboard write failed', e); }
+   let ok = false;
+   try { ok = document.execCommand('copy'); }
+   catch (e) { console.warn('[share] execCommand copy failed', e); }
+   btn.textContent = ok ? 'Copied' : 'Press Ctrl+C';
+   }
+
 async function openInfoModal() {
    const cur = player.queue[player.index];
    if (!cur) return;
@@ -3632,6 +3685,12 @@ async function openInfoModal() {
    // browser" is as much a fact as a device name. The other two rows drop
    // themselves when empty, as every row in the first list does.
    fill(play, playRows);
+
+   // The position is a snapshot taken as the dialog opens, not a live reading:
+   // the label and the URL have to agree, and a time that crept on while the
+   // box sat open would make "Start at 3:07" name some other moment by the
+   // time it was ticked.
+   infoShareSet(song.id, Math.floor(playerPosition()));
    }
 
 // One row of the cast picker, laid out as the Android sheet lays it out: the
@@ -5814,6 +5873,14 @@ function setupPlayer() {
    document.getElementById('info-close-btn').addEventListener('click', () => {
       document.getElementById('info-modal').classList.add('hidden');
       });
+   document.getElementById('info-share-at')
+      .addEventListener('change', infoShareUpdate);
+   document.getElementById('info-share-copy')
+      .addEventListener('click', infoShareCopy);
+   // Selecting on focus is what a share box is expected to do, and it is also
+   // what leaves execCommand something to act on when it is clicked into.
+   document.getElementById('info-share-url')
+      .addEventListener('focus', e => e.target.select());
 
    document.querySelector('.nav-title').addEventListener('click', () => {
       document.getElementById('about-version').textContent = serverVersion ?? '?';

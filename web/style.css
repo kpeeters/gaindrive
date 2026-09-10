@@ -2556,12 +2556,38 @@ input.chapter-time.bad { border-color: #e06c6c; }
    word-break: break-word;
 }
 
-#info-playback-head {
+#info-playback-head,
+#info-share-head {
    margin: 1.1rem 0 0.5rem;
    font-size: 0.85rem;
    font-weight: 600;
    letter-spacing: 0.04em;
    text-transform: uppercase;
+   color: var(--text-dim);
+}
+
+#info-share {
+   display: flex;
+   flex-direction: column;
+   gap: 0.4rem;
+}
+
+/* The box and the button share a line, the box taking what is left.  min-width
+   because a flex item's default minimum is its content, and a long URL would
+   otherwise push the button off the edge of the dialog. */
+#info-share-row {
+   display: flex;
+   gap: 0.5rem;
+   align-items: center;
+}
+
+#info-share-row .token-input { flex: 1; min-width: 0; }
+
+#info-share-at-label {
+   display: flex;
+   align-items: center;
+   gap: 0.4rem;
+   font-size: 0.85rem;
    color: var(--text-dim);
 }
 

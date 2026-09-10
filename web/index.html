@@ -252,6 +252,21 @@
            browser" is as much an answer as a device name. -->
       <h4 id="info-playback-head">Playback</h4>
       <dl id="info-playback-list"></dl>
+      <!-- A link back to this track.  Its own section rather than a row in
+           the lists above: those are a two-column grid of text, and this is a
+           box, a checkbox and a button. -->
+      <h4 id="info-share-head">Share</h4>
+      <div id="info-share">
+         <div id="info-share-row">
+            <input id="info-share-url" class="token-input" type="text"
+                   readonly spellcheck="false">
+            <button id="info-share-copy">Copy</button>
+         </div>
+         <label id="info-share-at-label" hidden>
+            <input type="checkbox" id="info-share-at">
+            Start at <span id="info-share-at-time"></span>
+         </label>
+      </div>
       <button id="info-close-btn">Close</button>
    </div>
 </div>
