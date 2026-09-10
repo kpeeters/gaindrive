@@ -7971,6 +7971,52 @@ function loginFormAttach() {
    detachedLoginForm = null;
 }
 
+// A ?track= deep link, read once at load.  Held rather than read where it is
+// acted on: logging out and back in runs showShell() again, and a link must
+// not play a second time.  `t` is optional, in seconds.
+let pendingTrack = (() => {
+   const q  = new URLSearchParams(window.location.search);
+   const id = q.get('track');
+   if (!id) return null;
+   const t = parseFloat(q.get('t'));
+   return {id, offset: Number.isFinite(t) && t > 0 ? t : 0};
+   })();
+
+// Open the album a ?track= link names and start that track playing.  It goes
+// through viewTracks' autoPlay parameters rather than loading the one song, so
+// the whole album is queued and albumCtx is right -- the same path a search
+// result's click takes, and the reason a deep link needs almost no code.
+async function openTrackLink(link) {
+   let song;
+   try {
+      song = (await apiCall('getSong', {id: link.id})).song;
+      }
+   catch (e) {
+      // A song id is a rowid and is reassigned when the music DB is rebuilt,
+      // so a link that has outlived one says "not found".  Saying so is better
+      // than landing silently on the artists view, which reads as the link
+      // having been ignored.
+      showError(e?.message ?? 'That track could not be opened.');
+      return;
+      }
+   if (!song) return;
+
+   // Spent only once it has been acted on, rather than at parse time: that is
+   // what lets a link survive a mistyped password and a reload.  The whole
+   // query string goes, which is right while this is the only parameter the
+   // client reads -- revisit it when there is a second.
+   history.replaceState(history.state, '', window.location.pathname);
+
+   // The id passed on is the server's own spelling of it, not the one from the
+   // URL: the match inside viewTracks is ===, so this is what makes ?track=007
+   // find song 7.  Ids are strings on the wire; nothing here may parseInt one.
+   history.pushState({view: 'tracks', albumId: song.parent,
+                      albumTitle: song.album ?? '', artistId: null,
+                      artistName: song.artist ?? ''}, '');
+   await viewTracks(song.parent, song.album ?? '', null, song.artist ?? '',
+                    song.id, link.offset);
+}
+
 async function showShell() {
    console.log('[shell] showing main shell');
    document.getElementById('login-screen').hidden = true;
@@ -8138,6 +8184,15 @@ async function showShell() {
    // Record initial state so the browser can pop back to it.
    history.replaceState({view: 'artists'}, '');
    await showView('artists');
+
+   // A deep link last, and below the cast restore above, which overwrites the
+   // queue.  After showView() so the pane behind the listing is populated and
+   // Back reaches something.
+   if (pendingTrack) {
+      const link = pendingTrack;
+      pendingTrack = null;
+      await openTrackLink(link);
+      }
 }
 
 function showLogin() {
