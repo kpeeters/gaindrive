@@ -3513,7 +3513,7 @@ setInterval(() => {
 // rather than one string so ticking the checkbox needs no re-read of anything.
 let shareBase    = '';    // the link with no position
 let shareAt      = 0;     // seconds; 0 when there is nothing worth offering
-let shareChapter = null;  // {start (ms), name} under the snapshot position
+let shareChapter = null;  // {start (s), name} under the snapshot position
 
 // location.pathname rather than serverBase(): a proxy may mount the client
 // under a subpath and the origin alone would drop it.  It also drops any query
@@ -3558,12 +3558,14 @@ async function infoShareChapter(songId, seconds) {
       if (base !== shareBase) return;
       }
 
-   // The last marker at or before the snapshot.  One starting at 0 is not
-   // offered -- "start at this chapter" would be the plain link, the same
+   // The last marker at or before the snapshot -- both sides in seconds,
+   // which is what the API's `start` holds (to millisecond precision), the
+   // same comparison videoChapterTick makes.  One starting at 0 is not
+   // offered: "start at this chapter" would be the plain link, the same
    // "offers nothing" rule the position label applies to 0:00.
    let cur = null, idx = 0;
    for (let i = 0; i < chapters.length; i++)
-      if (chapters[i].start <= seconds * 1000) { cur = chapters[i]; idx = i + 1; }
+      if (chapters[i].start <= seconds) { cur = chapters[i]; idx = i + 1; }
    if (!cur || !(cur.start > 0)) return;
 
    shareChapter = cur;
@@ -3577,10 +3579,10 @@ async function infoShareChapter(songId, seconds) {
 function infoShareUpdate() {
    const at        = document.getElementById('info-share-at').checked;
    const atChapter = document.getElementById('info-share-ch').checked;
-   // A chapter's start is stored in milliseconds and may carry a fraction,
-   // which both readers of t= accept; the position box is whole seconds.
+   // A chapter's start is seconds and may carry a fraction, which both
+   // readers of t= accept; the position box is whole seconds.
    let t = 0;
-   if (shareChapter && atChapter) t = shareChapter.start / 1000;
+   if (shareChapter && atChapter) t = shareChapter.start;
    else if (shareAt && at)        t = shareAt;
    document.getElementById('info-share-url').value =
       t > 0 ? `${shareBase}&t=${t}` : shareBase;
