@@ -692,13 +692,13 @@
 <p class="api-meta"><code>GET /rest/getServerSettings.view</code>
 <span class="api-badge">admin only</span>
 <span class="api-badge">JSON only</span></p>
-<p>Returns the third-party API credentials the server holds.</p>
+<p>Reports whether the server holds each third-party API credential.</p>
 <h4>Response</h4>
 <table class="doc-table">
 <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
-<tr><td><code>serverSettings.discogsToken</code></td><td>string</td><td>Discogs personal access token, used in the artist-portrait chain. Empty when unset.</td></tr>
-<tr><td><code>serverSettings.tmdbKey</code></td><td>string</td><td>TMDB API key, used to identify films and series during the scan. Empty when unset.</td></tr>
+<tr><td><code>serverSettings.discogsTokenSet</code></td><td>bool</td><td>Whether a Discogs personal access token is stored, used in the artist-portrait chain.</td></tr>
+<tr><td><code>serverSettings.tmdbKeySet</code></td><td>bool</td><td>Whether a TMDB API key is stored, used to identify films and series during the scan.</td></tr>
 </tbody>
 </table>
 <h4>Errors</h4>
@@ -708,6 +708,8 @@
 <tr><td><code>50</code></td><td>Subsonic</td><td>The caller is not an admin.</td></tr>
 </tbody>
 </table>
+<p><b>The credentials themselves are never returned</b>, only whether each is set. Nothing needs to read one back — they are written once and used server-side — and a secret the server hands out is one in an API response, in the client&#x27;s memory and in every cache between. It also stopped a browser&#x27;s own password manager offering to store the value as a login, the web client having put it in a masked box.</p>
+<p>Editing one is therefore blind: send a new value to <code>saveServerSettings</code>, or omit the field to leave it alone.</p>
 </div>
 <div class="api-ep">
 <h3 id="ep-saveServerSettings">saveServerSettings</h3>
@@ -718,8 +720,8 @@
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
-<tr><td><code>discogsToken</code></td><td>string</td><td>New Discogs token. Omit to leave unchanged.</td></tr>
-<tr><td><code>tmdbKey</code></td><td>string</td><td>New TMDB key. Omit to leave unchanged. Re-read at the top of every scan.</td></tr>
+<tr><td><code>discogsToken</code></td><td>string</td><td>New Discogs token. Omit to leave unchanged; send empty to clear. <code>getServerSettings</code> reports only whether one is stored, so a client cannot show the current value.</td></tr>
+<tr><td><code>tmdbKey</code></td><td>string</td><td>New TMDB key. Omit to leave unchanged; send empty to clear. Re-read at the top of every scan.</td></tr>
 </tbody>
 </table>
 <h4>Errors</h4>

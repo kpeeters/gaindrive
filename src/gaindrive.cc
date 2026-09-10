@@ -3657,11 +3657,22 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto ri = store_.get_user(qp("u"));
 		if (!ri || !ri->is_admin) { err(50, "User is not authorized for this operation."); return; }
 
-		std::string token    = store_.get_setting("discogs_token");
-		std::string tmdb_key = store_.get_setting("tmdb_key");
+		// Whether each is set, never what it is.  A secret the server can
+		// hand back is a secret in an API response, in the browser's memory
+		// and in whatever cache sits between — and, because the web client
+		// filled a masked box with it, one the browser's own password manager
+		// offered to store as a login.  Nothing needs to read these back: they
+		// are written once and used server-side, so the client only has to
+		// know whether to say "(set)" or "(not set)".
+		//
+		// saveServerSettings already writes only the keys the caller sent, so
+		// "unchanged" needs no sentinel: the client simply omits the field it
+		// did not touch.  Clearing one stays possible by sending it empty.
+		bool has_token = !store_.get_setting("discogs_token").empty();
+		bool has_tmdb  = !store_.get_setting("tmdb_key").empty();
 		std::string body = subsonic_ok_json([&](nlohmann::json& r) {
-			r["serverSettings"]["discogsToken"] = token;
-			r["serverSettings"]["tmdbKey"]      = tmdb_key;
+			r["serverSettings"]["discogsTokenSet"] = has_token;
+			r["serverSettings"]["tmdbKeySet"]      = has_tmdb;
 			});
 		res.set_content(body, "application/json");
 		});

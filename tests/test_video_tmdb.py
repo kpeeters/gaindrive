@@ -97,8 +97,10 @@ def _described():
 
 
 def _need_key():
+    # Whether one is set is all the server will say; it stopped handing the key
+    # back, so this can no longer check that it looks plausible.
     r = _json("getServerSettings.view")
-    if not (r.get("serverSettings") or {}).get("tmdbKey"):
+    if not (r.get("serverSettings") or {}).get("tmdbKeySet"):
         raise Skip("no TMDB key configured — Settings → Server")
 
 
@@ -212,22 +214,30 @@ def test_video_genre_is_browsable():
           f"{v['genre']!r}")
 
 
-def test_saving_one_setting_keeps_the_other():
-    """saveServerSettings writes only what it is given. With one field that
-    distinction did not exist; with two, saving the TMDB key must not blank
-    the Discogs token."""
+def test_saving_nothing_keeps_both_settings():
+    """saveServerSettings writes only the settings it is given, so a call
+    naming neither must leave both alone.
+
+    This used to read both values, re-send one and compare — which it cannot
+    do now that getServerSettings reports only whether each is set. Sending
+    nothing tests the same property and is the safer shape besides: the
+    regression guarded against is the handler writing unconditionally, and
+    against a call carrying no values that clears both, flipping both flags.
+    Re-sending a real key would have been a destructive test on a live
+    server, and could not have been restored from a boolean."""
     before = _json("getServerSettings.view").get("serverSettings") or {}
-    token  = before.get("discogsToken", "")
-    tmdb   = before.get("tmdbKey", "")
-    if not token and not tmdb:
+    had_token = bool(before.get("discogsTokenSet"))
+    had_tmdb  = bool(before.get("tmdbKeySet"))
+    if not had_token and not had_tmdb:
         raise Skip("neither setting is set, so there is nothing to preserve")
 
-    _json("saveServerSettings.view", {"tmdbKey": tmdb})
+    _json("saveServerSettings.view")
     after = _json("getServerSettings.view").get("serverSettings") or {}
-    assert after.get("discogsToken", "") == token, \
-        "saving the TMDB key blanked the Discogs token"
-    assert after.get("tmdbKey", "") == tmdb, "the TMDB key did not survive"
-    print("PASS  saving one server setting leaves the other alone")
+    assert bool(after.get("discogsTokenSet")) == had_token, \
+        "a saveServerSettings naming nothing cleared the Discogs token"
+    assert bool(after.get("tmdbKeySet")) == had_tmdb, \
+        "a saveServerSettings naming nothing cleared the TMDB key"
+    print("PASS  saving no server setting leaves both alone")
 
 
 TESTS = [
@@ -236,7 +246,7 @@ TESTS = [
     test_matched_titles_are_not_release_names,
     test_matched_video_has_a_genre,
     test_video_genre_is_browsable,
-    test_saving_one_setting_keeps_the_other,
+    test_saving_nothing_keeps_both_settings,
 ]
 
 if __name__ == "__main__":

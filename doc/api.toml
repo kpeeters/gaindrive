@@ -1458,17 +1458,28 @@ name     = "getServerSettings"
 section  = "settings"
 auth     = 'admin'
 response = 'subsonic-json'
-summary  = 'Returns the third-party API credentials the server holds.'
+summary  = 'Reports whether the server holds each third-party API credential.'
+notes    = '''
+**The credentials themselves are never returned**, only whether each is set.
+Nothing needs to read one back — they are written once and used server-side —
+and a secret the server hands out is one in an API response, in the client's
+memory and in every cache between. It also stopped a browser's own password
+manager offering to store the value as a login, the web client having put it in
+a masked box.
+
+Editing one is therefore blind: send a new value to `saveServerSettings`, or
+omit the field to leave it alone.
+'''
 
   [[endpoint.field]]
-  name = "serverSettings.discogsToken"
-  type = "string"
-  doc  = 'Discogs personal access token, used in the artist-portrait chain. Empty when unset.'
+  name = "serverSettings.discogsTokenSet"
+  type = "bool"
+  doc  = 'Whether a Discogs personal access token is stored, used in the artist-portrait chain.'
 
   [[endpoint.field]]
-  name = "serverSettings.tmdbKey"
-  type = "string"
-  doc  = 'TMDB API key, used to identify films and series during the scan. Empty when unset.'
+  name = "serverSettings.tmdbKeySet"
+  type = "bool"
+  doc  = 'Whether a TMDB API key is stored, used to identify films and series during the scan.'
 
   [[endpoint.error]]
   code = '50'
@@ -1491,12 +1502,12 @@ Send an empty value to clear a setting.
   [[endpoint.param]]
   name = "discogsToken"
   type = "string"
-  doc  = 'New Discogs token. Omit to leave unchanged.'
+  doc  = 'New Discogs token. Omit to leave unchanged; send empty to clear. `getServerSettings` reports only whether one is stored, so a client cannot show the current value.'
 
   [[endpoint.param]]
   name = "tmdbKey"
   type = "string"
-  doc  = 'New TMDB key. Omit to leave unchanged. Re-read at the top of every scan.'
+  doc  = 'New TMDB key. Omit to leave unchanged; send empty to clear. Re-read at the top of every scan.'
 
   [[endpoint.error]]
   code = '50'

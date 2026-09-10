@@ -2896,6 +2896,15 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 /* min-width: 0 as well as flex: 1 — without it a long URL sets the input's
    min-content width and pushes the Fetch button out of the row. */
+/* A secret shown as discs without being an <input type="password">, which is
+   the point — see makeSecretInput() in app.js: a password field makes the
+   browser's own manager treat the page as a login form and offer to store the
+   token.  Only the prefixed property exists; where it is unsupported the box
+   is a real password field instead, so there is nothing to fall back to here. */
+.secret-input {
+   -webkit-text-security: disc;
+   }
+
 .upload-row .token-input { flex: 1; min-width: 0; }
 
 /* The audio/video toggle is the library segmented control reused, and that one

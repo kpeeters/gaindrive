@@ -454,6 +454,42 @@ function showError(msg) {
    document.getElementById('error-modal').classList.remove('hidden');
    }
 
+// A box holding a secret — an API token, not a login credential.
+//
+// It is masked by CSS rather than by being <input type="password">, and that is
+// the whole point: a browser's own password manager classifies a *page* by
+// looking for a password field, and having found one offers to store whatever
+// was typed in it as a login.  That is what made leaving Settings pop "Store
+// your login details?", and no attribute prevents it — there is no autocomplete
+// token meaning "a secret that is not a credential".  `off` is ignored on
+// principle, `current-password` invites a fill, and `new-password` invites
+// precisely that save, being the token for a password *being set*.
+//
+// Where -webkit-text-security is unsupported there is no way to mask a text
+// box at all, so the field falls back to being a password one: today's
+// behaviour, prompt included, in preference to showing the token to the room.
+// Feature-detected rather than sniffed, so it starts working wherever the
+// property lands next.
+function makeSecretInput(placeholder) {
+   const el = document.createElement('input');
+   if (CSS.supports('-webkit-text-security', 'disc')) {
+      el.type = 'text';
+      el.classList.add('secret-input');
+      }
+   else {
+      el.type = 'password';
+      }
+   // Honoured here in a way it is not on a password field: what it is turning
+   // off is ordinary form autofill, which has no saved-login machinery behind
+   // it insisting otherwise.
+   el.autocomplete   = 'off';
+   el.spellcheck     = false;
+   el.autocapitalize = 'off';
+   el.classList.add('token-input');
+   el.placeholder = placeholder;
+   return el;
+   }
+
 let _confirmYes = null;
 function showConfirm(msg, onYes, {title='Confirm', yes='OK', no='Cancel'} = {}) {
    document.getElementById('confirm-modal-title').textContent = title;
@@ -950,16 +986,7 @@ async function viewSettings() {
    const tokenRow = document.createElement('div');
    tokenRow.className = 'token-row';
 
-   const tokenInput = document.createElement('input');
-   tokenInput.type        = 'password';
-   // A bare password box with no hint reads to a manager as a login form, and
-   // this pane injects two of them every time Settings is opened — which would
-   // re-arm, right there in the shell, exactly what loginFormDetach() exists to
-   // stop.  'new-password' is the one autocomplete token every manager honours,
-   // and is already what the user editor below uses for the same reason.
-   tokenInput.autocomplete = 'new-password';
-   tokenInput.className   = 'token-input';
-   tokenInput.placeholder = '(not set)';
+   const tokenInput = makeSecretInput('(not set)');
    tokenRow.appendChild(tokenInput);
 
    const tokenSave = document.createElement('button');
@@ -980,11 +1007,7 @@ async function viewSettings() {
    const tmdbRow = document.createElement('div');
    tmdbRow.className = 'token-row';
 
-   const tmdbInput = document.createElement('input');
-   tmdbInput.type        = 'password';
-   tmdbInput.autocomplete = 'new-password';   // as above
-   tmdbInput.className   = 'token-input';
-   tmdbInput.placeholder = '(not set)';
+   const tmdbInput = makeSecretInput('(not set)');
    tmdbRow.appendChild(tmdbInput);
 
    const tmdbSave = document.createElement('button');
@@ -1008,35 +1031,60 @@ async function viewSettings() {
 
    pane.appendChild(serverSection);
 
+   // The server reports only whether each secret is stored, never what it is,
+   // so the placeholder is the whole of what this pane can say about one.  An
+   // empty box therefore means "unchanged" rather than "empty", which is why
+   // saveSecret() below refuses to send one.
    try {
       const sr = await apiCall('getServerSettings');
-      tokenInput.value = sr.serverSettings?.discogsToken ?? '';
-      tmdbInput.value  = sr.serverSettings?.tmdbKey ?? '';
+      tokenInput.placeholder =
+         sr.serverSettings?.discogsTokenSet ? '(set — type to replace)' : '(not set)';
+      tmdbInput.placeholder  =
+         sr.serverSettings?.tmdbKeySet      ? '(set — type to replace)' : '(not set)';
       }
    catch { /* server may not yet have this endpoint */ }
 
-   tokenSave.addEventListener('click', async () => {
-      tokenStatus.textContent = '';
+   // Saving a box the user did not type into would clear the stored secret,
+   // which it never could while the box arrived holding it.  So an empty box
+   // saves nothing and says so, and clearing is asked for rather than fallen
+   // into — the API still takes an empty value for it.
+   const saveSecret = async (input, status, name, param, ok) => {
+      const typed = input.value;
+      if (!typed) {
+         showConfirm(`Clear the stored ${name}?`, async () => {
+            try {
+               await apiCall('saveServerSettings', {[param]: ''});
+               input.placeholder = '(not set)';
+               status.textContent = 'Cleared.';
+               }
+            catch (e) { status.textContent = `Error: ${e.message}`; }
+            }, {title: 'Clear', yes: 'Clear'});
+         return;
+         }
       try {
          // Only this field is sent: saveServerSettings writes what it is given,
          // so sending both would let a stale input overwrite the other setting.
-         await apiCall('saveServerSettings', {discogsToken: tokenInput.value});
-         tokenStatus.textContent = 'Saved.';
+         await apiCall('saveServerSettings', {[param]: typed});
+         // Emptied on success, so the secret does not sit in the DOM for the
+         // rest of the session — the same reason the login form's fields are
+         // wiped, and now the only thing the placeholder has to convey.
+         input.value = '';
+         input.placeholder = '(set — type to replace)';
+         status.textContent = ok;
          }
-      catch (e) {
-         tokenStatus.textContent = `Error: ${e.message}`;
-         }
+      catch (e) { status.textContent = `Error: ${e.message}`; }
+      };
+
+   tokenSave.addEventListener('click', () => {
+      tokenStatus.textContent = '';
+      saveSecret(tokenInput, tokenStatus, 'Discogs token', 'discogsToken',
+                 'Saved.');
       });
 
-   tmdbSave.addEventListener('click', async () => {
+   tmdbSave.addEventListener('click', () => {
       tmdbStatus.textContent = '';
-      try {
-         await apiCall('saveServerSettings', {tmdbKey: tmdbInput.value});
-         tmdbStatus.textContent = 'Saved. Applies on the next library scan.';
-         }
-      catch (e) {
-         tmdbStatus.textContent = `Error: ${e.message}`;
-         }
+      saveSecret(tmdbInput, tmdbStatus, 'TMDB API key', 'tmdbKey',
+                 'Saved. Applies on the next library scan.');
       });
 
    } // end server section
