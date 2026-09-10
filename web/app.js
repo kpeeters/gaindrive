@@ -3491,8 +3491,10 @@ async function openInfoModal() {
 // see renderCastDevices.  It is drawn as the key that picks the row, for the
 // first nine only: past that there is no single keystroke to offer, and a cap
 // naming a key that does nothing is worse than no cap.
-function castDeviceButton(dev, n) {
+function castDeviceRow(dev, n) {
    const btn = document.createElement('button');
+   // The handle the number keys select by; see the '1…9' entry in SHORTCUTS.
+   btn.className = 'cast-device-btn';
    const label = dev.name || dev.address;
    const connected = dev.id === castDeviceId;
 
@@ -3545,14 +3547,6 @@ function castDeviceButton(dev, n) {
    btn.appendChild(text);
    btn.addEventListener('click', () => selectCastDevice(dev.id, label));
 
-   // The row is a wrapper rather than the button itself, so the picker can
-   // carry a control beside the name.  A <select> inside a <button> is invalid
-   // and behaves unpredictably, and the whole button is a "start casting"
-   // target — as a sibling the menu cannot start a cast by being clicked.
-   const row = document.createElement('div');
-   row.className = 'cast-row';
-   row.appendChild(btn);
-
    // What to do with a video on this device.  Two options rather than three,
    // and which two depends on which side of its own announcement the device
    // is: only one of "send" and "sound" can change anything for it, and
@@ -3578,6 +3572,9 @@ function castDeviceButton(dev, n) {
    // Anything the two options above cannot express reads as auto, which is
    // also what the server does with a value it does not recognise.
    sel.value = opts.some(o => o[0] === dev.videoPref) ? dev.videoPref : 'auto';
+   // The column heading is not programmatically tied to these — a CSS grid has
+   // no th for it to be — so each one says which device it belongs to.
+   sel.setAttribute('aria-label', `What to send to ${label}`);
    sel.addEventListener('change', async () => {
       try {
          await apiCall('setCastDevicePref',
@@ -3588,9 +3585,18 @@ function castDeviceButton(dev, n) {
          }
       catch (err) { showError(err.message); }
       });
-   row.appendChild(sel);
 
-   return row;
+   // The two cells go into the grid as siblings, not wrapped in a row: it is
+   // the grid that lines the selects up with each other and with the heading
+   // above them, and a wrapper would put each row in a box of its own again —
+   // which is what made the widths ragged, the two option sets being different
+   // lengths.  The select stays *outside* the button, as it always had to: a
+   // <select> inside a <button> is invalid and behaves unpredictably, and the
+   // whole button is a "start casting" target, so as a sibling the menu cannot
+   // start a cast by being clicked.
+   const cells = document.createDocumentFragment();
+   cells.append(btn, sel);
+   return cells;
    }
 
 // The list last drawn, kept so a per-device control can redraw the rows after
@@ -3616,19 +3622,35 @@ function renderCastDevices(devices) {
       return;
       }
 
+   // Column headings, drawn only when there is a row under them.  The second
+   // is the one worth having: the selects were four different phrases in a
+   // column nothing named, so what they were choosing between had to be
+   // guessed from the options themselves.
+   //
+   // Divs in a grid rather than a real <table>: every row here is a button and
+   // a menu, which is a set of controls and not tabular data, and table markup
+   // would both mislead a screen reader and take the layout apart.
+   const headDevice = document.createElement('div');
+   headDevice.className   = 'cast-col-head';
+   headDevice.textContent = 'Device';
+   const headSend = document.createElement('div');
+   headSend.className   = 'cast-col-head cast-col-send';
+   headSend.textContent = 'What to send';
+   list.append(headDevice, headSend);
+
    // One counter across both groups, because the number is "the nth row of
    // this list" and the heading between them is not a row.  Numbering each
    // group from 1 would give two rows the same key, and the dispatcher picks
    // by position in the DOM — so the duplicate would silently be unreachable.
    let n = 0;
-   for (const dev of found) list.appendChild(castDeviceButton(dev, ++n));
+   for (const dev of found) list.appendChild(castDeviceRow(dev, ++n));
 
    if (manual.length > 0) {
       const heading = document.createElement('div');
       heading.className = 'cast-list-heading';
       heading.textContent = 'Added manually';
       list.appendChild(heading);
-      for (const dev of manual) list.appendChild(castDeviceButton(dev, ++n));
+      for (const dev of manual) list.appendChild(castDeviceRow(dev, ++n));
       }
    }
 
@@ -7508,7 +7530,7 @@ const SHORTCUTS = [
    // button's handler runs.  Without it Search would be the one unhinted entry
    // among four hinted neighbours, which reads as having no key.
    // One row in the overlay for nine keys.  The number a row answers to is
-   // drawn on the row itself by castDeviceButton(), and both come from the
+   // drawn on the row itself by castDeviceRow(), and both come from the
    // same place — the order the picker appends them in — so the cap and the
    // key cannot disagree.  Clicking the row rather than calling
    // selectCastDevice() keeps one definition of what picking one means.
@@ -7519,7 +7541,7 @@ const SHORTCUTS = [
     label: 'Pick that cast device',
     modal: 'cast-modal', when: castModalOpen,
     run(pressed) {
-       document.querySelectorAll('#cast-device-list .cast-row > button')
+       document.querySelectorAll('#cast-device-list .cast-device-btn')
           [Number(pressed) - 1]?.click();
        }},
    // Works from anywhere a cast is running, not only in the picker — which is

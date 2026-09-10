@@ -290,7 +290,7 @@ body {
 }
 
 #sidebar a .mi {
-   font-size: 1.125rem;
+    font-size: 1.5rem;
 }
 
 #sidebar a:hover,
@@ -2353,27 +2353,40 @@ input.chapter-time.bad { border-color: #e06c6c; }
    margin: 0;
 }
 
-#cast-device-list {
-   display: flex;
-   flex-direction: column;
-   gap: 0.4rem;
-}
+/* Two columns — the device, and what to send it — and every row contributes
+   its two cells directly.  A grid rather than a flex row per device because
+   the widths have to agree *between* rows: the menu carries one of two pairs
+   of phrases depending on what the receiver announced, so per-row boxes left
+   every select a different width and the column visibly wandered.
 
-/* One row: the device button takes the width, a per-device control sits beside
-   it.  The button keeps its own border, so the row itself draws nothing. */
-.cast-row {
-   display: flex;
+   max-content on the second column is what makes them agree, sizing it to the
+   widest menu — the heading included — while the device takes the rest. */
+#cast-device-list {
+   display: grid;
+   grid-template-columns: 1fr max-content;
    align-items: center;
    gap: 0.4rem;
 }
 
-.cast-row > button {
-   flex: 1;
-   min-width: 0;
+/* Both headings, and the "Added manually" divider, are grid items like any
+   other; the divider spans the pair because it names the rows below it rather
+   than a column. */
+.cast-col-head {
+   font-size: 0.85em;
+   color: var(--text-dim);
+}
+
+/* Its own class rather than :nth-of-type(2): that counts among sibling divs,
+   and the "Added manually" divider is one too, so the rule would move the
+   moment the list gained or lost a heading. */
+.cast-col-send {
+   text-align: center;
 }
 
 .cast-row-pref {
-   flex-shrink: 0;
+   /* Fills the column, so every menu is the width of the widest rather than
+      of its own longest option. */
+   width: 100%;
    background: var(--bg);
    color: var(--text);
    border: 1px solid var(--border);
@@ -2387,6 +2400,9 @@ input.chapter-time.bad { border-color: #e06c6c; }
    display: flex;
    align-items: center;
    gap: 0.6rem;
+   /* A grid item's min-width is auto, so without this a long device name sets
+      the first column's width instead of being ellipsised by .cast-row-sub. */
+   min-width: 0;
    background: none;
    border: 1px solid var(--border);
    color: var(--text);
@@ -2446,6 +2462,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 }
 
 .cast-list-heading {
+   grid-column: 1 / -1;
    font-size: 0.85em;
    color: var(--text-dim);
    margin-top: 0.4rem;
@@ -2586,6 +2603,10 @@ input.chapter-time.bad { border-color: #e06c6c; }
 }
 
 #keys-list .keys-group:first-child { margin-top: 0; }
+
+kdb {
+    background: #eee;
+}
 
 /* A key cap, not a glyph: it has to read as "press this" beside prose. */
 #keys-list kbd {
