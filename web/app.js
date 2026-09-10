@@ -692,6 +692,16 @@ const paneNav = {
    slideTo(depth) {
       this.depth = depth;
       this._apply(true);
+      // The cursor belongs to whichever pane is active, so a pane change moves
+      // it — which is what makes Enter on an artist land on the first album
+      // rather than leaving the mark behind on the artist that opened it.
+      //
+      // Here rather than at the call sites because a view renders its pane and
+      // slides last, so this is the one moment at which both halves are true:
+      // the new pane holds its rows and it is the pane the keys now drive.  The
+      // click handler's deferred paint cannot do it — a view is a fetch away,
+      // and by the time its rows exist that timeout has long since fired.
+      navPaint();
       },
 
    // Re-layout without animation, e.g. on window resize.
@@ -6977,8 +6987,9 @@ function navMovePane(delta) {
    // panes keep their contents, so moving left is a change of attention and not
    // a navigation; going through history would re-enter whichever entry happens
    // to sit behind this one, and that is not reliably one pane to the left.
+   // Which paints: the cursor follows the active pane, and slideTo is where
+   // that happens.
    paneNav.slideTo(d);
-   navPaint();
 }
 
 // Enter is the row's own click, which is the whole of it: every list builder
@@ -7011,7 +7022,7 @@ function navDrill() {
       return;
       }
    // Otherwise the click loads that pane and slides to it itself, and the
-   // cursor follows once it has — which is a fetch away, so not now.
+   // cursor follows on that slide — which is a fetch away, so not now.
    row.click();
 }
 
