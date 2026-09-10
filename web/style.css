@@ -2583,12 +2583,21 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 #info-share-row .token-input { flex: 1; min-width: 0; }
 
-#info-share-at-label {
+#info-share-at-label,
+#info-share-ch-label {
    display: flex;
    align-items: center;
    gap: 0.4rem;
    font-size: 0.85rem;
    color: var(--text-dim);
+}
+
+/* A chapter name is whatever somebody typed into the sidecar; it truncates
+   rather than widening the modal. */
+#info-share-ch-name {
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
 }
 
 /* The keyboard cursor.  A mark of its own rather than reusing .selected, which

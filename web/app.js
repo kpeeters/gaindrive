@@ -3511,8 +3511,9 @@ setInterval(() => {
 
 // The link back to this track, as the info dialog offers it.  Two values
 // rather than one string so ticking the checkbox needs no re-read of anything.
-let shareBase = '';   // the link with no position
-let shareAt   = 0;    // seconds; 0 when there is nothing worth offering
+let shareBase    = '';    // the link with no position
+let shareAt      = 0;     // seconds; 0 when there is nothing worth offering
+let shareChapter = null;  // {start (ms), name} under the snapshot position
 
 // location.pathname rather than serverBase(): a proxy may mount the client
 // under a subpath and the origin alone would drop it.  It also drops any query
@@ -3526,13 +3527,63 @@ function infoShareSet(songId, seconds) {
    label.hidden = shareAt === 0;             // "Start at 0:00" offers nothing
    document.getElementById('info-share-at-time').textContent = fmtDuration(shareAt);
    document.getElementById('info-share-at').checked = false;
+   infoShareChapter(songId, seconds);
    infoShareUpdate();
    }
 
+// The other place a link can start: the chapter under the same snapshot the
+// position box holds, for the concert film or DJ set that is one file holding
+// a dozen songs.  The player has already fetched the marker list for any
+// video it is showing, so that copy is reused; only audio -- whose markers
+// the player never loads -- asks getChapters here, which for the common
+// chapterless track costs the server one failed open().
+async function infoShareChapter(songId, seconds) {
+   shareChapter = null;
+   const label = document.getElementById('info-share-ch-label');
+   label.hidden = true;
+   document.getElementById('info-share-ch').checked = false;
+
+   let chapters;
+   if (player.chapterSong === songId) {
+      chapters = player.chapters;
+      } else {
+      const base = shareBase;
+      try {
+         const sr = await apiCall('getChapters', {id: songId});
+         chapters = (sr.chapters?.chapter ?? [])
+            .map(x => ({start: Number(x.start) || 0, name: x.name ?? ''}));
+         }
+      catch { return; }
+      // The dialog may describe another track by the time this returns.
+      if (base !== shareBase) return;
+      }
+
+   // The last marker at or before the snapshot.  One starting at 0 is not
+   // offered -- "start at this chapter" would be the plain link, the same
+   // "offers nothing" rule the position label applies to 0:00.
+   let cur = null, idx = 0;
+   for (let i = 0; i < chapters.length; i++)
+      if (chapters[i].start <= seconds * 1000) { cur = chapters[i]; idx = i + 1; }
+   if (!cur || !(cur.start > 0)) return;
+
+   shareChapter = cur;
+   // The file's own empty name stays empty on the wire; the placeholder is
+   // drawn here, as the album view draws it.
+   document.getElementById('info-share-ch-name').textContent =
+      cur.name || `Chapter ${idx}`;
+   label.hidden = false;
+   }
+
 function infoShareUpdate() {
-   const at = document.getElementById('info-share-at').checked;
+   const at        = document.getElementById('info-share-at').checked;
+   const atChapter = document.getElementById('info-share-ch').checked;
+   // A chapter's start is stored in milliseconds and may carry a fraction,
+   // which both readers of t= accept; the position box is whole seconds.
+   let t = 0;
+   if (shareChapter && atChapter) t = shareChapter.start / 1000;
+   else if (shareAt && at)        t = shareAt;
    document.getElementById('info-share-url').value =
-      (shareAt && at) ? `${shareBase}&t=${shareAt}` : shareBase;
+      t > 0 ? `${shareBase}&t=${t}` : shareBase;
    // The button reports the last copy until the box changes under it.
    document.getElementById('info-share-copy').textContent = 'Copy';
    }
@@ -5873,8 +5924,18 @@ function setupPlayer() {
    document.getElementById('info-close-btn').addEventListener('click', () => {
       document.getElementById('info-modal').classList.add('hidden');
       });
-   document.getElementById('info-share-at')
-      .addEventListener('change', infoShareUpdate);
+   // The position box and the chapter box both answer "where should this
+   // link start", so ticking either lets go of the other.
+   document.getElementById('info-share-at').addEventListener('change', e => {
+      if (e.target.checked)
+         document.getElementById('info-share-ch').checked = false;
+      infoShareUpdate();
+      });
+   document.getElementById('info-share-ch').addEventListener('change', e => {
+      if (e.target.checked)
+         document.getElementById('info-share-at').checked = false;
+      infoShareUpdate();
+      });
    document.getElementById('info-share-copy')
       .addEventListener('click', infoShareCopy);
    // Selecting on focus is what a share box is expected to do, and it is also
