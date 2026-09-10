@@ -952,6 +952,12 @@ async function viewSettings() {
 
    const tokenInput = document.createElement('input');
    tokenInput.type        = 'password';
+   // A bare password box with no hint reads to a manager as a login form, and
+   // this pane injects two of them every time Settings is opened — which would
+   // re-arm, right there in the shell, exactly what loginFormDetach() exists to
+   // stop.  'new-password' is the one autocomplete token every manager honours,
+   // and is already what the user editor below uses for the same reason.
+   tokenInput.autocomplete = 'new-password';
    tokenInput.className   = 'token-input';
    tokenInput.placeholder = '(not set)';
    tokenRow.appendChild(tokenInput);
@@ -976,6 +982,7 @@ async function viewSettings() {
 
    const tmdbInput = document.createElement('input');
    tmdbInput.type        = 'password';
+   tmdbInput.autocomplete = 'new-password';   // as above
    tmdbInput.className   = 'token-input';
    tmdbInput.placeholder = '(not set)';
    tmdbRow.appendChild(tmdbInput);
@@ -7757,9 +7764,79 @@ function setupKeys() {
 
 let wiredOnce = false;
 
+// The login form is taken out of the document for the whole signed-in session
+// rather than merely hidden along with #login-screen.  A password manager
+// decides what a page *is* by looking for a live <input type="password">
+// anywhere in it, and having found one it treats every other text-ish box as
+// somewhere credentials might belong — which is why a saved login was being
+// offered for #search-input, a box already declared type="search"
+// autocomplete="off".  That attribute is not the lever and never was: every
+// major manager ignores it on principle, sites having used it to fight them.
+// Removing the password field from the document is the one thing they all
+// agree on.
+//
+// It is also what makes the save prompt behave.  The submit handler calls
+// preventDefault(), so nothing navigates, and a browser then needs a heuristic
+// "the login worked" signal before it offers to save: a navigation, the form
+// becoming invisible, or the form being removed.  Hiding an ancestor is the
+// weakest of the three, which is why the offer used to arrive at moments that
+// had nothing to do with logging in — the manager never got a resolution and
+// went on re-deciding all session.
+//
+// The same node is kept and put back rather than rebuilt from markup.  The
+// submit listener at the foot of this file is bound once per page load and
+// lives on the node; rebuilding would lose it, and re-binding it per login is
+// the doubling bug wiredOnce exists to prevent.  Keeping the node also keeps
+// whatever detectSubsonicOrigin() applied to #server at boot, which is wanted
+// back on the login screen a logout returns to.
+let detachedLoginForm = null;
+
+function loginFormDetach() {
+   if (detachedLoginForm) return;
+   const form = document.getElementById('login-form');
+   if (!form) return;
+
+   // Focus is inside the form here — the user has just pressed Connect — and
+   // removing the subtree would hand it to <body> without saying so.  Said out
+   // loud instead, because on iOS a focused control torn out from under the
+   // soft keyboard leaves the visual viewport in a state it does not recover
+   // from by itself.
+   document.activeElement?.blur();
+
+   // remove() first and the wipe second, in that order deliberately.  Both
+   // Chrome and Firefox capture the values when they see the submit event —
+   // preventDefault() does not stop that — but it is this removal that fires
+   // the offer to save, so a manager re-reading the fields as the node goes
+   // should find the real ones.  For the same reason the wipe must never move
+   // up into the submit handler: blanking before capture kills the prompt.
+   detachedLoginForm = form;
+   form.remove();
+
+   // Nothing outside this module can reach a detached node, so this is not
+   // plugging a leak so much as declining to keep a typed password alive for
+   // the session after the single exchange that needed it — by here tryLogin()
+   // has already turned it into a salt and token, and neither field is read
+   // again.  The username goes too, so a re-login starts from empty boxes.
+   form.querySelector('#password').value = '';
+   form.querySelector('#username').value = '';
+}
+
+function loginFormAttach() {
+   if (!detachedLoginForm) return;
+   document.querySelector('.login-card').appendChild(detachedLoginForm);
+   detachedLoginForm = null;
+}
+
 async function showShell() {
    console.log('[shell] showing main shell');
    document.getElementById('login-screen').hidden = true;
+   // Hidden first, then detached, so no ordering of the two can paint
+   // .login-card with its contents gone — the card is a fixed 320px box and
+   // would draw as an empty one holding just the title.  It cannot happen
+   // today, [hidden]{display:none!important} applying in this same synchronous
+   // task, and writing the safe order is what keeps that true if someone later
+   // puts an await in here.
+   loginFormDetach();
    const shell = document.getElementById('app-shell');
    shell.hidden = false;
    console.log('[shell] app-shell hidden=', shell.hidden, 'display=', getComputedStyle(shell).display);
@@ -7922,7 +7999,18 @@ async function showShell() {
 function showLogin() {
    console.log('[shell] showing login screen');
    document.getElementById('app-shell').hidden = true;
+   // Attached before the screen is shown, mirroring showShell().  Safe when the
+   // form was never detached: the boot path below reaches here without ever
+   // having called showShell(), which is what both guards are for.
+   loginFormAttach();
    document.getElementById('login-screen').hidden = false;
+
+   // Focus would otherwise be on nothing: the click that got here was on
+   // #logout-btn, now inside a hidden #app-shell, so the browser drops it to
+   // <body>.  The first empty visible box rather than #server outright, because
+   // a self-hosted build hides that one at boot.
+   [...document.querySelectorAll('#login-form input')]
+      .find(el => !el.hidden && !el.value)?.focus();
 }
 
 // ── Boot ────────────────────────────────────────────────────────────────────
@@ -7954,6 +8042,15 @@ document.getElementById('login-form').addEventListener('submit', async e => {
 // On load: if we have saved credentials, verify them and skip the login form.
 console.log('[boot] checking saved credentials');
 (async () => {
+   // Looked up before the first await rather than beside their use below.
+   // Both branches await something — one of them a round trip — and a user who
+   // finishes typing and presses Connect while that is in flight has by then
+   // taken the form out of the document, at which point getElementById returns
+   // null and the self-hosted block throws on .value.  Holding the nodes means
+   // the prefill lands wherever the form currently is, and a detached node
+   // keeps it, so it is still applied when a logout puts the form back.
+   const serverInput = document.getElementById('server');
+   const serverLabel = document.querySelector('label[for="server"]');
    const {server, user, salt, token} = creds.load();
    console.log('[boot] saved creds present:', !!(server && user && salt && token));
    if (server && user && salt && token) {
@@ -7976,9 +8073,8 @@ console.log('[boot] checking saved credentials');
    }
    if (await detectSubsonicOrigin()) {
       console.log('[boot] self-hosted: hiding server field');
-      const serverInput = document.getElementById('server');
       serverInput.value = window.location.origin;
       serverInput.hidden = true;
-      document.querySelector('label[for="server"]').hidden = true;
+      serverLabel.hidden = true;
    }
 })();
