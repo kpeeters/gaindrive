@@ -2769,6 +2769,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
    display: flex;
    align-items: center;
    gap: 0.6rem;
+   margin-bottom: 20px;
    }
 
 .upload-row input[type=file] {

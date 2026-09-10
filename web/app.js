@@ -1589,9 +1589,9 @@ function makeUploadBar() {
    const stagingHint = document.createElement('p');
    stagingHint.className   = 'admin-hint';
    stagingHint.textContent =
-      'Everything here stays in your own uploads until an admin moves it into '
-      + 'the shared library. The names below apply to both an archive and a '
-      + 'URL; leave either blank to use what the source supplies.';
+      'Your upload stays in your own uploads area until an admin moves it into '
+      + 'the shared library. Please provide information on where it should appear '
+      + 'in the shared library; leave either blank to use what the source supplies.';
 
    // One status line for both producers, which reads as belonging to whichever
    // was used last only because the order below puts it under both of them.
