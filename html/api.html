@@ -202,16 +202,27 @@
 <h3 id="ep-getartistinfo-getartistinfo2">getArtistInfo / getArtistInfo2</h3>
 <p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
 <p>Carried by <code>getArtistInfo</code>, <code>getArtistInfo2</code>. Only the gaindrive additions are listed here.</p>
-<p>Re-ask the metadata providers for an artist rather than answering from cache.</p>
+<p>Re-ask the metadata providers for an artist, and say when an answer is still being worked out.</p>
 <h4>Parameters</h4>
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
-<tr><td><code>force</code></td><td>bool</td><td>Bypass the cached <code>artist_info_cache</code> row and query the providers again.</td></tr>
+<tr><td><code>force</code></td><td>bool</td><td>Queue a fresh provider lookup rather than letting the cached <code>artist_info_cache</code> row stand.</td></tr>
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>force</code></p>
-<p>The chain is MusicBrainz, then Wikidata, Wikipedia, TheAudioDB and Discogs, paced against MusicBrainz&#x27;s rate limit, so a forced lookup is not instant.</p></div>
+<p>The chain is MusicBrainz, then Wikidata, Wikipedia, TheAudioDB and Discogs, paced against MusicBrainz&#x27;s rate limit. <b>It does not run while you wait.</b> The request queues the artist at the front of the background resolver and returns whatever is cached right now, with <code>resolving</code> set; poll until that field is gone.</p></div>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>resolving</code> <span class="api-on">on artistInfo / artistInfo2</span></td><td>bool</td><td>Present and true while the providers have yet to be asked about this artist. Absent means the answer above is final, empty or not.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>resolving</code></p>
+<p>gaindrive never queries a metadata provider from a request thread. The lookup runs on the same background resolver that finds artist portraits — one artist at a time, paced against MusicBrainz&#x27;s rate limit — and asking for an artist it has not reached yet is what pushes them to the front of its queue. So a first request for an unknown artist returns at once with an empty biography and this field set, and a later one returns the biography.</p>
+<p>The field is emitted <b>only when it is true</b>, so its absence means the same thing to a client that has never heard of it as to one that has: this is everything there is. A client that ignores it sees an empty biography on the first view and a real one on the next.</p>
+<div class="note"><p>An artist the providers had nothing to say about settles with no biography and no <code>resolving</code>. That is a final answer and not a reason to keep polling.</p></div></div>
 </div>
 <div class="api-ep">
 <h3 id="ep-getalbumlist-getalbumlist2-getartist-getalbum">getAlbumList / getAlbumList2 / getArtist / getAlbum</h3>

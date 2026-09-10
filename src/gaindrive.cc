@@ -124,6 +124,38 @@ static constexpr auto PORTRAIT_GAP = std::chrono::milliseconds(2000);
 // against the window at the far end.
 static constexpr auto MB_REQUEST_GAP = std::chrono::milliseconds(1100);
 
+// ---- Metadata provider timeouts ---------------------------------------
+//
+// **httplib's client defaults are 300 s to connect and 300 s to read**, and
+// the provider clients in resolve_artist_info() set neither — so a host that
+// black-holed packets rather than refusing them parked the caller for five
+// minutes per request. That was a latent hang on an HTTP worker until the
+// lookup moved to the resolver thread, and it would still be one there: the
+// portrait queue is a single thread, so one unreachable provider stalls every
+// artist behind it.
+//
+// The numbers are the ones portrait_fetch() and setCoverArt's url= already use
+// for the same kind of request, and nothing here is worth waiting longer for —
+// a provider that has not answered in fifteen seconds is not going to.
+//
+// Note this reads correctly through mb_get(): a timeout makes Get() return a
+// falsy Result, and its retry loop only *returns* on `r && r->status != 503`,
+// so a timed-out MusicBrainz request costs a retry rather than an immediate
+// give-up. Four attempts at fifteen seconds plus backoff is the bound.
+//
+// handle_album_info()'s three clients are deliberately left alone for now; it
+// is still synchronous on the request thread and wants the whole treatment
+// this endpoint just had, not half of it.
+static constexpr int PROVIDER_CONNECT_TIMEOUT_S = 5;
+static constexpr int PROVIDER_READ_TIMEOUT_S    = 15;
+
+// One spelling of it rather than one per client.
+static void provider_timeouts(httplib::SSLClient& cli)
+	{
+	cli.set_connection_timeout(PROVIDER_CONNECT_TIMEOUT_S);
+	cli.set_read_timeout(PROVIDER_READ_TIMEOUT_S);
+	}
+
 static std::mutex                            mb_gate_mu_;
 static std::chrono::steady_clock::time_point mb_last_request_;
 
@@ -1217,8 +1249,10 @@ static bool host_is_global(const std::string& host)
 
 // ---- Artist info helper -----------------------------------------------
 
-// Performs MusicBrainz/Wikipedia lookup for an artist, caching the result.
-// Returns cached data immediately when available; triggers a fresh fetch otherwise.
+// Performs the MusicBrainz -> Wikidata -> Wikipedia -> TheAudioDB -> Discogs
+// lookup for one artist and caches the result. Runs on the portrait resolver's
+// thread and nowhere else; it is paced, it sleeps, and it must never be reached
+// from a request handler again.
 //
 // `provider_error`, when given, is set true if any provider failed to answer —
 // no response, or a status that is neither 200 nor 404. That distinction is the
@@ -1227,8 +1261,18 @@ static bool host_is_global(const std::string& host)
 // has a picture of this artist" from "MusicBrainz returned 503 because we asked
 // too fast", and recording the second as though it were the first makes a
 // transient rate-limit permanent.
+//
+// **It never reads artist_info_cache**, and the missing `force` parameter is
+// that rule rather than an omission. Its one caller is portrait_worker(), which
+// always wanted the providers asked: resolve_artist_info() caches whenever the
+// MusicBrainz *search* succeeded, so an artist whose image providers were the
+// ones that fell over — then or in any earlier version of gaindrive — has a
+// cached row with an empty image_url, and reading that back would find no image
+// and conclude there is none. That is the very confusion artist_art exists to
+// record correctly. It costs one lookup per artist, once, and the answer is
+// then kept for good. handle_artist_info() is what serves the cache.
 static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::string& name,
-                                                         MediaStore& store, bool force = false,
+                                                         MediaStore& store,
                                                          bool* provider_error = nullptr)
 	{
 	// A level-1 folder of a categories root is a section — Film, Series,
@@ -1242,20 +1286,11 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 		return {};
 		}
 
-	if (!force) {
-		auto cached = store.get_cached_artist_info(id);
-		if (cached) {
-			std::cout << stamp() << "getArtistInfo [" << name << "] cached"
-			          << " mbid=" << (cached->mbid.empty() ? "(none)" : cached->mbid)
-			          << std::endl;
-			return *cached;
-			}
-		}
-
 	std::cout << stamp() << "getArtistInfo [" << name << "] querying MusicBrainz"
 	          << std::endl;
 	MediaStore::CachedArtistInfo info;
 	httplib::SSLClient mb("musicbrainz.org");
+	provider_timeouts(mb);
 	mb.set_default_headers({
 		{"User-Agent", USER_AGENT}
 		});
@@ -1416,6 +1451,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 					std::cout << stamp() << "getArtistInfo [" << name
 					          << "] Wikidata entity: " << entity << std::endl;
 					httplib::SSLClient wd("www.wikidata.org");
+					provider_timeouts(wd);
 					wd.set_default_headers({
 						{"User-Agent",USER_AGENT}
 						});
@@ -1464,6 +1500,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 			// Step 3 — Wikipedia REST summary → bio + thumbnail.
 			if (!wiki_title.empty()) {
 				httplib::SSLClient wp("en.wikipedia.org");
+				provider_timeouts(wp);
 				wp.set_default_headers({
 					{"User-Agent",USER_AGENT}
 					});
@@ -1533,6 +1570,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 			if (info.image_url.empty() || info.biography.empty()) {
 				std::this_thread::sleep_for(std::chrono::seconds(1));
 				httplib::SSLClient tadb("www.theaudiodb.com");
+				provider_timeouts(tadb);
 				tadb.set_default_headers({
 					{"User-Agent",USER_AGENT}
 					});
@@ -1587,6 +1625,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 						if (!id_str.empty()) {
 							std::this_thread::sleep_for(std::chrono::seconds(1));
 							httplib::SSLClient disc("api.discogs.com");
+							provider_timeouts(disc);
 							disc.set_default_headers({
 								{"User-Agent", USER_AGENT},
 								{"Authorization", "Discogs token=" + token}
@@ -1646,8 +1685,30 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 
 // Shared implementation for getArtistInfo and getArtistInfo2.
 // key is "artistInfo" or "artistInfo2" — controls the XML element / JSON key.
-static void handle_artist_info(const httplib::Request& req, httplib::Response& res,
-                                MediaStore& store, const char* key)
+//
+// **This reads the database and nothing else**, which is the whole point of it
+// and was not true until recently. It used to call resolve_artist_info() right
+// here, on the httplib worker: MusicBrainz (paced against a process-global gate
+// that sleeps under its own mutex, and retried four times when the service says
+// it is busy — which is roughly one request in three), then Wikidata, Wikipedia,
+// TheAudioDB and Discogs, two unconditional one-second courtesy sleeps included.
+// One uncached artist held a worker for tens of seconds.
+//
+// That did not merely make *this* endpoint slow. httplib dispatches one task per
+// *connection* rather than per request, and a browser gets about six connections
+// to an origin, so clicking through three or four unresolved artists spent most
+// of the budget and the cover-art requests queued up behind them — in the
+// browser, where nothing on the server can see it. The symptom is an album grid
+// crawling while serving images that are sitting in memory.
+//
+// It is exactly the fault the *portrait* was moved off the request thread to
+// fix; see the comment in getCoverArt. The picture went to the background
+// resolver and the words were left behind. They travel together now, which cost
+// nothing to arrange: portrait_worker() already calls resolve_artist_info() and
+// that function already writes artist_info_cache, so the biography this handler
+// wants is a side effect the resolver was producing all along.
+void GainDrive::handle_artist_info(const httplib::Request& req,
+                                    httplib::Response& res, const char* key)
 	{
 	bool use_json = (fmt_of(req) == "json");
 	auto err = [&](int code, const char* msg) {
@@ -1661,12 +1722,49 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 	if (it == req.params.end()) { err(10, "Required parameter missing: id."); return; }
 
 	int id = std::stoi(it->second);
-	std::string name = store.get_folder_name(id);
+	std::string name = store_.get_folder_name(id);
 	if (name.empty()) { err(70, "Artist not found."); return; }
 
 	bool force = req.params.count("force") > 0
 	          && req.params.find("force")->second != "0";
-	auto info = resolve_artist_info(id, name, store, force);
+
+	MediaStore::CachedArtistInfo info;
+	bool resolving = false;
+
+	// A level-1 folder of a categories root is a section — Film, Series,
+	// Documentary — not a performer. This test used to live inside
+	// resolve_artist_info(); it has to be made here now, or a section would be
+	// pushed onto the resolver queue to have MusicBrainz asked about "Film".
+	// Nothing is resolving and nothing ever will be, so say so: a client that
+	// polled on `resolving` would poll for ever.
+	if (!store_.is_category_folder(id)) {
+		if (auto cached = store_.get_cached_artist_info(id))
+			info = *cached;
+
+		// Whether the resolver has *finished* with this artist, which is not
+		// the same question as whether it found anything. store_artist_art()
+		// is called on every pass whatever the outcome, so a row saying "ok"
+		// or "none" means the answer above — including an empty one — is
+		// final, while a missing row or "error" means it has yet to run or
+		// could not reach a provider. Conflating the two is the failure the
+		// artist_art status column exists to prevent, one endpoint over: an
+		// artist nobody has written about would otherwise be re-queued and
+		// re-polled for ever.
+		std::string path  = store_.get_folder_path(id);
+		auto        state = store_.get_artist_art_state(path);
+		resolving = force || !state || state->status == "error"
+		         || portrait_pending(path);
+
+		if (resolving) {
+			// Front of the queue: what somebody is looking at beats the
+			// alphabet. Already queued or in flight is a no-op, so a client
+			// polling every few seconds costs nothing.
+			portrait_request_front(id, path, name);
+			std::cout << stamp() << "getArtistInfo [" << name << "] "
+			          << (force ? "re-queued (force)" : "queued for the resolver")
+			          << std::endl;
+			}
+		}
 
 	// Build response. All fields are child elements per the Subsonic spec.
 	auto add_text_el = [](XMLDocument& doc, XMLElement* parent,
@@ -1677,9 +1775,14 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 		parent->InsertEndChild(el);
 		};
 
+	// `resolving` is emitted only when it is true, so its absence carries the
+	// same meaning to a client that has never heard of it as to one that has:
+	// this is everything there is. A standard Subsonic client ignores it and
+	// sees an empty biography on the first view and a real one on the next,
+	// which is the bargain the portrait already makes with it.
 	std::string body;
 	if (use_json)
-		body = subsonic_ok_json([&info, key](nlohmann::json& r) {
+		body = subsonic_ok_json([&info, resolving, key](nlohmann::json& r) {
 			nlohmann::json ai = nlohmann::json::object();
 			if (!info.biography.empty())      ai["biography"]     = info.biography;
 			if (!info.mbid.empty())           ai["musicBrainzId"] = info.mbid;
@@ -1692,10 +1795,12 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 				ai["mediumImageUrl"] = info.image_url;
 				ai["largeImageUrl"]  = info.image_url;
 				}
+			if (resolving)                    ai["resolving"]     = true;
 			r[key] = ai;
 			});
 	else
-		body = subsonic_ok([&info, &add_text_el, key](XMLDocument& doc, XMLElement* root) {
+		body = subsonic_ok([&info, &add_text_el, resolving, key]
+		                   (XMLDocument& doc, XMLElement* root) {
 			auto* ai = doc.NewElement(key);
 			add_text_el(doc, ai, "biography",     info.biography);
 			add_text_el(doc, ai, "musicBrainzId", info.mbid);
@@ -1706,6 +1811,7 @@ static void handle_artist_info(const httplib::Request& req, httplib::Response& r
 			add_text_el(doc, ai, "smallImageUrl",  info.image_url);
 			add_text_el(doc, ai, "mediumImageUrl", info.image_url);
 			add_text_el(doc, ai, "largeImageUrl",  info.image_url);
+			if (resolving) add_text_el(doc, ai, "resolving", "true");
 			root->InsertEndChild(ai);
 			});
 	res.set_content(body, use_json ? "application/json" : "application/xml");
@@ -4099,17 +4205,18 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getArtistInfo / getArtistInfo2 — MusicBrainz lookup, result cached in DB.
-	// Both endpoints share identical logic; only the response key name differs.
+	// getArtistInfo / getArtistInfo2 — answered from artist_info_cache, with the
+	// lookup itself queued onto the portrait resolver. Both endpoints share
+	// identical logic; only the response key name differs.
 	server_.Get("/rest/getArtistInfo.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		handle_artist_info(req, res, store_, "artistInfo");
+		handle_artist_info(req, res, "artistInfo");
 		});
 	server_.Get("/rest/getArtistInfo2.view", [this](const httplib::Request& req,
 	                                                httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		handle_artist_info(req, res, store_, "artistInfo2");
+		handle_artist_info(req, res, "artistInfo2");
 		});
 
 	// getCoverArt — serve a cover image, optionally scaled.
@@ -8458,6 +8565,15 @@ void GainDrive::portrait_request_front(int folder_id, const std::string& path,
 	portrait_cv_.notify_one();
 	}
 
+// See the header. portrait_queued_ covers both halves of "pending": a job is
+// inserted when it is queued and erased only after store_artist_art() has run,
+// so the in-flight window is inside it too.
+bool GainDrive::portrait_pending(const std::string& path)
+	{
+	std::lock_guard<std::mutex> lk(portrait_mu_);
+	return portrait_queued_.count(path) > 0;
+	}
+
 // Downloads one image URL and normalises it to something that can be stored
 // and scaled later. Never throws: this runs on a background thread, where an
 // escaping exception is std::terminate.
@@ -8646,19 +8762,13 @@ void GainDrive::portrait_worker()
 				row.status = "none";
 				}
 			else {
-				// force = true, always, and not because a refresh is wanted:
-				// artist_info_cache must not be allowed to answer this
-				// question. resolve_artist_info() caches whenever the
-				// MusicBrainz *search* succeeded, so an artist whose image
-				// providers were the ones that fell over — then or in any
-				// earlier version of gaindrive — has a cached row with an
-				// empty image_url. Reading that back would find no image and
-				// conclude there is none, which is the very confusion this
-				// table exists to record correctly. It costs one lookup per
-				// artist, once, and the answer is then kept here for good.
+				// Always the providers and never artist_info_cache — see the
+				// note on resolve_artist_info(). This call is also what fills
+				// that cache, so it resolves the biography getArtistInfo2
+				// serves as much as it resolves the picture.
 				bool provider_error = false;
 				auto info = resolve_artist_info(job.folder_id, job.name, store_,
-				                                true, &provider_error);
+				                                &provider_error);
 				if (provider_error && info.image_url.empty()) {
 					// A provider did not answer — a 503 from MusicBrainz is the
 					// usual one, since it rate-limits hard. We have learnt

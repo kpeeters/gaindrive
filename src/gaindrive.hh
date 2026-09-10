@@ -292,6 +292,19 @@ class GainDrive {
 		void portrait_wake();
 		void portrait_request_front(int folder_id, const std::string& path,
 		                            const std::string& name);
+		// Whether this artist is queued for the resolver or being resolved
+		// right now. It is what makes a *forced* re-lookup observable: both
+		// artist_info_cache and the artist_art status still describe the
+		// previous answer until the worker replaces them, so a client polling
+		// after `force` would otherwise be told on its very next request that
+		// the work had finished — before it had started.
+		bool portrait_pending(const std::string& path);
+		// getArtistInfo / getArtistInfo2. A member rather than a free function
+		// because answering one now means *queueing* the lookup instead of
+		// performing it, and the queue is ours. `key` is "artistInfo" or
+		// "artistInfo2" — it names the XML element and the JSON key.
+		void handle_artist_info(const httplib::Request& req,
+		                        httplib::Response& res, const char* key);
 		// Downloads one portrait URL and normalises it to something storable.
 		// Empty on any failure; it never throws.
 		MediaStore::ArtistArtRow portrait_fetch(const std::string& url);

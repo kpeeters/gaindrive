@@ -1321,6 +1321,18 @@ input.chapter-time.bad { border-color: #e06c6c; }
    50%       { opacity: 1;   }
 }
 
+/* Sits under the whole .artist-bio row rather than inside it: that row is a
+   flex line of portrait + text column, and a third item there would either
+   squeeze the biography or land beside the picture depending on which of the
+   three render branches ran. */
+.artist-bio-pending {
+   font-size: 0.8rem;
+   color: var(--text-dim);
+   font-style: italic;
+   /* .artist-bio's own margin-bottom supplies the gap above this. */
+   margin: 0 0 1.5rem;
+}
+
 .artist-bio {
    display: flex;
    gap: 1rem;

@@ -2695,21 +2695,88 @@ async function viewAlbums(artistId, artistName, isCategory = false) {
    paneNav.slideTo(1);
 
    // Fetch artist info without blocking the album list.
+   //
+   // The server does not query MusicBrainz while we wait any more — it queues
+   // the artist onto the same background resolver that finds portraits and
+   // answers at once with `resolving` set. That is what stops three or four
+   // unresolved artists eating this browser's six connections to the origin and
+   // stalling every cover-art request behind them, which is what it used to do.
+   //
+   // So the words now need the poll the picture already has, and at the same
+   // cadence, because one pass of that resolver produces both. Same numbers as
+   // portraitPending for the same reason: fifteen seconds apart, giving up
+   // after ten minutes, which is long enough for any backlog a person is
+   // waiting on.
+   const BIO_POLL_MS   = 15000;
+   const BIO_MAX_TRIES = 40;
+   let bioTimer = null;
+   let bioTries = 0;
+
    // Extracted into loadBio() so the refresh button can re-invoke with force=1.
+   // It restarts the count and drops any poll already scheduled, so pressing
+   // refresh twice cannot leave two timers asking.
    function loadBio(force) {
-      bioSlot.className = 'artist-bio-loading';
-      bioSlot.innerHTML = '';
+      if (bioTimer !== null) { clearTimeout(bioTimer); bioTimer = null; }
+      bioTries = 0;
+      requestBio(force);
+      }
+
+   function requestBio(force) {
+      // Only the first attempt draws the shimmer. Re-drawing it every fifteen
+      // seconds for ten minutes would say less than the one line below it does.
+      if (bioTries === 0) {
+         bioSlot.className = 'artist-bio-loading';
+         bioSlot.innerHTML = '';
+         }
       refreshBtn.disabled = true;
       const params = {id: artistId};
       if (force) params.force = '1';
       apiCall('getArtistInfo2', params).then(srInfo => {
+         // Navigated away, or this pane has been reused for another artist.
+         // Nobody can see this, so stop asking — the same test portraitPending
+         // makes, against the marker set just above.
+         if (!document.contains(bioSlot)
+             || pane.dataset.artistId !== String(artistId)) return;
+
+         refreshBtn.disabled = false;
+
          const info        = srInfo?.artistInfo2 ?? {};
          const bio         = info.biography ?? '';
          const wikiUrl     = info.wikiUrl ?? '';
          const allMusicUrl = info.allMusicUrl ?? '';
 
+         // Absent means final, empty or not: an artist the providers had
+         // nothing to say about settles here, and polling them for ever would
+         // be asking a question that has already been answered.
+         const resolving = info.resolving === true && bioTries < BIO_MAX_TRIES;
+
+         // A poll that learnt nothing must not redraw. Rebuilding the row
+         // replaces the portrait <img>, which drops one that is still loading
+         // and hands portraitPending a fresh element to chase — two pollers on
+         // the same picture, restarted every fifteen seconds.
+         if (bioTries > 0 && resolving && !bio && !wikiUrl && !allMusicUrl) {
+            bioTimer = setTimeout(() => { bioTries++; requestBio(false); },
+                                  BIO_POLL_MS);
+            return;
+            }
+
          bioSlot.className = '';   // remove shimmer regardless of outcome
-         refreshBtn.disabled = false;
+         bioSlot.innerHTML = '';   // a poll that did learn something redraws
+
+         // Appends the row, and when the server is still working this artist
+         // out the note and the timer that will ask again. Both exit paths go
+         // through it: the common resolving case is precisely the one with
+         // nothing to show yet.
+         const finish = () => {
+            bioSlot.appendChild(block);
+            if (!resolving) return;
+            const pending = document.createElement('p');
+            pending.className = 'artist-bio-pending';
+            pending.textContent = 'Looking this up…';
+            bioSlot.appendChild(pending);
+            bioTimer = setTimeout(() => { bioTries++; requestBio(false); },
+                                  BIO_POLL_MS);
+            };
 
          // The portrait is served by us and is no longer conditional on what
          // this response says: the image and the words arrive from different
@@ -2722,7 +2789,7 @@ async function viewAlbums(artistId, artistName, isCategory = false) {
                            artistName));
 
          if (!bio && !wikiUrl && !allMusicUrl) {
-            bioSlot.appendChild(block);   // the picture, with nothing to say
+            finish();   // the picture, with nothing to say (yet)
             return;
             }
 
@@ -2812,8 +2879,10 @@ async function viewAlbums(artistId, artistName, isCategory = false) {
             block.appendChild(linksRow);
             }
 
-         bioSlot.appendChild(block);
+         finish();
          }).catch(() => {
+            // No retry from here on purpose: `resolving` is the server saying
+            // it is working, and this is the server not answering at all.
             bioSlot.className = '';
             refreshBtn.disabled = false;
             });   // server may not support getArtistInfo2

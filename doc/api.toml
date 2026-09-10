@@ -431,15 +431,41 @@ summary    = 'Reach the extra images in an album folder, beyond the cover.'
 kind       = 'additions'
 applies_to = ["getArtistInfo", "getArtistInfo2"]
 section    = "browsing"
-summary    = 'Re-ask the metadata providers for an artist rather than answering from cache.'
+summary    = 'Re-ask the metadata providers for an artist, and say when an answer is still being worked out.'
 
   [[endpoint.param]]
   name  = "force"
   type  = "bool"
-  doc   = 'Bypass the cached `artist_info_cache` row and query the providers again.'
+  doc   = 'Queue a fresh provider lookup rather than letting the cached `artist_info_cache` row stand.'
   notes = '''
 The chain is MusicBrainz, then Wikidata, Wikipedia, TheAudioDB and Discogs,
-paced against MusicBrainz's rate limit, so a forced lookup is not instant.
+paced against MusicBrainz's rate limit. **It does not run while you wait.** The
+request queues the artist at the front of the background resolver and returns
+whatever is cached right now, with `resolving` set; poll until that field is
+gone.
+'''
+
+  [[endpoint.field]]
+  name  = "resolving"
+  type  = "bool"
+  on    = "artistInfo / artistInfo2"
+  doc   = 'Present and true while the providers have yet to be asked about this artist. Absent means the answer above is final, empty or not.'
+  notes = '''
+gaindrive never queries a metadata provider from a request thread. The lookup
+runs on the same background resolver that finds artist portraits — one artist
+at a time, paced against MusicBrainz's rate limit — and asking for an artist it
+has not reached yet is what pushes them to the front of its queue. So a first
+request for an unknown artist returns at once with an empty biography and this
+field set, and a later one returns the biography.
+
+The field is emitted **only when it is true**, so its absence means the same
+thing to a client that has never heard of it as to one that has: this is
+everything there is. A client that ignores it sees an empty biography on the
+first view and a real one on the next.
+
+NOTE: An artist the providers had nothing to say about settles with no
+biography and no `resolving`. That is a final answer and not a reason to keep
+polling.
 '''
 
 [[endpoint]]
