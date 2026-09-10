@@ -6,6 +6,9 @@ namespace embedded {
    extern const std::string_view index_html;
    extern const std::string_view index_html_mime;
 
+   extern const std::string_view link_html;
+   extern const std::string_view link_html_mime;
+
    extern const std::string_view style_css;
    extern const std::string_view style_css_mime;
 

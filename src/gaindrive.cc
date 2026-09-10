@@ -3317,14 +3317,27 @@ GainDrive::GainDrive(const std::string& db_path,
 		});
 
 	// Web client — serve embedded static files.
-	server_.Get("/", [](const httplib::Request&, httplib::Response& res) {
-		res.set_content(embedded::index_html.data(), embedded::index_html.size(),
-		                embedded::index_html_mime.data());
-		});
-	server_.Get("/index.html", [](const httplib::Request&, httplib::Response& res) {
-		res.set_content(embedded::index_html.data(), embedded::index_html.size(),
-		                embedded::index_html_mime.data());
-		});
+	//
+	// A track link opened on an Android device is answered with a chooser
+	// page — an intent:// anchor aimed at the app, and a browser link —
+	// instead of the SPA.  web=1 is the loop-breaker: the chooser's own
+	// browser link and the intent's fallback URL both carry it, or an
+	// Android browser would be handed the chooser again for ever.  The page
+	// composes its anchors from location.href itself, so nothing from the
+	// query string is spliced into HTML here, and the public scheme and
+	// host — which behind a proxy this process does not know — come free.
+	auto index_page = [](const httplib::Request& req, httplib::Response& res) {
+		if (req.has_param("track") && !req.has_param("web")
+		    && req.get_header_value("User-Agent").find("Android")
+		       != std::string::npos)
+			res.set_content(embedded::link_html.data(), embedded::link_html.size(),
+			                embedded::link_html_mime.data());
+		else
+			res.set_content(embedded::index_html.data(), embedded::index_html.size(),
+			                embedded::index_html_mime.data());
+		};
+	server_.Get("/",           index_page);
+	server_.Get("/index.html", index_page);
 	server_.Get("/style.css", [](const httplib::Request&, httplib::Response& res) {
 		res.set_content(embedded::style_css.data(), embedded::style_css.size(),
 		                embedded::style_css_mime.data());

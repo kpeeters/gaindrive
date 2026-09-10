@@ -641,6 +641,7 @@ add_custom_command(
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_web.cmake
 	DEPENDS
 		${CMAKE_CURRENT_SOURCE_DIR}/web/index.html
+		${CMAKE_CURRENT_SOURCE_DIR}/web/link.html
 		${CMAKE_CURRENT_SOURCE_DIR}/web/style.css
 		${CMAKE_CURRENT_SOURCE_DIR}/web/app.js
 		${CMAKE_CURRENT_SOURCE_DIR}/web/favicon.svg
