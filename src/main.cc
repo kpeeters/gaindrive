@@ -28,6 +28,7 @@
 #include "service.hh"
 #include "stamp.hh"
 #include "tmdb.hh"
+#include "untrusted.hh"
 #include "videoart.hh"
 #include "videoname.hh"
 
@@ -345,6 +346,100 @@ static int run_chapters_test(const std::string& target)
 	return 0;
 	}
 
+// --untrusted-test: what the provider-string guards make of a value, with no
+// database, no roots and no network.
+//
+// One `kind:value` per line on stdin, kind naming which guard to apply, and
+// one line of output each so a table in tests/test_untrusted.py can compare
+// them. It exists for the reason --artist-pick-test and --video-name-test do:
+// this is where a wrong answer would come from, so it is the part worth being
+// able to exercise directly — and a rule about hostile input is only as good
+// as the cases somebody wrote down.
+//
+// Non-printable input has to survive getting here, so a value may carry \xNN,
+// \r, \n, \t and \\ escapes; output is escaped the same way. That is
+// dump_derived.py's convention and it is here for its reason: a test whose
+// whole subject is control characters cannot put them on a line raw.
+static std::string untrusted_unescape(const std::string& in)
+	{
+	std::string out;
+	for (size_t i = 0; i < in.size(); ++i) {
+		if (in[i] != '\\' || i + 1 >= in.size()) { out += in[i]; continue; }
+		char c = in[++i];
+		switch (c) {
+			case 'n':  out += '\n'; break;
+			case 'r':  out += '\r'; break;
+			case 't':  out += '\t'; break;
+			case '\\': out += '\\'; break;
+			// Parsed by hand rather than with std::stoi, which *throws* on a
+			// pair that is not hex — in a mode whose whole subject is
+			// malformed input, a fixture typo should be a visible passthrough
+			// and not an abort.
+			case 'x': {
+				auto nib = [](char h) -> int {
+					if (h >= '0' && h <= '9') return h - '0';
+					if (h >= 'a' && h <= 'f') return h - 'a' + 10;
+					if (h >= 'A' && h <= 'F') return h - 'A' + 10;
+					return -1;
+					};
+				int hi = i + 1 < in.size() ? nib(in[i + 1]) : -1;
+				int lo = i + 2 < in.size() ? nib(in[i + 2]) : -1;
+				if (hi < 0 || lo < 0) { out += "\\x"; break; }
+				out += (char)(hi * 16 + lo);
+				i += 2;
+				break;
+				}
+			default: out += '\\'; out += c;
+			}
+		}
+	return out;
+	}
+
+static std::string untrusted_escape(const std::string& in)
+	{
+	static const char* hex = "0123456789abcdef";
+	std::string out;
+	for (unsigned char c : in) {
+		if (c == '\\')      out += "\\\\";
+		else if (c == '\n') out += "\\n";
+		else if (c == '\r') out += "\\r";
+		else if (c == '\t') out += "\\t";
+		else if (c < 0x20 || c == 0x7f) {
+			out += "\\x"; out += hex[c >> 4]; out += hex[c & 15];
+			}
+		else out += (char)c;
+		}
+	return out;
+	}
+
+static int run_untrusted_test()
+	{
+	std::string line;
+	while (std::getline(std::cin, line)) {
+		if (!line.empty() && line.back() == '\r') line.pop_back();
+		if (line.empty() || line[0] == '#') continue;
+		auto colon = line.find(':');
+		if (colon == std::string::npos) {
+			std::cerr << "no kind on line: " << line << "\n";
+			return 1;
+			}
+		std::string kind = line.substr(0, colon);
+		std::string val  = untrusted_unescape(line.substr(colon + 1));
+
+		if      (kind == "url")   std::cout << untrusted_escape(clean_url(val));
+		else if (kind == "prose") std::cout << untrusted_escape(
+		                                        clean_prose(val, MAX_PROSE_BYTES));
+		else if (kind == "genre") std::cout << untrusted_escape(clean_genre(val));
+		else if (kind == "uuid")  std::cout << (is_uuid(val) ? "yes" : "no");
+		else {
+			std::cerr << "unknown kind: " << kind << "\n";
+			return 1;
+			}
+		std::cout << '\n';
+		}
+	return 0;
+	}
+
 // --artist-pick-test: the query that would go to MusicBrainz for an artist
 // name, and which of a search's results the matching rule chooses.
 //
@@ -587,6 +682,7 @@ int main(int argc, char* argv[])
 		("video-name-test","Parse video filenames and exit; takes a file, a directory, or - for stdin", cxxopts::value<std::string>())
 		("chapters-test", "Parse one .chapters.txt file and exit", cxxopts::value<std::string>())
 		("artist-pick-test","Pick a MusicBrainz artist from a search response on stdin and exit", cxxopts::value<std::string>())
+		("untrusted-test","Apply the provider-string guards to kind:value lines on stdin and exit")
 		("tmdb-test",     "Look one title up on TMDB and exit", cxxopts::value<std::string>())
 		("tmdb-year",     "Year for --tmdb-test", cxxopts::value<int>()->default_value("0"))
 		("tmdb-key",      "API key for --tmdb-test (default: the stored setting)", cxxopts::value<std::string>())
@@ -620,6 +716,11 @@ int main(int argc, char* argv[])
 
 	if (args.count("chapters-test"))
 		return run_chapters_test(args["chapters-test"].as<std::string>());
+
+	// Beside the others that need nothing at all: no database, no roots, no
+	// config and no network, since the values arrive on stdin.
+	if (args.count("untrusted-test"))
+		return run_untrusted_test();
 
 	// Beside the other two that need nothing at all: no database, no roots, no
 	// config and no network, since the response body arrives on stdin.

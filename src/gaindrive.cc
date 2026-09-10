@@ -4,6 +4,7 @@
 #include "codecs.hh"
 #include "imagescale.hh"
 #include "jsonread.hh"
+#include "untrusted.hh"
 #include "artistmatch.hh"
 #include "embedded_web.hh"
 
@@ -1326,6 +1327,17 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 			// candidate won, and a wrong match is otherwise indistinguishable
 			// from a right one until somebody reads the biography.
 			auto pick = mb_pick_artist(r->body, name);
+			// is_uuid because this is about to be concatenated into a
+			// MusicBrainz URL *path* below.  mb_uuid() has applied the same
+			// check to a file's tag since that path existed, on the stated
+			// grounds that a tag is arbitrary bytes somebody else wrote — a
+			// search result is that too, and was the half being trusted.
+			if (pick && !is_uuid(pick->mbid)) {
+				std::cout << stamp() << "getArtistInfo [" << name
+				          << "] ignoring a match whose id is not a UUID"
+				          << std::endl;
+				pick.reset();
+				}
 			if (pick) {
 				info.mbid        = pick->mbid;
 				info.last_fm_url = "https://www.last.fm/music/" + url_encode(name);
@@ -1379,12 +1391,12 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 				std::string type     = jstr(rel, "type");
 				std::string resource = jstr(jsub(rel, "url"), "resource");
 				if (type == "allmusic" && info.allmusic_url.empty()) {
-					info.allmusic_url = resource;
+					info.allmusic_url = clean_url(resource);
 					std::cout << stamp() << "getArtistInfo [" << name
 					          << "] AllMusic: " << resource << std::endl;
 					}
 				else if (type == "discogs" && info.discogs_url.empty()) {
-					info.discogs_url = resource;
+					info.discogs_url = clean_url(resource);
 					std::cout << stamp() << "getArtistInfo [" << name
 					          << "] Discogs: " << resource << std::endl;
 					}
@@ -1455,8 +1467,14 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 				wp.set_default_headers({
 					{"User-Agent",USER_AGENT}
 					});
+				// Percent-encoded, because this is spliced into an HTTP
+				// request line: a CR/LF in a provider-supplied title is
+				// request splitting against Wikipedia.  The underscore
+				// substitution stays and happens first, or url_encode would
+				// turn the spaces into %20 and the article would not be found.
 				std::string path_title = wiki_title;
 				for (char& c : path_title) if (c == ' ') c = '_';
+				path_title = url_encode(path_title);
 				auto r3 = wp.Get("/api/rest_v1/page/summary/" + path_title,
 				                 httplib::Params{}, httplib::Headers{});
 				note(r3);
@@ -1471,9 +1489,16 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 				else {
 					auto j3 = nlohmann::json::parse(r3->body, nullptr, false);
 					if (!j3.is_discarded()) {
-						info.biography = jstr(j3, "extract");
-						info.wiki_url  = "https://en.wikipedia.org/wiki/" + wiki_title;
-						info.image_url = jstr(jsub(j3, "thumbnail"), "source");
+						// Cleaned here rather than on the way to the cache:
+						// the log lines below print these, and untrusted.hh
+						// explains what a control character costs in each of
+						// the two response formats.  path_title is reused for
+						// the stored URL so the encoding is done once.
+						info.biography = clean_prose(jstr(j3, "extract"),
+						                             MAX_PROSE_BYTES);
+						info.wiki_url  = "https://en.wikipedia.org/wiki/" + path_title;
+						info.image_url = clean_url(jstr(jsub(j3, "thumbnail"),
+						                                "source"));
 						std::cout << stamp() << "getArtistInfo [" << name
 						          << "] bio=" << info.biography.size()
 						          << " chars, image="
@@ -1520,7 +1545,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 					auto jt = nlohmann::json::parse(rt->body, nullptr, false);
 					const auto& ta = jidx(jsub(jt, "artists"), 0);
 					if (info.image_url.empty()) {
-						info.image_url = jstr(ta, "strArtistThumb");
+						info.image_url = clean_url(jstr(ta, "strArtistThumb"));
 						if (!info.image_url.empty())
 							std::cout << stamp() << "getArtistInfo [" << name
 							          << "] image from TheAudioDB: "
@@ -1532,9 +1557,11 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 						// records exist where it is null while strBiography
 						// holds the English prose — reading only the tagged
 						// name yields nothing for those.
-						info.biography = jstr(ta, "strBiographyEN");
+						info.biography = clean_prose(jstr(ta, "strBiographyEN"),
+						                             MAX_PROSE_BYTES);
 						if (info.biography.empty())
-							info.biography = jstr(ta, "strBiography");
+							info.biography = clean_prose(jstr(ta, "strBiography"),
+							                             MAX_PROSE_BYTES);
 						if (!info.biography.empty())
 							std::cout << stamp() << "getArtistInfo [" << name
 							          << "] bio from TheAudioDB: "
@@ -1575,6 +1602,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 									if (jstr(img, "type") == "primary")
 										{ uri = jstr(img, "uri"); break; }
 								if (uri.empty()) uri = jstr(jidx(imgs, 0), "uri");
+								uri = clean_url(uri);
 								if (!uri.empty()) {
 									info.image_url = uri;
 									std::cout << stamp() << "getArtistInfo [" << name
@@ -1762,7 +1790,16 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 				}
 			else {
 				auto j1 = nlohmann::json::parse(r1->body, nullptr, false);
-				info.mbid = jstr(jidx(jsub(j1, "release-groups"), 0), "id");
+				// Same reasoning as the artist search: this is concatenated
+				// into "/ws/2/release-group/" below.
+				std::string rg = jstr(jidx(jsub(j1, "release-groups"), 0), "id");
+				if (!rg.empty() && !is_uuid(rg)) {
+					std::cout << stamp() << "getAlbumInfo [" << title
+					          << "] ignoring a release-group id that is not a UUID"
+					          << std::endl;
+					rg.clear();
+					}
+				info.mbid = rg;
 				}
 			}
 
@@ -1801,7 +1838,7 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 					std::string type     = jstr(rel, "type");
 					std::string resource = jstr(jsub(rel, "url"), "resource");
 					if (type == "allmusic" && info.allmusic_url.empty()) {
-						info.allmusic_url = resource;
+						info.allmusic_url = clean_url(resource);
 						std::cout << stamp() << "getAlbumInfo [" << title
 						          << "] AllMusic: " << resource << std::endl;
 						}
@@ -1851,8 +1888,11 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 					wp.set_default_headers({
 						{"User-Agent",USER_AGENT}
 						});
+					// Percent-encoded before it becomes a request line — see
+					// the artist chain above for what a CR/LF there would be.
 					std::string path_title = wiki_title;
 					for (char& c : path_title) if (c == ' ') c = '_';
+					path_title = url_encode(path_title);
 					auto r3 = wp.Get("/api/rest_v1/page/summary/" + path_title,
 					                 httplib::Params{}, httplib::Headers{});
 					if (!r3) {
@@ -1866,8 +1906,9 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 					else {
 						auto j3 = nlohmann::json::parse(r3->body, nullptr, false);
 						if (!j3.is_discarded()) {
-							info.notes    = jstr(j3, "extract");
-							info.wiki_url = "https://en.wikipedia.org/wiki/" + wiki_title;
+							info.notes    = clean_prose(jstr(j3, "extract"),
+							                            MAX_PROSE_BYTES);
+							info.wiki_url = "https://en.wikipedia.org/wiki/" + path_title;
 							std::cout << stamp() << "getAlbumInfo [" << title
 							          << "] notes=" << info.notes.size()
 							          << " chars" << std::endl;
@@ -2321,33 +2362,6 @@ static void reorganise_by_tags(const std::filesystem::path& batch_root)
 // Drops anything that is not well-formed UTF-8, and truncates only on a
 // character boundary.
 //
-// Not defensive programming for its own sake: nlohmann's dump() *throws* on
-// invalid UTF-8, on an httplib thread, where it becomes a bare 500 with nothing
-// in the log. The strings this guards come from a remote site by way of a
-// tool's stdout — a filename in some other encoding is entirely ordinary there
-// — and a half-copied multi-byte sequence is exactly what a byte-count truncate
-// produces.
-static std::string utf8_clean(const std::string& s, size_t max_bytes)
-	{
-	std::string out;
-	for (size_t i = 0; i < s.size(); ) {
-		unsigned char c = s[i];
-		size_t len = c < 0x80 ? 1
-		           : (c & 0xE0) == 0xC0 ? 2
-		           : (c & 0xF0) == 0xE0 ? 3
-		           : (c & 0xF8) == 0xF0 ? 4 : 0;
-		if (len == 0 || i + len > s.size()) { i++; continue; }
-		bool ok = true;
-		for (size_t k = 1; k < len; k++)
-			if ((static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) ok = false;
-		if (!ok) { i++; continue; }
-		if (out.size() + len > max_bytes) break;
-		out.append(s, i, len);
-		i += len;
-		}
-	return out;
-	}
-
 // The longest a single chapter title may be. A bound rather than a guess: the
 // list is arbitrary text a client posted, and it comes straight back out
 // through a JSON document and an XML attribute.
@@ -8468,27 +8482,73 @@ MediaStore::ArtistArtRow GainDrive::portrait_fetch(const std::string& url)
 			fetch_url += (fetch_url.find('?') == std::string::npos ? "?" : "&")
 			           + std::string("width=") + std::to_string(PORTRAIT_PX);
 
-		size_t scheme_end = https ? 8 : 7;
-		size_t slash      = fetch_url.find('/', scheme_end);
-		std::string host  = fetch_url.substr(scheme_end,
-			slash == std::string::npos ? std::string::npos : slash - scheme_end);
-		std::string path  = (slash == std::string::npos) ? "/"
-		                                                 : fetch_url.substr(slash);
-
-		auto get = [&](auto& cli) {
-			// Commons answers Special:FilePath with a 302, so without this
-			// every Wikidata-sourced portrait 404s — which is how they have
-			// behaved since the feature was written.
-			cli.set_follow_location(true);
-			cli.set_connection_timeout(5);
-			cli.set_read_timeout(15);
-			cli.set_default_headers({{"User-Agent", USER_AGENT}});
-			return cli.Get(path.c_str());
-			};
+		// Redirects are followed by hand, exactly as setCoverArt does, and for
+		// the same reason: the address check has to run again on every hop,
+		// because a public URL that 302s to 127.0.0.1 is the ordinary way a
+		// check that only looks at the first address is defeated.  Commons
+		// answers Special:FilePath with a 302, so a portrait genuinely needs
+		// the hops — set_follow_location(true) was how they were taken, which
+		// meant no hop was checked at all.
+		//
+		// This URL is not typed by anyone: it arrives in a provider's JSON,
+		// which is a narrower source than setCoverArt's but not a trusted one,
+		// and it is dereferenced by the server rather than by a browser.  So
+		// the whole LAN, loopback and any link-local metadata service were
+		// reachable through whatever MusicBrainz, Wikipedia, TheAudioDB or
+		// Discogs returned.
+		//
+		// The residual is the one setCoverArt records: this resolution and
+		// httplib's own when it connects are two lookups, so DNS rebinding
+		// stays open.  Closing it needs a client that can be handed an address
+		// rather than a name.
+		std::string next = fetch_url;
 		httplib::Result r;
-		if (https) { httplib::SSLClient cli(host); r = get(cli); }
-		else       { httplib::Client    cli(host); r = get(cli); }
-		if (!r || r->status != 200 || r->body.empty()) return row;
+		for (int hop = 0; ; ++hop) {
+			if (hop > MAX_COVER_REDIRECTS) {
+				std::cout << stamp() << "Artist portrait: too many redirects for "
+				          << url << std::endl;
+				return row;
+				}
+			bool hop_https = next.rfind("https://", 0) == 0;
+			bool hop_http  = next.rfind("http://",  0) == 0;
+			if (!hop_https && !hop_http) {
+				std::cout << stamp() << "Artist portrait: refusing a non-http(s)"
+				             " redirect from " << url << std::endl;
+				return row;
+				}
+			size_t scheme_end = hop_https ? 8 : 7;
+			size_t slash      = next.find('/', scheme_end);
+			std::string host  = next.substr(scheme_end,
+				slash == std::string::npos ? std::string::npos : slash - scheme_end);
+			std::string path  = (slash == std::string::npos) ? "/"
+			                                                 : next.substr(slash);
+
+			if (!host_is_global(host)) {
+				std::cout << stamp() << "Artist portrait: refusing non-global host: "
+				          << host << std::endl;
+				return row;
+				}
+
+			auto get = [&](auto& cli) {
+				cli.set_follow_location(false);
+				cli.set_connection_timeout(5);
+				cli.set_read_timeout(15);
+				cli.set_default_headers({{"User-Agent", USER_AGENT}});
+				return cli.Get(path.c_str());
+				};
+			if (hop_https) { httplib::SSLClient cli(host); r = get(cli); }
+			else           { httplib::Client    cli(host); r = get(cli); }
+			if (!r) return row;
+			if (r->status == 301 || r->status == 302 || r->status == 303
+			    || r->status == 307 || r->status == 308) {
+				std::string loc = r->get_header_value("Location");
+				if (loc.empty()) return row;
+				next = loc;
+				continue;
+				}
+			break;
+			}
+		if (r->status != 200 || r->body.empty()) return row;
 
 		// These are arbitrary third-party URLs; nothing about them is bounded
 		// except by us.

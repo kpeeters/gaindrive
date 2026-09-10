@@ -1,6 +1,7 @@
 #include "tmdb.hh"
 #include "stamp.hh"
 #include "jsonread.hh"
+#include "untrusted.hh"
 
 #include <algorithm>
 #include <cctype>
@@ -108,10 +109,17 @@ static TmdbMatch match_from(const nlohmann::json& j, bool tv)
 	TmdbMatch m;
 	m.is_tv       = tv;
 	m.id          = jint(j, "id");
-	m.title       = tv ? jstr(j, "name")  : jstr(j, "title");
+	// Cleaned here because this is where both shapes land — the search result
+	// and the detail body — so one site covers every route a match arrives by.
+	// untrusted.hh says what a control character costs in each response
+	// format; the title is the sharper case of the two, since it overwrites
+	// albums.title and songs.title and so appears as an XML *attribute* in
+	// every browse listing rather than only in getAlbumInfo2.
+	m.title       = clean_prose(tv ? jstr(j, "name") : jstr(j, "title"),
+	                            MAX_NAME_BYTES);
 	m.year        = year_of(tv ? jstr(j, "first_air_date")
 	                           : jstr(j, "release_date"));
-	m.overview    = jstr(j, "overview");
+	m.overview    = clean_prose(jstr(j, "overview"), MAX_PROSE_BYTES);
 	m.poster_path = jstr(j, "poster_path");
 
 	// Two shapes, because the two endpoints answer differently: a search
@@ -128,7 +136,7 @@ static TmdbMatch match_from(const nlohmann::json& j, bool tv)
 	// why the dangerous case is easy to miss.
 	if (const auto& gs = jsub(j, "genres"); gs.is_array())
 		for (const auto& g : gs)
-			if (std::string n = jstr(g, "name"); !n.empty())
+			if (std::string n = clean_genre(jstr(g, "name")); !n.empty())
 				m.genres.push_back(n);
 	if (const auto& ids = jsub(j, "genre_ids"); ids.is_array())
 		for (const auto& id : ids)
@@ -290,7 +298,11 @@ void Tmdb::load_genre_names() const
 			if (const auto& gs = jsub(j, "genres"); gs.is_array())
 				for (const auto& g : gs) {
 					int id = jint(g, "id");
-					std::string name = jstr(g, "name");
+					// The other door a genre name comes in by: search results
+					// carry ids and are resolved through this map, so cleaning
+					// only match_from() would leave every searched film's
+					// genres unchecked.
+					std::string name = clean_genre(jstr(g, "name"));
 					if (id > 0 && !name.empty()) found.emplace(id, name);
 					}
 			}

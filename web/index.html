@@ -14,10 +14,9 @@
 <div id="login-screen">
    <div class="login-card">
       <h1><img src="favicon.svg" alt="">GainDrive</h1>
+      <!-- No server field: this client only ever talks to the origin that
+           served it.  See serverBase() in app.js. -->
       <form id="login-form">
-         <label for="server">Server</label>
-         <input type="url" id="server" placeholder="https://music.example.com" required autocomplete="url">
-
          <label for="username">Username</label>
          <input type="text" id="username" required autocomplete="username">
 

@@ -22,10 +22,27 @@
 // the Android app and for the same reason recorded there: a per-request salt
 // gives every cover-art URL a unique query string, so the browser's image cache
 // misses on every scroll.
+// The server this client talks to, which is always the one that served it.
+//
+// It used to be typed into the login form and kept in localStorage, so a copy
+// of this page could be pointed at any gaindrive anywhere — including one
+// hosted somewhere else entirely, which is a credential prompt for a server
+// the person reading it has no way to identify.  There is nothing to configure
+// now: the API lives under the origin the page was loaded from, and a build of
+// this client that is not being served by a gaindrive has nothing to talk to.
+//
+// Not simply relative URLs, though these are all same-origin and could be.
+// An absolute base is what the four multipart and body-carrying fetches
+// compose, what ends up in a media element's src, and what the login log line
+// prints — and one that reads back as the address in the URL bar is easier to
+// believe than a relative path that resolves silently.
+function serverBase() {
+   return window.location.origin;
+   }
+
 const creds = {
    load() {
       return {
-         server: localStorage.getItem('gd_server'),
          user:   localStorage.getItem('gd_user'),
          salt:   localStorage.getItem('gd_salt'),
          token:  localStorage.getItem('gd_token'),
@@ -35,14 +52,12 @@ const creds = {
    // here. tryLogin() derives it, proves it against the server, and then saves
    // that exact pair — deriving a second time would store a token the login
    // never tested.
-   save(server, user, salt, token) {
-      localStorage.setItem('gd_server', server);
+   save(user, salt, token) {
       localStorage.setItem('gd_user',   user);
       localStorage.setItem('gd_salt',   salt);
       localStorage.setItem('gd_token',  token);
    },
    clear() {
-      localStorage.removeItem('gd_server');
       localStorage.removeItem('gd_user');
       localStorage.removeItem('gd_salt');
       localStorage.removeItem('gd_token');
@@ -50,6 +65,10 @@ const creds = {
       // logout or failed restore so an upgrade does not leave the password
       // sitting in localStorage for ever.
       localStorage.removeItem('gd_password');
+      // Likewise a server address from before this client stopped asking for
+      // one.  Nothing reads it, so it is only clutter — but clutter naming a
+      // host somebody's library is on.
+      localStorage.removeItem('gd_server');
    },
 };
 
@@ -326,7 +345,7 @@ function audioOnlyFormat() {
 
 // Build a subsonic API URL. Extra params can be passed as an object.
 function apiUrl(endpoint, extra = {}) {
-   const {server} = creds.load();
+   const server = serverBase();
    const p = new URLSearchParams({
       ...authParams(),
       v: '1.16.1',
@@ -609,9 +628,8 @@ function showLightbox(src) {
 
 // ── Login ───────────────────────────────────────────────────────────────────
 
-async function tryLogin(server, user, password) {
-   // Normalise server URL: strip trailing slash.
-   server = server.replace(/\/+$/, '');
+async function tryLogin(user, password) {
+   const server = serverBase();
    console.log('[login] attempting ping', server, user);
 
    // Derived once and proved before it is stored, so what ends up in
@@ -642,36 +660,29 @@ async function tryLogin(server, user, password) {
       throw new Error(sr.error?.message ?? 'Authentication failed');
 
    console.log('[login] success, saving credentials');
-   creds.save(server, user, salt, token);
+   creds.save(user, salt, token);
 }
 
 // Verify credentials already in localStorage. Separate from tryLogin() because
 // there is no password to derive from at this point — the stored token is the
 // credential, and this only asks the server whether it still works.
 async function verifySaved() {
-   const {server, user, salt, token} = creds.load();
-   if (!server || !user || !salt || !token) return false;
+   const {user, salt, token} = creds.load();
+   if (!user || !salt || !token) return false;
    const p = new URLSearchParams({
       u: user, t: token, s: salt, v: '1.16.1', c: 'gaindrive-web', f: 'json',
    });
-   const resp = await fetch(`${server}/rest/ping.view?${p}`);
+   // Against the origin, which for a token saved by a client that still asked
+   // for a server address may not be the server it was issued by.  It fails
+   // auth there, the restore path clears it, and the user logs in again — the
+   // one thing that must not happen is it being sent to whatever host that
+   // client was pointed at.
+   const resp = await fetch(`${serverBase()}/rest/ping.view?${p}`);
    if (!resp.ok) throw new Error(`Server returned HTTP ${resp.status}`);
    const sr = (await resp.json())['subsonic-response'];
    if (sr.status !== 'ok')
       throw new Error(sr.error?.message ?? 'Authentication failed');
    return true;
-}
-
-async function detectSubsonicOrigin() {
-   if (window.location.protocol === 'file:') return false;
-   try {
-      const resp = await fetch('/rest/ping.view?v=1.16.1&c=gaindrive-web&f=json');
-      if (!resp.ok) return false;
-      const data = await resp.json();
-      return 'subsonic-response' in data;
-   } catch {
-      return false;
-   }
 }
 
 // ── Multi-pane navigation ────────────────────────────────────────────────────
@@ -1207,7 +1218,7 @@ async function viewUserEdit(user, refreshFn) {
       formStatus.textContent = '';
       saveBtn.disabled = true;
 
-      const {server} = creds.load();
+      const server = serverBase();
       const base = new URLSearchParams({
          ...authParams(), v: '1.16.1', c: 'gaindrive-web', f: 'json'
          });
@@ -1871,7 +1882,7 @@ function makeUploadBar() {
       const file = fileInput.files[0];
       if (!file) { uploadStatus.textContent = 'No file selected.'; return; }
 
-      const {server} = creds.load();
+      const server = serverBase();
       const p = new URLSearchParams({
          ...authParams(), v: '1.16.1', c: 'gaindrive-web', f: 'json'
          });
@@ -2721,7 +2732,23 @@ async function viewAlbums(artistId, artistName, isCategory = false) {
             body.className = 'artist-bio-body';
             bioP = document.createElement('p');
             bioP.className = 'artist-bio-text';
-            bioP.innerHTML = bio;   // Last.fm-supplied HTML
+            // Text, not markup.  A provider's biography is somebody else's
+            // editable content — Wikipedia's extract and TheAudioDB's, which
+            // is community-edited — and this was the one place it was treated
+            // as HTML and so the one place it could run: innerHTML does not
+            // execute a <script> tag, but <img src=x onerror=…> fires, on
+            // this origin, with the auth token in localStorage in reach.
+            //
+            // The comment here used to say "Last.fm-supplied HTML" and was
+            // wrong twice over: Last.fm supplies only a URL now, and the field
+            // is prose.  The server also cleans it (src/untrusted.hh), so this
+            // is the second of two locks rather than the only one — but the
+            // first one cannot know what a client will do with the string.
+            //
+            // Consistent with the rest of the client rather than a new rule:
+            // album notes are the same class of provider prose, share this CSS
+            // class, and have always used textContent.
+            bioP.textContent = bio;
             body.appendChild(bioP);
 
             // Links + 'more' toggle below the description, inside the text column.
@@ -5128,7 +5155,7 @@ async function videoChaptersSave() {
       // A raw fetch because apiCall() takes an object of query parameters and
       // cannot express a request body.  The id stays in the query string; the
       // body is the chapter file itself.
-      const {server} = creds.load();
+      const server = serverBase();
       const p = new URLSearchParams({...authParams(),
          v: '1.16.1', c: 'gaindrive-web', f: 'json', id: song.id});
       const resp = await fetch(`${server}/rest/saveChapters.view?${p}`, {
@@ -6294,7 +6321,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
          // Save cover art first, if changed.
          if (pendingCover) {
             try {
-               const {server} = creds.load();
+               const server = serverBase();
                const p = new URLSearchParams({...authParams(),
                   v: '1.16.1', c: 'gaindrive-web', f: 'json', id: albumId});
                const fd = new FormData();
@@ -7835,8 +7862,8 @@ let wiredOnce = false;
 // submit listener at the foot of this file is bound once per page load and
 // lives on the node; rebuilding would lose it, and re-binding it per login is
 // the doubling bug wiredOnce exists to prevent.  Keeping the node also keeps
-// whatever detectSubsonicOrigin() applied to #server at boot, which is wanted
-// back on the login screen a logout returns to.
+// #login-error's text, which is wanted back on the login screen a logout
+// returns to.
 let detachedLoginForm = null;
 
 function loginFormDetach() {
@@ -8073,7 +8100,6 @@ document.getElementById('login-form').addEventListener('submit', async e => {
 
    try {
       await tryLogin(
-         document.getElementById('server').value.trim(),
          document.getElementById('username').value.trim(),
          document.getElementById('password').value,
       );
@@ -8090,18 +8116,25 @@ document.getElementById('login-form').addEventListener('submit', async e => {
 // On load: if we have saved credentials, verify them and skip the login form.
 console.log('[boot] checking saved credentials');
 (async () => {
-   // Looked up before the first await rather than beside their use below.
-   // Both branches await something — one of them a round trip — and a user who
-   // finishes typing and presses Connect while that is in flight has by then
-   // taken the form out of the document, at which point getElementById returns
-   // null and the self-hosted block throws on .value.  Holding the nodes means
-   // the prefill lands wherever the form currently is, and a detached node
-   // keeps it, so it is still applied when a logout puts the form back.
-   const serverInput = document.getElementById('server');
-   const serverLabel = document.querySelector('label[for="server"]');
-   const {server, user, salt, token} = creds.load();
-   console.log('[boot] saved creds present:', !!(server && user && salt && token));
-   if (server && user && salt && token) {
+   // There is no server to talk to unless this page was served by one.  Said
+   // plainly rather than left to fail: window.location.origin is the string
+   // "null" for a file: URL, so every request would go to null/rest/… and the
+   // login would report a network error, which reads as the server being down
+   // rather than as this copy of the client being in the wrong place.
+   if (!/^https?:$/.test(window.location.protocol)) {
+      console.error('[boot] not served over http(s):', window.location.protocol);
+      const errEl = document.getElementById('login-error');
+      errEl.textContent = 'Open this page from your gaindrive server — '
+         + 'a copy opened from disk has no server to talk to.';
+      errEl.hidden = false;
+      document.getElementById('login-form')
+         .querySelector('button').disabled = true;
+      return;
+      }
+
+   const {user, salt, token} = creds.load();
+   console.log('[boot] saved creds present:', !!(user && salt && token));
+   if (user && salt && token) {
       try {
          await verifySaved();
          showShell();
@@ -8114,15 +8147,10 @@ console.log('[boot] checking saved credentials');
    }
    // A password left by a version of this client that stored one. There is no
    // way to turn it into a token without the user typing it again, so the only
-   // safe thing is to remove it and ask.
-   if (localStorage.getItem('gd_password')) {
-      console.log('[boot] clearing a password stored by an older client');
+   // safe thing is to remove it and ask.  creds.clear() takes the stale
+   // gd_server with it.
+   if (localStorage.getItem('gd_password') || localStorage.getItem('gd_server')) {
+      console.log('[boot] clearing state left by an older client');
       creds.clear();
-   }
-   if (await detectSubsonicOrigin()) {
-      console.log('[boot] self-hosted: hiding server field');
-      serverInput.value = window.location.origin;
-      serverInput.hidden = true;
-      serverLabel.hidden = true;
    }
 })();

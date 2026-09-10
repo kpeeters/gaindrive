@@ -1348,6 +1348,11 @@ input.chapter-time.bad { border-color: #e06c6c; }
    font-size: 0.8rem;
    color: var(--text-dim);
    line-height: 1.5;
+   /* These fields are several paragraphs of plain text whose breaks are the
+      only structure they have, and a <p> collapses them — so a multi-paragraph
+      biography used to render as one blob however it was inserted.  The server
+      keeps \n through clean_prose() for this. */
+   white-space: pre-line;
    display: -webkit-box;
    -webkit-line-clamp: 5;
    -webkit-box-orient: vertical;
@@ -1359,9 +1364,6 @@ input.chapter-time.bad { border-color: #e06c6c; }
    overflow: visible;
 }
 
-.artist-bio-text a {
-   color: var(--accent);
-}
 
 .bio-toggle {
    font-size: 0.75rem;

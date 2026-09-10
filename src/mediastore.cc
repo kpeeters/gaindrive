@@ -31,6 +31,7 @@
 #include "dvd.hh"
 #include "parallel.hh"
 #include "tmdb.hh"
+#include "untrusted.hh"
 #include "videoname.hh"
 
 namespace fs = std::filesystem;
@@ -1852,13 +1853,10 @@ static std::string mb_uuid(const TagLib::PropertyMap& props, const char* key)
 	auto it = props.find(key);
 	if (it == props.end() || it->second.size() != 1) return "";
 	std::string v = it->second.front().toCString(true);
-	if (v.size() != 36) return "";
-	for (size_t i = 0; i < v.size(); ++i) {
-		bool dash = (i == 8 || i == 13 || i == 18 || i == 23);
-		if (dash ? v[i] != '-' : !std::isxdigit((unsigned char)v[i]))
-			return "";
-		}
-	return v;
+	// The shape check now lives in untrusted.hh, because the provider path
+	// needed the same one: a search result's `id` had been trusted where a
+	// file's tag was not.
+	return is_uuid(v) ? v : "";
 	}
 
 // Phase 3 for one changed file: the slow reads, with no lock held.  Shared by
@@ -4314,14 +4312,27 @@ std::optional<MediaStore::CachedArtistInfo> MediaStore::get_cached_artist_info(i
 		" FROM artist_info_cache WHERE folder_id = ?");
 	q.bind(1, folder_id);
 	if (!q.executeStep()) return std::nullopt;
+	// Cleaned on the way out as well as on the way in, which is not belt and
+	// braces: artist_info_cache has no TTL, so every row written before the
+	// providers were being cleaned would go on serving whatever they sent,
+	// for ever.  Bumping MUSIC_CACHE_VERSION is how this codebase normally
+	// drops cache rows that were made under an older rule, and is deliberately
+	// not used here — these rows cost the whole paced provider chain per
+	// artist to rebuild, which is minutes of network for a real library,
+	// against a string pass on read.
+	//
+	// last_fm_url is composed locally from the artist name and needs nothing;
+	// it goes through clean_url anyway rather than being the one field a
+	// reader has to check the provenance of.
 	CachedArtistInfo a;
-	a.mbid         = q.getColumn(0).getString();
-	a.last_fm_url  = q.getColumn(1).getString();
-	a.biography    = q.getColumn(2).getString();
-	a.image_url    = q.getColumn(3).getString();
-	a.wiki_url     = q.getColumn(4).getString();
-	a.allmusic_url = q.getColumn(5).getString();
-	a.discogs_url  = q.getColumn(6).getString();
+	std::string mbid = q.getColumn(0).getString();
+	a.mbid         = is_uuid(mbid) ? mbid : "";
+	a.last_fm_url  = clean_url(q.getColumn(1).getString());
+	a.biography    = clean_prose(q.getColumn(2).getString(), MAX_PROSE_BYTES);
+	a.image_url    = clean_url(q.getColumn(3).getString());
+	a.wiki_url     = clean_url(q.getColumn(4).getString());
+	a.allmusic_url = clean_url(q.getColumn(5).getString());
+	a.discogs_url  = clean_url(q.getColumn(6).getString());
 	return a;
 	}
 
@@ -4702,11 +4713,16 @@ MediaStore::get_cached_album_info(int folder_id)
 		"SELECT mbid, notes, wiki_url, allmusic_url FROM album_info_cache WHERE folder_id = ?");
 	q.bind(1, folder_id);
 	if (!q.executeStep()) return std::nullopt;
+	// On read for the reason get_cached_artist_info() gives.  notes has two
+	// independent providers writing it — Wikipedia here and TMDB through
+	// apply_album_overview() — which is one more reason not to rely on every
+	// write path having remembered.
 	CachedAlbumInfo a;
-	a.mbid         = q.getColumn(0).getString();
-	a.notes        = q.getColumn(1).getString();
-	a.wiki_url     = q.getColumn(2).getString();
-	a.allmusic_url = q.getColumn(3).getString();
+	std::string mbid = q.getColumn(0).getString();
+	a.mbid         = is_uuid(mbid) ? mbid : "";
+	a.notes        = clean_prose(q.getColumn(1).getString(), MAX_PROSE_BYTES);
+	a.wiki_url     = clean_url(q.getColumn(2).getString());
+	a.allmusic_url = clean_url(q.getColumn(3).getString());
 	return a;
 	}
 
