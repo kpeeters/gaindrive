@@ -6779,6 +6779,14 @@ function setupSearch() {
 //    both chapter buttons are hidden on a film with no markers, and
 //    #video-fullscreen is hidden while casting.  Testing the button is
 //    therefore the whole of `when` in three of the four cases.
+//  * `nav` is optional and holds the CSS selector of the sidebar entry the
+//    key stands for.  It is one string doing two jobs: `run` clicks it, and
+//    keysNavHints() stamps `show` onto it as a key cap — so the letter printed
+//    in the sidebar is read out of the entry that makes the letter work, and a
+//    rebinding moves the hint with it rather than leaving a lie in the markup.
+//    `run` reaches it as `this.nav`, which is why those entries are written as
+//    methods rather than arrows; the dispatcher calls sc.run(), exactly as the
+//    overlay calls sc.label().
 //  * `label` may be a function, so `q` can read the live title off
 //    #video-close.  That button already flips between "Stop and close" and
 //    "Close" depending on whether a cast is running, and a second copy of that
@@ -6794,6 +6802,24 @@ function setupSearch() {
 function keyShown(id) {
    const el = document.getElementById(id);
    return !!el && !el.hidden;
+}
+
+// The four view keys share one gate, so it is written once.
+//
+// !videoCovering() is the Browsing rule, here for the Browsing reason: a
+// picture filling the content area is drawn over the panes, so switching which
+// list is underneath it changes something the viewer cannot see.  A minimised
+// picture is deliberately not covered — the panes are still there and still the
+// thing being looked at.
+//
+// keyShown('app-shell') is the other half.  setupKeys() binds its listener once
+// per page load, inside showShell()'s wiredOnce block, and showLogin() only
+// sets the hidden attribute — so the keyboard outlives a logout.  Without this,
+// Shift L on the login screen would rebuild a shell nobody is looking at and
+// fetch with credentials that were just dropped.  #app-shell carries the
+// attribute rather than a class, which is exactly what keyShown tests.
+function keyCanSwitchView() {
+   return keyShown('app-shell') && !videoCovering();
 }
 
 function videoOnScreen() {
@@ -7301,6 +7327,29 @@ const SHORTCUTS = [
     label: 'Find in this pane',
     when: () => !videoCovering(), run: isearchStart},
 
+   // Shift, because these are the one kind of jump that leaves whatever you
+   // were doing for somewhere else entirely, and because plain l is already the
+   // chapter list — a letter meaning two things told apart by state the viewer
+   // has to infer is what the shift avoids.
+   //
+   // Each mirrors its sidebar entry by clicking it, the table's usual bargain:
+   // that handler already owns history.pushState + showView, so a key switches
+   // views by exactly the path the mouse does, back button and all, and no
+   // second copy of that sequence exists to drift.  The selector is written
+   // once per entry and read again by keysNavHints() to draw the cap.
+   {group: 'Views', key: 'l', show: 'Shift L', shift: true, label: 'Library',
+    nav:  '#sidebar a[data-view="artists"]',
+    when: keyCanSwitchView, run() { document.querySelector(this.nav).click(); }},
+   {group: 'Views', key: 'p', show: 'Shift P', shift: true, label: 'Playlists',
+    nav:  '#sidebar a[data-view="playlists"]',
+    when: keyCanSwitchView, run() { document.querySelector(this.nav).click(); }},
+   {group: 'Views', key: 'r', show: 'Shift R', shift: true, label: 'Recents',
+    nav:  '#sidebar a[data-view="recents"]',
+    when: keyCanSwitchView, run() { document.querySelector(this.nav).click(); }},
+   {group: 'Views', key: 's', show: 'Shift S', shift: true, label: 'Settings',
+    nav:  '#sidebar a[data-view="settings"]',
+    when: keyCanSwitchView, run() { document.querySelector(this.nav).click(); }},
+
    {group: 'Video', key: 'f', show: 'F', label: 'Fullscreen',
     when: () => videoOnScreen() && keyShown('video-fullscreen'),
     run:  videoFullscreenToggle},
@@ -7319,8 +7368,12 @@ const SHORTCUTS = [
     when: () => keyShown('player-cast'),
     run:  () => { keyLeaveFullscreen();
                   document.getElementById('player-cast').click(); }},
+   // nav here is the hint's anchor alone: the field means "the sidebar entry
+   // this key stands for", not "how it runs", and Search runs what its own
+   // button's handler runs.  Without it Search would be the one unhinted entry
+   // among four hinted neighbours, which reads as having no key.
    {group: 'Elsewhere', key: '/', show: '/', label: 'Search the library',
-    when: () => true, run: openSearchBar},
+    nav: '#search-btn', when: () => true, run: openSearchBar},
    {group: 'Elsewhere', key: '?', show: '?', label: 'This list',
     when: () => true, run: keysToggle},
 ];
@@ -7361,6 +7414,35 @@ function keysRender() {
       dd.textContent = (typeof sc.label === 'function') ? sc.label() : sc.label;
       if (!on) { dt.classList.add('keys-off'); dd.classList.add('keys-off'); }
       list.append(dt, dd);
+      }
+}
+
+// The caps drawn beside the sidebar entries, generated from the table for the
+// reason the overlay is: the letter is stated once, in the entry that makes it
+// work, so the sidebar cannot come to claim a key the dispatcher does not
+// honour.  Writing <kbd>Shift L</kbd> into index.html would be the letter in
+// two files, and the copy in the one that cannot execute is the copy that goes
+// stale.
+//
+// Selecting through `nav` — which names a #sidebar element — is also what keeps
+// the caps out of #bottom-nav, whose [data-view] markup is otherwise identical.
+// The layout that shows that bar is the phone layout, and a phone has no
+// keyboard to press: a media query would build the cap and then paint it away,
+// leaving it in the accessibility tree of the one device that cannot use it,
+// and would put a second definition of "this is a phone" beside the first.
+// This never builds it at all.
+//
+// Once per page load, from the wiredOnce block.  Nothing rebuilds these links —
+// showView only toggles .active on them — so once is enough, and twice would
+// stack a second cap on every entry.
+function keysNavHints() {
+   for (const sc of SHORTCUTS) {
+      if (!sc.nav) continue;
+      const a = document.querySelector(sc.nav);
+      if (!a) continue;
+      const kb = document.createElement('kbd');
+      kb.textContent = sc.show;
+      a.appendChild(kb);
       }
 }
 
@@ -7434,19 +7516,26 @@ function setupKeys() {
       // is the one result a shortcut set must not produce.
       if (keyOpenModal() && e.key !== '?') return;
 
-      // Lowercased so Shift+F works.  ? is Shift+/ on most layouts and arrives
-      // as ? already, which is why it is spelled that way in the table.
-      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-      // Shift is part of a *named* key's identity and never a printable one's.
-      // ArrowLeft is spelled the same either way, so Shift+← has to be told
-      // apart from ← by the flag; a character already encodes it, and testing
-      // shiftKey there would stop ? — which is Shift+/ — from matching at all.
-      const shifted = (e.key.length === 1) ? null : !!e.shiftKey;
+      // Shift is part of the identity of a named key and of a *letter*, and of
+      // nothing else.  ArrowLeft is spelled the same either way, so Shift+← has
+      // to be told apart from ← by the flag.  A letter is the same case: Shift L
+      // and l are one letter in two cases, and the view keys have to be told
+      // apart from f, l, q and c.  Punctuation is the exception that keeps its
+      // old rule — ? is Shift+/ on most layouts and arrives as ? already, so the
+      // character is the whole identity and testing shiftKey would stop it
+      // matching at all.
+      //
+      // A letter is asked about e.shiftKey rather than about its own case,
+      // because Caps Lock changes the case with nobody having pressed Shift —
+      // and reading the case would then select the *wrong* entry rather than
+      // merely fail to find one.
+      const key   = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      const cased = e.key.length > 1 || /^[a-z]$/.test(key);
       // when() is part of the match rather than a test after it, so one key can
       // carry two entries and the applicable one wins: ← seeks over a film that
       // is covering the panes and moves between them when it is not.
       const sc = SHORTCUTS.find(s =>
-         s.key === key && (shifted === null || !!s.shift === shifted)
+         s.key === key && (!cased || !!s.shift === !!e.shiftKey)
          && !!s.ctrl === e.ctrlKey && s.when());
       if (!sc) return;
       // Applied to every match rather than per entry: / would otherwise open
@@ -7481,7 +7570,75 @@ async function showShell() {
       setupPlayer();
       setupSearch();
       setupKeys();
+      // After setupKeys, because it reads the table the keys are bound from:
+      // bind them, then say so.
+      keysNavHints();
       setupPaneNav();
+
+      // These four were below, outside the guard, and so were re-bound on every
+      // login: after one logout and back, a nav click pushed two history
+      // entries and rendered twice, and Back popped through doubled handlers.
+      // They meet this block's own criterion — nothing in them depends on who
+      // logged in — and the view keys click that nav link, so a key would have
+      // inherited the doubling exactly.
+
+      // Wire up sidebar and bottom-nav links with history entries.
+      shell.querySelectorAll('[data-view]').forEach(a => {
+         a.addEventListener('click', e => {
+            e.preventDefault();
+            history.pushState({view: a.dataset.view}, '');
+            showView(a.dataset.view).catch(err => console.error('[view] error', err));
+            });
+         });
+
+      // Handle browser back/forward: re-render from the popped state.
+      // On back navigation the target pane still has its previous content, so we
+      // just slide to it. A full fetch is only needed if the pane is empty (e.g.
+      // after a page refresh that landed on a deeper history entry).
+      window.addEventListener('popstate', async e => {
+         const s = e.state ?? {view: 'artists'};
+         if (s.view === 'albums') {
+            if (document.getElementById('pane-albums').children.length > 0)
+               paneNav.slideTo(1);
+            else
+               await viewAlbums(s.artistId, s.artistName, s.isCategory === true);
+            } else if (s.view === 'tracks') {
+            if (document.getElementById('pane-tracks').children.length > 0)
+               paneNav.slideTo(2);
+            else
+               await viewTracks(s.albumId, s.albumTitle, s.artistId, s.artistName);
+            } else if (s.view === 'playlist-tracks') {
+            if (document.getElementById('pane-albums').children.length > 0)
+               paneNav.slideTo(1);
+            else
+               await viewPlaylistTracks(s.playlistId, s.playlistName);
+            } else if (s.view === 'playlists') {
+            if (document.getElementById('pane-artists').children.length > 0)
+               paneNav.slideTo(0);
+            else
+               await viewPlaylists();
+            } else {
+            if (document.getElementById('pane-artists').children.length > 0) {
+               paneNav.slideTo(0);
+               await returnedToArtists();
+               }
+            else
+               await showView('artists');
+            }
+         });
+
+      // Recalculate pane widths and strip offset on resize without animating.
+      new ResizeObserver(() => paneNav.relayout()).observe(
+         document.getElementById('pane-viewport'));
+
+      document.getElementById('logout-btn').addEventListener('click', async e => {
+         e.preventDefault();
+         // Tear down any active cast session before dropping creds — otherwise
+         // the Chromecast keeps playing and the SSE listener stays open server-side.
+         if (castDeviceId !== null) await stopCast({resumeLocal: false});
+         creds.clear();
+         showLogin();
+         });
       }
 
    // Fetch the logged-in user's roles so we can show/hide the cast button.
@@ -7551,64 +7708,6 @@ async function showShell() {
             }
          } catch (_) {}
       }
-
-   // Wire up sidebar and bottom-nav links with history entries.
-   shell.querySelectorAll('[data-view]').forEach(a => {
-      a.addEventListener('click', e => {
-         e.preventDefault();
-         history.pushState({view: a.dataset.view}, '');
-         showView(a.dataset.view).catch(err => console.error('[view] error', err));
-         });
-      });
-
-   // Handle browser back/forward: re-render from the popped state.
-   // On back navigation the target pane still has its previous content, so we
-   // just slide to it. A full fetch is only needed if the pane is empty (e.g.
-   // after a page refresh that landed on a deeper history entry).
-   window.addEventListener('popstate', async e => {
-      const s = e.state ?? {view: 'artists'};
-      if (s.view === 'albums') {
-         if (document.getElementById('pane-albums').children.length > 0)
-            paneNav.slideTo(1);
-         else
-            await viewAlbums(s.artistId, s.artistName, s.isCategory === true);
-         } else if (s.view === 'tracks') {
-         if (document.getElementById('pane-tracks').children.length > 0)
-            paneNav.slideTo(2);
-         else
-            await viewTracks(s.albumId, s.albumTitle, s.artistId, s.artistName);
-         } else if (s.view === 'playlist-tracks') {
-         if (document.getElementById('pane-albums').children.length > 0)
-            paneNav.slideTo(1);
-         else
-            await viewPlaylistTracks(s.playlistId, s.playlistName);
-         } else if (s.view === 'playlists') {
-         if (document.getElementById('pane-artists').children.length > 0)
-            paneNav.slideTo(0);
-         else
-            await viewPlaylists();
-         } else {
-         if (document.getElementById('pane-artists').children.length > 0) {
-            paneNav.slideTo(0);
-            await returnedToArtists();
-            }
-         else
-            await showView('artists');
-         }
-      });
-
-   // Recalculate pane widths and strip offset on resize without animating.
-   new ResizeObserver(() => paneNav.relayout()).observe(
-      document.getElementById('pane-viewport'));
-
-   document.getElementById('logout-btn').addEventListener('click', async e => {
-      e.preventDefault();
-      // Tear down any active cast session before dropping creds — otherwise
-      // the Chromecast keeps playing and the SSE listener stays open server-side.
-      if (castDeviceId !== null) await stopCast({resumeLocal: false});
-      creds.clear();
-      showLogin();
-      });
 
    // Record initial state so the browser can pop back to it.
    history.replaceState({view: 'artists'}, '');

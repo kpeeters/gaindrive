@@ -299,6 +299,30 @@ body {
    color: var(--text);
 }
 
+/* The key cap beside a sidebar entry, drawn by keysNavHints() out of the
+   shortcut table.  The overlay's cap (#keys-list kbd) fills with var(--bg),
+   which is the exact colour the two rules above paint — so a cap sharing that
+   fill would disappear on the row the viewer is standing on, which is why this
+   is its own rule rather than a second selector on that one.  Unfilled and
+   outlined instead: --border reads against the sidebar's --surface and against
+   the active row's --bg alike, so one cap works on both grounds.  It stays
+   --text-dim on the active row too — this is a hint, not part of the label.
+
+   No mobile override is needed: the rule can only match inside #sidebar, which
+   is display:none below 650px, and the caps are never built into #bottom-nav. */
+#sidebar a kbd {
+   margin-left: auto;      /* the flex row's right edge, past the label */
+   flex-shrink: 0;
+   padding: 0 0.3rem;
+   border: 1px solid var(--border);
+   border-radius: 3px;
+   background: none;
+   color: var(--text-dim);
+   font-family: inherit;   /* kbd defaults to monospace */
+   font-size: 0.72rem;
+   line-height: 1.5;
+}
+
 /* ── Sidebar queue ──────────────────────────────────────── */
 
 #sidebar-queue {
