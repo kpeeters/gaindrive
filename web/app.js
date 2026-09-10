@@ -1582,7 +1582,7 @@ function makeUploadBar() {
 
    const hint = document.createElement('p');
    hint.className   = 'admin-hint';
-   hint.textContent = 'Music archive: zip, tar, tar.gz';
+   hint.textContent = 'Upload music archive: zip, tar, tar.gz:';
    // Says where an upload actually goes, because "Uploads" is a place people
    // reasonably expect to be the library itself. It is not: an admin has to
    // move it, and until then only this account can see it.
@@ -1756,8 +1756,10 @@ function makeUploadBar() {
       urlHint.className   = 'admin-hint';
       // The names are below this now, so the sentence telling you to leave
       // them blank went with them, into stagingHint.
-      urlHint.textContent = `Or paste a URL — handled by: ${names}.`;
+      urlHint.textContent = `Or paste a URL of a page containing a video/audio file:`;
 
+		//— handled by: ${names}
+		
       const submit = async () => {
          const url = urlInput.value.trim();
          if (!url) { uploadStatus.textContent = 'No URL entered.'; return; }
@@ -1803,10 +1805,10 @@ function makeUploadBar() {
    //
    // Then their two captions, then what happens to whatever arrives, then the
    // names that apply to both, then the progress of the one you started.
-   bar.append(row);
-   if (urlRow) bar.append(urlRow);
    bar.append(hint);
+   bar.append(row);
    if (urlHint) bar.append(urlHint);
+   if (urlRow) bar.append(urlRow);
    bar.append(stagingHint, nameRow, nameList, dupeNote, progress, uploadStatus);
    if (jobs) bar.append(jobs);
 
