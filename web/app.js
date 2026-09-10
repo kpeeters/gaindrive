@@ -7093,7 +7093,16 @@ function navDrill() {
 
 // Ctrl+S, then type: the cursor walks to the first row in the *active pane*
 // whose text contains what has been typed, and moves again with each further
-// character.  Ctrl+S again advances to the next match, wrapping at the end.
+// character.  Ctrl+S again advances to the next match, wrapping at the end;
+// Ctrl+R does the same backwards, and either turns a running search round
+// without losing what has been typed — which is what makes overshooting a
+// match cost one keystroke rather than the whole string.
+//
+// Ctrl+R is the browser's reload, and taking it is deliberate: reload is on a
+// toolbar button, on F5 and on Ctrl+Shift+R, while a search that can only go
+// forwards has nothing else to offer.  The shifted form is left alone for that
+// reason — it is the one a person reaches for when the page looks broken, which
+// is exactly the moment not to be clever.
 //
 // It is not the search bar `/` opens.  That one asks the server and replaces
 // pane 0 with the answer; this one never leaves the listing already on screen,
@@ -7102,7 +7111,10 @@ function navDrill() {
 //
 // `origin` is captured on entry so Escape can put the cursor back, which is
 // what makes an exploratory search free.
-const isearch = {on: false, text: '', origin: null, wrapped: false, failing: false};
+// `back` is sticky, as in emacs: further typing carries on the way the search
+// was last sent, and it is Ctrl+S / Ctrl+R that change their minds.
+const isearch = {on: false, text: '', origin: null, wrapped: false,
+                 failing: false, back: false};
 
 const ISEARCH_HL = 'gd-isearch';
 
@@ -7175,30 +7187,42 @@ function isearchDraw() {
    bar.hidden = !isearch.on;
    if (!isearch.on) return;
    bar.classList.toggle('failing', isearch.failing);
+   // Both halves in one line, as emacs spells it: "Failing I-search backward:"
+   // is the state a reader most needs named, being two surprises at once.
    document.getElementById('isearch-label').textContent =
-      isearch.failing ? 'Failing I-search:' : 'I-search:';
+      (isearch.failing ? 'Failing I-search' : 'I-search')
+      + (isearch.back ? ' backward:' : ':');
    document.getElementById('isearch-text').textContent = isearch.text;
    document.getElementById('isearch-note').textContent =
       isearch.wrapped && !isearch.failing ? 'wrapped' : '';
 }
 
-// Looks forward from `start` for a row matching the current string, wrapping
-// once through the whole pane.  Returns the index, or null when nothing in the
-// pane matches at all — which is what "failing" means, and is deliberately not
-// the same as "no more after here".
-function isearchFind(rows, start) {
+// Looks from `start` for a row matching the current string — forward, or
+// backward when `back` — wrapping once through the whole pane.  Returns the
+// index, or null when nothing in the pane matches at all, which is what
+// "failing" means and is deliberately not the same as "no more this way".
+//
+// `start` is allowed to sit outside the pane: Ctrl+S passes one past the
+// cursor and Ctrl+R one before it, so at the ends they are n and -1.  The
+// double modulo is what brings those back inside, and the comparison that
+// decides `wrapped` is against the raw `start` rather than the folded index,
+// which is what makes a step off either end report the wrap it just made.
+function isearchFind(rows, start, back) {
    const n = rows.length;
    for (let k = 0; k < n; k++) {
-      const i = ((start + k) % n + n) % n;
-      if (isearchMatches(rows[i], isearch.text)) return {i, wrapped: i < start};
+      const i = (((back ? start - k : start + k) % n) + n) % n;
+      if (isearchMatches(rows[i], isearch.text))
+         return {i, wrapped: back ? i > start : i < start};
       }
    return null;
 }
 
-// `from` is where the scan starts.  Typing passes the current row, so a row
-// that still matches the longer string keeps the cursor — the emacs feel, and
-// what stops the cursor bolting away in the middle of a word.  Ctrl+S passes
-// the row after it, which is what makes it "next".
+// `from` is where the scan starts; which way it goes is isearch.back, so every
+// caller sets the direction before it and none of them passes it twice.
+// Typing passes the current row, so a row that still matches the longer string
+// keeps the cursor — the emacs feel, and what stops the cursor bolting away in
+// the middle of a word.  Ctrl+S passes the row after it and Ctrl+R the one
+// before, which is what makes them "next" and "previous".
 function isearchStep(from) {
    const d    = paneNav.depth;
    const rows = navSettle(d);
@@ -7213,7 +7237,7 @@ function isearchStep(from) {
       return;
       }
 
-   const hit = isearchFind(rows, from);
+   const hit = isearchFind(rows, from, isearch.back);
    isearch.failing = (hit === null);
    if (hit) {
       isearch.wrapped = hit.wrapped;
@@ -7226,7 +7250,7 @@ function isearchStep(from) {
    isearchDraw();
 }
 
-function isearchStart() {
+function isearchStart(back = false) {
    navShown = true;
    const d = paneNav.depth;
    navSettle(d);
@@ -7235,6 +7259,7 @@ function isearchStart() {
    isearch.origin  = navCursor[d];
    isearch.wrapped = false;
    isearch.failing = false;
+   isearch.back    = back;
    isearchDraw();
 }
 
@@ -7274,7 +7299,20 @@ function isearchKey(e) {
    if (e.key === 'Escape')                 { isearchEnd(true);  return true; }
    if (e.key === 'Enter')                  { isearchEnd(false); return true; }
    if (e.ctrlKey && e.key.toLowerCase() === 's') {
+      isearch.back = false;
       isearchStep(navCursor[paneNav.depth] + 1);
+      return true;
+      }
+   // Turned round rather than restarted, which is the whole value of it: the
+   // string is kept, so overshooting a match forward is undone by one press.
+   // Without this branch the bail below would end the search and the table
+   // entry would then start a fresh one, losing what had been typed.
+   //
+   // !shiftKey so Ctrl+Shift+R stays the browser's hard reload even mid-search,
+   // matching the table entry, which asks for no shift either.
+   if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'r') {
+      isearch.back = true;
+      isearchStep(navCursor[paneNav.depth] - 1);
       return true;
       }
    if (e.ctrlKey || e.metaKey || e.altKey) { isearchEnd(false); return false; }
@@ -7362,7 +7400,14 @@ const SHORTCUTS = [
     when: () => !videoCovering(), run: navActivate},
    {group: 'Browsing', key: 's', show: 'Ctrl S', ctrl: true,
     label: 'Find in this pane',
-    when: () => !videoCovering(), run: isearchStart},
+    when: () => !videoCovering(), run: () => isearchStart(false)},
+   // This is what stops the browser reloading when no search is running: the
+   // dispatcher preventDefaults every match, and returns before doing so when
+   // there is none.  Ctrl+Shift+R is left to the browser because letters are
+   // shift-significant and this entry asks for no shift.
+   {group: 'Browsing', key: 'r', show: 'Ctrl R', ctrl: true,
+    label: 'Find backwards in this pane',
+    when: () => !videoCovering(), run: () => isearchStart(true)},
 
    // Shift, because these are the one kind of jump that leaves whatever you
    // were doing for somewhere else entirely, and because plain l is already the
