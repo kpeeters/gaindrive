@@ -7579,13 +7579,27 @@ function keysRender() {
    const list = document.getElementById('keys-list');
    list.replaceChildren();
    let group = null;
+   let pairs = null;
    for (const sc of SHORTCUTS) {
       if (sc.group !== group) {
          group = sc.group;
-         const h = document.createElement('div');
+         // Each group is a block of its own holding its own <dl>, rather than
+         // every pair going into one flat grid with the headings spanning it.
+         // That is what lets the whole list flow in columns: a block can be
+         // told not to break, so a group is never split down the fold with its
+         // heading in one column and half its keys in the next.
+         //
+         // It is also why #keys-list is a <div> and not a <dl> — a <dl> may
+         // hold dt, dd and grouping divs, and a nested <dl> is not among them.
+         const block = document.createElement('section');
+         block.className = 'keys-group-block';
+         const h = document.createElement('h4');
          h.className   = 'keys-group';
          h.textContent = group;
-         list.appendChild(h);
+         pairs = document.createElement('dl');
+         pairs.className = 'keys-pairs';
+         block.append(h, pairs);
+         list.appendChild(block);
          }
       const on = sc.when();
       const dt = document.createElement('dt');
@@ -7595,7 +7609,7 @@ function keysRender() {
       const dd = document.createElement('dd');
       dd.textContent = (typeof sc.label === 'function') ? sc.label() : sc.label;
       if (!on) { dt.classList.add('keys-off'); dd.classList.add('keys-off'); }
-      list.append(dt, dd);
+      pairs.append(dt, dd);
       }
 }
 
