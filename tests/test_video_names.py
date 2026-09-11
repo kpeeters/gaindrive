@@ -133,6 +133,17 @@ CASES = {
         {"title": "The Third Man", "year": "1949", "source": "folder"},
     "Big Film 2019/VIDEO_TS":
         {"title": "Big Film", "year": "2019", "source": "folder"},
+    # The vts arm of UNINFORMATIVE, both halves.  A short one still matches;
+    # the long one is the ReDoS regression — the old nested-quantifier
+    # spelling took exponential time on exactly this shape (many digits, then
+    # one letter that forces every partition to be tried), so the assertion
+    # here is as much "the parser returns at all" as what it returns.
+    "Big Film 2019/vts_01_2":
+        {"title": "Big Film", "year": "2019", "source": "folder"},
+    # Asserts nothing about the parse — only that a line comes back, which
+    # the old spelling did not do within the age of the universe.
+    "Junk 2020/vts111111111111111111111111111111111111111111111111111111111111111111111111x":
+        {},
     # A part marker ends the title, and the folder supplies the year.
     "Big Film 2019/BigFilm.CD1":
         {"title": "BigFilm", "year": "2019"},
@@ -154,11 +165,18 @@ FIELDS = ["label", "title", "year", "ep", "source", "cleaned", "series"]
 def run():
     names = "\n".join(CASES) + "\n"
     try:
+        # The timeout is part of the test: the ReDoS case above regresses as
+        # a hang, and a hung test reports nothing.
         p = subprocess.run([BINARY, "--video-name-test", "-"],
-                           input=names, capture_output=True, text=True)
+                           input=names, capture_output=True, text=True,
+                           timeout=30)
     except FileNotFoundError:
         print(f"FAIL  no binary at {BINARY} — pass its path as the first "
               f"argument")
+        return 1
+    except subprocess.TimeoutExpired:
+        print("FAIL  parser did not finish in 30 s — a name in the table "
+              "backtracks; see the ReDoS case")
         return 1
     if p.returncode != 0:
         print(f"FAIL  {BINARY} exited {p.returncode}: {p.stderr.strip()}")

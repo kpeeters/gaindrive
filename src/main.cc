@@ -668,6 +668,7 @@ int main(int argc, char* argv[])
 		("cast-device",   "Chromecast that does not announce itself, as [name=]IP[:port] (repeatable)", cxxopts::value<std::vector<std::string>>())
 		("cast-probe",    "Connect to one Chromecast by IP, report whether it answered, and exit", cxxopts::value<std::string>())
 		("trusted-proxy", "Address of a reverse proxy whose X-Forwarded-For may be believed (repeatable; default loopback)", cxxopts::value<std::vector<std::string>>())
+		("public-url", "Origin clients reach this server at, e.g. https://music.example.org. Used for the URLs a Chromecast is told to fetch; without it the client's own Host header is believed", cxxopts::value<std::string>())
 		("upload-dir", "Directory for uploaded archives", cxxopts::value<std::string>()->default_value("/tmp/gaindrive-uploads"))
 		("transcode-cache",    "Directory for cached transcodes (default: alongside --db)", cxxopts::value<std::string>())
 		("transcode-cache-mb", "Transcode cache size in MB (0 disables)", cxxopts::value<int>()->default_value("1024"))
@@ -866,6 +867,14 @@ int main(int argc, char* argv[])
 	if (args.count("trusted-proxy"))
 		trusted_proxies = args["trusted-proxy"].as<std::vector<std::string>>();
 
+	// The origin this server is reachable at, when it is not the one clients
+	// name in Host — i.e. behind a reverse proxy. Everything a Chromecast is
+	// told to fetch is built on it; the fallback is the request's own Host
+	// header, which is right on a LAN and attacker-chosen on the internet.
+	std::string public_url;
+	if (args.count("public-url"))
+		public_url = args["public-url"].as<std::string>();
+
 	std::vector<CastManager::CastDevice> cast_devices;
 	if (args.count("cast-device")) {
 		std::string err;
@@ -964,6 +973,8 @@ int main(int argc, char* argv[])
 			if (cfg.contains("trusted_proxies") && trusted_proxies.empty())
 				for (const auto& a : cfg["trusted_proxies"])
 					trusted_proxies.push_back(a.get<std::string>());
+			if (cfg.contains("public_url") && !args.count("public-url"))
+				public_url = cfg["public_url"].get<std::string>();
 			if (cfg.contains("upload_dir") && !args.count("upload-dir"))
 				upload_dir = cfg["upload_dir"];
 			// CLI flags take precedence over config for port.
@@ -1055,6 +1066,7 @@ int main(int argc, char* argv[])
 		c["db_path"] = db_path;
 		if (!user_db_path.empty()) c["user_db_path"] = user_db_path;
 		if (!trusted_proxies.empty()) c["trusted_proxies"] = trusted_proxies;
+		if (!public_url.empty()) c["public_url"] = public_url;
 
 		nlohmann::ordered_json rs = nlohmann::ordered_json::array();
 		for (const auto& r : roots)
@@ -1303,6 +1315,19 @@ int main(int argc, char* argv[])
 			std::cout << stamp() << "Trusting X-Forwarded-For from "
 			          << trusted_proxies.size() << " configured proxy address(es)"
 			          << std::endl;
+			}
+
+		if (!public_url.empty()) {
+			if (public_url.rfind("http://", 0) != 0
+			    && public_url.rfind("https://", 0) != 0) {
+				std::cerr << "Error: public_url must start with http:// or "
+				             "https://\n";
+				return 1;
+				}
+			while (!public_url.empty() && public_url.back() == '/')
+				public_url.pop_back();
+			gaindrive_set_public_url(public_url);
+			std::cout << stamp() << "Public URL: " << public_url << std::endl;
 			}
 
 		GainDrive gd(db_path, roots, upload_dir, no_scan, debug, flat_multi_disc,

@@ -5,7 +5,7 @@
 #   OUTPUT  — full path to write the generated .cc file
 #   WEB_DIR — directory containing the web files
 
-set(TEXT_FILES index.html link.html style.css app.js favicon.svg)
+set(TEXT_FILES index.html link.html style.css app.js theme.js favicon.svg)
 
 # A binary file cannot go in a raw string literal — it contains NUL bytes, and
 # no compiler is obliged to carry those through a source file — so these are
@@ -17,6 +17,7 @@ set(VARNAME_index.html  index_html)
 set(VARNAME_link.html   link_html)
 set(VARNAME_style.css   style_css)
 set(VARNAME_app.js      app_js)
+set(VARNAME_theme.js    theme_js)
 set(VARNAME_favicon.svg favicon_svg)
 set(VARNAME_material-symbols-rounded.woff2 material_symbols_woff2)
 
@@ -25,6 +26,7 @@ set(MIME_index.html  text/html)
 set(MIME_link.html   text/html)
 set(MIME_style.css   text/css)
 set(MIME_app.js      application/javascript)
+set(MIME_theme.js    application/javascript)
 set(MIME_favicon.svg image/svg+xml)
 set(MIME_material-symbols-rounded.woff2 font/woff2)
 

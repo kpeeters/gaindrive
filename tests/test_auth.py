@@ -226,6 +226,115 @@ def test_login_throttle():
     print("PASS  a correct password still works, and resets the counter")
 
 
+
+
+def test_xff_does_not_move_the_throttle_bucket():
+    """A forged X-Forwarded-For must not choose the rate-limit bucket.
+
+    The header is believed only from a configured trusted proxy, and even
+    then the entry taken is the rightmost one that is not itself a trusted
+    proxy — proxies append the real peer, so the leftmost entry is the one
+    string the attacker composed in full. From this test's direct connection
+    the header must simply be ignored; if it were honoured, each request
+    below would land in a fresh bucket and the throttle test at the end of
+    this file would be meaningless against a real attacker.
+    """
+    req = urllib.request.Request(
+        f"{BASE}/ping.view?" + urllib.parse.urlencode(
+            {"u": USER, "p": PASS, "v": VER, "c": CLIENT}),
+        headers={"X-Forwarded-For": "203.0.113.7"})
+    with urllib.request.urlopen(req) as r:
+        root = ET.fromstring(r.read())
+    _check(root)
+    print("PASS  X-Forwarded-For from an untrusted peer is ignored")
+
+
+def test_large_body_refused_before_read():
+    """A big Content-Length on an ordinary endpoint must be refused (413).
+
+    The pre-request handler rejects it before a byte of body is read; only
+    /upload (streamed to disk) and setCoverArt (its own image cap) may carry
+    more than a megabyte.
+    """
+    import http.client
+    host = urllib.parse.urlparse(BASE)
+    conn = http.client.HTTPConnection(host.hostname, host.port, timeout=10)
+    params = urllib.parse.urlencode(
+        {"u": USER, "p": PASS, "v": VER, "c": CLIENT})
+    conn.putrequest("POST", f"/rest/saveChapters.view?{params}&id=1")
+    conn.putheader("Content-Type", "text/plain")
+    conn.putheader("Content-Length", str(64 * 1024 * 1024))
+    conn.endheaders()
+    # Send nothing further: the refusal must arrive without the body.
+    resp = conn.getresponse()
+    assert resp.status == 413, f"expected 413, got {resp.status}"
+    conn.close()
+    print("PASS  oversized Content-Length answered 413 before the body")
+
+
+def test_chunked_body_refused():
+    """A chunked body outside /upload is refused with 411.
+
+    Length-less bodies would otherwise be read-and-measured up to the global
+    payload cap, which is sized for an /upload archive.
+    """
+    import http.client
+    host = urllib.parse.urlparse(BASE)
+    conn = http.client.HTTPConnection(host.hostname, host.port, timeout=10)
+    params = urllib.parse.urlencode(
+        {"u": USER, "p": PASS, "v": VER, "c": CLIENT})
+    conn.putrequest("POST", f"/rest/saveChapters.view?{params}&id=1")
+    conn.putheader("Content-Type", "text/plain")
+    conn.putheader("Transfer-Encoding", "chunked")
+    conn.endheaders()
+    conn.send(b"0\r\n\r\n")
+    resp = conn.getresponse()
+    assert resp.status == 411, f"expected 411, got {resp.status}"
+    conn.close()
+    print("PASS  chunked request body answered 411")
+
+
+def test_album_text_nul_name_rejected():
+    """A %00 in getAlbumText's name must be a 400, not a truncated open.
+
+    `cover.jpg%00.txt` passes a naive suffix test as a C++ string and is then
+    truncated at the NUL by c_str(), opening cover.jpg as text/plain.
+    """
+    params = urllib.parse.urlencode(
+        {"u": USER, "p": PASS, "v": VER, "c": CLIENT, "id": "1"})
+    url = f"{BASE}/getAlbumText.view?{params}&name=cover.jpg%00.txt"
+    try:
+        with urllib.request.urlopen(url) as r:
+            status = r.status
+    except urllib.error.HTTPError as e:
+        status = e.code
+    assert status == 400, f"expected 400, got {status}"
+    print("PASS  NUL inside getAlbumText name is rejected")
+
+
+def test_security_headers_present():
+    """nosniff and no-referrer ride on every response; CORS only on the
+    endpoints a Cast receiver fetches."""
+    params = urllib.parse.urlencode(
+        {"u": USER, "p": PASS, "v": VER, "c": CLIENT})
+    with urllib.request.urlopen(f"{BASE}/ping.view?{params}") as r:
+        h = r.headers
+        assert h.get("X-Content-Type-Options") == "nosniff", h
+        assert h.get("Referrer-Policy") == "no-referrer", h
+        assert h.get("Access-Control-Allow-Origin") is None, (
+            "ping.view must not be CORS-readable — it is the password oracle")
+    # The header is set pre-routing, so it must be there whatever the
+    # status — a missing id answering 404 still carries it.
+    try:
+        r = urllib.request.urlopen(f"{BASE}/getCaptions.view?{params}&id=0")
+        headers = r.headers
+    except urllib.error.HTTPError as e:
+        headers = e.headers
+    assert headers.get("Access-Control-Allow-Origin") == "*", (
+        "the Cast receiver needs * on getCaptions")
+    print("PASS  security headers present; CORS scoped to cast endpoints")
+
+
 TESTS = [
     test_ping_ok,
     test_ping_wrong_password,
@@ -240,6 +349,11 @@ TESTS = [
     test_search_counts_are_clamped,
     test_search_count_non_numeric,
     test_bad_id_is_not_a_500,
+    test_xff_does_not_move_the_throttle_bucket,
+    test_large_body_refused_before_read,
+    test_chunked_body_refused,
+    test_album_text_nul_name_rejected,
+    test_security_headers_present,
     # Last, because it deliberately spends the throttle budget for this
     # address and everything above would then be running against a penalty.
     test_login_throttle,

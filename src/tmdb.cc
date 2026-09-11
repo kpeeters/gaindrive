@@ -355,11 +355,10 @@ std::optional<TmdbMatch> Tmdb::search(const std::string& title, int year,
 	// the filename by one — a festival year against a general release, which
 	// is common — would come back empty rather than come back close.
 	//
-	// encode_query_param, not encode_url: the latter leaves '&' and '=' alone,
-	// which a film title can contain. It lives in httplib's detail namespace,
-	// which is safe here only because third_party/httplib.h is pinned by being
-	// copied rather than by a version range — see CLAUDE.md.
-	std::string q = "query=" + httplib::detail::encode_query_param(title)
+	// encode_query_component, not encode_uri: the latter leaves '&' and '='
+	// alone, which a film title can contain. space_as_plus=false keeps the
+	// %20 spelling the pinned 0.18 encoder produced.
+	std::string q = "query=" + httplib::encode_query_component(title, false)
 	              + "&include_adult=false";
 	auto body = get(std::string("/3/search/") + (tv ? "tv" : "movie"), q);
 	if (!body) return std::nullopt;

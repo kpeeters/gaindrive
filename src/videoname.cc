@@ -41,8 +41,17 @@ static const std::set<std::string> STOP_WORDS = {
 // Rip defaults and part markers: a filename that is only one of these says
 // nothing, so the folder above is the better source.  Anchored, because a film
 // really can be called "Video" or "The Movie".
+//
+// The vts arm is spelled `vts[\s._\d-]*\d` (dash last, or the class is a
+// malformed range), not the `vts([\s._-]*\d+)+` it used to be.  The two
+// match the same names — vts, then separators and digits, ending on a
+// digit — but the second is a nested quantifier over a
+// nullable inner part, which std::regex backtracks exponentially: a filename
+// of `vts` plus sixty digits and one letter, arriving in an uploaded archive,
+// parked a scan worker for longer than the server's lifetime.  Nothing else
+// in this file repeats a group whose body can match empty.
 static const std::regex UNINFORMATIVE(
-	R"(^(video_?ts|vts([\s._-]*\d+)+|title[\s._-]*\d*|track[\s._-]*\d*|)"
+	R"(^(video_?ts|vts[\s._\d-]*\d|title[\s._-]*\d*|track[\s._-]*\d*|)"
 	R"(movie|video|main|index|film|stream|playlist|)"
 	R"(disc[\s._-]*\d*|dvd[\s._-]*\d*|part[\s._-]*\d*|pt[\s._-]*\d*|)"
 	R"(cd[\s._-]*\d*|\d+)$)",

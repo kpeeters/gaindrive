@@ -6,8 +6,9 @@
    <title>GainDrive</title>
    <link rel="icon" type="image/svg+xml" href="favicon.svg">
    <link rel="stylesheet" href="style.css">
-   <!-- Apply saved theme before first paint to avoid a flash. -->
-   <script>(function(){var t=localStorage.getItem('gd_theme');if(t)document.documentElement.classList.add(t);})();</script>
+   <!-- Theme restore lives in its own file so the CSP needs no inline
+        script allowance; it must stay a blocking script in <head>. -->
+   <script src="theme.js"></script>
 </head>
 <body>
 

@@ -870,6 +870,10 @@ were the obvious shape and do not work here: the server drops an exact
 duplicate pair, so two chapters both called `Encore` would lose one, and the
 urlencoded body limit is 8 kB whatever the configured payload limit says.
 
+The body is bounded at 1 MiB — a request naming more `Content-Length` than
+that is answered `413`, and one naming none at all `411` — which clears any
+real chapter list by three orders of magnitude, the marker cap being 1000.
+
 The parse is deliberately liberal, so a block pasted out of a video
 description works as it stands:
 

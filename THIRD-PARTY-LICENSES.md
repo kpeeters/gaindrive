@@ -20,7 +20,7 @@ them can be relied on from a package manager; `third_party/README.md` explains
 why. A version change here is a manual `cp` and must be recorded in this file in
 the same commit.
 
-* cpp-httplib 0.18.7 — `third_party/httplib.h`, `third_party/httplib.LICENSE`
+* cpp-httplib 0.54.1 — `third_party/httplib.h`, `third_party/httplib.LICENSE`
   MIT · Copyright (c) 2025 Yuji Hirose
   https://github.com/yhirose/cpp-httplib
 

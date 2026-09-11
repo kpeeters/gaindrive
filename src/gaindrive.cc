@@ -79,16 +79,30 @@ static constexpr size_t MAX_PORTRAIT_BYTES = 8u * 1024 * 1024;
 static constexpr size_t MAX_COVER_BYTES     = 16u * 1024 * 1024;
 static constexpr int    MAX_COVER_REDIRECTS = 5;
 
-// The ceiling on a request body, which is also the ceiling on one upload
-// archive. See the set_payload_max_length() call for why this cannot be left
-// at httplib's default.
+// The ceiling on one upload archive as it streams through /upload, and
+// therefore also httplib's global payload cap — the content-reader path
+// enforces that cap on what it hands the receiver. Every other route is
+// bounded far lower, before a byte of body is read, by the pre-request
+// handler and MAX_SMALL_BODY_BYTES.
 static constexpr size_t MAX_REQUEST_BYTES = 4ull * 1024 * 1024 * 1024;
+
+// The body bound for every route that is not /upload. Nothing else accepts a
+// large body: the biggest legitimate one is a saveChapters file, which
+// MAX_CHAPTERS keeps to a few tens of kilobytes.
+static constexpr size_t MAX_SMALL_BODY_BYTES = 1024 * 1024;
 
 // Bounds on what one search may ask for. getAlbumList and getRecentSongs have
 // clamped for as long as they have existed; search did not, and its LIKE
 // pattern can be made to match everything, so the two together turn one
 // request into the whole library serialised into a single in-memory document.
 static constexpr int MAX_SEARCH_COUNT = 500;
+
+// The matching bound on every paging offset. Unbounded, OFFSET is a full
+// table walk inside SQLite — LIMIT 500 OFFSET 100000000 visits every row to
+// discard it — executed while holding db_mutex_, behind which every other
+// request in the server queues, authentication included. A million deep is
+// past the end of any real library and costs a bounded walk.
+static constexpr int MAX_LIST_OFFSET = 1000000;
 
 // What one uploaded archive may expand to. An archive's compressed size bounds
 // nothing — the ratio is the attack — so the extraction has to carry its own
@@ -263,7 +277,8 @@ static std::string sid(int id)
 // Numeric query params, without letting a malformed one escape the handler.
 // std::stoi throws on garbage and on overflow; httplib turns that into a bare
 // HTTP 500, which no Subsonic client can interpret — they expect a 200 with an
-// <error> body.  See ISSUES.md for the sites still unguarded.
+// <error> body.  Every request parameter goes through these; a bare std::stoi
+// below this point reads a value the server itself produced.
 static int to_int(const std::string& s, int def)
 	{
 	if (s.empty()) return def;
@@ -274,6 +289,12 @@ static float to_float(const std::string& s, float def)
 	{
 	if (s.empty()) return def;
 	try { return std::stof(s); } catch (...) { return def; }
+	}
+
+static int64_t to_int64(const std::string& s, int64_t def)
+	{
+	if (s.empty()) return def;
+	try { return std::stoll(s); } catch (...) { return def; }
 	}
 
 // SQLite CURRENT_TIMESTAMP formats as "YYYY-MM-DD HH:MM:SS" in UTC, but the
@@ -375,15 +396,23 @@ static std::string fmt_of(const httplib::Request& req)
 // which matters most for exactly the question it is there to answer: whether a
 // request came from a browser or from a Chromecast fetching for itself. Apache
 // and nginx both pass the original along in `X-Forwarded-For`, a
-// comma-separated chain with the client first and each proxy appended after it,
-// so the first entry is the one worth having.
+// comma-separated chain.
+//
+// **The entry taken is the rightmost one that is not a trusted proxy, never
+// the first.** Proxies *append* the peer they heard from, so what arrives here
+// is `<whatever the client sent>, <real client>` — the leftmost entry is the
+// one string in the chain the attacker composed in full. This code used to
+// take it, which handed the login throttle's bucket to the caller: send a
+// fresh X-Forwarded-For per request and there is no rate limit at all.
+// httplib::get_client_ip() walks from the right and skips configured proxies,
+// which is the standard answer, and one copy of it beats a second one here.
 //
 // **Trusted only from a configured proxy.** The header is client-supplied and
 // forgeable, so honouring it from any peer lets a caller write whatever it
-// likes into the log — and, now that the login throttle keys on this, choose
-// its own rate-limit bucket and so have no rate limit at all. It used to be
-// trusted unconditionally, which was defensible while nothing read it back;
-// the throttle is what made that stop being true.
+// likes into the log — and, since the login throttle keys on this, choose its
+// own rate-limit bucket. It used to be trusted unconditionally, which was
+// defensible while nothing read it back; the throttle is what made that stop
+// being true.
 //
 // The default list is loopback, because a proxy on the same host is what the
 // packaging sets up and what `host: 127.0.0.1` in the example config assumes.
@@ -391,15 +420,40 @@ static std::string fmt_of(const httplib::Request& req)
 // the TCP handshake.
 static std::vector<std::string> trusted_proxies_ = { "127.0.0.1", "::1" };
 
+// An IPv4 peer on a dual-stack listener shows up as `::ffff:127.0.0.1`, which
+// is the same host as `127.0.0.1` and must match the same configuration entry.
+// Compared both ways so a proxy list written in either spelling works.
+static std::string strip_v4_mapped(const std::string& addr)
+	{
+	static const std::string prefix = "::ffff:";
+	if (addr.rfind(prefix, 0) == 0 &&
+	    addr.find('.') != std::string::npos)
+		return addr.substr(prefix.size());
+	return addr;
+	}
+
 void gaindrive_set_trusted_proxies(std::vector<std::string> addrs)
 	{
 	trusted_proxies_ = std::move(addrs);
 	}
 
+// The origin this server is reachable at — scheme and host, no trailing
+// slash — when a deployment knows it. Consulted wherever a URL for a third
+// device is composed; empty means "believe the request's Host header", which
+// is right on a LAN, where there is no other source, and wrong on the public
+// internet, where Host is whatever the caller typed.
+static std::string public_url_;
+
+void gaindrive_set_public_url(std::string origin)
+	{
+	public_url_ = std::move(origin);
+	}
+
 static bool from_trusted_proxy(const httplib::Request& req)
 	{
+	const std::string peer = strip_v4_mapped(req.remote_addr);
 	for (const auto& p : trusted_proxies_)
-		if (p == req.remote_addr) return true;
+		if (strip_v4_mapped(p) == peer) return true;
 	return false;
 	}
 
@@ -410,13 +464,19 @@ static std::string client_addr(const httplib::Request& req)
 	const std::string xff = req.get_header_value("X-Forwarded-For");
 	if (xff.empty()) return req.remote_addr;
 
-	const auto comma = xff.find(',');
-	const std::string first = comma == std::string::npos ? xff
-	                                                     : xff.substr(0, comma);
-	const auto b = first.find_first_not_of(" \t");
-	if (b == std::string::npos) return req.remote_addr;   // header was blank
-	const auto e = first.find_last_not_of(" \t");
-	return first.substr(b, e - b + 1);
+	// Rightmost untrusted entry — see the comment on trusted_proxies_.
+	std::string addr = httplib::get_client_ip(xff, trusted_proxies_);
+	if (addr.empty()) return req.remote_addr;
+
+	// Some proxies write `1.2.3.4:5678` or `[2001:db8::1]:443`. The throttle
+	// keys on this string, so a port would split one client into many buckets.
+	if (addr.front() == '[') {
+		const auto close = addr.find(']');
+		if (close != std::string::npos) addr = addr.substr(1, close - 1);
+		}
+	else if (std::count(addr.begin(), addr.end(), ':') == 1)
+		addr = addr.substr(0, addr.find(':'));
+	return addr;
 	}
 
 // A string safe to put in a log line: control characters replaced and the
@@ -1131,10 +1191,9 @@ static bool check_item_write_perm(const httplib::Request& req,
 // getMusicDirectory all served it to anyone who tried the number. Filtering
 // here rather than in each query keeps the eleven ChildEntry queries untouched,
 // which is the same trade getVideos made for is_video.
-static bool check_item_read_perm(const httplib::Request& req,
-                                  httplib::Response& res, MediaStore& store,
-                                  const std::string& uploads_root_name,
-                                  const std::string& rel_path, bool use_json)
+static bool item_read_allowed(const httplib::Request& req, MediaStore& store,
+                              const std::string& uploads_root_name,
+                              const std::string& rel_path)
 	{
 	if (uploads_root_name.empty() || rel_path.empty()) return true;
 
@@ -1146,7 +1205,15 @@ static bool check_item_read_perm(const httplib::Request& req,
 	const std::string uname = req.get_param_value("u");
 	auto info = store.get_user(uname);
 	if (info && info->is_admin) return true;
-	if (parts.size() >= 2 && !uname.empty() && parts[1] == uname) return true;
+	return parts.size() >= 2 && !uname.empty() && parts[1] == uname;
+	}
+
+static bool check_item_read_perm(const httplib::Request& req,
+                                  httplib::Response& res, MediaStore& store,
+                                  const std::string& uploads_root_name,
+                                  const std::string& rel_path, bool use_json)
+	{
+	if (item_read_allowed(req, store, uploads_root_name, rel_path)) return true;
 
 	// Deliberately the same shape of answer a missing item gets, so this does
 	// not become an oracle for which ids exist in somebody else's uploads.
@@ -1191,9 +1258,12 @@ static bool addr_is_global(const struct sockaddr* addr)
 		    || IN6_IS_ADDR_MULTICAST(&s6))
 			return false;
 		// Unique local (fc00::/7), and IPv4-mapped, which would otherwise be a
-		// straight bypass of every rule above.
+		// straight bypass of every rule above. V4COMPAT is the deprecated
+		// spelling of the same idea (::1.2.3.4, RFC 4291 §2.5.5.1) — modern
+		// stacks refuse to route it, but "refuse" is their promise, not
+		// ours, and the check costs one macro beside the one that matters.
 		if ((s6.s6_addr[0] & 0xfe) == 0xfc) return false;
-		if (IN6_IS_ADDR_V4MAPPED(&s6)) {
+		if (IN6_IS_ADDR_V4MAPPED(&s6) || IN6_IS_ADDR_V4COMPAT(&s6)) {
 			struct sockaddr_in v4{};
 			v4.sin_family = AF_INET;
 			std::memcpy(&v4.sin_addr.s_addr, s6.s6_addr + 12, 4);
@@ -1245,6 +1315,28 @@ static bool host_is_global(const std::string& host)
 			}
 	freeaddrinfo(result);
 	return all_global;
+	}
+
+// The authority part of a fetched URL, split for the client constructors.
+// SSLClient's single-string constructor does not parse a `:port` — the colon
+// and digits go into the TLS SNI and the connect fails — so the split has to
+// happen here, for both clients, or an https URL with an explicit port
+// silently fetches nothing.
+static std::pair<std::string, int> split_host_port(const std::string& host,
+                                                   int default_port)
+	{
+	if (!host.empty() && host.front() == '[') {
+		auto close = host.find(']');
+		if (close == std::string::npos) return { host, default_port };
+		std::string h = host.substr(1, close - 1);
+		if (close + 1 < host.size() && host[close + 1] == ':')
+			return { h, to_int(host.substr(close + 2), default_port) };
+		return { h, default_port };
+		}
+	auto colon = host.find(':');
+	if (colon == std::string::npos) return { host, default_port };
+	return { host.substr(0, colon),
+	         to_int(host.substr(colon + 1), default_port) };
 	}
 
 // ---- Artist info helper -----------------------------------------------
@@ -1721,9 +1813,16 @@ void GainDrive::handle_artist_info(const httplib::Request& req,
 	auto it = req.params.find("id");
 	if (it == req.params.end()) { err(10, "Required parameter missing: id."); return; }
 
-	int id = std::stoi(it->second);
+	int id = to_int(it->second, -1);
 	std::string name = store_.get_folder_name(id);
 	if (name.empty()) { err(70, "Artist not found."); return; }
+	// An id under another user's uploads must answer exactly like a missing
+	// one — this endpoint both leaks the directory name and pushes it onto
+	// the provider queue, so it is a read like any other.
+	if (!item_read_allowed(req, store_, uploads_root_name_,
+	                       store_.get_folder_path(id))) {
+		err(70, "Artist not found."); return;
+		}
 
 	bool force = req.params.count("force") > 0
 	          && req.params.find("force")->second != "0";
@@ -1824,7 +1923,9 @@ void GainDrive::handle_artist_info(const httplib::Request& req,
 // Searches MusicBrainz for the release-group, then resolves a Wikipedia
 // article via Wikidata if needed. Results are cached in album_info_cache.
 static void handle_album_info(const httplib::Request& req, httplib::Response& res,
-                               MediaStore& store, const char* key)
+                               MediaStore& store,
+                               const std::string& uploads_root_name,
+                               const char* key)
 	{
 	bool use_json = (fmt_of(req) == "json");
 	auto err = [&](int code, const char* msg) {
@@ -1837,9 +1938,16 @@ static void handle_album_info(const httplib::Request& req, httplib::Response& re
 	auto it = req.params.find("id");
 	if (it == req.params.end()) { err(10, "Required parameter missing: id."); return; }
 
-	int id = std::stoi(it->second);
+	int id = to_int(it->second, -1);
 	auto album_data = store.get_album(id);
 	if (!album_data) { err(70, "Album not found."); return; }
+	// Same rule as handle_artist_info: an id in somebody else's uploads is
+	// answered like a missing one, before its title or artist reaches a log
+	// line or a MusicBrainz query.
+	if (!item_read_allowed(req, store, uploads_root_name,
+	                       store.get_folder_path(id))) {
+		err(70, "Album not found."); return;
+		}
 
 	const std::string& title  = album_data->album.title;
 	const std::string& artist = album_data->album.artist;
@@ -2071,7 +2179,7 @@ static void handle_album_list(const httplib::Request& req, httplib::Response& re
 
 	auto param_int = [&](const char* name, int def) {
 		auto it = req.params.find(name);
-		return it != req.params.end() ? std::stoi(it->second) : def;
+		return it != req.params.end() ? to_int(it->second, def) : def;
 		};
 	auto param_str = [&](const char* name) {
 		auto it = req.params.find(name);
@@ -2081,7 +2189,7 @@ static void handle_album_list(const httplib::Request& req, httplib::Response& re
 	std::string type     = param_str("type");
 	if (type.empty()) type = "newest";
 	int size             = std::min(500, std::max(1, param_int("size", 10)));
-	int offset           = param_int("offset", 0);
+	int offset           = std::clamp(param_int("offset", 0), 0, MAX_LIST_OFFSET);
 	int from_year        = param_int("fromYear", 0);
 	int to_year          = param_int("toYear",   0);
 	std::string genre    = param_str("genre");
@@ -2186,7 +2294,16 @@ static std::string make_uuid()
 // Entry paths are sanitised: absolute components and ".." are stripped so
 // no file can escape dest_dir. Returns the number of regular files written,
 // or -1 if the archive could not be opened.
-static int extract_archive_to_dir(const std::string& content,
+// libarchive's error string can embed an entry's own name, and an entry name
+// is attacker bytes that may hold newlines — a forged log line, in the log a
+// host-level blocker reads. NULL when there is no message.
+static std::string archive_err(struct archive* a)
+   {
+   const char* e = archive_error_string(a);
+   return log_safe(e ? e : "(none)");
+   }
+
+static int extract_archive_to_dir(const std::filesystem::path& archive_file,
                                    const std::filesystem::path& dest_dir)
    {
    namespace fs = std::filesystem;
@@ -2228,15 +2345,18 @@ static int extract_archive_to_dir(const std::string& content,
       archive_write_free(wd);
       };
 
-   int r = archive_read_open_memory(a, content.data(), content.size());
+   // From a file, not memory: the upload handler streams the body to disk
+   // precisely so an archive is never held in RAM, and reading it back here
+   // would undo that.
+   int r = archive_read_open_filename(a, archive_file.c_str(), 64 * 1024);
    if (r != ARCHIVE_OK) {
       std::cout << stamp() << "extract: open failed (" << r << "): "
-                << archive_error_string(a) << std::endl;
+                << archive_err(a) << std::endl;
       cleanup();
       return -1;
       }
 
-   int count = 0, skipped = 0;
+   int count = 0, skipped = 0, entries = 0;
    uint64_t written = 0;
    struct archive_entry* entry;
    int hr;
@@ -2244,7 +2364,7 @@ static int extract_archive_to_dir(const std::string& content,
           || hr == ARCHIVE_WARN) {
       if (hr == ARCHIVE_WARN)
          std::cout << stamp() << "extract: header warn: "
-                   << archive_error_string(a) << std::endl;
+                   << archive_err(a) << std::endl;
 
       const char* raw = archive_entry_pathname(entry);
       if (!raw) { skipped++; continue; }
@@ -2257,7 +2377,7 @@ static int extract_archive_to_dir(const std::string& content,
          safe /= part;
          }
       if (safe.empty()) {
-         std::cout << stamp() << "extract: skip (empty after sanitise): " << raw << std::endl;
+         std::cout << stamp() << "extract: skip (empty after sanitise): " << log_safe(raw) << std::endl;
          skipped++;
          continue;
          }
@@ -2270,20 +2390,26 @@ static int extract_archive_to_dir(const std::string& content,
       const auto ft = archive_entry_filetype(entry);
       if (ft != AE_IFREG && ft != AE_IFDIR) {
          std::cout << stamp() << "extract: skip (not a file or directory): "
-                   << raw << std::endl;
+                   << log_safe(raw) << std::endl;
          skipped++;
          continue;
          }
       if (archive_entry_hardlink(entry) || archive_entry_symlink(entry)) {
-         std::cout << stamp() << "extract: skip (link entry): " << raw << std::endl;
+         std::cout << stamp() << "extract: skip (link entry): " << log_safe(raw) << std::endl;
          skipped++;
          continue;
          }
-      if (count >= MAX_ARCHIVE_ENTRIES) {
+      // `entries` counts everything written, directories included — counting
+      // only files let a zip of a few hundred kilobytes create millions of
+      // directories, which is inode exhaustion on a filesystem other people's
+      // music is also on, with the byte cap never tripping because a
+      // directory carries no data.
+      if (entries >= MAX_ARCHIVE_ENTRIES) {
          std::cout << stamp() << "extract: entry limit reached, stopping"
                    << std::endl;
          break;
          }
+      entries++;
 
       fs::path target = dest_dir / safe;
       archive_entry_set_pathname(entry, target.c_str());
@@ -2292,13 +2418,13 @@ static int extract_archive_to_dir(const std::string& content,
       int wr = archive_write_header(wd, entry);
       if (wr < ARCHIVE_WARN) {
          std::cout << stamp() << "extract: write_header failed (" << wr << ") for "
-                   << target << ": " << archive_error_string(wd) << std::endl;
+                   << target << ": " << archive_err(wd) << std::endl;
          skipped++;
          continue;
          }
       if (wr == ARCHIVE_WARN)
          std::cout << stamp() << "extract: write_header warn for "
-                   << target << ": " << archive_error_string(wd) << std::endl;
+                   << target << ": " << archive_err(wd) << std::endl;
 
       // Bounded, because an archive's *compressed* size says nothing about
       // what it expands to: a few megabytes of zeros is gigabytes on disk, and
@@ -2306,7 +2432,16 @@ static int extract_archive_to_dir(const std::string& content,
       const void* buf; size_t sz; la_int64_t off;
       bool truncated = false;
       while (archive_read_data_block(a, &buf, &sz, &off) == ARCHIVE_OK) {
-         if (written + sz > MAX_ARCHIVE_BYTES) { truncated = true; break; }
+         // The declared block offset counts against the budget as well as the
+         // data: a sparse tar entry placing a few bytes at offset 2^50 makes
+         // a file of that apparent length for almost nothing, and everything
+         // downstream — songs.file_size, the transcode planner — believes the
+         // fiction.
+         if (written + sz > MAX_ARCHIVE_BYTES
+             || off < 0
+             || static_cast<uint64_t>(off) + sz > MAX_ARCHIVE_BYTES) {
+            truncated = true; break;
+            }
          archive_write_data_block(wd, buf, sz, off);
          written += sz;
          }
@@ -2324,7 +2459,7 @@ static int extract_archive_to_dir(const std::string& content,
 
    if (hr != ARCHIVE_EOF)
       std::cout << stamp() << "extract: read_next_header stopped (r=" << hr << "): "
-                << archive_error_string(a) << std::endl;
+                << archive_err(a) << std::endl;
 
    std::cout << stamp() << "extract: done, files=" << count
              << " skipped=" << skipped << std::endl;
@@ -3091,6 +3226,10 @@ static constexpr int64_t FETCH_KEEP_S       = 15 * 60;
 // actually stops the cast.
 static constexpr int CAST_IDLE_GRACE_S = 30;
 
+// How many SSE listeners one cast session may hold open at once. Each one is
+// a worker thread parked for the life of the connection; see castEvents.
+static constexpr int CAST_SSE_MAX_LISTENERS = 8;
+
 GainDrive::GainDrive(const std::string& db_path,
                      const std::vector<MediaStore::Root>& roots,
                      const std::string& upload_dir,
@@ -3145,18 +3284,61 @@ GainDrive::GainDrive(const std::string& db_path,
 	// (seconds, not milliseconds), so the default pool of 8 is too small to
 	// absorb a client that pins an album and fans out downloads.  The ffmpeg
 	// count is bounded separately by --transcode-jobs; this only bounds waiting.
-	server_.new_task_queue = []{ return new httplib::ThreadPool(32); };
+	// The queue behind the pool is bounded (third argument): unbounded, a
+	// slowloris that pinned all 32 workers would go on accepting connections
+	// into an ever-growing deque, each holding a file descriptor, until
+	// EMFILE. Refusing the 129th queued request instead sheds load at the
+	// edge, which is the recoverable failure. max_n stays 0 — a fixed pool.
+	server_.new_task_queue = []{ return new httplib::ThreadPool(32, 0, 128); };
 
-	// httplib's default payload cap is SIZE_MAX, and it reads the whole body
-	// into memory *before* it dispatches to a handler — so check_auth runs
-	// after the allocation, and an unauthenticated POST with a large
-	// Content-Length is a memory-exhaustion DoS against a server that has not
-	// even decided who is asking. This is the only bound there is.
-	//
-	// It has to clear the largest thing anyone legitimately posts, which is an
-	// archive to /upload; that endpoint buffers the whole body too, so this
-	// doubles as the cap on an upload.
+	// httplib's payload cap defaults to SIZE_MAX. Since 0.54 the body of a
+	// routed request is read only after the route has matched and the
+	// pre-request handler has approved it, so the cap no longer has to be
+	// small to protect unauthenticated callers — the pre-request handler
+	// below is that protection. What this still has to clear is the one
+	// legitimately large body, an archive streamed to /upload, because the
+	// content-reader path enforces the same cap on what it hands the
+	// receiver.
 	server_.set_payload_max_length(MAX_REQUEST_BYTES);
+
+	// The per-route body bound, enforced before a byte of body is read.
+	// Every request that carries content must name its length, and every
+	// route but /upload gets a small one: the largest legitimate small body
+	// is a saveChapters file, which MAX_CHAPTERS bounds far below a megabyte.
+	// /upload is exempt because its handler streams the body through a
+	// content reader to disk under its own cap — it never buffers it — and
+	// authenticates from the query string before reading at all.
+	//
+	// Chunked (or otherwise length-less) bodies are refused outside /upload
+	// rather than read-and-measured: read_content would buffer up to the
+	// global cap before anyone could object, which is the allocation this
+	// handler exists to prevent. No Subsonic client sends one.
+	server_.set_pre_request_handler([](const httplib::Request& req,
+	                                   httplib::Response& res) {
+		if (req.matched_route == "/upload")
+			return httplib::Server::HandlerResponse::Unhandled;
+		const bool has_body = req.method == "POST" || req.method == "PUT"
+		                   || req.method == "PATCH"
+		                   || req.has_header("Content-Length")
+		                   || req.has_header("Transfer-Encoding");
+		if (!has_body)
+			return httplib::Server::HandlerResponse::Unhandled;
+		if (req.has_header("Transfer-Encoding")) {
+			res.status = 411;   // Length Required
+			return httplib::Server::HandlerResponse::Handled;
+			}
+		// setCoverArt takes an uploaded image, bounded where it is read by
+		// MAX_COVER_BYTES; the slack on top is multipart framing.
+		const size_t cap = req.matched_route == "/rest/setCoverArt.view"
+		    ? MAX_COVER_BYTES + 64 * 1024
+		    : MAX_SMALL_BODY_BYTES;
+		const auto len = req.get_header_value_u64("Content-Length", 0);
+		if (len > cap) {
+			res.status = 413;
+			return httplib::Server::HandlerResponse::Handled;
+			}
+		return httplib::Server::HandlerResponse::Unhandled;
+		});
 
 	if (!fs::exists(upload_dir_))
 		fs::create_directories(upload_dir_);
@@ -3177,23 +3359,25 @@ GainDrive::GainDrive(const std::string& db_path,
 	// In debug mode also strip Accept-Encoding: httplib swaps compressed bytes into
 	// res.body before firing the logger, making it unreadable (cpp-httplib#1656).
 	//
-	// Also the one place CORS is answered, for every endpoint and every status.
-	// **A Chromecast needs this to show a subtitle.** The receiver fetches a
-	// side-loaded WebVTT track by XHR, and declaring any track at all puts its
-	// media element into anonymous cross-origin mode — so the *film* needs the
-	// header as much as the captions do, on its 206 responses as much as its
-	// 200s. Setting it here rather than per handler is what makes that true
-	// without anyone having to remember it.
+	// Also the one place CORS is answered — and it is answered only for the
+	// endpoints a Cast receiver fetches for itself. **A Chromecast needs this
+	// to show a subtitle.** The receiver fetches a side-loaded WebVTT track by
+	// XHR, and declaring any track at all puts its media element into
+	// anonymous cross-origin mode — so the *film* needs the header as much as
+	// the captions do, on its 206 responses as much as its 200s.
 	//
-	// `*` is safe here in a way it would not be for a cookie-authenticated
-	// server. Every endpoint takes its credentials as query parameters, so
-	// there is no ambient authority for a hostile page to borrow: it would have
-	// to already know the username and password, and if it knows those it does
-	// not need a browser. What the header does cost is that such a page can
-	// read replies from a server it can only reach because the victim is on the
-	// same network — which mainly means it can tell a wrong password from a
-	// right one. Narrowing to one endpoint would not remove that, since any
-	// CORS-open endpoint that checks auth is the same oracle.
+	// It used to be `*` on every endpoint, on the reasoning that credentials
+	// ride in query parameters so there is no ambient authority for a hostile
+	// page to borrow. That was true and still incomplete: the Subsonic
+	// envelope is HTTP 200 for success and failure alike, so only a
+	// CORS-readable body distinguishes a right password from a wrong one —
+	// `*` on ping.view made every web page a visitor opens a password oracle
+	// against this server, rate-limited only by the login throttle. And a
+	// leaked credentialed URL (a proxy log, a pasted link) was readable from
+	// any origin. The receiver's three endpoints keep `*` because a Cast
+	// token is scoped to one song of one LOAD; everything else answers
+	// cross-origin reads with nothing, which is what a same-origin web client
+	// and every native client expect anyway.
 	server_.set_pre_routing_handler([this](const httplib::Request& req,
 	                                       httplib::Response& res) {
 		auto& r = const_cast<httplib::Request&>(req);
@@ -3202,13 +3386,26 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (debug_)
 			r.headers.erase("Accept-Encoding");
 
-		res.set_header("Access-Control-Allow-Origin",  "*");
-		res.set_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
-		res.set_header("Access-Control-Allow-Headers", "Range, Content-Type");
-		// Without this a cross-origin reader is allowed the body but not the
-		// headers that say how long it is or which part of it this was.
-		res.set_header("Access-Control-Expose-Headers",
-		               "Content-Length, Content-Range, Accept-Ranges");
+		// On every response, CORS or not: a cover is client-supplied bytes
+		// served back, so it must never be content-sniffed into something
+		// else, and a Referer must not carry this origin to the provider
+		// links the client renders.
+		res.set_header("X-Content-Type-Options", "nosniff");
+		res.set_header("Referrer-Policy", "no-referrer");
+
+		const bool cast_fetched = r.path == "/rest/stream.view"
+		                       || r.path == "/rest/getCaptions.view"
+		                       || r.path == "/rest/hls.m3u8"
+		                       || r.path == "/rest/hls.view";
+		if (cast_fetched) {
+			res.set_header("Access-Control-Allow-Origin",  "*");
+			res.set_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+			res.set_header("Access-Control-Allow-Headers", "Range, Content-Type");
+			// Without this a cross-origin reader is allowed the body but not
+			// the headers that say how long it is or which part this was.
+			res.set_header("Access-Control-Expose-Headers",
+			               "Content-Length, Content-Range, Accept-Ranges");
+			}
 
 		// Answered here because nothing routes it: there is no Options()
 		// handler for any path, so a preflight would otherwise fall through to
@@ -3259,7 +3456,12 @@ GainDrive::GainDrive(const std::string& db_path,
 	// matters more once something is reading this log to decide who to block.
 	server_.set_logger([this](const httplib::Request& req, const httplib::Response& res) {
 		static const std::set<std::string> secret_params = {
-			"p", "password", "t", "s", "castToken"
+			"p", "password", "t", "s", "castToken",
+			// Server-side API keys arrive as ordinary GET parameters on
+			// saveServerSettings, and getServerSettings goes to some lengths
+			// never to read them back — a log line that printed them would
+			// undo that for every proxy and journal on the path.
+			"discogsToken", "tmdbKey"
 			};
 		std::cout << stamp(client_addr(req))
 		          << req.method << " " << log_safe(req.path);
@@ -3326,15 +3528,39 @@ GainDrive::GainDrive(const std::string& db_path,
 	// composes its anchors from location.href itself, so nothing from the
 	// query string is spliced into HTML here, and the public scheme and
 	// host — which behind a proxy this process does not know — come free.
+	// The two HTML pages carry a Content-Security-Policy; assets and API
+	// responses need none, since a policy governs only the document that a
+	// browser renders. frame-ancestors 'none' is the load-bearing directive:
+	// without it the Settings pane — delete user, move album — can be framed
+	// and overlaid by any origin, and one click on the overlay is a click on
+	// this UI. The SPA loads nothing external and keeps its one inline script
+	// in theme.js precisely so script-src can be 'self' with no carve-out;
+	// link.html is deliberately self-contained (it must survive with no other
+	// asset loading), so its policy allows its own inline script and style
+	// and nothing else. X-Frame-Options is the same rule for browsers that
+	// predate frame-ancestors.
 	auto index_page = [](const httplib::Request& req, httplib::Response& res) {
+		res.set_header("X-Frame-Options", "DENY");
 		if (req.has_param("track") && !req.has_param("web")
 		    && req.get_header_value("User-Agent").find("Android")
-		       != std::string::npos)
+		       != std::string::npos) {
+			res.set_header("Content-Security-Policy",
+			               "default-src 'none'; script-src 'unsafe-inline'; "
+			               "style-src 'unsafe-inline'; base-uri 'none'; "
+			               "form-action 'none'; frame-ancestors 'none'");
 			res.set_content(embedded::link_html.data(), embedded::link_html.size(),
 			                embedded::link_html_mime.data());
-		else
+			}
+		else {
+			res.set_header("Content-Security-Policy",
+			               "default-src 'none'; script-src 'self'; "
+			               "style-src 'self' 'unsafe-inline'; img-src 'self'; "
+			               "media-src 'self'; connect-src 'self'; "
+			               "font-src 'self'; base-uri 'none'; "
+			               "form-action 'self'; frame-ancestors 'none'");
 			res.set_content(embedded::index_html.data(), embedded::index_html.size(),
 			                embedded::index_html_mime.data());
+			}
 		};
 	server_.Get("/",           index_page);
 	server_.Get("/index.html", index_page);
@@ -3345,6 +3571,10 @@ GainDrive::GainDrive(const std::string& db_path,
 	server_.Get("/app.js", [](const httplib::Request&, httplib::Response& res) {
 		res.set_content(embedded::app_js.data(), embedded::app_js.size(),
 		                embedded::app_js_mime.data());
+		});
+	server_.Get("/theme.js", [](const httplib::Request&, httplib::Response& res) {
+		res.set_content(embedded::theme_js.data(), embedded::theme_js.size(),
+		                embedded::theme_js_mime.data());
 		});
 	server_.Get("/favicon.svg", [](const httplib::Request&, httplib::Response& res) {
 		res.set_content(embedded::favicon_svg.data(), embedded::favicon_svg.size(),
@@ -3670,7 +3900,11 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!ri || !ri->is_admin) { err(50, "User is not authorized for this operation."); return; }
 
 		std::string username = qp("username");
-		std::string password = qp("password");
+		// enc: decoded before storing — validate_auth decodes it on the way
+		// in, so storing the encoded spelling stores a different password.
+		auto decoded = MediaStore::decode_enc_password(qp("password"));
+		if (!decoded) { err(10, "Malformed enc: password."); return; }
+		std::string password = *decoded;
 		if (username.empty()) { err(10, "Required parameter missing: username."); return; }
 		if (password.empty()) { err(10, "Required parameter missing: password."); return; }
 		if (!MediaStore::valid_username(username)) {
@@ -3723,9 +3957,12 @@ GainDrive::GainDrive(const std::string& db_path,
 		bool upload_allowed = qp("uploadRole").empty() ? existing->upload_allowed : (qp("uploadRole") == "true");
 		bool disabled       = qp("disabled").empty()   ? existing->disabled       : (qp("disabled")   == "true");
 		bool cast_allowed   = qp("castRole").empty()   ? existing->cast_allowed   : (qp("castRole")   == "true");
-		int  max_bitrate    = qp("maxBitRate").empty()  ? existing->max_bitrate    : std::stoi(qp("maxBitRate"));
+		int  max_bitrate    = qp("maxBitRate").empty()  ? existing->max_bitrate    : std::max(0, to_int(qp("maxBitRate"), existing->max_bitrate));
 		std::string email   = qp("email").empty()       ? existing->email          : qp("email");
-		std::string pw      = qp("password");
+		// enc: decoded before storing, as in createUser.
+		auto pw_dec = MediaStore::decode_enc_password(qp("password"));
+		if (!pw_dec) { err(10, "Malformed enc: password."); return; }
+		std::string pw      = *pw_dec;
 
 		// An admin cannot disable their own account.
 		if (username == qp("u") && disabled)
@@ -3754,7 +3991,10 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		std::string requester = qp("u");
 		std::string target    = qp("username");
-		std::string password  = qp("password");
+		// enc: decoded before storing, as in createUser.
+		auto decoded = MediaStore::decode_enc_password(qp("password"));
+		if (!decoded) { err(10, "Malformed enc: password."); return; }
+		std::string password  = *decoded;
 		if (target.empty())   { err(10, "Required parameter missing: username."); return; }
 		if (password.empty()) { err(10, "Required parameter missing: password."); return; }
 
@@ -4186,8 +4426,8 @@ GainDrive::GainDrive(const std::string& db_path,
 			};
 
 		std::string user = qp("u");
-		int size   = std::min(500, std::max(1, std::stoi(qp("size",   "50"))));
-		int offset = std::max(0,               std::stoi(qp("offset", "0")));
+		int size   = std::min(500, std::max(1, to_int(qp("size", "50"), 50)));
+		int offset = std::clamp(to_int(qp("offset", "0"), 0), 0, MAX_LIST_OFFSET);
 
 		auto entries = store_.get_recent_songs(user, size, offset);
 		int max_br   = request_max_bitrate(req, store_);
@@ -4367,7 +4607,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 		else {
 			if (idx_it != req.params.end()) {
-				int idx = std::stoi(idx_it->second);
+				int idx = to_int(idx_it->second, 0);
 				if (idx > 0) {
 					auto extras = store_.get_extra_image_paths(folder_id);
 					if (idx - 1 >= static_cast<int>(extras.size())) {
@@ -4446,8 +4686,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::string etag = "\"t2-" + std::to_string(src.stamp)
 		    + "-" + std::to_string(orig_len)
 		    + "-" + (ladder > 0 ? std::to_string(ladder) : std::string("full"))
-		    + "-" + (idx_it != req.params.end() ? idx_it->second
-		                                        : std::string("0")) + "\"";
+		    + "-" + std::to_string(idx_it != req.params.end()
+		                           ? to_int(idx_it->second, 0) : 0) + "\"";
 		res.set_header("Cache-Control", "no-cache");
 		res.set_header("ETag", etag);
 		if (req.get_header_value("If-None-Match") == etag) {
@@ -4567,8 +4807,17 @@ GainDrive::GainDrive(const std::string& db_path,
 			// <stem>.chapters.txt, a different filename, which is the whole
 			// point of sidecar_chapters_path() not being replace_extension().
 			std::string note = MediaStore::sidecar_text_path(folder);
-			if (fs::exists(note, fec))
-				files.push_back({{"name", fs::path(note).filename().string()}});
+			if (fs::exists(note, fec)) {
+				// utf8_clean before json: a filename is arbitrary bytes on
+				// Linux, and one invalid sequence makes dump() throw — a
+				// permanent 500 for this album's listing. A name the clean
+				// changes cannot be fetched back through getAlbumText anyway,
+				// so it is dropped rather than listed under a lie.
+				const std::string fname = fs::path(note).filename().string();
+				const std::string clean = utf8_clean(fname, 255);
+				if (clean == fname)
+					files.push_back({{"name", clean}});
+				}
 			}
 		else try {
 			for (auto& entry : fs::directory_iterator(folder)) {
@@ -4580,7 +4829,10 @@ GainDrive::GainDrive(const std::string& db_path,
 				                         chapters_suffix.size(),
 				                         chapters_suffix) == 0)
 					continue;
-				files.push_back({{"name", entry.path().filename().string()}});
+				// Same rule as the file-album branch above.
+				const std::string clean = utf8_clean(fname, 255);
+				if (clean != fname) continue;
+				files.push_back({{"name", clean}});
 				}
 			}
 		catch (...) {}
@@ -4629,10 +4881,15 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
-		// Reject any path traversal attempts.
+		// Reject any path traversal attempts. The NUL test is not
+		// theoretical: a query parameter arrives percent-decoded, so
+		// `cover.jpg%00.txt` passes the suffix test as a C++ string and is
+		// then truncated at the NUL by every c_str() the filesystem layer
+		// takes — the file opened is cover.jpg, served as text/plain.
 		const std::string& name = name_it->second;
 		if (name.find('/') != std::string::npos  ||
 		    name.find('\\') != std::string::npos ||
+		    name.find('\0') != std::string::npos ||
 		    name.find("..") != std::string::npos ||
 		    name.size() < 5 ||
 		    name.substr(name.size() - 4) != ".txt") {
@@ -4673,6 +4930,17 @@ GainDrive::GainDrive(const std::string& db_path,
 			res.status = 403;
 			return;
 			}
+		// Bounded before it is read: liner notes are kilobytes, and the file
+		// is whatever an uploader put beside the album — an 8 GiB .txt inside
+		// an archive would otherwise become an 8 GiB allocation per request.
+		std::error_code sec;
+		const auto fsize = fs::file_size(full, sec);
+		if (sec) { res.status = 404; return; }
+		if (fsize > MAX_SMALL_BODY_BYTES) {
+			res.status = 413;
+			return;
+			}
+
 		std::ifstream f(full);
 		if (!f) {
 			res.status = 404;
@@ -4700,16 +4968,19 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::vector<std::string> paths;
 		auto range = req.params.equal_range("id");
 		for (auto it = range.first; it != range.second; ++it) {
-			if (auto p = store_.song_path_by_id(std::stoi(it->second)))
-				paths.push_back(*p);
+			if (auto p = store_.song_path_by_id(to_int(it->second, -1)))
+				if (item_read_allowed(req, store_, uploads_root_name_, *p))
+					paths.push_back(*p);
 			}
 
-		int         current_id   = std::stoi(qp("current", "0"));
+		int         current_id   = to_int(qp("current", "0"), 0);
 		std::string current_path = "";
 		if (current_id != 0) {
-			if (auto p = store_.song_path_by_id(current_id)) current_path = *p;
+			if (auto p = store_.song_path_by_id(current_id))
+				if (item_read_allowed(req, store_, uploads_root_name_, *p))
+					current_path = *p;
 			}
-		int64_t offset_ms  = std::stoll(qp("position", "0"));
+		int64_t offset_ms  = to_int64(qp("position", "0"), 0);
 		std::string client = qp("c");
 		std::string user   = qp("u");
 
@@ -4779,10 +5050,17 @@ GainDrive::GainDrive(const std::string& db_path,
 		// submission defaults to true per the Subsonic spec.
 		bool submission = (qp("submission", "true") != "false");
 
+		// The read-permission filter on every id: these client-state writes
+		// come back out through getStarred/getPlaylist/getPlayQueue with the
+		// full song entry, so an id resolved here without the check is a
+		// metadata read of somebody else's uploads by integer-guessing.
+		// Foreign ids are dropped like unresolvable ones rather than failing
+		// the request, matching how a deleted id already behaves.
 		auto range = req.params.equal_range("id");
 		for (auto it = range.first; it != range.second; ++it) {
-			if (auto p = store_.song_path_by_id(std::stoi(it->second)))
-				store_.scrobble(user, *p, submission, client);
+			if (auto p = store_.song_path_by_id(to_int(it->second, -1)))
+				if (item_read_allowed(req, store_, uploads_root_name_, *p))
+					store_.scrobble(user, *p, submission, client);
 			}
 
 		bool use_json = (fmt_of(req) == "json");
@@ -4806,13 +5084,14 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
-		int     song_id     = std::stoi(it->second);
-		int64_t position_ms = std::stoll(qp("position", "0"));
+		int     song_id     = to_int(it->second, -1);
+		int64_t position_ms = to_int64(qp("position", "0"), 0);
 		std::string comment = qp("comment");
 		std::string user    = qp("u");
 
 		auto song_path = store_.song_path_by_id(song_id);
-		if (!song_path) {
+		if (!song_path
+		    || !item_read_allowed(req, store_, uploads_root_name_, *song_path)) {
 			res.set_content(subsonic_error(70, "Song not found."), "application/xml");
 			return;
 			}
@@ -4975,7 +5254,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		        && req.params.find("timeOffset") == req.params.end()
 		        && last_cast_offset_ > 0.0f
 		        && req.get_header_value("Range").empty()) {
-			std::cout << stamp() << "cast probe: id=" << it->second
+			std::cout << stamp() << "cast probe: id=" << log_safe(it->second, 64)
 			          << " offset=" << last_cast_offset_ << std::endl;
 			auto probe_si = streamer_song(*song, song_abs,
 			                              std::min(song->file_size,
@@ -4987,7 +5266,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (cast_authed) {
 			// Log Range header so we can see what the Cast receiver is requesting.
 			auto range = req.get_header_value("Range");
-			std::cout << stamp() << "cast stream: id=" << it->second
+			std::cout << stamp() << "cast stream: id=" << log_safe(it->second, 64)
 			          << " size=" << song->file_size
 			          << " range=[" << (range.empty() ? "none" : range) << "]"
 			          << std::endl;
@@ -5015,7 +5294,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 
 		if (!cast_authed)
-			std::cout << stamp() << "stream: id=" << it->second
+			std::cout << stamp() << "stream: id=" << log_safe(it->second, 64)
 			          << " codec=" << song->codec
 			          << " size=" << song->file_size
 			          << " duration=" << song->duration
@@ -5089,7 +5368,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		               "attachment; filename=\"" + ascii + "\"; "
 		               "filename*=UTF-8''" + enc.str());
 
-		std::cout << stamp() << "download: id=" << it->second
+		std::cout << stamp() << "download: id=" << log_safe(it->second, 64)
 		          << " path=" << song->path
 		          << " size=" << song->file_size << std::endl;
 
@@ -5111,18 +5390,22 @@ GainDrive::GainDrive(const std::string& db_path,
 			};
 
 		auto it = req.params.find("name");
-		if (it == req.params.end() || it->second.empty()) {
+		// clean_name for the same reason updateSong's title gets it: this is
+		// typed text on its way into a column both response formats serve.
+		std::string name = it != req.params.end() ? clean_name(it->second)
+		                                          : std::string();
+		if (name.empty()) {
 			err(10, "Required parameter missing: name.");
 			return;
 			}
-		std::string name = it->second;
 		std::string user = req.params.find("u")->second;
 
 		std::vector<std::string> song_paths;
 		auto range = req.params.equal_range("songId");
 		for (auto i = range.first; i != range.second; ++i) {
-			if (auto p = store_.song_path_by_id(std::stoi(i->second)))
-				song_paths.push_back(*p);
+			if (auto p = store_.song_path_by_id(to_int(i->second, -1)))
+				if (item_read_allowed(req, store_, uploads_root_name_, *p))
+					song_paths.push_back(*p);
 			}
 
 		auto pl = store_.create_playlist(user, name, song_paths);
@@ -5298,23 +5581,25 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		auto it = req.params.find("playlistId");
 		if (it == req.params.end()) { err(10, "Required parameter missing: playlistId."); return; }
-		int playlist_id = std::stoi(it->second);
+		int playlist_id = to_int(it->second, -1);
 		std::string user = req.params.find("u")->second;
 
 		std::optional<std::string> name, comment;
 		std::optional<bool> is_public;
-		if (req.params.count("name"))    name      = req.params.find("name")->second;
-		if (req.params.count("comment")) comment   = req.params.find("comment")->second;
+		if (req.params.count("name"))    name      = clean_name(req.params.find("name")->second);
+		if (req.params.count("comment")) comment   = clean_prose(req.params.find("comment")->second,
+		                                                         MAX_PROSE_BYTES);
 		if (req.params.count("public"))  is_public = (req.params.find("public")->second == "true");
 
 		std::vector<std::string> paths_to_add;
 		std::vector<int> to_remove;
 		for (auto& [k, v] : req.params) {
 			if (k == "songIdToAdd") {
-				if (auto p = store_.song_path_by_id(std::stoi(v)))
-					paths_to_add.push_back(*p);
+				if (auto p = store_.song_path_by_id(to_int(v, -1)))
+					if (item_read_allowed(req, store_, uploads_root_name_, *p))
+						paths_to_add.push_back(*p);
 				}
-			else if (k == "songIndexToRemove") to_remove.push_back(std::stoi(v));
+			else if (k == "songIndexToRemove") to_remove.push_back(to_int(v, -1));
 			}
 
 		if (!store_.update_playlist(playlist_id, user, name, comment, is_public,
@@ -5334,18 +5619,22 @@ GainDrive::GainDrive(const std::string& db_path,
 		bool use_json = (fmt_of(req) == "json");
 		std::string user = req.params.find("u")->second;
 
+		// item_read_allowed on every kind of id — see scrobble.
+		auto readable = [&](const std::string& path) {
+			return item_read_allowed(req, store_, uploads_root_name_, path);
+			};
 		for (auto& [k, v] : req.params) {
 			if (k == "id") {
-				if (auto p = store_.song_path_by_id(std::stoi(v)))
-					store_.add_star(user, *p, "", "");
+				if (auto p = store_.song_path_by_id(to_int(v, -1)))
+					if (readable(*p)) store_.add_star(user, *p, "", "");
 				}
 			else if (k == "albumId") {
-				if (auto p = store_.album_folder_path_by_id(std::stoi(v)))
-					store_.add_star(user, "", *p, "");
+				if (auto p = store_.album_folder_path_by_id(to_int(v, -1)))
+					if (readable(*p)) store_.add_star(user, "", *p, "");
 				}
 			else if (k == "artistId") {
-				if (auto p = store_.artist_folder_path_by_id(std::stoi(v)))
-					store_.add_star(user, "", "", *p);
+				if (auto p = store_.artist_folder_path_by_id(to_int(v, -1)))
+					if (readable(*p)) store_.add_star(user, "", "", *p);
 				}
 			}
 
@@ -5360,18 +5649,21 @@ GainDrive::GainDrive(const std::string& db_path,
 		bool use_json = (fmt_of(req) == "json");
 		std::string user = req.params.find("u")->second;
 
+		auto readable = [&](const std::string& path) {
+			return item_read_allowed(req, store_, uploads_root_name_, path);
+			};
 		for (auto& [k, v] : req.params) {
 			if (k == "id") {
-				if (auto p = store_.song_path_by_id(std::stoi(v)))
-					store_.remove_star(user, *p, "", "");
+				if (auto p = store_.song_path_by_id(to_int(v, -1)))
+					if (readable(*p)) store_.remove_star(user, *p, "", "");
 				}
 			else if (k == "albumId") {
-				if (auto p = store_.album_folder_path_by_id(std::stoi(v)))
-					store_.remove_star(user, "", *p, "");
+				if (auto p = store_.album_folder_path_by_id(to_int(v, -1)))
+					if (readable(*p)) store_.remove_star(user, "", *p, "");
 				}
 			else if (k == "artistId") {
-				if (auto p = store_.artist_folder_path_by_id(std::stoi(v)))
-					store_.remove_star(user, "", "", *p);
+				if (auto p = store_.artist_folder_path_by_id(to_int(v, -1)))
+					if (readable(*p)) store_.remove_star(user, "", "", *p);
 				}
 			}
 
@@ -5459,12 +5751,12 @@ GainDrive::GainDrive(const std::string& db_path,
 	server_.Get("/rest/getAlbumInfo.view", [this](const httplib::Request& req,
 	                                              httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		handle_album_info(req, res, store_, "albumInfo");
+		handle_album_info(req, res, store_, uploads_root_name_, "albumInfo");
 		});
 	server_.Get("/rest/getAlbumInfo2.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
-		handle_album_info(req, res, store_, "albumInfo2");
+		handle_album_info(req, res, store_, uploads_root_name_, "albumInfo2");
 		});
 
 	// getTopSongs — play-count tracking not implemented; return empty list.
@@ -5578,7 +5870,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		// whole response is built in memory as one document.
 		int count  = std::clamp(to_int(req.get_param_value("count"), 10),
 		                        1, MAX_SEARCH_COUNT);
-		int offset = std::max(0, to_int(req.get_param_value("offset"), 0));
+		int offset = std::clamp(to_int(req.get_param_value("offset"), 0),
+		                        0, MAX_LIST_OFFSET);
 
 		auto songs = store_.get_songs_by_genre(genre, count, offset);
 		int  mbr   = request_max_bitrate(req, store_);
@@ -5746,7 +6039,7 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		auto vtt = store_.get_captions_vtt(to_int(it->second, -1), index);
 		if (vtt.empty()) {
-			std::cout << stamp() << "getCaptions: nothing for id=" << it->second
+			std::cout << stamp() << "getCaptions: nothing for id=" << log_safe(it->second, 64)
 			          << " captionId=" << index << std::endl;
 			res.status = 404;
 			return;
@@ -5756,7 +6049,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		// the television's address is the proof that the receiver accepted the
 		// tracks the LOAD declared and went looking for one. Its absence is the
 		// single most useful fact when captions do not appear on a cast.
-		std::cout << stamp() << "getCaptions: id=" << it->second
+		std::cout << stamp() << "getCaptions: id=" << log_safe(it->second, 64)
 		          << " captionId=" << index << " " << vtt.size() << " bytes"
 		          << (cast_authed ? " (cast token)" : "")
 		          << " to " << client_addr(req) << std::endl;
@@ -6082,7 +6375,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			// No #EXT-X-ENDLIST here: that tag terminates a media playlist,
 			// and a master holds no segments to terminate.
 
-			std::cout << stamp() << "hls: id=" << it->second
+			std::cout << stamp() << "hls: id=" << log_safe(it->second, 64)
 			          << " variants=" << announced.size()
 			          << " path=" << req.path << std::endl;
 			res.set_header("Cache-Control", "no-store");
@@ -6114,7 +6407,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 		m3u << "#EXT-X-ENDLIST\n";
 
-		std::cout << stamp() << "hls: id=" << it->second
+		std::cout << stamp() << "hls: id=" << log_safe(it->second, 64)
 		          << " duration=" << total
 		          << " segments=" << ((total + SEGMENT - 1) / SEGMENT)
 		          << " path=" << req.path << std::endl;
@@ -6156,7 +6449,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			return std::clamp(to_int(qp(k, "20"), 20), 0, MAX_SEARCH_COUNT);
 			};
 		auto offset_param = [&](const char* k) {
-			return std::max(0, to_int(qp(k, "0"), 0));
+			return std::clamp(to_int(qp(k, "0"), 0), 0, MAX_LIST_OFFSET);
 			};
 		int artist_count  = count_param("artistCount");
 		int artist_offset = offset_param("artistOffset");
@@ -6343,7 +6636,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
-		auto song_path = store_.song_path_by_id(std::stoi(it->second));
+		auto song_path = store_.song_path_by_id(to_int(it->second, -1));
 		if (!song_path || !store_.delete_bookmark(user, *song_path)) {
 			auto msg = "Bookmark not found.";
 			res.set_content(use_json ? subsonic_error_json(70, msg)
@@ -6372,7 +6665,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 
-		if (!store_.delete_playlist(std::stoi(it->second), user)) {
+		if (!store_.delete_playlist(to_int(it->second, -1), user)) {
 			auto msg = "Playlist not found.";
 			res.set_content(use_json ? subsonic_error_json(70, msg)
 			                         : subsonic_error(70, msg),
@@ -6456,6 +6749,14 @@ GainDrive::GainDrive(const std::string& db_path,
 	// file's sound is the same answer in every browser and on the phone.  The
 	// per-viewer knob next to it in spirit, castSyncDelay, is client-side for
 	// exactly the opposite reason — it is about the screen you are watching.
+	//
+	// Gated on castRole and deliberately not on admin, though the row is
+	// process-global: the person standing in front of the device is the one
+	// who knows whether it has a screen, and that is a cast user.  The write
+	// is bounded — the id must name a device in cached_devices(), the value
+	// is one of three enumerated strings, and the worst a cast user can do
+	// with it is what the setting exists to do.  Decided during the security
+	// pass, not overlooked.
 	server_.Get("/rest/setCastDevicePref.view", [this](const httplib::Request& req,
 	                                                   httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -6618,6 +6919,20 @@ GainDrive::GainDrive(const std::string& db_path,
 		// most of its life blocked inside wait_status(), so the flag alone
 		// would never show the gap.
 		const int session_gen = cast_session_gen_.load();
+
+		// A cap on concurrent SSE listeners. Each one parks a worker thread
+		// in wait_status() for the life of the connection, so without a
+		// ceiling the session's one authorised owner could occupy the whole
+		// pool with a loop over EventSource(). A real client holds one; the
+		// allowance covers a reload race and a second tab.
+		if (cast_sse_listeners_.load() >= CAST_SSE_MAX_LISTENERS) {
+			std::cout << stamp() << "Cast: refusing SSE listener, "
+			          << CAST_SSE_MAX_LISTENERS << " already attached"
+			          << std::endl;
+			res.status = 503;
+			return;
+			}
+
 		res.set_header("Cache-Control",    "no-cache");
 		res.set_header("X-Accel-Buffering","no");   // disable nginx/apache buffering
 
@@ -6846,6 +7161,12 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		auto song = store_.get_song(to_int(it->second, -1));
 		if (!song) { err(70, "Song not found."); return; }
+		// The uploads root is personal, and this is an id-addressed read like
+		// stream.view — more so: the cast token it mints is then accepted by
+		// stream.view with no account and no bitrate cap at all, so skipping
+		// the check here skips it everywhere downstream.
+		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		                          song->path, use_json)) return;
 
 		auto to_it = req.params.find("timeOffset");
 		float cast_offset = to_it != req.params.end()
@@ -6914,7 +7235,11 @@ GainDrive::GainDrive(const std::string& db_path,
 		std::optional<int> track_number;
 		std::optional<int> year;
 		std::optional<int> disc_number;
-		if (req.params.count("title")) title        = req.params.find("title")->second;
+		// Typed by a person and stored raw until now: invalid UTF-8 in
+		// songs.title made every later JSON response holding the song throw
+		// out of dump() — a permanent 500 — and a C0 byte makes the XML
+		// envelope unparseable for every conformant client.
+		if (req.params.count("title")) title        = clean_name(req.params.find("title")->second);
 		if (req.params.count("track")) track_number = to_int(req.params.find("track")->second, 0);
 		if (req.params.count("year"))  year         = to_int(req.params.find("year")->second, 0);
 		if (req.params.count("disc"))  disc_number  = to_int(req.params.find("disc")->second, 0);
@@ -7010,11 +7335,13 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		std::string bytes;
 		std::string url;
-		if (req.has_file("url")) url = req.get_file_value("url").content;
+		if (req.form.has_file("url")) url = req.form.get_file("url").content;
 		else if (req.has_param("url")) url = req.get_param_value("url");
 
-		if (req.has_file("file")) {
-			const auto& fp = req.get_file_value("file");
+		if (req.form.has_file("file")) {
+			// A reference into the form map, not get_file(), which returns a
+			// copy — this part can be a whole image.
+			const auto& fp = req.form.files.find("file")->second;
 			if (fp.content_type.rfind("image/", 0) != 0) {
 				err(0, "Uploaded file must be an image."); return;
 				}
@@ -7059,8 +7386,9 @@ GainDrive::GainDrive(const std::string& db_path,
 						});
 					return cli.Get(path.c_str());
 					};
-				if (https) { httplib::SSLClient cli(host); r = fetch(cli); }
-				else       { httplib::Client    cli(host); r = fetch(cli); }
+				auto [hname, hport] = split_host_port(host, https ? 443 : 80);
+				if (https) { httplib::SSLClient cli(hname, hport); r = fetch(cli); }
+				else       { httplib::Client    cli(hname, hport); r = fetch(cli); }
 				if (!r) { err(0, "Failed to fetch URL."); return; }
 				if (r->status == 301 || r->status == 302 || r->status == 303
 				    || r->status == 307 || r->status == 308) {
@@ -7177,7 +7505,16 @@ GainDrive::GainDrive(const std::string& db_path,
 
 	// Upload a music archive (zip / tar / tar.gz / tgz) and extract it into
 	// the calling user's personal folder under <uploads root>/<username>/.
-	server_.Post("/upload", [this](const httplib::Request& req, httplib::Response& res) {
+	// The content-reader form, and that is the security boundary as much as a
+	// convenience: httplib hands the handler control *before* reading a byte
+	// of body, so auth and the upload permission are checked against the
+	// query-string credentials first, and an unauthenticated multi-gigabyte
+	// POST costs the server nothing. The archive then streams to a file on
+	// disk rather than through req.body — the old form buffered the whole
+	// body in memory (and the multipart copy doubled it), which made /upload
+	// the cheapest OOM in the server.
+	server_.Post("/upload", [this](const httplib::Request& req, httplib::Response& res,
+	                               const httplib::ContentReader& content_reader) {
 		if (!check_auth(req, res, store_)) return;
 
 		auto json_err = [&](const std::string& msg) {
@@ -7232,32 +7569,80 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 		}
 
-		if (!req.has_file("file")) { json_err("Missing file part."); return; }
-		const auto& fp = req.get_file_value("file");
-
-		// Validate extension.
-		const std::string& name = fp.filename;
-		bool ok = name.ends_with(".zip")
-		       || name.ends_with(".tar")
-		       || name.ends_with(".tar.gz")
-		       || name.ends_with(".tgz");
-		if (!ok) { json_err("Unsupported file type. Use zip, tar, tar.gz, or tgz."); return; }
+		if (!req.is_multipart_form_data()) {
+			json_err("Expected multipart/form-data."); return;
+			}
 
 		namespace fs = std::filesystem;
 
 		// Each upload lands in its own UUID subdirectory so that messy zip
 		// structures (missing artist/album dirs) are always isolated and the
-		// scanner has a stable "artist-level" root to work from.
+		// scanner has a stable "artist-level" root to work from. The archive
+		// itself streams to a sibling .part file — outside dest, so the
+		// extraction can never mistake it for content — and is deleted
+		// whatever happens.
 		std::string uuid = make_uuid();
 		fs::path dest = fs::path(users_dir_) / uname / uuid;
+		fs::path part = fs::path(users_dir_) / uname / (uuid + ".upload.part");
+
+		std::ofstream out;
+		std::string cur_part;      // name of the multipart part being received
+		std::string name;          // the file part's client-side filename
+		uint64_t received = 0;
+		bool too_big = false, bad_type = false, io_failed = false;
+
+		auto type_ok = [](const std::string& n) {
+			return n.ends_with(".zip") || n.ends_with(".tar")
+			    || n.ends_with(".tar.gz") || n.ends_with(".tgz");
+			};
+
+		bool read_ok = content_reader(
+			[&](const httplib::FormData& fd) {
+				cur_part = fd.name;
+				if (cur_part != "file") return true;   // other parts: ignored
+				name = fd.filename;
+				// Refusing here aborts the read, so a wrong extension costs
+				// the client its upload time, not the server its disk.
+				if (!type_ok(name)) { bad_type = true; return false; }
+				std::error_code ec;
+				fs::create_directories(part.parent_path(), ec);
+				out.open(part, std::ios::binary | std::ios::trunc);
+				if (!out) { io_failed = true; return false; }
+				return true;
+				},
+			[&](const char* data, size_t n) {
+				if (cur_part != "file") return true;
+				received += n;
+				if (received > MAX_REQUEST_BYTES) { too_big = true; return false; }
+				out.write(data, static_cast<std::streamsize>(n));
+				if (!out) { io_failed = true; return false; }
+				return true;
+				});
+		if (out.is_open()) out.close();
+
+		auto drop_part = [&]{ std::error_code ec; fs::remove(part, ec); };
+
+		if (bad_type) {
+			drop_part();
+			json_err("Unsupported file type. Use zip, tar, tar.gz, or tgz.");
+			return;
+			}
+		if (too_big)   { drop_part(); res.status = 413;
+		                 json_err("Upload too large."); return; }
+		if (io_failed) { drop_part(); res.status = 500;
+		                 json_err("Could not store the upload."); return; }
+		if (!read_ok)  { drop_part(); json_err("Upload was interrupted."); return; }
+		if (name.empty()) { drop_part(); json_err("Missing file part."); return; }
+
 		fs::create_directories(dest);
 
-		std::cout << stamp() << "Upload: extracting " << name
-		          << " (" << fp.content.size() << " bytes)"
+		std::cout << stamp() << "Upload: extracting " << log_safe(name)
+		          << " (" << received << " bytes)"
 		          << " for user " << uname
 		          << " into " << dest << std::endl;
 
-		int n = extract_archive_to_dir(fp.content, dest);
+		int n = extract_archive_to_dir(part, dest);
+		drop_part();
 		if (n < 0) { json_err("Failed to open archive."); return; }
 
 		std::cout << stamp() << "Upload: extracted " << n << " file(s) to " << dest << std::endl;
@@ -7345,6 +7730,32 @@ GainDrive::GainDrive(const std::string& db_path,
 		// libstdc++ and lifetime-extends the temporary on libc++.
 		for (const auto& c : fs::path(old_rel)) parts.push_back(c.string());
 		if (parts.size() < 2) { err(0, "Could not resolve the library path."); return; }
+
+		// ---- Permission, first cut -------------------------------------
+		//
+		// The full rule — an upload user may reorganise inside their own
+		// batch, naming a destination root is admin's alone — needs the
+		// destination parsed and so still runs below.  What cannot wait is
+		// the refusal: the shape-specific errors between here and there (is
+		// it a file, how deep does it sit) were an oracle a non-admin could
+		// walk over ids in other users' uploads.  A foreign upload answers
+		// exactly like a missing id; a shared-library item tells a non-admin
+		// no before its shape is examined.
+		{
+		const std::string uname = req.get_param_value("u");
+		auto ui = store_.get_user(uname);
+		if (!(ui && ui->is_admin)) {
+			if (!item_read_allowed(req, store_, uploads_root_name_, old_rel)) {
+				err(70, "Item not found."); return;
+				}
+			const bool own_upload = !uploads_root_name_.empty()
+			                        && parts[0] == uploads_root_name_;
+			if (!own_upload) {
+				err(50, "Moving outside your own uploads requires admin role.");
+				return;
+				}
+			}
+		}
 
 		// **The album may be a single media file.**  A loose file is its own
 		// album, so its folder row's path names the file — and every step
@@ -8232,7 +8643,9 @@ GainDrive::GainDrive(const std::string& db_path,
 
 	// Catch-all for endpoints not yet implemented.
 	server_.Get("/rest/:endpoint", [](const httplib::Request& req, httplib::Response& res) {
-		std::cout << stamp() << "NOT IMPLEMENTED: " << req.path << std::endl;
+		// log_safe: this is the one unauthenticated route that echoed the
+		// percent-decoded path into the log verbatim.
+		std::cout << stamp() << "NOT IMPLEMENTED: " << log_safe(req.path) << std::endl;
 		res.set_content(subsonic_error(0, "Not implemented."), "application/xml");
 		});
 
@@ -8446,8 +8859,13 @@ void GainDrive::fetch_worker()
 					if (j.id == id) {
 						if (!cancelled) {
 							j.state = "error";
-							j.error = r.error.empty() ? "The fetch failed."
-							                          : r.error;
+							// Through sanitise_detail like every progress
+							// line: the message names argv.front(), which
+							// for a configured handler is an absolute path
+							// on this machine.
+							j.error = r.error.empty()
+							    ? std::string("The fetch failed.")
+							    : sanitise_detail(r.error, dest, snap.batch);
 							}
 						j.finished = static_cast<int64_t>(std::time(nullptr));
 						break;
@@ -8665,8 +9083,9 @@ MediaStore::ArtistArtRow GainDrive::portrait_fetch(const std::string& url)
 				cli.set_default_headers({{"User-Agent", USER_AGENT}});
 				return cli.Get(path.c_str());
 				};
-			if (hop_https) { httplib::SSLClient cli(host); r = get(cli); }
-			else           { httplib::Client    cli(host); r = get(cli); }
+			auto [hname, hport] = split_host_port(host, hop_https ? 443 : 80);
+			if (hop_https) { httplib::SSLClient cli(hname, hport); r = get(cli); }
+			else           { httplib::Client    cli(hname, hport); r = get(cli); }
 			if (!r) return row;
 			if (r->status == 301 || r->status == 302 || r->status == 303
 			    || r->status == 307 || r->status == 308) {
@@ -9044,15 +9463,29 @@ GainDrive::cast_load_song(const httplib::Request& req,
                           const MediaStore::SongInfo& song,
                           int song_id, float offset, int track_id)
 	{
-	std::string host  = req.get_header_value("Host");
-	if (host.empty()) host = "localhost";
-	std::string proto = req.get_header_value("X-Forwarded-Proto");
-	if (proto.empty()) proto = "http";
 	// Everything the receiver fetches hangs off this, and every one of them
 	// carries the cast token rather than the account's credentials: a
 	// television is not a place to leave a password, and the token is already
 	// what stream.view accepts.
-	const std::string base = proto + "://" + host + "/rest/";
+	//
+	// The configured public_url wins over the request's own Host header, and
+	// on a public deployment it must: Host and X-Forwarded-Proto are client
+	// input, so believing them let any cast-role account point the receiver
+	// at an origin of its choosing — which hands that origin the cast token
+	// in the query string, and the token is accepted by stream.view with no
+	// account attached. On a LAN with no public_url configured the header is
+	// the only source there is, and the peers who could abuse it are the
+	// household.
+	std::string base;
+	if (!public_url_.empty())
+		base = public_url_ + "/rest/";
+	else {
+		std::string host  = req.get_header_value("Host");
+		if (host.empty()) host = "localhost";
+		std::string proto = req.get_header_value("X-Forwarded-Proto");
+		if (proto.empty()) proto = "http";
+		base = proto + "://" + host + "/rest/";
+		}
 	const std::string sid_s = std::to_string(song_id);
 
 	// A receiver that cannot display a picture is sent the film's soundtrack

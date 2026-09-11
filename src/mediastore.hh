@@ -97,6 +97,10 @@ class MediaStore {
 		static std::string client_db_path(const std::string& db_path);
 
 		// Returns false if the username already exists or is not valid.
+		// p=enc:HEX decoded, p passed through, nullopt for malformed hex.
+		// Shared by validate_auth and the endpoints that *store* a password.
+		static std::optional<std::string> decode_enc_password(const std::string& p);
+
 		bool add_user(const std::string& username, const std::string& password,
 		              bool is_admin = false);
 

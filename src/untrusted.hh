@@ -76,6 +76,23 @@ inline std::string utf8_clean(std::string_view s, size_t max_bytes)
 	return out;
 	}
 
+// A one-line name somebody typed: a song title through updateSong, a
+// playlist's name. The same contract as clean_prose minus the newlines — a
+// title with a line break in it is nothing but a way to make a log line or a
+// list row lie about where it ends. Length is MAX_NAME_BYTES for the reason
+// stated above it.
+inline std::string clean_name(std::string_view s)
+	{
+	std::string kept;
+	kept.reserve(s.size());
+	for (char ch : s) {
+		auto c = static_cast<unsigned char>(ch);
+		if (c < 0x20 || c == 0x7f) continue;
+		kept.push_back(ch);
+		}
+	return utf8_clean(kept, MAX_NAME_BYTES);
+	}
+
 // A biography, album notes, a film's plot: prose from a provider, on its way
 // into a cache column and out through both response formats.
 //

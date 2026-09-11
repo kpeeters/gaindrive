@@ -644,6 +644,7 @@ add_custom_command(
 		${CMAKE_CURRENT_SOURCE_DIR}/web/link.html
 		${CMAKE_CURRENT_SOURCE_DIR}/web/style.css
 		${CMAKE_CURRENT_SOURCE_DIR}/web/app.js
+		${CMAKE_CURRENT_SOURCE_DIR}/web/theme.js
 		${CMAKE_CURRENT_SOURCE_DIR}/web/favicon.svg
 		${CMAKE_CURRENT_SOURCE_DIR}/web/material-symbols-rounded.woff2
 		${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_web.cmake

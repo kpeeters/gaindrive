@@ -75,7 +75,13 @@ ProtectSystem=full
 ProtectControlGroups=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
 RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
 PrivateTmp=yes
 PrivateDevices=yes
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
@@ -93,6 +99,13 @@ SystemCallFilter=@system-service
 MemoryMax=4G
 TasksMax=512
 
+# CapabilityBoundingSet= (empty) is safe because the service runs as an
+# ordinary user with NoNewPrivileges: it never holds a capability to give up,
+# so the empty set costs nothing today and stops a future root-run unit from
+# quietly inheriting the lot. The other additions above (kernel logs, clock,
+# hostname, realtime scheduling, SysV IPC) are things neither gaindrive nor
+# its ffmpeg/yt-dlp children have any business touching.
+#
 # NOTE: do NOT add ProtectHome. A unit written by --install-service runs as a
 # person rather than a system account, so its database is under a home
 # directory essentially always and its music very often -- both must stay

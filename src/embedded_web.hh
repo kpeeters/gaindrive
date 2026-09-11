@@ -15,6 +15,9 @@ namespace embedded {
    extern const std::string_view app_js;
    extern const std::string_view app_js_mime;
 
+   extern const std::string_view theme_js;
+   extern const std::string_view theme_js_mime;
+
    extern const std::string_view favicon_svg;
    extern const std::string_view favicon_svg_mime;
 

@@ -4082,6 +4082,18 @@ bool MediaStore::add_user(const std::string& username, const std::string& passwo
 	{
 	if (!valid_username(username)) return false;
 	std::lock_guard<std::mutex> lock(db_mutex_);
+	// Refused case-insensitively, though the column collates by bytes: each
+	// user's uploads live at <uploads>/<username>, and on a case-insensitive
+	// filesystem — macOS is a supported host — "alice" and "Alice" are one
+	// directory on disk while every permission check here compares bytes.
+	// Two accounts sharing a directory neither may read is not a state worth
+	// being able to create.
+	{
+	SQLite::Statement dup(db_music_,
+		"SELECT 1 FROM client.users WHERE username = ? COLLATE NOCASE");
+	dup.bind(1, username);
+	if (dup.executeStep()) return false;
+	}
 	SQLite::Statement ins(db_music_,
 		"INSERT OR IGNORE INTO client.users (username, password_enc, is_admin) VALUES (?,?,?)");
 	ins.bind(1, username);
@@ -4181,6 +4193,39 @@ bool MediaStore::update_user(const std::string& username,
 	return db_music_.getChanges() > 0;
 	}
 
+// The `p=enc:HEXHEX` spelling of a password, decoded, or the string
+// unchanged when it does not carry the prefix; nullopt for a malformed hex
+// body. One definition, because two callers need it and they must agree:
+// validate_auth() reads it off the wire, and the user-management endpoints
+// decode it before *storing* — a spec-compliant client that sent
+// password=enc:… to changePassword used to have the literal string stored,
+// which validate_auth then decoded on the next login and matched nothing;
+// the account was locked out of the password path by its own password
+// change.
+//
+// Decoded by hand rather than with std::stoi, which **throws** on anything
+// that is not a hex digit. That made `p=enc:zz` an unauthenticated 500 from
+// any caller. A malformed password is a wrong password, not a server error.
+std::optional<std::string> MediaStore::decode_enc_password(const std::string& p)
+	{
+	if (!(p.size() > 4 && p.substr(0, 4) == "enc:")) return p;
+	const std::string hex = p.substr(4);
+	std::string plain;
+	auto nibble = [](char c) -> int {
+		if (c >= '0' && c <= '9') return c - '0';
+		if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+		if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+		return -1;
+		};
+	if ((hex.size() % 2) != 0) return std::nullopt;
+	for (size_t i = 0; i + 1 < hex.size(); i += 2) {
+		const int hi = nibble(hex[i]), lo = nibble(hex[i + 1]);
+		if (hi < 0 || lo < 0) return std::nullopt;
+		plain += static_cast<char>((hi << 4) | lo);
+		}
+	return plain;
+	}
+
 bool MediaStore::validate_auth(const std::string& username,
                                 const std::string& password,
                                 const std::string& token,
@@ -4214,35 +4259,12 @@ bool MediaStore::validate_auth(const std::string& username,
 	bool ok = false;
 
 	if (!password.empty()) {
-		// Some clients send p=enc:HEXHEX (hex-encoded plaintext password).
-		//
-		// Decoded by hand rather than with std::stoi, which **throws** on
-		// anything that is not a hex digit. That made `p=enc:zz` an
-		// unauthenticated 500 from any caller — the exception escapes into
-		// httplib's fallback handler, which answers 500 and puts the
-		// exception text in an EXCEPTION_WHAT header. A malformed password is
-		// a wrong password, not a server error.
-		std::string plain = password;
-		if (plain.size() > 4 && plain.substr(0, 4) == "enc:") {
-			const std::string hex = plain.substr(4);
-			plain.clear();
-			auto nibble = [](char c) -> int {
-				if (c >= '0' && c <= '9') return c - '0';
-				if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-				if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-				return -1;
-				};
-			bool valid = (hex.size() % 2) == 0;
-			for (size_t i = 0; valid && i + 1 < hex.size(); i += 2) {
-				const int hi = nibble(hex[i]), lo = nibble(hex[i + 1]);
-				if (hi < 0 || lo < 0) { valid = false; break; }
-				plain += static_cast<char>((hi << 4) | lo);
-				}
-			// Not a hex string at all, so it cannot be the password however it
-			// is read. Fail rather than comparing a half-decoded prefix.
-			if (!valid) return false;
-			}
-		ok = const_time_eq(plain, stored);
+		// Some clients send p=enc:HEXHEX; see decode_enc_password() above.
+		auto decoded = decode_enc_password(password);
+		// Not a hex string at all, so it cannot be the password however it
+		// is read. Fail rather than comparing a half-decoded prefix.
+		if (!decoded) return false;
+		ok = const_time_eq(*decoded, stored);
 		}
 	else if (!token.empty() && !salt.empty()) {
 		// The Subsonic spec requires a salt of at least six characters, and
@@ -5364,11 +5386,17 @@ std::string MediaStore::get_captions_vtt(int song_id, int stream_index)
 	reproc::sink::string sink(out);
 	auto ec            = reproc::drain(proc, sink, reproc::sink::null);
 	auto [status, wec] = proc.wait(reproc::infinite);
-	if (ec || wec || status != 0) return {};
+	if (ec || wec || status != 0) out.clear();
 
-	// A failure is not cached. Unlike video_meta's stored negatives, there is
-	// nothing here to be judged: ffmpeg not answering is a transient condition
-	// and the next request should try again.
+	// A failure *is* cached, as an empty entry — the reversal of what this
+	// used to say ("ffmpeg not answering is transient, try again"). That
+	// reasoning made every failing request a fresh fork: a captionId naming
+	// no stream fails identically every time, so an authenticated client
+	// could run one ffmpeg per request for ever. An empty entry answers 404
+	// like a missing sidecar does, and a genuinely transient failure costs
+	// one film's captions until the entry ages out of the bounded queue or
+	// the file's mtime changes the key — against an unbounded fork
+	// amplifier, that is the right trade.
 	{
 	std::lock_guard<std::mutex> lk(captions_mutex_);
 	if (captions_cache_.emplace(key, out).second) {

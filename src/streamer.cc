@@ -4,6 +4,7 @@
 #include "proc.hh"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -866,6 +867,27 @@ void Streamer::serve_transcoded(httplib::Response& res,
 	std::cout << stamp() << "stream: ffmpeg:" << cmd << std::endl;
 	}
 
+	// A ceiling on concurrent *piped* transcodes.  TranscodeCache bounds its
+	// own ffmpegs with --transcode-jobs; this path — seeks, HLS segments,
+	// cast pipes, cache fallbacks — forked with no bound at all, so one
+	// account fanning stream.view requests out over the 32 workers could put
+	// an encoder on every one of them.  The slot rides in the releaser and so
+	// is freed when the response finishes, however it finishes; a request
+	// past the cap is refused rather than queued, because a worker sleeping
+	// on a slot is the pool exhaustion this exists to prevent, one layer
+	// down.
+	static std::atomic<int> piped_ffmpeg_count{0};
+	static constexpr int    MAX_PIPED_FFMPEG = 16;
+	if (piped_ffmpeg_count.fetch_add(1) >= MAX_PIPED_FFMPEG) {
+		piped_ffmpeg_count.fetch_sub(1);
+		std::cout << stamp() << "stream: refusing piped transcode, "
+		          << MAX_PIPED_FFMPEG << " already running" << std::endl;
+		res.status = 503;
+		return;
+		}
+	auto slot = std::shared_ptr<void>(nullptr,
+		[](void*){ piped_ffmpeg_count.fetch_sub(1); });
+
 	auto proc = std::make_shared<reproc::process>();
 	reproc::options opts;
 	// Capture stderr to a temp file rather than discarding it.  A pipe would
@@ -998,7 +1020,7 @@ void Streamer::serve_transcoded(httplib::Response& res,
 			return Pump::More;
 			};
 
-	auto releaser = [proc, total_sent, errf](bool success) {
+	auto releaser = [proc, total_sent, errf, slot](bool success) {
 			if (!success) proc->kill();
 			auto [status, ec] = proc->wait(reproc::infinite);
 			std::cout << stamp() << "stream: ffmpeg exit status=" << status

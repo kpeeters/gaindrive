@@ -412,3 +412,4 @@ class GainDrive {
 // the login throttle keys on the result, so it would let a caller pick a fresh
 // rate-limit bucket per request.
 void gaindrive_set_trusted_proxies(std::vector<std::string> addrs);
+void gaindrive_set_public_url(std::string origin);
