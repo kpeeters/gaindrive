@@ -9,24 +9,29 @@
 import SwiftUI
 
 /// The Library tab: the merged listing, one artist's albums, and one album's
-/// tracks — and, presented over it, the same three columns a second time for
+/// tracks — and, presented over it, the same three panes a second time for
 /// the account's own uploads.
 ///
-/// **The only tab that is a `NavigationSplitView`**, and that is a decision
-/// rather than an accident. It is the one with three genuine levels, which is
-/// exactly the three columns the API offers. Playlists and Recents are two
-/// levels deep and would gain a column that mostly stood empty; Search keeps
-/// its results whatever the width, which a split view cannot express. Those
-/// three keep their `NavigationStack`s, and this one no longer has one.
+/// **The only tab with three panes**, and that is a decision rather than an
+/// accident. It is the one with three genuine levels, which is exactly three
+/// panes' worth. Playlists and Recents are two levels deep and would gain a
+/// pane that mostly stood empty; Search keeps its results whatever the width,
+/// which a pane layout cannot express. Those three keep their
+/// `NavigationStack`s, and this one no longer has one.
 ///
-/// **The collapse to a stack on a phone is SwiftUI's, not ours.** A
-/// three-column split view driven by `List(selection:)` becomes a push stack in
-/// a compact size class, so the iPhone behaves as it did before this existed —
-/// which is the thing most worth checking, because getting it wrong is what
-/// would make the change not worth having.
+/// **Regular width draws the three panes by hand; compact keeps a
+/// `NavigationSplitView`.** A three-column split view drew the wide layout
+/// once, but nested inside the `.sidebarAdaptable` `TabView` its automatic
+/// style resolves to prominent-detail behaviour: the artists column becomes a
+/// floating overlay that hides the albums column, and the visible columns get
+/// unequal, width-dependent sizes. An `HStack` of three equal panes has no
+/// such state machine. The split view survives on compact for the one thing
+/// it did reliably — collapsing to a push stack driven by the same
+/// `List(selection:)` bindings — so the iPhone behaves as it always did,
+/// which is the thing most worth checking.
 struct ArtistsView: View {
 	let model: ArtistsViewModel
-	/// The uploads flavour: same screen, same columns, the personal listing.
+	/// The uploads flavour: same screen, same panes, the personal listing.
 	/// A parameter rather than module state, so the two instances cannot
 	/// share or leak a selection.
 	var uploads = false
@@ -34,12 +39,12 @@ struct ArtistsView: View {
 	@Environment(ServerSelection.self) private var servers
 	@Environment(SettingsStore.self) private var settings
 	@Environment(\.library) private var library
-	@State private var columns = NavigationSplitViewVisibility.all
+	@Environment(\.horizontalSizeClass) private var sizeClass
 	/// **The selections carry the domain values, not ids.** A `List` would
 	/// default to the element's `id`, which here is an `ItemRef` — and both
-	/// trailing columns need more than that: the albums column wants the
+	/// trailing panes need more than that: the albums pane wants the
 	/// artist's `refs`, name and the section the row was picked from, and the
-	/// tracks column wants the album's title for its bar before the load
+	/// tracks pane wants the album's title for its bar before the load
 	/// returns. Tagging the value means neither has to look anything up, and
 	/// there is no stale id to resolve against a list that has since reloaded.
 	@State private var selectedChoice: ArtistChoice?
@@ -52,7 +57,86 @@ struct ArtistsView: View {
 	@State private var showingUploads = false
 
 	var body: some View {
-		NavigationSplitView(columnVisibility: $columns) {
+		layout
+			// Replaces what a `NavigationStack` path did here: a different scope
+			// is a different library, so what was chosen in the old one is not a
+			// screen the user can act on.
+			.onChange(of: servers.scope) { clearSelection() }
+			// Going offline is a different library, so what was chosen in the other
+			// one is not a screen the user can act on.
+			.onChange(of: settings.offlineMode) { clearSelection() }
+			// A different artist cannot still have the same album showing.
+			.onChange(of: selectedChoice) { selectedAlbum = nil }
+			// A cover rather than a sheet: this hosts a second pane layout, which
+			// needs the full width on an iPad — a centred sheet card cannot give
+			// it three panes — and collapses to a stack on a phone exactly like
+			// the view underneath. Presented from within the tab's content, so it
+			// inherits the environment; the caveat in RootView about sheets losing
+			// it applies only to presentations hung off the TabView itself.
+			.fullScreenCover(isPresented: $showingUploads, onDismiss: { uploadsModel = nil }) {
+				uploadsCover
+			}
+	}
+
+	/// The branch, with everything cross-cutting hung on the container above
+	/// it: the clearing rules and the uploads cover must survive a size-class
+	/// flip (rotation into a multitasking split, a Catalyst window resize)
+	/// rather than being torn down with the branch they happened to sit on.
+	/// The selections live above it too, so a flip keeps them; the pane view
+	/// models rebuild and refetch, which is the same cost `.id()` already
+	/// pays on every change of artist.
+	@ViewBuilder
+	private var layout: some View {
+		if sizeClass == .regular {
+			panes
+		} else {
+			splitView
+		}
+	}
+
+	/// Three equal panes, by hand. One `NavigationStack` *per pane*, so each
+	/// pane hosts exactly the bar its view already declares — which is what
+	/// leaves `ArtistsList`, `AlbumsView` and `AlbumDetailView` untouched,
+	/// and with them the phone path. Nothing ever pushes: a non-nil selection
+	/// binding makes `AlbumsView` render tagged rows rather than links, so
+	/// the stacks are pure chrome hosts.
+	private var panes: some View {
+		HStack(spacing: 0) {
+			pane {
+				ArtistsList(
+					model: model, uploads: uploads, selection: $selectedChoice,
+					onOpenUploads: openUploadsAction)
+				// Inline like its neighbours: a large title beside two inline
+				// bars is three bars of two heights.
+				.navigationBarTitleDisplayMode(.inline)
+			}
+			Divider()
+			// The empty titles keep an (empty, inline) bar over the
+			// placeholder branches, so the bars stay one height before
+			// anything is selected; a deeper `.navigationTitle` wins the
+			// moment a selection exists.
+			pane { albums.navigationTitle("") }
+			Divider()
+			pane { tracks.navigationTitle("") }
+		}
+	}
+
+	/// Out of line for the same reason as `openUploadsAction`: the smaller
+	/// each expression the body has to solve, the better.
+	private func pane(@ViewBuilder _ content: () -> some View) -> some View {
+		NavigationStack { content() }
+			.frame(maxWidth: .infinity)
+	}
+
+	/// Compact only, kept for the one thing the split view does reliably:
+	/// collapsing to a push stack derived from the live selections, so
+	/// shrinking into a multitasking split lands on the screen that was
+	/// showing. A hand-built `NavigationStack` path would need pops
+	/// synchronised back to the selection clearing — exactly the identity-bug
+	/// class the `.id()` comments below warn about. No visibility binding:
+	/// compact ignores it.
+	private var splitView: some View {
+		NavigationSplitView {
 			ArtistsList(
 				model: model, uploads: uploads, selection: $selectedChoice,
 				onOpenUploads: openUploadsAction)
@@ -60,24 +144,6 @@ struct ArtistsView: View {
 			albums
 		} detail: {
 			tracks
-		}
-		// Replaces what a `NavigationStack` path did here: a different scope
-		// is a different library, so what was chosen in the old one is not a
-		// screen the user can act on.
-		.onChange(of: servers.scope) { clearSelection() }
-		// Going offline is a different library, so what was chosen in the other
-		// one is not a screen the user can act on.
-		.onChange(of: settings.offlineMode) { clearSelection() }
-		// A different artist cannot still have the same album showing.
-		.onChange(of: selectedChoice) { selectedAlbum = nil }
-		// A cover rather than a sheet: this hosts a second split view, which
-		// needs the full width on an iPad — a centred sheet card cannot give
-		// it three columns — and collapses to a stack on a phone exactly like
-		// the view underneath. Presented from within the tab's content, so it
-		// inherits the environment; the caveat in RootView about sheets losing
-		// it applies only to presentations hung off the TabView itself.
-		.fullScreenCover(isPresented: $showingUploads, onDismiss: { uploadsModel = nil }) {
-			uploadsCover
 		}
 	}
 
@@ -125,7 +191,7 @@ struct ArtistsView: View {
 			// missed.
 			.id(choice.artist.ref)
 		} else {
-			// One line rather than a blank column. `android/SCREENS.md`: the
+			// One line rather than a blank pane. `android/SCREENS.md`: the
 			// web client leaves it empty, which is fine for a `<div>` and
 			// reads as a rendering fault on a tablet.
 			ContentUnavailableView("Choose an artist", systemImage: "music.mic")
@@ -162,9 +228,10 @@ struct ArtistChoice: Hashable {
 /// The merged listing — categories under one header, then every artist in
 /// index buckets with a fast-scroll rail — or the uploads listing.
 ///
-/// The split view's leading column, and — once that collapses — the tab's first
-/// screen on a phone. `.listStyle(.plain)` stays for that reason: `.sidebar` is
-/// the iPad idiom, but this is the same view the phone shows.
+/// The first pane on a wide screen, and the tab's first screen on a phone.
+/// `.listStyle(.plain)` stays for that reason: `.sidebar` is the iPad idiom,
+/// but this is the same view the phone shows — and the pane it fills is a
+/// third of the window, not a sidebar.
 private struct ArtistsList: View {
 	let model: ArtistsViewModel
 	let uploads: Bool

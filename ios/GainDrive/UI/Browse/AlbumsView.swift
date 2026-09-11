@@ -17,8 +17,9 @@ struct AlbumsView: View {
 	/// See `Route.albums`. Only the album-sort key reads it — iOS has no
 	/// delete or promote yet (Phase 8).
 	var fromUploads = false
-	/// Non-nil inside the Library tab's split view, where choosing an album
-	/// fills the third column. **Nil everywhere else**: from Search, Recents
+	/// Non-nil inside the Library tab's pane layout (and the split view it
+	/// keeps on compact), where choosing an album fills the third pane.
+	/// **Nil everywhere else**: from Search, Recents
 	/// and the Now Playing sheet this list sits in a `NavigationStack` and a
 	/// row is a push.
 	///
@@ -115,9 +116,9 @@ struct AlbumsView: View {
 	/// The rows *are* the branch, because the list is not.
 	///
 	/// A `NavigationLink` inside a selectable list would push as well as
-	/// select, so the split view gets a bare row — tagged with the album
-	/// itself rather than left to `AlbumUi.id`, so the column above receives
-	/// enough to title the detail column without a lookup.
+	/// select, so a selectable listing gets a bare row — tagged with the
+	/// album itself rather than left to `AlbumUi.id`, so the view above
+	/// receives enough to title the tracks pane without a lookup.
 	@ViewBuilder
 	private func row(_ item: AlbumUi) -> some View {
 		if selection != nil {
