@@ -47,7 +47,7 @@ extension View {
 		#else
 		self
 			.frame(maxWidth: .infinity, alignment: .leading)
-			.padding(.horizontal, 20)
+			.padding(.horizontal, 16)
 			.padding(.vertical, 8)
 			.background(Color(.systemBackground))
 			.listRowInsets(EdgeInsets())
