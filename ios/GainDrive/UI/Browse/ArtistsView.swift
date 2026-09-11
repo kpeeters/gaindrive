@@ -123,9 +123,19 @@ struct ArtistsView: View {
 
 	/// Out of line for the same reason as `openUploadsAction`: the smaller
 	/// each expression the body has to solve, the better.
+	///
+	/// Clipped, because a pane flush against a safe-area edge is extended
+	/// into it by SwiftUI's full-bleed rule for scrollables — the artists
+	/// list's selection highlight drew under (and in the floating gap left
+	/// of) the TabView sidebar, through its translucent material. Row
+	/// content was already safe-area inset; only the background leaked, so
+	/// the clip moves nothing. In the helper so all three panes get it: the
+	/// trailing pane has the mirror-image bleed on the right, with nothing
+	/// tinted to show it.
 	private func pane(@ViewBuilder _ content: () -> some View) -> some View {
 		NavigationStack { content() }
 			.frame(maxWidth: .infinity)
+			.clipped()
 	}
 
 	/// Compact only, kept for the one thing the split view does reliably:
