@@ -11,7 +11,7 @@ import org.gaindrive.android.data.model.AlbumDetail
 import org.gaindrive.android.data.model.Artist
 import org.gaindrive.android.data.model.ArtistIndex
 import org.gaindrive.android.data.model.ItemRef
-import org.gaindrive.android.data.model.LibraryMode
+import org.gaindrive.android.data.model.LibrarySection
 import org.gaindrive.android.data.model.LibrarySelection
 import org.gaindrive.android.data.model.Playlist
 import org.gaindrive.android.data.model.ServerId
@@ -49,23 +49,27 @@ class LocalLibrary @Inject constructor(
 
 	suspend fun saveArtistIndexes(
 		server: ServerId,
-		mode: LibraryMode,
+		section: LibrarySection,
 		indexes: List<ArtistIndex>,
 	) = write {
 		dao.upsertArtists(
 			indexes.flatMap { index ->
-				index.artists.map { it.toEntity(server, index.label, mode.id) }
+				index.artists.map { it.toEntity(server, index.label, section.id) }
 			}
 		)
 	}
 
-	suspend fun artistIndexes(server: ServerId, mode: LibraryMode): List<ArtistIndex> = io {
-		dao.artists(server.value, mode.id)
+	suspend fun artistIndexes(server: ServerId, section: LibrarySection): List<ArtistIndex> = io {
+		dao.artists(server.value, section.id)
 			.groupBy { it.indexLabel }
 			.map { (label, rows) -> ArtistIndex(label, rows.map { it.toDomain() }) }
 	}
 
-	/** Slices present in the mirror, so offline chips reflect reality. */
+	/**
+	 * Sections present in the mirror. Offline this is what says whether there
+	 * is an uploads listing to offer, and which kinds the fetch panel's field
+	 * labels can name.
+	 */
 	suspend fun storedContentTypes(servers: List<ServerId>): List<String> =
 		io { dao.storedContentTypes(servers.map { it.value }) }
 
@@ -84,7 +88,7 @@ class LocalLibrary @Inject constructor(
 		// with the default would move a category section into the Artists
 		// list the next time the app is offline.
 		val kind = dao.artist(server.value, artist.ref.id)?.contentType
-			?: LibraryMode.ARTISTS.id
+			?: LibrarySection.ARTISTS.id
 		dao.upsertArtists(listOf(artist.toEntity(server, indexLabelFor(artist.name), kind)))
 	}
 
@@ -322,7 +326,7 @@ private fun Artist.toEntity(
 	server: ServerId,
 	indexLabel: String,
 	/** Defaulted for the paths that genuinely cannot know — see saveSelection. */
-	contentType: String = LibraryMode.ARTISTS.id,
+	contentType: String = LibrarySection.ARTISTS.id,
 ) = ArtistEntity(
 	serverId = server.value,
 	id = ref.id,

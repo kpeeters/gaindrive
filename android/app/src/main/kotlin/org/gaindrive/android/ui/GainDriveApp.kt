@@ -111,7 +111,7 @@ fun GainDriveApp(
 		// Straight to Settings, whose own path starts at Servers when nothing
 		// is configured — see `stacks` below. There is exactly one useful
 		// thing to do on a first run and that is where its button lives.
-		if (settings.servers.isEmpty()) Route.Settings else Route.Artists
+		if (settings.servers.isEmpty()) Route.Settings else Route.Artists()
 	}
 
 	// One path per tab — see PaneStack. Held here rather than inside each tab
@@ -120,7 +120,7 @@ fun GainDriveApp(
 	// bookkeeping, and tapping the tab you are already in can shed that
 	// drill-down, which the tab itself has no way to reach.
 	val stacks = mapOf(
-		TopLevel.ARTISTS to rememberPaneStack { listOf(Route.Artists) },
+		TopLevel.ARTISTS to rememberPaneStack { listOf(Route.Artists()) },
 		TopLevel.PLAYLISTS to rememberPaneStack { listOf(Route.Playlists) },
 		TopLevel.RECENTS to rememberPaneStack { listOf(Route.Recents) },
 		TopLevel.SEARCH to rememberPaneStack { listOf(Route.Search) },
@@ -136,6 +136,11 @@ fun GainDriveApp(
 			}
 		},
 	)
+
+	// The uploads listing's own drill-down, beside the tabs' rather than in
+	// the map: it is not a tab, but it keeps its path between visits for the
+	// same reason a tab does.
+	val uploadsStack = rememberPaneStack { listOf(Route.Artists(uploads = true)) }
 
 	// Read here rather than in the bottom bar: whether there is a bar at all
 	// depends on it, and that decision is made before the bar is composed.
@@ -467,6 +472,18 @@ fun GainDriveApp(
 						// field. A form wants the whole window, so it is pushed onto
 						// the shell's own host rather than into a pane.
 						onFetchUrl = { navController.navigate(Route.FetchUrl("")) },
+						onOpenUploads = { navController.navigate(Route.Uploads) },
+					)
+				}
+
+				// The uploads listing: the Library tab's own pane strip a second
+				// time, rooted at the personal slice. The bottom bar and player
+				// stay — it is a listing, not a form.
+				composable<Route.Uploads> {
+					LibraryTab(
+						stack = uploadsStack,
+						onFetchUrl = { navController.navigate(Route.FetchUrl("")) },
+						onBack = { navController.popBackStack() },
 					)
 				}
 
@@ -595,6 +612,9 @@ private fun NavDestination?.isDetail(): Boolean =
 		// Reached only from the Now Playing sheet; every other album is a pane.
 		hasRoute(Route.Album::class) ||
 			hasRoute(Route.ServerEdit::class) ||
+			// The uploads listing: pushed from the library's upload icon, shed
+			// by back and by tapping the Library tab again.
+			hasRoute(Route.Uploads::class) ||
 			// Reached from outside the app entirely, but shed by back and by
 			// the tap-the-current-tab gesture like any other drill-down.
 			hasRoute(Route.FetchUrl::class) ||

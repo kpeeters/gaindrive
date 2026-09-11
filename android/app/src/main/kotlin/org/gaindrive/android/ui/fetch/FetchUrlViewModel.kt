@@ -21,10 +21,11 @@ import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.ServerRegistry
 import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.UrlFetchRepository
+import org.gaindrive.android.data.model.Artist
 import org.gaindrive.android.data.model.BrowseScope
 import org.gaindrive.android.data.model.FetchState
 import org.gaindrive.android.data.model.ItemRef
-import org.gaindrive.android.data.model.LibraryMode
+import org.gaindrive.android.data.model.LibrarySection
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.net.FetchJobDto
 import org.gaindrive.android.net.runCatchingCancellable
@@ -79,12 +80,12 @@ data class FetchUrlUiState(
 	val status: FetchStatus = FetchStatus(),
 	val error: String? = null,
 	/**
-	 * The slices the library offers, minus Uploads. Chooses what the two name
-	 * fields are *called* and what the artist field pre-fills to — and nothing
-	 * else. It deliberately does not narrow the suggestions below.
+	 * The sections the library's roots offer — never Uploads. Chooses what the
+	 * two name fields are *called* and what the artist field pre-fills to —
+	 * and nothing else. It deliberately does not narrow the suggestions below.
 	 */
-	val kinds: List<LibraryMode> = emptyList(),
-	val kind: LibraryMode = LibraryMode.ARTISTS,
+	val kinds: List<LibrarySection> = emptyList(),
+	val kind: LibrarySection = LibrarySection.ARTISTS,
 	/** Every top-level name the library knows, across every slice and server. */
 	val suggestions: List<NameSuggestion> = emptyList(),
 	/** What the library already has under these names, or null. */
@@ -127,10 +128,10 @@ data class FetchUrlUiState(
 	/** Both offered means the choice is worth drawing; one means it is not. */
 	val showModes: Boolean get() = target?.let { it.canAudio && it.canVideo } == true
 
-	/** Same rule as the library's own chip row: one slice is no choice at all. */
+	/** One section is no choice at all. */
 	val showKinds: Boolean get() = kinds.size > 1
 
-	val filingUnderCategory: Boolean get() = kind.id == "categories"
+	val filingUnderCategory: Boolean get() = kind == LibrarySection.CATEGORIES
 
 	val artistLabel: String get() = if (filingUnderCategory) "Category" else "Artist"
 
@@ -238,11 +239,10 @@ class FetchUrlViewModel @Inject constructor(
 	 * library listing would show.
 	 */
 	private suspend fun loadSuggestions() {
-		val modes = runCatchingCancellable {
-			library.availableModes(BrowseScope.AllServers)
-		}.getOrDefault(listOf(LibraryMode.ARTISTS))
+		val kinds = runCatchingCancellable {
+			library.availableSections(BrowseScope.AllServers)
+		}.getOrDefault(listOf(LibrarySection.ARTISTS))
 
-		val kinds = modes.filterNot { it == LibraryMode.UPLOADS }
 		_state.update { s ->
 			s.copy(
 				kinds = kinds,
@@ -252,23 +252,35 @@ class FetchUrlViewModel @Inject constructor(
 
 		// Uploads last, so a library hit wins the first-spelling tie-break below
 		// and the message says "in your library" rather than "in staging" for
-		// something that is in both.
-		val sources = kinds + LibraryMode.UPLOADS
+		// something that is in both. The library arrives as one merged listing,
+		// so its two groups are read out of a single call.
 		val seen = LinkedHashMap<String, NameSuggestion>()
-		for (mode in sources) {
-			val indexes = runCatchingCancellable {
-				library.artistIndexes(BrowseScope.AllServers, mode)
-			}.getOrNull()?.items ?: continue
-			for (artist in indexes.flatMap { it.artists }) {
+		fun note(artists: List<Artist>, where: String, staging: Boolean) {
+			for (artist in artists) {
 				val key = artist.name.lowercase()
 				if (seen.containsKey(key)) continue
 				seen[key] = NameSuggestion(
 					name = artist.name,
 					refs = artist.refs,
-					where = if (mode == LibraryMode.UPLOADS) "your uploads" else mode.label,
-					staging = mode == LibraryMode.UPLOADS,
+					where = where,
+					staging = staging,
 				)
 			}
+		}
+		runCatchingCancellable {
+			library.libraryListing(BrowseScope.AllServers)
+		}.getOrNull()?.items?.let { listing ->
+			note(listing.categories, LibrarySection.CATEGORIES.label, staging = false)
+			note(
+				listing.artists.flatMap { it.artists },
+				LibrarySection.ARTISTS.label,
+				staging = false,
+			)
+		}
+		runCatchingCancellable {
+			library.uploadIndexes(BrowseScope.AllServers)
+		}.getOrNull()?.items?.let { indexes ->
+			note(indexes.flatMap { it.artists }, "your uploads", staging = true)
 		}
 		_state.update { it.copy(suggestions = seen.values.toList()) }
 	}
@@ -403,7 +415,7 @@ class FetchUrlViewModel @Inject constructor(
 	 * holds. Not persisted either: a category one week and an album the next is
 	 * the ordinary case, and it costs one tap to say so.
 	 */
-	fun onKind(kind: LibraryMode) {
+	fun onKind(kind: LibrarySection) {
 		if (kind == _state.value.kind) return
 		_state.update { it.copy(kind = kind, error = null) }
 	}

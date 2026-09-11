@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.gaindrive.android.data.model.AlbumSort
 import org.gaindrive.android.data.model.AudioQuality
-import org.gaindrive.android.data.model.LibraryMode
+import org.gaindrive.android.data.model.LibrarySection
 import org.gaindrive.android.data.model.ThemeMode
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -40,19 +40,6 @@ class SettingsStore @Inject constructor(
 	 */
 	val browseScope: Flow<String?> = dataStore.data.map { it[SELECTED_SERVER] }
 
-	/**
-	 * Which kind of top-level entry the library view is showing.
-	 *
-	 * Stored as the raw content-type id rather than an enum ordinal: the modes
-	 * come from the server, so a value written today may name a kind this
-	 * build has never heard of, and it must survive a round trip regardless.
-	 */
-	val libraryMode: Flow<String?> = dataStore.data.map { it[LIBRARY_MODE] }
-
-	suspend fun setLibraryMode(value: String) {
-		dataStore.edit { it[LIBRARY_MODE] = value }
-	}
-
 	suspend fun setBrowseScope(value: String) {
 		dataStore.edit { it[SELECTED_SERVER] = value }
 	}
@@ -60,23 +47,17 @@ class SettingsStore @Inject constructor(
 	/**
 	 * Which order the albums screen lists an artist's albums in.
 	 *
-	 * Kept per library mode, because the slices are browsed for different
+	 * Kept per library section, because they are browsed for different
 	 * reasons: a discography is chronological, while a film category is
-	 * findable only by name. The key is composed from [libraryMode]'s stored
-	 * string, so a folder slice contributes a colon — which needs no encoding,
-	 * a preference key being an arbitrary string.
-	 *
-	 * Both halves are read out of the *same* preferences snapshot rather than
-	 * combining two flows, so an in-flight mode change can never answer one
-	 * slice's order under another slice's key. The write does the same, which
-	 * is why it composes its key inside `edit` rather than outside it.
+	 * findable only by name. The caller names the section it drilled in from
+	 * — this used to key on a stored "current mode" preference, which could
+	 * disagree with the listing actually on screen.
 	 */
-	val albumSort: Flow<AlbumSort> = dataStore.data.map { prefs ->
-		AlbumSort.parse(prefs[albumSortKey(prefs[LIBRARY_MODE])])
-	}
+	fun albumSort(section: LibrarySection): Flow<AlbumSort> =
+		dataStore.data.map { AlbumSort.parse(it[albumSortKey(section)]) }
 
-	suspend fun setAlbumSort(sort: AlbumSort) {
-		dataStore.edit { it[albumSortKey(it[LIBRARY_MODE])] = sort.name }
+	suspend fun setAlbumSort(section: LibrarySection, sort: AlbumSort) {
+		dataStore.edit { it[albumSortKey(section)] = sort.name }
 	}
 
 	/**
@@ -270,15 +251,10 @@ class SettingsStore @Inject constructor(
 
 		private val THEME = stringPreferencesKey("theme_mode")
 		private val SELECTED_SERVER = stringPreferencesKey("selected_server")
-		private val LIBRARY_MODE = stringPreferencesKey("library_mode")
 
-		/**
-		 * One key per library slice, so the slices do not share an answer. A
-		 * mode never chosen yet reads as the default slice's key rather than a
-		 * key of its own, matching what the library screen is showing.
-		 */
-		private fun albumSortKey(mode: String?) =
-			stringPreferencesKey("album_sort_${mode ?: LibraryMode.ARTISTS.id}")
+		/** One key per library section, so the sections do not share an answer. */
+		private fun albumSortKey(section: LibrarySection) =
+			stringPreferencesKey("album_sort_${section.id}")
 
 		private val MERGE_ALBUMS = booleanPreferencesKey("merge_duplicate_albums")
 		private val CACHE_MAX_BYTES = longPreferencesKey("cache_max_bytes")

@@ -16,9 +16,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.gaindrive.android.data.browse.browseSource
-import org.gaindrive.android.data.browse.chipsFor
-import org.gaindrive.android.data.browse.mergeChips
-import org.gaindrive.android.data.browse.rootRequest
+import org.gaindrive.android.data.browse.RootRequest
+import org.gaindrive.android.data.browse.listingRequests
+import org.gaindrive.android.data.browse.uploadsRequest
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.local.LocalLibrary
 import org.gaindrive.android.data.local.StoredFilter
@@ -31,7 +31,8 @@ import org.gaindrive.android.data.model.ArtistInfo
 import org.gaindrive.android.data.model.BrowseScope
 import org.gaindrive.android.data.model.Chapter
 import org.gaindrive.android.data.model.ItemRef
-import org.gaindrive.android.data.model.LibraryMode
+import org.gaindrive.android.data.model.LibraryListing
+import org.gaindrive.android.data.model.LibrarySection
 import org.gaindrive.android.data.model.LibrarySelection
 import org.gaindrive.android.data.model.MusicRoot
 import org.gaindrive.android.data.model.Playlist
@@ -89,73 +90,131 @@ class LibraryRepository @Inject constructor(
 	private suspend fun storedOnly(): StoredFilter? =
 		if (offline) local.storedFilter(audioCache.cachedKeys.value) else null
 
-	suspend fun artistIndexes(
-		scope: BrowseScope,
-		mode: LibraryMode = LibraryMode.ARTISTS,
-	): MergedResult<List<ArtistIndex>> {
+	/**
+	 * One server's contribution to the merged list: its category buckets and
+	 * its artist buckets. A private pair with names, because a bare Pair at
+	 * the merge site would leave which half is which to memory.
+	 */
+	private data class ServerListing(
+		val categories: List<ArtistIndex>,
+		val artists: List<ArtistIndex>,
+	)
+
+	/**
+	 * The Library screen's merged list: every category folder from every
+	 * `categories` root, and every artist — including all roots of a server
+	 * that names no kinds; see `listingRequests`.
+	 *
+	 * A typed server is asked once per kind it has, concurrently — the halves
+	 * are independent requests against the same session. A kind the server
+	 * lacks is not asked for at all rather than filtered out of an answer:
+	 * a server predating library roots ignores the unknown contentType
+	 * parameter and answers with its entire library, so the request itself is
+	 * what would put the same folders in both groups. If either half fails the
+	 * whole server falls back to its mirror, which is the same all-or-nothing
+	 * failure reporting one request had.
+	 */
+	suspend fun libraryListing(scope: BrowseScope): MergedResult<LibraryListing> {
 		val stored = storedOnly()
 		return fanOut(
 			scope,
-			// The mirror is filtered by mode too, so an unreachable server
-			// contributes the same kind the live one would have.
 			fallback = { config ->
-				local.artistIndexes(config.id, mode)
+				ServerListing(
+					categories = local.artistIndexes(config.id, LibrarySection.CATEGORIES)
+						.let { stored?.filterIndexes(it) ?: it },
+					artists = local.artistIndexes(config.id, LibrarySection.ARTISTS)
+						.let { stored?.filterIndexes(it) ?: it },
+				).takeIf { it.categories.isNotEmpty() || it.artists.isNotEmpty() }
+			},
+		) { client, config ->
+			val requests = listingRequests(config.browseByFolder, rootsOf(client, config))
+
+			suspend fun fetch(request: RootRequest?, section: LibrarySection) =
+				if (request == null) {
+					emptyList()
+				} else {
+					config.browseSource.indexes(client, config.id, request)
+						// Buckets with no artists are noise in a sticky-header
+						// list.
+						.filter { it.artists.isNotEmpty() }
+						.also { local.saveArtistIndexes(config.id, section, it) }
+				}
+
+			coroutineScope {
+				val categories = async {
+					fetch(requests.categories, LibrarySection.CATEGORIES)
+				}
+				val artists = async { fetch(requests.artists, LibrarySection.ARTISTS) }
+				ServerListing(categories.await(), artists.await())
+			}
+		}.map { perServer ->
+			LibraryListing(
+				categories = mergeCategories(perServer.map { it.categories }),
+				artists = mergeArtistIndexes(perServer.map { it.artists }),
+			)
+		}
+	}
+
+	/**
+	 * The uploads listing — this account's own on every server it may upload
+	 * to, or everyone's where it is the admin. A server where it may not
+	 * upload contributes nothing rather than a failure: having no upload
+	 * rights on one server of several is a fact, not an outage.
+	 */
+	suspend fun uploadIndexes(scope: BrowseScope): MergedResult<List<ArtistIndex>> {
+		val stored = storedOnly()
+		return fanOut(
+			scope,
+			fallback = { config ->
+				local.artistIndexes(config.id, LibrarySection.UPLOADS)
 					.let { stored?.filterIndexes(it) ?: it }
 					.takeIf { it.isNotEmpty() }
 			},
 		) { client, config ->
-			// Servers that cannot answer for this chip are not asked at all.
-			// Not asking is the whole point: a server predating library roots
-			// ignores the unknown contentType parameter and answers with its
-			// entire library, so the request itself is what would put the same
-			// folders under every mode. Filtering the response instead would
-			// be too late — nothing in it says which entries to discard.
-			// Both facts come from the one cached getUser per server, so the
-			// second costs no request.
 			val facts = accounts.factsFor(config)
-			val request = rootRequest(
-				config.browseByFolder,
-				rootsOf(client, config),
-				mode,
-				facts.canUpload,
-				facts.isAdmin,
-			) ?: return@fanOut emptyList()
-
-			config.browseSource.indexes(client, config.id, request)
-				// Buckets with no artists are noise in a sticky-header list.
+			if (!facts.canUpload) return@fanOut emptyList()
+			config.browseSource.indexes(client, config.id, uploadsRequest(facts.isAdmin))
 				.filter { it.artists.isNotEmpty() }
-				.also { local.saveArtistIndexes(config.id, mode, it) }
+				.also { local.saveArtistIndexes(config.id, LibrarySection.UPLOADS, it) }
 		}.map { mergeArtistIndexes(it) }
 	}
 
 	/**
-	 * The slices worth offering, unioned across every configured server.
-	 *
-	 * Online this comes from each server's `getMusicFolders`; offline that is
-	 * unreachable, so it comes from what is actually present in the mirror —
-	 * which is the honest answer, since those are the only slices that can be
-	 * browsed at all. The mirror stores the same strings, so a folder chip
-	 * survives going offline as readily as a content type does.
+	 * Whether the upload icon is worth drawing: some server in [scope] takes
+	 * uploads from this account. Offline the accounts cache is unreachable, so
+	 * the honest answer is whether the mirror holds an uploads listing at all.
 	 */
-	suspend fun availableModes(scope: BrowseScope): List<LibraryMode> {
+	suspend fun canUpload(scope: BrowseScope): Boolean {
 		if (offline) {
-			// Scoped, like every other query: the mirror still holds the rows of
-			// a server that has been disabled, and offering its chips would be a
-			// slice with nothing behind it.
-			val stored = local.storedContentTypes(serversIn(scope).map { it.id })
-			return mergeChips(listOf(stored.map { LibraryMode(it) }))
-				.ifEmpty { listOf(LibraryMode.ARTISTS) }
+			return LibrarySection.UPLOADS.id in
+				local.storedContentTypes(serversIn(scope).map { it.id })
 		}
+		return serversIn(scope).any { config ->
+			runCatchingCancellable { accounts.canUploadTo(config) }.getOrDefault(false)
+		}
+	}
 
-		// Each server returns its own answer and they are combined afterwards:
-		// fanOut runs the blocks concurrently, so accumulating into shared
-		// state inside one would be a data race.
-		val perServer = fanOut(scope, fallback = { null }) { client, config ->
-			chipsFor(config.browseByFolder, rootsOf(client, config), accounts.canUploadTo(config))
-		}.items
-
-		// Every server failing still has to leave something selectable.
-		return mergeChips(perServer).ifEmpty { listOf(LibraryMode.ARTISTS) }
+	/**
+	 * Which sections the scope's roots offer, for the fetch panel's field
+	 * labels. Never contains [LibrarySection.UPLOADS] — uploads is not a kind
+	 * of root — and never empty: a server nothing is known about is assumed to
+	 * hold artists, which is what every Subsonic server without roots is.
+	 */
+	suspend fun availableSections(scope: BrowseScope): List<LibrarySection> {
+		val ids = if (offline) {
+			local.storedContentTypes(serversIn(scope).map { it.id })
+		} else {
+			fanOut(scope, fallback = { null }) { client, config ->
+				val requests = listingRequests(config.browseByFolder, rootsOf(client, config))
+				listOfNotNull(
+					LibrarySection.ARTISTS.id.takeIf { requests.artists != null },
+					LibrarySection.CATEGORIES.id.takeIf { requests.categories != null },
+				)
+			}.items.flatten()
+		}
+		return LibrarySection.entries
+			.filter { it != LibrarySection.UPLOADS && it.id in ids }
+			.ifEmpty { listOf(LibrarySection.ARTISTS) }
 	}
 
 	/** This server's configured roots, fetched once per session. */

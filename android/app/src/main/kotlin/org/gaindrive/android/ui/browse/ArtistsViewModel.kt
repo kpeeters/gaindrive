@@ -1,7 +1,9 @@
 package org.gaindrive.android.ui.browse
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.navigation.toRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -9,7 +11,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.gaindrive.android.data.FetchMonitor
@@ -17,27 +18,34 @@ import org.gaindrive.android.data.FetchStatus
 import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.ServerFailure
 import org.gaindrive.android.data.ServerSelection
-import org.gaindrive.android.data.SettingsStore
-import org.gaindrive.android.data.model.ArtistIndex
 import org.gaindrive.android.data.model.BrowseScope
-import org.gaindrive.android.data.model.LibraryMode
+import org.gaindrive.android.data.model.LibraryListing
 import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.net.runCatchingCancellable
 import org.gaindrive.android.net.userMessage
 import org.gaindrive.android.ui.Load
+import org.gaindrive.android.ui.Route
 import javax.inject.Inject
 
 @HiltViewModel
 class ArtistsViewModel @Inject constructor(
 	private val library: LibraryRepository,
 	private val selection: ServerSelection,
-	private val settings: SettingsStore,
 	monitor: FetchMonitor,
+	savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
 	/**
-	 * What is being fetched, for the Uploads slice's own row.
+	 * Whether this instance is the uploads listing rather than the library.
+	 * From the route, so the pushed `Route.Uploads` host and the Library tab
+	 * share every line of this class — the listing they load is the whole
+	 * difference.
+	 */
+	val uploads: Boolean = savedStateHandle.toRoute<Route.Artists>().uploads
+
+	/**
+	 * What is being fetched, for the uploads listing's own row.
 	 *
 	 * Here as well as in the shell's strip because this is where somebody looks
 	 * when they wonder whether a fetch is running — the report that prompted all
@@ -60,8 +68,8 @@ class ArtistsViewModel @Inject constructor(
 	 * list does not change while the user is two screens deep, so it is simply
 	 * kept until something asks for it again.
 	 */
-	private val _state = MutableStateFlow<Load<List<ArtistIndex>>>(Load.Loading)
-	val state: StateFlow<Load<List<ArtistIndex>>> = _state.asStateFlow()
+	private val _state = MutableStateFlow<Load<LibraryListing>>(Load.Loading)
+	val state: StateFlow<Load<LibraryListing>> = _state.asStateFlow()
 
 	/** Servers that did not answer this load, if any did. */
 	private val _failures = MutableStateFlow<List<ServerFailure>>(emptyList())
@@ -71,36 +79,24 @@ class ArtistsViewModel @Inject constructor(
 	private val _isRefreshing = MutableStateFlow(false)
 	val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
-	/** The kinds on offer, and which one is showing. */
-	private val _modes = MutableStateFlow(listOf(LibraryMode.ARTISTS))
-	val modes: StateFlow<List<LibraryMode>> = _modes.asStateFlow()
-
-	private val _mode = MutableStateFlow(LibraryMode.ARTISTS)
-	val mode: StateFlow<LibraryMode> = _mode.asStateFlow()
+	/**
+	 * Whether the upload icon is worth drawing. Never true on the uploads
+	 * listing itself — the icon is how you get there.
+	 */
+	private val _canUpload = MutableStateFlow(false)
+	val canUpload: StateFlow<Boolean> = _canUpload.asStateFlow()
 
 	private var scope: BrowseScope = BrowseScope.AllServers
 	private var loadJob: Job? = null
 
 	init {
 		viewModelScope.launch {
-			// The stored mode is read once, before the first load, so the
-			// first list drawn is already the right kind rather than artists
-			// flashing past on the way to categories.
-			settings.libraryMode.first()?.let { _mode.value = LibraryMode(it) }
-
 			// distinctUntilChanged because the registry re-emits whenever
 			// anything in DataStore changes, and an unchanged scope is not a
 			// reason to re-read the library.
 			selection.browse.distinctUntilChanged().collect { selected ->
 				scope = selected.scope
-				// Awaited rather than launched alongside the load, because it
-				// may *change* the selected chip — a server offering only
-				// folders has no "artists" among them — and loading first would
-				// then query a chip nothing answers for and leave the correction
-				// with no reload behind it. It costs nothing to wait: both this
-				// and the load below read the same per-session root cache, so
-				// only one of them reaches the network.
-				refreshModes()
+				refreshCanUpload()
 				// A different scope is a different library, and going offline
 				// is the same library from a different source — either way the
 				// old list must go rather than linger under a spinner.
@@ -109,28 +105,17 @@ class ArtistsViewModel @Inject constructor(
 		}
 	}
 
-	fun selectMode(next: LibraryMode) {
-		if (next == _mode.value) return
-		_mode.value = next
-		viewModelScope.launch { settings.setLibraryMode(next.id) }
-		startLoad(clearFirst = true)
-	}
-
 	/**
-	 * Re-reads which slices this scope offers, and falls back when the stored
-	 * one is gone — a server may have been removed since it was chosen, or
-	 * switched to browsing by folder, which replaces its chips entirely.
-	 * Failure leaves the current list alone: the chips are navigation, and
-	 * losing them because one server timed out would be worse than showing a
-	 * stale set.
-	 *
-	 * The caller must load *after* this, not alongside it; see the collector.
+	 * Failure keeps the last answer rather than hiding the icon: it is
+	 * navigation, and taking it away because one request timed out would strand
+	 * the user out of their own uploads.
 	 */
-	private suspend fun refreshModes() {
-		val available = runCatchingCancellable { library.availableModes(scope) }
-			.getOrNull() ?: return
-		_modes.value = available
-		if (_mode.value !in available) _mode.value = available.first()
+	private fun refreshCanUpload() {
+		if (uploads) return
+		viewModelScope.launch {
+			runCatchingCancellable { library.canUpload(scope) }
+				.getOrNull()?.let { _canUpload.value = it }
+		}
 	}
 
 	/** Retry after a failure: there is nothing worth keeping on screen. */
@@ -152,11 +137,20 @@ class ArtistsViewModel @Inject constructor(
 				return@launch
 			}
 
-			runCatchingCancellable { library.artistIndexes(scope, _mode.value) }.fold(
+			val loaded = runCatchingCancellable {
+				if (uploads) {
+					// The personal slice has no categories by construction, so
+					// it is an artists-only listing of the same shape.
+					library.uploadIndexes(scope).map { LibraryListing(emptyList(), it) }
+				} else {
+					library.libraryListing(scope)
+				}
+			}
+			loaded.fold(
 				onSuccess = { merged ->
 					// Every server failing is a failed screen; some of them
 					// failing is a note over the ones that worked.
-					if (merged.items.isEmpty() && merged.isPartial) {
+					if (merged.items.isEmpty && merged.isPartial) {
 						_state.value = Load.Failed(merged.failures.first().message)
 					} else {
 						_state.value = Load.Ready(merged.items)

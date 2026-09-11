@@ -54,6 +54,22 @@ fun mergeArtistIndexes(perServer: List<List<ArtistIndex>>): List<ArtistIndex> {
 }
 
 /**
+ * Every server's category buckets flattened into one alphabetical list,
+ * same-named sections collapsed across servers.
+ *
+ * Built on [mergeArtistIndexes], which already keys artists by name across all
+ * buckets — a "Film" section on two servers becomes one row carrying both
+ * refs. The explicit sort is load-bearing: the single-server short-circuit in
+ * that function returns the server's own bucket order untouched, and the
+ * merged list draws these under one header where only alphabetical reads as
+ * an order at all.
+ */
+fun mergeCategories(perServer: List<List<ArtistIndex>>): List<Artist> =
+	mergeArtistIndexes(perServer)
+		.flatMap { it.artists }
+		.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+
+/**
  * Collapses copies of the same album held on more than one server, keeping the
  * copy from the server highest in registry order. That order is the user's
  * stated preference — it is what the Settings list reorders — so "my own server

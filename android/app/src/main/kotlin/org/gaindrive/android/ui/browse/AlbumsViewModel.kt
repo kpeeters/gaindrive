@@ -21,6 +21,7 @@ import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.AlbumSort
 import org.gaindrive.android.data.model.ArtistInfo
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.data.model.LibrarySection
 import org.gaindrive.android.data.model.comparator
 import org.gaindrive.android.net.runCatchingCancellable
 import org.gaindrive.android.net.userMessage
@@ -76,7 +77,19 @@ class AlbumsViewModel @Inject constructor(
 
 	private val _albums = MutableStateFlow<Load<List<AlbumUi>>>(Load.Loading)
 
-	val sort: StateFlow<AlbumSort> = settings.albumSort
+	/**
+	 * Which section this listing was drilled in from, keying the sort
+	 * preference: a discography wants a different order than a film category.
+	 * Derived from the route flags rather than from any stored "current
+	 * section", so the key always matches the listing on screen.
+	 */
+	private val section = when {
+		route.fromUploads -> LibrarySection.UPLOADS
+		route.fromCategories -> LibrarySection.CATEGORIES
+		else -> LibrarySection.ARTISTS
+	}
+
+	val sort: StateFlow<AlbumSort> = settings.albumSort(section)
 		.stateIn(viewModelScope, SharingStarted.Lazily, AlbumSort.DEFAULT)
 
 	/**
@@ -99,7 +112,8 @@ class AlbumsViewModel @Inject constructor(
 			}
 		}.stateIn(viewModelScope, SharingStarted.Lazily, Load.Loading)
 
-	fun setSort(order: AlbumSort) = viewModelScope.launch { settings.setAlbumSort(order) }
+	fun setSort(order: AlbumSort) =
+		viewModelScope.launch { settings.setAlbumSort(section, order) }
 
 	private val _header = MutableStateFlow(ArtistHeaderUi())
 	val header: StateFlow<ArtistHeaderUi> = _header.asStateFlow()

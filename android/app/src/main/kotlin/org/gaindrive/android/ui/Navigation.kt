@@ -25,8 +25,14 @@ import kotlinx.serialization.Serializable
 @Serializable
 sealed interface Route {
 
+	/**
+	 * The library's top-level list. With [uploads] set it is the account's
+	 * own uploads instead — same screen, same pane strip, different listing.
+	 * A route argument rather than two routes, because everything below the
+	 * top pane (albums, tracks) is identical.
+	 */
 	@Serializable
-	data object Artists : Route
+	data class Artists(val uploads: Boolean = false) : Route
 
 	/**
 	 * [artistRefs] is comma-separated: a merged artist row stands for the same
@@ -149,6 +155,15 @@ sealed interface Route {
 	 */
 	@Serializable
 	data object Video : Route
+
+	/**
+	 * The uploads listing, pushed from the Library screen's upload icon. A
+	 * shell destination rather than a pane, because it hosts a pane strip of
+	 * its own — the same artists/albums/tracks drill-down the Library tab has,
+	 * rooted at [Artists] with `uploads = true`.
+	 */
+	@Serializable
+	data object Uploads : Route
 }
 
 /** The bottom navigation destinations, in bar order. */
@@ -157,11 +172,11 @@ enum class TopLevel(
 	val label: String,
 	val icon: ImageVector,
 ) {
-	// The destination shows artists, categories or uploads depending on the
-	// mode chosen in its own top bar, so the label names the place rather than
-	// one of the things it can hold. Route.Artists keeps its name to avoid
-	// churning navigation for a wording change.
-	ARTISTS(Route.Artists, "Library", Icons.Default.LibraryMusic),
+	// The destination shows the whole library — categories and artists in one
+	// list — so the label names the place rather than one of the things it
+	// holds. Route.Artists keeps its name to avoid churning navigation for a
+	// wording change.
+	ARTISTS(Route.Artists(), "Library", Icons.Default.LibraryMusic),
 	PLAYLISTS(Route.Playlists, "Playlists", Icons.AutoMirrored.Filled.QueueMusic),
 	RECENTS(Route.Recents, "Recents", Icons.Default.History),
 	SEARCH(Route.Search, "Search", Icons.Default.Search),
