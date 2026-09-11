@@ -4,8 +4,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.layout.AnimatedPane
@@ -242,16 +245,33 @@ val LocalPaneBack = compositionLocalOf<(() -> Unit)?> { null }
 private fun Modifier.paneName(titles: List<String>, level: Int): Modifier =
 	semantics { paneTitle = titles.getOrElse(level) { "" } }
 
-/** The stock placeholder: one line saying what the pane is waiting for. */
+/**
+ * The stock placeholder: one line saying what the pane is waiting for.
+ *
+ * Under an empty [TopAppBar], because the pane beside this one draws a real
+ * one: without it the idle pane starts flush at the top while its neighbour
+ * carries a bar, and the mismatched top edges read as a broken layout rather
+ * than an intentionally empty state. The bar is the stock component, not a
+ * measured spacer, so it tracks the neighbours' height through inset and
+ * font-scale changes by construction.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PaneWaiting(text: String) {
-	Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-		Text(
-			text = text,
-			style = MaterialTheme.typography.bodyMedium,
-			color = MaterialTheme.colorScheme.onSurfaceVariant,
-			textAlign = TextAlign.Center,
-			modifier = Modifier.padding(24.dp),
-		)
+	Scaffold(
+		topBar = { TopAppBar(title = {}) },
+	) { insets ->
+		Box(
+			modifier = Modifier.fillMaxSize().padding(insets),
+			contentAlignment = Alignment.Center,
+		) {
+			Text(
+				text = text,
+				style = MaterialTheme.typography.bodyMedium,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+				textAlign = TextAlign.Center,
+				modifier = Modifier.padding(24.dp),
+			)
+		}
 	}
 }
