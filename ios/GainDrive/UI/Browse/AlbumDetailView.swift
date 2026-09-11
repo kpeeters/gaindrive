@@ -86,7 +86,7 @@ struct AlbumDetailView: View {
 							listRow(row, in: detail, playing: playingMarker)
 						}
 					} header: {
-						SectionHeading(text: "Disc \(disc.number)")
+						SectionHeading(text: "Disc \(disc.number)").pinnedHeaderBackground()
 					}
 				}
 			} else {

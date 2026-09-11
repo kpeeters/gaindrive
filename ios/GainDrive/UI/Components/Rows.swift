@@ -21,6 +21,40 @@ struct SectionHeading: View {
 	}
 }
 
+extension View {
+	/// For the pinned header of a `.plain` list, and nowhere else. iOS 26
+	/// pins those on translucent Liquid Glass, so the rows scroll visibly
+	/// through the letter — hence an opaque, full-bleed background instead.
+	/// `Color(.systemBackground)` is the plain list's own background in both
+	/// appearances, so the header matches the rows either side of it.
+	///
+	/// The zeroed `listRowInsets` remove the default header margins, which
+	/// would otherwise survive as translucent slivers at the pane edges; the
+	/// padding puts back what the margins provided, so the text keeps lining
+	/// up with the rows.
+	///
+	/// An extension rather than part of `SectionHeading`, because that view
+	/// is also drawn *inside* rows (the recording headings in
+	/// `AlbumDetailView`), where this treatment would be wrong — and two of
+	/// the artist list's headers are bare `Text`.
+	///
+	/// Define `GD_GLASS_HEADERS` (commented out in `project.yml`, then
+	/// `make generate`) to restore the stock translucent header.
+	@ViewBuilder
+	func pinnedHeaderBackground() -> some View {
+		#if GD_GLASS_HEADERS
+		self
+		#else
+		self
+			.frame(maxWidth: .infinity, alignment: .leading)
+			.padding(.horizontal, 20)
+			.padding(.vertical, 8)
+			.background(Color(.systemBackground))
+			.listRowInsets(EdgeInsets())
+		#endif
+	}
+}
+
 /// **No artwork, deliberately** — as `ArtistRow` on Android, which takes no
 /// cover either.
 ///

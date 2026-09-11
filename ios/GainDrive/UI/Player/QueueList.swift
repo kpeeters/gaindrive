@@ -40,7 +40,7 @@ struct QueueList: View {
 				player.move(from: from, to: QueueMove.destination(from: from, insertingBefore: offset))
 			}
 		} header: {
-			SectionHeading(text: "Queue")
+			SectionHeading(text: "Queue").pinnedHeaderBackground()
 		}
 	}
 

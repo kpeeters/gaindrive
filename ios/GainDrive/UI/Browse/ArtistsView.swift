@@ -332,7 +332,7 @@ private struct ArtistsList: View {
 									.tag(ArtistChoice(artist: artist, section: .categories))
 							}
 						} header: {
-							Text("Categories")
+							Text("Categories").pinnedHeaderBackground()
 						}
 					}
 					ForEach(listing.artists) { bucket in
@@ -345,7 +345,7 @@ private struct ArtistsList: View {
 											section: uploads ? .uploads : .artists))
 							}
 						} header: {
-							Text(bucket.label).id(bucket.label)
+							Text(bucket.label).id(bucket.label).pinnedHeaderBackground()
 						}
 					}
 				}

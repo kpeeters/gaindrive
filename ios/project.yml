@@ -47,6 +47,17 @@ settings:
     # things at review time.
     SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
     GCC_WARN_ABOUT_RETURN_TYPE: YES_ERROR
+  # Uncomment to restore the stock translucent (Liquid Glass) pinned list
+  # headers that `pinnedHeaderBackground()` (UI/Components/Rows.swift)
+  # otherwise paints opaque; then run `make generate`. Per config rather than
+  # in `base:` above, because a base-level SWIFT_ACTIVE_COMPILATION_CONDITIONS
+  # replaces XcodeGen's config presets and would silently drop DEBUG from
+  # Debug builds.
+  # configs:
+  #   Debug:
+  #     SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG GD_GLASS_HEADERS
+  #   Release:
+  #     SWIFT_ACTIVE_COMPILATION_CONDITIONS: GD_GLASS_HEADERS
 
 # Mac Catalyst, giving the "My Mac (Mac Catalyst)" destination from the same
 # single target and the same sources. PLAN.md, "Mac Catalyst", records why this

@@ -78,7 +78,7 @@ struct SearchView: View {
 						}
 					}
 				} header: {
-					SectionHeading(text: "Artists")
+					SectionHeading(text: "Artists").pinnedHeaderBackground()
 				}
 			}
 
@@ -90,7 +90,7 @@ struct SearchView: View {
 						}
 					}
 				} header: {
-					SectionHeading(text: "Albums")
+					SectionHeading(text: "Albums").pinnedHeaderBackground()
 				}
 			}
 
@@ -100,7 +100,7 @@ struct SearchView: View {
 						songRow(item)
 					}
 				} header: {
-					SectionHeading(text: "Tracks")
+					SectionHeading(text: "Tracks").pinnedHeaderBackground()
 				}
 			}
 
@@ -114,7 +114,7 @@ struct SearchView: View {
 						chapterRow(hit)
 					}
 				} header: {
-					SectionHeading(text: "Chapters")
+					SectionHeading(text: "Chapters").pinnedHeaderBackground()
 				}
 			}
 		}

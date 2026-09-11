@@ -107,7 +107,7 @@ struct PlaylistsView: View {
 						// Suppressed when there is only one section, since a
 						// heading naming the only server present says nothing.
 						if sections.count > 1 {
-							SectionHeading(text: section.server.displayName)
+							SectionHeading(text: section.server.displayName).pinnedHeaderBackground()
 						}
 					}
 				}

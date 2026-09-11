@@ -70,7 +70,7 @@ struct RecentsView: View {
 						}
 					} header: {
 						if sections.count > 1 {
-							SectionHeading(text: section.server.displayName)
+							SectionHeading(text: section.server.displayName).pinnedHeaderBackground()
 						}
 					}
 				}
