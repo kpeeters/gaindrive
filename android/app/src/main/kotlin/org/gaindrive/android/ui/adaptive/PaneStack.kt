@@ -52,6 +52,21 @@ class PaneStack internal constructor(private val state: MutableState<List<Route>
 		state.value = state.value.take(level) + route
 	}
 
+	/**
+	 * Put [route] at [level], keeping everything deeper — the web client's
+	 * pane-1 back-fill (`viewTracks` filling the albums pane), for a level
+	 * whose content only becomes known after the level below it has loaded.
+	 * [show] is the wrong tool for that: it discards the deeper levels, which
+	 * here are the very pane the user is reading.
+	 *
+	 * It inserts rather than replaces, so the caller must check the level does
+	 * not already hold what is being added — see RecentsTab, whose guard is
+	 * also what stops a late load rewriting a path the user has moved on from.
+	 */
+	fun insert(level: Int, route: Route) {
+		state.value = state.value.take(level) + route + state.value.drop(level)
+	}
+
 	/** One level up. Nothing to do at the root — the tab itself is the floor. */
 	fun back() {
 		if (state.value.size > 1) state.value = state.value.dropLast(1)

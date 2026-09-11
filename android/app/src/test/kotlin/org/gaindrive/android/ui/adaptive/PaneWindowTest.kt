@@ -66,8 +66,8 @@ class PaneWindowTest {
 
 	@Test
 	fun `a two-level tab never draws a third pane`() {
-		// Playlists and Recents. Without the `levels` bound a wide window would
-		// offer a choice at a level that does not exist.
+		// Playlists. Without the `levels` bound a wide window would offer a
+		// choice at a level that does not exist.
 		assertEquals(
 			PaneSlots(Pane.At(0), Pane.At(1), Pane.Gone),
 			leadingWindow(depth = 1, panes = 3, levels = 2),

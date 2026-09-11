@@ -43,7 +43,7 @@ data class PaneSlots(val list: Pane, val detail: Pane, val extra: Pane)
  * The ordinary mapping, used by every tab but Search: a level *is* a pane role,
  * and the window of visible levels ends at the one being read.
  *
- * [levels] is how deep the tab goes — two for Playlists and Recents, three for
+ * [levels] is how deep the tab goes — two for Playlists, three for
  * the Library — and bounds both the window and the placeholders, so a tab with
  * nothing at level 2 never draws a third pane inviting a choice that does not
  * exist.

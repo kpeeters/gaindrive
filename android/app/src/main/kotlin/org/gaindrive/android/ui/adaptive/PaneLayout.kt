@@ -113,22 +113,29 @@ private fun Pane.adaptedValue(): PaneAdaptedValue =
  * their own content the same way — so the directive says the same thing:
  * preferred widths that sum to the whole area, leaving no surplus for the
  * priority rule to misplace.
+ *
+ * The divisor is [shown] — the panes actually on screen — not [panes], the
+ * partition cap. The two differ whenever a slot is [Pane.Gone] under a wider
+ * cap: a three-level tab at its root shows two panes (list and its Waiting
+ * neighbour, the third Gone), and dividing by three would leave a spare
+ * third of the width for the priority rule to hand to one pane — the exact
+ * unequal split the copy above exists to prevent.
  */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
-fun paneDirective(panes: Int, paneAreaWidth: Dp): PaneScaffoldDirective =
+fun paneDirective(panes: Int, paneAreaWidth: Dp, shown: Int = panes): PaneScaffoldDirective =
 	calculatePaneScaffoldDirective(currentWindowAdaptiveInfo())
 		.copy(
 			maxHorizontalPartitions = panes,
 			horizontalPartitionSpacerSize = 0.dp,
-			defaultPanePreferredWidth = paneAreaWidth / panes,
+			defaultPanePreferredWidth = paneAreaWidth / shown.coerceAtLeast(1),
 		)
 
 /**
  * Draws [stack] as a strip of panes, one per level of its path.
  *
  * [titles] names each level, leading first, and its *size* is how deep the tab
- * goes — two for Playlists and Recents, three for the Library. One list rather
+ * goes — two for Playlists, three for the Library and Recents. One list rather
  * than a count and a lookup because the two could not then disagree. The names
  * reach the panes as `paneTitle`, which is what TalkBack announces when a pane
  * changes underneath the user; on a phone only one pane exists and it is the
@@ -176,8 +183,11 @@ fun PaneStrip(
 		// for nothing.
 		val back = remember(stack) { { stack.back() } }
 
+		val shown = listOf(assigned.list, assigned.detail, assigned.extra)
+			.count { it !is Pane.Gone }
+
 		ListDetailPaneScaffold(
-			directive = paneDirective(panes, maxWidth),
+			directive = paneDirective(panes, maxWidth, shown),
 			value = assigned.scaffoldValue(),
 			listPane = {
 				AnimatedPane(modifier = Modifier.paneName(titles, 0)) {

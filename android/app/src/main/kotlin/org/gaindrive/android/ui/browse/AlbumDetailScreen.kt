@@ -59,6 +59,7 @@ import org.gaindrive.android.ui.components.SectionHeading
 import org.gaindrive.android.ui.components.TrackRow
 import org.gaindrive.android.ui.player.PlayerViewModel
 import org.gaindrive.android.ui.player.TrackActionsSheet
+import org.gaindrive.android.ui.valueOrNull
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,6 +75,16 @@ fun AlbumDetailScreen(
 	 * it, so one level up is a list that may no longer exist.
 	 */
 	onPromoted: () -> Unit,
+	/**
+	 * Called when the loaded album names its artist. The artist folder id
+	 * travels only on the album detail — a recents or search row carries the
+	 * name and nothing addressable — so this is the first moment the level
+	 * above can learn who the album belongs to. The Recents tab uses it to
+	 * back-fill that level with the artist's albums, the way the web client's
+	 * `viewTracks` fills pane 1; null everywhere the level above already
+	 * holds what it should.
+	 */
+	onArtistKnown: ((artistRef: ItemRef, artistName: String) -> Unit)? = null,
 	viewModel: AlbumDetailViewModel = hiltViewModel(),
 	player: PlayerViewModel = hiltViewModel(),
 ) {
@@ -101,6 +112,14 @@ fun AlbumDetailScreen(
 	// lands on has already been reloaded by the bumped library revision.
 	LaunchedEffect(promoted) {
 		if (promoted) onPromoted()
+	}
+
+	// Keyed on the artist rather than the load state, so a pull-to-refresh of
+	// the same album does not re-announce it.
+	val loadedAlbum = state.valueOrNull()?.album
+	LaunchedEffect(loadedAlbum?.artistRef) {
+		val artistRef = loadedAlbum?.artistRef ?: return@LaunchedEffect
+		onArtistKnown?.invoke(artistRef, loadedAlbum.artistName)
 	}
 
 	actionsFor?.let { song ->
