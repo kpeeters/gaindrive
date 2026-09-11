@@ -1392,8 +1392,8 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 .view-header {
    display: flex;
-   /* Wraps so the Library mode toggle can sit on its own line inside the
-      sticky header rather than competing with the title for width. */
+   /* Wraps so a header whose controls outgrow a narrow pane can break to a
+      second line rather than clipping. */
    flex-wrap: wrap;
    align-items: baseline;
    gap: 1rem;
@@ -1423,7 +1423,8 @@ input.chapter-time.bad { border-color: #e06c6c; }
    font-weight: 600;
 }
 
-.refresh-btn {
+.refresh-btn,
+.uploads-open-btn {
    margin-left: auto;
    background: none;
    border: none;
@@ -1434,8 +1435,22 @@ input.chapter-time.bad { border-color: #e06c6c; }
    line-height: 1;
    opacity: 0.55;
 }
-.refresh-btn:hover    { opacity: 1; }
+.refresh-btn:hover,
+.uploads-open-btn:hover { opacity: 1; }
 .refresh-btn:disabled { opacity: 0.2; cursor: default; }
+
+/* Back out of the Uploads listing. Sits left of the title, so no auto
+   margin; a plain icon button rather than a .back-link, which paneNav hides
+   whenever the leftmost pane is 0 — and this listing is pane 0. */
+.uploads-back-btn {
+   background: none;
+   border: none;
+   cursor: pointer;
+   color: var(--accent);
+   font-size: 1.1rem;
+   padding: 0 0.3rem;
+   line-height: 1;
+}
 
 /* Album-pane sort toggle. It carries the margin-left:auto that pushes the
    header's right-hand group over, and .refresh-btn's own must then be
@@ -1466,18 +1481,16 @@ input.chapter-time.bad { border-color: #e06c6c; }
 }
 .personal-toggle-btn:hover { color: var(--text, #eee); border-color: var(--text, #eee); }
 
-/* ── Library mode toggle ────────────────────────────────
-   Segmented control selecting which kind of top-level entry the Library view
-   shows. Rendered only when there is more than one kind, so a music-only
-   server never sees it. Wraps rather than scrolls: the number of segments
-   follows the number of configured root types, which is small but not fixed. */
+/* ── Segmented control ──────────────────────────────────
+   Used by the upload bar's Audio/Video toggle for a URL fetch. (It was the
+   Library's mode switcher once; that view is one merged list now, and the
+   classes stayed with their remaining user.) */
 
 .library-modes {
    display: flex;
    flex-wrap: wrap;
    gap: 0.35rem;
-   /* Own line inside .view-header, which is position:sticky — so the toggle
-      stays visible while the list scrolls under it. */
+   /* Own line inside the row that holds it. */
    flex-basis: 100%;
    margin-top: 0.1rem;
 }

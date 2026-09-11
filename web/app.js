@@ -193,17 +193,18 @@ const videoAudioOnly = {
 // in year order and that is the default here, spelled as the *absent* key the
 // way castLocalVideo's default is.
 //
-// Kept per library mode, because the two libraries are browsed for different
-// reasons: a discography is chronological, while a film category is findable
-// only by name.  libraryMode is declared further down the file — that is fine,
-// it is read at call time and never at load time.
+// Kept per library section, because they are browsed for different reasons:
+// a discography is chronological, while a film category is findable only by
+// name.  The caller names the section it drilled in from ('artists',
+// 'categories' or 'uploads') — this used to key on a stored "current mode",
+// which could disagree with the listing actually on screen.
 const albumSort = {
-   get()  {
-      return localStorage.getItem(`gd_album_sort_${libraryMode}`) === 'name'
+   get(section)  {
+      return localStorage.getItem(`gd_album_sort_${section}`) === 'name'
          ? 'name' : 'year';
       },
-   set(v) {
-      const k = `gd_album_sort_${libraryMode}`;
+   set(section, v) {
+      const k = `gd_album_sort_${section}`;
       if (v === 'name') localStorage.setItem(k, 'name');
       else              localStorage.removeItem(k);
       },
@@ -907,9 +908,9 @@ async function viewSettings() {
       showError('Could not reach the server. Please check your connection.');
       }
 
-   // The archive-upload form used to sit here. It now lives at the top of the
-   // Library view's Uploads mode — see makeUploadBar() — because that is the
-   // listing it fills.
+   // The archive-upload form used to sit here. It now lives at the top of
+   // the Uploads listing — see makeUploadBar() — because that is the listing
+   // it fills.
 
    // ── Users section — visible to admins only ──────────────────────────────
 
@@ -1265,41 +1266,20 @@ async function viewUserEdit(user, refreshFn) {
       });
    }
 
-// Human labels for root content types. An unknown type falls back to its own
-// name capitalised, so a server that grows a new kind of root still renders a
-// sensible segment without a client change.
-const LIBRARY_MODE_LABELS = {
-   artists:    'Artists',
-   categories: 'Categories',
-   uploads:    'Uploads',
-   };
-
-// The segments to offer, in display order: one per distinct root content type,
-// plus Uploads when the user may upload. Derived rather than hardcoded — that
-// is what keeps the toggle correct as roots change.
-//
-// Uploads cannot be conditioned on an uploads root actually existing:
-// getMusicFolders deliberately omits it, since it is per-user space rather
-// than shared library. Offering it on the role alone matches what the old
-// My Uploads button did.
-function libraryModes() {
-   const seen = [];
-   for (const f of musicFolders ?? [])
-      if (f.contentType && !seen.includes(f.contentType))
-         seen.push(f.contentType);
-   seen.sort();   // stable order regardless of how the server listed them
-   if (currentUser?.uploadRole || currentUser?.adminRole)
-      seen.push('uploads');
-   return seen;
+// Whether this account may reach the uploads listing at all. On the role, not
+// on an uploads root existing: getMusicFolders deliberately omits that root,
+// since it is per-user space rather than shared library, so the roots can
+// never answer this question.
+function canUpload() {
+   return !!(currentUser?.uploadRole || currentUser?.adminRole);
    }
 
-// Choosing a mode, without drawing anything: the caller decides whether that
-// means re-rendering the Library view it is already in or navigating to it.
-// Shared with Shift U so the remembering cannot drift from the segmented
-// control that is the other way in.
-function setLibraryMode(m) {
-   libraryMode = m;
-   localStorage.setItem('gd_library_mode', m);
+// Whether pane 0 currently holds the uploads listing rather than the library.
+// Answered from the DOM, the way the upload pollers already answer it, so it
+// cannot go stale the way a module flag would when some other view rewrites
+// the pane. The bar is drawn if and only if viewArtists() rendered uploads.
+function uploadsShowing() {
+   return !!document.querySelector('#pane-artists .upload-bar');
    }
 
 // Signature of the personal library as last rendered, and the timer watching
@@ -1334,7 +1314,7 @@ let fetchPollGen   = 0;
 // because the poll stops on the very tick that sees the last job end.
 let uploadsStale   = false;
 
-// Whose uploads the Uploads mode shows.
+// Whose uploads the uploads listing shows.
 //
 // An admin gets everybody's, because an admin is the only account that can
 // promote one into the shared library — without this a non-admin's upload is
@@ -1460,10 +1440,10 @@ function pollForUpload(status, files) {
    let tries = 0;
    clearInterval(uploadsPollTimer);
    uploadsPollTimer = setInterval(async () => {
-      // The bar is gone once anything else has rewritten pane 0 — another
-      // library mode, or Settings/Playlists/Recents — and a re-render then
+      // The bar is gone once anything else has rewritten pane 0 — the
+      // library, or Settings/Playlists/Recents — and a re-render then
       // would drag the user back here.
-      if (!document.querySelector('#pane-artists .upload-bar')) {
+      if (!uploadsShowing()) {
          clearInterval(uploadsPollTimer);
          return;
          }
@@ -1477,7 +1457,7 @@ function pollForUpload(status, files) {
       if (personalSignature(sr.artists?.index) !== uploadsSignature
           && paneNav.depth === 0) {
          clearInterval(uploadsPollTimer);
-         viewArtists();
+         viewArtists(true);
          return;
          }
       if (++tries >= 10) {
@@ -1503,7 +1483,7 @@ function pollFetchJobs() {
 
    const tick = async () => {
       if (gen !== fetchPollGen) return;
-      // Gone once anything else has rewritten pane 0 — another library mode, or
+      // Gone once anything else has rewritten pane 0 — the library, or
       // Settings/Playlists/Recents. Same guard pollForUpload() uses, and for the
       // same reason: a re-render then would drag the user back here.
       let host = document.querySelector('#pane-artists .fetch-jobs');
@@ -1589,7 +1569,7 @@ function pollFetchJobs() {
       if (finished) {
          if (paneNav.depth === 0) {
             clearInterval(fetchPollTimer);
-            viewArtists();
+            viewArtists(true);
             return;
             }
          uploadsStale = true;
@@ -1615,9 +1595,12 @@ function pollFetchJobs() {
 // meanwhile, here or in another client, is never picked up. Restarting it costs
 // one getFetchJobs and it stops itself again if there is nothing to watch.
 async function returnedToArtists() {
-   if (uploadsStale) { await viewArtists(); return; }   // which clears the flag
-   if (libraryMode === 'uploads'
-       && document.querySelector('#pane-artists .fetch-jobs'))
+   // The flag can only have been set while pane 0 held the uploads listing —
+   // the poll checks for its own .fetch-jobs node at the top of every tick,
+   // and any other pane-0 render clears the flag — so uploads is always the
+   // right flavour to redraw. Which also clears the flag.
+   if (uploadsStale) { await viewArtists(true); return; }
+   if (document.querySelector('#pane-artists .fetch-jobs'))
       pollFetchJobs();
    }
 
@@ -1793,8 +1776,8 @@ function makeUploadBar() {
       if (fetchMode === 'video' && !canVideo) fetchMode = 'audio';
 
       if (canAudio && canVideo) {
-         // The same segmented control the library modes use — it is the same
-         // kind of choice, and it already has an active state.
+         // The .library-modes segmented control, whose only remaining user
+         // this is — the Library's own mode switcher became the merged list.
          const seg = document.createElement('div');
          seg.className = 'library-modes';
          for (const m of ['audio', 'video']) {
@@ -1940,7 +1923,7 @@ function makeUploadBar() {
    return bar;
    }
 
-async function viewArtists() {
+async function viewArtists(uploads = false) {
    // Whatever a finished fetch left behind is about to be re-read, however the
    // user got here — so the deferred redraw is owed to nobody any more.
    uploadsStale = false;
@@ -1961,8 +1944,7 @@ async function viewArtists() {
    // Static for the life of the server, like the roots above. Asked only when
    // the user could act on the answer, so an account with no upload rights
    // never sends the request at all.
-   if (urlHandlers === null
-       && (currentUser?.uploadRole || currentUser?.adminRole)) {
+   if (urlHandlers === null && canUpload()) {
       try {
          const r = await apiCall('getUrlHandlers');
          urlHandlers = r.urlHandlers?.urlHandler ?? [];
@@ -1970,111 +1952,155 @@ async function viewArtists() {
       catch { urlHandlers = []; }
       }
 
-   // Fall back if the stored mode is no longer offered — a root may have been
-   // removed, or upload rights revoked, since it was chosen.
-   const modes = libraryModes();
-   if (modes.length && !modes.includes(libraryMode)) libraryMode = modes[0];
-   console.log('[library] loading, mode=', libraryMode);
+   console.log('[library] loading' + (uploads ? ' (uploads)' : ''));
 
-   let sr;
+   let upIndexes = [], artistIndexes = [], categoryList = [];
    try {
-      sr = await apiCall('getArtists',
-         libraryMode === 'uploads' ? {personal: uploadsScope()}
-                                   : {contentType: libraryMode});
+      if (uploads) {
+         const sr = await apiCall('getArtists', {personal: uploadsScope()});
+         upIndexes = sr.artists?.index ?? [];
+         uploadsSignature = personalSignature(upIndexes);
+         }
+      else {
+         // One request per root kind actually configured. The kinds cannot be
+         // asked for together: omitting contentType answers with every root
+         // merged, which is exactly what the two-group list exists to avoid.
+         const types = new Set((musicFolders ?? []).map(f => f.contentType));
+         const [cat, art] = await Promise.all([
+            types.has('categories')
+               ? apiCall('getArtists', {contentType: 'categories'}) : null,
+            types.has('artists')
+               ? apiCall('getArtists', {contentType: 'artists'}) : null,
+            ]);
+         artistIndexes = art?.artists?.index ?? [];
+         // The whole group sits under one heading, where only alphabetical
+         // reads as an order at all — so the server's buckets are flattened
+         // and re-sorted rather than kept.
+         categoryList = (cat?.artists?.index ?? []).flatMap(i => i.artist ?? [])
+            .sort((a, b) =>
+               a.name.localeCompare(b.name, undefined, {sensitivity: 'base'}));
+         }
       }
    catch {
       showError('Could not reach the server. Please check your connection.');
       return;
       }
 
-   const indexes = sr.artists?.index ?? [];
-   console.log('[artists] got', indexes.reduce((n, i) => n + i.artist.length, 0), 'artists');
-
-   if (libraryMode === 'uploads') uploadsSignature = personalSignature(indexes);
-
    const frag = document.createDocumentFragment();
    const header = document.createElement('div');
    header.className = 'view-header';
+   if (uploads) {
+      // Not a .back-link: paneNav hides those whenever the leftmost pane is
+      // 0, and this listing *is* pane 0. history.back() rather than a direct
+      // re-render, so the entry openUploads() pushed is actually consumed.
+      const back = document.createElement('button');
+      back.className = 'mi uploads-back-btn';
+      back.title = 'Back to Library';
+      back.textContent = 'arrow_back';
+      back.addEventListener('click', () => history.back());
+      header.appendChild(back);
+      }
    const title = document.createElement('h1');
    title.className = 'view-title';
-   title.textContent = 'Library';
+   title.textContent = uploads ? 'Uploads' : 'Library';
    header.appendChild(title);
 
-   // Segmented control, one segment per available mode. Hidden entirely when
-   // there is only one — a music-only server with no upload rights then looks
-   // exactly as it did before this control existed.
-   //
-   // It goes *inside* the header, which is position:sticky, so it stays put
-   // while the list scrolls under it.
-   if (modes.length > 1) {
-      const seg = document.createElement('div');
-      seg.className = 'library-modes';
-      for (const m of modes) {
-         const btn = document.createElement('button');
-         btn.className = 'library-mode' + (m === libraryMode ? ' active' : '');
-         btn.textContent = LIBRARY_MODE_LABELS[m]
-            ?? (m.charAt(0).toUpperCase() + m.slice(1));
-         btn.addEventListener('click', () => {
-            if (m === libraryMode) return;
-            setLibraryMode(m);
-            viewArtists();
-            });
-         seg.appendChild(btn);
-         }
-      header.appendChild(seg);
+   // The one control the segmented mode row left behind: the way into the
+   // uploads listing. On the role, not on the roots — see canUpload().
+   if (!uploads && canUpload()) {
+      const up = document.createElement('button');
+      up.className = 'mi uploads-open-btn';
+      up.title = 'Uploads';
+      up.textContent = 'upload';
+      up.addEventListener('click', openUploads);
+      header.appendChild(up);
       }
 
    frag.appendChild(header);
 
-   // The form belongs to the library it fills, so it is drawn only in that
-   // mode. Role-gated rather than root-gated for the same reason
-   // libraryModes() is: getMusicFolders omits the uploads root, so the client
-   // cannot tell whether one is configured — the server says so on submit.
-   // The role test is not redundant with libraryModes(): libraryMode is
-   // restored from localStorage, and the fallback above only fires when some
-   // other mode is on offer, so revoked upload rights can still land here.
-   if (libraryMode === 'uploads'
-       && (currentUser?.uploadRole || currentUser?.adminRole))
+   // The form belongs to the listing it fills. Role-gated rather than
+   // root-gated: getMusicFolders omits the uploads root, so the client cannot
+   // tell whether one is configured — the server says so on submit. The role
+   // test is not redundant with the entry points being gated the same way:
+   // a {view:'uploads'} history entry can be popped after upload rights were
+   // revoked, and must not draw a form the server would only refuse.
+   if (uploads && canUpload())
       frag.appendChild(makeUploadBar());
 
-   for (const index of indexes) {
+   const addHeading = text => {
       const heading = document.createElement('h2');
       heading.className = 'index-heading';
-      heading.textContent = index.name;
+      heading.textContent = text;
       frag.appendChild(heading);
+      };
 
-      for (const artist of index.artist) {
-         const row = document.createElement('div');
-         row.className = 'artist-row';
-         row.dataset.id = artist.id;
+   const addRow = (artist, isCategory, fromUploads) => {
+      const row = document.createElement('div');
+      row.className = 'artist-row';
+      row.dataset.id = artist.id;
 
-         const name = document.createElement('span');
-         name.className = 'artist-name';
-         name.textContent = artist.name;
+      const name = document.createElement('span');
+      name.className = 'artist-name';
+      name.textContent = artist.name;
 
-         const count = document.createElement('span');
-         count.className = 'artist-albums';
-         count.textContent = artist.albumCount === 1
-            ? '1 album' : `${artist.albumCount} albums`;
+      const count = document.createElement('span');
+      count.className = 'artist-albums';
+      count.textContent = artist.albumCount === 1
+         ? '1 album' : `${artist.albumCount} albums`;
 
-         row.appendChild(name);
-         row.appendChild(count);
-         row.addEventListener('click', () => {
-            document.querySelectorAll('#pane-artists .artist-row.selected')
-               .forEach(r => r.classList.remove('selected'));
-            row.classList.add('selected');
-            const isCategory = libraryMode === 'categories';
-            if (paneNav.willSlide(1))
-               history.pushState({view: 'albums', artistId: artist.id,
-                                  artistName: artist.name, isCategory}, '');
-            viewAlbums(artist.id, artist.name, isCategory);
-            });
-         frag.appendChild(row);
+      row.appendChild(name);
+      row.appendChild(count);
+      row.addEventListener('click', () => {
+         document.querySelectorAll('#pane-artists .artist-row.selected')
+            .forEach(r => r.classList.remove('selected'));
+         row.classList.add('selected');
+         if (paneNav.willSlide(1))
+            history.pushState({view: 'albums', artistId: artist.id,
+                               artistName: artist.name, isCategory,
+                               fromUploads}, '');
+         viewAlbums(artist.id, artist.name, isCategory, fromUploads);
+         });
+      frag.appendChild(row);
+      };
+
+   if (uploads) {
+      // Letter buckets — or usernames, for an admin's everyone view.
+      for (const index of upIndexes) {
+         if (!index.artist?.length) continue;
+         addHeading(index.name);
+         for (const artist of index.artist) addRow(artist, false, true);
+         }
+      }
+   else {
+      // Categories first, the whole group under one heading — a library holds
+      // a handful of sections, not enough to bucket by letter. An empty group
+      // draws nothing, so an artists-only server looks exactly as it did.
+      if (categoryList.length) {
+         addHeading('Categories');
+         for (const c of categoryList) addRow(c, true, false);
+         }
+      for (const index of artistIndexes) {
+         if (!index.artist?.length) continue;
+         addHeading(index.name);
+         for (const artist of index.artist) addRow(artist, false, false);
          }
       }
    pane.appendChild(frag);
    paneNav.slideTo(0);
 }
+
+// The way into the uploads listing: its own history entry, so Back returns to
+// the library, and the same pre-render hygiene showView() does for a view
+// switch. The Library nav entry stays lit — uploads is a flavour of Library,
+// which matters when arriving via Shift U from some other view.
+async function openUploads() {
+   isearchEnd(false);
+   navForget();
+   document.querySelectorAll('#sidebar a, #bottom-nav a').forEach(a =>
+      a.classList.toggle('active', a.dataset.view === 'artists'));
+   history.pushState({view: 'uploads'}, '');
+   await viewArtists(true);
+   }
 
 async function viewPlaylists() {
    console.log('[playlists] loading');
@@ -2449,12 +2475,21 @@ async function viewPlaylistTracks(playlistId, playlistName) {
 // MusicBrainz lookup, so asking anyway only reserves a shimmer and an empty
 // circle that never fill in.
 //
-// Passed in rather than read from libraryMode, for the reason Route.Albums on
-// Android takes fromUploads: an artist id says which folder, never which
-// section it was reached through. Search, and the sideways entries into
-// viewTracks(), leave it defaulted and behave exactly as before.
-async function viewAlbums(artistId, artistName, isCategory = false) {
+// fromUploads says it is a folder of the account's own uploads, which is what
+// offers Delete and (for an admin) Promote on each album row.
+//
+// Both are passed in rather than read from module state, for the reason
+// Route.Albums on Android takes the same two flags: an artist id says which
+// folder, never which listing it was reached through. Search, and the
+// sideways entries into viewTracks(), leave them defaulted and behave exactly
+// as before.
+async function viewAlbums(artistId, artistName, isCategory = false,
+                          fromUploads = false) {
    console.log('[albums] loading artist', artistId, artistName);
+   // The section this listing was drilled in from, keying the sort preference
+   // and stamped on the pane so the album-edit save path in viewTracks() can
+   // return to the listing that led here.
+   const section = fromUploads ? 'uploads' : isCategory ? 'categories' : 'artists';
    const pane = document.getElementById('pane-albums');
    pane.innerHTML = '';
    document.getElementById('pane-tracks').innerHTML = '';
@@ -2485,7 +2520,7 @@ async function viewAlbums(artistId, artistName, isCategory = false) {
    const sortBtn = document.createElement('button');
    sortBtn.className = 'sort-btn';
    const labelSort = () => {
-      const byName = albumSort.get() === 'name';
+      const byName = albumSort.get(section) === 'name';
       sortBtn.textContent = byName ? 'Name' : 'Year';
       sortBtn.title = byName ? 'Sort by year' : 'Sort by name';
       };
@@ -2523,7 +2558,7 @@ async function viewAlbums(artistId, artistName, isCategory = false) {
 
    function renderRows() {
       const frag = document.createDocumentFragment();
-      for (const album of sortedAlbums(albums, albumSort.get())) {
+      for (const album of sortedAlbums(albums, albumSort.get(section))) {
          const row = document.createElement('div');
          row.className = 'album-row';
          row.dataset.id = album.id;
@@ -2567,8 +2602,8 @@ async function viewAlbums(artistId, artistName, isCategory = false) {
          row.appendChild(info);
          row.appendChild(makeAlbumStar(album));
 
-         // Promote-to-library button (admin only, uploads mode only).
-         if (libraryMode === 'uploads' && currentUser?.adminRole) {
+         // Promote-to-library button (admin only, uploads listing only).
+         if (fromUploads && currentUser?.adminRole) {
             const promoteBtn = document.createElement('button');
             promoteBtn.className = 'promote-btn';
             promoteBtn.title = 'Move to shared library';
@@ -2597,21 +2632,24 @@ async function viewAlbums(artistId, artistName, isCategory = false) {
                      const moved = sr.movedAlbum ?? null;
                      // It is in the shared library now, so staying in Uploads
                      // would leave the user looking at the listing it just left.
-                     // Switch to the destination root's own mode and walk in to
-                     // where it landed — the ids to do that are what moveAlbum
-                     // returns and promoteAlbum never did.
+                     // The merged library shows both sections, so there is no
+                     // mode to switch — render it and walk in to where the
+                     // album landed, with the flags of the destination root's
+                     // kind. The ids to do that are what moveAlbum returns
+                     // and promoteAlbum never did.
                      const destType = (musicFolders ?? [])
                         .find(f => String(f.id) === String(rootId))?.contentType;
                      if (moved?.id && moved?.parent && destType) {
-                        setLibraryMode(destType);
                         await viewArtists();
                         await viewAlbums(moved.parent, moved.artist,
-                                         destType === 'categories');
+                                         destType === 'categories', false);
                         await viewTracks(moved.id, moved.album, moved.parent,
                                          moved.artist);
                         }
                      else
-                        viewArtists();
+                        // The reply did not say where it went; the uploads
+                        // listing is at least certainly no longer right.
+                        viewArtists(true);
                      }
                   catch (err) {
                      promoteBtn.disabled = false;
@@ -2626,11 +2664,12 @@ async function viewAlbums(artistId, artistName, isCategory = false) {
             row.appendChild(promoteBtn);
             }
 
-         // Delete-from-uploads button. Uploads mode only, but *not* admin only,
-         // unlike promote beside it: clearing out your own staging area after a
-         // fetch went wrong is not an administrative act, and before this the only
-         // way out of the uploads area was to promote into the shared library.
-         if (libraryMode === 'uploads') {
+         // Delete-from-uploads button. Uploads listing only, but *not* admin
+         // only, unlike promote beside it: clearing out your own staging area
+         // after a fetch went wrong is not an administrative act, and before
+         // this the only way out of the uploads area was to promote into the
+         // shared library.
+         if (fromUploads) {
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'promote-btn delete-btn';
             deleteBtn.title = 'Delete from your uploads';
@@ -2645,7 +2684,7 @@ async function viewAlbums(artistId, artistName, isCategory = false) {
                      deleteBtn.textContent = '…';
                      try {
                         await apiCall('deleteUpload', {id: album.id});
-                        viewArtists();
+                        viewArtists(true);
                         }
                      catch (err) {
                         deleteBtn.disabled = false;
@@ -2681,7 +2720,7 @@ async function viewAlbums(artistId, artistName, isCategory = false) {
       // are new nodes, so the highlight would otherwise be dropped on a
       // listing whose tracks are still on screen beside it.
       const sel = list.querySelector('.album-row.selected')?.dataset.id;
-      albumSort.set(albumSort.get() === 'name' ? 'year' : 'name');
+      albumSort.set(section, albumSort.get(section) === 'name' ? 'year' : 'name');
       labelSort();
       renderRows();
       if (sel)
@@ -2692,6 +2731,7 @@ async function viewAlbums(artistId, artistName, isCategory = false) {
    // Marker so viewTracks() can tell whether pane 1 already shows this artist
    // and skip a redundant re-render when navigating artists → albums → tracks.
    pane.dataset.artistId = String(artistId);
+   pane.dataset.section  = section;
    paneNav.slideTo(1);
 
    // Fetch artist info without blocking the album list.
@@ -2912,16 +2952,9 @@ function timeAgo(isoStr) {
 // Info for the currently logged-in user (populated in showShell).
 let currentUser = null;
 
-// Which kind of top-level entry the Library view is showing: a root content
-// type ('artists', 'categories', …) or 'uploads' for the user's own files.
-// A list must never contain more than one kind, so this is a single value
-// rather than a set of flags — the server filters on it and the rendered list
-// is single-kind by construction.
-let libraryMode = localStorage.getItem('gd_library_mode') || 'artists';
-
 // Roots as reported by getMusicFolders, fetched once. The client otherwise has
-// no idea roots exist; the Library toggle is built from what is in here, so a
-// server growing a new root type grows a new segment without a client change.
+// no idea roots exist; the merged Library listing asks once per root kind
+// found in here, and the promote dialog offers these as destinations.
 let musicFolders = null;
 
 // Id of the currently active cast device, or null when not casting.
@@ -6622,9 +6655,15 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
             // Every id in this pane has just changed, so there is nothing to
             // patch in place — re-render all three panes against the new ones.
             // Pane 0 too: re-filing may have created an artist or emptied one.
-            await viewArtists();
+            // Which listing to rebuild comes from the stamp pane 1 carries
+            // from whichever viewAlbums rendered it — a rename in place keeps
+            // the same root, so the section is unchanged by the rename. Read
+            // before the re-render replaces it.
+            const section =
+               document.getElementById('pane-albums').dataset.section ?? 'artists';
+            await viewArtists(section === 'uploads');
             await viewAlbums(renamed.parent, renamed.artist,
-                             libraryMode === 'categories');
+                             section === 'categories', section === 'uploads');
             await viewTracks(renamed.id, renamed.album, renamed.parent, renamed.artist);
             return;
             }
@@ -7771,22 +7810,18 @@ const SHORTCUTS = [
    {group: 'Views', key: 's', show: 'Shift S', shift: true, label: 'Settings',
     nav:  '#sidebar a[data-view="settings"]',
     when: keyCanSwitchView, run() { document.querySelector(this.nav).click(); }},
-   // Uploads is a mode of the Library view rather than a view, so this one sets
-   // the mode and then goes to that view the way the others do — by clicking
-   // the sidebar entry, which keeps the history entry and the .active mark the
-   // mouse's.  It works from anywhere for the same reason: viewArtists() reads
-   // libraryMode when it renders, so the mode is already chosen by the time it
-   // does.  Being a mode is also why it carries no `nav` and so draws no cap:
-   // there is no sidebar row to hang one on, and the segmented control in the
-   // Library header is where it is offered instead.
+   // Uploads is a listing of its own, entered through openUploads() — the
+   // same function the upload icon in the Library header calls, which owns
+   // the history entry and the .active mark, so the key cannot drift from the
+   // mouse's way in.  It carries no `nav` and so draws no cap: there is no
+   // sidebar row to hang one on, and the header icon is where it is offered.
    //
-   // Offered on exactly the terms the segment is, by asking the function that
-   // decides them — an account with no upload rights is shown the row dimmed
-   // rather than given a key that lands on a mode it does not have.
+   // Offered on exactly the terms the icon is, by asking the same predicate —
+   // an account with no upload rights is shown the row dimmed rather than
+   // given a key that lands on a listing it does not have.
    {group: 'Views', key: 'u', show: 'Shift U', shift: true, label: 'Uploads',
-    when: () => keyCanSwitchView() && libraryModes().includes('uploads'),
-    run:  () => { setLibraryMode('uploads');
-                  document.querySelector('#sidebar a[data-view="artists"]').click(); }},
+    when: () => keyCanSwitchView() && canUpload(),
+    run:  openUploads},
 
    {group: 'Video', key: 'f', show: 'F', label: 'Fullscreen',
     when: () => videoOnScreen() && keyShown('video-fullscreen'),
@@ -8203,7 +8238,8 @@ async function showShell() {
             if (document.getElementById('pane-albums').children.length > 0)
                paneNav.slideTo(1);
             else
-               await viewAlbums(s.artistId, s.artistName, s.isCategory === true);
+               await viewAlbums(s.artistId, s.artistName, s.isCategory === true,
+                                s.fromUploads === true);
             } else if (s.view === 'tracks') {
             if (document.getElementById('pane-tracks').children.length > 0)
                paneNav.slideTo(2);
@@ -8219,8 +8255,23 @@ async function showShell() {
                paneNav.slideTo(0);
             else
                await viewPlaylists();
+            } else if (s.view === 'uploads') {
+            // Slide only when pane 0 still holds the uploads listing; a
+            // refresh that landed on this entry, or a pane 0 since rewritten
+            // by some other view, re-renders it.
+            if (document.getElementById('pane-artists').children.length > 0
+                && uploadsShowing()) {
+               paneNav.slideTo(0);
+               await returnedToArtists();
+               }
+            else
+               await viewArtists(true);
             } else {
-            if (document.getElementById('pane-artists').children.length > 0) {
+            // uploadsShowing() is the extra test: Back out of the uploads
+            // listing must re-render the merged library rather than slide to
+            // the uploads content still sitting in pane 0.
+            if (document.getElementById('pane-artists').children.length > 0
+                && !uploadsShowing()) {
                paneNav.slideTo(0);
                await returnedToArtists();
                }
