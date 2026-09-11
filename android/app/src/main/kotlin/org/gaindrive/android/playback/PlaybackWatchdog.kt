@@ -22,12 +22,12 @@ import javax.inject.Singleton
  * loading machinery cannot notice, because from its point of view everything is
  * working; only the position gives it away.
  *
- * The consequence was worse than a stuck screen. `onTaskRemoved` shuts the
- * service down only when the player is not `playWhenReady`, and a player wedged
- * in `STATE_BUFFERING` still is — so swiping the app away left the foreground
- * service running with the wedged player inside it, and re-opening re-bound to
- * the same wedge. Stopping the player is what breaks that: `playWhenReady` goes
- * false, and the next swipe ends the service.
+ * Stopping the player is what un-wedges it: the stall cannot clear itself,
+ * and only the stop makes the retry the message offers start from a clean
+ * player. (This stop once also carried a second job — `onTaskRemoved` used to
+ * end the service only when the player was not `playWhenReady`, so a wedged
+ * player survived swiping the app away until something stopped it. A swipe
+ * now always pauses and ends the service, so that job is gone.)
  *
  * Attached to the [ExoPlayer] directly, like [VideoSurface] and for the same
  * reason — it has to work with nothing bound to the session, which is precisely

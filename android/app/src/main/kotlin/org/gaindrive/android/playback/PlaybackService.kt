@@ -350,14 +350,14 @@ class PlaybackService : MediaLibraryService() {
 		session
 
 	/**
-	 * Stopping playback should end the service rather than leave a paused
-	 * notification behind with nothing queued.
+	 * Swiping the app out of recents means quit: pause whatever is playing —
+	 * the cast player included, since the session holds whichever one is
+	 * active — and end the service, so no playing notification outlives the
+	 * app. This only covers a user-initiated task removal; a system memory
+	 * kill never calls onTaskRemoved, so restore-after-restart is unaffected.
 	 */
 	override fun onTaskRemoved(rootIntent: android.content.Intent?) {
-		val player = session?.player
-		if (player == null || !player.playWhenReady || player.mediaItemCount == 0) {
-			stopSelf()
-		}
+		pauseAllPlayersAndStopSelf()
 	}
 
 	override fun onDestroy() {
