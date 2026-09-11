@@ -94,6 +94,23 @@ enum Merge {
 		}
 	}
 
+	/// Every server's category buckets flattened into one alphabetical list,
+	/// same-named sections collapsed across servers.
+	///
+	/// Built on `artistIndexes`, which already keys artists by name across all
+	/// buckets — a "Film" section on two servers becomes one row carrying both
+	/// refs, the first contributor in registry order winning the ref. The
+	/// explicit sort is load-bearing: the single-server shortcut in that
+	/// function returns the server's own bucket order untouched, and the
+	/// merged list draws these under one header where only alphabetical reads
+	/// as an order at all. `matchKey`, not `caseInsensitiveCompare`, so the
+	/// order agrees with how the buckets themselves are sorted.
+	static func categories(perServer: [[ArtistIndex]]) -> [Artist] {
+		artistIndexes(perServer: perServer)
+			.flatMap(\.artists)
+			.sorted { matchKey($0.name) < matchKey($1.name) }
+	}
+
 	/// Collapses albums that two *different* servers both hold.
 	///
 	/// Matched on artist and title through `matchKey`, which keeps letters and

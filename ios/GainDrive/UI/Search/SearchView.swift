@@ -186,8 +186,10 @@ struct SearchView: View {
 	@ViewBuilder
 	private func destination(_ route: Route) -> some View {
 		switch route {
-		case .albums(let artists, let name, let fromCategories):
-			AlbumsView(refs: artists, artistName: name, fromCategories: fromCategories)
+		case .albums(let artists, let name, let fromCategories, let fromUploads):
+			AlbumsView(
+				refs: artists, artistName: name,
+				fromCategories: fromCategories, fromUploads: fromUploads)
 		case .album(let ref, let title, let autoPlay, let at):
 			AlbumDetailView(ref: ref, albumTitle: title, autoPlay: autoPlay, autoPlayAt: at)
 		case .playlist(let ref, let name):

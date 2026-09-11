@@ -14,6 +14,9 @@ struct AlbumsView: View {
 	/// See `Route.albums`. Defaulted, so a section reached from search keeps
 	/// today's placeholder rather than having the answer guessed.
 	var fromCategories = false
+	/// See `Route.albums`. Only the album-sort key reads it — iOS has no
+	/// delete or promote yet (Phase 8).
+	var fromUploads = false
 	/// Non-nil inside the Library tab's split view, where choosing an album
 	/// fills the third column. **Nil everywhere else**: from Search, Recents
 	/// and the Now Playing sheet this list sits in a `NavigationStack` and a
@@ -56,7 +59,7 @@ struct AlbumsView: View {
 			if model == nil, let library {
 				model = AlbumsViewModel(
 					library: library, selection: servers, settings: settings,
-					refs: refs, fromCategories: fromCategories)
+					refs: refs, fromCategories: fromCategories, fromUploads: fromUploads)
 			}
 			model?.appear()
 		}

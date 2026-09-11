@@ -57,29 +57,21 @@ final class SettingsStore {
 		didSet { defaults.set(offlineMode, forKey: Self.offlineKey) }
 	}
 
-	/// Which slice of the library was last showing, as `LibraryMode.id`.
-	///
-	/// Stored as the raw string rather than as a `LibraryMode`, so a value
-	/// written by a build that knew a kind this one does not still parses —
-	/// which is the same reason `LibraryMode` wraps a string at all. An
-	/// unrecognised one falls back when the chip row is read.
-	var libraryMode: String? {
-		didSet { defaults.set(libraryMode, forKey: Self.libraryModeKey) }
-	}
-
-	/// Album order, **per slice**, so films can sit A–Z while a musician's
-	/// albums stay chronological. A single global setting would make one of
-	/// those two wrong every time the other was set.
+	/// Album order, **per library section**, so films can sit A–Z while a
+	/// musician's albums stay chronological. A single global setting would
+	/// make one of those two wrong every time the other was set. The caller
+	/// names the section it drilled in from — this used to key on a stored
+	/// "current mode", which could disagree with the listing on screen.
 	private(set) var albumSorts: [String: String] {
 		didSet { defaults.set(albumSorts, forKey: Self.albumSortsKey) }
 	}
 
-	func albumSort(for mode: LibraryMode) -> AlbumSort {
-		AlbumSort.parse(albumSorts[mode.id])
+	func albumSort(for section: LibrarySection) -> AlbumSort {
+		AlbumSort.parse(albumSorts[section.rawValue])
 	}
 
-	func setAlbumSort(_ sort: AlbumSort, for mode: LibraryMode) {
-		albumSorts[mode.id] = sort.rawValue
+	func setAlbumSort(_ sort: AlbumSort, for section: LibrarySection) {
+		albumSorts[section.rawValue] = sort.rawValue
 	}
 
 	/// How much downloaded audio may sit on the device.
@@ -113,7 +105,6 @@ final class SettingsStore {
 	private static let selectedServerKey = "selected_server"
 	private static let mergeAlbumsKey = "merge_duplicate_albums"
 	private static let audioQualityKey = "audio_quality"
-	private static let libraryModeKey = "library_mode"
 	private static let albumSortsKey = "album_sort"
 	private static let cacheCapKey = "cache_max_bytes"
 	private static let offlineKey = "offline_mode"
@@ -132,7 +123,6 @@ final class SettingsStore {
 		// that could disagree would be two settings pretending to be one.
 		audioQuality =
 			defaults.string(forKey: Self.audioQualityKey).flatMap(AudioQuality.parse) ?? .default
-		libraryMode = defaults.string(forKey: Self.libraryModeKey)
 		albumSorts = defaults.dictionary(forKey: Self.albumSortsKey) as? [String: String] ?? [:]
 		// `double(forKey:)` answers 0 for an absent key, which would be a cap
 		// of nothing rather than the default — the same trap the merge switch

@@ -77,107 +77,167 @@ final class LibraryRepository: Sendable {
 
 	// MARK: - Fan-out reads
 
-	/// Which slices this scope offers, as one chip row.
+	/// One server's contribution to the merged list: its category buckets and
+	/// its artist buckets. Named halves, because a bare tuple at the merge
+	/// site would leave which is which to memory.
+	private struct ServerListing: Sendable {
+		var categories: [ArtistIndex]
+		var artists: [ArtistIndex]
+	}
+
+	/// The Library screen's merged list: every category folder from every
+	/// `categories` root, and every artist — including all roots of a server
+	/// that names no kinds; see `LibraryRoots.listingRequests`.
 	///
-	/// **Empty when nothing answered**, which is not the same as "this library
-	/// has only Artists" and must not be flattened into it here: the caller
-	/// keeps the row it already has, because losing the chips to one server's
-	/// timeout would be worse than showing a stale set. The floor lives in the
-	/// view model, which is the only place that knows what is currently on
-	/// screen.
-	func availableModes(scope: BrowseScope) async -> [LibraryMode] {
+	/// A typed server is asked once per kind it has, concurrently — the halves
+	/// are independent requests against the same session. A kind the server
+	/// lacks is not asked for at all rather than filtered out of an answer:
+	/// one predating library roots ignores an unknown `contentType` and
+	/// answers with its **entire** library, so the request itself is what
+	/// would put the same folders in both groups. If either half fails the
+	/// whole server falls back to its mirror — the same all-or-nothing
+	/// failure reporting one request had.
+	func libraryListing(scope: BrowseScope) async -> MergedResult<LibraryListing> {
 		let clients = await registry.clientsSnapshot()
 		if await offline {
-			// Scoped like every other read: the mirror still holds the rows of
-			// a server that has since been disabled, and offering its chips
-			// would be a slice with nothing behind it.
-			var stored: [[LibraryMode]] = []
+			let reach = await reachable(in: scope)
+			var perServer: [ServerListing] = []
 			for config in clients.servers(in: scope) {
-				stored.append(await mirror.load([LibraryMode].self, at: .chips(config.id)) ?? [])
+				let categories =
+					await mirror.load([ArtistIndex].self, at: .indexes(config.id, .categories)) ?? []
+				let artists =
+					await mirror.load([ArtistIndex].self, at: .indexes(config.id, .artists)) ?? []
+				perServer.append(
+					ServerListing(
+						categories: Self.keepingReachable(categories, artists: reach.artists),
+						artists: Self.keepingReachable(artists, artists: reach.artists)))
 			}
-			return LibraryRoots.mergeChips(perServer: stored)
+			return MergedResult(items: Self.mergedListing(perServer))
 		}
 		let gathered = await gather(
 			over: clients.servers(in: scope), clients: clients,
-			stored: { [mirror] config in
-				await mirror.load([LibraryMode].self, at: .chips(config.id))
+			stored: { [mirror] config -> ServerListing? in
+				let categories =
+					await mirror.load([ArtistIndex].self, at: .indexes(config.id, .categories))
+				let artists =
+					await mirror.load([ArtistIndex].self, at: .indexes(config.id, .artists))
+				// A never-mirrored server reads as a plain failure rather than
+				// as an empty library shown in its place.
+				guard categories != nil || artists != nil else { return nil }
+				return ServerListing(categories: categories ?? [], artists: artists ?? [])
 			}
-		) { [accounts, roots, mirror] client, config in
-			let facts = await accounts.facts(for: config.id, using: clients)
+		) { [roots, mirror] client, config in
 			let known = try await Self.rootsOf(client, config.id, cache: roots)
-			let chips = LibraryRoots.chips(roots: known, canUpload: facts.canUpload)
-			await mirror.store(chips, at: .chips(config.id))
-			return chips
+			let requests = LibraryRoots.listingRequests(roots: known)
+
+			@Sendable func fetch(
+				_ request: RootRequest?, _ section: LibrarySection
+			) async throws -> [ArtistIndex] {
+				guard let request else { return [] }
+				let indexes = try await client.artists(
+					personal: request.personal.parameter,
+					contentType: request.contentType,
+					musicFolderId: request.musicFolderId
+				).map { LibraryMapper.index($0, server: config.id) }
+				// Written through only on a real answer: a nil half returned
+				// early above, so an empty listing here is a genuine one.
+				await mirror.store(indexes, at: .indexes(config.id, section))
+				return indexes
+			}
+
+			// The two halves are independent requests against one session, so
+			// they run together — the same shape as Android's `async` pair.
+			async let categories = fetch(requests.categories, .categories)
+			async let artists = fetch(requests.artists, .artists)
+			return ServerListing(categories: try await categories, artists: try await artists)
 		}
-		return LibraryRoots.mergeChips(perServer: gathered.answers.map(\.1))
+		return MergedResult(
+			items: Self.mergedListing(gathered.answers.map(\.1)),
+			failures: gathered.failures)
 	}
 
-	func artistIndexes(scope: BrowseScope, mode: LibraryMode = .artists) async -> MergedResult<
-		[ArtistIndex]
-	> {
+	private static func mergedListing(_ perServer: [ServerListing]) -> LibraryListing {
+		LibraryListing(
+			categories: Merge.categories(perServer: perServer.map(\.categories)),
+			artists: Merge.artistIndexes(perServer: perServer.map(\.artists)))
+	}
+
+	/// The uploads listing — this account's own on every server it may upload
+	/// to, or everyone's where it is the admin. A server where it may not
+	/// upload contributes nothing rather than a failure: having no upload
+	/// rights on one server of several is a fact, not an outage. It also
+	/// writes no mirror file then, which is what keeps the offline
+	/// `canUpload(scope:)` answer honest.
+	func uploadIndexes(scope: BrowseScope) async -> MergedResult<[ArtistIndex]> {
 		let clients = await registry.clientsSnapshot()
 		if await offline {
 			let reach = await reachable(in: scope)
 			var perServer: [[ArtistIndex]] = []
 			for config in clients.servers(in: scope) {
 				let stored =
-					await mirror.load([ArtistIndex].self, at: .indexes(config.id, mode)) ?? []
+					await mirror.load([ArtistIndex].self, at: .indexes(config.id, .uploads)) ?? []
 				perServer.append(Self.keepingReachable(stored, artists: reach.artists))
 			}
-			return MergedResult(
-				items: mode == .uploads
-					? Merge.concatenatedIndexes(perServer: perServer)
-					: Merge.artistIndexes(perServer: perServer))
+			return MergedResult(items: Merge.concatenatedIndexes(perServer: perServer))
 		}
 		let gathered = await gather(
 			over: clients.servers(in: scope), clients: clients,
 			stored: { [mirror] config in
-				await mirror.load([ArtistIndex].self, at: .indexes(config.id, mode))
+				await mirror.load([ArtistIndex].self, at: .indexes(config.id, .uploads))
 			}
-		) { [accounts, roots, mirror] client, config in
-			// **A server that cannot answer for this chip is not asked at
-			// all.** Not asking is the whole point: one predating library roots
-			// ignores an unknown `contentType` and answers with its entire
-			// library, so the request itself is what would put the same artists
-			// under every chip. Filtering the reply would be too late — nothing
-			// in it says which rows to discard.
-			//
-			// Both facts come from the one cached `getUser` per server, so the
-			// second costs no request.
+		) { [accounts, mirror] client, config in
 			let facts = await accounts.facts(for: config.id, using: clients)
-			let known = try await Self.rootsOf(client, config.id, cache: roots)
-			guard
-				let request = LibraryRoots.request(
-					roots: known, mode: mode,
-					canUpload: facts.canUpload, isAdmin: facts.isAdmin)
 			// **Typed, not `[]`.** This closure's return type is inferred, and
 			// an untyped empty literal unifies with the real return below as
 			// `[Any]` — which then fails `gather`'s `Sendable` bound several
 			// lines away, naming neither this line nor the reason.
-			else { return [ArtistIndex]() }
-
+			guard facts.canUpload else { return [ArtistIndex]() }
+			let request = LibraryRoots.uploadsRequest(isAdmin: facts.isAdmin)
 			let indexes = try await client.artists(
 				personal: request.personal.parameter,
 				contentType: request.contentType,
 				musicFolderId: request.musicFolderId
 			).map { LibraryMapper.index($0, server: config.id) }
-			// Written through only on a real answer. A server that could not be
-			// asked for this chip returns early above, so an empty listing here
-			// is a genuine one and is worth storing.
-			await mirror.store(indexes, at: .indexes(config.id, mode))
+			await mirror.store(indexes, at: .indexes(config.id, .uploads))
 			return indexes
 		}
-		let perServer = gathered.answers.map(\.1)
 		return MergedResult(
-			// **Not merged in the uploads slice.** Everywhere else, two servers
-			// holding an artist of the same name are holding the same artist.
-			// In uploads they are two people's folders, and the owner buckets
-			// exist to keep them apart — merging by name would file one
-			// person's upload under another's heading.
-			items: mode == .uploads
-				? Merge.concatenatedIndexes(perServer: perServer)
-				: Merge.artistIndexes(perServer: perServer),
+			// **Not merged by name.** Everywhere else, two servers holding an
+			// artist of the same name are holding the same artist. In uploads
+			// they are two people's folders, and the owner buckets exist to
+			// keep them apart — merging by name would file one person's upload
+			// under another's heading. (A deliberate divergence from Android,
+			// which merges here.)
+			items: Merge.concatenatedIndexes(perServer: gathered.answers.map(\.1)),
 			failures: gathered.failures)
+	}
+
+	/// Whether the upload icon is worth drawing: some server in `scope` takes
+	/// uploads from this account. Offline the account facts are unreachable,
+	/// so the honest answer is whether some server's uploads listing was ever
+	/// mirrored — an empty stored list still counts, since it was listable.
+	func canUpload(scope: BrowseScope) async -> Bool {
+		let clients = await registry.clientsSnapshot()
+		if await offline {
+			for config in clients.servers(in: scope) {
+				let stored =
+					await mirror.load([ArtistIndex].self, at: .indexes(config.id, .uploads))
+				if stored != nil { return true }
+			}
+			return false
+		}
+		return await withTaskGroup(of: Bool.self) { group in
+			for config in clients.servers(in: scope) {
+				group.addTask { [accounts] in
+					await accounts.facts(for: config.id, using: clients).canUpload
+				}
+			}
+			for await can in group where can {
+				group.cancelAll()
+				return true
+			}
+			return false
+		}
 	}
 
 	/// Drops artists the walk did not reach, and buckets that empty as a

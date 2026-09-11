@@ -95,3 +95,16 @@ extension MergedResult where Value: Collection {
 		return .ready(items)
 	}
 }
+
+// The same rule for the merged library listing, which is a pair of
+// collections rather than one and so cannot take the constrained property
+// above. Same shape on purpose: two spellings of "empty and partial is
+// failed" that agreed by luck would drift.
+extension MergedResult where Value == LibraryListing {
+	var load: Load<Value> {
+		if items.isEmpty, let first = failures.first {
+			return .failed(first.message)
+		}
+		return .ready(items)
+	}
+}

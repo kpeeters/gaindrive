@@ -29,11 +29,15 @@ enum Route: Hashable {
 	/// `is_category_folder()`. Without it the avatar sits as a placeholder for
 	/// ever while the fetch retries a 404.
 	///
-	/// It travels on the route rather than being read from the current chip
-	/// because **an artist reference says which folder, never which slice it
-	/// was reached through** — and it is defaulted, so a section reached from
-	/// search keeps today's placeholder rather than having the answer guessed.
-	case albums(artists: [ItemRef], name: String, fromCategories: Bool)
+	/// `fromUploads` says the row was tapped in the **uploads** listing, which
+	/// keys the album sort to that listing's own preference.
+	///
+	/// Both travel on the route rather than being read from module state
+	/// because **an artist reference says which folder, never which listing it
+	/// was reached through** — and both are defaulted, so a section reached
+	/// from search keeps today's placeholder rather than having the answer
+	/// guessed.
+	case albums(artists: [ItemRef], name: String, fromCategories: Bool, fromUploads: Bool)
 	/// `autoPlay` names a track to start once the listing has arrived, which is
 	/// how a hit in Recents or Search is played.
 	///
@@ -53,9 +57,10 @@ enum Route: Hashable {
 	case album(ItemRef, title: String, autoPlay: ItemRef?, autoPlayAt: Double)
 	case playlist(ItemRef, name: String)
 
-	/// The ordinary way in, from a slice that is not categories.
+	/// The ordinary way in, from a listing that is neither categories nor
+	/// uploads.
 	static func albums(artists: [ItemRef], name: String) -> Route {
-		.albums(artists: artists, name: name, fromCategories: false)
+		.albums(artists: artists, name: name, fromCategories: false, fromUploads: false)
 	}
 
 	/// Open the album and start nothing — every browse screen's way in.

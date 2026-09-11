@@ -40,19 +40,18 @@ import Foundation
 actor LibraryMirror {
 	/// What a stored answer belongs to.
 	///
-	/// The mode is part of the artist-index key because a listing must never
-	/// mix slices: Categories stored over Artists would be a chip that shows
-	/// the wrong library the moment its server goes away.
+	/// The section is part of the artist-index key because a listing must
+	/// never mix sections: Categories stored over Artists would rebuild the
+	/// merged list with the wrong rows the moment its server goes away.
 	enum Key: Sendable {
-		case indexes(ServerId, LibraryMode)
-		case chips(ServerId)
+		case indexes(ServerId, LibrarySection)
 		case playlists(ServerId)
 		case albums(ItemRef)
 		case album(ItemRef)
 
 		var server: ServerId {
 			switch self {
-			case .indexes(let server, _), .chips(let server), .playlists(let server):
+			case .indexes(let server, _), .playlists(let server):
 				server
 			case .albums(let ref), .album(let ref):
 				ref.server
@@ -61,8 +60,7 @@ actor LibraryMirror {
 
 		var name: String {
 			switch self {
-			case .indexes(_, let mode): "indexes-\(FileNames.component(mode.id))"
-			case .chips: "chips"
+			case .indexes(_, let section): "indexes-\(FileNames.component(section.rawValue))"
 			case .playlists: "playlists"
 			case .albums(let ref): "albums-\(FileNames.component(ref.id))"
 			case .album(let ref): "album-\(FileNames.component(ref.id))"

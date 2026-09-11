@@ -30,8 +30,8 @@ import Foundation
 /// rule.** A root id is only meaningful to the server that issued it, and this
 /// one never travels: it is read from that server's `getMusicFolders` and put
 /// straight back into a request to the same server. Nothing above `Data` ever
-/// sees it — the chip row speaks in `LibraryMode`, which is keyed by name for
-/// exactly that reason.
+/// sees it — the merged listing is asked for by root *kind*
+/// (`LibraryRoots.listingRequests`), never by a root's own id.
 struct MusicRoot: Hashable, Sendable, Codable {
 	let id: String
 	let name: String

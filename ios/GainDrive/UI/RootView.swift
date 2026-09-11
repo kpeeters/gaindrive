@@ -36,13 +36,12 @@ struct RootView: View {
 
 	init(
 		firstRun: Bool, library: LibraryRepository, selection: ServerSelection,
-		events: LibraryEvents, settings: SettingsStore
+		events: LibraryEvents
 	) {
 		self.firstRun = firstRun
 		_tab = State(initialValue: firstRun ? .settings : .artists)
 		_artists = State(
-			initialValue: ArtistsViewModel(
-				library: library, selection: selection, settings: settings))
+			initialValue: ArtistsViewModel(library: library, selection: selection))
 		_playlists = State(
 			initialValue: PlaylistsViewModel(
 				library: library, selection: selection, events: events))
@@ -62,7 +61,11 @@ struct RootView: View {
 
 	var body: some View {
 		TabView(selection: $tab) {
-			Tab("Artists", systemImage: "music.mic", value: Destination.artists) {
+			// "Library", not "Artists": the tab shows categories and artists in
+			// one merged list, so the label names the place rather than one of
+			// the things it holds. Destination.artists keeps its name to avoid
+			// churning navigation for a wording change.
+			Tab("Library", systemImage: "music.mic", value: Destination.artists) {
 				ArtistsView(model: artists)
 					.miniPlayerInset(active: tab == .artists)
 			}

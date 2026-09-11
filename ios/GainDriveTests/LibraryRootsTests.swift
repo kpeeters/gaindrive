@@ -11,13 +11,17 @@ import Testing
 
 @testable import GainDrive
 
-/// What the chip row offers, and what a chosen chip becomes on the wire.
+/// What one server is asked for the merged library list, and for uploads.
 ///
-/// Every decision is a function of one server's `getMusicFolders` answer and of
-/// whether this account may upload to it, which is why it is exercised by
-/// calling it. The failure that matters most is silent: asking a server for a
-/// chip it does not have gets its **entire** library back, so the same artists
-/// appear under every chip and nothing anywhere says why.
+/// Every decision is a function of one server's `getMusicFolders` answer,
+/// which is why it is exercised by calling it. The failure that matters most
+/// is silent: asking a server for a kind it does not have gets its **entire**
+/// library back, so the same folders appear in both groups and nothing
+/// anywhere says why.
+///
+/// Android's counterpart additionally pins a folder-browsing server's
+/// unnarrowed request; iOS has no folder-browse mode, so that case has no
+/// counterpart here.
 struct LibraryRootsTests {
 	private func root(_ id: String, _ name: String, type: String? = nil) -> MusicRoot {
 		MusicRoot(id: id, name: name, contentType: type)
@@ -31,104 +35,93 @@ struct LibraryRootsTests {
 		]
 	}
 
-	// MARK: - Chips
+	// MARK: - The merged listing's requests
 
-	/// The *distinct* kinds, not one per root: a kind may span several roots
-	/// and the server filters on the kind, so two music roots are one chip.
-	@Test func chipsAreTheDistinctContentTypes() {
-		#expect(
-			LibraryRoots.chips(roots: typed, canUpload: false) == [.artists, .categories])
+	/// A server naming both kinds is asked once per kind — and the *distinct*
+	/// kinds, not once per root: two music roots are one artists request,
+	/// because a kind may span several roots and the server filters on the
+	/// kind.
+	@Test func aServerNamingBothKindsIsAskedForEach() {
+		let requests = LibraryRoots.listingRequests(roots: typed)
+		#expect(requests.categories?.contentType == "categories")
+		#expect(requests.artists?.contentType == "artists")
+		#expect(requests.categories?.musicFolderId == nil)
+		#expect(requests.artists?.musicFolderId == nil)
+		#expect(requests.categories?.personal == PersonalScope.none)
+		#expect(requests.artists?.personal == PersonalScope.none)
 	}
 
-	@Test func aServerNamingNoKindOffersArtistsAlone() {
-		let untyped = [root("1", "music")]
-		#expect(LibraryRoots.chips(roots: untyped, canUpload: false) == [.artists])
-		#expect(LibraryRoots.chips(roots: [], canUpload: false) == [.artists])
+	/// The group a server lacks is not asked for at all — asking would come
+	/// back empty at best, and on a server predating roots as the entire
+	/// library, putting the same folders in both groups.
+	@Test func aServerWithoutCategoriesContributesNothingToThatGroup() {
+		let requests = LibraryRoots.listingRequests(
+			roots: [root("1", "music", type: "artists")])
+		#expect(requests.categories == nil)
+		#expect(requests.artists?.contentType == "artists")
 	}
 
-	/// A fact about the **account**, not the roots: the server keeps its
-	/// uploads root out of `getMusicFolders` entirely, so no amount of reading
-	/// them would produce this chip.
-	@Test func uploadsComesFromTheAccountAndIsAppendedLast() {
-		#expect(
-			LibraryRoots.chips(roots: typed, canUpload: true)
-				== [.artists, .categories, .uploads])
-		#expect(LibraryRoots.chips(roots: [], canUpload: true) == [.artists, .uploads])
+	@Test func aCategoriesOnlyServerContributesNothingToTheArtistsGroup() {
+		let requests = LibraryRoots.listingRequests(
+			roots: [root("1", "films", type: "categories")])
+		#expect(requests.categories?.contentType == "categories")
+		#expect(requests.artists == nil)
 	}
 
-	// MARK: - Requests
-
-	/// **The one that must not regress.** A chip contributed by a different
-	/// server is not a failure, and asking anyway is what would put the same
-	/// artists under every chip.
-	@Test func aChipThisServerCannotAnswerForIsNotAsked() {
-		#expect(
-			LibraryRoots.request(
-				roots: [root("1", "music", type: "artists")], mode: .categories,
-				canUpload: false, isAdmin: false) == nil)
-		#expect(
-			LibraryRoots.request(
-				roots: typed, mode: .uploads, canUpload: false, isAdmin: false) == nil)
+	/// A kind this build has never heard of contributes nothing: the merged
+	/// list has exactly two groups and nowhere meaningful to put it.
+	@Test func anUnknownContentTypeContributesNothing() {
+		let requests = LibraryRoots.listingRequests(
+			roots: [root("1", "stuff", type: "podcasts")])
+		#expect(requests.categories == nil)
+		#expect(requests.artists == nil)
 	}
 
-	@Test func aContentTypeChipSendsContentType() {
-		#expect(
-			LibraryRoots.request(
-				roots: typed, mode: .categories, canUpload: false, isAdmin: false)
-				== RootRequest(contentType: "categories"))
+	/// The guarantee for a server that has never heard of roots, pinned: it is
+	/// still sent `contentType=artists`, which is exactly what this app sent
+	/// before roots existed and which such a server ignores.
+	@Test func anUntypedServerIsStillSentContentTypeArtists() {
+		for roots in [[], [root("1", "Music"), root("2", "Podcasts")]] {
+			let requests = LibraryRoots.listingRequests(roots: roots)
+			#expect(requests.categories == nil)
+			#expect(requests.artists?.contentType == "artists")
+			#expect(requests.artists?.musicFolderId == nil)
+		}
 	}
 
-	/// Uploads is handled before everything else because it is **not a root**:
-	/// `contentType=uploads` would narrow the shared library to a kind no
-	/// server has and answer with nothing at all.
-	@Test func uploadsSendsPersonalAndNoContentType() {
-		let request = LibraryRoots.request(
-			roots: typed, mode: .uploads, canUpload: true, isAdmin: false)
-		#expect(request == RootRequest(personal: .mine))
-		#expect(request?.contentType == nil)
-		#expect(request?.personal.parameter == "true")
-	}
-
-	/// An admin is the only account that can promote an upload into the shared
-	/// library, so without the wider scope a non-admin's upload is visible to
-	/// its owner and to nobody able to act on it.
-	@Test func anAdminSeesEverybodysUploads() {
-		let request = LibraryRoots.request(
-			roots: typed, mode: .uploads, canUpload: true, isAdmin: true)
-		#expect(request?.personal == PersonalScope.all)
-		#expect(request?.personal.parameter == "*")
-	}
-
-	/// Nil rather than `"false"`: the parameter would work, but appending one
-	/// to every ordinary library request that never carried it is a gratuitous
-	/// difference from what a third-party server has always seen.
+	/// The shared library must go on sending exactly what it sent before.
 	@Test func theSharedLibrarySendsNoPersonalParameter() {
-		#expect(PersonalScope.none.parameter == nil)
+		let requests = LibraryRoots.listingRequests(roots: typed)
+		#expect(requests.artists?.personal.parameter == nil)
+		#expect(requests.categories?.personal.parameter == nil)
 	}
 
-	// MARK: - Merging
+	// MARK: - The uploads listing
+	//
+	// A fact about the account, not about the roots: the server keeps its
+	// uploads root out of getMusicFolders entirely, so uploads is its own
+	// request rather than a half of listingRequests.
 
-	@Test func chipsFromSeveralServersDeduplicateCaseInsensitively() {
-		let merged = LibraryRoots.mergeChips(perServer: [
-			[.artists, .categories],
-			[LibraryMode("Artists"), LibraryMode("podcasts")],
-		])
-		#expect(merged == [.artists, .categories, LibraryMode("podcasts")])
+	/// `personal=true` and nothing else. Sending `contentType=uploads` would
+	/// narrow the *shared* library to a kind no server has, and answer with an
+	/// empty list rather than an error.
+	@Test func uploadsIsAskedAsPersonalAndNarrowsNothingElse() {
+		let request = LibraryRoots.uploadsRequest(isAdmin: false)
+		#expect(request.personal == .mine)
+		#expect(request.personal.parameter == "true")
+		#expect(request.contentType == nil)
+		#expect(request.musicFolderId == nil)
 	}
 
-	/// Ranked last explicitly rather than left to sort alphabetically among the
-	/// content types, where it lands after "Categories" today and would land
-	/// before a server's "Videos" tomorrow.
-	@Test func uploadsSortsLastWhateverItIsSpelledNextTo() {
-		let merged = LibraryRoots.mergeChips(perServer: [
-			[.uploads, LibraryMode("videos")],
-			[.artists],
-		])
-		#expect(merged == [.artists, LibraryMode("videos"), .uploads])
-	}
-
-	@Test func anUnknownKindStillGetsALabel() {
-		#expect(LibraryMode("podcasts").label == "Podcasts")
-		#expect(LibraryMode.uploads.label == "Uploads")
+	/// An admin gets everybody's, because an admin is the only account that
+	/// can promote an upload into the shared library — without this a
+	/// non-admin's upload is visible to its owner and to nobody able to act
+	/// on it.
+	@Test func anAdminAsksForEveryAccountsUploads() {
+		let request = LibraryRoots.uploadsRequest(isAdmin: true)
+		#expect(request.personal == .all)
+		#expect(request.personal.parameter == "*")
+		#expect(request.contentType == nil)
+		#expect(request.musicFolderId == nil)
 	}
 }

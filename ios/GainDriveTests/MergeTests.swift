@@ -87,6 +87,47 @@ struct MergeTests {
 		#expect(merged.map(\.label) == ["A", "B", "#"])
 	}
 
+	// MARK: - Categories
+
+	/// The category half of the merged library list: every server's buckets
+	/// flattened into one alphabetical group under a single header.
+	@Test func categoriesFlattenAcrossBucketsAndSortAlphabetically() {
+		let merged = Merge.categories(perServer: [
+			[
+				ArtistIndex(label: "F", artists: [artist(serverA, "1", "Film")]),
+				ArtistIndex(label: "S", artists: [artist(serverA, "2", "Series")]),
+			]
+		])
+		#expect(merged.map(\.name) == ["Film", "Series"])
+	}
+
+	/// The explicit sort is load-bearing: `Merge.artistIndexes` short-circuits
+	/// a single server and returns its own bucket order, which under one
+	/// header would read as no order at all.
+	@Test func aSingleServersCategoriesStillComeOutAlphabetical() {
+		let merged = Merge.categories(perServer: [
+			[
+				ArtistIndex(label: "S", artists: [artist(serverA, "2", "Series")]),
+				ArtistIndex(label: "D", artists: [artist(serverA, "3", "Documentary")]),
+				ArtistIndex(label: "F", artists: [artist(serverA, "1", "Film")]),
+			]
+		])
+		#expect(merged.map(\.name) == ["Documentary", "Film", "Series"])
+	}
+
+	/// The same section on two servers is one row carrying both refs, the
+	/// first contributor in registry order winning the spelling and the ref.
+	@Test func sameNamedCategoriesCollapseAcrossServers() {
+		let merged = Merge.categories(perServer: [
+			[ArtistIndex(label: "F", artists: [artist(serverA, "1", "Film")])],
+			[ArtistIndex(label: "F", artists: [artist(serverB, "9", "film")])],
+		])
+		#expect(merged.count == 1)
+		#expect(merged[0].name == "Film")
+		#expect(merged[0].refs.count == 2)
+		#expect(merged[0].ref == ItemRef(server: serverA, id: "1"))
+	}
+
 	// MARK: - Albums
 
 	@Test func collapsesAlbumsAcrossPunctuation() {

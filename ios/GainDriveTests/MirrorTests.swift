@@ -39,7 +39,6 @@ struct MirrorKeyTests {
 	@Test func everyKeyBelongsToItsServer() {
 		let ref = ItemRef(server: server, id: "12")
 		#expect(LibraryMirror.Key.albums(ref).server == server)
-		#expect(LibraryMirror.Key.chips(server).server == server)
 		#expect(LibraryMirror.Key.indexes(server, .artists).server == server)
 	}
 

@@ -33,27 +33,26 @@ final class AlbumsViewModel {
 	/// A section of a **categories** root: Film and Series are not performers,
 	/// so there is no portrait to fetch and no biography to wait for.
 	@ObservationIgnored private let fromCategories: Bool
-	/// Which slice's preference the sort belongs to.
-	///
-	/// The Library tab's current chip, which is also what a screen reached from
-	/// Search uses — the same compromise Android makes, and the reason the
-	/// control appears in both places.
-	@ObservationIgnored private let mode: LibraryMode
+	/// Which section's preference the sort belongs to, derived from the route
+	/// flags the listing was drilled in from — this used to read a stored
+	/// "current chip", which could disagree with the listing on screen.
+	@ObservationIgnored private let section: LibrarySection
 	@ObservationIgnored private var loaded = false
 	@ObservationIgnored private var task: Task<Void, Never>?
 
 	init(
 		library: LibraryRepository, selection: ServerSelection, settings: SettingsStore,
-		refs: [ItemRef], fromCategories: Bool
+		refs: [ItemRef], fromCategories: Bool, fromUploads: Bool = false
 	) {
 		self.library = library
 		self.selection = selection
 		self.settings = settings
 		self.refs = refs
 		self.fromCategories = fromCategories
-		let mode = settings.libraryMode.map(LibraryMode.init) ?? .artists
-		self.mode = mode
-		self.sort = settings.albumSort(for: mode)
+		let section: LibrarySection =
+			fromUploads ? .uploads : fromCategories ? .categories : .artists
+		self.section = section
+		self.sort = settings.albumSort(for: section)
 	}
 
 	/// **Re-sorted in the client, never asked of the server.** The whole list
@@ -65,7 +64,7 @@ final class AlbumsViewModel {
 	func setSort(_ next: AlbumSort) {
 		guard next != sort else { return }
 		sort = next
-		settings.setAlbumSort(next, for: mode)
+		settings.setAlbumSort(next, for: section)
 		guard case .ready(let items) = state else { return }
 		state = .ready(items.sorted { sort.precedes($0.album, $1.album) })
 	}

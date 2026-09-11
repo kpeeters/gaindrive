@@ -97,8 +97,7 @@ struct GainDriveApp: App {
 	var body: some Scene {
 		WindowGroup {
 			RootView(
-				firstRun: firstRun, library: library, selection: selection, events: events,
-				settings: settings
+				firstRun: firstRun, library: library, selection: selection, events: events
 			)
 			.environment(registry)
 			.environment(settings)

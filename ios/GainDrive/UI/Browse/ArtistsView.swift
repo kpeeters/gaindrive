@@ -8,7 +8,9 @@
 
 import SwiftUI
 
-/// The Library tab: artists, one artist's albums, and one album's tracks.
+/// The Library tab: the merged listing, one artist's albums, and one album's
+/// tracks — and, presented over it, the same three columns a second time for
+/// the account's own uploads.
 ///
 /// **The only tab that is a `NavigationSplitView`**, and that is a decision
 /// rather than an accident. It is the one with three genuine levels, which is
@@ -24,46 +26,78 @@ import SwiftUI
 /// would make the change not worth having.
 struct ArtistsView: View {
 	let model: ArtistsViewModel
+	/// The uploads flavour: same screen, same columns, the personal listing.
+	/// A parameter rather than module state, so the two instances cannot
+	/// share or leak a selection.
+	var uploads = false
 
 	@Environment(ServerSelection.self) private var servers
 	@Environment(SettingsStore.self) private var settings
+	@Environment(\.library) private var library
 	@State private var columns = NavigationSplitViewVisibility.all
 	/// **The selections carry the domain values, not ids.** A `List` would
 	/// default to the element's `id`, which here is an `ItemRef` — and both
 	/// trailing columns need more than that: the albums column wants the
-	/// artist's `refs` and name, and the tracks column wants the album's title
-	/// for its bar before the load returns. Tagging the value means neither has
-	/// to look anything up, and there is no stale id to resolve against a list
-	/// that has since reloaded.
-	@State private var selectedArtist: Artist?
+	/// artist's `refs`, name and the section the row was picked from, and the
+	/// tracks column wants the album's title for its bar before the load
+	/// returns. Tagging the value means neither has to look anything up, and
+	/// there is no stale id to resolve against a list that has since reloaded.
+	@State private var selectedChoice: ArtistChoice?
 	@State private var selectedAlbum: Album?
+
+	/// The uploads listing's own model, built when the icon is tapped and
+	/// discarded on dismiss — Android's fresh-listing-per-visit lifecycle,
+	/// and what stops a stale `loadedFor` surviving a re-presentation.
+	@State private var uploadsModel: ArtistsViewModel?
+	@State private var showingUploads = false
 
 	var body: some View {
 		NavigationSplitView(columnVisibility: $columns) {
-			ArtistsList(model: model, selection: $selectedArtist)
+			ArtistsList(
+				model: model, uploads: uploads, selection: $selectedChoice,
+				onOpenUploads: uploads ? nil : openUploads)
 		} content: {
 			albums
 		} detail: {
 			tracks
 		}
-		// Replaces what a `NavigationStack` path did here: a scope or a slice
+		// Replaces what a `NavigationStack` path did here: a different scope
 		// is a different library, so what was chosen in the old one is not a
 		// screen the user can act on.
 		.onChange(of: servers.scope) { clearSelection() }
-		.onChange(of: model.mode) { clearSelection() }
 		// Going offline is a different library, so what was chosen in the other
 		// one is not a screen the user can act on.
 		.onChange(of: settings.offlineMode) { clearSelection() }
 		// A different artist cannot still have the same album showing.
-		.onChange(of: selectedArtist) { selectedAlbum = nil }
+		.onChange(of: selectedChoice) { selectedAlbum = nil }
+		// A cover rather than a sheet: this hosts a second split view, which
+		// needs the full width on an iPad — a centred sheet card cannot give
+		// it three columns — and collapses to a stack on a phone exactly like
+		// the view underneath. Presented from within the tab's content, so it
+		// inherits the environment; the caveat in RootView about sheets losing
+		// it applies only to presentations hung off the TabView itself.
+		.fullScreenCover(isPresented: $showingUploads, onDismiss: { uploadsModel = nil }) {
+			if let uploadsModel {
+				ArtistsView(model: uploadsModel, uploads: true)
+			}
+		}
+	}
+
+	private func openUploads() {
+		guard let library else { return }
+		// Built here rather than held ready: initialisers do no work, and a
+		// model that exists only while its screen does cannot go stale.
+		uploadsModel = ArtistsViewModel(library: library, selection: servers, uploads: true)
+		showingUploads = true
 	}
 
 	@ViewBuilder
 	private var albums: some View {
-		if let artist = selectedArtist {
+		if let choice = selectedChoice {
 			AlbumsView(
-				refs: artist.refs, artistName: artist.name,
-				fromCategories: model.mode == .categories,
+				refs: choice.artist.refs, artistName: choice.artist.name,
+				fromCategories: choice.section == .categories,
+				fromUploads: choice.section == .uploads,
 				selection: $selectedAlbum
 			)
 			// **A fresh identity per artist.** `AlbumsView` builds its view
@@ -72,7 +106,7 @@ struct ArtistsView: View {
 			// the previous one's albums — which reads as a stale list rather
 			// than as an error, and is the failure here most likely to be
 			// missed.
-			.id(artist.ref)
+			.id(choice.artist.ref)
 		} else {
 			// One line rather than a blank column. `android/SCREENS.md`: the
 			// web client leaves it empty, which is fine for a `<div>` and
@@ -92,43 +126,69 @@ struct ArtistsView: View {
 	}
 
 	private func clearSelection() {
-		selectedArtist = nil
+		selectedChoice = nil
 		selectedAlbum = nil
 	}
 }
 
-/// Every artist across the current scope, in index buckets with a fast-scroll
-/// rail.
+/// A picked row and the section it was picked from. The section travels with
+/// the selection because an artist ref says which folder, never which listing
+/// it was reached through — and two downstream screens key on that: a
+/// category has no portrait or biography, and an upload's album sort has a
+/// key of its own. The same reason Android's `onOpenArtist` passes a
+/// `LibrarySection` beside the refs.
+struct ArtistChoice: Hashable {
+	let artist: Artist
+	let section: LibrarySection
+}
+
+/// The merged listing — categories under one header, then every artist in
+/// index buckets with a fast-scroll rail — or the uploads listing.
 ///
 /// The split view's leading column, and — once that collapses — the tab's first
 /// screen on a phone. `.listStyle(.plain)` stays for that reason: `.sidebar` is
 /// the iPad idiom, but this is the same view the phone shows.
 private struct ArtistsList: View {
 	let model: ArtistsViewModel
-	@Binding var selection: Artist?
+	let uploads: Bool
+	@Binding var selection: ArtistChoice?
+	/// The way into the uploads listing, present only on the library
+	/// instance — on the uploads listing the icon would be a door into the
+	/// room you are standing in.
+	let onOpenUploads: (() -> Void)?
 
 	@Environment(ServerSelection.self) private var servers
 	@Environment(SettingsStore.self) private var settings
+	@Environment(\.dismiss) private var dismiss
 	/// Held in the *view*, not the view model: dismissing a note must not cost
 	/// a second fan-out across every server.
 	@State private var notesDismissed = false
 
 	var body: some View {
-		LoadStateBox(state: model.state, onRetry: { model.retry() }) { indexes in
-			content(indexes)
+		LoadStateBox(state: model.state, onRetry: { model.retry() }) { listing in
+			content(listing)
 		}
-		// Outside the list rather than a row in it, so the chips are there
-		// while the slice is loading, when the load failed, and when there is
-		// nothing in it yet — which is exactly when somebody wants to be
-		// somewhere else.
-		.safeAreaInset(edge: .top, spacing: 0) {
-			LibraryModeChips(
-				modes: model.modes, selected: model.mode,
-				onSelect: { model.select($0) })
-		}
-		.navigationTitle("Artists")
+		.navigationTitle(uploads ? "Uploads" : "Library")
 		.toolbar {
 			ToolbarItem(placement: .topBarLeading) { LibrarySelector() }
+			// A cover has no back gesture of its own on every platform this
+			// runs on; Done is the way out, in the slot iOS reserves for it.
+			if uploads {
+				ToolbarItem(placement: .cancellationAction) {
+					Button("Done") { dismiss() }
+				}
+			}
+			if let onOpenUploads, model.canUpload {
+				ToolbarItem(placement: .topBarTrailing) {
+					Button(action: onOpenUploads) {
+						// Not `square.and.arrow.up`, which is the share glyph
+						// and would read as "share this screen": this is the
+						// Android app's Upload icon — putting something into
+						// a holding area.
+						Label("Uploads", systemImage: "tray.and.arrow.up")
+					}
+				}
+			}
 			// Unconditional rather than iOS-only: Mac Catalyst has
 			// `.refreshable` but no gesture that comfortably reaches it, so
 			// without this the Catalyst build has no way to reload at all.
@@ -150,8 +210,8 @@ private struct ArtistsList: View {
 	}
 
 	@ViewBuilder
-	private func content(_ indexes: [ArtistIndex]) -> some View {
-		if indexes.isEmpty {
+	private func content(_ listing: LibraryListing) -> some View {
+		if listing.isEmpty {
 			EmptyMessage(text: emptyText)
 		} else {
 			ScrollViewReader { proxy in
@@ -167,11 +227,28 @@ private struct ArtistsList: View {
 						)
 						.listRowSeparator(.hidden)
 					}
-					ForEach(indexes) { bucket in
+					// The whole group under one heading — a library holds a
+					// handful of sections, not enough to bucket by letter.
+					// The header carries no `.id`, so it is not a rail stop;
+					// the rail belongs to the artist buckets below.
+					if !listing.categories.isEmpty {
+						Section {
+							ForEach(listing.categories) { artist in
+								ArtistRow(item: model.artistUi(artist))
+									.tag(ArtistChoice(artist: artist, section: .categories))
+							}
+						} header: {
+							Text("Categories")
+						}
+					}
+					ForEach(listing.artists) { bucket in
 						Section {
 							ForEach(bucket.artists) { artist in
 								ArtistRow(item: model.artistUi(artist))
-									.tag(artist)
+									.tag(
+										ArtistChoice(
+											artist: artist,
+											section: uploads ? .uploads : .artists))
 							}
 						} header: {
 							Text(bucket.label).id(bucket.label)
@@ -182,10 +259,10 @@ private struct ArtistsList: View {
 				.refreshable { await model.refresh() }
 				// Long names would otherwise slide underneath the rail rather
 				// than being clipped short of it.
-				.safeAreaPadding(.trailing, showsRail(indexes) ? 20 : 0)
+				.safeAreaPadding(.trailing, showsRail(listing.artists) ? 20 : 0)
 				.overlay(alignment: .trailing) {
-					if showsRail(indexes) {
-						AlphabetRail(labels: indexes.map(\.label)) { label in
+					if showsRail(listing.artists) {
+						AlphabetRail(labels: listing.artists.map(\.label)) { label in
 							// Not animated: scrubbing the rail issues these in
 							// quick succession, and animations queue up and lag
 							// behind the finger.
@@ -197,20 +274,22 @@ private struct ArtistsList: View {
 		}
 	}
 
-	/// "No artists" would read as a fault in the uploads slice, where an empty
-	/// list is the ordinary state of somewhere nothing has been put yet.
+	/// "No artists" would read as a fault in the uploads listing, where an
+	/// empty list is the ordinary state of somewhere nothing has been put yet.
 	private var emptyText: String {
 		if servers.hasNoServers { return "No servers configured" }
 		// Offline, an empty list is not a library with no artists in it — it is
 		// a library with nothing downloaded. "No artists" would send somebody
 		// looking for a server problem that is not there.
 		if settings.offlineMode { return "Nothing downloaded yet" }
-		return model.mode == .uploads ? "Nothing in your uploads yet" : "No artists"
+		return uploads ? "Nothing in your uploads yet" : "No artists"
 	}
 
 	/// The rail is for scrubbing a long alphabetical list, not for jumping
-	/// between four people. An admin's Uploads slice comes back bucketed by
-	/// **username**, and a vertical strip of those reads as a mistake.
+	/// between four people. An admin's uploads listing comes back bucketed by
+	/// **username**, and a vertical strip of those reads as a mistake. It
+	/// scans the artist buckets only — the Categories header above them is
+	/// not a stop.
 	private func showsRail(_ indexes: [ArtistIndex]) -> Bool {
 		indexes.count > 1 && indexes.allSatisfy { $0.label.count == 1 }
 	}

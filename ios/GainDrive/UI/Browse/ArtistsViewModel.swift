@@ -8,7 +8,8 @@
 
 import Foundation
 
-/// The artist list, mirroring `ui/browse/ArtistsViewModel.kt`.
+/// The merged library listing — or, with `uploads` set, the account's own
+/// uploads — mirroring `ui/browse/ArtistsViewModel.kt`.
 ///
 /// **State is a plain held value**, not something derived from a subscription.
 /// Android reversed away from `stateIn(WhileSubscribed)` here because leaving
@@ -25,47 +26,35 @@ import Foundation
 @MainActor
 @Observable
 final class ArtistsViewModel {
-	private(set) var state: Load<[ArtistIndex]> = .loading
+	private(set) var state: Load<LibraryListing> = .loading
 	private(set) var failures: [ServerFailure] = []
 	private(set) var isRefreshing = false
 	private(set) var badgeNames: [ServerId: String] = [:]
 
-	/// The slices on offer, and which one is showing.
-	///
-	/// **The floor lives here, not in the repository**, which answers with
-	/// nothing when no server did: keeping the row already on screen is better
-	/// than losing the chips to one timeout, and a fresh launch needs something
-	/// selectable regardless. `[.artists]` is that something.
-	private(set) var modes: [LibraryMode] = [.artists]
-	private(set) var mode: LibraryMode
+	/// Whether the upload icon is worth drawing. Never true on the uploads
+	/// instance — the icon is how you get there. A failed check leaves the
+	/// last answer standing: the icon is navigation, and taking it away
+	/// because one request timed out would strand the user out of their own
+	/// uploads.
+	private(set) var canUpload = false
+
+	/// Whether this instance is the uploads listing rather than the library.
+	/// The listing it loads is the whole difference — the pushed uploads
+	/// screen and the Library tab share every other line of this class.
+	let uploads: Bool
 
 	@ObservationIgnored private let library: LibraryRepository
 	@ObservationIgnored private let selection: ServerSelection
-	@ObservationIgnored private let settings: SettingsStore
 	/// What is currently on screen. Leaving for an album and coming back is not
 	/// a reason to re-read the library: the list has not changed while the user
 	/// was two screens deep.
 	@ObservationIgnored private var loadedFor: BrowseScope?
 	@ObservationIgnored private var task: Task<Void, Never>?
 
-	init(library: LibraryRepository, selection: ServerSelection, settings: SettingsStore) {
+	init(library: LibraryRepository, selection: ServerSelection, uploads: Bool = false) {
 		self.library = library
 		self.selection = selection
-		self.settings = settings
-		// Read here rather than in the first load, so the first list drawn is
-		// already the right kind rather than artists flashing past on the way
-		// to categories. A stored read is not work, which is what the rule
-		// about initialisers is really about.
-		self.mode = settings.libraryMode.map(LibraryMode.init) ?? .artists
-	}
-
-	/// A different slice is a different library, so the list goes rather than
-	/// lingering under a spinner.
-	func select(_ next: LibraryMode) {
-		guard next != mode else { return }
-		mode = next
-		settings.libraryMode = next.id
-		start(clearFirst: true)
+		self.uploads = uploads
 	}
 
 	/// Called from `.task(id:)`, which fires on appearance *and* on a scope
@@ -96,41 +85,32 @@ final class ArtistsViewModel {
 		if clearFirst { state = .loading }
 		badgeNames = selection.badgeNames
 
+		// Fire-and-forget beside the load, never awaited before it: the icon
+		// arriving a beat after the list costs nothing, while serialising the
+		// two would put an account lookup in front of every listing.
+		if !uploads {
+			Task { [library] in
+				self.canUpload = await library.canUpload(scope: scope)
+			}
+		}
+
 		task?.cancel()
 		// The counterpart of `viewModelScope.launch`: the *view model* owns the
 		// task, so navigating away does not cancel the load and strand the
 		// screen on `.loading` forever. The view's `.task` closure only kicks
 		// this off and returns.
-		task = Task { [library] in
-			// **Awaited before the load, never alongside it.** It may *change*
-			// the selected chip — a scope whose only server offers categories
-			// has no "artists" among them — and loading first would then query
-			// a chip nothing answers for, with the correction arriving too late
-			// to have a reload behind it. It costs nothing to wait: both this
-			// and the load below read the same per-session root cache, so only
-			// one of them reaches the network.
-			await self.refreshModes(scope: scope)
-			guard !Task.isCancelled else { return }
-			let merged = await library.artistIndexes(scope: scope, mode: self.mode)
+		task = Task { [library, uploads] in
+			let merged =
+				uploads
+				// The personal listing has no categories by construction, so
+				// it is an artists-only listing of the same shape.
+				? await library.uploadIndexes(scope: scope)
+					.map { LibraryListing(categories: [], artists: $0) }
+				: await library.libraryListing(scope: scope)
 			guard !Task.isCancelled else { return }
 			self.state = merged.load
 			self.failures = merged.failures
 		}
-	}
-
-	/// Re-reads which slices this scope offers, and falls back when the stored
-	/// one has gone — a server may have been removed since it was chosen.
-	///
-	/// An empty answer means no server replied, and leaves everything alone:
-	/// the chips are navigation, and losing them because one server timed out
-	/// would be worse than showing a stale set.
-	private func refreshModes(scope: BrowseScope) async {
-		let available = await library.availableModes(scope: scope)
-		guard !available.isEmpty else { return }
-		modes = available
-		guard !available.contains(mode), let fallback = available.first else { return }
-		mode = fallback
-		settings.libraryMode = fallback.id
 	}
 
 	func dismissFailures() {
