@@ -53,7 +53,7 @@ import kotlin.math.min
 private val TWO_PANE_MIN = 650.dp
 
 /** And its third. */
-private val THREE_PANE_MIN = 1100.dp
+private val THREE_PANE_MIN = 900.dp
 
 /**
  * How many panes fit in [paneAreaWidth].

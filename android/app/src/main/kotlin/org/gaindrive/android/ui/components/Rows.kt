@@ -64,7 +64,7 @@ fun ArtistRow(artist: Artist, onClick: () -> Unit, badges: List<String> = emptyL
 			// touch target even at large font scales, while letting the rows sit
 			// close together. There is no divider between them — with rows this
 			// dense, one line per artist reads better than a ruled list.
-			.heightIn(min = 48.dp)
+			.heightIn(min = 40.dp)
 			.clickable(onClick = onClick)
 			.padding(horizontal = 16.dp, vertical = 4.dp),
 		verticalAlignment = Alignment.CenterVertically,
