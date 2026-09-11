@@ -90,18 +90,36 @@ private fun Pane.adaptedValue(): PaneAdaptedValue =
 	if (this is Pane.Gone) PaneAdaptedValue.Hidden else PaneAdaptedValue.Expanded
 
 /**
- * The stock directive with the partition count replaced.
+ * The stock directive with the partition count and the pane widths replaced.
  *
  * `copy` rather than a fresh [PaneScaffoldDirective] because the default
  * carries `excludedBounds` — the bounds of a foldable's hinge, which is what
  * stops a pane being laid out across it. Building one from scratch loses that
  * silently, on the one class of device where it is visible.
+ *
+ * The widths are replaced because the stock ones are not equal and not even
+ * consistent. The scaffold gives every pane a preferred 360dp and then hands
+ * *all* surplus to its highest-priority pane — the detail — so a 900dp pane
+ * area draws list 360 / detail 540; only in deficit does it scale the panes
+ * evenly, which is why narrow windows looked right while tablets did not.
+ * And the stock gutter keys on the *window* size class (0dp below EXPANDED,
+ * 24dp above) while [paneCount] keys on the pane area at 650dp, so the gap
+ * between two panes appeared and vanished with the window. The web client
+ * divides `#pane-viewport` into exact equal panes with no gutter, each pane
+ * padding its own content (`paneNav._apply()`), and the screens here pad
+ * their own content the same way — so the directive says the same thing:
+ * preferred widths that sum to the whole area, leaving no surplus for the
+ * priority rule to misplace.
  */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
-fun paneDirective(panes: Int): PaneScaffoldDirective =
+fun paneDirective(panes: Int, paneAreaWidth: Dp): PaneScaffoldDirective =
 	calculatePaneScaffoldDirective(currentWindowAdaptiveInfo())
-		.copy(maxHorizontalPartitions = panes)
+		.copy(
+			maxHorizontalPartitions = panes,
+			horizontalPartitionSpacerSize = 0.dp,
+			defaultPanePreferredWidth = paneAreaWidth / panes,
+		)
 
 /**
  * Draws [stack] as a strip of panes, one per level of its path.
@@ -156,7 +174,7 @@ fun PaneStrip(
 		val back = remember(stack) { { stack.back() } }
 
 		ListDetailPaneScaffold(
-			directive = paneDirective(panes),
+			directive = paneDirective(panes, maxWidth),
 			value = assigned.scaffoldValue(),
 			listPane = {
 				AnimatedPane(modifier = Modifier.paneName(titles, 0)) {
