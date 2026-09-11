@@ -192,7 +192,28 @@ class PlayerConnection @Inject constructor(
 	fun connect() {
 		if (controller != null) return
 		val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-		val future = MediaController.Builder(context, token).buildAsync()
+		val future = MediaController.Builder(context, token)
+			// The service releases its session when the task is swiped away,
+			// and this singleton usually outlives that — the process survives
+			// the swipe. A dead controller kept here would make every later
+			// connect() return early on it, so it is dropped the moment the
+			// session goes; PlayerViewModel calls connect() again on reopen.
+			.setListener(object : MediaController.Listener {
+				override fun onDisconnected(disconnected: MediaController) {
+					disconnected.release()
+					if (controller !== disconnected) return
+					controller = null
+					stopTicker()
+					clearPending()
+					autoFrom = QueueBoundary.EMPTY
+					// As in stop(): the watchdog outlives the service too, and
+					// its held message would republish an explanation for a
+					// queue that no longer exists.
+					watchdog.clear()
+					_state.value = PlayerState()
+				}
+			})
+			.buildAsync()
 		future.addListener(
 			{
 				controller = runCatching { future.get() }.getOrNull()?.also {

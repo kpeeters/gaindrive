@@ -355,12 +355,26 @@ class PlaybackService : MediaLibraryService() {
 	 * active — and end the service, so no playing notification outlives the
 	 * app. This only covers a user-initiated task removal; a system memory
 	 * kill never calls onTaskRemoved, so restore-after-restart is unaffected.
+	 *
+	 * The release is done here rather than left to onDestroy, because
+	 * stopSelf() cannot destroy a service that still has bound clients — and
+	 * [PlayerConnection]'s app-context MediaController is exactly that, with
+	 * nobody left to release it once the task is gone (the process survives
+	 * the swipe; the foreground service is what keeps it alive). Waiting for
+	 * onDestroy left the session alive and the notification pinned to the
+	 * lock screen, observed on Android 13. Releasing the session is what
+	 * removes the notification and disconnects the bound controllers, after
+	 * which the stopSelf() already issued can complete. The pause still goes
+	 * first, so a cast receiver hears it before the bridge is torn down.
 	 */
 	override fun onTaskRemoved(rootIntent: android.content.Intent?) {
 		pauseAllPlayersAndStopSelf()
+		releaseEverything()
 	}
 
-	override fun onDestroy() {
+	/** Idempotent: everything is null-checked and nulled, so the second run
+	 * (onTaskRemoved first, then onDestroy) is a no-op. */
+	private fun releaseEverything() {
 		session?.release()
 		session = null
 		libraryCallback = null
@@ -373,6 +387,10 @@ class PlaybackService : MediaLibraryService() {
 		localPlayer?.release()
 		localPlayer = null
 		scope.cancel()
+	}
+
+	override fun onDestroy() {
+		releaseEverything()
 		super.onDestroy()
 	}
 
