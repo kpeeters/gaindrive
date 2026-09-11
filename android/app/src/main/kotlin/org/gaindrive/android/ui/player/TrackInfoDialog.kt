@@ -1,5 +1,6 @@
 package org.gaindrive.android.ui.player
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,21 +9,35 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.gaindrive.android.data.chapterAt
 import org.gaindrive.android.data.model.AudioFormat
 import org.gaindrive.android.data.model.AudioQuality
+import org.gaindrive.android.data.model.Chapter
+import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
+import org.gaindrive.android.data.trackShareUrl
 import org.gaindrive.android.playback.NowPlaying
 import org.gaindrive.android.playback.cast.CastMedia
 import org.gaindrive.android.playback.cast.CastRoute
@@ -48,6 +63,7 @@ import org.gaindrive.android.ui.components.formatDuration
 fun TrackInfoDialog(
 	current: NowPlaying,
 	casting: Boolean,
+	positionMs: Long,
 	onDismiss: () -> Unit,
 	viewModel: TrackInfoViewModel = hiltViewModel(),
 ) {
@@ -79,6 +95,20 @@ fun TrackInfoDialog(
 					serverName = state.serverName,
 					loaded = loaded,
 				)
+				// Unlike the stream URL the KDoc above rules out, this link is
+				// safe to show: it names the server and a track id and carries
+				// no credentials by construction.
+				val serverUrl = state.serverUrl
+				val ref = current.ref
+				if (ref != null && serverUrl != null) {
+					Heading("Share")
+					ShareSection(
+						ref = ref,
+						serverUrl = serverUrl,
+						chapters = state.chapters,
+						positionMs = positionMs,
+					)
+				}
 			}
 		},
 		confirmButton = {
@@ -166,6 +196,96 @@ private fun routeLabel(route: CastRoute, serverName: String?): String {
 		CastRoute.DIRECT -> "Direct — the player fetches from $server"
 		CastRoute.RELAY -> "Through this phone — relayed from $server"
 		CastRoute.LOCAL -> "Through this phone — from the downloaded copy"
+	}
+}
+
+/**
+ * The web dialog's Share section, with the platform's own ending: no copy
+ * button, a share icon firing the standard sheet — which itself offers copy.
+ * Same rules otherwise: the position is a snapshot taken as the dialog opens
+ * (PlayerState ticks twice a second, and a label that crept on would name
+ * some other moment by the time it was ticked); the chapter is the marker
+ * under that snapshot; the two checkboxes both answer "where should this
+ * link start", so ticking either lets go of the other; a position of 0 and a
+ * chapter starting at 0 offer nothing and are not drawn.
+ */
+@Composable
+private fun ShareSection(
+	ref: ItemRef,
+	serverUrl: String,
+	chapters: List<Chapter>,
+	positionMs: Long,
+) {
+	val snapshotSec = remember(ref) { positionMs / 1000 }
+	val chapter = chapterAt(chapters, snapshotSec)
+	var atPosition by remember(ref) { mutableStateOf(false) }
+	var atChapter by remember(ref) { mutableStateOf(false) }
+
+	val t = when {
+		atChapter && chapter != null -> chapter.startSeconds
+		atPosition && snapshotSec > 0 -> snapshotSec.toDouble()
+		else -> 0.0
+	}
+	// The visible text is the exact string shared, so what the sheet sends
+	// is never a surprise.
+	val url = trackShareUrl(serverUrl, ref.id, t)
+
+	val context = LocalContext.current
+	Row(
+		modifier = Modifier.fillMaxWidth(),
+		verticalAlignment = Alignment.CenterVertically,
+	) {
+		Text(
+			text = url,
+			style = MaterialTheme.typography.bodySmall,
+			color = MaterialTheme.colorScheme.onSurfaceVariant,
+			maxLines = 1,
+			overflow = TextOverflow.Ellipsis,
+			modifier = Modifier.weight(1f),
+		)
+		IconButton(onClick = {
+			val send = Intent(Intent.ACTION_SEND)
+				.setType("text/plain")
+				.putExtra(Intent.EXTRA_TEXT, url)
+			context.startActivity(Intent.createChooser(send, null))
+		}) {
+			Icon(Icons.Default.Share, contentDescription = "Share link")
+		}
+	}
+
+	if (snapshotSec > 0) {
+		ShareToggle(
+			label = "Start at ${formatDuration(snapshotSec.toInt())}",
+			checked = atPosition,
+		) { checked ->
+			atPosition = checked
+			if (checked) atChapter = false
+		}
+	}
+	if (chapter != null) {
+		ShareToggle(
+			label = "Start at chapter ${chapter.displayName}",
+			checked = atChapter,
+		) { checked ->
+			atChapter = checked
+			if (checked) atPosition = false
+		}
+	}
+}
+
+@Composable
+private fun ShareToggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+	Row(
+		modifier = Modifier.fillMaxWidth(),
+		verticalAlignment = Alignment.CenterVertically,
+	) {
+		Checkbox(checked = checked, onCheckedChange = onChange)
+		Text(
+			text = label,
+			style = MaterialTheme.typography.bodyMedium,
+			maxLines = 1,
+			overflow = TextOverflow.Ellipsis,
+		)
 	}
 }
 

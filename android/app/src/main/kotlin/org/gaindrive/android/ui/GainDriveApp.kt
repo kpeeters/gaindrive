@@ -579,6 +579,7 @@ fun GainDriveApp(
 			TrackInfoDialog(
 				current = current,
 				casting = castDevice != null,
+				positionMs = playerState.positionMs,
 				onDismiss = { trackInfoOpen = false },
 			)
 		}

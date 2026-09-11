@@ -6,9 +6,12 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.gaindrive.android.data.ChapterTracks
 import org.gaindrive.android.data.ServerRegistry
 import org.gaindrive.android.data.local.LocalLibrary
+import org.gaindrive.android.data.model.Chapter
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.playback.cast.CastDevice
@@ -29,6 +32,10 @@ data class TrackInfoState(
 	val song: Song? = null,
 	/** The name of the server this track came from, for the cast route line. */
 	val serverName: String? = null,
+	/** Its stored base URL, which is what a share link is composed from. */
+	val serverUrl: String? = null,
+	/** The track's markers, for the "start at current chapter" offer. */
+	val chapters: List<Chapter> = emptyList(),
 )
 
 /**
@@ -46,6 +53,7 @@ data class TrackInfoState(
 class TrackInfoViewModel @Inject constructor(
 	private val local: LocalLibrary,
 	private val registry: ServerRegistry,
+	private val chapterTracks: ChapterTracks,
 	castSession: CastSession,
 ) : ViewModel() {
 
@@ -63,12 +71,28 @@ class TrackInfoViewModel @Inject constructor(
 	 * on screen for as long as the read took.
 	 */
 	fun load(ref: ItemRef) {
+		shownRef = ref
 		_state.value = TrackInfoState()
 		viewModelScope.launch {
-			_state.value = TrackInfoState(
-				song = local.song(ref),
-				serverName = registry.get(ref.server)?.name,
-			)
+			val song = local.song(ref)
+			val config = registry.get(ref.server)
+			if (shownRef != ref) return@launch
+			_state.update {
+				it.copy(song = song, serverName = config?.name, serverUrl = config?.url)
+			}
+		}
+		// Separately, so the info rows are never held behind a network call;
+		// chaptersFor never throws and answers empty for the chapterless
+		// common case. The guard matters on both launches: a queue advance
+		// re-calls load() while these are in flight, and a late reply must
+		// not land under the next track's dialog.
+		viewModelScope.launch {
+			val list = chapterTracks.chaptersFor(ref)
+			if (shownRef != ref) return@launch
+			_state.update { it.copy(chapters = list.chapters) }
 		}
 	}
+
+	/** The ref the dialog currently describes; late replies for any other are dropped. */
+	private var shownRef: ItemRef? = null
 }
