@@ -31,6 +31,17 @@ sealed interface Pane {
 	/** On screen, with nothing chosen at this level yet. */
 	data object Waiting : Pane
 
+	/**
+	 * On screen, for a level deeper than the one [Waiting] invites — nothing
+	 * can be chosen at it yet, and unlike Waiting it says nothing, because a
+	 * label there would invite a choice that cannot be made. It exists to
+	 * hold its width: with it, every visible window is full (non-[Gone] slots
+	 * == `min(panes, levels)`), so the strip's widths are a function of the
+	 * window and the tab alone and never jump as the user drills in. It is
+	 * the web client's blank pane `<div>`, given a name.
+	 */
+	data object Blank : Pane
+
 	/** On screen, showing `path[index]`. */
 	data class At(val index: Int) : Pane
 }
@@ -53,12 +64,12 @@ fun leadingWindow(depth: Int, panes: Int, levels: Int): PaneSlots {
 	fun at(level: Int): Pane = when {
 		level < leftmost || level > leftmost + panes - 1 || level >= levels -> Pane.Gone
 		level <= depth -> Pane.At(level)
-		// Only the level immediately below the one being read. A third pane
-		// asking for an album while no artist is chosen invites a choice that
-		// cannot be made — the web client can leave both blank because a blank
-		// pane says nothing, and a labelled one does.
+		// Only the level immediately below the one being read is *labelled*. A
+		// third pane asking for an album while no artist is chosen invites a
+		// choice that cannot be made, so anything deeper is Blank — on screen
+		// for its width, saying nothing, exactly as the web client draws it.
 		level == depth + 1 -> Pane.Waiting
-		else -> Pane.Gone
+		else -> Pane.Blank
 	}
 	return PaneSlots(at(0), at(1), at(2))
 }
@@ -86,7 +97,11 @@ fun searchWindow(depth: Int, panes: Int, levels: Int): PaneSlots {
 		val spare = if (shown.size < room && depth + 1 <= levels - 1) listOf(depth + 1) else emptyList()
 		setOf(0) + shown + spare
 	}
+	// Room the spare could not claim is filled with blank levels below it, so
+	// the window is as full here as under leadingWindow and the widths match.
+	val blank: Set<Int> = ((depth + 2) until levels).take(panes - visible.size).toSet()
 	fun at(level: Int): Pane = when {
+		level in blank -> Pane.Blank
 		level !in visible -> Pane.Gone
 		level <= depth -> Pane.At(level)
 		else -> Pane.Waiting

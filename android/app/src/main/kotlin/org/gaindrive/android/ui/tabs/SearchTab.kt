@@ -40,11 +40,12 @@ fun SearchTab(stack: PaneStack) {
 		// level, and here that matters: an album hit lands at level 1 and is a
 		// leaf, while an artist hit lands there as a list with albums below it.
 		// Without this, a wide window beside an album hit offers a third pane
-		// asking for an album — of a pane that is already one.
+		// asking for an album — of a pane that is already one. Blank, not
+		// Gone: the pane must keep its width, it just must not ask.
 		slots = { depth, panes, levels ->
 			val base = searchWindow(depth, panes, levels)
 			if (base.extra is Pane.Waiting && stack.path.getOrNull(1) !is Route.Albums) {
-				base.copy(extra = Pane.Gone)
+				base.copy(extra = Pane.Blank)
 			} else {
 				base
 			}

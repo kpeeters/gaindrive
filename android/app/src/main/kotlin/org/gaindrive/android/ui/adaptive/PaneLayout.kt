@@ -91,6 +91,7 @@ private fun PaneSlots.scaffoldValue(): ThreePaneScaffoldValue = ThreePaneScaffol
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 private fun Pane.adaptedValue(): PaneAdaptedValue =
 	if (this is Pane.Gone) PaneAdaptedValue.Hidden else PaneAdaptedValue.Expanded
+// Note Blank is Expanded: holding its width is the whole reason it exists.
 
 /**
  * The stock directive with the partition count and the pane widths replaced.
@@ -114,21 +115,21 @@ private fun Pane.adaptedValue(): PaneAdaptedValue =
  * preferred widths that sum to the whole area, leaving no surplus for the
  * priority rule to misplace.
  *
- * The divisor is [shown] — the panes actually on screen — not [panes], the
- * partition cap. The two differ whenever a slot is [Pane.Gone] under a wider
- * cap: a three-level tab at its root shows two panes (list and its Waiting
- * neighbour, the third Gone), and dividing by three would leave a spare
- * third of the width for the priority rule to hand to one pane — the exact
- * unequal split the copy above exists to prevent.
+ * Dividing by [panes] is exact, not approximate, because the window rules
+ * keep every visible window full: [leadingWindow] and [searchWindow] mark a
+ * level too deep to choose yet as [Pane.Blank] rather than [Pane.Gone], so
+ * the number of expanded panes always equals [panes] and the widths are a
+ * function of the window and the tab alone — they must never jump as the
+ * user drills in. PaneWindowTest pins that invariant.
  */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
-fun paneDirective(panes: Int, paneAreaWidth: Dp, shown: Int = panes): PaneScaffoldDirective =
+fun paneDirective(panes: Int, paneAreaWidth: Dp): PaneScaffoldDirective =
 	calculatePaneScaffoldDirective(currentWindowAdaptiveInfo())
 		.copy(
 			maxHorizontalPartitions = panes,
 			horizontalPartitionSpacerSize = 0.dp,
-			defaultPanePreferredWidth = paneAreaWidth / shown.coerceAtLeast(1),
+			defaultPanePreferredWidth = paneAreaWidth / panes,
 		)
 
 /**
@@ -183,11 +184,8 @@ fun PaneStrip(
 		// for nothing.
 		val back = remember(stack) { { stack.back() } }
 
-		val shown = listOf(assigned.list, assigned.detail, assigned.extra)
-			.count { it !is Pane.Gone }
-
 		ListDetailPaneScaffold(
-			directive = paneDirective(panes, maxWidth, shown),
+			directive = paneDirective(panes, maxWidth),
 			value = assigned.scaffoldValue(),
 			listPane = {
 				AnimatedPane(modifier = Modifier.paneName(titles, 0)) {
@@ -221,6 +219,8 @@ private fun Slot(
 ) {
 	when (content) {
 		is Pane.Gone -> Unit
+		// The blank bar with nothing under it — present for its width alone.
+		is Pane.Blank -> PaneWaiting("")
 		is Pane.Waiting -> waiting(level)
 		// Guarded because a pane and the stack can disagree for one frame while
 		// a pop is recomposing, and an index past the end would be a crash where

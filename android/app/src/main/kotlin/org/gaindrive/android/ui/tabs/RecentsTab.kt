@@ -36,11 +36,12 @@ fun RecentsTab(stack: PaneStack) {
 		titles = listOf("Recently played", "Albums", "Album"),
 		// A Waiting third pane is only honest once the middle level actually
 		// holds the artist's albums; before the back-fill it would invite a
-		// choice from a list that does not exist yet.
+		// choice from a list that does not exist yet. Blank, not Gone: the
+		// pane must keep its width, it just must not ask for anything.
 		slots = { depth, panes, levels ->
 			val base = leadingWindow(depth, panes, levels)
 			if (base.extra is Pane.Waiting && stack.path.getOrNull(1) !is Route.Albums) {
-				base.copy(extra = Pane.Gone)
+				base.copy(extra = Pane.Blank)
 			} else {
 				base
 			}
