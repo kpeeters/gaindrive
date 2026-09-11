@@ -55,7 +55,7 @@ struct ArtistsView: View {
 		NavigationSplitView(columnVisibility: $columns) {
 			ArtistsList(
 				model: model, uploads: uploads, selection: $selectedChoice,
-				onOpenUploads: uploads ? nil : openUploads)
+				onOpenUploads: openUploadsAction)
 		} content: {
 			albums
 		} detail: {
@@ -77,9 +77,26 @@ struct ArtistsView: View {
 		// inherits the environment; the caveat in RootView about sheets losing
 		// it applies only to presentations hung off the TabView itself.
 		.fullScreenCover(isPresented: $showingUploads, onDismiss: { uploadsModel = nil }) {
-			if let uploadsModel {
-				ArtistsView(model: uploadsModel, uploads: true)
-			}
+			uploadsCover
+		}
+	}
+
+	/// Typed out of line rather than written as `uploads ? nil : openUploads`
+	/// at the call site: a `nil` against an unapplied method reference, with
+	/// the optional-closure type left to inference inside the body's builder,
+	/// is what pushed the type checker into "failed to produce diagnostic".
+	/// A property with a declared type gives the solver nothing to infer.
+	private var openUploadsAction: (() -> Void)? {
+		if uploads { return nil }
+		return { openUploads() }
+	}
+
+	/// Out of the body for the same reason as `openUploadsAction`: the
+	/// smaller each expression the body has to solve, the better.
+	@ViewBuilder
+	private var uploadsCover: some View {
+		if let uploadsModel {
+			ArtistsView(model: uploadsModel, uploads: true)
 		}
 	}
 
