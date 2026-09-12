@@ -16,6 +16,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -3583,6 +3584,58 @@ GainDrive::GainDrive(const std::string& db_path,
 	// composes its anchors from location.href itself, so nothing from the
 	// query string is spliced into HTML here, and the public scheme and
 	// host — which behind a proxy this process does not know — come free.
+	//
+	// Every embedded asset is revalidated rather than cached blindly, which is
+	// the same bargain getCoverArt strikes and for a sharper reason.
+	//
+	// These files had no cache headers at all — no Cache-Control, no ETag, no
+	// Last-Modified — which does not mean "do not cache", it means the browser
+	// picks a lifetime by heuristic and nothing can correct it. **The SPA talks
+	// to the API it shipped with**, so a heuristically cached app.js run against
+	// an upgraded server is a client out of step with its server, with nothing
+	// anywhere saying so: exactly the confusion Errors.kt's "the server may be
+	// too old" message exists to name, arriving from the other direction. The
+	// person who upgraded the binary has no reason to suspect their browser.
+	//
+	// `no-cache` is not `no-store`: the copy is kept and revalidated, so the
+	// steady-state cost is a conditional request answered 304, not a download.
+	//
+	// The validator is the version *and* a hash of the bytes. The version alone
+	// would be wrong in the case it matters most — every build between releases
+	// carries the same VERSION, so changed bytes would keep their old validator
+	// during development. std::hash is enough for a cache validator: this is not
+	// a signature, and a collision costs one stale load, which is what the
+	// version half is there to bound anyway.
+	auto etag_of = [](std::string_view body) {
+		// Computed per call rather than memoised: it is one pass over a few
+		// hundred kilobytes on a request that is already writing that much to a
+		// socket, and a static would have to be keyed by asset to be correct.
+		return "\"gd-" + std::string(GAINDRIVE_VERSION) + "-"
+		     + std::to_string(std::hash<std::string_view>{}(body)) + "\"";
+		};
+	// True when the response has been completed as a 304, so the caller returns
+	// without writing a body. Headers that describe the *resource* rather than
+	// the payload — the CSP, X-Frame-Options — are already set by then, which is
+	// what a conformant 304 wants.
+	auto revalidated = [etag_of](const httplib::Request& req, httplib::Response& res,
+	                             std::string_view body) {
+		std::string etag = etag_of(body);
+		res.set_header("Cache-Control", "no-cache");
+		res.set_header("ETag", etag);
+		if (req.get_header_value("If-None-Match") == etag) {
+			res.status = 304;
+			return true;
+			}
+		return false;
+		};
+	auto static_asset = [revalidated](std::string_view body, std::string_view mime) {
+		return [revalidated, body, mime](const httplib::Request& req,
+		                                 httplib::Response& res) {
+			if (revalidated(req, res, body)) return;
+			res.set_content(body.data(), body.size(), mime.data());
+			};
+		};
+
 	// The two HTML pages carry a Content-Security-Policy; assets and API
 	// responses need none, since a policy governs only the document that a
 	// browser renders. frame-ancestors 'none' is the load-bearing directive:
@@ -3594,7 +3647,8 @@ GainDrive::GainDrive(const std::string& db_path,
 	// asset loading), so its policy allows its own inline script and style
 	// and nothing else. X-Frame-Options is the same rule for browsers that
 	// predate frame-ancestors.
-	auto index_page = [](const httplib::Request& req, httplib::Response& res) {
+	auto index_page = [revalidated](const httplib::Request& req,
+	                                httplib::Response& res) {
 		res.set_header("X-Frame-Options", "DENY");
 		if (req.has_param("track") && !req.has_param("web")
 		    && req.get_header_value("User-Agent").find("Android")
@@ -3603,6 +3657,7 @@ GainDrive::GainDrive(const std::string& db_path,
 			               "default-src 'none'; script-src 'unsafe-inline'; "
 			               "style-src 'unsafe-inline'; base-uri 'none'; "
 			               "form-action 'none'; frame-ancestors 'none'");
+			if (revalidated(req, res, embedded::link_html)) return;
 			res.set_content(embedded::link_html.data(), embedded::link_html.size(),
 			                embedded::link_html_mime.data());
 			}
@@ -3613,30 +3668,31 @@ GainDrive::GainDrive(const std::string& db_path,
 			               "media-src 'self'; connect-src 'self'; "
 			               "font-src 'self'; base-uri 'none'; "
 			               "form-action 'self'; frame-ancestors 'none'");
+			if (revalidated(req, res, embedded::index_html)) return;
 			res.set_content(embedded::index_html.data(), embedded::index_html.size(),
 			                embedded::index_html_mime.data());
 			}
 		};
 	server_.Get("/",           index_page);
 	server_.Get("/index.html", index_page);
-	server_.Get("/style.css", [](const httplib::Request&, httplib::Response& res) {
-		res.set_content(embedded::style_css.data(), embedded::style_css.size(),
-		                embedded::style_css_mime.data());
-		});
-	server_.Get("/app.js", [](const httplib::Request&, httplib::Response& res) {
-		res.set_content(embedded::app_js.data(), embedded::app_js.size(),
-		                embedded::app_js_mime.data());
-		});
-	server_.Get("/theme.js", [](const httplib::Request&, httplib::Response& res) {
-		res.set_content(embedded::theme_js.data(), embedded::theme_js.size(),
-		                embedded::theme_js_mime.data());
-		});
-	server_.Get("/favicon.svg", [](const httplib::Request&, httplib::Response& res) {
-		res.set_content(embedded::favicon_svg.data(), embedded::favicon_svg.size(),
-		                embedded::favicon_svg_mime.data());
-		});
+	server_.Get("/style.css",
+	            static_asset(embedded::style_css, embedded::style_css_mime));
+	server_.Get("/app.js",
+	            static_asset(embedded::app_js, embedded::app_js_mime));
+	server_.Get("/theme.js",
+	            static_asset(embedded::theme_js, embedded::theme_js_mime));
+	server_.Get("/favicon.svg",
+	            static_asset(embedded::favicon_svg, embedded::favicon_svg_mime));
 	// Half a megabyte that only changes when the binary does, so it is worth
 	// telling the browser not to ask again.
+	//
+	// The one asset deliberately left out of the revalidation above, and
+	// `immutable` is why: it tells the browser never to consult a validator, so
+	// an ETag here would be decoration. That is the right trade for a font that
+	// has never changed — but it does mean a *replaced* font would be served
+	// stale for a year. Fixing that properly means versioning the URL, and this
+	// URL lives in style.css's @font-face, so it would need substituting at
+	// build time. Worth knowing before anyone swaps the font.
 	server_.Get("/material-symbols-rounded.woff2",
 	            [](const httplib::Request&, httplib::Response& res) {
 		res.set_header("Cache-Control", "public, max-age=31536000, immutable");
