@@ -40,6 +40,7 @@ import org.gaindrive.android.data.model.Playlist
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.playback.TrackState
 import org.gaindrive.android.ui.Availability
+import org.gaindrive.android.ui.ContainerMark
 import org.gaindrive.android.ui.LocalAvailability
 
 /** Shared row composables. Every browse screen is built from these. */
@@ -124,6 +125,7 @@ fun AlbumRow(
 				overflow = TextOverflow.Ellipsis,
 			)
 		}
+		ContainerDownloadMark(album.refs)
 		AlbumVideoMark(album)
 		ServerBadges(badges)
 	}
@@ -191,6 +193,7 @@ fun PlaylistRow(
 				overflow = TextOverflow.Ellipsis,
 			)
 		}
+		ContainerDownloadMark(listOf(playlist.ref))
 		trailing?.invoke()
 	}
 }
@@ -526,6 +529,43 @@ fun ChapterHitRow(hit: ChapterHit, onClick: () -> Unit) {
 }
 
 /**
+ * Where a whole album or playlist stands, in the same two marks its tracks use.
+ *
+ * A tick means downloaded — asked for, and safe from eviction — and before it
+ * the ring, clock or error the album's own screen shows, so a row never
+ * disagrees with the screen it opens. A dot means every track is here without
+ * anything keeping it that way, which is what a record played straight through
+ * looks like.
+ *
+ * Nothing at all is drawn otherwise, and that includes an album whose tracks
+ * the mirror has never seen. It deliberately does **not** fall back to
+ * [DownloadIndicator]'s own null state: that is a download arrow meaning "not
+ * yet", which is an invitation on a button and, down the side of a list, a
+ * column of buttons that do nothing.
+ */
+@Composable
+private fun ContainerDownloadMark(refs: List<ItemRef>) {
+	when (val mark = LocalAvailability.current.containerMark(refs)) {
+		null -> Unit
+
+		ContainerMark.StoredOnly -> Icon(
+			imageVector = Icons.Default.Circle,
+			contentDescription = "Stored, but not downloaded",
+			tint = MaterialTheme.colorScheme.onSurfaceVariant,
+			modifier = Modifier.size(8.dp),
+		)
+
+		// Both sizes given, or the running ring keeps its own and the row
+		// reflows the moment a download finishes.
+		is ContainerMark.Pinned -> DownloadIndicator(
+			status = mark.status,
+			modifier = Modifier.size(MARK_SIZE),
+			ringSize = MARK_SIZE,
+		)
+	}
+}
+
+/**
  * Where a track stands with respect to being downloaded: waiting its turn, being
  * fetched, or here.
  *
@@ -583,6 +623,9 @@ private fun TrackDownloadMark(ref: ItemRef) {
 
 /** Legible, but plainly not something you can tap. */
 private const val UNAVAILABLE_ALPHA = 0.38f
+
+/** What every download mark occupies, so no row reflows as one progresses. */
+private val MARK_SIZE = 16.dp
 
 /** Small enough to sit in a track number's place. */
 @Composable

@@ -12,6 +12,8 @@ import org.gaindrive.android.data.Connectivity
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.cache.DownloadQueue
 import org.gaindrive.android.data.cache.PinRepository
+import org.gaindrive.android.data.cache.PinStatus
+import org.gaindrive.android.data.cache.StoredContainers
 import org.gaindrive.android.data.cache.TrackDownload
 import org.gaindrive.android.data.model.ItemRef
 import javax.inject.Inject
@@ -28,6 +30,23 @@ enum class Availability {
 	UNAVAILABLE,
 }
 
+/**
+ * What an album or playlist row has to say about being downloaded.
+ *
+ * The two levels deliberately speak the same language: [Pinned] is the tick
+ * (and, before it, the ring) a track gets for being asked for, [StoredOnly] is
+ * the quieter dot for being here anyway. Null is not "no", it is "nothing to
+ * say" — which is also the answer for a collection never opened, whose tracks
+ * the mirror does not know.
+ */
+sealed interface ContainerMark {
+	/** Asked for, with [status] saying how far it has got. */
+	data class Pinned(val status: PinStatus) : ContainerMark
+
+	/** Every track is here, but nothing is keeping them from eviction. */
+	data object StoredOnly : ContainerMark
+}
+
 data class AvailabilityState(
 	val online: Boolean = true,
 	val storedKeys: Set<String> = emptySet(),
@@ -39,10 +58,30 @@ data class AvailabilityState(
 	val offlineByChoice: Boolean = false,
 	/** Tracks being fetched right now, keyed by encoded ref. */
 	val downloads: Map<String, TrackDownload> = emptyMap(),
+	/** How far each *pinned* album or playlist has got, by encoded ref. */
+	val pinStatuses: Map<String, PinStatus> = emptyMap(),
+	/** Albums and playlists whose every track is stored, pinned or not. */
+	val storedContainers: Set<String> = emptySet(),
 ) {
 
 	/** What, if anything, this track's row should show about a download. */
 	fun downloadOf(ref: ItemRef): TrackDownload? = downloads[ref.encode()]
+
+	/**
+	 * What, if anything, an album or playlist row should show.
+	 *
+	 * Takes every ref the row stands for, not one: a merged album row is one
+	 * album on several servers, and having downloaded it from any of them is
+	 * still having downloaded what the row names. A pin wins over the dot,
+	 * being the stronger promise of the two.
+	 */
+	fun containerMark(refs: List<ItemRef>): ContainerMark? {
+		val keys = refs.map { it.encode() }
+		keys.firstNotNullOfOrNull { pinStatuses[it] }
+			?.let { return ContainerMark.Pinned(it) }
+		return if (keys.any { it in storedContainers }) ContainerMark.StoredOnly else null
+	}
+
 	fun of(ref: ItemRef): Availability {
 		val key = ref.encode()
 		return when {
@@ -88,26 +127,51 @@ class AvailabilityViewModel @Inject constructor(
 	pins: PinRepository,
 	downloads: DownloadQueue,
 	connectivity: Connectivity,
+	containers: StoredContainers,
 ) : ViewModel() {
+
+	/**
+	 * Two groupings, because `combine` is typed only up to five flows and this
+	 * wants seven. Both pair things that are about the same subject anyway, so
+	 * the records read as facts rather than as a workaround for the arity.
+	 */
+	private data class Net(val online: Boolean, val byChoice: Boolean)
+
+	private data class Containers(
+		val pinStatuses: Map<String, PinStatus>,
+		val stored: Set<String>,
+	)
+
+	private val net = combine(
+		connectivity.online,
+		connectivity.offlineByChoice,
+	) { online, byChoice -> Net(online, byChoice) }
+
+	private val containerState = combine(
+		pins.statuses,
+		containers.fullyStored,
+	) { statuses, stored -> Containers(statuses, stored) }
 
 	val state: StateFlow<AvailabilityState> =
 		combine(
-			connectivity.online,
+			net,
 			audioCache.cachedKeys,
 			pins.protectedKeys,
-			connectivity.offlineByChoice,
 			downloads.states,
-		) { online, cached, pinned, byChoice, downloadStates ->
+			containerState,
+		) { net, cached, pinned, downloadStates, containerState ->
 			AvailabilityState(
-				online = online,
+				online = net.online,
 				// Union, not just the cache: a completed download is on the
 				// device whether or not the cache recorded a length it can check
 				// against, and gaindrive's chunked responses mean it often did
 				// not.
 				storedKeys = cached + downloadStates.completed,
 				pinnedKeys = pinned,
-				offlineByChoice = byChoice,
+				offlineByChoice = net.byChoice,
 				downloads = downloadStates.active,
+				pinStatuses = containerState.pinStatuses,
+				storedContainers = containerState.stored,
 			)
 		}.stateIn(
 			scope = viewModelScope,

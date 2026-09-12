@@ -3,6 +3,7 @@ package org.gaindrive.android.data.cache
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -251,5 +252,50 @@ class PinsTest {
 
 		assertEquals(1, before.size)
 		assertTrue(ref(serverA, "9").encode() in after)
+	}
+
+	@Test
+	fun `a collection counts as stored once every track of it is here`() {
+		val stored = collectionsFullyStored(
+			membership = mapOf(
+				"a/10" to listOf("a/1", "a/2"),
+				"a/11" to listOf("a/3", "a/4"),
+			),
+			here = setOf("a/1", "a/2", "a/3"),
+		)
+		assertEquals(setOf("a/10"), stored)
+	}
+
+	/**
+	 * The one that matters. The mirror only holds the tracks of collections
+	 * visited while online, so an album nobody has opened has no members at all
+	 * — and `containsAll` over an empty list is vacuously true. Without the
+	 * guard every album in a fresh library would claim to be downloaded.
+	 *
+	 * Note this is the opposite answer to `a pin covering nothing counts as
+	 * done` above, and deliberately: there the user asked for the thing, so the
+	 * question is whether their request is outstanding. Here nobody asked, and
+	 * the question is whether the bytes are present.
+	 */
+	@Test
+	fun `a collection the mirror knows no tracks of is not stored`() {
+		assertTrue(
+			collectionsFullyStored(
+				membership = mapOf("a/10" to emptyList()),
+				here = setOf("a/1", "a/2"),
+			).isEmpty()
+		)
+	}
+
+	/**
+	 * A film in an album's folder would otherwise make it permanently
+	 * incomplete: a video is not downloaded at all unless it is being played
+	 * for its soundtrack, so it can never join the stored set.
+	 */
+	@Test
+	fun `a video counts only when videos are played as audio`() {
+		assertFalse(covered(isVideo = true, audioOnly = false))
+		assertTrue(covered(isVideo = true, audioOnly = true))
+		assertTrue(covered(isVideo = false, audioOnly = false))
 	}
 }

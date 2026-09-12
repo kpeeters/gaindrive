@@ -249,6 +249,20 @@ class LocalLibrary @Inject constructor(
 	}
 
 	/**
+	 * Every mirrored album and playlist, to the tracks it holds.
+	 *
+	 * Keyed and valued in encoded refs, so both sides compare directly against
+	 * a cache key. A collection never visited online has no entry at all rather
+	 * than an empty one, which is the distinction `fullyStored` turns on.
+	 *
+	 * Videos are left in. Whether one counts is `Pins.downloadable`'s decision
+	 * and it needs the setting, which the mirror has no business reading.
+	 */
+	suspend fun collectionMembership(): Map<String, List<MemberRow>> = io {
+		(dao.albumMembership() + dao.playlistMembership()).groupBy { it.containerKey }
+	}
+
+	/**
 	 * Server-reported byte sizes for the given cache keys, where the mirror
 	 * knows them. Keys never browsed are simply absent.
 	 */

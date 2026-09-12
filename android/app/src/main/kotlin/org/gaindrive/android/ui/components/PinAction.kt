@@ -17,6 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -62,11 +63,22 @@ fun PinAction(
 }
 
 /**
- * Shared by the app-bar button and the track sheet, so "downloading" looks the
- * same wherever it is reported.
+ * Shared by the app-bar button, the track sheet and the album and playlist
+ * rows, so "downloading" looks the same wherever it is reported.
+ *
+ * [ringSize] is separate from [modifier] because the running state is a
+ * progress indicator rather than an icon, and one does not take its size from
+ * the other: a `size` in the modifier would be overridden by the ring's own.
+ * The default is an icon's footprint at the sizes a bar uses; a list row passes
+ * its own, and passing one without matching [modifier] is how a row comes to
+ * reflow as a download finishes.
  */
 @Composable
-fun DownloadIndicator(status: PinStatus?, modifier: Modifier = Modifier) {
+fun DownloadIndicator(
+	status: PinStatus?,
+	modifier: Modifier = Modifier,
+	ringSize: Dp = RING_SIZE,
+) {
 	if (status == null) {
 		Icon(
 			imageVector = Icons.Default.Download,
@@ -114,11 +126,14 @@ fun DownloadIndicator(status: PinStatus?, modifier: Modifier = Modifier) {
 				color = MaterialTheme.colorScheme.primary,
 				// Matches an icon's own footprint so the bar does not reflow
 				// when the state changes.
-				modifier = modifier.size(20.dp),
+				modifier = modifier.size(ringSize),
 			)
 		}
 	}
 }
+
+/** An icon's own footprint at the size an app bar draws one. */
+private val RING_SIZE = 20.dp
 
 /** What to call the action, given the same status the indicator draws. */
 fun downloadActionLabel(status: PinStatus?): String = when (status?.phase) {

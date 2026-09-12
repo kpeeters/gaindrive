@@ -1,6 +1,7 @@
 package org.gaindrive.android.data.cache
 
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.data.model.Song
 
 /** What a pin was placed on. Only [PinKind.SONG] names a cache key directly. */
 enum class PinKind { SONG, ALBUM, PLAYLIST }
@@ -54,6 +55,65 @@ fun expandPins(
 		pin.ref.encode() to songs.map { it.encode() }
 	}
 )
+
+/**
+ * A video is part of what a pin covers only when it is being played for its
+ * soundtrack — `SettingsStore.videoAudioOnly`.
+ *
+ * Otherwise it could never complete: a video the server can only re-encode has
+ * no `Content-Length`, so nothing downstream can decide the copy is whole, and
+ * the byte cache is sized for tracks rather than films. With the setting on,
+ * what is fetched is an ordinary audio transcode with a real length, and none
+ * of that applies. The individual action follows the same rule (see
+ * `TrackActionsSheet`); this is the collection case, where the video is
+ * incidental and the rest of the album should still download.
+ *
+ * Turning the setting back off leaves the stored bytes behind but stops the pin
+ * covering them, so eviction reclaims them in its own time. That is the right
+ * way round — a pin means "keep what I can play", and with the setting off the
+ * film is not something this app plays from the cache.
+ *
+ * Here rather than private to `PinRepository`, and spelled as a predicate over
+ * one track, because `StoredContainers` asks the same question of collections
+ * nobody pinned and has rows rather than songs to ask it of. A second spelling
+ * — an `isVideo = 0` in SQL, say — would make an album holding a film read as
+ * complete in a list and as permanently incomplete on its own screen.
+ */
+fun covered(isVideo: Boolean, audioOnly: Boolean): Boolean = !isVideo || audioOnly
+
+/** [covered] over a list of songs, which is the shape a pin expands to. */
+fun List<Song>.downloadable(audioOnly: Boolean): List<Song> =
+	filter { covered(it.isVideo, audioOnly) }
+
+/**
+ * How long to let the mirror settle before recomputing what it says.
+ *
+ * Both classes that listen on `LocalLibrary.revision` want the same wait and
+ * for the same reason: one browse writes several tables in a burst, and only
+ * the settled result is worth the recompute.
+ */
+const val REVISION_DEBOUNCE_MS = 500L
+
+/**
+ * Which collections are entirely on the device, from their membership and the
+ * set of song keys that are here.
+ *
+ * The unpinned counterpart of [pinPhaseOf]: that one answers "how far has this
+ * download got", this one "is all of this here anyway", which is what lets an
+ * album played straight through be told apart from one nobody has.
+ *
+ * **An empty membership is not complete**, and that is the whole reason this is
+ * a function rather than a `containsAll`. The mirror only holds the tracks of
+ * collections visited while online, so an album never opened has no members at
+ * all — and [PinStatus.fraction] reports exactly that case as 1f, which is the
+ * right answer for a pin the user placed and the wrong one here. Unknown has to
+ * read as unknown, or every album in a fresh library claims to be downloaded.
+ */
+fun collectionsFullyStored(
+	membership: Map<String, List<String>>,
+	here: Set<String>,
+): Set<String> =
+	membership.filterValues { keys -> keys.isNotEmpty() && here.containsAll(keys) }.keys
 
 /** What a pin is doing, as far as the icon reporting it is concerned. */
 enum class PinPhase {

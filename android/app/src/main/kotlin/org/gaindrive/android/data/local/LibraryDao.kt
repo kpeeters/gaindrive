@@ -19,6 +19,19 @@ data class ArtistAlbumRow(val serverId: String, val artistId: String, val albumI
 /** [refKey] is already an encoded `ItemRef`, so it matches a cache key directly. */
 data class SongSizeRow(val refKey: String, val sizeBytes: Long)
 
+/**
+ * One track's place in one collection: which album or playlist, and the track's
+ * own cache key.
+ *
+ * [refKey] and [containerKey] are both already encoded `ItemRef`s, so neither
+ * needs rebuilding before being compared against the cache.
+ *
+ * [isVideo] travels with the row rather than being filtered in SQL because the
+ * rule that decides whether a video counts is `Pins.downloadable`, and it has
+ * to have one definition — see the comment there.
+ */
+data class MemberRow(val containerKey: String, val refKey: String, val isVideo: Boolean)
+
 @Dao
 interface LibraryDao {
 
@@ -140,6 +153,30 @@ interface LibraryDao {
 			"WHERE serverId || '/' || songId IN (:keys)"
 	)
 	suspend fun playlistsWithStoredSongs(keys: List<String>): List<RefRow>
+
+	// Whole membership rather than a count, because deciding what counts is
+	// `Pins.downloadable`'s job and restating it as an `isVideo = 0` here would
+	// be the same rule in two places — an album holding a film would then read
+	// as complete in a list and as permanently incomplete on its own screen.
+	// Bounded by what has been visited online: there is no whole-library sync.
+	//
+	// No key parameter, so neither of these needs the chunking the queries
+	// above do.
+
+	@Query(
+		"SELECT serverId || '/' || albumId AS containerKey, " +
+			"serverId || '/' || id AS refKey, isVideo FROM songs " +
+			"WHERE albumId IS NOT NULL"
+	)
+	suspend fun albumMembership(): List<MemberRow>
+
+	@Query(
+		"SELECT ps.serverId || '/' || ps.playlistId AS containerKey, " +
+			"ps.serverId || '/' || ps.songId AS refKey, s.isVideo AS isVideo " +
+			"FROM playlist_songs ps " +
+			"JOIN songs s ON s.serverId = ps.serverId AND s.id = ps.songId"
+	)
+	suspend fun playlistMembership(): List<MemberRow>
 
 	/**
 	 * The server's byte size for songs the cache is holding.

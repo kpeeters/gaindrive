@@ -318,26 +318,6 @@ class PinRepository @Inject constructor(
 		PinKind.PLAYLIST -> local.songsOfPlaylist(pin.ref)
 	}.downloadable(settings.videoAudioOnly.first())
 
-	/**
-	 * A video is part of what a pin covers only when it is being played for its
-	 * soundtrack — `SettingsStore.videoAudioOnly`.
-	 *
-	 * Otherwise it could never complete: a video the server can only re-encode
-	 * has no `Content-Length`, so nothing downstream can decide the copy is
-	 * whole, and the byte cache is sized for tracks rather than films. With the
-	 * setting on, what is fetched is an ordinary audio transcode with a real
-	 * length, and none of that applies. The individual action follows the same
-	 * rule (see `TrackActionsSheet`); this is the collection case, where the
-	 * video is incidental and the rest of the album should still download.
-	 *
-	 * Turning the setting back off leaves the stored bytes behind but stops the
-	 * pin covering them, so eviction reclaims them in its own time. That is the
-	 * right way round — a pin means "keep what I can play", and with the setting
-	 * off the film is not something this app plays from the cache.
-	 */
-	private fun List<Song>.downloadable(audioOnly: Boolean): List<Song> =
-		if (audioOnly) this else filterNot { it.isVideo }
-
 	private suspend fun enqueue(songs: List<Song>) {
 		songs.forEach { song ->
 			// A video only ever reaches here through downloadable(), which lets
@@ -382,9 +362,5 @@ class PinRepository @Inject constructor(
 		val ref = ItemRef.decode(refKey) ?: return null
 		val pinKind = runCatching { PinKind.valueOf(kind) }.getOrNull() ?: return null
 		return Pin(ref, pinKind)
-	}
-
-	private companion object {
-		const val REVISION_DEBOUNCE_MS = 500L
 	}
 }
