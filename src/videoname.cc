@@ -38,6 +38,23 @@ static const std::set<std::string> STOP_WORDS = {
 	"repost", "nfo", "readnfo", "untouched",
 	};
 
+// The language names and the subtitle words beside them: junk in a release
+// name, but ordinary adjectives inside a real title — "La French", "The
+// English Patient" and "The Italian Job" all cut to their first word while
+// these counted unconditionally.  A weak stop word ends the title only in the
+// company of junk: when the next token is itself a stop word, or nothing
+// follows.  A following *year* keeps it, because "Title Year Junk" puts
+// everything before the year in the title — which is what separates
+// "La French 2014 720p" (a film called La French) from
+// "Amelie 2001 FRENCH 1080p" (a language tag).  Edition words ("extended",
+// "final") stay strong deliberately: weakening them regresses
+// "Movie.2012.EXTENDED.CUT.1080p", since "cut" is not in the table.
+static const std::set<std::string> WEAK_STOP_WORDS = {
+	"multi", "dual", "dubbed", "subbed", "subs", "sub", "eng", "english",
+	"nl", "dutch", "ger", "german", "fre", "french", "spa", "spanish",
+	"ita", "italian", "nordic", "retail",
+	};
+
 // Rip defaults and part markers: a filename that is only one of these says
 // nothing, so the folder above is the better source.  Anchored, because a film
 // really can be called "Video" or "The Movie".
@@ -108,6 +125,11 @@ static bool is_stop_word(const std::string& token)
 		R"((cd|disc|disk|part|pt|dvd)\d{1,2})$)",
 		std::regex::icase);
 	return std::regex_match(t, pat);
+	}
+
+static bool is_weak_stop_word(const std::string& token)
+	{
+	return WEAK_STOP_WORDS.count(stop_key(token)) != 0;
 	}
 
 static bool is_year_token(const std::string& token, int& out)
@@ -182,9 +204,16 @@ static std::string clean_run(const std::string& text, int& year)
 
 	size_t cut = tokens.size();
 
-	// The first stop word ends the title.
-	for (size_t i = 0; i < tokens.size(); ++i)
-		if (is_stop_word(tokens[i])) { cut = i; break; }
+	// The first stop word ends the title.  A weak one only in the company of
+	// junk — see WEAK_STOP_WORDS; followed by a real word or a year it is
+	// title text.
+	for (size_t i = 0; i < tokens.size(); ++i) {
+		if (!is_stop_word(tokens[i])) continue;
+		if (is_weak_stop_word(tokens[i])
+		    && i + 1 < tokens.size() && !is_stop_word(tokens[i + 1]))
+			continue;
+		cut = i; break;
+		}
 
 	// Unless it is the *first* word, in which case it is not junk at all —
 	// "4K Nature Scenes" and "HD Home Video" are titles that happen to open
@@ -251,10 +280,18 @@ VideoName parse_video_name(std::string_view name)
 		s = std::regex_replace(s, imdb_re, " ");
 		}
 	// A bracketed year is unambiguous wherever it sits, so it wins over every
-	// rule below and is removed before the token scan can mistake it.
+	// rule below and is removed before the token scan can mistake it.  It also
+	// marks where the title *ends*: "Title (Year)" is a human convention, not
+	// scene naming, so everything before it is the title verbatim and the junk
+	// after it is ignored.  That is the only rule that can save a title-final
+	// ambiguous word — "The Girl Who Was French (2037) DVDRip" is
+	// shape-identical to a language tag, and no token heuristic tells them
+	// apart.
 	static const std::regex paren_year(R"([\(\[]((?:19|20)\d{2})[\)\]])");
+	std::string title_zone;
 	if (std::regex_search(s, m, paren_year)) {
-		out.year = std::stoi(m[1]);
+		out.year   = std::stoi(m[1]);
+		title_zone = m.prefix().str();
 		s = std::regex_replace(s, paren_year, " ");
 		}
 
@@ -264,6 +301,8 @@ VideoName parse_video_name(std::string_view name)
 	s = std::regex_replace(s, tracker, "");
 	static const std::regex brackets(R"(\[[^\]]*\]|\{[^}]*\})");
 	s = std::regex_replace(s, brackets, " ");
+	title_zone = std::regex_replace(title_zone, tracker, "");
+	title_zone = std::regex_replace(title_zone, brackets, " ");
 
 	// ---- episode markers ----
 	// Only the unambiguous forms split the title. A leading number is handled
@@ -295,8 +334,14 @@ VideoName parse_video_name(std::string_view name)
 		return out;
 		}
 
+	// Everything before a bracketed year is the title, taken as it stands.  A
+	// zone that tokenises to nothing — "(2014) Some Movie", year-first
+	// naming — falls through to the token rules, which handle it.
+	auto zone_tokens = tokenise(title_zone);
+	std::string zone_title = tidy(join(zone_tokens, zone_tokens.size()));
+
 	int year = out.year;
-	out.title = clean_run(s, year);
+	out.title = !zone_title.empty() ? zone_title : clean_run(s, year);
 	out.year  = year;
 
 	// A leading number orders episodes that carry no other marker. It sets the

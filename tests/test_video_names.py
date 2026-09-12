@@ -157,6 +157,35 @@ CASES = {
     # --- real extensions are stripped, fake ones are not ----------------
     "The Third Man (1949).mkv":
         {"title": "The Third Man", "year": "1949"},
+
+    # --- language words are title words, junk only in junk company -------
+    # The reported file: "french" is a release tag in the stop-word table
+    # and an ordinary adjective here. Followed by the year it stays title
+    # text, and the year then anchors the cut at 720p — which also recovers
+    # the year the lowercase group tag ("titler") used to defeat.
+    "La French [The Connection] 2014 720p BRRip x264 titler":
+        {"title": "La French", "year": "2014"},
+    "The.English.Patient.1996.720p.BluRay.x264-GRP":
+        {"title": "The English Patient", "year": "1996"},
+    # A language tag in the company of junk still cuts...
+    "Amelie.2001.FRENCH.1080p.BluRay":
+        {"title": "Amelie", "year": "2001"},
+    # ...with or without a year to anchor on.
+    "Un.Film.FRENCH.DVDRip":
+        {"title": "Un Film"},
+
+    # --- a bracketed year marks where the title ends ---------------------
+    # "Title (Year)" is a human convention, so what precedes the bracket is
+    # the title verbatim — the only rule that can save a title-*final*
+    # language word, which is shape-identical to a tag.
+    "The.Girl.Who.Was.French.(2037).DVDRip":
+        {"title": "The Girl Who Was French", "year": "2037"},
+    # ...and it outranks a strong stop word sitting inside the title.
+    "Charlottes Web (2006) 720p BluRay x264":
+        {"title": "Charlottes Web", "year": "2006"},
+    # Year-first naming: an empty prefix falls through to the token rules.
+    "(2014) Some Movie":
+        {"title": "Some Movie", "year": "2014"},
 }
 
 FIELDS = ["label", "title", "year", "ep", "source", "cleaned", "series"]

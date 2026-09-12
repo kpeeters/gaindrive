@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GainDrive — Documentation</title>
+<title>GainDrive Documentation</title>
 <link rel="icon" type="image/svg+xml" href="assets/gaindrive.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -185,10 +185,10 @@
         <div class="code">
 <pre><span class="o">Music/
 ├── Artist Name/
-│   ├── 1994 — Album Title/
+│   ├── 1994 - Album Title/
 │   │   ├── 01 First Track.flac
 │   │   └── cover.jpg
-│   └── 1998 — Box Set/
+│   └── 1998 - Box Set/
 │       ├── Disc 1/
 │       └── Disc 2/</span>
 </pre>
@@ -236,8 +236,8 @@
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
+        proxy_read_timeout 3600s; # for media streamed in real-time
+        proxy_send_timeout 3600s; # for media streamed in real-time
     }
 }</span>
 </pre>
@@ -248,7 +248,7 @@
     ServerName music.example.com
 
     ProxyPreserveHost On
-    ProxyTimeout     3600
+    ProxyTimeout     3600  # for media streamed in real-time
     ProxyPass        / http://127.0.0.1:4040/
     ProxyPassReverse / http://127.0.0.1:4040/
     RequestHeader set X-Forwarded-Proto "https"
@@ -257,9 +257,19 @@
         </div>
         <p>Either way, run <code>certbot</code> afterwards to add the certificate and the HTTPS redirect.</p>
         <div class="note">
+          <span class="msym">public</span>
+          <div>Behind a proxy, tell GainDrive the origin your users actually reach it at: <code>public_url: "https://music.example.com"</code> in <code>/etc/gaindrive.conf</code>, or <code>--public-url https://music.example.com</code> on the command line. This is required so that gaindrive can construct the correct URLs for Chromecast sessions.</div>
+        </div>
+        <p>If the proxy runs on a different machine than GainDrive, also name it in <code>trusted_proxies</code>. GainDrive believes <code>X-Forwarded-For</code> only from addresses on that list (plus loopback).</p>
+        <div class="note">
+          <span class="msym">shield</span>
+          <div>Do not add, replace or "fix" CORS headers at the proxy. GainDrive sends <code>Access-Control-Allow-Origin: *</code> on exactly the three endpoints a Chromecast fetches for itself (<code>stream</code>, <code>getCaptions</code>, <code>hls</code>) and deliberately nothing anywhere else (which is what stops any web page a user visits from reading API responses cross-origin). The same goes for the security headers (<code>Content-Security-Policy</code>, <code>X-Frame-Options</code>, <code>X-Content-Type-Options</code>, <code>Referrer-Policy</code>): let them through unchanged.</div>
+        </div>
+<!--        <p>One more thing worth a minute: every credential this API accepts rides in the query string, and while GainDrive redacts its own log, the proxy's access log records the full request line by default &mdash; a complete plaintext credential store with longer retention than the database. Log the path without the query: in nginx define a <code>log_format</code> using <code>$uri</code> instead of <code>$request</code>; in Apache replace <code>%r</code> with <code>"%m %U %H"</code> in the <code>LogFormat</code>.</p> -->
+<!--        <div class="note">
           <span class="msym">timer</span>
           <div>The raised timeouts are highly recommended. A media stream is read at playback speed, so a connection can legitimately carry no bytes for a long while (e.g. a player whose buffer is full stops reading, and a video remux produces nothing until it finishes).</div>
-        </div>
+        </div> -->
         <div class="note">
           <span class="msym">cast</span>
           <div>Casting from the server needs the Chromecast device to be able to reach the server directly on your local network. If your server is only reachable over a VPN, use the Android app's bridge mode instead. A Chromecast-built-in speaker that reaches GainDrive <em>through</em> the proxy is the case the timeouts above matter most for: it buffers a large part of a track, stops reading, and a 60-second default cuts it off.</div>
