@@ -126,11 +126,17 @@ data class Song(
 	 * What the server will actually send if it has to convert this, or null when
 	 * it will send the file as it stands.
 	 *
-	 * Only casting reads it, and it is the reason casting does not have to work
-	 * out the tier for itself: the receiver picks its decode pipeline from the
-	 * declared type, and for a video the *source* `contentType` is wrong in
+	 * Casting is the reason it exists, and the reason casting does not have to
+	 * work out the tier for itself: the receiver picks its decode pipeline from
+	 * the declared type, and for a video the *source* `contentType` is wrong in
 	 * exactly the common case — an H.264/AAC `.mkv` is remuxed and arrives as
 	 * `video/mp4`, not as `video/x-matroska`.
+	 *
+	 * It describes what **any** client would be sent, and deliberately stays that
+	 * way: a `playableContainers` declaration changes the tier for one request
+	 * without moving this, so it can be cached and stays right for the receiver,
+	 * which declares nothing. The track info dialog reads it alongside that
+	 * declaration to say whether this playback is the untouched file.
 	 */
 	val transcodedContentType: String? = null,
 	/** Video frame size, when the server could probe it. */

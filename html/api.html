@@ -262,7 +262,7 @@
 <h3 id="ep-stream">stream</h3>
 <p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
 <p>Carried by <code>stream</code>. Only the gaindrive additions are listed here.</p>
-<p>Five gaindrive parameters on the standard streaming endpoint.</p>
+<p>Six gaindrive parameters on the standard streaming endpoint.</p>
 <h4>Parameters</h4>
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
@@ -273,6 +273,7 @@
 <tr><td><code>castRedirect</code></td><td>bool</td><td>Send <code>false</code> to be served the stream even though you own the live cast session. default <code>true</code>.</td></tr>
 <tr><td><code>size</code></td><td>string</td><td>Video only. A cap on the output frame size, as <code>WxH</code> — <code>640x480</code>.</td></tr>
 <tr><td><code>duration</code></td><td>int</td><td>Video only. Bound the output to this many seconds from <code>timeOffset</code>, and switch the container to MPEG-TS. That is one HLS segment.</td></tr>
+<tr><td><code>playableContainers</code></td><td>string</td><td>Video only. A comma list of container extensions you demux yourself, so the server need not remux them — <code>mkv,mov,avi</code>.</td></tr>
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>pace</code></p>
@@ -290,6 +291,13 @@
 <div class="api-note"><p class="api-note-h"><code>size</code></p>
 <p>Any value here disqualifies the direct and remux tiers, so the video is re-encoded on the fly and the response is chunked with no <code>Content-Length</code>.</p>
 <p>Strictly <code>WxH</code>, both between 16 and 7680/4320. Anything else is ignored rather than rejected, and means &quot;do not scale&quot; — the same as omitting it.</p></div>
+<div class="api-note"><p class="api-note-h"><code>playableContainers</code></p>
+<p>Most players handle more containers than a browser does. Matroska is the case this exists for: an H.264/AAC <code>.mkv</code> is remuxed to MP4 for no reason other than that no browser reads Matroska, and the remux is a whole-file <code>-c copy</code> the client waits out before it hears anything.</p>
+<p>What it does is narrow, and deliberately so.</p>
+<ul class="doc-list"><li>It <b>only ever skips a remux</b>, never a re-encode. The codec pair still has to be one the server would have served directly anyway, so an HEVC or AC3 file is unaffected — the saving is the container work alone.</li><li>It <b>never beats a constraint</b>. <code>size</code>, <code>maxBitRate</code> and <code>timeOffset</code> each force a real encode, and this does not override any of them.</li><li><code>vob</code> is <b>refused</b>. A DVD titleset is one continuous stream split across numbered VOBs and the stored path names only the first, so serving it untouched would hand back twenty minutes of a two-hour film with nothing reporting an error.</li><li>An extension this server does not know is ignored rather than rejected, so naming a new one costs nothing against an older server.</li></ul>
+<p><code>transcodedContentType</code>, <code>transcodedSuffix</code> and <code>nativeSeek</code> are <b>not</b> affected by it, deliberately. They describe what any client would be sent, so they stay cacheable and stay right for the one consumer that is not you — a Cast receiver being told what it is about to fetch. The two tiers this parameter moves a file between are both natively seekable, so <code>nativeSeek</code> is correct either way.</p>
+<p>Ignored when a <code>castToken</code> is presented, and ignored on <code>hls.m3u8</code>, where every segment is bounded by <code>duration</code> and is therefore an encode whatever the container holds.</p>
+<div class="note"><p><b>Never put this on a URL you are handing to something else</b> — a Cast receiver above all. The <code>LOAD</code> you sent it declared a <code>contentType</code> taken from <code>transcodedContentType</code>, and a receiver told <code>video/mp4</code> while being sent Matroska refuses the media outright, which looks like a broken file rather than a mislabelled one. Apply it where the request is made, not where the URL is built.</p></div></div>
 </div>
 <div class="api-ep">
 <h3 id="ep-hls-m3u8">hls.m3u8</h3>
@@ -334,6 +342,23 @@
 <p><code>discNumber</code> already carries the same number — that is the field every Subsonic client groups and sorts by, and none of them knows what a season is — so a client that ignores <code>season</code> groups a series correctly and simply calls the groups discs. A client that reads it can head them &quot;Series 2&quot; instead.</p>
 <p>The number comes from an <code>S02E03</code>-style marker or from a folder naming its season. A <code>Disc 2</code> or <code>CD1</code> folder is deliberately not one, and neither is an unnumbered <code>Specials</code> folder, so both of those keep reporting a disc.</p></div>
 <div class="note"><p>Only these four queries select the underlying columns. A video reached through <code>getStarred</code>, <code>getPlaylist</code>, <code>getPlayQueue</code>, <code>getBookmarks</code> or <code>search</code> reports neither field. That is the safe direction — it plays correctly and seeks by re-request — but such a video re-encodes on every seek even when it could have been remuxed.</p></div>
+</div>
+<div class="api-ep">
+<h3 id="ep-getvideoinfo">getVideoInfo</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>getVideoInfo</code>. Only the gaindrive additions are listed here.</p>
+<p>One field on each caption entry, saying where that subtitle lives.</p>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>source</code> <span class="api-on">on captions</span></td><td>string</td><td>Where the track lives: <code>container</code> for a stream inside the video, <code>sidecar</code> for a subtitle file beside it.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>source</code></p>
+<p>The same two words <code>getChapters</code> uses for the same distinction, and it matters for the same kind of client: one that demuxes the container itself.</p>
+<p>Every caption listed here can be fetched as WebVTT from <code>getCaptions</code>, whichever it is. But a client playing the container directly — see <code>playableContainers</code> on <code>stream</code> — is handed the embedded tracks by its own demuxer, so side-loading those as well lists every subtitle twice. The sidecar is the half no container carries, so it still has to come from here.</p>
+<p>A client that is being served a remux or a re-encode has no embedded tracks at all: the conversion keeps the first video and audio stream and drops the rest. So it should side-load every caption regardless of <code>source</code>, and only a client reading the original container should filter on it.</p></div>
 </div>
 <div class="api-ep">
 <h3 id="ep-getcaptions">getCaptions</h3>

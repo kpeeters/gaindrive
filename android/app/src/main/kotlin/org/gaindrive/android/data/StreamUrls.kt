@@ -42,6 +42,27 @@ data class VideoTarget(
 )
 
 /**
+ * The query a progressive video request carries: the id, and the containers we
+ * told the server we demux ourselves.
+ *
+ * Top-level and `internal` for the reason `CastUrls.paced()` is — it can then
+ * be exercised with no Hilt and no `android.util`, which matters here because
+ * the failure it guards against is silent and happens on a television. The
+ * test that asserts an empty set yields exactly `{id}` is the one standing
+ * between a refactor and every cast of an `.mkv` failing.
+ *
+ * Sorted rather than joined in set order: these end up in log lines and in
+ * OkHttp's cache key, and a `Set`'s iteration order is not a promise, so one
+ * request would otherwise be able to build two different URLs.
+ */
+internal fun videoStreamParams(id: String, containers: Set<String>): Map<String, String> =
+	buildMap {
+		put("id", id)
+		if (containers.isNotEmpty())
+			put("playableContainers", containers.sorted().joinToString(","))
+	}
+
+/**
  * The single builder of stream URLs, used by both the download queue and the
  * player.
  *
@@ -129,16 +150,37 @@ class StreamUrls @Inject constructor(
 	 * server can only re-encode this file, which is chunked with no
 	 * `Content-Length` and no `Range` — unseekable as a progressive stream, so
 	 * it is played as HLS, where seeking is picking a segment.
+	 *
+	 * [playableContainers] is a third parameter that is *usually* absent, and the
+	 * default is the safety. It tells the server we demux those containers
+	 * ourselves, so it can skip a remux it would otherwise pay — but the same URL
+	 * builder serves the Cast route, and a receiver demuxes none of them. Worse,
+	 * the `LOAD` sent to that receiver declared a `contentType` taken from the
+	 * entry's `transcodedContentType`, which is `video/mp4` for exactly the files
+	 * this affects; a receiver told `video/mp4` and handed Matroska refuses the
+	 * media outright, which reads as a broken file rather than a mislabelled one.
+	 *
+	 * So it is passed at the call site that plays locally and nowhere else,
+	 * exactly as `CastUrls.paced()` is applied at the route rather than here.
+	 * Empty on the HLS branch too: every segment carries a `duration`, which
+	 * makes it an encode whatever the container holds, so declaring there would
+	 * be a claim the server cannot act on.
 	 */
-	suspend fun forVideo(ref: ItemRef, nativeSeek: Boolean): VideoTarget? =
+	suspend fun forVideo(
+		ref: ItemRef,
+		nativeSeek: Boolean,
+		playableContainers: Set<String> = emptySet(),
+	): VideoTarget? =
 		withContext(Dispatchers.IO) {
 			val config = registry.get(ref.server) ?: return@withContext null
 			val client = clients.clientFor(config)
-			val params = mapOf("id" to ref.id)
 
 			if (nativeSeek) {
 				VideoTarget(
-					url = client.url("stream", params),
+					url = client.url(
+						"stream",
+						videoStreamParams(ref.id, playableContainers),
+					),
 					// No declared type: sniffing is the only honest answer, the
 					// same argument AudioFormat.ORIGINAL makes. The remux tier
 					// turns an .mkv into MP4, and a VP9/Opus .mkv is served
@@ -152,7 +194,7 @@ class StreamUrls @Inject constructor(
 					// The playlist copies this request's auth parameters onto
 					// every segment URL, so the player needs no context from
 					// here to fetch them.
-					url = client.url("hls.m3u8", params, suffix = ""),
+					url = client.url("hls.m3u8", mapOf("id" to ref.id), suffix = ""),
 					mimeType = MimeTypes.APPLICATION_M3U8,
 					isHls = true,
 				)

@@ -884,6 +884,61 @@ static std::string sane_video_size(const std::string& s)
 	return std::to_string(w) + "x" + std::to_string(h);
 	}
 
+// The containers a client declared it demuxes for itself, from the comma list
+// stream.view spells `playableContainers`.
+//
+// Validated here rather than in Streamer for the reason sane_video_size() above
+// gives: the one caller reachable from outside is the one that checks. What is
+// bounded is the whole parameter, at 64 characters — that caps the token count
+// and every token length at once, so there are no separate counters to keep
+// agreeing with each other.
+//
+// An unrecognised token is **dropped, not refused**, matching `size`. A client
+// naming a container this server has never heard of is asking for nothing, not
+// asking wrongly, and a hard error would make adding a container to a client a
+// breaking change against every older server.
+//
+// Everything that survives is a VIDEO_TARGETS name, which is what lets
+// serve_video() log the set verbatim.
+static ClientContainers parse_client_containers(const std::string& s)
+	{
+	ClientContainers out;
+	if (s.empty() || s.size() > 64) return out;
+	size_t start = 0;
+	while (start <= s.size()) {
+		size_t      comma = s.find(',', start);
+		std::string tok   = s.substr(start, comma == std::string::npos
+		                                    ? std::string::npos
+		                                    : comma - start);
+		// songs.codec holds a lowercased extension, so that is what a
+		// declaration has to be compared against.
+		for (char& c : tok)
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		if (container_declarable(tok)) out.insert(std::move(tok));
+		if (comma == std::string::npos) break;
+		start = comma + 1;
+		}
+	return out;
+	}
+
+// Where one of getVideoInfo's caption tracks lives, as the API reports it:
+// "sidecar" for the subtitle file beside the video, "container" for a stream
+// inside it.  The same two words getChapters already uses for the same
+// distinction.
+//
+// It exists because the answer stopped being the server's business alone. A
+// client that demuxes the container itself (see playableContainers on
+// stream.view) is handed those streams by its own demuxer, so side-loading
+// them through getCaptions as well would list every subtitle twice — while the
+// sidecar, which no container carries, still has to come from here.
+//
+// A pure derivation: SIDECAR_CAPTION_INDEX is negative precisely so it can
+// never be a stream index, which is the fact this reads.
+static const char* caption_source(const MediaStore::CaptionTrack& c)
+	{
+	return c.index < 0 ? "sidecar" : "container";
+	}
+
 static std::string url_encode(const std::string& s)
 	{
 	static const char hex[] = "0123456789ABCDEF";
@@ -5259,6 +5314,9 @@ GainDrive::GainDrive(const std::string& db_path,
 			auto probe_si = streamer_song(*song, song_abs,
 			                              std::min(song->file_size,
 			                                       (int64_t)32768));
+			// No VideoOptions, deliberately rather than by omission: this call
+			// stops before it, so the one path that must never honour a client's
+			// container declaration gets the empty set by construction.
 			Streamer::serve(req, res, probe_si, transcode_cache_, 0, "", 0, true, {});
 			return;
 			}
@@ -5308,11 +5366,23 @@ GainDrive::GainDrive(const std::string& db_path,
 		// Validated here rather than in Streamer, so the one caller that can be
 		// reached from outside is the one that checks. Anything unparseable
 		// becomes empty, which means "do not scale" — the same as omitting it.
-		std::string video_size = sane_video_size(qp("size"));
-		int         seg_dur    = to_int(qp("duration"), 0);
+		VideoOptions vopts{
+			.size             = sane_video_size(qp("size")),
+			.segment_duration = to_int(qp("duration"), 0),
+			// Never for a cast token, and that is not caution.  A
+			// server-driven cast URL is fetched by the *receiver*, which
+			// declared none of this, and the LOAD it is playing announced a
+			// contentType that cast_mime_for() computed before a byte was
+			// served.  Honouring a capability the controller claimed would
+			// send Matroska to a receiver told video/mp4, which refuses the
+			// media outright and reads as a broken file.
+			.client_containers = cast_authed
+			    ? ClientContainers{}
+			    : parse_client_containers(qp("playableContainers")),
+			};
 		Streamer::serve(req, res, si, transcode_cache_, max_bitrate, format,
 		                time_offset, cast_authed, std::move(get_pos),
-		                estimate_length, video_size, seg_dur);
+		                estimate_length, vopts);
 		});
 
 	// download — the original file, never transcoded and never bitrate-capped.
@@ -5956,7 +6026,8 @@ GainDrive::GainDrive(const std::string& db_path,
 				for (auto& c : streams.captions)
 					caps.push_back({ {"id",   sid(c.index)},
 					                 {"name", c.title.empty() ? c.language
-					                                          : c.title} });
+					                                          : c.title},
+					                 {"source", caption_source(c)} });
 				nlohmann::json tracks = nlohmann::json::array();
 				for (auto& a : streams.audio_tracks)
 					tracks.push_back({ {"id",           sid(a.index)},
@@ -5977,6 +6048,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					el->SetAttribute("id",   c.index);
 					el->SetAttribute("name",
 						(c.title.empty() ? c.language : c.title).c_str());
+					el->SetAttribute("source", caption_source(c));
 					vi->InsertEndChild(el);
 					}
 				for (auto& a : streams.audio_tracks) {

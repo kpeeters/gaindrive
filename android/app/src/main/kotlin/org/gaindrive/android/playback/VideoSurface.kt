@@ -88,6 +88,7 @@ class VideoSurface @Inject constructor() {
 						" supported=${group.isTrackSupported(0)}" +
 						" selected=${group.isSelected}")
 				}
+			pinFirstAudioTrack(tracks)
 		}
 	}
 
@@ -176,6 +177,44 @@ class VideoSurface @Inject constructor() {
 		player.trackSelectionParameters = builder
 			.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
 			.setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, 0))
+			.build()
+	}
+
+	/**
+	 * Keeps the film's *first* audio track, which is the one the server used to
+	 * pick on our behalf.
+	 *
+	 * A remux or a re-encode passes `-map 0:a:0`, and that is not arbitrary:
+	 * ffmpeg's own "best stream" rule scores by channel count and would take a
+	 * 5.1 director's commentary over the stereo mix. Since the server started
+	 * handing over whole containers (see `PlayableContainers`), the same choice
+	 * falls to `DefaultTrackSelector` — which scores by preferred language, then
+	 * by channel count, so it can reach the same wrong answer and there is no
+	 * picker to undo it with.
+	 *
+	 * Guarded on there being more than one group rather than applied always, so
+	 * the single-track case — every remux, every HLS stream — keeps whatever the
+	 * selector would have done and this cannot regress a path it has no business
+	 * touching.
+	 *
+	 * An override rather than a preferred language because there is nothing to
+	 * prefer: the honest statement is "the first one", and it is what playback
+	 * did before. An audio-track picker mirroring [selectTextTrack] is the real
+	 * answer and is deliberately not attempted here.
+	 */
+	private fun pinFirstAudioTrack(tracks: Tracks) {
+		val player = player ?: return
+		val audio = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+		if (audio.size < 2) return
+		val first = audio.first().mediaTrackGroup
+		// Nothing to do if it is already the selection — onTracksChanged fires
+		// again for our own override, and re-applying it would loop.
+		if (audio.first().isSelected) return
+		Log.d(TAG, "pinning the first of ${audio.size} audio tracks:" +
+			" lang=${first.getFormat(0).language}")
+		player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+			.clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+			.setOverrideForType(TrackSelectionOverride(first, 0))
 			.build()
 	}
 

@@ -486,7 +486,18 @@ class PlaybackService : MediaLibraryService() {
 		 * that would not load is not.
 		 */
 		private suspend fun resolveVideo(item: MediaItem, ref: ItemRef): MediaItem? {
-			val target = streamUrls.forVideo(ref, item.nativeSeek()) ?: return null
+			// The one call site that declares what this player can demux. Local
+			// playback is the only route where that is true of whoever reads the
+			// bytes — the cast route deliberately declares nothing.
+			val target = streamUrls.forVideo(ref, item.nativeSeek(), MEDIA3_CONTAINERS)
+				?: return null
+
+			// Whether the declaration above will actually be honoured, which is
+			// what decides where the subtitle tracks come from. Both halves are
+			// needed: without nativeSeek the server can only re-encode, and no
+			// declaration changes that. A local mirror read, no network.
+			val demuxedHere = item.nativeSeek()
+				&& demuxedLocally(local.song(ref)?.suffix)
 			// Marked before it goes out, so a restored item carries the answer
 			// the mirror just gave: GainDriveMediaSourceFactory reads the same
 			// flag to keep this off the byte cache, and the UI reads it to
@@ -494,7 +505,9 @@ class PlaybackService : MediaLibraryService() {
 			return item.markedAsVideo().buildUpon()
 				.setUri(target.url)
 				.setMimeType(target.mimeType)
-				.setSubtitleConfigurations(captions.configurationsFor(ref))
+				.setSubtitleConfigurations(
+					captions.configurationsFor(ref, sidecarOnly = demuxedHere)
+				)
 				.build()
 		}
 

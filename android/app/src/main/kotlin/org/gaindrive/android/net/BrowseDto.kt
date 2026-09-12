@@ -304,6 +304,11 @@ data class GetArtistInfoBody(
  * what `getCaptions` expects back as `captionId`; [name] is the stream's title,
  * falling back to its language.
  *
+ * [source] is `"container"` for a track inside the video and `"sidecar"` for a
+ * subtitle file beside it — the same two words `getChapters` uses. It only
+ * matters when we are demuxing the container ourselves, where the embedded
+ * tracks arrive twice unless these are filtered out; see [CaptionTracks].
+ *
  * Expect an empty list for a DVD: its subtitles are bitmaps, and the server
  * filters those out rather than offer tracks that could never become WebVTT.
  */
@@ -311,6 +316,7 @@ data class GetArtistInfoBody(
 data class CaptionDto(
 	val id: String = "",
 	val name: String = "",
+	val source: String = "",
 )
 
 @Serializable

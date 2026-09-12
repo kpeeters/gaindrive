@@ -1,7 +1,9 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 
@@ -95,6 +97,20 @@ inline bool is_video_ext(std::string_view ext)
 	return video_target_for(ext).has_value();
 	}
 
+// A container a *client* may declare it demuxes for itself — see
+// video_direct_playable_for() below.  Every video container qualifies except
+// vob, and that exclusion is not caution.
+//
+// A DVD titleset's songs.path names only the *first* VOB of a set that is one
+// continuous stream split at 1 GB boundaries; dvd_input() is what hands ffmpeg
+// the concat: list of the rest.  Served untouched, that is twenty minutes of a
+// two-hour film — and nothing anywhere reports an error, because what goes out
+// is a valid program stream that simply ends.
+inline bool container_declarable(std::string_view ext)
+	{
+	return is_video_ext(ext) && ext != "vob";
+	}
+
 // songs.codec holds a lowercased extension for video rows too, so every
 // existing caller of this function keeps working once the video table is
 // consulted as a fallback.  Audio wins on a tie; there is no overlap today.
@@ -183,6 +199,47 @@ inline bool video_direct_playable(std::string_view container,
 	        && video_seeks_natively(video_codec, audio_codec))
 		return true;
 	return container == "mkv" && webm_codecs(video_codec, audio_codec);
+	}
+
+// The containers one particular client declared it can demux for itself, on
+// that client's own stream.view request.  Empty for everybody else.
+//
+// std::less<> so find() takes a string_view without allocating.
+using ClientContainers = std::set<std::string, std::less<>>;
+
+// The Direct tier for a client that declared containers of its own, which is a
+// different question from video_direct_playable() and is deliberately a
+// different function rather than a fourth defaulted argument.
+//
+// video_direct_playable() says two callers must agree on it: serve_video()'s
+// tier choice and the transcoded* fields the API advertises.  That stays true
+// only while those two ask the *same* question — and a defaulted argument is
+// exactly how one of them quietly stops.  transcode_target() fills
+// transcodedContentType/transcodedSuffix, which a client caches and which the
+// Android app hands a Cast receiver as the LOAD's contentType; cast_tier_for()
+// answers for a receiver, which declared nothing.  Neither may ever acquire
+// this answer, and two names cannot drift because there is no argument to
+// forget.
+//
+// **Only the container is widened.  video_seeks_natively() is untouched**, and
+// that is the whole safety argument: the two tiers this moves a file between
+// are both seekable, so nativeSeek is identical either side of it and no
+// advertised field becomes client-dependent.  Widening the *codec* pair could
+// not be done this way — nativeSeek is what a client picks its transport with,
+// and what the Android app refuses to cast on.
+//
+// container_declarable() is re-checked here rather than trusted from whoever
+// built the set, because the failure a declared vob produces is a film that
+// stops after twenty minutes and says nothing.
+inline bool video_direct_playable_for(std::string_view container,
+                                      std::string_view video_codec,
+                                      std::string_view audio_codec,
+                                      const ClientContainers& client)
+	{
+	if (video_direct_playable(container, video_codec, audio_codec)) return true;
+	if (!container_declarable(container))       return false;
+	if (client.find(container) == client.end()) return false;
+	return video_seeks_natively(video_codec, audio_codec);
 	}
 
 // Which of serve_video()'s three tiers a Chromecast's fetch will land on.

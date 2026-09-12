@@ -147,3 +147,22 @@ if bad:
         print(f"  {f}: castLoad {load.get(f)!r} vs castSession {sess.get(f)!r}")
     sys.exit(1)
 print("\ncastSession agrees with castLoad on every field.")
+
+# A receiver demuxes no more containers than a browser does, so a video whose
+# container a browser will not take must still be remuxed for it — whatever any
+# *client* said about what it can demux itself.  `playableContainers` on
+# stream.view moves an .mkv to the direct tier for the request that sent it, and
+# it must never reach this decision: the LOAD above announced a contentType
+# computed before a byte was served, and Matroska arriving under video/mp4 is
+# refused outright by the receiver, which reads as a broken file.
+song = get_json("getSong", id=SONG)["song"]
+if song.get("isVideo") and song.get("suffix") in ("mkv", "mov", "avi"):
+    if load.get("tier") != "remux":
+        print(f"\nWRONG TIER: a .{song['suffix']} cast as "
+              f"{load.get('tier')!r}, expected 'remux'.")
+        sys.exit(1)
+    if load.get("contentType") != "video/mp4":
+        print(f"\nWRONG TYPE: a .{song['suffix']} announced as "
+              f"{load.get('contentType')!r}, expected 'video/mp4'.")
+        sys.exit(1)
+    print(f"A .{song['suffix']} is still remuxed for the receiver.")

@@ -135,8 +135,7 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
                      int max_bitrate,
                      const std::string& format, int time_offset,
                      bool cast_stream, std::function<float()> get_position,
-                     bool estimate_length,
-                     const std::string& video_size, int segment_duration)
+                     bool estimate_length, const VideoOptions& video)
 	{
 	// "Paced" means deliver at roughly 1x playback rate rather than as fast as
 	// the socket takes it.  Two clients want that and they ask in different
@@ -172,7 +171,7 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	// container, and format/maxBitRate here are about audio muxers.
 	if (song.is_video && !audio_only) {
 		serve_video(req, res, song, cache, max_bitrate, format, time_offset,
-		            video_size, segment_duration, std::move(get_position));
+		            video, std::move(get_position));
 		return;
 		}
 
@@ -738,8 +737,7 @@ std::vector<std::string> Streamer::video_ffmpeg_argv(
 void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
                            const SongInfo& song, TranscodeCache& cache,
                            int max_bitrate, const std::string& format,
-                           int time_offset, const std::string& video_size,
-                           int segment_duration,
+                           int time_offset, const VideoOptions& video,
                            std::function<float()> get_position)
 	{
 	// Same predicate the API uses to tell the client whether it may seek
@@ -749,20 +747,26 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	// Anything that changes the picture or bounds the output forces a real
 	// encode; a seek or a segment forces the pipe because neither a raw file
 	// nor a whole-file remux can start partway in.
-	bool constrained = !video_size.empty() || max_bitrate > 0
+	bool constrained = !video.size.empty() || max_bitrate > 0
 	                || (!format.empty() && format != "raw");
-	bool partial     = time_offset > 0 || segment_duration > 0;
+	bool partial     = time_offset > 0 || video.segment_duration > 0;
 
 	// A VP9/Opus .mkv is a WebM file wearing the wrong extension: it can be
 	// served untouched, but only once relabelled (see the Direct branch).
 	bool relabel_webm = song.codec == "mkv"
 	                 && webm_codecs(song.video_codec, song.audio_codec);
 
+	// video_direct_playable_for(), not video_direct_playable(): a client may
+	// have said it demuxes this container itself, which moves the file from
+	// Remux to Direct and changes nothing else.  Both tiers are
+	// video_seeks_natively()-true, so nativeSeek — which the API advertised
+	// before this request existed — is right either way.  See codecs.hh.
 	enum class Tier { Direct, Remux, Encode };
 	Tier tier = Tier::Encode;
 	if (codecs_ok && !constrained && !partial)
-		tier = video_direct_playable(song.codec, song.video_codec,
-		                             song.audio_codec)
+		tier = video_direct_playable_for(song.codec, song.video_codec,
+		                                 song.audio_codec,
+		                                 video.client_containers)
 		     ? Tier::Direct : Tier::Remux;
 	const char* tier_name = tier == Tier::Direct ? "direct"
 	                      : tier == Tier::Remux  ? "remux" : "encode";
@@ -771,16 +775,27 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	// itself is not the client that asked, and nothing else records what it is.
 	std::string ua = req.get_header_value("User-Agent");
 
+	// What the client said it can demux, which is the only way "the app sent
+	// playableContainers and the server remuxed anyway" gets diagnosed — nine
+	// times in ten a proxy dropping the query string.  Printed verbatim, unlike
+	// the id on the audio line: the handler dropped everything that is not a
+	// VIDEO_TARGETS name, so there is nothing here for log_safe() to clean.
+	std::string declared;
+	for (const auto& c : video.client_containers)
+		declared += (declared.empty() ? "" : ",") + c;
+	if (declared.empty()) declared = "none";
+
 	std::cout << stamp() << "video [" << song.path << "]"
 	          << " v=" << (song.video_codec.empty() ? "?" : song.video_codec)
 	          << " a=" << (song.audio_codec.empty() ? "?" : song.audio_codec)
 	          << " " << song.width << "x" << song.height
 	          << " tier=" << tier_name
-	          << (video_size.empty() ? "" : " size=" + video_size)
+	          << (video.size.empty() ? "" : " size=" + video.size)
 	          << (max_bitrate > 0 ? " max=" + std::to_string(max_bitrate) : "")
 	          << (time_offset > 0 ? " offset=" + std::to_string(time_offset) : "")
-	          << (segment_duration > 0
-	              ? " seg=" + std::to_string(segment_duration) : "")
+	          << (video.segment_duration > 0
+	              ? " seg=" + std::to_string(video.segment_duration) : "")
+	          << " declared=[" << declared << "]"
 	          << " ua=[" << (ua.empty() ? "none" : ua) << "]"
 	          << std::endl;
 
@@ -842,10 +857,11 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	bool  copy = (tier == Tier::Remux);
 	float bps  = (song.bitrate > 0 ? static_cast<float>(song.bitrate)
 	                               : 2000.0f) * 125.0f;
-	auto  argv = video_ffmpeg_argv(song, copy, max_bitrate, video_size,
-	                               time_offset, segment_duration,
-	                               segment_duration > 0, "pipe:1");
-	std::string mime(segment_duration > 0 ? VIDEO_TS_MIME : VIDEO_MP4_MIME);
+	auto  argv = video_ffmpeg_argv(song, copy, max_bitrate, video.size,
+	                               time_offset, video.segment_duration,
+	                               video.segment_duration > 0, "pipe:1");
+	std::string mime(video.segment_duration > 0 ? VIDEO_TS_MIME
+	                                            : VIDEO_MP4_MIME);
 
 	// Unpaced for the same reason as Tier 0, and with the same residual risk
 	// recorded there: the audio throttle's 15 s window starves a player that

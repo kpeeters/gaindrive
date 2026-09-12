@@ -33,6 +33,25 @@ NS = "http://subsonic.org/restapi"
 # Containers the server serves untouched; anything else is remuxed or encoded.
 DIRECT_SUFFIXES = {"mp4", "m4v", "webm"}
 
+# Containers a client may declare it demuxes itself, which moves them from the
+# remux tier to the direct one for that one request.  Not vob: a DVD titleset's
+# stored path names only the first of its concatenated VOBs.
+DECLARABLE_SUFFIXES = {"mkv", "mov", "avi"}
+
+# What the server labels each of those when it hands it over untouched, and how
+# to recognise the bytes.  A remux answers video/mp4 whatever it started as, so
+# the type is most of the test; the magic number is what catches a direct serve
+# that was somehow mislabelled.
+CONTAINER_MIMES = {
+    "mkv": "video/x-matroska",
+    "mov": "video/quicktime",
+    "avi": "video/x-msvideo",
+}
+CONTAINER_MAGIC = {
+    "mkv": (0, b"\x1a\x45\xdf\xa3"),   # EBML
+    "avi": (0, b"RIFF"),
+}
+
 
 def _url(endpoint, extra=None):
     p = {"u": USER, "p": PASS, "v": VER, "c": CLIENT}
@@ -182,6 +201,128 @@ def test_segment_request_returns_mpegts():
     # Every MPEG-TS packet starts with the sync byte 0x47.
     assert body[:1] == b"\x47", f"not a transport stream: {body[:4]!r}"
     print("PASS  a bounded request returns one MPEG-TS segment")
+
+
+# ---- declared containers ----------------------------------------------
+#
+# `playableContainers` lets a client say it demuxes a container itself, so the
+# server can skip a remux it would otherwise pay.  What is worth testing is
+# almost entirely the boundaries: that it never widens the codec test, never
+# beats a constraint, never admits `vob`, and — the one with the worst blast
+# radius — never changes what the browse endpoints advertise, because that is
+# what a Cast receiver is told it is about to fetch.
+
+
+def _remuxable():
+    """A video the server would remux: right codecs, wrong container."""
+    return [v for v in _videos()
+            if v.get("nativeSeek") is True
+            and v.get("suffix") not in DIRECT_SUFFIXES
+            and v.get("suffix") in DECLARABLE_SUFFIXES]
+
+
+def test_declared_container_is_served_untouched():
+    """The point of the feature: a remux becomes a direct serve."""
+    vs = _remuxable()
+    if not vs:
+        print("SKIP  no remuxable mkv/mov/avi in the library")
+        return
+    v = vs[0]
+    status, hdrs, body = _raw("stream.view",
+                              {"id": v["id"],
+                               "playableContainers": v["suffix"]},
+                              {"Range": "bytes=0-1023"})
+    assert status == 206, f"expected 206, got {status}"
+    assert "Content-Range" in hdrs, hdrs
+    assert "X-Gaindrive-Transcode" not in hdrs, \
+        "still went through the transcode cache: " + str(hdrs)
+    ctype = hdrs.get("Content-Type", "")
+    assert ctype == CONTAINER_MIMES[v["suffix"]], \
+        f"expected {CONTAINER_MIMES[v['suffix']]}, got {ctype!r}"
+    # The headers alone cannot tell a served container from a mislabelled
+    # remux, so check the bytes where the container has a magic number worth
+    # checking.  Not .mov: it is MP4-family, so its header and a remux's are
+    # the same shape and only the Content-Type above separates them.
+    magic = CONTAINER_MAGIC.get(v["suffix"])
+    if magic:
+        off, want = magic
+        assert body[off:off + len(want)] == want, \
+            f"not a .{v['suffix']}: {body[:12]!r}"
+    print(f"PASS  a declared .{v['suffix']} is served untouched")
+
+
+def test_declared_container_does_not_change_metadata():
+    """The advertised fields describe what *any* client is sent, and must.
+
+    A Cast receiver picks its decode pipeline from transcodedContentType, so
+    the day this starts varying per client is the day casting an .mkv breaks.
+    """
+    vs = _remuxable()
+    if not vs:
+        print("SKIP  no remuxable mkv/mov/avi in the library")
+        return
+    v = vs[0]
+    plain = _json("getSong.view", {"id": v["id"]})["song"]
+    declared = _json("getSong.view",
+                     {"id": v["id"],
+                      "playableContainers": v["suffix"]})["song"]
+    for field in ("transcodedContentType", "transcodedSuffix", "nativeSeek"):
+        assert plain.get(field) == declared.get(field), \
+            f"{field} moved: {plain.get(field)!r} -> {declared.get(field)!r}"
+    assert plain.get("transcodedSuffix") == "mp4", plain.get("transcodedSuffix")
+    print("PASS  browse metadata is unchanged by a declaration")
+
+
+def test_vob_is_never_declarable():
+    """A DVD row's path names only the first VOB of a concatenated titleset."""
+    vobs = [v for v in _videos() if v.get("suffix") == "vob"]
+    if not vobs:
+        print("SKIP  no DVD rip in the library")
+        return
+    status, hdrs, _ = _raw("stream.view",
+                           {"id": vobs[0]["id"], "playableContainers": "vob"})
+    assert status == 200, status
+    assert hdrs.get("Content-Type") == "video/mp4", \
+        "a declared vob was served raw: " + str(hdrs.get("Content-Type"))
+    print("PASS  vob is refused as a declaration")
+
+
+def test_declared_container_still_honours_constraints():
+    """A declaration skips a remux; it never overrides a real constraint."""
+    vs = _remuxable()
+    if not vs:
+        print("SKIP  no remuxable mkv/mov/avi in the library")
+        return
+    v = vs[0]
+    status, hdrs, body = _raw("stream.view",
+                              {"id": v["id"], "size": "320x240",
+                               "playableContainers": v["suffix"]})
+    assert status == 200, status
+    assert hdrs.get("Content-Type") == "video/mp4", hdrs.get("Content-Type")
+    assert len(body) > 0, "empty body — ffmpeg produced nothing"
+    print("PASS  a declaration does not beat size=")
+
+
+def test_garbage_declaration_is_ignored():
+    """Unrecognised tokens are dropped, not refused, and never 500."""
+    _need_video()
+    vid = _video()["id"]
+    for value in ("../../etc/passwd", "a" * 500, ",,,", "nonsense",
+                  "mkv,,vob,,nonsense"):
+        status, _, _ = _raw("stream.view", {"id": vid,
+                                            "playableContainers": value},
+                            {"Range": "bytes=0-1023"})
+        assert status in (200, 206), f"{value!r} gave HTTP {status}"
+    vs = _remuxable()
+    if vs and vs[0]["suffix"] == "mkv":
+        # Case is folded: songs.codec is stored lowercased.
+        status, hdrs, _ = _raw("stream.view",
+                               {"id": vs[0]["id"],
+                                "playableContainers": "MKV"},
+                               {"Range": "bytes=0-1023"})
+        assert "X-Gaindrive-Transcode" not in hdrs, \
+            "MKV was not folded to mkv: " + str(hdrs)
+    print("PASS  a malformed declaration is ignored rather than fatal")
 
 
 # ---- audio only -------------------------------------------------------
@@ -489,6 +630,11 @@ TESTS = [
     test_direct_tier_honours_ranges,
     test_transcoded_tier_returns_video,
     test_segment_request_returns_mpegts,
+    test_declared_container_is_served_untouched,
+    test_declared_container_does_not_change_metadata,
+    test_vob_is_never_declarable,
+    test_declared_container_still_honours_constraints,
+    test_garbage_declaration_is_ignored,
     test_audio_format_returns_the_soundtrack,
     test_audio_only_stream_is_seekable,
     test_audio_only_covers_the_whole_video,

@@ -39,6 +39,7 @@ import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.data.trackShareUrl
 import org.gaindrive.android.playback.NowPlaying
+import org.gaindrive.android.playback.demuxedLocally
 import org.gaindrive.android.playback.cast.CastMedia
 import org.gaindrive.android.playback.cast.CastRoute
 import org.gaindrive.android.ui.components.formatDuration
@@ -156,7 +157,7 @@ private fun PlaybackRows(
 	// resolved separately from the local player's — a queue may have been
 	// playing locally at a quality the cast path then re-decided.
 	val quality = if (casting) loaded?.quality else current.quality
-	InfoRow("Sent", sentLabel(current, song, quality))
+	InfoRow("Sent", sentLabel(current, song, quality, casting))
 
 	if (casting) {
 		InfoRow(
@@ -180,9 +181,25 @@ private fun fileLabel(song: Song): String? {
  * either one demotes a file that could have been served off disk — so its
  * answer comes from `nativeSeek`, which is the same flag `StreamUrls.forVideo`
  * branches on and therefore cannot drift from what actually happens.
+ *
+ * Within `nativeSeek` there are still two tiers, and which one this playback
+ * got is not a property of the file alone: local playback declares the
+ * containers media3 demuxes and is handed those untouched, while the cast route
+ * declares nothing and takes the remux. Hence [casting] — the same track can
+ * honestly answer this differently depending on who is reading the bytes.
  */
-private fun sentLabel(current: NowPlaying, song: Song?, quality: AudioQuality?): String? = when {
-	current.isVideo && current.nativeSeek -> "As stored, or remuxed to MP4"
+private fun sentLabel(
+	current: NowPlaying,
+	song: Song?,
+	quality: AudioQuality?,
+	casting: Boolean,
+): String? = when {
+	current.isVideo && current.nativeSeek ->
+		// Untouched either because this container goes to every client as it
+		// stands, or because we told the server we demux this one ourselves.
+		if (song?.transcodedContentType == null ||
+			(!casting && demuxedLocally(song.suffix))
+		) "As stored" else "Remuxed to MP4"
 	current.isVideo -> "HLS, re-encoded as it plays"
 	quality == null -> null
 	quality.format == AudioFormat.ORIGINAL ->

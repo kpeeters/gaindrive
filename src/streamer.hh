@@ -15,6 +15,31 @@
 inline constexpr float CAST_POS_STOP      = -2.0f;  // new stream started → exit immediately
 inline constexpr float CAST_POS_BUFFERING = -1.0f;  // receiver seeking → suppress throttle
 
+// The video-only knobs of one request.  Grouped rather than passed alongside
+// everything else because these are precisely the parameters Streamer::serve()
+// ignores for audio — and because a third positional argument appended to its
+// trailing run of bool/string/int is a mis-ordering that compiles.  Fill it
+// with designated initialisers.
+//
+// Namespace scope rather than nested in Streamer, which is not a style
+// preference: a nested struct carrying a default member initialiser cannot be
+// spelled `= {}` as a default argument, so `serve()` would have had to demand
+// it from every caller — and the cast probe getting the empty set *by leaving
+// it out* is the property worth keeping.
+struct VideoOptions {
+	// Caps the output frame size ("1280x720"); empty keeps the source size.
+	// Any value disqualifies the direct and remux tiers.
+	std::string      size;
+	// > 0 bounds the output to that many seconds from time_offset and switches
+	// the container to MPEG-TS — that is one HLS segment.
+	int              segment_duration = 0;
+	// Containers the *client* declared it demuxes for itself, validated by the
+	// stream.view handler.  Empty means "declared nothing", which is what every
+	// other caller gets and what a cast token must always get: a receiver
+	// fetches for itself and declared none of this.
+	ClientContainers client_containers;
+	};
+
 class Streamer {
 	public:
 		struct SongInfo {
@@ -79,10 +104,7 @@ class Streamer {
 		// or overflows regardless of its buffer size.
 		// `cache` is always present; a disabled cache simply never produces an
 		// entry, so there is no nullability to reason about at the call site.
-		// video_size caps the output frame size ("1280x720"); empty means keep
-		// the source size. segment_duration > 0 bounds the output to that many
-		// seconds from time_offset and switches the container to MPEG-TS —
-		// that is one HLS segment. Both are ignored for audio.
+		// `video` is ignored for audio entirely.
 		//
 		// `pace=true` on the query string is a gaindrive extension asking for
 		// the audio to be delivered at roughly 1x playback rate instead of as
@@ -96,8 +118,7 @@ class Streamer {
 		                  bool cast_stream = false,
 		                  std::function<float()> get_position = {},
 		                  bool estimate_length = false,
-		                  const std::string& video_size = "",
-		                  int segment_duration = 0);
+		                  const VideoOptions& video = {});
 
 		// Serves the original file, never transcoded and never paced.
 		// download.view is defined as "the original media data", so it must not
@@ -133,8 +154,7 @@ class Streamer {
 		                        httplib::Response& res, const SongInfo& song,
 		                        TranscodeCache& cache, int max_bitrate,
 		                        const std::string& format, int time_offset,
-		                        const std::string& video_size,
-		                        int segment_duration,
+		                        const VideoOptions& video,
 		                        std::function<float()> get_position);
 
 		// Runs `args` and pipes its stdout to the client.  Takes a prebuilt

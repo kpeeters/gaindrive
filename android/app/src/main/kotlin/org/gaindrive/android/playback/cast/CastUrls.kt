@@ -276,6 +276,12 @@ class CastUrls @Inject constructor(
 	 */
 	private suspend fun forVideo(ref: ItemRef, source: CastSource): CastTarget? {
 		if (!source.nativeSeek) return null
+		// No playableContainers, and that omission is the load-bearing one on this
+		// route. A receiver demuxes none of them, and [mime] below is
+		// `transcodedContentType` — `video/mp4` for exactly the files declaring
+		// would change. Adding the argument here announces MP4 and sends Matroska,
+		// which a receiver refuses outright: the film never starts and nothing
+		// anywhere says why. See `StreamUrls.forVideo`.
 		val target = streamUrls.forVideo(ref, nativeSeek = true) ?: return null
 		val config = registry.get(ref.server) ?: return null
 
