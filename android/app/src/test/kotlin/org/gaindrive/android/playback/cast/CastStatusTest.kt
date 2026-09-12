@@ -3,7 +3,9 @@ package org.gaindrive.android.playback.cast
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -144,5 +146,28 @@ class CastStatusTest {
 			]}}
 		""".trimIndent()
 		assertEquals("ours", CastStatus.transportIdOf(message(both), MEDIA_APP))
+	}
+
+	/**
+	 * The distinction `transportIdOf` cannot make on its own: it answers null
+	 * both for "our app is not running" and for "this status was not about
+	 * applications at all". Only the first means the cached transport is stale.
+	 *
+	 * A volume push is the case that matters — it arrives during ordinary
+	 * playback, and reading it as an app teardown threw away a working
+	 * transport, pushing the next load onto the slow LAUNCH path.
+	 */
+	@Test
+	fun `a status that names no applications is not an empty list of them`() {
+		assertTrue(CastStatus.listsApplications(message("""{"status":{"applications":[]}}""")))
+		assertTrue(
+			CastStatus.listsApplications(
+				message("""{"status":{"applications":[{"appId":"E8C28D3C"}]}}""")
+			)
+		)
+
+		assertFalse(CastStatus.listsApplications(message("""{"status":{"volume":{"level":0.4}}}""")))
+		assertFalse(CastStatus.listsApplications(message("""{"status":{}}""")))
+		assertFalse(CastStatus.listsApplications(message("""{"type":"RECEIVER_STATUS"}""")))
 	}
 }

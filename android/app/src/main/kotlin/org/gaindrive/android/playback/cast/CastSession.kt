@@ -138,6 +138,16 @@ class CastSession @Inject constructor(
 
 	fun consumeMessage() { _message.value = null }
 
+	/**
+	 * How many `MEDIA_STATUS` messages have arrived on this connection.
+	 *
+	 * Only [awaitLoadAck] reads it, and only as a before-and-after comparison —
+	 * the value itself means nothing, and it is deliberately not reset by
+	 * [teardown], since a wrap or a stale figure cannot make two reads taken
+	 * seconds apart look equal.
+	 */
+	private val mediaMessages = MutableStateFlow(0)
+
 	/** Non-null only while the receiver has our media session open. */
 	private val transportId = MutableStateFlow<String?>(null)
 	private val channel = MutableStateFlow<CastChannel?>(null)
@@ -366,6 +376,13 @@ class CastSession @Inject constructor(
 
 			"MEDIA_STATUS" -> {
 				Log.i(TAG, "rx MEDIA_STATUS: $message")
+				// Counted before it is parsed, and that order is the point:
+				// parse() returns null for an empty `status` array, which is
+				// what a freshly launched receiver holding no media answers
+				// with. awaitLoadAck needs "the receiver is talking to us on
+				// the media namespace", which is this, not "it reported a
+				// playable state", which is the line below.
+				mediaMessages.value += 1
 				CastStatus.parse(message)?.let(::onMediaStatus)
 			}
 
@@ -378,7 +395,13 @@ class CastSession @Inject constructor(
 	private suspend fun onReceiverStatus(open: CastChannel, message: JsonObject) {
 		val transport = CastStatus.transportIdOf(message, CastNs.DEFAULT_MEDIA_APP)
 		if (transport == null) {
-			transportId.value = null
+			// Only when the receiver actually enumerated what it is running
+			// and ours was not among it. A RECEIVER_STATUS announcing a volume
+			// change carries no `applications` array at all, and reading that
+			// as "the app is gone" threw away a working transport mid-session
+			// — which cost the *next* load the whole GET_STATUS-and-LAUNCH
+			// path, the slow route this timing bug lives on.
+			if (CastStatus.listsApplications(message)) transportId.value = null
 			return
 		}
 		if (transport == transportId.value) return
@@ -413,16 +436,40 @@ class CastSession @Inject constructor(
 
 	private suspend fun sendLoad(media: CastMedia, gen: Int) {
 		if (loadGen.get() != gen) return
-		val open = awaitChannel() ?: return
-		if (loadGen.get() != gen) return
-
-		val transport = ensureTransport(open) ?: run {
-			Log.w(TAG, "no transportId from receiver; LOAD abandoned")
+		// Said out loud. This was the one abandon in the sequence that logged
+		// nothing at all, so a LOAD lost here left no trace anywhere — the
+		// player simply never started and there was no line to search for.
+		val open = awaitChannel() ?: run {
+			Log.w(TAG, "no control channel after ${CHANNEL_WAIT_MS}ms; LOAD abandoned")
+			reportReceiverFailure()
 			return
 		}
 		if (loadGen.get() != gen) return
 
-		val payload = buildJsonObject {
+		val transport = ensureTransport(open) ?: run {
+			Log.w(TAG, "no transportId from receiver; LOAD abandoned")
+			reportReceiverFailure()
+			return
+		}
+		if (loadGen.get() != gen) return
+
+		val payload = loadPayload(media)
+		Log.i(TAG, "LOAD $payload")
+		open.send(CastNs.MEDIA, transport, payload)
+		awaitLoadAck(open, transport, media, gen)
+	}
+
+	/**
+	 * One LOAD message.
+	 *
+	 * Built by a function rather than inline because it is sent twice: once by
+	 * [sendLoad] and again by [awaitLoadAck] if the receiver never answered.
+	 * **The second must not be a byte-for-byte copy of the first** — a receiver
+	 * correlates its replies by `requestId`, so re-sending one it has already
+	 * seen is a worse thing to do than sending nothing.
+	 */
+	private fun loadPayload(media: CastMedia): JsonObject =
+		buildJsonObject {
 			put("type", "LOAD")
 			put("requestId", requestIds.getAndIncrement())
 			// Explicit even though the spec defaults it true — some receiver
@@ -459,9 +506,58 @@ class CastSession @Inject constructor(
 				}
 			}
 		}
-		Log.i(TAG, "LOAD $payload")
-		open.send(CastNs.MEDIA, transport, payload)
+
+	/**
+	 * Sends the LOAD once more if the receiver never acknowledged the first.
+	 *
+	 * **The gap `LoadRetryWatcher` is structurally unable to see.** That class
+	 * decides from `MEDIA_STATUS` pushes, and the failure here produces none: a
+	 * receiver that has published its transport but is not yet consuming the
+	 * media namespace drops the LOAD on the floor. There is no ack to wait for
+	 * — `send` reports only that the bytes left this phone — so elapsed time is
+	 * the only evidence there is.
+	 *
+	 * Three rules keep it from becoming a source of its own problems:
+	 *
+	 *  * **Once, never a loop.** What this recovers from is a receiver that was
+	 *    a moment too early. If the second is ignored too then something else
+	 *    is wrong, and repeating would bury it.
+	 *  * **Generation-checked**, like the three checks in [sendLoad] above, so a
+	 *    track the user chose in the meantime always wins.
+	 *  * **Judged on the message, not on a parsed status.** `CastStatus.parse`
+	 *    returns null for an empty `status` array, which is exactly what a
+	 *    freshly launched receiver with no media answers a `GET_STATUS` with —
+	 *    so counting parsed statuses would call a healthy receiver silent and
+	 *    re-send against it. [mediaMessages] counts arrivals instead.
+	 */
+	private suspend fun awaitLoadAck(
+		open: CastChannel,
+		transport: String,
+		media: CastMedia,
+		gen: Int,
+	) {
+		val before = mediaMessages.value
+		delay(LOAD_ACK_WAIT_MS)
+		if (loadGen.get() != gen) return
+		if (mediaMessages.value != before) return
+		if (channel.value !== open) return
+
+		val again = loadPayload(media)
+		Log.w(TAG, "no MEDIA_STATUS ${LOAD_ACK_WAIT_MS}ms after LOAD; sending it once more")
+		Log.i(TAG, "LOAD $again")
+		open.send(CastNs.MEDIA, transport, again)
 	}
+
+	/**
+	 * The same words for both ways a LOAD can be given up on, and deliberately
+	 * about the receiver rather than the file: nothing here is a judgement on
+	 * what was being cast, and saying so would send the next person to look at
+	 * the wrong thing.
+	 */
+	private fun reportReceiverFailure() = report(
+		"The television did not finish starting up, so nothing was sent to it. " +
+			"Try again."
+	)
 
 	/**
 	 * The transport of a running Default Media Receiver, launching one if there
@@ -537,9 +633,61 @@ class CastSession @Inject constructor(
 	private companion object {
 		const val TAG = "GainDriveCast"
 		const val RECONNECT_DELAY_MS = 500L
-		const val CHANNEL_WAIT_MS = 5_000L
-		const val STATUS_WAIT_MS = 1_500L
-		const val LAUNCH_WAIT_MS = 10_000L
+
+		/**
+		 * How long a LOAD waits for the TLS channel to exist.
+		 *
+		 * **It must exceed the time opening one can take**, which was not true
+		 * of the 5 s it started at: `CastChannel.open` spends up to
+		 * `CONNECT_TIMEOUT_MS` (5 s) on the Wi-Fi-bound connect, then
+		 * `FALLBACK_TIMEOUT_MS` (3 s) on the unbound one, and only then runs a
+		 * handshake under another 5 s `soTimeout` — about thirteen seconds
+		 * worst case. A ceiling below the work it bounds is not a timeout, it
+		 * is a race, and losing it abandoned the LOAD.
+		 */
+		const val CHANNEL_WAIT_MS = 20_000L
+
+		/**
+		 * How long to wait for a `RECEIVER_STATUS` naming our app *before*
+		 * launching it.
+		 *
+		 * Not about the launch at all — it is what decides whether an already
+		 * running receiver is joined or torn down. `ensureTransport` sends
+		 * LAUNCH when this expires, and LAUNCH against a running app recreates
+		 * it, losing the session. 1.5 s is easily too short for a television
+		 * that is waking up to answer a `GET_STATUS`.
+		 */
+		const val STATUS_WAIT_MS = 4_000L
+
+		/**
+		 * How long to wait for the receiver app after LAUNCH.
+		 *
+		 * **This is a television changing HDMI input and cold-starting a web
+		 * app, not a network round trip.** Measured at 10–20 s on the
+		 * reference device, so the 10 s this started at expired first perhaps
+		 * half the time: the LOAD was abandoned, the receiver finished
+		 * launching a few seconds later, and the set sat on the Chromecast
+		 * idle backdrop with a live control channel and nothing loaded. A
+		 * second attempt always worked, because `ensureTransport` then found
+		 * the transport already cached.
+		 *
+		 * Waiting longer costs nothing: `awaitTransport` is event-driven and
+		 * returns the instant `onReceiverStatus` publishes the transport, and
+		 * a newer load supersedes this one through `loadGen`.
+		 */
+		const val LAUNCH_WAIT_MS = 45_000L
+
+		/**
+		 * How long to give a LOAD that was *sent* before sending it once more.
+		 *
+		 * The gap `LoadRetryWatcher` cannot cover: it is fed by `MEDIA_STATUS`
+		 * pushes, so it sees nothing at all when the receiver drops the LOAD —
+		 * which it does when the app has published its transport but is not yet
+		 * consuming the media namespace. There is no ack to wait on, so a timer
+		 * is the only evidence available.
+		 */
+		const val LOAD_ACK_WAIT_MS = 8_000L
+
 		const val STOP_GRACE_MS = 300L
 	}
 }

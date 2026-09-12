@@ -132,6 +132,18 @@ data class CastStatus(
 			message.runningApp(appId)?.string("sessionId")
 
 		/**
+		 * Whether this `RECEIVER_STATUS` says what the television is running.
+		 *
+		 * The distinction [transportIdOf] cannot express: it answers null both
+		 * for "our app is not running" and for "this status was not about
+		 * applications at all". A volume-change push is the second — it carries
+		 * `volume` and nothing else — and treating it as the first discards a
+		 * transport that is still perfectly good.
+		 */
+		fun listsApplications(message: JsonObject): Boolean =
+			message.obj("status")?.array("applications") != null
+
+		/**
 		 * Matched on [appId] rather than taken as the first entry, which is a
 		 * fix and not a refinement.
 		 *
