@@ -122,6 +122,24 @@ fun VideoScreen(
 	// during the countdown extends the reprieve rather than being ignored.
 	var interactionTick by remember { mutableIntStateOf(0) }
 
+	// What a side swipe is adjusting, and the last thing it adjusted — the
+	// second held separately so the indicator has something to draw through its
+	// own fade-out. Deliberately *not* bumping `interactionTick`: nudging the
+	// volume must not drag the whole transport back over the picture, which is
+	// the opposite of what the gesture is for.
+	var adjustment by remember { mutableStateOf<SideAdjustment?>(null) }
+	var hud by remember { mutableStateOf<SideAdjustment?>(null) }
+	var hudVisible by remember { mutableStateOf(false) }
+	LaunchedEffect(adjustment) {
+		adjustment?.let {
+			hud = it
+			hudVisible = true
+			return@LaunchedEffect
+		}
+		delay(HUD_LINGER_MS)
+		hudVisible = false
+	}
+
 	// Nothing to watch any more: the queue moved on to a track, or emptied.
 	// Staying would leave a black rectangle with an inert seek bar under it.
 	// Safe to fire on the first frame, because the only ways here are a video
@@ -203,7 +221,20 @@ fun VideoScreen(
 			) {
 				controlsVisible = !controlsVisible
 				interactionTick++
-			},
+			}
+			// After `clickable` and not before: `clickable` consumes the down
+			// it is given, so from outside it this would be waiting for an
+			// unconsumed one for ever. See videoSideGestures.
+			.videoSideGestures(
+				// Nothing to dim while the picture is on a television, and the
+				// volume that matters there is not this device's. The chapter
+				// panel is the other exclusion: it sits on the trailing edge,
+				// exactly where the volume zone is, and its list and this
+				// gesture would both be waiting for vertical slop on the same
+				// drag.
+				enabled = castDevice == null && !chaptersOpen,
+				onAdjust = { adjustment = it },
+			),
 		contentAlignment = Alignment.Center,
 	) {
 		// Not merely hidden while casting: composing it is what attaches the
@@ -272,6 +303,18 @@ fun VideoScreen(
 				chaptersOpen = chaptersOpen,
 				onToggleChapters = { chaptersOpen = !chaptersOpen },
 			)
+		}
+
+		// Outside the controls' AnimatedVisibility for the reason the chapter
+		// panel is outside it: a swipe must neither bring the transport back
+		// nor have its own readout fade away with it.
+		AnimatedVisibility(
+			visible = hudVisible,
+			enter = fadeIn(),
+			exit = fadeOut(),
+			modifier = Modifier.align(Alignment.Center),
+		) {
+			hud?.let { SideAdjustmentHud(it) }
 		}
 
 		// Last child, so it draws over the controls' scrim rather than under it,
@@ -651,8 +694,11 @@ private const val CONTROLS_TIMEOUT_MS = 3_500L
  * Compose hands out a themed `ContextWrapper` rather than the Activity itself,
  * so the chain has to be walked. `LocalActivity` would say this in one line,
  * but it arrived in activity-compose 1.10 and this app is on 1.9.
+ *
+ * Shared with `VideoGestures.kt`, which needs the same window to set a
+ * brightness on, hence `internal` rather than private to this file.
  */
-private fun View.activityWindow(): Window? =
+internal fun View.activityWindow(): Window? =
 	generateSequence(context) { (it as? ContextWrapper)?.baseContext }
 		.filterIsInstance<Activity>()
 		.firstOrNull()
@@ -665,6 +711,13 @@ private fun View.activityWindow(): Window? =
 private const val SWAP_GRACE_MS = 500L
 
 private const val CONTROLS_SCRIM = 0.4f
+
+/**
+ * How long the brightness/volume readout stays after the finger lifts. Long
+ * enough to see where it ended up, short enough not to become furniture — it
+ * sits over the film, unlike the controls, which dim it first.
+ */
+private const val HUD_LINGER_MS = 600L
 
 /**
  * Wide enough for a marker title, narrow enough to leave the picture readable.
