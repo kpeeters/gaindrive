@@ -156,27 +156,27 @@ fun MiniPlayer(
 					IconButton(onClick = onInfo) {
 						Icon(Icons.Default.Info, contentDescription = "Track info")
 					}
-					// The sheet's rule, not a second one: a receiver is
-					// offered a video only when the server can hand it over as
-					// a seekable MP4, since a button whose only outcome is a
-					// refusal is worse than no button — but it stays while
-					// casting, so the way to disconnect does not move either.
-					if (!state.isVideo || state.nativeSeek || casting) {
-						IconButton(onClick = onCast) {
-							Icon(
-								imageVector = if (casting) {
-									Icons.Default.CastConnected
-								} else {
-									Icons.Default.Cast
-								},
-								contentDescription = if (casting) "Casting" else "Cast",
-								tint = if (casting) {
-									MaterialTheme.colorScheme.primary
-								} else {
-									LocalContentColor.current
-								},
-							)
-						}
+					// Offered for every video now that a film the server can
+					// only re-encode is cast as HLS. The one case left that
+					// cannot be cast — no direct route to the server, so the
+					// bridge would have to carry a playlist it cannot resolve —
+					// is refused in words by PlayerConnection, because
+					// answering it here would mean a reachability probe this
+					// composable cannot await.
+					IconButton(onClick = onCast) {
+						Icon(
+							imageVector = if (casting) {
+								Icons.Default.CastConnected
+							} else {
+								Icons.Default.Cast
+							},
+							contentDescription = if (casting) "Casting" else "Cast",
+							tint = if (casting) {
+								MaterialTheme.colorScheme.primary
+							} else {
+								LocalContentColor.current
+							},
+						)
 					}
 				}
 

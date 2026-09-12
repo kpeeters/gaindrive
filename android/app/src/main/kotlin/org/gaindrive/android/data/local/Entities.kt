@@ -82,7 +82,9 @@ data class SongEntity(
 	 *
 	 * `nativeSeek` and the frame size are deliberately not mirrored: they only
 	 * matter once a stream URL is being built, and no video can be played
-	 * without the network anyway.
+	 * without the network anyway. Reading false for one that is in fact
+	 * seekable costs the expensive tier and nothing else — it no longer costs
+	 * the ability to cast the film.
 	 */
 	val isVideo: Boolean = false,
 	/**

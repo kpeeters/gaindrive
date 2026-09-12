@@ -186,6 +186,26 @@ static const std::string SONG_COVER_ART_SQL =
 	"            THEN COALESCE(al.folder_id, s.folder_id)"
 	"            ELSE -1 END AS cover_art_id,";
 
+// The three columns a video entry needs beyond the ones audio already selects:
+// the codec pair nativeSeek is derived from, and the season that separates
+// "Series 2" from "Disc 2" in a client's grouping.
+//
+// It is a *suffix*, with a leading comma, and every caller appends it to the
+// very end of its SELECT list.  That is not stylistic: several of these queries
+// carry their own columns in the middle — pq.is_current, b.position, an
+// explicitly unused f.parent_id — so appending is what keeps every existing
+// getColumn() index valid.  Inserting these beside the other song columns would
+// silently renumber the rest.
+//
+// Cover art is deliberately *not* here: SONG_COVER_ART_SQL above answers it as
+// one column in the middle of the list, sidecar arm included, so a query that
+// uses that fragment needs nothing further.  The queries that hand-rolled a
+// cover CASE without the sidecar arm were the cover half of the same gap, and
+// the fix for those is to use the shared fragment rather than to select
+// s.cover_path raw.
+static const std::string SONG_VIDEO_COLS_SQL =
+	", s.video_codec, s.audio_codec, s.season";
+
 // The artist folder of an album whose folder is aliased `f`: the folder above
 // it, always.
 //
@@ -1042,7 +1062,7 @@ void MediaStore::create_schema()
 		--
 		-- songs.genre survives beside this and holds the *first* of them: it
 		-- is the single-valued Subsonic `genre` field, and what albums.genre
-		-- rolls up from, so keeping it is what leaves the eleven ChildEntry
+		-- rolls up from, so keeping it is what leaves the twelve ChildEntry
 		-- queries untouched. This table is the full list, and it is what
 		-- getGenres, getSongsByGenre and getAlbumList type=byGenre read.
 		--
@@ -5034,6 +5054,7 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_songs_by_genre(
 		"       COALESCE(al.title,'') AS album,"
 		+ SONG_COVER_ART_SQL +
 		"       s.path, COALESCE(s.artist,'') AS track_artist"
+		+ SONG_VIDEO_COLS_SQL +
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -5068,6 +5089,9 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_songs_by_genre(
 		e.cover_art_id = q.getColumn(13).getInt();
 		e.path         = q.getColumn(14).getString();
 		e.track_artist = q.getColumn(15).getString();
+		e.video_codec  = q.getColumn(16).isNull() ? "" : q.getColumn(16).getString();
+		e.audio_codec  = q.getColumn(17).isNull() ? "" : q.getColumn(17).getString();
+		e.season       = q.getColumn(18).getInt();
 		result.push_back(std::move(e));
 		}
 	return result;
@@ -5856,10 +5880,10 @@ std::vector<MediaStore::RecentSongEntry> MediaStore::get_recent_songs(
 		"       al.folder_id,"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title, f.name) AS album,"
-		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN al.folder_id ELSE -1 END AS cover_art_id,"
+		+ SONG_COVER_ART_SQL +
 		"       f.parent_id,"
 		"       pc.last_played, COALESCE(s.artist,'') AS track_artist"
+		+ SONG_VIDEO_COLS_SQL +
 		" FROM client.play_counts pc"
 		" JOIN client.users u ON u.id = pc.user_id"
 		" JOIN songs s ON s.path = pc.song_path"
@@ -5895,6 +5919,9 @@ std::vector<MediaStore::RecentSongEntry> MediaStore::get_recent_songs(
 		// column 14 (f.parent_id) unused — parent_id is already the album folder
 		e.last_played       = q.getColumn(15).isNull() ? "" : q.getColumn(15).getString();
 		e.song.track_artist = q.getColumn(16).getString();
+		e.song.video_codec  = q.getColumn(17).isNull() ? "" : q.getColumn(17).getString();
+		e.song.audio_codec  = q.getColumn(18).isNull() ? "" : q.getColumn(18).getString();
+		e.song.season       = q.getColumn(19).getInt();
 		result.push_back(std::move(e));
 		}
 	return result;
@@ -6169,10 +6196,10 @@ std::optional<MediaStore::PlayQueue> MediaStore::get_play_queue(
 		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
-		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
+		+ SONG_COVER_ART_SQL +
 		"       pq.is_current, pq.offset_ms, pq.client, pq.updated,"
 		"       COALESCE(s.artist,'') AS track_artist"
+		+ SONG_VIDEO_COLS_SQL +
 		" FROM client.play_queue pq"
 		" JOIN client.users u ON u.id = pq.user_id"
 		" JOIN songs s ON s.path = pq.song_path"
@@ -6212,6 +6239,9 @@ std::optional<MediaStore::PlayQueue> MediaStore::get_play_queue(
 		if (pq.client.empty())  pq.client  = q.getColumn(16).isNull() ? "" : q.getColumn(16).getString();
 		if (pq.changed.empty()) pq.changed = q.getColumn(17).isNull() ? "" : q.getColumn(17).getString();
 		e.track_artist = q.getColumn(18).getString();
+		e.video_codec  = q.getColumn(19).isNull() ? "" : q.getColumn(19).getString();
+		e.audio_codec  = q.getColumn(20).isNull() ? "" : q.getColumn(20).getString();
+		e.season       = q.getColumn(21).getInt();
 
 		pq.songs.push_back(std::move(e));
 		}
@@ -6349,9 +6379,9 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
-		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
+		+ SONG_COVER_ART_SQL +
 		"       COALESCE(s.artist,'') AS track_artist"
+		+ SONG_VIDEO_COLS_SQL +
 		" FROM client.stars st"
 		" JOIN client.users u ON u.id = st.user_id"
 		" JOIN songs s ON s.path = st.song_path"
@@ -6379,6 +6409,9 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 		e.album        = sq.getColumn(12).getString();
 		e.cover_art_id = sq.getColumn(13).getInt();
 		e.track_artist = sq.getColumn(14).getString();
+		e.video_codec  = sq.getColumn(15).isNull() ? "" : sq.getColumn(15).getString();
+		e.audio_codec  = sq.getColumn(16).isNull() ? "" : sq.getColumn(16).getString();
+		e.season       = sq.getColumn(17).getInt();
 		result.songs.push_back(std::move(e));
 		}
 
@@ -6484,9 +6517,9 @@ MediaStore::PlaylistInfo MediaStore::create_playlist(const std::string& username
 		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
-		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
+		+ SONG_COVER_ART_SQL +
 		"       COALESCE(s.artist,'') AS track_artist"
+		+ SONG_VIDEO_COLS_SQL +
 		" FROM client.playlist_songs ps"
 		" JOIN songs s ON s.path = ps.song_path"
 		" LEFT JOIN albums al ON al.id = s.album_id"
@@ -6514,6 +6547,9 @@ MediaStore::PlaylistInfo MediaStore::create_playlist(const std::string& username
 		e.album        = sq.getColumn(12).getString();
 		e.cover_art_id = sq.getColumn(13).getInt();
 		e.track_artist = sq.getColumn(14).getString();
+		e.video_codec  = sq.getColumn(15).isNull() ? "" : sq.getColumn(15).getString();
+		e.audio_codec  = sq.getColumn(16).isNull() ? "" : sq.getColumn(16).getString();
+		e.season       = sq.getColumn(17).getInt();
 		total_duration += (int)e.duration;
 		pl.songs.push_back(std::move(e));
 		}
@@ -7128,9 +7164,9 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
-		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
+		+ SONG_COVER_ART_SQL +
 		"       COALESCE(s.artist,'') AS track_artist"
+		+ SONG_VIDEO_COLS_SQL +
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
@@ -7162,6 +7198,9 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		e.album        = sq.getColumn(12).getString();
 		e.cover_art_id = sq.getColumn(13).getInt();
 		e.track_artist = sq.getColumn(14).getString();
+		e.video_codec  = sq.getColumn(15).isNull() ? "" : sq.getColumn(15).getString();
+		e.audio_codec  = sq.getColumn(16).isNull() ? "" : sq.getColumn(16).getString();
+		e.season       = sq.getColumn(17).getInt();
 		result.songs.push_back(std::move(e));
 		}
 
@@ -7223,10 +7262,10 @@ std::vector<MediaStore::BookmarkInfo> MediaStore::get_bookmarks(
 		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
-		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id,"
+		+ SONG_COVER_ART_SQL +
 		"       b.position, COALESCE(b.comment,''), b.created, b.changed,"
 		"       u.username, COALESCE(s.artist,'') AS track_artist"
+		+ SONG_VIDEO_COLS_SQL +
 		" FROM client.bookmarks b"
 		" JOIN client.users u ON u.id = b.user_id"
 		" JOIN songs s ON s.path = b.song_path"
@@ -7261,6 +7300,9 @@ std::vector<MediaStore::BookmarkInfo> MediaStore::get_bookmarks(
 		bm.changed            = q.getColumn(17).getString();
 		bm.username           = q.getColumn(18).getString();
 		bm.entry.track_artist = q.getColumn(19).getString();
+		bm.entry.video_codec  = q.getColumn(20).isNull() ? "" : q.getColumn(20).getString();
+		bm.entry.audio_codec  = q.getColumn(21).isNull() ? "" : q.getColumn(21).getString();
+		bm.entry.season       = q.getColumn(22).getInt();
 		result.push_back(std::move(bm));
 		}
 	return result;
@@ -7437,10 +7479,14 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
 		"       COALESCE(a.name,'') AS artist,"
 		"       COALESCE(al.title,'') AS album,"
-		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
-		"            THEN COALESCE(al.folder_id, s.folder_id) ELSE -1 END AS cover_art_id"
-		+ star_col +
-		", COALESCE(s.artist,'') AS track_artist"
+		+ SONG_COVER_ART_SQL +
+		"       COALESCE(s.artist,'') AS track_artist"
+		// After track_artist rather than before it, which is what lets the
+		// shared cover fragment above be dropped in unchanged: that fragment
+		// ends with a comma, and star_col begins with one.  The reader below
+		// numbers them in this order.
+		+ star_col
+		+ SONG_VIDEO_COLS_SQL +
 		" FROM client.playlist_songs ps"
 		" JOIN songs s ON s.path = ps.song_path"
 		" LEFT JOIN albums al ON al.id = s.album_id"
@@ -7473,8 +7519,11 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 		e.artist       = sq.getColumn(11).getString();
 		e.album        = sq.getColumn(12).getString();
 		e.cover_art_id = sq.getColumn(13).getInt();
-		e.starred      = sq.getColumn(14).getString();
-		e.track_artist = sq.getColumn(15).getString();
+		e.track_artist = sq.getColumn(14).getString();
+		e.starred      = sq.getColumn(15).getString();
+		e.video_codec  = sq.getColumn(16).isNull() ? "" : sq.getColumn(16).getString();
+		e.audio_codec  = sq.getColumn(17).isNull() ? "" : sq.getColumn(17).getString();
+		e.season       = sq.getColumn(18).getInt();
 		total_duration += (int)e.duration;
 		pl.songs.push_back(std::move(e));
 		}

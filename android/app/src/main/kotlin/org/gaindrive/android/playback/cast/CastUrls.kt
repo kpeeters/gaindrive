@@ -249,14 +249,49 @@ class CastUrls @Inject constructor(
 	}
 
 	/**
+	 * Whether a video can be handed to a receiver at all, answered without
+	 * building the URL.
+	 *
+	 * The same rule [forVideo] applies, and deliberately the only other place
+	 * it is written down: a seekable file goes over either route, and one the
+	 * server can only re-encode goes as HLS, which the bridge cannot carry. A
+	 * second copy of that in the UI is exactly how a button and the thing it
+	 * does come to disagree.
+	 *
+	 * It is cheap to ask: [CastReachability] memoises per server and network,
+	 * so this costs a map lookup after the first call.
+	 */
+	suspend fun videoIsCastable(ref: ItemRef, nativeSeek: Boolean): Boolean {
+		if (nativeSeek) return true
+		val config = registry.get(ref.server) ?: return false
+		return reachability.canReachDirectly(config)
+	}
+
+	/**
 	 * The same decision for a video, which differs from audio in three ways.
 	 *
-	 * Only one tier is offered: the one the server can hand over as a real MP4
-	 * with a `Content-Length` and byte ranges, which is what `nativeSeek` names.
-	 * A file the server can only re-encode has no seekable form at all — its
-	 * answer is chunked with `Accept-Ranges: none` — and the fix for that is
-	 * `hls.m3u8`, whose relative segment URIs the bridge cannot resolve. So it
-	 * is refused here, and the UI refuses it earlier and in words.
+	 * **Two tiers are offered, and which one is available depends on the
+	 * route.** A file whose codec pair a browser takes arrives as a real MP4
+	 * with a `Content-Length` that answers byte ranges — that is what
+	 * `nativeSeek` names, and it is what the bridge already relays. Anything
+	 * else the server can only re-encode, and its progressive answer is chunked
+	 * with `Accept-Ranges: none`; the seekable form of it is `hls.m3u8`, where
+	 * seeking is picking a segment.
+	 *
+	 * The playlist's segment URIs are **relative**, so they resolve against
+	 * whatever base served the playlist. On the direct route that base is the
+	 * gaindrive server's own `/rest/`, exactly as for any other client, and
+	 * nothing else is needed — the server already sends the CORS headers a
+	 * receiver requires for an adaptive stream. Through the bridge, whose
+	 * grammar is a flat `/<token>/<key>`, a segment arrives as an unrecognised
+	 * key and 404s. So HLS is refused *there and only there*, below the route
+	 * decision rather than above it. See "What HLS would take" in `CAST.md`.
+	 *
+	 * What that refusal used to be is worth knowing, because it is the shape to
+	 * avoid going back to: it sat at the top of this function, so it refused
+	 * the direct route too — for a limitation belonging only to the relay —
+	 * and direct is the common case. The symptom was a film with no cast icon
+	 * and no explanation.
 	 *
 	 * Nothing about quality or bitrate is sent, for the reason set out on
 	 * [StreamUrls.forVideo]: any `format` or `maxBitRate` sets `constrained`
@@ -275,25 +310,39 @@ class CastUrls @Inject constructor(
 	 * video-sized pacing window on the server, not this call.
 	 */
 	private suspend fun forVideo(ref: ItemRef, source: CastSource): CastTarget? {
-		if (!source.nativeSeek) return null
 		// No playableContainers, and that omission is the load-bearing one on this
 		// route. A receiver demuxes none of them, and [mime] below is
 		// `transcodedContentType` — `video/mp4` for exactly the files declaring
 		// would change. Adding the argument here announces MP4 and sends Matroska,
 		// which a receiver refuses outright: the film never starts and nothing
 		// anywhere says why. See `StreamUrls.forVideo`.
-		val target = streamUrls.forVideo(ref, nativeSeek = true) ?: return null
+		//
+		// The flag is passed through rather than pinned true, which is what
+		// selects the playlist for a file the server can only re-encode.
+		val target = streamUrls.forVideo(ref, source.nativeSeek) ?: return null
 		val config = registry.get(ref.server) ?: return null
 
-		// The server's own answer, not one worked out from the codecs: it is
-		// present exactly when the file will be remuxed, and the source type is
-		// wrong in precisely that case.
-		val mime = source.transcodedMime ?: source.sourceMime
+		// For a playlist the type is the playlist's, which only [target] knows.
+		// Otherwise the server's own answer, not one worked out from the codecs:
+		// `transcodedMime` is present exactly when the file will be remuxed, and
+		// the source type is wrong in precisely that case.
+		val mime = if (target.isHls) target.mimeType
+		           else source.transcodedMime ?: source.sourceMime
 
-		warmTranscode(target.url)
+		// Nothing to warm for a playlist: an HLS segment is transcoded per
+		// request and no whole-file build blocks the first byte, so this would
+		// fetch one byte of playlist text and warm nothing.
+		if (!target.isHls) warmTranscode(target.url)
 
 		if (reachability.canReachDirectly(config)) {
 			return CastTarget(target.url, mime, CastRoute.DIRECT)
+		}
+		// See the note above: the bridge cannot resolve a playlist's relative
+		// segment URIs, and publishing the playlist alone would hand the
+		// receiver a document whose every entry 404s.
+		if (target.isHls) {
+			Log.i(TAG, "no direct route and this film is HLS-only; refusing")
+			return null
 		}
 		val relayed = bridge.publish(target.url)
 		return CastTarget(

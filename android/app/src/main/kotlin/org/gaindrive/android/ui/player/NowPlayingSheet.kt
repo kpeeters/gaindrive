@@ -224,28 +224,28 @@ fun NowPlayingSheet(
 								)
 							}
 						}
-						// Offered for a video only when the receiver could
-						// actually play it: one the server can hand over as a
-						// seekable MP4. For the rest a button whose only
-						// outcome is a refusal is worse than no button. Still
-						// shown while casting, so the way to disconnect stays
-						// where it always is.
-						if (!state.isVideo || state.nativeSeek || casting) {
-							IconButton(onClick = onCast) {
-								Icon(
-									imageVector = if (casting) {
-										Icons.Default.CastConnected
-									} else {
-										Icons.Default.Cast
-									},
-									contentDescription = if (casting) "Casting" else "Cast",
-									tint = if (casting) {
-										MaterialTheme.colorScheme.primary
-									} else {
-										MaterialTheme.colorScheme.onSurfaceVariant
-									},
-								)
-							}
+						// Offered for every video: one the server can only
+						// re-encode is cast as HLS, which plays and seeks on a
+						// receiver that fetches from the server itself. The one
+						// case that still cannot — no direct route, so the
+						// bridge would have to carry a playlist whose relative
+						// segment URIs it cannot resolve — is refused in words
+						// by PlayerConnection, since deciding it here would need
+						// a reachability probe a composable cannot await.
+						IconButton(onClick = onCast) {
+							Icon(
+								imageVector = if (casting) {
+									Icons.Default.CastConnected
+								} else {
+									Icons.Default.Cast
+								},
+								contentDescription = if (casting) "Casting" else "Cast",
+								tint = if (casting) {
+									MaterialTheme.colorScheme.primary
+								} else {
+									MaterialTheme.colorScheme.onSurfaceVariant
+								},
+							)
 						}
 					}
 				}

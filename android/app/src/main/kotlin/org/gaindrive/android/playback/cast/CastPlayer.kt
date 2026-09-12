@@ -346,6 +346,21 @@ class CastPlayer(
 		loadJob = scope.launch {
 			val target = castUrls.forCast(ref, source) ?: run {
 				Log.i(TAG, "nothing castable for $ref, skipping")
+				// Said out loud, not merely logged. The only way to get here
+				// is a film the server can only re-encode on a receiver that
+				// cannot reach the server, so the answer would be HLS through
+				// the bridge, which cannot resolve a playlist's relative
+				// segment URIs. Both enqueue checks refuse that up front;
+				// neither covers connecting a device to a queue already
+				// holding one, and skipping it in silence reads as the track
+				// being broken.
+				if (source.isVideo) {
+					session.report(
+						"This video has to be converted as it plays, and this " +
+							"receiver cannot reach the server to fetch it. " +
+							"Disconnect to watch on this device."
+					)
+				}
 				advance()
 				return@launch
 			}

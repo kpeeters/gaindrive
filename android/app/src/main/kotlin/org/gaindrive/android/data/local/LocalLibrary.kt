@@ -441,9 +441,10 @@ private fun SongEntity.toDomain(): Song {
 		// Left at its default, along with transcodedContentType: the mirror
 		// stores neither, and false is the answer that still plays — HLS works
 		// for every video, it is merely more work for the server than a file
-		// that could have been ranged. It also means a video read from the
-		// mirror cannot be cast, since casting is offered only for the tier
-		// that arrives as a seekable MP4. Both facts want the network anyway.
+		// that could have been ranged. It no longer costs the cast route
+		// either, now that an HLS film casts to a receiver that can reach the
+		// server; it only costs the cheaper tier. Both facts want the network
+		// anyway.
 		nativeSeek = false,
 	)
 }

@@ -97,11 +97,15 @@ data class SongDto(
 	// ── Video ───────────────────────────────────────────────────────────
 	//
 	// The server derives isVideo from the file extension, so it is right on
-	// every endpoint. nativeSeek is not: only getVideos, getMusicDirectory,
-	// getAlbum and getSong select the codec columns it is computed from, and
-	// everywhere else it comes back false. That is the safe direction — such a
-	// video plays and seeks, just over HLS when it need not have — so the flag
-	// is trusted as given rather than second-guessed.
+	// every endpoint, and nativeSeek is now too: every query that returns a
+	// song selects the codec columns it is computed from. It was not always
+	// so — only getVideos, getMusicDirectory, getAlbum and getSong did, and
+	// the rest reported false whatever the codecs were, so the same film was
+	// castable from its album and not from a playlist.
+	//
+	// The default below stays false regardless, and is still the right
+	// reading: an older server genuinely does not populate it, and false only
+	// costs the expensive tier.
 
 	val isVideo: Boolean = false,
 	/**
@@ -114,9 +118,9 @@ data class SongDto(
 	 * gaindrive extension: the season an episode belongs to, absent for
 	 * anything that is not one. `discNumber` already carries the same number —
 	 * it is what orders and groups the tracks — so this only decides whether a
-	 * group is headed "Series 2" or "Disc 2". Populated by the same endpoints
-	 * as [nativeSeek], and absent from the rest, where a season reads as a
-	 * disc; that is cosmetic and the ordering is unaffected.
+	 * group is headed "Series 2" or "Disc 2". Populated alongside
+	 * [nativeSeek], so on an older server it is absent and a season reads as
+	 * a disc; that is cosmetic and the ordering is unaffected.
 	 */
 	val season: Int? = null,
 	/** Both omitted when the scan could not probe the file. */

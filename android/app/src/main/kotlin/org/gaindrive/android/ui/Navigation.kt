@@ -70,13 +70,14 @@ sealed interface Route {
 	 * recording sits in and starting that recording partway through.
 	 *
 	 * Opening the album rather than playing the track from the search screen is
-	 * not only about there being no `getSong` here. `nativeSeek` is false on
-	 * every search result — only `getAlbum`, `getMusicDirectory`, `getVideos`
-	 * and `getSong` select the codec columns it is computed from — so playing a
-	 * hit directly would send a perfectly remuxable concert down the re-encode
-	 * path every time. Reading the entry again through the album listing is
-	 * what puts it on the right tier, and it gives the queue the rest of the
-	 * recording's album besides.
+	 * about there being no `getSong` here, and about the queue: reading the
+	 * listing gives it the rest of the recording's album.
+	 *
+	 * It used to have a third reason, now gone — `nativeSeek` was false on
+	 * every search result, because only `getAlbum`, `getMusicDirectory`,
+	 * `getVideos` and `getSong` selected the codec columns it is computed
+	 * from, so playing a hit directly sent a perfectly remuxable concert down
+	 * the re-encode path every time. Every query selects them now.
 	 *
 	 * Both defaulted, so the four existing call sites are unchanged.
 	 */

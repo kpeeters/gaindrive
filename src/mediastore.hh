@@ -415,9 +415,9 @@ class MediaStore {
 			// in one place — the song entry writers in gaindrive.cc, which are
 			// the only code holding both facts at once.
 			//
-			// Unlike video_codec/season, *every* ChildEntry query selects it:
-			// the ones those skip (getStarred, search, getPlaylist) are exactly
-			// where a track is shown away from its album and most needs it.
+			// Every ChildEntry query selects it, as they now all select the
+			// codec pair and the season beside it: a track shown away from its
+			// album is exactly where this is most needed.
 			std::string track_artist;
 			std::string album;
 			int         cover_art_id = -1;  // folder_id for getCoverArt; -1 = none
@@ -436,7 +436,8 @@ class MediaStore {
 			std::string starred;
 			// Video only, and populated only by the paths where a client can
 			// act on them: get_videos(), get_song_entry() and the browse
-			// queries. Zero elsewhere, which is why the API emits
+			// queries. Zero elsewhere — unlike the codec pair below, which
+			// every song query now selects — which is why the API emits
 			// originalWidth/originalHeight conditionally. Whether an entry
 			// *is* video is not stored here — it is derived from `codec` via
 			// is_video_ext() in codecs.hh, so every existing query that
@@ -445,14 +446,25 @@ class MediaStore {
 			int         height = 0;
 			// The codec pair decides whether the served stream will be
 			// seekable, which the API passes to the client as nativeSeek.
+			//
+			// **Every song query selects these**, via SONG_VIDEO_COLS_SQL, and
+			// that is newer than it looks.  Four queries used to, and a video
+			// reached through getStarred, getPlaylist, getPlayQueue,
+			// getBookmarks, getSongsByGenre, getRecentSongs or search came back
+			// with both empty — so video_seeks_natively() answered false for a
+			// file that seeks perfectly well.  The same file therefore answered
+			// differently depending on which endpoint was asked, which is not a
+			// difference any client can be expected to reason about: the
+			// Android app hides its cast button on it, and transcode_target()
+			// advertises a conversion that will not happen.
 			std::string video_codec;
 			std::string audio_codec;
 			// The season an episode belongs to; 0 for anything that is not
 			// one. disc_number carries the same number — it is what clients
 			// group and sort by — and this says that grouping is a season
 			// rather than a disc, which is all that separates "Series 2" from
-			// "Disc 2" in a listing. Populated by the same four queries as the
-			// two codecs above, and zero elsewhere for the same reason.
+			// "Disc 2" in a listing. Selected by the same fragment as the two
+			// codecs above, and for the same reason.
 			int         season = 0;
 			};
 

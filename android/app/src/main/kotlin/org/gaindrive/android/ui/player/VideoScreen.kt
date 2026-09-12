@@ -566,21 +566,22 @@ private fun Controls(
 			// it — a video takes the app straight here — so without this the
 			// button exists in a place a film never visits.
 			//
-			// Offered only for a video the receiver could play, on the same
-			// rule the sheet uses, and always while casting so the way back off
-			// the television stays where it was.
-			if (state.nativeSeek || casting) {
-				IconButton(onClick = onCast) {
-					Icon(
-						imageVector = if (casting) {
-							Icons.Default.CastConnected
-						} else {
-							Icons.Default.Cast
-						},
-						contentDescription = if (casting) "Casting" else "Cast",
-						tint = Color.White,
-					)
-				}
+			// Offered for every film, on the same rule the sheet uses: one the
+			// server can only re-encode is cast as HLS. The single case that
+			// still cannot be cast — no direct route to the server — is refused
+			// in words by PlayerConnection rather than by hiding the button,
+			// since deciding it here would need a reachability probe a
+			// composable cannot await.
+			IconButton(onClick = onCast) {
+				Icon(
+					imageVector = if (casting) {
+						Icons.Default.CastConnected
+					} else {
+						Icons.Default.Cast
+					},
+					contentDescription = if (casting) "Casting" else "Cast",
+					tint = Color.White,
+				)
 			}
 		}
 

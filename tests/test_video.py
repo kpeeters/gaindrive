@@ -733,6 +733,134 @@ def test_missing_id_is_a_subsonic_error():
     print("PASS  missing and malformed ids produce Subsonic errors, not 500s")
 
 
+# ---- The fields must not depend on which endpoint was asked ----------
+
+def _find_entry(entries, vid):
+    """A song entry by id, out of whatever list shape an endpoint returned."""
+    if isinstance(entries, dict):
+        entries = [entries]
+    for e in entries or []:
+        if e.get("id") == vid:
+            return e
+    return None
+
+
+# The fields that come from the codec pair and its two neighbours.  Compared
+# as a set rather than one at a time so a failure names every disagreement.
+_TIER_FIELDS = ("nativeSeek", "season", "coverArt",
+                "transcodedContentType", "transcodedSuffix")
+
+
+def test_video_fields_agree_across_endpoints():
+    """The same file must answer the same way whichever endpoint was asked.
+
+    Only four queries used to select video_codec/audio_codec/season, so a video
+    reached through a playlist or a search hit came back with empty codecs —
+    reporting nativeSeek: false however seekable it was, advertising a
+    transcode that would not happen, and (for a loose file) its section's cover
+    instead of its own. The Android app hides its cast button on that flag, so
+    the same film was castable from its album and not from a playlist.
+
+    getVideos is the reference: it is one of the four that always selected them.
+    """
+    _need_video()
+    v   = _video()
+    vid = v["id"]
+    ref = {k: v.get(k) for k in _TIER_FIELDS}
+
+    seen = {}
+
+    # search3 — no mutation needed.
+    r = _json("search3.view", {"query": v.get("title", ""),
+                               "songCount": 500, "artistCount": 0,
+                               "albumCount": 0})
+    hit = _find_entry(r.get("searchResult3", {}).get("song"), vid)
+    if hit is not None:
+        seen["search3"] = hit
+
+    # getStarred2 — star it, then leave the star exactly as it was found.
+    was_starred = bool(v.get("starred"))
+    if not was_starred:
+        _json("star.view", {"id": vid})
+    try:
+        r = _json("getStarred2.view")
+        hit = _find_entry(r.get("starred2", {}).get("song"), vid)
+        assert hit is not None, "the video did not come back from getStarred2"
+        seen["getStarred2"] = hit
+    finally:
+        if not was_starred:
+            _json("unstar.view", {"id": vid})
+
+    # createPlaylist reads its songs back through a near-duplicate of
+    # get_playlist's query, so both are worth checking: it is the copy a fix
+    # applied by hand is most likely to miss.
+    r = _json("createPlaylist.view",
+              {"name": "gd-test-native-seek", "songId": vid})
+    pid = str(r.get("playlist", {}).get("id", ""))
+    assert pid, f"createPlaylist returned no id: {r}"
+    try:
+        hit = _find_entry(r.get("playlist", {}).get("entry"), vid)
+        if hit is not None:
+            seen["createPlaylist"] = hit
+        r = _json("getPlaylist.view", {"id": pid})
+        hit = _find_entry(r.get("playlist", {}).get("entry"), vid)
+        assert hit is not None, "the video did not come back from getPlaylist"
+        seen["getPlaylist"] = hit
+    finally:
+        _json("deletePlaylist.view", {"id": pid})
+
+    assert seen, "the video could not be reached through any other endpoint"
+
+    bad = []
+    for name, e in sorted(seen.items()):
+        got = {k: e.get(k) for k in _TIER_FIELDS}
+        if got != ref:
+            bad.append(f"  {name}: {got}")
+    assert not bad, (
+        "endpoints disagree about %r\n  getVideos: %s\n%s"
+        % (v.get("title"), ref, "\n".join(bad)))
+
+    print(f"PASS  nativeSeek/season/coverArt/transcoded* agree across "
+          f"{', '.join(sorted(seen))}")
+
+
+def test_direct_video_advertises_no_transcode_from_a_playlist():
+    """transcode_target() reads the same codec pair, so it had the same gap.
+
+    A directly-playable file advertises no transcodedContentType at all. With
+    the codecs empty it advertised video/mp4 — and the Android app hands that
+    value to a Cast receiver as the LOAD's contentType, so it is not cosmetic.
+    """
+    _need_video()
+    direct = [v for v in _videos()
+              if v.get("suffix") in DIRECT_SUFFIXES
+              and v.get("nativeSeek") is True
+              and not v.get("transcodedContentType")]
+    if not direct:
+        print("SKIP  no directly-playable video in the library")
+        return
+    v   = direct[0]
+    vid = v["id"]
+
+    r = _json("createPlaylist.view",
+              {"name": "gd-test-transcode-target", "songId": vid})
+    pid = str(r.get("playlist", {}).get("id", ""))
+    assert pid, f"createPlaylist returned no id: {r}"
+    try:
+        r = _json("getPlaylist.view", {"id": pid})
+        e = _find_entry(r.get("playlist", {}).get("entry"), vid)
+        assert e is not None, "the video did not come back from getPlaylist"
+        assert not e.get("transcodedContentType"), \
+            (f"{v.get('title')!r} is served untouched but getPlaylist "
+             f"advertises transcodedContentType="
+             f"{e.get('transcodedContentType')!r}")
+        assert not e.get("transcodedSuffix"), \
+            f"{v.get('title')!r}: transcodedSuffix={e.get('transcodedSuffix')!r}"
+    finally:
+        _json("deletePlaylist.view", {"id": pid})
+    print(f"PASS  a directly-played video advertises no transcode from a playlist")
+
+
 TESTS = [
     test_get_videos_marks_entries_as_video,
     test_get_videos_reports_dimensions,
@@ -765,6 +893,8 @@ TESTS = [
     test_video_info_rejects_audio,
     test_captions_are_webvtt_or_absent,
     test_missing_id_is_a_subsonic_error,
+    test_video_fields_agree_across_endpoints,
+    test_direct_video_advertises_no_transcode_from_a_playlist,
 ]
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.playback.cast.CastSession
+import org.gaindrive.android.playback.cast.CastUrls
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -73,8 +74,14 @@ data class PlayerState(
 	val isVideo: Boolean get() = current?.isVideo == true
 
 	/**
-	 * Whether what is playing could go to a Chromecast. Always true for audio;
-	 * for video, only the tier the server can hand over as a seekable MP4.
+	 * Whether the stream the server would send is seekable by byte range —
+	 * true for audio, and for the video tiers that arrive as a real MP4.
+	 *
+	 * No longer what decides whether the cast button is drawn: a film the
+	 * server can only re-encode is cast as HLS, so the question there is
+	 * whether the *receiver* can reach the server, which
+	 * [org.gaindrive.android.playback.cast.CastUrls.videoIsCastable] answers
+	 * and no composable can.
 	 */
 	val nativeSeek: Boolean get() = current?.nativeSeek == true
 
@@ -114,6 +121,10 @@ class PlayerConnection @Inject constructor(
 	private val videoSurface: VideoSurface,
 	private val watchdog: PlaybackWatchdog,
 	private val castSession: CastSession,
+	// For videoIsCastable() alone: whether a receiver could fetch a film the
+	// server can only re-encode. The rule lives there so the refusal here and
+	// the URL builder cannot disagree.
+	private val castUrls: CastUrls,
 	private val settings: SettingsStore,
 	private val scope: CoroutineScope,
 ) {
@@ -186,6 +197,17 @@ class PlayerConnection @Inject constructor(
 		// would otherwise hear about, so its message has to push a republish
 		// rather than wait for one.
 		scope.launch { watchdog.message.collect { publish() } }
+		// A refusal raised on the cast load worker, where there is no tap to
+		// return it to. Forwarded into the same field the enqueue refusals
+		// use, so the shell has one thing to show and one thing to clear.
+		scope.launch {
+			castSession.message.collect { text ->
+				if (text != null) {
+					_message.value = text
+					castSession.consumeMessage()
+				}
+			}
+		}
 	}
 
 	/** Idempotent: safe to call from every screen that needs the player. */
@@ -233,12 +255,16 @@ class PlayerConnection @Inject constructor(
 	/**
 	 * Whether [songs] can be played where playback is currently going.
 	 *
-	 * Video is cast, but only the tier the server can hand over as a real MP4 —
-	 * which is what `nativeSeek` names. Anything else it can only convert as it
-	 * plays, and that stream is chunked with no byte ranges, so the receiver
-	 * would show a seek bar that does nothing on exactly the long content where
-	 * seeking matters most. The answer for those is `hls.m3u8`, which the bridge
-	 * cannot yet carry. Refusing here, in words, is the honest version of that.
+	 * A video the server can only re-encode is cast as `hls.m3u8`, where
+	 * seeking is picking a segment — so it plays and seeks on a receiver that
+	 * fetches from the server itself. Through the bridge it cannot: the
+	 * playlist's segment URIs are relative and the bridge's flat
+	 * `/<token>/<key>` grammar 404s them. That is the only case left to refuse,
+	 * and [CastUrls.videoIsCastable] is the one place the rule is written.
+	 *
+	 * The refusal used to cover every such video on both routes, which meant
+	 * the common case — a receiver that can reach the server — was turned away
+	 * for a limitation belonging to the rarer one.
 	 *
 	 * None of it applies when videos are being played for their soundtrack:
 	 * what the receiver is offered then is an ordinary audio transcode, which
@@ -247,9 +273,13 @@ class PlayerConnection @Inject constructor(
 	private suspend fun refuseIfCasting(songs: List<Song>): Boolean {
 		if (castSession.device.value == null) return false
 		if (settings.videoAudioOnly.first()) return false
-		if (songs.none { it.isVideo && !it.nativeSeek }) return false
-		_message.value = "This video has to be converted as it plays, which the player " +
-			"cannot seek. Disconnect to watch on this device."
+		val blocked = songs.any {
+			it.isVideo && !castUrls.videoIsCastable(it.ref, it.nativeSeek)
+		}
+		if (!blocked) return false
+		_message.value = "This video has to be converted as it plays, and this " +
+			"receiver cannot reach the server to fetch it. Disconnect to watch " +
+			"on this device."
 		return true
 	}
 

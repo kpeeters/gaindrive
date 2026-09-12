@@ -329,10 +329,10 @@
 <div class="doc-sec" id="video">
 <h2>Video</h2>
 <div class="api-ep">
-<h3 id="ep-getalbum-getmusicdirectory-getvideos-getsong">getAlbum / getMusicDirectory / getVideos / getSong</h3>
+<h3 id="ep-any-endpoint-that-returns-a-song-entry">any endpoint that returns a song entry</h3>
 <p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
-<p>Carried by <code>getAlbum</code>, <code>getMusicDirectory</code>, <code>getVideos</code>, <code>getSong</code>. Only the gaindrive additions are listed here.</p>
-<p>Two fields on a video entry, from the four endpoints that populate them.</p>
+<p>Carried by <code>any endpoint that returns a song entry</code>. Only the gaindrive additions are listed here.</p>
+<p>Two fields on a video entry, carried by every endpoint that returns one.</p>
 <h4>Response</h4>
 <table class="doc-table">
 <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
@@ -348,7 +348,7 @@
 <div class="api-note"><p class="api-note-h"><code>season</code></p>
 <p><code>discNumber</code> already carries the same number — that is the field every Subsonic client groups and sorts by, and none of them knows what a season is — so a client that ignores <code>season</code> groups a series correctly and simply calls the groups discs. A client that reads it can head them &quot;Series 2&quot; instead.</p>
 <p>The number comes from an <code>S02E03</code>-style marker or from a folder naming its season. A <code>Disc 2</code> or <code>CD1</code> folder is deliberately not one, and neither is an unnumbered <code>Specials</code> folder, so both of those keep reporting a disc.</p></div>
-<div class="note"><p>Only these four queries select the underlying columns. A video reached through <code>getStarred</code>, <code>getPlaylist</code>, <code>getPlayQueue</code>, <code>getBookmarks</code> or <code>search</code> reports neither field. That is the safe direction — it plays correctly and seeks by re-request — but such a video re-encodes on every seek even when it could have been remuxed.</p></div>
+<p>Both fields are populated wherever a song entry appears. That was not always so: they once came only from <code>getAlbum</code>, <code>getMusicDirectory</code>, <code>getVideos</code> and <code>getSong</code>, and a video reached any other way reported <code>nativeSeek: false</code> whatever its codecs were — so the same file answered differently depending on which endpoint was asked.</p>
 </div>
 <div class="api-ep">
 <h3 id="ep-getvideoinfo">getVideoInfo</h3>

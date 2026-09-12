@@ -116,6 +116,28 @@ class CastSession @Inject constructor(
 	private val _status = MutableStateFlow(CastStatus())
 	val status: StateFlow<CastStatus> = _status.asStateFlow()
 
+	private val _message = MutableStateFlow<String?>(null)
+
+	/**
+	 * Something that could not be cast, in words, for the shell to show.
+	 *
+	 * Here rather than on [CastPlayer] because that object is rebuilt per
+	 * session while this one is the singleton every observer already holds —
+	 * the same arrangement `PlaybackWatchdog.message` uses, and it is
+	 * `PlayerConnection` that collects both.
+	 *
+	 * The case it exists for: a queue already holding a film that cannot be
+	 * cast when a device is connected. The enqueue checks refuse such a film
+	 * up front, but neither covers connecting to a queue that has one in it,
+	 * and the alternative is [CastPlayer] skipping the track with nothing on
+	 * screen to say why.
+	 */
+	val message: StateFlow<String?> = _message.asStateFlow()
+
+	fun report(text: String) { _message.value = text }
+
+	fun consumeMessage() { _message.value = null }
+
 	/** Non-null only while the receiver has our media session open. */
 	private val transportId = MutableStateFlow<String?>(null)
 	private val channel = MutableStateFlow<CastChannel?>(null)

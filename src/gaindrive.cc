@@ -1244,7 +1244,7 @@ static bool check_item_write_perm(const httplib::Request& req,
 // but every id-addressed read went straight to `WHERE id = ?`. So the listing
 // hid another user's batch while stream, download, getCoverArt and
 // getMusicDirectory all served it to anyone who tried the number. Filtering
-// here rather than in each query keeps the eleven ChildEntry queries untouched,
+// here rather than in each query keeps the twelve ChildEntry queries untouched,
 // which is the same trade getVideos made for is_video.
 static bool item_read_allowed(const httplib::Request& req, MediaStore& store,
                               const std::string& uploads_root_name,

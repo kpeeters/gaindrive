@@ -738,15 +738,15 @@ governs on its own.
 
 [[endpoint]]
 kind       = 'additions'
-applies_to = ["getAlbum", "getMusicDirectory", "getVideos", "getSong"]
+applies_to = ["any endpoint that returns a song entry"]
 section    = "video"
-summary    = 'Two fields on a video entry, from the four endpoints that populate them.'
+summary    = 'Two fields on a video entry, carried by every endpoint that returns one.'
 notes      = '''
-NOTE: Only these four queries select the underlying columns. A video reached
-through `getStarred`, `getPlaylist`, `getPlayQueue`, `getBookmarks` or
-`search` reports neither field. That is the safe direction — it plays
-correctly and seeks by re-request — but such a video re-encodes on every seek
-even when it could have been remuxed.
+Both fields are populated wherever a song entry appears. That was not always
+so: they once came only from `getAlbum`, `getMusicDirectory`, `getVideos` and
+`getSong`, and a video reached any other way reported `nativeSeek: false`
+whatever its codecs were — so the same file answered differently depending on
+which endpoint was asked.
 '''
 
   [[endpoint.field]]
