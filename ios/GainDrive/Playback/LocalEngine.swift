@@ -274,7 +274,15 @@ final class LocalEngine: PlaybackEngine {
 	func target(for song: Song) async -> StreamTarget? {
 		// A film asks a different question: no format, no ceiling, and a
 		// transport chosen by `nativeSeek`. See `StreamUrls.video`.
-		if song.isVideo { return targets.video(for: song) }
+		//
+		// The one call site that declares what AVFoundation demuxes. Local
+		// playback is the only route where that is true of whoever reads the
+		// bytes: `CastUrls.video(for:)` calls the same builder and must keep
+		// passing nothing.
+		if song.isVideo {
+			return targets.video(
+				for: song, playableContainers: avfoundationContainers)
+		}
 		guard var target = await targets.target(for: song.ref) else { return nil }
 		if let local = await store.storedFile(for: song.ref) {
 			target = StreamTarget(

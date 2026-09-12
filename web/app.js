@@ -3471,6 +3471,13 @@ function castLocalVideoStart(song, offset) {
    // request is the opposite: it is the picture belonging to the soundtrack
    // the receiver is already playing.  Without the parameter the picture never
    // arrives, and worse, the 204 path re-issues the LOAD.
+   //
+   // No startImmediately here, unlike playerPlay(), and the difference is
+   // deliberate: this element is a muted picture chasing the receiver's clock,
+   // and castSyncTick() seeks it whenever the two drift past SYNC_HARD.  It
+   // wants the seekable file, not the earliest byte — and waiting costs
+   // nothing anyway, because the soundtrack the receiver is playing has its
+   // own transcode to get through first.
    const streamParams = {id: song.id, castRedirect: 'false'};
    const chunked = song.nativeSeek === false;
    if (chunked && offset > 0) streamParams.timeOffset = Math.floor(offset);
@@ -4492,9 +4499,18 @@ function videoCastPanel(on, note = false) {
    document.getElementById('video-fullscreen').hidden = on;
 }
 
-// The remux tier blocks on ffmpeg copying the whole file into the transcode
-// cache before it sends a byte, which for a feature-length film is tens of
-// seconds.  Show that rather than a black rectangle that looks broken.
+// Shown rather than a black rectangle that looks broken.
+//
+// It used to cover the remux tier blocking on ffmpeg copying a whole film into
+// the transcode cache before it sent a byte — tens of seconds of nothing.
+// playerPlay() now sends startImmediately, so that wait is gone and this is
+// back to covering the ordinary gap before the first frame decodes.  It still
+// earns its place on the re-encode tier, and on the cast paths, where the
+// soundtrack of a disc rip really does take a minute to appear.
+//
+// Note it is cleared only by `loadeddata` and `error`, so a stream that
+// arrives and then stalls leaves it up indefinitely; there is no watchdog here
+// the way PlaybackWatchdog is one on Android.  See ISSUES.md.
 function videoPreparing(on, label = 'Preparing…') {
    const el = document.getElementById('video-preparing');
    el.hidden = !on;
@@ -4585,8 +4601,86 @@ function playerSeekTo(target) {
          player.media.addEventListener('canplay',
             () => player.media.pause(), {once: true});
          }
+      } else if (player.queue[player.index]?.isVideo
+                 && !mediaStreamSeekable(player.media)) {
+      videoRemuxSeek(target);
       } else {
       player.media.currentTime = target;
+      }
+}
+
+// Whether this *response* can be seeked at all, as opposed to whether the file
+// could be.
+//
+// `nativeSeek` promises a Content-Length and Range support, and it is right
+// about the file — but the server can still answer a remuxable video from a
+// pipe, and does whenever the transcode cache is disabled, full, unable to run
+// ffmpeg, or still building after its 20 s wait.  The assignment below this
+// then sets currentTime on a chunked stream, which the browser refuses
+// silently: no event, no exception, a scrub bar that simply does not move.
+//
+// The test is `seekable` and not `buffered`, for the reason spelled out at
+// castSyncCanSeek() — and it is made here, at the point of use, rather than
+// latched on an event, because nothing fires when `seekable` changes.
+//
+// readyState is checked first because before metadata `seekable` is
+// legitimately empty, and an assignment there is not a seek at all: it becomes
+// the element's default playback start position, which is what makes
+// playerPlay()'s own `offset > 0 && !chunked` line work.
+function mediaStreamSeekable(el) {
+   if (el.readyState < 1) return true;
+   return el.seekable.length > 0
+       && el.seekable.end(el.seekable.length - 1) > 0;
+}
+
+// A seek on a video the server promised was seekable and then piped anyway.
+//
+// The remux is very likely being built right now — serve_video starts one in
+// the background when it answers from a pipe — and a -c copy runs far faster
+// than playback, so the answer is usually "it is there now, ask again".  What
+// must not happen is re-fetching blind: a re-fetch that comes back piped
+// restarts the film from zero, which is worse than the seek doing nothing.
+//
+// So ask first and read the header the server sets.  A `fetch` rather than the
+// element, because a page cannot see response headers for anything a
+// <video src> loads — the same trick the Android client's warmTranscode() uses
+// for a different question.
+//
+// startImmediately is on the probe deliberately: it must never be the request
+// that waits.  What that costs is one short-lived ffmpeg, because a piped
+// answer ignores the Range and starts producing — the body is cancelled the
+// moment the header has been read, which aborts it.  The background build is a
+// separate process and is not touched.  One per seek attempt a person actually
+// made, which is the bound that makes it affordable.
+async function videoRemuxSeek(target) {
+   const song = player.queue[player.index];
+   if (!song) return;
+   let ready = false;
+   try {
+      const r = await fetch(apiUrl('stream',
+                                   {id: song.id, startImmediately: 'true'}),
+                            {headers: {Range: 'bytes=0-0'}});
+      ready = r.headers.get('X-Gaindrive-Transcode') !== 'building';
+      // fetch() resolves on headers, so the body is still arriving.  Drop it
+      // rather than leaving the connection to garbage collection.
+      r.body?.cancel().catch(() => {});
+      }
+   catch (err) {
+      // Offline, or the request was cancelled.  Declining is the safe answer:
+      // the picture carries on from where it was.
+      console.warn('[player] seek probe failed', err);
+      return;
+      }
+   if (!ready) {
+      videoPreparing(true, 'Still preparing — seeking will work shortly');
+      setTimeout(() => videoPreparing(false), 2500);
+      return;
+      }
+   const wasPaused = player.media.paused;
+   playerPlay(target);
+   if (wasPaused) {
+      player.media.addEventListener('canplay',
+         () => player.media.pause(), {once: true});
       }
 }
 
@@ -5631,6 +5725,16 @@ function playerPlay(offset = 0, forceMp3 = false) {
    // (chunked, no Range support), so ask the server to start ffmpeg at the
    // seek point instead — the served stream is already the slice we want.
    if (chunked && offset > 0) streamParams.timeOffset = Math.floor(offset);
+   // Ask the server not to wait out a whole-file remux before sending
+   // anything: it answers from a fragmented pipe and builds the seekable
+   // entry beside it.  The picture starts in about a second instead of tens.
+   //
+   // **Only on a fresh play.**  A seek needs the seekable file, so its
+   // re-fetch omits this and takes the waiting path — by which time the
+   // background build is done or nearly, because a -c copy far outruns
+   // playback.  videoRemuxSeek() is what checks before getting there.
+   if (song.isVideo && !audioOnly && offset === 0)
+      streamParams.startImmediately = 'true';
    player.streamIsTranscoded = chunked;
    player.streamFormat       = fmt ?? null;
    player.localOffset        = (chunked && offset > 0) ? offset : 0;

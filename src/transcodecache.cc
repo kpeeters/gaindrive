@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <exception>
 #include <fstream>
 #include <iostream>
+#include <thread>
 
 #include <reproc++/reproc.hpp>
 
@@ -83,6 +85,85 @@ TranscodeCache::TranscodeCache(const fs::path& dir, int64_t cap_bytes, int jobs)
 	          << " jobs=" << jobs_ << std::endl;
 	}
 
+// Caller holds mu_.
+std::shared_ptr<const TranscodeCache::Entry> TranscodeCache::open_locked(
+	const std::string& key, const fs::path& final, bool hit)
+	{
+	std::error_code ec;
+	if (!fs::exists(final, ec)) return {};
+	int64_t size = static_cast<int64_t>(fs::file_size(final, ec));
+	if (ec || size <= 0) return {};
+	// Touch so prune()'s LRU ordering reflects use, not creation.
+	fs::last_write_time(final, fs::file_time_type::clock::now(), ec);
+	in_use_[key]++;
+	return std::make_shared<Entry>(*this, key, final, size, hit);
+	}
+
+// Runs ffmpeg and publishes the result.  Entered with a slot claimed in
+// running_ and `key` in building_; both are released here whatever happens.
+std::shared_ptr<const TranscodeCache::Entry> TranscodeCache::run_build(
+	const std::string& key, const fs::path& final, const fs::path& part,
+	const std::vector<std::string>& argv,
+	const std::string& out_placeholder, bool background)
+	{
+	std::vector<std::string> cmd = argv;
+	for (auto& a : cmd)
+		if (a == out_placeholder) a = part.string();
+
+	// The release is written twice rather than once because a throw out of
+	// run_ffmpeg() would otherwise leak a job slot *and* leave `key` in
+	// building_ for ever, which bars that entry from ever being built again.
+	// It has always been able to; it matters more now that one caller is a
+	// detached thread whose catch is further away.
+	auto release = [&]{
+		running_--;
+		if (background) bg_running_--;
+		building_.erase(key);
+		};
+
+	bool ok = false;
+	try { ok = run_ffmpeg(cmd, part); }
+	catch (...) {
+		std::lock_guard<std::mutex> lk(mu_);
+		release();
+		cv_.notify_all();
+		throw;
+		}
+
+	std::error_code ec;
+	std::unique_lock<std::mutex> lock(mu_);
+	release();
+
+	std::shared_ptr<const Entry> entry;
+	if (ok) {
+		// The rename is the only way a file becomes visible under its final
+		// name, so a reader can never observe a partial transcode.
+		fs::rename(part, final, ec);
+		if (ec) {
+			std::cout << stamp() << "transcode cache: rename failed for "
+			          << key << ": " << ec.message() << std::endl;
+			fs::remove(part, ec);
+			ok = false;
+			}
+		else {
+			int64_t size = static_cast<int64_t>(fs::file_size(final, ec));
+			in_use_[key]++;
+			entry = std::make_shared<Entry>(*this, key, final, size, false);
+			}
+		}
+	else
+		fs::remove(part, ec);
+
+	// On failure as much as on success: a get_or_build() waiting in the
+	// building_ loop below would otherwise sleep out the whole SLOT_TIMEOUT
+	// for a build that has already given up.
+	cv_.notify_all();
+	lock.unlock();
+
+	if (entry) prune();
+	return entry;
+	}
+
 std::shared_ptr<const TranscodeCache::Entry> TranscodeCache::get_or_build(
 	const std::string& key, const std::string& ext,
 	const std::vector<std::string>& argv,
@@ -91,7 +172,6 @@ std::shared_ptr<const TranscodeCache::Entry> TranscodeCache::get_or_build(
 	if (!enabled_) return {};
 
 	fs::path final = dir_ / (key + ext);
-	std::error_code ec;
 
 	std::unique_lock<std::mutex> lock(mu_);
 
@@ -102,15 +182,7 @@ std::shared_ptr<const TranscodeCache::Entry> TranscodeCache::get_or_build(
 			break;
 		}
 
-	if (fs::exists(final, ec)) {
-		int64_t size = static_cast<int64_t>(fs::file_size(final, ec));
-		if (!ec && size > 0) {
-			// Touch so prune()'s LRU ordering reflects use, not creation.
-			fs::last_write_time(final, fs::file_time_type::clock::now(), ec);
-			in_use_[key]++;
-			return std::make_shared<Entry>(*this, key, final, size, true);
-			}
-		}
+	if (auto e = open_locked(key, final, true)) return e;
 
 	// Still being built after the wait above timed out.  Two ffmpegs writing
 	// the same .part file would corrupt it, so let this request stream instead
@@ -135,42 +207,88 @@ std::shared_ptr<const TranscodeCache::Entry> TranscodeCache::get_or_build(
 	running_++;
 	lock.unlock();
 
-	fs::path part = dir_ / (key + ext + ".part");
-	std::vector<std::string> cmd = argv;
-	for (auto& a : cmd)
-		if (a == out_placeholder) a = part.string();
+	return run_build(key, final, dir_ / (key + ext + ".part"), argv,
+	                 out_placeholder, false);
+	}
 
-	bool ok = run_ffmpeg(cmd, part);
+std::shared_ptr<const TranscodeCache::Entry> TranscodeCache::get_if_present(
+	const std::string& key, const std::string& ext)
+	{
+	if (!enabled_) return {};
+	std::lock_guard<std::mutex> lock(mu_);
+	// Deliberately no wait on building_: the whole point is to answer now, so
+	// the caller can start streaming while somebody else finishes the file.
+	return open_locked(key, dir_ / (key + ext), true);
+	}
 
-	lock.lock();
-	running_--;
-	building_.erase(key);
+bool TranscodeCache::build_in_background(
+	const std::string& key, const std::string& ext,
+	const std::vector<std::string>& argv,
+	const std::string& out_placeholder)
+	{
+	if (!enabled_) return false;
 
-	std::shared_ptr<const Entry> entry;
-	if (ok) {
-		// The rename is the only way a file becomes visible under its final
-		// name, so a reader can never observe a partial transcode.
-		fs::rename(part, final, ec);
-		if (ec) {
-			std::cout << stamp() << "transcode cache: rename failed for "
-			          << key << ": " << ec.message() << std::endl;
-			fs::remove(part, ec);
-			ok = false;
-			}
-		else {
-			int64_t size = static_cast<int64_t>(fs::file_size(final, ec));
-			in_use_[key]++;
-			entry = std::make_shared<Entry>(*this, key, final, size, false);
-			}
+	fs::path        final = dir_ / (key + ext);
+	fs::path        part  = dir_ / (key + ext + ".part");
+	std::error_code ec;
+
+	std::unique_lock<std::mutex> lock(mu_);
+	// Closes the race with a build that landed between the caller's
+	// get_if_present() and this call.
+	if (fs::exists(final, ec))  return false;
+	// Already being built — by another viewer of the same film, most likely.
+	// The answer is still "expect it".
+	if (building_.count(key))   return true;
+
+	// **The slot is taken here and never waited for.**  A background build has
+	// nobody waiting on it, so failing to get one costs only a repeat next
+	// time; entering the cv_ queue, on the other hand, would let it sit in
+	// front of a foreground audio request whose fallback is a piped MP3 with
+	// no XING header.  bg_running_ caps it further, so a burst of first plays
+	// cannot fill the whole budget with video copies.
+	if (running_ >= jobs_ || bg_running_ >= std::max(1, jobs_ / 2)) {
+		std::cout << stamp() << "transcode cache: no background slot for "
+		          << key << " (" << running_ << "/" << jobs_ << " busy, "
+		          << bg_running_ << " background)" << std::endl;
+		return false;
 		}
-	else
-		fs::remove(part, ec);
-
-	cv_.notify_all();
+	building_.insert(key);
+	running_++;
+	bg_running_++;
 	lock.unlock();
 
-	if (entry) prune();
-	return entry;
+	std::cout << stamp() << "transcode cache: building " << key
+	          << " in the background" << std::endl;
+
+	std::vector<std::string> cmd = argv;
+	std::string              ph  = out_placeholder;
+	// Detached rather than joined: the request that asked for this is already
+	// being answered from a pipe and must not wait.  It catches for the reason
+	// every detached thread here does — an exception leaving a thread's
+	// top-level function is std::terminate, so a bad argv would take the
+	// server down rather than lose one cache entry.
+	//
+	// The Entry run_build() returns is dropped immediately, and that is not a
+	// leak but the point: it holds the in-use count across run_build()'s own
+	// prune(), which skips in-use keys.  Without it a film larger than
+	// --transcode-cache-mb would be built and then deleted by the very prune
+	// that followed it, and the streamed play would have paid for nothing.
+	std::thread([this, key, final, part, cmd, ph]{
+		try {
+			auto entry = run_build(key, final, part, cmd, ph, true);
+			std::cout << stamp() << "transcode cache: background build of "
+			          << key << (entry ? " done" : " failed") << std::endl;
+			}
+		catch (const std::exception& e) {
+			std::cout << stamp() << "transcode cache: background build of "
+			          << key << " threw: " << e.what() << std::endl;
+			}
+		catch (...) {
+			std::cout << stamp() << "transcode cache: background build of "
+			          << key << " threw" << std::endl;
+			}
+		}).detach();
+	return true;
 	}
 
 bool TranscodeCache::run_ffmpeg(const std::vector<std::string>& argv,

@@ -519,7 +519,7 @@ the account's own ceiling, so the two cannot disagree.
 kind       = 'additions'
 applies_to = ["stream"]
 section    = "playback"
-summary    = 'Six gaindrive parameters on the standard streaming endpoint.'
+summary    = 'Seven gaindrive parameters on the standard streaming endpoint.'
 
   [[endpoint.param]]
   name  = "pace"
@@ -645,6 +645,50 @@ receiver above all. The `LOAD` you sent it declared a `contentType` taken from
 Matroska refuses the media outright, which looks like a broken file rather than
 a mislabelled one. Apply it where the request is made, not where the URL is
 built.
+'''
+
+  [[endpoint.param]]
+  name  = "startImmediately"
+  type  = "bool"
+  doc   = 'Video only. Be sent a stream that starts at once rather than one that can be seeked, when the two conflict.'
+  notes = '''
+Only the **remux** tier reads it, and only when its cached file is not there
+yet. That tier copies the whole film into a seekable MP4 before it sends a
+byte, which for a feature film is tens of seconds and for a disc rip minutes.
+With this, the server answers from a fragmented pipe straight away and builds
+the seekable file beside it, for the next request.
+
+The one response that produces is **not seekable**: chunked,
+`Accept-Ranges: none`, no `Content-Length`. `nativeSeek` still describes the
+file rather than this one request, deliberately — see below — so a client
+sending this must be ready for a stream it cannot seek, and must find out by
+testing rather than by asking. In a browser that is `HTMLMediaElement.seekable`
+being empty; a refused seek raises nothing.
+
+* `X-Gaindrive-Transcode: building` marks such a response, which is how a
+  client can tell before it tries. `hit` or `miss` means the seekable file was
+  there after all and was sent instead.
+* **Send it on a fresh play and not on a seek.** Omitting it is what asks for
+  the seekable file, and by the time somebody seeks the background build is
+  usually finished, so a seek costs the wait only once and often not at all.
+* It overrides nothing. `size`, `maxBitRate` and `timeOffset` each force a real
+  re-encode, and this does not make one seekable or skip it.
+* It does nothing at all on the direct tier, where the file is already served
+  off disk.
+* Ignored when a `castToken` is presented.
+* Only the literal `true` counts.
+
+`transcodedContentType`, `transcodedSuffix` and `nativeSeek` are **not**
+affected by it. They describe what any client would be sent, which is what
+keeps them cacheable and keeps them right for the one consumer that is not
+you — a Cast receiver being told what it is about to fetch.
+
+NOTE: **Never send it on a URL something else will fetch**, a Cast receiver
+above all. Two things break rather than one: the receiver is handed a stream
+with no length that it was told was MP4, and a client that fetches one byte
+ahead of a `LOAD` in order to *make the build happen* gets an instant reply
+having warmed nothing — so the first cast of every affected film fails and the
+second works, which reads as a random fault rather than as a setting.
 '''
 
 [[endpoint]]

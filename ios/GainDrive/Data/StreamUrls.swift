@@ -126,12 +126,46 @@ enum StreamUrls {
 	/// The HLS tier is the server re-encoding to H.264, which always plays. It
 	/// costs a re-encode, so it is only ever reached by `LocalEngine` having
 	/// *asked AVFoundation* and been told the track cannot be decoded.
-	static func video(for song: Song, client: SubsonicClient, transcoded: Bool = false)
-		-> StreamTarget
+	///
+	/// `playableContainers` is the one parameter that *is* sent, and only from
+	/// local playback. It names containers this player demuxes itself, so the
+	/// server hands the file over instead of remuxing it — see
+	/// `LocalEngine.target(for:)`, which is the single call site that passes
+	/// one. It defaults to empty because **`CastUrls.video(for:)` calls this
+	/// same function**: a receiver demuxes none of them, and the `LOAD` it was
+	/// sent declared a `contentType` of `video/mp4` for exactly the files a
+	/// declaration would change. Told MP4 and handed QuickTime, it refuses the
+	/// media outright and the film simply never starts.
+	/// The query a progressive video request carries: the id, and the
+	/// containers we told the server we demux ourselves.
+	///
+	/// Its own function so a test can assert the shape without building a
+	/// `SubsonicClient` — the failure it guards is silent and happens on a
+	/// television, so the assertion that an empty set yields exactly `id` is
+	/// the one standing between a refactor and every cast of a `.mov` failing.
+	///
+	/// Sorted rather than taken in set order: a `Set` promises no iteration
+	/// order, and one request must not be able to build two different URLs.
+	static func videoParameters(id: String, containers: Set<String>)
+		-> [String: String]
 	{
+		var p = ["id": id]
+		if !containers.isEmpty {
+			p["playableContainers"] = containers.sorted().joined(separator: ",")
+		}
+		return p
+	}
+
+	static func video(
+		for song: Song,
+		client: SubsonicClient,
+		transcoded: Bool = false,
+		playableContainers: Set<String> = []
+	) -> StreamTarget {
 		let url =
 			song.nativeSeek && !transcoded
-			? client.url("stream", parameters: ["id": song.ref.id])
+			? client.url("stream", parameters: videoParameters(
+				id: song.ref.id, containers: playableContainers))
 			// `.m3u8` rather than `.view`: the server answers both, and the
 			// extension is how AVFoundation knows it is a playlist. That is
 			// what `SubsonicClient.url`'s `suffix` has been there for since

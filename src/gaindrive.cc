@@ -5379,6 +5379,12 @@ GainDrive::GainDrive(const std::string& db_path,
 			.client_containers = cast_authed
 			    ? ClientContainers{}
 			    : parse_client_containers(qp("playableContainers")),
+			// Same exclusion and the same reason: a receiver fetches for
+			// itself, and a stream with no Content-Length is the one thing it
+			// must not be handed after a LOAD announced video/mp4.  The
+			// literal "true" only, as pace and estimateContentLength read it.
+			.start_immediately = !cast_authed
+			                  && qp("startImmediately") == "true",
 			};
 		Streamer::serve(req, res, si, transcode_cache_, max_bitrate, format,
 		                time_offset, cast_authed, std::move(get_pos),

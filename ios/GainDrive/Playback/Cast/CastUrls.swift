@@ -120,6 +120,13 @@ struct CastUrls {
 	/// Anything else can only be re-encoded, which `CastEngine` refuses rather
 	/// than sending.
 	func video(for song: Song) -> StreamTarget? {
+		// No `playableContainers`, and that omission is the load-bearing one on
+		// this route. A receiver demuxes none of them, and the `contentType`
+		// below is the entry's `transcodedContentType` — `video/mp4` for
+		// exactly the files a declaration would change. Adding the argument
+		// here announces MP4 and sends QuickTime, which a receiver refuses
+		// outright: the film never starts and nothing on the phone says why.
+		// See `StreamUrls.video`.
 		guard let target = targets.video(for: song) else { return nil }
 		return StreamTarget(
 			url: paced(target.url), quality: target.quality, cacheKey: target.cacheKey,

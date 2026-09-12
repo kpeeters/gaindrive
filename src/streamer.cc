@@ -796,6 +796,7 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	          << (video.segment_duration > 0
 	              ? " seg=" + std::to_string(video.segment_duration) : "")
 	          << " declared=[" << declared << "]"
+	          << (video.start_immediately ? " nowait" : "")
 	          << " ua=[" << (ua.empty() ? "none" : ua) << "]"
 	          << std::endl;
 
@@ -833,7 +834,35 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 		                + std::to_string(song.file_modified) + "-remux";
 		static const std::string OUT = TranscodeCache::OUT_PLACEHOLDER;
 		auto argv = video_ffmpeg_argv(song, true, 0, "", 0, 0, false, OUT);
-		if (auto entry = cache.get_or_build(key, ".mp4", argv, OUT)) {
+
+		// A warm entry answers everybody the same way, whatever was asked for:
+		// it is already the better stream, and looking first is what keeps
+		// start_immediately from making a second copy of a file we have.
+		auto entry = cache.get_if_present(key, ".mp4");
+
+		// Cold, and the client would rather start now.  Two different files
+		// are wanted here and that is the whole shape of this branch: what
+		// goes out is *fragmented* MP4, which streams as it is produced, while
+		// the entry being built beside it has its moov at the end, which is
+		// what makes every later play Range-seekable.  A moov-at-end file
+		// cannot be streamed as it grows — the player fetches the tail for the
+		// index first — and a fragmented one carries no index at all, so
+		// neither layout can do both jobs.
+		//
+		// Two independent ffmpegs rather than one with -f tee, deliberately.
+		// A tee's outputs share one loop, so the client draining the pipe
+		// would pace the cache write too: a paused viewer stalls the build and
+		// holds its slot, and the SIGKILL this path sends on disconnect would
+		// truncate the .part — making whether the cache is ever populated a
+		// function of whether somebody watched to the end.  Separate runs give
+		// each half the lifecycle it needs, and cost a second read of the
+		// source that the page cache largely absorbs.
+		if (!entry && video.start_immediately)
+			cache.build_in_background(key, ".mp4", argv, OUT);
+		else if (!entry)
+			entry = cache.get_or_build(key, ".mp4", argv, OUT);
+
+		if (entry) {
 			SongInfo cached{ entry->path().string(), "mp4", song.bitrate,
 			                 song.duration, entry->size(), song.id,
 			                 song.file_modified };
@@ -843,9 +872,18 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 			             entry);
 			return;
 			}
-		// Cache disabled, disk full or ffmpeg unhappy — fall through and pipe
-		// it instead.  The user still sees the video.
-		std::cout << stamp() << "video: remux cache unavailable, piping"
+		// Asked to start now, or the cache is disabled, full or unhappy —
+		// fall through and pipe it instead.  The user still sees the video.
+		//
+		// `building` rather than hit/miss, and it is not decoration: this
+		// response carries no Content-Length, so a client that was told
+		// nativeSeek is true cannot seek it, and the header is the only way
+		// for one to find that out before trying.  web/app.js's
+		// videoRemuxSeek() reads exactly this.
+		res.set_header("X-Gaindrive-Transcode", "building");
+		std::cout << stamp() << "video: remux "
+		          << (video.start_immediately ? "streaming while it builds"
+		                                      : "cache unavailable, piping")
 		          << std::endl;
 		}
 

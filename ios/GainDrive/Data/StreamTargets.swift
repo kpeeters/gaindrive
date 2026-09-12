@@ -27,12 +27,19 @@ struct StreamTargets {
 	let accounts: Accounts
 
 	/// A film. See `StreamUrls.video` for why it carries neither `format` nor
-	/// `maxBitRate`, and why the account ceiling is not applied.
-	func video(for song: Song, transcoded: Bool = false) -> StreamTarget? {
+	/// `maxBitRate`, why the account ceiling is not applied, and why
+	/// `playableContainers` defaults to empty rather than being filled in here.
+	func video(
+		for song: Song,
+		transcoded: Bool = false,
+		playableContainers: Set<String> = []
+	) -> StreamTarget? {
 		guard let client = registry.clientsSnapshot().client(for: song.ref.server) else {
 			return nil
 		}
-		return StreamUrls.video(for: song, client: client, transcoded: transcoded)
+		return StreamUrls.video(
+			for: song, client: client, transcoded: transcoded,
+			playableContainers: playableContainers)
 	}
 
 	func target(for ref: ItemRef) async -> StreamTarget? {

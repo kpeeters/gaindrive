@@ -78,8 +78,39 @@ class TranscodeCache
 			const std::vector<std::string>& argv,
 			const std::string& out_placeholder);
 
+		// The entry for `key` if it is already on disk, and nothing else: this
+		// never runs ffmpeg and never waits for a build somebody else started.
+		// Empty means "not there (yet)", which is the caller's cue to serve this
+		// one request another way — see serve_video()'s remux tier.
+		std::shared_ptr<const Entry> get_if_present(const std::string& key,
+		                                            const std::string& ext);
+
+		// Builds the entry for `key` on a detached thread and returns at once, so
+		// no request thread waits on it.  True when the entry may be expected to
+		// appear — a build was started, or one was already running; false when the
+		// cache is disabled, the file is already there, or no slot was free.
+		//
+		// The answer is for the log rather than for control flow: the caller's
+		// fallback is to stream this request either way.
+		bool build_in_background(const std::string& key, const std::string& ext,
+		                         const std::vector<std::string>& argv,
+		                         const std::string& out_placeholder);
+
 	private:
 		void release(const std::string& key);
+		// Caller holds mu_.  Opens `final` as an Entry with the in-use count
+		// taken and the LRU mtime touched, or {} when it is not a usable file.
+		// One definition, so the touch and the refcount cannot drift between the
+		// two lookups that need them.
+		std::shared_ptr<const Entry> open_locked(
+			const std::string& key, const std::filesystem::path& final, bool hit);
+		// The body both build paths share, run with a slot already claimed and
+		// `key` already in building_.  Releases both.
+		std::shared_ptr<const Entry> run_build(
+			const std::string& key, const std::filesystem::path& final,
+			const std::filesystem::path& part,
+			const std::vector<std::string>& argv,
+			const std::string& out_placeholder, bool background);
 		// Deletes least-recently-used entries until the total is comfortably
 		// under the cap.  Called only after a successful build.
 		void prune();
@@ -96,4 +127,11 @@ class TranscodeCache
 		std::set<std::string>                  building_;
 		std::unordered_map<std::string, int>   in_use_;
 		int                                    running_ = 0;
+		// Background builds inside running_, capped separately.  A burst of first
+		// plays must not fill every --transcode-jobs slot and push the next
+		// *audio* transcode onto the piped path, which is the one with no XING
+		// header and no seektable — precisely what this cache exists to avoid.
+		// Nobody is waiting on a background build, so losing the race costs it
+		// nothing; an audio request losing it costs seekability.
+		int                                    bg_running_ = 0;
 	};

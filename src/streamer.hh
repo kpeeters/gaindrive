@@ -38,6 +38,19 @@ struct VideoOptions {
 	// other caller gets and what a cast token must always get: a receiver
 	// fetches for itself and declared none of this.
 	ClientContainers client_containers;
+	// "I would rather have bytes now than a seekable stream."  Only the remux
+	// tier reads it: with the cache cold, this request is answered from a
+	// fragmented pipe while the real entry is built beside it, instead of
+	// waiting out a whole-file -c copy.
+	//
+	// Opt-in because the server cannot tell who is reading the bytes, and here
+	// the client it would guess wrong about is a television.  Note pace's
+	// User-Agent sniff is no guide: a Chromecast's media player sends a UA
+	// containing Mozilla/.  Guessing wrong about pacing costs pacing; guessing
+	// wrong about this costs a film that will not seek on a TV — and it would
+	// silently defeat the Android client's warmTranscode(), which fetches one
+	// byte precisely *because* the build blocks.
+	bool             start_immediately = false;
 	};
 
 class Streamer {

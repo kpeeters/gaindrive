@@ -17,6 +17,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -323,6 +324,116 @@ def test_garbage_declaration_is_ignored():
         assert "X-Gaindrive-Transcode" not in hdrs, \
             "MKV was not folded to mkv: " + str(hdrs)
     print("PASS  a malformed declaration is ignored rather than fatal")
+
+
+# ---- streaming while the remux builds ---------------------------------
+#
+# `startImmediately` asks the server not to wait out a whole-file `-c copy`
+# before sending anything: it answers from a fragmented pipe and builds the
+# seekable cache entry beside it.  What is worth testing is the boundaries —
+# that it touches no other tier, overrides no constraint, changes nothing the
+# API advertises, and is refused for a cast token, which is the one whose
+# failure would only ever show up on somebody's television.
+
+
+def test_start_immediately_streams_and_then_caches():
+    """The feature, end to end: piped now, seekable afterwards."""
+    vs = _remuxable()
+    if not vs:
+        print("SKIP  no remuxable mkv/mov/avi in the library")
+        return
+    v = vs[0]
+    status, hdrs, body = _raw("stream.view",
+                              {"id": v["id"], "startImmediately": "true"})
+    assert status == 200, status
+    assert len(body) > 0, "empty body"
+    # Two well-formed answers, and which one arrives depends on whether the
+    # cache happened to be warm — so accept either rather than demanding a
+    # cold cache the test cannot arrange.
+    state = hdrs.get("X-Gaindrive-Transcode")
+    assert state in ("building", "hit", "miss"), state
+    if state == "building":
+        assert "Content-Length" not in hdrs, hdrs
+        assert hdrs.get("Accept-Ranges") == "none", hdrs.get("Accept-Ranges")
+        # A fragmented MP4: ftyp first, and a moof rather than a moov, which
+        # is what distinguishes it from the cache entry's layout.
+        assert body[4:8] == b"ftyp", f"not MP4: {body[:12]!r}"
+        assert b"moof" in body[:65536], "no moof — not fragmented"
+    else:
+        assert "Content-Length" in hdrs, hdrs
+
+    # Whatever happened above, the entry must exist shortly afterwards: the
+    # background build is the half that makes later plays cheap.
+    for _ in range(120):
+        _, h2, _ = _raw("stream.view", {"id": v["id"]},
+                        {"Range": "bytes=0-1023"})
+        if h2.get("X-Gaindrive-Transcode") == "hit":
+            print("PASS  streamed at once, and the cache entry landed")
+            return
+        time.sleep(1)
+    raise AssertionError("the background build never produced an entry")
+
+
+def test_start_immediately_does_not_change_metadata():
+    """The advertised fields describe what *any* client is sent, and must.
+
+    A Cast receiver picks its decode pipeline from transcodedContentType, so
+    the day these start varying per request is the day casting breaks.
+    """
+    _need_video()
+    vid = _video()["id"]
+    plain = _json("getSong.view", {"id": vid})["song"]
+    asked = _json("getSong.view",
+                  {"id": vid, "startImmediately": "true"})["song"]
+    for field in ("transcodedContentType", "transcodedSuffix", "nativeSeek"):
+        assert plain.get(field) == asked.get(field), \
+            f"{field} moved: {plain.get(field)!r} -> {asked.get(field)!r}"
+    print("PASS  browse metadata is unchanged by startImmediately")
+
+
+def test_start_immediately_leaves_the_direct_tier_alone():
+    """Nothing to skip when the file is already served off disk."""
+    direct = [v for v in _videos() if v.get("suffix") in DIRECT_SUFFIXES]
+    if not direct:
+        print("SKIP  no mp4/m4v/webm video in the library")
+        return
+    status, hdrs, _ = _raw("stream.view",
+                           {"id": direct[0]["id"],
+                            "startImmediately": "true"},
+                           {"Range": "bytes=0-1023"})
+    assert status == 206, status
+    assert "Content-Range" in hdrs, hdrs
+    assert "X-Gaindrive-Transcode" not in hdrs, hdrs
+    print("PASS  startImmediately does not touch the direct tier")
+
+
+def test_start_immediately_does_not_beat_a_constraint():
+    """It skips a remux.  It does not make a re-encode seekable."""
+    _need_video()
+    status, hdrs, body = _raw("stream.view",
+                              {"id": _video()["id"], "size": "320x240",
+                               "startImmediately": "true"})
+    assert status == 200, status
+    assert hdrs.get("Content-Type") == "video/mp4", hdrs.get("Content-Type")
+    assert len(body) > 0, "empty body — ffmpeg produced nothing"
+    print("PASS  startImmediately does not override size=")
+
+
+def test_start_immediately_only_accepts_true():
+    """Pinned to the literal, as pace and estimateContentLength are."""
+    vs = _remuxable()
+    if not vs:
+        print("SKIP  no remuxable mkv/mov/avi in the library")
+        return
+    v = vs[0]
+    for value in ("yes", "1", "TRUE", "", "../../etc/passwd"):
+        status, hdrs, _ = _raw("stream.view",
+                               {"id": v["id"], "startImmediately": value},
+                               {"Range": "bytes=0-1023"})
+        assert status in (200, 206), f"{value!r} gave HTTP {status}"
+        assert hdrs.get("X-Gaindrive-Transcode") != "building", \
+            f"{value!r} was read as true"
+    print("PASS  only the literal 'true' asks for the fast path")
 
 
 # ---- audio only -------------------------------------------------------
@@ -635,6 +746,11 @@ TESTS = [
     test_vob_is_never_declarable,
     test_declared_container_still_honours_constraints,
     test_garbage_declaration_is_ignored,
+    test_start_immediately_streams_and_then_caches,
+    test_start_immediately_does_not_change_metadata,
+    test_start_immediately_leaves_the_direct_tier_alone,
+    test_start_immediately_does_not_beat_a_constraint,
+    test_start_immediately_only_accepts_true,
     test_audio_format_returns_the_soundtrack,
     test_audio_only_stream_is_seekable,
     test_audio_only_covers_the_whole_video,
