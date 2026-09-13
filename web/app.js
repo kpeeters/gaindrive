@@ -6702,6 +6702,14 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
                }
             }
 
+         // What a track edit changes that this pane cannot patch: the year
+         // is the album's own, drawn only by pane 1 and derived by the server
+         // from whichever track carries the earliest one; track and disc
+         // numbers settle the order and the disc headings when the listing is
+         // built. All of it has to come back from the server.
+         let yearChanged  = false;
+         let orderChanged = false;
+
          // Save changed tracks.
          for (const row of pane.querySelectorAll('.track-row')) {
             const songId     = row.dataset.id;
@@ -6716,6 +6724,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
             if (numInput.value !== numInput.dataset.orig) {
                params.track = numInput.value;
                changed = true;
+               orderChanged = true;
                }
             if (titleInput.value !== titleInput.dataset.orig) {
                params.title = titleInput.value;
@@ -6724,10 +6733,12 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
             if (discInput.value !== discInput.dataset.orig) {
                params.disc = discInput.value;
                changed = true;
+               orderChanged = true;
                }
             if (yearInput.value !== yearInput.dataset.orig) {
                params.year = yearInput.value;
                changed = true;
+               yearChanged = true;
                }
             if (changed) {
                try { await apiCall('updateSong', params); }
@@ -6793,6 +6804,26 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
             await viewAlbums(renamed.parent, renamed.artist,
                              section === 'categories', section === 'uploads');
             await viewTracks(renamed.id, renamed.album, renamed.parent, renamed.artist);
+            return;
+            }
+
+         if (yearChanged || orderChanged) {
+            // Pane 1 draws the album's own year and sorts on it, so a year
+            // edit rebuilds that listing too — and since viewAlbums() clears
+            // pane 2, the tracks have to follow. Guarded on pane 1 really
+            // holding this album's row, so a listing that came from somewhere
+            // else is not thrown away.
+            const sel = `.album-row[data-id="${CSS.escape(albumId)}"]`;
+            if (yearChanged && albumsPane.querySelector(sel)) {
+               const section = albumsPane.dataset.section ?? 'artists';
+               await viewAlbums(album.parent, album.artist ?? artistName ?? '',
+                                section === 'categories', section === 'uploads');
+               // The rows are new nodes, so the highlight on the album whose
+               // tracks are about to fill pane 2 has to be put back.
+               albumsPane.querySelector(sel)?.classList.add('selected');
+               }
+            await viewTracks(albumId, albumTitle, album.parent,
+                             album.artist ?? artistName ?? '');
             return;
             }
 
