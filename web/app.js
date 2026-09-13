@@ -1288,6 +1288,7 @@ async function viewUserEdit(user, refreshFn) {
    const h1 = document.createElement('h1');
    h1.className = 'view-title';
    h1.textContent = isNew ? 'New user' : user.username;
+   h1.title = h1.textContent;
    hdr.appendChild(h1);
    pane.appendChild(hdr);
 
@@ -2449,6 +2450,7 @@ async function viewPlaylistTracks(playlistId, playlistName) {
    const heading = document.createElement('h1');
    heading.className = 'view-title';
    heading.textContent = pl.name;
+   heading.title = pl.name;
    const publicBadge = document.createElement('span');
    publicBadge.className = 'playlist-public-badge';
    publicBadge.textContent = 'Public';
@@ -2692,6 +2694,9 @@ async function viewAlbums(artistId, artistName, isCategory = false,
    const heading = document.createElement('h1');
    heading.className = 'view-title';
    heading.textContent = artistName;
+   // The heading ellipsises when the header is crowded; the tooltip keeps the
+   // full name reachable.
+   heading.title = artistName;
    // The label says the state, the tooltip says what pressing it does.
    const sortBtn = document.createElement('button');
    sortBtn.className = 'sort-btn';
@@ -6431,6 +6436,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
    const heading = document.createElement('h1');
    heading.className = 'view-title';
    heading.textContent = albumTitle;
+   heading.title = albumTitle;
    const albumStar = makeAlbumStar(album);
    albumStar.classList.add('album-star-header');
    const editLink = document.createElement('span');

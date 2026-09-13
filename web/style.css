@@ -1420,7 +1420,15 @@ input.chapter-time.bad { border-color: #e06c6c; }
    text-decoration: underline;
 }
 
+/* Zero flex-basis, so a long title never forces the header's controls to wrap
+   onto a second line that the fixed header height would clip: it grows into
+   whatever space the buttons leave, and ellipsises past that. */
 .view-title {
+   flex: 1 1 0;
+   min-width: 0;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
    font-size: 1.2rem;
    font-weight: 600;
 }
