@@ -760,6 +760,30 @@ const paneNav = {
 
 // ── Views ───────────────────────────────────────────────────────────────────
 
+// Which render a view belongs to.
+//
+// Every view empties its pane, awaits the server, and only then appends what it
+// drew. Those two halves are separated by an await, so the browser is free to
+// start a *second* render in between — a click on another row, a Back, an
+// upload poller's redraw — and that one appends into the pane the first is
+// still filling. Both listings then sit in the pane, stacked, which is exactly
+// the doubled track listing and doubled uploads listing this guards against.
+//
+// So a render takes a generation on entry and gives up at its next await once a
+// newer one has started. Same idiom as fetchPollGen, one level up.
+let renderGen = 0;
+
+// Entry points call this with nothing. A view that renders another view passes
+// its own generation down instead, so the inner render does not declare the
+// outer one stale — viewTracks() -> viewAlbums() is the only such call.
+function beginRender(inherit = null) {
+   return inherit ?? ++renderGen;
+   }
+
+function renderStale(gen) {
+   return gen !== renderGen;
+   }
+
 async function showView(name) {
    console.log('[view] showView', name);
    document.querySelectorAll('#sidebar a, #bottom-nav a').forEach(a => {
@@ -784,6 +808,7 @@ async function showView(name) {
       } else if (name === 'recents') {
       await viewRecents();
       } else {
+      beginRender();
       document.getElementById('pane-artists').innerHTML =
          `<p style="color:var(--text-dim)">${name}</p>`;
       document.getElementById('pane-albums').innerHTML = '';
@@ -793,6 +818,7 @@ async function showView(name) {
 }
 
 async function viewSettings() {
+   const gen = beginRender();
    const pane = document.getElementById('pane-artists');
    document.getElementById('pane-albums').innerHTML = '';
    document.getElementById('pane-tracks').innerHTML = '';
@@ -905,8 +931,10 @@ async function viewSettings() {
       userInfo = sr.user;
       }
    catch {
-      showError('Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError('Could not reach the server. Please check your connection.');
       }
+   if (renderStale(gen)) return;
 
    // The archive-upload form used to sit here. It now lives at the top of
    // the Uploads listing — see makeUploadBar() — because that is the listing
@@ -973,6 +1001,7 @@ async function viewSettings() {
 
    // Attach refreshUsers so viewUserEdit can call it back.
    await refreshUsers();
+   if (renderStale(gen)) return;
 
    // Expose so viewUserEdit can trigger a refresh after save.
    pane._refreshUsers = refreshUsers;
@@ -1115,6 +1144,10 @@ async function viewUserEdit(user, refreshFn) {
    const adminPane = document.getElementById('pane-artists');
    const refresh = refreshFn ?? adminPane._refreshUsers;
 
+   // Nothing here awaits before it paints, so it cannot be interrupted — but
+   // the two panes it empties may well be mid-render from something else, and
+   // the bump is what stops that render appending on top of this form.
+   beginRender();
    const pane = document.getElementById('pane-albums');
    document.getElementById('pane-tracks').innerHTML = '';
    pane.innerHTML = '';
@@ -1935,6 +1968,7 @@ async function viewArtists(uploads = false) {
    // Whatever a finished fetch left behind is about to be re-read, however the
    // user got here — so the deferred redraw is owed to nobody any more.
    uploadsStale = false;
+   const gen = beginRender();
    const pane = document.getElementById('pane-artists');
    pane.innerHTML = '';
    document.getElementById('pane-albums').innerHTML = '';
@@ -1947,6 +1981,7 @@ async function viewArtists(uploads = false) {
          musicFolders = mf.musicFolders?.musicFolder ?? [];
          }
       catch { musicFolders = []; }
+      if (renderStale(gen)) return;
       }
 
    // Static for the life of the server, like the roots above. Asked only when
@@ -1958,6 +1993,7 @@ async function viewArtists(uploads = false) {
          urlHandlers = r.urlHandlers?.urlHandler ?? [];
          }
       catch { urlHandlers = []; }
+      if (renderStale(gen)) return;
       }
 
    console.log('[library] loading' + (uploads ? ' (uploads)' : ''));
@@ -1990,9 +2026,11 @@ async function viewArtists(uploads = false) {
          }
       }
    catch {
-      showError('Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError('Could not reach the server. Please check your connection.');
       return;
       }
+   if (renderStale(gen)) return;
 
    const frag = document.createDocumentFragment();
    const header = document.createElement('div');
@@ -2112,6 +2150,7 @@ async function openUploads() {
 
 async function viewPlaylists() {
    console.log('[playlists] loading');
+   const gen = beginRender();
    const pane = document.getElementById('pane-artists');
    pane.innerHTML = '';
    document.getElementById('pane-albums').innerHTML = '';
@@ -2122,9 +2161,11 @@ async function viewPlaylists() {
       sr = await apiCall('getPlaylists');
       }
    catch {
-      showError('Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError('Could not reach the server. Please check your connection.');
       return;
       }
+   if (renderStale(gen)) return;
    const lists = sr.playlists?.playlist ?? [];
    console.log('[playlists] got', lists.length, 'playlists');
 
@@ -2171,12 +2212,14 @@ async function viewPlaylists() {
    starredContainer.id = 'starred-sections';
    pane.appendChild(starredContainer);
    await refreshStarredSections(starredContainer);
+   if (renderStale(gen)) return;
 
    paneNav.slideTo(0);
 }
 
 async function viewRecents() {
    console.log('[recents] loading');
+   const gen = beginRender();
    const pane = document.getElementById('pane-artists');
    pane.innerHTML = '';
    document.getElementById('pane-albums').innerHTML = '';
@@ -2187,9 +2230,11 @@ async function viewRecents() {
       sr = await apiCall('getRecentSongs', {size: 50});
       }
    catch {
-      showError('Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError('Could not reach the server. Please check your connection.');
       return;
       }
+   if (renderStale(gen)) return;
 
    const songs = sr.recentSongs?.song ?? [];
    console.log('[recents] got', songs.length, 'songs');
@@ -2259,6 +2304,7 @@ async function viewRecents() {
 
 async function viewPlaylistTracks(playlistId, playlistName) {
    console.log('[playlist-tracks] loading playlist', playlistId, playlistName);
+   const gen = beginRender();
    const pane = document.getElementById('pane-albums');
    pane.innerHTML = '';
    document.getElementById('pane-tracks').innerHTML = '';
@@ -2268,9 +2314,11 @@ async function viewPlaylistTracks(playlistId, playlistName) {
       sr = await apiCall('getPlaylist', {id: playlistId});
       }
    catch {
-      showError('Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError('Could not reach the server. Please check your connection.');
       return;
       }
+   if (renderStale(gen)) return;
    const pl = sr.playlist;
    const songs = pl.entry ?? [];
    console.log('[playlist-tracks] got', songs.length, 'tracks');
@@ -2491,9 +2539,12 @@ async function viewPlaylistTracks(playlistId, playlistName) {
 // folder, never which listing it was reached through. Search, and the
 // sideways entries into viewTracks(), leave them defaulted and behave exactly
 // as before.
+// `gen` is viewTracks()'s render generation when this is the pane-1 refresh it
+// does on the way in; every other caller leaves it null and takes its own.
 async function viewAlbums(artistId, artistName, isCategory = false,
-                          fromUploads = false) {
+                          fromUploads = false, gen = null) {
    console.log('[albums] loading artist', artistId, artistName);
+   gen = beginRender(gen);
    // The section this listing was drilled in from, keying the sort preference
    // and stamped on the pane so the album-edit save path in viewTracks() can
    // return to the listing that led here.
@@ -2507,9 +2558,11 @@ async function viewAlbums(artistId, artistName, isCategory = false,
       srArtist = await apiCall('getArtist', {id: artistId});
       }
    catch {
-      showError('Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError('Could not reach the server. Please check your connection.');
       return;
       }
+   if (renderStale(gen)) return;
    const albums   = srArtist.artist?.album ?? [];
    console.log('[albums] got', albums.length, 'albums');
 
@@ -6211,9 +6264,13 @@ function setupPlayer() {
       });
 }
 
+// `gen`, as in viewAlbums(): viewTracksFromSearch() takes the generation and
+// then has to know whether this render still held it, so it cannot let this
+// function take its own.
 async function viewTracks(albumId, albumTitle, artistId, artistName,
-                           autoPlayId = null, autoPlayOffset = 0) {
+                           autoPlayId = null, autoPlayOffset = 0, gen = null) {
    console.log('[tracks] loading album', albumId, albumTitle);
+   gen = beginRender(gen);
    const pane = document.getElementById('pane-tracks');
    pane.innerHTML = '';
 
@@ -6222,9 +6279,11 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
       sr = await apiCall('getAlbum', {id: albumId});
       }
    catch (e) {
-      showError(e?.message ?? 'Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError(e?.message ?? 'Could not reach the server. Please check your connection.');
       return;
       }
+   if (renderStale(gen)) return;
    const album = sr.album ?? {};
    const songs = album.song ?? [];
    console.log('[tracks] got', songs.length, 'tracks');
@@ -6241,8 +6300,11 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
    const albumsPane = document.getElementById('pane-albums');
    const pane1Fresh = albumsPane.dataset.artistId === String(album.parent)
                       && albumsPane.querySelector('.album-row');
-   if (album.parent !== undefined && !pane1Fresh)
-      await viewAlbums(album.parent, album.artist ?? artistName ?? '');
+   if (album.parent !== undefined && !pane1Fresh) {
+      await viewAlbums(album.parent, album.artist ?? artistName ?? '',
+                       false, false, gen);
+      if (renderStale(gen)) return;
+      }
 
    // Back link + headings + Edit link.
    const header = document.createElement('div');
@@ -6347,6 +6409,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
          chaptersByVideo.set(v.id, v.chapter ?? []);
       }
    catch (e) { console.warn('[chapters] album index unavailable', e); }
+   if (renderStale(gen)) return;
 
    const frag = document.createDocumentFragment();
    const multiDisc = new Set(songs.map(s => s.discNumber ?? 1)).size > 1;
@@ -6991,6 +7054,11 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
 
    // Fetch liner-note text files without blocking the track list.
    apiCall('getAlbumTexts', {id: albumId}).then(srTxt => {
+      // The one late continuation that appends to the pane itself rather than
+      // into a slot this render already placed there — a detached slot is
+      // invisible, a second liner-notes panel under somebody else's album is
+      // not.
+      if (renderStale(gen)) return;
       const files = srTxt?.albumTexts?.textFile ?? [];
       if (files.length === 0) return;
 
@@ -7083,6 +7151,8 @@ function scheduleSearch() {
 async function runSearch() {
    const q = document.getElementById('search-input').value.trim();
    if (!q) return;
+   // renderSearchResults() empties panes 1 and 2 as well as filling pane 0.
+   const gen = beginRender();
    const wantArtists = document.getElementById('sf-artists').checked;
    const wantAlbums  = document.getElementById('sf-albums').checked;
    const wantSongs   = document.getElementById('sf-songs').checked;
@@ -7101,9 +7171,11 @@ async function runSearch() {
          });
       }
    catch {
-      showError('Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError('Could not reach the server. Please check your connection.');
       return;
       }
+   if (renderStale(gen)) return;
    renderSearchResults(sr.searchResult3 ?? {});
 }
 
@@ -7297,8 +7369,14 @@ function renderSearchResults(res) {
 // pane 1 and stay at depth 1, keeping search visible on the left.
 async function viewTracksFromSearch(albumId, albumTitle, artistId, artistName,
                                      autoPlayId, autoPlayOffset = 0) {
+   // Moving pane 2's nodes below is only right while they are still the ones
+   // viewTracks() just drew. Superseded, pane 2 is somebody else's listing --
+   // or, mid-render, empty, and the move would blank pane 1 for as long as the
+   // newer render takes.
+   const gen = beginRender();
    await viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId,
-                    autoPlayOffset);
+                    autoPlayOffset, gen);
+   if (renderStale(gen)) return;
    if (document.getElementById('search-bar').classList.contains('open')
          && paneNav._visiblePanes() === 2) {
       const p1 = document.getElementById('pane-albums');
