@@ -323,16 +323,40 @@ class MediaStore {
 		void store_artist_art(const std::string& folder_path,
 		                      const std::string& name, const ArtistArtRow& row);
 
-		// Artist folders with no usable portrait yet, in name order — what the
-		// background resolver works through. Only artists roots: a categories
-		// section is called "Film", and asking MusicBrainz about that is the
-		// mistake is_category_folder() exists to prevent.
-		struct ArtistArtJob {
+		// One folder for the online resolver to work through: an artist to be
+		// looked up, or an album. Only ever produced by the three queries
+		// below, all of which restrict themselves to *artists* roots — a
+		// categories section is called "Film", and asking MusicBrainz about
+		// that is the mistake is_category_folder() exists to prevent, while a
+		// film's own description comes from TMDB during the scan instead.
+		//
+		// That is a test on the root, not on the album, so a concert or a music
+		// video filed under the performer is admitted. It should be:
+		// MusicBrainz catalogues official concert releases as release groups,
+		// and the query is anchored on the artist, which is the half that
+		// discriminates.
+		struct LookupTarget {
 			int         folder_id = 0;
 			std::string name;
 			std::string path;
 			};
-		std::vector<ArtistArtJob> artists_needing_art(int64_t retry_none_before);
+		// Artist folders with no usable portrait yet, in name order — what the
+		// background resolver works through on its own timer.
+		std::vector<LookupTarget> artists_needing_art(int64_t retry_none_before);
+
+		// The two backfill queries behind startInfoLookup, asking the question
+		// artists_needing_art() does not: not "has this ever been resolved"
+		// but "are there any *words*". An artist whose portrait arrived while
+		// Wikipedia was down has a cached row, an 'ok' art verdict, an empty
+		// biography and nothing that will ever ask again — which is how a
+		// library ends up with hundreds of them.
+		//
+		// Neither consults fetched_at. An admin pressing the button means it,
+		// and re-asking is also what makes a spell of provider failure
+		// recoverable; the cost is that a second press re-asks about everyone
+		// nobody has written about.
+		std::vector<LookupTarget> artists_needing_bio();
+		std::vector<LookupTarget> albums_needing_info();
 
 		// What TMDB was asked about a video and what it said. Recorded for
 		// failures as much as for successes: without that, every scan would

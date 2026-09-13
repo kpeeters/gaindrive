@@ -1939,6 +1939,13 @@ input.chapter-time.bad { border-color: #e06c6c; }
    align-items: baseline;
 }
 
+/* The album header now carries a refresh button before Edit, and that button
+   has its own margin-left:auto. Same trap as .sort-btn + .refresh-btn: two auto
+   margins in one flex row split the free space instead of stacking, which would
+   leave the icon and the word drifting apart in the middle of the header. The
+   refresh button keeps the auto, being the first of the pair. */
+.refresh-btn + .edit-link { margin-left: 0; }
+
 /* Album title and artist, editable. They replace the .view-title heading inside
    .view-header, which is a wrapping flex row — flex-basis pushes the artist onto
    its own line on a narrow pane rather than squeezing both to nothing. */

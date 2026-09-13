@@ -251,6 +251,36 @@ def test_bad_username_refused():
     print("PASS  a username that is not a safe path component is refused")
 
 
+def test_start_info_lookup_needs_admin():
+    """startInfoLookup spends hours of the server's MusicBrainz budget.
+
+    One account being able to saturate the single paced gate would make every
+    other account's artist and album panes crawl for as long as the pass ran,
+    and there is no way to stop it short of a restart.
+    """
+    _, root = _get("startInfoLookup.view", {"what": "artists"},
+                   user=PLAIN, password=PPASS)
+    assert _status(root) == "failed" and _error_code(root) == "50", (
+        "a non-admin was allowed to start a library-wide metadata lookup: "
+        + (ET.tostring(root).decode() if root is not None else "no response")
+    )
+    print("PASS  startInfoLookup refuses a non-admin")
+
+
+def test_start_info_lookup_rejects_a_bad_what():
+    """An unrecognised `what` must not be promoted to "everything".
+
+    Run as admin, and deliberately *not* followed by a valid call: a passing
+    run of this file must not leave an overnight pass queued behind it.
+    """
+    _, root = _get("startInfoLookup.view", {"what": "artits"})
+    assert _status(root) == "failed" and _error_code(root) == "0", (
+        "an invalid `what` was accepted: "
+        + (ET.tostring(root).decode() if root is not None else "no response")
+    )
+    print("PASS  startInfoLookup rejects an unknown `what`")
+
+
 TESTS = [
     test_update_song_needs_permission,
     test_update_song_still_works_for_admin,
@@ -260,6 +290,8 @@ TESTS = [
     test_shared_library_is_still_readable,
     test_disabled_account_is_refused,
     test_bad_username_refused,
+    test_start_info_lookup_needs_admin,
+    test_start_info_lookup_rejects_a_bad_what,
 ]
 
 if __name__ == "__main__":

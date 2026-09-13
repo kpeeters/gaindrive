@@ -4749,7 +4749,7 @@ void MediaStore::store_artist_art(const std::string& folder_path,
 	tx.commit();
 	}
 
-std::vector<MediaStore::ArtistArtJob>
+std::vector<MediaStore::LookupTarget>
 MediaStore::artists_needing_art(int64_t retry_none_before)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
@@ -4770,9 +4770,78 @@ MediaStore::artists_needing_art(int64_t retry_none_before)
 
 	SQLite::Statement q(db_music_, sql);
 	q.bind(1, retry_none_before);
-	std::vector<ArtistArtJob> out;
+	std::vector<LookupTarget> out;
 	while (q.executeStep()) {
-		ArtistArtJob j;
+		LookupTarget j;
+		j.folder_id = q.getColumn(0).getInt();
+		j.name      = q.getColumn(1).getString();
+		j.path      = q.getColumn(2).getString();
+		out.push_back(std::move(j));
+		}
+	return out;
+	}
+
+// The two backfill queries. See the header for why they ask about the *words*
+// rather than about whether anything was ever resolved.
+//
+// Both read a row's emptiness rather than its age, so they are idempotent in
+// the only sense that matters here: an entry that acquires a biography or a
+// description drops out, and one that does not stays in and is asked again next
+// time the button is pressed.
+std::vector<MediaStore::LookupTarget> MediaStore::artists_needing_bio()
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	// Same folder predicate as artists_needing_art() -- a level-1 folder of an
+	// artists root -- with the test moved from artist_art to the biography.
+	std::string sql =
+		"SELECT f.id, f.name, f.path FROM folders f"
+		" WHERE f.parent_id IN (SELECT id FROM folders WHERE parent_id IS NULL"
+		"                        AND COALESCE(content_type, 'artists') = 'artists')"
+		"   AND NOT EXISTS (SELECT 1 FROM artist_info_cache c"
+		"                    WHERE c.folder_id = f.id AND c.biography <> '')";
+	sql += not_uploads("f.path");
+	sql += " ORDER BY f.name COLLATE NOCASE";
+
+	SQLite::Statement q(db_music_, sql);
+	std::vector<LookupTarget> out;
+	while (q.executeStep()) {
+		LookupTarget j;
+		j.folder_id = q.getColumn(0).getInt();
+		j.name      = q.getColumn(1).getString();
+		j.path      = q.getColumn(2).getString();
+		out.push_back(std::move(j));
+		}
+	return out;
+	}
+
+std::vector<MediaStore::LookupTarget> MediaStore::albums_needing_info()
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	// An album folder's parent is the artist folder, whose parent is the root.
+	// The second arm of the OR is the loose-file album, whose parent *is* the
+	// root: one media file sitting directly in a flat library is its own album,
+	// and leaving it out would silently skip every such album in the library.
+	//
+	// The content_type test is on the root in both arms, which is the whole of
+	// how video is kept out of this pass -- see the LookupTarget comment.
+	std::string sql =
+		"SELECT al.folder_id, COALESCE(al.title, f.name), f.path"
+		" FROM albums al"
+		" JOIN folders f ON f.id = al.folder_id"
+		" JOIN folders p ON p.id = f.parent_id"
+		" WHERE (p.parent_id IN (SELECT id FROM folders WHERE parent_id IS NULL"
+		"                         AND COALESCE(content_type, 'artists') = 'artists')"
+		"        OR (p.parent_id IS NULL"
+		"            AND COALESCE(p.content_type, 'artists') = 'artists'))"
+		"   AND NOT EXISTS (SELECT 1 FROM album_info_cache c"
+		"                    WHERE c.folder_id = al.folder_id AND c.notes <> '')";
+	sql += not_uploads("f.path");
+	sql += " ORDER BY f.path COLLATE NOCASE";
+
+	SQLite::Statement q(db_music_, sql);
+	std::vector<LookupTarget> out;
+	while (q.executeStep()) {
+		LookupTarget j;
 		j.folder_id = q.getColumn(0).getInt();
 		j.name      = q.getColumn(1).getString();
 		j.path      = q.getColumn(2).getString();

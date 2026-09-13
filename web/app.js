@@ -1182,6 +1182,82 @@ async function viewSettings() {
       });
 
    } // end server section
+
+   // ── Metadata section — admin only ──────────────────────────────────────────
+
+   if (userInfo?.adminRole) {
+
+   const metaSection = document.createElement('div');
+   metaSection.className = 'admin-section';
+
+   const metaHeading = document.createElement('h2');
+   metaHeading.className = 'admin-section-title';
+   metaHeading.textContent = 'Metadata';
+   metaSection.appendChild(metaHeading);
+
+   const metaHint = document.createElement('p');
+   metaHint.className = 'admin-hint';
+   metaHint.textContent =
+      'Queues an online lookup for every artist with no biography and every '
+      + 'album with no description. MusicBrainz allows one request a second, '
+      + 'so a whole library takes hours — leave it running. Progress is in '
+      + 'the server log; the only way to stop it is to restart the server.';
+   metaSection.appendChild(metaHint);
+
+   const metaRow = document.createElement('div');
+   metaRow.className = 'token-row';
+
+   const bioBtn = document.createElement('button');
+   bioBtn.textContent = 'Artist biographies';
+   bioBtn.className   = 'upload-btn';
+   metaRow.appendChild(bioBtn);
+
+   const notesBtn = document.createElement('button');
+   notesBtn.textContent = 'Album descriptions';
+   notesBtn.className   = 'upload-btn';
+   metaRow.appendChild(notesBtn);
+
+   metaSection.appendChild(metaRow);
+
+   const metaStatus = document.createElement('p');
+   metaStatus.className = 'upload-status';
+   metaSection.appendChild(metaStatus);
+
+   pane.appendChild(metaSection);
+
+   // Confirmed rather than fired on the first click: it commits the server to
+   // hours of paced network, and — having no stop — a mis-click is not
+   // undoable except by restarting.
+   const startLookup = (what, label) => {
+      const msg = `Look up missing ${label} for the whole library?`;
+      showConfirm(msg, async () => {
+         bioBtn.disabled = notesBtn.disabled = true;
+         metaStatus.textContent = 'Queueing…';
+         try {
+            const sr = await apiCall('startInfoLookup', {what});
+            const a  = sr.infoLookup?.artistsQueued ?? 0;
+            const b  = sr.infoLookup?.albumsQueued  ?? 0;
+            const parts = [];
+            if (what !== 'albums')  parts.push(`${a} artist(s)`);
+            if (what !== 'artists') parts.push(`${b} album(s)`);
+            // Nothing queued is an answer rather than a failure: everything
+            // already has words, or a previous press is still working through
+            // them.
+            metaStatus.textContent = (a + b === 0)
+               ? 'Nothing left to look up.'
+               : `Queued ${parts.join(' and ')}.`;
+            }
+         catch (e) { metaStatus.textContent = `Error: ${e.message}`; }
+         finally   { bioBtn.disabled = notesBtn.disabled = false; }
+         }, {title: 'Look up', yes: 'Start'});
+      };
+
+   bioBtn.addEventListener('click',
+      () => startLookup('artists', 'artist biographies'));
+   notesBtn.addEventListener('click',
+      () => startLookup('albums', 'album descriptions'));
+
+   } // end metadata section
    }
 
 function makeBadge(text, cls) {
@@ -6360,9 +6436,17 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
    const editLink = document.createElement('span');
    editLink.className = 'edit-link';
    editLink.textContent = 'Edit';
+   // The artist header's counterpart, and for the same reason: the lookup can
+   // have cached an empty answer while a provider was down, and this is the
+   // only way to ask again.
+   const notesRefreshBtn = document.createElement('button');
+   notesRefreshBtn.className = 'refresh-btn mi';
+   notesRefreshBtn.title = 'Reload album info from MusicBrainz';
+   notesRefreshBtn.textContent = 'refresh';
    header.appendChild(back);
    header.appendChild(heading);
    header.appendChild(albumStar);
+   header.appendChild(notesRefreshBtn);
    header.appendChild(editLink);
    pane.appendChild(header);
 
@@ -7030,65 +7114,135 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
    // Re-apply the playing highlight if a track from this album is active.
    playerUpdateUI();
 
-   // Fetch album notes without blocking the track listing.
-   apiCall('getAlbumInfo2', {id: albumId}).then(srInfo => {
-      const info        = srInfo?.albumInfo2 ?? {};
-      infoSlot.className = '';   // remove shimmer regardless of outcome
+   // Album notes, fetched without blocking the track listing — and polled on
+   // `resolving`, exactly as loadBio() does for a biography. getAlbumInfo2
+   // answers from album_info_cache now and queues the lookup rather than
+   // performing it, so the first view of an album nobody has looked up has
+   // nothing to show yet and has to ask again.
+   const NOTES_POLL_MS   = 15000;
+   const NOTES_MAX_TRIES = 40;
+   let notesTimer = null;
+   let notesTries = 0;
 
-      const notes       = info.notes       ?? '';
-      const wikiUrl     = info.wikiUrl     ?? '';
-      const allMusicUrl = info.allMusicUrl ?? '';
-      if (!notes && !wikiUrl && !allMusicUrl) return;
+   // Restarts the count and drops any poll already scheduled, so pressing
+   // refresh twice cannot leave two timers asking.
+   function loadNotes(force) {
+      if (notesTimer !== null) { clearTimeout(notesTimer); notesTimer = null; }
+      notesTries = 0;
+      requestNotes(force);
+      }
 
-      const block = document.createElement('div');
-      block.className = 'album-notes';
-
-      let notesP = null;
-      if (notes) {
-         notesP = document.createElement('p');
-         notesP.className = 'artist-bio-text';   // reuse same clamp style
-         notesP.textContent = notes;
-         block.appendChild(notesP);
+   function requestNotes(force) {
+      // Only the first attempt draws the shimmer; re-drawing it every fifteen
+      // seconds would say less than the line below it does.
+      if (notesTries === 0) {
+         infoSlot.className = 'album-notes-loading';
+         infoSlot.innerHTML = '';
          }
+      notesRefreshBtn.disabled = true;
+      const params = {id: albumId};
+      if (force) params.force = '1';
+      apiCall('getAlbumInfo2', params).then(srInfo => {
+         // Navigated away, or this pane has been reused for another album.
+         // Nobody can see this, so stop asking.
+         if (!document.contains(infoSlot)
+             || !paneHolds('pane-tracks', `tracks:${albumId}`)) return;
 
-      // Links + 'more' toggle on one line.
-      const linksRow = document.createElement('div');
-      linksRow.className = 'links-row';
-      if (wikiUrl) {
-         const a = document.createElement('a');
-         a.className = 'wiki-link';
-         a.href = wikiUrl;
-         a.target = '_blank';
-         a.rel = 'noopener';
-         a.textContent = 'Wikipedia';
-         linksRow.appendChild(a);
-         }
-      if (allMusicUrl) {
-         const a = document.createElement('a');
-         a.className = 'wiki-link';
-         a.href = allMusicUrl;
-         a.target = '_blank';
-         a.rel = 'noopener';
-         a.textContent = 'AllMusic';
-         linksRow.appendChild(a);
-         }
-      if (notesP) {
-         const toggle = document.createElement('span');
-         toggle.className = 'bio-toggle';
-         toggle.textContent = 'more';
-         toggle.addEventListener('click', () => {
-            const expanded = notesP.classList.toggle('expanded');
-            toggle.textContent = expanded ? 'less' : 'more';
+         notesRefreshBtn.disabled = false;
+
+         const info        = srInfo?.albumInfo2 ?? {};
+         const notes       = info.notes       ?? '';
+         const wikiUrl     = info.wikiUrl     ?? '';
+         const allMusicUrl = info.allMusicUrl ?? '';
+
+         // Absent means final, empty or not: an album MusicBrainz has nothing
+         // on settles here, and polling for ever would be re-asking a question
+         // that has already been answered.
+         const resolving = info.resolving === true
+                        && notesTries < NOTES_MAX_TRIES;
+
+         // A poll that learnt nothing must not redraw.
+         if (notesTries > 0 && resolving
+             && !notes && !wikiUrl && !allMusicUrl) {
+            notesTimer = setTimeout(() => { notesTries++; requestNotes(false); },
+                                    NOTES_POLL_MS);
+            return;
+            }
+
+         infoSlot.className = '';   // remove shimmer regardless of outcome
+         infoSlot.innerHTML = '';   // a poll that did learn something redraws
+
+         // Both exit paths go through it, the common resolving case being
+         // precisely the one with nothing to show yet.
+         const finish = () => {
+            if (block.children.length > 0) infoSlot.appendChild(block);
+            if (!resolving) return;
+            const pending = document.createElement('p');
+            pending.className = 'artist-bio-pending';
+            pending.textContent = 'Looking this up…';
+            infoSlot.appendChild(pending);
+            notesTimer = setTimeout(() => { notesTries++; requestNotes(false); },
+                                    NOTES_POLL_MS);
+            };
+
+         const block = document.createElement('div');
+         block.className = 'album-notes';
+
+         if (!notes && !wikiUrl && !allMusicUrl) { finish(); return; }
+
+         let notesP = null;
+         if (notes) {
+            notesP = document.createElement('p');
+            notesP.className = 'artist-bio-text';   // reuse same clamp style
+            notesP.textContent = notes;
+            block.appendChild(notesP);
+            }
+
+         // Links + 'more' toggle on one line.
+         const linksRow = document.createElement('div');
+         linksRow.className = 'links-row';
+         if (wikiUrl) {
+            const a = document.createElement('a');
+            a.className = 'wiki-link';
+            a.href = wikiUrl;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.textContent = 'Wikipedia';
+            linksRow.appendChild(a);
+            }
+         if (allMusicUrl) {
+            const a = document.createElement('a');
+            a.className = 'wiki-link';
+            a.href = allMusicUrl;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.textContent = 'AllMusic';
+            linksRow.appendChild(a);
+            }
+         if (notesP) {
+            const toggle = document.createElement('span');
+            toggle.className = 'bio-toggle';
+            toggle.textContent = 'more';
+            toggle.addEventListener('click', () => {
+               const expanded = notesP.classList.toggle('expanded');
+               toggle.textContent = expanded ? 'less' : 'more';
+               });
+            linksRow.appendChild(toggle);
+            requestAnimationFrame(() => {
+               if (notesP.scrollHeight <= notesP.clientHeight) toggle.hidden = true;
+               });
+            }
+         if (linksRow.children.length > 0) block.appendChild(linksRow);
+
+         finish();
+         }).catch(() => {
+            infoSlot.className = '';
+            notesRefreshBtn.disabled = false;
             });
-         linksRow.appendChild(toggle);
-         requestAnimationFrame(() => {
-            if (notesP.scrollHeight <= notesP.clientHeight) toggle.hidden = true;
-            });
-         }
-      if (linksRow.children.length > 0) block.appendChild(linksRow);
+      }
 
-      infoSlot.appendChild(block);
-      }).catch(() => { infoSlot.className = ''; });
+   notesRefreshBtn.addEventListener('click', () => loadNotes(true));
+   loadNotes(false);
 
    // Fetch liner-note text files without blocking the track list.
    apiCall('getAlbumTexts', {id: albumId}).then(srTxt => {

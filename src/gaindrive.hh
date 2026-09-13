@@ -261,7 +261,7 @@ class GainDrive {
 		// so a wrong address is reported rather than only failing later.
 		void probe_cast_devices_background();
 
-		// ---- Artist portraits ----
+		// ---- The online info resolver ----
 		//
 		// Resolving an artist means MusicBrainz, then Wikidata, then
 		// Wikipedia, then TheAudioDB, then Discogs, with two deliberate
@@ -279,52 +279,90 @@ class GainDrive {
 		//
 		// Same shape as TMDB's Phase 3c, and for the same reason: a slow first
 		// pass over a large library must block nothing.
-		struct PortraitJob {
+		//
+		// **Albums are the second kind of job rather than a second thread**,
+		// which is why this section is no longer called "artist portraits".
+		// getAlbumInfo ran its own two MusicBrainz requests plus Wikidata and
+		// Wikipedia straight off the HTTP pool, up to 32 at a time; the whole
+		// argument above applied to it word for word one field over. It shares
+		// this queue because mb_pace() is one gate for the process, so a
+		// second consumer would add no throughput while halving the courtesy
+		// headroom LOOKUP_GAP exists to leave.
+		enum class LookupKind { Artist, Album };
+		struct LookupJob {
+			LookupKind  kind = LookupKind::Artist;
 			int         folder_id = 0;
 			std::string path;
+			// The artist's name, or the album's title. Only for the log and
+			// for the providers; the album branch re-reads the row it needs.
 			std::string name;
 			};
-		void portrait_worker();
-		void portrait_seed();
+		void lookup_worker();
+		// One job, providers and all. Separate from the loop so the guard
+		// there wraps a job rather than the thread -- see its definition.
+		void lookup_run_job(const LookupJob& job);
+		void lookup_seed();
 		// Ask the worker to re-seed now rather than when its timer next
 		// expires.  Called when a scan finishes, which is the only event that
 		// can turn an empty seed into a full one.
-		void portrait_wake();
-		void portrait_request_front(int folder_id, const std::string& path,
-		                            const std::string& name);
-		// Whether this artist is queued for the resolver or being resolved
+		void lookup_wake();
+		void lookup_request_front(LookupKind kind, int folder_id,
+		                          const std::string& path,
+		                          const std::string& name);
+		// The other end of the queue, for a pass over the whole library:
+		// nobody is waiting on these, so they must not get in front of the
+		// artist a client is looking at right now. startInfoLookup is its only
+		// caller. It answers whether it actually queued the job, so that
+		// caller's counts are what was added rather than what it looked at.
+		bool lookup_request_back(LookupKind kind, int folder_id,
+		                         const std::string& path,
+		                         const std::string& name);
+		// Seeds the queue's back from artists_needing_bio() and
+		// albums_needing_info(), and returns how many of each it added.
+		// startInfoLookup's answer is that pair.
+		struct LookupSeeded { int artists = 0; int albums = 0; };
+		LookupSeeded lookup_seed_missing_info(bool artists, bool albums);
+		// Whether this folder is queued for the resolver or being resolved
 		// right now. It is what makes a *forced* re-lookup observable: both
-		// artist_info_cache and the artist_art status still describe the
+		// the info cache and the artist_art status still describe the
 		// previous answer until the worker replaces them, so a client polling
 		// after `force` would otherwise be told on its very next request that
 		// the work had finished — before it had started.
-		bool portrait_pending(const std::string& path);
+		//
+		// One set for both kinds: an album folder's path and an artist
+		// folder's path cannot be the same string.
+		bool lookup_pending(const std::string& path);
 		// getArtistInfo / getArtistInfo2. A member rather than a free function
 		// because answering one now means *queueing* the lookup instead of
 		// performing it, and the queue is ours. `key` is "artistInfo" or
 		// "artistInfo2" — it names the XML element and the JSON key.
 		void handle_artist_info(const httplib::Request& req,
 		                        httplib::Response& res, const char* key);
+		// getAlbumInfo / getAlbumInfo2, a member for the same reason and since
+		// the same change. `key` is "albumInfo" or "albumInfo2".
+		void handle_album_info(const httplib::Request& req,
+		                       httplib::Response& res, const char* key);
 		// Downloads one portrait URL and normalises it to something storable.
-		// Empty on any failure; it never throws.
+		// Empty on any failure; it never throws. Still named for the portrait
+		// because that is all it is: an album has no image to fetch.
 		MediaStore::ArtistArtRow portrait_fetch(const std::string& url);
 
-		std::thread             portrait_thread_;
-		std::mutex              portrait_mu_;
-		std::condition_variable portrait_cv_;
-		std::deque<PortraitJob> portrait_queue_;
-		std::set<std::string>   portrait_queued_;
-		std::atomic<bool>       portrait_stop_{false};
-		// Set by portrait_wake(), cleared by the worker when it acts on it.
-		// A plain bool under portrait_mu_ rather than an atomic, because it is
+		std::thread             lookup_thread_;
+		std::mutex              lookup_mu_;
+		std::condition_variable lookup_cv_;
+		std::deque<LookupJob>   lookup_queue_;
+		std::set<std::string>   lookup_queued_;
+		std::atomic<bool>       lookup_stop_{false};
+		// Set by lookup_wake(), cleared by the worker when it acts on it.
+		// A plain bool under lookup_mu_ rather than an atomic, because it is
 		// read inside the condition variable's predicate and so must be part
 		// of what the lock protects — a notify that races the predicate is a
 		// wake-up the worker sleeps straight through.
-		bool                    portrait_reseed_ = false;
+		bool                    lookup_reseed_ = false;
 
 		// ---- URL fetch ----
 		//
-		// Same shape as the portrait worker, and for the same reason: a fetch
+		// Same shape as the info resolver, and for the same reason: a fetch
 		// takes minutes, so it cannot run on an httplib thread and the request
 		// cannot wait for it.
 		//

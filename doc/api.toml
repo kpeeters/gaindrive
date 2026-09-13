@@ -470,6 +470,53 @@ polling.
 
 [[endpoint]]
 kind       = 'additions'
+applies_to = ["getAlbumInfo", "getAlbumInfo2"]
+section    = "browsing"
+summary    = 'The same two additions, for an album.'
+notes      = '''
+These behave exactly as the `getArtistInfo` pair above, and for the same reason:
+the endpoint used to run the MusicBrainz release-group search, the url-rels
+lookup, Wikidata and Wikipedia on the request thread, so one album nobody had
+looked up could hold an HTTP worker for minutes. It reads `album_info_cache` and
+queues the lookup instead.
+
+The chain is shorter than the artist one — MusicBrainz, then Wikidata and
+Wikipedia — and there is no image, so an album carries no `coverArt` answer from
+this endpoint either way.
+'''
+
+  [[endpoint.param]]
+  name  = "force"
+  type  = "bool"
+  doc   = 'Queue a fresh provider lookup rather than letting the cached `album_info_cache` row stand.'
+  notes = '''
+This is the only way to correct a cached empty answer, and before it existed
+there was none: the row was written whatever MusicBrainz had said, including
+nothing at all, and no read ever consulted its age. An album viewed once while
+MusicBrainz was shedding load therefore had no description for good.
+
+That half is fixed too — a row is written only when MusicBrainz actually
+answered, so a failed lookup is retried on the next view — but a *successful*
+lookup that found nothing is final, and `force` is how to ask again.
+'''
+
+  [[endpoint.field]]
+  name  = "resolving"
+  type  = "bool"
+  on    = "albumInfo / albumInfo2"
+  doc   = 'Present and true while the providers have yet to be asked about this album. Absent means the answer above is final, empty or not.'
+  notes = '''
+Emitted only when true, exactly as on `artistInfo2`, so a client that ignores it
+sees empty notes on the first view and real ones on the next.
+
+Albums and artists share one background resolver and one queue, because
+MusicBrainz's rate limit is per address: a second worker would add no throughput
+and would spend the courtesy headroom the first one leaves for requests somebody
+is actually waiting on.
+'''
+
+[[endpoint]]
+kind       = 'additions'
 applies_to = ["getAlbumList", "getAlbumList2", "getArtist", "getAlbum"]
 section    = "browsing"
 summary    = 'Say how much of an album is video, before its tracks are fetched.'
@@ -1652,6 +1699,70 @@ Send an empty value to clear a setting.
   name = "tmdbKey"
   type = "string"
   doc  = 'New TMDB key. Omit to leave unchanged; send empty to clear. Re-read at the top of every scan.'
+
+  [[endpoint.error]]
+  code = '50'
+  when = 'The caller is not an admin.'
+
+[[endpoint]]
+kind     = 'endpoint'
+name     = "startInfoLookup"
+section  = "settings"
+auth     = 'admin'
+summary  = 'Queue an online lookup for every artist with no biography and every album with no description.'
+notes    = '''
+The remedy for a library full of blank biographies, which happens because a
+lookup that only half succeeded was cached as a complete answer: the artist chain
+writes its row as soon as the MusicBrainz *search* has worked, so an artist whose
+Wikipedia or TheAudioDB request fell over keeps an empty `biography` — and
+nothing re-asks, since the background resolver's own seed query is about missing
+*portraits*, which that artist has. `force` on `getArtistInfo2` fixes one artist.
+This fixes all of them.
+
+**It takes hours, and it is meant to be left running.** MusicBrainz allows one
+request a second per address, the resolver waits two seconds between jobs on top
+of that, and each artist costs two MusicBrainz requests plus up to four more
+providers. A library of a few thousand artists is an overnight job.
+
+Everything is queued *behind* whatever a client is looking at, so browsing stays
+responsive while it runs.
+
+**There is no status endpoint and no way to stop it** short of restarting the
+server. The queue is in memory, so a restart simply forgets the rest of the pass
+and pressing the button again re-queues whatever is still missing. The server log
+names each artist and album as it is resolved.
+
+An entry with no words is re-asked on **every** press — no interval is
+remembered. That is deliberate: it is what makes a spell of provider failure
+recoverable, and the cost is that a second press also re-asks about everyone
+nobody has written about.
+
+Video is untouched. A film's or series' description comes from TMDB during the
+scan, and the two seed queries only look at *artists* roots — asking MusicBrainz
+about a categories section called "Film" is the mistake `getCoverArt` already
+avoids. A concert filed under the performer rather than under a category *is*
+included, since that test is on the root and not on whether an album holds video.
+'''
+
+  [[endpoint.param]]
+  name    = "what"
+  type    = "string"
+  default = "'all'"
+  doc     = '`artists`, `albums`, or `all` for both. Any other value is rejected rather than treated as `all`, since promoting a typo to "everything" would start a pass nobody asked for.'
+
+  [[endpoint.field]]
+  name = "infoLookup.artistsQueued"
+  type = "int"
+  doc  = 'How many artists were added to the queue.'
+
+  [[endpoint.field]]
+  name = "infoLookup.albumsQueued"
+  type = "int"
+  doc  = 'How many albums were added to the queue.'
+
+  [[endpoint.error]]
+  code = '0'
+  when = '`what` is not one of the three accepted values.'
 
   [[endpoint.error]]
   code = '50'
