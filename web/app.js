@@ -1359,14 +1359,6 @@ function canUpload() {
    return !!(currentUser?.uploadRole || currentUser?.adminRole);
    }
 
-// Whether pane 0 currently holds the uploads listing rather than the library.
-// Answered from the DOM, the way the upload pollers already answer it, so it
-// cannot go stale the way a module flag would when some other view rewrites
-// the pane. The bar is drawn if and only if viewArtists() rendered uploads.
-function uploadsShowing() {
-   return !!document.querySelector('#pane-artists .upload-bar');
-   }
-
 // Signature of the personal library as last rendered, and the timer watching
 // for it to change. Both are module-level because viewArtists() destroys the
 // upload bar's DOM when it re-renders, so a timer owned by that node would be
@@ -1525,10 +1517,15 @@ function pollForUpload(status, files) {
    let tries = 0;
    clearInterval(uploadsPollTimer);
    uploadsPollTimer = setInterval(async () => {
-      // The bar is gone once anything else has rewritten pane 0 — the
-      // library, or Settings/Playlists/Recents — and a re-render then
-      // would drag the user back here.
-      if (!uploadsShowing()) {
+      // Pane 0 holds something else once another view has rewritten it — the
+      // library, or Settings/Playlists/Recents — and a re-render then would
+      // drag the user back here.
+      //
+      // The stamp rather than the upload bar's node, which this used to look
+      // for: a re-render of this very listing has the bar out of the DOM
+      // between emptying the pane and filling it, and a tick landing in that
+      // window ended the wait over nothing.
+      if (!paneHolds('pane-artists', 'uploads')) {
          clearInterval(uploadsPollTimer);
          return;
          }
