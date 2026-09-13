@@ -3100,12 +3100,13 @@ static void batch_rename_level(const std::filesystem::path& parent,
 //
 // **This is a plain fs::rename and must never become relocate_prefix().**
 // Nothing under the batch has been indexed yet: scan_batch() is the only thing
-// that ever hands a batch to scan_dirs() and does so after this; scan() skips
-// the uploads root outright; and FolderWatcher never watches it, so no inotify
-// event can name one. There is therefore no row holding any of these paths to
-// repair — and relocate_prefix's plain UPDATEs are safe only because its
-// callers first checked the destination was free, which merging deliberately
-// does not do.
+// that ever hands a batch to scan_dirs() and does so after this, and scan()
+// skips the uploads root outright. FolderWatcher does watch it — but only for
+// removals, and its sole response is MediaStore::reconcile_uploads(), which
+// skips every directory that still exists and so cannot touch a batch being
+// written. There is therefore no row holding any of these paths to repair —
+// and relocate_prefix's plain UPDATEs are safe only because its callers first
+// checked the destination was free, which merging deliberately does not do.
 //
 // Renaming rather than substituting the names into the handler's -o template is
 // also deliberate, and the second reason is the stronger one. urlfetch_expand()

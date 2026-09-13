@@ -76,6 +76,20 @@ class MediaStore {
 		// root itself; if present, falls back to a full scan().
 		void scan_dirs(const std::set<std::string>& dirs);
 
+		// Reconcile the uploads root with the filesystem: prune the rows of
+		// every indexed batch directory that is no longer there.  Nothing else
+		// ever does — scan() walks library roots only, and scan_batch() and
+		// deleteUpload each know about one directory — so a batch removed from
+		// the shell would otherwise keep its artist in the personal listing for
+		// ever.
+		//
+		// **It prunes and never discovers.**  A directory that still exists is
+		// left completely alone, which is what makes it safe to call at any
+		// moment: a batch still being written by a fetch must not be indexed
+		// early, or the plain fs::rename in apply_batch_names() would be
+		// renaming directories that already have rows.
+		void reconcile_uploads();
+
 		// What getScanStatus reports. `count` is songs processed, and it keeps
 		// the finished total once a scan ends — which is what the spec's
 		// "scanning: false, count: N" is for.

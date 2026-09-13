@@ -1491,7 +1491,10 @@ void MediaStore::scan()
 
 	// The uploads root holds per-user personal files, not library content, so
 	// it is never walked here — that is what replaced the old ".users" hidden
-	// directory sitting inside the music tree.
+	// directory sitting inside the music tree.  It is still *reconciled*, by
+	// reconcile_uploads() below: not walking it is what keeps hand-dropped
+	// files out of the library, and has nothing to say about a batch that has
+	// been removed and whose rows nothing else will ever prune.
 	for (const auto& root : roots_) {
 		if (root.cfg.type == "uploads") continue;
 		std::cout << stamp() << "Scan started: " << root.cfg.name
@@ -1555,6 +1558,11 @@ void MediaStore::scan()
 
 		scan_root_files(root);
 		}
+
+	// Inside the timed region, and after the roots: the uploads root is not
+	// walked above, so this is the only thing that ever notices a batch
+	// directory that has been removed behind the server's back.
+	reconcile_uploads();
 
 	double wall = std::chrono::duration<double>(
 		std::chrono::steady_clock::now() - t0).count();
@@ -1632,6 +1640,85 @@ void MediaStore::scan_dirs(const std::set<std::string>& dirs)
 		std::chrono::steady_clock::now() - t0).count();
 	std::cout << stamp() << "Rescan totals: " << scan_times_report(wall)
 	          << std::endl;
+	}
+
+// Prune the rows of every uploads batch directory that is no longer on disk.
+//
+// The uploads root is excluded from every automatic indexing path — scan()
+// does not walk it, sync_roots() creates no row for it, and the loose-file
+// fallback in scan_dirs() skips it — so before this nothing in the server ever
+// compared it with the filesystem except scan_batch() and deleteUpload, each of
+// which knows about exactly one directory. A batch removed from the shell
+// therefore kept its artist in the personal listing permanently, with its stars
+// and play counts pointing at files that had gone.
+//
+// Three things about the shape:
+//
+//   * **It follows rows, never the disk.** The enumeration is the query scan()
+//     uses to reinstate a root's level-1 children so deleted ones get pruned.
+//     Nothing is ever discovered here: a directory that still exists is skipped
+//     whole. A fetch in progress is writing into exactly such a directory, and
+//     indexing it early would leave apply_batch_names() renaming directories
+//     that already have rows — its plain fs::rename is safe only because they
+//     do not.
+//
+//     The file-album exclusion is carried over defensively rather than because
+//     one is expected: reparent_loose_media() pushes every uploaded file down
+//     to <artist>/<album>/file, so a level-1 child of this root is always a
+//     directory. If one ever were not, handing it to scan_artist_dir() would
+//     read it as a removed directory and prune a live file.
+//   * **forget_prefix() first, then scan_artist_dir().** deleteUpload's order
+//     and deleteUpload's reason: the scanner prunes the music DB and every
+//     derived cache keyed on the path, and has never touched the client
+//     schema, so stars, play counts, playlist entries, the queue, bookmarks,
+//     manual_covers and song_meta would outlive the files — invisibly, since
+//     they are read through INNER JOINs.
+//   * **scan_artist_dir() needs no help with a directory that is gone.** It
+//     reads fs::is_directory() itself, skips Phase 1, and lets the prune take
+//     the subtree and the artist folder row with it.
+//
+// The ScanGuard is what makes this show up in getScanStatus. It is a depth
+// count, so nesting inside scan()'s own guard is exactly what it is for.
+void MediaStore::reconcile_uploads()
+	{
+	const Root* up = uploads_root();
+	if (!up) return;
+
+	ScanGuard guard(*this);
+
+	// Level-1 children of the uploads root row: the artist directories, which
+	// scan_artist_dir() parents straight to the root whatever depth they sit
+	// at on disk. A root that has never had a batch scanned has no row at all,
+	// in which case the subquery matches nothing and there is no special case
+	// to write.
+	std::vector<std::string> rels;
+		{
+		std::lock_guard<std::mutex> lock(db_mutex_);
+		SQLite::Statement s(db_music_,
+			"SELECT path FROM folders"
+			" WHERE parent_id = (SELECT id FROM folders WHERE path = ?)"
+			"   AND NOT EXISTS (SELECT 1 FROM songs s WHERE s.path = folders.path)");
+		s.bind(1, up->name);
+		while (s.executeStep())
+			rels.push_back(s.getColumn(0).getString());
+		}
+
+	int pruned = 0;
+	for (const auto& rel : rels) {
+		std::string abs = join_root(rel);
+		if (abs.empty() || fs::is_directory(abs)) continue;
+		forget_prefix(rel);
+		scan_artist_dir(fs::path(abs));
+		pruned++;
+		}
+
+	// Only when something went: this runs on every scan and on every removal
+	// the watcher sees, and a line saying nothing happened would be most of
+	// what the log contained.
+	if (pruned)
+		std::cout << stamp() << "Uploads: pruned " << pruned
+		          << " removed batch director" << (pruned == 1 ? "y" : "ies")
+		          << std::endl;
 	}
 
 // Per-song data collected in Phases 1–3, consumed in Phase 4.

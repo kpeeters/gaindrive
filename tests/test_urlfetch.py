@@ -22,6 +22,8 @@ takes minutes and needs yt-dlp installed on the server.
 
 import io
 import json
+import os
+import shutil
 import sys
 import time
 import urllib.error
@@ -37,6 +39,11 @@ CLIENT = "test"
 
 # e.g. "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
 LIVE_URL = None
+
+# The uploads root as the *server* sees it, needed by the one test that removes
+# a batch behind the server's back. Only meaningful when the tests and the
+# server share a filesystem; that test skips when this path is not there.
+UPLOAD_ROOT = "/tmp/gd_uploads"
 
 # A second account, created and removed by the permission test.
 OTHER_USER = "urlfetch_nobody"
@@ -517,6 +524,69 @@ def test_loose_sidecar_follows_its_media():
         _cleanup(song)
 
 
+def _personal_artists():
+    sr = _ok(_get("getArtists.view", {"personal": "true"}))
+    out = []
+    for idx in sr.get("artists", {}).get("index", []):
+        out.extend(idx.get("artist", []))
+    return out
+
+
+def test_removed_batch_is_pruned():
+    """A batch removed from the shell must not keep its artist for ever.
+
+    The uploads root is excluded from every automatic indexing path, so before
+    MediaStore::reconcile_uploads() nothing in the server ever compared it with
+    the filesystem except scan_batch() and deleteUpload — and a directory
+    removed behind gaindrive's back kept its rows permanently.
+
+    Two mechanisms answer it and this exercises whichever is quicker:
+    FolderWatcher now watches the uploads root for removals, and scan() runs the
+    same reconcile. The fallback below is what tells them apart in the output.
+
+    A unique artist name is deliberate: fold_batch_into_siblings() merges an
+    artist directory into the user's earlier batch of the same name, so a shared
+    one would leave the files somewhere other than the batch this removes.
+    """
+    if not os.path.isdir(UPLOAD_ROOT):
+        raise Skip(f"{UPLOAD_ROOT} is not there — the tests and the server "
+                   f"need a shared filesystem for this one")
+
+    tag    = str(int(time.time())) + "d"
+    artist = f"Zqx Gone {tag}"
+    name   = f"Zqx Track {tag}"
+    r = _upload_zip({f"{artist}/{name}/{name}.opus": b"\0" * 4096})
+    assert r.get("status") == "ok", r
+    uuid = r["batch"].rsplit("/", 1)[-1]
+
+    song = _await_song(name)
+    assert song, f"{name!r} never appeared in the personal listing"
+    assert any(a["name"] == artist for a in _personal_artists()), \
+        f"{artist!r} is not in the personal listing to begin with"
+
+    batch = os.path.join(UPLOAD_ROOT, USER, uuid)
+    if not os.path.isdir(batch):
+        raise Skip(f"{batch} is not there — is UPLOAD_ROOT right?")
+    shutil.rmtree(batch)
+
+    def gone(seconds):
+        for _ in range(seconds * 2):
+            if not any(a["name"] == artist for a in _personal_artists()):
+                return True
+            time.sleep(0.5)
+        return False
+
+    if gone(15):
+        print("PASS  a batch removed from the shell is pruned (watcher)")
+        return
+    # Not a failure yet: the watcher can be out of inotify slots, and on macOS
+    # FSEvents coalesces. A scan must still catch it.
+    _ok(_get("startScan.view"))
+    assert gone(60), \
+        f"{artist!r} is still listed after its batch was removed and rescanned"
+    print("PASS  a batch removed from the shell is pruned (scan)")
+
+
 TESTS = [
     test_handlers_well_formed,
     test_missing_url,
@@ -532,6 +602,7 @@ TESTS = [
     test_info_json_becomes_a_chapter_sidecar,
     test_info_json_without_chapters_writes_nothing,
     test_loose_sidecar_follows_its_media,
+    test_removed_batch_is_pruned,
     test_live_fetch,
     test_live_fetch_with_names,
     test_duplicate_refused,
