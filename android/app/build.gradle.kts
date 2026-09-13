@@ -65,12 +65,12 @@ val releaseStore = keystoreValue("storeFile", "GAINDRIVE_KEYSTORE")
 
 android {
 	namespace = "org.gaindrive.android"
-	compileSdk = 35
+	compileSdk = 36
 
 	defaultConfig {
 		applicationId = "org.gaindrive.android"
 		minSdk = 26
-		targetSdk = 35
+		targetSdk = 36
 		versionCode = gdVersionCode
 		versionName = gdVersionName
 
