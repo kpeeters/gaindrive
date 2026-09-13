@@ -2346,10 +2346,14 @@ static std::string make_uuid()
    return ss.str();
    }
 
-// Extract a zip/tar/tar.gz/tgz archive from memory into dest_dir.
+// Extract a zip/tar/tar.gz/tgz archive into dest_dir.
 // Entry paths are sanitised: absolute components and ".." are stripped so
 // no file can escape dest_dir. Returns the number of regular files written,
-// or -1 if the archive could not be opened.
+// -1 if the archive could not be opened, or -2 if every entry failed to be
+// written. That last one is its own answer because nothing else would ever be
+// told: an extraction that wrote not one byte otherwise returns 0, which the
+// caller reports as a success carrying a file count of zero -- the shape the
+// symlink bug below wore for as long as it lasted, visible only in this log.
 // libarchive's error string can embed an entry's own name, and an entry name
 // is attacker bytes that may hold newlines — a forged log line, in the log a
 // host-level blocker reads. NULL when there is no message.
@@ -2363,6 +2367,25 @@ static int extract_archive_to_dir(const std::filesystem::path& archive_file,
                                    const std::filesystem::path& dest_dir)
    {
    namespace fs = std::filesystem;
+
+   // The destination with its own symlinks resolved, because SECURE_SYMLINKS
+   // below refuses to write *through* one -- and libarchive walks the whole
+   // pathname it is handed, starting at '/', so it is our own ancestors it
+   // trips over long before it reaches anything the archive supplied. An
+   // uploads root spelled through a symlink is a supported configuration and
+   // deliberately so: abs_path() in main.cc leaves a root's symlinks alone on
+   // purpose, and the MediaStore ctor says a root that is itself a symlink
+   // still works. With one, every entry of every upload failed with "Cannot
+   // extract through symlink" while the reply went on saying ok.
+   //
+   // Resolving the prefix gives up nothing. What the flag exists to guard is
+   // the part below it, which comes out of the archive, and that is still
+   // walked exactly as before. weakly_canonical rather than canonical to match
+   // every other canonicalisation here, and because it needs no existence
+   // guarantee; falling back on error leaves the previous behaviour.
+   std::error_code base_ec;
+   fs::path base = fs::weakly_canonical(dest_dir, base_ec);
+   if (base_ec) base = dest_dir;
 
    struct archive* a = archive_read_new();
    archive_read_support_format_all(a);
@@ -2384,9 +2407,11 @@ static int extract_archive_to_dir(const std::filesystem::path& archive_file,
    // has both pathnames pass the loop unchanged, since neither contains "..",
    // and libarchive then follows the link it has just created. The objection
    // to the flag was that it refuses to extract through a host symlink that
-   // the music root may contain; that does not apply here, because the
-   // destination is a batch directory gaindrive created itself, under the
-   // uploads root and never inside a library root.
+   // the music root may contain, and the answer given here was that the
+   // destination is a batch directory gaindrive created itself. That is true
+   // of the components *below* the destination and silently assumed the ones
+   // above it were not being looked at. They are, and `base` above is what
+   // answers for them.
    //
    // The filetype filter below makes the flag belt-and-braces rather than the
    // only defence, since a link that is never written cannot be followed.
@@ -2412,7 +2437,7 @@ static int extract_archive_to_dir(const std::filesystem::path& archive_file,
       return -1;
       }
 
-   int count = 0, skipped = 0, entries = 0;
+   int count = 0, skipped = 0, entries = 0, failed = 0;
    uint64_t written = 0;
    struct archive_entry* entry;
    int hr;
@@ -2467,7 +2492,7 @@ static int extract_archive_to_dir(const std::filesystem::path& archive_file,
          }
       entries++;
 
-      fs::path target = dest_dir / safe;
+      fs::path target = base / safe;
       archive_entry_set_pathname(entry, target.c_str());
 
       // ARCHIVE_WARN (-20) means partial success; still write the data.
@@ -2475,6 +2500,7 @@ static int extract_archive_to_dir(const std::filesystem::path& archive_file,
       if (wr < ARCHIVE_WARN) {
          std::cout << stamp() << "extract: write_header failed (" << wr << ") for "
                    << target << ": " << archive_err(wd) << std::endl;
+         failed++;
          skipped++;
          continue;
          }
@@ -2518,9 +2544,9 @@ static int extract_archive_to_dir(const std::filesystem::path& archive_file,
                 << archive_err(a) << std::endl;
 
    std::cout << stamp() << "extract: done, files=" << count
-             << " skipped=" << skipped << std::endl;
+             << " skipped=" << skipped << " failed=" << failed << std::endl;
    cleanup();
-   return count;
+   return (count == 0 && failed > 0) ? -2 : count;
    }
 
 // Make a string safe to use as a single directory name. Shared by the upload
@@ -7132,11 +7158,20 @@ GainDrive::GainDrive(const std::string& db_path,
 				// reload rather than the stream" that castSession exists to
 				// prevent.
 				const CastStreamInfo st = cast_stream();
+				// Something to say to the person, for the failures that produce
+				// no status of their own — a LOAD the receiver was never told
+				// about. `noticeSeq` is what lets a client show one exactly
+				// once: wait_status() republishes an unchanged status every
+				// fifteen seconds, and a notice without a sequence would be
+				// shown again on every one of them.
+				const auto notice = cast_manager_.notice();
 				std::string event = "data: " + nlohmann::json({
 					{"playerState", s.player_state},
 					{"currentTime", s.current_time},
 					{"duration",    s.duration},
 					{"idleReason",  s.idle_reason},
+					{"notice",      notice.text},
+					{"noticeSeq",   notice.seq},
 					{"startOffset", last_cast_offset_},
 					{"audioOnly",          st.audio_only},
 					{"receiverShowsVideo", st.receiver_video},
@@ -7182,6 +7217,12 @@ GainDrive::GainDrive(const std::string& db_path,
 			r["castSession"]["currentTime"]  = st.current_time;
 			r["castSession"]["duration"]     = st.duration;
 			r["castSession"]["songDuration"] = song_duration;
+			// As on castEvents, and for the reason every other field here is
+			// repeated: a page that reloads has no SSE push to have read it
+			// from. Cleared by the next load, so it describes this attempt.
+			const auto notice = cast_manager_.notice();
+			r["castSession"]["notice"]       = notice.text;
+			r["castSession"]["noticeSeq"]    = notice.seq;
 			// The same description castLoad's reply carries, and it must stay
 			// the same: a reloaded page has no castLoad response to have read
 			// it from, and a client that drew one thing before the reload and
@@ -7777,7 +7818,11 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		int n = extract_archive_to_dir(part, dest);
 		drop_part();
-		if (n < 0) { json_err("Failed to open archive."); return; }
+		if (n == -1) { json_err("Failed to open archive."); return; }
+		// Not a message naming symlinks: with the prefix resolved the
+		// remaining causes are a full disk or a permission problem, and
+		// libarchive's own words are already in the log.
+		if (n == -2) { json_err("Could not write the archive's contents."); return; }
 
 		std::cout << stamp() << "Upload: extracted " << n << " file(s) to " << dest << std::endl;
 

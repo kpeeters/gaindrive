@@ -3005,9 +3005,25 @@ let castSyncWarned      = false;
 let castExpectedPosition = null;  // absolute position we asked the receiver to
                                   // seek to via the most recent LOAD; cleared
                                   // once the receiver reports playback near it
+// The last server notice sequence this page has acted on.  The notice itself
+// is what the server has to say about a load that produced no status of its
+// own — a television that never finished starting up, so the LOAD was never
+// sent — and it is repeated on every push, since a push is the only thing that
+// carries it.  Without the sequence the same sentence would be shown again
+// every fifteen seconds, which is how often the SSE republishes an unchanged
+// status.
+let castNoticeSeq       = 0;
 
 // Handle one MEDIA_STATUS push from the server SSE stream.
 function onCastStatus(s) {
+   // Anything the server needs a person to know, once.  Read first, above the
+   // transient gate below: the statuses that carry a notice are precisely the
+   // IDLE ones that gate drops, so reading it any later would show nothing at
+   // all for the failure it exists to report.
+   if (typeof s.noticeSeq === 'number' && s.noticeSeq !== castNoticeSeq) {
+      castNoticeSeq = s.noticeSeq;
+      if (s.notice) showError(s.notice);
+      }
    // Server tells us where the served stream begins in the song.  Native
    // seek (MP3) keeps this at 0; server-side seek (FLAC/other) sets it to
    // the seek point so the absolute song position is startOffset + the
@@ -8421,6 +8437,11 @@ async function showShell() {
             castSongDuration = sess.songDuration;
             castAudioOnly    = !!sess.audioOnly;
             castReceiverVideo = !!sess.receiverShowsVideo;
+            // Adopted rather than acted on.  A notice describes the load it
+            // belongs to, and this page has just arrived: reporting a failure
+            // the user has already seen elsewhere — or already worked around
+            // by loading something else — is worse than saying nothing.
+            castNoticeSeq    = sess.noticeSeq ?? 0;
             // The same description castLoad's reply carries, for the load
             // that is already playing — this reload has no castLoad reply to
             // have read it from, which is why castSession repeats it.

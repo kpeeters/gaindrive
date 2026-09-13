@@ -1746,7 +1746,7 @@ see = ["fetchUrl", "moveAlbum", "deleteUpload"]
 
   [[endpoint.error]]
   http = '400'
-  when = 'No uploads root, an unsupported archive type, or a supplied name holding nothing usable once sanitised.'
+  when = 'No uploads root, an unsupported archive type, a supplied name holding nothing usable once sanitised, or an archive none of whose contents could be written.'
 
 [[endpoint]]
 kind    = 'endpoint'
@@ -2445,6 +2445,16 @@ load and show itself as casting.
   doc  = 'The subtitle track currently showing, or 0.'
 
   [[endpoint.field]]
+  name = "castSession.notice"
+  type = "string"
+  doc  = 'Something a person should be told about the last load, or empty. It exists for the failures the receiver never reports, because it was never told: a television that had not finished starting up when the `LOAD` was due, or one that could not be reached at all. Cleared when a new load begins.'
+
+  [[endpoint.field]]
+  name = "castSession.noticeSeq"
+  type = "int"
+  doc  = 'Changes whenever `notice` is a new one. Show a notice when this differs from the last value seen and the text is non-empty; a client restoring a session after a reload should adopt the value without acting on it, since the notice describes a load it was not there for.'
+
+  [[endpoint.field]]
   name = "castSession.audioOnly"
   type = "bool"
   doc  = 'The same answer `castLoad` returned for the load now playing. Present here because a client that has just reloaded has no `castLoad` reply to have read it from.'
@@ -2494,9 +2504,16 @@ summary      = "Server-sent events carrying the receiver's status as it changes.
 notes        = '''
 An event is emitted whenever the receiver pushes a status change, and at least
 every 15 seconds otherwise. Each `data:` payload is a JSON object with
-`playerState`, `currentTime`, `duration`, `idleReason` and `startOffset`, plus
-the same stream description `castLoad` and `castSession` carry: `audioOnly`,
-`receiverShowsVideo`, `contentType`, `sentSuffix`, `sentBitRate` and `tier`.
+`playerState`, `currentTime`, `duration`, `idleReason`, `startOffset`,
+`notice` and `noticeSeq`, plus the same stream description `castLoad` and
+`castSession` carry: `audioOnly`, `receiverShowsVideo`, `contentType`,
+`sentSuffix`, `sentBitRate` and `tier`.
+
+`notice` and `noticeSeq` are as `castSession` describes them: a sentence about
+a load the receiver was never told about, and a number that changes when there
+is a new one. A client should show a notice once, when the number changes and
+the text is non-empty — an unchanged status is republished every 15 seconds,
+so acting on the text alone would repeat it for as long as the session lasted.
 
 Those six are repeated here rather than left to the `castLoad` reply because
 that reply describes an *attempt*. A receiver that refuses a LOAD is sent a
