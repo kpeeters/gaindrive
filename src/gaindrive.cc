@@ -7521,8 +7521,16 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		std::string bytes;
 		std::string url;
-		if (req.form.has_file("url")) url = req.form.get_file("url").content;
-		else if (req.has_param("url")) url = req.get_param_value("url");
+		// Three spellings, because a url= is a string and a client may send it
+		// any of these ways. The first is the one that matters: a multipart part
+		// carrying no filename is a *text field*, and httplib files those under
+		// form.fields. Before 0.54.1 every part landed in form.files whatever it
+		// was, so has_file("url") alone used to be enough — the bump turned the
+		// web client's FormData.append('url', …) into "Required parameter
+		// missing".
+		if (req.form.has_field("url"))     url = req.form.get_field("url");
+		else if (req.form.has_file("url")) url = req.form.get_file("url").content;
+		else if (req.has_param("url"))     url = req.get_param_value("url");
 
 		if (req.form.has_file("file")) {
 			// A reference into the form map, not get_file(), which returns a
