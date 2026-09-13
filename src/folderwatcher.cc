@@ -12,8 +12,14 @@ namespace fs = std::filesystem;
 FolderWatcher::FolderWatcher(MediaStore& store, int debounce_ms)
 	: store_(store), debounce_ms_(debounce_ms)
 	{
-	for (const auto& r : store_.roots())
-		if (r.type != "uploads") roots_.push_back(r.path);
+	for (const auto& r : store_.roots()) {
+		roots_.push_back(r.path);
+		// At most one, and remembered rather than re-derived: every event has
+		// to be told apart from a library one before it is turned into an
+		// artist directory, and the uploads layout has two extra levels that
+		// artist_dir_for_path() knows nothing about.
+		if (r.type == "uploads") uploads_root_ = r.path;
+		}
 	}
 
 FolderWatcher::~FolderWatcher()
@@ -30,6 +36,15 @@ std::string FolderWatcher::root_of(const std::string& path) const
 			return r;
 		}
 	return "";
+	}
+
+bool FolderWatcher::is_uploads(const std::string& path) const
+	{
+	if (uploads_root_.empty()) return false;
+	if (path == uploads_root_) return true;
+	return path.size() > uploads_root_.size()
+	       && path.compare(0, uploads_root_.size(), uploads_root_) == 0
+	       && path[uploads_root_.size()] == '/';
 	}
 
 std::string FolderWatcher::artist_dir_for_path(const std::string& path) const
@@ -212,9 +227,19 @@ void FolderWatcher::run()
 				if (!scan_running_.exchange(true)) {
 					auto abs_dirs = std::move(changed_artists_);
 					changed_artists_.clear();
-					std::cout << stamp() << "FolderWatcher: rescanning "
-					          << abs_dirs.size() << " artist director"
-					          << (abs_dirs.size() == 1 ? "y" : "ies") << std::endl;
+					// Taken with the set, and for the same reason: whatever
+					// arrives after this point belongs to the next pass.
+					bool uploads = uploads_dirty_;
+					uploads_dirty_ = false;
+					if (!abs_dirs.empty())
+						std::cout << stamp() << "FolderWatcher: rescanning "
+						          << abs_dirs.size() << " artist director"
+						          << (abs_dirs.size() == 1 ? "y" : "ies")
+						          << std::endl;
+					if (uploads)
+						std::cout << stamp()
+						          << "FolderWatcher: reconciling uploads"
+						          << std::endl;
 					// scan_dirs() expects stored-form paths
 					// ("<root>/<dir>"); the rewatch helper still needs
 					// absolute ones for inotify_add_watch().  MediaStore owns
@@ -223,13 +248,20 @@ void FolderWatcher::run()
 					std::set<std::string> rel_dirs;
 					for (auto& d : abs_dirs)
 						rel_dirs.insert(store_.rel_path(d));
-					std::thread([this, rel_dirs = std::move(rel_dirs),
+					std::thread([this, uploads, rel_dirs = std::move(rel_dirs),
 					             abs_dirs = std::move(abs_dirs)]{
 						// Only the scan is guarded: an exception escaping this
 						// thread would terminate the server, but the bookkeeping
 						// below must run either way — leaving scan_running_ set
 						// would stop the watcher ever scanning again.
-						try { store_.scan_dirs(rel_dirs); }
+						try {
+							// The set is empty whenever the pass was an uploads
+							// removal alone.  scan_dirs() would survive that,
+							// but it would take a ScanGuard and print a totals
+							// line for a scan of nothing.
+							if (!rel_dirs.empty()) store_.scan_dirs(rel_dirs);
+							if (uploads) store_.reconcile_uploads();
+							}
 						catch (const std::exception& e) {
 							std::cout << stamp() << "FolderWatcher: rescan "
 							          << "aborted: " << e.what() << std::endl;
@@ -331,27 +363,55 @@ void FolderWatcher::run()
 					// Can't know what changed; mark for full scan.  A bare root
 					// path maps to a bare root name, which scan_dirs() treats
 					// as "lost track" and escalates to a full scan.
-					for (const auto& r : roots_)
-						changed_artists_.insert(r);
+					//
+					// Not the uploads root: that name would escalate the same
+					// way, so an overflow of uploads events alone would rescan
+					// the entire library.  The uploads half of "we lost track"
+					// is exactly what reconcile_uploads() answers.
+					for (const auto& r : roots_) {
+						if (is_uploads(r)) uploads_dirty_ = true;
+						else               changed_artists_.insert(r);
+						}
 					last_event = Clock::now();
 					continue;
 					}
 
-				// Arm / reset the debounce timer and record the affected artist
-				// dir. The full path of the changed entry is what identifies it:
-				// when the watch is on a root, parent + "/" + name IS the artist
-				// directory; deeper down, the first component below the root is
-				// the same either way.
-				last_event = Clock::now();
+				// Record the affected artist dir, and arm the debounce timer
+				// only if something was recorded. The full path of the changed
+				// entry is what identifies it: when the watch is on a root,
+				// parent + "/" + name IS the artist directory; deeper down, the
+				// first component below the root is the same either way.
 				{
 				auto it = wd_to_path_.find(ev->wd);
 				std::string parent = (it != wd_to_path_.end()) ? it->second : "";
 				std::string name   = (ev->len > 0) ? ev->name : "";
 				if (!parent.empty()) {
 					std::string full = name.empty() ? parent : parent + "/" + name;
-					std::string artist = artist_dir_for_path(full);
-					if (!artist.empty())
-						changed_artists_.insert(artist);
+					if (is_uploads(full)) {
+						// **Removals only, and never an artist directory.** An
+						// uploads batch is <user>/<uuid>/<artist>/<album>, which
+						// artist_dir_for_path() would read as <user>; and a
+						// write here is a fetch in progress, whose batch
+						// scan_batch() will index itself once it is complete.
+						// Indexing it early would leave apply_batch_names()
+						// renaming directories that already have rows.
+						//
+						// So the only question asked of the uploads root is
+						// "has something gone", and the only answer is
+						// reconcile_uploads().
+						if (ev->mask & (IN_DELETE | IN_MOVED_FROM
+						                | IN_DELETE_SELF | IN_MOVE_SELF)) {
+							uploads_dirty_ = true;
+							last_event = Clock::now();
+							}
+						}
+					else {
+						std::string artist = artist_dir_for_path(full);
+						if (!artist.empty()) {
+							changed_artists_.insert(artist);
+							last_event = Clock::now();
+							}
+						}
 					}
 				}
 
@@ -457,6 +517,22 @@ void FolderWatcher::handle_paths(size_t n, const char* const* paths)
 			while (path.size() > 1 && path.back() == '/') path.pop_back();
 			path = unresolve(path);
 
+			// The uploads root is watched for removals and nothing else — see
+			// the ctor comment.  FSEvents carries no entry name and this branch
+			// deliberately ignores the flags, so a removal cannot be told from
+			// a write here; running the reconcile on both is harmless, because
+			// it is one stat per indexed batch directory and it never indexes
+			// anything.  What it must not do is reach artist_dir_for_path(),
+			// which would read <uploads>/<user> as an artist directory, or the
+			// bare-root fallback below, which would escalate to a full scan of
+			// the whole library.
+			if (is_uploads(path)) {
+				std::cout << stamp() << "FolderWatcher: changed  " << path
+				          << std::endl;
+				uploads_dirty_ = true;
+				continue;
+				}
+
 			std::string artist = artist_dir_for_path(path);
 			if (artist.empty()) {
 				// Either outside every root, or the root itself changed. Unlike
@@ -472,7 +548,7 @@ void FolderWatcher::handle_paths(size_t n, const char* const* paths)
 			std::cout << stamp() << "FolderWatcher: changed  " << path << std::endl;
 			changed_artists_.insert(artist);
 			}
-		if (changed_artists_.empty()) return;
+		if (changed_artists_.empty() && !uploads_dirty_) return;
 		// One scan thread at a time. It loops until nothing new is left, so a
 		// batch delivered mid-scan is picked up rather than dropped.
 		if (!scan_running_) { scan_running_ = true; spawn = true; }
@@ -486,19 +562,27 @@ void FolderWatcher::drain_and_scan()
 	{
 	while (true) {
 		std::set<std::string> abs_dirs;
+		bool uploads = false;
 			{
 			std::lock_guard<std::mutex> lk(changed_mutex_);
 			abs_dirs.swap(changed_artists_);
+			// Taken with the set, and for the same reason.
+			uploads = uploads_dirty_;
+			uploads_dirty_ = false;
 			// Clearing the flag under the lock that guards the set closes the
 			// handoff race: a batch arriving after this point sees scan_running_
 			// false and starts a new thread, and one arriving before it is
 			// already in abs_dirs.
-			if (abs_dirs.empty()) { scan_running_ = false; return; }
+			if (abs_dirs.empty() && !uploads) { scan_running_ = false; return; }
 			}
 
-		std::cout << stamp() << "FolderWatcher: rescanning "
-		          << abs_dirs.size() << " artist director"
-		          << (abs_dirs.size() == 1 ? "y" : "ies") << std::endl;
+		if (!abs_dirs.empty())
+			std::cout << stamp() << "FolderWatcher: rescanning "
+			          << abs_dirs.size() << " artist director"
+			          << (abs_dirs.size() == 1 ? "y" : "ies") << std::endl;
+		if (uploads)
+			std::cout << stamp() << "FolderWatcher: reconciling uploads"
+			          << std::endl;
 
 		// This is a detached thread touching the DB: an escaping exception
 		// calls std::terminate and takes the server down with it. Both arms log
@@ -510,7 +594,9 @@ void FolderWatcher::drain_and_scan()
 			std::set<std::string> rel_dirs;
 			for (auto& d : abs_dirs)
 				rel_dirs.insert(store_.rel_path(d));
-			store_.scan_dirs(rel_dirs);
+			// The set is empty whenever the pass was an uploads removal alone.
+			if (!rel_dirs.empty()) store_.scan_dirs(rel_dirs);
+			if (uploads) store_.reconcile_uploads();
 			}
 		catch (const std::exception& e) {
 			std::cout << stamp() << "FolderWatcher: rescan aborted: "

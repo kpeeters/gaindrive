@@ -14,10 +14,21 @@ class MediaStore;
 
 class FolderWatcher {
 	public:
-		// Watches every library root the store is configured with. The uploads
-		// root is deliberately not watched: personal batches are scanned by
-		// explicit scan_dirs() calls from the upload handler, which know the
-		// batch layout, and watching them would also burn inotify slots.
+		// Watches every root the store is configured with, the uploads root
+		// included — but the two are watched for different things, and the
+		// difference is load-bearing.
+		//
+		// A library root's events name an artist directory to rescan. An
+		// uploads root's do not: they only ever set a flag, and the debounced
+		// action is MediaStore::reconcile_uploads(), which prunes the rows of
+		// batch directories that have gone and never indexes anything. That
+		// asymmetry is what keeps the watcher unable to index a batch while a
+		// fetch is still writing it — apply_batch_names()' plain fs::rename is
+		// safe only because nothing under a live batch has rows yet.
+		//
+		// Personal batches still reach the DB through the explicit scan_dirs()
+		// calls in scan_batch(), which know the <user>/<uuid>/<artist>/<album>
+		// layout. Nothing here does.
 		FolderWatcher(MediaStore& store, int debounce_ms = 2000);
 		~FolderWatcher();
 
@@ -41,8 +52,13 @@ class FolderWatcher {
 		// which callers treat as "rescan that whole root".
 		std::string artist_dir_for_path(const std::string& path) const;
 
+		// True when `path` is the uploads root or sits under it. There is at
+		// most one, so this is a prefix test rather than a lookup.
+		bool is_uploads(const std::string& path) const;
+
 		MediaStore&              store_;
-		std::vector<std::string> roots_;   // library roots, absolute
+		std::vector<std::string> roots_;   // every root, absolute
+		std::string              uploads_root_;   // "" when none is configured
 		int                      debounce_ms_;
 
 #if defined(__linux__)
@@ -58,6 +74,10 @@ class FolderWatcher {
 		std::thread                         thread_;
 		std::unordered_map<int,std::string> wd_to_path_;
 		std::set<std::string>               changed_artists_;
+		// Set by a removal under the uploads root, taken with the set above by
+		// the debounced rescan. Touched only on the watcher thread, as
+		// changed_artists_ is, so it needs no lock of its own.
+		bool                                uploads_dirty_ = false;
 		std::mutex                          rewatches_mutex_;
 		std::vector<std::string>            pending_rewatches_;
 #elif defined(__APPLE__)
@@ -79,6 +99,7 @@ class FolderWatcher {
 		// that guards the set is what makes the scan handoff race-free.
 		std::mutex            changed_mutex_;
 		std::set<std::string> changed_artists_;
+		bool                  uploads_dirty_ = false;
 		bool                  scan_running_ = false;
 #endif
 	};

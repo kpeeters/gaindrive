@@ -11,6 +11,11 @@
 
 #include <nlohmann/json.hpp>
 
+// The TLS connection to a receiver, defined in castmanager.cc: it is an
+// OpenSSL socket and nothing else, and keeping it out of this header is what
+// keeps <openssl/ssl.h> out of everything that casts.
+struct Tls;
+
 class CastManager {
 	public:
 		struct CastDevice {
@@ -209,6 +214,27 @@ class CastManager {
 		// Return the last cached status.
 		CastStatus get_status() const;
 
+		// Something a person should be told about the cast session, and a
+		// sequence number that changes when it does.
+		//
+		// It exists for the failures that produce no status of their own: a
+		// LOAD abandoned because the television never finished starting up is
+		// invisible to the receiver, so nothing would otherwise reach the
+		// client and it would sit on "Preparing…" for ever.
+		//
+		// **Not a field of CastStatus**, although that is where a reader would
+		// look for it: update_status() assigns status_ wholesale from each
+		// push, so a notice living there would be wiped by the very status
+		// published to announce it. The sequence number is what lets a client
+		// show one exactly once — wait_status() republishes an unchanged status
+		// every fifteen seconds.
+		struct Notice
+			{
+			std::string text;
+			int         seq = 0;
+			};
+		Notice notice() const;
+
 		// Block until the next status push from the Chromecast (or timeout_ms elapses).
 		// Used by the SSE endpoint to stream updates to the browser.
 		CastStatus wait_status(int timeout_ms = 15000);
@@ -295,6 +321,26 @@ class CastManager {
 		int         last_load_old_msid_ = 0;   // msid active when load() was called
 		LoadRequest last_load_;
 
+		// The last thing worth telling a person, under status_mutex_ with the
+		// status it accompanies. See notice() above for why it does not live in
+		// CastStatus.
+		std::string notice_;
+		int         notice_seq_ = 0;
+
+		// Bumped by every LOAD that leaves this process, and by nothing else.
+		// It is what scopes await_load_ack() to its own attempt, so the watcher
+		// armed by a first LOAD stays out of the way of a degrade retry that
+		// has since taken over the session.
+		std::atomic<int> load_attempt_{0};
+
+		// Every message we send carries one, and it must be fresh: a receiver
+		// correlates its replies by requestId, so a re-send repeating one it
+		// has already seen is worse than sending nothing. Every LOAD used to be
+		// requestId 2, which was harmless only because nothing was ever sent
+		// twice. Starts clear of every fixed id still in use — the playback
+		// commands' 10-13 and poll_loop's 100/101.
+		std::atomic<int> request_id_{1000};
+
 		mutable std::mutex         cache_mutex_;
 		std::vector<CastDevice>    devices_cache_;  // last result of discover_background()
 
@@ -349,9 +395,48 @@ class CastManager {
 		// a newer load() has been called.
 		void load_worker(LoadRequest req, int gen);
 
-		// The LOAD message itself.  One builder for both paths in load_worker:
-		// they were byte-identical literals, and a field added to one and not
-		// the other would apply only when the receiver app happened to already
-		// be running.
+		// The transport of a running Default Media Receiver on `t`, launching
+		// one if there is none. The counterpart of the Android client's
+		// ensureTransport, and the deadlines it waits under are the ones at the
+		// top of castmanager.cc.
+		std::string ensure_transport(Tls& t, const std::string& src, int gen);
+
+		// One LOAD, from opening the socket to writing the message. Resolves a
+		// transport if none is cached, and reports every way of giving up
+		// through note_load_abandoned(). `used_cached_transport` says whether
+		// the LOAD went to a transport we already had, which is what decides
+		// whether a re-send should throw that transport away first.
+		// Returns the attempt number to hand await_load_ack(), or 0 if nothing
+		// was sent.
+		int send_load_once(const LoadRequest& req, int gen,
+		                   bool* used_cached_transport);
+
+		// Wait LOAD_ACK_WAIT_MS; true if the LOAD was acknowledged, or is no
+		// longer ours to worry about.
+		//
+		// **retry_pending_ is the acknowledgement**, and that is where this
+		// differs from the Android client, which counts MEDIA_STATUS arrivals.
+		// It cannot here: poll_loop() sends its own GET_STATUS every second and
+		// a receiver that dropped the LOAD still answers those, so a bare
+		// arrival proves nothing. retry_pending_ is armed by load() and cleared
+		// by update_status() only for a status carrying the *new*
+		// mediaSessionId, which is exactly the question being asked — with the
+		// stale-push filtering already written and already commented there.
+		bool await_load_ack(int gen, int attempt);
+
+		// A LOAD that never reached the receiver: publishes the IDLE/ERROR
+		// nothing else will, records the notice, and consumes the retry flag
+		// *without* degrading. See the definition for why the ladder has no
+		// rung for this.
+		void note_load_abandoned(const char* what);
+
+		// The next requestId. See request_id_.
+		int next_request_id();
+
+		// The LOAD message itself.  One builder, which is why send_load_once()
+		// is one function rather than a fast path and a slow one: they were
+		// byte-identical literals, and a field added to one and not the other
+		// would apply only when the receiver app happened to already be
+		// running.
 		static nlohmann::json build_load(const LoadRequest& req, int request_id);
 	};

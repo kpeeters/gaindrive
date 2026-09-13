@@ -11,6 +11,7 @@
 #include "jsonread.hh"
 
 #include <cctype>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <unordered_map>
@@ -40,6 +41,46 @@ static const char* NS_CONN      = "urn:x-cast:com.google.cast.tp.connection";
 static const char* NS_RECV      = "urn:x-cast:com.google.cast.receiver";
 static const char* NS_MEDIA     = "urn:x-cast:com.google.cast.media";
 static const char* NS_HEARTBEAT = "urn:x-cast:com.google.cast.tp.heartbeat";
+
+// The Default Media Receiver: the only app we ever launch, and the only one
+// whose transport a LOAD may be sent to.
+static const char* MEDIA_APP_ID = "CC1AD845";
+
+// ---- The deadlines around a LOAD ----------------------------------
+//
+// Each waits for something specific, and each was once shorter than the thing
+// it waits for — which is the whole of the "casting a film does not start it
+// on the first play" fault, fixed on the Android side first (see the same
+// section in android/CAST.md).
+//
+// Waiting longer costs nothing here: every wait ends the instant the message
+// it wants arrives, nobody is blocked on the thread doing it, and a newer load
+// supersedes an old one through load_gen_. These are backstops against a
+// receiver that will never answer, not pacing.
+
+// How long to wait for a RECEIVER_STATUS naming our app *before* launching it.
+//
+// Not about the launch at all: it decides whether an already running receiver
+// is joined or torn down, since a LAUNCH against a running app recreates it.
+static constexpr int STATUS_WAIT_MS = 4000;
+
+// How long to wait for the receiver app after LAUNCH.
+//
+// **This is a television changing HDMI input and cold-starting a web app, not
+// a network round trip** — measured at 10-20 s on the reference device. What
+// this replaced was bounded by the socket's own 5 s timeout, so the set was
+// still starting up when the LOAD was abandoned; the receiver then finished
+// launching, published its transport, and sat on the Chromecast backdrop with
+// a live control channel and nothing loaded. A second attempt always worked,
+// because it found the transport already cached.
+static constexpr int LAUNCH_WAIT_MS = 45000;
+
+// How long a LOAD that *was* sent is given before it is sent once more.
+//
+// See load_worker(): the receiver that has published its transport but is not
+// yet consuming the media namespace drops the LOAD on the floor, and there is
+// no ack to wait on — a send reports only that the bytes left this machine.
+static constexpr int LOAD_ACK_WAIT_MS = 8000;
 
 // ---- mDNS discovery -----------------------------------------------
 
@@ -815,50 +856,141 @@ static bool cast_send(SSL* ssl, const std::string& ns,
 	    && SSL_write(ssl, msg.data(), (int)msg.size()) == (int)msg.size();
 	}
 
-static nlohmann::json cast_recv(SSL* ssl)
+// Why a receive produced no message, for a caller that has to tell "nothing
+// yet" from "there will never be anything".
+//
+// The distinction only became load-bearing with cast_wait_for(): a loop that
+// waits up to forty-five seconds must keep waiting through a socket timeout,
+// must keep waiting through a frame it cannot read as JSON, and must *not*
+// keep waiting on a closed connection — which would spin for the rest of the
+// deadline, since a clean EOF sets no errno to notice it by.
+enum class Recv { Message, Timeout, Closed, Unusable };
+
+static nlohmann::json cast_recv(SSL* ssl, Recv* why = nullptr)
 	{
+	auto fail = [&](Recv r) { if (why) *why = r; return nlohmann::json(nullptr); };
+	// A read that ended for no reason the socket reports is a closed one, not a
+	// timeout: SSL_read answers 0 on a clean shutdown and leaves errno alone.
+	auto read_failed = [] {
+		return (errno == EAGAIN || errno == EWOULDBLOCK) ? Recv::Timeout
+		                                                 : Recv::Closed;
+		};
+	if (why) *why = Recv::Message;
+
 	uint8_t fr[4]; size_t got = 0;
 	while (got < 4) {
+		errno = 0;
 		int r = SSL_read(ssl, fr + got, (int)(4 - got));
-		if (r <= 0) return nullptr;
+		if (r <= 0) return fail(read_failed());
 		got += (size_t)r;
 		}
 	uint32_t len = ((uint32_t)fr[0] << 24) | ((uint32_t)fr[1] << 16)
 	             | ((uint32_t)fr[2] <<  8) |  (uint32_t)fr[3];
-	if (len == 0 || len > (1u << 20)) return nullptr;
+	// A length we cannot believe leaves the stream unresynchronisable, so the
+	// connection is finished rather than merely this message.
+	if (len == 0 || len > (1u << 20)) return fail(Recv::Closed);
 	std::vector<uint8_t> msg(len);
 	got = 0;
 	while (got < len) {
+		errno = 0;
 		int r = SSL_read(ssl, msg.data() + got, (int)(len - got));
-		if (r <= 0) return nullptr;
+		if (r <= 0) return fail(read_failed());
 		got += (size_t)r;
 		}
 	std::string payload = pb_payload(msg);
-	if (payload.empty()) return nullptr;
+	// A whole message that says nothing we can read — a binary payload, say.
+	// The framing is intact, so the next one may well be fine.
+	if (payload.empty()) return fail(Recv::Unusable);
 	// Null for anything unusable, because that is what every caller already
 	// tests. A failed parse yields a *discarded* value, and `is_null()` is
 	// false for one — so returning it directly would send a body we could not
 	// read past the "did we receive a message" check and into a value() call
 	// that throws, on the poll thread, where an exception is std::terminate.
 	auto j = nlohmann::json::parse(payload, nullptr, false);
-	if (!j.is_object()) return nullptr;
+	if (!j.is_object()) return fail(Recv::Unusable);
 	return j;
 	}
 
-// Poll until we see a RECEIVER_STATUS that includes a running application.
-// Returns the application's transportId, or empty string on timeout/error.
-static std::string wait_transport(SSL* ssl)
+// A deadline this many milliseconds from now.
+static std::chrono::steady_clock::time_point in_ms(int ms)
 	{
-	for (int i = 0; i < 20; i++) {
-		auto m = cast_recv(ssl);
-		if (m.is_null()) break;
-		if (jstr(m, "type") == "RECEIVER_STATUS") {
-			std::string tid = jstr(jidx(jsub(jsub(m, "status"), "applications"), 0),
-			                       "transportId");
-			if (!tid.empty()) return tid;
+	return std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+	}
+
+// Receive until a message the caller wants arrives, or the deadline passes.
+//
+// Three things it does that the bare cast_recv() loops it replaces did not,
+// and each of them was a fault in at least one of those loops:
+//
+//  * **It answers PING.** The platform drops a sender that stops answering its
+//    heartbeat, so any wait of more than a few seconds has to PONG or the
+//    connection dies underneath it. That is what makes a 45 s wait for a
+//    launching television possible at all.
+//  * **The deadline is wall clock**, not a count of reads. cast_recv() returns
+//    null when the socket's own SO_RCVTIMEO fires, and reading that as failure
+//    is what capped every one of these waits at five seconds however long they
+//    asked for. Only Recv::Closed ends the wait — see there for why that has to
+//    be cast_recv()'s answer rather than this loop's guess at errno.
+//  * **It can be cancelled**, so a load the user has already replaced does not
+//    sit here for the rest of the deadline.
+//
+// The receive timeout is lowered to 1 s for the duration, which is the
+// granularity the deadline and the cancellation are then checked at; these are
+// all throwaway connections, so nothing else cares.
+static nlohmann::json cast_wait_for(
+		Tls& t, const std::string& src,
+		std::chrono::steady_clock::time_point deadline,
+		const std::function<bool(const nlohmann::json&)>& want,
+		const std::function<bool()>& cancelled = {})
+	{
+	struct timeval tv = {1, 0};
+	setsockopt(t.sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+	while (std::chrono::steady_clock::now() < deadline) {
+		if (cancelled && cancelled()) return nullptr;
+		Recv why = Recv::Message;
+		auto m = cast_recv(t.ssl, &why);
+		if (m.is_null()) {
+			if (why == Recv::Closed) return nullptr;
+			continue;   // nothing yet, or nothing we can read
 			}
+		if (jstr(m, "type") == "PING") {
+			cast_send(t.ssl, NS_HEARTBEAT, src, "receiver-0", {{"type", "PONG"}});
+			continue;
+			}
+		if (want(m)) return m;
 		}
-	return {};
+	return nullptr;
+	}
+
+// The entry for one app in a RECEIVER_STATUS, matched on appId, or a null.
+//
+// **Never applications[0]**, which is a fix rather than a refinement: an idle
+// television runs its own ambient app (E8C28D3C, Backdrop), which publishes a
+// transportId like any other and ignores the media namespace — so a LOAD sent
+// there produces no MEDIA_STATUS, no fetch, no error and nothing in any log.
+static const nlohmann::json& running_app(const nlohmann::json& msg,
+                                          const char* app_id)
+	{
+	static const nlohmann::json none;
+	const auto& apps = jsub(jsub(msg, "status"), "applications");
+	if (!apps.is_array()) return none;
+	for (const auto& a : apps)
+		if (jstr(a, "appId") == app_id) return a;
+	return none;
+	}
+
+// Whether this RECEIVER_STATUS says what the receiver is running at all.
+//
+// The distinction running_app() cannot express: it yields nothing both for
+// "our app is not running" and for "this status was not about applications".
+// A volume-change push is the second — it carries `volume` and no applications
+// array — and reading it as the first discards a transport that is still
+// perfectly good, which costs the *next* load the whole GET_STATUS-and-LAUNCH
+// path this file's deadlines exist for.
+static bool lists_applications(const nlohmann::json& msg)
+	{
+	return jsub(jsub(msg, "status"), "applications").is_array();
 	}
 
 // ---- CastManager public methods -----------------------------------
@@ -887,24 +1019,20 @@ CastManager::Probe CastManager::probe(const CastDevice& dev, int timeout_ms)
 	cast_send(t.ssl, NS_RECV, src, "receiver-0",
 	          {{"type", "GET_STATUS"}, {"requestId", 1}});
 
-	// cast_recv() blocks up to the socket's own 5 s timeout, so the deadline is
-	// checked between reads rather than being able to interrupt one.
-	auto deadline = std::chrono::steady_clock::now()
-	              + std::chrono::milliseconds(timeout_ms);
-	while (std::chrono::steady_clock::now() < deadline) {
-		auto m = cast_recv(t.ssl);
-		if (m.is_null()) break;
-		std::string type = jstr(m, "type");
-		if (type == "RECEIVER_STATUS") {
-			std::cout << stamp() << "Cast: probe " << dev.address << ":" << dev.port
-			          << " answered: " << m.dump() << std::endl;
-			return Probe::ANSWERED;
-			}
-		// Answering costs one write and keeps this identical to what the
-		// session does; a probe is short enough that a missed PONG would not
-		// have dropped the connection anyway.
-		if (type == "PING")
-			cast_send(t.ssl, NS_HEARTBEAT, src, "receiver-0", {{"type", "PONG"}});
+	// Through cast_wait_for(), which is what makes timeout_ms mean what it
+	// says: this loop used to give up on the first read that returned nothing,
+	// so it could never wait past the socket's own 5 s however long it was
+	// asked for. Answering PING is that helper's job too.
+	auto m = cast_wait_for(t, src,
+	                       std::chrono::steady_clock::now()
+	                       + std::chrono::milliseconds(timeout_ms),
+	                       [](const nlohmann::json& j) {
+	                           return jstr(j, "type") == "RECEIVER_STATUS";
+	                           });
+	if (!m.is_null()) {
+		std::cout << stamp() << "Cast: probe " << dev.address << ":" << dev.port
+		          << " answered: " << m.dump() << std::endl;
+		return Probe::ANSWERED;
 		}
 
 	return Probe::SILENT;
@@ -1074,6 +1202,12 @@ void CastManager::load(const LoadRequest& request)
 	status_.duration    = static_cast<float>(request.duration);
 	last_load_          = request;
 	retry_pending_      = true;
+	// A new attempt supersedes whatever the last one had to say. The sequence
+	// number is deliberately not bumped: a client shows a notice when the
+	// sequence changes *and* the text is non-empty, so clearing the text is
+	// enough to stop a page that reloads now being told about a load that has
+	// since been replaced.
+	notice_.clear();
 	}
 
 	// All TLS/blocking work happens in a detached thread so that the
@@ -1086,10 +1220,166 @@ void CastManager::load(const LoadRequest& request)
 		}).detach();
 	}
 
+std::string CastManager::ensure_transport(Tls& t, const std::string& src,
+                                          int gen)
+	{
+	// Every wait here ends the moment its message arrives, and ends early if
+	// the user has picked something else in the meantime.
+	auto cancelled = [this, gen] { return load_gen_.load() != gen; };
+	auto ours = [](const nlohmann::json& j) {
+		return jstr(j, "type") == "RECEIVER_STATUS"
+		    && !jstr(running_app(j, MEDIA_APP_ID), "transportId").empty();
+		};
+
+	cast_send(t.ssl, NS_CONN, src, "receiver-0", {{"type", "CONNECT"}});
+
+	// Ask before launching. A LAUNCH against a running app *recreates* it, so a
+	// receiver already showing ours would pay the whole cold start again — ten
+	// to twenty seconds of black on a television — and the media session it was
+	// holding would go with it.
+	//
+	// Waited for by requestId, which the receiver echoes on a reply and sets to
+	// 0 on a broadcast. That is what makes this step cost nothing when the app
+	// is *not* running: the reply is the answer either way, so a receiver that
+	// is idle or showing something else is launched at once rather than after
+	// the full STATUS_WAIT_MS. Matching on "any RECEIVER_STATUS" instead would
+	// be satisfied by a volume push, which says nothing about applications and
+	// would send a LAUNCH into a running app — the one thing this step exists
+	// to avoid.
+	const int status_req = next_request_id();
+	cast_send(t.ssl, NS_RECV, src, "receiver-0",
+	          {{"type", "GET_STATUS"}, {"requestId", status_req}});
+	auto m = cast_wait_for(t, src, in_ms(STATUS_WAIT_MS),
+	                       [status_req](const nlohmann::json& j) {
+	                           return jstr(j, "type") == "RECEIVER_STATUS"
+	                               && jint(j, "requestId") == status_req;
+	                           },
+	                       cancelled);
+	if (cancelled()) return {};
+	std::string running = jstr(running_app(m, MEDIA_APP_ID), "transportId");
+	if (!running.empty()) {
+		std::cout << stamp() << "Cast: joined the running receiver, transport "
+		          << running << std::endl;
+		return running;
+		}
+
+	cast_send(t.ssl, NS_RECV, src, "receiver-0",
+	          {{"type", "LAUNCH"}, {"appId", MEDIA_APP_ID},
+	           {"requestId", next_request_id()}});
+	// The transport may arrive on the LAUNCH's own reply or on a broadcast that
+	// follows it, so this one is matched on content rather than on requestId.
+	m = cast_wait_for(t, src, in_ms(LAUNCH_WAIT_MS), ours, cancelled);
+	if (m.is_null()) return {};
+
+	std::string tid = jstr(running_app(m, MEDIA_APP_ID), "transportId");
+	std::cout << stamp() << "Cast: receiver launched, transport " << tid
+	          << std::endl;
+	return tid;
+	}
+
+int CastManager::send_load_once(const LoadRequest& req, int gen,
+                                 bool* used_cached_transport)
+	{
+	const std::string src = "sender-0";
+	if (load_gen_.load() != gen) return 0;
+
+	std::string tid;
+	{
+	std::lock_guard<std::mutex> lk(tid_mutex_);
+	tid = transport_id_;
+	}
+	if (used_cached_transport) *used_cached_transport = !tid.empty();
+
+	Tls t;
+	if (!tls_connect(t, device_.address, device_.port)) {
+		// A device that will not accept a connection is not holding a transport
+		// worth keeping either; the next LOAD resolves a fresh one.
+		{
+		std::lock_guard<std::mutex> lk(tid_mutex_);
+		transport_id_.clear();
+		}
+		std::cout << stamp() << "Cast: connect failed ("
+		          << device_.address << ":" << device_.port << ")" << std::endl;
+		note_load_abandoned("The receiver could not be reached, so nothing was "
+		                    "sent to it.");
+		return 0;
+		}
+
+	if (tid.empty()) {
+		tid = ensure_transport(t, src, gen);
+		if (load_gen_.load() != gen) return 0;
+		if (tid.empty()) {
+			// Said out loud and reported, because this was the invisible
+			// abandon: the receiver finished launching seconds later, published
+			// its transport, and sat on the Chromecast backdrop with a live
+			// control channel and nothing loaded.
+			std::cout << stamp() << "Cast: no transportId from receiver"
+			          << std::endl;
+			note_load_abandoned("The television did not finish starting up, so "
+			                    "nothing was sent to it. Try again.");
+			return 0;
+			}
+		std::lock_guard<std::mutex> lk(tid_mutex_);
+		transport_id_ = tid;
+		}
+	else {
+		// The app is already running, but the virtual connection to the
+		// platform still has to exist on this fresh socket before anything else
+		// is accepted. ensure_transport() sends it on the other branch.
+		cast_send(t.ssl, NS_CONN, src, "receiver-0", {{"type", "CONNECT"}});
+		}
+
+	if (load_gen_.load() != gen) return 0;
+
+	cast_send(t.ssl, NS_CONN, src, tid, {{"type", "CONNECT"}});
+	// A fresh requestId every time, which matters for the re-send above all:
+	// a receiver correlates its replies by it, so repeating one it has already
+	// seen is a worse thing to do than sending nothing.
+	nlohmann::json msg = build_load(req, next_request_id());
+	std::cout << stamp() << "Cast: LOAD " << msg.dump() << std::endl;
+	if (!cast_send(t.ssl, NS_MEDIA, src, tid, msg)) {
+		std::cout << stamp() << "Cast: LOAD could not be written" << std::endl;
+		note_load_abandoned("The connection to the receiver was lost before the "
+		                    "track was sent.");
+		return 0;
+		}
+	// Returned rather than read back by the caller, so that a degrade retry
+	// firing microseconds after this send cannot hand its own attempt number to
+	// the watcher this one is about to arm.
+	const int attempt = ++load_attempt_;
+
+	// poll_loop() receives the MEDIA_STATUS response and updates status_. There
+	// is nothing to read here — but there is something to wait for; see
+	// await_load_ack().
+	std::cout << stamp() << "Cast: → " << req.url << std::endl;
+	return attempt;
+	}
+
+bool CastManager::await_load_ack(int gen, int attempt)
+	{
+	// On the condition variable every status push already notifies, rather than
+	// sleeping the window out: a healthy receiver answers in well under a
+	// second, and there is no reason for the worker thread to outlive it by
+	// eight. wait_for returns the predicate's value at the deadline, which is
+	// the answer wanted.
+	std::unique_lock<std::mutex> lk(status_mutex_);
+	return status_cv_.wait_for(
+		lk, std::chrono::milliseconds(LOAD_ACK_WAIT_MS),
+		[this, gen, attempt] {
+			// The last is the acknowledgement. The three before it are not an
+			// unanswered LOAD either: the session is gone, the user has chosen
+			// something else, or a degrade retry fired by the failure path owns
+			// the session now.
+			return !active_
+			    || load_gen_.load() != gen
+			    || load_attempt_.load() != attempt
+			    || !retry_pending_;
+			});
+	}
+
 void CastManager::load_worker(LoadRequest req, int gen)
 	{
 	const std::string& url = req.url;
-	std::string src = "sender-0";
 
 	// Make the URL answerable before anyone is told to fetch it.  A receiver
 	// gives up after about a minute of silence on the HTTP body, and a film's
@@ -1118,72 +1408,78 @@ void CastManager::load_worker(LoadRequest req, int gen)
 		if (load_gen_.load() != gen) return;
 		}
 
-	std::string tid;
-	{
-	std::lock_guard<std::mutex> lk(tid_mutex_);
-	tid = transport_id_;
+	bool cached  = false;
+	int  attempt = send_load_once(req, gen, &cached);
+	if (!attempt) return;
+	if (await_load_ack(gen, attempt)) return;
+
+	// A *cached* transport that answered nothing is the one most likely to be
+	// dead — the receiver tore the app down and nothing told us — so throw it
+	// away and let the second attempt resolve a fresh one. One we had just
+	// resolved is reused as it is.
+	if (cached) {
+		std::lock_guard<std::mutex> lk(tid_mutex_);
+		transport_id_.clear();
+		}
+	std::cout << stamp() << "Cast: no answer " << LOAD_ACK_WAIT_MS
+	          << "ms after LOAD; sending it once more" << std::endl;
+	attempt = send_load_once(req, gen, nullptr);
+	if (!attempt) return;
+
+	// Once, never a loop. What this recovers from is a receiver that was a
+	// moment too early; if the second is ignored too then something else is
+	// wrong and repeating would bury it. The wait still has to happen, because
+	// retry_pending_ must be resolved either way — a flag left armed is
+	// consumed by an unrelated status minutes later and re-LOADs whatever is
+	// playing then.
+	if (await_load_ack(gen, attempt)) return;
+	note_load_abandoned("The receiver did not answer, so playback did not "
+	                    "start.");
 	}
 
-	if (!tid.empty()) {
-		// Fast path: app already running — LOAD into the existing session.
-		if (load_gen_.load() != gen) return;
-		Tls t;
-		if (!tls_connect(t, device_.address, device_.port)) {
-			std::cout << stamp() << "Cast: connect failed" << std::endl;
-			// Treat as stale transport; fall through to LAUNCH.
-			{
-			std::lock_guard<std::mutex> lk(tid_mutex_);
-			transport_id_.clear();
-			}
-			}
-		else {
-			if (load_gen_.load() != gen) return;
-			cast_send(t.ssl, NS_CONN,  src, "receiver-0", {{"type", "CONNECT"}});
-			cast_send(t.ssl, NS_CONN,  src, tid,           {{"type", "CONNECT"}});
-			nlohmann::json msg = build_load(req, 2);
-			std::cout << stamp() << "Cast: LOAD " << msg.dump() << std::endl;
-			cast_send(t.ssl, NS_MEDIA, src, tid, msg);
-			// poll_loop() receives the MEDIA_STATUS response and updates status_.
-			// No need to wait here — that would block an httplib thread.
-			std::cout << stamp() << "Cast: → " << url << std::endl;
-			return;
-			}
-		}
-
-	// Slow path: launch the Default Media Receiver app first.
-	if (load_gen_.load() != gen) return;
-	Tls t;
-	if (!tls_connect(t, device_.address, device_.port)) {
-		std::cout << stamp() << "Cast: connect failed ("
-		          << device_.address << ":" << device_.port << ")" << std::endl;
-		return;
-		}
-
-	cast_send(t.ssl, NS_CONN, src, "receiver-0", {{"type", "CONNECT"}});
-	cast_send(t.ssl, NS_RECV, src, "receiver-0",
-	          {{"type", "LAUNCH"}, {"appId", "CC1AD845"}, {"requestId", 1}});
-
-	tid = wait_transport(t.ssl);
-	if (tid.empty()) {
-		std::cout << stamp() << "Cast: no transportId from receiver" << std::endl;
-		return;
-		}
-
-	// Only store the new transport_id if this is still the current load.
-	if (load_gen_.load() != gen) return;
+void CastManager::note_load_abandoned(const char* what)
 	{
-	std::lock_guard<std::mutex> lk(tid_mutex_);
-	transport_id_ = tid;
+	// **Never degrade_load().** Every rung of that ladder answers "the receiver
+	// refused this" — drop the subtitle tracks, become the soundtrack — and
+	// none of them answers "the receiver was never told". The flag still has to
+	// be cleared, or it survives to be consumed by an unrelated status minutes
+	// later and re-LOADs whatever is playing then.
+	{
+	std::lock_guard<std::mutex> lk(status_mutex_);
+	retry_pending_ = false;
+	// Set *before* the status below, because publishing that status is what
+	// wakes every SSE listener: a notice written afterwards would miss the very
+	// push it belongs to and arrive on the next one, up to fifteen seconds
+	// later.
+	notice_      = what;
+	notice_seq_ += 1;
+	}
+	std::cout << stamp() << "Cast: LOAD abandoned — " << what << std::endl;
+
+	// The status the receiver never sent, published the way note_load_failure()
+	// publishes the one a refused LOAD never sends. Without it nothing on the
+	// SSE ever says this attempt is over, and the client sits on "Preparing…"
+	// for ever.
+	update_status({
+		{"status", nlohmann::json::array({
+			nlohmann::json{
+				{"playerState",    "IDLE"},
+				{"idleReason",     "ERROR"},
+				{"mediaSessionId", 0}
+				}
+			})}
+		});
 	}
 
-	cast_send(t.ssl, NS_CONN,  src, tid, {{"type", "CONNECT"}});
+CastManager::Notice CastManager::notice() const
 	{
-	nlohmann::json msg = build_load(req, 2);
-	std::cout << stamp() << "Cast: LOAD " << msg.dump() << std::endl;
-	cast_send(t.ssl, NS_MEDIA, src, tid, msg);
+	std::lock_guard<std::mutex> lk(status_mutex_);
+	return Notice{ notice_, notice_seq_ };
 	}
 
-	std::cout << stamp() << "Cast: → " << url << std::endl;
+int CastManager::next_request_id()
+	{
+	return request_id_++;
 	}
 
 void CastManager::update_status(const nlohmann::json& msg)
@@ -1506,18 +1802,22 @@ void CastManager::poll_loop()
 				if (transport_id_ != connected_tid) break;
 				}
 
-				auto m = cast_recv(t.ssl);
+				Recv why = Recv::Message;
+				auto m = cast_recv(t.ssl, &why);
 				if (m.is_null()) {
-					// EAGAIN means SO_RCVTIMEO fired with no data — loop to re-check
-					// poll_active_ and transport_id_ before blocking again.
-					if (errno == EAGAIN || errno == EWOULDBLOCK) {
+					// A timeout is SO_RCVTIMEO firing with no data — loop to
+					// re-check poll_active_ and transport_id_ before blocking
+					// again. Unusable is a message we could not read, which
+					// says nothing about the ones after it.
+					if (why == Recv::Timeout) {
 						// Chromecast only pushes MEDIA_STATUS on state changes, not
 						// during continuous playback — poll for position explicitly.
 						cast_send(t.ssl, NS_MEDIA, src, tid,
 						          {{"type", "GET_STATUS"}, {"requestId", 101}});
 						continue;
 						}
-					break;  // real error or closed connection — reconnect
+					if (why == Recv::Unusable) continue;
+					break;  // closed connection — reconnect
 					}
 
 				std::string type = jstr(m, "type");
@@ -1569,6 +1869,42 @@ void CastManager::poll_loop()
 					// that invalidates our cached transport_id.
 					std::cout << stamp() << "Cast rx RECEIVER_STATUS: "
 					          << m.dump() << std::endl;
+					// And act on it, which nothing here used to do:
+					// transport_id_ was written only by a load and cleared only
+					// by stop(), so a receiver that tore the app down left a
+					// dead transport cached for the rest of the session and
+					// every LOAD after it went into the void — no MEDIA_STATUS,
+					// no error, nothing in the log past "Cast: LOAD {…}".
+					//
+					// Only when the status actually enumerated what the
+					// receiver is running. A volume-change push carries
+					// `volume` and no applications array at all, and reading
+					// that as "our app is gone" throws away a transport that is
+					// still perfectly good — which costs the *next* load the
+					// whole GET_STATUS-and-LAUNCH path.
+					if (lists_applications(m)) {
+						std::string tid_now =
+							jstr(running_app(m, MEDIA_APP_ID), "transportId");
+						std::lock_guard<std::mutex> lk(tid_mutex_);
+						// The second test keeps this connection from speaking
+						// for a session it no longer belongs to: a load that has
+						// just launched a new receiver has already published its
+						// transport, and a status arriving on the connection
+						// this loop is about to drop must not put the old one
+						// back.
+						if (tid_now != connected_tid
+						    && transport_id_ == connected_tid) {
+							std::cout << stamp() << "Cast: transport "
+							          << (tid_now.empty()
+							                ? std::string("gone")
+							                : "now " + tid_now)
+							          << std::endl;
+							// The inner loop's transport_id_ != connected_tid
+							// check reconnects, or drops out to wait for the
+							// next load if it is now empty.
+							transport_id_ = tid_now;
+							}
+						}
 					}
 				else if (type != "PONG") {
 					std::cout << stamp() << "Cast rx " << type << std::endl;
@@ -1606,6 +1942,9 @@ void CastManager::stop()
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
 	status_ = CastStatus{};
+	// The session is over, so anything it had to say is stale; a client
+	// restoring one has nothing to be told about.
+	notice_.clear();
 	}
 	// Wake any SSE handlers blocked in wait_status() so they can detect
 	// that cast is no longer active and close their response stream.
@@ -1619,20 +1958,23 @@ void CastManager::stop()
 
 	std::string src = "sender-0", dst = "receiver-0";
 	cast_send(t.ssl, NS_CONN, src, dst, {{"type", "CONNECT"}});
-	cast_send(t.ssl, NS_RECV, src, dst, {{"type", "GET_STATUS"}, {"requestId", 1}});
+	cast_send(t.ssl, NS_RECV, src, dst,
+	          {{"type", "GET_STATUS"}, {"requestId", next_request_id()}});
 
-	std::string session_id;
-	for (int i = 0; i < 5 && session_id.empty(); i++) {
-		auto m = cast_recv(t.ssl);
-		if (m.is_null()) break;
-		if (jstr(m, "type") == "RECEIVER_STATUS")
-			session_id = jstr(jidx(jsub(jsub(m, "status"), "applications"), 0),
-			                  "sessionId");
-		}
+	// Matched on appId like everywhere else: applications[0] is whatever the
+	// set happens to be running, and stopping the wrong one is worse than
+	// stopping nothing. Through cast_wait_for() so the deadline is a real one
+	// and a PING does not consume one of the five reads this used to get.
+	auto m = cast_wait_for(t, src, in_ms(STATUS_WAIT_MS),
+	                       [](const nlohmann::json& j) {
+	                           return jstr(j, "type") == "RECEIVER_STATUS";
+	                           });
+	std::string session_id = jstr(running_app(m, MEDIA_APP_ID), "sessionId");
 
 	if (!session_id.empty())
 		cast_send(t.ssl, NS_RECV, src, dst,
-		          {{"type", "STOP"}, {"requestId", 2}, {"sessionId", session_id}});
+		          {{"type", "STOP"}, {"requestId", next_request_id()},
+		           {"sessionId", session_id}});
 
 	std::cout << stamp() << "Cast: stopped" << std::endl;
 	}

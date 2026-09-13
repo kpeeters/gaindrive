@@ -760,10 +760,86 @@ const paneNav = {
 
 // ── Views ───────────────────────────────────────────────────────────────────
 
+// Which render a view belongs to.
+//
+// Every view empties its pane, awaits the server, and only then appends what it
+// drew. Those two halves are separated by an await, so the browser is free to
+// start a *second* render in between — a click on another row, a Back, an
+// upload poller's redraw — and that one appends into the pane the first is
+// still filling. Both listings then sit in the pane, stacked, which is exactly
+// the doubled track listing and doubled uploads listing this guards against.
+//
+// So a render takes a generation on entry and gives up at its next await once a
+// newer one has started. Same idiom as fetchPollGen, one level up.
+let renderGen = 0;
+
+// Bumped by the two navigations that move the strip without drawing anything:
+// Back/Forward, and the pane keys. Neither starts a render, so neither bumps
+// renderGen — which is how a slow viewTracks() used to finish after a Back and
+// slide the user straight back out of the pane they had just returned to.
+//
+// The content it drew is not wrong, though, and Forward is one keypress away,
+// so the render still paints. It is only the strip it may no longer touch.
+let navEpoch = 0;
+
+// The navEpoch the current render began at.
+let renderNavEpoch = 0;
+
+// Entry points call this with nothing. A view that renders another view passes
+// its own generation down instead, so the inner render does not declare the
+// outer one stale — viewTracks() -> viewAlbums() is the only such call.
+function beginRender(inherit = null) {
+   if (inherit !== null) return inherit;
+   renderNavEpoch = navEpoch;
+   return ++renderGen;
+   }
+
+function renderStale(gen) {
+   return gen !== renderGen;
+   }
+
+// How a view asks for the strip, in place of paneNav.slideTo(): it must still
+// be the current render, and the user must not have navigated since it began.
+function renderSlideTo(gen, depth) {
+   if (renderStale(gen) || navEpoch !== renderNavEpoch) return;
+   paneNav.slideTo(depth);
+   }
+
+// Empty a pane and say what is going into it. The two are one act: the stamp
+// is what the popstate handler reads to decide whether an entry's content is
+// already on screen, and a pane emptied without one would go on claiming to
+// hold what it had just thrown away. The panes *behind* the one a view draws
+// take no key -- they hold nothing any entry can name.
+//
+// Stamped here, at the start of the render, rather than when it finishes: a
+// pane still being filled then answers for the content it is about to hold, so
+// a Back during a slow load slides and lets the running render land in place
+// instead of starting a second one. It cannot lie, because a render only ever
+// abandons when a newer one superseded it, and that newer one emptied the pane
+// and wrote its own stamp before its first await.
+function paneReset(id, key = '') {
+   const pane = document.getElementById(id);
+   pane.innerHTML = '';
+   pane.dataset.render = key;
+   return pane;
+   }
+
+function paneHolds(id, key) {
+   return document.getElementById(id).dataset.render === key;
+   }
+
+// The views that draw pane 0, by the name their history entry and their pane
+// stamp both use, which is what lets one lookup answer "is it already there"
+// and "how is it drawn" alike. A state naming none of them is the Library.
+const PANE0 = ['artists', 'uploads', 'playlists', 'recents', 'settings'];
+
 async function showView(name) {
    console.log('[view] showView', name);
+   // Uploads lights the Library link: it is a flavour of Library, which is what
+   // somebody arriving by Shift U from another view needs to see.
+   const lit = name === 'uploads' ? 'artists' : name;
    document.querySelectorAll('#sidebar a, #bottom-nav a').forEach(a => {
-      a.classList.toggle('active', a.dataset.view === name);
+      a.classList.toggle('active', a.dataset.view === lit);
       });
    // Every one of these rebuilds pane 0 from scratch and empties the two behind
    // it, so a row number left over from the previous view describes nothing.
@@ -777,6 +853,8 @@ async function showView(name) {
 
    if (name === 'artists') {
       await viewArtists();
+      } else if (name === 'uploads') {
+      await viewArtists(true);
       } else if (name === 'playlists') {
       await viewPlaylists();
       } else if (name === 'settings') {
@@ -784,19 +862,20 @@ async function showView(name) {
       } else if (name === 'recents') {
       await viewRecents();
       } else {
-      document.getElementById('pane-artists').innerHTML =
+      beginRender();
+      paneReset('pane-artists', 'other').innerHTML =
          `<p style="color:var(--text-dim)">${name}</p>`;
-      document.getElementById('pane-albums').innerHTML = '';
-      document.getElementById('pane-tracks').innerHTML = '';
+      paneReset('pane-albums');
+      paneReset('pane-tracks');
       paneNav.slideTo(0);
       }
 }
 
 async function viewSettings() {
-   const pane = document.getElementById('pane-artists');
-   document.getElementById('pane-albums').innerHTML = '';
-   document.getElementById('pane-tracks').innerHTML = '';
-   pane.innerHTML = '';
+   const gen = beginRender();
+   const pane = paneReset('pane-artists', 'settings');
+   paneReset('pane-albums');
+   paneReset('pane-tracks');
    paneNav.slideTo(0);
 
    const hdr = document.createElement('div');
@@ -905,8 +984,10 @@ async function viewSettings() {
       userInfo = sr.user;
       }
    catch {
-      showError('Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError('Could not reach the server. Please check your connection.');
       }
+   if (renderStale(gen)) return;
 
    // The archive-upload form used to sit here. It now lives at the top of
    // the Uploads listing — see makeUploadBar() — because that is the listing
@@ -973,6 +1054,7 @@ async function viewSettings() {
 
    // Attach refreshUsers so viewUserEdit can call it back.
    await refreshUsers();
+   if (renderStale(gen)) return;
 
    // Expose so viewUserEdit can trigger a refresh after save.
    pane._refreshUsers = refreshUsers;
@@ -1115,9 +1197,12 @@ async function viewUserEdit(user, refreshFn) {
    const adminPane = document.getElementById('pane-artists');
    const refresh = refreshFn ?? adminPane._refreshUsers;
 
-   const pane = document.getElementById('pane-albums');
-   document.getElementById('pane-tracks').innerHTML = '';
-   pane.innerHTML = '';
+   // Nothing here awaits before it paints, so it cannot be interrupted — but
+   // the two panes it empties may well be mid-render from something else, and
+   // the bump is what stops that render appending on top of this form.
+   beginRender();
+   const pane = paneReset('pane-albums', 'user-edit');
+   paneReset('pane-tracks');
    paneNav.slideTo(1);
 
    const isNew = (user === null);
@@ -1272,14 +1357,6 @@ async function viewUserEdit(user, refreshFn) {
 // never answer this question.
 function canUpload() {
    return !!(currentUser?.uploadRole || currentUser?.adminRole);
-   }
-
-// Whether pane 0 currently holds the uploads listing rather than the library.
-// Answered from the DOM, the way the upload pollers already answer it, so it
-// cannot go stale the way a module flag would when some other view rewrites
-// the pane. The bar is drawn if and only if viewArtists() rendered uploads.
-function uploadsShowing() {
-   return !!document.querySelector('#pane-artists .upload-bar');
    }
 
 // Signature of the personal library as last rendered, and the timer watching
@@ -1440,10 +1517,15 @@ function pollForUpload(status, files) {
    let tries = 0;
    clearInterval(uploadsPollTimer);
    uploadsPollTimer = setInterval(async () => {
-      // The bar is gone once anything else has rewritten pane 0 — the
-      // library, or Settings/Playlists/Recents — and a re-render then
-      // would drag the user back here.
-      if (!uploadsShowing()) {
+      // Pane 0 holds something else once another view has rewritten it — the
+      // library, or Settings/Playlists/Recents — and a re-render then would
+      // drag the user back here.
+      //
+      // The stamp rather than the upload bar's node, which this used to look
+      // for: a re-render of this very listing has the bar out of the DOM
+      // between emptying the pane and filling it, and a tick landing in that
+      // window ended the wait over nothing.
+      if (!paneHolds('pane-artists', 'uploads')) {
          clearInterval(uploadsPollTimer);
          return;
          }
@@ -1678,9 +1760,11 @@ function makeUploadBar() {
    nameList.id = 'upload-name-list';
 
    // Sticky, unlike the URL: fetching six tracks off one concert should mean
-   // typing the names once. That is also why they are not cleared on success —
-   // only the URL is, since that one genuinely differs every time. The check
-   // below is what keeps a stale name from being applied unnoticed.
+   // typing the names once, and only the URL is cleared on success, since that
+   // one genuinely differs every time. The album is the exception — a finished
+   // archive upload forgets it, because the next zip is almost never the same
+   // album and a leftover name would quietly file it under the last one. The
+   // check below is what keeps a stale name from being applied unnoticed.
    const makeNameInput = (key, placeholder, list) => {
       const el = document.createElement('input');
       el.type        = 'text';
@@ -1903,6 +1987,12 @@ function makeUploadBar() {
             if (j.status === 'ok') {
                uploadStatus.textContent = `Extracted ${j.files} file(s); scanning…`;
                pollForUpload(uploadStatus, j.files);
+               // The stored key goes with the field: pollForUpload ends in a
+               // re-render, and this bar is rebuilt out of localStorage.
+               albumInput.value = '';
+               localStorage.removeItem('gd_fetch_album');
+               // The note was computed from the pair that just left.
+               recheck();
                }
             else
                uploadStatus.textContent = `Error: ${j.message}`;
@@ -1927,10 +2017,10 @@ async function viewArtists(uploads = false) {
    // Whatever a finished fetch left behind is about to be re-read, however the
    // user got here — so the deferred redraw is owed to nobody any more.
    uploadsStale = false;
-   const pane = document.getElementById('pane-artists');
-   pane.innerHTML = '';
-   document.getElementById('pane-albums').innerHTML = '';
-   document.getElementById('pane-tracks').innerHTML = '';
+   const gen = beginRender();
+   const pane = paneReset('pane-artists', uploads ? 'uploads' : 'artists');
+   paneReset('pane-albums');
+   paneReset('pane-tracks');
 
    // Roots are static for the life of the server; fetch once.
    if (musicFolders === null) {
@@ -1939,6 +2029,7 @@ async function viewArtists(uploads = false) {
          musicFolders = mf.musicFolders?.musicFolder ?? [];
          }
       catch { musicFolders = []; }
+      if (renderStale(gen)) return;
       }
 
    // Static for the life of the server, like the roots above. Asked only when
@@ -1950,6 +2041,7 @@ async function viewArtists(uploads = false) {
          urlHandlers = r.urlHandlers?.urlHandler ?? [];
          }
       catch { urlHandlers = []; }
+      if (renderStale(gen)) return;
       }
 
    console.log('[library] loading' + (uploads ? ' (uploads)' : ''));
@@ -1982,9 +2074,11 @@ async function viewArtists(uploads = false) {
          }
       }
    catch {
-      showError('Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError('Could not reach the server. Please check your connection.');
       return;
       }
+   if (renderStale(gen)) return;
 
    const frag = document.createDocumentFragment();
    const header = document.createElement('div');
@@ -2086,37 +2180,35 @@ async function viewArtists(uploads = false) {
          }
       }
    pane.appendChild(frag);
-   paneNav.slideTo(0);
+   renderSlideTo(gen, 0);
 }
 
-// The way into the uploads listing: its own history entry, so Back returns to
-// the library, and the same pre-render hygiene showView() does for a view
-// switch. The Library nav entry stays lit — uploads is a flavour of Library,
-// which matters when arriving via Shift U from some other view.
+// The way into the uploads listing: showView's uploads case, plus the history
+// entry that makes Back return to the library. Everything else a view switch
+// owes — the nav highlight, ending a search, forgetting the cursor — is
+// showView's, and was duplicated here until it had a case to go to.
 async function openUploads() {
-   isearchEnd(false);
-   navForget();
-   document.querySelectorAll('#sidebar a, #bottom-nav a').forEach(a =>
-      a.classList.toggle('active', a.dataset.view === 'artists'));
    history.pushState({view: 'uploads'}, '');
-   await viewArtists(true);
+   await showView('uploads');
    }
 
 async function viewPlaylists() {
    console.log('[playlists] loading');
-   const pane = document.getElementById('pane-artists');
-   pane.innerHTML = '';
-   document.getElementById('pane-albums').innerHTML = '';
-   document.getElementById('pane-tracks').innerHTML = '';
+   const gen = beginRender();
+   const pane = paneReset('pane-artists', 'playlists');
+   paneReset('pane-albums');
+   paneReset('pane-tracks');
 
    let sr;
    try {
       sr = await apiCall('getPlaylists');
       }
    catch {
-      showError('Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError('Could not reach the server. Please check your connection.');
       return;
       }
+   if (renderStale(gen)) return;
    const lists = sr.playlists?.playlist ?? [];
    console.log('[playlists] got', lists.length, 'playlists');
 
@@ -2164,24 +2256,26 @@ async function viewPlaylists() {
    pane.appendChild(starredContainer);
    await refreshStarredSections(starredContainer);
 
-   paneNav.slideTo(0);
+   renderSlideTo(gen, 0);
 }
 
 async function viewRecents() {
    console.log('[recents] loading');
-   const pane = document.getElementById('pane-artists');
-   pane.innerHTML = '';
-   document.getElementById('pane-albums').innerHTML = '';
-   document.getElementById('pane-tracks').innerHTML = '';
+   const gen = beginRender();
+   const pane = paneReset('pane-artists', 'recents');
+   paneReset('pane-albums');
+   paneReset('pane-tracks');
 
    let sr;
    try {
       sr = await apiCall('getRecentSongs', {size: 50});
       }
    catch {
-      showError('Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError('Could not reach the server. Please check your connection.');
       return;
       }
+   if (renderStale(gen)) return;
 
    const songs = sr.recentSongs?.song ?? [];
    console.log('[recents] got', songs.length, 'songs');
@@ -2246,23 +2340,25 @@ async function viewRecents() {
       }
 
    pane.appendChild(frag);
-   paneNav.slideTo(0);
+   renderSlideTo(gen, 0);
 }
 
 async function viewPlaylistTracks(playlistId, playlistName) {
    console.log('[playlist-tracks] loading playlist', playlistId, playlistName);
-   const pane = document.getElementById('pane-albums');
-   pane.innerHTML = '';
-   document.getElementById('pane-tracks').innerHTML = '';
+   const gen = beginRender();
+   const pane = paneReset('pane-albums', `playlist-tracks:${playlistId}`);
+   paneReset('pane-tracks');
 
    let sr;
    try {
       sr = await apiCall('getPlaylist', {id: playlistId});
       }
    catch {
-      showError('Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError('Could not reach the server. Please check your connection.');
       return;
       }
+   if (renderStale(gen)) return;
    const pl = sr.playlist;
    const songs = pl.entry ?? [];
    console.log('[playlist-tracks] got', songs.length, 'tracks');
@@ -2354,7 +2450,7 @@ async function viewPlaylistTracks(playlistId, playlistName) {
       frag.appendChild(row);
       }
    pane.appendChild(frag);
-   paneNav.slideTo(1);
+   renderSlideTo(gen, 1);
 
    // ── Edit mode ──────────────────────────────────────────────────────────────
    // Only the playlist's owner sees the Edit link; the server enforces the
@@ -2483,25 +2579,29 @@ async function viewPlaylistTracks(playlistId, playlistName) {
 // folder, never which listing it was reached through. Search, and the
 // sideways entries into viewTracks(), leave them defaulted and behave exactly
 // as before.
+// `gen` is viewTracks()'s render generation when this is the pane-1 refresh it
+// does on the way in; every other caller leaves it null and takes its own.
 async function viewAlbums(artistId, artistName, isCategory = false,
-                          fromUploads = false) {
+                          fromUploads = false, gen = null) {
    console.log('[albums] loading artist', artistId, artistName);
+   gen = beginRender(gen);
    // The section this listing was drilled in from, keying the sort preference
    // and stamped on the pane so the album-edit save path in viewTracks() can
    // return to the listing that led here.
    const section = fromUploads ? 'uploads' : isCategory ? 'categories' : 'artists';
-   const pane = document.getElementById('pane-albums');
-   pane.innerHTML = '';
-   document.getElementById('pane-tracks').innerHTML = '';
+   const pane = paneReset('pane-albums', `albums:${artistId}`);
+   paneReset('pane-tracks');
 
    let srArtist;
    try {
       srArtist = await apiCall('getArtist', {id: artistId});
       }
    catch {
-      showError('Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError('Could not reach the server. Please check your connection.');
       return;
       }
+   if (renderStale(gen)) return;
    const albums   = srArtist.artist?.album ?? [];
    console.log('[albums] got', albums.length, 'albums');
 
@@ -2732,7 +2832,7 @@ async function viewAlbums(artistId, artistName, isCategory = false,
    // and skip a redundant re-render when navigating artists → albums → tracks.
    pane.dataset.artistId = String(artistId);
    pane.dataset.section  = section;
-   paneNav.slideTo(1);
+   renderSlideTo(gen, 1);
 
    // Fetch artist info without blocking the album list.
    //
@@ -3005,9 +3105,25 @@ let castSyncWarned      = false;
 let castExpectedPosition = null;  // absolute position we asked the receiver to
                                   // seek to via the most recent LOAD; cleared
                                   // once the receiver reports playback near it
+// The last server notice sequence this page has acted on.  The notice itself
+// is what the server has to say about a load that produced no status of its
+// own — a television that never finished starting up, so the LOAD was never
+// sent — and it is repeated on every push, since a push is the only thing that
+// carries it.  Without the sequence the same sentence would be shown again
+// every fifteen seconds, which is how often the SSE republishes an unchanged
+// status.
+let castNoticeSeq       = 0;
 
 // Handle one MEDIA_STATUS push from the server SSE stream.
 function onCastStatus(s) {
+   // Anything the server needs a person to know, once.  Read first, above the
+   // transient gate below: the statuses that carry a notice are precisely the
+   // IDLE ones that gate drops, so reading it any later would show nothing at
+   // all for the failure it exists to report.
+   if (typeof s.noticeSeq === 'number' && s.noticeSeq !== castNoticeSeq) {
+      castNoticeSeq = s.noticeSeq;
+      if (s.notice) showError(s.notice);
+      }
    // Server tells us where the served stream begins in the song.  Native
    // seek (MP3) keeps this at 0; server-side seek (FLAC/other) sets it to
    // the seek point so the absolute song position is startOffset + the
@@ -6187,20 +6303,25 @@ function setupPlayer() {
       });
 }
 
+// `gen`, as in viewAlbums(): viewTracksFromSearch() takes the generation and
+// then has to know whether this render still held it, so it cannot let this
+// function take its own.
 async function viewTracks(albumId, albumTitle, artistId, artistName,
-                           autoPlayId = null, autoPlayOffset = 0) {
+                           autoPlayId = null, autoPlayOffset = 0, gen = null) {
    console.log('[tracks] loading album', albumId, albumTitle);
-   const pane = document.getElementById('pane-tracks');
-   pane.innerHTML = '';
+   gen = beginRender(gen);
+   const pane = paneReset('pane-tracks', `tracks:${albumId}`);
 
    let sr;
    try {
       sr = await apiCall('getAlbum', {id: albumId});
       }
    catch (e) {
-      showError(e?.message ?? 'Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError(e?.message ?? 'Could not reach the server. Please check your connection.');
       return;
       }
+   if (renderStale(gen)) return;
    const album = sr.album ?? {};
    const songs = album.song ?? [];
    console.log('[tracks] got', songs.length, 'tracks');
@@ -6217,8 +6338,11 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
    const albumsPane = document.getElementById('pane-albums');
    const pane1Fresh = albumsPane.dataset.artistId === String(album.parent)
                       && albumsPane.querySelector('.album-row');
-   if (album.parent !== undefined && !pane1Fresh)
-      await viewAlbums(album.parent, album.artist ?? artistName ?? '');
+   if (album.parent !== undefined && !pane1Fresh) {
+      await viewAlbums(album.parent, album.artist ?? artistName ?? '',
+                       false, false, gen);
+      if (renderStale(gen)) return;
+      }
 
    // Back link + headings + Edit link.
    const header = document.createElement('div');
@@ -6323,6 +6447,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
          chaptersByVideo.set(v.id, v.chapter ?? []);
       }
    catch (e) { console.warn('[chapters] album index unavailable', e); }
+   if (renderStale(gen)) return;
 
    const frag = document.createDocumentFragment();
    const multiDisc = new Set(songs.map(s => s.discNumber ?? 1)).size > 1;
@@ -6432,7 +6557,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
       }
 
    pane.appendChild(frag);
-   paneNav.slideTo(2);
+   renderSlideTo(gen, 2);
 
    if (autoPlayId !== null) {
       const idx = songs.findIndex(s => s.id === autoPlayId);
@@ -6678,6 +6803,14 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
                }
             }
 
+         // What a track edit changes that this pane cannot patch: the year
+         // is the album's own, drawn only by pane 1 and derived by the server
+         // from whichever track carries the earliest one; track and disc
+         // numbers settle the order and the disc headings when the listing is
+         // built. All of it has to come back from the server.
+         let yearChanged  = false;
+         let orderChanged = false;
+
          // Save changed tracks.
          for (const row of pane.querySelectorAll('.track-row')) {
             const songId     = row.dataset.id;
@@ -6692,6 +6825,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
             if (numInput.value !== numInput.dataset.orig) {
                params.track = numInput.value;
                changed = true;
+               orderChanged = true;
                }
             if (titleInput.value !== titleInput.dataset.orig) {
                params.title = titleInput.value;
@@ -6700,10 +6834,12 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
             if (discInput.value !== discInput.dataset.orig) {
                params.disc = discInput.value;
                changed = true;
+               orderChanged = true;
                }
             if (yearInput.value !== yearInput.dataset.orig) {
                params.year = yearInput.value;
                changed = true;
+               yearChanged = true;
                }
             if (changed) {
                try { await apiCall('updateSong', params); }
@@ -6769,6 +6905,26 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
             await viewAlbums(renamed.parent, renamed.artist,
                              section === 'categories', section === 'uploads');
             await viewTracks(renamed.id, renamed.album, renamed.parent, renamed.artist);
+            return;
+            }
+
+         if (yearChanged || orderChanged) {
+            // Pane 1 draws the album's own year and sorts on it, so a year
+            // edit rebuilds that listing too — and since viewAlbums() clears
+            // pane 2, the tracks have to follow. Guarded on pane 1 really
+            // holding this album's row, so a listing that came from somewhere
+            // else is not thrown away.
+            const sel = `.album-row[data-id="${CSS.escape(albumId)}"]`;
+            if (yearChanged && albumsPane.querySelector(sel)) {
+               const section = albumsPane.dataset.section ?? 'artists';
+               await viewAlbums(album.parent, album.artist ?? artistName ?? '',
+                                section === 'categories', section === 'uploads');
+               // The rows are new nodes, so the highlight on the album whose
+               // tracks are about to fill pane 2 has to be put back.
+               albumsPane.querySelector(sel)?.classList.add('selected');
+               }
+            await viewTracks(albumId, albumTitle, album.parent,
+                             album.artist ?? artistName ?? '');
             return;
             }
 
@@ -6936,6 +7092,11 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
 
    // Fetch liner-note text files without blocking the track list.
    apiCall('getAlbumTexts', {id: albumId}).then(srTxt => {
+      // The one late continuation that appends to the pane itself rather than
+      // into a slot this render already placed there — a detached slot is
+      // invisible, a second liner-notes panel under somebody else's album is
+      // not.
+      if (renderStale(gen)) return;
       const files = srTxt?.albumTexts?.textFile ?? [];
       if (files.length === 0) return;
 
@@ -7028,6 +7189,8 @@ function scheduleSearch() {
 async function runSearch() {
    const q = document.getElementById('search-input').value.trim();
    if (!q) return;
+   // renderSearchResults() empties panes 1 and 2 as well as filling pane 0.
+   const gen = beginRender();
    const wantArtists = document.getElementById('sf-artists').checked;
    const wantAlbums  = document.getElementById('sf-albums').checked;
    const wantSongs   = document.getElementById('sf-songs').checked;
@@ -7046,17 +7209,19 @@ async function runSearch() {
          });
       }
    catch {
-      showError('Could not reach the server. Please check your connection.');
+      if (!renderStale(gen))
+         showError('Could not reach the server. Please check your connection.');
       return;
       }
-   renderSearchResults(sr.searchResult3 ?? {});
+   if (renderStale(gen)) return;
+   renderSearchResults(sr.searchResult3 ?? {}, gen);
 }
 
-function renderSearchResults(res) {
-   const pane = document.getElementById('pane-artists');
-   document.getElementById('pane-albums').innerHTML = '';
-   document.getElementById('pane-tracks').innerHTML = '';
-   paneNav.slideTo(0);
+function renderSearchResults(res, gen) {
+   const pane = paneReset('pane-artists', 'search');
+   paneReset('pane-albums');
+   paneReset('pane-tracks');
+   renderSlideTo(gen, 0);
 
    const artists = res.artist ?? [];
    const albums  = res.album  ?? [];
@@ -7242,14 +7407,24 @@ function renderSearchResults(res) {
 // pane 1 and stay at depth 1, keeping search visible on the left.
 async function viewTracksFromSearch(albumId, albumTitle, artistId, artistName,
                                      autoPlayId, autoPlayOffset = 0) {
+   // Moving pane 2's nodes below is only right while they are still the ones
+   // viewTracks() just drew. Superseded, pane 2 is somebody else's listing --
+   // or, mid-render, empty, and the move would blank pane 1 for as long as the
+   // newer render takes.
+   const gen = beginRender();
    await viewTracks(albumId, albumTitle, artistId, artistName, autoPlayId,
-                    autoPlayOffset);
+                    autoPlayOffset, gen);
+   if (renderStale(gen)) return;
    if (document.getElementById('search-bar').classList.contains('open')
          && paneNav._visiblePanes() === 2) {
       const p1 = document.getElementById('pane-albums');
       const p2 = document.getElementById('pane-tracks');
       p1.replaceChildren(...Array.from(p2.childNodes));
-      paneNav.slideTo(1);
+      // The stamp travels with the rows, or pane 1 would answer for the album
+      // listing it used to hold and pane 2 for the tracks it no longer has.
+      p1.dataset.render = p2.dataset.render;
+      p2.dataset.render = '';
+      renderSlideTo(gen, 1);
       }
    }
 
@@ -7529,6 +7704,9 @@ function navMovePane(delta) {
    navShown = true;
    const d = Math.max(0, Math.min(paneNav.depth + delta, NAV_PANES.length - 1));
    if (d === paneNav.depth) return;
+   // A navigation as far as any render in flight is concerned: it moved the
+   // user, and whatever finishes loading behind them may not move them back.
+   navEpoch++;
    // slideTo rather than history.back(), which is what the back links do.  The
    // panes keep their contents, so moving left is a change of attention and not
    // a navigation; going through history would re-enter whichever entry happens
@@ -8332,55 +8510,52 @@ async function showShell() {
             });
          });
 
-      // Handle browser back/forward: re-render from the popped state.
-      // On back navigation the target pane still has its previous content, so we
-      // just slide to it. A full fetch is only needed if the pane is empty (e.g.
-      // after a page refresh that landed on a deeper history entry).
+      // Handle browser back/forward: slide to the pane when it already holds
+      // what the popped entry names, and draw it when it does not — a refresh
+      // that landed on a deep entry, or a pane since rewritten by another view.
+      //
+      // What it holds is read from the stamp paneReset() left, not from a child
+      // count. A count says something is there; it never said *what*, so Back
+      // slid to a pane 1 full of a playlist's tracks for an entry naming an
+      // artist's albums, and — with no branch for Recents or Settings, which
+      // fell through to the Library's — did nothing at all between the sidebar
+      // views.
       window.addEventListener('popstate', async e => {
          const s = e.state ?? {view: 'artists'};
+         // Before the branches below, so a branch that does render starts after
+         // the bump and is allowed to slide, while one that only slides leaves
+         // any render still in flight unable to.
+         navEpoch++;
          if (s.view === 'albums') {
-            if (document.getElementById('pane-albums').children.length > 0)
+            if (paneHolds('pane-albums', `albums:${s.artistId}`))
                paneNav.slideTo(1);
             else
                await viewAlbums(s.artistId, s.artistName, s.isCategory === true,
                                 s.fromUploads === true);
             } else if (s.view === 'tracks') {
-            if (document.getElementById('pane-tracks').children.length > 0)
+            if (paneHolds('pane-tracks', `tracks:${s.albumId}`))
                paneNav.slideTo(2);
             else
                await viewTracks(s.albumId, s.albumTitle, s.artistId, s.artistName);
             } else if (s.view === 'playlist-tracks') {
-            if (document.getElementById('pane-albums').children.length > 0)
+            if (paneHolds('pane-albums', `playlist-tracks:${s.playlistId}`))
                paneNav.slideTo(1);
             else
                await viewPlaylistTracks(s.playlistId, s.playlistName);
-            } else if (s.view === 'playlists') {
-            if (document.getElementById('pane-artists').children.length > 0)
-               paneNav.slideTo(0);
-            else
-               await viewPlaylists();
-            } else if (s.view === 'uploads') {
-            // Slide only when pane 0 still holds the uploads listing; a
-            // refresh that landed on this entry, or a pane 0 since rewritten
-            // by some other view, re-renders it.
-            if (document.getElementById('pane-artists').children.length > 0
-                && uploadsShowing()) {
-               paneNav.slideTo(0);
-               await returnedToArtists();
-               }
-            else
-               await viewArtists(true);
             } else {
-            // uploadsShowing() is the extra test: Back out of the uploads
-            // listing must re-render the merged library rather than slide to
-            // the uploads content still sitting in pane 0.
-            if (document.getElementById('pane-artists').children.length > 0
-                && !uploadsShowing()) {
+            // One branch for every pane-0 view, because each is one key and one
+            // way of drawing it. An entry naming something else is the Library,
+            // which is also the oldest entry's own {view:'artists'}.
+            const key = PANE0.includes(s.view) ? s.view : 'artists';
+            if (paneHolds('pane-artists', key)) {
                paneNav.slideTo(0);
-               await returnedToArtists();
+               // Only the two library flavours have a stale listing to redraw
+               // or a fetch poll to restart.
+               if (key === 'artists' || key === 'uploads')
+                  await returnedToArtists();
                }
             else
-               await showView('artists');
+               await showView(key);
             }
          });
 
@@ -8421,6 +8596,11 @@ async function showShell() {
             castSongDuration = sess.songDuration;
             castAudioOnly    = !!sess.audioOnly;
             castReceiverVideo = !!sess.receiverShowsVideo;
+            // Adopted rather than acted on.  A notice describes the load it
+            // belongs to, and this page has just arrived: reporting a failure
+            // the user has already seen elsewhere — or already worked around
+            // by loading something else — is worse than saying nothing.
+            castNoticeSeq    = sess.noticeSeq ?? 0;
             // The same description castLoad's reply carries, for the load
             // that is already playing — this reload has no castLoad reply to
             // have read it from, which is why castSession repeats it.

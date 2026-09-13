@@ -16,6 +16,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -2345,10 +2346,14 @@ static std::string make_uuid()
    return ss.str();
    }
 
-// Extract a zip/tar/tar.gz/tgz archive from memory into dest_dir.
+// Extract a zip/tar/tar.gz/tgz archive into dest_dir.
 // Entry paths are sanitised: absolute components and ".." are stripped so
 // no file can escape dest_dir. Returns the number of regular files written,
-// or -1 if the archive could not be opened.
+// -1 if the archive could not be opened, or -2 if every entry failed to be
+// written. That last one is its own answer because nothing else would ever be
+// told: an extraction that wrote not one byte otherwise returns 0, which the
+// caller reports as a success carrying a file count of zero -- the shape the
+// symlink bug below wore for as long as it lasted, visible only in this log.
 // libarchive's error string can embed an entry's own name, and an entry name
 // is attacker bytes that may hold newlines — a forged log line, in the log a
 // host-level blocker reads. NULL when there is no message.
@@ -2362,6 +2367,25 @@ static int extract_archive_to_dir(const std::filesystem::path& archive_file,
                                    const std::filesystem::path& dest_dir)
    {
    namespace fs = std::filesystem;
+
+   // The destination with its own symlinks resolved, because SECURE_SYMLINKS
+   // below refuses to write *through* one -- and libarchive walks the whole
+   // pathname it is handed, starting at '/', so it is our own ancestors it
+   // trips over long before it reaches anything the archive supplied. An
+   // uploads root spelled through a symlink is a supported configuration and
+   // deliberately so: abs_path() in main.cc leaves a root's symlinks alone on
+   // purpose, and the MediaStore ctor says a root that is itself a symlink
+   // still works. With one, every entry of every upload failed with "Cannot
+   // extract through symlink" while the reply went on saying ok.
+   //
+   // Resolving the prefix gives up nothing. What the flag exists to guard is
+   // the part below it, which comes out of the archive, and that is still
+   // walked exactly as before. weakly_canonical rather than canonical to match
+   // every other canonicalisation here, and because it needs no existence
+   // guarantee; falling back on error leaves the previous behaviour.
+   std::error_code base_ec;
+   fs::path base = fs::weakly_canonical(dest_dir, base_ec);
+   if (base_ec) base = dest_dir;
 
    struct archive* a = archive_read_new();
    archive_read_support_format_all(a);
@@ -2383,9 +2407,11 @@ static int extract_archive_to_dir(const std::filesystem::path& archive_file,
    // has both pathnames pass the loop unchanged, since neither contains "..",
    // and libarchive then follows the link it has just created. The objection
    // to the flag was that it refuses to extract through a host symlink that
-   // the music root may contain; that does not apply here, because the
-   // destination is a batch directory gaindrive created itself, under the
-   // uploads root and never inside a library root.
+   // the music root may contain, and the answer given here was that the
+   // destination is a batch directory gaindrive created itself. That is true
+   // of the components *below* the destination and silently assumed the ones
+   // above it were not being looked at. They are, and `base` above is what
+   // answers for them.
    //
    // The filetype filter below makes the flag belt-and-braces rather than the
    // only defence, since a link that is never written cannot be followed.
@@ -2411,7 +2437,7 @@ static int extract_archive_to_dir(const std::filesystem::path& archive_file,
       return -1;
       }
 
-   int count = 0, skipped = 0, entries = 0;
+   int count = 0, skipped = 0, entries = 0, failed = 0;
    uint64_t written = 0;
    struct archive_entry* entry;
    int hr;
@@ -2466,7 +2492,7 @@ static int extract_archive_to_dir(const std::filesystem::path& archive_file,
          }
       entries++;
 
-      fs::path target = dest_dir / safe;
+      fs::path target = base / safe;
       archive_entry_set_pathname(entry, target.c_str());
 
       // ARCHIVE_WARN (-20) means partial success; still write the data.
@@ -2474,6 +2500,7 @@ static int extract_archive_to_dir(const std::filesystem::path& archive_file,
       if (wr < ARCHIVE_WARN) {
          std::cout << stamp() << "extract: write_header failed (" << wr << ") for "
                    << target << ": " << archive_err(wd) << std::endl;
+         failed++;
          skipped++;
          continue;
          }
@@ -2517,9 +2544,9 @@ static int extract_archive_to_dir(const std::filesystem::path& archive_file,
                 << archive_err(a) << std::endl;
 
    std::cout << stamp() << "extract: done, files=" << count
-             << " skipped=" << skipped << std::endl;
+             << " skipped=" << skipped << " failed=" << failed << std::endl;
    cleanup();
-   return count;
+   return (count == 0 && failed > 0) ? -2 : count;
    }
 
 // Make a string safe to use as a single directory name. Shared by the upload
@@ -3073,12 +3100,13 @@ static void batch_rename_level(const std::filesystem::path& parent,
 //
 // **This is a plain fs::rename and must never become relocate_prefix().**
 // Nothing under the batch has been indexed yet: scan_batch() is the only thing
-// that ever hands a batch to scan_dirs() and does so after this; scan() skips
-// the uploads root outright; and FolderWatcher never watches it, so no inotify
-// event can name one. There is therefore no row holding any of these paths to
-// repair — and relocate_prefix's plain UPDATEs are safe only because its
-// callers first checked the destination was free, which merging deliberately
-// does not do.
+// that ever hands a batch to scan_dirs() and does so after this, and scan()
+// skips the uploads root outright. FolderWatcher does watch it — but only for
+// removals, and its sole response is MediaStore::reconcile_uploads(), which
+// skips every directory that still exists and so cannot touch a batch being
+// written. There is therefore no row holding any of these paths to repair —
+// and relocate_prefix's plain UPDATEs are safe only because its callers first
+// checked the destination was free, which merging deliberately does not do.
 //
 // Renaming rather than substituting the names into the handler's -o template is
 // also deliberate, and the second reason is the stronger one. urlfetch_expand()
@@ -3583,18 +3611,80 @@ GainDrive::GainDrive(const std::string& db_path,
 	// composes its anchors from location.href itself, so nothing from the
 	// query string is spliced into HTML here, and the public scheme and
 	// host — which behind a proxy this process does not know — come free.
+	//
+	// Every embedded asset is revalidated rather than cached blindly, which is
+	// the same bargain getCoverArt strikes and for a sharper reason.
+	//
+	// These files had no cache headers at all — no Cache-Control, no ETag, no
+	// Last-Modified — which does not mean "do not cache", it means the browser
+	// picks a lifetime by heuristic and nothing can correct it. **The SPA talks
+	// to the API it shipped with**, so a heuristically cached app.js run against
+	// an upgraded server is a client out of step with its server, with nothing
+	// anywhere saying so: exactly the confusion Errors.kt's "the server may be
+	// too old" message exists to name, arriving from the other direction. The
+	// person who upgraded the binary has no reason to suspect their browser.
+	//
+	// `no-cache` is not `no-store`: the copy is kept and revalidated, so the
+	// steady-state cost is a conditional request answered 304, not a download.
+	//
+	// The validator is the version *and* a hash of the bytes. The version alone
+	// would be wrong in the case it matters most — every build between releases
+	// carries the same VERSION, so changed bytes would keep their old validator
+	// during development. std::hash is enough for a cache validator: this is not
+	// a signature, and a collision costs one stale load, which is what the
+	// version half is there to bound anyway.
+	auto etag_of = [](std::string_view body) {
+		// Computed per call rather than memoised: it is one pass over a few
+		// hundred kilobytes on a request that is already writing that much to a
+		// socket, and a static would have to be keyed by asset to be correct.
+		return "\"gd-" + std::string(GAINDRIVE_VERSION) + "-"
+		     + std::to_string(std::hash<std::string_view>{}(body)) + "\"";
+		};
+	// True when the response has been completed as a 304, so the caller returns
+	// without writing a body. Headers that describe the *resource* rather than
+	// the payload — the CSP, X-Frame-Options — are already set by then, which is
+	// what a conformant 304 wants.
+	auto revalidated = [etag_of](const httplib::Request& req, httplib::Response& res,
+	                             std::string_view body) {
+		std::string etag = etag_of(body);
+		res.set_header("Cache-Control", "no-cache");
+		res.set_header("ETag", etag);
+		if (req.get_header_value("If-None-Match") == etag) {
+			res.status = 304;
+			return true;
+			}
+		return false;
+		};
+	auto static_asset = [revalidated](std::string_view body, std::string_view mime) {
+		return [revalidated, body, mime](const httplib::Request& req,
+		                                 httplib::Response& res) {
+			if (revalidated(req, res, body)) return;
+			res.set_content(body.data(), body.size(), mime.data());
+			};
+		};
+
 	// The two HTML pages carry a Content-Security-Policy; assets and API
 	// responses need none, since a policy governs only the document that a
 	// browser renders. frame-ancestors 'none' is the load-bearing directive:
 	// without it the Settings pane — delete user, move album — can be framed
 	// and overlaid by any origin, and one click on the overlay is a click on
-	// this UI. The SPA loads nothing external and keeps its one inline script
-	// in theme.js precisely so script-src can be 'self' with no carve-out;
-	// link.html is deliberately self-contained (it must survive with no other
-	// asset loading), so its policy allows its own inline script and style
-	// and nothing else. X-Frame-Options is the same rule for browsers that
-	// predate frame-ancestors.
-	auto index_page = [](const httplib::Request& req, httplib::Response& res) {
+	// this UI. The SPA keeps its one inline script in theme.js precisely so
+	// script-src can be 'self' with no carve-out; img-src is the single
+	// exception to "nothing external", and it is one the cover-art dialog
+	// needs: it previews an image URL a person has typed, so the host is not
+	// knowable in advance and no list of them would do. An image is all the
+	// carve-out buys — script-src, connect-src and the rest stay 'self', so
+	// nothing reached this way can execute or be read back — and data: is
+	// there for the same dialog's preview of a file picked off the device.
+	// http: matters only when gaindrive itself is served over plain http,
+	// where setCoverArt would accept such a URL and the preview should not
+	// disagree with it; over https the browser blocks it as mixed content
+	// whatever the policy says. link.html is deliberately self-contained (it
+	// must survive with no other asset loading), so its policy allows its own
+	// inline script and style and nothing else. X-Frame-Options is the same
+	// rule for browsers that predate frame-ancestors.
+	auto index_page = [revalidated](const httplib::Request& req,
+	                                httplib::Response& res) {
 		res.set_header("X-Frame-Options", "DENY");
 		if (req.has_param("track") && !req.has_param("web")
 		    && req.get_header_value("User-Agent").find("Android")
@@ -3603,40 +3693,43 @@ GainDrive::GainDrive(const std::string& db_path,
 			               "default-src 'none'; script-src 'unsafe-inline'; "
 			               "style-src 'unsafe-inline'; base-uri 'none'; "
 			               "form-action 'none'; frame-ancestors 'none'");
+			if (revalidated(req, res, embedded::link_html)) return;
 			res.set_content(embedded::link_html.data(), embedded::link_html.size(),
 			                embedded::link_html_mime.data());
 			}
 		else {
 			res.set_header("Content-Security-Policy",
 			               "default-src 'none'; script-src 'self'; "
-			               "style-src 'self' 'unsafe-inline'; img-src 'self'; "
+			               "style-src 'self' 'unsafe-inline'; "
+			               "img-src 'self' data: https: http:; "
 			               "media-src 'self'; connect-src 'self'; "
 			               "font-src 'self'; base-uri 'none'; "
 			               "form-action 'self'; frame-ancestors 'none'");
+			if (revalidated(req, res, embedded::index_html)) return;
 			res.set_content(embedded::index_html.data(), embedded::index_html.size(),
 			                embedded::index_html_mime.data());
 			}
 		};
 	server_.Get("/",           index_page);
 	server_.Get("/index.html", index_page);
-	server_.Get("/style.css", [](const httplib::Request&, httplib::Response& res) {
-		res.set_content(embedded::style_css.data(), embedded::style_css.size(),
-		                embedded::style_css_mime.data());
-		});
-	server_.Get("/app.js", [](const httplib::Request&, httplib::Response& res) {
-		res.set_content(embedded::app_js.data(), embedded::app_js.size(),
-		                embedded::app_js_mime.data());
-		});
-	server_.Get("/theme.js", [](const httplib::Request&, httplib::Response& res) {
-		res.set_content(embedded::theme_js.data(), embedded::theme_js.size(),
-		                embedded::theme_js_mime.data());
-		});
-	server_.Get("/favicon.svg", [](const httplib::Request&, httplib::Response& res) {
-		res.set_content(embedded::favicon_svg.data(), embedded::favicon_svg.size(),
-		                embedded::favicon_svg_mime.data());
-		});
+	server_.Get("/style.css",
+	            static_asset(embedded::style_css, embedded::style_css_mime));
+	server_.Get("/app.js",
+	            static_asset(embedded::app_js, embedded::app_js_mime));
+	server_.Get("/theme.js",
+	            static_asset(embedded::theme_js, embedded::theme_js_mime));
+	server_.Get("/favicon.svg",
+	            static_asset(embedded::favicon_svg, embedded::favicon_svg_mime));
 	// Half a megabyte that only changes when the binary does, so it is worth
 	// telling the browser not to ask again.
+	//
+	// The one asset deliberately left out of the revalidation above, and
+	// `immutable` is why: it tells the browser never to consult a validator, so
+	// an ETag here would be decoration. That is the right trade for a font that
+	// has never changed — but it does mean a *replaced* font would be served
+	// stale for a year. Fixing that properly means versioning the URL, and this
+	// URL lives in style.css's @font-face, so it would need substituting at
+	// build time. Worth knowing before anyone swaps the font.
 	server_.Get("/material-symbols-rounded.woff2",
 	            [](const httplib::Request&, httplib::Response& res) {
 		res.set_header("Cache-Control", "public, max-age=31536000, immutable");
@@ -7076,11 +7169,20 @@ GainDrive::GainDrive(const std::string& db_path,
 				// reload rather than the stream" that castSession exists to
 				// prevent.
 				const CastStreamInfo st = cast_stream();
+				// Something to say to the person, for the failures that produce
+				// no status of their own — a LOAD the receiver was never told
+				// about. `noticeSeq` is what lets a client show one exactly
+				// once: wait_status() republishes an unchanged status every
+				// fifteen seconds, and a notice without a sequence would be
+				// shown again on every one of them.
+				const auto notice = cast_manager_.notice();
 				std::string event = "data: " + nlohmann::json({
 					{"playerState", s.player_state},
 					{"currentTime", s.current_time},
 					{"duration",    s.duration},
 					{"idleReason",  s.idle_reason},
+					{"notice",      notice.text},
+					{"noticeSeq",   notice.seq},
 					{"startOffset", last_cast_offset_},
 					{"audioOnly",          st.audio_only},
 					{"receiverShowsVideo", st.receiver_video},
@@ -7126,6 +7228,12 @@ GainDrive::GainDrive(const std::string& db_path,
 			r["castSession"]["currentTime"]  = st.current_time;
 			r["castSession"]["duration"]     = st.duration;
 			r["castSession"]["songDuration"] = song_duration;
+			// As on castEvents, and for the reason every other field here is
+			// repeated: a page that reloads has no SSE push to have read it
+			// from. Cleared by the next load, so it describes this attempt.
+			const auto notice = cast_manager_.notice();
+			r["castSession"]["notice"]       = notice.text;
+			r["castSession"]["noticeSeq"]    = notice.seq;
 			// The same description castLoad's reply carries, and it must stay
 			// the same: a reloaded page has no castLoad response to have read
 			// it from, and a client that drew one thing before the reload and
@@ -7413,8 +7521,16 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		std::string bytes;
 		std::string url;
-		if (req.form.has_file("url")) url = req.form.get_file("url").content;
-		else if (req.has_param("url")) url = req.get_param_value("url");
+		// Three spellings, because a url= is a string and a client may send it
+		// any of these ways. The first is the one that matters: a multipart part
+		// carrying no filename is a *text field*, and httplib files those under
+		// form.fields. Before 0.54.1 every part landed in form.files whatever it
+		// was, so has_file("url") alone used to be enough — the bump turned the
+		// web client's FormData.append('url', …) into "Required parameter
+		// missing".
+		if (req.form.has_field("url"))     url = req.form.get_field("url");
+		else if (req.form.has_file("url")) url = req.form.get_file("url").content;
+		else if (req.has_param("url"))     url = req.get_param_value("url");
 
 		if (req.form.has_file("file")) {
 			// A reference into the form map, not get_file(), which returns a
@@ -7721,7 +7837,11 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		int n = extract_archive_to_dir(part, dest);
 		drop_part();
-		if (n < 0) { json_err("Failed to open archive."); return; }
+		if (n == -1) { json_err("Failed to open archive."); return; }
+		// Not a message naming symlinks: with the prefix resolved the
+		// remaining causes are a full disk or a permission problem, and
+		// libarchive's own words are already in the log.
+		if (n == -2) { json_err("Could not write the archive's contents."); return; }
 
 		std::cout << stamp() << "Upload: extracted " << n << " file(s) to " << dest << std::endl;
 

@@ -335,6 +335,81 @@ def test_security_headers_present():
     print("PASS  security headers present; CORS scoped to cast endpoints")
 
 
+def test_web_assets_revalidate():
+    """A rebuilt binary must not be able to serve a browser its old client.
+
+    The assets carried no cache headers at all, which does not mean "do not
+    cache" — the browser picks a lifetime by heuristic. Since the SPA talks to
+    the API it shipped with, a stale app.js against an upgraded server is a
+    client out of step with its server with nothing saying so.
+    """
+    # Not under /rest/, so the shared _get() does not apply and no credentials
+    # are needed: these are the unauthenticated static routes.
+    root = BASE.rsplit("/rest", 1)[0]
+    for path in ("/", "/index.html", "/app.js", "/theme.js", "/style.css",
+                 "/favicon.svg"):
+        with urllib.request.urlopen(root + path) as r:
+            h = r.headers
+            body = r.read()
+        cc = (h.get("Cache-Control") or "")
+        etag = h.get("ETag")
+        assert "no-cache" in cc, f"{path}: Cache-Control={cc!r}"
+        assert etag, f"{path}: no ETag"
+        assert body, f"{path}: empty body"
+
+        # The same validator must be answered 304, with nothing in the body.
+        req = urllib.request.Request(root + path,
+                                     headers={"If-None-Match": etag})
+        try:
+            with urllib.request.urlopen(req) as r2:
+                status, again = r2.status, r2.read()
+        except urllib.error.HTTPError as e:      # 304 is not an error here
+            status, again = e.code, e.read()
+        assert status == 304, f"{path}: If-None-Match gave HTTP {status}"
+        assert not again, f"{path}: 304 carried {len(again)} bytes"
+
+        # And a validator that does not match must serve the file again.
+        req = urllib.request.Request(root + path,
+                                     headers={"If-None-Match": '"gd-stale"'})
+        with urllib.request.urlopen(req) as r3:
+            assert r3.status == 200, f"{path}: stale etag gave {r3.status}"
+            assert r3.read() == body, f"{path}: stale etag served a short body"
+
+    # The font is the deliberate exception: immutable means the browser never
+    # consults a validator, so an ETag there would be decoration.
+    with urllib.request.urlopen(root + "/material-symbols-rounded.woff2") as r:
+        cc = r.headers.get("Cache-Control") or ""
+    assert "immutable" in cc, f"the font should stay immutable: {cc!r}"
+    print("PASS  web assets revalidate with an ETag; the font stays immutable")
+
+
+def test_spa_keeps_its_policy_on_a_304():
+    """The CSP describes the resource, so it has to survive revalidation.
+
+    The revalidation check sits after the policy is set precisely so that a 304
+    still carries it. Getting that order wrong would leave a cached page with no
+    policy at all, which nothing in a browser would report.
+    """
+    root = BASE.rsplit("/rest", 1)[0]
+    with urllib.request.urlopen(root + "/") as r:
+        etag = r.headers.get("ETag")
+        csp = r.headers.get("Content-Security-Policy") or ""
+    assert "script-src 'self'" in csp, csp
+    assert "frame-ancestors 'none'" in csp, csp
+
+    req = urllib.request.Request(root + "/", headers={"If-None-Match": etag})
+    try:
+        with urllib.request.urlopen(req) as r2:
+            status, headers = r2.status, r2.headers
+    except urllib.error.HTTPError as e:
+        status, headers = e.code, e.headers
+    assert status == 304, status
+    assert "script-src 'self'" in (headers.get("Content-Security-Policy") or ""), \
+        "the 304 dropped the CSP"
+    assert headers.get("X-Frame-Options") == "DENY", "the 304 dropped X-Frame-Options"
+    print("PASS  the SPA's CSP and X-Frame-Options survive a 304")
+
+
 TESTS = [
     test_ping_ok,
     test_ping_wrong_password,
@@ -354,6 +429,8 @@ TESTS = [
     test_chunked_body_refused,
     test_album_text_nul_name_rejected,
     test_security_headers_present,
+    test_web_assets_revalidate,
+    test_spa_keeps_its_policy_on_a_304,
     # Last, because it deliberately spends the throttle budget for this
     # address and everything above would then be running against a penalty.
     test_login_throttle,

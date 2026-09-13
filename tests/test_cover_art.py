@@ -376,6 +376,65 @@ def test_pipelined_requests_are_not_off_by_one():
           f"request")
 
 
+# ---- setCoverArt takes its url= from a multipart text field -------------
+#
+# The web client sends the URL with FormData.append('url', ...), which is a
+# part with no filename. httplib 0.54.1 files those under form.fields, not
+# form.files; the handler read only form.files, so every URL cover arrived as
+# "Required parameter missing: file or url". A scheme the server refuses is
+# enough to prove the value was read, and it costs no outbound request.
+
+def _post_multipart(endpoint, extra, fields):
+    """POST one multipart body. Returns the subsonic-response dict."""
+    boundary = "----gdtest0123456789"
+    body = b""
+    for name, value in fields.items():
+        body += (f"--{boundary}\r\n"
+                 f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                 f"{value}\r\n").encode()
+    body += f"--{boundary}--\r\n".encode()
+
+    extra = dict(extra)
+    extra["f"] = "json"
+    c = http.client.HTTPConnection(HOST, PORT, timeout=10)
+    c.request("POST", f"/rest/{endpoint}?{_query(extra)}", body,
+              {"Content-Type": f"multipart/form-data; boundary={boundary}",
+               "Content-Length": str(len(body))})
+    r = c.getresponse()
+    raw = r.read()
+    c.close()
+    try:
+        return json.loads(raw)["subsonic-response"]
+    except (json.JSONDecodeError, KeyError):
+        raise AssertionError(
+            f"setCoverArt returned HTTP {r.status} with a non-JSON body: "
+            f"{raw[:200]!r}") from None
+
+
+def test_set_cover_art_reads_a_multipart_url_field():
+    albums = _albums()
+    if not albums:
+        raise Skip("no albums in the library")
+    album_id = albums[0]["id"]
+
+    sr = _post_multipart("setCoverArt.view", {"id": album_id},
+                         {"url": "ftp://example.invalid/cover.jpg"})
+    msg = sr.get("error", {}).get("message", "")
+    assert "http(s)" in msg, (
+        "the url field was not read; the server said: " + repr(msg))
+
+    # The query-string spelling is the same value by another road. The body
+    # still carries a part: an empty multipart is a separate question and not
+    # the one being asked here.
+    sr = _post_multipart("setCoverArt.view",
+                         {"id": album_id, "url": "ftp://example.invalid/c.jpg"},
+                         {"unused": "x"})
+    msg = sr.get("error", {}).get("message", "")
+    assert "http(s)" in msg, (
+        "the url query param was not read; the server said: " + repr(msg))
+    print("PASS  setCoverArt reads url= from a multipart field and the query")
+
+
 # ---- negative ----------------------------------------------------------
 
 def test_unknown_id_is_not_a_server_error():
@@ -396,6 +455,7 @@ TESTS = [
     test_video_art_honours_size,
     test_artist_portrait_is_pending_or_present,
     test_pipelined_requests_are_not_off_by_one,
+    test_set_cover_art_reads_a_multipart_url_field,
     test_unknown_id_is_not_a_server_error,
 ]
 
