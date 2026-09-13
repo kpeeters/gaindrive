@@ -1678,9 +1678,11 @@ function makeUploadBar() {
    nameList.id = 'upload-name-list';
 
    // Sticky, unlike the URL: fetching six tracks off one concert should mean
-   // typing the names once. That is also why they are not cleared on success —
-   // only the URL is, since that one genuinely differs every time. The check
-   // below is what keeps a stale name from being applied unnoticed.
+   // typing the names once, and only the URL is cleared on success, since that
+   // one genuinely differs every time. The album is the exception — a finished
+   // archive upload forgets it, because the next zip is almost never the same
+   // album and a leftover name would quietly file it under the last one. The
+   // check below is what keeps a stale name from being applied unnoticed.
    const makeNameInput = (key, placeholder, list) => {
       const el = document.createElement('input');
       el.type        = 'text';
@@ -1903,6 +1905,12 @@ function makeUploadBar() {
             if (j.status === 'ok') {
                uploadStatus.textContent = `Extracted ${j.files} file(s); scanning…`;
                pollForUpload(uploadStatus, j.files);
+               // The stored key goes with the field: pollForUpload ends in a
+               // re-render, and this bar is rebuilt out of localStorage.
+               albumInput.value = '';
+               localStorage.removeItem('gd_fetch_album');
+               // The note was computed from the pair that just left.
+               recheck();
                }
             else
                uploadStatus.textContent = `Error: ${j.message}`;
