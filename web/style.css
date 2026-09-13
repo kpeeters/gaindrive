@@ -43,6 +43,7 @@
    -webkit-font-smoothing: antialiased;
    user-select: none;
    flex-shrink: 0;
+   color: var(--accent);
 }
 
 /* ── Colour themes ─────────────────────────────────────────────────────────
@@ -1405,6 +1406,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
    top: 0;
    background: var(--bg);
    z-index: 1;
+   height: 56px;
 }
 
 .back-link {
