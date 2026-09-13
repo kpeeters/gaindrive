@@ -3668,12 +3668,21 @@ GainDrive::GainDrive(const std::string& db_path,
 	// browser renders. frame-ancestors 'none' is the load-bearing directive:
 	// without it the Settings pane — delete user, move album — can be framed
 	// and overlaid by any origin, and one click on the overlay is a click on
-	// this UI. The SPA loads nothing external and keeps its one inline script
-	// in theme.js precisely so script-src can be 'self' with no carve-out;
-	// link.html is deliberately self-contained (it must survive with no other
-	// asset loading), so its policy allows its own inline script and style
-	// and nothing else. X-Frame-Options is the same rule for browsers that
-	// predate frame-ancestors.
+	// this UI. The SPA keeps its one inline script in theme.js precisely so
+	// script-src can be 'self' with no carve-out; img-src is the single
+	// exception to "nothing external", and it is one the cover-art dialog
+	// needs: it previews an image URL a person has typed, so the host is not
+	// knowable in advance and no list of them would do. An image is all the
+	// carve-out buys — script-src, connect-src and the rest stay 'self', so
+	// nothing reached this way can execute or be read back — and data: is
+	// there for the same dialog's preview of a file picked off the device.
+	// http: matters only when gaindrive itself is served over plain http,
+	// where setCoverArt would accept such a URL and the preview should not
+	// disagree with it; over https the browser blocks it as mixed content
+	// whatever the policy says. link.html is deliberately self-contained (it
+	// must survive with no other asset loading), so its policy allows its own
+	// inline script and style and nothing else. X-Frame-Options is the same
+	// rule for browsers that predate frame-ancestors.
 	auto index_page = [revalidated](const httplib::Request& req,
 	                                httplib::Response& res) {
 		res.set_header("X-Frame-Options", "DENY");
@@ -3691,7 +3700,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		else {
 			res.set_header("Content-Security-Policy",
 			               "default-src 'none'; script-src 'self'; "
-			               "style-src 'self' 'unsafe-inline'; img-src 'self'; "
+			               "style-src 'self' 'unsafe-inline'; "
+			               "img-src 'self' data: https: http:; "
 			               "media-src 'self'; connect-src 'self'; "
 			               "font-src 'self'; base-uri 'none'; "
 			               "form-action 'self'; frame-ancestors 'none'");
