@@ -773,15 +773,36 @@ const paneNav = {
 // newer one has started. Same idiom as fetchPollGen, one level up.
 let renderGen = 0;
 
+// Bumped by the two navigations that move the strip without drawing anything:
+// Back/Forward, and the pane keys. Neither starts a render, so neither bumps
+// renderGen — which is how a slow viewTracks() used to finish after a Back and
+// slide the user straight back out of the pane they had just returned to.
+//
+// The content it drew is not wrong, though, and Forward is one keypress away,
+// so the render still paints. It is only the strip it may no longer touch.
+let navEpoch = 0;
+
+// The navEpoch the current render began at.
+let renderNavEpoch = 0;
+
 // Entry points call this with nothing. A view that renders another view passes
 // its own generation down instead, so the inner render does not declare the
 // outer one stale — viewTracks() -> viewAlbums() is the only such call.
 function beginRender(inherit = null) {
-   return inherit ?? ++renderGen;
+   if (inherit !== null) return inherit;
+   renderNavEpoch = navEpoch;
+   return ++renderGen;
    }
 
 function renderStale(gen) {
    return gen !== renderGen;
+   }
+
+// How a view asks for the strip, in place of paneNav.slideTo(): it must still
+// be the current render, and the user must not have navigated since it began.
+function renderSlideTo(gen, depth) {
+   if (renderStale(gen) || navEpoch !== renderNavEpoch) return;
+   paneNav.slideTo(depth);
    }
 
 async function showView(name) {
@@ -2132,7 +2153,7 @@ async function viewArtists(uploads = false) {
          }
       }
    pane.appendChild(frag);
-   paneNav.slideTo(0);
+   renderSlideTo(gen, 0);
 }
 
 // The way into the uploads listing: its own history entry, so Back returns to
@@ -2212,9 +2233,8 @@ async function viewPlaylists() {
    starredContainer.id = 'starred-sections';
    pane.appendChild(starredContainer);
    await refreshStarredSections(starredContainer);
-   if (renderStale(gen)) return;
 
-   paneNav.slideTo(0);
+   renderSlideTo(gen, 0);
 }
 
 async function viewRecents() {
@@ -2299,7 +2319,7 @@ async function viewRecents() {
       }
 
    pane.appendChild(frag);
-   paneNav.slideTo(0);
+   renderSlideTo(gen, 0);
 }
 
 async function viewPlaylistTracks(playlistId, playlistName) {
@@ -2410,7 +2430,7 @@ async function viewPlaylistTracks(playlistId, playlistName) {
       frag.appendChild(row);
       }
    pane.appendChild(frag);
-   paneNav.slideTo(1);
+   renderSlideTo(gen, 1);
 
    // ── Edit mode ──────────────────────────────────────────────────────────────
    // Only the playlist's owner sees the Edit link; the server enforces the
@@ -2793,7 +2813,7 @@ async function viewAlbums(artistId, artistName, isCategory = false,
    // and skip a redundant re-render when navigating artists → albums → tracks.
    pane.dataset.artistId = String(artistId);
    pane.dataset.section  = section;
-   paneNav.slideTo(1);
+   renderSlideTo(gen, 1);
 
    // Fetch artist info without blocking the album list.
    //
@@ -6519,7 +6539,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
       }
 
    pane.appendChild(frag);
-   paneNav.slideTo(2);
+   renderSlideTo(gen, 2);
 
    if (autoPlayId !== null) {
       const idx = songs.findIndex(s => s.id === autoPlayId);
@@ -7176,14 +7196,14 @@ async function runSearch() {
       return;
       }
    if (renderStale(gen)) return;
-   renderSearchResults(sr.searchResult3 ?? {});
+   renderSearchResults(sr.searchResult3 ?? {}, gen);
 }
 
-function renderSearchResults(res) {
+function renderSearchResults(res, gen) {
    const pane = document.getElementById('pane-artists');
    document.getElementById('pane-albums').innerHTML = '';
    document.getElementById('pane-tracks').innerHTML = '';
-   paneNav.slideTo(0);
+   renderSlideTo(gen, 0);
 
    const artists = res.artist ?? [];
    const albums  = res.album  ?? [];
@@ -7382,7 +7402,7 @@ async function viewTracksFromSearch(albumId, albumTitle, artistId, artistName,
       const p1 = document.getElementById('pane-albums');
       const p2 = document.getElementById('pane-tracks');
       p1.replaceChildren(...Array.from(p2.childNodes));
-      paneNav.slideTo(1);
+      renderSlideTo(gen, 1);
       }
    }
 
@@ -7662,6 +7682,9 @@ function navMovePane(delta) {
    navShown = true;
    const d = Math.max(0, Math.min(paneNav.depth + delta, NAV_PANES.length - 1));
    if (d === paneNav.depth) return;
+   // A navigation as far as any render in flight is concerned: it moved the
+   // user, and whatever finishes loading behind them may not move them back.
+   navEpoch++;
    // slideTo rather than history.back(), which is what the back links do.  The
    // panes keep their contents, so moving left is a change of attention and not
    // a navigation; going through history would re-enter whichever entry happens
@@ -8471,6 +8494,10 @@ async function showShell() {
       // after a page refresh that landed on a deeper history entry).
       window.addEventListener('popstate', async e => {
          const s = e.state ?? {view: 'artists'};
+         // Before the branches below, so a branch that does render starts after
+         // the bump and is allowed to slide, while one that only slides leaves
+         // any render still in flight unable to.
+         navEpoch++;
          if (s.view === 'albums') {
             if (document.getElementById('pane-albums').children.length > 0)
                paneNav.slideTo(1);
