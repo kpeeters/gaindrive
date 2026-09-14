@@ -1840,6 +1840,20 @@ input.chapter-time.bad { border-color: #e06c6c; }
    vertical-align: middle;
 }
 
+/* The track has been asked for but nothing is audible yet — most often the
+   server transcoding it, which it does in full before sending a single byte,
+   so there is nothing the browser can show from the response.  Everything but
+   the glyph is inherited from the rule above, which keeps the slot the same
+   size and so keeps the row's baseline still (see the nbsp note above). */
+.track-row.playing.buffering .track-icon::before {
+   content: 'progress_activity';
+   animation: track-spin 1s linear infinite;
+}
+
+@keyframes track-spin {
+   to { transform: rotate(360deg); }
+}
+
 .track-num {
    font-size: 0.8rem;
    color: var(--text-dim);
