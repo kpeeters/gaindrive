@@ -6536,7 +6536,12 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
       for (const v of cr.albumChapters?.song ?? [])
          chaptersByVideo.set(v.id, v.chapter ?? []);
       }
-   catch (e) { console.warn('[chapters] album index unavailable', e); }
+   // Named rather than just noted: this catch is why a film with markers can
+   // list as though it had none, so the line has to say which album asked and
+   // what went wrong, not merely that something did.
+   catch (e) {
+      console.warn(`[chapters] album ${albumId} index unavailable:`, e);
+      }
    if (renderStale(gen)) return;
 
    const frag = document.createDocumentFragment();

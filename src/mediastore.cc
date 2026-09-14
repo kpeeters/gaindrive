@@ -1788,6 +1788,13 @@ struct SongReadData {
 	// sees only changed files, and a sidecar is written without touching the
 	// media file's mtime, so an edit would never be noticed.
 	std::vector<Chapter> chapters;
+	// Whether there was a sidecar, and whether it could be read. Two questions,
+	// not one: `chapters` is empty for a file that has none, for the empty file
+	// that is the deliberate tombstone, and for one that simply would not open,
+	// and only the last of those must leave the index alone. See
+	// read_sidecar_chapters() and upsert_song_with_data()'s guard.
+	bool sidecar_present  = false;
+	bool sidecar_readable = false;
 	};
 
 // What Phase 2 already knows about a row in the database, for the songs the
@@ -1860,23 +1867,62 @@ static std::string loose_album_title(const fs::path& p)
 	return strip_track_prefix(t);
 	}
 
-// The markers beside a video, for the scan's index. Empty for a file with no
-// sidecar, which is nearly all of them.
+// The markers beside a video, for the scan's index, and whether there was a
+// sidecar there to read them from. Empty for a file with none, which is nearly
+// all of them.
 //
 // Opened rather than tested for: fs::exists() followed by an open is two
 // syscalls where one answers the same question, and this runs for every video
-// on every scan.
-static std::vector<Chapter> read_sidecar_chapters(const fs::path& p)
+// on every scan. The exists() call is paid only when the open *fails*, which
+// is the rare path and the one case where the two answers differ.
+//
+// That difference is the whole reason this returns more than a vector.
+// `present && !readable` -- a sidecar that is there but could not be read --
+// must never be confused with no sidecar at all, because the caller clears a
+// song's rows when there are no markers to be had. Conflating the two means one
+// transient unreadable moment during a scan silently deletes markers the file
+// still holds, and they stay deleted until some later scan happens to read it:
+// self-healing, intermittent and unlogged, which is the worst shape a bug has.
+struct SidecarChapters
 	{
-	std::ifstream f(MediaStore::sidecar_chapters_path(p.string()),
-	                std::ios::binary);
-	if (!f) return {};
+	std::vector<Chapter> chapters;
+	bool                 present  = false;   // the file is there
+	bool                 readable = false;   // ...and its contents are in hand
+	};
+
+static SidecarChapters read_sidecar_chapters(const fs::path& p)
+	{
+	SidecarChapters   out;
+	const std::string side = MediaStore::sidecar_chapters_path(p.string());
+
+	std::ifstream f(side, std::ios::binary);
+	if (!f) {
+		std::error_code ec;
+		out.present = fs::exists(side, ec);
+		if (out.present)
+			log_line("scan: cannot open chapter sidecar " + side
+			         + " -- keeping the markers already indexed");
+		return out;
+		}
+	out.present = true;
+
 	std::string text((std::istreambuf_iterator<char>(f)),
 	                  std::istreambuf_iterator<char>());
+	// bad(), not fail(): reading to the end sets failbit alongside eofbit and is
+	// how this loop is supposed to finish. Only badbit says the text in hand is
+	// not the text in the file.
+	if (f.bad()) {
+		log_line("scan: cannot read chapter sidecar " + side
+		         + " -- keeping the markers already indexed");
+		return out;
+		}
+	out.readable = true;
+
 	auto parsed = parse_chapters(text);
 	if (parsed.chapters.size() > MediaStore::MAX_CHAPTERS)
 		parsed.chapters.resize(MediaStore::MAX_CHAPTERS);
-	return std::move(parsed.chapters);
+	out.chapters = std::move(parsed.chapters);
+	return out;
 	}
 
 // One media file → everything Phase 1 can learn about it without a lock.
@@ -1942,7 +1988,10 @@ static SongReadData read_song_file(const fs::path& p,
 	// branch above rather than repeated in both, and here in Phase 1 rather
 	// than Phase 3 because that phase sees only files whose mtime changed --
 	// and a sidecar is written without touching the media file's.
-	sdat.chapters = read_sidecar_chapters(p);
+	auto side = read_sidecar_chapters(p);
+	sdat.chapters         = std::move(side.chapters);
+	sdat.sidecar_present  = side.present;
+	sdat.sidecar_readable = side.readable;
 	return sdat;
 	}
 
@@ -2804,8 +2853,27 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 	// album transactions to discover that almost none of them has any.
 	// `chapter_keys` is one query per artist, the same bargain
 	// load_video_art_keys() strikes.
-	if (!sdat.chapters.empty() || chapter_keys.count(rel_path))
+	//
+	// A sidecar that is there but would not open writes nothing at all. The
+	// line below clears the index when it finds no markers, and for an
+	// unreadable file "no markers" is not an answer but the absence of one --
+	// acting on it deletes what the file still holds, and the next scan that
+	// can read the file is the only thing that would put them back.
+	const bool sidecar_lost = sdat.sidecar_present && !sdat.sidecar_readable;
+	const bool had_rows     = chapter_keys.count(rel_path) > 0;
+
+	if (!sidecar_lost && (!sdat.chapters.empty() || had_rows)) {
+		// Clearing rows that existed earns a line of its own: it is how a
+		// deleted sidecar and an emptied one take effect, and it is also what a
+		// chapter list disappearing from an album listing looks like from in
+		// here. When that gets reported, the log should already say whether it
+		// happened, to which file, and which of the two it was.
+		if (sdat.chapters.empty() && had_rows)
+			log_line("scan: clearing indexed chapters of " + rel_path
+			         + (sdat.sidecar_present ? " -- its sidecar is now empty"
+			                                 : " -- it has no sidecar"));
 		apply_song_chapters(db, rel_path, sdat.chapters);
+		}
 
 	// Also before the split, and for a related but distinct reason: a video's
 	// genres come from Phase 3c rather than from the file, so they arrive for
@@ -3195,7 +3263,10 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 					// read_song_file(), so anything Phase 1 learns there has
 					// to be repeated here -- the gap sdat.cover already has.
 					// A concert DVD is exactly the thing someone marks up.
-					sdat.chapters    = read_sidecar_chapters(vobs.front());
+					auto side = read_sidecar_chapters(vobs.front());
+					sdat.chapters         = std::move(side.chapters);
+					sdat.sidecar_present  = side.present;
+					sdat.sidecar_readable = side.readable;
 					for (auto& v : vobs) sdat.parts.push_back(v.string());
 					adat.songs.push_back(std::move(sdat));
 					}
@@ -3739,6 +3810,15 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		"  AND path NOT IN (SELECT path FROM songs)");
 	s.bind(1, prefix);
 	s.exec();
+	// Only when it took something. This is the other way an indexed chapter
+	// list disappears -- the video itself going missing, briefly or for good,
+	// and its markers following the song row out -- and the two are told apart
+	// in the log rather than guessed at.
+	const int gone = db_music_.getChanges();
+	if (gone > 0)
+		std::cout << stamp() << "scan: pruned " << gone
+		          << " chapter row(s) whose song is gone, under " << prefix
+		          << std::endl;
 	}
 	{
 	// The genres of a song that has gone. Here with the other derived sweeps
@@ -4017,6 +4097,11 @@ void MediaStore::scan_root_files(const RootRec& root)
 		"  AND path NOT IN (SELECT path FROM songs)");
 	s.bind(1, root.cfg.name + "/%");
 	s.exec();
+	const int gone = db_music_.getChanges();
+	if (gone > 0)
+		std::cout << stamp() << "scan: pruned " << gone
+		          << " chapter row(s) whose song is gone, under "
+		          << root.cfg.name << std::endl;
 	}
 	{
 	// The genres, likewise.

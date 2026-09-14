@@ -6456,7 +6456,19 @@ GainDrive::GainDrive(const std::string& db_path,
 		int folder_id = to_int(it->second, -1);
 
 		std::string folder_rel = store_.get_folder_path(folder_id);
-		if (folder_rel.empty()) { err(70, "Album folder not found."); return; }
+		if (folder_rel.empty()) {
+			// Logged, unlike most 70s, because of what the client does with it:
+			// the album view swallows a failure here and simply draws its tracks
+			// without chapters, which is indistinguishable from a film that has
+			// none. A folder id that no longer resolves is the likely way that
+			// happens to an album whose markers were listed a moment ago --
+			// INSERT OR REPLACE hands out fresh rowids, so a rescan can strand
+			// the id a client is holding.
+			std::cout << stamp() << "getAlbumChapters: no folder with id "
+			          << folder_id << "; the album view will list this one"
+			             " without its chapters" << std::endl;
+			err(70, "Album folder not found."); return;
+			}
 		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
 		                          folder_rel, use_json)) return;
 
