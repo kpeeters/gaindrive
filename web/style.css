@@ -1775,10 +1775,23 @@ input.chapter-time.bad { border-color: #e06c6c; }
    background: var(--border);   /* placeholder colour while loading */
 }
 
+/* center, not baseline, and a floor under the height -- the two together are
+   what stop a row resizing as the icon slot changes.  Baseline alignment makes
+   a row as tall as the largest ascent above the shared baseline plus the
+   largest descent below it, computed across six cells carrying four font sizes
+   and two font families; swapping the body font for the icon font, which sits
+   1.1em above the baseline where system-ui sits 0.9em, moved that baseline on
+   every hover.  Every other row type in this file (.artist-row, .album-row,
+   .playlist-row, .search-song-row, .chapter-row) already centres its children;
+   this one was the outlier.
+
+   min-height rather than height: a row whose title carries a .track-artist
+   under it is meant to be taller, and only that may grow one. */
 .track-row {
    display: grid;
    grid-template-columns: 1.2rem 2ch 1fr auto auto auto;
-   align-items: baseline;
+   align-items: center;
+   min-height: 1.9rem;
    gap: 0.5rem;
    padding: 0.3rem 0.4rem;
    border-radius: 4px;
@@ -1794,27 +1807,34 @@ input.chapter-time.bad { border-color: #e06c6c; }
    background: var(--surface);
 }
 
-/* Column 1: icon slot — shows "add" on hover, "play_arrow" when playing. */
+/* Column 1: icon slot — shows "add" on hover, "play_arrow" when playing.
+
+   A box of fixed size that centres whatever is put in it, the same technique
+   .mi and .sq-remove use to keep a glyph's own metrics out of the layout.  The
+   size is the grid column's, so the slot measures the same whether it holds
+   the hover 'add', either triangle, the spinner, or nothing at all -- which is
+   what lets the states below pick whatever glyph size reads best without any
+   of them being able to resize the row. */
 .track-icon {
    font-size: 1rem;
+   line-height: 1;
    color: var(--text-dim);
-   text-align: center;
    cursor: pointer;
    display: flex;
+   align-items: center;
+   justify-content: center;
+   width: 1.2rem;
+   height: 1.2rem;
 }
 
-/* Always generate ::before with a non-breaking space so the flex container
-   has a stable text baseline. Without this, the cell has no flex items in
-   the default state and its baseline falls at the bottom edge; the moment
-   hover/queued/playing inserts a real glyph, the row's baseline shifts and
-   the whole row jumps vertically. */
+/* The states below fill this in.  It needs to exist even when empty so that
+   there is a flex item to centre, but it no longer needs to *contain*
+   anything -- the sized box above holds the slot open. */
 .track-icon::before {
-   content: '\00a0';
+   content: '';
 }
 
-/* Only the states that actually draw an icon switch to the icon font — the
-   default ::before keeps the nbsp in the body font, which is what holds the
-   baseline still (see above). */
+/* Only the states that actually draw an icon switch to the icon font. */
 .track-row:hover .track-icon::before,
 .track-row.queued .track-icon::before,
 .track-row.playing .track-icon::before {
@@ -1837,14 +1857,13 @@ input.chapter-time.bad { border-color: #e06c6c; }
    font-variation-settings: 'FILL' 1;
    color: var(--accent);
    font-size: 0.9rem;
-   vertical-align: middle;
 }
 
 /* The track has been asked for but nothing is audible yet — most often the
    server transcoding it, which it does in full before sending a single byte,
    so there is nothing the browser can show from the response.  Everything but
-   the glyph is inherited from the rule above, which keeps the slot the same
-   size and so keeps the row's baseline still (see the nbsp note above). */
+   the glyph is inherited from the rule above; the slot's own size is fixed by
+   .track-icon, so swapping a spinner in for the triangle moves nothing. */
 .track-row.playing.buffering .track-icon::before {
    content: 'progress_activity';
    animation: track-spin 1s linear infinite;
@@ -2194,6 +2213,20 @@ input.chapter-time.bad { border-color: #e06c6c; }
    -moz-appearance: textfield;
 }
 
+/* One height and one font family for all four, for the reason .chapter-time
+   and .chapter-name share theirs: a form control does not inherit the page's
+   font, so each of these was sized by the UA's control font at its own
+   font-size, and four different box heights met in one row.  The row centres
+   them now, but they still have to agree on how tall they are. */
+.track-num-input,
+.track-title-input,
+.track-disc-input,
+.track-year-input {
+   font-family: inherit;
+   line-height: 1.2;
+   height: 1.5rem;
+}
+
 .track-num-input {
    /* wide enough for 3 digits plus padding */
    width: calc(3ch + 0.8rem);
@@ -2246,6 +2279,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 .track-edit-header {
    display: grid;
    grid-template-columns: 1.2rem calc(3ch + 0.8rem) 1fr 1rem 1rem calc(2ch + 0.8rem) calc(4ch + 0.8rem);
+   align-items: center;
    gap: 0.5rem;
    padding: 0 0.4rem 0.2rem;
 }
