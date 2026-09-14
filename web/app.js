@@ -2713,7 +2713,9 @@ async function viewAlbums(artistId, artistName, isCategory = false,
    header.appendChild(back);
    header.appendChild(heading);
    header.appendChild(sortBtn);
-   if (!isCategory) header.appendChild(refreshBtn);
+   // Admin only, as on the album header: force= re-asks the providers over a
+   // cache the whole server shares.
+   if (!isCategory && currentUser?.adminRole) header.appendChild(refreshBtn);
    pane.appendChild(header);
 
    // Placeholder filled asynchronously once getArtistInfo2 responds.
@@ -6913,6 +6915,12 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
    console.log('[tracks] loading album', albumId, albumTitle);
    gen = beginRender(gen);
    const pane = paneReset('pane-tracks', `tracks:${albumId}`);
+   // Editing something nobody may write is not a state to be in. paneReset
+   // empties what is *in* the pane but leaves the class *on* it, and this flag
+   // is the only piece of edit mode that lives there -- so without this it
+   // outlives the album it belonged to, and the next listing draws with its
+   // chapter rows still hidden.
+   pane.classList.remove('editing-tracks');
 
    let sr;
    try {
@@ -6960,12 +6968,21 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
    heading.title = albumTitle;
    const albumStar = makeAlbumStar(album);
    albumStar.classList.add('album-star-header');
-   const editLink = document.createElement('span');
-   editLink.className = 'edit-link';
-   editLink.textContent = 'Edit';
+   // The server's own answer rather than a guess from the account's roles:
+   // uploadRole makes an account's own uploads writable and nothing else, so no
+   // set of roles decides this. And the pane is entered from search, from
+   // history and from the player as well as from the albums listing, so there
+   // is no reliable "came from uploads" here to read it off either.
+   const editLink = album.writable ? document.createElement('span') : null;
+   if (editLink) {
+      editLink.className = 'edit-link';
+      editLink.textContent = 'Edit';
+      }
    // The artist header's counterpart, and for the same reason: the lookup can
    // have cached an empty answer while a provider was down, and this is the
-   // only way to ask again.
+   // only way to ask again. Built whichever way this goes -- the notes loader
+   // disables and re-enables it on every pass -- but hung in the header only
+   // for an admin, since forcing a lookup is now admin's alone.
    const notesRefreshBtn = document.createElement('button');
    notesRefreshBtn.className = 'refresh-btn mi';
    notesRefreshBtn.title = 'Reload album info from MusicBrainz';
@@ -6973,8 +6990,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
    header.appendChild(back);
    header.appendChild(heading);
    header.appendChild(albumStar);
-   header.appendChild(notesRefreshBtn);
-   header.appendChild(editLink);
+   if (currentUser?.adminRole) header.appendChild(notesRefreshBtn);
+   if (editLink) header.appendChild(editLink);
    pane.appendChild(header);
 
    // Large cover art hero with carousel support for extra images.
@@ -7638,10 +7655,15 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
          });
       }
 
-   editLink.addEventListener('click', e => {
-      // Only fire on the link itself, not the Save/Cancel children.
-      if (e.target === editLink) enterEditMode();
-      });
+   // enterEditMode() and exitEditMode() close over editLink and are reachable
+   // from here alone, so a null link makes the pair dead code rather than a
+   // thing needing guards of its own.
+   if (editLink) {
+      editLink.addEventListener('click', e => {
+         // Only fire on the link itself, not the Save/Cancel children.
+         if (e.target === editLink) enterEditMode();
+         });
+      }
 
    // Re-apply the playing highlight if a track from this album is active.
    playerUpdateUI();

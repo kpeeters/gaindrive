@@ -1894,6 +1894,17 @@ void GainDrive::handle_artist_info(const httplib::Request& req,
 
 	bool force = req.params.count("force") > 0
 	          && req.params.find("force")->second != "0";
+	// The read stays open to everyone; the re-ask does not. It spends the single
+	// paced MusicBrainz gate every other pane is waiting on, and it overwrites a
+	// cache the whole server shares — so one account could keep re-resolving an
+	// artist nobody else wanted re-resolved. Refused rather than quietly ignored:
+	// a client that asked for a fresh lookup should hear that it did not get one.
+	if (force) {
+		auto ui = store_.get_user(req.get_param_value("u"));
+		if (!ui || !ui->is_admin) {
+			err(50, "Forcing a provider lookup requires admin role."); return;
+			}
+		}
 
 	MediaStore::CachedArtistInfo info;
 	bool resolving = false;
@@ -2250,6 +2261,17 @@ void GainDrive::handle_album_info(const httplib::Request& req,
 
 	bool force = req.params.count("force") > 0
 	          && req.params.find("force")->second != "0";
+	// The read stays open to everyone; the re-ask does not. It spends the single
+	// paced MusicBrainz gate every other pane is waiting on, and it overwrites a
+	// cache the whole server shares — so one account could keep re-resolving an
+	// album nobody else wanted re-resolved. Refused rather than quietly ignored:
+	// a client that asked for a fresh lookup should hear that it did not get one.
+	if (force) {
+		auto ui = store_.get_user(req.get_param_value("u"));
+		if (!ui || !ui->is_admin) {
+			err(50, "Forcing a provider lookup requires admin role."); return;
+			}
+		}
 
 	auto cached = store_.get_cached_album_info(id);
 	MediaStore::CachedAlbumInfo info;
@@ -6015,15 +6037,22 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		std::string user = req.params.find("u")->second;
 		const int album_fid = to_int(it->second, -1);
+		const std::string album_rel = store_.get_folder_path(album_fid);
 		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
-		                          store_.get_folder_path(album_fid), use_json)) return;
+		                          album_rel, use_json)) return;
 		auto info = store_.get_album(album_fid, flat_multi_disc_, user);
 		if (!info) { err(70, "Album not found."); return; }
 		int mbr = request_max_bitrate(req, store_);
+		// Reported for the same reason chapters.writable is: the client draws an
+		// Edit affordance from this rather than guessing at the rule, which it
+		// cannot do — an album reached from search or from the player carries no
+		// trace of whether it came out of the caller's own uploads.
+		const bool writable = item_write_allowed(req, store_, uploads_root_name_,
+		                                         album_rel);
 
 		std::string body;
 		if (use_json)
-			body = subsonic_ok_json([&info, mbr](nlohmann::json& r) {
+			body = subsonic_ok_json([&info, mbr, writable](nlohmann::json& r) {
 				nlohmann::json songs = nlohmann::json::array();
 				for (auto& s : info->songs)
 					songs.push_back(song_entry_json(s, mbr));
@@ -6037,6 +6066,7 @@ GainDrive::GainDrive(const std::string& db_path,
 					{"songCount", al.song_count},
 					{"duration",  al.duration},
 					{"videoCount", al.video_count},
+					{"writable",  writable},
 					{"song",      songs}
 					};
 				if (!al.created.empty()) entry["created"] = iso8601(al.created);
@@ -6047,7 +6077,7 @@ GainDrive::GainDrive(const std::string& db_path,
 				r["album"] = std::move(entry);
 				});
 		else
-			body = subsonic_ok([&info, mbr](XMLDocument& doc, XMLElement* root) {
+			body = subsonic_ok([&info, mbr, writable](XMLDocument& doc, XMLElement* root) {
 				auto& al = info->album;
 				auto* el = doc.NewElement("album");
 				el->SetAttribute("id",        al.id);
@@ -6057,6 +6087,7 @@ GainDrive::GainDrive(const std::string& db_path,
 				el->SetAttribute("songCount", al.song_count);
 				el->SetAttribute("duration",  al.duration);
 				el->SetAttribute("videoCount", al.video_count);
+				el->SetAttribute("writable",  writable);
 				if (al.cover_art_id >= 0) el->SetAttribute("coverArt", al.cover_art_id);
 				if (!al.created.empty())  el->SetAttribute("created",  iso8601(al.created).c_str());
 				if (al.year > 0)          el->SetAttribute("year",     al.year);

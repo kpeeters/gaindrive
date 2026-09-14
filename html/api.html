@@ -223,6 +223,13 @@
 <p>gaindrive never queries a metadata provider from a request thread. The lookup runs on the same background resolver that finds artist portraits — one artist at a time, paced against MusicBrainz&#x27;s rate limit — and asking for an artist it has not reached yet is what pushes them to the front of its queue. So a first request for an unknown artist returns at once with an empty biography and this field set, and a later one returns the biography.</p>
 <p>The field is emitted <b>only when it is true</b>, so its absence means the same thing to a client that has never heard of it as to one that has: this is everything there is. A client that ignores it sees an empty biography on the first view and a real one on the next.</p>
 <div class="note"><p>An artist the providers had nothing to say about settles with no biography and no <code>resolving</code>. That is a final answer and not a reason to keep polling.</p></div></div>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>50</code></td><td>Subsonic</td><td>A non-admin sent <code>force</code>. The lookup is not queued and nothing cached is returned; drop the parameter to read.</td></tr>
+</tbody>
+</table>
 </div>
 <div class="api-ep">
 <h3 id="ep-getalbuminfo-getalbuminfo2">getAlbumInfo / getAlbumInfo2</h3>
@@ -233,12 +240,13 @@
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
-<tr><td><code>force</code></td><td>bool</td><td>Queue a fresh provider lookup rather than letting the cached <code>album_info_cache</code> row stand.</td></tr>
+<tr><td><code>force</code></td><td>bool</td><td>Queue a fresh provider lookup rather than letting the cached <code>album_info_cache</code> row stand. <b>Admin only.</b></td></tr>
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>force</code></p>
 <p>This is the only way to correct a cached empty answer, and before it existed there was none: the row was written whatever MusicBrainz had said, including nothing at all, and no read ever consulted its age. An album viewed once while MusicBrainz was shedding load therefore had no description for good.</p>
-<p>That half is fixed too — a row is written only when MusicBrainz actually answered, so a failed lookup is retried on the next view — but a <em>successful</em> lookup that found nothing is final, and <code>force</code> is how to ask again.</p></div>
+<p>That half is fixed too — a row is written only when MusicBrainz actually answered, so a failed lookup is retried on the next view — but a <em>successful</em> lookup that found nothing is final, and <code>force</code> is how to ask again.</p>
+<p><b>Admin only</b>, on the same terms as <code>getArtistInfo</code>&#x27;s: the endpoint stays open to any user, the re-ask does not.</p></div>
 <h4>Response</h4>
 <table class="doc-table">
 <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
@@ -249,6 +257,13 @@
 <div class="api-note"><p class="api-note-h"><code>resolving</code></p>
 <p>Emitted only when true, exactly as on <code>artistInfo2</code>, so a client that ignores it sees empty notes on the first view and real ones on the next.</p>
 <p>Albums and artists share one background resolver and one queue, because MusicBrainz&#x27;s rate limit is per address: a second worker would add no throughput and would spend the courtesy headroom the first one leaves for requests somebody is actually waiting on.</p></div>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>50</code></td><td>Subsonic</td><td>A non-admin sent <code>force</code>. The lookup is not queued and nothing cached is returned; drop the parameter to read.</td></tr>
+</tbody>
+</table>
 <p>These behave exactly as the <code>getArtistInfo</code> pair above, and for the same reason: the endpoint used to run the MusicBrainz release-group search, the url-rels lookup, Wikidata and Wikipedia on the request thread, so one album nobody had looked up could hold an HTTP worker for minutes. It reads <code>album_info_cache</code> and queues the lookup instead.</p>
 <p>The chain is shorter than the artist one — MusicBrainz, then Wikidata and Wikipedia — and there is no image, so an album carries no <code>coverArt</code> answer from this endpoint either way.</p>
 </div>
@@ -678,6 +693,25 @@
 </div>
 <div class="doc-sec" id="metadata">
 <h2>Metadata editing</h2>
+<div class="api-ep">
+<h3 id="ep-getalbum">getAlbum</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>getAlbum</code>. Only the gaindrive additions are listed here.</p>
+<p>Say whether this caller may edit an album, before offering to.</p>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>writable</code> <span class="api-on">on Album</span></td><td>bool</td><td>Whether this caller may edit this album -- its tags, its cover and its name.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>writable</code></p>
+<p>The same rule every other library edit follows, and the same question <code>getChapters</code> answers as <code>chapters.writable</code>: an admin anywhere, or the owner of the item inside their own uploads.</p>
+<p>Offered as a field because no set of roles answers it. An account with <code>uploadRole</code> may edit some albums and not others, so a client deriving this from <code>getUser</code> would either hide the button from people who may edit or draw a form the server refuses.</p>
+<div class="note"><p><code>moveAlbum</code> is fractionally stricter for a non-admin -- it also wants the full uploads shape, and refuses anything naming a destination root, that being a move into the shared library rather than an edit. Renaming your own upload in place, which is what an album edit sends, is covered.</p></div>
+<p>Only <code>getAlbum</code> carries it. The album entries from <code>getAlbumList2</code>, <code>search3</code> and <code>getMusicDirectory</code> do not, and its absence there is not a claim that an album is read-only.</p></div>
+<p class="api-see">See also <a href="#ep-updateSong"><code>updateSong</code></a>, <a href="#ep-setCoverArt"><code>setCoverArt</code></a>, <a href="#ep-moveAlbum"><code>moveAlbum</code></a>.</p>
+</div>
 <div class="api-ep">
 <h3 id="ep-updateSong">updateSong</h3>
 <p class="api-meta"><code>GET /rest/updateSong.view</code></p>

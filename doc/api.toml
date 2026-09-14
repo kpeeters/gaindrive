@@ -468,6 +468,10 @@ biography and no `resolving`. That is a final answer and not a reason to keep
 polling.
 '''
 
+  [[endpoint.error]]
+  code = '50'
+  when = 'A non-admin sent `force`. The lookup is not queued and nothing cached is returned; drop the parameter to read.'
+
 [[endpoint]]
 kind       = 'additions'
 applies_to = ["getAlbumInfo", "getAlbumInfo2"]
@@ -488,7 +492,7 @@ this endpoint either way.
   [[endpoint.param]]
   name  = "force"
   type  = "bool"
-  doc   = 'Queue a fresh provider lookup rather than letting the cached `album_info_cache` row stand.'
+  doc   = 'Queue a fresh provider lookup rather than letting the cached `album_info_cache` row stand. **Admin only.**'
   notes = '''
 This is the only way to correct a cached empty answer, and before it existed
 there was none: the row was written whatever MusicBrainz had said, including
@@ -498,6 +502,9 @@ MusicBrainz was shedding load therefore had no description for good.
 That half is fixed too — a row is written only when MusicBrainz actually
 answered, so a failed lookup is retried on the next view — but a *successful*
 lookup that found nothing is final, and `force` is how to ask again.
+
+**Admin only**, on the same terms as `getArtistInfo`'s: the endpoint stays open
+to any user, the re-ask does not.
 '''
 
   [[endpoint.field]]
@@ -514,6 +521,10 @@ MusicBrainz's rate limit is per address: a second worker would add no throughput
 and would spend the courtesy headroom the first one leaves for requests somebody
 is actually waiting on.
 '''
+
+  [[endpoint.error]]
+  code = '50'
+  when = 'A non-admin sent `force`. The lookup is not queued and nothing cached is returned; drop the parameter to read.'
 
 [[endpoint]]
 kind       = 'additions'
@@ -1433,6 +1444,38 @@ see = ["getAlbumImages"]
 # ===========================================================================
 # Metadata editing
 # ===========================================================================
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["getAlbum"]
+section    = "metadata"
+summary    = 'Say whether this caller may edit an album, before offering to.'
+see        = ["updateSong", "setCoverArt", "moveAlbum"]
+
+  [[endpoint.field]]
+  name  = "writable"
+  type  = "bool"
+  on    = "Album"
+  doc   = 'Whether this caller may edit this album -- its tags, its cover and its name.'
+  notes = '''
+The same rule every other library edit follows, and the same question
+`getChapters` answers as `chapters.writable`: an admin anywhere, or the owner
+of the item inside their own uploads.
+
+Offered as a field because no set of roles answers it. An account with
+`uploadRole` may edit some albums and not others, so a client deriving this
+from `getUser` would either hide the button from people who may edit or draw a
+form the server refuses.
+
+NOTE: `moveAlbum` is fractionally stricter for a non-admin -- it also wants the
+full uploads shape, and refuses anything naming a destination root, that being
+a move into the shared library rather than an edit. Renaming your own upload in
+place, which is what an album edit sends, is covered.
+
+Only `getAlbum` carries it. The album entries from `getAlbumList2`, `search3`
+and `getMusicDirectory` do not, and its absence there is not a claim that an
+album is read-only.
+'''
 
 [[endpoint]]
 kind    = 'endpoint'

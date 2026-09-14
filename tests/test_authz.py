@@ -155,6 +155,81 @@ def test_set_cover_art_needs_permission():
     print("PASS  setCoverArt refuses a non-admin on the shared library")
 
 
+def test_get_album_reports_writability():
+    """The Edit affordance is drawn from this flag, not from the caller's roles.
+
+    Without it the web client offered Edit on every album to everybody and let
+    the save fail — the same gap as updateSong above, one screen earlier. A
+    role test cannot stand in for it: uploadRole makes an account's own
+    uploads writable and the shared library not, so the answer differs per
+    album rather than per account.
+    """
+    _, folder_id = _first_song_and_folder()
+    _, root = _get("getAlbum.view", {"id": folder_id},
+                   user=PLAIN, password=PPASS)
+    album = root.find(f"{{{NS}}}album") if root is not None else None
+    assert album is not None, (
+        "getAlbum refused an ordinary user on the shared library: "
+        + (ET.tostring(root).decode() if root is not None else "no response")
+    )
+    assert album.get("writable") == "false", (
+        "getAlbum told a non-admin it may edit the shared library: "
+        + ET.tostring(album).decode()
+    )
+    print("PASS  getAlbum reports the shared library unwritable to a non-admin")
+
+    # And the gate must not have shut out the people it is for.
+    _, root = _get("getAlbum.view", {"id": folder_id})
+    album = root.find(f"{{{NS}}}album") if root is not None else None
+    assert album is not None and album.get("writable") == "true", (
+        "getAlbum denies an admin the Edit link: "
+        + (ET.tostring(root).decode() if root is not None else "no response")
+    )
+    print("PASS  getAlbum reports the shared library writable to an admin")
+
+
+def test_album_info_force_needs_admin():
+    """force= re-queries MusicBrainz over a cache the whole server shares.
+
+    It had no role check, so any account could spend the one paced provider
+    gate every other pane waits behind, and overwrite cached notes nobody
+    asked to have refreshed.
+    """
+    _, folder_id = _first_song_and_folder()
+    _, root = _get("getAlbumInfo2.view", {"id": folder_id, "force": "1"},
+                   user=PLAIN, password=PPASS)
+    assert _status(root) == "failed" and _error_code(root) == "50", (
+        "a non-admin was allowed to force an album lookup: "
+        + (ET.tostring(root).decode() if root is not None else "no response")
+    )
+    print("PASS  getAlbumInfo2 refuses force= from a non-admin")
+
+    # The read itself stays open — the gate is on the re-ask alone, and a
+    # non-admin who can no longer see album notes would be a worse bug.
+    _, root = _get("getAlbumInfo2.view", {"id": folder_id},
+                   user=PLAIN, password=PPASS)
+    assert _status(root) == "ok", (
+        "the force gate also blocked an ordinary read: "
+        + (ET.tostring(root).decode() if root is not None else "no response")
+    )
+    print("PASS  getAlbumInfo2 still reads for a non-admin without force=")
+
+
+def test_artist_info_force_needs_admin():
+    """The artist half of the same hole, reached from the artist pane."""
+    _, root = _get("getIndexes.view")
+    artist = root.find(f".//{{{NS}}}artist") if root is not None else None
+    assert artist is not None, "no artists; this test needs a non-empty library"
+    _, root = _get("getArtistInfo2.view", {"id": artist.get("id"),
+                                           "force": "1"},
+                   user=PLAIN, password=PPASS)
+    assert _status(root) == "failed" and _error_code(root) == "50", (
+        "a non-admin was allowed to force an artist lookup: "
+        + (ET.tostring(root).decode() if root is not None else "no response")
+    )
+    print("PASS  getArtistInfo2 refuses force= from a non-admin")
+
+
 def test_cover_art_url_refuses_private_addresses():
     """setCoverArt's url= made the server fetch anything it could reach.
 
@@ -285,6 +360,9 @@ TESTS = [
     test_update_song_needs_permission,
     test_update_song_still_works_for_admin,
     test_set_cover_art_needs_permission,
+    test_get_album_reports_writability,
+    test_album_info_force_needs_admin,
+    test_artist_info_force_needs_admin,
     test_cover_art_url_refuses_private_addresses,
     test_playlist_is_not_readable_by_id,
     test_shared_library_is_still_readable,
