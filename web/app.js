@@ -3140,6 +3140,25 @@ let currentUser = null;
 // found in here, and the promote dialog offers these as destinations.
 let musicFolders = null;
 
+// Whether this browser reached the server from a network the server is itself
+// attached to, as `ping` last reported it.  Casting is refused from anywhere
+// else, so that opening this client from a hotel abroad cannot start music
+// playing in an empty house — and a VPN deliberately does not count, since a
+// full tunnel from that same hotel would reach the speakers just as well.
+//
+// Optimistic until the first ping answers, because the alternative is a
+// control that starts disabled and enables itself a moment later on every
+// single load, which reads as the page having thought better of it.  The
+// server refuses regardless, so guessing wrong for one round trip costs an
+// error dialog at worst.
+let onLocalNetwork = true;
+
+// One sentence, in one place: the tooltip, the refused click and the message
+// that replaces "taken over by another device" all say the same thing, because
+// they are all answering the same question.
+const CAST_OFF_NETWORK =
+   'Casting is only available on the server’s own network.';
+
 // Id of the currently active cast device, or null when not casting.
 let castDeviceId        = null;
 let castDeviceName      = '';    // friendly name, for the panel that replaces the picture
@@ -3346,7 +3365,18 @@ function startCastEvents() {
       const where = castDeviceName ? ` on ${castDeviceName}` : '';
       castExit();
       videoSurfaceSet(null);
-      showError(`The cast session${where} was taken over by another device.`);
+      // Worth the round trip before saying which it was.  The server refuses
+      // castEvents off its own network, and that close arrives here looking
+      // exactly like a takeover — so telling somebody who has just carried
+      // the laptop out of the house that another device took their session is
+      // a confident answer to a question they never asked.  A ping that fails
+      // leaves the flag alone and the takeover wording stands, which is the
+      // right way round: it is what this handler has always meant.
+      refreshLocalNetwork().then(() => {
+         showError(onLocalNetwork
+            ? `The cast session${where} was taken over by another device.`
+            : `The cast session${where} ended. ${CAST_OFF_NETWORK}`);
+         });
       };
    }
 
@@ -4160,6 +4190,11 @@ function renderCastDevices(devices) {
    }
 
 async function openCastModal() {
+   // The button is greyed rather than disabled, so the click still arrives
+   // here; this is where it stops. Saying so is the whole reason the control
+   // is left visible at all.
+   if (!onLocalNetwork) { showError(CAST_OFF_NETWORK); return; }
+
    const modal   = document.getElementById('cast-modal');
    const list    = document.getElementById('cast-device-list');
    const stopRow = document.getElementById('cast-stop-row');
@@ -4189,6 +4224,47 @@ async function openCastModal() {
          console.warn('cast device refresh failed:', err);
          }
       }, 5000);
+   }
+
+// Whether the cast button can be pressed, which is a different question from
+// whether it is shown: `hidden` is the account (no castRole, no button), this
+// is the network.
+//
+// Greyed rather than hidden, because a control that vanishes the moment you
+// take the laptop out of the house reads as a bug, and somebody in that
+// position needs a sentence saying why yesterday's button has stopped
+// working.  But *not* the `disabled` property, which would swallow the
+// sentence with it: a disabled button receives no mouse events, so Chrome and
+// Safari draw no tooltip on one.  The class does the greying, aria-disabled
+// says so to a screen reader, and openCastModal() refuses the click itself --
+// which turns the explanation into something that cannot be missed rather
+// than something that has to be hovered for.
+function castAvailUpdate() {
+   const btn = document.getElementById('player-cast');
+   btn.classList.toggle('unavailable', !onLocalNetwork);
+   btn.setAttribute('aria-disabled', String(!onLocalNetwork));
+   btn.title = onLocalNetwork ? 'Cast' : CAST_OFF_NETWORK;
+   }
+
+// Ask the server whether we are still on its network and redraw the button.
+//
+// `ping` answers it because it is a fact about the request rather than about
+// the account — see the endpoint's own comment.  Called on the events that
+// mean the answer may have changed: coming back online, and returning to a tab
+// that may have been asleep in a bag on the way home.
+async function refreshLocalNetwork() {
+   try {
+      const sr = await apiCall('ping');
+      onLocalNetwork = sr.localNetwork !== false;
+      }
+   catch (err) {
+      // Left as it was rather than assumed false: a ping that failed says the
+      // server is unreachable, which is not the same as being on the wrong
+      // network, and disabling the button over it would be a guess.
+      console.warn('[cast] could not refresh network locality', err);
+      return;
+      }
+   castAvailUpdate();
    }
 
 // The cast button is both the state and the control: the filled
@@ -9295,6 +9371,17 @@ async function showShell() {
          creds.clear();
          showLogin();
          });
+
+      // Both fire on the journey this exists for — shutting the lid at home
+      // and opening it somewhere else — and neither alone covers it: a laptop
+      // waking on a new network raises `online`, one carried between two
+      // networks it already knows may only ever raise `visibilitychange`.
+      // Inside wiredOnce for the reason everything else here is: logging out
+      // and back in must not leave two of each bound.
+      window.addEventListener('online', refreshLocalNetwork);
+      document.addEventListener('visibilitychange', () => {
+         if (!document.hidden) refreshLocalNetwork();
+         });
       }
 
    // Fetch the logged-in user's roles so we can show/hide the cast button.
@@ -9303,6 +9390,10 @@ async function showShell() {
       currentUser = sr.user;
    } catch {}
    document.getElementById('player-cast').hidden = !currentUser?.castRole;
+
+   // Two separate questions, asked in this order: the account decides whether
+   // the button exists, the network decides whether it can be pressed.
+   await refreshLocalNetwork();
 
    // If a cast session is already active on the server (e.g. after a page
    // reload), restore local state so the icon and progress bar reflect it.

@@ -2382,6 +2382,20 @@ input.chapter-time.bad { border-color: #e06c6c; }
    background: none;
 }
 
+/* Greyed but still clickable: the cast button off the server's own network.
+   It cannot use :disabled, because a disabled button receives no mouse events
+   and so draws no tooltip -- and the sentence explaining itself is the only
+   reason the control is shown at all rather than hidden. app.js refuses the
+   click; this just has to look refused. */
+#player-controls button.unavailable {
+   opacity: 0.4;
+}
+
+#player-controls button.unavailable:hover {
+   color: var(--text-dim);
+   background: none;
+}
+
 #player-seek {
    flex: 1;
    min-width: 60px;

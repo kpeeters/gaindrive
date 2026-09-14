@@ -240,6 +240,31 @@ token. All seven endpoints require `castRole` in addition to authentication,
 and return error 50 without it. `stream` and `getCaptions` are exempt when
 called with a valid `castToken`, since only `castLoad` ever issues one.
 
+**Every one of them except `stopCast` also requires the caller to be on a
+network the server is attached to**, and returns error 50 with a message
+naming the network rather than the role. `stopCast` is answered from
+anywhere, because refusing it would leave the music playing in the house with
+no way to end it from wherever the person holding the client now is. A client
+discovers the answer in advance from `localNetwork` on `ping`.
+
+The rule is the client's address — `X-Forwarded-For` where a trusted proxy
+supplied one, otherwise the peer — falling inside a subnet the server is
+directly attached to. **A VPN deliberately does not qualify.** Casting exists
+to make sound come out of a device in the room, and a full tunnel from a hotel
+on another continent reaches the speakers just as well as standing next to
+them does; the point of the check is that the second case is almost always an
+accident. Interfaces are selected by flag rather than by name, so a
+point-to-point tunnel is excluded whatever it is called.
+
+What the check cannot see is a VPN bridged into the LAN, or a router handing
+VPN clients addresses out of the LAN's own pool — such a client is on the
+subnet by every question available at this layer.
+
+**A refused call also ends the session it owns.** Somebody who walks out of
+the house mid-album wants the music to stop, and leaving it to the
+`castEvents` idle watchdog would reach the same end by an indeterminate
+route. A refused caller that owns nothing tears down nothing.
+
 **A session belongs to one account *and* one client instance.** The client half
 is the `castController` parameter — an opaque id the client makes up once and
 keeps. `startCast` requires it and records the pair; every other endpoint here
@@ -329,6 +354,35 @@ summary = 'Recently played tracks for the authenticated user, newest first.'
   type = "string"
   on   = "song"
   doc  = 'When the play this entry reports happened.'
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["ping"]
+section    = "cast"
+summary    = 'Says whether this request reached the server from a network the server is on.'
+
+  [[endpoint.field]]
+  name  = "localNetwork"
+  type  = "bool"
+  doc   = 'True when the caller is on a network this server is directly attached to, and casting will therefore be accepted.'
+  notes = '''
+It rides on `ping` because it is a fact about the **request**, not about the
+account: the same person is on the home network in the morning and not in the
+afternoon. That is also why it is not folded into `castRole`, which names what
+an account is allowed and must keep meaning that — a client reading a role
+that changed with the weather would write the change back the next time
+somebody edited the user.
+
+A client should re-ask when the answer may have changed rather than once at
+startup: the web client does so on `online` and when a hidden tab is shown
+again, which between them cover shutting a laptop at home and opening it
+elsewhere.
+
+Being told `true` is not permission. The seven casting endpoints test the same
+thing for themselves on every call, and this field exists so that a client can
+disable a control instead of offering one that fails.
+'''
+
 
 [[endpoint]]
 kind       = 'additions'

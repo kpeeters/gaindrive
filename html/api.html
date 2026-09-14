@@ -1081,12 +1081,33 @@
 <div class="doc-sec" id="cast">
 <h2>Chromecast</h2>
 <p>Casting is server-driven: the browser asks gaindrive to load a URL onto the Chromecast, and the device then fetches the media from <code>stream</code> itself using a token. All seven endpoints require <code>castRole</code> in addition to authentication, and return error 50 without it. <code>stream</code> and <code>getCaptions</code> are exempt when called with a valid <code>castToken</code>, since only <code>castLoad</code> ever issues one.</p>
+<p><b>Every one of them except <code>stopCast</code> also requires the caller to be on a network the server is attached to</b>, and returns error 50 with a message naming the network rather than the role. <code>stopCast</code> is answered from anywhere, because refusing it would leave the music playing in the house with no way to end it from wherever the person holding the client now is. A client discovers the answer in advance from <code>localNetwork</code> on <code>ping</code>.</p>
+<p>The rule is the client&#x27;s address — <code>X-Forwarded-For</code> where a trusted proxy supplied one, otherwise the peer — falling inside a subnet the server is directly attached to. <b>A VPN deliberately does not qualify.</b> Casting exists to make sound come out of a device in the room, and a full tunnel from a hotel on another continent reaches the speakers just as well as standing next to them does; the point of the check is that the second case is almost always an accident. Interfaces are selected by flag rather than by name, so a point-to-point tunnel is excluded whatever it is called.</p>
+<p>What the check cannot see is a VPN bridged into the LAN, or a router handing VPN clients addresses out of the LAN&#x27;s own pool — such a client is on the subnet by every question available at this layer.</p>
+<p><b>A refused call also ends the session it owns.</b> Somebody who walks out of the house mid-album wants the music to stop, and leaving it to the <code>castEvents</code> idle watchdog would reach the same end by an indeterminate route. A refused caller that owns nothing tears down nothing.</p>
 <p><b>A session belongs to one account <em>and</em> one client instance.</b> The client half is the <code>castController</code> parameter — an opaque id the client makes up once and keeps. <code>startCast</code> requires it and records the pair; every other endpoint here compares against it, and a caller that does not match is treated as having no session at all: <code>castSession</code> reports inactive, <code>castEvents</code> answers 204, <code>castLoad</code> and <code>castControl</code> return error 0, and <code>stopCast</code> succeeds without stopping anything.</p>
 <p>That is also what keeps <code>stream</code> honest. While a session is live, <code>stream</code> answers 204 to the session&#x27;s <b>owner</b> and redirects playback to the receiver; everyone else is served normally. Without the owner test it answered 204 to every caller in the server, so playing a track in one client sent it to whatever receiver another client had most recently picked.</p>
 <p>The id cannot be the standard <code>c=</code> parameter, which names the kind of client rather than the instance — every browser sends the same value, so two of one user&#x27;s browsers could not be told apart. For the same reason there is no fallback to <code>c=</code> when <code>castController</code> is absent: two installs of one app would collapse into a single identity. A caller that sends none simply never owns a session, which is what every client that does not drive these endpoints wants.</p>
 <p><code>castController</code> is <b>not a credential</b> and authorises nothing. Authentication is unchanged, and the id only breaks ties among one account&#x27;s own devices.</p>
 <p>Only one session exists at a time, because the server holds one control channel. <code>startCast</code> from a different owner therefore takes the session over: the previous owner&#x27;s receiver is stopped and its <code>castEvents</code> stream is dropped, so its UI leaves cast mode by itself.</p>
 <p>The token is minted per <code>castLoad</code> and is scoped to what that load declared — one song, and the caption ids offered for it. It is not a general credential: presenting it for any other id is refused exactly as if it were absent.</p>
+<div class="api-ep">
+<h3 id="ep-ping">ping</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>ping</code>. Only the gaindrive additions are listed here.</p>
+<p>Says whether this request reached the server from a network the server is on.</p>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>localNetwork</code></td><td>bool</td><td>True when the caller is on a network this server is directly attached to, and casting will therefore be accepted.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>localNetwork</code></p>
+<p>It rides on <code>ping</code> because it is a fact about the <b>request</b>, not about the account: the same person is on the home network in the morning and not in the afternoon. That is also why it is not folded into <code>castRole</code>, which names what an account is allowed and must keep meaning that — a client reading a role that changed with the weather would write the change back the next time somebody edited the user.</p>
+<p>A client should re-ask when the answer may have changed rather than once at startup: the web client does so on <code>online</code> and when a hidden tab is shown again, which between them cover shutting a laptop at home and opening it elsewhere.</p>
+<p>Being told <code>true</code> is not permission. The seven casting endpoints test the same thing for themselves on every call, and this field exists so that a client can disable a control instead of offering one that fails.</p></div>
+</div>
 <div class="api-ep">
 <h3 id="ep-listCastDevices">listCastDevices</h3>
 <p class="api-meta"><code>GET /rest/listCastDevices.view</code>

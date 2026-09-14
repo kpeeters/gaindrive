@@ -189,6 +189,18 @@ class GainDrive {
 		// stopCast endpoint and from the SSE watchdog thread.
 		void cast_teardown();
 
+		// Refuse a cast request that did not come from the network this
+		// server is on, and end any session the refused caller owns.
+		//
+		// Separate from the static check_cast_perm() rather than folded into
+		// it for two reasons: it needs `this`, to reach cast_owned_by() and
+		// cast_teardown(); and stopCast deliberately does not call it, so the
+		// two are not one test. Refusing stopCast would leave the music
+		// playing in the house with no way to end it from where the person
+		// with the laptop is actually standing.
+		bool check_cast_local(const httplib::Request& req, httplib::Response& res,
+		                      bool use_json);
+
 		// True when `req` is the client that owns the current cast session.
 		// False when it sent no castController at all, which is what keeps
 		// every client that does not speak the extension — the Android app, a

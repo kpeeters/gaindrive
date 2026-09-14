@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -28,6 +29,9 @@
 
 #include <openssl/rand.h>
 
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -485,6 +489,128 @@ static std::string client_addr(const httplib::Request& req)
 	else if (std::count(addr.begin(), addr.end(), ':') == 1)
 		addr = addr.substr(0, addr.find(':'));
 	return addr;
+	}
+
+// The subnets this machine is directly attached to.
+//
+// Interfaces are chosen by flag and never by name, because a tunnel is
+// precisely what the two flag tests exclude: WireGuard, OpenVPN in tun mode
+// and PPP are all point-to-point and none carries broadcast, so a VPN client's
+// address falls in no subnet listed here even though it is private and even
+// though it reaches us perfectly well. Matching on `wg`/`tun`/`utun` instead
+// would do the same job until somebody renamed an interface or built this on
+// another platform. castmanager.cc's list_ifaces4() makes the same kind of
+// judgement with IFF_MULTICAST, for its own unrelated reason.
+//
+// What no test at this layer can see is a VPN bridged into the LAN, or a
+// router handing VPN clients addresses out of the LAN's own pool: such a
+// client *is* on the subnet by every question we are able to ask. ISSUES.md
+// carries it as an accepted risk.
+struct LocalNet { int family; size_t len; uint8_t addr[16], mask[16]; };
+
+static std::vector<LocalNet> local_nets()
+	{
+	// Re-read rather than computed once at startup: a DHCP renewal or a new
+	// IPv6 prefix changes the answer, and a server up for a month would
+	// otherwise still be deciding on the network it booted into. Cached for a
+	// few seconds because this is consulted per request.
+	static std::mutex                             mu;
+	static std::vector<LocalNet>                  cache;
+	static std::chrono::steady_clock::time_point  taken;
+
+	std::lock_guard<std::mutex> lk(mu);
+	const auto now = std::chrono::steady_clock::now();
+	if (!cache.empty() && now - taken < std::chrono::seconds(10)) return cache;
+
+	std::vector<LocalNet> out;
+	struct ifaddrs* iflist;
+	if (getifaddrs(&iflist) < 0) {
+		// Deliberately not cached, and deliberately logged: an empty answer
+		// refuses every cast, and freezing one in for ten seconds would turn a
+		// momentary failure into a window nobody could explain afterwards.
+		std::cout << stamp() << "getifaddrs failed (" << std::strerror(errno)
+		          << "); no address can be recognised as local" << std::endl;
+		return out;
+		}
+	for (struct ifaddrs* ifa = iflist; ifa; ifa = ifa->ifa_next) {
+		if (!ifa->ifa_addr || !ifa->ifa_netmask)  continue;
+		if (!(ifa->ifa_flags & IFF_UP))           continue;
+		if (ifa->ifa_flags & IFF_LOOPBACK)        continue;
+		if (ifa->ifa_flags & IFF_POINTOPOINT)     continue;
+		if (!(ifa->ifa_flags & IFF_BROADCAST))    continue;
+
+		LocalNet n{};
+		if (ifa->ifa_addr->sa_family == AF_INET) {
+			n.family = AF_INET;
+			n.len    = 4;
+			std::memcpy(n.addr, &reinterpret_cast<struct sockaddr_in*>
+			                     (ifa->ifa_addr)->sin_addr, 4);
+			std::memcpy(n.mask, &reinterpret_cast<struct sockaddr_in*>
+			                     (ifa->ifa_netmask)->sin_addr, 4);
+			}
+		else if (ifa->ifa_addr->sa_family == AF_INET6) {
+			// The netmask of an IPv6 address is its prefix, so a link-local
+			// fe80::/64 and a global /64 are both handled by the same compare.
+			n.family = AF_INET6;
+			n.len    = 16;
+			std::memcpy(n.addr, &reinterpret_cast<struct sockaddr_in6*>
+			                     (ifa->ifa_addr)->sin6_addr, 16);
+			std::memcpy(n.mask, &reinterpret_cast<struct sockaddr_in6*>
+			                     (ifa->ifa_netmask)->sin6_addr, 16);
+			}
+		else continue;
+		out.push_back(n);
+		}
+	freeifaddrs(iflist);
+	cache = out;
+	taken = now;
+	return out;
+	}
+
+// True when the request came from a network this machine is attached to.
+//
+// The address tested is client_addr()'s, so behind a reverse proxy this is
+// only ever as good as that proxy's X-Forwarded-For. A proxy that sends none
+// makes every caller in the world look like loopback, which is the one way
+// this check can fail open — hence loopback counts only where public_url is
+// unset and the deployment is therefore saying it is not on a public address.
+// The same distinction cast_load_song() draws for the Host header. README's
+// public-address checklist carries the operator's half of it.
+static bool client_is_local(const httplib::Request& req)
+	{
+	const std::string who = strip_v4_mapped(client_addr(req));
+
+	uint8_t raw[16];
+	size_t  len;
+	int     family;
+
+	struct in_addr  v4;
+	struct in6_addr v6;
+	if (inet_pton(AF_INET, who.c_str(), &v4) == 1) {
+		if (((ntohl(v4.s_addr) >> 24) & 0xff) == 127) return public_url_.empty();
+		family = AF_INET;
+		len    = 4;
+		std::memcpy(raw, &v4, 4);
+		}
+	else {
+		// A scope suffix is how a link-local address is written and inet_pton
+		// does not accept one; is_ip_literal() in main.cc strips it the same way.
+		const std::string bare = who.substr(0, who.find('%'));
+		if (inet_pton(AF_INET6, bare.c_str(), &v6) != 1) return false;
+		if (IN6_IS_ADDR_LOOPBACK(&v6)) return public_url_.empty();
+		family = AF_INET6;
+		len    = 16;
+		std::memcpy(raw, &v6, 16);
+		}
+
+	for (const auto& n : local_nets()) {
+		if (n.family != family) continue;
+		bool same = true;
+		for (size_t i = 0; i < len && same; i++)
+			if ((raw[i] & n.mask[i]) != (n.addr[i] & n.mask[i])) same = false;
+		if (same) return true;
+		}
+	return false;
 	}
 
 // A string safe to put in a log line: control characters replaced and the
@@ -3859,12 +3985,27 @@ GainDrive::GainDrive(const std::string& db_path,
 		                embedded::material_symbols_woff2_mime.data());
 		});
 
-	// ping
+	// ping, carrying one gaindrive field: `localNetwork`, whether this request
+	// reached the server from a network the server is itself attached to.
+	//
+	// It rides here rather than beside castRole on getUser because it is a
+	// fact about the *request*, not about the account — the same person is on
+	// the home network in the morning and not in the afternoon. Folding it
+	// into castRole would be worse than untidy: web/app.js reads that field
+	// into the admin edit form and writes it back, so an admin editing their
+	// own account from abroad would silently revoke their own role.
 	server_.Get("/rest/ping.view", [this](const httplib::Request& req,
 	                                      httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
-		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
+		const bool local = client_is_local(req);
+		std::string body = use_json
+			? subsonic_ok_json([&](nlohmann::json& r) {
+				r["localNetwork"] = local;
+				})
+			: subsonic_ok([&](XMLDocument&, XMLElement* root) {
+				root->SetAttribute("localNetwork", local);
+				});
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -7055,6 +7196,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 		if (!check_cast_perm(req, res, store_, use_json)) return;
+		if (!check_cast_local(req, res, use_json)) return;
 
 		auto devices = cast_manager_.cached_devices();
 		cast_manager_.discover_background();
@@ -7133,6 +7275,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 		if (!check_cast_perm(req, res, store_, use_json)) return;
+		if (!check_cast_local(req, res, use_json)) return;
 
 		auto err = [&](int code, const char* msg) {
 			res.set_content(use_json ? subsonic_error_json(code, msg)
@@ -7187,6 +7330,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 		if (!check_cast_perm(req, res, store_, use_json)) return;
+		if (!check_cast_local(req, res, use_json)) return;
 
 		auto it = req.params.find("id");
 		if (it == req.params.end()) {
@@ -7279,6 +7423,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		{
 		bool use_json = (fmt_of(req) == "json");
 		if (!check_cast_perm(req, res, store_, use_json)) return;
+		if (!check_cast_local(req, res, use_json)) return;
 		}
 		if (!cast_manager_.active() || !cast_owned_by(req)) {
 			res.status = 204;
@@ -7401,6 +7546,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 		if (!check_cast_perm(req, res, store_, use_json)) return;
+		if (!check_cast_local(req, res, use_json)) return;
 
 		// Someone else's session is not visible here. This is what stops a
 		// second browser adopting it wholesale on page load — showShell()
@@ -7461,6 +7607,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 		if (!check_cast_perm(req, res, store_, use_json)) return;
+		if (!check_cast_local(req, res, use_json)) return;
 		// As castLoad: a non-owner controls nothing and is told the session it
 		// thinks it has is not there.
 		if (!cast_manager_.active() || !cast_owned_by(req)) {
@@ -7526,6 +7673,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 		if (!check_cast_perm(req, res, store_, use_json)) return;
+		if (!check_cast_local(req, res, use_json)) return;
 
 		auto err = [&](int code, const char* msg) {
 			res.set_content(use_json ? subsonic_error_json(code, msg)
@@ -9816,6 +9964,46 @@ bool GainDrive::cast_owned_by(const httplib::Request& req)
 	return !cast_owner_controller_.empty()
 	    && cast_owner_controller_ == controller
 	    && cast_owner_user_       == req.get_param_value("u");
+	}
+
+// Casting is offered only to a browser on the same network as the server, so
+// that opening this client from a hotel in another country cannot start music
+// playing in an empty house. A VPN deliberately does not qualify: a full
+// tunnel from that same hotel reaches the speakers just as well, which is the
+// whole reason local_nets() excludes point-to-point interfaces.
+//
+// The session is ended rather than merely frozen. Somebody who walks out of
+// the house mid-album wants the music to stop, and without this it would stop
+// anyway — but only once castEvents stopped being renewed and the
+// CAST_IDLE_GRACE_S watchdog fired, which is a deterministic outcome reached
+// by an indeterminate route.
+bool GainDrive::check_cast_local(const httplib::Request& req,
+                                 httplib::Response& res, bool use_json)
+	{
+	if (client_is_local(req)) return true;
+
+	const std::string who = client_addr(req);
+	// Logged on every refusal because this is the only place a proxy that
+	// forgets X-Forwarded-For becomes visible: it would otherwise report every
+	// caller in the world as loopback, and the check would pass in silence.
+	std::cout << stamp() << "Cast refused: " << log_safe(who, 64)
+	          << " is not on a network this server is attached to"
+	          << std::endl;
+
+	if (cast_owned_by(req)) {
+		std::cout << stamp() << "Cast: owner left the network; ending session"
+		          << std::endl;
+		cast_teardown();
+		}
+
+	// Error 50 is the Subsonic code for "not authorised", which is the only
+	// one that fits; the message says network rather than permission so that
+	// the cause is not mistaken for a castRole that has been taken away.
+	const char* msg = "Casting is only available on the server's own network.";
+	res.set_content(use_json ? subsonic_error_json(50, msg)
+	                         : subsonic_error(50, msg),
+	                use_json ? "application/json" : "text/xml");
+	return false;
 	}
 
 void GainDrive::cast_claim(const std::string& user,
