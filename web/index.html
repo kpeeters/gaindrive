@@ -214,9 +214,41 @@
          <button id="player-next"      class="mi" title="Next">skip_next</button>
          <button id="player-cast"      class="mi" title="Cast" hidden>cast</button>
          <button id="player-info-btn" class="mi" title="Track info" disabled>info</button>
+         <button id="player-eq-btn"   class="mi" title="Equaliser">graphic_eq</button>
       </div>
       <input id="player-seek" type="range" value="0" min="0" step="1">
       <span id="player-time">0:00 / 0:00</span>
+
+      <!-- A panel anchored to this bar rather than a .modal, because an
+           equaliser is adjusted while listening: the transport has to stay
+           reachable and the library behind it must not dim.  It hangs off the
+           footer and not off its own button, which is what lets it survive a
+           phone — the right edge of the bar always has a panel's width to its
+           left, while a button sitting in the middle of the bar does not.
+           The faders themselves are built from EQ_BANDS in app.js, so a label
+           cannot end up naming a frequency its filter does not have. -->
+      <div id="eq-panel" class="hidden">
+         <div id="eq-head">
+            <label><input type="checkbox" id="eq-on"> Equaliser</label>
+            <!-- Derived, never typed into: see eqApply().  Shown because
+                 otherwise "I raised every band and nothing got louder" reads
+                 as a fault rather than as the clipping it avoids. -->
+            <span id="eq-preamp">Preamp 0 dB</span>
+         </div>
+         <div id="eq-bands"></div>
+         <div id="eq-preset-row">
+            <select id="eq-preset"></select>
+            <button id="eq-save"   class="mi" title="Save as a preset">save</button>
+            <button id="eq-delete" class="mi" title="Delete this preset">delete</button>
+         </div>
+         <!-- Naming is asked for rather than always on screen: the row below
+              is wanted once per curve and the faders are wanted constantly. -->
+         <div id="eq-save-row" hidden>
+            <input id="eq-save-name" type="text" placeholder="Preset name…"
+                   spellcheck="false" autocomplete="off">
+            <button id="eq-save-go">Save</button>
+         </div>
+      </div>
    </footer>
 </div>
 

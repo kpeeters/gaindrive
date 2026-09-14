@@ -4195,6 +4195,9 @@ function castButtonState(on) {
    const btn = document.getElementById('player-cast');
    btn.classList.toggle('active', on);
    btn.textContent = on ? 'cast_connected' : 'cast';
+   // The same three callers are exactly the moments the equaliser stops and
+   // starts having any sound of its own to work on.
+   eqUpdateAvail();
    }
 
 async function selectCastDevice(id, label = '') {
@@ -4294,6 +4297,439 @@ async function stopCast({resumeLocal = true} = {}) {
       // on its way past.
       videoSurfaceSet(null);
       }
+   }
+
+// ── Equaliser ───────────────────────────────────────────────────────────────
+
+// Ten octave bands, and the single table the filters, the fader labels and
+// the presets are all built from — a second list of frequencies written out
+// somewhere else is a second list that can disagree with this one.
+//
+// The two ends are shelves and not peaks.  A peaking filter at 32 Hz or
+// 16 kHz spends half its curve outside what anyone can hear, so a fader
+// marked "32" would deliver visibly less than it promises; a shelf puts the
+// whole of the boost on the side the listener is actually asking about.
+const EQ_BANDS = [
+   {f:    32, type: 'lowshelf',  label: '32'},
+   {f:    64, type: 'peaking',   label: '64'},
+   {f:   125, type: 'peaking',   label: '125'},
+   {f:   250, type: 'peaking',   label: '250'},
+   {f:   500, type: 'peaking',   label: '500'},
+   {f:  1000, type: 'peaking',   label: '1k'},
+   {f:  2000, type: 'peaking',   label: '2k'},
+   {f:  4000, type: 'peaking',   label: '4k'},
+   {f:  8000, type: 'peaking',   label: '8k'},
+   {f: 16000, type: 'highshelf', label: '16k'},
+];
+
+// Adjacent octave bands meet at their half-power point at this Q.  Lower and
+// they smear into one another, so two neighbouring faders fight over the same
+// sound; higher and a set of faders that looks flat still leaves ripple in the
+// gaps between them.
+const EQ_Q     = 1.41;
+const EQ_RANGE = 12;     // dB, either way
+
+// Starting points, not a complete set.  Anything beyond these is what the
+// saved slots are for, which is why "Flat" is here rather than being a Reset
+// button: it is the one curve everybody wants back, and the menu is already
+// the place curves are chosen from.
+const EQ_PRESETS = {
+   'Flat':         [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
+   'Bass boost':   [ 6,  5,  3,  1,  0,  0,  0,  0,  0,  0],
+   'Treble boost': [ 0,  0,  0,  0,  0,  1,  2,  4,  5,  6],
+   'Loudness':     [ 6,  5,  3,  0, -2, -2,  0,  3,  5,  6],
+   'Vocal':        [-3, -2,  0,  2,  4,  4,  3,  1,  0, -1],
+   'Rock':         [ 4,  3,  1, -1, -2,  0,  2,  4,  5,  5],
+};
+
+// Whether the equaliser is engaged, the curve it is set to, and the curves
+// that have been named and kept.
+//
+// Deliberately not private to the audio graph below.  The graph is one
+// consumer of these numbers and not the only one it will have: a receiver
+// with an equaliser of its own is meant to be driven from the same curve, and
+// that is a great deal easier if the curve was never stored as a property of
+// this browser's filters.
+//
+// The curve is a comma list rather than JSON because it is a fixed-length row
+// of small integers, and because a stale or hand-edited entry has to degrade
+// to flat on a path that runs before anything is on screen, not throw.
+const eqPrefs = {
+   on()     { return localStorage.getItem('gd_eq_on') === '1'; },
+   setOn(v) {
+      if (v) localStorage.setItem('gd_eq_on', '1');
+      else   localStorage.removeItem('gd_eq_on');
+      },
+   gains() {
+      const raw = (localStorage.getItem('gd_eq_gains') || '').split(',');
+      return EQ_BANDS.map((_, i) => {
+         const v = Number(raw[i]);
+         if (!Number.isFinite(v)) return 0;
+         return Math.max(-EQ_RANGE, Math.min(EQ_RANGE, Math.round(v)));
+         });
+      },
+   setGains(g) {
+      // Flat is the default, so it is the absent key — same spelling as every
+      // other preference here.
+      if (g.some(v => v !== 0)) localStorage.setItem('gd_eq_gains', g.join(','));
+      else                      localStorage.removeItem('gd_eq_gains');
+      },
+   slots() {
+      try {
+         const o = JSON.parse(localStorage.getItem('gd_eq_slots') || '{}');
+         return (o && typeof o === 'object') ? o : {};
+         }
+      catch (err) {
+         console.warn('[eq] saved presets are unreadable, ignoring them', err);
+         return {};
+         }
+      },
+   setSlots(o) {
+      if (Object.keys(o).length) localStorage.setItem('gd_eq_slots', JSON.stringify(o));
+      else                       localStorage.removeItem('gd_eq_slots');
+      },
+   };
+
+// The graph is built once and never taken down, because createMediaElementSource
+// is a one-way door: after it, the element's sound leaves only through the
+// graph, and there is no call that puts it back.  So it is built the first
+// time the equaliser is actually switched on, and anyone who never touches the
+// panel keeps the untouched native path.  That is not tidiness — a media
+// element routed through Web Audio loses AirPlay on Safari and behaves badly
+// on the lock screen, which is a steep price for a feature never used.
+//
+// Both media elements feed the same chain.  playerSelectMedia() already clears
+// the src of whichever element it is leaving, so only one of them is ever
+// making a sound; connecting both permanently costs nothing and saves the
+// switching code that would otherwise have to run on every video.
+let eqCtx    = null;
+let eqNodes  = [];     // one BiquadFilterNode per EQ_BANDS entry, in order
+let eqPreamp = null;   // GainNode at the end of the chain
+let eqGains  = null;   // the live curve; read from storage on first use
+
+function eqCurve() {
+   if (!eqGains) eqGains = eqPrefs.gains();
+   return eqGains;
+   }
+
+// Returns false when there is no graph and there is not going to be one, so
+// the caller can put the switch back rather than leaving it on over silence.
+function eqEnsureGraph() {
+   if (eqCtx) {
+      if (eqCtx.state === 'suspended') eqCtx.resume();
+      return true;
+      }
+   const AC = window.AudioContext || window.webkitAudioContext;
+   if (!AC) return false;
+   try {
+      eqCtx = new AC();
+      let tail = null;
+      eqNodes = EQ_BANDS.map(b => {
+         const n = eqCtx.createBiquadFilter();
+         n.type = b.type;
+         n.frequency.value = b.f;
+         // Q means nothing to a shelf, and setting it on one is how a shelf
+         // quietly turns into something else in a future browser.
+         if (b.type === 'peaking') n.Q.value = EQ_Q;
+         if (tail) tail.connect(n);
+         tail = n;
+         return n;
+         });
+      eqPreamp = eqCtx.createGain();
+      tail.connect(eqPreamp);
+      eqPreamp.connect(eqCtx.destination);
+      for (const el of [player.audioEl, player.videoEl])
+         if (el) eqCtx.createMediaElementSource(el).connect(eqNodes[0]);
+      }
+   catch (err) {
+      // Not fatal: the sound keeps leaving the element the way it did before.
+      // Logged because faders that silently do nothing look like a bug in the
+      // faders rather than a browser that would not give us a graph.
+      console.warn('[eq] cannot build the audio graph', err);
+      eqCtx = null;
+      return false;
+      }
+   eqCtx.resume();
+   return true;
+   }
+
+// Push the curve into the graph and into the readout.
+//
+// Switching off is every band set flat, never a disconnect: the chain cannot
+// be rebuilt once it exists, and unhooking it from a stream that is already
+// playing is an audible break.
+//
+// The preamp is derived and not offered, because there is only one right
+// answer.  A boosted band asks for headroom the output does not have — the
+// browser is already handing the device something close to full scale — so
+// the loudest thing the curve asks for is exactly what has to come off the
+// whole of it.  Only positive gain counts; cutting a band cannot clip.
+function eqApply() {
+   const on  = eqPrefs.on();
+   const g   = on ? eqCurve() : EQ_BANDS.map(() => 0);
+   const cut = -Math.max(0, ...g);
+   if (eqCtx) {
+      const t = eqCtx.currentTime;
+      // A ramp and not an assignment: a fader dragged across ten steps is ten
+      // discontinuities in the filter coefficients, and every one is a click.
+      eqNodes.forEach((n, i) => n.gain.setTargetAtTime(g[i], t, 0.01));
+      eqPreamp.gain.setTargetAtTime(Math.pow(10, cut / 20), t, 0.01);
+      }
+   document.getElementById('eq-preamp').textContent = `Preamp ${eqDb(cut)} dB`;
+   // Accent means engaged, as it does on the cast button — not "the panel is
+   // open", which the panel being on screen already says.
+   document.getElementById('player-eq-btn').classList.toggle('active', on);
+   }
+
+// A real minus sign, and an explicit plus: a column of faders is read by
+// glancing down it, and "6" against "-6" does not separate at a glance the
+// way "+6" against "−6" does.
+function eqDb(v) {
+   if (v > 0) return `+${v}`;
+   return String(v).replace('-', '\u2212');
+   }
+
+// Built here rather than written out in index.html for the same reason the
+// shortcut overlay is built from SHORTCUTS: a label typed out separately from
+// the thing it names is a label that can end up naming a frequency no filter
+// in the chain actually has.
+function eqBuildFaders() {
+   const wrap = document.getElementById('eq-bands');
+   if (wrap.childElementCount) return;
+   EQ_BANDS.forEach((b, i) => {
+      const col = document.createElement('div');
+      col.className = 'eq-band';
+
+      const val = document.createElement('span');
+      val.className = 'eq-band-val';
+
+      const sl = document.createElement('input');
+      sl.type  = 'range';
+      sl.min   = -EQ_RANGE;
+      sl.max   = EQ_RANGE;
+      sl.step  = 1;
+      // Spelled out from the frequency rather than from the fader's own label,
+      // which is the abbreviation a column of ten has room for — "16k Hz" is
+      // not a unit anybody writes.
+      const hz = b.f >= 1000 ? `${b.f / 1000} kHz` : `${b.f} Hz`;
+      sl.title = hz;
+      sl.setAttribute('aria-label', hz);
+      // input and not change, unlike #player-seek: the whole point of a tone
+      // control is that the ear follows the hand.
+      sl.addEventListener('input', () => {
+         eqCurve()[i] = Number(sl.value);
+         val.textContent = eqDb(Number(sl.value));
+         eqPrefs.setGains(eqCurve());
+         eqShowPreset();
+         eqApply();
+         });
+
+      const lab = document.createElement('span');
+      lab.className = 'eq-band-label';
+      lab.textContent = b.label;
+
+      col.append(val, sl, lab);
+      wrap.appendChild(col);
+      });
+   }
+
+// Bring the faders back in line with the curve, after a preset has moved it
+// under them.
+function eqSyncFaders() {
+   const g = eqCurve();
+   [...document.getElementById('eq-bands').children].forEach((col, i) => {
+      col.querySelector('input').value = g[i];
+      col.querySelector('.eq-band-val').textContent = eqDb(g[i]);
+      });
+   }
+
+function eqFillPresets() {
+   const sel   = document.getElementById('eq-preset');
+   const saved = eqPrefs.slots();
+   sel.textContent = '';
+
+   // "Custom" is a state and not a choice — it is what the menu says while the
+   // curve matches nothing — so it is present but never selectable.
+   const custom = document.createElement('option');
+   custom.value = '';
+   custom.textContent = 'Custom';
+   custom.disabled = true;
+   sel.appendChild(custom);
+
+   const group = (label, names) => {
+      if (!names.length) return;
+      const g = document.createElement('optgroup');
+      g.label = label;
+      for (const n of names) {
+         const o = document.createElement('option');
+         o.value = n;
+         o.textContent = n;
+         g.appendChild(o);
+         }
+      sel.appendChild(g);
+      };
+   group('Presets', Object.keys(EQ_PRESETS));
+   group('Saved',   Object.keys(saved));
+   }
+
+// Which entry the current curve *is*, so the menu stops claiming a preset the
+// faders have since been moved away from.  This also decides whether Delete
+// can do anything: a built-in is not deletable, and neither is "Custom".
+function eqShowPreset() {
+   const sel   = document.getElementById('eq-preset');
+   const saved = eqPrefs.slots();
+   const all   = {...EQ_PRESETS, ...saved};
+   const g     = eqCurve();
+   const hit   = Object.keys(all).find(n =>
+      Array.isArray(all[n]) && all[n].length === EQ_BANDS.length
+      && all[n].every((v, i) => v === g[i]));
+   sel.value = hit ?? '';
+   document.getElementById('eq-delete').disabled = !(hit && hit in saved);
+   }
+
+function eqLoadPreset(name) {
+   const all = {...EQ_PRESETS, ...eqPrefs.slots()};
+   const g   = all[name];
+   if (!Array.isArray(g) || g.length !== EQ_BANDS.length) return;
+   eqGains = g.slice();
+   eqPrefs.setGains(eqGains);
+   eqSyncFaders();
+   eqShowPreset();
+   eqApply();
+   }
+
+function eqSaveSlot() {
+   const field = document.getElementById('eq-save-name');
+   const name  = field.value.trim();
+   if (!name) return;
+   // A saved curve under a built-in's name would leave the built-in
+   // unreachable behind two identical entries in the menu.
+   if (name in EQ_PRESETS) {
+      showError(`"${name}" is the name of a built-in preset. Pick another.`);
+      return;
+      }
+   const slots = eqPrefs.slots();
+   slots[name] = eqCurve().slice();
+   eqPrefs.setSlots(slots);
+   document.getElementById('eq-save-row').hidden = true;
+   eqFillPresets();
+   eqShowPreset();
+   }
+
+// The panel is not a .modal on purpose: that class carries a backdrop that
+// dims the library and swallows clicks, and this is a control meant to be
+// used while the music plays.  The price is that the two things a dialog gets
+// for free here — Escape and dismissal on an outside click — have to be wired
+// by hand; see setupKeys() for the first and eqOutside for the second.
+let eqOutside = null;
+
+function eqIsOpen() {
+   return !document.getElementById('eq-panel').classList.contains('hidden');
+   }
+
+function eqOpen() {
+   const panel = document.getElementById('eq-panel');
+   eqBuildFaders();
+   eqFillPresets();
+   eqSyncFaders();
+   eqShowPreset();
+   document.getElementById('eq-on').checked = eqPrefs.on();
+   eqApply();
+   panel.classList.remove('hidden');
+
+   // Installed only while the panel is up.  A listener that spends the rest of
+   // the session testing every click in the app against a panel that is closed
+   // is a listener with nothing to do and a way to go wrong.
+   eqOutside = e => {
+      if (!panel.contains(e.target) && e.target.id !== 'player-eq-btn')
+         eqClose();
+      };
+   // Next tick, or the very click that opened the panel closes it again.
+   setTimeout(() => document.addEventListener('click', eqOutside), 0);
+   }
+
+function eqClose() {
+   document.getElementById('eq-panel').classList.add('hidden');
+   document.getElementById('eq-save-row').hidden = true;
+   if (eqOutside) {
+      document.removeEventListener('click', eqOutside);
+      eqOutside = null;
+      }
+   }
+
+// The equaliser is a graph in this browser, so it can only touch sound this
+// browser is making.  While a receiver is playing, the faders would move and
+// nothing would happen, which is worse than a button that declines.
+//
+// This is also the seam a receiver-side equaliser goes behind later: the curve
+// in eqPrefs is already the whole description of what is wanted, and this is
+// the only function with an opinion about who is able to honour it.
+function eqUpdateAvail() {
+   const btn = document.getElementById('player-eq-btn');
+   const casting = castDeviceId !== null;
+   btn.disabled = casting;
+   btn.title = casting ? 'Equaliser — not available while casting' : 'Equaliser';
+   if (casting) eqClose();
+   }
+
+// Called once from setupPlayer().
+function eqSetup() {
+   document.getElementById('player-eq-btn').addEventListener('click', () => {
+      if (eqIsOpen()) eqClose(); else eqOpen();
+      });
+
+   document.getElementById('eq-on').addEventListener('change', e => {
+      // The graph is built the first time it is genuinely wanted, which is
+      // here — and this is a click, which is what an AudioContext needs to
+      // start in a state that makes sound.
+      if (e.target.checked && !eqEnsureGraph()) {
+         e.target.checked = false;
+         showError('This browser will not give us an audio graph, so the '
+                   + 'equaliser cannot run here.');
+         return;
+         }
+      eqPrefs.setOn(e.target.checked);
+      eqApply();
+      });
+
+   document.getElementById('eq-preset').addEventListener('change', e =>
+      eqLoadPreset(e.target.value));
+
+   document.getElementById('eq-save').addEventListener('click', () => {
+      const row = document.getElementById('eq-save-row');
+      row.hidden = !row.hidden;
+      if (!row.hidden) {
+         const f = document.getElementById('eq-save-name');
+         f.value = '';
+         f.focus();
+         }
+      });
+   document.getElementById('eq-save-go').addEventListener('click', eqSaveSlot);
+   document.getElementById('eq-save-name').addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); eqSaveSlot(); }
+      // Stopped here rather than left to the document handler, which would
+      // close the whole panel: while this field has focus, Escape is a way out
+      // of naming a preset and not a way out of the equaliser.
+      if (e.key === 'Escape') {
+         e.stopPropagation();
+         document.getElementById('eq-save-row').hidden = true;
+         }
+      });
+
+   document.getElementById('eq-delete').addEventListener('click', () => {
+      const name  = document.getElementById('eq-preset').value;
+      const slots = eqPrefs.slots();
+      if (!(name in slots)) return;
+      delete slots[name];
+      eqPrefs.setSlots(slots);
+      eqFillPresets();
+      eqShowPreset();
+      });
+
+   // The stored state has to reach the button on load, or a session that was
+   // left with the equaliser engaged comes back looking as though it was not.
+   eqApply();
+   eqUpdateAvail();
    }
 
 // ── Star synchronisation across panes ─────────────────────────────────────
@@ -5953,6 +6389,11 @@ function playerPlay(offset = 0, forceMp3 = false) {
       }
 
    player.scrobbled = false;
+   // Built here as well as at the switch, so an equaliser left engaged is
+   // engaged again after a reload without anyone having to open the panel.
+   // This is the right place for it because playback always begins from a
+   // click, and an AudioContext created outside a gesture starts suspended.
+   if (eqPrefs.on() && eqEnsureGraph()) eqApply();
    player.media.src = apiUrl('stream', streamParams);
    if (offset > 0 && !chunked) {
       // Range-capable stream — let the browser seek natively.  Keyed on
@@ -6193,6 +6634,9 @@ function setupPlayer() {
    player.videoEl = document.getElementById('video-el');
    bindMediaEvents(player.videoEl);
    setupVideoSurface();
+   // After player.videoEl exists: eqEnsureGraph() taps both media elements in
+   // one go and cannot come back for the second one afterwards.
+   eqSetup();
 
    document.getElementById('player-playpause').addEventListener('click', () => {
       if (castDeviceId !== null) {
@@ -8288,6 +8732,15 @@ const SHORTCUTS = [
     when: () => keyShown('player-cast'),
     run:  () => { keyLeaveFullscreen();
                   document.getElementById('player-cast').click(); }},
+   {group: 'Elsewhere', key: 'e', show: 'E', label: 'Equaliser',
+    // Not keyShown('player-eq-btn'): unlike the cast button this one is never
+    // hidden, so that test is always true and would hand the key to the login
+    // screen.  The shell is what says the player is really there, and disabled
+    // is how this button spells "casting, so there is nothing to filter".
+    when: () => keyShown('app-shell')
+                && !document.getElementById('player-eq-btn').disabled,
+    run:  () => { keyLeaveFullscreen();
+                  document.getElementById('player-eq-btn').click(); }},
    // nav here is the hint's anchor alone: the field means "the sidebar entry
    // this key stands for", not "how it runs", and Search runs what its own
    // button's handler runs.  Without it Search would be the one unhinted entry
@@ -8446,6 +8899,13 @@ function setupKeys() {
          const modal = keyOpenModal();
          if (modal) {
             keyDismissModal(modal);
+            e.preventDefault();
+            }
+         // Below a dialog, which is drawn over it, and above the search bar,
+         // which is further away.  The panel is not a .modal and so is not in
+         // keyOpenModal()'s reach; see the note above eqOutside.
+         else if (eqIsOpen()) {
+            eqClose();
             e.preventDefault();
             }
          else if (document.getElementById('search-bar').classList.contains('open')) {

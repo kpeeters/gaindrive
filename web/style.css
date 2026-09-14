@@ -572,6 +572,7 @@ body {
 
 #player {
    grid-area: player;
+   position: relative;   /* containing block for #eq-panel */
    background: var(--surface);
    border-top: 1px solid var(--divider);
    display: flex;
@@ -2363,6 +2364,171 @@ input.chapter-time.bad { border-color: #e06c6c; }
    color: var(--accent);
 }
 
+/* ── Equaliser ─────────────────────────────────────── */
+
+/* Accent means engaged, exactly as it does on the cast button above — not
+   "the panel is open", which the panel being on screen already says. */
+#player-eq-btn.active {
+   color: var(--accent);
+}
+
+/* Same upward-opening panel as #video-sync-menu, and for the same reason: the
+   bar it hangs from is the bottom edge of the window.  Anchored to the bar
+   rather than to its own button, which is what makes it survive a phone — the
+   right edge of the bar always has a panel's width to its left, while a button
+   sitting in the middle of the bar does not.  z-index sits above the video
+   surface (40) and below the modals (100), which is where it belongs in both
+   directions: a film must not cover it, and a dialog must. */
+#eq-panel {
+   position: absolute;
+   right: 1rem;
+   bottom: 100%;
+   margin-bottom: 0.4rem;
+   z-index: 50;
+   /* Stated rather than left to shrink-to-fit: the faders below are
+      flex-basis 0, so the panel's natural width is whatever their labels
+      happen to measure, which is not a width anybody chose. */
+   width: 22rem;
+   max-width: calc(100vw - 2rem);
+   padding: 0.6rem 0.7rem;
+   display: flex;
+   flex-direction: column;
+   gap: 0.5rem;
+   background: var(--surface);
+   border: 1px solid var(--border);
+   border-radius: 6px;
+   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+   font-size: 0.85rem;
+   color: var(--text);
+}
+
+#eq-panel.hidden { display: none; }
+
+#eq-head {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   gap: 1rem;
+}
+
+#eq-head label {
+   display: flex;
+   align-items: center;
+   gap: 0.35rem;
+   cursor: pointer;
+}
+
+/* Tabular so the number does not shuffle the row sideways as it steps, the
+   same reason #video-sync-value and #player-time carry it. */
+#eq-preamp {
+   color: var(--text-dim);
+   font-variant-numeric: tabular-nums;
+}
+
+/* The faders.  Each column takes an equal share and is allowed to shrink, so
+   a narrow window narrows the ten of them evenly instead of pushing the panel
+   off the side of the screen. */
+#eq-bands {
+   display: flex;
+   align-items: stretch;
+   gap: 0.15rem;
+}
+
+.eq-band {
+   flex: 1 1 0;
+   min-width: 0;
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+   gap: 0.2rem;
+}
+
+.eq-band-val,
+.eq-band-label {
+   font-size: 0.7rem;
+   color: var(--text-dim);
+   font-variant-numeric: tabular-nums;
+   white-space: nowrap;
+}
+
+/* writing-mode is the standard way to stand a range input on end; the
+   -webkit appearance below it is deprecated but is the only thing older
+   Safari and Firefox understand, and a horizontal slider in a column of
+   vertical ones is not a graceful degradation. */
+.eq-band input[type="range"] {
+   writing-mode: vertical-lr;
+   direction: rtl;
+   -webkit-appearance: slider-vertical;
+   appearance: slider-vertical;
+   width: 1.1rem;
+   height: 7rem;
+   margin: 0;
+   padding: 0;
+   accent-color: var(--accent);
+   cursor: pointer;
+}
+
+#eq-preset-row,
+#eq-save-row {
+   display: flex;
+   align-items: center;
+   gap: 0.35rem;
+}
+
+#eq-preset,
+#eq-save-name {
+   flex: 1;
+   min-width: 0;
+   background: var(--bg);
+   color: var(--text);
+   border: 1px solid var(--border);
+   border-radius: 4px;
+   padding: 0.3rem 0.4rem;
+   font-size: 0.85rem;
+}
+
+/* Borderless icon buttons, as on the video bar: they sit next to a menu and
+   would otherwise draw more attention than the menu does. */
+#eq-preset-row .mi {
+   background: none;
+   border: 0;
+   color: var(--text-dim);
+   font-size: 1.1rem;
+   padding: 0.2rem 0.3rem;
+   border-radius: 4px;
+   cursor: pointer;
+}
+
+#eq-preset-row .mi:hover:enabled {
+   color: var(--text);
+   background: var(--border);
+}
+
+/* Delete is disabled for a built-in and for "Custom", which is most of the
+   time — so it has to look inert rather than merely unresponsive. */
+#eq-preset-row .mi:disabled {
+   opacity: 0.4;
+   cursor: default;
+}
+
+/* A bordered text button, the same one the dialogs use for Close and Stop
+   casting — this one commits something, so it should not read as an icon. */
+#eq-save-go {
+   background: none;
+   border: 1px solid var(--border);
+   color: var(--text-dim);
+   padding: 0.3rem 0.7rem;
+   border-radius: 4px;
+   font-size: 0.85rem;
+   cursor: pointer;
+   flex-shrink: 0;
+}
+
+#eq-save-go:hover {
+   color: var(--text);
+   background: var(--bg);
+}
+
 /* ── Cast modal ────────────────────────────────────── */
 
 .modal {
@@ -2894,6 +3060,20 @@ input.chapter-time.bad { border-color: #e06c6c; }
       order: 4;
    }
    #player-time { order: 5; }
+   /* Across the bar rather than hugging its right end: at this width the
+      panel is as wide as the window anyway, and left:0 stops it depending on
+      where the button happened to wrap to. */
+   #eq-panel {
+      left: 0.5rem;
+      right: 0.5rem;
+      /* Both edges are pinned here, so a stated width would over-constrain
+         the box and one of them would simply be dropped. */
+      width: auto;
+      max-width: none;
+   }
+   .eq-band input[type="range"] {
+      height: 5.5rem;
+   }
 }
 
 /* ── Admin / upload ────────────────────────────────── */
