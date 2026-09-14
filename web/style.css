@@ -1856,7 +1856,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
    content: 'play_arrow';
    font-variation-settings: 'FILL' 1;
    color: var(--accent);
-   font-size: 0.9rem;
+   font-size: 1.5rem;
 }
 
 /* The track has been asked for but nothing is audible yet — most often the
@@ -2516,6 +2516,25 @@ input.chapter-time.bad { border-color: #e06c6c; }
    cursor: pointer;
 }
 
+/* Off.  Dimmed as whole rows rather than control by control, so the panel
+   reads as one inert block below a checkbox that is still live — the head,
+   which carries that checkbox and the preamp readout, keeps its colour. */
+#eq-panel.eq-off #eq-bands,
+#eq-panel.eq-off #eq-preset-row,
+#eq-panel.eq-off #eq-save-row {
+   opacity: 0.45;
+}
+
+/* The icon buttons already dim themselves when disabled; inside a row that is
+   dimming too, the two would multiply into something barely visible. */
+#eq-panel.eq-off #eq-preset-row .mi:disabled {
+   opacity: 1;
+}
+
+#eq-panel.eq-off .eq-band input[type="range"] {
+   cursor: default;
+}
+
 #eq-preset-row,
 #eq-save-row {
    display: flex;
@@ -2572,7 +2591,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
    flex-shrink: 0;
 }
 
-#eq-save-go:hover {
+#eq-save-go:hover:enabled {
    color: var(--text);
    background: var(--bg);
 }

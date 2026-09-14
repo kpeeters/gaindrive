@@ -4482,6 +4482,21 @@ function eqApply() {
    // Accent means engaged, as it does on the cast button — not "the panel is
    // open", which the panel being on screen already says.
    document.getElementById('player-eq-btn').classList.toggle('active', on);
+   eqEnable(on);
+   }
+
+// Everything under the checkbox describes a curve that, while the equaliser
+// is off, is not reaching the ear — so it is made inert rather than left
+// looking live.  Actually disabled and not merely dimmed: a fader that moves
+// and changes nothing is the thing the greying is there to prevent, and the
+// keyboard would still reach it behind a pointer-events rule.
+function eqEnable(on) {
+   const panel = document.getElementById('eq-panel');
+   panel.classList.toggle('eq-off', !on);
+   panel.querySelectorAll('#eq-bands input, #eq-preset, #eq-save,'
+      + ' #eq-save-name, #eq-save-go').forEach(el => el.disabled = !on);
+   // Delete has a second condition of its own, so it is left to its owner.
+   eqShowPreset();
    }
 
 // A real minus sign, and an explicit plus: a column of faders is read by
@@ -4587,7 +4602,10 @@ function eqShowPreset() {
       Array.isArray(all[n]) && all[n].length === EQ_BANDS.length
       && all[n].every((v, i) => v === g[i]));
    sel.value = hit ?? '';
-   document.getElementById('eq-delete').disabled = !(hit && hit in saved);
+   // Off disables it too, for the same reason as the rest of the panel;
+   // see eqEnable().
+   document.getElementById('eq-delete').disabled =
+      !eqPrefs.on() || !(hit && hit in saved);
    }
 
 function eqLoadPreset(name) {
