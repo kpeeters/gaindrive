@@ -311,7 +311,7 @@
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
 <tr><td><code>pace</code></td><td>bool</td><td>Deliver at roughly 1x playback rate rather than as fast as the socket takes it.</td></tr>
-<tr><td><code>castToken</code></td><td>string</td><td>The token minted by <code>castLoad</code>, accepted in place of credentials.</td></tr>
+<tr><td><code>castToken</code></td><td>string</td><td>A token from <code>castLoad</code> or <code>getCastToken</code>, accepted in place of credentials.</td></tr>
 <tr><td><code>castController</code></td><td>string</td><td>The id given to <code>startCast</code>. Only the owner of a live cast session has its playback redirected to the receiver.</td></tr>
 <tr><td><code>castRedirect</code></td><td>bool</td><td>Send <code>false</code> to be served the stream even though you own the live cast session. default <code>true</code>.</td></tr>
 <tr><td><code>size</code></td><td>string</td><td>Video only. A cap on the output frame size, as <code>WxH</code> — <code>640x480</code>.</td></tr>
@@ -324,8 +324,9 @@
 <p>Send it when the URL is being handed to something that will play it in real time and cannot be recognised from the request — a Cast receiver fetching for itself is the case it exists for. Without it such a receiver is sent the whole track at once, stops reading when its buffer fills, and the connection is then idle until its own 60-second no-data timeout, or a reverse proxy&#x27;s, kills it mid-track.</p>
 <p><b>Never send it on a download or a prefetch</b>: that would make the transfer take as long as the music. A browser is paced already, by its User-Agent, and video is never paced.</p></div>
 <div class="api-note"><p class="api-note-h"><code>castToken</code></p>
-<p>A Chromecast fetches the media for itself and has no account, so the token is what authorises it. It is not single-use per request — the receiver makes many range requests for one track — but it <b>is</b> scoped to the song <code>castLoad</code> declared, and to a limited lifetime. Presenting it for a different <code>id</code> is refused as though it were absent.</p>
-<p>A request carrying a valid token skips the <code>castRole</code> check, since only <code>castLoad</code> ever issues one, and skips the account bitrate ceiling — there is no account to apply it to.</p></div>
+<p>A receiver fetches the media for itself and has no account, so the token is what authorises it. It is not single-use per request — the receiver makes many range requests for one track — but it <b>is</b> scoped to one song and to a limited lifetime. Presenting it for a different <code>id</code> is refused as though it were absent.</p>
+<p><b>Two different tokens travel on this parameter</b>, and a URL looks the same whichever issued it. They are not interchangeable behind it:</p>
+<ul class="doc-list"><li><code>castLoad</code>&#x27;s belongs to the server&#x27;s own cast session. There is genuinely no account behind a request carrying it, so it skips the account bitrate ceiling, and the request is also subject to the session&#x27;s own offset — the receiver probes with <code>timeOffset</code> stripped, and the server answers from what the <code>LOAD</code> declared rather than from the URL.</li><li><code>getCastToken</code>&#x27;s belongs to an account, for a cast some <em>other</em> sender is driving. So the ceiling is applied, and nothing about a session applies: such a request is an ordinary one that happens to carry a token where a password would be, <code>timeOffset</code> and all.</li></ul></div>
 <div class="api-note"><p class="api-note-h"><code>castController</code></p>
 <p>While a cast session is live, a request from the client that <b>owns</b> it is answered <code>204</code> and the track is sent to the Chromecast instead, so that client does not play it a second time itself. Every other caller — a client that sent no <code>castController</code>, one whose id does not match, or a different account — is served the stream normally.</p>
 <p>Without this the redirect was global: any request in the server was answered <code>204</code> while anyone was casting, so starting a track on a phone played it on whatever receiver a browser had picked earlier.</p></div>
@@ -1080,7 +1081,7 @@
 </div>
 <div class="doc-sec" id="cast">
 <h2>Chromecast</h2>
-<p>Casting is server-driven: the browser asks gaindrive to load a URL onto the Chromecast, and the device then fetches the media from <code>stream</code> itself using a token. All seven endpoints require <code>castRole</code> in addition to authentication, and return error 50 without it. <code>stream</code> and <code>getCaptions</code> are exempt when called with a valid <code>castToken</code>, since only <code>castLoad</code> ever issues one.</p>
+<p>Casting is server-driven: the browser asks gaindrive to load a URL onto the Chromecast, and the device then fetches the media from <code>stream</code> itself using a token. All seven endpoints require <code>castRole</code> in addition to authentication, and return error 50 without it. <code>stream</code> and <code>getCaptions</code> are exempt when called with a valid <code>castToken</code>, since a token is only ever issued to a caller that has already passed those checks — see <code>getCastToken</code> for the other issuer and for what it is bounded by instead.</p>
 <p><b>Every one of them except <code>stopCast</code> also requires the caller to be on a network the server is attached to</b>, and returns error 50 with a message naming the network rather than the role. <code>stopCast</code> is answered from anywhere, because refusing it would leave the music playing in the house with no way to end it from wherever the person holding the client now is. A client discovers the answer in advance from <code>localNetwork</code> on <code>ping</code>.</p>
 <p>The rule is the client&#x27;s address — <code>X-Forwarded-For</code> where a trusted proxy supplied one, otherwise the peer — falling inside a subnet the server is directly attached to. <b>A VPN deliberately does not qualify.</b> Casting exists to make sound come out of a device in the room, and a full tunnel from a hotel on another continent reaches the speakers just as well as standing next to them does; the point of the check is that the second case is almost always an accident. Interfaces are selected by flag rather than by name, so a point-to-point tunnel is excluded whatever it is called.</p>
 <p>What the check cannot see is a VPN bridged into the LAN, or a router handing VPN clients addresses out of the LAN&#x27;s own pool — such a client is on the subnet by every question available at this layer.</p>
@@ -1107,6 +1108,40 @@
 <p>It rides on <code>ping</code> because it is a fact about the <b>request</b>, not about the account: the same person is on the home network in the morning and not in the afternoon. That is also why it is not folded into <code>castRole</code>, which names what an account is allowed and must keep meaning that — a client reading a role that changed with the weather would write the change back the next time somebody edited the user.</p>
 <p>A client should re-ask when the answer may have changed rather than once at startup: the web client does so on <code>online</code> and when a hidden tab is shown again, which between them cover shutting a laptop at home and opening it elsewhere.</p>
 <p>Being told <code>true</code> is not permission. The seven casting endpoints test the same thing for themselves on every call, and this field exists so that a client can disable a control instead of offering one that fails.</p></div>
+</div>
+<div class="api-ep">
+<h3 id="ep-getCastToken">getCastToken</h3>
+<p class="api-meta"><code>GET /rest/getCastToken.view</code>
+<span class="api-badge">JSON only</span></p>
+<p>Mints a token that lets a receiver fetch one song without credentials.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>The song the token will be good for, and only that one.</td></tr>
+</tbody>
+</table>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>castToken</code></td><td>string</td><td>Pass as the <code>castToken</code> parameter of <code>stream</code>.</td></tr>
+</tbody>
+</table>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>10</code></td><td>Subsonic</td><td>No <code>id</code> was given.</td></tr>
+<tr><td><code>70</code></td><td>Subsonic</td><td>No song with that id.</td></tr>
+<tr><td><code>50</code></td><td>Subsonic</td><td>The song is a personal upload belonging to another account.</td></tr>
+</tbody>
+</table>
+<p>For a cast this server is not driving. A browser that can cast by itself — Chrome&#x27;s Remote Playback API is the one this exists for — still has to give the receiver a URL it can fetch, and the receiver has no account.</p>
+<p><b>Requires only authentication.</b> Not <code>castRole</code>, and not the local-network rule the rest of this section carries, because it is the fallback for exactly the callers those two turn away: it would be no use if it were gated on them. What bounds it instead is the grant — one song, one account, twelve hours — and the read-permission check below, which is the load-bearing one, since what comes back opens a URL needing no credentials at all.</p>
+<p>It widens one thing deliberately: any account can now produce such a URL, where before only a <code>castRole</code> one could. The floor under that is that anyone who can read a song can already download it.</p>
+<p>Mint one per track, and again on a seek, the way <code>castLoad</code> does. Do not put <code>startImmediately</code> or <code>playableContainers</code> on a URL built with it — see those parameters for what a receiver does with the response they produce — and do put <code>pace=true</code> on it, since the server otherwise paces only for a browser&#x27;s own User-Agent.</p>
+<p class="api-see">See also <a href="#ep-castLoad"><code>castLoad</code></a>.</p>
 </div>
 <div class="api-ep">
 <h3 id="ep-listCastDevices">listCastDevices</h3>

@@ -8,6 +8,7 @@
 #endif
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
@@ -188,6 +189,35 @@ class GainDrive {
 		// (last_cast_song_id_, last_cast_offset_). Called both from the
 		// stopCast endpoint and from the SSE watchdog thread.
 		void cast_teardown();
+
+		// A credential-free grant to fetch one song, for a receiver that has
+		// no account of its own.
+		//
+		// This is the browser-driven cast's half of what CastManager's token
+		// does for the server-driven one, and it cannot be that token:
+		// CastManager holds a *single* one bound to the live session, and
+		// these are per-client and concurrent — two people casting from two
+		// browsers have no session on this server at all.
+		//
+		// Scoped to one song, one account and a short life, because the point
+		// of it is not to hand a receiver `u`/`t`/`s`: `t` is
+		// md5(password + salt) and `s` is the salt, which together read the
+		// whole library as that person for as long as the password stands.
+		struct StreamGrant
+			{
+			std::string                           user;
+			int                                   song_id = -1;
+			std::chrono::steady_clock::time_point expires;
+			};
+		std::mutex                                   grant_mu_;
+		std::unordered_map<std::string, StreamGrant> grants_;
+
+		// Mint a grant for `user` to fetch `song_id`; empty if it could not be.
+		std::string mint_stream_grant(const std::string& user, int song_id);
+
+		// The account a grant authorises for `song_id`, or empty when none
+		// does — expired, for another song, or simply not a grant.
+		std::string stream_grant_user(const std::string& token, int song_id);
 
 		// Refuse a cast request that did not come from the network this
 		// server is on, and end any session the refused caller owns.

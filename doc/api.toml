@@ -238,7 +238,9 @@ Casting is server-driven: the browser asks gaindrive to load a URL onto the
 Chromecast, and the device then fetches the media from `stream` itself using a
 token. All seven endpoints require `castRole` in addition to authentication,
 and return error 50 without it. `stream` and `getCaptions` are exempt when
-called with a valid `castToken`, since only `castLoad` ever issues one.
+called with a valid `castToken`, since a token is only ever issued to a caller
+that has already passed those checks — see `getCastToken` for the other issuer
+and for what it is bounded by instead.
 
 **Every one of them except `stopCast` also requires the caller to be on a
 network the server is attached to**, and returns error 50 with a message
@@ -653,17 +655,26 @@ video is never paced.
   [[endpoint.param]]
   name  = "castToken"
   type  = "string"
-  doc   = 'The token minted by `castLoad`, accepted in place of credentials.'
+  doc   = 'A token from `castLoad` or `getCastToken`, accepted in place of credentials.'
   notes = '''
-A Chromecast fetches the media for itself and has no account, so the token is
+A receiver fetches the media for itself and has no account, so the token is
 what authorises it. It is not single-use per request — the receiver makes many
-range requests for one track — but it **is** scoped to the song `castLoad`
-declared, and to a limited lifetime. Presenting it for a different `id` is
-refused as though it were absent.
+range requests for one track — but it **is** scoped to one song and to a
+limited lifetime. Presenting it for a different `id` is refused as though it
+were absent.
 
-A request carrying a valid token skips the `castRole` check, since only
-`castLoad` ever issues one, and skips the account bitrate ceiling — there is no
-account to apply it to.
+**Two different tokens travel on this parameter**, and a URL looks the same
+whichever issued it. They are not interchangeable behind it:
+
+* `castLoad`'s belongs to the server's own cast session. There is genuinely
+  no account behind a request carrying it, so it skips the account bitrate
+  ceiling, and the request is also subject to the session's own offset — the
+  receiver probes with `timeOffset` stripped, and the server answers from what
+  the `LOAD` declared rather than from the URL.
+* `getCastToken`'s belongs to an account, for a cast some *other* sender is
+  driving. So the ceiling is applied, and nothing about a session applies:
+  such a request is an ordinary one that happens to carry a token where a
+  password would be, `timeOffset` and all.
 '''
 
   [[endpoint.param]]
@@ -2219,6 +2230,59 @@ summary = 'Stop a queued or running fetch and delete its batch.'
 # ===========================================================================
 # Chromecast
 # ===========================================================================
+
+[[endpoint]]
+kind     = 'endpoint'
+name     = "getCastToken"
+section  = "cast"
+response = 'subsonic-json'
+summary  = 'Mints a token that lets a receiver fetch one song without credentials.'
+notes    = '''
+For a cast this server is not driving. A browser that can cast by itself —
+Chrome's Remote Playback API is the one this exists for — still has to give
+the receiver a URL it can fetch, and the receiver has no account.
+
+**Requires only authentication.** Not `castRole`, and not the local-network
+rule the rest of this section carries, because it is the fallback for exactly
+the callers those two turn away: it would be no use if it were gated on them.
+What bounds it instead is the grant — one song, one account, twelve hours —
+and the read-permission check below, which is the load-bearing one, since what
+comes back opens a URL needing no credentials at all.
+
+It widens one thing deliberately: any account can now produce such a URL,
+where before only a `castRole` one could. The floor under that is that anyone
+who can read a song can already download it.
+
+Mint one per track, and again on a seek, the way `castLoad` does. Do not put
+`startImmediately` or `playableContainers` on a URL built with it — see those
+parameters for what a receiver does with the response they produce — and do
+put `pace=true` on it, since the server otherwise paces only for a browser's
+own User-Agent.
+'''
+see = ["castLoad"]
+
+  [[endpoint.param]]
+  name     = "id"
+  type     = "string"
+  required = true
+  doc      = 'The song the token will be good for, and only that one.'
+
+  [[endpoint.field]]
+  name = "castToken"
+  type = "string"
+  doc  = 'Pass as the `castToken` parameter of `stream`.'
+
+  [[endpoint.error]]
+  code = '10'
+  when = 'No `id` was given.'
+
+  [[endpoint.error]]
+  code = '70'
+  when = 'No song with that id.'
+
+  [[endpoint.error]]
+  code = '50'
+  when = 'The song is a personal upload belonging to another account.'
 
 [[endpoint]]
 kind    = 'endpoint'

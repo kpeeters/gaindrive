@@ -5587,7 +5587,22 @@ GainDrive::GainDrive(const std::string& db_path,
 		auto tok_it = req.params.find("castToken");
 		bool cast_authed = tok_it != req.params.end()
 		                && cast_manager_.valid_token(tok_it->second, req_song_id);
-		if (!cast_authed && !check_auth(req, res, store_)) return;
+		// The browser-driven cast's grant travels on the same parameter, so a
+		// URL looks the same whichever cast built it — but it is a *different*
+		// credential and must not collapse into cast_authed. Everything below
+		// that keys on cast_authed is about the server's own session: the
+		// offset the LOAD declared, and the receiver's habit of probing with
+		// timeOffset stripped. A grant has no session behind it, so none of
+		// that applies; it is an ordinary client request that happens to carry
+		// a token where a password would be. What it does carry that the
+		// session token cannot is an account, which is why the bitrate ceiling
+		// below still finds one to apply.
+		std::string grant_user;
+		if (!cast_authed && tok_it != req.params.end())
+			grant_user = stream_grant_user(tok_it->second, req_song_id);
+		const bool grant_authed = !grant_user.empty();
+
+		if (!cast_authed && !grant_authed && !check_auth(req, res, store_)) return;
 
 		auto song = store_.get_song(req_song_id);
 		if (!song) {
@@ -5599,7 +5614,10 @@ GainDrive::GainDrive(const std::string& db_path,
 		// for it — CastManager::valid_token() has already bound it to this
 		// exact song id. For everyone else, another user's uploads are not
 		// readable by id.
-		if (!cast_authed
+		// A grant skips it for the same reason and with the same safety: the
+		// check was run against its account at getCastToken, and the grant
+		// names the one song it passed for.
+		if (!cast_authed && !grant_authed
 		    && !check_item_read_perm(req, res, store_, uploads_root_name_,
 		                             song->path, fmt_of(req) == "json")) return;
 
@@ -5691,8 +5709,19 @@ GainDrive::GainDrive(const std::string& db_path,
 		// depends on it.
 		bool audio_only = audio_only_request(song->is_video, format,
 		                                     song->audio_codec);
+		//
+		// A *grant* does not escape it, which is where the two tokens part
+		// company. The session token skips this because there is genuinely no
+		// account behind the request; a grant names one, so the person's
+		// ceiling follows their music onto the receiver exactly as it follows
+		// it into their browser.
 		if (!cast_authed && (!song->is_video || audio_only)) {
-			int acct_max = request_max_bitrate(req, store_);
+			int acct_max;
+			if (grant_authed) {
+				auto gu  = store_.get_user(grant_user);
+				acct_max = gu ? gu->max_bitrate : 0;
+				}
+			else acct_max = request_max_bitrate(req, store_);
 			if (acct_max > 0 && (max_bitrate == 0 || max_bitrate > acct_max))
 				max_bitrate = acct_max;
 			}
@@ -7187,6 +7216,58 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// getCastToken — a credential a receiver can fetch one song with, for a
+	// cast this server is not driving.
+	//
+	// Chrome can cast by itself, and that is the fallback for exactly the two
+	// cases the endpoints below cannot serve: an account without castRole, and
+	// a client that is not on this server's network. **So this is gated on
+	// neither of them.** It would be no use if it were — it exists precisely
+	// for the callers those two turn away — and it sits here, above the gated
+	// block, so that the asymmetry is read rather than discovered.
+	//
+	// What bounds it instead is the grant: one song, one account, twelve
+	// hours, minted only after the same check_item_read_perm that castLoad
+	// runs before minting its own. That check is the load-bearing one, because
+	// what comes back opens a URL that needs no credentials at all.
+	//
+	// It does widen something, deliberately: any account can now produce such
+	// a URL, where before only a castRole one could. ISSUES.md carries it. The
+	// floor under it is that anyone who can read a song can already download
+	// it.
+	//
+	// JSON only, the reason getServerSettings gives: this is a credential, and
+	// the one client that asks for it speaks JSON.
+	server_.Get("/rest/getCastToken.view", [this](const httplib::Request& req,
+	                                              httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto err = [&](int code, const char* msg) {
+			res.set_content(use_json ? subsonic_error_json(code, msg)
+			                         : subsonic_error(code, msg),
+			                use_json ? "application/json" : "application/xml");
+			};
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			err(10, "Required parameter missing: id.");
+			return;
+			}
+		const int song_id = to_int(it->second, -1);
+		auto song = store_.get_song(song_id);
+		if (!song) { err(70, "Song not found."); return; }
+		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		                          song->path, use_json)) return;
+
+		const std::string token = mint_stream_grant(req.get_param_value("u"),
+		                                            song_id);
+		if (token.empty()) { err(0, "Could not mint a stream token."); return; }
+
+		res.set_content(subsonic_ok_json([&](nlohmann::json& r) {
+			r["castToken"] = token;
+			}), "application/json");
 		});
 
 	// listCastDevices — return the cached device list and kick off a background
@@ -9954,6 +10035,69 @@ void GainDrive::cast_teardown()
 	// displaced castEvents connection watches for, and it must not see a
 	// session that is half torn down.
 	++cast_session_gen_;
+	}
+
+// A grant lives twelve hours, matching CastManager's CAST_TOKEN_TTL and for
+// the same reason it gives: it is a backstop for a cast somebody walked away
+// from, not a timeout a receiver will ever reach — a track is minted its own
+// grant, and so is every seek.
+static constexpr auto   STREAM_GRANT_TTL = std::chrono::hours(12);
+// A bound, because any authenticated account can mint and nothing else evicts.
+static constexpr size_t STREAM_GRANT_MAX = 256;
+
+std::string GainDrive::mint_stream_grant(const std::string& user, int song_id)
+	{
+	// 128 bits, and **the return value checked**, for the reason
+	// CastManager::mint_token() records: ignoring it leaves the buffer holding
+	// whatever was on the stack, which is a guessable value for a credential
+	// that skips authentication entirely.
+	uint8_t bytes[16];
+	if (RAND_bytes(bytes, sizeof(bytes)) != 1) {
+		std::cout << stamp() << "RAND_bytes failed; refusing to mint a stream "
+		          << "grant" << std::endl;
+		return {};
+		}
+	char hex[33];
+	for (int i = 0; i < 16; i++) snprintf(hex + 2*i, 3, "%02x", bytes[i]);
+
+	const auto now = std::chrono::steady_clock::now();
+	std::lock_guard<std::mutex> lk(grant_mu_);
+	// Swept on the way in rather than on a timer, because a grant is only ever
+	// reached through this map: nothing else has to notice one has expired.
+	for (auto it = grants_.begin(); it != grants_.end(); )
+		it = (it->second.expires <= now) ? grants_.erase(it) : std::next(it);
+	// Dropped wholesale at the cap, which is what the login throttle does and
+	// is right for the same reason: every entry is re-mintable by the client
+	// that wanted it, so being wrong costs one extra round trip rather than a
+	// cast that cannot be started.
+	if (grants_.size() >= STREAM_GRANT_MAX) grants_.clear();
+	grants_[hex] = {user, song_id, now + STREAM_GRANT_TTL};
+	return hex;
+	}
+
+std::string GainDrive::stream_grant_user(const std::string& token, int song_id)
+	{
+	if (token.empty()) return {};
+	const auto now = std::chrono::steady_clock::now();
+	std::lock_guard<std::mutex> lk(grant_mu_);
+	// Walked rather than looked up, so the comparison can be constant-time.
+	// CastManager's token_eq() gives the reasoning — 128 bits makes timing
+	// academic, but the wrong primitive should not be the thing deciding
+	// whether an unauthenticated request is served — and the cap above is what
+	// keeps the walk bounded.
+	for (const auto& [tok, g] : grants_) {
+		if (tok.size() != token.size()) continue;
+		unsigned diff = 0;
+		for (size_t i = 0; i < tok.size(); ++i)
+			diff |= static_cast<unsigned char>(tok[i])
+			      ^ static_cast<unsigned char>(token[i]);
+		if (diff) continue;
+		// Scoped to one song, so presenting it for another is refused exactly
+		// as if it were absent — the rule castToken already follows.
+		if (g.expires <= now || g.song_id != song_id) return {};
+		return g.user;
+		}
+	return {};
 	}
 
 bool GainDrive::cast_owned_by(const httplib::Request& req)
