@@ -487,6 +487,18 @@ data class GetRecentSongsBody(
 	val recentSongs: RecentSongsContainer? = null,
 ) : SubsonicBody
 
+/**
+ * The token [SubsonicApi.getCastToken] mints, or null on a server too old to
+ * have the endpoint — which answers an error rather than a token, and which
+ * every caller is expected to shrug off.
+ */
+@Serializable
+data class GetCastTokenBody(
+	override val status: String = "failed",
+	override val error: SubsonicError? = null,
+	val castToken: String? = null,
+) : SubsonicBody
+
 /** Endpoints that return nothing beyond a status: star, unstar, scrobble. */
 @Serializable
 data class EmptyBody(

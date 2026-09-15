@@ -16,6 +16,9 @@ import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.di.MediaHttp
+import org.gaindrive.android.net.SubsonicClientFactory
+import org.gaindrive.android.net.requireOk
+import org.gaindrive.android.net.runCatchingCancellable
 import org.gaindrive.android.playback.CastSource
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -58,6 +61,18 @@ data class CastTarget(
 	val route: CastRoute,
 	/** What the server was asked to send. Null for video, which is never asked. */
 	val quality: AudioQuality? = null,
+	/**
+	 * The grant [url] carries, so that the artwork and subtitles built
+	 * afterwards can carry the same one. Null when this route hands the
+	 * receiver no server URL at all, and when the server is too old to mint
+	 * one — in both cases the ordinary credentials are what travel.
+	 *
+	 * It rides here because [CastUrls.artworkFor] and [CastUrls.captionsFor]
+	 * are separate calls made once this has returned, and minting a second and
+	 * third token for one track would burn three of the server's slots to say
+	 * the same thing.
+	 */
+	val castToken: String? = null,
 ) {
 	/** Whether artwork has to travel the same road; see [CastUrls.artworkFor]. */
 	val bridged: Boolean get() = route != CastRoute.DIRECT
@@ -91,11 +106,14 @@ internal fun castPlaysNatively(mime: String?): Boolean = mime in CAST_NATIVE_TYP
  * delivers it at roughly 1x instead of as fast as the socket takes it.
  *
  * The server cannot work this out for itself, which is why it has to be said
- * here. It paces a browser by its `Mozilla/` User-Agent and a server-driven
- * cast by its `castToken`; a receiver on our direct route has neither, since
- * the app holds the control channel itself and hands over a URL built with the
- * ordinary credentials. That makes it indistinguishable from a third-party
- * Subsonic client, which wants the opposite treatment.
+ * here. It paces a browser by its `Mozilla/` User-Agent and its *own* cast by
+ * knowing it started it; a receiver on our route is neither, since the app
+ * holds the control channel itself. That makes it indistinguishable from a
+ * third-party Subsonic client, which wants the opposite treatment.
+ *
+ * Note this is not the same question as [withCastToken] answers, and a URL
+ * carrying a cast token still needs pacing: the token says who may fetch,
+ * `pace` says how fast to send.
  *
  * What happens without it is not a slow stream but a dead one. A receiver
  * reads at 1x and stops reading once its buffer is full; unpaced, the server
@@ -119,6 +137,39 @@ internal fun paced(url: String): String {
 	return parsed.newBuilder().addQueryParameter("pace", "true").build().toString()
 }
 
+/**
+ * Swaps this account's credentials out of a URL for a token that opens one
+ * track and nothing else.
+ *
+ * Applied at the route rather than in [StreamUrls], for the reason [paced] is:
+ * those builders are shared with playback, downloads and pins, where the
+ * ordinary credentials are exactly right. This is only ever for a URL a
+ * *receiver* fetches.
+ *
+ * What it replaces is worth stating plainly. `u`/`t`/`s` are the account's
+ * password — `t` is md5(password + salt) and `s` is the salt — so a television
+ * handed them can read the whole library as this person for as long as the
+ * password stands, and does so from its own logs and whatever is between. The
+ * grant is one song, twelve hours, and reaches nothing the account could not
+ * already read.
+ *
+ * `v`, `c` and `f` stay. The server ignores them on a grant-authed request and
+ * `c` is what names this client in its log, which is worth keeping. Any
+ * existing `castToken` is dropped first so applying this twice cannot leave
+ * two.
+ */
+internal fun withCastToken(url: String, token: String): String {
+	val parsed = url.toHttpUrlOrNull() ?: return url
+	return parsed.newBuilder()
+		.removeAllQueryParameters("u")
+		.removeAllQueryParameters("t")
+		.removeAllQueryParameters("s")
+		.removeAllQueryParameters("castToken")
+		.addQueryParameter("castToken", token)
+		.build()
+		.toString()
+}
+
 private val CAST_NATIVE_TYPES = setOf(
 	"audio/flac",
 	"audio/mpeg",
@@ -140,6 +191,7 @@ class CastUrls @Inject constructor(
 	// that waits on one.
 	@MediaHttp private val httpClient: OkHttpClient,
 	private val settings: SettingsStore,
+	private val clients: SubsonicClientFactory,
 ) {
 
 	/**
@@ -170,11 +222,14 @@ class CastUrls @Inject constructor(
 
 		if (reachability.canReachDirectly(config)) {
 			val direct = directTarget(ref, source) ?: return null
+			val url = paced(direct.url)
+			val token = castToken(ref)
 			return CastTarget(
-				paced(direct.url),
+				token?.let { withCastToken(url, it) } ?: url,
 				direct.mimeType ?: source.sourceMime,
 				CastRoute.DIRECT,
 				direct.quality,
+				token,
 			)
 		}
 
@@ -211,12 +266,50 @@ class CastUrls @Inject constructor(
 		// that have one.
 		val upstream = paced(target.url)
 		val relayed = bridge.publish(upstream)
+		if (relayed != null) {
+			// No token, and not an oversight: on this route the server URL
+			// never leaves the phone. The receiver is given a bridge URL and
+			// the bridge fetches upstream itself, so the credentials are on a
+			// request this device makes — which is the one place they belong.
+			// Minting here would cost a round trip per track and one of the
+			// server's grant slots to protect nothing.
+			return CastTarget(relayed, mime, CastRoute.RELAY, target.quality)
+		}
+		// The bridge would not start, so the fallback really does hand a server
+		// URL to the receiver — and therefore really does need a credential of
+		// its own, exactly as the direct branch above.
+		val token = castToken(ref)
 		return CastTarget(
-			relayed ?: upstream,
+			token?.let { withCastToken(upstream, it) } ?: upstream,
 			mime,
-			if (relayed != null) CastRoute.RELAY else CastRoute.DIRECT,
+			CastRoute.DIRECT,
 			target.quality,
+			token,
 		)
+	}
+
+	/**
+	 * A grant for one track, or null to carry on with the ordinary credentials.
+	 *
+	 * Null is a normal answer rather than a failure. A server older than the
+	 * endpoint answers an error, and the behaviour that leaves — the URL keeps
+	 * `u`/`t`/`s` — is exactly what this app did before the endpoint existed,
+	 * so there is nothing to tell the user and nothing to abandon the cast
+	 * over. It is logged, because "why is the password still going to the
+	 * television" deserves an answer in the log rather than a shrug.
+	 *
+	 * One per track, and not per seek: this app seeks the receiver rather than
+	 * reloading it, so the receiver goes on fetching the URL it already has.
+	 * That is why the server's grant lasts hours.
+	 */
+	private suspend fun castToken(ref: ItemRef): String? {
+		val config = registry.get(ref.server) ?: return null
+		val token = runCatchingCancellable {
+			clients.clientFor(config).getCastToken(ref.id).requireOk().castToken
+		}.onFailure {
+			Log.i(TAG, "no cast token ($it); sending the account's own credentials")
+		}.getOrNull()
+		return token?.takeIf { it.isNotBlank() }
 	}
 
 	/**
@@ -334,8 +427,22 @@ class CastUrls @Inject constructor(
 		// fetch one byte of playlist text and warm nothing.
 		if (!target.isHls) warmTranscode(target.url)
 
+		// **A playlist keeps the ordinary credentials, and must.** The grant
+		// does not cover `hls.m3u8`, and could not usefully: the playlist's
+		// segment URIs are relative, so each segment is fetched with whatever
+		// the playlist request carried, and the server has no way to hand a
+		// per-song grant down to them. Tokening the playlist would authorise
+		// the one document and leave every segment unauthorised, which is a
+		// film that starts and immediately stops.
 		if (reachability.canReachDirectly(config)) {
-			return CastTarget(target.url, mime, CastRoute.DIRECT)
+			if (target.isHls) return CastTarget(target.url, mime, CastRoute.DIRECT)
+			val token = castToken(ref)
+			return CastTarget(
+				token?.let { withCastToken(target.url, it) } ?: target.url,
+				mime,
+				CastRoute.DIRECT,
+				castToken = token,
+			)
 		}
 		// See the note above: the bridge cannot resolve a playlist's relative
 		// segment URIs, and publishing the playlist alone would hand the
@@ -345,10 +452,13 @@ class CastUrls @Inject constructor(
 			return null
 		}
 		val relayed = bridge.publish(target.url)
+		if (relayed != null) return CastTarget(relayed, mime, CastRoute.RELAY)
+		val token = castToken(ref)
 		return CastTarget(
-			relayed ?: target.url,
+			token?.let { withCastToken(target.url, it) } ?: target.url,
 			mime,
-			if (relayed != null) CastRoute.RELAY else CastRoute.DIRECT,
+			CastRoute.DIRECT,
+			castToken = token,
 		)
 	}
 
@@ -402,10 +512,17 @@ class CastUrls @Inject constructor(
 	 * Artwork has to travel the same road as the audio. A receiver that cannot
 	 * reach the server for one cannot reach it for the other, and a cast session
 	 * showing a blank sleeve on the television looks broken.
+	 *
+	 * And the same credential, which is why [castToken] is threaded here rather
+	 * than left to the audio alone: the sleeve goes to the receiver in the
+	 * `LOAD`'s metadata and the receiver fetches it itself, so a token that
+	 * stopped at the stream would have left the password on the television
+	 * regardless. The grant covers the cover art of the song it was minted for.
 	 */
-	fun artworkFor(url: String?, bridged: Boolean): String? {
+	fun artworkFor(url: String?, bridged: Boolean, castToken: String? = null): String? {
 		if (url == null) return null
-		return if (bridged) bridge.publish(url) ?: url else url
+		if (bridged) return bridge.publish(url) ?: url
+		return castToken?.let { withCastToken(url, it) } ?: url
 	}
 
 	/**
@@ -427,12 +544,22 @@ class CastUrls @Inject constructor(
 	fun captionsFor(
 		configs: List<MediaItem.SubtitleConfiguration>,
 		bridged: Boolean,
+		castToken: String? = null,
 	): List<CastCaption> =
 		configs.mapIndexed { i, config ->
 			val source = config.uri.toString()
 			CastCaption(
 				trackId = i + 1,
-				url = if (bridged) bridge.publish(source) ?: source else source,
+				url = when {
+					bridged -> bridge.publish(source) ?: source
+					// One grant covers every caption of its song, unlike the
+					// server's own cast token, which is scoped to the ids one
+					// LOAD declared. There is no LOAD of the server's here to
+					// scope against, and a subtitle of a track this account may
+					// read is no wider a reach than the track.
+					castToken != null -> withCastToken(source, castToken)
+					else -> source
+				},
 				label = config.label ?: "Subtitles",
 				language = config.language ?: "und",
 			)

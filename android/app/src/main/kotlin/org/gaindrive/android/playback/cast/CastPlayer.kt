@@ -379,6 +379,7 @@ class CastPlayer(
 					artworkUrl = castUrls.artworkFor(
 						metadata.artworkUri?.toString(),
 						bridged = target.bridged,
+						castToken = target.castToken,
 					),
 					isVideo = source.isVideo,
 					route = target.route,
@@ -390,6 +391,7 @@ class CastPlayer(
 					captions = castUrls.captionsFor(
 						entry.item.captionConfigs(),
 						bridged = target.bridged,
+						castToken = target.castToken,
 					),
 					// Carried across the reload a seek performs, which is the
 					// only way the receiver is ever told twice about one film.

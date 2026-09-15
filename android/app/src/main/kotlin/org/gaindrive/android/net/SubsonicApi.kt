@@ -245,6 +245,29 @@ interface SubsonicApi {
 	suspend fun getRecentSongs(@Query("size") size: Int): SubsonicEnvelope<GetRecentSongsBody>
 
 	/**
+	 * A credential a Cast receiver can fetch one track with, so the URL we hand
+	 * it need not carry ours.
+	 *
+	 * This app holds the Cast control channel itself and builds the receiver's
+	 * URLs, and a receiver has no account — so those URLs used to carry
+	 * `u`/`t`/`s`, which together are the password: `t` is md5(password + salt)
+	 * and `s` is the salt, and a television that has them reads the whole
+	 * library as this person until the password changes.
+	 *
+	 * One token covers the track's stream, its cover art and its subtitles,
+	 * expires in twelve hours, and reaches nothing the account could not
+	 * already read. It does **not** cover `hls.m3u8`, whose playlist copies the
+	 * request's credentials onto every segment.
+	 *
+	 * Needs no `castRole` and no local network — a client casting for itself is
+	 * not asking the server to cast. Older servers do not have it, which is why
+	 * every caller treats a failure as "carry on with the ordinary credentials"
+	 * rather than as an error.
+	 */
+	@GET("rest/getCastToken.view")
+	suspend fun getCastToken(@Query("id") id: String): SubsonicEnvelope<GetCastTokenBody>
+
+	/**
 	 * Puts an album somewhere, under a name, by moving it on the server's disk.
 	 *
 	 * The server's one mover: `moveAlbum` also renames in place and re-files
