@@ -189,14 +189,19 @@
 <h3 id="ep-getcoverart">getCoverArt</h3>
 <p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
 <p>Carried by <code>getCoverArt</code>. Only the gaindrive additions are listed here.</p>
-<p>Reach the extra images in an album folder, beyond the cover.</p>
+<p>Reach the extra images in an album folder, and let a receiver fetch the sleeve.</p>
 <h4>Parameters</h4>
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
 <tr><td><code>index</code></td><td>int</td><td>0 is the main cover; 1 and up select the extras <code>getAlbumImages</code> counted. default <code>0</code>.</td></tr>
+<tr><td><code>castToken</code></td><td>string</td><td>A token from <code>getCastToken</code>, accepted in place of credentials.</td></tr>
 </tbody>
 </table>
+<div class="api-note"><p class="api-note-h"><code>castToken</code></p>
+<p>Only <code>getCastToken</code>&#x27;s, not <code>castLoad</code>&#x27;s: the server&#x27;s own cast sends a receiver no artwork at all, so the session token has no reason to reach here and does not.</p>
+<p>Scoped to the <b>one cover</b> the grant&#x27;s song carries, resolved when the grant was minted rather than named by the caller. Presenting it for any other id is refused as though it were absent, and a grant for a track with no artwork authorises nothing here.</p>
+<p>A receiver fetches the sleeve named in the LOAD&#x27;s metadata and has no account to fetch it with. Without this the picture would be the one thing still carrying <code>u</code>/<code>t</code>/<code>s</code> to the television, which would have defeated the point of the token.</p></div>
 </div>
 <div class="api-ep">
 <h3 id="ep-getartistinfo-getartistinfo2">getArtistInfo / getArtistInfo2</h3>
@@ -326,7 +331,7 @@
 <div class="api-note"><p class="api-note-h"><code>castToken</code></p>
 <p>A receiver fetches the media for itself and has no account, so the token is what authorises it. It is not single-use per request — the receiver makes many range requests for one track — but it <b>is</b> scoped to one song and to a limited lifetime. Presenting it for a different <code>id</code> is refused as though it were absent.</p>
 <p><b>Two different tokens travel on this parameter</b>, and a URL looks the same whichever issued it. They are not interchangeable behind it:</p>
-<ul class="doc-list"><li><code>castLoad</code>&#x27;s belongs to the server&#x27;s own cast session. There is genuinely no account behind a request carrying it, so it skips the account bitrate ceiling, and the request is also subject to the session&#x27;s own offset — the receiver probes with <code>timeOffset</code> stripped, and the server answers from what the <code>LOAD</code> declared rather than from the URL.</li><li><code>getCastToken</code>&#x27;s belongs to an account, for a cast some <em>other</em> sender is driving. So the ceiling is applied, and nothing about a session applies: such a request is an ordinary one that happens to carry a token where a password would be, <code>timeOffset</code> and all.</li></ul></div>
+<ul class="doc-list"><li><code>castLoad</code>&#x27;s belongs to the server&#x27;s own cast session. There is genuinely no account behind a request carrying it, so it skips the account bitrate ceiling, and the request is also subject to the session&#x27;s own offset — the receiver probes with <code>timeOffset</code> stripped, and the server answers from what the <code>LOAD</code> declared rather than from the URL. On <code>getCaptions</code> it authorises the caption ids that <code>LOAD</code> declared, and nothing else.</li><li><code>getCastToken</code>&#x27;s belongs to an account, for a cast some <em>other</em> sender is driving. So the ceiling <b>is</b> applied — there is somebody to apply it to — and nothing about a session applies: such a request is an ordinary one that happens to carry a token where a password would be, <code>timeOffset</code> and all. It also reaches <code>getCoverArt</code>, which the session token does not, because the server&#x27;s own cast sends a receiver no artwork and a client&#x27;s does.</li></ul></div>
 <div class="api-note"><p class="api-note-h"><code>castController</code></p>
 <p>While a cast session is live, a request from the client that <b>owns</b> it is answered <code>204</code> and the track is sent to the Chromecast instead, so that client does not play it a second time itself. Every other caller — a client that sent no <code>castController</code>, one whose id does not match, or a different account — is served the stream normally.</p>
 <p>Without this the redirect was global: any request in the server was answered <code>204</code> while anyone was casting, so starting a track on a phone played it on whatever receiver a browser had picked earlier.</p></div>
@@ -420,11 +425,11 @@
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
-<tr><td><code>castToken</code></td><td>string</td><td>The token minted by <code>castLoad</code>, accepted in place of credentials.</td></tr>
+<tr><td><code>castToken</code></td><td>string</td><td>A token from <code>castLoad</code> or <code>getCastToken</code>, accepted in place of credentials.</td></tr>
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>castToken</code></p>
-<p>Scoped as it is on <code>stream</code>, and additionally to the caption ids the LOAD declared: a track that LOAD did not offer is one the receiver has no reason to ask for, so the token does not authorise it.</p>
+<p>Scoped as it is on <code>stream</code>, and the two issuers differ by one notch here. <code>castLoad</code>&#x27;s is additionally scoped to the caption ids that LOAD declared: a track the LOAD did not offer is one the receiver has no reason to ask for, so the token does not authorise it. <code>getCastToken</code>&#x27;s authorises any caption of its song, because there is no LOAD of ours to scope it against — the client builds its own — and a subtitle of a song that account may read is no wider a reach than the song.</p>
 <p>The converted result is cached, because ffmpeg has to demux the whole container to collect one subtitle stream and the receiver fetches the track the moment it is switched on.</p></div>
 </div>
 </div>
@@ -1113,7 +1118,7 @@
 <h3 id="ep-getCastToken">getCastToken</h3>
 <p class="api-meta"><code>GET /rest/getCastToken.view</code>
 <span class="api-badge">JSON only</span></p>
-<p>Mints a token that lets a receiver fetch one song without credentials.</p>
+<p>Mints a token that lets a receiver fetch one track without credentials.</p>
 <h4>Parameters</h4>
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
@@ -1125,7 +1130,7 @@
 <table class="doc-table">
 <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
-<tr><td><code>castToken</code></td><td>string</td><td>Pass as the <code>castToken</code> parameter of <code>stream</code>.</td></tr>
+<tr><td><code>castToken</code></td><td>string</td><td>Pass as the <code>castToken</code> parameter of <code>stream</code>, <code>getCoverArt</code> or <code>getCaptions</code>.</td></tr>
 </tbody>
 </table>
 <h4>Errors</h4>
@@ -1137,10 +1142,15 @@
 <tr><td><code>50</code></td><td>Subsonic</td><td>The song is a personal upload belonging to another account.</td></tr>
 </tbody>
 </table>
-<p>For a cast this server is not driving. A browser that can cast by itself — Chrome&#x27;s Remote Playback API is the one this exists for — still has to give the receiver a URL it can fetch, and the receiver has no account.</p>
-<p><b>Requires only authentication.</b> Not <code>castRole</code>, and not the local-network rule the rest of this section carries, because it is the fallback for exactly the callers those two turn away: it would be no use if it were gated on them. What bounds it instead is the grant — one song, one account, twelve hours — and the read-permission check below, which is the load-bearing one, since what comes back opens a URL needing no credentials at all.</p>
+<p>For a cast this server is not driving. A client that holds its own Cast control channel — the Android and iOS apps both do — builds the receiver&#x27;s URLs itself, and the receiver has no account to build them with. Before this existed those URLs carried <code>u</code>/<code>t</code>/<code>s</code>, which is to say the account&#x27;s password: <code>t</code> is md5(password + salt) and <code>s</code> is the salt, and together they read the whole library as that person until the password changes.</p>
+<p><b>Requires only authentication.</b> Not <code>castRole</code>, and not the local-network rule the rest of this section carries. Neither would mean anything here: a client casting for itself is not asking this server to cast, so the permission to drive <em>this</em> server&#x27;s Chromecast, and the question of which network this server is on, are both beside the point.</p>
+<p>What bounds it instead is the grant — one song, one account, twelve hours — and the read-permission check below, which is the load-bearing one, since what comes back opens URLs needing no credentials at all.</p>
+<p><b>One grant covers the three things a LOAD needs</b>, and stopping at the audio would have defeated the exercise: the sleeve travels in the LOAD&#x27;s metadata and the receiver fetches that too, so a stream-only grant would have left the password on the television regardless.</p>
+<ul class="doc-list"><li><code>stream</code> — the song the grant names.</li><li><code>getCoverArt</code> — that song&#x27;s own artwork, resolved when the grant is minted rather than named by the caller, so asking for a grant can never be a way to name somebody else&#x27;s.</li><li><code>getCaptions</code> — any caption of that song. Deliberately one notch wider than the session token, which scopes to the ids one <code>LOAD</code> declared: there is no <code>LOAD</code> here to mirror, and a subtitle of a song the account may read is no wider a reach than the song.</li></ul>
+<p><code>hls.m3u8</code> is <b>not</b> covered. Its playlist copies the request&#x27;s credentials onto every segment URL, which a grant would have to be propagated through.</p>
 <p>It widens one thing deliberately: any account can now produce such a URL, where before only a <code>castRole</code> one could. The floor under that is that anyone who can read a song can already download it.</p>
-<p>Mint one per track, and again on a seek, the way <code>castLoad</code> does. Do not put <code>startImmediately</code> or <code>playableContainers</code> on a URL built with it — see those parameters for what a receiver does with the response they produce — and do put <code>pace=true</code> on it, since the server otherwise paces only for a browser&#x27;s own User-Agent.</p>
+<p>Mint one per track. Unlike <code>castLoad</code>&#x27;s, a seek does not need a fresh one — a client that owns the control channel seeks the receiver rather than reloading it, and the receiver goes on fetching the URL it already has, which is why the lifetime is hours rather than minutes.</p>
+<p>Do not put <code>startImmediately</code> or <code>playableContainers</code> on a URL built with it — see those parameters for what a receiver does with the response they produce — and do put <code>pace=true</code> on it, since the server otherwise paces only for a browser&#x27;s own User-Agent.</p>
 <p class="api-see">See also <a href="#ep-castLoad"><code>castLoad</code></a>.</p>
 </div>
 <div class="api-ep">

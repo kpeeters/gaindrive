@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""getCastToken: a credential a receiver can fetch one song with.
+"""getCastToken: a credential a receiver can fetch one track with.
 
-It exists for a cast this server is not driving — a browser casting by itself
-still has to hand the receiver a URL, and the receiver has no account. So the
-endpoint is gated on authentication and **nothing else**: not `castRole`, and
-not the local-network rule the other cast endpoints carry, because it is the
-fallback for exactly the callers those two turn away. These tests are mostly
-about proving those two gates really are absent, and that the grant is bounded
-the way the absence assumes.
+It exists for a cast this server is not driving. The Android and iOS apps hold
+their own Cast control channel and build the receiver's URLs themselves, and a
+receiver has no account — so those URLs used to carry `u`/`t`/`s`, which is the
+account's password. The endpoint is therefore gated on authentication and
+**nothing else**: not `castRole`, and not the local-network rule the other cast
+endpoints carry, since a client casting for itself is not asking this server to
+cast. These tests are mostly about proving those two gates really are absent,
+and that the grant is bounded the way the absence assumes — one song, and that
+song's stream, cover art and captions, and nothing else.
 
 The script creates a throwaway non-castRole account, uses it, and disables it
 on the way out — Subsonic has no deleteUser, the same compromise
@@ -83,6 +85,7 @@ def _failed(resp, code=None, why=""):
 
 
 SONGS = []
+COVERS = []
 
 
 def setup():
@@ -103,6 +106,8 @@ def setup():
     _ok(sr, "search3")
     for s in sr.get("searchResult3", {}).get("song", []):
         SONGS.append(s["id"])
+        if s.get("coverArt"):
+            COVERS.append(s["coverArt"])
     assert len(SONGS) >= 2, (
         "need at least two songs in the library to test token scoping")
 
@@ -179,6 +184,67 @@ def test_no_token_at_all_is_refused():
         f"an uncredentialled stream was served: HTTP {status} {body[:200]!r}")
 
 
+def test_token_fetches_the_cover_with_no_credentials():
+    """The sleeve travels in the LOAD and the receiver fetches it too.
+
+    A grant that stopped at the audio would leave the account's password on
+    the television anyway, which is the whole thing this is for.
+    """
+    if not COVERS:
+        print("      (skipped: no song in the search result has cover art)")
+        return
+    sr = _get("getCastToken", {"id": SONGS[0]}, user=PLAIN, password=PPASS)
+    tok = sr["castToken"]
+    status, headers, body = _raw("getCoverArt", {"id": COVERS[0],
+                                                 "castToken": tok})
+    assert status == 200, f"getCoverArt with a grant: HTTP {status}"
+    assert len(body) > 0, "getCoverArt with a grant returned an empty body"
+    assert headers.get("Content-Type", "").startswith("image/"), (
+        f"expected an image, got {headers.get('Content-Type')}: {body[:120]!r}")
+
+
+def test_the_cover_is_scoped_to_the_grant():
+    """The cover id is resolved at mint time, not named by the caller."""
+    if len(COVERS) < 2 or COVERS[0] == COVERS[1]:
+        print("      (skipped: need two songs with different cover art)")
+        return
+    tok = _get("getCastToken", {"id": SONGS[0]},
+               user=PLAIN, password=PPASS)["castToken"]
+    status, _, body = _raw("getCoverArt", {"id": COVERS[1], "castToken": tok})
+    assert status != 200 or b"failed" in body[:400], (
+        f"a grant for {COVERS[0]} served cover {COVERS[1]}: HTTP {status}")
+
+
+def test_captions_get_past_authentication():
+    """Authorisation, not content — most test libraries have no subtitles.
+
+    Without a credential getCaptions answers a Subsonic auth error; with a
+    valid grant it gets as far as looking, and answers 404 when there is
+    nothing to find. The difference between those two is the whole assertion,
+    and it holds whether or not the library contains a single caption.
+    """
+    tok = _get("getCastToken", {"id": SONGS[0]},
+               user=PLAIN, password=PPASS)["castToken"]
+
+    bare_status, _, bare_body = _raw("getCaptions", {"id": SONGS[0]})
+    assert bare_status != 200 or b"failed" in bare_body[:400], (
+        "getCaptions served an uncredentialled request")
+
+    status, _, body = _raw("getCaptions", {"id": SONGS[0], "castToken": tok})
+    assert not (status != 200 and b'"code":40' in body[:400]), (
+        f"a grant was refused by getCaptions: HTTP {status} {body[:200]!r}")
+    assert status in (200, 404), (
+        f"getCaptions with a grant: unexpected HTTP {status} {body[:200]!r}")
+
+
+def test_captions_are_scoped_to_the_grants_song():
+    tok = _get("getCastToken", {"id": SONGS[0]},
+               user=PLAIN, password=PPASS)["castToken"]
+    status, _, body = _raw("getCaptions", {"id": SONGS[1], "castToken": tok})
+    assert status != 200 or b"failed" in body[:400], (
+        f"a grant for {SONGS[0]} served captions for {SONGS[1]}: HTTP {status}")
+
+
 def test_the_account_ceiling_still_applies():
     """A grant names an account, so the account's bitrate cap follows it.
 
@@ -222,6 +288,10 @@ TESTS = [
     test_token_is_scoped_to_one_song,
     test_an_invented_token_is_refused,
     test_no_token_at_all_is_refused,
+    test_token_fetches_the_cover_with_no_credentials,
+    test_the_cover_is_scoped_to_the_grant,
+    test_captions_get_past_authentication,
+    test_captions_are_scoped_to_the_grants_song,
     test_the_account_ceiling_still_applies,
 ]
 

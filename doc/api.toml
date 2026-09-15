@@ -475,13 +475,33 @@ summary    = 'Search and list within the uploads area instead of the shared libr
 kind       = 'additions'
 applies_to = ["getCoverArt"]
 section    = "browsing"
-summary    = 'Reach the extra images in an album folder, beyond the cover.'
+summary    = 'Reach the extra images in an album folder, and let a receiver fetch the sleeve.'
 
   [[endpoint.param]]
   name    = "index"
   type    = "int"
   default = '0'
   doc     = '0 is the main cover; 1 and up select the extras `getAlbumImages` counted.'
+
+  [[endpoint.param]]
+  name  = "castToken"
+  type  = "string"
+  doc   = 'A token from `getCastToken`, accepted in place of credentials.'
+  notes = '''
+Only `getCastToken`'s, not `castLoad`'s: the server's own cast sends a
+receiver no artwork at all, so the session token has no reason to reach here
+and does not.
+
+Scoped to the **one cover** the grant's song carries, resolved when the grant
+was minted rather than named by the caller. Presenting it for any other id is
+refused as though it were absent, and a grant for a track with no artwork
+authorises nothing here.
+
+A receiver fetches the sleeve named in the LOAD's metadata and has no account
+to fetch it with. Without this the picture would be the one thing still
+carrying `u`/`t`/`s` to the television, which would have defeated the point of
+the token.
+'''
 
 [[endpoint]]
 kind       = 'additions'
@@ -670,11 +690,14 @@ whichever issued it. They are not interchangeable behind it:
   no account behind a request carrying it, so it skips the account bitrate
   ceiling, and the request is also subject to the session's own offset — the
   receiver probes with `timeOffset` stripped, and the server answers from what
-  the `LOAD` declared rather than from the URL.
+  the `LOAD` declared rather than from the URL. On `getCaptions` it authorises
+  the caption ids that `LOAD` declared, and nothing else.
 * `getCastToken`'s belongs to an account, for a cast some *other* sender is
-  driving. So the ceiling is applied, and nothing about a session applies:
-  such a request is an ordinary one that happens to carry a token where a
-  password would be, `timeOffset` and all.
+  driving. So the ceiling **is** applied — there is somebody to apply it to —
+  and nothing about a session applies: such a request is an ordinary one that
+  happens to carry a token where a password would be, `timeOffset` and all.
+  It also reaches `getCoverArt`, which the session token does not, because the
+  server's own cast sends a receiver no artwork and a client's does.
 '''
 
   [[endpoint.param]]
@@ -943,11 +966,15 @@ summary    = 'A Chromecast fetches its own subtitle track and has no credentials
   [[endpoint.param]]
   name  = "castToken"
   type  = "string"
-  doc   = 'The token minted by `castLoad`, accepted in place of credentials.'
+  doc   = 'A token from `castLoad` or `getCastToken`, accepted in place of credentials.'
   notes = '''
-Scoped as it is on `stream`, and additionally to the caption ids the LOAD
-declared: a track that LOAD did not offer is one the receiver has no reason to
-ask for, so the token does not authorise it.
+Scoped as it is on `stream`, and the two issuers differ by one notch here.
+`castLoad`'s is additionally scoped to the caption ids that LOAD declared: a
+track the LOAD did not offer is one the receiver has no reason to ask for, so
+the token does not authorise it. `getCastToken`'s authorises any caption of
+its song, because there is no LOAD of ours to scope it against — the client
+builds its own — and a subtitle of a song that account may read is no wider a
+reach than the song.
 
 The converted result is cached, because ffmpeg has to demux the whole
 container to collect one subtitle stream and the receiver fetches the track
@@ -2236,28 +2263,55 @@ kind     = 'endpoint'
 name     = "getCastToken"
 section  = "cast"
 response = 'subsonic-json'
-summary  = 'Mints a token that lets a receiver fetch one song without credentials.'
+summary  = 'Mints a token that lets a receiver fetch one track without credentials.'
 notes    = '''
-For a cast this server is not driving. A browser that can cast by itself —
-Chrome's Remote Playback API is the one this exists for — still has to give
-the receiver a URL it can fetch, and the receiver has no account.
+For a cast this server is not driving. A client that holds its own Cast
+control channel — the Android and iOS apps both do — builds the receiver's
+URLs itself, and the receiver has no account to build them with. Before this
+existed those URLs carried `u`/`t`/`s`, which is to say the account's
+password: `t` is md5(password + salt) and `s` is the salt, and together they
+read the whole library as that person until the password changes.
 
 **Requires only authentication.** Not `castRole`, and not the local-network
-rule the rest of this section carries, because it is the fallback for exactly
-the callers those two turn away: it would be no use if it were gated on them.
+rule the rest of this section carries. Neither would mean anything here: a
+client casting for itself is not asking this server to cast, so the permission
+to drive *this* server's Chromecast, and the question of which network this
+server is on, are both beside the point.
+
 What bounds it instead is the grant — one song, one account, twelve hours —
 and the read-permission check below, which is the load-bearing one, since what
-comes back opens a URL needing no credentials at all.
+comes back opens URLs needing no credentials at all.
+
+**One grant covers the three things a LOAD needs**, and stopping at the audio
+would have defeated the exercise: the sleeve travels in the LOAD's metadata
+and the receiver fetches that too, so a stream-only grant would have left the
+password on the television regardless.
+
+* `stream` — the song the grant names.
+* `getCoverArt` — that song's own artwork, resolved when the grant is minted
+  rather than named by the caller, so asking for a grant can never be a way to
+  name somebody else's.
+* `getCaptions` — any caption of that song. Deliberately one notch wider than
+  the session token, which scopes to the ids one `LOAD` declared: there is no
+  `LOAD` here to mirror, and a subtitle of a song the account may read is no
+  wider a reach than the song.
+
+`hls.m3u8` is **not** covered. Its playlist copies the request's credentials
+onto every segment URL, which a grant would have to be propagated through.
 
 It widens one thing deliberately: any account can now produce such a URL,
 where before only a `castRole` one could. The floor under that is that anyone
 who can read a song can already download it.
 
-Mint one per track, and again on a seek, the way `castLoad` does. Do not put
-`startImmediately` or `playableContainers` on a URL built with it — see those
-parameters for what a receiver does with the response they produce — and do
-put `pace=true` on it, since the server otherwise paces only for a browser's
-own User-Agent.
+Mint one per track. Unlike `castLoad`'s, a seek does not need a fresh one — a
+client that owns the control channel seeks the receiver rather than reloading
+it, and the receiver goes on fetching the URL it already has, which is why the
+lifetime is hours rather than minutes.
+
+Do not put `startImmediately` or `playableContainers` on a URL built with it —
+see those parameters for what a receiver does with the response they produce —
+and do put `pace=true` on it, since the server otherwise paces only for a
+browser's own User-Agent.
 '''
 see = ["castLoad"]
 
@@ -2270,7 +2324,7 @@ see = ["castLoad"]
   [[endpoint.field]]
   name = "castToken"
   type = "string"
-  doc  = 'Pass as the `castToken` parameter of `stream`.'
+  doc  = 'Pass as the `castToken` parameter of `stream`, `getCoverArt` or `getCaptions`.'
 
   [[endpoint.error]]
   code = '10'

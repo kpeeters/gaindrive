@@ -4943,8 +4943,6 @@ GainDrive::GainDrive(const std::string& db_path,
 	// getCoverArt — serve a cover image, optionally scaled.
 	server_.Get("/rest/getCoverArt.view", [this](const httplib::Request& req,
 	                                              httplib::Response& res) {
-		if (!check_auth(req, res, store_)) return;
-
 		auto it = req.params.find("id");
 		if (it == req.params.end()) {
 			res.set_content(subsonic_error(10, "Required parameter missing: id."),
@@ -4953,6 +4951,22 @@ GainDrive::GainDrive(const std::string& db_path,
 			}
 
 		int folder_id = to_int(it->second, -1);
+
+		// The id is read before the token, as stream.view reads its own first
+		// and for the same reason: a grant authorises *this* cover or none.
+		//
+		// A receiver fetching the sleeve a LOAD named has no account, and this
+		// is the whole reason a grant covers artwork rather than stopping at
+		// the audio: the picture travels in the LOAD's metadata, the receiver
+		// goes and gets it, and a grant that did not cover it would leave the
+		// account's password on the television anyway. The server's own cast
+		// never needed this because it sends no artwork at all; the clients
+		// that hold their own control channel do.
+		auto tok_it = req.params.find("castToken");
+		const bool grant_authed = tok_it != req.params.end()
+		                       && grant_allows_cover(tok_it->second, folder_id);
+		if (!grant_authed && !check_auth(req, res, store_)) return;
+
 		std::string rel_path = store_.get_cover_path(folder_id);
 
 		// A cover is as personal as the item it belongs to, and every stored
@@ -4966,11 +4980,16 @@ GainDrive::GainDrive(const std::string& db_path,
 		// transactions — so the only branch that costs a lookup is the one
 		// with no cover_path at all, an artist folder, which the handler is
 		// about to look up anyway.
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
-		                          rel_path.empty()
-		                              ? store_.get_folder_path(folder_id)
-		                              : rel_path,
-		                          fmt_of(req) == "json")) return;
+		//
+		// A grant skips it, with the same safety stream.view relies on: the
+		// check was run against its account at getCastToken, and the grant
+		// names the one cover that song passed for.
+		if (!grant_authed
+		    && !check_item_read_perm(req, res, store_, uploads_root_name_,
+		                             rel_path.empty()
+		                                 ? store_.get_folder_path(folder_id)
+		                                 : rel_path,
+		                             fmt_of(req) == "json")) return;
 
 		namespace fs = std::filesystem;
 
@@ -6543,9 +6562,10 @@ GainDrive::GainDrive(const std::string& db_path,
 
 		// The Chromecast fetches its own subtitle track and has no credentials
 		// to do it with — the same problem stream.view solves the same way.
-		// Handing the television the account's password instead would work and
-		// is what the Android app does for its stream URLs; it is not something
-		// to spread further.
+		// Handing the television the account's password instead would work,
+		// and is what the phone apps used to do for the URLs they built
+		// themselves; getCastToken is what stopped that, and the second
+		// validator below is its half of this endpoint.
 		//
 		// Both ids are read before the token is checked, for the same reason
 		// stream.view reads its id first: the token authorises one song and one
@@ -6556,11 +6576,19 @@ GainDrive::GainDrive(const std::string& db_path,
 		bool cast_authed = tok_it != req.params.end()
 		                && cast_manager_.valid_caption_token(tok_it->second,
 		                                                     req_song_id, index);
-		if (!cast_authed && !check_auth(req, res, store_)) return;
+		// A grant is the other credential this parameter carries, and it is
+		// scoped one notch wider: any caption of its song, rather than the
+		// ids one LOAD declared. There is no LOAD here to mirror — the client
+		// that minted it builds its own — and a subtitle of a song the account
+		// may already read is not a wider reach than the song was.
+		const bool grant_authed = !cast_authed && tok_it != req.params.end()
+		                       && grant_allows_captions(tok_it->second,
+		                                                req_song_id);
+		if (!cast_authed && !grant_authed && !check_auth(req, res, store_)) return;
 
-		// As in stream.view: the cast token is its own authority, everyone
+		// As in stream.view: either token is its own authority, everyone
 		// else may not read another user's uploads by id.
-		if (!cast_authed) {
+		if (!cast_authed && !grant_authed) {
 			auto song = store_.get_song(req_song_id);
 			if (song && !check_item_read_perm(req, res, store_, uploads_root_name_,
 			                                  song->path, use_json)) return;
@@ -6580,7 +6608,8 @@ GainDrive::GainDrive(const std::string& db_path,
 		// single most useful fact when captions do not appear on a cast.
 		std::cout << stamp() << "getCaptions: id=" << log_safe(it->second, 64)
 		          << " captionId=" << index << " " << vtt.size() << " bytes"
-		          << (cast_authed ? " (cast token)" : "")
+		          << (cast_authed ? " (cast token)"
+		                          : grant_authed ? " (grant)" : "")
 		          << " to " << client_addr(req) << std::endl;
 		res.set_content(vtt, "text/vtt");
 		});
@@ -7218,28 +7247,34 @@ GainDrive::GainDrive(const std::string& db_path,
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getCastToken — a credential a receiver can fetch one song with, for a
+	// getCastToken — a credential a receiver can fetch one track with, for a
 	// cast this server is not driving.
 	//
-	// Chrome can cast by itself, and that is the fallback for exactly the two
-	// cases the endpoints below cannot serve: an account without castRole, and
-	// a client that is not on this server's network. **So this is gated on
-	// neither of them.** It would be no use if it were — it exists precisely
-	// for the callers those two turn away — and it sits here, above the gated
-	// block, so that the asymmetry is read rather than discovered.
+	// The Android and iOS apps hold their own Cast control channel and build
+	// the receiver's URLs themselves, which until now meant building them with
+	// `u`/`t`/`s`. getCaptions' own comment below says what is wrong with
+	// that: it hands the television the account's password. This is the way
+	// out, and the phone apps are its callers.
+	//
+	// **Gated on authentication alone** — not castRole, and not the
+	// local-network rule the endpoints below carry. Neither would make sense
+	// here: a client casting for itself is not asking this server to cast, so
+	// neither the permission to drive this server's Chromecast nor the
+	// question of which network this server is on has any bearing on it. It
+	// sits above the gated block so the asymmetry is read rather than
+	// discovered.
 	//
 	// What bounds it instead is the grant: one song, one account, twelve
 	// hours, minted only after the same check_item_read_perm that castLoad
 	// runs before minting its own. That check is the load-bearing one, because
-	// what comes back opens a URL that needs no credentials at all.
+	// what comes back opens URLs that need no credentials at all.
 	//
 	// It does widen something, deliberately: any account can now produce such
 	// a URL, where before only a castRole one could. ISSUES.md carries it. The
 	// floor under it is that anyone who can read a song can already download
 	// it.
 	//
-	// JSON only, the reason getServerSettings gives: this is a credential, and
-	// the one client that asks for it speaks JSON.
+	// JSON only, the reason getServerSettings gives: this is a credential.
 	server_.Get("/rest/getCastToken.view", [this](const httplib::Request& req,
 	                                              httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -7256,13 +7291,18 @@ GainDrive::GainDrive(const std::string& db_path,
 			return;
 			}
 		const int song_id = to_int(it->second, -1);
-		auto song = store_.get_song(song_id);
+		// get_song_entry() rather than get_song(): both carry the path the
+		// permission check needs, and only this one carries cover_art_id —
+		// which is what lets the grant cover the sleeve without the caller
+		// naming it, and so without a caller being able to name someone
+		// else's.
+		auto song = store_.get_song_entry(song_id);
 		if (!song) { err(70, "Song not found."); return; }
 		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
 		                          song->path, use_json)) return;
 
 		const std::string token = mint_stream_grant(req.get_param_value("u"),
-		                                            song_id);
+		                                            song_id, song->cover_art_id);
 		if (token.empty()) { err(0, "Could not mint a stream token."); return; }
 
 		res.set_content(subsonic_ok_json([&](nlohmann::json& r) {
@@ -10037,15 +10077,21 @@ void GainDrive::cast_teardown()
 	++cast_session_gen_;
 	}
 
-// A grant lives twelve hours, matching CastManager's CAST_TOKEN_TTL and for
-// the same reason it gives: it is a backstop for a cast somebody walked away
-// from, not a timeout a receiver will ever reach — a track is minted its own
-// grant, and so is every seek.
+// Twelve hours, matching CastManager's CAST_TOKEN_TTL, but for a stronger
+// reason than the backstop that one describes. A client holding its own Cast
+// channel does **not** re-issue the LOAD to seek: the receiver seeks by byte
+// range against the URL it already has, and goes on fetching that same URL for
+// as long as the track is open. So this is not a timeout nobody reaches, it is
+// the length of time a receiver may still come back — and shortening it would
+// break a seek an hour into a concert recording.
 static constexpr auto   STREAM_GRANT_TTL = std::chrono::hours(12);
 // A bound, because any authenticated account can mint and nothing else evicts.
-static constexpr size_t STREAM_GRANT_MAX = 256;
+// Entries are a few dozen bytes; the number is about not growing without
+// limit, not about memory.
+static constexpr size_t STREAM_GRANT_MAX = 1024;
 
-std::string GainDrive::mint_stream_grant(const std::string& user, int song_id)
+std::string GainDrive::mint_stream_grant(const std::string& user, int song_id,
+                                         int cover_id)
 	{
 	// 128 bits, and **the return value checked**, for the reason
 	// CastManager::mint_token() records: ignoring it leaves the buffer holding
@@ -10066,18 +10112,28 @@ std::string GainDrive::mint_stream_grant(const std::string& user, int song_id)
 	// reached through this map: nothing else has to notice one has expired.
 	for (auto it = grants_.begin(); it != grants_.end(); )
 		it = (it->second.expires <= now) ? grants_.erase(it) : std::next(it);
-	// Dropped wholesale at the cap, which is what the login throttle does and
-	// is right for the same reason: every entry is re-mintable by the client
-	// that wanted it, so being wrong costs one extra round trip rather than a
-	// cast that cannot be started.
-	if (grants_.size() >= STREAM_GRANT_MAX) grants_.clear();
-	grants_[hex] = {user, song_id, now + STREAM_GRANT_TTL};
+	// The oldest goes, not the table.
+	//
+	// The login throttle clears wholesale at its cap and is right to: every
+	// entry there is re-creatable at no cost. A grant is not. A receiver holds
+	// its URL for the length of a track and re-fetches it on every seek, with
+	// nothing on this server able to tell it to ask again — so clearing would
+	// stop music that is playing, on a machine busy enough to reach the cap.
+	// Expiry order is mint order, the lifetime being fixed.
+	if (grants_.size() >= STREAM_GRANT_MAX) {
+		auto oldest = grants_.begin();
+		for (auto it = grants_.begin(); it != grants_.end(); ++it)
+			if (it->second.expires < oldest->second.expires) oldest = it;
+		grants_.erase(oldest);
+		}
+	grants_[hex] = {user, song_id, cover_id, now + STREAM_GRANT_TTL};
 	return hex;
 	}
 
-std::string GainDrive::stream_grant_user(const std::string& token, int song_id)
+std::optional<GainDrive::StreamGrant>
+GainDrive::grant_lookup(const std::string& token)
 	{
-	if (token.empty()) return {};
+	if (token.empty()) return std::nullopt;
 	const auto now = std::chrono::steady_clock::now();
 	std::lock_guard<std::mutex> lk(grant_mu_);
 	// Walked rather than looked up, so the comparison can be constant-time.
@@ -10092,12 +10148,34 @@ std::string GainDrive::stream_grant_user(const std::string& token, int song_id)
 			diff |= static_cast<unsigned char>(tok[i])
 			      ^ static_cast<unsigned char>(token[i]);
 		if (diff) continue;
-		// Scoped to one song, so presenting it for another is refused exactly
-		// as if it were absent — the rule castToken already follows.
-		if (g.expires <= now || g.song_id != song_id) return {};
-		return g.user;
+		if (g.expires <= now) return std::nullopt;
+		return g;
 		}
-	return {};
+	return std::nullopt;
+	}
+
+std::string GainDrive::stream_grant_user(const std::string& token, int song_id)
+	{
+	auto g = grant_lookup(token);
+	// Scoped to one song, so presenting it for another is refused exactly as
+	// if it were absent — the rule castToken already follows.
+	if (!g || g->song_id != song_id) return {};
+	return g->user;
+	}
+
+bool GainDrive::grant_allows_cover(const std::string& token, int cover_id)
+	{
+	auto g = grant_lookup(token);
+	// The >= 0 matters: a song with no artwork has cover_id -1, and so does a
+	// request whose id did not parse. Without it those two would agree and a
+	// grant for an art-less track would authorise `getCoverArt?id=nonsense`.
+	return g && g->cover_id >= 0 && g->cover_id == cover_id;
+	}
+
+bool GainDrive::grant_allows_captions(const std::string& token, int song_id)
+	{
+	auto g = grant_lookup(token);
+	return g && g->song_id == song_id;
 	}
 
 bool GainDrive::cast_owned_by(const httplib::Request& req)

@@ -190,34 +190,62 @@ class GainDrive {
 		// stopCast endpoint and from the SSE watchdog thread.
 		void cast_teardown();
 
-		// A credential-free grant to fetch one song, for a receiver that has
-		// no account of its own.
+		// A credential-free grant to everything one track's playback needs, for
+		// a receiver that has no account of its own.
 		//
-		// This is the browser-driven cast's half of what CastManager's token
-		// does for the server-driven one, and it cannot be that token:
-		// CastManager holds a *single* one bound to the live session, and
-		// these are per-client and concurrent — two people casting from two
-		// browsers have no session on this server at all.
+		// This is the other half of what CastManager's token does for the
+		// server-driven cast, and it cannot be that token: CastManager holds a
+		// *single* one bound to the live session, and these belong to clients
+		// that hold the Cast control channel themselves — concurrent, and with
+		// no session on this server at all.
 		//
 		// Scoped to one song, one account and a short life, because the point
 		// of it is not to hand a receiver `u`/`t`/`s`: `t` is
 		// md5(password + salt) and `s` is the salt, which together read the
 		// whole library as that person for as long as the password stands.
+		//
+		// It covers three endpoints because a LOAD needs three things, and a
+		// grant that covered only the audio would leave the password on the
+		// television regardless — the sleeve travels in the LOAD's metadata
+		// and the receiver fetches that too.
 		struct StreamGrant
 			{
 			std::string                           user;
-			int                                   song_id = -1;
+			int                                   song_id  = -1;
+			// The song's own cover_art_id, resolved when the grant is minted
+			// rather than named by the caller, so that asking for a grant can
+			// never be a way to name somebody else's artwork.
+			int                                   cover_id = -1;
 			std::chrono::steady_clock::time_point expires;
 			};
 		std::mutex                                   grant_mu_;
 		std::unordered_map<std::string, StreamGrant> grants_;
 
-		// Mint a grant for `user` to fetch `song_id`; empty if it could not be.
-		std::string mint_stream_grant(const std::string& user, int song_id);
+		// Mint a grant for `user` covering `song_id` and its cover art; empty
+		// if it could not be.
+		std::string mint_stream_grant(const std::string& user, int song_id,
+		                              int cover_id);
+
+		// The live grant a token names, or nullopt. Takes the lock and returns
+		// a copy rather than a pointer into the table, so the three callers
+		// below cannot hold a reference across an eviction.
+		std::optional<StreamGrant> grant_lookup(const std::string& token);
 
 		// The account a grant authorises for `song_id`, or empty when none
 		// does — expired, for another song, or simply not a grant.
 		std::string stream_grant_user(const std::string& token, int song_id);
+
+		// True when a grant covers this cover art. Separate from the above
+		// because a cover is addressed by its own id, not by the song's.
+		bool grant_allows_cover(const std::string& token, int cover_id);
+
+		// True when a grant covers a caption of its song.
+		//
+		// Any caption of it, deliberately unlike valid_caption_token(), which
+		// scopes to the ids one LOAD declared. There is no LOAD here to
+		// mirror — the client builds its own — and a subtitle of a song the
+		// account may already read is not a wider reach than the song was.
+		bool grant_allows_captions(const std::string& token, int song_id);
 
 		// Refuse a cast request that did not come from the network this
 		// server is on, and end any session the refused caller owns.
