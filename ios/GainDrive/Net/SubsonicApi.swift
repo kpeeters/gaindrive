@@ -255,4 +255,26 @@ extension SubsonicClient {
 			expecting: GetRecentSongsBody.self
 		).recentSongs?.song ?? []
 	}
+
+	// MARK: - Casting
+
+	/// A credential a Cast receiver can fetch one track with, so the URL we hand
+	/// it need not carry ours.
+	///
+	/// This app holds the Cast control channel itself and builds the receiver's
+	/// URLs, and a receiver has no account — so those URLs used to carry
+	/// `u`/`t`/`s`, which together are the password: `t` is md5(password + salt)
+	/// and `s` is the salt, and a television holding them reads the whole library
+	/// as this person until the password changes.
+	///
+	/// One token covers the track's stream, its cover art and its subtitles,
+	/// expires in twelve hours, and reaches nothing the account could not already
+	/// read. A gaindrive extension, and a server without it answers an error —
+	/// which `CastUrls.castToken(for:)` degrades to "carry on with the ordinary
+	/// credentials" rather than surfacing, since that is exactly what this app
+	/// did before the endpoint existed.
+	func castToken(id: String) async throws -> String? {
+		try await perform("getCastToken", parameters: ["id": id], expecting: CastTokenBody.self)
+			.castToken
+	}
 }

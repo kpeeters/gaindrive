@@ -7,16 +7,21 @@
 //	full text of the GPL.
 
 import Foundation
+import OSLog
 
 /// Marks a URL as one that will be read at playback speed, so the server
 /// delivers it at roughly 1x instead of as fast as the socket will take it.
 ///
 /// **The server cannot work this out for itself, which is why it has to be
-/// said.** It paces a browser by its `Mozilla/` User-Agent and a server-driven
-/// cast by its `castToken`; a receiver on our route has neither, because this
-/// app holds the control channel itself and hands over a URL built with the
-/// ordinary credentials. From the server's side that is indistinguishable from a
-/// third-party Subsonic client, which wants the opposite treatment.
+/// said.** It paces a browser by its `Mozilla/` User-Agent and its *own* cast by
+/// knowing it started it; a receiver on our route is neither, because this app
+/// holds the control channel itself. From the server's side that is
+/// indistinguishable from a third-party Subsonic client, which wants the
+/// opposite treatment.
+///
+/// Not the same question `withCastToken(_:_:)` answers, and the two are applied
+/// together without either subsuming the other: a grant says *who may fetch*,
+/// `pace` says *how fast to send*.
 ///
 /// **What happens without it is not a slow stream but a dead one.** A receiver
 /// reads at 1x and stops reading once its buffer is full; unpaced, the server
@@ -35,6 +40,38 @@ import Foundation
 func paced(_ url: URL) -> URL {
 	guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
 	parts.queryItems = (parts.queryItems ?? []) + [URLQueryItem(name: "pace", value: "true")]
+	return parts.url ?? url
+}
+
+/// Swaps this account's credentials out of a URL for a grant that opens one
+/// track and nothing else.
+///
+/// **What it replaces is the password.** `u`/`t`/`s` are the account's
+/// credentials — `t` is md5(password + salt) and `s` is the salt — so a
+/// television handed them reads the whole library as this person for as long as
+/// the password stands, from its own logs and from anything on the path. The
+/// grant is one song, twelve hours, and reaches nothing the account could not
+/// already read. `getCaptions`' own comment in `src/gaindrive.cc` said as much
+/// about the old arrangement before there was anything to do about it.
+///
+/// `v`, `c` and `f` stay: the server ignores them on a grant-authed request, and
+/// `c` is what names this client in its log. Any existing `castToken` is dropped
+/// first, so applying this twice cannot leave two for the server to pick between.
+///
+/// **A nil token returns the URL untouched**, which is what keeps the call sites
+/// free of branches — a server too old to mint one is not an error, it is the
+/// behaviour this app had before the endpoint existed.
+///
+/// Applied at the cast route rather than in `StreamUrls`, for the reason
+/// `paced(_:)` gives: those builders are shared with playback, downloads and
+/// pins, where the ordinary credentials are exactly right.
+func withCastToken(_ url: URL, _ token: String?) -> URL {
+	guard let token, !token.isEmpty else { return url }
+	guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+	let kept = (parts.queryItems ?? []).filter {
+		!["u", "t", "s", "castToken"].contains($0.name)
+	}
+	parts.queryItems = kept + [URLQueryItem(name: "castToken", value: token)]
 	return parts.url ?? url
 }
 
@@ -86,6 +123,12 @@ private let castNativeTypes: Set<String> = [
 struct CastUrls {
 	let targets: StreamTargets
 	let registry: ServerRegistry
+
+	// `nonisolated` as `CastDiscovery` declares its own: a static in a
+	// `@MainActor` type is main-actor isolated otherwise, which is a constraint
+	// a logger has no reason to carry.
+	nonisolated private static let log = Logger(
+		subsystem: "org.gaindrive.ios", category: "cast")
 
 	/// The audio a receiver should fetch.
 	///
@@ -148,9 +191,43 @@ struct CastUrls {
 	/// The sleeve the television shows. An ordinary cover URL — the receiver
 	/// fetches it from the same server as the audio, so if it can reach one it
 	/// can reach the other.
+	///
+	/// Which is also why it needs the same credential, and why the grant covers
+	/// cover art rather than stopping at the stream: this URL travels to the
+	/// receiver in the `LOAD`'s metadata and the receiver goes and gets it, so a
+	/// token that covered only the audio would have left the password on the
+	/// television regardless. `CastEngine.load` applies it to both.
 	func artwork(for song: Song) -> URL? {
 		registry.clientsSnapshot().coverUrls
 			.source(song.coverArt, size: CoverSize.hero)?.url
+	}
+
+	/// A grant for one track, or nil to carry on with the ordinary credentials.
+	///
+	/// **Nil is a normal answer rather than a failure.** A server older than the
+	/// endpoint answers a failed envelope, and what that leaves — a URL still
+	/// carrying `u`/`t`/`s` — is exactly what this app did before the endpoint
+	/// existed. There is nothing to tell the person holding the phone and
+	/// nothing to abandon a cast over. It is logged, because "why is the password
+	/// still going to the television" should be answerable from the log rather
+	/// than by reading this.
+	///
+	/// **One per track, and not per seek.** This app seeks the receiver rather
+	/// than re-issuing the LOAD, so the receiver goes on fetching the URL it
+	/// already holds for as long as the track is open — which is why the server's
+	/// grant lasts hours, and why it evicts its oldest rather than clearing its
+	/// table when full.
+	func castToken(for song: Song) async -> String? {
+		guard let client = registry.clientsSnapshot().client(for: song.ref.server) else {
+			return nil
+		}
+		do {
+			return try await client.castToken(id: song.ref.id)
+		} catch {
+			Self.log.info(
+				"no cast token (\(error.localizedDescription, privacy: .public)); sending the account's own credentials")
+			return nil
+		}
 	}
 
 }

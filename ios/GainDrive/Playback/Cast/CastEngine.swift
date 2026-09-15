@@ -179,16 +179,32 @@ final class CastEngine: PlaybackEngine {
 			onStateChange?()
 			await prewarmer.warm(target)
 		}
+		// **Minted here and nowhere else**, and after the warm rather than
+		// before it. This is the one point at which a URL actually reaches a
+		// receiver: `target(for:)` is also called by the track-info sheet, which
+		// wants only the quality, and by `prewarmNext()`, and minting in
+		// `CastUrls` would burn a grant on each of those to say nothing.
+		//
+		// The warm keeps the ordinary credentials on purpose. It is a request
+		// *this app* makes, and it warms the same transcode either way: the
+		// server's cache is keyed on the file and the plan, and the account's
+		// ceiling is the same whether the server reads it from `u` or from the
+		// grant.
+		//
+		// One token, two URLs. The sleeve travels to the receiver in the
+		// metadata and is fetched by it, so a grant applied only to the audio
+		// would leave the account's password on the television regardless.
+		let token = await urls.castToken(for: song)
 		session.load(
 			CastMedia(
-				url: target.url,
+				url: withCastToken(target.url, token),
 				contentType: target.contentType,
 				duration: song.duration > 0 ? Double(song.duration) : nil,
 				startAt: offset,
 				title: song.title,
 				artist: song.artistName.isEmpty ? nil : song.artistName,
 				album: song.albumTitle.isEmpty ? nil : song.albumTitle,
-				artwork: urls.artwork(for: song),
+				artwork: urls.artwork(for: song).map { withCastToken($0, token) },
 				// What is being *sent*, not what the library calls it: a
 				// soundtrack wants the music metadata block, or the television —
 				// or the amp's app — is given a movie's fields and shows
