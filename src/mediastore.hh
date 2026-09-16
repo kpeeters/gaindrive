@@ -9,6 +9,7 @@
 #include <optional>
 #include <filesystem>
 #include <mutex>
+#include <system_error>
 #include <SQLiteCpp/SQLiteCpp.h>
 
 #include "chapters.hh"
@@ -24,6 +25,29 @@ inline bool is_hidden_name(const std::filesystem::path& p)
 	{
 	auto name = p.filename().string();
 	return !name.empty() && name.front() == '.';
+	}
+
+// The marker a producer holds while a personal upload batch is still being
+// rearranged: "<uploads>/<user>/<uuid>.inflight", beside the batch directory
+// and deliberately not inside it, because reparent_loose_media() sweeps every
+// regular file at the top of a batch down into <artist>/.  The archive staging
+// file "<uuid>.upload.part" sits beside a batch for the same reason.
+//
+// On disk rather than in memory because the thing it guards against outlives a
+// process: a server killed mid-fetch must not come back and index the part
+// files the download tool left behind, several of which end in .m4a and would
+// otherwise each earn a songs row.  It says one thing only -- this batch's
+// directory layout is still moving -- and it is released after the fold and
+// before the scan, which is what stops scan_batch() skipping its own batch.
+inline std::filesystem::path batch_marker(const std::filesystem::path& batch)
+	{
+	return batch.parent_path() / (batch.filename().string() + ".inflight");
+	}
+
+inline bool batch_held(const std::filesystem::path& batch)
+	{
+	std::error_code ec;
+	return std::filesystem::exists(batch_marker(batch), ec);
 	}
 
 // One album as Phase 1 read it off the disk. Defined in mediastore.cc, because
@@ -86,20 +110,6 @@ class MediaStore {
 		// dirs are stored-form paths "<root>/<dir>". A bare root name means the
 		// root itself; if present, falls back to a full scan().
 		void scan_dirs(const std::set<std::string>& dirs);
-
-		// Reconcile the uploads root with the filesystem: prune the rows of
-		// every indexed batch directory that is no longer there.  Nothing else
-		// ever does — scan() walks library roots only, and scan_batch() and
-		// deleteUpload each know about one directory — so a batch removed from
-		// the shell would otherwise keep its artist in the personal listing for
-		// ever.
-		//
-		// **It prunes and never discovers.**  A directory that still exists is
-		// left completely alone, which is what makes it safe to call at any
-		// moment: a batch still being written by a fetch must not be indexed
-		// early, or the plain fs::rename in apply_batch_names() would be
-		// renaming directories that already have rows.
-		void reconcile_uploads();
 
 		// What getScanStatus reports. `count` is songs processed, and it keeps
 		// the finished total once a scan ends — which is what the spec's

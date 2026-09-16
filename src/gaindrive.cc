@@ -3382,6 +3382,65 @@ static void convert_tool_sidecars(const std::filesystem::path& batch_root)
 		}
 	}
 
+// Creates the marker batch_held() tests, and removes it however the scope is
+// left. The producers hold one across everything that moves a directory under
+// a batch; scan_batch() releases it deliberately, after the fold and before the
+// scan, so the guard's own destructor is the safety net for an early return or
+// a throw rather than the normal path.
+class BatchHold {
+   public:
+      explicit BatchHold(const std::filesystem::path& batch)
+         : marker_(batch_marker(batch))
+         {
+         // The marker sits beside the batch, so on a user's first fetch its
+         // directory does not exist yet: fetch_worker() takes the hold before
+         // create_directories(dest), which is the whole point of taking it
+         // there. Without this the open would fail silently and the batch would
+         // be unheld.
+         std::error_code ec;
+         std::filesystem::create_directories(marker_.parent_path(), ec);
+         // Truncating open rather than a create-if-absent test: two producers
+         // cannot share a batch uuid, so there is no one to race.
+         std::ofstream(marker_).close();
+         }
+      ~BatchHold()
+         {
+         std::error_code ec;
+         std::filesystem::remove(marker_, ec);
+         }
+      BatchHold(const BatchHold&)            = delete;
+      BatchHold& operator=(const BatchHold&) = delete;
+   private:
+      std::filesystem::path marker_;
+   };
+
+// A marker outlives the process that wrote it, so a batch still holding one at
+// startup was being written when the server stopped. What is under it is a
+// part-extracted archive or a part-downloaded video, which is not playable and
+// never will be -- the same judgement fetch_worker() makes when a download
+// fails, and the reason a job keeps no state a restart would have to repair.
+//
+// Without this the marker would be permanent and the batch invisible for ever,
+// which is the one way an on-disk hold is worse than an in-memory one.
+static void sweep_held_batches(const std::string& users_dir)
+   {
+   namespace fs = std::filesystem;
+   std::error_code ec;
+   for (auto& user : fs::directory_iterator(users_dir, ec)) {
+      std::error_code uec;
+      if (!user.is_directory(uec)) continue;
+      for (auto& e : fs::directory_iterator(user.path(), uec)) {
+         std::error_code bec;
+         if (!e.is_directory(bec) || !batch_held(e.path())) continue;
+         fs::remove_all(e.path(), bec);
+         fs::remove(batch_marker(e.path()), bec);
+         std::cout << stamp() << "Uploads: removed unfinished batch "
+                   << user.path().filename().string() << "/"
+                   << e.path().filename().string() << std::endl;
+         }
+      }
+   }
+
 // Pushes anything still loose in a batch down to <artist>/<album>/file.
 //
 // Two invariants downstream want exactly that depth and neither of them says so
@@ -3573,14 +3632,14 @@ static void batch_rename_level(const std::filesystem::path& parent,
 // renames only the second level.
 //
 // **This is a plain fs::rename and must never become relocate_prefix().**
-// Nothing under the batch has been indexed yet: scan_batch() is the only thing
-// that ever hands a batch to scan_dirs() and does so after this, and scan()
-// skips the uploads root outright. FolderWatcher does watch it — but only for
-// removals, and its sole response is MediaStore::reconcile_uploads(), which
-// skips every directory that still exists and so cannot touch a batch being
-// written. There is therefore no row holding any of these paths to repair —
-// and relocate_prefix's plain UPDATEs are safe only because its callers first
-// checked the destination was free, which merging deliberately does not do.
+// Nothing under the batch has been indexed yet, and that is what BatchHold
+// guarantees: both producers take a hold before the batch directory exists and
+// scan_batch() releases it only after the fold, so every path that walks the
+// uploads root — scan(), scan_dirs() and the watcher through them — skips this
+// batch whole for the whole of the window these renames happen in. There is
+// therefore no row holding any of these paths to repair — and relocate_prefix's
+// plain UPDATEs are safe only because its callers first checked the destination
+// was free, which merging deliberately does not do.
 //
 // Renaming rather than substituting the names into the handler's -o template is
 // also deliberate, and the second reason is the stronger one. urlfetch_expand()
@@ -3699,6 +3758,21 @@ static void fold_batch_into_siblings(const std::filesystem::path& batch_root,
 		}
 	std::sort(siblings.begin(), siblings.end());
 
+	// **The destinations below are deliberately not held**, though a merge
+	// moves content into one and a scan could catch it half-moved.
+	//
+	// A hold means "this batch was never complete", which is what lets
+	// sweep_held_batches() delete one still held at startup. A destination here
+	// is an established batch with rows, so holding it would have a crash
+	// mid-fold destroy somebody's earlier upload -- trading a transient wrong
+	// listing for permanent data loss. The race is self-healing: keep_rel goes
+	// into to_scan a few lines below, so the same paths are rescanned the
+	// moment the fold returns.
+	//
+	// Closing it properly means telling "incomplete" from "busy", which is a
+	// second marker or a DB test in the sweep. Not worth it for a window this
+	// short, and recorded in ISSUES.md rather than left to be rediscovered.
+
 	// Collected before anything moves: merging mutates the directory this would
 	// otherwise still be iterating.
 	std::vector<fs::path> mine;
@@ -3748,9 +3822,10 @@ static void fold_batch_into_siblings(const std::filesystem::path& batch_root,
 			               + "/" + name);
 			}
 
-		// Nothing under *this* batch was ever indexed — scan_batch() is the only
-		// thing that hands a batch to scan_dirs() and does so after this — so
-		// the source needs no prune, only the destination a rescan.
+		// Nothing under *this* batch was ever indexed — it has been held since
+		// before it existed, and scan_batch() does not release until this
+		// returns — so the source needs no prune, only the destination a
+		// rescan.
 		batch_merge_into(a, keep);
 		to_scan.insert(keep_rel);
 		std::cout << stamp() << "batch merge: " << rel_batch << "/" << name
@@ -8527,6 +8602,12 @@ GainDrive::GainDrive(const std::string& db_path,
 		if (!read_ok)  { drop_part(); json_err("Upload was interrupted."); return; }
 		if (name.empty()) { drop_part(); json_err("Missing file part."); return; }
 
+		// Before the directory exists, so there is no window in which a batch
+		// is on disk unheld. Shared because the scan that releases it runs on
+		// the detached thread below, which outlives this handler; every early
+		// return between here and there drops the last reference and clears
+		// the marker on the way out.
+		auto hold = std::make_shared<BatchHold>(dest);
 		fs::create_directories(dest);
 
 		std::cout << stamp() << "Upload: extracting " << log_safe(name)
@@ -8550,7 +8631,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		// place. Detached here because this one is on an HTTP thread and the
 		// client is holding a request open; the fetch worker calls it directly,
 		// being a background thread already.
-		std::thread([this, rel_batch, dest, want_artist, want_album]{
+		std::thread([this, rel_batch, dest, hold, want_artist, want_album]{
 			scan_batch(rel_batch, dest, "Unknown Artist", want_artist, want_album);
 			}).detach();
 
@@ -9625,6 +9706,14 @@ void GainDrive::scan_batch(const std::string& rel_batch,
 		std::lock_guard<std::mutex> lock(batch_fold_mu_);
 		fold_batch_into_siblings(dest, rel_batch, to_scan);
 		}
+		// Nothing moves a directory under this batch after the fold, so the
+		// hold has done its job. Released *before* the scan rather than by the
+		// producer afterwards, because scan_dirs() skips a held batch and this
+		// is the scan that batch exists for.
+		{
+		std::error_code ec;
+		std::filesystem::remove(batch_marker(dest), ec);
+		}
 		if (!to_scan.empty()) store_.scan_dirs(to_scan);
 		}
 	catch (const std::exception& e) {
@@ -9716,11 +9805,17 @@ void GainDrive::fetch_worker()
 			const UrlHandler* h = url_fetcher_.match(snap.url);
 			fs::path dest = fs::path(users_dir_) / snap.user / snap.id;
 
+			// Declared out here so it outlives the fetch and covers scan_batch()
+			// below, but only taken once there is a batch to hold: an unmatched
+			// URL never creates the directory.
+			std::optional<BatchHold> hold;
+
 			UrlFetcher::Result r;
 			if (!h)
 				r.error = "No handler is configured for that URL.";
 			else {
 				std::error_code ec;
+				hold.emplace(dest);
 				fs::create_directories(dest, ec);
 				r = url_fetcher_.run(*h, snap.audio, snap.url, dest, snap.id,
 					[this, &id, &dest, &snap](int pct, const std::string& ln) {
@@ -10946,6 +11041,10 @@ bool GainDrive::listen(const std::string& host, int port)
 	// std::terminate, so an unguarded scan turns a momentary database lock
 	// into a dead server.  A stale library until the next scan is a far better
 	// outcome, and the folder watcher will retry on the next filesystem event.
+	// Before the scan and before the watcher, so neither can reach a batch the
+	// previous run left half-written.
+	if (!users_dir_.empty()) sweep_held_batches(users_dir_);
+
 	if (!no_scan_)
 		std::thread([this]{
 			try { store_.scan(); }

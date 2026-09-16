@@ -15,20 +15,16 @@ class MediaStore;
 class FolderWatcher {
 	public:
 		// Watches every root the store is configured with, the uploads root
-		// included — but the two are watched for different things, and the
-		// difference is load-bearing.
+		// included, and answers both the same way: an event names artist
+		// directories, and those are handed to MediaStore::scan_dirs().
 		//
-		// A library root's events name an artist directory to rescan. An
-		// uploads root's do not: they only ever set a flag, and the debounced
-		// action is MediaStore::reconcile_uploads(), which prunes the rows of
-		// batch directories that have gone and never indexes anything. That
-		// asymmetry is what keeps the watcher unable to index a batch while a
-		// fetch is still writing it — apply_batch_names()' plain fs::rename is
-		// safe only because nothing under a live batch has rows yet.
-		//
-		// Personal batches still reach the DB through the explicit scan_dirs()
-		// calls in scan_batch(), which know the <user>/<uuid>/<artist>/<album>
-		// layout. Nothing here does.
+		// The one difference is where an artist sits. Under a library root it
+		// is the depth-1 child; under an uploads root it is
+		// <user>/<uuid>/<artist>, two levels deeper. What used to keep this
+		// class out of the uploads root altogether was that a fetch still
+		// writing a batch must not have it indexed — apply_batch_names()' plain
+		// fs::rename is safe only while nothing under the batch has rows.
+		// batch_held() is what says so now, so the asymmetry is gone.
 		FolderWatcher(MediaStore& store, int debounce_ms = 2000);
 		~FolderWatcher();
 
@@ -49,8 +45,16 @@ class FolderWatcher {
 		// The depth-1 child of the owning root that contains (or is) `path` —
 		// the artist (or category) directory a change belongs to. Returns ""
 		// both when `path` lies outside every root and when it *is* a root,
-		// which callers treat as "rescan that whole root".
+		// which callers treat as "rescan that whole root". Library roots only;
+		// artist_dirs_for_path() is what every caller actually wants.
 		std::string artist_dir_for_path(const std::string& path) const;
+
+		// The artist directories a changed path belongs to, added to `out`.
+		// One for a library root, any number under an uploads root, where a
+		// path shallower than <user>/<uuid>/<artist> is expanded by listing
+		// rather than escalated. Batches being written are left out.
+		void artist_dirs_for_path(const std::string& path,
+		                           std::set<std::string>& out) const;
 
 		// True when `path` is the uploads root or sits under it. There is at
 		// most one, so this is a prefix test rather than a lookup.
@@ -74,10 +78,6 @@ class FolderWatcher {
 		std::thread                         thread_;
 		std::unordered_map<int,std::string> wd_to_path_;
 		std::set<std::string>               changed_artists_;
-		// Set by a removal under the uploads root, taken with the set above by
-		// the debounced rescan. Touched only on the watcher thread, as
-		// changed_artists_ is, so it needs no lock of its own.
-		bool                                uploads_dirty_ = false;
 		std::mutex                          rewatches_mutex_;
 		std::vector<std::string>            pending_rewatches_;
 #elif defined(__APPLE__)
@@ -95,11 +95,11 @@ class FolderWatcher {
 		// it — gaindrive.cc has no business seeing Carbon.
 		void*                 stream_ = nullptr;
 		void*                 queue_  = nullptr;
-		// Both guarded by changed_mutex_. Clearing the flag under the same lock
-		// that guards the set is what makes the scan handoff race-free.
+		// Both guarded by changed_mutex_. Swapping the set and testing
+		// scan_running_ under one lock is what makes the scan handoff
+		// race-free.
 		std::mutex            changed_mutex_;
 		std::set<std::string> changed_artists_;
-		bool                  uploads_dirty_ = false;
 		bool                  scan_running_ = false;
 #endif
 	};
