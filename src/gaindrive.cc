@@ -2155,6 +2155,63 @@ void GainDrive::handle_artist_info(const httplib::Request& req,
 
 // ---- Album info helper ------------------------------------------------
 
+// What a folder name carries and a release-group title does not.
+//
+// **MusicBrainz's search is a phrase query, so a suffix does not merely lower
+// the score -- it returns nothing at all.**  Measured against the live
+// service: releasegroup:"Abbey Road (Remastered)" answers with zero results,
+// releasegroup:"Abbey Road" answers with the album at score 100.  Same for
+// "[2011 Remaster]", "(Disc 1)" and " - Legacy Edition".  That, and not any
+// character needing escaping, is why a library resolves so few of its albums:
+// escaping changes nothing here, because everything between the quotes is
+// literal to Lucene already and the analyzer drops the punctuation anyway --
+// a title holding a comma, a colon, a slash, an exclamation mark or even a
+// double quote searches identically escaped or not.
+//
+// Suffixes only, and only ones that are visibly an aside.  A title whose
+// brackets open at position zero is left alone, since the whole of it is the
+// aside, and a bare " - " needs one of the edition words below before it
+// counts -- plenty of real titles are written with a dash.  Not resolving an
+// album costs a description; resolving the wrong one attributes somebody
+// else's to it, with nothing downstream able to tell.
+static std::string strip_album_decoration(const std::string& title)
+	{
+	auto rtrim = [](std::string& s) {
+		while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.pop_back();
+		};
+
+	std::string t = title;
+	rtrim(t);
+
+	// As many trailing "(...)" or "[...]" groups as there are: a folder is
+	// quite capable of saying "(Deluxe Edition) (Disc 2)".
+	for (;;) {
+		if (t.size() < 2) break;
+		char open = t.back() == ')' ? '(' : t.back() == ']' ? '[' : '\0';
+		if (open == '\0') break;
+		auto pos = t.rfind(open);
+		if (pos == std::string::npos || pos == 0) break;
+		t.erase(pos);
+		rtrim(t);
+		}
+
+	auto dash = t.rfind(" - ");
+	if (dash != std::string::npos && dash > 0) {
+		std::string tail = t.substr(dash + 3);
+		for (char& c : tail)
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		static const char* const MARKS[] = {
+			"edition", "remaster", "version", "reissue", "deluxe", "expanded",
+			"anniversary", "bonus", "disc", "cd"
+			};
+		for (const char* m : MARKS)
+			if (tail.find(m) != std::string::npos) { t.erase(dash); break; }
+		}
+
+	rtrim(t);
+	return t;
+	}
+
 // Performs the MusicBrainz -> Wikidata -> Wikipedia lookup for one album and
 // caches the result. Runs on the resolver thread and nowhere else; it is paced
 // by mb_pace() and it must never be reached from a request handler again.
@@ -2174,8 +2231,13 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
                                                       MediaStore& store)
 	{
 	MediaStore::CachedAlbumInfo info;
+	// The artist is half of the query and was not in the log, so a lookup that
+	// found nothing could not be told apart from one that asked for the wrong
+	// artist entirely -- which is what a compilation, a folder named after a
+	// label, or a tag the scan read as the album artist produces.
 	std::cout << stamp() << "getAlbumInfo [" << title
-	          << "] querying MusicBrainz" << std::endl;
+	          << "] querying MusicBrainz, folder " << id
+	          << ", artist [" << artist << "]" << std::endl;
 	httplib::SSLClient mb("musicbrainz.org");
 	provider_timeouts(mb);
 	mb.set_default_headers({
@@ -2203,13 +2265,31 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 		mb_ok = true;
 		std::cout << stamp() << "getAlbumInfo [" << title
 		          << "] release-group id from the files' tags, skipping"
-		             " search" << std::endl;
+		             " search: " << info.mbid << std::endl;
 		}
 
-	if (info.mbid.empty()) {
+	// One release-group search: the query it sends, every candidate that came
+	// back, and the id taken from them. Empty when nothing usable did.  mb_ok
+	// is set whenever MusicBrainz answered at all, which is the gate on the
+	// cache write at the bottom -- a 200 naming nothing is an answer, a 503 is
+	// not.
+	auto search = [&](const std::string& want) -> std::string {
+		// **Logged verbatim, because this string is the lookup.** Neither the
+		// folder name nor the tags show what actually gets sent, and the
+		// difference is where the misses are.
+		std::string query = "releasegroup:\"" + mb_escape_phrase(want)
+		                  + "\" AND artist:\"" + mb_escape_phrase(artist) + "\"";
+		std::cout << stamp() << "getAlbumInfo [" << title
+		          << "] search: /ws/2/release-group?query=" << query
+		          << std::endl;
 		httplib::Params p1{
-			{"query", "releasegroup:\"" + title + "\" AND artist:\"" + artist + "\""},
-			{"limit", "1"},
+			{"query", query},
+			// Was 1. The pick below is still the first result, so this
+			// changes no outcome; it is a page size on a request being made
+			// either way, and the candidates that lose are what say whether
+			// MusicBrainz does not have the album or merely spells it
+			// differently.
+			{"limit", "5"},
 			{"fmt",   "json"}
 			};
 		auto r1 = mb_get(mb, "/ws/2/release-group", p1,
@@ -2217,36 +2297,91 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 		if (!r1) {
 			std::cout << stamp() << "getAlbumInfo [" << title
 			          << "] MusicBrainz request failed (no response)" << std::endl;
+			return {};
 			}
-		else if (r1->status != 200) {
+		if (r1->status != 200) {
 			std::cout << stamp() << "getAlbumInfo [" << title
 			          << "] MusicBrainz HTTP " << r1->status
 			          << (mb_rate_limited(r1) ? " - rate limited" : "")
 			          << std::endl;
+			return {};
 			}
-		else {
-			// A 200 is an answer even when it names nothing: MusicBrainz has
-			// been asked and has no release group under this title and artist.
-			// That is the case the empty cache row exists to record.
-			mb_ok = true;
-			auto j1 = nlohmann::json::parse(r1->body, nullptr, false);
-			// Same reasoning as the artist search: this is concatenated
-			// into "/ws/2/release-group/" below.
-			std::string rg = jstr(jidx(jsub(j1, "release-groups"), 0), "id");
-			if (!rg.empty() && !is_uuid(rg)) {
-				std::cout << stamp() << "getAlbumInfo [" << title
-				          << "] ignoring a release-group id that is not a UUID"
-				          << std::endl;
-				rg.clear();
+
+		// A 200 is an answer even when it names nothing: MusicBrainz has been
+		// asked and has no release group under this title and artist. That is
+		// the case the empty cache row exists to record.
+		mb_ok = true;
+		auto j1 = nlohmann::json::parse(r1->body, nullptr, false);
+		if (j1.is_discarded()) {
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] search reply was not JSON: "
+			          << r1->body.substr(0, 200) << std::endl;
+			}
+		const auto& rgs = jsub(j1, "release-groups");
+		std::cout << stamp() << "getAlbumInfo [" << title
+		          << "] search returned " << rgs.size() << " of "
+		          << jint(j1, "count") << " release-group(s)" << std::endl;
+		// Every candidate, not just the winner. A miss is nearly always one of
+		// two things and this is what tells them apart: nothing came back at
+		// all (the title carries something the release group does not), or
+		// something came back under a title or an artist spelled differently
+		// from ours and only the score kept it down.
+		for (const auto& cand : rgs) {
+			std::string credit;
+			for (const auto& ac : jsub(cand, "artist-credit")) {
+				credit += jstr(jsub(ac, "artist"), "name");
+				credit += jstr(ac, "joinphrase");
 				}
-			info.mbid = rg;
+			std::string type = jstr(cand, "primary-type");
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "]   candidate score=" << jint(cand, "score")
+			          << " [" << jstr(cand, "title") << "] by [" << credit
+			          << "]" << (type.empty() ? "" : " " + type) << " "
+			          << jstr(cand, "id") << std::endl;
 			}
+
+		// Same reasoning as the artist search: this is concatenated into
+		// "/ws/2/release-group/" below.
+		std::string rg = jstr(jidx(rgs, 0), "id");
+		if (!rg.empty() && !is_uuid(rg)) {
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] ignoring a release-group id that is not a UUID"
+			          << std::endl;
+			rg.clear();
+			}
+		return rg;
+		};
+
+	if (info.mbid.empty()) {
+		info.mbid = search(title);
+
+		// Second chance without the folder's decoration -- see
+		// strip_album_decoration(). Only when the first search found nothing,
+		// so an album that already resolves keeps resolving to exactly what it
+		// did before, and still a phrase query AND'd with the artist, so this
+		// widens what is asked without loosening what is accepted.
+		if (info.mbid.empty()) {
+			std::string bare = strip_album_decoration(title);
+			if (!bare.empty() && bare != title) {
+				std::cout << stamp() << "getAlbumInfo [" << title
+				          << "] nothing under that title; retrying as [" << bare
+				          << "]" << std::endl;
+				info.mbid = search(bare);
+				}
+			}
+
+		if (info.mbid.empty())
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] no release-group taken from the search" << std::endl;
 		}
 
 	// Step 2 — fetch URL relations for the release-group.
 	if (!info.mbid.empty()) {
 		// The one-second wait that used to sit here is mb_get()'s job now;
 		// doing it in both places only made every lookup a second slower.
+		std::cout << stamp() << "getAlbumInfo [" << title
+		          << "] fetching /ws/2/release-group/" << info.mbid
+		          << "?inc=url-rels" << std::endl;
 		auto r2 = mb_get(mb, "/ws/2/release-group/" + info.mbid,
 		                 httplib::Params{{"inc","url-rels"},{"fmt","json"}},
 		                 "getAlbumInfo [" + title + "] url-rels");
@@ -2324,6 +2459,10 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 				}
 
 			// Step 3 — Wikipedia REST summary → notes text.
+			if (wiki_title.empty())
+				std::cout << stamp() << "getAlbumInfo [" << title
+				          << "] no Wikipedia or Wikidata relation on this"
+				             " release-group" << std::endl;
 			if (!wiki_title.empty()) {
 				httplib::SSLClient wp("en.wikipedia.org");
 				provider_timeouts(wp);

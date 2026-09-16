@@ -99,13 +99,19 @@ static std::string provider_key(const std::string& s)
 	return artist_key(fold_diacritics(s));
 	}
 
-std::string mb_artist_query(const std::string& name)
+std::string mb_escape_phrase(const std::string& s)
 	{
 	std::string esc;
-	for (char c : name) {
+	for (char c : s) {
 		if (c == '\\' || c == '"') esc += '\\';
 		esc += c;
 		}
+	return esc;
+	}
+
+std::string mb_artist_query(const std::string& name)
+	{
+	const std::string esc = mb_escape_phrase(name);
 	return "artist:\"" + esc + "\" OR alias:\"" + esc + "\"";
 	}
 

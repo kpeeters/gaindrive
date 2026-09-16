@@ -30,15 +30,26 @@ struct MbArtistMatch
 	bool        exact = false;  // the name or one of its aliases *is* the query
 	};
 
+// One string, safe to drop between the quotes of a Lucene phrase.
+//
+// **Only \ and " need this, and that is measured rather than assumed.**
+// Everything else is literal inside a quoted phrase and the search analyzer
+// drops the punctuation anyway: against the live service, a title holding a
+// comma, a colon, a slash, an exclamation mark or a bracket searches
+// identically escaped and unescaped, which is why "AC/DC" needs no special
+// case.  A double quote is the one that is genuinely query syntax -- it closes
+// the phrase and has the rest of the name parsed as operators.
+//
+// So this is not what makes an album resolve; strip_album_decoration() in
+// gaindrive.cc is.  It is here so that neither query can be malformed.
+std::string mb_escape_phrase(const std::string& s);
+
 // The search query for one artist name, covering both fields:
 //
 //     artist:"<name>" OR alias:"<name>"
 //
-// The name is escaped, which the caller must not do again.  It reaches a
-// Lucene query, so a folder holding a double quote would otherwise close the
-// phrase and have the rest of its own name parsed as query syntax.  Only \ and
-// " need it: everything else is literal inside a quoted phrase, which is why
-// "AC/DC" needs no special case.
+// The name is escaped with mb_escape_phrase(), which the caller must not do
+// again.
 std::string mb_artist_query(const std::string& name);
 
 // Which of a search's results, if any, is the artist that was asked for.
