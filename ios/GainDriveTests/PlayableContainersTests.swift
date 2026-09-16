@@ -15,7 +15,7 @@ import Testing
 /// demuxes, and — the half worth testing — its absence everywhere else.
 ///
 /// The same reasoning as `CastUrlTests`: the failure is silent and remote. A
-/// cast URL carrying `playableContainers` gets the receiver a `LOAD`
+/// cast URL carrying `playable` gets the receiver a `LOAD`
 /// announcing `video/mp4` followed by QuickTime, which it refuses outright.
 /// The film never starts and nothing on the phone says why. The obvious
 /// refactor — filling the set in inside `StreamUrls.video` "because both
@@ -27,7 +27,7 @@ struct PlayableContainersTests {
 		// different URLs — they reach a log line and a URL cache.
 		#expect(
 			StreamUrls.videoParameters(id: "7", containers: ["mov", "avi"])
-				== ["id": "7", "playableContainers": "avi,mov"])
+				== ["id": "7", "playable": "avi,mov"])
 	}
 
 	@Test func orderOfTheSetDoesNotReachTheURL() {

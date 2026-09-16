@@ -8,6 +8,7 @@
 
 import Foundation
 import Testing
+import UniformTypeIdentifiers
 
 @testable import GainDrive
 
@@ -152,5 +153,42 @@ struct ContentTypeTests {
 	/// response to read there is nothing honest to claim.
 	@Test func theOriginalNeedsTheResponseToSayAnything() {
 		#expect(CachingResourceLoader.uti(for: nil, quality: .original) == nil)
+	}
+
+	/// **The response outranks the requested quality**, and that order is the
+	/// recent one. Since a request may declare what it takes as it stands, an
+	/// AAC 160 request can be answered with the MP3 the server already holds;
+	/// telling AVFoundation `audio/mp4` over those bytes plays nothing, with
+	/// no error either side.
+	@Test func theResponseOutranksTheRequestedQuality() {
+		#expect(
+			CachingResourceLoader.uti(
+				for: mp3Response, quality: AudioQuality(format: .m4a, bitRate: 160))
+				== UTType.mp3.identifier)
+	}
+
+	/// The same inversion where it fails worst: a stored file is typed by its
+	/// path extension, and a wrong one is not an error but a track that never
+	/// starts.
+	@Test func aStoredFileIsNamedByItsResponse() {
+		#expect(
+			DownloadQueue.fileExtension(
+				for: mp3Response, quality: AudioQuality(format: .m4a, bitRate: 160))
+				== "mp3")
+	}
+
+	/// With nothing to read, the format is still the best answer available —
+	/// the fallback the inversion above kept rather than replaced.
+	@Test func withNoResponseTheFormatStillNames() {
+		#expect(
+			DownloadQueue.fileExtension(
+				for: nil, quality: AudioQuality(format: .m4a, bitRate: 160))
+				== "m4a")
+	}
+
+	private var mp3Response: URLResponse {
+		URLResponse(
+			url: URL(string: "https://example.invalid/rest/stream.view")!,
+			mimeType: "audio/mpeg", expectedContentLength: -1, textEncodingName: nil)
 	}
 }

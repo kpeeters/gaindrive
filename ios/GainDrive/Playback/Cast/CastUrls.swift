@@ -136,6 +136,14 @@ struct CastUrls {
 	/// track-info view and the prewarmer need no second vocabulary — the URL is
 	/// simply one a receiver can use.
 	func audio(for song: Song) async -> StreamTarget? {
+		// **No `playable` here either, and by the same omission.** This reaches
+		// the resolver `LocalEngine` reaches, one call apart, and the only
+		// thing keeping them apart is that this one passes no declaration. With
+		// one, a receiver asked for AAC 160 would be sent the MP3 the server
+		// holds while the `LOAD` below announced `audio/mp4`, and refuse the
+		// media outright — the audio shape of the QuickTime failure on
+		// `video(for:)`. `PlayableAudioTests.castRouteDeclaresNothing` guards
+		// the seam; there is nothing to assert at this line itself.
 		guard var target = await targets.target(for: song.ref) else { return nil }
 		// **The original is only sent when the receiver can decode it.** Asking
 		// for `raw` is a setting about *this device's* ears, and a receiver that
@@ -163,7 +171,7 @@ struct CastUrls {
 	/// Anything else can only be re-encoded, which `CastEngine` refuses rather
 	/// than sending.
 	func video(for song: Song) -> StreamTarget? {
-		// No `playableContainers`, and that omission is the load-bearing one on
+		// No `playable`, and that omission is the load-bearing one on
 		// this route. A receiver demuxes none of them, and the `contentType`
 		// below is the entry's `transcodedContentType` — `video/mp4` for
 		// exactly the files a declaration would change. Adding the argument

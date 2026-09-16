@@ -297,12 +297,19 @@ extension CachingResourceLoader: URLSessionDataDelegate {
 	/// server holds, so the response's MIME type is asked. Both paths end in a
 	/// UTI, which is what the content information request wants — see `serve`.
 	static func uti(for response: URLResponse?, quality: AudioQuality) -> String? {
-		if let declared = quality.format.contentType,
-			let type = UTType(mimeType: declared)
-		{
+		// **The response first, the quality only as a fallback.** The order
+		// used to be reversed, which was right while the format settled what
+		// arrived. It no longer does: a request that declared what it takes as
+		// it stands — see `PlayableAudio` — may be answered with the file the
+		// server holds rather than the format asked for, and telling
+		// AVFoundation the wrong one plays nothing, silently, exactly as the
+		// note on the content-information request above warns.
+		if let mime = response?.mimeType, let type = UTType(mimeType: mime) {
 			return type.identifier
 		}
-		guard let mime = response?.mimeType, let type = UTType(mimeType: mime) else { return nil }
+		guard let declared = quality.format.contentType,
+			let type = UTType(mimeType: declared)
+		else { return nil }
 		return type.identifier
 	}
 }

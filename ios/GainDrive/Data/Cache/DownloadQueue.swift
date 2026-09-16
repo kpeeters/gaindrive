@@ -203,16 +203,28 @@ extension DownloadQueue: URLSessionDownloadDelegate {
 	/// cosmetic: a file without one is never reported as unplayable, the player
 	/// simply waits, and the symptom is a track that never starts.
 	///
-	/// The format usually says. The original does not — its container is
-	/// whatever the server holds — so the response is asked instead, which is
-	/// the one moment that answer is available.
+	/// **The response is asked first, and the quality is only the fallback.**
+	/// That order used to be the other way round, on the reasoning that the
+	/// format says what it will be and only `.original` cannot. Since requests
+	/// began declaring what they take as it stands — see `PlayableAudio` — the
+	/// format no longer says: a request at AAC 160 may be answered with the
+	/// MP3 the server holds, and naming that file `.m4a` is exactly the hang
+	/// above.
+	///
+	/// Nothing is lost by the inversion. For a real transcode the response
+	/// carries the type the format would have named, so the two agree; where
+	/// they could differ, the response is the one that saw the bytes.
+	///
+	/// A declaration cannot travel here to be tested for: the only state that
+	/// outlives the process is `taskDescription`, and that is the cache key.
+	/// Preferring the response needs no flag, which is the other reason to.
 	static func fileExtension(for response: URLResponse?, quality: AudioQuality) -> String {
-		if let known = quality.format.fileExtension { return known }
 		if let mime = response?.mimeType, let type = UTType(mimeType: mime),
 			let derived = type.preferredFilenameExtension
 		{
 			return derived
 		}
+		if let known = quality.format.fileExtension { return known }
 		let suggested = (response?.suggestedFilename as NSString?)?.pathExtension ?? ""
 		// `audio` is not a container anything can read, and that is the point:
 		// it is better to store a file AVFoundation refuses outright than one

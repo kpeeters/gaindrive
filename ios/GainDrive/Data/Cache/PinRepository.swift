@@ -269,7 +269,13 @@ final class PinRepository {
 
 	private func startMissing(_ refs: [ItemRef]) async {
 		for ref in refs where !stored.contains(ref) && progress[ref] == nil {
-			guard let target = await targets.target(for: ref) else { continue }
+			// The same declaration playback makes, and it must be the same:
+			// `StreamTargets` is shared precisely so a download and a play
+			// cannot ask for different bytes, and they derive one cache key.
+			guard
+				let target = await targets.target(
+					for: ref, playable: avfoundationPlayable(for:))
+			else { continue }
 			progress[ref] = 0
 			queue.start(ref, quality: target.quality, url: target.url)
 		}

@@ -62,23 +62,14 @@ enum StreamUrls {
 	/// caps at every boundary, so there is no single "current" cap to read and
 	/// nothing here may close over one.
 	static func target(
-		for ref: ItemRef, client: SubsonicClient, wanted: AudioQuality, accountCap: Int
+		for ref: ItemRef, client: SubsonicClient, wanted: AudioQuality, accountCap: Int,
+		playable: Set<String> = []
 	) -> StreamTarget {
 		let quality = wanted.cappedBy(accountCap)
-		var parameters = ["id": ref.id]
-
-		if quality.format != .original {
-			// **Both, always.** A format change with no `maxBitRate` is served
-			// at 320 kbps (`src/streamer.cc:95`), so sending `format` alone
-			// would quietly deliver 320 for the whole library while the app
-			// believed it had asked for 160.
-			parameters["format"] = quality.format.rawValue
-			parameters["maxBitRate"] = String(quality.bitRate)
-		}
-		// For the original neither is sent: the server serves the file with no
-		// ffmpeg involved at all.
-		//
-		// Two more are never sent, and both omissions are load-bearing.
+		let parameters = audioParameters(
+			id: ref.id, quality: quality, playable: playable)
+		// Two parameters are never sent at all, and both omissions are
+		// load-bearing.
 		// `timeOffset` bypasses the transcode cache entirely, turning every
 		// seek into a fresh ffmpeg run over a chunked response that cannot then
 		// be seeked. `estimateContentLength` promises a length ffmpeg
@@ -91,7 +82,46 @@ enum StreamUrls {
 			url: client.url("stream", parameters: parameters),
 			quality: quality,
 			cacheKey: CacheKeys.of(ref, quality: quality),
-			contentType: quality.format.contentType)
+			// Nil the moment anything was declared, for the reason `.original`
+			// is always nil: the container is then whatever the server holds
+			// and is only known from the response.
+			contentType: playable.isEmpty ? quality.format.contentType : nil)
+	}
+
+	/// The query an audio request carries: the id, what to convert to, and what
+	/// not to convert at all.
+	///
+	/// Its own function for the reason `videoParameters` below is — a test can
+	/// assert the shape without building a `SubsonicClient`, and the assertion
+	/// worth having is that an empty `playable` emits no `playable` parameter
+	/// whatsoever. That is the audio twin of `castRouteDeclaresNothing`: a
+	/// receiver handed a URL that declares is sent the original while the
+	/// `LOAD` announced the transcode's type, and refuses the media outright.
+	///
+	/// `format` and `maxBitRate` go together or not at all, and are what the
+	/// declaration is *not*: they say what to produce, `playable` says what to
+	/// leave alone, and the two are independent.
+	///
+	/// Sorted for the reason the video list is: a `Set` promises no iteration
+	/// order, and one request must not be able to build two different URLs.
+	static func audioParameters(
+		id: String, quality: AudioQuality, playable: Set<String>
+	) -> [String: String] {
+		var p = ["id": id]
+		if quality.format != .original {
+			// **Both, always.** A format change with no `maxBitRate` is served
+			// at 320 kbps (`src/streamer.cc:95`), so sending `format` alone
+			// would quietly deliver 320 for the whole library while the app
+			// believed it had asked for 160.
+			p["format"] = quality.format.rawValue
+			p["maxBitRate"] = String(quality.bitRate)
+		}
+		// For the original neither is sent: the server serves the file with no
+		// ffmpeg involved at all.
+		if !playable.isEmpty {
+			p["playable"] = playable.sorted().joined(separator: ",")
+		}
+		return p
 	}
 
 	/// A film, which is a different question from a track.
@@ -127,7 +157,7 @@ enum StreamUrls {
 	/// costs a re-encode, so it is only ever reached by `LocalEngine` having
 	/// *asked AVFoundation* and been told the track cannot be decoded.
 	///
-	/// `playableContainers` is the one parameter that *is* sent, and only from
+	/// `playable` is the one parameter that *is* sent, and only from
 	/// local playback. It names containers this player demuxes itself, so the
 	/// server hands the file over instead of remuxing it — see
 	/// `LocalEngine.target(for:)`, which is the single call site that passes
@@ -151,7 +181,7 @@ enum StreamUrls {
 	{
 		var p = ["id": id]
 		if !containers.isEmpty {
-			p["playableContainers"] = containers.sorted().joined(separator: ",")
+			p["playable"] = containers.sorted().joined(separator: ",")
 		}
 		return p
 	}
@@ -160,12 +190,12 @@ enum StreamUrls {
 		for song: Song,
 		client: SubsonicClient,
 		transcoded: Bool = false,
-		playableContainers: Set<String> = []
+		playable: Set<String> = []
 	) -> StreamTarget {
 		let url =
 			song.nativeSeek && !transcoded
 			? client.url("stream", parameters: videoParameters(
-				id: song.ref.id, containers: playableContainers))
+				id: song.ref.id, containers: playable))
 			// `.m3u8` rather than `.view`: the server answers both, and the
 			// extension is how AVFoundation knows it is a playlist. That is
 			// what `SubsonicClient.url`'s `suffix` has been there for since

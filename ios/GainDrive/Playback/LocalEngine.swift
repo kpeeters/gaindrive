@@ -280,10 +280,16 @@ final class LocalEngine: PlaybackEngine {
 		// bytes: `CastUrls.video(for:)` calls the same builder and must keep
 		// passing nothing.
 		if song.isVideo {
-			return targets.video(
-				for: song, playableContainers: avfoundationContainers)
+			return targets.video(for: song, playable: avfoundationContainers)
 		}
-		guard var target = await targets.target(for: song.ref) else { return nil }
+		// And the audio half of the same declaration, at the same one call
+		// site and for the same reason: this is the route whose bytes this
+		// framework reads. `CastUrls.audio(for:)` reaches the same resolver
+		// and must keep passing nothing.
+		guard
+			var target = await targets.target(
+				for: song.ref, playable: avfoundationPlayable(for:))
+		else { return nil }
 		if let local = await store.storedFile(for: song.ref) {
 			target = StreamTarget(
 				url: local, quality: target.quality, cacheKey: target.cacheKey,
