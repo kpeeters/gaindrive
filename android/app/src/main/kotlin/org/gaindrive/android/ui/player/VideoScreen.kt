@@ -34,9 +34,11 @@ import androidx.compose.material.icons.automirrored.filled.Toc
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
@@ -295,6 +297,10 @@ fun VideoScreen(
 					viewModel.seekTo(it)
 					interactionTick++
 				},
+				onSkip = {
+					viewModel.seekBy(it)
+					interactionTick++
+				},
 				onSelectTextTrack = viewModel::selectTextTrack,
 				onCast = onCast,
 				onInfo = onInfo,
@@ -471,6 +477,7 @@ private fun Controls(
 	onNext: () -> Unit,
 	onPrevious: () -> Unit,
 	onSeek: (Long) -> Unit,
+	onSkip: (Long) -> Unit,
 	onSelectTextTrack: (Int?) -> Unit,
 	onCast: () -> Unit,
 	onInfo: () -> Unit,
@@ -603,6 +610,21 @@ private fun Controls(
 						modifier = Modifier.size(36.dp),
 					)
 				}
+				// Inside previous/next rather than replacing them: this screen is
+				// the only transport a film ever reaches — a video opens it
+				// directly, never through the Now Playing sheet — and a series or
+				// a concert recording is still a queue.
+				//
+				// Disabled on the same test the scrub bar uses, so the two agree
+				// about when there is a position to move within.
+				IconButton(onClick = { onSkip(-SKIP_MS) }, enabled = state.durationMs > 0) {
+					Icon(
+						Icons.Default.Replay10,
+						contentDescription = "Back 10 seconds",
+						tint = Color.White,
+						modifier = Modifier.size(36.dp),
+					)
+				}
 				IconButton(onClick = onTogglePlay) {
 					Icon(
 						imageVector = if (state.isPlaying) {
@@ -613,6 +635,14 @@ private fun Controls(
 						contentDescription = if (state.isPlaying) "Pause" else "Play",
 						tint = Color.White,
 						modifier = Modifier.size(56.dp),
+					)
+				}
+				IconButton(onClick = { onSkip(SKIP_MS) }, enabled = state.durationMs > 0) {
+					Icon(
+						Icons.Default.Forward10,
+						contentDescription = "Forward 10 seconds",
+						tint = Color.White,
+						modifier = Modifier.size(36.dp),
 					)
 				}
 				IconButton(onClick = onNext, enabled = state.hasNext) {
@@ -687,6 +717,14 @@ private const val DEFAULT_ASPECT = 16f / 9f
 
 /** Long enough to read the title, short enough to get out of the way. */
 private const val CONTROLS_TIMEOUT_MS = 3_500L
+
+/**
+ * How far one press of the skip buttons moves, matching `SKIP_SECS` in
+ * `web/app.js`. It lives here rather than beside `PlayerConnection.seekBy`,
+ * which takes any delta: how far a *button* jumps is a decision about the
+ * button, and the icons on these two say ten seconds.
+ */
+private const val SKIP_MS = 10_000L
 
 /**
  * The window this view belongs to, or null if there is somehow no Activity

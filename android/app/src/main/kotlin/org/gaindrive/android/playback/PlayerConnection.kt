@@ -395,6 +395,32 @@ class PlayerConnection @Inject constructor(
 	fun seekTo(positionMs: Long) = controller?.seekTo(positionMs)
 
 	/**
+	 * Move [deltaMs] from wherever the player is now — the skip buttons over a
+	 * picture.
+	 *
+	 * The position comes from the controller rather than from [PlayerState],
+	 * whose own is up to [POSITION_POLL_MS] old: a press landing late in a tick
+	 * would otherwise move nine and a half seconds, and a run of presses would
+	 * drift differently every time.
+	 *
+	 * Clamped short of the end rather than to it, matching `playerSkip()` in
+	 * `web/app.js`: a seek to the duration ends the item and starts the next
+	 * one, and a forward skip is not a request to leave the film. A duration
+	 * that is not known yet leaves the upper bound to the player.
+	 *
+	 * Works while casting for the reason [previous] does — an ordinary seek is
+	 * something `CastPlayer` already serves.
+	 */
+	fun seekBy(deltaMs: Long) {
+		val controller = controller ?: return
+		val last = controller.duration
+			.takeIf { it > 0 }
+			?.let { (it - END_GUARD_MS).coerceAtLeast(0L) }
+			?: Long.MAX_VALUE
+		controller.seekTo((controller.currentPosition + deltaMs).coerceIn(0L, last))
+	}
+
+	/**
 	 * Starts the stopped queue again from where it was.
 	 *
 	 * `stop()` keeps the media items and the current index, so preparing again
@@ -604,5 +630,12 @@ class PlayerConnection @Inject constructor(
 		 * how long "just started" lasts.
 		 */
 		const val MAX_SEEK_TO_PREVIOUS_MS = 3_000L
+
+		/**
+		 * How far short of the end [seekBy] is allowed to land. One second, as
+		 * in `web/app.js`, which stops a forward skip near the end from
+		 * finishing the item and starting the next one.
+		 */
+		const val END_GUARD_MS = 1_000L
 	}
 }

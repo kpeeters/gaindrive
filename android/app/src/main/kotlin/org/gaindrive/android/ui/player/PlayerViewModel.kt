@@ -52,6 +52,7 @@ class PlayerViewModel @Inject constructor(
 	fun next() { player.next() }
 	fun previous() { player.previous() }
 	fun seekTo(positionMs: Long) { player.seekTo(positionMs) }
+	fun seekBy(deltaMs: Long) { player.seekBy(deltaMs) }
 	fun jumpTo(index: Int) = player.jumpTo(index)
 
 	fun attachVideo(surface: SurfaceView, subtitles: SubtitleView) =
