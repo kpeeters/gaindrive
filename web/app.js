@@ -953,6 +953,22 @@ async function showView(name) {
       }
 }
 
+// ── Settings ─────────────────────────────────────────────────────────────────
+//
+// Nested rather than one long pane, which is what this was and was already
+// outgrowing. The index below is a list of categories; each opens a pane of its
+// own, the way the Android client's Settings does, so that adding a setting
+// costs a line in one category instead of another screenful of scroll nobody
+// reads.
+//
+// The panes it uses are the strip's own: the index on pane 0, a category on
+// pane 1, and user editing, the only thing a category itself opens, on pane 2.
+// On a wide window all three stand side by side, which is the whole reason
+// for nesting into the strip rather than swapping one pane's contents.
+//
+// The archive-upload form used to sit in here. It now lives at the top of the
+// Uploads listing — see makeUploadBar() — because that is the listing it fills.
+
 async function viewSettings() {
    const gen = beginRender();
    const pane = paneReset('pane-artists', 'settings');
@@ -968,15 +984,216 @@ async function viewSettings() {
    hdr.appendChild(h1);
    pane.appendChild(hdr);
 
-   // ── Theme section — visible to all users ────────────────────────────────
+   const list = document.createElement('div');
+   list.className = 'settings-cat-list';
+   pane.appendChild(list);
 
-   const themeSection = document.createElement('div');
-   themeSection.className = 'admin-section';
+   // Returns the summary node, so a row whose summary has to be asked for can
+   // fill it in when the answer lands.
+   const addRow = (key, title, summary) => {
+      const row = document.createElement('div');
+      row.className = 'settings-cat-row';
 
-   const themeHeading = document.createElement('h2');
-   themeHeading.className = 'admin-section-title';
-   themeHeading.textContent = 'Appearance';
-   themeSection.appendChild(themeHeading);
+      const text = document.createElement('div');
+      text.className = 'settings-cat-text';
+
+      const t = document.createElement('span');
+      t.className   = 'settings-cat-title';
+      t.textContent = title;
+      text.appendChild(t);
+
+      const s = document.createElement('span');
+      s.className   = 'settings-cat-summary';
+      s.id          = `settings-sum-${key}`;
+      s.textContent = summary;
+      text.appendChild(s);
+
+      row.appendChild(text);
+
+      const chev = document.createElement('span');
+      chev.className   = 'mi settings-cat-chevron';
+      chev.textContent = 'chevron_right';
+      row.appendChild(chev);
+
+      row.addEventListener('click', () => {
+         history.pushState({view: 'settings-cat', cat: key}, '');
+         showSettingsCategory(key);
+         });
+
+      list.appendChild(row);
+      return s;
+      };
+
+   // Roles come from the copy showShell() already fetched, which is what every
+   // other admin-only control in this client reads. One less round trip, and
+   // the index paints in one go rather than growing two rows under the cursor.
+   const admin = !!currentUser?.adminRole;
+
+   addRow('playback', 'Playback', playbackSummary());
+   const userSummary   = admin ? addRow('users',  'Users',  '') : null;
+   const serverSummary = admin ? addRow('server', 'Server', '') : null;
+   addRow('appearance', 'Appearance', themeSummary());
+
+   // Left blank until the server answers rather than filled with a guess: a
+   // summary is only worth the line it takes if it is the current truth.
+   if (admin) {
+      apiCall('getUsers').then(sr => {
+         if (renderStale(gen)) return;
+         // getUsers returns {users: {user: [...]}} — user may be absent if empty.
+         const u   = sr.users?.user ?? [];
+         const arr = Array.isArray(u) ? u : [u];
+         const off = arr.filter(x => x.disabled).length;
+         const n   = arr.length === 1 ? '1 user' : `${arr.length} users`;
+         userSummary.textContent = off ? `${n}, ${off} disabled` : n;
+         }).catch(e => console.error('[settings] getUsers', e));
+
+      apiCall('getServerSettings').then(sr => {
+         if (renderStale(gen)) return;
+         const set = [];
+         if (sr.serverSettings?.discogsTokenSet) set.push('Discogs');
+         if (sr.serverSettings?.tmdbKeySet)      set.push('TMDB');
+         serverSummary.textContent =
+            set.length ? `${set.join(' and ')} set` : 'No keys set';
+         }).catch(e => console.error('[settings] getServerSettings', e));
+      }
+   }
+
+// What the index says under Playback. Audio-only wins the line when it is on:
+// it changes what every video in the library will do, which counts for more
+// than where the picture goes while casting.
+function playbackSummary() {
+   if (videoAudioOnly.get())  return 'Videos as audio only';
+   if (!castLocalVideo.get()) return 'Video stops here when casting';
+   return 'Videos play with picture';
+   }
+
+function themeSummary() {
+   const t = localStorage.getItem('gd_theme') ?? 'auto';
+   return t.charAt(0).toUpperCase() + t.slice(1);
+   }
+
+// Bring the index's summaries back in step with a control the user just
+// changed. On a wide window the index stands beside the category pane, so a
+// stale line sits on screen contradicting the very switch that changed it.
+// Only these two: the other categories' summaries are the server's answer, and
+// nothing a category pane does alters the count or which keys are stored.
+function settingsSummariesChanged() {
+   const p = document.getElementById('settings-sum-playback');
+   if (p) p.textContent = playbackSummary();
+   const a = document.getElementById('settings-sum-appearance');
+   if (a) a.textContent = themeSummary();
+   }
+
+// The one place deciding what a category key draws, shared by the index's rows
+// and by the popstate handler, which is handed whatever a history entry
+// carries. That is why the role is checked here and not only on the row.
+async function showSettingsCategory(cat) {
+   const admin = !!currentUser?.adminRole;
+   if (cat === 'playback')             return viewSettingsPlayback();
+   if (cat === 'users'      && admin)  return viewSettingsUsers();
+   if (cat === 'server'     && admin)  return viewSettingsServer();
+   if (cat === 'appearance')           return viewSettingsAppearance();
+   }
+
+// The frame every category shares. Returns the pane and the generation, since
+// the two that fetch need the generation to tell whether they still own it.
+function settingsPane(cat, title) {
+   const gen = beginRender();
+   const pane = paneReset('pane-albums', `settings:${cat}`);
+   paneReset('pane-tracks');
+   paneNav.slideTo(1);
+
+   // The expando outlives the innerHTML wipe paneReset() does, so without this
+   // a later user edit would call back into a Users list that is no longer here.
+   pane._refreshUsers = null;
+
+   const hdr = document.createElement('div');
+   hdr.className = 'view-header';
+   const h1 = document.createElement('h1');
+   h1.className = 'view-title';
+   h1.textContent = title;
+   h1.title       = title;
+   hdr.appendChild(h1);
+   pane.appendChild(hdr);
+
+   return {pane, gen};
+   }
+
+// A padded block inside a category pane. [title] is omitted for the first one,
+// which needs no heading: the pane is already titled with the category name.
+function settingsSection(pane, title) {
+   const sec = document.createElement('div');
+   sec.className = 'admin-section';
+   if (title) {
+      const h2 = document.createElement('h2');
+      h2.className   = 'admin-section-title';
+      h2.textContent = title;
+      sec.appendChild(h2);
+      }
+   pane.appendChild(sec);
+   return sec;
+   }
+
+// ── Settings: Playback ───────────────────────────────────────────────────────
+
+function viewSettingsPlayback() {
+   const {pane} = settingsPane('playback', 'Playback');
+   const sec = settingsSection(pane);
+
+   const audioOnlyRow   = document.createElement('div');
+   audioOnlyRow.className = 'form-row';
+   const audioOnlyLabel = document.createElement('label');
+   const audioOnlyBox   = document.createElement('input');
+   audioOnlyBox.type    = 'checkbox';
+   audioOnlyBox.checked = videoAudioOnly.get();
+   audioOnlyBox.addEventListener('change', () => {
+      videoAudioOnly.set(audioOnlyBox.checked);
+      settingsSummariesChanged();
+      });
+   audioOnlyLabel.appendChild(audioOnlyBox);
+   audioOnlyLabel.appendChild(
+      document.createTextNode('Play videos as audio only'));
+   audioOnlyRow.appendChild(audioOnlyLabel);
+   sec.appendChild(audioOnlyRow);
+
+   const audioOnlyHint = document.createElement('p');
+   audioOnlyHint.className = 'admin-hint';
+   audioOnlyHint.textContent =
+      'Streams the soundtrack instead of the picture, which is a fraction of '
+      + 'the data. Takes effect on the next track.';
+   sec.appendChild(audioOnlyHint);
+
+   const localVidRow   = document.createElement('div');
+   localVidRow.className = 'form-row';
+   const localVidLabel = document.createElement('label');
+   const localVidBox   = document.createElement('input');
+   localVidBox.type    = 'checkbox';
+   localVidBox.checked = castLocalVideo.get();
+   localVidBox.addEventListener('change', () => {
+      castLocalVideo.set(localVidBox.checked);
+      settingsSummariesChanged();
+      });
+   localVidLabel.appendChild(localVidBox);
+   localVidLabel.appendChild(
+      document.createTextNode('Keep video here when casting to a speaker'));
+   localVidRow.appendChild(localVidLabel);
+   sec.appendChild(localVidRow);
+
+   const localVidHint = document.createElement('p');
+   localVidHint.className = 'admin-hint';
+   localVidHint.textContent =
+      'A speaker or amplifier that cannot show a picture is sent the '
+      + 'soundtrack. With this on the film also plays here, muted and kept in '
+      + 'step with it — which means streaming it to this device as well. '
+      + 'Takes effect on the next track.';
+   sec.appendChild(localVidHint);
+   }
+
+// ── Settings: Appearance ─────────────────────────────────────────────────────
+
+function viewSettingsAppearance() {
+   const {pane} = settingsPane('appearance', 'Appearance');
+   const sec = settingsSection(pane);
 
    const themeRow = document.createElement('div');
    themeRow.className = 'theme-btn-row';
@@ -986,68 +1203,15 @@ async function viewSettings() {
       btn.textContent = t.charAt(0).toUpperCase() + t.slice(1);
       btn.className   = 'theme-option-btn';
       btn.id          = `theme-opt-${t}`;
-      btn.addEventListener('click', () => { applyTheme(t); markActiveTheme(); });
+      btn.addEventListener('click', () => {
+         applyTheme(t);
+         markActiveTheme();
+         settingsSummariesChanged();
+         });
       themeRow.appendChild(btn);
       }
 
-   themeSection.appendChild(themeRow);
-   pane.appendChild(themeSection);
-
-   // ── Playback section — visible to all users ─────────────────────────────
-
-   const playbackSection = document.createElement('div');
-   playbackSection.className = 'admin-section';
-
-   const playbackHeading = document.createElement('h2');
-   playbackHeading.className = 'admin-section-title';
-   playbackHeading.textContent = 'Playback';
-   playbackSection.appendChild(playbackHeading);
-
-   const audioOnlyRow   = document.createElement('div');
-   audioOnlyRow.className = 'form-row';
-   const audioOnlyLabel = document.createElement('label');
-   const audioOnlyBox   = document.createElement('input');
-   audioOnlyBox.type    = 'checkbox';
-   audioOnlyBox.checked = videoAudioOnly.get();
-   audioOnlyBox.addEventListener('change',
-      () => videoAudioOnly.set(audioOnlyBox.checked));
-   audioOnlyLabel.appendChild(audioOnlyBox);
-   audioOnlyLabel.appendChild(
-      document.createTextNode('Play videos as audio only'));
-   audioOnlyRow.appendChild(audioOnlyLabel);
-   playbackSection.appendChild(audioOnlyRow);
-
-   const audioOnlyHint = document.createElement('p');
-   audioOnlyHint.className = 'admin-hint';
-   audioOnlyHint.textContent =
-      'Streams the soundtrack instead of the picture, which is a fraction of '
-      + 'the data. Takes effect on the next track.';
-   playbackSection.appendChild(audioOnlyHint);
-
-   const localVidRow   = document.createElement('div');
-   localVidRow.className = 'form-row';
-   const localVidLabel = document.createElement('label');
-   const localVidBox   = document.createElement('input');
-   localVidBox.type    = 'checkbox';
-   localVidBox.checked = castLocalVideo.get();
-   localVidBox.addEventListener('change',
-      () => castLocalVideo.set(localVidBox.checked));
-   localVidLabel.appendChild(localVidBox);
-   localVidLabel.appendChild(
-      document.createTextNode('Keep video here when casting to a speaker'));
-   localVidRow.appendChild(localVidLabel);
-   playbackSection.appendChild(localVidRow);
-
-   const localVidHint = document.createElement('p');
-   localVidHint.className = 'admin-hint';
-   localVidHint.textContent =
-      'A speaker or amplifier that cannot show a picture is sent the '
-      + 'soundtrack. With this on the film also plays here, muted and kept in '
-      + 'step with it — which means streaming it to this device as well. '
-      + 'Takes effect on the next track.';
-   playbackSection.appendChild(localVidHint);
-
-   pane.appendChild(playbackSection);
+   sec.appendChild(themeRow);
 
    // Mark the currently active theme button.
    function markActiveTheme() {
@@ -1058,45 +1222,22 @@ async function viewSettings() {
          });
       }
    markActiveTheme();
+   }
 
-   // Fetch current user's roles to decide what sections to show.
-   let userInfo = null;
-   try {
-      const sr = await apiCall('getUser', {username: creds.load().user});
-      userInfo = sr.user;
-      }
-   catch {
-      if (!renderStale(gen))
-         showError('Could not reach the server. Please check your connection.');
-      }
-   if (renderStale(gen)) return;
+// ── Settings: Users ──────────────────────────────────────────────────────────
 
-   // The archive-upload form used to sit here. It now lives at the top of
-   // the Uploads listing — see makeUploadBar() — because that is the listing
-   // it fills.
-
-   // ── Users section — visible to admins only ──────────────────────────────
-
-   if (userInfo?.adminRole) {
-
-   const userSection = document.createElement('div');
-   userSection.className = 'admin-section';
-
-   const userHeading = document.createElement('h2');
-   userHeading.className = 'admin-section-title';
-   userHeading.textContent = 'Users';
-   userSection.appendChild(userHeading);
+async function viewSettingsUsers() {
+   const {pane, gen} = settingsPane('users', 'Users');
+   const sec = settingsSection(pane);
 
    const userList = document.createElement('div');
    userList.className = 'user-list';
-   userSection.appendChild(userList);
+   sec.appendChild(userList);
 
    const addBtn = document.createElement('button');
    addBtn.textContent = 'Add user';
    addBtn.className   = 'upload-btn';
-   userSection.appendChild(addBtn);
-
-   pane.appendChild(userSection);
+   sec.appendChild(addBtn);
 
    async function refreshUsers() {
       userList.innerHTML = '';
@@ -1134,30 +1275,22 @@ async function viewSettings() {
 
    addBtn.addEventListener('click', () => viewUserEdit(null, refreshUsers));
 
-   // Attach refreshUsers so viewUserEdit can call it back.
    await refreshUsers();
    if (renderStale(gen)) return;
 
    // Expose so viewUserEdit can trigger a refresh after save.
    pane._refreshUsers = refreshUsers;
+   }
 
-   } // end users section
+// ── Settings: Server ─────────────────────────────────────────────────────────
 
-   // ── Server section — admin only ────────────────────────────────────────────
-
-   if (userInfo?.adminRole) {
-
-   const serverSection = document.createElement('div');
-   serverSection.className = 'admin-section';
-
-   const serverHeading = document.createElement('h2');
-   serverHeading.className = 'admin-section-title';
-   serverHeading.textContent = 'Server';
-   serverSection.appendChild(serverHeading);
+async function viewSettingsServer() {
+   const {pane} = settingsPane('server', 'Server');
+   const sec = settingsSection(pane);
 
    const tokenLabel = document.createElement('p');
    tokenLabel.textContent = 'Discogs Personal Access Token:';
-   serverSection.appendChild(tokenLabel);
+   sec.appendChild(tokenLabel);
 
    const tokenRow = document.createElement('div');
    tokenRow.className = 'token-row';
@@ -1170,15 +1303,15 @@ async function viewSettings() {
    tokenSave.className   = 'upload-btn';
    tokenRow.appendChild(tokenSave);
 
-   serverSection.appendChild(tokenRow);
+   sec.appendChild(tokenRow);
 
    const tokenStatus = document.createElement('p');
    tokenStatus.className = 'upload-status';
-   serverSection.appendChild(tokenStatus);
+   sec.appendChild(tokenStatus);
 
    const tmdbLabel = document.createElement('p');
    tmdbLabel.textContent = 'TMDB API key (posters and descriptions for video):';
-   serverSection.appendChild(tmdbLabel);
+   sec.appendChild(tmdbLabel);
 
    const tmdbRow = document.createElement('div');
    tmdbRow.className = 'token-row';
@@ -1191,11 +1324,11 @@ async function viewSettings() {
    tmdbSave.className   = 'upload-btn';
    tmdbRow.appendChild(tmdbSave);
 
-   serverSection.appendChild(tmdbRow);
+   sec.appendChild(tmdbRow);
 
    const tmdbStatus = document.createElement('p');
    tmdbStatus.className = 'upload-status';
-   serverSection.appendChild(tmdbStatus);
+   sec.appendChild(tmdbStatus);
 
    // Required by TMDB's terms of use; it has to be visible wherever the API is
    // used, not buried in a licence file.
@@ -1203,9 +1336,39 @@ async function viewSettings() {
    tmdbAttrib.className = 'upload-status';
    tmdbAttrib.textContent =
       'This product uses the TMDB API but is not endorsed or certified by TMDB.';
-   serverSection.appendChild(tmdbAttrib);
+   sec.appendChild(tmdbAttrib);
 
-   pane.appendChild(serverSection);
+   // ── Metadata ──────────────────────────────────────────────────────────────
+
+   const metaSection = settingsSection(pane, 'Metadata');
+
+   const metaHint = document.createElement('p');
+   metaHint.className = 'admin-hint';
+   metaHint.textContent =
+      'Queues an online lookup for every artist with no biography and every '
+      + 'album with no description. MusicBrainz allows one request a second, '
+      + 'so a whole library takes hours — leave it running. Progress is in '
+      + 'the server log; the only way to stop it is to restart the server.';
+   metaSection.appendChild(metaHint);
+
+   const metaRow = document.createElement('div');
+   metaRow.className = 'token-row';
+
+   const bioBtn = document.createElement('button');
+   bioBtn.textContent = 'Artist biographies';
+   bioBtn.className   = 'upload-btn';
+   metaRow.appendChild(bioBtn);
+
+   const notesBtn = document.createElement('button');
+   notesBtn.textContent = 'Album descriptions';
+   notesBtn.className   = 'upload-btn';
+   metaRow.appendChild(notesBtn);
+
+   metaSection.appendChild(metaRow);
+
+   const metaStatus = document.createElement('p');
+   metaStatus.className = 'upload-status';
+   metaSection.appendChild(metaStatus);
 
    // The server reports only whether each secret is stored, never what it is,
    // so the placeholder is the whole of what this pane can say about one.  An
@@ -1218,7 +1381,11 @@ async function viewSettings() {
       tmdbInput.placeholder  =
          sr.serverSettings?.tmdbKeySet      ? '(set — type to replace)' : '(not set)';
       }
-   catch { /* server may not yet have this endpoint */ }
+   catch (e) {
+      // Not fatal: the boxes still save. Logged rather than shown, since the
+      // only thing lost is which of the two already holds something.
+      console.error('[settings] getServerSettings', e);
+      }
 
    // Saving a box the user did not type into would clear the stored secret,
    // which it never could while the box arrived holding it.  So an empty box
@@ -1263,50 +1430,6 @@ async function viewSettings() {
                  'Saved. Applies on the next library scan.');
       });
 
-   } // end server section
-
-   // ── Metadata section — admin only ──────────────────────────────────────────
-
-   if (userInfo?.adminRole) {
-
-   const metaSection = document.createElement('div');
-   metaSection.className = 'admin-section';
-
-   const metaHeading = document.createElement('h2');
-   metaHeading.className = 'admin-section-title';
-   metaHeading.textContent = 'Metadata';
-   metaSection.appendChild(metaHeading);
-
-   const metaHint = document.createElement('p');
-   metaHint.className = 'admin-hint';
-   metaHint.textContent =
-      'Queues an online lookup for every artist with no biography and every '
-      + 'album with no description. MusicBrainz allows one request a second, '
-      + 'so a whole library takes hours — leave it running. Progress is in '
-      + 'the server log; the only way to stop it is to restart the server.';
-   metaSection.appendChild(metaHint);
-
-   const metaRow = document.createElement('div');
-   metaRow.className = 'token-row';
-
-   const bioBtn = document.createElement('button');
-   bioBtn.textContent = 'Artist biographies';
-   bioBtn.className   = 'upload-btn';
-   metaRow.appendChild(bioBtn);
-
-   const notesBtn = document.createElement('button');
-   notesBtn.textContent = 'Album descriptions';
-   notesBtn.className   = 'upload-btn';
-   metaRow.appendChild(notesBtn);
-
-   metaSection.appendChild(metaRow);
-
-   const metaStatus = document.createElement('p');
-   metaStatus.className = 'upload-status';
-   metaSection.appendChild(metaStatus);
-
-   pane.appendChild(metaSection);
-
    // Confirmed rather than fired on the first click: it commits the server to
    // hours of paced network, and — having no stop — a mis-click is not
    // undoable except by restarting.
@@ -1338,8 +1461,6 @@ async function viewSettings() {
       () => startLookup('artists', 'artist biographies'));
    notesBtn.addEventListener('click',
       () => startLookup('albums', 'album descriptions'));
-
-   } // end metadata section
    }
 
 function makeBadge(text, cls) {
@@ -1351,17 +1472,19 @@ function makeBadge(text, cls) {
 
 async function viewUserEdit(user, refreshFn) {
    // refreshFn is a callback to reload the user list; if not provided, look for it
-   // on the pane element (set by viewSettings).
-   const adminPane = document.getElementById('pane-artists');
+   // on the pane element (set by viewSettingsUsers).
+   const adminPane = document.getElementById('pane-albums');
    const refresh = refreshFn ?? adminPane._refreshUsers;
 
+   // Pane 2, under the Users category on pane 1: the only place in Settings
+   // that goes a level deeper than a category.
+   //
    // Nothing here awaits before it paints, so it cannot be interrupted — but
-   // the two panes it empties may well be mid-render from something else, and
-   // the bump is what stops that render appending on top of this form.
+   // the pane it empties may well be mid-render from something else, and the
+   // bump is what stops that render appending on top of this form.
    beginRender();
-   const pane = paneReset('pane-albums', 'user-edit');
-   paneReset('pane-tracks');
-   paneNav.slideTo(1);
+   const pane = paneReset('pane-tracks', 'user-edit');
+   paneNav.slideTo(2);
 
    const isNew = (user === null);
 
@@ -1456,7 +1579,8 @@ async function viewUserEdit(user, refreshFn) {
 
    cancelBtn.addEventListener('click', () => {
       pane.innerHTML = '';
-      paneNav.slideTo(0);
+      pane.dataset.render = '';
+      paneNav.slideTo(1);
       });
 
    saveBtn.addEventListener('click', async () => {
@@ -9434,6 +9558,11 @@ async function showShell() {
                paneNav.slideTo(1);
             else
                await viewPlaylistTracks(s.playlistId, s.playlistName);
+            } else if (s.view === 'settings-cat') {
+            if (paneHolds('pane-albums', `settings:${s.cat}`))
+               paneNav.slideTo(1);
+            else
+               await showSettingsCategory(s.cat);
             } else {
             // One branch for every pane-0 view, because each is one key and one
             // way of drawing it. An entry naming something else is the Library,

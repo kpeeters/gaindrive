@@ -3339,6 +3339,57 @@ input.chapter-time.bad { border-color: #e06c6c; }
    white-space: nowrap;
    }
 
+/* ── Settings: category index ────────────── */
+
+.settings-cat-list {
+   display: flex;
+   flex-direction: column;
+   gap: 0.25rem;
+   }
+
+/* Roomier than .user-row: these are top-level destinations, and the summary
+   line under the title needs the height anyway. */
+.settings-cat-row {
+   display: flex;
+   align-items: center;
+   gap: 0.6rem;
+   padding: 0.7rem 0.6rem;
+   border-radius: 4px;
+   cursor: pointer;
+   }
+
+.settings-cat-row:hover { background: var(--surface); }
+
+.settings-cat-text {
+   flex: 1 1 0;
+   min-width: 0;
+   display: flex;
+   flex-direction: column;
+   gap: 0.15rem;
+   }
+
+.settings-cat-title {
+   font-size: 0.95rem;
+   }
+
+/* Empty until the server answers, for the two categories that have to ask.
+   The reserved height keeps the row from growing under the cursor when it
+   does. */
+.settings-cat-summary {
+   font-size: 0.8rem;
+   line-height: 1.2;
+   min-height: 1.2em;
+   color: var(--text-dim);
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+   }
+
+.settings-cat-chevron {
+   flex-shrink: 0;
+   color: var(--text-dim);
+   }
+
 /* ── Admin — users ──────────────────────────────────── */
 
 .admin-section {
@@ -3347,6 +3398,12 @@ input.chapter-time.bad { border-color: #e06c6c; }
    flex-direction: column;
    gap: 0.75rem;
    border-top: 1px solid var(--divider);
+   }
+
+/* A category pane opens with a section, so the divider the rule above draws
+   would sit right under the header with nothing above it to divide from. */
+.view-header + .admin-section {
+   border-top: none;
    }
 
 .admin-section-title {
