@@ -3097,6 +3097,10 @@ static void reorganise_by_tags(const std::filesystem::path& batch_root)
    std::error_code ec;
    for (auto& e : fs::recursive_directory_iterator(batch_root, ec)) {
       if (!e.is_regular_file() || !is_audio(e.path())) continue;
+      // A zip built on macOS carries a "._Track01.mp3" beside every track.
+      // TagLib reads nothing from a resource fork, so each would be filed
+      // under Unknown Artist and moved into the library.
+      if (is_hidden_name(e.path())) continue;
       auto rel   = e.path().lexically_relative(batch_root);
       int  depth = (int)std::distance(rel.begin(), rel.end()) - 1; // -1 for filename
       if (depth >= 2) continue;  // already in Artist/Album structure
@@ -5532,6 +5536,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		else try {
 			for (auto& entry : fs::directory_iterator(folder)) {
 				if (!entry.is_regular_file() || entry.path().extension() != ".txt") continue;
+				if (is_hidden_name(entry.path())) continue;
 				const std::string fname = entry.path().filename().string();
 				if (excluded.count(fname)) continue;
 				if (fname.size() > chapters_suffix.size()

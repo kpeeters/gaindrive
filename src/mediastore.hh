@@ -15,6 +15,17 @@
 #include "tmdb.hh"
 #include "videoart.hh"
 
+// A dot-prefixed name is never library content.  macOS writes "._Track01.mp3"
+// beside every file it copies to a foreign filesystem: an AppleDouble resource
+// fork carrying the same extension, which is all the scanner's admission test
+// looks at.  It also keeps out .DS_Store, a synced tree's .stversions and a
+// leftover .users.
+inline bool is_hidden_name(const std::filesystem::path& p)
+	{
+	auto name = p.filename().string();
+	return !name.empty() && name.front() == '.';
+	}
+
 // One album as Phase 1 read it off the disk. Defined in mediastore.cc, because
 // it is the scanner's own working type and nothing outside the scan needs it;
 // declared here only so commit_album() can take one.

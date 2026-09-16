@@ -143,6 +143,10 @@ static std::string find_cover(const fs::path& dir)
 	std::string any_img_fallback;
 	for (auto& entry : fs::directory_iterator(dir)) {
 		if (!entry.is_regular_file()) continue;
+		// "._cover.jpg" is an AppleDouble resource fork, not the cover.  Pass 1
+		// is safe without this because it matches whole names; every pass from
+		// here down matches a suffix, which a fork's name shares.
+		if (is_hidden_name(entry.path())) continue;
 		std::string fname = entry.path().filename().string();
 		if (iends_with(fname, "front.jpg") || iends_with(fname, "front.jpeg"))
 			return entry.path().string();
@@ -156,6 +160,7 @@ static std::string find_cover(const fs::path& dir)
 	// Pass 5: recurse into subdirectories for any image.
 	for (auto& entry : fs::recursive_directory_iterator(dir)) {
 		if (!entry.is_regular_file()) continue;
+		if (is_hidden_name(entry.path())) continue;
 		std::string fname = entry.path().filename().string();
 		if (iends_with(fname, ".jpg") || iends_with(fname, ".jpeg") || iends_with(fname, ".png"))
 			return entry.path().string();
@@ -257,6 +262,7 @@ static std::vector<std::string> find_extra_images(const fs::path& dir,
 	std::vector<std::string> result;
 	auto consider = [&](const fs::directory_entry& entry) {
 		if (!entry.is_regular_file()) return;
+		if (is_hidden_name(entry.path())) return;
 		std::string ext = entry.path().extension().string();
 		std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 		if (!IMG_EXT.count(ext)) return;
@@ -1536,8 +1542,7 @@ void MediaStore::scan()
 			// on a Synology share. Indexing them adds junk entries and churns
 			// every folders.id after them on each rescan.
 			if (!e.is_directory()) continue;
-			auto name = e.path().filename().string();
-			if (!name.empty() && name.front() == '.') continue;
+			if (is_hidden_name(e.path())) continue;
 			to_scan.insert(e.path());
 			}
 		if (ec)
@@ -3381,6 +3386,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		PhaseTimer pt(scan_times_.walk);
 		for (auto& album_entry : fs::directory_iterator(artist_path)) {
 			if (!album_entry.is_directory()) continue;
+			if (is_hidden_name(album_entry.path())) continue;
 
 			AlbumReadData adat;
 			adat.path  = album_entry.path().string();
@@ -3440,7 +3446,13 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			// loop below so each directory is still enumerated exactly once.
 			std::vector<DiscDir>  disc_dirs;
 			std::vector<fs::path> direct_files;
+			// is_hidden_name() on both levels: this is where a zip unpacked on
+			// macOS puts its "._Track01.mp3" forks, one beside every track, and
+			// is_media_file() cannot tell them apart from the tracks.  A
+			// __MACOSX subfolder needs no test of its own -- with its forks
+			// filtered it holds no media, and the empty() test below drops it.
 			for (auto& e : fs::directory_iterator(album_entry.path())) {
+				if (is_hidden_name(e.path())) continue;
 				if (e.is_regular_file()) {
 					if (is_media_file(e.path())) direct_files.push_back(e.path());
 					continue;
@@ -3449,7 +3461,8 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 				DiscDir dd;
 				dd.path = e.path();
 				for (auto& te : fs::directory_iterator(e.path())) {
-					if (te.is_regular_file() && is_media_file(te.path()))
+					if (te.is_regular_file() && is_media_file(te.path())
+					        && !is_hidden_name(te.path()))
 						dd.files.push_back(te.path());
 					}
 				if (!dd.files.empty()) disc_dirs.push_back(std::move(dd));
@@ -3495,8 +3508,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		for (auto& e : fs::directory_iterator(artist_path)) {
 			if (!e.is_regular_file() || !is_media_file(e.path())) continue;
 			// "._movie.mp4" is an AppleDouble resource fork, not a film.
-			auto name = e.path().filename().string();
-			if (!name.empty() && name.front() == '.') continue;
+			if (is_hidden_name(e.path())) continue;
 
 			AlbumReadData loose;
 			loose.loose = true;
@@ -4025,8 +4037,7 @@ void MediaStore::scan_root_files(const RootRec& root)
 	PhaseTimer pt(scan_times_.walk);
 	for (auto& e : fs::directory_iterator(root.cfg.path, ec)) {
 		if (!e.is_regular_file() || !is_media_file(e.path())) continue;
-		auto name = e.path().filename().string();
-		if (!name.empty() && name.front() == '.') continue;
+		if (is_hidden_name(e.path())) continue;
 		AlbumReadData adat;
 		adat.loose = true;
 		adat.path  = e.path().string();
