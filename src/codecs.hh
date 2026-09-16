@@ -111,53 +111,53 @@ inline bool container_declarable(std::string_view ext)
 	return is_video_ext(ext) && ext != "vob";
 	}
 
-// The audio half of the same question, and deliberately two predicates rather
-// than one table column: an audio container either *implies* its codec or it
-// does not, and that difference is what decides whether a client may name it
-// on its own.
-
-// An audio container whose codec follows from the extension, so naming it
-// alone is exact rather than a guess.  A .mp3 holds MPEG audio and nothing
-// else, and the other three are equally closed.
+// What an audio file *is*: the container it is muxed in and the codec inside
+// it, both as the scan observed them and as songs.audio_container /
+// songs.audio_codec store them.
 //
-// This is what makes a *bare* token safe on the audio side.  Every other audio
-// container has to be spelled as a container/codec pair, because the server
-// cannot know what is inside one and must not guess what the client decodes.
-inline bool audio_bare_declarable(std::string_view ext)
+// This is the pair a `playable` declaration is matched against, and it is
+// deliberately not built out of the filename.  A .ogg and a .oga are one
+// container under two extensions, so a token derived from the extension would
+// have to name both -- and the scan already *proves* the container on its way
+// to the codec, so inferring it a second way would be discarding an answer in
+// order to guess at it.
+//
+// Container names are the real ones, never extensions: `ogg`, `mp4`, `mpeg`.
+// Codec names are ffprobe's, because the same column already holds ffprobe's
+// answer for every video row and one column must not carry two vocabularies.
+struct AudioForm
 	{
-	return ext == "mp3" || ext == "flac" || ext == "opus" || ext == "aac";
+	std::string_view container;
+	std::string_view codec;
+	};
+
+// The form an extension settles on its own, or an empty container when it does
+// not.  A .mp3 holds MPEG audio and nothing else; a .m4a holds AAC or ALAC and
+// nothing outside the file says which.
+//
+// What this saves is the whole point of it: the scan fills these rows without
+// opening a single file, so the one-time back-fill pass reads only the
+// containers that genuinely need reading.
+inline AudioForm implied_audio_form(std::string_view ext)
+	{
+	if (ext == "mp3")  return { "mpeg", "mp3"   };
+	if (ext == "flac") return { "flac", "flac"  };
+	if (ext == "opus") return { "ogg",  "opus"  };
+	if (ext == "aac")  return { "adts", "aac"   };
+	if (ext == "wav")  return { "riff", "pcm"   };
+	if (ext == "wma")  return { "asf",  "wma"   };
+	return {};
 	}
 
-// An audio container that can hold more than one codec, and may therefore only
-// be declared as a pair.  A .ogg is Vorbis, Opus, FLAC or Speex; a .m4a is AAC
-// or ALAC, which is the gap songs.codec has never been able to close.
+// Whether the file has to be opened to learn its form.  The complement of
+// implied_audio_form() over the audio containers, and asked by the scan alone
+// -- deciding whether to open a file is a question only a filename can answer.
 //
-// wav and wma are deliberately **not** here, so neither is declarable in any
-// form.  Both are genuinely ambiguous -- the RIFF format tag admits ADPCM and
-// mu-law beside PCM, and .wma spans four codecs -- so admitting them bare would
-// be a guess.  Admitting them as pairs would mean teaching the scanner to read
-// two more container formats for no gain: a client that wants a lossless or
-// legacy file untouched asks for the original, which sends no format at all and
-// is already served straight off disk.
-inline bool audio_pair_declarable(std::string_view ext)
+// `oga` is here beside `ogg` because both are Ogg: the *extension* is ambiguous
+// twice over, and reading the file is what resolves both at once.
+inline bool audio_form_needs_read(std::string_view ext)
 	{
 	return ext == "m4a" || ext == "ogg" || ext == "oga";
-	}
-
-// The codec inside a container that only ever holds one, spelled the way
-// songs.audio_codec stores it -- lowercased, ffprobe's codec_name.  Empty for
-// everything else, which is every container a declaration has to pair.
-//
-// The scan fills audio_codec from this for the unambiguous extensions without
-// opening the file, which is what keeps the one-time back-fill pass
-// proportional to the .m4a/.ogg part of a library rather than to all of it.
-inline std::string_view implied_audio_codec(std::string_view ext)
-	{
-	if (ext == "mp3")  return "mp3";
-	if (ext == "flac") return "flac";
-	if (ext == "opus") return "opus";
-	if (ext == "aac")  return "aac";
-	return {};
 	}
 
 // songs.codec holds a lowercased extension for video rows too, so every
@@ -317,23 +317,20 @@ inline bool video_direct_playable_for(std::string_view container,
 // second-guessing the one party that knows, which is the whole thing this
 // parameter exists to stop.
 //
-// The codec half is compared verbatim and never validated against a table.  An
-// unrecognised spelling simply fails to match and the file transcodes exactly
-// as it did before, which is a better failure than a second vocabulary to keep
-// in step with ffprobe's.
-inline bool audio_declared(std::string_view container,
-                           std::string_view audio_codec,
-                           const Playable& client)
+// Neither half is validated against a table.  Both are compared verbatim
+// against what the scan stored, so a spelling this server does not use simply
+// fails to match and the file transcodes exactly as it did before -- a better
+// failure than a second vocabulary to keep in step with ffprobe's.
+//
+// An empty half is a row the scan has not reached yet, and is not a match:
+// "ogg/" and "/vorbis" can never be declared, so there is nothing to equal.
+inline bool audio_declared(const AudioForm& form, const Playable& client)
 	{
-	if (audio_bare_declarable(container))
-		return client.find(container) != client.end();
-	// An empty audio_codec is a row the scan has not reached yet, not a match:
-	// "m4a/" can never be declared, so there is nothing for it to equal.
-	if (!audio_pair_declarable(container) || audio_codec.empty()) return false;
-	std::string pair(container);
-	pair += '/';
-	pair += audio_codec;
-	return client.find(pair) != client.end();
+	if (form.container.empty() || form.codec.empty()) return false;
+	std::string token(form.container);
+	token += '/';
+	token += form.codec;
+	return client.find(token) != client.end();
 	}
 
 // Which of serve_video()'s three tiers a Chromecast's fetch will land on.

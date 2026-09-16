@@ -12,7 +12,7 @@ import org.junit.Test
  * ourselves, and — the half worth testing — its absence everywhere else.
  *
  * The same reasoning as `CastPacingTest`: the failure is silent and remote. A
- * cast URL that carries `playableContainers` gets the receiver a `LOAD`
+ * cast URL that carries `playable` gets the receiver a `LOAD`
  * announcing `video/mp4` followed by Matroska, which it refuses outright. The
  * film never starts and nothing on the phone says why. The obvious refactor —
  * moving the declaration into `StreamUrls.forVideo`'s default "because both
@@ -24,7 +24,7 @@ class PlayableContainersTest {
 	@Test
 	fun `a declared set becomes one sorted comma list`() {
 		assertEquals(
-			mapOf("id" to "7", "playableContainers" to "avi,mkv,mov"),
+			mapOf("id" to "7", "playable" to "avi,mkv,mov"),
 			videoStreamParams("7", setOf("mov", "mkv", "avi")),
 		)
 	}

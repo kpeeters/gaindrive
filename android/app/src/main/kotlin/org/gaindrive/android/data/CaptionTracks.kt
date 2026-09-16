@@ -66,7 +66,7 @@ class CaptionTracks @Inject constructor(
 			// that silently stopped being listed is neither.
 			//
 			// That is also what makes an older server safe rather than lucky. One
-			// that does not report `source` does not honour `playableContainers`
+			// that does not report `source` does not honour `playable`
 			// either, so it remuxes — and a remux drops the embedded tracks, which
 			// is exactly when every caption has to be side-loaded. The two halves
 			// arrived together and degrade together.

@@ -22,6 +22,7 @@ import org.gaindrive.android.data.model.AudioFormat
 import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
+import org.gaindrive.android.playback.playableAudioFor
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -324,7 +325,14 @@ class PinRepository @Inject constructor(
 			// one past exactly when its soundtrack is what will be fetched — so
 			// `isVideo` is the flag the URL builder wants, not a second reading
 			// of the setting that could disagree with the first.
-			val target = streamUrls.forDownload(song.ref, song.isVideo) ?: return@forEach
+			// The same declaration playback makes, and it must be: both build
+			// the same cache key, so a pinned copy and a played one that
+			// declared differently would write different bytes under it.
+			val target = streamUrls.forDownload(
+				song.ref,
+				song.isVideo,
+				::playableAudioFor,
+			) ?: return@forEach
 			downloads.add(song.ref, target)
 		}
 	}

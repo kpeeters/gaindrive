@@ -133,9 +133,9 @@ data class Song(
 	 * `video/mp4`, not as `video/x-matroska`.
 	 *
 	 * It describes what **any** client would be sent, and deliberately stays that
-	 * way: a `playableContainers` declaration changes the tier for one request
-	 * without moving this, so it can be cached and stays right for the receiver,
-	 * which declares nothing. The track info dialog reads it alongside that
+	 * way: a `playable` declaration changes the tier for one request without
+	 * moving this, so it can be cached and stays right for the receiver, which
+	 * declares nothing. The track info dialog reads it alongside that
 	 * declaration to say whether this playback is the untouched file.
 	 */
 	val transcodedContentType: String? = null,

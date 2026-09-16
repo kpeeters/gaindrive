@@ -62,9 +62,21 @@ class TranscodePrewarmer @Inject constructor(
 		// cache, so there is nothing for the server to prepare.
 		if (ref.encode() in audioCache.cachedKeys.value) return
 
-		val target = streamUrls.forPlayback(ref, audioOnlyVideo) ?: return
+		// The same declaration playback will make, and it has to be: warming an
+		// undeclared URL builds an Opus transcode that playback then never
+		// fetches, so the server pays for the file twice and the cache entry it
+		// wrote is never read.
+		val target = streamUrls.forPlayback(
+			ref,
+			audioOnlyVideo,
+			::playableAudioFor,
+		) ?: return
 		// The original is served straight off disk with no ffmpeg involved, so
-		// there is no transcode to build and nothing to wait for.
+		// there is no transcode to build and nothing to wait for. A declared
+		// format the server passes through costs the same nothing, but it
+		// cannot be recognised from here — whether a `.m4a` holds AAC or ALAC
+		// is not on a song entry — so that request goes out and finds a 206
+		// waiting for it.
 		if (target.quality.format == AudioFormat.ORIGINAL) return
 
 		// Claimed only now that a request is actually going out, and keyed by

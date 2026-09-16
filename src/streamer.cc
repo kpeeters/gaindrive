@@ -64,7 +64,8 @@ Streamer::TranscodePlan Streamer::plan_transcode(const SongInfo& song,
 	// the soundtrack the client wants extracted; honouring a declaration would
 	// hand it the film's own codec instead of the one it asked for.
 	bool declared = !song.is_video
-	             && audio_declared(song.codec, song.audio_codec, playable);
+	             && audio_declared({ song.audio_container, song.audio_codec },
+	                               playable);
 
 	// A format request that resolves to the same muxer and encoder as the
 	// source is not a change: ".oga" and "ogg" are the same thing spelled two

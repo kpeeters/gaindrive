@@ -192,15 +192,21 @@ CREATE TABLE songs (
     width         INTEGER DEFAULT 0,   -- 0 when unprobed
     height        INTEGER DEFAULT 0,
     video_codec   TEXT,      -- "h264","mpeg2video", etc. (ffprobe codec_name)
-    -- Set for videos, and for the audio containers that can hold more than one
-    -- codec -- .m4a (AAC or ALAC) and .ogg/.oga (Vorbis, Opus, FLAC, Speex),
-    -- where the extension does not say which.  That is the half a `playable`
-    -- container/codec declaration is matched against; see codecs.hh.  Filled
-    -- from the extension alone for .mp3/.flac/.opus/.aac, which settle it.
+    -- Set for videos (from ffprobe) and for every audio row.  With
+    -- audio_container below it forms the pair a `playable` declaration is
+    -- matched against; see AudioForm in codecs.hh.
     -- NULL means "never read" and '' means "read, could not tell", the same
     -- distinction `artist` above uses, and for the same reason: it is what
-    -- terminates the scanner's Phase 3 back-fill on an existing library.
+    -- terminates the scanner's Phase 3 back-fill on an existing library.  The
+    -- two columns are written together and never separately, so this one NULL
+    -- check stands for both.
     audio_codec   TEXT,      -- "aac","alac","vorbis","ac3", etc.
+    -- Audio only: the container the scan *observed*, which is a different fact
+    -- from `codec` above -- that holds the filename's extension, and .ogg and
+    -- .oga are one container under two of them while .m4a is an MP4.  Read
+    -- from the file for .m4a/.ogg/.oga, and settled by the extension for
+    -- everything else without opening anything.
+    audio_container TEXT,    -- "mpeg","ogg","mp4","flac","adts","riff","asf"
     -- The season an episode belongs to, from an S02E03 marker or a folder
     -- naming its season; 0 for anything that is not one. disc_number holds
     -- the same number, because that is what clients group and sort by; this

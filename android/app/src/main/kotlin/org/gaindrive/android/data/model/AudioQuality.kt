@@ -6,17 +6,24 @@ package org.gaindrive.android.data.model
  * [param] is the `format` value sent to `stream.view`. [mime] is what the media
  * item declares; null for [ORIGINAL], where the container is whatever the file
  * happens to be and extractor sniffing is the only honest answer.
+ *
+ * [sampleMime] is the *codec* inside that container, which is a different
+ * string for Opus and the same one for MP3 — Ogg is a container and MPEG audio
+ * is not. It exists so the track info dialog can compare what the decoder
+ * reports against what was asked for: since a request declares the formats
+ * media3 takes as they stand, the two no longer have to agree, and a mismatch
+ * is precisely how "this arrived unconverted" is recognised.
  */
-enum class AudioFormat(val param: String, val mime: String?) {
-	ORIGINAL("raw", null),
-	OPUS("opus", "audio/ogg"),
+enum class AudioFormat(val param: String, val mime: String?, val sampleMime: String?) {
+	ORIGINAL("raw", null, null),
+	OPUS("opus", "audio/ogg", "audio/opus"),
 
 	/**
 	 * Never chosen directly — it is what an account bitrate cap turns a request
 	 * for [ORIGINAL] into, because that is what the server sends in that case.
 	 * See [AudioQuality.cappedBy].
 	 */
-	MP3("mp3", "audio/mpeg"),
+	MP3("mp3", "audio/mpeg", "audio/mpeg"),
 }
 
 /**

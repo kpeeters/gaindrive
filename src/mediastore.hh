@@ -622,6 +622,12 @@ class MediaStore {
 			int         height   = 0;
 			std::string video_codec;
 			std::string audio_codec;
+			// Audio only: the container the scan observed, which is a
+			// different fact from `codec` above -- that is the filename's
+			// extension, and .ogg and .oga are one container under two of
+			// them. The pair (this, audio_codec) is what a `playable`
+			// declaration is compared against; see AudioForm in codecs.hh.
+			std::string audio_container;
 			};
 
 		std::optional<SongInfo> get_song(int song_id);

@@ -753,7 +753,7 @@ than rejected, and means "do not scale" — the same as omitting it.
   [[endpoint.param]]
   name  = "playable"
   type  = "string"
-  doc   = 'A comma list of what this client can be sent untouched, so the server skips work it would otherwise pay — `mp3,m4a/aac,mkv,mov,avi`.'
+  doc   = 'A comma list of what this client can be sent untouched, so the server skips work it would otherwise pay — `mpeg/mp3,mp4/aac` for audio, `mkv,mov,avi` for video.'
   notes = '''
 Most players handle more than a browser does, and a server that cannot be told
 so re-encodes for no reason. An MP3 played through a client that decodes MP3
@@ -762,22 +762,29 @@ ones that needed nothing. Matroska is the video case — an H.264/AAC `.mkv` is
 remuxed to MP4 only because no browser reads Matroska, and that remux is a
 whole-file `-c copy` the client waits out before it hears anything.
 
-**A token is a container, or a `container/codec` pair**, and which one is legal
-depends on the container:
+**A token is a bare container for video, and a `container/codec` pair for
+audio.** The split is by medium, not by anything about the file:
 
-* **Bare** — every video container except `vob`, and the four audio containers
-  whose codec their extension already settles: `mp3`, `flac`, `opus`, `aac`.
-  Nothing is being assumed about a bare audio token; only one codec can be
-  inside.
-* **Paired** — `m4a`, `ogg` and `oga`, which hold more than one. A `.m4a` is
-  AAC or ALAC and a `.ogg` is Vorbis, Opus, FLAC or Speex, and the extension
-  does not say which. These are **not** accepted bare: that would be the server
-  guessing what is in the file and what you decode, which is the pair of
-  guesses this parameter exists to remove.
+* **Video, bare** — every video container except `vob`. Video is a
+  container-only declaration by design: the server keeps its own codec test, so
+  naming `mkv` says which containers may be served untouched and nothing more.
+* **Audio, paired** — `mpeg/mp3`, `mp4/aac`, `ogg/vorbis`, `flac/flac` and so
+  on. Both halves are compared against what the scan **observed** and recorded,
+  never against a filename.
 
-`wav` and `wma` are not declarable in either form. Both are genuinely
-ambiguous, and a client that wants a lossless or legacy file untouched asks for
-the original instead — no `format` at all, which is served straight off disk.
+That is why audio has no bare form. A `.ogg` and a `.oga` are one container
+under two extensions, and a `.m4a` is an MP4 — so a token naming an extension
+would reach some of a container's files and not others. Naming the container
+itself, `ogg` or `mp4`, reaches all of them, and `mp3` alongside `mpeg/mp3`
+would be two spellings of one thing.
+
+Containers are the real ones: `mpeg`, `flac`, `ogg`, `mp4`, `adts`, `riff`,
+`asf`. Codec names are lowercase and spelled as ffprobe spells them: `mp3`,
+`aac`, `alac`, `vorbis`, `opus`, `flac`, `speex`, `pcm`.
+
+Neither half is checked against a list. Both are compared for equality with
+what was stored, so a spelling this server does not use simply never matches
+and the file is converted exactly as it was before.
 
 **Declaring something means "send me this", not "I can decode this."** They are
 different claims, and only the second is about your decoder. A client set to
@@ -796,16 +803,14 @@ What it does is narrow, and deliberately so.
   directly anyway, so an HEVC or AC3 file is unaffected — the saving is the
   container work alone.
 * An unrecognised token is ignored rather than rejected, so naming a new one
-  costs nothing against an older server. The codec half of a pair is compared
-  verbatim against what the scan recorded and is not checked against any list:
-  a spelling this server does not use simply never matches.
+  costs nothing against an older server.
 * `vob` is **refused**. A DVD titleset is one continuous stream split across
   numbered VOBs and the stored path names only the first, so serving it
   untouched would hand back twenty minutes of a two-hour film with nothing
   reporting an error.
-
-Codec names are lowercase and spelled as ffprobe spells them: `aac`, `alac`,
-`vorbis`, `opus`, `flac`, `speex`.
+* A pair naming `riff` or `asf` will never match. Those forms are recorded, but
+  a client that wants a lossless or legacy file untouched asks for the original
+  instead — no `format` at all, which is served straight off disk.
 
 `transcodedContentType`, `transcodedSuffix`, `transcodedBitRate` and
 `nativeSeek` are **not** affected by it, deliberately. They describe what any

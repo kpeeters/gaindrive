@@ -1,7 +1,10 @@
 package org.gaindrive.android.data.cache
 
+import android.net.Uri
+import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.ContentMetadata
 import androidx.media3.datasource.cache.SimpleCache
@@ -17,6 +20,7 @@ import kotlinx.coroutines.withContext
 import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.local.LocalLibrary
 import org.gaindrive.android.data.model.AudioQuality
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -157,6 +161,57 @@ class AudioCache @Inject constructor(
 		CacheDataSource.Factory().setCache(cache).createDataSource()
 
 	/**
+	 * What the stored bytes under [key] actually are, from their own first bytes.
+	 *
+	 * The cache key names the quality that was **asked for**, and since the app
+	 * began declaring what it takes as it stands that no longer decides what
+	 * arrived: an `@opus160` key may hold the original MP3. Anything that has to
+	 * put a type on these bytes therefore has to look, and the Cast bridge has to
+	 * — a receiver cannot sniff, and one told `audio/ogg` over MP3 refuses the
+	 * media outright, on a television, with nothing on the phone to say why.
+	 *
+	 * Reading the container is the whole answer, and there is no need to work out
+	 * whether the server converted: an Opus transcode and a passed-through `.ogg`
+	 * are both `audio/ogg`, an MP3 transcode and a passed-through `.mp3` are both
+	 * `audio/mpeg`. Null when the bytes are not there or say nothing recognised,
+	 * which is a refusal the caller answers by keeping what it had.
+	 *
+	 * Reads through [readOnlySource], so it never goes to the network: a key with
+	 * nothing stored throws inside and returns null rather than fetching.
+	 */
+	suspend fun storedMimeType(key: String): String? = withContext(Dispatchers.IO) {
+		val head = ByteArray(SNIFF_BYTES)
+		val source = readOnlySource()
+		val read = try {
+			source.open(
+				DataSpec.Builder()
+					.setUri(Uri.EMPTY)
+					.setKey(key)
+					.setPosition(0)
+					.setLength(SNIFF_BYTES.toLong())
+					.build()
+			)
+			var got = 0
+			while (got < SNIFF_BYTES) {
+				val n = source.read(head, got, SNIFF_BYTES - got)
+				if (n == C.RESULT_END_OF_INPUT) break
+				got += n
+			}
+			got
+		} catch (e: IOException) {
+			Log.i(TAG, "sniff $key: ${e.message}")
+			0
+		} finally {
+			try {
+				source.close()
+			} catch (e: IOException) {
+				Log.i(TAG, "sniff close $key: ${e.message}")
+			}
+		}
+		sniffAudioMime(head, read)
+	}
+
+	/**
 	 * The quality tag of a copy of [refKey] that is held in full, preferring
 	 * [preferred] when that one is present.
 	 *
@@ -243,5 +298,7 @@ class AudioCache @Inject constructor(
 	private companion object {
 		/** Long enough to coalesce a track's worth of span writes. */
 		const val REFRESH_DEBOUNCE_MS = 500L
+
+		const val TAG = "AudioCache"
 	}
 }

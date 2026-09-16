@@ -40,6 +40,9 @@ COLUMNS = [
 	"title", "track_number", "disc_number", "year", "genre", "artist",
 	"duration", "bitrate", "sample_rate", "channels",
 	"is_video", "width", "height", "video_codec", "audio_codec", "season",
+	# Written with audio_codec and never separately, so a dump where one moved
+	# and the other did not is a bug rather than a diff worth reading past.
+	"audio_container",
 	]
 
 # NULL has to survive the round trip as something no value can collide with:

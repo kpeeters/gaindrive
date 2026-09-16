@@ -65,6 +65,11 @@ class Streamer {
 			int         height   = 0;
 			std::string video_codec;
 			std::string audio_codec;
+			// Audio only: the container the scan observed, as opposed to the
+			// extension `codec` above holds.  The pair (this, audio_codec) is
+			// what a `playable` declaration is matched against -- see
+			// AudioForm in codecs.hh for why it is not derived from the name.
+			std::string audio_container;
 			};
 
 		// What one request resolves to: whether ffmpeg is needed at all, which

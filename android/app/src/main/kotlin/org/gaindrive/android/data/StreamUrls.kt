@@ -59,8 +59,64 @@ internal fun videoStreamParams(id: String, containers: Set<String>): Map<String,
 	buildMap {
 		put("id", id)
 		if (containers.isNotEmpty())
-			put("playableContainers", containers.sorted().joinToString(","))
+			put("playable", containers.sorted().joinToString(","))
 	}
+
+/**
+ * The query an audio request carries: the id, what to convert to, and what not
+ * to convert at all.
+ *
+ * Hoisted out of [StreamUrls.build] for the reason [videoStreamParams] is —
+ * `build` needs Hilt and this does not, and the assertion worth having is that
+ * an empty [playable] yields no `playable` parameter whatsoever. That is the
+ * audio twin of `the cast route declares nothing`: a receiver handed a URL that
+ * declares gets the original while its `LOAD` announced the transcode's type,
+ * and refuses the media outright.
+ *
+ * `format` and `maxBitRate` are omitted together for the original, because the
+ * server serves the file directly with no ffmpeg involved at all. They are what
+ * the declaration is *not*: these say what to produce, [playable] says what to
+ * leave alone, and the two are independent.
+ *
+ * Sorted for the same reason the video list is: a `Set`'s iteration order is not
+ * a promise, and this string lands in OkHttp's cache key and the server's log.
+ */
+internal fun audioStreamParams(
+	id: String,
+	quality: AudioQuality,
+	playable: Set<String>,
+): Map<String, String> =
+	buildMap {
+		put("id", id)
+		if (quality.format != AudioFormat.ORIGINAL) {
+			put("format", quality.format.param)
+			put("maxBitRate", quality.bitRate.toString())
+		}
+		if (playable.isNotEmpty())
+			put("playable", playable.sorted().joinToString(","))
+	}
+
+/**
+ * What a request may declare it takes as it stands, given the quality that
+ * request settled on.
+ *
+ * A function rather than a set, because the set follows from a quality the
+ * caller does not have: `forPlayback` may build for a copy already held rather
+ * than for the current setting, and the declaration has to match whatever it
+ * lands on. A function rather than a flag, because [StreamUrls] must not be the
+ * thing that knows — what media3 decodes is a claim about a player, and the
+ * same argument that keeps `MEDIA3_CONTAINERS` out of this file keeps its audio
+ * counterpart out too. `PlaybackService` passes `::playableAudioFor`.
+ *
+ * [DECLARES_NOTHING] is the default, and the default is the safety. It covers
+ * every caller that has not thought about it, which is the property that
+ * matters: a Cast receiver demuxes none of this and was told in advance what it
+ * was about to be sent.
+ */
+typealias PlayableFor = (AudioQuality) -> Set<String>
+
+/** Declares nothing at all; see [PlayableFor]. */
+val DECLARES_NOTHING: PlayableFor = { emptySet() }
 
 /**
  * The single builder of stream URLs, used by both the download queue and the
@@ -83,8 +139,12 @@ class StreamUrls @Inject constructor(
 	 * Always the current setting: pinning is the user asking for this track at
 	 * the quality they have chosen, so an older copy does not satisfy it.
 	 */
-	suspend fun forDownload(ref: ItemRef, audioOnlyVideo: Boolean = false): StreamTarget? =
-		build(ref, settings.audioQuality.first(), audioOnlyVideo)
+	suspend fun forDownload(
+		ref: ItemRef,
+		audioOnlyVideo: Boolean = false,
+		playable: PlayableFor = DECLARES_NOTHING,
+	): StreamTarget? =
+		build(ref, settings.audioQuality.first(), audioOnlyVideo, playable)
 
 	/**
 	 * Prefers a quality already held in full, so a library downloaded at an
@@ -93,8 +153,18 @@ class StreamUrls @Inject constructor(
 	 * The URL is built for the held quality rather than the current one: if the
 	 * copy turns out to need topping up, the bytes that arrive have to match the
 	 * bytes already there.
+	 *
+	 * [playable] decides what the request may declare it takes as it stands,
+	 * and the default declares nothing. **This function serves the Cast route as
+	 * well as the local player** — `CastUrls.directTarget` reaches the server
+	 * through it in three of its branches — so the declaration cannot live in
+	 * here, only at the call site that will read the bytes itself.
 	 */
-	suspend fun forPlayback(ref: ItemRef, audioOnlyVideo: Boolean = false): StreamTarget? {
+	suspend fun forPlayback(
+		ref: ItemRef,
+		audioOnlyVideo: Boolean = false,
+		playable: PlayableFor = DECLARES_NOTHING,
+	): StreamTarget? {
 		val preferred = settings.audioQuality.first().let {
 			if (audioOnlyVideo) it.forVideoAudio() else it
 		}
@@ -103,7 +173,7 @@ class StreamUrls @Inject constructor(
 		val held = withContext(Dispatchers.IO) {
 			audioCache.heldTagOf(ref.encode(), preferred)
 		}?.let(AudioQuality::parse)
-		return build(ref, held ?: preferred, audioOnlyVideo)
+		return build(ref, held ?: preferred, audioOnlyVideo, playable)
 	}
 
 	/**
@@ -151,10 +221,12 @@ class StreamUrls @Inject constructor(
 	 * `Content-Length` and no `Range` — unseekable as a progressive stream, so
 	 * it is played as HLS, where seeking is picking a segment.
 	 *
-	 * [playableContainers] is a third parameter that is *usually* absent, and the
-	 * default is the safety. It tells the server we demux those containers
-	 * ourselves, so it can skip a remux it would otherwise pay — but the same URL
-	 * builder serves the Cast route, and a receiver demuxes none of them. Worse,
+	 * [playable] is a third parameter that is *usually* absent, and the default
+	 * is the safety. It tells the server we demux those containers ourselves —
+	 * the video half of one parameter that also carries the audio declaration,
+	 * see [audioStreamParams] — so it can skip a remux it would otherwise pay.
+	 * But the same URL builder serves the Cast route, and a receiver demuxes
+	 * none of them. Worse,
 	 * the `LOAD` sent to that receiver declared a `contentType` taken from the
 	 * entry's `transcodedContentType`, which is `video/mp4` for exactly the files
 	 * this affects; a receiver told `video/mp4` and handed Matroska refuses the
@@ -169,7 +241,7 @@ class StreamUrls @Inject constructor(
 	suspend fun forVideo(
 		ref: ItemRef,
 		nativeSeek: Boolean,
-		playableContainers: Set<String> = emptySet(),
+		playable: Set<String> = emptySet(),
 	): VideoTarget? =
 		withContext(Dispatchers.IO) {
 			val config = registry.get(ref.server) ?: return@withContext null
@@ -179,7 +251,7 @@ class StreamUrls @Inject constructor(
 				VideoTarget(
 					url = client.url(
 						"stream",
-						videoStreamParams(ref.id, playableContainers),
+						videoStreamParams(ref.id, playable),
 					),
 					// No declared type: sniffing is the only honest answer, the
 					// same argument AudioFormat.ORIGINAL makes. The remux tier
@@ -212,30 +284,41 @@ class StreamUrls @Inject constructor(
 		ref: ItemRef,
 		wanted: AudioQuality,
 		audioOnlyVideo: Boolean = false,
+		playable: PlayableFor = DECLARES_NOTHING,
 	): StreamTarget? =
 		withContext(Dispatchers.IO) {
 			val config = registry.get(ref.server) ?: return@withContext null
+			// Named rather than folded into the line below, because the
+			// declaration reads this value and the capped one would be wrong:
+			// a capped account asking for the original is sent mp3 at the cap,
+			// so `quality` has already lost the fact that originals were wanted.
+			val asked = if (audioOnlyVideo) wanted.forVideoAudio() else wanted
 			// The account ceiling is applied here, where this track's own server
 			// is in hand. A queue may span servers, so there is no single
 			// "current" cap to read.
-			val quality = (if (audioOnlyVideo) wanted.forVideoAudio() else wanted)
-				.cappedBy(accounts.capFor(config))
+			val quality = asked.cappedBy(accounts.capFor(config))
 
-			val params = buildMap {
-				put("id", ref.id)
-				// Omitted entirely for the original: the server serves the file
-				// directly, with no ffmpeg involved at all.
-				if (quality.format != AudioFormat.ORIGINAL) {
-					put("format", quality.format.param)
-					put("maxBitRate", quality.bitRate.toString())
-				}
-			}
+			// Nothing for a video played as audio, and not merely because it
+			// would be ignored: `plan_transcode` guards the audio declaration on
+			// `!song.is_video`, and a parameter the server drops on the floor
+			// invites the next reader to believe it does something.
+			val declared: Set<String> =
+				if (audioOnlyVideo) emptySet() else playable(asked)
 
 			StreamTarget(
-				url = clients.clientFor(config).url("stream", params),
+				url = clients.clientFor(config).url(
+					"stream",
+					audioStreamParams(ref.id, quality, declared),
+				),
 				quality = quality,
 				cacheKey = CacheKeys.of(ref, quality),
-				mimeType = quality.format.mime,
+				// Null the moment anything was declared: the response may be the
+				// file as it stands rather than the format asked for, and this
+				// value reaches ExoPlayer, the download index and — where it
+				// cannot be sniffed away — a Cast receiver. Sniffing is then the
+				// only honest answer, the same argument AudioFormat.ORIGINAL
+				// already makes for itself.
+				mimeType = if (declared.isEmpty()) quality.format.mime else null,
 			)
 		}
 }

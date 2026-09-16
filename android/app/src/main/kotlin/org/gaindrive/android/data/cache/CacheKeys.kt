@@ -4,12 +4,21 @@ import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.ItemRef
 
 /**
- * Cache keys, which are an encoded [ItemRef] plus the quality of the bytes
- * stored under it: `<serverId>/<songId>@opus160`.
+ * Cache keys, which are an encoded [ItemRef] plus the quality that was
+ * **asked for**: `<serverId>/<songId>@opus160`.
  *
  * The quality has to be part of the key because the same track can be held at
  * more than one quality — changing the setting re-downloads pins, and the old
  * copies stay playable until eviction reclaims them.
+ *
+ * It names the request rather than the response, and that distinction became
+ * real when the app began declaring what it takes as it stands: an `@opus160`
+ * key can hold the original MP3. The key is still exactly as safe, because what
+ * it has to keep apart is two requests that would store different bytes, and
+ * every request for one track at one quality declares the same thing. What no
+ * longer follows from it is the *format* — read that off the bytes with
+ * `AudioCache.storedMimeType`, or off the decoder with
+ * `PlayerState.deliveredMime`, and never off the tag.
  *
  * ## Where a suffixed key may appear
  *

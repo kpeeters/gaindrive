@@ -65,6 +65,8 @@ fun TrackInfoDialog(
 	current: NowPlaying,
 	casting: Boolean,
 	positionMs: Long,
+	/** What the local player is decoding; `PlayerState.deliveredMime`. */
+	deliveredMime: String?,
 	onDismiss: () -> Unit,
 	viewModel: TrackInfoViewModel = hiltViewModel(),
 ) {
@@ -95,6 +97,7 @@ fun TrackInfoDialog(
 					deviceName = device?.name,
 					serverName = state.serverName,
 					loaded = loaded,
+					deliveredMime = deliveredMime,
 				)
 				// Unlike the stream URL the KDoc above rules out, this link is
 				// safe to show: it names the server and a track id and carries
@@ -140,6 +143,7 @@ private fun PlaybackRows(
 	deviceName: String?,
 	serverName: String?,
 	loaded: CastMedia?,
+	deliveredMime: String?,
 ) {
 	InfoRow(
 		"Output",
@@ -157,7 +161,7 @@ private fun PlaybackRows(
 	// resolved separately from the local player's — a queue may have been
 	// playing locally at a quality the cast path then re-decided.
 	val quality = if (casting) loaded?.quality else current.quality
-	InfoRow("Sent", sentLabel(current, song, quality, casting))
+	InfoRow("Sent", sentLabel(current, song, quality, casting, deliveredMime))
 
 	if (casting) {
 		InfoRow(
@@ -175,7 +179,8 @@ private fun fileLabel(song: Song): String? {
 }
 
 /**
- * What the server was asked for.
+ * What was actually sent — which is no longer the same question as what was
+ * asked for.
  *
  * Video has no such choice — `format` and `maxBitRate` are never sent, because
  * either one demotes a file that could have been served off disk — so its
@@ -187,12 +192,27 @@ private fun fileLabel(song: Song): String? {
  * containers media3 demuxes and is handed those untouched, while the cast route
  * declares nothing and takes the remux. Hence [casting] — the same track can
  * honestly answer this differently depending on who is reading the bytes.
+ *
+ * **Audio is now the same shape.** A local playback request declares the
+ * formats media3 takes as they stand, so a track asked for at Opus 160 may
+ * arrive as the file on the server, and [quality] records only the request.
+ * [deliveredMime] is the decoder's own answer and overrules it: anything that
+ * is not the codec the conversion would have produced means no conversion
+ * happened. Null before the tracks are known and whenever casting, where
+ * nothing is being decoded here — and then the request is the best available
+ * answer, which is what this said before.
+ *
+ * One case it cannot resolve, and nothing could: a *capped* account is sent
+ * mp3, so a passed-through MP3 and an MP3 transcode are the same codec. That
+ * one still reads as converted. Telling them apart would mean comparing
+ * bitrates, which is a lot of machinery for a row of text.
  */
 private fun sentLabel(
 	current: NowPlaying,
 	song: Song?,
 	quality: AudioQuality?,
 	casting: Boolean,
+	deliveredMime: String?,
 ): String? = when {
 	current.isVideo && current.nativeSeek ->
 		// Untouched either because this container goes to every client as it
@@ -203,6 +223,10 @@ private fun sentLabel(
 	current.isVideo -> "HLS, re-encoded as it plays"
 	quality == null -> null
 	quality.format == AudioFormat.ORIGINAL ->
+		listOfNotNull(song?.suffix?.uppercase(), "unconverted").joinToString(", ")
+	!casting && deliveredMime != null && deliveredMime != quality.format.sampleMime ->
+		// The same wording the Original branch uses, because it is the same
+		// outcome reached a different way: the file, untouched.
 		listOfNotNull(song?.suffix?.uppercase(), "unconverted").joinToString(", ")
 	else -> "${quality.label} kbps"
 }

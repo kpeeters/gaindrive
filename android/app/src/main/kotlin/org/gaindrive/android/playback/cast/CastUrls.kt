@@ -246,8 +246,20 @@ class CastUrls @Inject constructor(
 		// server should still fetch for itself, because that survives the phone
 		// sleeping, going out of range or running flat.
 		storedCopy(target.cacheKey)?.let { length ->
-			bridge.publishLocal(target.cacheKey, mime, length)?.let { url ->
-				return CastTarget(url, mime, CastRoute.LOCAL, target.quality)
+			// **The stored bytes decide the type here, not the request.** This
+			// copy was written by local playback, which declares what media3
+			// takes as it stands, so an `@opus160` key can hold the original
+			// MP3 — while `mime` above was derived from the quality asked for
+			// and would say Ogg. Everywhere else that mismatch is absorbed by
+			// an extractor sniffing; a receiver cannot, and one told audio/ogg
+			// over MP3 refuses the media outright, on a television, with
+			// nothing on the phone to say why.
+			//
+			// Falls back to `mime` when the bytes say nothing recognisable,
+			// which is exactly what this line did before.
+			val storedMime = audioCache.storedMimeType(target.cacheKey) ?: mime
+			bridge.publishLocal(target.cacheKey, storedMime, length)?.let { url ->
+				return CastTarget(url, storedMime, CastRoute.LOCAL, target.quality)
 			}
 		}
 
@@ -403,7 +415,7 @@ class CastUrls @Inject constructor(
 	 * video-sized pacing window on the server, not this call.
 	 */
 	private suspend fun forVideo(ref: ItemRef, source: CastSource): CastTarget? {
-		// No playableContainers, and that omission is the load-bearing one on this
+		// No `playable`, and that omission is the load-bearing one on this
 		// route. A receiver demuxes none of them, and [mime] below is
 		// `transcodedContentType` — `video/mp4` for exactly the files declaring
 		// would change. Adding the argument here announces MP4 and sends Matroska,

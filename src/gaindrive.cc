@@ -937,7 +937,8 @@ static Streamer::SongInfo streamer_song(const MediaStore::SongInfo& s,
 	si.width       = s.width;
 	si.height      = s.height;
 	si.video_codec = s.video_codec;
-	si.audio_codec = s.audio_codec;
+	si.audio_codec     = s.audio_codec;
+	si.audio_container = s.audio_container;
 	return si;
 	}
 
@@ -1021,36 +1022,47 @@ static std::string sane_video_size(const std::string& s)
 // What a client declared it can be sent untouched, from the comma list
 // stream.view spells `playable`.
 //
-// Two token shapes, and which is legal depends on the container alone:
+// Two token shapes, and the split is by *medium* rather than by anything about
+// the file:
 //
-//  * bare — a video container (every VIDEO_TARGETS name but vob), or one of
-//    the four audio containers whose codec the extension already settles.
-//  * `container/codec` — the audio containers that hold more than one codec.
-//    An ambiguous container is **not** accepted bare: that would be the server
-//    guessing what is inside the file *and* what the client decodes, which is
-//    the pair of guesses this parameter exists to remove.
+//  * bare — a video container (every VIDEO_TARGETS name but vob). Video is a
+//    container-only declaration by design: the server keeps its own codec test,
+//    so declaring `mkv` widens which containers may be served untouched and
+//    nothing else.
+//  * `container/codec` — audio, always. Both halves are compared against what
+//    the scan observed and stored, so there is no bare audio form: `mp3` and
+//    `mpeg/mp3` would be two spellings of one thing, which is the class of bug
+//    that made a `.oga` and a `.ogg` disagree about the same container.
 //
 // Validated here rather than in Streamer for the reason sane_video_size() above
 // gives: the one caller reachable from outside is the one that checks. What is
 // bounded is the whole parameter, at 128 characters — that caps the token count
 // and every token length at once, so there are no separate counters to keep
 // agreeing with each other. 128 rather than the 64 a container-only list needed:
-// a realistic audio-and-video declaration runs to about seventy.
+// a realistic audio declaration runs to about seventy.
 //
 // An unrecognised token is **dropped, not refused**, matching `size`. A client
 // naming something this server has never heard of is asking for nothing, not
 // asking wrongly, and a hard error would make adding a format to a client a
 // breaking change against every older server.
 //
-// The codec half of a pair is deliberately *not* checked against a vocabulary.
-// It is only ever compared for equality with songs.audio_codec, so a spelling
-// this server does not use simply fails to match and the file transcodes as it
-// always did — a better failure than a second table to keep in step with
-// ffprobe's codec names. What is checked is only that it is shaped like one —
-// non-empty and alphanumeric — which also keeps the set printable in a log line
-// and drops a "a/b/c" that names nothing.
+// **Neither half of a pair is checked against a vocabulary.** Both are compared
+// for equality with what the scan stored, so a spelling this server does not use
+// simply fails to match and the file transcodes as it always did — a better
+// failure than two more tables to keep in step with ffprobe's names and with
+// whatever container the next format turns out to be. What is checked is only
+// that each half is *shaped* like one: non-empty, letters, digits and
+// underscores. That keeps the set printable in a log line without log_safe(),
+// and drops an "a/b/c" that names nothing.
 static Playable parse_playable(const std::string& s)
 	{
+	auto plain = [](const std::string& t) {
+		return !t.empty()
+		    && std::all_of(t.begin(), t.end(), [](unsigned char c) {
+		       	return std::isalnum(c) || c == '_';
+		       	});
+		};
+
 	Playable out;
 	if (s.empty() || s.size() > 128) return out;
 	size_t start = 0;
@@ -1059,30 +1071,16 @@ static Playable parse_playable(const std::string& s)
 		std::string tok   = s.substr(start, comma == std::string::npos
 		                                    ? std::string::npos
 		                                    : comma - start);
-		// songs.codec and songs.audio_codec are both stored lowercased, so that
-		// is what a declaration has to be compared against.
+		// Every column this is compared against is stored lowercased, so that
+		// is what a declaration has to be folded to.
 		for (char& c : tok)
 			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 		size_t slash = tok.find('/');
 		if (slash == std::string::npos) {
-			if (container_declarable(tok) || audio_bare_declarable(tok))
-				out.insert(std::move(tok));
+			if (container_declarable(tok)) out.insert(std::move(tok));
 			}
-		else {
-			std::string container = tok.substr(0, slash);
-			std::string codec     = tok.substr(slash + 1);
-			// An ffprobe codec_name is letters, digits and underscores —
-			// "aac", "alac", "wmav2", "pcm_s16le".  Anything else cannot be a
-			// codec this server ever stored, so dropping it costs nothing and
-			// keeps the set printable in a log line without log_safe().
-			bool plain = !codec.empty()
-			          && std::all_of(codec.begin(), codec.end(),
-			                         [](unsigned char c) {
-			                         	return std::isalnum(c) || c == '_';
-			                         	});
-			if (audio_pair_declarable(container) && plain)
-				out.insert(std::move(tok));
-			}
+		else if (plain(tok.substr(0, slash)) && plain(tok.substr(slash + 1)))
+			out.insert(std::move(tok));
 		if (comma == std::string::npos) break;
 		start = comma + 1;
 		}

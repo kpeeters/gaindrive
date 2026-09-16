@@ -453,7 +453,16 @@ class PlaybackService : MediaLibraryService() {
 			ref: ItemRef,
 			audioOnlyVideo: Boolean,
 		): MediaItem? {
-			val target = streamUrls.forPlayback(ref, audioOnlyVideo) ?: return null
+			// Declaring the formats media3 takes as they stand, so an MP3 is
+			// not re-encoded to Opus for nothing. Passed here rather than
+			// defaulted in the builder: the Cast route reaches that same
+			// builder, and a receiver declares none of this. It is also what
+			// media3 knows and StreamUrls has no business knowing.
+			val target = streamUrls.forPlayback(
+				ref,
+				audioOnlyVideo,
+				::playableAudioFor,
+			) ?: return null
 			// The quality is recorded on the item on the way past, the same way
 			// resolveVideo marks what it learned: it is decided here and
 			// nowhere else, and the info dialog would otherwise have to

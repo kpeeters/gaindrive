@@ -3,6 +3,7 @@ package org.gaindrive.android.playback
 import android.content.ComponentName
 import android.content.Context
 import android.view.SurfaceView
+import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
@@ -58,6 +59,22 @@ data class PlayerState(
 	 * bitmaps the server cannot turn into WebVTT.
 	 */
 	val textTracks: List<TextTrack> = emptyList(),
+	/**
+	 * The codec the local player is actually decoding, as media3 names a
+	 * sample type — `audio/opus`, `audio/mpeg`, `audio/flac`.
+	 *
+	 * The request no longer settles this. A playback request declares the
+	 * formats media3 takes as they stand, so a track asked for at Opus 160 may
+	 * arrive as the original MP3, and [NowPlaying.quality] records only what
+	 * was *asked for*. This is the answer from the decoder, which is the one
+	 * party that cannot be wrong about it.
+	 *
+	 * Null until the tracks are known — they arrive shortly after playback
+	 * starts rather than when the item is queued, the same reason
+	 * [textTracks] is published state — and while casting, where nothing is
+	 * being decoded here.
+	 */
+	val deliveredMime: String? = null,
 	/**
 	 * Why playback stopped, when it stopped for a reason worth explaining.
 	 *
@@ -537,6 +554,7 @@ class PlayerConnection @Inject constructor(
 				queue = items,
 				queueIndex = controller.currentMediaItemIndex,
 				textTracks = controller.textTracks(),
+				deliveredMime = controller.deliveredAudioMime(),
 				error = watchdog.message.value,
 			)
 		}
@@ -569,6 +587,25 @@ class PlayerConnection @Inject constructor(
 	 */
 	private fun MediaController.textGroups(): List<Tracks.Group> =
 		currentTracks.subtitleGroups()
+
+	/**
+	 * The sample type of the audio track being decoded, or null before the
+	 * player knows.
+	 *
+	 * Read here rather than derived from the request, because the request no
+	 * longer decides: a playback URL declares what media3 takes as it stands,
+	 * so the bytes may be the file on the server rather than the format asked
+	 * for. `Format.sampleMimeType` is what the extractor settled on, which
+	 * cannot disagree with what is being heard.
+	 *
+	 * The *selected* group only. A container can offer several audio tracks —
+	 * a film played for its soundtrack is the case here — and the one being
+	 * decoded is the answer; the others describe bytes nobody is reading.
+	 */
+	private fun MediaController.deliveredAudioMime(): String? =
+		currentTracks.groups
+			.firstOrNull { it.type == C.TRACK_TYPE_AUDIO && it.isSelected }
+			?.mediaTrackGroup?.getFormat(0)?.sampleMimeType
 
 	/**
 	 * Marks [ref] as awaited, with a watchdog: a load that neither succeeds nor
