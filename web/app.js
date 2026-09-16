@@ -1016,7 +1016,8 @@ async function viewSettings() {
       row.appendChild(chev);
 
       row.addEventListener('click', () => {
-         history.pushState({view: 'settings-cat', cat: key}, '');
+         if (paneNav.willSlide(1))
+            history.pushState({view: 'settings-cat', cat: key}, '');
          showSettingsCategory(key);
          });
 
@@ -1095,13 +1096,15 @@ async function showSettingsCategory(cat) {
    if (cat === 'appearance')           return viewSettingsAppearance();
    }
 
-// The frame every category shares. Returns the pane and the generation, since
-// the two that fetch need the generation to tell whether they still own it.
+// The frame every category shares. Returns the pane and the generation; the
+// caller fills the pane and then calls renderSlideTo(gen, 1) itself, last, the
+// way every other view does. Sliding here instead would run paneNav's
+// show-the-back-link pass before the link below exists, leaving it on screen on
+// a window wide enough not to need it.
 function settingsPane(cat, title) {
    const gen = beginRender();
    const pane = paneReset('pane-albums', `settings:${cat}`);
    paneReset('pane-tracks');
-   paneNav.slideTo(1);
 
    // The expando outlives the innerHTML wipe paneReset() does, so without this
    // a later user edit would call back into a Users list that is no longer here.
@@ -1109,6 +1112,16 @@ function settingsPane(cat, title) {
 
    const hdr = document.createElement('div');
    hdr.className = 'view-header';
+
+   // Shown only when pane 1 is the leftmost visible one, which paneNav decides:
+   // with the index still beside this pane there is nothing to go back from.
+   const back = document.createElement('span');
+   back.className    = 'back-link';
+   back.dataset.pane = '1';
+   back.textContent  = '← Settings';
+   back.addEventListener('click', () => history.back());
+   hdr.appendChild(back);
+
    const h1 = document.createElement('h1');
    h1.className = 'view-title';
    h1.textContent = title;
@@ -1137,7 +1150,7 @@ function settingsSection(pane, title) {
 // ── Settings: Playback ───────────────────────────────────────────────────────
 
 function viewSettingsPlayback() {
-   const {pane} = settingsPane('playback', 'Playback');
+   const {pane, gen} = settingsPane('playback', 'Playback');
    const sec = settingsSection(pane);
 
    const audioOnlyRow   = document.createElement('div');
@@ -1187,12 +1200,14 @@ function viewSettingsPlayback() {
       + 'step with it — which means streaming it to this device as well. '
       + 'Takes effect on the next track.';
    sec.appendChild(localVidHint);
+
+   renderSlideTo(gen, 1);
    }
 
 // ── Settings: Appearance ─────────────────────────────────────────────────────
 
 function viewSettingsAppearance() {
-   const {pane} = settingsPane('appearance', 'Appearance');
+   const {pane, gen} = settingsPane('appearance', 'Appearance');
    const sec = settingsSection(pane);
 
    const themeRow = document.createElement('div');
@@ -1222,6 +1237,8 @@ function viewSettingsAppearance() {
          });
       }
    markActiveTheme();
+
+   renderSlideTo(gen, 1);
    }
 
 // ── Settings: Users ──────────────────────────────────────────────────────────
@@ -1275,6 +1292,8 @@ async function viewSettingsUsers() {
 
    addBtn.addEventListener('click', () => viewUserEdit(null, refreshUsers));
 
+   renderSlideTo(gen, 1);
+
    await refreshUsers();
    if (renderStale(gen)) return;
 
@@ -1285,7 +1304,7 @@ async function viewSettingsUsers() {
 // ── Settings: Server ─────────────────────────────────────────────────────────
 
 async function viewSettingsServer() {
-   const {pane} = settingsPane('server', 'Server');
+   const {pane, gen} = settingsPane('server', 'Server');
    const sec = settingsSection(pane);
 
    const tokenLabel = document.createElement('p');
@@ -1369,6 +1388,8 @@ async function viewSettingsServer() {
    const metaStatus = document.createElement('p');
    metaStatus.className = 'upload-status';
    metaSection.appendChild(metaStatus);
+
+   renderSlideTo(gen, 1);
 
    // The server reports only whether each secret is stored, never what it is,
    // so the placeholder is the whole of what this pane can say about one.  An
@@ -1484,12 +1505,26 @@ async function viewUserEdit(user, refreshFn) {
    // bump is what stops that render appending on top of this form.
    beginRender();
    const pane = paneReset('pane-tracks', 'user-edit');
-   paneNav.slideTo(2);
+
+   // Pushed before the slide, and only when the strip will move, so that the
+   // back link below and the browser's own Back agree on where they lead. The
+   // entry carries no user: whatever the form held is gone once the pane is
+   // rewritten, so the handler for it slides back to the list instead.
+   if (paneNav.willSlide(2))
+      history.pushState({view: 'user-edit'}, '');
 
    const isNew = (user === null);
 
    const hdr = document.createElement('div');
    hdr.className = 'view-header';
+
+   const back = document.createElement('span');
+   back.className    = 'back-link';
+   back.dataset.pane = '2';
+   back.textContent  = '← Users';
+   back.addEventListener('click', () => history.back());
+   hdr.appendChild(back);
+
    const h1 = document.createElement('h1');
    h1.className = 'view-title';
    h1.textContent = isNew ? 'New user' : user.username;
@@ -1577,10 +1612,16 @@ async function viewUserEdit(user, refreshFn) {
    form.appendChild(actions);
    pane.appendChild(form);
 
+   paneNav.slideTo(2);
+
    cancelBtn.addEventListener('click', () => {
       pane.innerHTML = '';
       pane.dataset.render = '';
-      paneNav.slideTo(1);
+      // Wound back rather than slid away from, when there is an entry to wind
+      // back, so Cancel and the back link leave history in the same place. The
+      // stamp is already cleared, so the handler slides to the list.
+      if (history.state?.view === 'user-edit') history.back();
+      else                                     paneNav.slideTo(1);
       });
 
    saveBtn.addEventListener('click', async () => {
@@ -9563,6 +9604,11 @@ async function showShell() {
                paneNav.slideTo(1);
             else
                await showSettingsCategory(s.cat);
+            } else if (s.view === 'user-edit') {
+            // The only entry here that cannot be redrawn: the form is built
+            // from a user object the entry does not carry. Forward into a pane
+            // that has since been rewritten therefore stops at the list.
+            paneNav.slideTo(paneHolds('pane-tracks', 'user-edit') ? 2 : 1);
             } else {
             // One branch for every pane-0 view, because each is one key and one
             // way of drawing it. An entry naming something else is the Library,
