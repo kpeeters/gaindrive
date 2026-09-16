@@ -2212,6 +2212,21 @@ static std::string strip_album_decoration(const std::string& title)
 	return t;
 	}
 
+// Which MusicBrainz search an album title is put to.
+//
+// **A release group is named after the *original* release, so a reissue keeps
+// its own name only one level down.**  Measured: no release group anywhere
+// carries the title "The Fillmore Concerts", not even with the artist clause
+// removed, while a *release* search finds three at score 100 and every one of
+// them sits in the release group "At Fillmore East".  A library filed under
+// the name printed on the disc is invisible to a release-group search however
+// exactly it is spelled, and no amount of loosening the query changes that --
+// it is the wrong index.
+//
+// The release search answers with its release group inline, so this costs one
+// request and yields the same kind of id.
+enum class MbBy { ReleaseGroup, Release };
+
 // Performs the MusicBrainz -> Wikidata -> Wikipedia lookup for one album and
 // caches the result. Runs on the resolver thread and nowhere else; it is paced
 // by mb_pace() and it must never be reached from a request handler again.
@@ -2273,14 +2288,21 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 	// is set whenever MusicBrainz answered at all, which is the gate on the
 	// cache write at the bottom -- a 200 naming nothing is an answer, a 503 is
 	// not.
-	auto search = [&](const std::string& want) -> std::string {
+	auto search = [&](const std::string& want, MbBy by) -> std::string {
+		const bool by_rel = by == MbBy::Release;
+		const char* path  = by_rel ? "/ws/2/release" : "/ws/2/release-group";
+
 		// **Logged verbatim, because this string is the lookup.** Neither the
 		// folder name nor the tags show what actually gets sent, and the
-		// difference is where the misses are.
-		std::string query = "releasegroup:\"" + mb_escape_phrase(want)
+		// difference is where the misses are.  Only the field changes between
+		// the two searches: the artist half stays, so the release search is
+		// no looser than the release-group one, just pointed at the index
+		// that holds reissue titles.
+		std::string query = std::string(by_rel ? "release:\"" : "releasegroup:\"")
+		                  + mb_escape_phrase(want)
 		                  + "\" AND artist:\"" + mb_escape_phrase(artist) + "\"";
 		std::cout << stamp() << "getAlbumInfo [" << title
-		          << "] search: /ws/2/release-group?query=" << query
+		          << "] search: " << path << "?query=" << query
 		          << std::endl;
 		httplib::Params p1{
 			{"query", query},
@@ -2292,8 +2314,7 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 			{"limit", "5"},
 			{"fmt",   "json"}
 			};
-		auto r1 = mb_get(mb, "/ws/2/release-group", p1,
-		                 "getAlbumInfo [" + title + "]");
+		auto r1 = mb_get(mb, path, p1, "getAlbumInfo [" + title + "]");
 		if (!r1) {
 			std::cout << stamp() << "getAlbumInfo [" << title
 			          << "] MusicBrainz request failed (no response)" << std::endl;
@@ -2317,32 +2338,48 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 			          << "] search reply was not JSON: "
 			          << r1->body.substr(0, 200) << std::endl;
 			}
-		const auto& rgs = jsub(j1, "release-groups");
+		const auto& hits = jsub(j1, by_rel ? "releases" : "release-groups");
 		std::cout << stamp() << "getAlbumInfo [" << title
-		          << "] search returned " << rgs.size() << " of "
-		          << jint(j1, "count") << " release-group(s)" << std::endl;
+		          << "] search returned " << hits.size() << " of "
+		          << jint(j1, "count") << (by_rel ? " release(s)"
+		                                          : " release-group(s)")
+		          << std::endl;
 		// Every candidate, not just the winner. A miss is nearly always one of
 		// two things and this is what tells them apart: nothing came back at
 		// all (the title carries something the release group does not), or
 		// something came back under a title or an artist spelled differently
 		// from ours and only the score kept it down.
-		for (const auto& cand : rgs) {
+		for (const auto& cand : hits) {
 			std::string credit;
 			for (const auto& ac : jsub(cand, "artist-credit")) {
 				credit += jstr(jsub(ac, "artist"), "name");
 				credit += jstr(ac, "joinphrase");
 				}
-			std::string type = jstr(cand, "primary-type");
+			const auto& grp  = jsub(cand, "release-group");
+			std::string type = jstr(by_rel ? grp : cand, "primary-type");
 			std::cout << stamp() << "getAlbumInfo [" << title
 			          << "]   candidate score=" << jint(cand, "score")
 			          << " [" << jstr(cand, "title") << "] by [" << credit
-			          << "]" << (type.empty() ? "" : " " + type) << " "
-			          << jstr(cand, "id") << std::endl;
+			          << "]" << (type.empty() ? "" : " " + type);
+			// **Both titles on the release path.** The whole point of this
+			// search is that the two differ -- a release called "The Fillmore
+			// Concerts" inside a release group called "At Fillmore East" --
+			// so printing only one makes a right answer read like a wrong one.
+			if (by_rel)
+				std::cout << " -> release-group [" << jstr(grp, "title") << "] "
+				          << jstr(grp, "id");
+			else
+				std::cout << " " << jstr(cand, "id");
+			std::cout << std::endl;
 			}
 
-		// Same reasoning as the artist search: this is concatenated into
-		// "/ws/2/release-group/" below.
-		std::string rg = jstr(jidx(rgs, 0), "id");
+		// A release names its release group inline, which is what makes this
+		// worth one request: either way what comes out is a release-group id.
+		// Same reasoning as the artist search for the is_uuid() check -- it is
+		// concatenated into "/ws/2/release-group/" below.
+		const auto& top = jidx(hits, 0);
+		std::string rg  = by_rel ? jstr(jsub(top, "release-group"), "id")
+		                         : jstr(top, "id");
 		if (!rg.empty() && !is_uuid(rg)) {
 			std::cout << stamp() << "getAlbumInfo [" << title
 			          << "] ignoring a release-group id that is not a UUID"
@@ -2353,20 +2390,35 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 		};
 
 	if (info.mbid.empty()) {
-		info.mbid = search(title);
+		// Each rung runs only when the one above found nothing, so an album
+		// that resolves today resolves to exactly what it did before and
+		// costs exactly what it cost before.  Every rung is still a phrase
+		// query AND'd with the artist: this widens what is asked without
+		// loosening what is accepted.
+		//
+		// The folder's own title at both endpoints before the stripped one at
+		// either, because stripping discards information and the most
+		// faithful question is worth asking first.  The two fallbacks are
+		// complementary rather than redundant, which is measured: the release
+		// search is the only thing that finds "The Fillmore Concerts", and
+		// strip_album_decoration() is the only thing that finds "Abbey Road
+		// (Remastered)" -- for which the release search returns nothing
+		// either.
+		const std::string bare = strip_album_decoration(title);
+		// Second entry empty when nothing was stripped, which is what ends the
+		// ladder after one title rather than asking the same thing twice.
+		const std::string tries[] = { title, bare == title ? std::string() : bare };
 
-		// Second chance without the folder's decoration -- see
-		// strip_album_decoration(). Only when the first search found nothing,
-		// so an album that already resolves keeps resolving to exactly what it
-		// did before, and still a phrase query AND'd with the artist, so this
-		// widens what is asked without loosening what is accepted.
-		if (info.mbid.empty()) {
-			std::string bare = strip_album_decoration(title);
-			if (!bare.empty() && bare != title) {
+		for (int step = 0; step < 2 && info.mbid.empty(); ++step) {
+			const std::string& want = tries[step];
+			if (want.empty()) break;
+			if (step == 1)
 				std::cout << stamp() << "getAlbumInfo [" << title
-				          << "] nothing under that title; retrying as [" << bare
+				          << "] nothing under that title; retrying as [" << want
 				          << "]" << std::endl;
-				info.mbid = search(bare);
+			for (MbBy by : { MbBy::ReleaseGroup, MbBy::Release }) {
+				info.mbid = search(want, by);
+				if (!info.mbid.empty()) break;
 				}
 			}
 
