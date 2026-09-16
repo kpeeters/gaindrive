@@ -244,23 +244,105 @@ function applyTheme(theme) {
 // Reused across calls so we don't spin up an HTMLAudioElement per track.
 const _canPlayProbe = document.createElement('audio');
 
+// Audio types whose container settles the codec, so there is exactly one thing
+// the browser could be asked to decode.
+//
+// The split this draws is the server's own: `implied_audio_form()` in
+// `src/codecs.hh` names the containers whose codec follows from the extension,
+// and `audio_form_needs_read()` the ones that have to be opened to find out.
+// These are the same two lists seen from the client, and they have to stay in
+// step by eye — there is no shared definition to lean on across the languages.
+const UNAMBIGUOUS_AUDIO_MIMES = new Set([
+   'audio/mpeg',   // MPEG audio, and nothing else
+   'audio/flac',
+   'audio/wav',
+   'audio/aac',    // raw ADTS
+]);
+
 // If the browser cannot play the format the server would otherwise send,
 // return 'mp3' so the caller appends ?format=mp3 to the stream URL and the
-// server transcodes. Returns null when direct serve is fine. mp3 is the
-// universal fallback: HTMLAudioElement.canPlayType('audio/mpeg') is
-// 'probably' in every modern browser.
+// server transcodes. Returns null when direct serve is fine.
 //
-// Only 'probably' bypasses transcode. 'maybe' is unreliable in practice —
-// notably Firefox on Linux returns 'maybe' for audio/mp4 then fails on the
-// AAC payload with a scary "could not be decoded" console message. Treating
-// 'maybe' as a no preempts the error before Firefox emits it. The decode-
-// error event listener below is still kept as a defensive safety net for
-// 'probably' surprises (rare, but possible across browser/codec updates).
+// **'maybe' is a hedge about the payload, not about the codec**, and which of
+// those it is depends on the container. For audio/mp4 it is genuinely about the
+// codec — AAC or ALAC — and Firefox on Linux answers 'maybe' there and then
+// fails on the AAC payload with a scary "could not be decoded" console message.
+// audio/ogg is ambiguous the same way: Vorbis, Opus, FLAC or Speex. Those two
+// still need 'probably'.
+//
+// For a container that can only hold one codec there is nothing to be ambiguous
+// about, so a hedge is not a refusal — and treating it as one is expensive.
+// Firefox answers 'maybe' for audio/mpeg, which had the whole library requested
+// as format=mp3: harmless for an MP3, which the server passes through untouched
+// because the encoder matches, but a real re-encode of every FLAC.
+//
+// What makes accepting 'maybe' safe rather than optimistic is that the fallback
+// below already exists: a decode error retries once with format=mp3. A wrong
+// 'maybe' costs one stall and a console warning. Treating every 'maybe' as a no
+// costs a transcode of everything.
 function pickStreamFormat(song) {
    const mime = song.transcodedContentType ?? song.contentType;
    if (!mime) return null;
-   if (_canPlayProbe.canPlayType(mime) === 'probably') return null;
+   const verdict = _canPlayProbe.canPlayType(mime);
+   if (verdict === 'probably') return null;
+   if (verdict === 'maybe' && UNAMBIGUOUS_AUDIO_MIMES.has(mime)) return null;
    return 'mp3';
+}
+
+// What ffmpeg would be asked to do for a `format`, as "<muxer>/<encoder>".
+//
+// A transcribed slice of TARGETS in `src/codecs.hh`, holding only the formats
+// this client names plus the aliases that collide with them. It exists for
+// sameEncoder() below.
+const FORMAT_ENCODERS = {
+   mp3:    'mp3/libmp3lame',
+   opus:   'opus/libopus',
+   ogg:    'ogg/libvorbis',
+   oga:    'ogg/libvorbis',
+   vorbis: 'ogg/libvorbis',
+   flac:   'flac/flac',
+   wav:    'wav/pcm_s16le',
+   m4a:    'ipod/aac',
+   aac:    'adts/aac',
+};
+
+// Whether asking for `fmt` leaves a `.suffix` file untouched.
+//
+// The server treats a format that resolves to the same muxer *and* encoder as
+// the source as no change at all — see `plan_transcode` in `src/streamer.cc`,
+// and API.md: "format=ogg on a .oga file does not re-encode". So a request can
+// name a format and still be answered with the original bytes.
+//
+// A table rather than `fmt === suffix`, which would be right for the two
+// formats this client actually sends and quietly wrong the day a third is
+// added: ogg, oga and vorbis are one encoder under three names.
+function sameEncoder(fmt, suffix) {
+   if (!fmt || !suffix) return false;
+   const want = FORMAT_ENCODERS[fmt];
+   return want !== undefined && want === FORMAT_ENCODERS[suffix];
+}
+
+// Whether asking for `fmt` leaves this song's bytes untouched.
+//
+// Two ways the server can decide to convert and this is both of them, so that
+// the answer is "the file arrives as it is" rather than merely "the format
+// matches".  The account ceiling is the second: it is applied server-side
+// whatever the client asks for, and a file above it becomes mp3 at the cap
+// even when the requested format was already its own.  `bitrate_limit` in
+// `plan_transcode` is the same test.
+//
+// An unknown bitrate reads as "the cap does not bite", which is not optimism
+// but the server's own rule: `bitrate_limit` requires `song.bitrate > 0`, so a
+// file whose rate was never read is passed through too.
+//
+// A missing suffix answers false, and the two callers both fail safe that way:
+// the info row falls back to what the server itself reported, and the seek
+// falls back to re-fetching rather than to a seek that goes nowhere.
+function servedUnchanged(fmt, song) {
+   if (!sameEncoder(fmt, song?.suffix)) return false;
+   const cap = currentUser?.maxBitRate || 0;
+   if (cap > 0 && (song?.bitRate || 0) > cap) return false;
+   return true;
 }
 
 // Which container to ask for when playing a video as audio only.
@@ -3967,8 +4049,13 @@ async function openInfoModal() {
       // source codec (or fell back after a decode error), which only the
       // client knows about.  player.streamFormat is the format the player
       // asked for on the most recent playerPlay() call.
+      //
+      // **Asking is not the same as being converted.** A format naming the
+      // source's own encoder is served untouched, so servedUnchanged() takes
+      // that request back out of case (b) and lets the file describe itself.
+      // This row read "MP3 320 kbps" over a 128 kbps MP3 before it did.
       let suffix, bitRate;
-      if (player.streamFormat) {
+      if (player.streamFormat && !servedUnchanged(player.streamFormat, song)) {
          // Streamer's format_change branch: target bitrate is max_bitrate when
          // the user has one set and it is below 320, else 320 kbps.
          suffix  = player.streamFormat;
@@ -6474,9 +6561,14 @@ function playerPlay(offset = 0, forceMp3 = false) {
    else if (song.isVideo) fmt = null;
    else                   fmt = forceMp3 ? 'mp3' : pickStreamFormat(song);
    if (fmt) streamParams.format = fmt;
+   // A format the server answers with the original file is not a transcode,
+   // and saying it is costs the seek: the stream carries a Content-Length and
+   // answers Range, so the element can seek it itself rather than the code
+   // below re-fetching from timeOffset.  Same rule as the "Sent" row, so the
+   // two cannot disagree about one stream.
    const chunked = (song.isVideo && !audioOnly)
       ? (song.nativeSeek === false)
-      : !!fmt;
+      : (!!fmt && !servedUnchanged(fmt, song));
    // For transcoded streams the browser can't seek to un-buffered offsets
    // (chunked, no Range support), so ask the server to start ffmpeg at the
    // seek point instead — the served stream is already the slice we want.
