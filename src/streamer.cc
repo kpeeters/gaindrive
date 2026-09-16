@@ -33,12 +33,38 @@ static constexpr size_t WRITE_CHUNK = 4096;
 
 // ---- Streamer --------------------------------------------------------
 
+// A declaration as one log token.  Both ladders print it, because "the client
+// sent playable and the server transcoded anyway" is the same question on
+// either — and nine times in ten the answer is a proxy dropping the query
+// string rather than anything here.
+//
+// Printed verbatim: the handler dropped every token that was not declarable,
+// so there is nothing left for log_safe() to clean.
+static std::string playable_log(const Playable& p)
+	{
+	std::string out;
+	for (const auto& t : p) out += (out.empty() ? "" : ",") + t;
+	return out.empty() ? "none" : out;
+	}
+
 Streamer::TranscodePlan Streamer::plan_transcode(const SongInfo& song,
                                                  const std::string& format,
                                                  int max_bitrate,
-                                                 int time_offset)
+                                                 int time_offset,
+                                                 const Playable& playable)
 	{
 	auto source = target_for(song.codec);
+
+	// The client said it can take this file as it sits on disk, so the format
+	// it also asked for is a preference rather than a requirement -- see
+	// audio_declared() in codecs.hh for what a declaration promises.
+	//
+	// !is_video is load-bearing rather than tidiness.  An audio-only request
+	// against a film reaches here with is_video set, and there `format` names
+	// the soundtrack the client wants extracted; honouring a declaration would
+	// hand it the film's own codec instead of the one it asked for.
+	bool declared = !song.is_video
+	             && audio_declared(song.codec, song.audio_codec, playable);
 
 	// A format request that resolves to the same muxer and encoder as the
 	// source is not a change: ".oga" and "ogg" are the same thing spelled two
@@ -46,7 +72,7 @@ Streamer::TranscodePlan Streamer::plan_transcode(const SongInfo& song,
 	std::optional<Target> wanted;
 	if (!format.empty() && format != "raw")
 		wanted = target_for(format);
-	bool format_change = wanted && (!source
+	bool format_change = wanted && !declared && (!source
 	                     || source->muxer   != wanted->muxer
 	                     || source->encoder != wanted->encoder);
 	bool bitrate_limit = max_bitrate > 0 && song.bitrate > 0 && song.bitrate > max_bitrate;
@@ -135,7 +161,8 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
                      int max_bitrate,
                      const std::string& format, int time_offset,
                      bool cast_stream, std::function<float()> get_position,
-                     bool estimate_length, const VideoOptions& video)
+                     bool estimate_length, const VideoOptions& video,
+                     const Playable& playable)
 	{
 	// "Paced" means deliver at roughly 1x playback rate rather than as fast as
 	// the socket takes it.  Two clients want that and they ask in different
@@ -171,12 +198,12 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	// container, and format/maxBitRate here are about audio muxers.
 	if (song.is_video && !audio_only) {
 		serve_video(req, res, song, cache, max_bitrate, format, time_offset,
-		            video, std::move(get_position));
+		            video, playable, std::move(get_position));
 		return;
 		}
 
 	const TranscodePlan plan = plan_transcode(song, format, max_bitrate,
-	                                          time_offset);
+	                                          time_offset, playable);
 	bool                  needs_transcode = plan.needed;
 	const auto&           target          = plan.target;
 	const int             target_bitrate  = plan.bitrate;
@@ -196,10 +223,12 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 
 	std::cout << stamp() << "stream ["
 	          << song.path << "] codec=" << song.codec
+	          << " a=" << (song.audio_codec.empty() ? "?" : song.audio_codec)
 	          << " src_bitrate=" << song.bitrate
 	          << " max_bitrate=" << max_bitrate
 	          << " format=" << (format.empty() ? "(none)" : format)
 	          << " time_offset=" << time_offset
+	          << " declared=[" << playable_log(playable) << "]"
 	          << " transcode=" << (needs_transcode ? "yes" : "no")
 	          << (needs_transcode ? " target=" + std::string(target->name) : "")
 	          << (audio_only ? " audio_only=yes" : "")
@@ -738,6 +767,7 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
                            const SongInfo& song, TranscodeCache& cache,
                            int max_bitrate, const std::string& format,
                            int time_offset, const VideoOptions& video,
+                           const Playable& playable,
                            std::function<float()> get_position)
 	{
 	// Same predicate the API uses to tell the client whether it may seek
@@ -765,8 +795,7 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	Tier tier = Tier::Encode;
 	if (codecs_ok && !constrained && !partial)
 		tier = video_direct_playable_for(song.codec, song.video_codec,
-		                                 song.audio_codec,
-		                                 video.client_containers)
+		                                 song.audio_codec, playable)
 		     ? Tier::Direct : Tier::Remux;
 	const char* tier_name = tier == Tier::Direct ? "direct"
 	                      : tier == Tier::Remux  ? "remux" : "encode";
@@ -775,15 +804,12 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	// itself is not the client that asked, and nothing else records what it is.
 	std::string ua = req.get_header_value("User-Agent");
 
-	// What the client said it can demux, which is the only way "the app sent
-	// playableContainers and the server remuxed anyway" gets diagnosed — nine
+	// What the client said it can be sent untouched, which is the only way "the
+	// app sent playable and the server remuxed anyway" gets diagnosed — nine
 	// times in ten a proxy dropping the query string.  Printed verbatim, unlike
-	// the id on the audio line: the handler dropped everything that is not a
-	// VIDEO_TARGETS name, so there is nothing here for log_safe() to clean.
-	std::string declared;
-	for (const auto& c : video.client_containers)
-		declared += (declared.empty() ? "" : ",") + c;
-	if (declared.empty()) declared = "none";
+	// the id on the audio line: the handler dropped every token that was not
+	// declarable, so there is nothing here for log_safe() to clean.
+	std::string declared = playable_log(playable);
 
 	std::cout << stamp() << "video [" << song.path << "]"
 	          << " v=" << (song.video_codec.empty() ? "?" : song.video_codec)

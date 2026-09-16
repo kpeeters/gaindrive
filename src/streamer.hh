@@ -33,11 +33,6 @@ struct VideoOptions {
 	// > 0 bounds the output to that many seconds from time_offset and switches
 	// the container to MPEG-TS — that is one HLS segment.
 	int              segment_duration = 0;
-	// Containers the *client* declared it demuxes for itself, validated by the
-	// stream.view handler.  Empty means "declared nothing", which is what every
-	// other caller gets and what a cast token must always get: a receiver
-	// fetches for itself and declared none of this.
-	ClientContainers client_containers;
 	// "I would rather have bytes now than a seekable stream."  Only the remux
 	// tier reads it: with the cache cold, this request is answered from a
 	// fragmented pipe while the real entry is built beside it, instead of
@@ -86,9 +81,12 @@ class Streamer {
 		// same answer serve() will: the cache key is built out of this, and
 		// two copies of the negotiation would key one request two ways and
 		// transcode the same file twice.
+		// `playable` is what the client said it can be sent untouched; empty
+		// for every caller that did not say, which includes every cast fetch.
 		static TranscodePlan plan_transcode(const SongInfo& song,
 		                                    const std::string& format,
-		                                    int max_bitrate, int time_offset);
+		                                    int max_bitrate, int time_offset,
+		                                    const Playable& playable = {});
 
 		// Materialises the cache entry `plan` describes, running ffmpeg first
 		// if it is not already there — so this blocks for the length of a
@@ -118,6 +116,8 @@ class Streamer {
 		// `cache` is always present; a disabled cache simply never produces an
 		// entry, so there is no nullability to reason about at the call site.
 		// `video` is ignored for audio entirely.
+		// `playable` is not: it is the one declaration that applies to both
+		// ladders, which is why it sits here rather than inside VideoOptions.
 		//
 		// `pace=true` on the query string is a gaindrive extension asking for
 		// the audio to be delivered at roughly 1x playback rate instead of as
@@ -131,7 +131,8 @@ class Streamer {
 		                  bool cast_stream = false,
 		                  std::function<float()> get_position = {},
 		                  bool estimate_length = false,
-		                  const VideoOptions& video = {});
+		                  const VideoOptions& video = {},
+		                  const Playable& playable = {});
 
 		// Serves the original file, never transcoded and never paced.
 		// download.view is defined as "the original media data", so it must not
@@ -168,6 +169,7 @@ class Streamer {
 		                        TranscodeCache& cache, int max_bitrate,
 		                        const std::string& format, int time_offset,
 		                        const VideoOptions& video,
+		                        const Playable& playable,
 		                        std::function<float()> get_position);
 
 		// Runs `args` and pipes its stdout to the client.  Takes a prebuilt

@@ -192,7 +192,15 @@ CREATE TABLE songs (
     width         INTEGER DEFAULT 0,   -- 0 when unprobed
     height        INTEGER DEFAULT 0,
     video_codec   TEXT,      -- "h264","mpeg2video", etc. (ffprobe codec_name)
-    audio_codec   TEXT,      -- "aac","ac3", etc.
+    -- Set for videos, and for the audio containers that can hold more than one
+    -- codec -- .m4a (AAC or ALAC) and .ogg/.oga (Vorbis, Opus, FLAC, Speex),
+    -- where the extension does not say which.  That is the half a `playable`
+    -- container/codec declaration is matched against; see codecs.hh.  Filled
+    -- from the extension alone for .mp3/.flac/.opus/.aac, which settle it.
+    -- NULL means "never read" and '' means "read, could not tell", the same
+    -- distinction `artist` above uses, and for the same reason: it is what
+    -- terminates the scanner's Phase 3 back-fill on an existing library.
+    audio_codec   TEXT,      -- "aac","alac","vorbis","ac3", etc.
     -- The season an episode belongs to, from an S02E03 marker or a folder
     -- naming its season; 0 for anything that is not one. disc_number holds
     -- the same number, because that is what clients group and sort by; this

@@ -577,10 +577,17 @@ if("TagLib" IN_LIST GD_BUNDLED)
 	# keeps the toolkit headers in a subdirectory instead, so without these three
 	# entries the same #include lines resolve against a system taglib and fail
 	# against this one.
+	# taglib/mp4 for the same reason: mp4file.h is the only container-specific
+	# header gaindrive includes (read_song_audio_codec() needs
+	# MP4::Properties::codec() to tell AAC from ALAC), and installed taglib
+	# flattens it to include/taglib/mp4file.h while the source tree does not.
+	# Everything it pulls in cross-directory -- tfile.h, tag.h, taglib_export.h
+	# -- is already covered by the three entries above.
 	target_include_directories(tag PUBLIC
 		$<BUILD_INTERFACE:${taglib_SOURCE_DIR}>
 		$<BUILD_INTERFACE:${taglib_SOURCE_DIR}/taglib>
 		$<BUILD_INTERFACE:${taglib_SOURCE_DIR}/taglib/toolkit>
+		$<BUILD_INTERFACE:${taglib_SOURCE_DIR}/taglib/mp4>
 	)
 endif()
 

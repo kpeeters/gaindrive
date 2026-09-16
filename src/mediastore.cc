@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstring>
 #include <ctime>
 #include <iomanip>
 #include <map>
@@ -20,6 +21,11 @@
 
 #include <taglib/fileref.h>
 #include <tfilestream.h>
+// The one container-specific header here, for MP4::Properties::codec(): a .m4a
+// is AAC or ALAC and nothing outside the container says which.  The Ogg family
+// is identified from its own first packet instead -- see
+// read_song_audio_codec() -- which needs no header at all.
+#include <mp4file.h>
 #include <taglib/tag.h>
 #include <taglib/audioproperties.h>
 #include <tpropertymap.h>
@@ -28,6 +34,7 @@
 #include <reproc++/reproc.hpp>
 #include <reproc++/drain.hpp>
 
+#include "codecs.hh"
 #include "dvd.hh"
 #include "parallel.hh"
 #include "tmdb.hh"
@@ -1745,6 +1752,15 @@ struct SongReadData {
 	bool        artist_missing = false;   // set in Phase 2
 	bool        artist_read    = false;
 
+	// The same shape again, for songs.audio_codec on an *audio* row.  Only the
+	// containers audio_pair_declarable() names can be in this set: every other
+	// extension either settles its codec on its own (implied_audio_codec) or is
+	// not declarable at all, so re-reading it would be work with no answer.
+	// audio_codec_read is what stores '' for a file whose codec could not be
+	// made out, which is what stops it returning on every scan for ever.
+	bool        audio_codec_missing = false;   // set in Phase 2
+	bool        audio_codec_read    = false;
+
 	// MusicBrainz identifiers out of the file's own tags. Empty when the tag
 	// is absent, unreadable, or names more than one entity — see mb_uuid().
 	// These are what let getArtistInfo2 and getAlbumInfo2 skip their
@@ -1802,6 +1818,11 @@ struct SongReadData {
 struct KnownSong {
 	int64_t mtime       = 0;
 	bool    artist_null = false;   // its ARTIST tag has never been read
+	// Its codec has never been read *and* the container is one that needs it.
+	// The container test belongs here rather than in Phase 3 for the reason
+	// is_video does: a row that can never acquire a value must never enter the
+	// pass, or the pass never ends and the log never says why.
+	bool    audio_codec_null = false;
 	};
 
 struct AlbumReadData {
@@ -2015,6 +2036,63 @@ static std::string mb_uuid(const TagLib::PropertyMap& props, const char* key)
 	return is_uuid(v) ? v : "";
 	}
 
+// The codec inside a container that can hold several, for songs.audio_codec on
+// an audio row -- the other half of what a `playable` pair declaration is
+// matched against.  Only ever called for an audio_pair_declarable() extension.
+//
+// Spelled the way ffprobe spells it, because the same column already holds
+// ffprobe's answer for every video row and one column must not carry two
+// vocabularies.
+//
+// Ogg is read here rather than through TagLib, and that is the cheaper answer
+// as well as the smaller one.  The identification header is the first packet of
+// the first page, at a fixed offset once the segment table is stepped over, and
+// its first bytes name the codec outright.  TagLib would reach the same answer
+// by constructing one of four file objects and parsing the comment header on
+// the way, and would cost four more include directories to say so.
+//
+// MP4 has no such shortcut -- the codec sits in a sample description atom, down
+// a nested atom tree -- so that one goes through TagLib, which has already
+// written the walk.
+//
+// A file this cannot open, or whose header says nothing recognisable, still
+// counts as read: '' is an answer, and only NULL brings the file back.
+static void read_song_audio_codec(SongReadData& sdat)
+	{
+	sdat.audio_codec_read = true;
+
+	if (sdat.codec == "m4a") {
+		TagLib::FileStream stream(sdat.path.c_str(), true /* readOnly */);
+		TagLib::MP4::File  f(&stream, true /* readAudioProperties */);
+		if (!f.isValid() || !f.audioProperties()) return;
+		switch (f.audioProperties()->codec()) {
+			case TagLib::MP4::Properties::AAC:  sdat.audio_codec = "aac";  break;
+			case TagLib::MP4::Properties::ALAC: sdat.audio_codec = "alac"; break;
+			default: break;   // Unknown: '' and never asked again
+			}
+		return;
+		}
+
+	// Ogg.  Page header is 27 bytes, the last of which counts the segment-table
+	// entries that follow it; the first packet begins after those.  Reading 255
+	// + 27 + 16 covers the largest possible table and enough of the packet to
+	// name any of the four.
+	std::ifstream in(sdat.path, std::ios::binary);
+	if (!in) return;
+	char buf[298] = {0};
+	in.read(buf, sizeof buf);
+	const size_t got = static_cast<size_t>(in.gcount());
+	if (got < 28 || std::memcmp(buf, "OggS", 4) != 0) return;
+	const size_t segs = static_cast<unsigned char>(buf[26]);
+	const size_t pkt  = 27 + segs;
+	if (got < pkt + 8) return;
+	const char* p = buf + pkt;
+	if      (!std::memcmp(p, "\x01" "vorbis", 7)) sdat.audio_codec = "vorbis";
+	else if (!std::memcmp(p, "OpusHead", 8))      sdat.audio_codec = "opus";
+	else if (!std::memcmp(p, "Speex   ", 8))      sdat.audio_codec = "speex";
+	else if (!std::memcmp(p, "\x7f" "FLAC", 5))  sdat.audio_codec = "flac";
+	}
+
 // Phase 3 for one changed file: the slow reads, with no lock held.  Shared by
 // scan_artist_dir() and scan_root_files().
 static void read_song_metadata(SongReadData& sdat)
@@ -2148,6 +2226,15 @@ static void read_song_metadata(SongReadData& sdat)
 		sdat.sr       = ap->sampleRate();
 		sdat.channels = ap->channels();
 		}
+
+	// songs.audio_codec for an audio row.  Free for the containers whose
+	// extension settles it, and a second open for the three that do not -- so a
+	// file arriving new or re-tagged never has to wait for the back-fill pass
+	// to catch up with it.
+	if (auto implied = implied_audio_codec(sdat.codec); !implied.empty())
+		sdat.audio_codec = implied;
+	else if (audio_pair_declarable(sdat.codec))
+		read_song_audio_codec(sdat);
 	}
 
 // Phase 3 for an *unchanged* file whose row predates songs.artist: read that
@@ -2192,9 +2279,11 @@ struct SongReadStats {
 // goes through log_line() — a bare std::cout would splice two workers' paths
 // together, and a path is the entire content of that message.
 //
-// The caller has already filtered to `changed || artist_missing`, so within
-// this set !changed implies artist_missing and the second branch needs only the
-// video test.
+// The caller filters to `changed || artist_missing || audio_codec_missing`, so
+// an unchanged file is here for at least one back-fill but not necessarily
+// both.  The second branch therefore tests the flags rather than is_video: it
+// once read `else if (!sdat.is_video)`, which was only correct while
+// artist_missing was the single reason an unchanged file could arrive.
 static void read_one_song(const MediaStore& store, SongReadData& sdat,
                           const SongReadStats& st)
 	{
@@ -2213,11 +2302,14 @@ static void read_one_song(const MediaStore& store, SongReadData& sdat,
 		st.files.fetch_add(1);
 		if (sdat.is_video) st.videos.fetch_add(1);
 		}
-	// An unchanged audio file whose row predates songs.artist: one narrow
-	// read, once, so an existing library gains the tag without every file
-	// having to be touched.
-	else if (!sdat.is_video) {
-		read_song_artist_tag(sdat);
+	// An unchanged audio file whose row predates songs.artist, or whose
+	// container needs a codec nobody has read yet: the narrow reads, once
+	// each, so an existing library gains both without every file having to be
+	// touched.  Both flags are set only for audio rows (Phase 2 filters on
+	// is_video), so neither branch repeats that test.
+	else if (sdat.artist_missing || sdat.audio_codec_missing) {
+		if (sdat.artist_missing)      read_song_artist_tag(sdat);
+		if (sdat.audio_codec_missing) read_song_audio_codec(sdat);
 		st.files.fetch_add(1);
 		}
 	else return;   // nothing was read, so nothing to charge
@@ -2940,6 +3032,19 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 			a.exec();
 			}
 
+		// The same back-fill for songs.audio_codec, which every audio row has
+		// held NULL since the column arrived with video.  Unguarded for the
+		// same reason: a container whose codec could not be made out stores ''
+		// and is done with, where a guard would put it back in the pass for
+		// ever.
+		if (sdat.audio_codec_read) {
+			SQLite::Statement a(db,
+				"UPDATE songs SET audio_codec = ? WHERE path = ?");
+			a.bind(1, sdat.audio_codec);
+			a.bind(2, rel_path);
+			a.exec();
+			}
+
 		// A video's title is derived from its filename, so it can improve
 		// without the file changing — which is how a library scanned before
 		// the parser existed gets back-filled.  Unguarded, unlike the version
@@ -3368,14 +3473,21 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// never opened with TagLib, so its artist column stays NULL for ever, and
 	// without this it would be offered to the back-fill on every scan, skipped,
 	// and leave nothing in the log to say why the pass never ends.
+	// codec and audio_codec ride along for the second back-fill: a row whose
+	// container can hold more than one codec, and whose codec has never been
+	// read.  The container test is here rather than in Phase 3 for the same
+	// reason is_video is -- a .mp3 can never need this, and offering it every
+	// scan would be a pass that never ends.
 	SQLite::Statement q(db_music_,
-		"SELECT path, file_modified, artist, is_video FROM songs"
-		" WHERE path LIKE ?");
+		"SELECT path, file_modified, artist, is_video, codec, audio_codec"
+		" FROM songs WHERE path LIKE ?");
 	q.bind(1, prefix);
 	while (q.executeStep())
 		known[join_root(q.getColumn(0).getString())] =
 			{ q.getColumn(1).getInt64(),
-			  q.getColumn(2).isNull() && q.getColumn(3).getInt() == 0 };
+			  q.getColumn(2).isNull() && q.getColumn(3).getInt() == 0,
+			  q.getColumn(5).isNull() && q.getColumn(3).getInt() == 0
+			      && audio_pair_declarable(q.getColumn(4).getString()) };
 	}
 
 	for (auto& adat : albums)
@@ -3383,6 +3495,8 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			auto it = known.find(sdat.path);
 			sdat.changed = (it == known.end() || it->second.mtime != sdat.mtime);
 			sdat.artist_missing = (it != known.end() && it->second.artist_null);
+			sdat.audio_codec_missing =
+				(it != known.end() && it->second.audio_codec_null);
 			}
 
 	// Which songs under this artist already have chapter rows. One query, so
@@ -3460,7 +3574,8 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	std::vector<SongReadData*> work;
 	for (auto& adat : albums)
 		for (auto& sdat : adat.songs)
-			if (sdat.changed || sdat.artist_missing) work.push_back(&sdat);
+			if (sdat.changed || sdat.artist_missing
+			        || sdat.audio_codec_missing) work.push_back(&sdat);
 
 	SongReadStats stats{ scan_times_.files,      scan_times_.videos,
 	                      scan_times_.meta_audio, scan_times_.meta_video };
@@ -3893,15 +4008,23 @@ void MediaStore::scan_root_files(const RootRec& root)
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	// See scan_artist_dir(): is_video is filtered here so a video, which has
 	// no readable tag and never will, cannot sit in the back-fill set for ever.
+	// codec and audio_codec ride along for the second back-fill: a row whose
+	// container can hold more than one codec, and whose codec has never been
+	// read.  The container test is here rather than in Phase 3 for the same
+	// reason is_video is -- a .mp3 can never need this, and offering it every
+	// scan would be a pass that never ends.
 	SQLite::Statement q(db_music_,
-		"SELECT s.path, s.file_modified, s.artist, s.is_video FROM songs s"
+		"SELECT s.path, s.file_modified, s.artist, s.is_video, s.codec,"
+		"       s.audio_codec FROM songs s"
 		" WHERE s.path LIKE ? AND s.path NOT LIKE ?");
 	q.bind(1, root.cfg.name + "/%");
 	q.bind(2, root.cfg.name + "/%/%");
 	while (q.executeStep())
 		known_songs[join_root(q.getColumn(0).getString())] =
 			{ q.getColumn(1).getInt64(),
-			  q.getColumn(2).isNull() && q.getColumn(3).getInt() == 0 };
+			  q.getColumn(2).isNull() && q.getColumn(3).getInt() == 0,
+			  q.getColumn(5).isNull() && q.getColumn(3).getInt() == 0
+			      && audio_pair_declarable(q.getColumn(4).getString()) };
 	}
 	if (albums.empty() && known_songs.empty()) return;
 
@@ -3909,6 +4032,8 @@ void MediaStore::scan_root_files(const RootRec& root)
 		auto it = known_songs.find(sdat->path);
 		sdat->changed = (it == known_songs.end() || it->second.mtime != sdat->mtime);
 		sdat->artist_missing = (it != known_songs.end() && it->second.artist_null);
+		sdat->audio_codec_missing =
+			(it != known_songs.end() && it->second.audio_codec_null);
 		}
 
 	// As in scan_artist_dir(). The prefix is the whole root here, which is
@@ -3922,7 +4047,8 @@ void MediaStore::scan_root_files(const RootRec& root)
 	PhaseTimer pt(scan_times_.meta);
 	std::vector<SongReadData*> work;
 	for (auto* sdat : all_songs)
-		if (sdat->changed || sdat->artist_missing) work.push_back(sdat);
+		if (sdat->changed || sdat->artist_missing
+		        || sdat->audio_codec_missing) work.push_back(sdat);
 
 	SongReadStats stats{ scan_times_.files,      scan_times_.videos,
 	                      scan_times_.meta_audio, scan_times_.meta_video };

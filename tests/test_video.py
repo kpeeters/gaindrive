@@ -206,8 +206,9 @@ def test_segment_request_returns_mpegts():
 
 # ---- declared containers ----------------------------------------------
 #
-# `playableContainers` lets a client say it demuxes a container itself, so the
-# server can skip a remux it would otherwise pay.  What is worth testing is
+# `playable` lets a client say it demuxes a container itself, so the server can
+# skip a remux it would otherwise pay.  The audio half of the same parameter is
+# covered by tests/test_playable.py.  What is worth testing here is
 # almost entirely the boundaries: that it never widens the codec test, never
 # beats a constraint, never admits `vob`, and — the one with the worst blast
 # radius — never changes what the browse endpoints advertise, because that is
@@ -231,7 +232,7 @@ def test_declared_container_is_served_untouched():
     v = vs[0]
     status, hdrs, body = _raw("stream.view",
                               {"id": v["id"],
-                               "playableContainers": v["suffix"]},
+                               "playable": v["suffix"]},
                               {"Range": "bytes=0-1023"})
     assert status == 206, f"expected 206, got {status}"
     assert "Content-Range" in hdrs, hdrs
@@ -266,7 +267,7 @@ def test_declared_container_does_not_change_metadata():
     plain = _json("getSong.view", {"id": v["id"]})["song"]
     declared = _json("getSong.view",
                      {"id": v["id"],
-                      "playableContainers": v["suffix"]})["song"]
+                      "playable": v["suffix"]})["song"]
     for field in ("transcodedContentType", "transcodedSuffix", "nativeSeek"):
         assert plain.get(field) == declared.get(field), \
             f"{field} moved: {plain.get(field)!r} -> {declared.get(field)!r}"
@@ -281,7 +282,7 @@ def test_vob_is_never_declarable():
         print("SKIP  no DVD rip in the library")
         return
     status, hdrs, _ = _raw("stream.view",
-                           {"id": vobs[0]["id"], "playableContainers": "vob"})
+                           {"id": vobs[0]["id"], "playable": "vob"})
     assert status == 200, status
     assert hdrs.get("Content-Type") == "video/mp4", \
         "a declared vob was served raw: " + str(hdrs.get("Content-Type"))
@@ -297,7 +298,7 @@ def test_declared_container_still_honours_constraints():
     v = vs[0]
     status, hdrs, body = _raw("stream.view",
                               {"id": v["id"], "size": "320x240",
-                               "playableContainers": v["suffix"]})
+                               "playable": v["suffix"]})
     assert status == 200, status
     assert hdrs.get("Content-Type") == "video/mp4", hdrs.get("Content-Type")
     assert len(body) > 0, "empty body — ffmpeg produced nothing"
@@ -311,7 +312,7 @@ def test_garbage_declaration_is_ignored():
     for value in ("../../etc/passwd", "a" * 500, ",,,", "nonsense",
                   "mkv,,vob,,nonsense"):
         status, _, _ = _raw("stream.view", {"id": vid,
-                                            "playableContainers": value},
+                                            "playable": value},
                             {"Range": "bytes=0-1023"})
         assert status in (200, 206), f"{value!r} gave HTTP {status}"
     vs = _remuxable()
@@ -319,7 +320,7 @@ def test_garbage_declaration_is_ignored():
         # Case is folded: songs.codec is stored lowercased.
         status, hdrs, _ = _raw("stream.view",
                                {"id": vs[0]["id"],
-                                "playableContainers": "MKV"},
+                                "playable": "MKV"},
                                {"Range": "bytes=0-1023"})
         assert "X-Gaindrive-Transcode" not in hdrs, \
             "MKV was not folded to mkv: " + str(hdrs)

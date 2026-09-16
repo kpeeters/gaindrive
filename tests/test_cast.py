@@ -150,7 +150,7 @@ print("\ncastSession agrees with castLoad on every field.")
 
 # A receiver demuxes no more containers than a browser does, so a video whose
 # container a browser will not take must still be remuxed for it — whatever any
-# *client* said about what it can demux itself.  `playableContainers` on
+# *client* said about what it can demux itself.  `playable` on
 # stream.view moves an .mkv to the direct tier for the request that sent it, and
 # it must never reach this decision: the LOAD above announced a contentType
 # computed before a byte was served, and Matroska arriving under video/mp4 is

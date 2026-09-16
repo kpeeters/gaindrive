@@ -1018,37 +1018,71 @@ static std::string sane_video_size(const std::string& s)
 	return std::to_string(w) + "x" + std::to_string(h);
 	}
 
-// The containers a client declared it demuxes for itself, from the comma list
-// stream.view spells `playableContainers`.
+// What a client declared it can be sent untouched, from the comma list
+// stream.view spells `playable`.
+//
+// Two token shapes, and which is legal depends on the container alone:
+//
+//  * bare — a video container (every VIDEO_TARGETS name but vob), or one of
+//    the four audio containers whose codec the extension already settles.
+//  * `container/codec` — the audio containers that hold more than one codec.
+//    An ambiguous container is **not** accepted bare: that would be the server
+//    guessing what is inside the file *and* what the client decodes, which is
+//    the pair of guesses this parameter exists to remove.
 //
 // Validated here rather than in Streamer for the reason sane_video_size() above
 // gives: the one caller reachable from outside is the one that checks. What is
-// bounded is the whole parameter, at 64 characters — that caps the token count
+// bounded is the whole parameter, at 128 characters — that caps the token count
 // and every token length at once, so there are no separate counters to keep
-// agreeing with each other.
+// agreeing with each other. 128 rather than the 64 a container-only list needed:
+// a realistic audio-and-video declaration runs to about seventy.
 //
 // An unrecognised token is **dropped, not refused**, matching `size`. A client
-// naming a container this server has never heard of is asking for nothing, not
-// asking wrongly, and a hard error would make adding a container to a client a
+// naming something this server has never heard of is asking for nothing, not
+// asking wrongly, and a hard error would make adding a format to a client a
 // breaking change against every older server.
 //
-// Everything that survives is a VIDEO_TARGETS name, which is what lets
-// serve_video() log the set verbatim.
-static ClientContainers parse_client_containers(const std::string& s)
+// The codec half of a pair is deliberately *not* checked against a vocabulary.
+// It is only ever compared for equality with songs.audio_codec, so a spelling
+// this server does not use simply fails to match and the file transcodes as it
+// always did — a better failure than a second table to keep in step with
+// ffprobe's codec names. What is checked is only that it is shaped like one —
+// non-empty and alphanumeric — which also keeps the set printable in a log line
+// and drops a "a/b/c" that names nothing.
+static Playable parse_playable(const std::string& s)
 	{
-	ClientContainers out;
-	if (s.empty() || s.size() > 64) return out;
+	Playable out;
+	if (s.empty() || s.size() > 128) return out;
 	size_t start = 0;
 	while (start <= s.size()) {
 		size_t      comma = s.find(',', start);
 		std::string tok   = s.substr(start, comma == std::string::npos
 		                                    ? std::string::npos
 		                                    : comma - start);
-		// songs.codec holds a lowercased extension, so that is what a
-		// declaration has to be compared against.
+		// songs.codec and songs.audio_codec are both stored lowercased, so that
+		// is what a declaration has to be compared against.
 		for (char& c : tok)
 			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-		if (container_declarable(tok)) out.insert(std::move(tok));
+		size_t slash = tok.find('/');
+		if (slash == std::string::npos) {
+			if (container_declarable(tok) || audio_bare_declarable(tok))
+				out.insert(std::move(tok));
+			}
+		else {
+			std::string container = tok.substr(0, slash);
+			std::string codec     = tok.substr(slash + 1);
+			// An ffprobe codec_name is letters, digits and underscores —
+			// "aac", "alac", "wmav2", "pcm_s16le".  Anything else cannot be a
+			// codec this server ever stored, so dropping it costs nothing and
+			// keeps the set printable in a log line without log_safe().
+			bool plain = !codec.empty()
+			          && std::all_of(codec.begin(), codec.end(),
+			                         [](unsigned char c) {
+			                         	return std::isalnum(c) || c == '_';
+			                         	});
+			if (audio_pair_declarable(container) && plain)
+				out.insert(std::move(tok));
+			}
 		if (comma == std::string::npos) break;
 		start = comma + 1;
 		}
@@ -1061,7 +1095,7 @@ static ClientContainers parse_client_containers(const std::string& s)
 // distinction.
 //
 // It exists because the answer stopped being the server's business alone. A
-// client that demuxes the container itself (see playableContainers on
+// client that demuxes the container itself (see `playable` on
 // stream.view) is handed those streams by its own demuxer, so side-loading
 // them through getCaptions as well would list every subtitle twice — while the
 // sidecar, which no container carries, still has to come from here.
@@ -5830,26 +5864,28 @@ GainDrive::GainDrive(const std::string& db_path,
 		VideoOptions vopts{
 			.size             = sane_video_size(qp("size")),
 			.segment_duration = to_int(qp("duration"), 0),
-			// Never for a cast token, and that is not caution.  A
-			// server-driven cast URL is fetched by the *receiver*, which
-			// declared none of this, and the LOAD it is playing announced a
-			// contentType that cast_mime_for() computed before a byte was
-			// served.  Honouring a capability the controller claimed would
-			// send Matroska to a receiver told video/mp4, which refuses the
-			// media outright and reads as a broken file.
-			.client_containers = cast_authed
-			    ? ClientContainers{}
-			    : parse_client_containers(qp("playableContainers")),
-			// Same exclusion and the same reason: a receiver fetches for
-			// itself, and a stream with no Content-Length is the one thing it
-			// must not be handed after a LOAD announced video/mp4.  The
-			// literal "true" only, as pace and estimateContentLength read it.
+			// A receiver fetches for itself, and a stream with no
+			// Content-Length is the one thing it must not be handed after a
+			// LOAD announced video/mp4.  The literal "true" only, as pace and
+			// estimateContentLength read it.
 			.start_immediately = !cast_authed
 			                  && qp("startImmediately") == "true",
 			};
+		// What the client can be sent untouched.  Never for a cast token, and
+		// that is not caution.  A server-driven cast URL is fetched by the
+		// *receiver*, which declared none of this, and the LOAD it is playing
+		// announced a contentType that cast_mime_for() computed before a byte
+		// was served.  Honouring a capability the controller claimed would send
+		// Matroska to a receiver told video/mp4, which refuses the media
+		// outright and reads as a broken file.  The audio half is no safer: the
+		// same LOAD named an audio type the soundtrack transcode was going to
+		// produce.
+		const Playable playable = cast_authed
+		    ? Playable{}
+		    : parse_playable(qp("playable"));
 		Streamer::serve(req, res, si, transcode_cache_, max_bitrate, format,
 		                time_offset, cast_authed, std::move(get_pos),
-		                estimate_length, vopts);
+		                estimate_length, vopts, playable);
 		});
 
 	// download — the original file, never transcoded and never bitrate-capped.

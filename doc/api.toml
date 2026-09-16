@@ -751,35 +751,67 @@ than rejected, and means "do not scale" — the same as omitting it.
   doc  = 'Video only. Bound the output to this many seconds from `timeOffset`, and switch the container to MPEG-TS. That is one HLS segment.'
 
   [[endpoint.param]]
-  name  = "playableContainers"
+  name  = "playable"
   type  = "string"
-  doc   = 'Video only. A comma list of container extensions you demux yourself, so the server need not remux them — `mkv,mov,avi`.'
+  doc   = 'A comma list of what this client can be sent untouched, so the server skips work it would otherwise pay — `mp3,m4a/aac,mkv,mov,avi`.'
   notes = '''
-Most players handle more containers than a browser does. Matroska is the case
-this exists for: an H.264/AAC `.mkv` is remuxed to MP4 for no reason other than
-that no browser reads Matroska, and the remux is a whole-file `-c copy` the
-client waits out before it hears anything.
+Most players handle more than a browser does, and a server that cannot be told
+so re-encodes for no reason. An MP3 played through a client that decodes MP3
+is the plain case: asking for `format=opus` converts every track, including the
+ones that needed nothing. Matroska is the video case — an H.264/AAC `.mkv` is
+remuxed to MP4 only because no browser reads Matroska, and that remux is a
+whole-file `-c copy` the client waits out before it hears anything.
+
+**A token is a container, or a `container/codec` pair**, and which one is legal
+depends on the container:
+
+* **Bare** — every video container except `vob`, and the four audio containers
+  whose codec their extension already settles: `mp3`, `flac`, `opus`, `aac`.
+  Nothing is being assumed about a bare audio token; only one codec can be
+  inside.
+* **Paired** — `m4a`, `ogg` and `oga`, which hold more than one. A `.m4a` is
+  AAC or ALAC and a `.ogg` is Vorbis, Opus, FLAC or Speex, and the extension
+  does not say which. These are **not** accepted bare: that would be the server
+  guessing what is in the file and what you decode, which is the pair of
+  guesses this parameter exists to remove.
+
+`wav` and `wma` are not declarable in either form. Both are genuinely
+ambiguous, and a client that wants a lossless or legacy file untouched asks for
+the original instead — no `format` at all, which is served straight off disk.
+
+**Declaring something means "send me this", not "I can decode this."** They are
+different claims, and only the second is about your decoder. A client set to
+Opus 160 that also declares `flac` will be sent FLAC, which is the opposite of
+what it asked for. There is deliberately no server-side guard against that: a
+guard would be the server overruling the one party that knows what it wants.
 
 What it does is narrow, and deliberately so.
 
-* It **only ever skips a remux**, never a re-encode. The codec pair still has
-  to be one the server would have served directly anyway, so an HEVC or
-  AC3 file is unaffected — the saving is the container work alone.
-* It **never beats a constraint**. `size`, `maxBitRate` and `timeOffset` each
-  force a real encode, and this does not override any of them.
+* It **only ever skips work**. On audio it skips a re-encode, on video a remux;
+  it never changes what a transcode produces when one happens.
+* It **never beats a constraint**. `maxBitRate` and `timeOffset` each force a
+  transcode, and `size` and `duration` do on video. A declared 320 kbps MP3
+  under a 160 ceiling is still converted.
+* On video the codec pair still has to be one the server would have served
+  directly anyway, so an HEVC or AC3 file is unaffected — the saving is the
+  container work alone.
+* An unrecognised token is ignored rather than rejected, so naming a new one
+  costs nothing against an older server. The codec half of a pair is compared
+  verbatim against what the scan recorded and is not checked against any list:
+  a spelling this server does not use simply never matches.
 * `vob` is **refused**. A DVD titleset is one continuous stream split across
   numbered VOBs and the stored path names only the first, so serving it
   untouched would hand back twenty minutes of a two-hour film with nothing
   reporting an error.
-* An extension this server does not know is ignored rather than rejected, so
-  naming a new one costs nothing against an older server.
 
-`transcodedContentType`, `transcodedSuffix` and `nativeSeek` are **not**
-affected by it, deliberately. They describe what any client would be sent, so
-they stay cacheable and stay right for the one consumer that is not you —
-a Cast receiver being told what it is about to fetch. The two tiers this
-parameter moves a file between are both natively seekable, so `nativeSeek` is
-correct either way.
+Codec names are lowercase and spelled as ffprobe spells them: `aac`, `alac`,
+`vorbis`, `opus`, `flac`, `speex`.
+
+`transcodedContentType`, `transcodedSuffix`, `transcodedBitRate` and
+`nativeSeek` are **not** affected by it, deliberately. They describe what any
+client would be sent, so they stay cacheable and stay right for the one
+consumer that is not you — a Cast receiver being told what it is about to
+fetch.
 
 Ignored when a `castToken` is presented, and ignored on `hls.m3u8`, where every
 segment is bounded by `duration` and is therefore an encode whatever the
@@ -789,9 +821,11 @@ NOTE: **Never put this on a URL you are handing to something else** — a Cast
 receiver above all. The `LOAD` you sent it declared a `contentType` taken from
 `transcodedContentType`, and a receiver told `video/mp4` while being sent
 Matroska refuses the media outright, which looks like a broken file rather than
-a mislabelled one. Apply it where the request is made, not where the URL is
-built.
+a mislabelled one. The audio half is no safer: the same `LOAD` named the type
+the transcode was going to produce. Apply it where the request is made, not
+where the URL is built.
 '''
+
 
   [[endpoint.param]]
   name  = "startImmediately"
@@ -947,7 +981,7 @@ for the same kind of client: one that demuxes the container itself.
 
 Every caption listed here can be fetched as WebVTT from `getCaptions`,
 whichever it is. But a client playing the container directly — see
-`playableContainers` on `stream` — is handed the embedded tracks by its own
+`playable` on `stream` — is handed the embedded tracks by its own
 demuxer, so side-loading those as well lists every subtitle twice. The sidecar
 is the half no container carries, so it still has to come from here.
 
@@ -2308,7 +2342,7 @@ client that owns the control channel seeks the receiver rather than reloading
 it, and the receiver goes on fetching the URL it already has, which is why the
 lifetime is hours rather than minutes.
 
-Do not put `startImmediately` or `playableContainers` on a URL built with it —
+Do not put `startImmediately` or `playable` on a URL built with it —
 see those parameters for what a receiver does with the response they produce —
 and do put `pace=true` on it, since the server otherwise paces only for a
 browser's own User-Agent.
