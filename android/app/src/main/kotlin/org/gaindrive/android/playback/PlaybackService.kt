@@ -6,6 +6,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
@@ -25,6 +26,7 @@ import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.gaindrive.android.data.CaptionTracks
+import org.gaindrive.android.data.Connectivity
 import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.StreamUrls
@@ -96,6 +98,9 @@ class PlaybackService : MediaLibraryService() {
 	@Inject
 	lateinit var settings: SettingsStore
 
+	@Inject
+	lateinit var connectivity: Connectivity
+
 	private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
 	private var session: MediaLibrarySession? = null
@@ -149,7 +154,11 @@ class PlaybackService : MediaLibraryService() {
 
 		val callback = LibraryCallback()
 		libraryCallback = callback
-		session = MediaLibrarySession.Builder(this, player, callback).build()
+		// CacheBitmapLoader holds the last bitmap it loaded, which is what
+		// stops a decode on every notification refresh.
+		session = MediaLibrarySession.Builder(this, player, callback)
+			.setBitmapLoader(CacheBitmapLoader(CoilBitmapLoader(this, scope, connectivity)))
+			.build()
 		watchCastDevice()
 		watchAudioOnly()
 	}

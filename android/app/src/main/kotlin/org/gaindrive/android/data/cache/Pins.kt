@@ -1,5 +1,6 @@
 package org.gaindrive.android.data.cache
 
+import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
 
@@ -55,6 +56,33 @@ fun expandPins(
 		pin.ref.encode() to songs.map { it.encode() }
 	}
 )
+
+/**
+ * The pictures a pin covers, which is a different question from the audio.
+ *
+ * Pure and fed already-resolved rows for the same reason [expandPins] is:
+ * the rule is worth testing without a database behind it.
+ *
+ * [album] may be null even for an album pin, because the mirror is emptied
+ * underneath a recompute when a server is removed or its browse mode changes.
+ * The fallback is the pin's own ref, which is always a valid `getCoverArt` id
+ * in gaindrive, where a cover art id is a folder id.
+ *
+ * An album pin takes the artist portrait too. It is one extra file, and it is
+ * the only art here that cannot simply be re-fetched on demand: the server has
+ * to go out to MusicBrainz and friends to find one, which offline cannot
+ * happen at all.
+ */
+fun artRefsOf(pin: Pin, album: Album?, songs: List<Song>): List<ItemRef> = when (pin.kind) {
+	PinKind.SONG -> listOfNotNull(songs.firstOrNull()?.coverArt ?: pin.ref)
+	PinKind.ALBUM -> listOfNotNull(
+		album?.coverArt ?: pin.ref,
+		album?.artistRef,
+	) + songs.mapNotNull { it.coverArt }
+	// A playlist has no art of its own, so it is worth exactly the covers of
+	// what is on it.
+	PinKind.PLAYLIST -> songs.mapNotNull { it.coverArt }
+}.distinct()
 
 /**
  * A video is part of what a pin covers only when it is being played for its

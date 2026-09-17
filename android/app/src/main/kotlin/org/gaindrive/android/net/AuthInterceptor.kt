@@ -47,9 +47,14 @@ class AuthInterceptor(
 		const val CLIENT_NAME = "gaindrive-android"
 
 		/**
-		 * Generated once per client instance, not per request. A per-request
-		 * salt would give every cover-art URL a unique query string, so Coil's
-		 * disk cache — which keys on the URL — would miss on every scroll.
+		 * Generated once per client instance, not per request, so that a
+		 * single screen's worth of cover-art URLs agree with each other.
+		 *
+		 * It is not what makes Coil's disk cache work, and never was: a client
+		 * instance lives in an in-memory map, so this rotates on every app
+		 * start and every stored entry keyed on a URL became unreachable with
+		 * it. `ArtKeys` is what fixes that, by keying on the request with this
+		 * taken back out.
 		 */
 		fun newSalt(): String {
 			val bytes = ByteArray(8)

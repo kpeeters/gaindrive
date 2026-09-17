@@ -1,7 +1,9 @@
 package org.gaindrive.android.data.cache
 
+import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerId
+import org.gaindrive.android.data.model.Song
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -19,6 +21,37 @@ class PinsTest {
 	private val serverB = ServerId("b")
 
 	private fun ref(server: ServerId, id: String) = ItemRef(server, id)
+
+	private fun album(ref: ItemRef, cover: ItemRef?, artist: ItemRef?) = Album(
+		ref = ref,
+		title = "An Album",
+		artistName = "An Artist",
+		artistRef = artist,
+		songCount = 2,
+		duration = 300,
+		year = null,
+		genre = null,
+		coverArt = cover,
+		starredAt = null,
+	)
+
+	private fun song(ref: ItemRef, cover: ItemRef?) = Song(
+		ref = ref,
+		title = "A Track",
+		artistName = "An Artist",
+		albumTitle = "An Album",
+		albumRef = null,
+		track = null,
+		discNumber = null,
+		year = null,
+		duration = 150,
+		bitRate = 320,
+		suffix = null,
+		contentType = null,
+		sizeBytes = 1000,
+		coverArt = cover,
+		starredAt = null,
+	)
 
 	private val fetching = TrackDownload(TrackDownloadState.DOWNLOADING, percent = 40f)
 
@@ -297,5 +330,57 @@ class PinsTest {
 		assertFalse(covered(isVideo = true, audioOnly = false))
 		assertTrue(covered(isVideo = true, audioOnly = true))
 		assertTrue(covered(isVideo = false, audioOnly = false))
+	}
+
+	@Test
+	fun `an album pin covers its cover, its artist and nothing twice`() {
+		val albumRef = ref(serverA, "10")
+		val cover = ref(serverA, "cover-10")
+		val artist = ref(serverA, "artist-3")
+		// The usual case: every track carries the album's own cover art id, so
+		// an album's worth of tracks is one picture, not twelve.
+		val tracks = listOf(song(ref(serverA, "1"), cover), song(ref(serverA, "2"), cover))
+
+		val art = artRefsOf(Pin(albumRef, PinKind.ALBUM), album(albumRef, cover, artist), tracks)
+
+		assertEquals(listOf(cover, artist), art)
+	}
+
+	@Test
+	fun `an album missing from the mirror falls back to its own ref`() {
+		// The window where a server has been removed or its browse mode
+		// changed: the rows are gone but the pin is still there. A cover art id
+		// is a folder id, so the pin's own ref is a usable stand-in, and
+		// covering nothing at all would let the files be swept.
+		val albumRef = ref(serverA, "10")
+
+		val art = artRefsOf(Pin(albumRef, PinKind.ALBUM), album = null, songs = emptyList())
+
+		assertEquals(listOf(albumRef), art)
+	}
+
+	@Test
+	fun `a playlist pin covers one picture per distinct album`() {
+		val first = ref(serverA, "cover-10")
+		val second = ref(serverB, "cover-20")
+		val tracks = listOf(
+			song(ref(serverA, "1"), first),
+			song(ref(serverA, "2"), first),
+			song(ref(serverB, "3"), second),
+		)
+
+		val art = artRefsOf(Pin(ref(serverA, "pl-1"), PinKind.PLAYLIST), album = null, songs = tracks)
+
+		assertEquals(listOf(first, second), art)
+	}
+
+	@Test
+	fun `a song pin covers exactly one picture`() {
+		val cover = ref(serverA, "cover-10")
+		val songRef = ref(serverA, "1")
+
+		val art = artRefsOf(Pin(songRef, PinKind.SONG), album = null, songs = listOf(song(songRef, cover)))
+
+		assertEquals(listOf(cover), art)
 	}
 }

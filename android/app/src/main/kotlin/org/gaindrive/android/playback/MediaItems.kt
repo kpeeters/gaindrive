@@ -85,6 +85,14 @@ private const val KEY_AUDIO_ONLY_VIDEO = "org.gaindrive.audioOnlyVideo"
 private const val KEY_QUALITY = "org.gaindrive.quality"
 
 /**
+ * The size the server is asked to scale notification artwork to, and the size
+ * `CoilBitmapLoader` then asks Coil for. Here rather than in `PlayerConnection`
+ * because the two have to agree: a different number on the loading side would
+ * be a second cache entry for a picture already held.
+ */
+const val ARTWORK_PX = 512
+
+/**
  * Song ↔ MediaItem. The `mediaId` carries the encoded [ItemRef], because it is
  * the only context Media3 hands back on notification actions and session
  * restore — a bare song id there would be ambiguous the moment a second server

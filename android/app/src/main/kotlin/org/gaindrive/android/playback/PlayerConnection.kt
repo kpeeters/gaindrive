@@ -646,8 +646,6 @@ class PlayerConnection @Inject constructor(
 	}
 
 	private companion object {
-		/** Notification artwork; the system scales it down from here. */
-		const val ARTWORK_PX = 512
 		const val POSITION_POLL_MS = 500L
 		const val CONNECT_ATTEMPTS = 40
 		const val CONNECT_POLL_MS = 50L

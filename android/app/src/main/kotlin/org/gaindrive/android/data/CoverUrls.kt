@@ -20,8 +20,9 @@ class CoverUrls internal constructor(
 
 	/**
 	 * [size] is the pixel size the server should scale to. Ask for what is
-	 * actually displayed: the URL is Coil's cache key, so a consistent size
-	 * per context is what makes the cache hit.
+	 * actually displayed: `ArtKeys` strips the auth off this before Coil sees
+	 * it but keeps the size, because the server serves a different ladder rung
+	 * per size, so a consistent size per context is what makes the cache hit.
 	 */
 	fun url(ref: ItemRef?, size: Int): String? {
 		val client = clients[ref?.server] ?: return null

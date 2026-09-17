@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
+import org.gaindrive.android.data.Connectivity
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -25,12 +26,15 @@ import javax.inject.Singleton
  * something does go wrong, "delete the lot and fetch it again" is the only
  * remedy that needs no diagnosis.
  *
- * **Images live in two places**, and clearing one alone achieves nothing:
+ * **Images live in three places**, and clearing one alone achieves nothing:
  *
  * * Coil's own disk and memory caches, configured in `GainDriveApplication`.
  * * The shared OkHttp cache, because Coil is built on the same client every
  *   Retrofit instance uses (see `AppModule`). Coil re-fetching an image it has
  *   dropped would otherwise be served the old bytes from there.
+ * * [PinnedArt], the copies kept in `filesDir` for what the user has pinned.
+ *   Sparing these would make the button quietly do nothing for a downloaded
+ *   album, since the mapper would go on serving the same stale file.
  *
  * The OkHttp side is cleared by URL rather than wholesale: that cache also
  * holds API responses, and dropping those would make this button quietly mean
@@ -49,20 +53,23 @@ import javax.inject.Singleton
 class ImageCache @Inject constructor(
 	@ApplicationContext private val context: Context,
 	private val httpClient: OkHttpClient,
+	private val pinnedArt: PinnedArt,
+	private val connectivity: Connectivity,
 ) {
 
 	private val _sizeBytes = MutableStateFlow(0L)
 
 	/**
-	 * Coil's disk cache only — the number is a label for a button, not an
-	 * accounting of everything [clear] touches. The memory cache is transient
-	 * and the art inside the HTTP cache cannot be sized without walking it.
+	 * Coil's disk cache plus the pinned files, which is a label for a button
+	 * rather than an accounting of everything [clear] touches. The memory
+	 * cache is transient and the art inside the HTTP cache cannot be sized
+	 * without walking it.
 	 */
 	val sizeBytes: StateFlow<Long> = _sizeBytes.asStateFlow()
 
 	suspend fun refreshSize() = withContext(Dispatchers.IO) {
 		_sizeBytes.value = runCatching {
-			SingletonImageLoader.get(context).diskCache?.size ?: 0L
+			(SingletonImageLoader.get(context).diskCache?.size ?: 0L) + pinnedArt.sizeBytes()
 		}.getOrDefault(0L)
 	}
 
@@ -76,6 +83,14 @@ class ImageCache @Inject constructor(
 			.onFailure { Log.w(TAG, "disk cache: ${it.message}") }
 		runCatching { clearHttpArt() }
 			.onFailure { Log.w(TAG, "http cache: ${it.message}") }
+		// Offline the pinned file is the only copy in existence and nothing
+		// can fetch it again, so dropping it would turn a precaution into data
+		// loss at exactly the moment the user is relying on it. `PinRepository`
+		// re-fetches what this removes; see `SettingsViewModel`.
+		if (connectivity.online.value) {
+			runCatching { pinnedArt.clear() }
+				.onFailure { Log.w(TAG, "pinned art: ${it.message}") }
+		}
 		refreshSize()
 	}
 

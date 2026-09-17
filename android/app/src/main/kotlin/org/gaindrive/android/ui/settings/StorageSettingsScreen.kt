@@ -192,19 +192,22 @@ fun StorageSettingsScreen(
 		item {
 			Text(
 				text = "Covers and artist portraits are stored separately from " +
-					"music, outside the cap above. Clearing them is what to do " +
-					"when the art on screen no longer matches the server; they " +
-					"come back as you browse.",
+					"music, outside the cap above. Downloads keep their own " +
+					"copies, so they still have artwork offline. Clearing is " +
+					"what to do when the art on screen no longer matches the " +
+					"server; it comes back as you browse.",
 				style = MaterialTheme.typography.bodySmall,
 				color = MaterialTheme.colorScheme.onSurfaceVariant,
 			)
 		}
 		item {
-			// Never disabled, and no confirmation. The size shown covers only
-			// the image cache's own files, while the button also clears the
-			// in-memory copies and the art sitting in the shared HTTP cache —
-			// so "0 B" does not mean there is nothing to do, and nothing here
-			// is lost by pressing it again.
+			// Never disabled, and no confirmation. The size shown covers the
+			// image cache's own files and the copies kept for downloads, while
+			// the button also clears the in-memory copies and the art sitting
+			// in the shared HTTP cache, so "0 B" does not mean there is
+			// nothing to do and nothing here is lost by pressing it again.
+			// Offline it leaves a download's copies alone, since those are the
+			// only ones left and nothing could fetch them back.
 			OutlinedButton(onClick = viewModel::clearImageCache) {
 				Text("Clear cover art (${formatBytes(storage.imageBytes)})")
 			}

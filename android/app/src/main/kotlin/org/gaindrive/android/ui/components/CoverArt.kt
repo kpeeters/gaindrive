@@ -23,10 +23,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
 import kotlinx.coroutines.delay
+import org.gaindrive.android.data.cache.artCaching
+import org.gaindrive.android.ui.LocalAvailability
 
 /**
  * Album or artist artwork with a placeholder for the common case of an album
@@ -34,7 +38,14 @@ import kotlinx.coroutines.delay
  *
  * The URL is built by [org.gaindrive.android.data.CoverUrls] and already
  * carries the server's auth parameters, so Coil needs no interceptor of its
- * own.
+ * own. It is not, however, a usable cache key (see
+ * [org.gaindrive.android.data.cache.ArtKeys]), which is what `artCaching`
+ * corrects here.
+ *
+ * The placeholder sits *behind* the image rather than replacing it, for the
+ * same reason [ArtistAvatar] layers its own: a load that fails draws nothing,
+ * and offline with nothing stored is a load that fails. Choosing the icon only
+ * on a null URL would leave an empty box in exactly the case it exists for.
  */
 @Composable
 fun CoverArt(
@@ -48,28 +59,36 @@ fun CoverArt(
 	// Last in the chain and after the clip, so the ripple lands on top of the
 	// artwork and follows its corners instead of a square.
 	val clicks = if (onClick == null) Modifier else Modifier.clickable(onClick = onClick)
-	if (url == null) {
-		Box(
-			modifier = modifier
-				.clip(shape)
-				.background(MaterialTheme.colorScheme.surfaceVariant)
-				.then(clicks),
-			contentAlignment = Alignment.Center,
-		) {
-			Icon(
-				imageVector = Icons.Default.MusicNote,
+	val online = LocalAvailability.current.online
+	val context = LocalContext.current
+	val request = remember(url, online) {
+		url?.let {
+			ImageRequest.Builder(context).data(it).artCaching(it, online).build()
+		}
+	}
+	Box(
+		modifier = modifier
+			.clip(shape)
+			.background(MaterialTheme.colorScheme.surfaceVariant)
+			.then(clicks),
+		contentAlignment = Alignment.Center,
+	) {
+		Icon(
+			imageVector = Icons.Default.MusicNote,
+			// Carried by the image when there is one, so a screen reader is
+			// not told the same thing twice.
+			contentDescription = if (request == null) contentDescription else null,
+			tint = MaterialTheme.colorScheme.onSurfaceVariant,
+			modifier = Modifier.size(20.dp),
+		)
+		if (request != null) {
+			AsyncImage(
+				model = request,
 				contentDescription = contentDescription,
-				tint = MaterialTheme.colorScheme.onSurfaceVariant,
-				modifier = Modifier.size(20.dp),
+				contentScale = ContentScale.Crop,
+				modifier = Modifier.fillMaxSize(),
 			)
 		}
-	} else {
-		AsyncImage(
-			model = url,
-			contentDescription = contentDescription,
-			contentScale = ContentScale.Crop,
-			modifier = modifier.clip(shape).then(clicks),
-		)
 	}
 }
 
@@ -101,11 +120,16 @@ fun CoverThumb(url: String?, contentDescription: String?, size: Dp = 48.dp) {
  * cannot fix it either: the URL it recomputes is identical, so the state never
  * changes and Coil is never asked a second time.
  *
- * The attempt counter therefore has to be *in the URL*. Coil keys its caches on
- * the model, so re-issuing the same string is a no-op, and the shared OkHttp
- * cache may be holding a cacheable 404 for an artist the server has since
- * resolved. A server that means "there is genuinely none" says so with a
- * `max-age`, which this will re-ask a handful of times and then leave alone.
+ * The attempt counter therefore has to be *in the URL*, and it stays there
+ * even though [org.gaindrive.android.data.cache.ArtKeys] strips it back out of
+ * the cache key. That split is the point: the URL has to differ or nothing is
+ * re-requested, while the key has to not differ or a portrait that finally
+ * arrives on attempt three is filed under a string no later screen will ever
+ * ask for. Coil keys its caches on the model, so re-issuing the same string
+ * would be a no-op, and the shared OkHttp cache may be holding a cacheable 404
+ * for an artist the server has since resolved. A server that means "there is
+ * genuinely none" says so with a `max-age`, which this will re-ask a handful
+ * of times and then leave alone.
  */
 @Composable
 fun ArtistAvatar(url: String?, contentDescription: String?, size: Dp = 96.dp) {
@@ -113,13 +137,23 @@ fun ArtistAvatar(url: String?, contentDescription: String?, size: Dp = 96.dp) {
 	var attempt by remember(url) { mutableIntStateOf(0) }
 	var failed by remember(url) { mutableStateOf(false) }
 
+	val online = LocalAvailability.current.online
+	val context = LocalContext.current
 	val model = when {
 		url == null -> null
 		attempt == 0 -> url
 		else -> "$url&_r=$attempt"
 	}
+	val request = remember(model, online) {
+		model?.let {
+			ImageRequest.Builder(context).data(it).artCaching(it, online).build()
+		}
+	}
 
-	LaunchedEffect(url, failed, attempt) {
+	LaunchedEffect(url, failed, attempt, online) {
+		// Offline the server cannot go and find a portrait, so every attempt
+		// is a guaranteed failure and the ladder is pure battery.
+		if (!online) return@LaunchedEffect
 		if (url == null || !failed || attempt >= PORTRAIT_RETRIES) return@LaunchedEffect
 		// Backing off: an artist resolved straight from the front of the queue
 		// takes a few seconds, one queued behind a first-run backlog takes
@@ -142,9 +176,9 @@ fun ArtistAvatar(url: String?, contentDescription: String?, size: Dp = 96.dp) {
 			tint = MaterialTheme.colorScheme.onSurfaceVariant,
 			modifier = Modifier.size(size / 2),
 		)
-		if (model != null) {
+		if (request != null) {
 			AsyncImage(
-				model = model,
+				model = request,
 				contentDescription = contentDescription,
 				contentScale = ContentScale.Crop,
 				modifier = Modifier.fillMaxSize(),

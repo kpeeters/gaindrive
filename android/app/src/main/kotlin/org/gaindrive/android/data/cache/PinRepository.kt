@@ -52,7 +52,9 @@ class PinRepository @Inject constructor(
 	private val settings: SettingsStore,
 	private val registry: ServerRegistry,
 	private val streamUrls: StreamUrls,
-	scope: CoroutineScope,
+	private val pinnedArt: PinnedArt,
+	private val artDownloader: ArtDownloader,
+	private val scope: CoroutineScope,
 ) {
 
 	private val _pins = MutableStateFlow<List<Pin>>(emptyList())
@@ -222,7 +224,8 @@ class PinRepository @Inject constructor(
 	}
 
 	private suspend fun applyProtection(pins: List<Pin>) {
-		val coverage = computeCoverage(pins)
+		val expansion = expand(pins)
+		val coverage = expansion.coverage
 		val keys = coverage.allKeys
 		// Two forms of the same set, and they are no longer interchangeable.
 		//
@@ -250,7 +253,38 @@ class PinRepository @Inject constructor(
 		_pins.value = pins
 		_coverage.value = coverage
 		_protectedKeys.value = keys
+		// After the pins, not before: nothing evicts art, so there is no race
+		// to lose here, and this reaches the disk and the network. Holding the
+		// pin state behind it would make every pin feel slower than it is.
+		applyArt(expansion)
 	}
+
+	/**
+	 * The picture half of a pin: which files to keep, and which to go and get.
+	 *
+	 * Skipped wholesale when the expansion retained anything, because a
+	 * retained pass is one where the mirror was emptied underneath it (see
+	 * [retaining]). The art refs it produced would be a handful of fallbacks
+	 * rather than the real set, and acting on them would delete the covers of
+	 * everything the user pinned. Leaving the index and the files exactly as
+	 * they are costs one stale pass and the next one puts it right.
+	 */
+	private suspend fun applyArt(expansion: Expansion) {
+		if (expansion.retained) return
+		pinnedArt.publish(artDownloader.index(expansion.artRefs))
+		pinnedArt.retain(expansion.artRefs.mapTo(mutableSetOf()) { ArtKeys.fileName(it) })
+		// Launched rather than awaited: pinning must not wait on pictures, and
+		// this is also the pass that picks up a portrait the server had not
+		// resolved when the pin was placed. Republished afterwards because the
+		// index holds only files that exist, and these did not a moment ago.
+		scope.launch {
+			artDownloader.fetchMissing(expansion.artRefs)
+			pinnedArt.publish(artDownloader.index(expansion.artRefs))
+		}
+	}
+
+	/** Re-fetches art a pin covers but does not have, for "Clear cover art". */
+	suspend fun refreshArt() = applyProtection(_pins.value)
 
 	/**
 	 * Re-fetches everything pinned, at whatever quality is now set.
@@ -264,26 +298,60 @@ class PinRepository @Inject constructor(
 		_pins.value.forEach { enqueue(songsFor(it)) }
 	}
 
-	private suspend fun computeCoverage(pins: List<Pin>): PinCoverage {
+	/**
+	 * What a set of pins covers, in audio and in pictures.
+	 *
+	 * Both at once because they need the same rows, and reading them twice
+	 * would be two passes over the mirror for every pin change. [retained]
+	 * says whether [retaining] had to carry anything over, which is the signal
+	 * that the mirror was empty underneath this pass and that acting on the
+	 * art would be destructive.
+	 */
+	private class Expansion(
+		val coverage: PinCoverage,
+		val artRefs: List<ItemRef>,
+		val retained: Boolean,
+	)
+
+	private suspend fun expand(pins: List<Pin>): Expansion {
 		// Read once for the whole pass rather than per pin: a flip halfway
 		// through would otherwise produce a coverage that included the videos
 		// under some pins and not others.
 		val audioOnly = settings.videoAudioOnly.first()
-		return retaining(
-			expandPins(
-				pins = pins,
-				albumSongs = pins.filter { it.kind == PinKind.ALBUM }
-					.associate {
-						it.ref to local.songsOfAlbum(it.ref)
-							.downloadable(audioOnly).map(Song::ref)
-					},
-				playlistSongs = pins.filter { it.kind == PinKind.PLAYLIST }
-					.associate {
-						it.ref to local.songsOfPlaylist(it.ref)
-							.downloadable(audioOnly).map(Song::ref)
-					},
-			)
+		val songs = pins.associateWith { songsOf(it) }
+		val fresh = expandPins(
+			pins = pins,
+			albumSongs = songs.filterKeys { it.kind == PinKind.ALBUM }
+				.map { (pin, rows) -> pin.ref to rows.downloadable(audioOnly).map(Song::ref) }
+				.toMap(),
+			playlistSongs = songs.filterKeys { it.kind == PinKind.PLAYLIST }
+				.map { (pin, rows) -> pin.ref to rows.downloadable(audioOnly).map(Song::ref) }
+				.toMap(),
 		)
+		// The same condition [retaining] acts on, asked before it does: a pin
+		// that covered something and now covers nothing means the mirror went
+		// out from under this pass.
+		val previous = _coverage.value.byPin
+		val retained = fresh.byPin.any { (pin, covered) ->
+			covered.isEmpty() && !previous[pin].isNullOrEmpty()
+		}
+		val coverage = retaining(fresh)
+		// Every song, not only the downloadable ones: a film excluded from the
+		// audio a pin covers is still an album the user will look at offline.
+		val art = pins.flatMap { pin ->
+			artRefsOf(
+				pin = pin,
+				album = if (pin.kind == PinKind.ALBUM) local.album(pin.ref) else null,
+				songs = songs[pin].orEmpty(),
+			)
+		}.distinct()
+		return Expansion(coverage, art, retained)
+	}
+
+	private suspend fun songsOf(pin: Pin): List<Song> = when (pin.kind) {
+		PinKind.SONG -> listOfNotNull(local.song(pin.ref))
+		PinKind.ALBUM -> local.songsOfAlbum(pin.ref)
+		PinKind.PLAYLIST -> local.songsOfPlaylist(pin.ref)
 	}
 
 	/**
@@ -313,11 +381,8 @@ class PinRepository @Inject constructor(
 		)
 	}
 
-	private suspend fun songsFor(pin: Pin): List<Song> = when (pin.kind) {
-		PinKind.SONG -> listOfNotNull(local.song(pin.ref))
-		PinKind.ALBUM -> local.songsOfAlbum(pin.ref)
-		PinKind.PLAYLIST -> local.songsOfPlaylist(pin.ref)
-	}.downloadable(settings.videoAudioOnly.first())
+	private suspend fun songsFor(pin: Pin): List<Song> =
+		songsOf(pin).downloadable(settings.videoAudioOnly.first())
 
 	private suspend fun enqueue(songs: List<Song>) {
 		songs.forEach { song ->

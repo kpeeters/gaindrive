@@ -10,6 +10,8 @@ import coil3.request.crossfade
 import dagger.hilt.android.HiltAndroidApp
 import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
+import org.gaindrive.android.data.cache.PinnedArt
+import org.gaindrive.android.data.cache.PinnedArtMapper
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -22,13 +24,25 @@ class GainDriveApplication : Application(), SingletonImageLoader.Factory {
 	@Inject
 	lateinit var httpClient: OkHttpClient
 
+	/**
+	 * Injected the same way and safe for the same reason: [newImageLoader] is
+	 * called lazily, on the first image request, long after `onCreate`.
+	 */
+	@Inject
+	lateinit var pinnedArt: PinnedArt
+
 	override fun newImageLoader(context: PlatformContext): ImageLoader =
 		ImageLoader.Builder(context)
 			.components {
+				// Before the fetcher, so a pinned file is served without a
+				// request ever being built for it.
+				add(PinnedArtMapper(pinnedArt))
 				add(OkHttpNetworkFetcherFactory(callFactory = { httpClient }))
 			}
-			// Cover art URLs are stable — the auth salt is per session, not per
-			// request — so a disk cache actually earns its keep here.
+			// Keyed by `ArtKeys` rather than by the URL, which carries a salt
+			// that changes on every app start and so made every entry written
+			// by the previous session unreachable. That is what lets this
+			// survive a restart, which is the whole point of a disk cache.
 			.diskCache {
 				DiskCache.Builder()
 					// Coil 3 speaks okio paths, not java.io.File.

@@ -234,5 +234,12 @@ class SettingsViewModel @Inject constructor(
 	 * — it exists for the case where the art on screen disagrees with the
 	 * server and nobody wants to work out why.
 	 */
-	fun clearImageCache() = viewModelScope.launch { imageCache.clear() }
+	fun clearImageCache() = viewModelScope.launch {
+		imageCache.clear()
+		// The clear took the pinned copies with it, and those are the ones
+		// nothing will re-request on its own: a pinned album is exactly what
+		// the user may next look at with no network. Offline the clear left
+		// them alone, and this finds nothing missing.
+		pins.refreshArt()
+	}
 }
