@@ -17,11 +17,13 @@ import org.gaindrive.android.data.model.AlbumNotes
 import org.gaindrive.android.data.model.Chapter
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.MusicRoot
+import org.gaindrive.android.data.model.StarKind
 import org.gaindrive.android.net.runCatchingCancellable
 import org.gaindrive.android.net.userMessage
 import org.gaindrive.android.ui.Load
 import org.gaindrive.android.ui.Route
 import org.gaindrive.android.ui.valueOrNull
+import java.time.Instant
 import javax.inject.Inject
 
 /**
@@ -156,6 +158,73 @@ class AlbumDetailViewModel @Inject constructor(
 	/** True only for a user-initiated pull, which drives the pull indicator. */
 	private val _isRefreshing = MutableStateFlow(false)
 	val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+	/**
+	 * A star tapped but not yet answered for.
+	 *
+	 * It disables the control rather than merely being drawn, because two taps
+	 * in flight at once leave two requests racing to decide the final state and
+	 * the loser wins about half the time.
+	 */
+	private val _starring = MutableStateFlow(false)
+	val starring: StateFlow<Boolean> = _starring.asStateFlow()
+
+	/** A star the server would not take, for a toast. */
+	private val _starError = MutableStateFlow<String?>(null)
+	val starError: StateFlow<String?> = _starError.asStateFlow()
+
+	fun consumeStarError() {
+		_starError.value = null
+	}
+
+	/**
+	 * Stars or unstars the album, drawing the new state before the server has
+	 * agreed to it.
+	 *
+	 * Optimistic because the round trip is long enough that a star waiting for
+	 * it reads as a dead control, and reverted on failure because the one thing
+	 * worse than a slow star is a star claiming the server knows something it
+	 * never heard. Starring requires the network, so the stale `starredAt` this
+	 * can leave in the offline mirror is replaced by the next load that reaches
+	 * the server.
+	 */
+	fun toggleStar() {
+		if (_starring.value) return
+		val album = _state.value.valueOrNull()?.album ?: return
+		val wanted = !album.isStarred
+		_starring.value = true
+		applyStar(wanted)
+		viewModelScope.launch {
+			runCatchingCancellable {
+				library.setStarred(albumRef, StarKind.ALBUM, wanted)
+			}.onFailure {
+				applyStar(!wanted)
+				_starError.value = it.userMessage()
+			}
+			_starring.value = false
+		}
+	}
+
+	/**
+	 * Written into [state] rather than held beside it, so a reload is simply
+	 * authoritative and there is no second copy to reconcile with it.
+	 *
+	 * The timestamp is invented, which is safe only because nothing reads it:
+	 * `Album.isStarred` asks whether it is there, never when it was, and the
+	 * server's own answer overwrites it on the next load.
+	 */
+	private fun applyStar(starred: Boolean) {
+		_state.update { current ->
+			val detail = current.valueOrNull() ?: return@update current
+			Load.Ready(
+				detail.copy(
+					album = detail.album.copy(
+						starredAt = if (starred) Instant.now().toString() else null,
+					)
+				)
+			)
+		}
+	}
 
 	init {
 		load()

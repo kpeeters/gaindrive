@@ -1,5 +1,6 @@
 package org.gaindrive.android.ui.browse
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,12 +16,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -37,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -104,6 +109,8 @@ fun AlbumDetailScreen(
 	val folder by viewModel.folder.collectAsStateWithLifecycle()
 	val folderSuggestions by viewModel.folderSuggestions.collectAsStateWithLifecycle()
 	val deleting by viewModel.deleting.collectAsStateWithLifecycle()
+	val starring by viewModel.starring.collectAsStateWithLifecycle()
+	val starError by viewModel.starError.collectAsStateWithLifecycle()
 	var confirmPromote by remember { mutableStateOf(false) }
 	var confirmDelete by remember { mutableStateOf(false) }
 
@@ -120,6 +127,17 @@ fun AlbumDetailScreen(
 	LaunchedEffect(loadedAlbum?.artistRef) {
 		val artistRef = loadedAlbum?.artistRef ?: return@LaunchedEffect
 		onArtistKnown?.invoke(artistRef, loadedAlbum.artistName)
+	}
+
+	// A toast rather than the dialog the move and the delete raise: those are
+	// one-way acts on files and have to be read, where a star that did not take
+	// is a tap to repeat. PinAction reports its own refusals the same way.
+	val context = LocalContext.current
+	LaunchedEffect(starError) {
+		starError?.let {
+			Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+			viewModel.consumeStarError()
+		}
 	}
 
 	actionsFor?.let { song ->
@@ -200,6 +218,30 @@ fun AlbumDetailScreen(
 				},
 				navigationIcon = { PaneBackIcon(onBack) },
 				actions = {
+					// Ahead of Pin because it is the reversible one: another tap
+					// undoes it, where a download commits the device to the whole
+					// album.
+					val starred = loadedAlbum?.isStarred == true
+					IconButton(
+						onClick = viewModel::toggleStar,
+						// Drawn from the first frame and merely disabled until the
+						// album is known, so the bar does not grow a button under
+						// the finger heading for Pin.
+						enabled = loadedAlbum != null && !starring,
+					) {
+						Icon(
+							imageVector =
+								if (starred) Icons.Default.Star else Icons.Default.StarBorder,
+							contentDescription =
+								if (starred) "Unstar album" else "Star album",
+							// Accent when set, as the web client's star is. Otherwise
+							// whatever the bar is handing out, which is how the outline
+							// dims itself while the album is still loading.
+							tint =
+								if (starred) MaterialTheme.colorScheme.primary
+								else LocalContentColor.current,
+						)
+					}
 					PinAction(ref = viewModel.albumRef, kind = PinKind.ALBUM)
 					// An overflow rather than icons of their own: both are rare
 					// one-way actions and neither belongs a tap away from Pin.
