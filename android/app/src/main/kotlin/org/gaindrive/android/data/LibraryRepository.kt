@@ -267,17 +267,23 @@ class LibraryRepository @Inject constructor(
 	 * The server may go out to MusicBrainz and Wikipedia to answer this the
 	 * first time, so it can be slow or fail outright. Callers must fetch it
 	 * separately from the album list and never let it hold that list up.
+	 *
+	 * Mirrored, so an artist read once online still has a biography offline.
+	 * Network-first, which is also what makes pull-to-refresh mean "ask the
+	 * server again": the stored copy is only consulted when the server cannot
+	 * be reached. Nothing here asks the server to redo its own provider
+	 * lookup, which is a server-side action and stays in the web client.
 	 */
-	suspend fun artistInfo(ref: ItemRef): ArtistInfo? {
-		// Not mirrored, and never essential. Offline it is simply absent, which
-		// is a state the screen already renders — the biography section just
-		// does not appear.
-		if (offline) return null
-		return onServer(ref.server) { client ->
-			client.getArtistInfo2(ref.id).requireOk().artistInfo2?.toDomain()
-				?.takeIf { !it.isEmpty }
+	suspend fun artistInfo(ref: ItemRef): ArtistInfo? =
+		storedOrNull({ local.artistInfo(ref) }) {
+			val fetched = onServer(ref.server) { client ->
+				client.getArtistInfo2(ref.id).requireOk().artistInfo2?.toDomain()
+			}
+			// An all-blank answer is collapsed before it is stored, so an
+			// artist the providers know nothing about does not get a row
+			// asserting that they know nothing about them.
+			fetched?.takeIf { !it.isEmpty }?.also { local.saveArtistInfo(ref, it) }
 		}
-	}
 
 	/**
 	 * Album with its tracks — one request, so the detail screen has something
@@ -296,13 +302,17 @@ class LibraryRepository @Inject constructor(
 			}?.also { local.saveAlbumDetail(album.server, it) }
 		}
 
-	/** Not mirrored either; see [artistInfo]. */
-	suspend fun albumNotes(album: ItemRef): AlbumNotes? {
-		if (offline) return null
-		return onServer(album.server) { client ->
-			client.getAlbumInfo2(album.id).requireOk().albumInfo2?.toDomain()
+	/** Mirrored and network-first; see [artistInfo]. */
+	suspend fun albumNotes(album: ItemRef): AlbumNotes? =
+		storedOrNull({ local.albumNotes(album) }) {
+			val fetched = onServer(album.server) { client ->
+				client.getAlbumInfo2(album.id).requireOk().albumInfo2?.toDomain()
+			}
+			// `AlbumDetailViewModel` checks this too, which is where the
+			// check used to live alone. It has to happen here as well: an
+			// all-blank answer stored is a blank row read back for ever.
+			fetched?.takeIf { !it.isEmpty }?.also { local.saveAlbumNotes(album, it) }
 		}
-	}
 
 	/**
 	 * The chapter markers of every chaptered item in one album folder, keyed by
@@ -314,24 +324,32 @@ class LibraryRepository @Inject constructor(
 	 * somebody opens an album. The playback path uses the file instead; see
 	 * [ChapterTracks].
 	 *
-	 * Not mirrored, like the notes above: a marker has no id Room could key on,
-	 * and the mirror answers "what can I still reach offline", which a position
-	 * inside a partly cached file is not. So this is empty offline and the
-	 * album lists its tracks exactly as it did before chapters existed.
+	 * Mirrored, keyed on the song and the marker's own position, which is the
+	 * shape `playlist_songs` already uses for a child row that has no id of its
+	 * own. The earlier argument that a marker is unstorable was about a chapter
+	 * as an addressable item, which it still is not.
 	 *
-	 * Throws like [albumNotes] — the caller's `runCatchingCancellable` is what
-	 * makes a failure cost only the chapter rows.
+	 * A failed request falls back to the stored markers rather than
+	 * propagating: the caller already treats an empty map as "this album has
+	 * none", so an error and an absence were indistinguishable to it anyway.
 	 */
 	suspend fun albumChapters(album: ItemRef): Map<ItemRef, List<Chapter>> {
-		if (offline) return emptyMap()
-		val found = onServer(album.server) { client ->
-			client.getAlbumChapters(album.id).requireOk().albumChapters?.song.orEmpty()
-				.map { it.toDomain(album.server) }
-		}
+		if (offline) return local.chaptersOfAlbum(album)
+		val found = runCatchingCancellable {
+			onServer(album.server) { client ->
+				client.getAlbumChapters(album.id).requireOk().albumChapters?.song.orEmpty()
+					.map { it.toDomain(album.server) }
+			}
+		}.getOrElse { return local.chaptersOfAlbum(album) }
 		// An entry with no markers cannot happen — the server omits those — but
 		// dropping one here is what lets every caller treat "in the map" and
 		// "has chapters" as the same question.
-		return found.filter { it.chapters.isNotEmpty() }.associate { it.ref to it.chapters }
+		val bySong = found.filter { it.chapters.isNotEmpty() }
+			.associate { it.ref to it.chapters }
+		// Stored even when empty: that is what clears markers the server has
+		// since lost, and an album with none is the overwhelmingly common case.
+		local.saveAlbumChapters(album, bySong)
+		return bySong
 	}
 
 	/**
@@ -867,6 +885,28 @@ class LibraryRepository @Inject constructor(
 		}
 		return runCatchingCancellable { block() }
 			.getOrElse { error -> stored() ?: throw error }
+	}
+
+	/**
+	 * [networkFirst] for things whose absence is ordinary.
+	 *
+	 * A biography, album notes and chapter markers are all missing for most
+	 * items, and every caller already renders that as "no section". Throwing
+	 * `OfflineException` when nothing is stored, as [networkFirst] does, would
+	 * dress up the normal case as a failure; returning the stored copy or null
+	 * says exactly what happened.
+	 *
+	 * A server that answers "none" is believed and *not* fallen back on, so a
+	 * biography really withdrawn stops being shown online. The stored row
+	 * outlives it and is still served offline, which is the safer of the two
+	 * wrong answers: offline the choice is between stale prose and none.
+	 */
+	private suspend fun <T : Any> storedOrNull(
+		stored: suspend () -> T?,
+		block: suspend () -> T?,
+	): T? {
+		if (offline) return stored()
+		return runCatchingCancellable { block() }.getOrElse { stored() }
 	}
 
 	/** Guards a write. Nothing can be queued, so failing at once is the honest answer. */

@@ -50,6 +50,15 @@ interface LibraryDao {
 	@Upsert
 	suspend fun upsertPlaylistSongs(rows: List<PlaylistSongEntity>)
 
+	@Upsert
+	suspend fun upsertArtistInfo(row: ArtistInfoEntity)
+
+	@Upsert
+	suspend fun upsertAlbumNotes(row: AlbumNotesEntity)
+
+	@Upsert
+	suspend fun upsertChapters(rows: List<ChapterEntity>)
+
 	@Query(
 		"SELECT * FROM artists WHERE serverId = :server " +
 			"AND contentType = :contentType " +
@@ -110,6 +119,37 @@ interface LibraryDao {
 	 */
 	@Query("DELETE FROM playlist_songs WHERE serverId = :server AND playlistId = :playlistId")
 	suspend fun clearPlaylistSongs(server: String, playlistId: String)
+
+	// ── Text the server supplies about an item ──────────────────────────────
+
+	@Query("SELECT * FROM artist_info WHERE serverId = :server AND id = :id")
+	suspend fun artistInfo(server: String, id: String): ArtistInfoEntity?
+
+	@Query("SELECT * FROM album_notes WHERE serverId = :server AND id = :id")
+	suspend fun albumNotes(server: String, id: String): AlbumNotesEntity?
+
+	@Query(
+		"SELECT * FROM chapters WHERE serverId = :server AND songId = :songId " +
+			"ORDER BY chapterIndex"
+	)
+	suspend fun chaptersOfSong(server: String, songId: String): List<ChapterEntity>
+
+	/**
+	 * Chapters are keyed by song and callers have an album, so both the read
+	 * and the clear below join through `songs`.
+	 */
+	@Query(
+		"SELECT * FROM chapters WHERE serverId = :server AND songId IN " +
+			"(SELECT id FROM songs WHERE serverId = :server AND albumId = :album) " +
+			"ORDER BY songId, chapterIndex"
+	)
+	suspend fun chaptersOfAlbum(server: String, album: String): List<ChapterEntity>
+
+	@Query(
+		"DELETE FROM chapters WHERE serverId = :server AND songId IN " +
+			"(SELECT id FROM songs WHERE serverId = :server AND albumId = :album)"
+	)
+	suspend fun clearChaptersOfAlbum(server: String, album: String)
 
 	@Query(
 		"SELECT * FROM artists WHERE serverId = :server AND name LIKE :pattern " +
@@ -233,4 +273,13 @@ interface LibraryDao {
 
 	@Query("DELETE FROM playlist_songs WHERE serverId = :server")
 	suspend fun deletePlaylistSongs(server: String)
+
+	@Query("DELETE FROM artist_info WHERE serverId = :server")
+	suspend fun deleteArtistInfo(server: String)
+
+	@Query("DELETE FROM album_notes WHERE serverId = :server")
+	suspend fun deleteAlbumNotes(server: String)
+
+	@Query("DELETE FROM chapters WHERE serverId = :server")
+	suspend fun deleteChapters(server: String)
 }

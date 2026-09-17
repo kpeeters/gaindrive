@@ -8,8 +8,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.AlbumDetail
+import org.gaindrive.android.data.model.AlbumNotes
 import org.gaindrive.android.data.model.Artist
 import org.gaindrive.android.data.model.ArtistIndex
+import org.gaindrive.android.data.model.ArtistInfo
+import org.gaindrive.android.data.model.Chapter
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.LibrarySection
 import org.gaindrive.android.data.model.LibrarySelection
@@ -129,6 +132,48 @@ class LocalLibrary @Inject constructor(
 
 	suspend fun song(ref: ItemRef): Song? = io {
 		dao.song(ref.server.value, ref.id)?.toDomain()
+	}
+
+	// ── Text the server supplies about an item ──────────────────────────────
+	//
+	// All of these use `io`, never `write`. A revision bump wakes the pin
+	// recompute in `PinRepository` and `StoredContainers`, and prose changes
+	// nothing about what is reachable offline, so bumping would be pure cost.
+
+	suspend fun saveArtistInfo(ref: ItemRef, info: ArtistInfo) = io {
+		dao.upsertArtistInfo(info.toEntity(ref))
+	}
+
+	suspend fun artistInfo(ref: ItemRef): ArtistInfo? = io {
+		dao.artistInfo(ref.server.value, ref.id)?.toDomain()
+	}
+
+	suspend fun saveAlbumNotes(ref: ItemRef, notes: AlbumNotes) = io {
+		dao.upsertAlbumNotes(notes.toEntity(ref))
+	}
+
+	suspend fun albumNotes(ref: ItemRef): AlbumNotes? = io {
+		dao.albumNotes(ref.server.value, ref.id)?.toDomain()
+	}
+
+	/**
+	 * Replaces what was stored for the whole album, rather than upserting what
+	 * arrived: a song whose markers were deleted server-side would otherwise
+	 * keep its old ones for ever. The same reasoning as `savePlaylist`.
+	 */
+	suspend fun saveAlbumChapters(album: ItemRef, bySong: Map<ItemRef, List<Chapter>>) = io {
+		dao.clearChaptersOfAlbum(album.server.value, album.id)
+		dao.upsertChapters(
+			bySong.flatMap { (song, chapters) -> chapters.map { it.toEntity(song) } }
+		)
+	}
+
+	suspend fun chaptersOfAlbum(album: ItemRef): Map<ItemRef, List<Chapter>> = io {
+		groupChapters(album.server, dao.chaptersOfAlbum(album.server.value, album.id))
+	}
+
+	suspend fun chaptersOfSong(ref: ItemRef): List<Chapter> = io {
+		dao.chaptersOfSong(ref.server.value, ref.id).map { it.toDomain() }
 	}
 
 	// ── Playlists ───────────────────────────────────────────────────────────
@@ -304,6 +349,9 @@ class LocalLibrary @Inject constructor(
 	suspend fun forgetLibrary(server: ServerId) = write { forgetLibraryRows(server) }
 
 	private suspend fun forgetLibraryRows(server: ServerId) {
+		dao.deleteChapters(server.value)
+		dao.deleteAlbumNotes(server.value)
+		dao.deleteArtistInfo(server.value)
 		dao.deleteSongs(server.value)
 		dao.deleteAlbums(server.value)
 		dao.deleteArtists(server.value)
@@ -469,3 +517,65 @@ private fun PlaylistEntity.toDomain() = Playlist(
 	songCount = songCount,
 	duration = duration,
 )
+
+private fun ArtistInfo.toEntity(ref: ItemRef) = ArtistInfoEntity(
+	serverId = ref.server.value,
+	id = ref.id,
+	biography = biography,
+	wikiUrl = wikiUrl,
+	allMusicUrl = allMusicUrl,
+	lastFmUrl = lastFmUrl,
+	discogsUrl = discogsUrl,
+)
+
+private fun ArtistInfoEntity.toDomain() = ArtistInfo(
+	biography = biography,
+	wikiUrl = wikiUrl,
+	allMusicUrl = allMusicUrl,
+	lastFmUrl = lastFmUrl,
+	discogsUrl = discogsUrl,
+)
+
+private fun AlbumNotes.toEntity(ref: ItemRef) = AlbumNotesEntity(
+	serverId = ref.server.value,
+	id = ref.id,
+	notes = notes,
+	wikiUrl = wikiUrl,
+	allMusicUrl = allMusicUrl,
+)
+
+private fun AlbumNotesEntity.toDomain() = AlbumNotes(
+	notes = notes,
+	wikiUrl = wikiUrl,
+	allMusicUrl = allMusicUrl,
+)
+
+private fun Chapter.toEntity(song: ItemRef) = ChapterEntity(
+	serverId = song.server.value,
+	songId = song.id,
+	chapterIndex = index,
+	startSeconds = startSeconds,
+	duration = duration,
+	name = name,
+)
+
+private fun ChapterEntity.toDomain() = Chapter(
+	index = chapterIndex,
+	startSeconds = startSeconds,
+	duration = duration,
+	name = name,
+)
+
+/**
+ * Chapter rows back into the shape the album screen wants.
+ *
+ * Separate and internal so it can be tested without a database. The rows
+ * arrive ordered by song and then by index, and the grouping preserves that,
+ * so nothing here re-sorts.
+ */
+internal fun groupChapters(
+	server: ServerId,
+	rows: List<ChapterEntity>,
+): Map<ItemRef, List<Chapter>> =
+	rows.groupBy { ItemRef(server, it.songId) }
+		.mapValues { (_, songRows) -> songRows.map { it.toDomain() } }

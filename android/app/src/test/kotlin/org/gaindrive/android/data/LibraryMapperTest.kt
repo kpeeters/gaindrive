@@ -3,7 +3,9 @@ package org.gaindrive.android.data
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.net.AlbumDto
+import org.gaindrive.android.net.AlbumInfoDto
 import org.gaindrive.android.net.ArtistDto
+import org.gaindrive.android.net.ArtistInfoDto
 import org.gaindrive.android.net.DirectoryDto
 import org.gaindrive.android.net.MusicFolderDto
 import org.gaindrive.android.net.SongDto
@@ -311,5 +313,38 @@ class LibraryMapperTest {
 		assertEquals("artists", MusicFolderDto("1", "music", "artists").toDomain().contentType)
 		assertNull(MusicFolderDto("1", "Music").toDomain().contentType)
 		assertEquals("Music", MusicFolderDto("1", "Music").toDomain().name)
+	}
+
+	@Test
+	fun `blank text in an info answer becomes absent, not empty`() {
+		// A server that sends "" rather than omitting the field would otherwise
+		// give NotesSection a non-null blank to draw a heading and a clamp
+		// around. It also decides whether the row is stored at all, since
+		// `isEmpty` is what the repository checks before writing.
+		val artist = ArtistInfoDto(
+			biography = "   ",
+			wikiUrl = "",
+			allMusicUrl = null,
+			lastFmUrl = null,
+			discogsUrl = null,
+		).toDomain()
+
+		assertNull(artist.biography)
+		assertNull(artist.wikiUrl)
+		assertTrue(artist.isEmpty)
+
+		val album = AlbumInfoDto(notes = "", wikiUrl = null, allMusicUrl = null).toDomain()
+		assertNull(album.notes)
+		assertTrue(album.isEmpty)
+	}
+
+	@Test
+	fun `an info answer with only a link is not empty`() {
+		// Worth pinning: a bio-less artist that still has a Discogs page has
+		// something to show, so it must be stored rather than collapsed.
+		val artist = ArtistInfoDto(discogsUrl = "https://discogs.example/1").toDomain()
+
+		assertNull(artist.biography)
+		assertFalse(artist.isEmpty)
 	}
 }

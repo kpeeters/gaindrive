@@ -123,6 +123,62 @@ data class PlaylistSongEntity(
 )
 
 /**
+ * An artist's biography and the links beside it.
+ *
+ * A table of its own rather than columns on [ArtistEntity], for two reasons.
+ * `@Upsert` replaces the whole row, and the artist row is written by several
+ * paths that know nothing about a biography, so a stored one would be blanked
+ * by the next browse. And a biography is free prose, several kilobytes of it,
+ * which the listing queries would then read for every artist on screen to
+ * display on none of them.
+ */
+@Entity(tableName = "artist_info", primaryKeys = ["serverId", "id"])
+data class ArtistInfoEntity(
+	val serverId: String,
+	val id: String,
+	val biography: String?,
+	val wikiUrl: String?,
+	val allMusicUrl: String?,
+	val lastFmUrl: String?,
+	val discogsUrl: String?,
+)
+
+/** An album's notes and links. Separate from [AlbumEntity]; see [ArtistInfoEntity]. */
+@Entity(tableName = "album_notes", primaryKeys = ["serverId", "id"])
+data class AlbumNotesEntity(
+	val serverId: String,
+	val id: String,
+	val notes: String?,
+	val wikiUrl: String?,
+	val allMusicUrl: String?,
+)
+
+/**
+ * The markers inside one long recording.
+ *
+ * A chapter has no id of its own, which `Chapter.kt` gives as the reason they
+ * are the one library concept with no `ItemRef`. That is true of a chapter as
+ * something addressable and beside the point for a child row: keyed on its
+ * parent and its position, it is exactly [PlaylistSongEntity], which is keyed
+ * that way because a playlist may hold the same track twice.
+ *
+ * Spelled `chapterIndex` rather than `index`, which is an SQL keyword and
+ * would need quoting in every hand-written query that touched it. It carries
+ * the server's own numbering, from 1, and is what the list is ordered by on
+ * the way back out.
+ */
+@Entity(tableName = "chapters", primaryKeys = ["serverId", "songId", "chapterIndex"])
+data class ChapterEntity(
+	val serverId: String,
+	val songId: String,
+	val chapterIndex: Int,
+	val startSeconds: Double,
+	val duration: Int,
+	/** Empty rather than null when the line was left bare; see `Chapter.name`. */
+	val name: String,
+)
+
+/**
  * What the user asked to keep.
  *
  * Records the *intent* — this album, that playlist — rather than the songs it

@@ -37,7 +37,8 @@ data class AlbumExtrasUi(
 	val notes: AlbumNotes? = null,
 	/**
 	 * The chapter markers of any chaptered recording in this folder, keyed by
-	 * the recording. Empty for almost every album, and empty offline.
+	 * the recording. Empty for almost every album. Mirrored, so an album
+	 * opened once online keeps its markers offline.
 	 *
 	 * An extra rather than part of the track list, on the same reasoning as the
 	 * notes: it reads an endpoint older servers do not implement, and a failure
