@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -254,16 +255,17 @@ fun TrackRow(
 		horizontalArrangement = Arrangement.spacedBy(12.dp),
 	) {
 		if (showNumber) {
-			// The spinner takes the number's place rather than sitting beside
-			// it, so nothing in the row shifts when a track starts loading.
+			// The spinner and the playing mark take the number's place rather
+			// than sitting beside it, so nothing in the row shifts when a track
+			// starts loading or starts playing.
 			Box(
 				modifier = Modifier.width(24.dp),
 				contentAlignment = Alignment.Center,
 			) {
-				if (playback == TrackState.LOADING) {
-					TrackSpinner()
-				} else {
-					Text(
+				when (playback) {
+					TrackState.LOADING -> TrackSpinner()
+					TrackState.CURRENT -> PlayingMark()
+					TrackState.IDLE -> Text(
 						text = number?.toString().orEmpty(),
 						style = MaterialTheme.typography.bodySmall,
 						color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -359,11 +361,12 @@ fun SongRow(
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(12.dp),
 	) {
-		// There is no number column here, so the spinner goes over the artwork
-		// — again leaving the row's geometry untouched.
+		// There is no number column here, so the spinner and the playing mark
+		// go over the artwork instead, again leaving the row's geometry
+		// untouched.
 		Box(contentAlignment = Alignment.Center) {
 			CoverThumb(coverUrl, song.albumTitle, size = 40.dp)
-			if (playback == TrackState.LOADING) {
+			if (playback != TrackState.IDLE) {
 				Box(
 					modifier = Modifier
 						.size(40.dp)
@@ -371,7 +374,15 @@ fun SongRow(
 						.background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f)),
 					contentAlignment = Alignment.Center,
 				) {
-					TrackSpinner(tint = MaterialTheme.colorScheme.inverseOnSurface)
+					// Both are tinted against the scrim rather than accent,
+					// because they lie over arbitrary artwork and red on dark is
+					// the one pairing that can vanish. The title beside them
+					// carries the red.
+					if (playback == TrackState.LOADING) {
+						TrackSpinner(tint = MaterialTheme.colorScheme.inverseOnSurface)
+					} else {
+						PlayingMark(tint = MaterialTheme.colorScheme.inverseOnSurface)
+					}
 				}
 			}
 		}
@@ -446,16 +457,17 @@ fun ChapterRow(
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(12.dp),
 	) {
+		// The mark takes the number's place, as it does in [TrackRow].
 		Box(modifier = Modifier.width(24.dp), contentAlignment = Alignment.Center) {
-			Text(
-				text = number.toString(),
-				style = MaterialTheme.typography.bodySmall,
-				color = if (playing) {
-					MaterialTheme.colorScheme.primary
-				} else {
-					MaterialTheme.colorScheme.onSurfaceVariant
-				},
-			)
+			if (playing) {
+				PlayingMark()
+			} else {
+				Text(
+					text = number.toString(),
+					style = MaterialTheme.typography.bodySmall,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+				)
+			}
 		}
 		Text(
 			text = title,
@@ -634,6 +646,25 @@ private fun TrackSpinner(tint: Color = MaterialTheme.colorScheme.primary) {
 		modifier = Modifier.size(16.dp),
 		strokeWidth = 2.dp,
 		color = tint,
+	)
+}
+
+/**
+ * Marks the row the player is on, as the web client's filled triangle does.
+ *
+ * Sized and tinted like [TrackSpinner] because it stands in the same place and
+ * is the state that follows it: a track loads, then it plays, and neither may
+ * move the row it is in. It carries a content description because the red title
+ * beside it says nothing to a screen reader, and says little to an eye that
+ * does not separate the two colours.
+ */
+@Composable
+private fun PlayingMark(tint: Color = MaterialTheme.colorScheme.primary) {
+	Icon(
+		imageVector = Icons.Default.PlayArrow,
+		contentDescription = "Playing",
+		tint = tint,
+		modifier = Modifier.size(16.dp),
 	)
 }
 
