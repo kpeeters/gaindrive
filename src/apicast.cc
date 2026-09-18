@@ -661,6 +661,18 @@ void GainDrive::routes_cast()
 		});
 	}
 
+GainDrive::CastStreamInfo GainDrive::cast_stream() const
+	{
+	std::lock_guard<std::mutex> lk(cast_stream_mu_);
+	return last_cast_stream_;
+	}
+
+void GainDrive::set_cast_stream(const CastStreamInfo& s)
+	{
+	std::lock_guard<std::mutex> lk(cast_stream_mu_);
+	last_cast_stream_ = s;
+	}
+
 void GainDrive::cast_teardown()
 	{
 	cast_manager_.stop();

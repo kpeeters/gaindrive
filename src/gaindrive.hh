@@ -174,16 +174,10 @@ class GainDrive {
 		mutable std::mutex cast_stream_mu_;
 		CastStreamInfo     last_cast_stream_;
 
-		CastStreamInfo cast_stream() const
-			{
-			std::lock_guard<std::mutex> lk(cast_stream_mu_);
-			return last_cast_stream_;
-			}
-		void set_cast_stream(const CastStreamInfo& s)
-			{
-			std::lock_guard<std::mutex> lk(cast_stream_mu_);
-			last_cast_stream_ = s;
-			}
+		// Both take cast_stream_mu_, so neither is the plain accessor it
+		// looks like; see the note above on why the lock is needed.
+		CastStreamInfo cast_stream() const;
+		void set_cast_stream(const CastStreamInfo& s);
 
 		// The cast session's owner: the account *and* the client instance that
 		// called startCast. Both halves are needed. The account alone is what

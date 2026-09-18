@@ -41,6 +41,46 @@
 #include "untrusted.hh"
 #include "videoname.hh"
 
+// A dot-prefixed name is never library content; see mediastore.hh.
+bool is_hidden_name(const std::filesystem::path& p)
+	{
+	auto name = p.filename().string();
+	return !name.empty() && name.front() == '.';
+	}
+
+std::filesystem::path batch_marker(const std::filesystem::path& batch)
+	{
+	return batch.parent_path() / (batch.filename().string() + ".inflight");
+	}
+
+bool batch_held(const std::filesystem::path& batch)
+	{
+	std::error_code ec;
+	return std::filesystem::exists(batch_marker(batch), ec);
+	}
+
+void MediaStore::ScanTimes::reset()
+	{
+	walk.store(0);   known.store(0);  meta.store(0);
+	art.store(0);    tmdb.store(0);   write.store(0);
+	prune.store(0);  files.store(0);  videos.store(0);
+	albums.store(0); meta_audio.store(0);
+	meta_video.store(0);
+	}
+
+MediaStore::ScanGuard::ScanGuard(MediaStore& st) : s(st)
+	{
+	if (s.scans_active_.fetch_add(1) == 0) {
+		s.scan_items_.store(0);
+		s.scan_times_.reset();
+		}
+	}
+
+MediaStore::ScanGuard::~ScanGuard()
+	{
+	s.scans_active_.fetch_sub(1);
+	}
+
 namespace fs = std::filesystem;
 
 // How long a contended write waits before SQLite reports SQLITE_BUSY.

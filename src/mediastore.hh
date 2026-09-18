@@ -21,11 +21,7 @@
 // fork carrying the same extension, which is all the scanner's admission test
 // looks at.  It also keeps out .DS_Store, a synced tree's .stversions and a
 // leftover .users.
-inline bool is_hidden_name(const std::filesystem::path& p)
-	{
-	auto name = p.filename().string();
-	return !name.empty() && name.front() == '.';
-	}
+bool is_hidden_name(const std::filesystem::path& p);
 
 // The marker a producer holds while a personal upload batch is still being
 // rearranged: "<uploads>/<user>/<uuid>.inflight", beside the batch directory
@@ -39,16 +35,9 @@ inline bool is_hidden_name(const std::filesystem::path& p)
 // otherwise each earn a songs row.  It says one thing only -- this batch's
 // directory layout is still moving -- and it is released after the fold and
 // before the scan, which is what stops scan_batch() skipping its own batch.
-inline std::filesystem::path batch_marker(const std::filesystem::path& batch)
-	{
-	return batch.parent_path() / (batch.filename().string() + ".inflight");
-	}
+std::filesystem::path batch_marker(const std::filesystem::path& batch);
 
-inline bool batch_held(const std::filesystem::path& batch)
-	{
-	std::error_code ec;
-	return std::filesystem::exists(batch_marker(batch), ec);
-	}
+bool batch_held(const std::filesystem::path& batch);
 
 // One album as Phase 1 read it off the disk. Defined in mediastore.cc, because
 // it is the scanner's own working type and nothing outside the scan needs it;
@@ -1145,14 +1134,7 @@ class MediaStore {
 			// audio files and 2k videos cannot.
 			std::atomic<long long> meta_audio{0};
 			std::atomic<long long> meta_video{0};
-			void reset()
-				{
-				walk.store(0);   known.store(0);  meta.store(0);
-				art.store(0);    tmdb.store(0);   write.store(0);
-				prune.store(0);  files.store(0);  videos.store(0);
-				albums.store(0); meta_audio.store(0);
-				meta_video.store(0);
-				}
+			void reset();
 			};
 		ScanTimes scan_times_;
 
@@ -1165,14 +1147,8 @@ class MediaStore {
 		// "this scan" rather than "since start-up".
 		struct ScanGuard {
 			MediaStore& s;
-			explicit ScanGuard(MediaStore& st) : s(st)
-				{
-				if (s.scans_active_.fetch_add(1) == 0) {
-					s.scan_items_.store(0);
-					s.scan_times_.reset();
-					}
-				}
-			~ScanGuard() { s.scans_active_.fetch_sub(1); }
+			explicit ScanGuard(MediaStore& st);
+			~ScanGuard();
 			};
 
 		// When each user's last_access was last written. Guarded by db_mutex_,

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <random>
@@ -542,6 +543,27 @@ void convert_tool_sidecars(const std::filesystem::path& batch_root)
 		std::cout << stamp() << "batch sidecars: " << chapters.size()
 		          << " chapter(s) -> " << target.filename() << std::endl;
 		}
+	}
+
+BatchHold::BatchHold(const std::filesystem::path& batch)
+	: marker_(batch_marker(batch))
+	{
+	// The marker sits beside the batch, so on a user's first fetch its
+	// directory does not exist yet: fetch_worker() takes the hold before
+	// create_directories(dest), which is the whole point of taking it
+	// there. Without this the open would fail silently and the batch would
+	// be unheld.
+	std::error_code ec;
+	std::filesystem::create_directories(marker_.parent_path(), ec);
+	// Truncating open rather than a create-if-absent test: two producers
+	// cannot share a batch uuid, so there is no one to race.
+	std::ofstream(marker_).close();
+	}
+
+BatchHold::~BatchHold()
+	{
+	std::error_code ec;
+	std::filesystem::remove(marker_, ec);
 	}
 
 void sweep_held_batches(const std::string& users_dir)

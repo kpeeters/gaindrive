@@ -723,6 +723,14 @@ add_executable(gaindrive
 	src/stamp.cc
 	src/castmanager.cc
 	src/folderwatcher.cc
+	src/codecs.cc
+	src/chapters.cc
+	src/untrusted.cc
+	src/dvd.cc
+	src/jsonread.cc
+	src/parallel.cc
+	src/proc.cc
+	src/md5.cc
 	${EMBEDDED_WEB_CC}
 )
 
@@ -811,6 +819,9 @@ if(GAINDRIVE_CAST_TOOL)
 		src/casttool.cc
 		src/castmanager.cc
 		src/stamp.cc
+		# castmanager.cc reads the receiver's JSON through jsonread.hh, whose
+		# bodies now live in a .cc rather than in the header.
+		src/jsonread.cc
 	)
 	target_include_directories(gaindrive-cast PRIVATE src third_party)
 	# ${GD_DEP_TARGETS} rather than named packages: the spellings differ
