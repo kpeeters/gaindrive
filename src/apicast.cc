@@ -754,6 +754,8 @@ GainDrive::grant_lookup(const std::string& token)
 	{
 	if (token.empty()) return std::nullopt;
 	const auto now = std::chrono::steady_clock::now();
+	std::optional<StreamGrant> found;
+	{
 	std::lock_guard<std::mutex> lk(grant_mu_);
 	// Walked rather than looked up, so the comparison can be constant-time.
 	// CastManager's token_eq() gives the reasoning — 128 bits makes timing
@@ -768,9 +770,21 @@ GainDrive::grant_lookup(const std::string& token)
 			      ^ static_cast<unsigned char>(token[i]);
 		if (diff) continue;
 		if (g.expires <= now) return std::nullopt;
-		return g;
+		found = g;
+		break;
 		}
-	return std::nullopt;
+	}
+	if (!found) return std::nullopt;
+	// A grant names an account, and twelve hours is long enough for that
+	// account to be disabled or deleted in the meantime. The token must not
+	// outlive the access it stood in for, so the account is re-checked at
+	// every use. Done here rather than in the three callers, so stream,
+	// captions and cover art cannot disagree about a revoked account; and
+	// outside the grant lock, because get_user takes the database mutex and
+	// nothing orders the two.
+	auto ui = store_.get_user(found->user);
+	if (!ui || ui->disabled) return std::nullopt;
+	return found;
 	}
 
 std::string GainDrive::stream_grant_user(const std::string& token, int song_id)

@@ -5,9 +5,12 @@
 #include "stamp.hh"
 
 #include <chrono>
+#include <cstring>
 #include <iostream>
 #include <map>
 #include <mutex>
+
+#include <arpa/inet.h>
 
 // ---- Login throttle ---------------------------------------------------
 
@@ -50,6 +53,29 @@ constexpr int    THROTTLE_BLOCK_AFTER = 50;     // failures before a hard block
 constexpr auto   THROTTLE_BLOCK_FOR   = std::chrono::minutes(10);
 constexpr auto   THROTTLE_FORGET      = std::chrono::minutes(30);
 constexpr size_t THROTTLE_MAX_KEYS    = 4096;
+
+// The bucket an address's failures count against. IPv6 keys on the /64
+// prefix rather than the full address: a routed allocation hands a caller
+// that entire prefix, so exact keys would give a rotating attacker its free
+// tries back on every guess, plus an endless supply of fresh keys with which
+// to fill the capped map and sweep everyone else's counters. IPv4 stays
+// exact, since one NAT'd household sharing a bucket is the throttle working
+// as sized. Only the key is truncated; log lines keep the address as it
+// arrived.
+std::string throttle_bucket(const std::string& addr)
+	{
+	// No colon is IPv4. A dot alongside colons is a v4-mapped IPv6 address,
+	// which names an IPv4 client and is keyed like one.
+	if (addr.find(':') == std::string::npos
+	    || addr.find('.') != std::string::npos) return addr;
+	struct in6_addr v6;
+	const std::string bare = addr.substr(0, addr.find('%'));
+	if (inet_pton(AF_INET6, bare.c_str(), &v6) != 1) return addr;
+	std::memset(v6.s6_addr + 8, 0, 8);
+	char buf[INET6_ADDRSTRLEN];
+	if (!inet_ntop(AF_INET6, &v6, buf, sizeof buf)) return addr;
+	return std::string(buf) + "/64";
+	}
 
 struct AuthFailures {
 	int                                   count = 0;
@@ -160,7 +186,8 @@ bool check_auth(const httplib::Request& req, httplib::Response& res,
 	// Paid before the password is looked at, so a caller in the penalty box
 	// cannot use the endpoint as an oracle at all, and so a wrong password
 	// costs the same whether the account exists or not.
-	const std::string throttle_key = client_addr(req);
+	const std::string addr         = client_addr(req);
+	const std::string throttle_key = throttle_bucket(addr);
 	{
 	const auto pen = throttle_penalty(throttle_key);
 	if (pen.blocked) {
@@ -179,7 +206,7 @@ bool check_auth(const httplib::Request& req, httplib::Response& res,
 		// Subsonic failure envelope, as the spec requires, so this log line is
 		// the only thing a host-level blocker can see. The username is
 		// included and the credential deliberately is not.
-		std::cout << stamp(throttle_key) << "auth failed for user "
+		std::cout << stamp(addr) << "auth failed for user "
 		          << log_safe(u, 64) << std::endl;
 		err(40, "Wrong username or password.");
 		return false;
