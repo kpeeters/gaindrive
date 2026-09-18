@@ -29,6 +29,30 @@
 #include "transcodecache.hh"
 #include "urlfetch.hh"
 
+// Bounds on a request body, and on an image fetched for one. At file scope
+// rather than inside GainDrive because the pre-request handler in apiweb.cc
+// applies them, while the endpoints they describe live in apiedit.cc and
+// apibrowse.cc.
+
+// The ceiling on one upload archive as it streams through /upload, and
+// therefore also httplib's global payload cap — the content-reader path
+// enforces that cap on what it hands the receiver. Every other route is
+// bounded far lower, before a byte of body is read, by the pre-request
+// handler and MAX_SMALL_BODY_BYTES.
+inline constexpr size_t MAX_REQUEST_BYTES = 4ull * 1024 * 1024 * 1024;
+
+// The body bound for every route that is not /upload. Nothing else accepts a
+// large body: the biggest legitimate one is a saveChapters file, which
+// MAX_CHAPTERS keeps to a few tens of kilobytes.
+inline constexpr size_t MAX_SMALL_BODY_BYTES = 1024 * 1024;
+
+// The bound on a cover fetched by setCoverArt, which is a URL a person typed
+// rather than one a provider returned, and so is bounded for the same reason
+// as a portrait and one more: this one is reachable by any account allowed to
+// edit the item. The redirect bound sits in netaddr.hh, because portrait_fetch
+// needs the same one.
+inline constexpr size_t MAX_COVER_BYTES = 16u * 1024 * 1024;
+
 class GainDrive {
 	public:
 		// transcode_cache_dir empty = derived from db_path.
@@ -69,6 +93,24 @@ class GainDrive {
 		// not be acquired, so the caller can exit non-zero rather than treat a
 		// doomed start as a clean shutdown.
 		bool listen(const std::string& host, int port);
+
+	private:
+		// Route registration, split by subject; each is defined in its own
+		// api*.cc and called once, in this order, from the constructor.
+		//
+		// The order is not cosmetic. httplib dispatches in registration
+		// order and routes_fallback() registers `/rest/:endpoint`, a
+		// wildcard that matches every Subsonic endpoint there is, so it has
+		// to be registered after all of them or it answers the lot.
+		void routes_web();       // server options, middleware, web assets
+		void routes_system();    // ping, scan, users, settings
+		void routes_browse();    // the library, its artwork and its texts
+		void routes_playlist();  // play queue, playlists, stars, bookmarks
+		void routes_stream();    // stream, download, video, captions, hls
+		void routes_cast();      // the Chromecast session
+		void routes_edit();      // tag edits, cover art, upload, move
+		void routes_fetch();     // fetching from a URL
+		void routes_fallback();  // the unknown-endpoint catch-all; last
 
 	private:
 		bool            debug_;
@@ -510,14 +552,3 @@ class GainDrive {
 		FolderWatcher   watcher_;
 		httplib::Server server_;
 	};
-
-// Which peers' X-Forwarded-For header may be believed. Defaults to loopback,
-// which is the reverse proxy the packaging installs. Free rather than a member
-// because client_addr() is used by static helpers in gaindrive.cc — the access
-// logger and check_auth's throttle — that have no GainDrive to ask.
-//
-// Believing the header from an untrusted peer is not merely a wrong log line:
-// the login throttle keys on the result, so it would let a caller pick a fresh
-// rate-limit bucket per request.
-void gaindrive_set_trusted_proxies(std::vector<std::string> addrs);
-void gaindrive_set_public_url(std::string origin);

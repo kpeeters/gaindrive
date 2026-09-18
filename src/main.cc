@@ -25,6 +25,7 @@
 #include "gaindrive.hh"
 #include "imagescale.hh"
 #include "mediastore.hh"
+#include "netaddr.hh"
 #include "service.hh"
 #include "stamp.hh"
 #include "tmdb.hh"

@@ -694,6 +694,22 @@ add_executable(gaindrive
 	src/service.cc
 	${CMAKE_CURRENT_BINARY_DIR}/embedded_unit.cc
 	src/gaindrive.cc
+	src/subsonic.cc
+	src/textutil.cc
+	src/netaddr.cc
+	src/authz.cc
+	src/apientry.cc
+	src/batchtools.cc
+	src/infolookup.cc
+	src/apiweb.cc
+	src/apisystem.cc
+	src/apibrowse.cc
+	src/apiplaylist.cc
+	src/apistream.cc
+	src/apicast.cc
+	src/apiedit.cc
+	src/apifetch.cc
+	src/apifallback.cc
 	src/mediastore.cc
 	src/streamer.cc
 	src/transcodecache.cc
