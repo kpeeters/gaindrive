@@ -53,6 +53,8 @@ inline constexpr size_t MAX_SMALL_BODY_BYTES = 1024 * 1024;
 // needs the same one.
 inline constexpr size_t MAX_COVER_BYTES = 16u * 1024 * 1024;
 
+class CountingPool;
+
 class GainDrive {
 	public:
 		// transcode_cache_dir empty = derived from db_path.
@@ -535,6 +537,12 @@ class GainDrive {
 		                            const std::filesystem::path& dest,
 		                            const std::string& rel_batch) const;
 
+		// How many fetches may be waiting at once. One worker runs the queue,
+		// so this is a bound on how far behind a user can get the server, not
+		// on throughput. Here rather than in apifetch.cc because
+		// getServerStatus reports it beside the queue length.
+		static constexpr size_t FETCH_QUEUE_MAX = 20;
+
 		UrlFetcher              url_fetcher_;
 		std::thread             fetch_thread_;
 		std::mutex              fetch_mu_;
@@ -544,5 +552,12 @@ class GainDrive {
 		std::atomic<bool>       fetch_stop_{false};
 
 		FolderWatcher   watcher_;
+
+		// Owned and deleted by server_; set by the task-queue factory in
+		// apiweb.cc. Only read while the server is listening, so the pointer
+		// is valid whenever a handler dereferences it.
+		std::atomic<CountingPool*> http_pool_{nullptr};
+		const std::chrono::steady_clock::time_point start_time_ =
+			std::chrono::steady_clock::now();
 		httplib::Server server_;
 	};

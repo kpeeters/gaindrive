@@ -9,6 +9,7 @@
 // and a throttle anything else could reach would be a throttle something else
 // could reset.
 
+#include <cstddef>
 #include <string>
 
 #include <httplib.h>
@@ -19,6 +20,10 @@
 // throttle. Returns false having already written the refusal.
 bool check_auth(const httplib::Request& req, httplib::Response& res,
                 MediaStore& store);
+
+// Entries currently in the login-throttle map. Purely for getServerStatus;
+// a visible spike means someone is guessing passwords.
+std::size_t throttle_entries();
 
 // Whether the authenticated user may drive a Chromecast.
 bool check_cast_perm(const httplib::Request& req, httplib::Response& res,

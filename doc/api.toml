@@ -1880,6 +1880,154 @@ Send an empty value to clear a setting.
 
 [[endpoint]]
 kind     = 'endpoint'
+name     = "getServerStatus"
+section  = "settings"
+auth     = 'admin'
+response = 'subsonic-json'
+summary  = 'Live load and capacity snapshot: HTTP workers, ffmpeg processes, caches, queues, uptime and memory.'
+notes    = '''
+Every counter is instantaneous, read at the moment of the request.
+`http.busy` includes the worker answering this very request, so it never
+reads zero while a client is polling.
+'''
+
+  [[endpoint.field]]
+  name = "serverStatus.uptimeSeconds"
+  type = "int"
+  doc  = 'Seconds since the server process started.'
+
+  [[endpoint.field]]
+  name = "serverStatus.memoryRssBytes"
+  type = "int"
+  doc  = 'Resident set size of the server process. Absent on a system without a proc filesystem.'
+
+  [[endpoint.field]]
+  name = "serverStatus.http.busy"
+  type = "int"
+  doc  = 'HTTP worker threads currently handling a request, this one included.'
+
+  [[endpoint.field]]
+  name = "serverStatus.http.queued"
+  type = "int"
+  doc  = 'Accepted requests waiting for a free worker.'
+
+  [[endpoint.field]]
+  name = "serverStatus.http.threads"
+  type = "int"
+  doc  = 'Size of the worker pool.'
+
+  [[endpoint.field]]
+  name = "serverStatus.http.queueCap"
+  type = "int"
+  doc  = 'Bound on the wait queue; a request past it is refused rather than queued.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.piped"
+  type = "int"
+  doc  = 'ffmpeg processes streaming straight to a response: seeks, HLS segments, cast pipes and cache fallbacks.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.pipedMax"
+  type = "int"
+  doc  = 'Ceiling on piped transcodes; one past it gets a 503.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.running"
+  type = "int"
+  doc  = 'ffmpeg processes filling the on-disk transcode cache, background builds included.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.bgRunning"
+  type = "int"
+  doc  = 'The background builds within `running`.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.jobsMax"
+  type = "int"
+  doc  = 'The `--transcode-jobs` bound on `running`.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.cacheEnabled"
+  type = "bool"
+  doc  = 'False when the on-disk cache is disabled; the byte fields then read zero.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.cacheBytes"
+  type = "int"
+  doc  = 'Bytes on disk in the transcode cache, files still being written included.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.cacheCapBytes"
+  type = "int"
+  doc  = 'The `--transcode-cache-mb` cap, in bytes.'
+
+  [[endpoint.field]]
+  name = "serverStatus.coverCache.memBytes"
+  type = "int"
+  doc  = 'Memory held by the scaled-cover cache.'
+
+  [[endpoint.field]]
+  name = "serverStatus.coverCache.memCapBytes"
+  type = "int"
+  doc  = 'Its cap; least-recently-used images are dropped past it.'
+
+  [[endpoint.field]]
+  name = "serverStatus.coverCache.entries"
+  type = "int"
+  doc  = 'Scaled images currently held in memory.'
+
+  [[endpoint.field]]
+  name = "serverStatus.coverCache.building"
+  type = "int"
+  doc  = 'Image decodes running right now.'
+
+  [[endpoint.field]]
+  name = "serverStatus.coverCache.jobsMax"
+  type = "int"
+  doc  = 'Bound on concurrent decodes.'
+
+  [[endpoint.field]]
+  name = "serverStatus.fetch.queued"
+  type = "int"
+  doc  = 'URL fetches waiting for the single fetch worker.'
+
+  [[endpoint.field]]
+  name = "serverStatus.fetch.queueCap"
+  type = "int"
+  doc  = 'Bound on that queue.'
+
+  [[endpoint.field]]
+  name = "serverStatus.scan.scanning"
+  type = "bool"
+  doc  = 'Whether a library scan is running.'
+
+  [[endpoint.field]]
+  name = "serverStatus.scan.count"
+  type = "int"
+  doc  = 'Files seen by the scan so far, or by the last one.'
+
+  [[endpoint.field]]
+  name = "serverStatus.cast.active"
+  type = "bool"
+  doc  = 'Whether a cast session is up.'
+
+  [[endpoint.field]]
+  name = "serverStatus.streamGrants"
+  type = "int"
+  doc  = 'Unexpired one-song stream grants (see the Stream grants section).'
+
+  [[endpoint.field]]
+  name = "serverStatus.loginThrottle"
+  type = "int"
+  doc  = 'Addresses in the login-throttle table. A spike means someone is guessing passwords.'
+
+  [[endpoint.error]]
+  code = '50'
+  when = 'The caller is not an admin.'
+
+
+[[endpoint]]
+kind     = 'endpoint'
 name     = "startInfoLookup"
 section  = "settings"
 auth     = 'admin'

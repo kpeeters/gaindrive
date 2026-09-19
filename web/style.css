@@ -3426,6 +3426,31 @@ input.chapter-time.bad { border-color: #e06c6c; }
    color: var(--text-dim);
    }
 
+/* ── Admin server status ────────────────────────────── */
+
+.status-rows {
+   display: flex;
+   flex-direction: column;
+   gap: 0.6rem;
+   }
+
+.status-line {
+   display: flex;
+   justify-content: space-between;
+   gap: 0.6rem;
+   font-size: 0.9rem;
+   }
+
+.status-value {
+   color: var(--text-dim);
+   text-align: right;
+   }
+
+.status-row progress {
+   width: 100%;
+   height: 6px;
+   }
+
 /* ── Admin — users ──────────────────────────────────── */
 
 .admin-section {

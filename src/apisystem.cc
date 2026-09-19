@@ -5,15 +5,30 @@
 #include "textutil.hh"
 #include "netaddr.hh"
 #include "apientry.hh"
+#include "countingpool.hh"
+#include "streamer.hh"
 
 #include <filesystem>
+#include <fstream>
 
 #include <iostream>
+
+#include <unistd.h>
 
 #include <tinyxml2.h>
 #include <nlohmann/json.hpp>
 
 using namespace tinyxml2;
+
+// Resident set size from /proc/self/statm; -1 where there is no proc
+// filesystem, and the field is then omitted rather than reported as zero.
+static long long rss_bytes()
+	{
+	std::ifstream f("/proc/self/statm");
+	long long pages = 0, resident = 0;
+	if (!(f >> pages >> resident)) return -1;
+	return resident * sysconf(_SC_PAGE_SIZE);
+	}
 
 void GainDrive::routes_system()
 	{
@@ -575,5 +590,74 @@ void GainDrive::routes_system()
 			store_.set_setting("tmdb_key", qp("tmdbKey"));
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
+	// getServerStatus, an admin-only live capacity snapshot: worker
+	// occupancy, ffmpeg counts, cache pressure, queue depths. JSON only, like
+	// getServerSettings: only the web client's Settings pane reads it.
+	server_.Get("/rest/getServerStatus.view", [this](const httplib::Request& req,
+	                                                  httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto ui = store_.get_user(req.get_param_value("u"));
+		if (!ui || !ui->is_admin) {
+			const char* msg = "User is not authorized for this operation.";
+			res.set_content(use_json ? subsonic_error_json(50, msg)
+			                         : subsonic_error(50, msg),
+			                use_json ? "application/json" : "application/xml");
+			return;
+			}
+
+		auto* pool = http_pool_.load();
+		auto  tc   = transcode_cache_.stats();
+		auto  cc   = cover_cache_.stats();
+		size_t grants = 0;
+		{
+		std::lock_guard<std::mutex> lock(grant_mu_);
+		const auto now = std::chrono::steady_clock::now();
+		for (const auto& [tok, g] : grants_)
+			if (g.expires > now) grants++;
+		}
+		size_t fetch_queued = 0;
+		{
+		std::lock_guard<std::mutex> lock(fetch_mu_);
+		fetch_queued = fetch_queue_.size();
+		}
+		auto scan = store_.scan_status();
+		long long uptime = std::chrono::duration_cast<std::chrono::seconds>(
+			std::chrono::steady_clock::now() - start_time_).count();
+		long long rss = rss_bytes();
+
+		std::string body = subsonic_ok_json([&](nlohmann::json& r) {
+			auto& st = r["serverStatus"];
+			st["uptimeSeconds"] = uptime;
+			if (rss >= 0) st["memoryRssBytes"] = rss;
+			// busy includes the worker answering this very request.
+			st["http"]["busy"]     = pool ? pool->busy()      : 0;
+			st["http"]["queued"]   = pool ? pool->queued()    : 0;
+			st["http"]["threads"]  = pool ? pool->threads()   : 0;
+			st["http"]["queueCap"] = pool ? pool->queue_cap() : 0;
+			st["transcode"]["piped"]         = Streamer::piped_ffmpeg_running();
+			st["transcode"]["pipedMax"]      = Streamer::MAX_PIPED_FFMPEG;
+			st["transcode"]["running"]       = tc.running;
+			st["transcode"]["bgRunning"]     = tc.bg_running;
+			st["transcode"]["jobsMax"]       = tc.jobs;
+			st["transcode"]["cacheEnabled"]  = tc.enabled;
+			st["transcode"]["cacheBytes"]    = tc.used_bytes;
+			st["transcode"]["cacheCapBytes"] = tc.cap_bytes;
+			st["coverCache"]["memBytes"]     = cc.mem_used;
+			st["coverCache"]["memCapBytes"]  = cc.mem_cap;
+			st["coverCache"]["entries"]      = cc.entries;
+			st["coverCache"]["building"]     = cc.building;
+			st["coverCache"]["jobsMax"]      = cc.jobs;
+			st["fetch"]["queued"]            = fetch_queued;
+			st["fetch"]["queueCap"]          = FETCH_QUEUE_MAX;
+			st["scan"]["scanning"]           = scan.scanning;
+			st["scan"]["count"]              = scan.count;
+			st["cast"]["active"]             = cast_manager_.active();
+			st["streamGrants"]  = grants;
+			st["loginThrottle"] = throttle_entries();
+			});
+		res.set_content(body, "application/json");
 		});
 	}

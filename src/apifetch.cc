@@ -22,10 +22,6 @@
 
 using namespace tinyxml2;
 
-// How many fetches may be waiting at once. One worker runs the queue, so this
-// is a bound on how far behind a user can get the server, not on throughput.
-static constexpr size_t FETCH_QUEUE_MAX = 20;
-
 // How many finished jobs are kept per user, and for how long. Per user rather
 // than server-wide: a shared cap lets one busy account evict another's results
 // before that person's browser has polled for them.

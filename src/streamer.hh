@@ -143,6 +143,11 @@ class Streamer {
 		// download.view is defined as "the original media data", so it must not
 		// go through serve(): that would deliver the response at 1x playback
 		// rate for a browser, or for anyone asking with pace=true.
+		// Piped transcodes currently running, and the ceiling
+		// serve_transcoded() enforces on them.  Read by getServerStatus.
+		static int piped_ffmpeg_running();
+		static constexpr int MAX_PIPED_FFMPEG = 16;
+
 		static void serve_raw(const httplib::Request& req, httplib::Response& res,
 		                      const SongInfo& song);
 

@@ -1,4 +1,5 @@
 #include "gaindrive.hh"
+#include "countingpool.hh"
 #include "subsonic.hh"
 #include "authz.hh"
 #include "stamp.hh"
@@ -34,7 +35,11 @@ void GainDrive::routes_web()
 	// into an ever-growing deque, each holding a file descriptor, until
 	// EMFILE. Refusing the 129th queued request instead sheds load at the
 	// edge, which is the recoverable failure. max_n stays 0 — a fixed pool.
-	server_.new_task_queue = []{ return new httplib::ThreadPool(32, 0, 128); };
+	server_.new_task_queue = [this]{
+		auto* q = new CountingPool(32, 0, 128);
+		http_pool_.store(q);
+		return q;
+		};
 
 	// httplib's payload cap defaults to SIZE_MAX. Since 0.54 the body of a
 	// routed request is read only after the route has matched and the

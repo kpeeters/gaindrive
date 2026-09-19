@@ -156,6 +156,12 @@ void throttle_record_success(const std::string& key)
 
 }  // namespace
 
+std::size_t throttle_entries()
+	{
+	std::lock_guard<std::mutex> lock(throttle_mu);
+	return throttle.size();
+	}
+
 // Extracts u/p/t/s params and validates auth. Writes error into res on failure.
 bool check_auth(const httplib::Request& req, httplib::Response& res,
                 MediaStore& store)

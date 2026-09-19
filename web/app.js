@@ -1033,6 +1033,7 @@ async function viewSettings() {
    addRow('playback', 'Playback', playbackSummary());
    const userSummary   = admin ? addRow('users',  'Users',  '') : null;
    const serverSummary = admin ? addRow('server', 'Server', '') : null;
+   const statusSummary = admin ? addRow('status', 'Server status', '') : null;
    addRow('appearance', 'Appearance', themeSummary());
 
    // Left blank until the server answers rather than filled with a guess: a
@@ -1056,6 +1057,12 @@ async function viewSettings() {
          serverSummary.textContent =
             set.length ? `${set.join(' and ')} set` : 'No keys set';
          }).catch(e => console.error('[settings] getServerSettings', e));
+
+      apiCall('getServerStatus').then(sr => {
+         if (renderStale(gen)) return;
+         statusSummary.textContent =
+            `Up ${fmtUptime(sr.serverStatus?.uptimeSeconds ?? 0)}`;
+         }).catch(e => console.error('[settings] getServerStatus', e));
       }
    }
 
@@ -1093,6 +1100,7 @@ async function showSettingsCategory(cat) {
    if (cat === 'playback')             return viewSettingsPlayback();
    if (cat === 'users'      && admin)  return viewSettingsUsers();
    if (cat === 'server'     && admin)  return viewSettingsServer();
+   if (cat === 'status'     && admin)  return viewSettingsStatus();
    if (cat === 'appearance')           return viewSettingsAppearance();
    }
 
@@ -1484,6 +1492,128 @@ async function viewSettingsServer() {
       () => startLookup('albums', 'album descriptions'));
    }
 
+// ── Settings: Server status ──────────────────────────────────────────────────
+
+function fmtUptime(s) {
+   const d = Math.floor(s / 86400);
+   const h = Math.floor(s % 86400 / 3600);
+   const m = Math.floor(s % 3600 / 60);
+   if (d) return `${d} d ${h} h`;
+   if (h) return `${h} h ${m} min`;
+   return `${m} min`;
+   }
+
+function fmtBytes(n) {
+   const G = 1024 * 1024 * 1024;
+   if (n >= G)           return `${(n / G).toFixed(1)} GiB`;
+   if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MiB`;
+   if (n >= 1024)        return `${Math.round(n / 1024)} kiB`;
+   return `${n} B`;
+   }
+
+function viewSettingsStatus() {
+   const {pane, gen} = settingsPane('status', 'Server status');
+   const sec = settingsSection(pane);
+
+   const host = document.createElement('div');
+   host.className = 'status-rows';
+   sec.appendChild(host);
+
+   const hint = document.createElement('p');
+   hint.className = 'admin-hint';
+   hint.textContent = 'Refreshes every few seconds. The busy worker count '
+      + 'includes the request for this page.';
+   sec.appendChild(hint);
+
+   renderSlideTo(gen, 1);
+   pollServerStatus();
+   }
+
+function pollServerStatus() {
+   clearInterval(statusPollTimer);
+   const gen = ++statusPollGen;
+
+   const tick = async () => {
+      if (gen !== statusPollGen) return;
+      let host = document.querySelector('#pane-albums .status-rows');
+      if (!host) { clearInterval(statusPollTimer); return; }
+
+      let r;
+      try { r = await apiCall('getServerStatus'); }
+      catch { return; }   // a blip should not end the poll
+      if (gen !== statusPollGen) return;
+      // Looked up again after the await, for the same reason pollFetchJobs()
+      // does: a re-render during the request detaches the node found above.
+      host = document.querySelector('#pane-albums .status-rows');
+      if (!host) { clearInterval(statusPollTimer); return; }
+      const st = r.serverStatus ?? {};
+
+      host.innerHTML = '';
+      const row = (label, value, used, cap) => {
+         const div = document.createElement('div');
+         div.className = 'status-row';
+         const line = document.createElement('div');
+         line.className = 'status-line';
+         const l = document.createElement('span');
+         l.className   = 'status-label';
+         l.textContent = label;
+         line.appendChild(l);
+         const v = document.createElement('span');
+         v.className   = 'status-value';
+         v.textContent = value;
+         line.appendChild(v);
+         div.appendChild(line);
+         if (cap > 0) {
+            const bar = document.createElement('progress');
+            bar.max   = cap;
+            bar.value = Math.min(used ?? 0, cap);
+            div.appendChild(bar);
+            }
+         host.appendChild(div);
+         };
+
+      row('Uptime', fmtUptime(st.uptimeSeconds ?? 0));
+      if (st.memoryRssBytes != null)
+         row('Memory', fmtBytes(st.memoryRssBytes));
+      const http = st.http ?? {};
+      row('HTTP workers', `${http.busy ?? 0} of ${http.threads ?? 0} busy`,
+          http.busy, http.threads);
+      row('Request queue', `${http.queued ?? 0} of ${http.queueCap ?? 0} waiting`,
+          http.queued, http.queueCap);
+      const tr = st.transcode ?? {};
+      row('Piped ffmpeg', `${tr.piped ?? 0} of ${tr.pipedMax ?? 0}`,
+          tr.piped, tr.pipedMax);
+      const bg = tr.bgRunning ? ` (${tr.bgRunning} background)` : '';
+      row('Cache transcodes', `${tr.running ?? 0} of ${tr.jobsMax ?? 0}${bg}`,
+          tr.running, tr.jobsMax);
+      row('Transcode cache',
+          tr.cacheEnabled
+             ? `${fmtBytes(tr.cacheBytes ?? 0)} of ${fmtBytes(tr.cacheCapBytes ?? 0)}`
+             : 'disabled',
+          tr.cacheBytes, tr.cacheEnabled ? tr.cacheCapBytes : 0);
+      const cov  = st.coverCache ?? {};
+      const imgs = cov.entries === 1 ? '1 image' : `${cov.entries ?? 0} images`;
+      row('Cover cache',
+          `${fmtBytes(cov.memBytes ?? 0)} of ${fmtBytes(cov.memCapBytes ?? 0)}, ${imgs}`,
+          cov.memBytes, cov.memCapBytes);
+      const fe = st.fetch ?? {};
+      row('Fetch queue', `${fe.queued ?? 0} of ${fe.queueCap ?? 0} waiting`,
+          fe.queued, fe.queueCap);
+      const scan = st.scan ?? {};
+      row('Library scan', scan.scanning
+          ? `scanning, ${scan.count ?? 0} files`
+          : `idle, ${scan.count ?? 0} files known`);
+      row('Cast session', st.cast?.active ? 'active' : 'none');
+      row('Stream grants', `${st.streamGrants ?? 0} active`);
+      const thr = st.loginThrottle ?? 0;
+      row('Login throttle', thr === 1 ? '1 address' : `${thr} addresses`);
+      };
+
+   statusPollTimer = setInterval(tick, 2500);
+   // Deferred like pollFetchJobs(): give the caller's append a macrotask.
+   setTimeout(tick, 0);
+   }
+
 function makeBadge(text, cls) {
    const b = document.createElement('span');
    b.className   = `user-badge ${cls}`;
@@ -1708,6 +1838,11 @@ let fetchLastState = {};
 // newer call has installed its own interval, render into a detached node and
 // then clearInterval the timer it never owned.
 let fetchPollGen   = 0;
+
+// The Server status pane's poll, same shape as the fetch poll above and
+// guarded the same way. See fetchPollGen for why the generation exists.
+let statusPollTimer = null;
+let statusPollGen   = 0;
 // A fetch finished while the user was reading an album, so the uploads listing
 // on pane 0 is stale. Not redrawn there and then: viewArtists() slides back to
 // pane 0, which would yank the album out from under them. Deferred to the next

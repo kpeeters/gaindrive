@@ -31,6 +31,15 @@ enum class Pump { More, Eof, Abort };
 static constexpr float  TARGET_BUF  = 15.0f;
 static constexpr size_t WRITE_CHUNK = 4096;
 
+// Slots taken by piped transcodes; the cap lives in the class so the status
+// endpoint can report both sides of the fraction.
+static std::atomic<int> piped_ffmpeg_count{0};
+
+int Streamer::piped_ffmpeg_running()
+	{
+	return piped_ffmpeg_count.load();
+	}
+
 // ---- Streamer --------------------------------------------------------
 
 // A declaration as one log token.  Both ladders print it, because "the client
@@ -957,8 +966,6 @@ void Streamer::serve_transcoded(httplib::Response& res,
 	// past the cap is refused rather than queued, because a worker sleeping
 	// on a slot is the pool exhaustion this exists to prevent, one layer
 	// down.
-	static std::atomic<int> piped_ffmpeg_count{0};
-	static constexpr int    MAX_PIPED_FFMPEG = 16;
 	if (piped_ffmpeg_count.fetch_add(1) >= MAX_PIPED_FFMPEG) {
 		piped_ffmpeg_count.fetch_sub(1);
 		std::cout << stamp() << "stream: refusing piped transcode, "

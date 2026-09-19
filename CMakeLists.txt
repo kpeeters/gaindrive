@@ -702,6 +702,7 @@ add_executable(gaindrive
 	src/batchtools.cc
 	src/infolookup.cc
 	src/apiweb.cc
+	src/countingpool.cc
 	src/apisystem.cc
 	src/apibrowse.cc
 	src/apiplaylist.cc

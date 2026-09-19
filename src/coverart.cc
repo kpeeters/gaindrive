@@ -113,6 +113,24 @@ int CoverArtCache::ladder_size(int requested)
 	return 0;
 	}
 
+CoverArtCache::Stats CoverArtCache::stats()
+	{
+	Stats s{};
+	{
+	std::lock_guard<std::mutex> lock(mem_mu_);
+	s.mem_used = mem_used_;
+	s.entries  = lru_.size();
+	}
+	{
+	std::lock_guard<std::mutex> lock(build_mu_);
+	s.building = running_;
+	}
+	// Set once in the constructor, safe to read unlocked.
+	s.mem_cap = mem_cap_;
+	s.jobs    = jobs_;
+	return s;
+	}
+
 std::optional<CoverArtCache::Result> CoverArtCache::mem_get(const std::string& ckey)
 	{
 	std::lock_guard<std::mutex> lk(mem_mu_);
