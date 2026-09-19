@@ -2060,7 +2060,7 @@ function makeUploadBar() {
 
    // ---- The names, which belong to both producers ----
    //
-   // Under both producers rather than inside either: an archive and a fetched
+   // Above both producers rather than inside either: an archive and a fetched
    // URL are the same batch by the time the server normalises them, and both
    // take the same overrides. Having these only under the URL box was the
    // earlier shape and made an uploaded zip the one thing that could not be
@@ -2211,8 +2211,8 @@ function makeUploadBar() {
       const names = urlHandlers.map(h => h.name).join(', ');
       urlHint = document.createElement('p');
       urlHint.className   = 'admin-hint';
-      // The names are below this now, so the sentence telling you to leave
-      // them blank went with them, into stagingHint.
+      // The names sit above, at the top of the panel, and the sentence
+      // telling you to leave them blank lives with them, in stagingHint.
       urlHint.textContent = `Or paste a URL of a page containing a video/audio file:`;
 
 		//— handled by: ${names}
@@ -2253,20 +2253,17 @@ function makeUploadBar() {
             });
       }
 
-   // The panel's order, in one place.  The two producers come first and
-   // adjacent, because they are alternatives — upload an archive, or paste a
-   // URL — and nothing else in here says so: the interleaved order this
-   // replaced put a paragraph, a caption, two name boxes and a duplicate note
-   // between them, so the URL box read as a further step in the upload rather
-   // than the other way of doing it.
-   //
-   // Then their two captions, then what happens to whatever arrives, then the
-   // names that apply to both, then the progress of the one you started.
+   // The panel's order, in one place.  What happens to whatever arrives and
+   // the names that apply to both producers come first: you say where it goes,
+   // then pick how it gets here.  The two producers follow, adjacent, because
+   // they are alternatives — upload an archive, or paste a URL — and nothing
+   // else in here says so.  Then the progress of the one you started.
+   bar.append(stagingHint, nameRow, nameList, dupeNote);
    bar.append(hint);
    bar.append(row);
    if (urlHint) bar.append(urlHint);
    if (urlRow) bar.append(urlRow);
-   bar.append(stagingHint, nameRow, nameList, dupeNote, progress, uploadStatus);
+   bar.append(progress, uploadStatus);
    if (jobs) bar.append(jobs);
 
    uploadBtn.addEventListener('click', () => {
