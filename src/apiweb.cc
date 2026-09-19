@@ -360,6 +360,12 @@ void GainDrive::routes_web()
 		};
 	server_.Get("/",           index_page);
 	server_.Get("/index.html", index_page);
+	// The old Subsonic server landed on /index.view after login; keep
+	// existing bookmarks working.
+	server_.Get("/index.view", [](const httplib::Request&, httplib::Response& res)
+		{
+		res.set_redirect("/", 301);
+		});
 	server_.Get("/style.css",
 	            static_asset(embedded::style_css, embedded::style_css_mime));
 	server_.Get("/app.js",
