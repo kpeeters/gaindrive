@@ -11,6 +11,8 @@
 #include "untrusted.hh"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <vector>
@@ -107,6 +109,55 @@ static void write_chapters_response(httplib::Response& res, int song_id,
 	res.set_content(body, use_json ? "application/json" : "application/xml");
 	}
 
+
+// Bounds for the web position table.  POS_STALE is when a report stops
+// steering the pacer; POS_FORGET is when the row is dropped altogether.
+static constexpr size_t POS_MAX_ENTRIES = 512;
+static constexpr auto   POS_STALE  = std::chrono::seconds(30);
+static constexpr auto   POS_FORGET = std::chrono::minutes(10);
+
+void GainDrive::web_position_report(const std::string& user,
+                                    const std::string& token,
+                                    float pos, bool playing)
+	{
+	// A negative or NaN position would read as one of the streamer's control
+	// sentinels and could abort the stream; clamp rather than trust.
+	if (!(pos >= 0.0f)) pos = 0.0f;
+	const auto now = std::chrono::steady_clock::now();
+	const std::string key = user + "\n" + token;
+	std::lock_guard<std::mutex> lock(web_pos_mu_);
+	if (web_positions_.size() >= POS_MAX_ENTRIES
+	    && !web_positions_.count(key)) {
+		std::erase_if(web_positions_, [&](const auto& e) {
+			return now - e.second.at > POS_FORGET;
+			});
+		if (web_positions_.size() >= POS_MAX_ENTRIES) {
+			// Dropping is safe: the stream this report was for degrades to
+			// unpaced delivery, not to a stall.
+			std::cout << stamp()
+			          << "reportPosition: table full, dropping report"
+			          << std::endl;
+			return;
+			}
+		}
+	web_positions_[key] = WebPosition{pos, playing, now};
+	}
+
+float GainDrive::web_position_lookup(const std::string& user,
+                                     const std::string& token)
+	{
+	const auto now = std::chrono::steady_clock::now();
+	std::lock_guard<std::mutex> lock(web_pos_mu_);
+	auto it = web_positions_.find(user + "\n" + token);
+	if (it == web_positions_.end()) return CAST_POS_BUFFERING;
+	const auto age = now - it->second.at;
+	if (age > POS_STALE) return CAST_POS_BUFFERING;
+	// While playing the playhead has moved since the report; while paused it
+	// has not.  The paused case is exact, so a pause of any length keeps the
+	// stream held at the lead instead of drifting ahead by the pause.
+	if (!it->second.playing) return it->second.pos;
+	return it->second.pos + std::chrono::duration<float>(age).count();
+	}
 
 void GainDrive::routes_stream()
 	{
@@ -334,6 +385,24 @@ void GainDrive::routes_stream()
 				return s.current_time;
 				};
 			}
+		else if (!grant_authed && !song->is_video) {
+			// The web player names a pacing session with posToken and feeds it
+			// through reportPosition, so the stream is throttled against the
+			// real playhead by the same position branch a cast stream uses.
+			// Audio only: the video ladder deliberately does not pace (see
+			// serve_video), and a grant's player cannot report.  The reported
+			// currentTime is relative to the served stream, which is the frame
+			// both throttle branches account in: a timeOffset stream starts
+			// at the seek point on both sides.
+			auto pt = req.params.find("posToken");
+			if (pt != req.params.end() && !pt->second.empty()
+			    && pt->second.size() <= 64) {
+				get_pos = [this, user = req.get_param_value("u"),
+				           token = pt->second]{
+					return web_position_lookup(user, token);
+					};
+				}
+			}
 
 		if (!cast_authed)
 			std::cout << stamp() << "stream: id=" << log_safe(it->second, 64)
@@ -375,6 +444,36 @@ void GainDrive::routes_stream()
 		Streamer::serve(req, res, si, transcode_cache_, max_bitrate, format,
 		                time_offset, cast_authed, std::move(get_pos),
 		                estimate_length, vopts, playable);
+		});
+
+	// reportPosition, a gaindrive extension.  The web player's playhead for
+	// one stream, named by the posToken its stream.view URL carried.  The
+	// pacer throttles against it exactly as a cast stream is throttled
+	// against the receiver's status; see serve_direct() in streamer.cc.
+	server_.Get("/rest/reportPosition.view", [this](const httplib::Request& req,
+	                                                httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		auto qp = [&](const char* k) {
+			auto i = req.params.find(k);
+			return i == req.params.end() ? std::string() : i->second;
+			};
+		const std::string token = qp("token");
+		const std::string pos_s = qp("pos");
+		// The size test is a bound, not a format: the token is a map key the
+		// client chooses freely.
+		if (token.empty() || token.size() > 64 || pos_s.empty()) {
+			res.set_content(use_json
+			    ? subsonic_error_json(10, "Required parameter missing: token/pos.")
+			    : subsonic_error(10, "Required parameter missing: token/pos."),
+			    use_json ? "application/json" : "application/xml");
+			return;
+			}
+		web_position_report(qp("u"), token,
+		                    std::strtof(pos_s.c_str(), nullptr),
+		                    qp("playing") == "true");
+		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
+		                use_json ? "application/json" : "application/xml");
 		});
 
 	// download — the original file, never transcoded and never bitrate-capped.

@@ -5521,6 +5521,12 @@ const player = {
    streamIsTranscoded: false,
    localOffset: 0,
    streamFallbackTried: false,
+   // Names the current local stream to the server's pacer.  Fresh per
+   // stream URL (playerPlay generates it), sent as posToken on stream.view
+   // and echoed by every reportPosition call, so the server throttles this
+   // stream against the real playhead rather than a wall-clock guess.
+   // null while casting: the receiver reports its own position.
+   posToken: null,
    // Format actually requested from the server for the current track, or null
    // if the source is being served as-is.  Used by the info dialog to show
    // the format the user is actually hearing rather than the on-disk format.
@@ -6765,6 +6771,7 @@ function playerPlay(offset = 0, forceMp3 = false) {
       // stream.view exempts for a cast token, so the dialog reported a
       // conversion that was not happening.
       player.streamFormat = null;
+      player.posToken     = null;
       const params = {id: song.id};
       if (offset > 0) params.timeOffset = Math.floor(offset);
       // Carried on the LOAD rather than sent afterwards, because a track has
@@ -6887,6 +6894,12 @@ function playerPlay(offset = 0, forceMp3 = false) {
    player.streamIsTranscoded = chunked;
    player.streamFormat       = fmt ?? null;
    player.localOffset        = (chunked && offset > 0) ? offset : 0;
+   // A fresh token per stream URL, because the reported currentTime is
+   // relative to the served stream: a timeOffset re-fetch starts at the seek
+   // point, and its positions must not be read against the previous stream.
+   player.posToken = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+                                b => b.toString(16).padStart(2, '0')).join('');
+   streamParams.posToken = player.posToken;
 
    // An audio-only video is played by the audio element and draws no surface:
    // there is no picture in the stream to draw, and nothing to caption.
@@ -6922,6 +6935,7 @@ function playerPlay(offset = 0, forceMp3 = false) {
    // is the only moment at which anything is known to report.
    player.buffering = true;
    player.media.play().catch(err => console.warn('[player] play failed', err));
+   posReportNow();
    playerUpdateUI();
 }
 
@@ -7101,6 +7115,22 @@ function scrobbleCurrentSong() {
       .catch(err => console.warn('[scrobble] failed', err));
 }
 
+// Tells the server's pacer where the playhead really is: reportPosition in
+// doc/api.toml, consumed by the get_pos lambda stream.view builds for a
+// posToken.  Sent while paused too: a paused report is what holds the stream
+// at the lead instead of letting the wall clock drift it ahead.  A failed or
+// missing report only degrades the stream to unpaced delivery, never stalls
+// it, so errors are logged and otherwise ignored.
+function posReportNow() {
+   if (castDeviceId !== null || !player.posToken || !player.media?.src) return;
+   apiCall('reportPosition', {
+      token:   player.posToken,
+      pos:     player.media.currentTime.toFixed(2),
+      playing: player.media.paused ? 'false' : 'true',
+      }).catch(err => console.warn('[pos-report] failed', err));
+}
+setInterval(posReportNow, 5000);
+
 // Bound to both the audio and the video element, so whichever is active
 // behaves identically.  The handler bodies address player.media rather than
 // the element they are bound to, which is safe because only the active element
@@ -7151,10 +7181,19 @@ el.addEventListener('timeupdate', () => {
 el.addEventListener('play',  () => {
    if (castDeviceId !== null) return;
    playerPlayGlyph('pause');
+   posReportNow();
    });
 el.addEventListener('pause', () => {
    if (castDeviceId !== null) return;
    playerPlayGlyph('play_arrow');
+   posReportNow();
+   });
+// A native seek moves the playhead without a new stream URL, so the pacer
+// must hear about it at once: a backward seek would otherwise leave it
+// thinking the client is minutes ahead.
+el.addEventListener('seeked', () => {
+   if (castDeviceId !== null) return;
+   posReportNow();
    });
 
 // The spinner's other half.  playerPlay() raises the flag at the click; these

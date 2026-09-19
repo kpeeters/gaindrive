@@ -115,9 +115,10 @@ class Streamer {
 		// Decides direct-serve vs transcode and sends the audio response.
 		// max_bitrate=0 means no limit.  format="" or "raw" means pass-through.
 		// time_offset is in whole seconds (0 = from the start).
-		// get_position, if set, returns the Cast receiver's current playback position
-		// in seconds; used to drive adaptive buffering so the receiver never starves
-		// or overflows regardless of its buffer size.
+		// get_position, if set, returns the client's current playback position
+		// in seconds -- a Cast receiver's polled status, or the web player's
+		// reportPosition reports; used to drive adaptive buffering so the
+		// client never starves or overflows regardless of its buffer size.
 		// `cache` is always present; a disabled cache simply never produces an
 		// entry, so there is no nullability to reason about at the call site.
 		// `video` is ignored for audio entirely.
@@ -155,8 +156,10 @@ class Streamer {
 		// keepalive, when set, is held for the lifetime of the response so a
 		// transcode-cache entry cannot be pruned while it is being sent.  It is
 		// otherwise unused — the throttle and range handling are untouched.
+		// pace_lead is the throttle's target lead in seconds -- how far ahead
+		// of the playback position (reported or estimated) the sender stays.
 		static void serve_direct(const httplib::Request& req, httplib::Response& res,
-		                         const SongInfo& song, bool pace,
+		                         const SongInfo& song, bool pace, float pace_lead,
 		                         std::function<float()> get_position,
 		                         std::shared_ptr<const TranscodeCache::Entry>
 		                             keepalive = {});
@@ -192,7 +195,7 @@ class Streamer {
 		static void serve_transcoded(httplib::Response& res,
 		                             std::vector<std::string> args,
 		                             const std::string& mime, float bps,
-		                             bool pace,
+		                             bool pace, float pace_lead,
 		                             std::function<float()> get_position,
 		                             int64_t est_length = 0);
 	};

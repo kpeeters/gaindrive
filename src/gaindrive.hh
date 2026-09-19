@@ -277,6 +277,36 @@ class GainDrive {
 		// because a cover is addressed by its own id, not by the song's.
 		bool grant_allows_cover(const std::string& token, int cover_id);
 
+		// The playhead the web player last reported for one paced stream, so
+		// stream.view can throttle against the real position instead of a
+		// wall-clock guess -- the same mechanism a cast stream gets from the
+		// receiver's status.  Written by reportPosition.view, read by the
+		// get_position lambda a posToken stream carries into Streamer.
+		struct WebPosition
+			{
+			float                                 pos     = 0.0f;
+			bool                                  playing = false;
+			std::chrono::steady_clock::time_point at;
+			};
+		std::mutex                                     web_pos_mu_;
+		// Keyed by account and client-chosen token together, so no account can
+		// steer another one's stream by guessing the token.
+		std::unordered_map<std::string, WebPosition>   web_positions_;
+
+		// Record one report.  Prunes stale entries and caps the table, so an
+		// authenticated client cannot grow it without bound.
+		void web_position_report(const std::string& user,
+		                         const std::string& token,
+		                         float pos, bool playing);
+
+		// The position for the pacer: extrapolated by wall clock while
+		// playing, exact while paused, and CAST_POS_BUFFERING when the token
+		// is unknown or its report has gone stale -- which the streamer treats
+		// as "send freely", so a client that stops reporting degrades to
+		// unpaced delivery rather than a stalled stream.
+		float web_position_lookup(const std::string& user,
+		                          const std::string& token);
+
 		// True when a grant covers a caption of its song.
 		//
 		// Any caption of it, deliberately unlike valid_caption_token(), which
