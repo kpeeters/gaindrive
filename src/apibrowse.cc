@@ -576,6 +576,56 @@ void GainDrive::routes_browse()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
+	// getNowPlaying: who is listening right now.  Backed by client.now_playing,
+	// which scrobble(submission=false) refreshes; get_now_playing() only
+	// returns rows younger than five minutes.  Entries under another user's
+	// private uploads are dropped whole, since the entry *is* the song and
+	// serving it would leak what the listing hides.
+	server_.Get("/rest/getNowPlaying.view", [this](const httplib::Request& req,
+	                                               httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+
+		auto entries = store_.get_now_playing();
+		int max_br   = request_max_bitrate(req, store_);
+
+		std::erase_if(entries, [&](const MediaStore::NowPlayingEntry& e) {
+			return !item_read_allowed(req, store_, uploads_root_name_, e.song_path);
+			});
+
+		bool use_json = (fmt_of(req) == "json");
+		std::string body;
+		if (use_json)
+			body = subsonic_ok_json([&entries, max_br](nlohmann::json& r) {
+				nlohmann::json arr = nlohmann::json::array();
+				int idx = 0;
+				for (const auto& e : entries) {
+					auto s = song_entry_json(e.song, max_br);
+					s["username"]   = e.username;
+					s["minutesAgo"] = e.minutes_ago;
+					s["playerId"]   = ++idx;
+					if (!e.client.empty()) s["playerName"] = e.client;
+					arr.push_back(std::move(s));
+					}
+				r["nowPlaying"] = {{"entry", arr}};
+				});
+		else
+			body = subsonic_ok([&entries, max_br](XMLDocument& doc, XMLElement* root) {
+				auto* np = doc.NewElement("nowPlaying");
+				int idx = 0;
+				for (const auto& e : entries) {
+					auto* el = song_entry_xml(doc, e.song, "entry", max_br);
+					el->SetAttribute("username", e.username.c_str());
+					el->SetAttribute("minutesAgo", e.minutes_ago);
+					el->SetAttribute("playerId", ++idx);
+					if (!e.client.empty())
+						el->SetAttribute("playerName", e.client.c_str());
+					np->InsertEndChild(el);
+					}
+				root->InsertEndChild(np);
+				});
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	// getArtistInfo / getArtistInfo2 — answered from artist_info_cache, with the
 	// lookup itself queued onto the info resolver. Both endpoints share
 	// identical logic; only the response key name differs.

@@ -526,6 +526,16 @@ class MediaStore {
 			int size   = 50,
 			int offset = 0);
 
+		struct NowPlayingEntry {
+			ChildEntry  song;
+			std::string username;
+			std::string client;      // player name, from scrobble's c= param
+			std::string song_path;   // relative path, for the uploads read check
+			int         minutes_ago = 0;
+			};
+
+		std::vector<NowPlayingEntry> get_now_playing();
+
 		struct DirInfo {
 			int         id;
 			std::string name;

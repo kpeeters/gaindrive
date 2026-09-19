@@ -392,6 +392,36 @@ body {
    color: var(--error);
 }
 
+/* Pinned to the bottom of the sidebar: #sidebar is a flex column. */
+#sidebar-users {
+   margin-top: auto;
+   border-top: 1px solid var(--divider);
+   padding-top: 0.5rem;
+}
+
+#sidebar-users-list {
+   list-style: none;
+}
+
+#sidebar-users-list li {
+   padding: 0.3rem 1rem;
+   font-size: 0.8rem;
+}
+
+.su-user {
+   display: block;
+   color: var(--text);
+}
+
+.su-track {
+   display: block;
+   font-size: 0.72rem;
+   color: var(--text-dim);
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+}
+
 /* ── Pane viewport + sliding strip ─────────────────────── */
 
 #pane-viewport {

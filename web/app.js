@@ -6584,6 +6584,10 @@ function playerEnqueue(song) {
 function playerPlay(offset = 0, forceMp3 = false) {
    const song = player.queue[player.index];
    if (!song) return;
+   // Tell the server what is playing, so getNowPlaying can answer.  Re-entry
+   // (seek, mp3 fallback) is harmless: the server just refreshes the row.
+   apiCall('scrobble', {id: song.id, submission: false})
+      .catch(err => console.warn('[now-playing] failed', err));
    // Track whether this attempt is the mp3 fallback. The 'error' listener
    // below uses this to retry exactly once before giving up.
    player.streamFallbackTried = forceMp3;
@@ -6886,6 +6890,65 @@ document.getElementById('sidebar-queue-list').addEventListener('click', e => {
       playerPlay();
       }
    });
+
+// ── Other users ─────────────────────────────────────────────────────────────
+
+// Polls getNowPlaying and lists everyone else at the bottom of the sidebar.
+// The tick also refreshes our own now_playing row while something is actually
+// playing, so a track longer than the server's five-minute freshness window
+// does not drop off other users' lists mid-play.
+let usersPollTimer = null;
+
+async function pollNowPlaying() {
+   const song    = player.queue[player.index];
+   const playing = castDeviceId !== null ? castPlayerState === 'PLAYING'
+                                         : !player.media.paused;
+   if (song && playing)
+      apiCall('scrobble', {id: song.id, submission: false})
+         .catch(err => console.warn('[now-playing] failed', err));
+
+   let sr;
+   try {
+      sr = await apiCall('getNowPlaying');
+   } catch {
+      return;   // transient blip; leave the list as it was
+   }
+   const me      = creds.load().user;
+   const entries = (sr.nowPlaying?.entry ?? []).filter(e => e.username !== me);
+
+   const section  = document.getElementById('sidebar-users');
+   const list     = document.getElementById('sidebar-users-list');
+   section.hidden = entries.length === 0;
+   list.innerHTML = '';
+   entries.forEach(e => {
+      const li   = document.createElement('li');
+      const user = document.createElement('span');
+      user.className   = 'su-user';
+      user.textContent = e.username;
+      const track = document.createElement('span');
+      track.className   = 'su-track';
+      track.textContent = e.title;
+      track.title       = e.artist ? `${e.artist} - ${e.title}` : e.title;
+      li.appendChild(user);
+      li.appendChild(track);
+      list.appendChild(li);
+      });
+}
+
+function usersPollStart() {
+   clearInterval(usersPollTimer);
+   usersPollTimer = setInterval(pollNowPlaying, 30000);
+   pollNowPlaying();
+}
+
+// Hides and empties the section too, so a re-login as a different user does
+// not flash the previous user's list.
+function usersPollStop() {
+   clearInterval(usersPollTimer);
+   usersPollTimer = null;
+   document.getElementById('sidebar-users').hidden = true;
+   document.getElementById('sidebar-users-list').innerHTML = '';
+}
 
 // Click cover art in the player bar to navigate to the album's track listing.
 document.getElementById('player-cover').addEventListener('click', () => {
@@ -9655,6 +9718,8 @@ async function showShell() {
    } catch {}
    document.getElementById('player-cast').hidden = !currentUser?.castRole;
 
+   usersPollStart();
+
    // Two separate questions, asked in this order: the account decides whether
    // the button exists, the network decides whether it can be pressed.
    await refreshLocalNetwork();
@@ -9741,6 +9806,7 @@ async function showShell() {
 
 function showLogin() {
    console.log('[shell] showing login screen');
+   usersPollStop();
    document.getElementById('app-shell').hidden = true;
    // Attached before the screen is shown, mirroring showShell().  Safe when the
    // form was never detached: the boot path below reaches here without ever

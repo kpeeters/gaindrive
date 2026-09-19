@@ -2936,11 +2936,6 @@ asked for. A `POST` matches no route at all and gets a bare 404 with no body,
 which behind a reverse proxy configured to serve a single-page client on 404
 arrives as 200 and a page of HTML.
 
-**Browsing, lists and similarity.**
-
-* `getNowPlaying`. `scrobble` records a now-playing event and nothing reads it
-  back.
-
 **Retrieval and annotation.**
 
 * `getLyrics`, and `getLyricsBySongId` of the OpenSubsonic `songLyrics`
