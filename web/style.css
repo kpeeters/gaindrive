@@ -2120,10 +2120,6 @@ input.chapter-time.bad { border-color: #e06c6c; }
    transform: scale(0.92);
 }
 
-@starting-style {
-   #cover-lightbox:not(.hidden) #cover-lightbox-img { transform: scale(0.92); }
-}
-
 .carousel-btn {
    position: absolute;
    top: 50%;
@@ -2494,17 +2490,14 @@ input.chapter-time.bad { border-color: #e06c6c; }
    font-size: 0.85rem;
    color: var(--text);
    opacity: 1;
-   transition: opacity 0.18s ease, display 0.18s allow-discrete;
+   visibility: visible;
+   transition: opacity 0.18s ease, visibility 0.18s;
 }
 
 #eq-panel.hidden {
-   display: none;
+   visibility: hidden;
    opacity: 0;
    pointer-events: none;
-}
-
-@starting-style {
-   #eq-panel:not(.hidden) { opacity: 0; }
 }
 
 #eq-head {
@@ -2662,21 +2655,20 @@ input.chapter-time.bad { border-color: #e06c6c; }
    justify-content: center;
    z-index: 100;
    opacity: 1;
-   /* display transitions discretely: it stays flex until the close fade
-      ends.  A browser without allow-discrete drops the whole declaration
-      and dialogs snap open and closed as before. */
-   transition: opacity 0.18s ease, display 0.18s allow-discrete;
+   visibility: visible;
+   /* Hidden via visibility, not display: display cannot transition without
+      allow-discrete, which not every browser accepts, and dropping it made
+      dialogs close instantly.  The visibility transition applies "hidden"
+      only once the opacity fade has finished; it flips to visible at once
+      on open, so both directions animate everywhere. */
+   transition: opacity 0.18s ease, visibility 0.18s;
 }
 
 .modal.hidden {
-   display: none;
+   visibility: hidden;
    opacity: 0;
-   /* Still flex while the close fade runs; do not swallow clicks. */
+   /* Still rendered while the close fade runs; do not swallow clicks. */
    pointer-events: none;
-}
-
-@starting-style {
-   .modal:not(.hidden) { opacity: 0; }
 }
 
 .modal-box {
@@ -2694,10 +2686,6 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 .modal.hidden .modal-box {
    transform: scale(0.95);
-}
-
-@starting-style {
-   .modal:not(.hidden) .modal-box { transform: scale(0.95); }
 }
 
 @media (prefers-reduced-motion: reduce) {
