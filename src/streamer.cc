@@ -720,6 +720,11 @@ std::vector<std::string> Streamer::video_ffmpeg_argv(
 				vf += ",scale=" + size.substr(0, x) + ":" + size.substr(x + 1)
 				    + ":force_original_aspect_ratio=decrease";
 			}
+		// x264 inherits the decoded pixel format, so a 10-bit or 4:4:4 source
+		// becomes High 10 / High 4:4:4 output (avc1.6E0028 and friends), which
+		// no phone and no browser hardware path decodes.  8-bit 4:2:0 is the
+		// one shape every client plays.
+		vf += ",format=yuv420p";
 		a.push_back("-vf");
 		a.push_back(vf);
 		if (max_bitrate > 0) {
