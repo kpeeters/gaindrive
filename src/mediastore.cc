@@ -2646,6 +2646,18 @@ static std::string tmdb_query_key(const std::string& title, int year, bool tv)
 	return title + "|" + std::to_string(year) + "|" + (tv ? "tv" : "movie");
 	}
 
+// A parsed title that is nothing but an article. Asking TMDB about it could
+// only ever match by accident: the query returns the most popular films
+// called almost anything, and no year narrows "A" down to one film. Real
+// one-letter titles ("M", 1931) are not articles and are still asked about.
+static bool bare_article_title(const std::string& title)
+	{
+	std::string t;
+	for (unsigned char c : title)
+		if (std::isalnum(c)) t += static_cast<char>(std::tolower(c));
+	return t.empty() || t == "a" || t == "an" || t == "the";
+	}
+
 // One lookup: consults the cache, asks TMDB only when it has to, and records
 // the outcome either way. Returns the row to act on, matched or not.
 static MediaStore::VideoMetaRow tmdb_lookup(
@@ -2673,8 +2685,12 @@ static MediaStore::VideoMetaRow tmdb_lookup(
 	row.media_type = tv ? "tv" : "movie";
 
 	std::optional<TmdbMatch> m;
-	if (explicit_id > 0) m = tmdb.by_id(explicit_id, tv);
-	else                 m = tmdb.search(title, year, tv);
+	// A bare-article title goes unasked and lands in the unmatched branch
+	// below, whose log line names the title.
+	if (explicit_id > 0)
+		m = tmdb.by_id(explicit_id, tv);
+	else if (!bare_article_title(title))
+		m = tmdb.search(title, year, tv);
 
 	if (m) {
 		row.status      = "matched";

@@ -174,6 +174,25 @@ CASES = {
     "Un.Film.FRENCH.DVDRip":
         {"title": "Un Film"},
 
+    # --- edition words that are title words ------------------------------
+    # "complete" is a weak stop word: followed by a real word it is title
+    # text. This is the file that matched the wrong film outright: cut to
+    # "A", the TMDB year branch accepted "A Desert" (2025) on the year alone.
+    "A_Complete_Unknown_2024":
+        {"title": "A Complete Unknown", "year": "2024"},
+    "A.Complete.Unknown.2024.1080p.BluRay.x264-GRP":
+        {"title": "A Complete Unknown", "year": "2024"},
+    # ...but in the company of junk it still cuts.
+    "Breaking.Bad.COMPLETE.720p":
+        {"title": "Breaking Bad"},
+    # A strong stop word whose cut would keep only an article has cut into
+    # the title; the junk further right anchors the real cut.
+    "The.Final.Countdown.1980.1080p.BluRay.x264-GRP":
+        {"title": "The Final Countdown", "year": "1980"},
+    # A real one-letter title is not an article and keeps working.
+    "M.1931.720p.BluRay":
+        {"title": "M", "year": "1931"},
+
     # --- a bracketed year marks where the title ends ---------------------
     # "Title (Year)" is a human convention, so what precedes the bracket is
     # the title verbatim — the only rule that can save a title-*final*

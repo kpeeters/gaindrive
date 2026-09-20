@@ -72,6 +72,11 @@ static httplib::SSLClient& client_for(
 // first — "Zulu" (1964) sits behind "Zulu" (2013).
 static constexpr int MAX_CANDIDATES = 10;
 
+// Containment only counts when the shorter folded title is at least this
+// long. Below that, containment is coincidence: "a" is inside almost every
+// title there is.
+static constexpr size_t MIN_CONTAIN_FOLD = 5;
+
 // Titles compared for equality with case, spacing and punctuation removed, so
 // "wall e" matches TMDB's "WALL·E".
 //
@@ -226,15 +231,38 @@ static std::optional<TmdbMatch> pick_impl(const std::string& results_json,
 	const auto& results = j["results"];
 	int n = std::min(static_cast<int>(results.size()), MAX_CANDIDATES);
 
+	std::string want = fold(title);
+
 	if (year > 0) {
 		// A year within one is a match. The gap is normal — TMDB records the
 		// release date, and a filename usually carries the production year.
+		//
+		// The year alone is not enough: a parse that mangled the title still
+		// carries a plausible year, and the first popular film from around it
+		// used to win on that alone (title "A", year 2024, took the poster of
+		// "A Desert"). The title must agree too. Exact folded equality goes
+		// first, so the right film beats one that merely contains it.
 		for (int i = 0; i < n; ++i) {
 			TmdbMatch m = match_from(results[i], tv);
-			if (m.year > 0 && std::abs(m.year - year) <= 1) return m;
+			if (m.year > 0 && std::abs(m.year - year) <= 1
+			    && fold(m.title) == want) return m;
 			}
-		std::cout << stamp() << "tmdb: no year match for \"" << title << "\" ("
-		          << year << ") in " << n << " result(s)" << std::endl;
+		// Then containment, which is what accepts a dropped article or a
+		// dropped subtitle ("Intouchables" against "The Intouchables"). Only
+		// when the shorter side is substantial: the year check alone is no
+		// defence against "a" being inside almost everything.
+		for (int i = 0; i < n; ++i) {
+			TmdbMatch m = match_from(results[i], tv);
+			if (m.year <= 0 || std::abs(m.year - year) > 1) continue;
+			std::string have = fold(m.title);
+			const std::string& small = want.size() < have.size() ? want : have;
+			const std::string& large = want.size() < have.size() ? have : want;
+			if (small.size() >= MIN_CONTAIN_FOLD
+			    && large.find(small) != std::string::npos) return m;
+			}
+		std::cout << stamp() << "tmdb: no title and year match for \"" << title
+		          << "\" (" << year << ") in " << n << " result(s)"
+		          << std::endl;
 		return std::nullopt;
 		}
 
@@ -242,7 +270,6 @@ static std::optional<TmdbMatch> pick_impl(const std::string& results_json,
 	// the bar is an exact one. Anything looser confidently attaches the wrong
 	// plot and poster to a vaguely named file, and nothing in the UI would
 	// signal that it is wrong — which is worse than leaving it bare.
-	std::string want = fold(title);
 	for (int i = 0; i < n; ++i) {
 		TmdbMatch m = match_from(results[i], tv);
 		if (fold(m.title) == want) return m;

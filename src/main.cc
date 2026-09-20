@@ -551,6 +551,22 @@ static int run_tmdb_test(const std::string& title, int year, bool tv,
 	return 0;
 	}
 
+// --tmdb-pick-test: the matching rule against a canned search response on
+// stdin, with no network and no key. tmdb_pick() is split off Tmdb exactly
+// so this seam exists; a wrong poster comes from this rule and nowhere else.
+static int run_tmdb_pick_test(const std::string& title, int year, bool tv)
+	{
+	std::string body((std::istreambuf_iterator<char>(std::cin)),
+	                  std::istreambuf_iterator<char>());
+	auto m = tmdb_pick(body, title, year, tv);
+	if (!m) {
+		std::cout << "(no match)\n";
+		return 0;
+		}
+	std::cout << m->title << '\t' << m->year << '\t' << m->id << '\n';
+	return 0;
+	}
+
 // --url-fetch-test: which handler claims a URL, and exactly what would be run
 // for it. A dry run — nothing is fetched and nothing is written.
 //
@@ -689,6 +705,7 @@ int main(int argc, char* argv[])
 		("tmdb-year",     "Year for --tmdb-test", cxxopts::value<int>()->default_value("0"))
 		("tmdb-key",      "API key for --tmdb-test (default: the stored setting)", cxxopts::value<std::string>())
 		("tmdb-tv",       "Search series rather than films for --tmdb-test")
+		("tmdb-pick-test","Pick from a TMDB search response on stdin and exit; honours --tmdb-year and --tmdb-tv", cxxopts::value<std::string>())
 		("url-fetch-test","Show which handler claims one URL and what would be run, then exit", cxxopts::value<std::string>())
 		("no-scan",    "Skip startup filesystem scan")
 		("debug",      "Print all API responses to stdout")
@@ -728,6 +745,11 @@ int main(int argc, char* argv[])
 	// config and no network, since the response body arrives on stdin.
 	if (args.count("artist-pick-test"))
 		return run_artist_pick_test(args["artist-pick-test"].as<std::string>());
+
+	if (args.count("tmdb-pick-test"))
+		return run_tmdb_pick_test(args["tmdb-pick-test"].as<std::string>(),
+		                           args["tmdb-year"].as<int>(),
+		                           args.count("tmdb-tv") > 0);
 
 	// Also before any database or root: asking one device whether it is there
 	// needs neither, and this is the check that says whether an address put in

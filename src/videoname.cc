@@ -49,7 +49,11 @@ static const std::set<std::string> STOP_WORDS = {
 // "Amelie 2001 FRENCH 1080p" (a language tag).  Edition words ("extended",
 // "final") stay strong deliberately: weakening them regresses
 // "Movie.2012.EXTENDED.CUT.1080p", since "cut" is not in the table.
+// "complete" is the exception among them: it is a common title adjective
+// ("A Complete Unknown"), and its release-name use is always followed by
+// junk or nothing, so demanding that company costs no real release name.
 static const std::set<std::string> WEAK_STOP_WORDS = {
+	"complete",
 	"multi", "dual", "dubbed", "subbed", "subs", "sub", "eng", "english",
 	"nl", "dutch", "ger", "german", "fre", "french", "spa", "spanish",
 	"ita", "italian", "nordic", "retail",
@@ -132,6 +136,14 @@ static bool is_weak_stop_word(const std::string& token)
 	return WEAK_STOP_WORDS.count(stop_key(token)) != 0;
 	}
 
+// "A", "An", "The". A stop-word cut that would leave nothing but these has
+// cut into the title, the same way a cut at position zero has.
+static bool is_article(const std::string& token)
+	{
+	std::string t = stop_key(token);
+	return t == "a" || t == "an" || t == "the";
+	}
+
 static bool is_year_token(const std::string& token, int& out)
 	{
 	static const std::regex year(R"(^(19|20)\d{2}$)");
@@ -211,6 +223,13 @@ static std::string clean_run(const std::string& text, int& year)
 		if (!is_stop_word(tokens[i])) continue;
 		if (is_weak_stop_word(tokens[i])
 		    && i + 1 < tokens.size() && !is_stop_word(tokens[i + 1]))
+			continue;
+		// A cut that keeps only articles is a cut into the title: no film is
+		// called "The", the stop word is title text ("The Final Countdown",
+		// where "final" is in the table). Keep looking; junk further right
+		// may still anchor a cut.
+		if (i > 0 && std::all_of(tokens.begin(), tokens.begin() + i,
+		                          is_article))
 			continue;
 		cut = i; break;
 		}
