@@ -5242,6 +5242,11 @@ MediaStore::artists_needing_art(int64_t retry_none_before)
 		"SELECT f.id, f.name, f.path FROM folders f"
 		" WHERE f.parent_id IN (SELECT id FROM folders WHERE parent_id IS NULL"
 		"                        AND COALESCE(content_type, 'artists') = 'artists')"
+		// A loose file in the root is its own album, not an artist; without
+		// this it would be queued under its own filename. See the same term
+		// in get_artist_dirs().
+		"   AND NOT EXISTS (SELECT 1 FROM albums own"
+		"                    WHERE own.folder_id = f.id)"
 		"   AND NOT EXISTS (SELECT 1 FROM artist_art a"
 		"                    WHERE a.folder_path = f.path"
 		"                      AND (a.status = 'ok'"
@@ -5278,6 +5283,9 @@ std::vector<MediaStore::LookupTarget> MediaStore::artists_needing_bio()
 		"SELECT f.id, f.name, f.path FROM folders f"
 		" WHERE f.parent_id IN (SELECT id FROM folders WHERE parent_id IS NULL"
 		"                        AND COALESCE(content_type, 'artists') = 'artists')"
+		// As in artists_needing_art(): a loose file-album is not an artist.
+		"   AND NOT EXISTS (SELECT 1 FROM albums own"
+		"                    WHERE own.folder_id = f.id)"
 		"   AND NOT EXISTS (SELECT 1 FROM artist_info_cache c"
 		"                    WHERE c.folder_id = f.id AND c.biography <> '')";
 	sql += not_uploads("f.path");
@@ -7312,6 +7320,12 @@ bool MediaStore::is_category_folder(int folder_id)
 	q.bind(1, folder_id);
 	if (!q.executeStep()) return false;
 	return q.getColumn(0).getString() == "categories";
+	}
+
+bool MediaStore::in_categories_root(const std::string& rel_path) const
+	{
+	const RootRec* r = root_for_rel(rel_path);
+	return r && r->cfg.type == "categories";
 	}
 
 // Brings the folders table's root rows into line with the configuration:

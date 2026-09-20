@@ -206,6 +206,11 @@ class MediaStore {
 		// bug was a MusicBrainz query for a thing called "Movies".
 		bool is_category_folder(int folder_id);
 
+		// True when the path's root is a "categories" root. The album-level
+		// twin of is_category_folder(), which only answers about level-1
+		// rows: a film's album sits a level below one.
+		bool in_categories_root(const std::string& rel_path) const;
+
 		// Returns empty string if folder_id not found.
 		std::string get_folder_name(int folder_id);
 		// Returns the stored-form folder path, or "" if not found.

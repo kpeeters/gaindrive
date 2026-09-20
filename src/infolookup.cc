@@ -724,7 +724,13 @@ void GainDrive::handle_artist_info(const httplib::Request& req,
 	// pushed onto the resolver queue to have MusicBrainz asked about "Film".
 	// Nothing is resolving and nothing ever will be, so say so: a client that
 	// polled on `resolving` would poll for ever.
-	if (!store_.is_category_folder(id)) {
+	//
+	// Nor is an album a performer, and is_category_folder() cannot say so: a
+	// loose film is its own album at depth 2, where that test answers false,
+	// and a folder-browsing client that hands this endpoint the file's own id
+	// would have MusicBrainz asked about "Meeting Gorbatchev 2018". The same
+	// guard getCoverArt's portrait branch carries.
+	if (!store_.is_category_folder(id) && !store_.folder_is_album(id)) {
 		if (auto cached = store_.get_cached_artist_info(id))
 			info = *cached;
 
@@ -1288,19 +1294,19 @@ void GainDrive::handle_album_info(const httplib::Request& req,
 	// describes the previous answer until the worker replaces it, so without
 	// it a refresh would report itself finished before it had started.
 	std::string path      = store_.get_folder_path(id);
-	const bool  resolving = force || !cached || lookup_pending(path);
+	bool        resolving = force || !cached || lookup_pending(path);
+
+	// A film's notes come from TMDB, never from here: an album under a
+	// categories root has its section for an artist, so the release-group
+	// search can only find nothing or find the wrong record, and either
+	// answer is cached for ever. Skipping the ask is strictly better than
+	// caching the miss, and it stops every film without a TMDB match from
+	// spending the shared MusicBrainz pace budget once per library.
+	if (resolving && store_.in_categories_root(path)) resolving = false;
 
 	if (resolving) {
 		// Front of the queue: what somebody is looking at beats a pass over
 		// the whole library. Already queued or in flight is a no-op.
-		//
-		// No is_category_folder() test, unlike the artist endpoint: that
-		// function answers about a *level-1* folder, and a film's album sits a
-		// level below one. So a film with no TMDB match does cost one
-		// release-group search, which finds nothing — an album under a
-		// categories root has its section for an artist, so the AND in the
-		// query cannot match. It is then cached empty and never asked again,
-		// which is exactly what the inline version did.
 		lookup_request_front(LookupKind::Album, id, path, title);
 		std::cout << stamp() << "getAlbumInfo [" << title << "] "
 		          << (force ? "re-queued (force)" : "queued for the resolver")
