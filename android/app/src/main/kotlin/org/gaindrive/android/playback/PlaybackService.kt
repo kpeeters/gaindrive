@@ -90,6 +90,9 @@ class PlaybackService : MediaLibraryService() {
 	lateinit var watchdog: PlaybackWatchdog
 
 	@Inject
+	lateinit var equalizer: EqualizerController
+
+	@Inject
 	lateinit var local: LocalLibrary
 
 	@Inject
@@ -151,6 +154,9 @@ class PlaybackService : MediaLibraryService() {
 		// Only the local player can stall on a stream — the Chromecast fetches
 		// its own, and nothing here would see it.
 		watchdog.registerPlayer(player)
+		// Likewise local-only: the effect lives on this player's audio
+		// session, and a receiver's equalizer is the receiver's business.
+		equalizer.registerPlayer(player)
 
 		val callback = LibraryCallback()
 		libraryCallback = callback
@@ -393,6 +399,7 @@ class PlaybackService : MediaLibraryService() {
 		castPlayer = null
 		videoSurface.registerPlayer(null)
 		watchdog.registerPlayer(null)
+		equalizer.registerPlayer(null)
 		localPlayer?.release()
 		localPlayer = null
 		scope.cancel()

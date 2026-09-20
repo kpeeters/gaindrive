@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Pause
@@ -56,6 +57,7 @@ fun NowPlayingSheet(
 	onJumpTo: (Int) -> Unit,
 	onCast: () -> Unit,
 	onWiiM: () -> Unit,
+	onEqualizer: () -> Unit,
 	onInfo: () -> Unit,
 	onRemoveFromQueue: (Int) -> Unit,
 	onWatch: () -> Unit,
@@ -210,6 +212,20 @@ fun NowPlayingSheet(
 								contentDescription = "Track info",
 								tint = MaterialTheme.colorScheme.onSurfaceVariant,
 							)
+						}
+						// Only while playing locally, and in the slot the
+						// speaker-controls button takes while casting to a
+						// WiiM: the middle of this row always means controls
+						// for the device making the sound, and at most one of
+						// the two can apply. A plain Chromecast gets neither.
+						if (!casting) {
+							IconButton(onClick = onEqualizer) {
+								Icon(
+									Icons.Default.GraphicEq,
+									contentDescription = "Equalizer",
+									tint = MaterialTheme.colorScheme.onSurfaceVariant,
+								)
+							}
 						}
 						// Only while casting to a WiiM, since everything behind
 						// it is that device's own HTTP API. Placed before the

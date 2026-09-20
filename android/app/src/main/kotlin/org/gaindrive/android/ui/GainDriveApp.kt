@@ -61,6 +61,7 @@ import org.gaindrive.android.ui.fetch.FetchStrip
 import org.gaindrive.android.ui.fetch.FetchUrlScreen
 import org.gaindrive.android.ui.player.CastDeviceSheet
 import org.gaindrive.android.ui.player.CastViewModel
+import org.gaindrive.android.ui.player.EqualizerSheet
 import org.gaindrive.android.ui.player.MiniPlayer
 import org.gaindrive.android.ui.player.NowPlayingSheet
 import org.gaindrive.android.ui.player.PlayerViewModel
@@ -165,6 +166,7 @@ fun GainDriveApp(
 	val castDevice by castViewModel.connected.collectAsStateWithLifecycle()
 	var castPickerOpen by remember { mutableStateOf(false) }
 	var wiimControlsOpen by remember { mutableStateOf(false) }
+	var equalizerOpen by remember { mutableStateOf(false) }
 
 	val backStackEntry by navController.currentBackStackEntryAsState()
 	val destination = backStackEntry?.destination
@@ -567,6 +569,7 @@ fun GainDriveApp(
 			onJumpTo = playerViewModel::jumpTo,
 			onCast = { castPickerOpen = true },
 			onWiiM = { wiimControlsOpen = true },
+			onEqualizer = { equalizerOpen = true },
 			onInfo = { trackInfoOpen = true },
 			onRemoveFromQueue = playerViewModel::removeFromQueue,
 			onWatch = {
@@ -587,6 +590,13 @@ fun GainDriveApp(
 	// stopped from the picker while this is open.
 	if (wiimControlsOpen && castDevice?.kind == CastDeviceKind.WIIM) {
 		WiiMControlsSheet(onDismiss = { wiimControlsOpen = false })
+	}
+
+	// Outside it for the same reason, and gated on not casting: the faders
+	// shape the phone's own audio path, and casting can start underneath the
+	// open sheet, at which point they would be shaping sound nobody hears.
+	if (equalizerOpen && castDevice == null) {
+		EqualizerSheet(onDismiss = { equalizerOpen = false })
 	}
 
 	// Outside it for the same reason, and gated on there being a track: the
