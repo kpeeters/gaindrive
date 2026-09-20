@@ -152,7 +152,7 @@ class WiiMClient @Inject constructor(
 	private fun execute(client: OkHttpClient, request: Request): String {
 		client.newCall(request).execute().use { response ->
 			if (!response.isSuccessful) throw Refused("The device answered HTTP ${response.code}.")
-			return response.body?.string() ?: ""
+			return response.body.string()
 		}
 	}
 

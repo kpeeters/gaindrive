@@ -96,7 +96,7 @@ class TranscodePrewarmer @Inject constructor(
 					.url(target.url)
 					.header("Range", "bytes=0-0")
 					.build()
-				httpClient.newCall(request).execute().use { it.body?.bytes() }
+				httpClient.newCall(request).execute().use { it.body.bytes() }
 			}
 		} catch (e: CancellationException) {
 			attempted.remove(claim)

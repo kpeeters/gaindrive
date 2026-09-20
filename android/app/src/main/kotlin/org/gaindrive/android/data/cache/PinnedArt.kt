@@ -194,7 +194,7 @@ class ArtDownloader @Inject constructor(
 			// decodes and that `has` would then treat as done.
 			val type = response.header("Content-Type").orEmpty()
 			if (!type.startsWith("image/")) return
-			val bytes = response.body?.bytes() ?: return
+			val bytes = response.body.bytes()
 			if (bytes.size > MAX_BYTES) return
 			store.write(name, bytes)
 		}

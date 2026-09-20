@@ -10,7 +10,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
-import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.material3.adaptive.layout.AnimatedPane
 import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffold
 import androidx.compose.material3.adaptive.layout.PaneAdaptedValue
@@ -125,7 +125,7 @@ private fun Pane.adaptedValue(): PaneAdaptedValue =
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
 fun paneDirective(panes: Int, paneAreaWidth: Dp): PaneScaffoldDirective =
-	calculatePaneScaffoldDirective(currentWindowAdaptiveInfo())
+	calculatePaneScaffoldDirective(currentWindowAdaptiveInfoV2())
 		.copy(
 			maxHorizontalPartitions = panes,
 			horizontalPartitionSpacerSize = 0.dp,

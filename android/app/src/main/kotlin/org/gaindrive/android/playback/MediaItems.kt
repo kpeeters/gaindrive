@@ -2,7 +2,6 @@ package org.gaindrive.android.playback
 
 import android.net.Uri
 import android.os.Bundle
-import androidx.core.os.bundleOf
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import org.gaindrive.android.data.model.AudioQuality
@@ -115,17 +114,17 @@ fun Song.toMediaItem(artworkUrl: String?): MediaItem {
 		.setIsPlayable(true)
 		.apply { artworkUrl?.let { setArtworkUri(Uri.parse(it)) } }
 		.setExtras(
-			bundleOf(
-				KEY_ALBUM_REF to albumRef?.encode(),
-				KEY_CONTENT_TYPE to contentType,
-				KEY_TRANSCODED_TYPE to transcodedContentType,
-				KEY_IS_VIDEO to isVideo,
-				KEY_NATIVE_SEEK to nativeSeek,
+			Bundle().apply {
+				putString(KEY_ALBUM_REF, albumRef?.encode())
+				putString(KEY_CONTENT_TYPE, contentType)
+				putString(KEY_TRANSCODED_TYPE, transcodedContentType)
+				putBoolean(KEY_IS_VIDEO, isVideo)
+				putBoolean(KEY_NATIVE_SEEK, nativeSeek)
 				// 0 rather than null: a Bundle float has no absent value, and
 				// the reader treats anything non-positive as "not known yet",
 				// which is also what an unprobed video gives.
-				KEY_ASPECT to (aspectRatio ?: 0f),
-			)
+				putFloat(KEY_ASPECT, aspectRatio ?: 0f)
+			}
 		)
 		.build()
 

@@ -23,7 +23,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
-import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
@@ -83,7 +83,7 @@ import org.gaindrive.android.ui.tabs.SettingsTab
  * [trackLink] and [onTrackLinkHandled] are the same contract for a
  * `gaindrive://` track link.
  */
-// currentWindowAdaptiveInfo() is the only experimental thing here;
+// currentWindowAdaptiveInfoV2() is the only experimental thing here;
 // NavigationSuiteScaffold itself is stable at material3 1.3.1.
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
@@ -290,7 +290,7 @@ fun GainDriveApp(
 	// navigation drawer" rule is untouched by any of this: the rule rejects the
 	// drawer, and the suite is never asked for one.
 	val layoutType = if (showNavAndPlayer) {
-		NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
+		NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfoV2())
 	} else {
 		NavigationSuiteType.None
 	}

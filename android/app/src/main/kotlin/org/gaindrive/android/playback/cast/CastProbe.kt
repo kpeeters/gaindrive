@@ -150,7 +150,7 @@ class CastProbe @Inject constructor(
 		return runCatching {
 			client.newCall(request).execute().use { response ->
 				if (!response.isSuccessful) return@use null
-				val body = response.body?.string() ?: return@use null
+				val body = response.body.string()
 				val parsed = json.parseToJsonElement(body) as? JsonObject ?: return@use null
 				parsed.string("name")
 			}

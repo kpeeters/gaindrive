@@ -401,7 +401,7 @@ class CastBridge @Inject constructor(
 			}
 			output.write("Connection: close\r\n\r\n".toByteArray())
 			if (request.method != "HEAD") {
-				response.body?.byteStream()?.copyTo(output, COPY_BUFFER)
+				response.body.byteStream().copyTo(output, COPY_BUFFER)
 			}
 			output.flush()
 		}
@@ -497,6 +497,11 @@ class CastBridge @Inject constructor(
 		if (wifiLock != null) return
 		val manager = context.applicationContext
 			.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
+		// HIGH_PERF although deprecated: the suggested replacement,
+		// WIFI_MODE_FULL_LOW_LATENCY, deactivates when the screen goes off,
+		// which is the one moment this lock exists for. On API 34+ HIGH_PERF
+		// degrades to WIFI_MODE_FULL by itself; older devices still honour it.
+		@Suppress("DEPRECATION")
 		wifiLock = runCatching {
 			manager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "gaindrive:cast")
 				.apply { acquire() }
