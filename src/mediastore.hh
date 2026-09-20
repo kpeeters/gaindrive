@@ -100,6 +100,12 @@ class MediaStore {
 		// root itself; if present, falls back to a full scan().
 		void scan_dirs(const std::set<std::string>& dirs);
 
+		// Re-read exactly one album, directory or loose file, and recommit
+		// it. moveAlbum's consistency pass: everything a rename invalidates
+		// is per-album, and a scan_dirs() of the parent rescans every
+		// sibling, TMDB pacing included.
+		void refresh_album(const std::string& rel);
+
 		// What getScanStatus reports. `count` is songs processed, and it keeps
 		// the finished total once a scan ends — which is what the spec's
 		// "scanning: false, count: N" is for.
@@ -238,6 +244,10 @@ class MediaStore {
 			std::string mime;
 			std::string bytes;
 			int64_t     file_modified = 0;
+			// When the blob was (re)written. The serving stamp, because
+			// file_modified is the media's mtime and does not move when a
+			// poster is replaced.
+			int64_t     created_at    = 0;
 			};
 
 		// path → file_modified for every cached image under a stored-form

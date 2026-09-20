@@ -486,25 +486,38 @@ const HERO_BOX = 320;
 // again. Without one the portraits would appear on the next navigation, which
 // is a strange thing to ask a user to discover.
 const portraitPending = {
-   items: new Map(),          // id -> {img, size, tries}
+   // Keyed on the img element, not the id: the grid tile, the hero and a
+   // search result can all show the same album at once, and each needs its
+   // own retry.
+   items: new Map(),          // img -> {id, size, tries}
    timer: null,
 
    add(id, img, size) {
-      this.items.set(String(id), {img, size, tries: 0});
+      this.items.set(img, {id: String(id), size, tries: 0});
       if (this.timer === null)
          this.timer = setInterval(() => this.tick(), 15000);
       },
 
+   // Called from the img's load listener: a cover that has arrived must not
+   // keep cache-busting itself for the rest of the ten minutes.
+   done(img) {
+      this.items.delete(img);
+      if (this.items.size === 0 && this.timer !== null) {
+         clearInterval(this.timer);
+         this.timer = null;
+         }
+      },
+
    tick() {
-      for (const [id, e] of this.items) {
+      for (const [img, e] of this.items) {
          // A pane that has been navigated away from and reused drops its
          // nodes. Nobody can see this image, so stop asking about it.
-         if (!document.contains(e.img)) { this.items.delete(id); continue; }
+         if (!document.contains(img)) { this.items.delete(img); continue; }
          // Ten minutes is long enough for any backlog a person is waiting on.
-         if (++e.tries > 40) { this.items.delete(id); continue; }
+         if (++e.tries > 40) { this.items.delete(img); continue; }
          // The cache-buster is not superstition: assigning the same string to
          // img.src is a no-op in every browser.
-         e.img.src = apiUrl('getCoverArt', {id, size: e.size, _v: Date.now()});
+         img.src = apiUrl('getCoverArt', {id: e.id, size: e.size, _v: Date.now()});
          }
       if (this.items.size === 0) {
          clearInterval(this.timer);
@@ -513,13 +526,25 @@ const portraitPending = {
       },
    };
 
+// Album covers share the poller: during a scan the poster, or the thumbnail
+// just invalidated by one, can be seconds away, and a failed <img> never
+// re-asks on its own -- a whole grid of them is what "no cover art anywhere"
+// looks like. The load listener stops the retries the moment one lands.
+function retryCoverOnError(img, id, size) {
+   img.addEventListener('load',  () => portraitPending.done(img));
+   img.addEventListener('error', () => portraitPending.add(id, img, size));
+   }
+
 // An <img> pointing at our own getCoverArt, which retries itself while the
 // server is still working out who this artist is.
 function artistPortrait(id, size, className, alt = '') {
    const img = document.createElement('img');
    img.className = className;
    img.alt = alt;
-   img.addEventListener('load',  () => img.classList.remove('is-missing'));
+   img.addEventListener('load',  () => {
+      img.classList.remove('is-missing');
+      portraitPending.done(img);
+      });
    img.addEventListener('error', () => {
       img.classList.add('is-missing');
       portraitPending.add(id, img, size);
@@ -5362,6 +5387,7 @@ function makeAlbumCover(album) {
       img.width  = ALBUM_COVER_BOX;
       img.height = ALBUM_COVER_BOX;
       img.alt    = '';
+      retryCoverOnError(img, album.coverArt, coverPx(ALBUM_COVER_BOX));
       img.src = apiUrl('getCoverArt',
                        {id: album.coverArt, size: coverPx(ALBUM_COVER_BOX)});
       return img;
@@ -7580,6 +7606,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
       heroImg.className = 'album-hero';
       heroImg.dataset.albumId   = album.id;
       heroImg.dataset.coverSize = coverPx(HERO_BOX);
+      retryCoverOnError(heroImg, album.coverArt, coverPx(HERO_BOX));
       heroImg.src = apiUrl('getCoverArt',
                            {id: album.coverArt, size: coverPx(HERO_BOX)});
       heroImg.alt = albumTitle;

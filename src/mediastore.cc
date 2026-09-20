@@ -3439,6 +3439,130 @@ void MediaStore::commit_album(const AlbumReadData& adat, int parent_folder_id,
 		}
 	}
 
+// One album directory's Phase 1 read: the DVD short-circuit, the disc
+// subdirectories and the direct files. Factored out of scan_artist_dir()'s
+// walk so refresh_album() reads an album exactly the way a full rescan
+// would; two spellings of this would disagree about what the album holds.
+static AlbumReadData read_album_dir(const fs::path& album_dir)
+	{
+	// A candidate disc subdirectory, with the media it was found to hold.
+	struct DiscDir { fs::path path; std::vector<fs::path> files; };
+
+	AlbumReadData adat;
+	adat.path  = album_dir.string();
+	adat.title = album_dir.filename().string();
+	std::replace(adat.title.begin(), adat.title.end(), '_', ' ');
+	adat.cover = find_cover(album_dir);
+
+	// A DVD rip is one track per titleset and nothing else.  This has
+	// to short-circuit the normal enumeration below: otherwise
+	// VIDEO_TS becomes a disc subdirectory and every menu VOB becomes
+	// a track of its own.
+	if (auto video_ts = dvd_video_ts_dir(album_dir);
+	        !video_ts.empty()) {
+		for (auto& [ts, vobs] : dvd_titlesets(video_ts)) {
+			int64_t total = 0;
+			int64_t newest = 0;
+			std::error_code fec;
+			for (auto& v : vobs) {
+				total  += static_cast<int64_t>(fs::file_size(v, fec));
+				newest  = std::max(newest, mtime_of(v));
+				}
+			// A few seconds of DVD video is reliably an FBI warning or
+			// a studio logo, never something worth a row.
+			if (total < 10 * 1024 * 1024) continue;
+
+			SongReadData sdat;
+			sdat.path        = vobs.front().string();
+			sdat.folder_path = adat.path;   // the album, not VIDEO_TS
+			sdat.mtime       = newest;
+			sdat.file_size   = total;
+			sdat.codec       = "vob";
+			sdat.is_video    = true;
+			sdat.disc_number = 0;
+			// DVD titles carry no names, only numbers.
+			sdat.title       = "Title " + std::to_string(ts);
+			sdat.track_nr    = ts;
+			// This branch builds its own SongReadData and never calls
+			// read_song_file(), so anything Phase 1 learns there has
+			// to be repeated here -- the gap sdat.cover already has.
+			// A concert DVD is exactly the thing someone marks up.
+			auto side = read_sidecar_chapters(vobs.front());
+			sdat.chapters         = std::move(side.chapters);
+			sdat.sidecar_present  = side.present;
+			sdat.sidecar_readable = side.readable;
+			for (auto& v : vobs) sdat.parts.push_back(v.string());
+			adat.songs.push_back(std::move(sdat));
+			}
+		return adat;
+		}
+
+	// A subdirectory is a disc only if it holds media of its own.  An
+	// album's Artwork or Scans folder is not disc 1, and counting it
+	// pushes every real disc up by one -- which is what a client is told
+	// the disc number is, so the headings and the sort order both go
+	// wrong.  The media is collected here rather than in the numbering
+	// loop below so each directory is still enumerated exactly once.
+	std::vector<DiscDir>  disc_dirs;
+	std::vector<fs::path> direct_files;
+	// is_hidden_name() on both levels: this is where a zip unpacked on
+	// macOS puts its "._Track01.mp3" forks, one beside every track, and
+	// is_media_file() cannot tell them apart from the tracks.  A
+	// __MACOSX subfolder needs no test of its own -- with its forks
+	// filtered it holds no media, and the empty() test below drops it.
+	for (auto& e : fs::directory_iterator(album_dir)) {
+		if (is_hidden_name(e.path())) continue;
+		if (e.is_regular_file()) {
+			if (is_media_file(e.path())) direct_files.push_back(e.path());
+			continue;
+			}
+		if (!e.is_directory()) continue;
+		DiscDir dd;
+		dd.path = e.path();
+		for (auto& te : fs::directory_iterator(e.path())) {
+			if (te.is_regular_file() && is_media_file(te.path())
+			        && !is_hidden_name(te.path()))
+				dd.files.push_back(te.path());
+			}
+		if (!dd.files.empty()) disc_dirs.push_back(std::move(dd));
+		}
+	std::sort(disc_dirs.begin(), disc_dirs.end(),
+		[](const DiscDir& a, const DiscDir& b) {
+			return a.path.filename() < b.path.filename();
+			});
+
+	for (auto& dd : disc_dirs)
+		adat.disc_paths.push_back(dd.path.string());
+
+	int disc_count = (int)disc_dirs.size();
+	for (int dn = 0; dn < disc_count; ++dn) {
+		for (auto& f : disc_dirs[dn].files)
+			adat.songs.push_back(read_song_file(
+				f, disc_dirs[dn].path.string(), dn + 1));
+		}
+	for (auto& p : direct_files)
+		adat.songs.push_back(read_song_file(p, adat.path, 0));
+
+	return adat;
+	}
+
+// One loose media file's Phase 1 read: an album of its own, holding that
+// one track. Shared by scan_artist_dir(), scan_root_files() and
+// refresh_album().
+static AlbumReadData read_loose_file(const fs::path& file)
+	{
+	AlbumReadData adat;
+	adat.loose = true;
+	adat.path  = file.string();
+	adat.title = loose_album_title(file);
+	// The file's own sidecar image, never find_cover(): a folder cover
+	// belongs to the whole section, and find_cover()'s directory_iterator
+	// is uncaught, so handing it a file would throw out of Phase 1.
+	adat.cover = find_song_cover(file);
+	adat.songs.push_back(read_song_file(file, adat.path, 0));
+	return adat;
+	}
+
 void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	{
 	// SQL `path LIKE ?` queries below compare against the stored-form column,
@@ -3462,111 +3586,12 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 
 	// ---- Phase 1: walk disk (no lock) ----
 	std::vector<AlbumReadData> albums;
-	// A candidate disc subdirectory, with the media it was found to hold.
-	struct DiscDir { fs::path path; std::vector<fs::path> files; };
 	if (exists) {
 		PhaseTimer pt(scan_times_.walk);
 		for (auto& album_entry : fs::directory_iterator(artist_path)) {
 			if (!album_entry.is_directory()) continue;
 			if (is_hidden_name(album_entry.path())) continue;
-
-			AlbumReadData adat;
-			adat.path  = album_entry.path().string();
-			adat.title = album_entry.path().filename().string();
-			std::replace(adat.title.begin(), adat.title.end(), '_', ' ');
-			adat.cover = find_cover(album_entry.path());
-
-			// A DVD rip is one track per titleset and nothing else.  This has
-			// to short-circuit the normal enumeration below: otherwise
-			// VIDEO_TS becomes a disc subdirectory and every menu VOB becomes
-			// a track of its own.
-			if (auto video_ts = dvd_video_ts_dir(album_entry.path());
-			        !video_ts.empty()) {
-				for (auto& [ts, vobs] : dvd_titlesets(video_ts)) {
-					int64_t total = 0;
-					int64_t newest = 0;
-					std::error_code fec;
-					for (auto& v : vobs) {
-						total  += static_cast<int64_t>(fs::file_size(v, fec));
-						newest  = std::max(newest, mtime_of(v));
-						}
-					// A few seconds of DVD video is reliably an FBI warning or
-					// a studio logo, never something worth a row.
-					if (total < 10 * 1024 * 1024) continue;
-
-					SongReadData sdat;
-					sdat.path        = vobs.front().string();
-					sdat.folder_path = adat.path;   // the album, not VIDEO_TS
-					sdat.mtime       = newest;
-					sdat.file_size   = total;
-					sdat.codec       = "vob";
-					sdat.is_video    = true;
-					sdat.disc_number = 0;
-					// DVD titles carry no names, only numbers.
-					sdat.title       = "Title " + std::to_string(ts);
-					sdat.track_nr    = ts;
-					// This branch builds its own SongReadData and never calls
-					// read_song_file(), so anything Phase 1 learns there has
-					// to be repeated here -- the gap sdat.cover already has.
-					// A concert DVD is exactly the thing someone marks up.
-					auto side = read_sidecar_chapters(vobs.front());
-					sdat.chapters         = std::move(side.chapters);
-					sdat.sidecar_present  = side.present;
-					sdat.sidecar_readable = side.readable;
-					for (auto& v : vobs) sdat.parts.push_back(v.string());
-					adat.songs.push_back(std::move(sdat));
-					}
-				albums.push_back(std::move(adat));
-				continue;
-				}
-
-			// A subdirectory is a disc only if it holds media of its own.  An
-			// album's Artwork or Scans folder is not disc 1, and counting it
-			// pushes every real disc up by one -- which is what a client is told
-			// the disc number is, so the headings and the sort order both go
-			// wrong.  The media is collected here rather than in the numbering
-			// loop below so each directory is still enumerated exactly once.
-			std::vector<DiscDir>  disc_dirs;
-			std::vector<fs::path> direct_files;
-			// is_hidden_name() on both levels: this is where a zip unpacked on
-			// macOS puts its "._Track01.mp3" forks, one beside every track, and
-			// is_media_file() cannot tell them apart from the tracks.  A
-			// __MACOSX subfolder needs no test of its own -- with its forks
-			// filtered it holds no media, and the empty() test below drops it.
-			for (auto& e : fs::directory_iterator(album_entry.path())) {
-				if (is_hidden_name(e.path())) continue;
-				if (e.is_regular_file()) {
-					if (is_media_file(e.path())) direct_files.push_back(e.path());
-					continue;
-					}
-				if (!e.is_directory()) continue;
-				DiscDir dd;
-				dd.path = e.path();
-				for (auto& te : fs::directory_iterator(e.path())) {
-					if (te.is_regular_file() && is_media_file(te.path())
-					        && !is_hidden_name(te.path()))
-						dd.files.push_back(te.path());
-					}
-				if (!dd.files.empty()) disc_dirs.push_back(std::move(dd));
-				}
-			std::sort(disc_dirs.begin(), disc_dirs.end(),
-				[](const DiscDir& a, const DiscDir& b) {
-					return a.path.filename() < b.path.filename();
-					});
-
-			for (auto& dd : disc_dirs)
-				adat.disc_paths.push_back(dd.path.string());
-
-			int disc_count = (int)disc_dirs.size();
-			for (int dn = 0; dn < disc_count; ++dn) {
-				for (auto& f : disc_dirs[dn].files)
-					adat.songs.push_back(read_song_file(
-						f, disc_dirs[dn].path.string(), dn + 1));
-				}
-			for (auto& p : direct_files)
-				adat.songs.push_back(read_song_file(p, adat.path, 0));
-
-			albums.push_back(std::move(adat));
+			albums.push_back(read_album_dir(album_entry.path()));
 			}
 
 		// Media files sitting directly in the artist/section folder, with no
@@ -3591,18 +3616,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			if (!e.is_regular_file() || !is_media_file(e.path())) continue;
 			// "._movie.mp4" is an AppleDouble resource fork, not a film.
 			if (is_hidden_name(e.path())) continue;
-
-			AlbumReadData loose;
-			loose.loose = true;
-			loose.path  = e.path().string();
-			loose.title = loose_album_title(e.path());
-			// The file's own sidecar image, never find_cover(): a folder cover
-			// belongs to the whole section, and find_cover()'s
-			// directory_iterator is uncaught, so handing it a file would throw
-			// out of Phase 1.
-			loose.cover = find_song_cover(e.path());
-			loose.songs.push_back(read_song_file(e.path(), loose.path, 0));
-			albums.push_back(std::move(loose));
+			albums.push_back(read_loose_file(e.path()));
 			}
 		}
 
@@ -4120,13 +4134,7 @@ void MediaStore::scan_root_files(const RootRec& root)
 	for (auto& e : fs::directory_iterator(root.cfg.path, ec)) {
 		if (!e.is_regular_file() || !is_media_file(e.path())) continue;
 		if (is_hidden_name(e.path())) continue;
-		AlbumReadData adat;
-		adat.loose = true;
-		adat.path  = e.path().string();
-		adat.title = loose_album_title(e.path());
-		adat.cover = find_song_cover(e.path());
-		adat.songs.push_back(read_song_file(e.path(), adat.path, 0));
-		albums.push_back(std::move(adat));
+		albums.push_back(read_loose_file(e.path()));
 		}
 	}
 	if (ec) return;   // scan() has already reported the unreadable root
@@ -4411,6 +4419,115 @@ void MediaStore::scan_root_files(const RootRec& root)
 		std::cout << stamp() << "Scan: prune of loose files in " << root.cfg.name
 		          << " failed, left as it was: " << e.what() << std::endl;
 		}
+	}
+
+// moveAlbum's consistency pass. relocate_prefix() has already moved every
+// row, so what a rename still invalidates is per-album: the parsed title,
+// the TMDB match (the rename changed tmdb_query_key), the poster, and the
+// album_artists link the relocate dropped, which commit_album() restores.
+// A scan_dirs() of the parent here rescanned every sibling too, TMDB
+// pacing included, inside the moveAlbum request.
+//
+// Deliberately absent: the last_scanned reset, the artist-prefix prune and
+// apply_artist_mbid(). A prune keyed on the parent after walking a single
+// album would delete every sibling, and commit_album()'s own mark and
+// sweep already prunes inside the album. The artist id is untouched by a
+// rename of one of its albums.
+void MediaStore::refresh_album(const std::string& rel)
+	{
+	ScanGuard guard(*this);
+	tmdb_.set_api_key(get_setting("tmdb_key"));
+
+	const RootRec* root = root_for_rel(rel);
+	fs::path abs(join_root(rel));
+	if (!root || abs.empty()) {
+		std::cout << stamp() << "Refresh: ignoring path outside every root: "
+		          << rel << std::endl;
+		return;
+		}
+	// Same contract as scan_dirs(): a held batch rescans itself on release.
+	// Two levels up because rel is the album; for a library album that is
+	// the root or above, one stat answering no.
+	if (batch_held(abs.parent_path().parent_path())) return;
+
+	const bool is_dir = fs::is_directory(abs);
+	if (!is_dir && !(fs::is_regular_file(abs) && is_media_file(abs))) {
+		std::cout << stamp() << "Refresh: nothing to read at " << rel
+		          << std::endl;
+		return;
+		}
+	std::cout << stamp() << "Refresh: " << rel << std::endl;
+
+	// ---- Phase 1: one album ----
+	std::vector<AlbumReadData> albums;
+	albums.push_back(is_dir ? read_album_dir(abs) : read_loose_file(abs));
+
+	// ---- Phase 2: identify changed files, as scan_artist_dir() does ----
+	std::unordered_map<std::string, KnownSong> known;
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT path, file_modified, artist, is_video, audio_codec"
+		" FROM songs WHERE path = ?1 OR path LIKE ?1 || '/%'");
+	q.bind(1, rel);
+	while (q.executeStep())
+		known[join_root(q.getColumn(0).getString())] =
+			{ q.getColumn(1).getInt64(),
+			  q.getColumn(2).isNull() && q.getColumn(3).getInt() == 0,
+			  q.getColumn(4).isNull() && q.getColumn(3).getInt() == 0 };
+	}
+	for (auto& sdat : albums.front().songs) {
+		auto it = known.find(sdat.path);
+		sdat.changed = (it == known.end() || it->second.mtime != sdat.mtime);
+		sdat.artist_missing = (it != known.end() && it->second.artist_null);
+		sdat.audio_form_missing =
+			(it != known.end() && it->second.audio_form_null);
+		}
+
+	// A superset, as in scan_root_files(): one spelling of the predicate.
+	const std::set<std::string> chapter_keys =
+		load_chapter_keys(strip_root(abs.parent_path().string()) + "/%");
+
+	// ---- Phase 3: metadata reads. A rename moves no mtime, so this
+	// normally opens nothing; serial because it is one album at most. ----
+	{
+	SongReadStats stats{ scan_times_.files,      scan_times_.videos,
+	                      scan_times_.meta_audio, scan_times_.meta_video };
+	for (auto& sdat : albums.front().songs)
+		if (sdat.changed || sdat.artist_missing || sdat.audio_form_missing)
+			read_one_song(*this, sdat, stats);
+	}
+
+	renumber_unseasoned(albums.front().songs);
+
+	// ---- Phases 3b and 3c, serial, in the order the art_on path keeps ----
+	if (video_art_ && video_art_->enabled())
+		make_video_art(*this, *video_art_, albums, rel + "%");
+	if (tmdb_.configured() && root->cfg.type == "categories")
+		lookup_video_meta(*this, tmdb_, albums);
+
+	// ---- Phase 4: parent rows, then the one album ----
+	int parent_folder_id, artist_id;
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Transaction txn(db_music_);
+	int root_id = upsert_folder(fs::path(root->cfg.path), -1);
+	if (fs::path(rel).parent_path() == fs::path(root->cfg.name)) {
+		// A loose file in the root itself: the root row plays the artist,
+		// exactly as scan_root_files() sets it up.
+		parent_folder_id = root_id;
+		artist_id        = upsert_artist(root->cfg.name);
+		}
+	else {
+		// Parented straight to the root whatever the depth, which is also
+		// the uploads invariant: the <user>/<uuid> levels never get rows.
+		parent_folder_id = upsert_folder(abs.parent_path(), root_id);
+		artist_id        = upsert_artist(abs.parent_path().filename().string());
+		}
+	txn.commit();
+	}
+	commit_album(albums.front(), parent_folder_id, artist_id, chapter_keys);
+	std::cout << stamp() << "  " << abs.filename().string() << std::endl;
 	}
 
 // ---- upsert helpers ---------------------------------------------------
@@ -4944,7 +5061,8 @@ MediaStore::get_video_art(const std::string& rel_path)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement q(db_music_,
-		"SELECT mime, image, file_modified FROM video_art WHERE path = ?");
+		"SELECT mime, image, file_modified, created_at"
+		" FROM video_art WHERE path = ?");
 	q.bind(1, rel_path);
 	if (!q.executeStep()) return std::nullopt;
 	auto blob = q.getColumn(1);
@@ -4957,6 +5075,7 @@ MediaStore::get_video_art(const std::string& rel_path)
 	r.bytes.assign(static_cast<const char*>(blob.getBlob()),
 	               static_cast<size_t>(blob.getBytes()));
 	r.file_modified = q.getColumn(2).getInt64();
+	r.created_at    = q.getColumn(3).getInt64();
 	return r;
 	}
 

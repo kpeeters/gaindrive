@@ -812,12 +812,20 @@ void GainDrive::routes_browse()
 			if (is_video_ext(ext_of(rel_path))) {
 				auto art = store_.get_video_art(rel_path);
 				if (!art) {
+					// no-store, as the artist branch above: the poster may be
+					// seconds away (a rename refresh, a scan in flight), and a
+					// heuristically cached 404 pins the blank tile until a
+					// browser restart.
+					res.set_header("Cache-Control", "no-store");
 					res.status = 404;
 					return;
 					}
 				src.kind  = CoverArtCache::Source::Kind::Blob;
 				src.key   = rel_path;
-				src.stamp = art->file_modified;
+				// created_at, not file_modified: the media's mtime does not
+				// move when a poster is replaced, so a same-length
+				// replacement would 304 its way to the stale image.
+				src.stamp = art->created_at;
 				orig_len  = static_cast<int64_t>(art->bytes.size());
 				orig_mime = art->mime.empty() ? "image/jpeg" : art->mime;
 				src.bytes = std::move(art->bytes);

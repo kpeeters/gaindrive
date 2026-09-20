@@ -961,48 +961,30 @@ void GainDrive::routes_edit()
 
 		// Synchronously, so the response is never ahead of the database. After
 		// the relocate above this is a consistency pass rather than a rebuild:
-		// the rows already carry the new paths, so the walk re-stamps them and
-		// prunes nothing. It is also what re-establishes the album's artist
-		// link, which relocate_prefix dropped — so a contended database here
-		// would leave the album with no artist until the next scan, and that is
-		// worth a log line rather than a 500 on a move that has already
-		// happened.
+		// the rows already carry the new paths. It is also what re-establishes
+		// the album's artist link, which relocate_prefix dropped; a contended
+		// database here would leave the album with no artist until the next
+		// scan, and that is worth a log line rather than a 500 on a move that
+		// has already happened.
 		//
-		// DESTINATION FIRST, and it must be two calls rather than one set:
-		// scan_dirs takes a std::set, so a single call would scan them in
-		// whatever order the names happen to sort in. The relocate moved the
-		// album folder's *path* out from under the old parent but left its
-		// parent_id pointing at the old parent's row, and folders.parent_id has
-		// no ON DELETE CASCADE. Tearing down the source first therefore hits
-		// FOREIGN KEY constraint failed, which rolls the whole prune back and
-		// leaves the emptied artist behind — with no error anywhere, because
-		// the prune catches. Scanning the destination first re-points
-		// parent_id, and the source then deletes cleanly.
+		// Only the moved album is refreshed. Its siblings were untouched by
+		// the relocate, and the scan_dirs() of the parent this replaced
+		// rescanned every one of them, TMDB pacing included, inside this
+		// request: minutes on a large category. refresh_album() costs at most
+		// two paced TMDB requests, so staying synchronous keeps the guarantee
+		// above at no real latency.
 		//
-		// **A level-1 file-album is rescanned by its own path, not its
-		// parent's.** Its parent is the bare root name, which scan_dirs()
-		// deliberately escalates to a full scan() — minutes of work to settle
-		// a rename. Handing it the file path instead lands in the file-album
-		// branch of scan_dirs(), which calls scan_root_files() for that root
-		// and nothing else. Both ends are checked separately because a move
-		// can be level-1 at one end only.
-		//
-		// The ordering rule is unaffected: for such a move both ends are in
-		// the same root and neither re-parents anything, so there is no
-		// dangling parent_id for the source pass to trip over.
-		auto components = [](const std::string& rel) {
-			int n = 0;
-			for (const auto& c : fs::path(rel)) { (void)c; ++n; }
-			return n;
-			};
-		const std::string scan_dest = (components(new_rel) < 3) ? new_rel
-		                                                        : new_parent_dir;
-		const std::string scan_src  = (parts.size() < 3) ? old_rel
-		                                                 : old_parent_dir;
+		// DESTINATION FIRST, still: the relocate moved the album folder's
+		// *path* out from under the old parent but left its parent_id
+		// pointing at the old parent's row, and folders.parent_id has no
+		// ON DELETE CASCADE. refresh_album() re-points it; only then can the
+		// emptied source directory's row be pruned. That prune is the only
+		// job left for a source pass, so it runs at all only when the rename
+		// emptied and removed the old parent.
 		try {
-			store_.scan_dirs({scan_dest});
-			if (scan_src != scan_dest)
-				store_.scan_dirs({scan_src});
+			store_.refresh_album(new_rel);
+			if (old_parent_gone)
+				store_.scan_dirs({old_parent_dir});
 			}
 		catch (const std::exception& e) {
 			std::cout << stamp() << "Move: rescan failed: " << e.what() << std::endl;
