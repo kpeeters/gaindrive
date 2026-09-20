@@ -462,6 +462,7 @@ private fun Song.toEntity(server: ServerId) = SongEntity(
 	coverArtId = coverArt?.id,
 	starredAt = starredAt,
 	isVideo = isVideo,
+	transcodedContentType = transcodedContentType,
 	season = season,
 )
 
@@ -486,13 +487,13 @@ private fun SongEntity.toDomain(): Song {
 		starredAt = starredAt,
 		isVideo = isVideo,
 		season = season,
-		// Left at its default, along with transcodedContentType: the mirror
-		// stores neither, and false is the answer that still plays — HLS works
-		// for every video, it is merely more work for the server than a file
-		// that could have been ranged. It no longer costs the cast route
-		// either, now that an HLS film casts to a receiver that can reach the
-		// server; it only costs the cheaper tier. Both facts want the network
-		// anyway.
+		transcodedContentType = transcodedContentType,
+		// Left at its default: the mirror does not store it, and false is the
+		// answer that still plays. HLS works for every video, it is merely
+		// more work for the server than a file that could have been ranged.
+		// It no longer costs the cast route either, now that an HLS film
+		// casts to a receiver that can reach the server; it only costs the
+		// cheaper tier. Building a stream URL wants the network anyway.
 		nativeSeek = false,
 	)
 }

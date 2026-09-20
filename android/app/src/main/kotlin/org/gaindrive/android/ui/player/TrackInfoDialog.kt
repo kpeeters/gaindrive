@@ -216,8 +216,12 @@ private fun sentLabel(
 ): String? = when {
 	current.isVideo && current.nativeSeek ->
 		// Untouched either because this container goes to every client as it
-		// stands, or because we told the server we demux this one ourselves.
-		if (song?.transcodedContentType == null ||
+		// stands (the mirrored transcodedContentType is null), or because we
+		// told the server we demux this one ourselves. A track the mirror
+		// never stored is unknown, not "As stored": null omits the row, the
+		// dialog's rule for every other missing field.
+		if (song == null) null
+		else if (song.transcodedContentType == null ||
 			(!casting && demuxedLocally(song.suffix))
 		) "As stored" else "Remuxed to MP4"
 	current.isVideo -> "HLS, re-encoded as it plays"

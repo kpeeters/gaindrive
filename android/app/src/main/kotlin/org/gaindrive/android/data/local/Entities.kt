@@ -88,6 +88,14 @@ data class SongEntity(
 	 */
 	val isVideo: Boolean = false,
 	/**
+	 * Mirrored because the track info dialog reads the mirror, and its "Sent"
+	 * row tells "As stored" from "Remuxed to MP4" by this field alone. Null is
+	 * itself the claim "served untouched", so like albumArtistName above it
+	 * has no default: forgetting the assignment must not compile into a mirror
+	 * that calls every remux a passthrough.
+	 */
+	val transcodedContentType: String?,
+	/**
 	 * Mirrored so an album read offline heads its groups the same way an online
 	 * one does. Unlike `nativeSeek` this costs nothing to keep — the ordering
 	 * already relies on `discNumber` being stored, and this is the one bit that
