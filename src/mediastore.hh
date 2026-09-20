@@ -254,16 +254,24 @@ class MediaStore {
 		// on every scan just in case it had some. With it, a song is touched
 		// only when it has markers now or had them before.
 		std::set<std::string> load_chapter_keys(const std::string& path_prefix);
+		// poster_path is which TMDB image the bytes are; empty for the local
+		// tiers, where the file itself is the identity.
 		void store_video_art(const std::string& rel_path, int64_t mtime,
 		                     const std::string& mime, const std::string& source,
-		                     const std::string& bytes);
+		                     const std::string& bytes,
+		                     const std::string& poster_path = "");
 		std::optional<VideoArtRow> get_video_art(const std::string& rel_path);
 
-		// Which tier produced the stored image, or empty when there is none.
-		// Separate from get_video_art() because the scan asks this of every
-		// video and only wants to know whether a better tier already won —
-		// get_video_art() would read the whole JPEG out of the row to answer.
-		std::string get_video_art_source(const std::string& rel_path);
+		// Which tier produced the stored image and, for a poster, which TMDB
+		// image it is; source is empty when there is no row. Separate from
+		// get_video_art() because the scan asks this of every video and only
+		// wants to know whether the right image already won; get_video_art()
+		// would read the whole JPEG out of the row to answer.
+		struct VideoArtState {
+			std::string source;
+			std::string poster_path;
+			};
+		VideoArtState get_video_art_state(const std::string& rel_path);
 
 		// ---- Scaled cover art (see imagescale.hh) ----
 		//
@@ -320,7 +328,7 @@ class MediaStore {
 		std::optional<ArtistArtRow> get_artist_art(const std::string& folder_path);
 
 		// Status without the image. Separate for the reason
-		// get_video_art_source() is: the serving path asks "is there one yet"
+		// get_video_art_state() is: the serving path asks "is there one yet"
 		// far more often than it needs the bytes, and reading a JPEG out of a
 		// row to answer that would undo the point of the table.
 		struct ArtistArtState {

@@ -317,6 +317,11 @@ CREATE TABLE video_art (
     -- which is what happens to every 'frame' row on
     -- startup when the frame tier is off
     source        TEXT NOT NULL,
+    -- which TMDB image the blob is; '' for the
+    -- local tiers. A corrected match compares this,
+    -- so the wrong film's poster gets replaced
+    -- instead of surviving on its source alone.
+    poster_path   TEXT NOT NULL DEFAULT '',
     image         BLOB NOT NULL,
     created_at    INTEGER NOT NULL
                     DEFAULT (strftime('%s','now'))

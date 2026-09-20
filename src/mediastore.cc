@@ -961,6 +961,9 @@ void MediaStore::create_schema()
 			file_modified INTEGER NOT NULL,
 			mime          TEXT NOT NULL,
 			source        TEXT NOT NULL,      -- embedded | frame | tmdb
+			-- which TMDB image the blob is; '' for the local tiers. A corrected
+			-- match compares this, so the wrong film's poster gets replaced.
+			poster_path   TEXT NOT NULL DEFAULT '',
 			image         BLOB NOT NULL,
 			created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 		);
@@ -1335,6 +1338,8 @@ void MediaStore::create_schema()
 	try { db_music_.exec("ALTER TABLE client.users ADD COLUMN cast_allowed INTEGER DEFAULT 0"); }
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE songs ADD COLUMN is_video INTEGER DEFAULT 0"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE video_art ADD COLUMN poster_path TEXT NOT NULL DEFAULT ''"); }
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE songs ADD COLUMN width INTEGER DEFAULT 0"); }
 	catch (const SQLite::Exception&) {}
@@ -2429,13 +2434,17 @@ static void read_one_song(const MediaStore& store, SongReadData& sdat,
 // named "Album (2017)" would otherwise lose its year, and that year is not
 // junk there.
 //
-// Guarded the same way song titles are, against the folder name as stored:
-// upsert_album() is INSERT OR IGNORE, so an existing album's title is never
-// rewritten by the scan today, and a title somebody edited must keep that
-// property.
+// Unguarded, like the songs.title write for an unchanged video and like the
+// plot: the scanner owns a video album's title. A person's correction lives
+// in client.song_meta and is re-asserted by apply_song_meta_overrides(), so
+// nothing a user typed is ever in albums.title to protect. The guard that
+// used to sit here compared against the on-disk name, which only ever let
+// the *first* write per album through: a corrected TMDB match, or a match
+// arriving after a keyless first scan, could never replace what an earlier
+// scan wrote.
 // A TMDB match, when there is one, supersedes the filename parse — that is the
 // whole point of asking, and it is what turns "THE.THIRD.MAN.1949" into "The
-// Third Man". The guard is unchanged either way.
+// Third Man".
 static void apply_album_video_name(SQLite::Database& db, int album_id,
                                     const std::string& stored_title,
                                     const std::vector<SongReadData>& songs,
@@ -2456,14 +2465,16 @@ static void apply_album_video_name(SQLite::Database& db, int album_id,
 		}
 	if (title == stored_title) return;
 
+	// A known year replaces a stale one: the wrong match writes a wrong year
+	// too. The WHERE tail is not a guard, only a no-op filter, so a rescan
+	// does not dirty the row with the values it already has.
 	SQLite::Statement upd(db,
-		"UPDATE albums SET title = ?,"
-		"                  year = CASE WHEN year = 0 THEN ? ELSE year END"
-		" WHERE id = ? AND title = ?");
+		"UPDATE albums SET title = ?1,"
+		"                  year = CASE WHEN ?2 = 0 THEN year ELSE ?2 END"
+		" WHERE id = ?3 AND (title <> ?1 OR (?2 <> 0 AND year <> ?2))");
 	upd.bind(1, title);
 	upd.bind(2, year);
 	upd.bind(3, album_id);
-	upd.bind(4, stored_title);
 	upd.exec();
 	}
 
@@ -2725,21 +2736,26 @@ static MediaStore::VideoMetaRow tmdb_lookup(
 // is what lets getCoverArt stay untouched: it resolves cover_path -> video_art
 // exactly as it does for an embedded cover.
 //
-// The skip is on the *source*, not on there being a row at all. A row left by
-// a local tier has to be replaced — the poster outranks it, which is the whole
-// point — and store_video_art() is INSERT OR REPLACE, so it is. Only a poster
-// already fetched for this file stops the download, which is what makes a
-// rescan cost no traffic.
+// The skip is on the poster's *identity*, not on the tier alone. A row left
+// by a local tier has to be replaced, since the poster outranks it, and so
+// does a poster fetched for a different film: a corrected match must not
+// stay stuck behind the very image it corrects. Only the same TMDB image
+// already stored stops the download, which is what keeps a rescan free of
+// traffic. Rows written before poster_path existed hold '' there and are
+// refetched once.
 static bool tmdb_fetch_poster(MediaStore& store, const Tmdb& tmdb,
                                const MediaStore::VideoMetaRow& row,
                                const std::string& rel_song, int64_t mtime)
 	{
 	if (row.poster_path.empty()) return false;
-	if (store.get_video_art_source(rel_song) == "tmdb") return true;
+	MediaStore::VideoArtState have = store.get_video_art_state(rel_song);
+	if (have.source == "tmdb" && have.poster_path == row.poster_path)
+		return true;
 
 	auto bytes = tmdb.poster(row.poster_path);
 	if (!bytes) return false;
-	store.store_video_art(rel_song, mtime, "image/jpeg", "tmdb", *bytes);
+	store.store_video_art(rel_song, mtime, "image/jpeg", "tmdb", *bytes,
+	                      row.poster_path);
 	std::cout << stamp() << "tmdb: poster " << bytes->size() << " bytes for "
 	          << rel_song << std::endl;
 	return true;
@@ -4882,18 +4898,20 @@ std::set<std::string> MediaStore::load_chapter_keys(
 void MediaStore::store_video_art(const std::string& rel_path, int64_t mtime,
                                   const std::string& mime,
                                   const std::string& source,
-                                  const std::string& bytes)
+                                  const std::string& bytes,
+                                  const std::string& poster_path)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement ins(db_music_,
 		"INSERT OR REPLACE INTO video_art"
-		" (path, file_modified, mime, source, image)"
-		" VALUES (?, ?, ?, ?, ?)");
+		" (path, file_modified, mime, source, image, poster_path)"
+		" VALUES (?, ?, ?, ?, ?, ?)");
 	ins.bind(1, rel_path);
 	ins.bind(2, mtime);
 	ins.bind(3, mime);
 	ins.bind(4, source);
 	ins.bind(5, bytes.data(), static_cast<int>(bytes.size()));
+	ins.bind(6, poster_path);
 	ins.exec();
 
 	// Anything scaled from the old blob is now wrong. A better tier winning —
@@ -4907,14 +4925,18 @@ void MediaStore::store_video_art(const std::string& rel_path, int64_t mtime,
 	del.exec();
 	}
 
-std::string MediaStore::get_video_art_source(const std::string& rel_path)
+MediaStore::VideoArtState
+MediaStore::get_video_art_state(const std::string& rel_path)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement q(db_music_,
-		"SELECT source FROM video_art WHERE path = ?");
+		"SELECT source, poster_path FROM video_art WHERE path = ?");
 	q.bind(1, rel_path);
-	if (!q.executeStep()) return "";
-	return q.getColumn(0).getString();
+	VideoArtState st;
+	if (!q.executeStep()) return st;
+	st.source      = q.getColumn(0).getString();
+	st.poster_path = q.getColumn(1).getString();
+	return st;
 	}
 
 std::optional<MediaStore::VideoArtRow>
