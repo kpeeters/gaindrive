@@ -734,6 +734,16 @@ function showLightbox(src) {
    document.getElementById('cover-lightbox').classList.remove('hidden');
    }
 
+function closeLightbox() {
+   document.getElementById('cover-lightbox').classList.add('hidden');
+   // Clearing src at once would flash the alt text through the close fade;
+   // wait it out, and keep the image if the lightbox reopened meanwhile.
+   setTimeout(() => {
+      if (document.getElementById('cover-lightbox').classList.contains('hidden'))
+         document.getElementById('cover-lightbox-img').src = '';
+      }, 250);
+   }
+
 // ── Login ───────────────────────────────────────────────────────────────────
 
 async function tryLogin(user, password) {
@@ -7376,11 +7386,7 @@ function setupPlayer() {
       });
 
    document.getElementById('player-cast').addEventListener('click', openCastModal);
-   document.getElementById('cover-lightbox').addEventListener('click', () => {
-      const el = document.getElementById('cover-lightbox');
-      el.classList.add('hidden');
-      document.getElementById('cover-lightbox-img').src = '';
-      });
+   document.getElementById('cover-lightbox').addEventListener('click', closeLightbox);
 
    document.getElementById('cast-close-btn').addEventListener('click', () => {
       document.getElementById('cast-modal').classList.add('hidden');
@@ -9577,17 +9583,15 @@ function keyOpenModal() {
 
 // Dismissing is not always just hiding: three of these arm a callback that must
 // not survive to answer whatever asks next, and the lightbox holds a full-size
-// image.  Two already have a close function, so this dispatches to them rather
-// than restating what they do; a dialog with nothing to clean up is hidden
-// directly.  Escape means No on a confirmation, as its No button does.
+// image.  Three already have a close function, so this dispatches to them
+// rather than restating what they do; a dialog with nothing to clean up is
+// hidden directly.  Escape means No on a confirmation, as its No button does.
 function keyDismissModal(modal) {
    switch (modal.id) {
       case 'cover-art-modal': _closeCoverArtDialog(); return;
       case 'promote-modal':   _closePromoteDialog();  return;
+      case 'cover-lightbox':  closeLightbox();        return;
       case 'confirm-modal':   _confirmYes = null;     break;
-      case 'cover-lightbox':
-         document.getElementById('cover-lightbox-img').src = '';
-         break;
       }
    modal.classList.add('hidden');
 }
