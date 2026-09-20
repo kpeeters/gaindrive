@@ -96,6 +96,17 @@ class TranscodeCache
 		                         const std::vector<std::string>& argv,
 		                         const std::string& out_placeholder);
 
+		// Snapshot for getServerStatus.  used_bytes repeats prune()'s
+		// directory walk with mu_ released: a count that lags a build by one
+		// poll is fine, holding the build lock across filesystem I/O is not.
+		struct Stats
+			{
+			bool    enabled;
+			int     running, bg_running, jobs;
+			int64_t cap_bytes, used_bytes;
+			};
+		Stats stats();
+
 	private:
 		void release(const std::string& key);
 		// Caller holds mu_.  Opens `final` as an Entry with the in-use count

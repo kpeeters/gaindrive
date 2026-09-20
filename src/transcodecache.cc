@@ -365,6 +365,28 @@ void TranscodeCache::release(const std::string& key)
 	cv_.notify_all();
 	}
 
+TranscodeCache::Stats TranscodeCache::stats()
+	{
+	Stats s{};
+	{
+	std::lock_guard<std::mutex> lock(mu_);
+	s.running    = running_;
+	s.bg_running = bg_running_;
+	}
+	// Set once in the constructor, safe to read unlocked.
+	s.enabled   = enabled_;
+	s.jobs      = jobs_;
+	s.cap_bytes = cap_bytes_;
+	if (!s.enabled) return s;
+	std::error_code ec;
+	for (const auto& e : fs::directory_iterator(dir_, ec)) {
+		if (!e.is_regular_file(ec)) continue;
+		int64_t size = static_cast<int64_t>(e.file_size(ec));
+		if (!ec) s.used_bytes += size;
+		}
+	return s;
+	}
+
 void TranscodeCache::prune()
 	{
 	struct Item {

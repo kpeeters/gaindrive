@@ -21,7 +21,11 @@ package org.gaindrive.android.playback
  * decides the transport and whether the file may be cast at all — means the
  * same thing either way.
  *
- * `wmv` is absent because media3 has no ASF extractor. `mpg`/`mpeg` are absent
+ * `wmv` is absent because media3 has no ASF extractor. `avi` is absent even
+ * though media3 ships an `AviExtractor`: it hands MP3 audio to MediaCodec in
+ * raw AVI chunk sizes rather than frame-aligned, so `c2.android.mp3.decoder`
+ * throws `IllegalStateException` mid-file. The server's `-c copy` remux to
+ * MP4 is the version that actually plays. `mpg`/`mpeg` are absent
  * because MPEG-PS essentially always carries MPEG-2, which the server's codec
  * test rejects, so declaring it would change nothing. `vob` is absent and the
  * server refuses it regardless: a DVD titleset is one stream split across
@@ -32,7 +36,7 @@ package org.gaindrive.android.playback
  * `android.util`. Not in `StreamUrls` — that builds URLs and has no business
  * holding a claim about a player.
  */
-internal val MEDIA3_CONTAINERS = setOf("mkv", "mov", "avi")
+internal val MEDIA3_CONTAINERS = setOf("mkv", "mov")
 
 /**
  * Whether the server will hand us [suffix] untouched if we declare it, so the

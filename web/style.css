@@ -392,6 +392,36 @@ body {
    color: var(--error);
 }
 
+/* Pinned to the bottom of the sidebar: #sidebar is a flex column. */
+#sidebar-users {
+   margin-top: auto;
+   border-top: 1px solid var(--divider);
+   padding-top: 0.5rem;
+}
+
+#sidebar-users-list {
+   list-style: none;
+}
+
+#sidebar-users-list li {
+   padding: 0.3rem 1rem;
+   font-size: 0.8rem;
+}
+
+.su-user {
+   display: block;
+   color: var(--text);
+}
+
+.su-track {
+   display: block;
+   font-size: 0.72rem;
+   color: var(--text-dim);
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+}
+
 /* ── Pane viewport + sliding strip ─────────────────────── */
 
 #pane-viewport {
@@ -1988,6 +2018,12 @@ input.chapter-time.bad { border-color: #e06c6c; }
    refresh button keeps the auto, being the first of the pair. */
 .refresh-btn + .edit-link { margin-left: 0; }
 
+/* While editing, Save and Cancel replace the Edit link and need the header
+   width the star and reload button were using; both are inert during an edit
+   anyway, so hide them instead of greying them. */
+.editing-tracks .view-header .album-star-header,
+.editing-tracks .view-header .refresh-btn { display: none; }
+
 /* Album title and artist, editable. They replace the .view-title heading inside
    .view-header, which is a wrapping flex row — flex-basis pushes the artist onto
    its own line on a narrow pane rather than squeezing both to nothing. */
@@ -3388,6 +3424,31 @@ input.chapter-time.bad { border-color: #e06c6c; }
 .settings-cat-chevron {
    flex-shrink: 0;
    color: var(--text-dim);
+   }
+
+/* ── Admin server status ────────────────────────────── */
+
+.status-rows {
+   display: flex;
+   flex-direction: column;
+   gap: 0.6rem;
+   }
+
+.status-line {
+   display: flex;
+   justify-content: space-between;
+   gap: 0.6rem;
+   font-size: 0.9rem;
+   }
+
+.status-value {
+   color: var(--text-dim);
+   text-align: right;
+   }
+
+.status-row progress {
+   width: 100%;
+   height: 6px;
    }
 
 /* ── Admin — users ──────────────────────────────────── */

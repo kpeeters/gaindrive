@@ -52,12 +52,7 @@ inline constexpr std::array<Target, 10> TARGETS = {{
 
 // Looks up by format name or by file extension (they share a namespace here).
 // Empty when the name is unknown.
-inline std::optional<Target> target_for(std::string_view name)
-	{
-	for (const auto& t : TARGETS)
-		if (t.name == name) return t;
-	return std::nullopt;
-	}
+std::optional<Target> target_for(std::string_view name);
 
 // Video source containers.  Deliberately a *separate* table rather than more
 // rows in TARGETS: target_for() is what validates the `format` parameter of
@@ -85,17 +80,9 @@ inline constexpr std::array<VideoTarget, 10> VIDEO_TARGETS = {{
 	{ "vob",  "video/mpeg"       },
 	}};
 
-inline std::optional<VideoTarget> video_target_for(std::string_view ext)
-	{
-	for (const auto& t : VIDEO_TARGETS)
-		if (t.name == ext) return t;
-	return std::nullopt;
-	}
+std::optional<VideoTarget> video_target_for(std::string_view ext);
 
-inline bool is_video_ext(std::string_view ext)
-	{
-	return video_target_for(ext).has_value();
-	}
+bool is_video_ext(std::string_view ext);
 
 // A container a *client* may declare it demuxes for itself — see
 // video_direct_playable_for() below.  Every video container qualifies except
@@ -106,10 +93,7 @@ inline bool is_video_ext(std::string_view ext)
 // the concat: list of the rest.  Served untouched, that is twenty minutes of a
 // two-hour film — and nothing anywhere reports an error, because what goes out
 // is a valid program stream that simply ends.
-inline bool container_declarable(std::string_view ext)
-	{
-	return is_video_ext(ext) && ext != "vob";
-	}
+bool container_declarable(std::string_view ext);
 
 // What an audio file *is*: the container it is muxed in and the codec inside
 // it, both as the scan observed them and as songs.audio_container /
@@ -138,16 +122,7 @@ struct AudioForm
 // What this saves is the whole point of it: the scan fills these rows without
 // opening a single file, so the one-time back-fill pass reads only the
 // containers that genuinely need reading.
-inline AudioForm implied_audio_form(std::string_view ext)
-	{
-	if (ext == "mp3")  return { "mpeg", "mp3"   };
-	if (ext == "flac") return { "flac", "flac"  };
-	if (ext == "opus") return { "ogg",  "opus"  };
-	if (ext == "aac")  return { "adts", "aac"   };
-	if (ext == "wav")  return { "riff", "pcm"   };
-	if (ext == "wma")  return { "asf",  "wma"   };
-	return {};
-	}
+AudioForm implied_audio_form(std::string_view ext);
 
 // Whether the file has to be opened to learn its form.  The complement of
 // implied_audio_form() over the audio containers, and asked by the scan alone
@@ -155,20 +130,12 @@ inline AudioForm implied_audio_form(std::string_view ext)
 //
 // `oga` is here beside `ogg` because both are Ogg: the *extension* is ambiguous
 // twice over, and reading the file is what resolves both at once.
-inline bool audio_form_needs_read(std::string_view ext)
-	{
-	return ext == "m4a" || ext == "ogg" || ext == "oga";
-	}
+bool audio_form_needs_read(std::string_view ext);
 
 // songs.codec holds a lowercased extension for video rows too, so every
 // existing caller of this function keeps working once the video table is
 // consulted as a fallback.  Audio wins on a tie; there is no overlap today.
-inline std::string_view codec_to_mime(std::string_view codec)
-	{
-	if (auto t = target_for(codec))       return t->mime;
-	if (auto v = video_target_for(codec)) return v->mime;
-	return std::string_view("application/octet-stream");
-	}
+std::string_view codec_to_mime(std::string_view codec);
 
 // What a video transcode produces.  Tier 1 (remux) and Tier 2 (re-encode)
 // share the fragmented-MP4 form; HLS segments use MPEG-TS.
@@ -185,21 +152,11 @@ inline constexpr std::string_view VIDEO_TS_MIME  = "video/mp2t";
 // client whether the resulting stream can be seeked natively.  If those two
 // ever disagreed, a client would seek into a stream that has no Range support
 // and the seek would silently do nothing.
-inline bool browser_video_codec(std::string_view c)
-	{
-	return c == "h264" || c == "vp8" || c == "vp9" || c == "av1";
-	}
+bool browser_video_codec(std::string_view c);
 
-inline bool browser_audio_codec(std::string_view c)
-	{
-	return c == "aac" || c == "mp3" || c == "opus" || c == "vorbis"
-	    || c == "flac";
-	}
+bool browser_audio_codec(std::string_view c);
 
-inline bool browser_container(std::string_view ext)
-	{
-	return ext == "mp4" || ext == "m4v" || ext == "webm";
-	}
+bool browser_container(std::string_view ext);
 
 // True when the served stream will carry a Content-Length and answer Range
 // requests, so the client can let the media element seek by itself.
@@ -214,23 +171,13 @@ inline bool browser_container(std::string_view ext)
 // An empty audio codec counts as playable: a silent video is fine, and a file
 // the scanner could not probe at all is better handled by the fallbacks in
 // serve_video() than by pessimising every request.
-inline bool video_seeks_natively(std::string_view video_codec,
-                                 std::string_view audio_codec)
-	{
-	return browser_video_codec(video_codec)
-	    && (audio_codec.empty() || browser_audio_codec(audio_codec));
-	}
+bool video_seeks_natively(std::string_view video_codec,
+                          std::string_view audio_codec);
 
 // WebM is a profile of Matroska, so an .mkv carrying these codecs is a WebM
 // file in all but name and every browser that plays WebM will decode it.
-inline bool webm_codecs(std::string_view video_codec,
-                        std::string_view audio_codec)
-	{
-	return (video_codec == "vp8" || video_codec == "vp9"
-	        || video_codec == "av1")
-	    && (audio_codec.empty() || audio_codec == "vorbis"
-	        || audio_codec == "opus");
-	}
+bool webm_codecs(std::string_view video_codec,
+                 std::string_view audio_codec);
 
 // True when the file can go to a browser untouched.  Two callers must agree on
 // this — serve_video()'s tier choice and the transcoded* fields the API
@@ -240,15 +187,9 @@ inline bool webm_codecs(std::string_view video_codec,
 // output) would otherwise pay a whole-file remux to produce something it
 // already is.  It must be *relabelled* video/webm when served, though —
 // browsers reject video/x-matroska on the MIME alone, whatever the bytes hold.
-inline bool video_direct_playable(std::string_view container,
-                                  std::string_view video_codec,
-                                  std::string_view audio_codec)
-	{
-	if (browser_container(container)
-	        && video_seeks_natively(video_codec, audio_codec))
-		return true;
-	return container == "mkv" && webm_codecs(video_codec, audio_codec);
-	}
+bool video_direct_playable(std::string_view container,
+                           std::string_view video_codec,
+                           std::string_view audio_codec);
 
 // What one particular client declared it can be sent untouched, on that
 // client's own stream.view request.  Empty for everybody else.
@@ -290,16 +231,10 @@ using Playable = std::set<std::string, std::less<>>;
 // container_declarable() is re-checked here rather than trusted from whoever
 // built the set, because the failure a declared vob produces is a film that
 // stops after twenty minutes and says nothing.
-inline bool video_direct_playable_for(std::string_view container,
-                                      std::string_view video_codec,
-                                      std::string_view audio_codec,
-                                      const Playable& client)
-	{
-	if (video_direct_playable(container, video_codec, audio_codec)) return true;
-	if (!container_declarable(container))       return false;
-	if (client.find(container) == client.end()) return false;
-	return video_seeks_natively(video_codec, audio_codec);
-	}
+bool video_direct_playable_for(std::string_view container,
+                               std::string_view video_codec,
+                               std::string_view audio_codec,
+                               const Playable& client);
 
 // The audio twin: whether this client asked to be sent this file as it sits on
 // disk, rather than an encode of it.
@@ -324,14 +259,7 @@ inline bool video_direct_playable_for(std::string_view container,
 //
 // An empty half is a row the scan has not reached yet, and is not a match:
 // "ogg/" and "/vorbis" can never be declared, so there is nothing to equal.
-inline bool audio_declared(const AudioForm& form, const Playable& client)
-	{
-	if (form.container.empty() || form.codec.empty()) return false;
-	std::string token(form.container);
-	token += '/';
-	token += form.codec;
-	return client.find(token) != client.end();
-	}
+bool audio_declared(const AudioForm& form, const Playable& client);
 
 // Which of serve_video()'s three tiers a Chromecast's fetch will land on.
 //
@@ -352,27 +280,11 @@ inline bool audio_declared(const AudioForm& form, const Playable& client)
 // AVI as a re-encode when it is a -c copy.
 enum class CastTier { Direct, Remux, Encode };
 
-inline CastTier cast_tier_for(std::string_view container,
-                              std::string_view video_codec,
-                              std::string_view audio_codec)
-	{
-	// Audio is byte-ranged off disk: no format and no ceiling means
-	// needs_transcode is false and serve() never reaches a transcode at all.
-	// The film-soundtrack case is not this — it puts `format` on the URL, and
-	// so is decided by cast_load_song() rather than by the codec pair.
-	if (!is_video_ext(container)) return CastTier::Direct;
-	if (!video_seeks_natively(video_codec, audio_codec))
-		return CastTier::Encode;
-	return video_direct_playable(container, video_codec, audio_codec)
-	     ? CastTier::Direct : CastTier::Remux;
-	}
+CastTier cast_tier_for(std::string_view container,
+                       std::string_view video_codec,
+                       std::string_view audio_codec);
 
-inline std::string_view cast_tier_name(CastTier t)
-	{
-	return t == CastTier::Direct ? std::string_view("direct")
-	     : t == CastTier::Remux  ? std::string_view("remux")
-	                             : std::string_view("encode");
-	}
+std::string_view cast_tier_name(CastTier t);
 
 // What a Chromecast will actually receive from stream.view, which is not the
 // same thing as what the file is.
@@ -385,17 +297,9 @@ inline std::string_view cast_tier_name(CastTier t)
 // The .mkv relabel is the one case where the bytes go out untouched under a
 // type that is not the container's own, and it is the case transcode_target()
 // does not have to answer because it only reports *that* a transcode happens.
-inline std::string_view cast_mime_for(std::string_view container,
-                                      std::string_view video_codec,
-                                      std::string_view audio_codec)
-	{
-	if (!is_video_ext(container)) return codec_to_mime(container);
-	if (cast_tier_for(container, video_codec, audio_codec) != CastTier::Direct)
-		return VIDEO_MP4_MIME;
-	if (container == "mkv" && webm_codecs(video_codec, audio_codec))
-		return std::string_view("video/webm");
-	return codec_to_mime(container);
-	}
+std::string_view cast_mime_for(std::string_view container,
+                               std::string_view video_codec,
+                               std::string_view audio_codec);
 
 // The format a server-driven cast asks for when the receiver cannot show a
 // picture and the soundtrack cannot be copied out as it stands — see
@@ -447,17 +351,7 @@ inline constexpr const char* CAST_AUDIO_ONLY_FORMAT = "flac";
 // end, `mp3` still writes its Xing/Info header under -c:a copy, and both Ogg
 // forms carry their own granule positions.  So a copied soundtrack is as
 // seekable as an encoded one, which native cast seek needs.
-inline std::optional<Target> audio_copy_target(std::string_view audio_codec)
-	{
-	std::string_view name;
-	if      (audio_codec == "aac")    name = "m4a";
-	else if (audio_codec == "mp3")    name = "mp3";
-	else if (audio_codec == "flac")   name = "flac";
-	else if (audio_codec == "opus")   name = "opus";
-	else if (audio_codec == "vorbis") name = "ogg";
-	else return std::nullopt;
-	return target_for(name);
-	}
+std::optional<Target> audio_copy_target(std::string_view audio_codec);
 
 // True when a request naming a video is really a request for its soundtrack.
 //
@@ -478,14 +372,8 @@ inline std::optional<Target> audio_copy_target(std::string_view audio_codec)
 // has nothing to extract, and `-map 0:a:0` against one makes ffmpeg exit
 // before writing a byte, which reaches the client as a 200 with an empty body
 // — the failure the format validation in stream.view exists to prevent.
-inline bool audio_only_request(bool is_video, std::string_view format,
-                               std::string_view audio_codec)
-	{
-	if (!is_video || audio_codec.empty())  return false;
-	if (format.empty() || format == "raw") return false;
-	auto t = target_for(format);
-	return t && !t->encoder.empty();
-	}
+bool audio_only_request(bool is_video, std::string_view format,
+                        std::string_view audio_codec);
 
 // Which audio format a cast soundtrack is asked for, or empty when the film
 // has nothing to extract — a silent video, or one the scanner could not probe.
@@ -497,10 +385,4 @@ inline bool audio_only_request(bool is_video, std::string_view format,
 //
 // Copy first, encode second.  Everything about that choice is in
 // audio_copy_target() and CAST_AUDIO_ONLY_FORMAT above.
-inline std::string cast_soundtrack_format(std::string_view audio_codec)
-	{
-	auto t = audio_copy_target(audio_codec);
-	std::string fmt = t ? std::string(t->name)
-	                    : std::string(CAST_AUDIO_ONLY_FORMAT);
-	return audio_only_request(true, fmt, audio_codec) ? fmt : std::string();
-	}
+std::string cast_soundtrack_format(std::string_view audio_codec);

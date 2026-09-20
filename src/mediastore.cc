@@ -41,6 +41,46 @@
 #include "untrusted.hh"
 #include "videoname.hh"
 
+// A dot-prefixed name is never library content; see mediastore.hh.
+bool is_hidden_name(const std::filesystem::path& p)
+	{
+	auto name = p.filename().string();
+	return !name.empty() && name.front() == '.';
+	}
+
+std::filesystem::path batch_marker(const std::filesystem::path& batch)
+	{
+	return batch.parent_path() / (batch.filename().string() + ".inflight");
+	}
+
+bool batch_held(const std::filesystem::path& batch)
+	{
+	std::error_code ec;
+	return std::filesystem::exists(batch_marker(batch), ec);
+	}
+
+void MediaStore::ScanTimes::reset()
+	{
+	walk.store(0);   known.store(0);  meta.store(0);
+	art.store(0);    tmdb.store(0);   write.store(0);
+	prune.store(0);  files.store(0);  videos.store(0);
+	albums.store(0); meta_audio.store(0);
+	meta_video.store(0);
+	}
+
+MediaStore::ScanGuard::ScanGuard(MediaStore& st) : s(st)
+	{
+	if (s.scans_active_.fetch_add(1) == 0) {
+		s.scan_items_.store(0);
+		s.scan_times_.reset();
+		}
+	}
+
+MediaStore::ScanGuard::~ScanGuard()
+	{
+	s.scans_active_.fetch_sub(1);
+	}
+
 namespace fs = std::filesystem;
 
 // How long a contended write waits before SQLite reports SQLITE_BUSY.
@@ -6365,6 +6405,68 @@ std::vector<MediaStore::RecentSongEntry> MediaStore::get_recent_songs(
 		e.song.video_codec  = q.getColumn(17).isNull() ? "" : q.getColumn(17).getString();
 		e.song.audio_codec  = q.getColumn(18).isNull() ? "" : q.getColumn(18).getString();
 		e.song.season       = q.getColumn(19).getInt();
+		result.push_back(std::move(e));
+		}
+	return result;
+	}
+
+// ---- Now playing ------------------------------------------------------------
+
+std::vector<MediaStore::NowPlayingEntry> MediaStore::get_now_playing()
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	// now_playing holds one row per user (PRIMARY KEY user_id), refreshed by
+	// scrobble(submission=false).  A row older than five minutes means the
+	// client stopped playing (or died) without telling us; treat it as gone.
+	SQLite::Statement q(db_music_,
+		"SELECT s.id, s.title, s.track_number, s.disc_number,"
+		"       s.year, s.genre, s.duration, s.bitrate, s.file_size, s.codec,"
+		"       al.folder_id,"
+		"       COALESCE(a.name,'') AS artist,"
+		"       COALESCE(al.title, f.name) AS album,"
+		+ SONG_COVER_ART_SQL +
+		"       u.username, COALESCE(np.client,''), np.song_path,"
+		"       CAST((strftime('%s','now') - strftime('%s', np.started)) / 60"
+		"            AS INTEGER),"
+		"       COALESCE(s.artist,'') AS track_artist"
+		+ SONG_VIDEO_COLS_SQL +
+		" FROM client.now_playing np"
+		" JOIN client.users u ON u.id = np.user_id"
+		" JOIN songs s ON s.path = np.song_path"
+		" JOIN albums al ON al.id = s.album_id"
+		" JOIN folders f ON f.id = al.folder_id"
+		" LEFT JOIN song_artists sas ON sas.song_id = s.id AND sas.role = 'artist'"
+		" LEFT JOIN artists a ON a.id = sas.artist_id"
+		" WHERE np.started >= datetime('now','-5 minutes')"
+		" ORDER BY np.started DESC");
+
+	std::vector<NowPlayingEntry> result;
+	while (q.executeStep()) {
+		NowPlayingEntry e;
+		e.song.id           = q.getColumn(0).getInt();
+		e.song.is_dir       = false;
+		e.song.title        = q.getColumn(1).getString();
+		e.song.track_number = q.getColumn(2).getInt();
+		e.song.disc_number  = q.getColumn(3).getInt();
+		e.song.year         = q.getColumn(4).getInt();
+		e.song.genre        = q.getColumn(5).isNull() ? "" : q.getColumn(5).getString();
+		e.song.duration     = q.getColumn(6).getDouble();
+		e.song.bitrate      = q.getColumn(7).getInt();
+		e.song.file_size    = q.getColumn(8).getInt64();
+		e.song.codec        = q.getColumn(9).isNull() ? "" : q.getColumn(9).getString();
+		e.song.parent_id    = q.getColumn(10).getInt();
+		e.song.artist       = q.getColumn(11).getString();
+		e.song.album        = q.getColumn(12).getString();
+		e.song.cover_art_id = q.getColumn(13).getInt();
+		e.username          = q.getColumn(14).getString();
+		e.client            = q.getColumn(15).getString();
+		e.song_path         = q.getColumn(16).getString();
+		e.minutes_ago       = q.getColumn(17).getInt();
+		e.song.track_artist = q.getColumn(18).getString();
+		e.song.video_codec  = q.getColumn(19).isNull() ? "" : q.getColumn(19).getString();
+		e.song.audio_codec  = q.getColumn(20).isNull() ? "" : q.getColumn(20).getString();
+		e.song.season       = q.getColumn(21).getInt();
 		result.push_back(std::move(e));
 		}
 	return result;

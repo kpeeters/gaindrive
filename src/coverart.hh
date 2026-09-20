@@ -77,6 +77,14 @@ class CoverArtCache
 		// MediaStore; this clears the memory tier, which nothing else can see.
 		void invalidate(const std::string& key);
 
+		// Snapshot for getServerStatus.
+		struct Stats
+			{
+			std::size_t mem_used, mem_cap, entries;
+			int         building, jobs;
+			};
+		Stats stats();
+
 	private:
 		struct Entry
 			{

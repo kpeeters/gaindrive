@@ -650,10 +650,39 @@ the account's own ceiling, so the two cannot disagree.
 # ===========================================================================
 
 [[endpoint]]
+kind    = 'endpoint'
+name    = "reportPosition"
+section = "playback"
+summary = 'The playhead of one paced stream, so the server throttles it against the real position.'
+
+  [[endpoint.param]]
+  name = "token"
+  type = "string"
+  doc  = 'The `posToken` the stream URL carried. At most 64 characters.'
+
+  [[endpoint.param]]
+  name = "pos"
+  type = "float"
+  doc  = 'The playhead in seconds, relative to the served stream (a `timeOffset` stream starts at the seek point).'
+
+  [[endpoint.param]]
+  name    = "playing"
+  type    = "bool"
+  default = 'false'
+  doc     = 'Whether the playhead is advancing. While `true` the server extrapolates between reports; while `false` it holds the reported position.'
+  notes   = '''
+Send a report every few seconds while a `posToken` stream is open, paused
+included, because a paused report is what holds the stream at its lead
+instead of letting the wall clock drift it ahead. A report older than 30
+seconds stops steering the stream, which then degrades to unpaced delivery;
+there is no need to unregister a finished stream.
+'''
+
+[[endpoint]]
 kind       = 'additions'
 applies_to = ["stream"]
 section    = "playback"
-summary    = 'Seven gaindrive parameters on the standard streaming endpoint.'
+summary    = 'Eight gaindrive parameters on the standard streaming endpoint.'
 
   [[endpoint.param]]
   name  = "pace"
@@ -670,6 +699,25 @@ mid-track.
 **Never send it on a download or a prefetch**: that would make the transfer
 take as long as the music. A browser is paced already, by its User-Agent, and
 video is never paced.
+'''
+
+  [[endpoint.param]]
+  name  = "posToken"
+  type  = "string"
+  doc   = 'Audio only. Names this stream so `reportPosition` calls can steer its pacing. An opaque client-chosen string, at most 64 characters.'
+  notes = '''
+With it, the paced delivery is throttled against the playhead the client
+reports through `reportPosition`, instead of against a wall-clock estimate:
+the same mechanism a cast stream gets from the receiver's status. The
+wall-clock estimate assumes 1x playback from the moment the request started,
+which drifts on a paused player and starves on a file whose front is not
+audio; the reported position does neither.
+
+Use a fresh random token per stream URL. Positions are read in the served
+stream's own time frame, so a `timeOffset` re-fetch is a new stream and needs
+a new token. Scoped to the authenticated account: another account sending the
+same token names a different pacing session. If the reports stop, the stream
+degrades to unpaced delivery rather than stalling.
 '''
 
   [[endpoint.param]]
@@ -1880,6 +1928,154 @@ Send an empty value to clear a setting.
 
 [[endpoint]]
 kind     = 'endpoint'
+name     = "getServerStatus"
+section  = "settings"
+auth     = 'admin'
+response = 'subsonic-json'
+summary  = 'Live load and capacity snapshot: HTTP workers, ffmpeg processes, caches, queues, uptime and memory.'
+notes    = '''
+Every counter is instantaneous, read at the moment of the request.
+`http.busy` includes the worker answering this very request, so it never
+reads zero while a client is polling.
+'''
+
+  [[endpoint.field]]
+  name = "serverStatus.uptimeSeconds"
+  type = "int"
+  doc  = 'Seconds since the server process started.'
+
+  [[endpoint.field]]
+  name = "serverStatus.memoryRssBytes"
+  type = "int"
+  doc  = 'Resident set size of the server process. Absent on a system without a proc filesystem.'
+
+  [[endpoint.field]]
+  name = "serverStatus.http.busy"
+  type = "int"
+  doc  = 'HTTP worker threads currently handling a request, this one included.'
+
+  [[endpoint.field]]
+  name = "serverStatus.http.queued"
+  type = "int"
+  doc  = 'Accepted requests waiting for a free worker.'
+
+  [[endpoint.field]]
+  name = "serverStatus.http.threads"
+  type = "int"
+  doc  = 'Size of the worker pool.'
+
+  [[endpoint.field]]
+  name = "serverStatus.http.queueCap"
+  type = "int"
+  doc  = 'Bound on the wait queue; a request past it is refused rather than queued.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.piped"
+  type = "int"
+  doc  = 'ffmpeg processes streaming straight to a response: seeks, HLS segments, cast pipes and cache fallbacks.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.pipedMax"
+  type = "int"
+  doc  = 'Ceiling on piped transcodes; one past it gets a 503.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.running"
+  type = "int"
+  doc  = 'ffmpeg processes filling the on-disk transcode cache, background builds included.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.bgRunning"
+  type = "int"
+  doc  = 'The background builds within `running`.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.jobsMax"
+  type = "int"
+  doc  = 'The `--transcode-jobs` bound on `running`.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.cacheEnabled"
+  type = "bool"
+  doc  = 'False when the on-disk cache is disabled; the byte fields then read zero.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.cacheBytes"
+  type = "int"
+  doc  = 'Bytes on disk in the transcode cache, files still being written included.'
+
+  [[endpoint.field]]
+  name = "serverStatus.transcode.cacheCapBytes"
+  type = "int"
+  doc  = 'The `--transcode-cache-mb` cap, in bytes.'
+
+  [[endpoint.field]]
+  name = "serverStatus.coverCache.memBytes"
+  type = "int"
+  doc  = 'Memory held by the scaled-cover cache.'
+
+  [[endpoint.field]]
+  name = "serverStatus.coverCache.memCapBytes"
+  type = "int"
+  doc  = 'Its cap; least-recently-used images are dropped past it.'
+
+  [[endpoint.field]]
+  name = "serverStatus.coverCache.entries"
+  type = "int"
+  doc  = 'Scaled images currently held in memory.'
+
+  [[endpoint.field]]
+  name = "serverStatus.coverCache.building"
+  type = "int"
+  doc  = 'Image decodes running right now.'
+
+  [[endpoint.field]]
+  name = "serverStatus.coverCache.jobsMax"
+  type = "int"
+  doc  = 'Bound on concurrent decodes.'
+
+  [[endpoint.field]]
+  name = "serverStatus.fetch.queued"
+  type = "int"
+  doc  = 'URL fetches waiting for the single fetch worker.'
+
+  [[endpoint.field]]
+  name = "serverStatus.fetch.queueCap"
+  type = "int"
+  doc  = 'Bound on that queue.'
+
+  [[endpoint.field]]
+  name = "serverStatus.scan.scanning"
+  type = "bool"
+  doc  = 'Whether a library scan is running.'
+
+  [[endpoint.field]]
+  name = "serverStatus.scan.count"
+  type = "int"
+  doc  = 'Files seen by the scan so far, or by the last one.'
+
+  [[endpoint.field]]
+  name = "serverStatus.cast.active"
+  type = "bool"
+  doc  = 'Whether a cast session is up.'
+
+  [[endpoint.field]]
+  name = "serverStatus.streamGrants"
+  type = "int"
+  doc  = 'Unexpired one-song stream grants (see the Stream grants section).'
+
+  [[endpoint.field]]
+  name = "serverStatus.loginThrottle"
+  type = "int"
+  doc  = 'Addresses in the login-throttle table. A spike means someone is guessing passwords.'
+
+  [[endpoint.error]]
+  code = '50'
+  when = 'The caller is not an admin.'
+
+
+[[endpoint]]
+kind     = 'endpoint'
 name     = "startInfoLookup"
 section  = "settings"
 auth     = 'admin'
@@ -2935,11 +3131,6 @@ carrying Subsonic error 0, `Not implemented.`** — always as XML, whatever `f`
 asked for. A `POST` matches no route at all and gets a bare 404 with no body,
 which behind a reverse proxy configured to serve a single-page client on 404
 arrives as 200 and a page of HTML.
-
-**Browsing, lists and similarity.**
-
-* `getNowPlaying`. `scrobble` records a now-playing event and nothing reads it
-  back.
 
 **Retrieval and annotation.**
 

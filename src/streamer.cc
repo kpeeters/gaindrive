@@ -29,7 +29,22 @@ enum class Pump { More, Eof, Abort };
 // position.  Large enough to absorb brief network jitter; small enough that
 // any receiver can hold it.
 static constexpr float  TARGET_BUF  = 15.0f;
+// The lead for a stream paced against the web player's reportPosition calls
+// rather than a receiver's status.  Wider than TARGET_BUF because the
+// bytes-to-seconds conversion in the throttle uses the file's average rate,
+// so front-loaded art or a loud VBR passage can overstate what has been sent
+// by several seconds; a browser can afford headroom a receiver cannot.
+static constexpr float  WEB_TARGET_BUF = 30.0f;
 static constexpr size_t WRITE_CHUNK = 4096;
+
+// Slots taken by piped transcodes; the cap lives in the class so the status
+// endpoint can report both sides of the fraction.
+static std::atomic<int> piped_ffmpeg_count{0};
+
+int Streamer::piped_ffmpeg_running()
+	{
+	return piped_ffmpeg_count.load();
+	}
 
 // ---- Streamer --------------------------------------------------------
 
@@ -185,6 +200,12 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	                != std::string::npos
 	         || (pace_it != req.params.end() && pace_it->second == "true");
 
+	// The throttle's target lead.  A position-driven web stream gets the
+	// wider one; a cast stream keeps the receiver-sized lead, and so does the
+	// wall-clock fallback, whose reader may be a receiver on the direct route.
+	const float pace_lead = (get_position && !cast_stream)
+	    ? WEB_TARGET_BUF : TARGET_BUF;
+
 	// A video whose request names an audio format is a request for its
 	// soundtrack alone, and falling through to the audio path below is the
 	// entire implementation of that — see audio_only_request() in codecs.hh.
@@ -240,7 +261,7 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	          << std::endl;
 
 	if (!needs_transcode) {
-		serve_direct(req, res, song, pace, std::move(get_position));
+		serve_direct(req, res, song, pace, pace_lead, std::move(get_position));
 		return;
 		}
 
@@ -295,7 +316,7 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 			// cannot delete the file mid-send.
 			res.set_header("X-Gaindrive-Transcode",
 			               entry->hit() ? "hit" : "miss");
-			serve_direct(req, res, cached, pace,
+			serve_direct(req, res, cached, pace, pace_lead,
 			             std::move(get_position), entry);
 			return;
 			}
@@ -329,7 +350,7 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	serve_transcoded(res, ffmpeg_argv(song, target_bitrate, *target,
 	                                  time_offset, "pipe:1"),
 	                 std::string(target->mime), bps,
-	                 pace, std::move(get_position), est_length);
+	                 pace, pace_lead, std::move(get_position), est_length);
 	}
 
 void Streamer::serve_raw(const httplib::Request& req, httplib::Response& res,
@@ -339,18 +360,18 @@ void Streamer::serve_raw(const httplib::Request& req, httplib::Response& res,
 	// query string asks for.  The throttle exists to keep a *playback*
 	// connection alive; download.view is defined as the original media data,
 	// and a paced download of a forty-minute FLAC would take forty minutes.
-	serve_direct(req, res, song, false, {});
+	serve_direct(req, res, song, false, TARGET_BUF, {});
 	}
 
 void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
-                            const SongInfo& song, bool pace,
+                            const SongInfo& song, bool pace, float pace_lead,
                             std::function<float()> get_position,
                             std::shared_ptr<const TranscodeCache::Entry> keepalive)
 	{
 	// Delivery rate.  Three cases, and the third is the one that bit.
 	//
 	// - Cast with a position callback: send the first 30 s at full speed, then
-	//   throttle to stay at most TARGET_BUF seconds ahead of the receiver's
+	//   throttle to stay at most pace_lead seconds ahead of the receiver's
 	//   *reported* playback position.
 	// - Paced without one: the same throttle, with wall-clock elapsed time
 	//   standing in for a position we cannot observe.  Asked for by the web
@@ -388,26 +409,42 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 	// client.  It is now `pace`, set by whoever hands the URL to something
 	// that will read it at 1x, which is knowledge only the client has.
 	//
-	// A stored bitrate of 0 would switch the throttle off entirely and make
-	// `pace` silently do nothing, which is a far worse failure than a slightly
-	// wrong rate: size/duration is exact for CBR and close enough for VBR.
-	// (The cast metadata probe in gaindrive.cc clamps file_size to 32768 while
-	// keeping the real duration, so its derived rate is nonsense — harmless,
-	// because that request is neither paced nor position-driven.)
-	const float  bytes_per_sec = (song.bitrate > 0)
-	    ? static_cast<float>(song.bitrate) * 125.0f
-	    : (song.duration > 0
-	       ? static_cast<float>(song.file_size) / static_cast<float>(song.duration)
-	       : 0.0f);
+	// The larger of two estimates, and max() rather than a preference is the
+	// fix for a stutter that shipped.  The scanned bitrate describes the
+	// audio stream alone (TagLib excludes metadata blocks), so a FLAC fronted
+	// by a megabyte of embedded art was paced as if the art were audio and
+	// the client ran dry; size/duration is the exact average rate of the
+	// bytes actually sent, art included, so for a real file it wins.  max()
+	// keeps two edge cases right as well: a stored bitrate of 0 must not
+	// switch the throttle off (`pace` silently doing nothing is worse than a
+	// slightly wrong rate), and the cast metadata probe in gaindrive.cc clamps
+	// file_size to 32768 while keeping the real duration, so its size/duration
+	// is nonsense; the real bitrate outvotes it there and the probe stays
+	// effectively unthrottled, as before.  Erring high is the right direction
+	// throughout: too fast costs client buffer, too slow costs a dropout.
+	const float rate_tag  = song.bitrate > 0
+	    ? static_cast<float>(song.bitrate) * 125.0f : 0.0f;
+	const float rate_file = song.duration > 0
+	    ? static_cast<float>(song.file_size) / static_cast<float>(song.duration)
+	    : 0.0f;
+	const float bytes_per_sec = std::max(rate_tag, rate_file);
 	const size_t prebuf_bytes = bytes_per_sec > 0
 	    ? static_cast<size_t>(bytes_per_sec) * 30   // 30 s at 1× rate
 	    : 0;
+	// The rate is the first question a stutter report raises, and nothing
+	// else logs it.
+	if (pace || get_position)
+		std::cout << stamp() << "stream pace: rate="
+		          << static_cast<int>(bytes_per_sec) << " B/s"
+		          << " lead=" << pace_lead << "s"
+		          << (get_position ? " position-driven" : " wall-clock")
+		          << std::endl;
 	// httplib parses the Range header and calls our provider with the correct
 	// offset/length when a known content-length is supplied.
 	res.set_content_provider(
 		static_cast<size_t>(song.file_size),
 		std::string(codec_to_mime(song.codec)),
-		[path = song.path, bytes_per_sec, prebuf_bytes, pace,
+		[path = song.path, bytes_per_sec, prebuf_bytes, pace, pace_lead,
 		 get_position = std::move(get_position), keepalive = std::move(keepalive)]
 		(size_t offset, size_t length, httplib::DataSink& sink) {
 			std::ifstream f(path, std::ios::binary);
@@ -481,7 +518,7 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 							float audio_sent_abs = static_cast<float>(offset + bytes_sent)
 							                     / bytes_per_sec;
 							float buf_secs = audio_sent_abs - pos;
-							if (buf_secs > TARGET_BUF) {
+							if (buf_secs > pace_lead) {
 								// Cap to 2 s: bytes_sent overcounts what the receiver
 								// actually has (the local kernel send buffer can hold
 								// many seconds beyond what reached the device).  A
@@ -491,7 +528,7 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 								// wake, write a chunk, and re-evaluate; TCP backpressure
 								// then paces the rest naturally.
 								auto sleep_ms = std::min(static_cast<long>(
-								    (buf_secs - TARGET_BUF) * 1000.0f), 2000L);
+								    (buf_secs - pace_lead) * 1000.0f), 2000L);
 								auto deadline = std::chrono::steady_clock::now()
 								              + std::chrono::milliseconds(sleep_ms);
 								while (std::chrono::steady_clock::now() < deadline) {
@@ -524,9 +561,9 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 						float audio_sent_abs = static_cast<float>(offset + bytes_sent)
 						                     / bytes_per_sec;
 						float buf_secs       = audio_sent_abs - estimated_pos;
-						if (buf_secs > TARGET_BUF) {
+						if (buf_secs > pace_lead) {
 							auto sleep_ms = std::min(static_cast<long>(
-							    (buf_secs - TARGET_BUF) * 1000.0f), 2000L);
+							    (buf_secs - pace_lead) * 1000.0f), 2000L);
 							std::this_thread::sleep_for(
 							    std::chrono::milliseconds(sleep_ms));
 							}
@@ -846,10 +883,12 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 		if (relabel_webm) {
 			SongInfo as_webm = song;
 			as_webm.codec = "webm";
-			serve_direct(req, res, as_webm, false, std::move(get_position));
+			serve_direct(req, res, as_webm, false, TARGET_BUF,
+			             std::move(get_position));
 			return;
 			}
-		serve_direct(req, res, song, false, std::move(get_position));
+		serve_direct(req, res, song, false, TARGET_BUF,
+		             std::move(get_position));
 		return;
 		}
 
@@ -895,7 +934,8 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 			                 song.file_modified };
 			res.set_header("X-Gaindrive-Transcode",
 			               entry->hit() ? "hit" : "miss");
-			serve_direct(req, res, cached, false, std::move(get_position),
+			serve_direct(req, res, cached, false, TARGET_BUF,
+			             std::move(get_position),
 			             entry);
 			return;
 			}
@@ -931,14 +971,14 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	// Unpaced for the same reason as Tier 0, and with the same residual risk
 	// recorded there: the audio throttle's 15 s window starves a player that
 	// wants to buffer a video.
-	serve_transcoded(res, std::move(argv), mime, bps, false,
+	serve_transcoded(res, std::move(argv), mime, bps, false, TARGET_BUF,
 	                 std::move(get_position));
 	}
 
 void Streamer::serve_transcoded(httplib::Response& res,
                                 std::vector<std::string> args,
                                 const std::string& mime, float bps,
-                                bool pace,
+                                bool pace, float pace_lead,
                                 std::function<float()> get_position,
                                 int64_t est_length)
 	{
@@ -957,8 +997,6 @@ void Streamer::serve_transcoded(httplib::Response& res,
 	// past the cap is refused rather than queued, because a worker sleeping
 	// on a slot is the pool exhaustion this exists to prevent, one layer
 	// down.
-	static std::atomic<int> piped_ffmpeg_count{0};
-	static constexpr int    MAX_PIPED_FFMPEG = 16;
 	if (piped_ffmpeg_count.fetch_add(1) >= MAX_PIPED_FFMPEG) {
 		piped_ffmpeg_count.fetch_sub(1);
 		std::cout << stamp() << "stream: refusing piped transcode, "
@@ -1014,7 +1052,7 @@ void Streamer::serve_transcoded(httplib::Response& res,
 	// out so the chunked and known-length variants below share it exactly;
 	// `cap` bounds what may be written this call, which is how the estimate
 	// variant stops precisely on the length it promised.
-	auto pump = [proc, bps, total_sent, t_start, pace,
+	auto pump = [proc, bps, total_sent, t_start, pace, pace_lead,
 	             get_position = std::move(get_position)]
 	            (httplib::DataSink& sink, size_t cap) -> Pump {
 			if (get_position && get_position() < CAST_POS_BUFFERING) {
@@ -1060,16 +1098,16 @@ void Streamer::serve_transcoded(httplib::Response& res,
 				if (bps > 0) {
 					float audio_sent = static_cast<float>(*total_sent) / bps;
 					// During BUFFERING (pos=-1) treat effective position as 0 so
-					// the throttle caps the pre-buffer at TARGET_BUF seconds.
+					// the throttle caps the pre-buffer at pace_lead seconds.
 					// serve_transcoded cannot rely on TCP backpressure alone the
 					// way serve_direct can, because ffmpeg produces data faster
 					// than real-time and would flood the receiver's buffers.
 					float effective_pos = (pos >= 0.0f) ? pos : 0.0f;
 					float buf_secs   = audio_sent - effective_pos;
-					if (buf_secs > TARGET_BUF) {
+					if (buf_secs > pace_lead) {
 						// Cap single-sleep at 2 s — see serve_direct comment.
 						auto sleep_ms = std::min(static_cast<long>(
-						    (buf_secs - TARGET_BUF) * 1000.0f), 2000L);
+						    (buf_secs - pace_lead) * 1000.0f), 2000L);
 						auto deadline = std::chrono::steady_clock::now()
 						              + std::chrono::milliseconds(sleep_ms);
 						while (std::chrono::steady_clock::now() < deadline) {
@@ -1091,9 +1129,9 @@ void Streamer::serve_transcoded(httplib::Response& res,
 				    std::chrono::steady_clock::now() - t_start).count();
 				float audio_sent = static_cast<float>(*total_sent) / bps;
 				float buf_secs   = audio_sent - elapsed;
-				if (buf_secs > TARGET_BUF) {
+				if (buf_secs > pace_lead) {
 					auto sleep_ms = std::min(static_cast<long>(
-					    (buf_secs - TARGET_BUF) * 1000.0f), 2000L);
+					    (buf_secs - pace_lead) * 1000.0f), 2000L);
 					std::this_thread::sleep_for(
 					    std::chrono::milliseconds(sleep_ms));
 					}
