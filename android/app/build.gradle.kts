@@ -184,7 +184,7 @@ dependencies {
 	debugImplementation(libs.androidx.compose.ui.tooling)
 
 	implementation(libs.hilt.android)
-	implementation(libs.hilt.navigation.compose)
+	implementation(libs.hilt.lifecycle.viewmodel.compose)
 	ksp(libs.hilt.compiler)
 
 	implementation(libs.media3.exoplayer)

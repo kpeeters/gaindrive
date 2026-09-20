@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
@@ -41,7 +43,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.playback.EqBand
 import org.gaindrive.android.playback.EqState
@@ -82,7 +84,13 @@ fun EqualizerSheet(
 				.heightIn(max = PANEL_HEIGHT)
 				.padding(bottom = 24.dp),
 		) { eq ->
-			Column {
+			// Scrollable so a shrunken viewport scrolls instead of squashing:
+			// with the keyboard up the sheet has less height than the panel,
+			// and a Column under a hard constraint hands its last child the
+			// scraps, clipping the name field to them. Under a scroll the
+			// children keep their intrinsic heights, and the focused field
+			// asks to be brought into view on its own.
+			Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
 				Row(
 					modifier = Modifier
 						.fillMaxWidth()
