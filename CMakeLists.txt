@@ -732,6 +732,9 @@ add_executable(gaindrive
 	src/parallel.cc
 	src/proc.cc
 	src/md5.cc
+	# cpp-httplib, split so its implementation compiles once instead of in
+	# every TU that includes httplib.h; see third_party/README.md.
+	third_party/httplib.cc
 	${EMBEDDED_WEB_CC}
 )
 

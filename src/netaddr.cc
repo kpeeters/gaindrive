@@ -16,6 +16,14 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
+// Not declared in httplib.h: upstream defines this only in the implementation
+// half, so since the split (third_party/README.md) the declaration has to live
+// here. One more piece of httplib we use beyond its public contract.
+namespace httplib {
+std::string get_client_ip(const std::string& x_forwarded_for,
+                          const std::vector<std::string>& trusted_proxies);
+}
+
 static std::vector<std::string> trusted_proxies_ = { "127.0.0.1", "::1" };
 
 // An IPv4 peer on a dual-stack listener shows up as `::ffff:127.0.0.1`, which
