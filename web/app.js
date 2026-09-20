@@ -5955,6 +5955,21 @@ function videoControlsHold() {
    videoControlsTimer = null;
    }
 
+// Pointer events from the clusters bubble to the surface too, so the surface
+// listeners route by where the pointer actually is: over a cluster they hold,
+// elsewhere they wake.  If the idle timer could fire while the pointer rests
+// on a cluster, removing the class would make the cluster unhittable and the
+// browser would send a synthetic leave/enter pair under the stationary
+// cursor; the enter cancels the timer and nothing re-arms it, pinning the
+// overlay up until the pointer left the surface.  A cluster is only
+// hittable while the class is on, so the hold branch never needs to add it.
+function videoControlsPoint(ev) {
+   if (ev.target.closest('#video-controls, #video-close'))
+      videoControlsHold();
+   else
+      videoControlsWake();
+   }
+
 // Requested on #video-frame rather than on the video element, so everything
 // absolutely positioned inside the frame goes fullscreen with the picture: the
 // transport cluster and the close button.  #video-bar is outside the frame and
@@ -5991,8 +6006,8 @@ function setupVideoSurface() {
    // Leaving the surface hides them at once, which is what :hover did and is
    // still the right answer — the pointer has gone somewhere else entirely.
    const surf = document.getElementById('video-surface');
-   surf.addEventListener('pointermove', videoControlsWake);
-   surf.addEventListener('pointerdown', videoControlsWake);
+   surf.addEventListener('pointermove', videoControlsPoint);
+   surf.addEventListener('pointerdown', videoControlsPoint);
    surf.addEventListener('pointerleave', videoControlsSleep);
 
    // Inner before outer, so a pointer leaving a control for somewhere else on
