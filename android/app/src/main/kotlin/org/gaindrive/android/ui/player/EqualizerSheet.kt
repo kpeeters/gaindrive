@@ -1,32 +1,50 @@
 package org.gaindrive.android.ui.player
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.playback.EqBand
-import org.gaindrive.android.ui.components.ChipRow
+import org.gaindrive.android.playback.EqState
 import org.gaindrive.android.ui.components.LoadStateBox
 import kotlin.math.roundToInt
 
@@ -50,6 +68,7 @@ fun EqualizerSheet(
 	viewModel: EqualizerViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
+	val error by viewModel.error.collectAsStateWithLifecycle()
 	val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
 	ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -94,22 +113,139 @@ fun EqualizerSheet(
 						)
 					}
 				}
-				// ChipRow scrolls sideways and finds the selected chip, which
-				// is what a list of a dozen device presets needs.
-				ChipRow(
-					selectedIndex = eq.preset?.let(eq.presets::indexOf) ?: -1,
-					chipCount = eq.presets.size,
-					modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-				) {
-					eq.presets.forEachIndexed { index, name ->
-						FilterChip(
-							selected = name == eq.preset,
-							enabled = eq.enabled,
-							onClick = { viewModel.usePreset(index) },
-							label = { Text(name, maxLines = 1) },
+				// The web panel's preset row: a dropdown that reads "Custom"
+				// once a fader has moved, a save button, and a trashcan that
+				// only works on something the user saved.
+				PresetRow(
+					eq = eq,
+					error = error,
+					onDevicePreset = viewModel::usePreset,
+					onSavedPreset = viewModel::useSaved,
+					onSave = viewModel::save,
+					onDelete = viewModel::deleteSlot,
+					onClearError = viewModel::clearError,
+				)
+			}
+		}
+	}
+}
+
+@Composable
+private fun PresetRow(
+	eq: EqState.Ready,
+	error: String?,
+	onDevicePreset: (Int) -> Unit,
+	onSavedPreset: (String) -> Unit,
+	onSave: (String) -> Boolean,
+	onDelete: () -> Unit,
+	onClearError: () -> Unit,
+) {
+	var menuOpen by remember { mutableStateOf(false) }
+	var saving by remember { mutableStateOf(false) }
+	var saveName by remember { mutableStateOf("") }
+
+	Row(
+		modifier = Modifier
+			.fillMaxWidth()
+			.padding(start = 24.dp, end = 12.dp, top = 8.dp),
+		verticalAlignment = Alignment.CenterVertically,
+	) {
+		Box(modifier = Modifier.weight(1f)) {
+			// The app's labelled-picker idiom (the fetch panel's library
+			// picker): a button naming the choice, over a DropdownMenu.
+			OutlinedButton(onClick = { menuOpen = true }, enabled = eq.enabled) {
+				Text(
+					text = eq.preset ?: "Custom",
+					maxLines = 1,
+					overflow = TextOverflow.Ellipsis,
+				)
+				Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+			}
+			DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+				eq.presets.forEachIndexed { index, name ->
+					DropdownMenuItem(
+						text = { Text(name) },
+						leadingIcon = {
+							RadioButton(selected = name == eq.preset, onClick = null)
+						},
+						onClick = {
+							menuOpen = false
+							onDevicePreset(index)
+						},
+					)
+				}
+				// The saved section, when there is one; a divider rather
+				// than a heading, the way the library selector groups.
+				if (eq.saved.isNotEmpty()) {
+					HorizontalDivider()
+					eq.saved.forEach { name ->
+						DropdownMenuItem(
+							text = { Text(name) },
+							leadingIcon = {
+								RadioButton(selected = name == eq.preset, onClick = null)
+							},
+							onClick = {
+								menuOpen = false
+								onSavedPreset(name)
+							},
 						)
 					}
 				}
+			}
+		}
+		IconButton(onClick = { saving = !saving }, enabled = eq.enabled) {
+			Icon(Icons.Default.Save, contentDescription = "Save preset")
+		}
+		IconButton(
+			onClick = onDelete,
+			// Only what the user saved can be deleted; the device's own
+			// presets and an unsaved custom curve cannot.
+			enabled = eq.enabled && eq.preset?.let { it in eq.saved } == true,
+		) {
+			Icon(Icons.Default.Delete, contentDescription = "Delete preset")
+		}
+	}
+
+	if (saving && eq.enabled) {
+		// Why the save was refused; above the field it belongs to, tapping
+		// clears it, like the WiiM sheet's error line.
+		error?.let {
+			Text(
+				text = it,
+				style = MaterialTheme.typography.bodySmall,
+				color = MaterialTheme.colorScheme.error,
+				modifier = Modifier
+					.clickable(onClick = onClearError)
+					.padding(start = 24.dp, end = 24.dp, top = 4.dp),
+			)
+		}
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(start = 24.dp, end = 12.dp, top = 4.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(8.dp),
+		) {
+			OutlinedTextField(
+				value = saveName,
+				onValueChange = {
+					saveName = it
+					onClearError()
+				},
+				label = { Text("Preset name") },
+				singleLine = true,
+				modifier = Modifier.weight(1f),
+			)
+			IconButton(
+				onClick = {
+					if (onSave(saveName)) {
+						saving = false
+						saveName = ""
+					}
+				},
+				enabled = saveName.isNotBlank(),
+			) {
+				Icon(Icons.Default.Check, contentDescription = "Save as preset")
 			}
 		}
 	}
@@ -200,7 +336,8 @@ private fun freqLabel(hz: Int): String = when {
 	else -> "%.1f kHz".format(hz / 1000.0)
 }
 
-/** The switch row, the faders with their labels, and the preset chips. */
-private val PANEL_HEIGHT = 340.dp
+/** The switch row, the faders with their labels, the preset row, and the
+ * name field the save button reveals under it. */
+private val PANEL_HEIGHT = 440.dp
 
 private val FADER_HEIGHT = 160.dp

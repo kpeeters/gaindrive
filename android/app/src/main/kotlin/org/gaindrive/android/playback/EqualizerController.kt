@@ -32,6 +32,8 @@ sealed interface EqState {
 		val bands: List<EqBand>,
 		/** The device's own preset names, in audiofx index order. */
 		val presets: List<String>,
+		/** The user's saved presets for this device, in name order. */
+		val saved: List<String>,
 		/** The preset the curve came from; null means hand-shaped. */
 		val preset: String?,
 	) : EqState
@@ -68,8 +70,23 @@ class EqualizerController @Inject constructor(
 	 * `getCurrentPreset` keeps naming a preset after the faders moved. */
 	private var presetName: String? = null
 
+	/** The saved presets, mirrored from the store so [publish] can stay
+	 * synchronous. The collect keeps an open sheet following outside writes;
+	 * mutations here update it optimistically so their publish is not a step
+	 * behind the write it just made. */
+	private var slots: Map<String, List<Int>> = emptyMap()
+
 	private val _state = MutableStateFlow<EqState>(EqState.NoPlayer)
 	val state: StateFlow<EqState> = _state.asStateFlow()
+
+	init {
+		scope.launch {
+			store.slots().collect { fresh ->
+				slots = fresh
+				eq?.let { publish(it) }
+			}
+		}
+	}
 
 	private val listener = object : AnalyticsListener {
 		override fun onAudioSessionIdChanged(
@@ -152,6 +169,58 @@ class EqualizerController @Inject constructor(
 		scope.launch { store.setCurve(levels, preset) }
 	}
 
+	fun useSaved(name: String) {
+		val effect = eq ?: return
+		val stored = slots[name] ?: return
+		if (!applyLevels(effect, stored)) return
+		presetName = name
+		publish(effect)
+		// What the effect actually holds, not what was asked: the values were
+		// coerced into the band range on the way in.
+		val levels = levels(effect)
+		scope.launch { store.setCurve(levels, name) }
+	}
+
+	/**
+	 * Saves the current curve under [name] and selects it, returning a
+	 * refusal message or null. A name already saved is overwritten, as on
+	 * the web; a device preset's name is refused, since the dropdown would
+	 * then carry it twice.
+	 */
+	fun saveSlot(name: String): String? {
+		val effect = eq ?: return "The equalizer is not running."
+		val trimmed = name.trim()
+		if (trimmed.isEmpty()) return "A preset needs a name."
+		val device = (0 until effect.numberOfPresets.toInt()).map {
+			effect.getPresetName(it.toShort())
+		}
+		if (trimmed in device) return "“$trimmed” is already a built-in preset."
+		val levels = levels(effect)
+		slots = slots + (trimmed to levels)
+		presetName = trimmed
+		publish(effect)
+		scope.launch {
+			store.saveSlot(trimmed, levels)
+			store.setCurve(levels, trimmed)
+		}
+		return null
+	}
+
+	/** Deletes the selected saved preset. The curve stays where it is and
+	 * the selection drops to custom, as on the web. */
+	fun deleteSlot() {
+		val effect = eq ?: return
+		val name = presetName?.takeIf { it in slots } ?: return
+		slots = slots - name
+		presetName = null
+		publish(effect)
+		val levels = levels(effect)
+		scope.launch {
+			store.deleteSlot(name)
+			store.setCurve(levels, null)
+		}
+	}
+
 	/**
 	 * Creates the effect on the current audio session if there is none yet,
 	 * applying [carryOver] when the effect is being rebuilt on a new session
@@ -211,22 +280,10 @@ class EqualizerController @Inject constructor(
 		preset: String?,
 	): String? {
 		var name = preset
-		val count = effect.numberOfBands.toInt()
-		val range = effect.bandLevelRange
-		if (levelsMb != null) {
-			if (levelsMb.size == count) {
-				levelsMb.forEachIndexed { band, mb ->
-					effect.setBandLevel(
-						band.toShort(),
-						mb.coerceIn(range[0].toInt(), range[1].toInt()).toShort(),
-					)
-				}
-			} else {
-				// An OS update can change the band layout, and a stale curve
-				// on the wrong bands is worse than starting over flat.
-				Log.w(TAG, "stored ${levelsMb.size} bands but the device has $count; starting flat")
-				name = null
-			}
+		if (levelsMb != null && !applyLevels(effect, levelsMb)) {
+			// An OS update can change the band layout, and a stale curve on
+			// the wrong bands is worse than starting over flat.
+			name = null
 		}
 		val status = effect.setEnabled(enabled)
 		if (status != Equalizer.SUCCESS) {
@@ -235,8 +292,30 @@ class EqualizerController @Inject constructor(
 		return name
 	}
 
+	/** Puts a curve onto the effect, coerced into the band range; false and
+	 * a log line when its band count is not the device's. */
+	private fun applyLevels(effect: Equalizer, levelsMb: List<Int>): Boolean {
+		val count = effect.numberOfBands.toInt()
+		if (levelsMb.size != count) {
+			Log.w(TAG, "curve has ${levelsMb.size} bands but the device has $count; leaving the faders alone")
+			return false
+		}
+		val range = effect.bandLevelRange
+		levelsMb.forEachIndexed { band, mb ->
+			effect.setBandLevel(
+				band.toShort(),
+				mb.coerceIn(range[0].toInt(), range[1].toInt()).toShort(),
+			)
+		}
+		return true
+	}
+
 	private fun publish(effect: Equalizer) {
 		val range = effect.bandLevelRange
+		val presets = (0 until effect.numberOfPresets.toInt()).map {
+			effect.getPresetName(it.toShort())
+		}
+		val saved = slots.keys.sorted()
 		_state.value = EqState.Ready(
 			enabled = effect.enabled,
 			minMb = range[0].toInt(),
@@ -248,10 +327,11 @@ class EqualizerController @Inject constructor(
 					levelMb = effect.getBandLevel(band.toShort()).toInt(),
 				)
 			},
-			presets = (0 until effect.numberOfPresets.toInt()).map {
-				effect.getPresetName(it.toShort())
-			},
-			preset = presetName,
+			presets = presets,
+			saved = saved,
+			// A name no list carries any more, a slot deleted from another
+			// session say, reads as custom rather than as a phantom entry.
+			preset = presetName?.takeIf { it in presets || it in saved },
 		)
 	}
 

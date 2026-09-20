@@ -3,8 +3,10 @@ package org.gaindrive.android.ui.player
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import org.gaindrive.android.playback.EqState
@@ -37,6 +39,10 @@ class EqualizerViewModel @Inject constructor(
 		}
 		.stateIn(viewModelScope, SharingStarted.Eagerly, Load.Loading)
 
+	/** Why a save was refused, until the next keystroke clears it. */
+	private val _error = MutableStateFlow<String?>(null)
+	val error: StateFlow<String?> = _error.asStateFlow()
+
 	init {
 		controller.open()
 	}
@@ -48,4 +54,19 @@ class EqualizerViewModel @Inject constructor(
 	fun commitLevels() = controller.commitLevels()
 
 	fun usePreset(index: Int) = controller.usePreset(index)
+
+	fun useSaved(name: String) = controller.useSaved(name)
+
+	/** True when the save was accepted, so the sheet can put the row away. */
+	fun save(name: String): Boolean {
+		val refusal = controller.saveSlot(name)
+		_error.value = refusal
+		return refusal == null
+	}
+
+	fun deleteSlot() = controller.deleteSlot()
+
+	fun clearError() {
+		_error.value = null
+	}
 }

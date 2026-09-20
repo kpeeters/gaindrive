@@ -176,21 +176,39 @@ fun NowPlayingSheet(
 							)
 						}
 					}
-					// The way back to the picture after backing out of the video
-					// screen, which leaves the sound playing. Without it the
-					// only route back would be to start the film again.
-					if (state.isVideo) {
-						IconButton(
-							onClick = onWatch,
-							modifier = Modifier
-								.align(Alignment.CenterStart)
-								.padding(start = 12.dp),
-						) {
+					// A Row for the same reason the trailing one is: the
+					// transport stays centred whatever this side adds up to.
+					Row(
+						modifier = Modifier
+							.align(Alignment.CenterStart)
+							.padding(start = 12.dp),
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						// Always offered, unlike cast: it has no outcome that
+						// is only a refusal, and what it answers — how the
+						// audio is reaching the speaker, and in what format —
+						// is nowhere else in the UI. On this side rather than
+						// with the device controls, because three trailing
+						// buttons ran into the transport on a phone.
+						IconButton(onClick = onInfo) {
 							Icon(
-								imageVector = Icons.Default.Movie,
-								contentDescription = "Watch",
-								tint = MaterialTheme.colorScheme.primary,
+								Icons.Default.Info,
+								contentDescription = "Track info",
+								tint = MaterialTheme.colorScheme.onSurfaceVariant,
 							)
+						}
+						// The way back to the picture after backing out of the
+						// video screen, which leaves the sound playing. Without
+						// it the only route back would be to start the film
+						// again.
+						if (state.isVideo) {
+							IconButton(onClick = onWatch) {
+								Icon(
+									imageVector = Icons.Default.Movie,
+									contentDescription = "Watch",
+									tint = MaterialTheme.colorScheme.primary,
+								)
+							}
 						}
 					}
 					// A Row rather than two aligned buttons, so the transport
@@ -202,20 +220,9 @@ fun NowPlayingSheet(
 							.padding(end = 12.dp),
 						verticalAlignment = Alignment.CenterVertically,
 					) {
-						// Always offered, unlike cast: it has no outcome that
-						// is only a refusal, and what it answers — how the
-						// audio is reaching the speaker, and in what format —
-						// is nowhere else in the UI.
-						IconButton(onClick = onInfo) {
-							Icon(
-								Icons.Default.Info,
-								contentDescription = "Track info",
-								tint = MaterialTheme.colorScheme.onSurfaceVariant,
-							)
-						}
 						// Only while playing locally, and in the slot the
 						// speaker-controls button takes while casting to a
-						// WiiM: the middle of this row always means controls
+						// WiiM: the slot before cast always means controls
 						// for the device making the sound, and at most one of
 						// the two can apply. A plain Chromecast gets neither.
 						if (!casting) {
