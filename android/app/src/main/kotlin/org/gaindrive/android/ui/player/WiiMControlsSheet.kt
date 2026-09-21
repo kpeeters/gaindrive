@@ -181,9 +181,10 @@ fun WiiMControlsSheet(
 					)
 				}
 			}
-			// Outside the load box on purpose: the volume rides the Cast
-			// channel, so it works even when the HTTP equalizer read failed,
-			// and it must not sit behind the EQ spinner.
+			// Outside the load box on purpose: transport and volume ride the
+			// Cast channel, so they work even when the HTTP equalizer read
+			// failed, and they must not sit behind the EQ spinner.
+			TransportSection()
 			CastVolumeSection()
 		}
 	}

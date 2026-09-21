@@ -126,8 +126,9 @@ fun EqualizerSheet(
 					)
 				}
 			}
-			// Below the box rather than in it: the media volume is there whether
-			// or not the equalizer effect could be created.
+			// Below the box rather than in it: transport and the media volume
+			// are there whether or not the equalizer effect could be created.
+			TransportSection()
 			val volume = rememberMusicVolume()
 			VolumeRow(fraction = volume.fraction, onDown = volume::down, onUp = volume::up)
 		}

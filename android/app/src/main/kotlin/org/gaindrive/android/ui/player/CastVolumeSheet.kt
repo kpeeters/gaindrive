@@ -93,13 +93,14 @@ fun CastVolumeSheet(
 					modifier = Modifier.padding(start = 24.dp, end = 24.dp),
 				)
 			}
+			TransportSection()
 			CastVolumeSection(viewModel)
 		}
 	}
 }
 
 /**
- * A twentieth of the range per tap. The receiver's scale is 0..1 and its own
+ * One percent of the range per tap. The receiver's scale is 0..1 and its own
  * step size is unknowable, so this is a feel choice, not a mapping.
  */
-private const val CAST_VOLUME_STEP = 0.05f
+private const val CAST_VOLUME_STEP = 0.01f

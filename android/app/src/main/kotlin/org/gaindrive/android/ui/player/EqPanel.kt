@@ -19,7 +19,11 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -246,6 +250,9 @@ internal fun VolumeRow(
 ) {
 	Column(modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp)) {
 		Text(text = "Volume", style = MaterialTheme.typography.titleSmall)
+		// The bar sits directly in the row so the buttons centre on it; the
+		// readout hangs below the whole row, where the equal-width buttons on
+		// either side keep it centred under the bar.
 		Row(verticalAlignment = Alignment.CenterVertically) {
 			IconButton(
 				onClick = onDown,
@@ -258,18 +265,10 @@ internal fun VolumeRow(
 					modifier = Modifier.size(VOLUME_ICON_SIZE),
 				)
 			}
-			Column(modifier = Modifier.weight(1f).padding(horizontal = 8.dp)) {
-				LinearProgressIndicator(
-					progress = { fraction ?: 0f },
-					modifier = Modifier.fillMaxWidth(),
-				)
-				Text(
-					text = fraction?.let { "${(it * 100).roundToInt()}%" } ?: "",
-					style = MaterialTheme.typography.labelSmall,
-					textAlign = TextAlign.Center,
-					modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-				)
-			}
+			LinearProgressIndicator(
+				progress = { fraction ?: 0f },
+				modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+			)
 			IconButton(
 				onClick = onUp,
 				enabled = fraction != null,
@@ -281,6 +280,55 @@ internal fun VolumeRow(
 					modifier = Modifier.size(VOLUME_ICON_SIZE),
 				)
 			}
+		}
+		Text(
+			text = fraction?.let { "${(it * 100).roundToInt()}%" } ?: "",
+			style = MaterialTheme.typography.labelSmall,
+			textAlign = TextAlign.Center,
+			modifier = Modifier.fillMaxWidth(),
+		)
+	}
+}
+
+/**
+ * Previous, play/pause, next, repeating the Now Playing sheet's transport in
+ * its sizes: these sheets are reached mid-listening, and closing one just to
+ * skip a track is the round trip this saves.
+ */
+@Composable
+internal fun TransportRow(
+	playing: Boolean,
+	hasPrevious: Boolean,
+	hasNext: Boolean,
+	onPrevious: () -> Unit,
+	onTogglePlay: () -> Unit,
+	onNext: () -> Unit,
+) {
+	Row(
+		modifier = Modifier.fillMaxWidth(),
+		horizontalArrangement = Arrangement.Center,
+		verticalAlignment = Alignment.CenterVertically,
+	) {
+		IconButton(onClick = onPrevious, enabled = hasPrevious) {
+			Icon(
+				Icons.Default.SkipPrevious,
+				contentDescription = "Previous",
+				modifier = Modifier.size(36.dp),
+			)
+		}
+		IconButton(onClick = onTogglePlay) {
+			Icon(
+				imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+				contentDescription = if (playing) "Pause" else "Play",
+				modifier = Modifier.size(48.dp),
+			)
+		}
+		IconButton(onClick = onNext, enabled = hasNext) {
+			Icon(
+				Icons.Default.SkipNext,
+				contentDescription = "Next",
+				modifier = Modifier.size(36.dp),
+			)
 		}
 	}
 }
