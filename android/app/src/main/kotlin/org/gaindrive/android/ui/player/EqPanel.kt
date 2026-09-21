@@ -11,8 +11,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeDown
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
@@ -22,6 +25,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
@@ -41,14 +45,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 
 /**
- * The pieces the two equalizer sheets share: a fader with its readout and
- * label, and the web panel's preset row.
+ * The pieces the sound-control sheets share: a fader with its readout and
+ * label, the web panel's preset row, and the volume row.
  *
  * [EqualizerSheet] shapes the phone's own audio path and [WiiMControlsSheet]
  * a WiiM's, and their scales differ (millibels against the WiiM's 0..99), so
@@ -225,6 +231,61 @@ internal fun PresetRow(
 }
 
 /**
+ * Volume up and down around an indicator, sized for a thumb: the sheet is
+ * reached mid-listening, often at arm's length from the speaker it controls.
+ *
+ * [fraction] is 0..1, or null while the level is not yet known (a cast
+ * receiver that has not answered its first GET_STATUS); the buttons disable
+ * rather than guess.
+ */
+@Composable
+internal fun VolumeRow(
+	fraction: Float?,
+	onDown: () -> Unit,
+	onUp: () -> Unit,
+) {
+	Column(modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp)) {
+		Text(text = "Volume", style = MaterialTheme.typography.titleSmall)
+		Row(verticalAlignment = Alignment.CenterVertically) {
+			IconButton(
+				onClick = onDown,
+				enabled = fraction != null,
+				modifier = Modifier.size(VOLUME_BUTTON_SIZE),
+			) {
+				Icon(
+					Icons.AutoMirrored.Filled.VolumeDown,
+					contentDescription = "Volume down",
+					modifier = Modifier.size(VOLUME_ICON_SIZE),
+				)
+			}
+			Column(modifier = Modifier.weight(1f).padding(horizontal = 8.dp)) {
+				LinearProgressIndicator(
+					progress = { fraction ?: 0f },
+					modifier = Modifier.fillMaxWidth(),
+				)
+				Text(
+					text = fraction?.let { "${(it * 100).roundToInt()}%" } ?: "",
+					style = MaterialTheme.typography.labelSmall,
+					textAlign = TextAlign.Center,
+					modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+				)
+			}
+			IconButton(
+				onClick = onUp,
+				enabled = fraction != null,
+				modifier = Modifier.size(VOLUME_BUTTON_SIZE),
+			) {
+				Icon(
+					Icons.AutoMirrored.Filled.VolumeUp,
+					contentDescription = "Volume up",
+					modifier = Modifier.size(VOLUME_ICON_SIZE),
+				)
+			}
+		}
+	}
+}
+
+/**
  * A [Slider] stood on end, minimum at the bottom, drawn the way the WiiM app
  * draws a fader: a thin bar with a ball riding on it.
  *
@@ -323,6 +384,9 @@ private fun VerticalSlider(
 }
 
 internal val FADER_HEIGHT = 160.dp
+
+private val VOLUME_BUTTON_SIZE = 56.dp
+private val VOLUME_ICON_SIZE = 32.dp
 
 /** The on-screen column width; the single knob if dragging feels too fiddly. */
 private val FADER_TOUCH_WIDTH = 28.dp

@@ -170,4 +170,35 @@ class CastStatusTest {
 		assertFalse(CastStatus.listsApplications(message("""{"status":{}}""")))
 		assertFalse(CastStatus.listsApplications(message("""{"type":"RECEIVER_STATUS"}""")))
 	}
+
+	@Test
+	fun `volume is read from a full status and from a volume-only push`() {
+		val full = """
+			{"type":"RECEIVER_STATUS","status":{
+			  "applications":[{"appId":"CC1AD845","transportId":"ours"}],
+			  "volume":{"level":0.7,"muted":false}
+			}}
+		""".trimIndent()
+		assertEquals(CastVolume(0.7f), CastStatus.volumeOf(message(full)))
+
+		// The push that carries volume and nothing else. It must feed the
+		// indicator and still not count as an application listing.
+		val push = """{"type":"RECEIVER_STATUS","status":{"volume":{"level":0.35,"muted":true}}}"""
+		assertEquals(CastVolume(0.35f, muted = true), CastStatus.volumeOf(message(push)))
+		assertFalse(CastStatus.listsApplications(message(push)))
+	}
+
+	/** Absent means "not stated"; callers keep their last value on null. */
+	@Test
+	fun `a status without a volume block reports none`() {
+		assertNull(CastStatus.volumeOf(message("""{"status":{"applications":[]}}""")))
+		assertNull(CastStatus.volumeOf(message("""{"status":{"volume":{"muted":true}}}""")))
+		assertNull(CastStatus.volumeOf(message("""{"type":"RECEIVER_STATUS"}""")))
+	}
+
+	@Test
+	fun `an out-of-range level is clamped`() {
+		assertEquals(CastVolume(1f), CastStatus.volumeOf(message("""{"status":{"volume":{"level":1.4}}}""")))
+		assertEquals(CastVolume(0f), CastStatus.volumeOf(message("""{"status":{"volume":{"level":-0.1}}}""")))
+	}
 }

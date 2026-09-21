@@ -116,6 +116,13 @@ class CastSession @Inject constructor(
 	private val _status = MutableStateFlow(CastStatus())
 	val status: StateFlow<CastStatus> = _status.asStateFlow()
 
+	/**
+	 * The receiver's device volume. Null until the receiver has stated one;
+	 * the connect-time GET_STATUS answer carries the first value.
+	 */
+	private val _volume = MutableStateFlow<CastVolume?>(null)
+	val volume: StateFlow<CastVolume?> = _volume.asStateFlow()
+
 	private val _message = MutableStateFlow<String?>(null)
 
 	/**
@@ -235,6 +242,7 @@ class CastSession @Inject constructor(
 		_device.value = null
 		transportId.value = null
 		_status.value = CastStatus()
+		_volume.value = null
 		retry.disarm()
 		_loaded.value = null
 	}
@@ -295,6 +303,24 @@ class CastSession @Inject constructor(
 		_loaded.value = media.copy(activeTrackIds = ids)
 		mediaCommand("EDIT_TRACKS_INFO") {
 			putJsonArray("activeTrackIds") { ids.forEach { add(it) } }
+		}
+	}
+
+	/**
+	 * Device volume, on the receiver namespace rather than the media one, so
+	 * it needs no transport and works from the moment the channel is up.
+	 *
+	 * Optimistic like the WiiM sheet's mutate(): the receiver answers with a
+	 * volume-only RECEIVER_STATUS, which then overwrites the guess.
+	 */
+	fun setVolume(level: Float) {
+		val clamped = level.coerceIn(0f, 1f)
+		_volume.value = _volume.value?.copy(level = clamped)
+			?: CastVolume(clamped)
+		scope.launch(Dispatchers.IO) {
+			val open = awaitChannel() ?: return@launch
+			open.send(CastNs.RECEIVER, CastNs.RECEIVER_ID,
+				setVolumePayload(requestIds.getAndIncrement(), clamped))
 		}
 	}
 
@@ -371,6 +397,10 @@ class CastSession @Inject constructor(
 				// Logged whole: STOP and idle teardown both invalidate our
 				// transport, and this is the only warning of either.
 				Log.i(TAG, "rx RECEIVER_STATUS: $message")
+				// Every kind carries it or not at all: the full status, and the
+				// volume-only pushes listsApplications tells apart. Null keeps
+				// the last value, per volumeOf.
+				CastStatus.volumeOf(message)?.let { _volume.value = it }
 				onReceiverStatus(open, message)
 			}
 
@@ -695,3 +725,11 @@ class CastSession @Inject constructor(
 /** Lets [CastSession.mediaCommand] take extra fields without a builder class. */
 private typealias JsonObjectBuilderScope =
 	kotlinx.serialization.json.JsonObjectBuilder.() -> Unit
+
+/** Top level so the wire shape is testable without a socket. */
+internal fun setVolumePayload(requestId: Int, level: Float): JsonObject =
+	buildJsonObject {
+		put("type", "SET_VOLUME")
+		put("requestId", requestId)
+		put("volume", buildJsonObject { put("level", level) })
+	}

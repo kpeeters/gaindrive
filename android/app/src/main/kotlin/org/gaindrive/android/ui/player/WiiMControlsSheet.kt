@@ -34,11 +34,13 @@ import kotlin.math.roundToInt
 /**
  * The controls a WiiM has that the Cast protocol does not reach.
  *
- * Today that is the equalizer alone: the switch, the device's ten graphic EQ
+ * Today that is the equalizer: the switch, the device's ten graphic EQ
  * faders, and the preset row shared with [EqualizerSheet] via `EqPanel.kt`.
- * The sheet is still shaped as a list of sections rather than as an EQ screen
- * because the same API carries input switching and the device's own volume
- * model, and those belong here when they land.
+ * The volume row below them is the exception that proves the shape: it rides
+ * the Cast channel ([CastVolumeSection]), not this API. The sheet is still
+ * shaped as a list of sections rather than as an EQ screen because the same
+ * API carries input switching and the device's own volume model, and those
+ * belong here when they land.
  *
  * A firmware that reports no band values (the `EQGetStat` fallback) degrades
  * to the switch and the preset dropdown; saving needs a curve to save.
@@ -179,6 +181,10 @@ fun WiiMControlsSheet(
 					)
 				}
 			}
+			// Outside the load box on purpose: the volume rides the Cast
+			// channel, so it works even when the HTTP equalizer read failed,
+			// and it must not sit behind the EQ spinner.
+			CastVolumeSection()
 		}
 	}
 }

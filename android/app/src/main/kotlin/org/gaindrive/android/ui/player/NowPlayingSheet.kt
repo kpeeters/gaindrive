@@ -46,8 +46,6 @@ import org.gaindrive.android.ui.components.CoverThumb
 fun NowPlayingSheet(
 	state: PlayerState,
 	casting: Boolean,
-	/** Casting, and to a device whose own HTTP API this app can drive. */
-	wiim: Boolean,
 	onDismiss: () -> Unit,
 	onOpenAlbum: (ItemRef, String) -> Unit,
 	onTogglePlay: () -> Unit,
@@ -56,7 +54,7 @@ fun NowPlayingSheet(
 	onSeek: (Long) -> Unit,
 	onJumpTo: (Int) -> Unit,
 	onCast: () -> Unit,
-	onWiiM: () -> Unit,
+	onSpeakerControls: () -> Unit,
 	onEqualizer: () -> Unit,
 	onInfo: () -> Unit,
 	onRemoveFromQueue: (Int) -> Unit,
@@ -221,10 +219,9 @@ fun NowPlayingSheet(
 						verticalAlignment = Alignment.CenterVertically,
 					) {
 						// Only while playing locally, and in the slot the
-						// speaker-controls button takes while casting to a
-						// WiiM: the slot before cast always means controls
-						// for the device making the sound, and at most one of
-						// the two can apply. A plain Chromecast gets neither.
+						// speaker-controls button takes while casting: the slot
+						// before cast always means controls for the device
+						// making the sound, and exactly one of the two applies.
 						if (!casting) {
 							IconButton(onClick = onEqualizer) {
 								Icon(
@@ -234,12 +231,12 @@ fun NowPlayingSheet(
 								)
 							}
 						}
-						// Only while casting to a WiiM, since everything behind
-						// it is that device's own HTTP API. Placed before the
-						// cast button so the one that is always there keeps
+						// Only while casting; which sheet it opens depends on
+						// the device, and GainDriveApp decides. Placed before
+						// the cast button so the one that is always there keeps
 						// its position as this one comes and goes.
-						if (wiim) {
-							IconButton(onClick = onWiiM) {
+						if (casting) {
+							IconButton(onClick = onSpeakerControls) {
 								Icon(
 									Icons.Default.Tune,
 									contentDescription = "Speaker controls",

@@ -4,6 +4,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 
@@ -25,6 +26,14 @@ data class CastDevice(
 	val address: String,
 	val port: Int = 8009,
 	val model: String? = null,
+)
+
+/**
+ * The receiver's device volume, 0..1, from a `RECEIVER_STATUS`.
+ */
+data class CastVolume(
+	val level: Float,
+	val muted: Boolean = false,
 )
 
 /**
@@ -142,6 +151,21 @@ data class CastStatus(
 		 */
 		fun listsApplications(message: JsonObject): Boolean =
 			message.obj("status")?.array("applications") != null
+
+		/**
+		 * The `volume` block of a `RECEIVER_STATUS`, or null when the message
+		 * carries none. Absent means "not stated", never "silent": a status
+		 * about applications alone must not zero the level, so callers keep
+		 * their last value on null.
+		 */
+		fun volumeOf(message: JsonObject): CastVolume? {
+			val volume = message.obj("status")?.obj("volume") ?: return null
+			val level = (volume["level"] as? JsonPrimitive)?.floatOrNull ?: return null
+			return CastVolume(
+				level = level.coerceIn(0f, 1f),
+				muted = (volume["muted"] as? JsonPrimitive)?.booleanOrNull ?: false,
+			)
+		}
 
 		/**
 		 * Matched on [appId] rather than taken as the first entry, which is a

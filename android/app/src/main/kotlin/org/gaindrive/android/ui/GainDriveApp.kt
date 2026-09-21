@@ -61,6 +61,7 @@ import org.gaindrive.android.ui.fetch.FetchStrip
 import org.gaindrive.android.ui.fetch.FetchUrlScreen
 import org.gaindrive.android.ui.player.CastDeviceSheet
 import org.gaindrive.android.ui.player.CastViewModel
+import org.gaindrive.android.ui.player.CastVolumeSheet
 import org.gaindrive.android.ui.player.EqualizerSheet
 import org.gaindrive.android.ui.player.MiniPlayer
 import org.gaindrive.android.ui.player.NowPlayingSheet
@@ -165,7 +166,7 @@ fun GainDriveApp(
 	val castViewModel: CastViewModel = hiltViewModel()
 	val castDevice by castViewModel.connected.collectAsStateWithLifecycle()
 	var castPickerOpen by remember { mutableStateOf(false) }
-	var wiimControlsOpen by remember { mutableStateOf(false) }
+	var speakerControlsOpen by remember { mutableStateOf(false) }
 	var equalizerOpen by remember { mutableStateOf(false) }
 
 	val backStackEntry by navController.currentBackStackEntryAsState()
@@ -551,7 +552,6 @@ fun GainDriveApp(
 		NowPlayingSheet(
 			state = playerState,
 			casting = castDevice != null,
-			wiim = castDevice?.kind == CastDeviceKind.WIIM,
 			onDismiss = { nowPlayingOpen = false },
 			onOpenAlbum = { ref, title ->
 				// Closed first: the sheet sits on top of the screen it is
@@ -568,7 +568,7 @@ fun GainDriveApp(
 			onSeek = playerViewModel::seekTo,
 			onJumpTo = playerViewModel::jumpTo,
 			onCast = { castPickerOpen = true },
-			onWiiM = { wiimControlsOpen = true },
+			onSpeakerControls = { speakerControlsOpen = true },
 			onEqualizer = { equalizerOpen = true },
 			onInfo = { trackInfoOpen = true },
 			onRemoveFromQueue = playerViewModel::removeFromQueue,
@@ -585,11 +585,18 @@ fun GainDriveApp(
 		CastDeviceSheet(onDismiss = { castPickerOpen = false })
 	}
 
-	// Outside it for the same reason, and gated on the device still being a WiiM:
-	// the sheet's whole content is that device's own API, and casting can be
-	// stopped from the picker while this is open.
-	if (wiimControlsOpen && castDevice?.kind == CastDeviceKind.WIIM) {
-		WiiMControlsSheet(onDismiss = { wiimControlsOpen = false })
+	// Outside it for the same reason, and gated on the device still being
+	// connected: both sheets' whole content is that device's, and casting can
+	// be stopped from the picker while this is open. Which sheet depends on
+	// what the device is; a plain Chromecast has only its volume to offer.
+	if (speakerControlsOpen) {
+		when (castDevice?.kind) {
+			CastDeviceKind.WIIM ->
+				WiiMControlsSheet(onDismiss = { speakerControlsOpen = false })
+			CastDeviceKind.GENERIC ->
+				CastVolumeSheet(onDismiss = { speakerControlsOpen = false })
+			null -> Unit
+		}
 	}
 
 	// Outside it for the same reason, and gated on not casting: the faders
