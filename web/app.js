@@ -952,6 +952,20 @@ const PANE0 = ['artists', 'uploads', 'playlists', 'recents', 'settings'];
 
 async function showView(name) {
    console.log('[view] showView', name);
+   // Navigating to a main view dismisses the picture: theatre mode covers the
+   // whole content area, so leaving it up makes the new view invisible and the
+   // click look dead.  A minimised thumbnail covers nothing and stays.  Local
+   // playback is paused, not stopped, so play brings the film back where it
+   // was; while casting this mirrors #video-close and only puts the local
+   // picture away, never touching the sound in another room.
+   if (videoCovering()) {
+      if (castDeviceId !== null) {
+         castLocalVideoStop();
+         } else {
+         player.media.pause();
+         }
+      videoSurfaceSet(null);
+      }
    // Uploads lights the Library link: it is a flavour of Library, which is what
    // somebody arriving by Shift U from another view needs to see.
    const lit = name === 'uploads' ? 'artists' : name;
@@ -7661,6 +7675,13 @@ setInterval(posReportNow, 5000);
 // the element they are bound to, which is safe because only the active element
 // has a src — the idle one fires nothing.
 function bindMediaEvents(el) {
+
+// A video resumed while its surface is hidden — paused away by a tab click in
+// showView() — would play sound-only, so bring the picture back.  Bound only
+// meaningfully to the video element; the audio element never matches.
+el.addEventListener('play', () => {
+   if (el === player.videoEl && !videoOnScreen()) videoSurfaceSet('theatre');
+   });
 
 // Auto-advance to next track.
 el.addEventListener('ended', () => {

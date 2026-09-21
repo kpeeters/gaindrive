@@ -626,15 +626,23 @@ body {
    background: #000;
    border: 1px solid var(--divider);
    overflow: hidden;
+   opacity: 1;
+   visibility: visible;
    transition: top 0.22s ease, left 0.22s ease,
                right 0.22s ease, bottom 0.22s ease,
-               width 0.22s ease, height 0.22s ease;
+               width 0.22s ease, height 0.22s ease,
+               opacity 0.18s ease, visibility 0.18s;
 }
 
 /* Must repeat the id: there is no generic .hidden rule in this file (only
-   .modal.hidden), and a bare .hidden could not override the display:flex
-   above anyway — an id outranks a class. */
-#video-surface.hidden { display: none; }
+   .modal.hidden), and a bare .hidden could not override the id rule above
+   anyway; an id outranks a class. Hidden via visibility, not display, so
+   the opacity fade can run; see the .modal comment further down. */
+#video-surface.hidden {
+   visibility: hidden;
+   opacity: 0;
+   pointer-events: none;
+}
 
 /* Theatre: fills the content area, leaving the sidebar and the player bar
    visible and usable. */
@@ -2788,7 +2796,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-   .modal, .modal-box, #cover-lightbox-img, #eq-panel {
+   .modal, .modal-box, #cover-lightbox-img, #eq-panel, #video-surface {
       transition: none;
    }
 }
