@@ -2,7 +2,6 @@ import java.util.Properties
 
 plugins {
 	alias(libs.plugins.android.application)
-	alias(libs.plugins.kotlin.android)
 	alias(libs.plugins.kotlin.compose)
 	alias(libs.plugins.kotlin.serialization)
 	alias(libs.plugins.ksp)
@@ -156,12 +155,6 @@ play {
 	// would take the next free version code from Play, which makes what was
 	// uploaded untraceable to the versionCode in this file; a refused upload
 	// naming the clash is more useful, and the fix is to bump versionCode.
-}
-
-kotlin {
-	compilerOptions {
-		jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-	}
 }
 
 dependencies {
