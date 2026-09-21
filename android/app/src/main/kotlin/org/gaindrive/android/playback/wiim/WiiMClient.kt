@@ -101,6 +101,10 @@ class WiiMClient @Inject constructor(
 	suspend fun setEqEnabled(address: String, enabled: Boolean): Boolean =
 		withContext(Dispatchers.IO) { command(address, if (enabled) EQ_ON else EQ_OFF) }
 
+	/** Writes all ten fader positions; see [eqSetBandCommand] for why all ten. */
+	suspend fun setBands(address: String, levels: List<Int>): Boolean =
+		withContext(Dispatchers.IO) { command(address, eqSetBandCommand(levels)) }
+
 	/**
 	 * A command whose whole answer is success or failure.
 	 *

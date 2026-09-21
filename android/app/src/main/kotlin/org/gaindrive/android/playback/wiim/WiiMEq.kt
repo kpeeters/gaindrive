@@ -3,6 +3,10 @@ package org.gaindrive.android.playback.wiim
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.put
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.gaindrive.android.net.SubsonicJson
@@ -17,6 +21,13 @@ import org.gaindrive.android.net.SubsonicJson
 data class WiiMEqState(
 	val enabled: Boolean,
 	val preset: String?,
+	/**
+	 * Fader positions in [WIIM_BANDS] order, or null when the device gave no
+	 * usable set (the `EQGetStat` fallback, or a band missing or unreadable).
+	 * Null is a real state too: the sheet then degrades to the switch and the
+	 * preset list instead of drawing faders it could not fill.
+	 */
+	val bands: List<Int>? = null,
 )
 
 /**
@@ -64,6 +75,34 @@ const val EQ_OFF = "EQOff"
 fun eqLoadCommand(preset: String): String = "EQLoad:$preset"
 
 /**
+ * The graphic EQ's ten fixed bands: `param_name` to fader label, in device
+ * index order. Fixed rather than read from the device, unlike the preset list,
+ * because `EQSetBand` must name them and a band this table does not know could
+ * not be written anyway.
+ */
+val WIIM_BANDS: List<Pair<String, String>> = listOf(
+	"band31hz" to "31",
+	"band63hz" to "63",
+	"band125hz" to "125",
+	"band250hz" to "250",
+	"band500hz" to "500",
+	"band1khz" to "1k",
+	"band2khz" to "2k",
+	"band4khz" to "4k",
+	"band8khz" to "8k",
+	"band16khz" to "16k",
+)
+
+/**
+ * The device's fader scale. How 0..99 maps to decibels is unverified (the WiiM
+ * app draws +-12 dB), which is why the sheet shows offsets from flat and not
+ * dB figures it cannot vouch for.
+ */
+const val WIIM_LEVEL_MIN = 0
+const val WIIM_LEVEL_MAX = 99
+const val WIIM_LEVEL_FLAT = 50
+
+/**
  * The presets *HTTP API for WiiM Products v1.2* documents.
  *
  * Used only when `EQGetList` fails, so the sheet is never empty. It is not the
@@ -85,13 +124,37 @@ val DOCUMENTED_PRESETS: List<String> = listOf(
  *
  * This is why `EQGetBand` is the state read rather than `EQGetStat`: only this
  * one says *which* preset is loaded, and a picker that cannot show the current
- * selection is barely a picker. The band values are ignored — a graphic EQ is
- * not what this screen offers.
+ * selection is barely a picker. The band values feed the fader row; a body
+ * without a usable set still yields the switch and the preset.
  */
 fun parseEqBand(body: String): WiiMEqState? {
 	val root = asObject(body) ?: return null
 	val stat = root.string("EQStat") ?: return null
-	return WiiMEqState(enabled = stat.equals("on", ignoreCase = true), preset = root.string("Name"))
+	return WiiMEqState(
+		enabled = stat.equals("on", ignoreCase = true),
+		preset = root.string("Name"),
+		bands = parseBands(root),
+	)
+}
+
+/**
+ * The `EQBand` array as fader positions in [WIIM_BANDS] order.
+ *
+ * Matched by `param_name` rather than by the `index` field, so a reordered
+ * array still reads correctly. All ten or nothing: a fader row with a hole in
+ * it has no honest rendering, and half a curve written back would be a curve
+ * the user never shaped.
+ */
+private fun parseBands(root: JsonObject): List<Int>? {
+	val entries = (root["EQBand"] as? JsonArray)?.filterIsInstance<JsonObject>() ?: return null
+	val byName = entries.mapNotNull { entry ->
+		val name = entry.string("param_name") ?: return@mapNotNull null
+		val value = (entry["value"] as? JsonPrimitive)?.intOrNull ?: return@mapNotNull null
+		name to value
+	}.toMap()
+	return WIIM_BANDS.map { (name, _) ->
+		(byName[name] ?: return null).coerceIn(WIIM_LEVEL_MIN, WIIM_LEVEL_MAX)
+	}
 }
 
 /**
@@ -130,6 +193,33 @@ fun parsePresets(body: String): List<String>? {
 	val names = array.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
 		.filter { it.isNotBlank() }
 	return names.ifEmpty { null }
+}
+
+/**
+ * The command that writes all ten fader positions at once.
+ *
+ * Community-documented like `EQGetBand`, not in WiiM's own PDF; `WIIM.md`
+ * records what is verified. Always the whole curve: the device accepts a
+ * partial array, but sending one would make the outcome depend on state this
+ * app last read rather than on what the user sees. Encoding the braces and
+ * quotes into the URL is [wiimUrl]'s job, as everywhere else.
+ */
+fun eqSetBandCommand(levels: List<Int>): String {
+	require(levels.size == WIIM_BANDS.size) {
+		"expected ${WIIM_BANDS.size} band levels, got ${levels.size}"
+	}
+	val payload = buildJsonObject {
+		put("EQBand", buildJsonArray {
+			levels.forEachIndexed { index, value ->
+				add(buildJsonObject {
+					put("index", index)
+					put("param_name", WIIM_BANDS[index].first)
+					put("value", value.coerceIn(WIIM_LEVEL_MIN, WIIM_LEVEL_MAX))
+				})
+			}
+		})
+	}
+	return "EQSetBand:$payload"
 }
 
 /**

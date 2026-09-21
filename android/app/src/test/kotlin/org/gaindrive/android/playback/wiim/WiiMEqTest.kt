@@ -1,8 +1,14 @@
 package org.gaindrive.android.playback.wiim
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -27,7 +33,9 @@ class WiiMEqTest {
 	@Test
 	fun `EQGetBand yields both the switch and the preset`() {
 		val state = parseEqBand(eqGetBand)
-		assertEquals(WiiMEqState(enabled = false, preset = "Rock"), state)
+		// Two of ten bands is no fader row at all: bands stays null while the
+		// switch and the preset still parse.
+		assertEquals(WiiMEqState(enabled = false, preset = "Rock", bands = null), state)
 	}
 
 	@Test
@@ -127,6 +135,91 @@ class WiiMEqTest {
 		assertNull(parsePresets("""{"EQStat":"On"}"""))
 	}
 
+	@Test
+	fun `a full band array is read in band order`() {
+		val values = listOf(71, 67, 50, 45, 50, 55, 60, 50, 48, 52)
+		val state = parseEqBand(tenBandBody(values.map { it.toString() }))
+		assertEquals(values, state?.bands)
+		assertEquals("Rock", state?.preset)
+	}
+
+	/** The index fields are decoration; the names are what binds a value. */
+	@Test
+	fun `band order comes from the names, not the index fields`() {
+		val reversed = (9 downTo 0).joinToString(",") { i ->
+			"""{"index":$i,"param_name":"${WIIM_BANDS[i].first}","value":${10 * i}}"""
+		}
+		val state = parseEqBand("""{"EQStat":"On","EQBand":[$reversed]}""")
+		assertEquals((0..9).map { it * 10 }, state?.bands)
+	}
+
+	@Test
+	fun `an unknown extra band is ignored`() {
+		val extra = tenBandBody(List(10) { "50" }).replace(
+			"]}",
+			""",{"index":10,"param_name":"band32khz","value":42}]}""",
+		)
+		assertEquals(List(10) { 50 }, parseEqBand(extra)?.bands)
+	}
+
+	@Test
+	fun `an unreadable band value withholds the faders, not the state`() {
+		val values = MutableList(10) { "50" }
+		values[3] = "\"loud\""
+		val state = parseEqBand(tenBandBody(values))
+		assertEquals(WiiMEqState(enabled = true, preset = "Rock", bands = null), state)
+	}
+
+	/** The harmless reading of a value off the documented scale. */
+	@Test
+	fun `band values are clamped to the device scale`() {
+		val values = MutableList(10) { "50" }
+		values[0] = "-20"
+		values[9] = "150"
+		val bands = parseEqBand(tenBandBody(values))?.bands
+		assertEquals(WIIM_LEVEL_MIN, bands?.first())
+		assertEquals(WIIM_LEVEL_MAX, bands?.last())
+	}
+
+	/**
+	 * Parsed back rather than pinned as a string: the property is that a device
+	 * reading the JSON sees ten correctly named bands, not that kotlinx spells
+	 * the object in one particular order.
+	 */
+	@Test
+	fun `EQSetBand carries all ten bands in the device's shape`() {
+		val levels = (0 until 10).map { 40 + it }
+		val command = eqSetBandCommand(levels)
+		assertTrue(command, command.startsWith("EQSetBand:"))
+		val root = Json.parseToJsonElement(command.removePrefix("EQSetBand:")) as JsonObject
+		val bands = root["EQBand"] as JsonArray
+		assertEquals(10, bands.size)
+		bands.forEachIndexed { index, element ->
+			val band = element as JsonObject
+			assertEquals(index, band["index"]?.jsonPrimitive?.int)
+			assertEquals(WIIM_BANDS[index].first, band["param_name"]?.jsonPrimitive?.content)
+			assertEquals(40 + index, band["value"]?.jsonPrimitive?.int)
+		}
+	}
+
+	/** A wrong-sized curve is a programming error, not a device condition. */
+	@Test
+	fun `EQSetBand refuses a curve that is not ten bands`() {
+		assertThrows(IllegalArgumentException::class.java) { eqSetBandCommand(listOf(50)) }
+		assertThrows(IllegalArgumentException::class.java) { eqSetBandCommand(List(11) { 50 }) }
+	}
+
+	/** The braces-and-quotes analogue of the `R&B` test below. */
+	@Test
+	fun `the band command survives the query encoding whole`() {
+		val command = eqSetBandCommand(List(10) { 50 })
+		val url = wiimUrl("10.0.0.5", command)
+		assertEquals(url.toString(), 1, url.querySize)
+		assertFalse(url.toString(), url.encodedQuery!!.contains("&"))
+		assertFalse(url.toString(), url.encodedQuery!!.contains("\""))
+		assertEquals(command, url.queryParameter("command"))
+	}
+
 	/**
 	 * The one that would break in the field rather than here.
 	 *
@@ -169,5 +262,12 @@ class WiiMEqTest {
 		assertEquals("Flat", DOCUMENTED_PRESETS.first())
 		assertTrue(DOCUMENTED_PRESETS.contains("R&B"))
 		assertTrue(DOCUMENTED_PRESETS.contains("Small Speakers"))
+	}
+	/** The measured `EQGetBand` shape with a full band array. */
+	private fun tenBandBody(values: List<String>, name: String = "Rock"): String {
+		val bands = values.mapIndexed { i, v ->
+			"""{"index":$i,"param_name":"${WIIM_BANDS[i].first}","value":$v}"""
+		}.joinToString(",")
+		return """{"status":"OK","source_name":"wifi","EQStat":"On","Name":"$name","EQBand":[$bands]}"""
 	}
 }
