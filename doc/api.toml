@@ -2906,7 +2906,7 @@ summary = 'Transport control for the active session.'
   name     = "action"
   type     = "string"
   required = true
-  values   = ["play", "pause", "seek", "captions"]
+  values   = ["play", "pause", "seek", "captions", "volume"]
   doc      = 'What to do.'
   notes    = '''
 * `play` resumes a paused session. If the session has gone `IDLE` — the
@@ -2916,6 +2916,10 @@ summary = 'Transport control for the active session.'
   which is a full reload.
 * `captions` silently does nothing when the receiver has no media session yet.
   The track belongs on the `castLoad` in that case.
+* `volume` sets the receiver's own volume, the one its remote and Google Home
+  move. The receiver reports the level back on its own schedule, so the
+  confirmed value arrives as `volume` on `castEvents` rather than in this
+  reply.
 '''
 
   [[endpoint.param]]
@@ -2927,6 +2931,11 @@ summary = 'Transport control for the active session.'
   name = "trackId"
   type = "int"
   doc  = 'For `action=captions`, numbered as for `castLoad`. 0 or absent turns subtitles off.'
+
+  [[endpoint.param]]
+  name = "level"
+  type = "float"
+  doc  = 'The absolute level, 0..1, required for `action=volume` (error 10 without it) and clamped into that range. Absolute rather than a step, so a client can show what it asked for and be corrected by the report.'
 
   [[endpoint.param]]
   name = "castController"
@@ -2969,6 +2978,16 @@ load and show itself as casting.
   name = "castSession.deviceName"
   type = "string"
   doc  = 'Its friendly name.'
+
+  [[endpoint.field]]
+  name = "castSession.deviceModel"
+  type = "string"
+  doc  = '''
+The model string from the device's own mDNS announcement ("WiiM Amp Ultra"),
+empty for a manually configured device. It is what tells a client whether
+`castWiimEq` applies, and it is repeated here because a page restoring a
+session has no device list to look the id up in.
+'''
 
   [[endpoint.field]]
   name = "castSession.songId"
@@ -3054,6 +3073,18 @@ all.
   type = "string"
   doc  = 'Which of the three delivery tiers this fetch lands on: `direct` (the file as it stands, byte-ranged), `remux` (`-c copy` through the transcode cache, still seekable), or `encode` (re-encoded). The same two words apply to a soundtrack, and there they are the answer to "why does this sound worse": `remux` is the track copied out of the film untouched, `encode` a lossless FLAC of it. A soundtrack is never re-encoded lossily — the source is already lossy, and this is the one route with no choice about transcoding.'
 
+  [[endpoint.field]]
+  name = "castSession.volume"
+  type = "object"
+  doc  = '''
+The receiver's own volume as it last reported it: `level` (0..1), `muted`,
+and `fixed`, true for a receiver whose volume nothing can move (its
+`controlType` is `fixed`, typically a television driving an amplifier).
+`null` until the first report arrives, so "not reported yet" and level zero
+stay distinguishable; a client should keep its volume controls disabled on
+`null`. The same object rides every `castEvents` payload.
+'''
+
 [[endpoint]]
 kind         = 'endpoint'
 name         = "castEvents"
@@ -3067,8 +3098,10 @@ An event is emitted whenever the receiver pushes a status change, and at least
 every 15 seconds otherwise. Each `data:` payload is a JSON object with
 `playerState`, `currentTime`, `duration`, `idleReason`, `startOffset`,
 `notice` and `noticeSeq`, plus the same stream description `castLoad` and
-`castSession` carry: `audioOnly`, `receiverShowsVideo`, `contentType`,
-`sentSuffix`, `sentBitRate` and `tier`.
+`castSession` carry (`audioOnly`, `receiverShowsVideo`, `contentType`,
+`sentSuffix`, `sentBitRate` and `tier`) and the same `volume` object
+`castSession` describes, `null` until the receiver has reported one. A
+volume change on the device itself arrives this way too.
 
 `notice` and `noticeSeq` are as `castSession` describes them: a sentence about
 a load the receiver was never told about, and a number that changes when there
@@ -3101,6 +3134,98 @@ see = ["castSession"]
   [[endpoint.error]]
   http = '204'
   when = 'No cast session is active, or the caller does not own it. There is nothing to stream, so no event stream is opened.'
+
+[[endpoint]]
+kind     = 'endpoint'
+name     = "castWiimEq"
+section  = "cast"
+auth     = 'castRole'
+response = 'subsonic-json'
+summary  = "A relay to the session device's own equalizer, for WiiM receivers."
+notes    = '''
+A WiiM is a Chromecast receiver and a LinkPlay device on one address, and its
+ten-band equalizer is reachable only over the latter's private HTTP API,
+which a browser cannot speak to (a self-signed certificate, and no CORS). So
+the server relays, and only to the device of the caller's own active cast
+session: the address is never a parameter.
+
+Whether a device answers this is inferred from its model string containing
+`wiim` (case-insensitive); `listCastDevices` and `castSession.deviceModel`
+both carry it. A manually configured device has no model string and is
+assumed not to.
+
+Bands are the device's fixed ten, 31 Hz to 16 kHz, each 0..99 with 50 flat.
+How that maps to decibels is undocumented, so a client should show offsets
+from flat rather than dB figures. `bands` may be absent from a reply: the
+device answered but did not report a usable band array (all ten or nothing),
+and a client should degrade to the on/off switch and the preset list.
+
+Every mutating action re-reads the device state afterwards and answers with
+what the device said, not what was asked. The reported `preset` name goes
+stale after `setBands` (the device keeps naming the last load), so a client
+that wrote the curve itself should keep its own bookkeeping for the name.
+'''
+see = ["listCastDevices", "castSession"]
+
+  [[endpoint.param]]
+  name     = "action"
+  type     = "string"
+  required = true
+  values   = ["state", "presets", "load", "on", "off", "setBands"]
+  doc      = 'What to do.'
+  notes    = '''
+* `state` reads the whole state; `presets` lists the device's preset names,
+  including ones its owner created on it.
+* `load` loads the named device preset and switches the equalizer on.
+* `on` / `off` move the switch alone.
+* `setBands` writes the whole curve, always all ten bands.
+
+`load`, `on`, `off` and `setBands` answer with the same fields as `state`,
+freshly re-read; `presets` answers with `presets` alone.
+'''
+
+  [[endpoint.param]]
+  name = "name"
+  type = "string"
+  doc  = 'The preset, for `action=load`, spelled as `presets` listed it.'
+
+  [[endpoint.param]]
+  name = "bands"
+  type = "string"
+  doc  = 'For `action=setBands`: exactly ten comma-separated integers 0..99, in band order 31 Hz to 16 kHz.'
+
+  [[endpoint.param]]
+  name = "castController"
+  type = "string"
+  doc  = 'The id given to `startCast`. Without a match this caller is treated as having no session.'
+
+  [[endpoint.field]]
+  name = "wiimEq.on"
+  type = "bool"
+  doc  = 'Whether the equalizer is engaged. Independent of `preset`: the device keeps reporting the loaded preset while switched off.'
+
+  [[endpoint.field]]
+  name = "wiimEq.preset"
+  type = "string"
+  doc  = 'The preset name the device reports, possibly stale after `setBands`; see the notes.'
+
+  [[endpoint.field]]
+  name = "wiimEq.bands"
+  type = "array"
+  doc  = 'The ten fader positions, 0..99, or absent when the device did not report a usable set.'
+
+  [[endpoint.field]]
+  name = "wiimEq.presets"
+  type = "array"
+  doc  = 'For `action=presets`: the preset names, as the device lists them.'
+
+  [[endpoint.error]]
+  code = '0'
+  when = 'No cast session is active, the caller does not own it, or the device did not answer.'
+
+  [[endpoint.error]]
+  code = '10'
+  when = '`name` missing for `load`, or `bands` missing or malformed for `setBands`.'
 
 
 # ===========================================================================

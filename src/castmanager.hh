@@ -235,6 +235,24 @@ class CastManager {
 			};
 		Notice notice() const;
 
+		// The receiver's own volume, as its RECEIVER_STATUS pushes report it.
+		// `known` starts false and stays false until a push carries a volume
+		// block, so a client can tell "not reported yet" from level zero and
+		// keep its buttons disabled rather than guess. `fixed` is the
+		// receiver's controlType saying nothing can move its volume: a
+		// television driving an amplifier, typically.
+		struct VolumeState
+			{
+			bool  known = false;
+			float level = 0.0f;   // 0..1
+			bool  muted = false;
+			bool  fixed = false;
+			};
+		VolumeState volume_state() const;
+
+		// Set the receiver's volume, 0..1.
+		void cast_volume(float level);
+
 		// Block until the next status push from the Chromecast (or timeout_ms elapses).
 		// Used by the SSE endpoint to stream updates to the browser.
 		CastStatus wait_status(int timeout_ms = 15000);
@@ -242,6 +260,11 @@ class CastManager {
 		bool        active()          const { return active_; }
 		std::string get_device_id()   const { return device_.id; }
 		std::string get_device_name() const { return device_.name; }
+		// The mDNS model string, empty for a configured device. A client uses
+		// it to tell one kind of receiver from another after a page reload,
+		// when it has no device list to look the id up in.
+		std::string get_device_model()   const { return device_.model; }
+		std::string get_device_address() const { return device_.address; }
 		// What the session's device can do, for callers deciding *what* to
 		// send it rather than how.  cast_load_song() is the one that matters:
 		// a receiver with no video_out gets a film's soundtrack.
@@ -307,6 +330,10 @@ class CastManager {
 		std::condition_variable    status_cv_;       // notified on every status update
 		CastStatus                 status_;
 		float                      last_known_time_ = 0.0f; // current_time from last non-IDLE status
+		// Under status_mutex_ and published through status_cv_ like status_:
+		// the SSE frame carries both, and a volume push must wake the same
+		// listeners a media push does.
+		VolumeState                volume_;
 
 		// Auto-retry state.  The Default Media Receiver sometimes fails the
 		// first LOAD that interrupts a currently-PLAYING media session: the
@@ -338,7 +365,7 @@ class CastManager {
 		// has already seen is worse than sending nothing. Every LOAD used to be
 		// requestId 2, which was harmless only because nothing was ever sent
 		// twice. Starts clear of every fixed id still in use — the playback
-		// commands' 10-13 and poll_loop's 100/101.
+		// commands' 10-13 and poll_loop's 100-102.
 		std::atomic<int> request_id_{1000};
 
 		mutable std::mutex         cache_mutex_;
@@ -354,6 +381,9 @@ class CastManager {
 
 		// Parse a MEDIA_STATUS message and store the result in status_.
 		void update_status(const nlohmann::json& msg);
+
+		// Read the volume block out of a RECEIVER_STATUS, if it carries one.
+		void update_volume(const nlohmann::json& msg);
 
 		// A LOAD the receiver refused, reported on the media namespace as an
 		// ERROR/LOAD_FAILED rather than as a status.  Publishes the IDLE/ERROR

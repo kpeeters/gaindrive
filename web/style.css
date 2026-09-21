@@ -2500,14 +2500,27 @@ input.chapter-time.bad { border-color: #e06c6c; }
    pointer-events: none;
 }
 
-#eq-head {
+/* The panel's three contents: this browser's equaliser, the WiiM's, and the
+   receiver volume row.  Sections inside one panel rather than three panels,
+   so the anchoring above is written once; eqOpen() shows exactly one of the
+   first two, plus the volume row while casting. */
+#eq-local,
+#eq-wiim {
+   display: flex;
+   flex-direction: column;
+   gap: 0.5rem;
+}
+
+#eq-head,
+#wiim-head {
    display: flex;
    align-items: center;
    justify-content: space-between;
    gap: 1rem;
 }
 
-#eq-head label {
+#eq-head label,
+#wiim-head label {
    display: flex;
    align-items: center;
    gap: 0.35rem;
@@ -2516,7 +2529,8 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 /* Tabular so the number does not shuffle the row sideways as it steps, the
    same reason #video-sync-value and #player-time carry it. */
-#eq-preamp {
+#eq-preamp,
+#wiim-note {
    color: var(--text-dim);
    font-variant-numeric: tabular-nums;
 }
@@ -2524,7 +2538,8 @@ input.chapter-time.bad { border-color: #e06c6c; }
 /* The faders.  Each column takes an equal share and is allowed to shrink, so
    a narrow window narrows the ten of them evenly instead of pushing the panel
    off the side of the screen. */
-#eq-bands {
+#eq-bands,
+#wiim-bands {
    display: flex;
    align-items: stretch;
    gap: 0.15rem;
@@ -2575,7 +2590,8 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 /* The icon buttons already dim themselves when disabled; inside a row that is
    dimming too, the two would multiply into something barely visible. */
-#eq-panel.eq-off #eq-preset-row .mi:disabled {
+#eq-panel.eq-off #eq-preset-row .mi:disabled,
+#eq-preset-row-wiim .mi:disabled {
    opacity: 1;
 }
 
@@ -2583,15 +2599,36 @@ input.chapter-time.bad { border-color: #e06c6c; }
    cursor: default;
 }
 
+/* The WiiM section's copy of the three rules above, on its own class: the
+   two switches are independent, and eq-off must not dim a panel whose
+   equaliser is a different device's. */
+#eq-panel.wiim-off #wiim-bands,
+#eq-panel.wiim-off #eq-preset-row-wiim,
+#eq-panel.wiim-off #wiim-save-row {
+   opacity: 0.45;
+}
+
+#eq-panel.wiim-off #eq-preset-row-wiim .mi:disabled {
+   opacity: 1;
+}
+
+#eq-panel.wiim-off #wiim-bands input[type="range"] {
+   cursor: default;
+}
+
 #eq-preset-row,
-#eq-save-row {
+#eq-preset-row-wiim,
+#eq-save-row,
+#wiim-save-row {
    display: flex;
    align-items: center;
    gap: 0.35rem;
 }
 
 #eq-preset,
-#eq-save-name {
+#wiim-preset,
+#eq-save-name,
+#wiim-save-name {
    flex: 1;
    min-width: 0;
    background: var(--bg);
@@ -2604,7 +2641,8 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 /* Borderless icon buttons, as on the video bar: they sit next to a menu and
    would otherwise draw more attention than the menu does. */
-#eq-preset-row .mi {
+#eq-preset-row .mi,
+#eq-preset-row-wiim .mi {
    background: none;
    border: 0;
    color: var(--text-dim);
@@ -2614,7 +2652,8 @@ input.chapter-time.bad { border-color: #e06c6c; }
    cursor: pointer;
 }
 
-#eq-preset-row .mi:hover:enabled {
+#eq-preset-row .mi:hover:enabled,
+#eq-preset-row-wiim .mi:hover:enabled {
    color: var(--text);
    background: var(--border);
 }
@@ -2628,7 +2667,8 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 /* A bordered text button, the same one the dialogs use for Close and Stop
    casting — this one commits something, so it should not read as an icon. */
-#eq-save-go {
+#eq-save-go,
+#wiim-save-go {
    background: none;
    border: 1px solid var(--border);
    color: var(--text-dim);
@@ -2639,9 +2679,68 @@ input.chapter-time.bad { border-color: #e06c6c; }
    flex-shrink: 0;
 }
 
-#eq-save-go:hover:enabled {
+#eq-save-go:hover:enabled,
+#wiim-save-go:hover:enabled {
    color: var(--text);
    background: var(--bg);
+}
+
+/* The receiver's volume row.  The bar is a readout, not a control: the level
+   lives on the device, whose own report arrives over SSE, so the buttons
+   step and the bar follows. */
+#eq-volume-row {
+   display: flex;
+   align-items: center;
+   gap: 0.5rem;
+}
+
+#eq-volume-row .mi {
+   background: none;
+   border: 0;
+   color: var(--text-dim);
+   font-size: 1.4rem;
+   padding: 0.2rem 0.3rem;
+   border-radius: 4px;
+   cursor: pointer;
+}
+
+#eq-volume-row .mi:hover:enabled {
+   color: var(--text);
+   background: var(--border);
+}
+
+#eq-volume-row .mi:disabled {
+   opacity: 0.4;
+   cursor: default;
+}
+
+#cast-vol-bar {
+   flex: 1;
+   height: 0.3rem;
+   border-radius: 0.15rem;
+   background: var(--border);
+   overflow: hidden;
+}
+
+#cast-vol-fill {
+   height: 100%;
+   width: 0;
+   background: var(--accent);
+}
+
+/* Width reserved even while blank, so the row does not jump sideways when
+   the first report lands. */
+#cast-vol-pct {
+   min-width: 3.5ch;
+   text-align: right;
+   color: var(--text-dim);
+   font-variant-numeric: tabular-nums;
+}
+
+/* Muted is reported, not offered: the number dims rather than growing a
+   control neither client has. */
+.cast-vol-muted {
+   opacity: 0.5;
 }
 
 /* ── Cast modal ────────────────────────────────────── */

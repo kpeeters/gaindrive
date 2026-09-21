@@ -7,6 +7,7 @@
 #include "netaddr.hh"
 #include "codecs.hh"
 #include "streamer.hh"
+#include "wiimeq.hh"
 
 #include <algorithm>
 #include <chrono>
@@ -40,6 +41,15 @@ static constexpr int CAST_IDLE_GRACE_S = 30;
 // a worker thread parked for the life of the connection; see castEvents.
 static constexpr int CAST_SSE_MAX_LISTENERS = 8;
 
+
+// The receiver's volume as a client sees it: null until the first
+// RECEIVER_STATUS carries one, so "not reported yet" and "level zero" stay
+// distinguishable and a client keeps its buttons disabled rather than guess.
+static nlohmann::json volume_json(const CastManager::VolumeState& v)
+	{
+	if (!v.known) return nullptr;
+	return {{"level", v.level}, {"muted", v.muted}, {"fixed", v.fixed}};
+	}
 
 void GainDrive::routes_cast()
 	{
@@ -452,7 +462,9 @@ void GainDrive::routes_cast()
 					{"contentType",        st.mime},
 					{"sentSuffix",         st.suffix},
 					{"sentBitRate",        st.bitrate},
-					{"tier",               st.tier}}).dump() + "\n\n";
+					{"tier",               st.tier},
+					{"volume", volume_json(cast_manager_.volume_state())}}).dump()
+					+ "\n\n";
 				return sink.write(event.data(), event.size());
 				});
 		});
@@ -486,6 +498,9 @@ void GainDrive::routes_cast()
 			r["castSession"]["active"]       = true;
 			r["castSession"]["deviceId"]     = cast_manager_.get_device_id();
 			r["castSession"]["deviceName"]   = cast_manager_.get_device_name();
+			// The model is what tells a WiiM from a generic receiver, and a
+			// reloaded page has no device list to look the id up in.
+			r["castSession"]["deviceModel"]  = cast_manager_.get_device_model();
 			r["castSession"]["songId"]       = last_cast_song_id_;
 			r["castSession"]["startOffset"]  = last_cast_offset_;
 			r["castSession"]["playerState"]  = st.player_state;
@@ -516,6 +531,7 @@ void GainDrive::routes_cast()
 			auto cap = cast_manager_.caption_state();
 			r["castSession"]["trackId"] = cap.active_track_ids.empty()
 			    ? 0 : cap.active_track_ids.front();
+			r["castSession"]["volume"] = volume_json(cast_manager_.volume_state());
 			}), "application/json");
 		});
 
@@ -577,9 +593,123 @@ void GainDrive::routes_cast()
 				std::cout << stamp() << "Cast: captions trackId=" << track_id
 				          << " not applied — no media session yet" << std::endl;
 			}
+		else if (action == "volume") {
+			// Absolute level, 0..1; the client does its own stepping. The
+			// echo comes back on the SSE stream when the receiver reports it.
+			auto li = req.params.find("level");
+			if (li == req.params.end()) {
+				const char* msg = "Required parameter missing: level.";
+				res.set_content(use_json ? subsonic_error_json(10, msg)
+				                         : subsonic_error(10, msg),
+				                use_json ? "application/json" : "application/xml");
+				return;
+				}
+			cast_manager_.cast_volume(to_float(li->second, 0.0f));
+			}
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
+		});
+
+	// castWiimEq: a relay to the session device's LinkPlay equalizer API.
+	//
+	// A WiiM is a Cast receiver and a LinkPlay device on one address, and its
+	// equalizer is reachable only over the latter (android/WIIM.md). The
+	// Android app speaks it directly from the phone; a browser cannot (the
+	// self-signed certificate and the absent CORS headers each stop it), so
+	// the server relays. The address is always the active session's device,
+	// never a parameter: a castRole account must not get a relay it can point
+	// at arbitrary LAN hosts.
+	//
+	// JSON only, like castSession: the web client is the only caller and the
+	// XML arm would be dead code.
+	server_.Get("/rest/castWiimEq.view", [this](const httplib::Request& req,
+	                                            httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		{
+		bool use_json = (fmt_of(req) == "json");
+		if (!check_cast_perm(req, res, store_, use_json)) return;
+		if (!check_cast_local(req, res, use_json)) return;
+		}
+		auto err = [&](int code, const char* msg) {
+			res.set_content(subsonic_error_json(code, msg), "application/json");
+			};
+		// As castControl: a non-owner controls nothing.
+		if (!cast_manager_.active() || !cast_owned_by(req)) {
+			err(0, "Cast not active.");
+			return;
+			}
+		const std::string address = cast_manager_.get_device_address();
+		const std::string action  = req.get_param_value("action");
+
+		// Every mutation's reply re-reads EQGetBand and describes what the
+		// device says rather than what was assumed: the Android client's
+		// re-read-after-write rule, folded into the one round trip. A failed
+		// re-read after a command that succeeded is still an error: the
+		// client keeps its optimistic value and shows it.
+		auto reply_state = [&]() {
+			auto st = wiimeq::state(address);
+			if (!st) { err(0, "The WiiM device did not answer."); return; }
+			res.set_content(subsonic_ok_json([&](nlohmann::json& r) {
+				r["wiimEq"]["on"]     = st->on;
+				r["wiimEq"]["preset"] = st->preset;
+				// Absent bands is the degraded mode: switch and preset list
+				// only.
+				if (!st->bands.empty()) r["wiimEq"]["bands"] = st->bands;
+				}), "application/json");
+			};
+
+		if (action == "state") reply_state();
+		else if (action == "presets") {
+			auto names = wiimeq::presets(address);
+			if (!names) { err(0, "The WiiM device did not answer."); return; }
+			res.set_content(subsonic_ok_json([&](nlohmann::json& r) {
+				r["wiimEq"]["presets"] = *names;
+				}), "application/json");
+			}
+		else if (action == "load") {
+			auto ni = req.params.find("name");
+			if (ni == req.params.end()) {
+				err(10, "Required parameter missing: name."); return;
+				}
+			if (!wiimeq::load_preset(address, ni->second)) {
+				err(0, "The WiiM device did not answer."); return;
+				}
+			reply_state();
+			}
+		else if (action == "on" || action == "off") {
+			if (!wiimeq::set_on(address, action == "on")) {
+				err(0, "The WiiM device did not answer."); return;
+				}
+			reply_state();
+			}
+		else if (action == "setBands") {
+			// A comma list of exactly ten values 0-99, refused otherwise:
+			// the all-ten-or-nothing rule holds at the write too.
+			std::vector<int> bands;
+			const std::string bs = req.get_param_value("bands");
+			bool   bad = bs.empty();
+			size_t pos = 0;
+			while (!bad) {
+				size_t c   = bs.find(',', pos);
+				int    v   = to_int(bs.substr(pos, c == std::string::npos
+				                              ? std::string::npos : c - pos), -1);
+				if (v < wiimeq::LEVEL_MIN || v > wiimeq::LEVEL_MAX) bad = true;
+				else bands.push_back(v);
+				if (c == std::string::npos) break;
+				pos = c + 1;
+				}
+			if (bad || bands.size() != 10) {
+				err(10, "Parameter bands must be ten comma-separated"
+				        " values 0-99.");
+				return;
+				}
+			if (!wiimeq::set_bands(address, bands)) {
+				err(0, "The WiiM device did not answer."); return;
+				}
+			reply_state();
+			}
+		else err(0, "Unknown action.");
 		});
 
 	// castLoad — instruct the Chromecast to fetch and play a song.

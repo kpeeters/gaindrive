@@ -1749,6 +1749,50 @@ CastManager::CaptionState CastManager::caption_state() const
 	return CaptionState{ last_load_.caption_ids, last_load_.active_track_ids };
 	}
 
+CastManager::VolumeState CastManager::volume_state() const
+	{
+	std::lock_guard<std::mutex> lk(status_mutex_);
+	return volume_;
+	}
+
+void CastManager::cast_volume(float level)
+	{
+	level = std::min(1.0f, std::max(0.0f, level));
+	// A receiver-level command, like stop()'s STOP: it goes to receiver-0 on
+	// the receiver namespace, needs no transport, and so works before
+	// anything has been loaded.
+	Tls t;
+	if (!tls_connect(t, device_.address, device_.port)) {
+		std::cout << stamp() << "Cast: connect failed for volume" << std::endl;
+		return;
+		}
+	std::string src = "sender-0", dst = "receiver-0";
+	cast_send(t.ssl, NS_CONN, src, dst, {{"type", "CONNECT"}});
+	cast_send(t.ssl, NS_RECV, src, dst,
+	          {{"type", "SET_VOLUME"}, {"requestId", next_request_id()},
+	           {"volume", nlohmann::json{{"level", level}}}});
+	std::cout << stamp() << "Cast: SET_VOLUME → " << level << std::endl;
+	}
+
+void CastManager::update_volume(const nlohmann::json& msg)
+	{
+	// A RECEIVER_STATUS need not carry a volume block: an application push may
+	// omit it, just as a volume-only push omits the applications array. Absent
+	// keeps the last known value: the same asymmetry lists_applications()
+	// exists for, in the other direction.
+	const auto& v = jsub(jsub(msg, "status"), "volume");
+	if (!v.is_object()) return;
+	{
+	std::lock_guard<std::mutex> lk(status_mutex_);
+	volume_.known = true;
+	volume_.level = (float)jnum(v, "level");
+	const auto& mj = jsub(v, "muted");
+	volume_.muted = mj.is_boolean() && mj.get<bool>();
+	volume_.fixed = jstr(v, "controlType") == "fixed";
+	}
+	status_cv_.notify_all();
+	}
+
 void CastManager::poll_loop()
 	{
 	std::string connected_tid;  // transport_id_ we are currently subscribed to
@@ -1783,6 +1827,11 @@ void CastManager::poll_loop()
 		// Ask for an immediate snapshot; subsequent updates arrive as pushes.
 		cast_send(t.ssl, NS_MEDIA, src, tid,
 		          {{"type", "GET_STATUS"}, {"requestId", 100}});
+		// And one receiver-level snapshot for the volume: RECEIVER_STATUS is
+		// only pushed on changes, so without asking once the level stays
+		// unknown until someone turns a knob.
+		cast_send(t.ssl, NS_RECV, src, "receiver-0",
+		          {{"type", "GET_STATUS"}, {"requestId", 102}});
 		connected_tid = tid;
 
 		std::cout << stamp() << "Cast: poll_loop connected to transport " << tid << std::endl;
@@ -1869,6 +1918,7 @@ void CastManager::poll_loop()
 					// that invalidates our cached transport_id.
 					std::cout << stamp() << "Cast rx RECEIVER_STATUS: "
 					          << m.dump() << std::endl;
+					update_volume(m);
 					// And act on it, which nothing here used to do:
 					// transport_id_ was written only by a load and cleared only
 					// by stop(), so a receiver that tore the app down left a
@@ -1942,6 +1992,7 @@ void CastManager::stop()
 	{
 	std::lock_guard<std::mutex> lk(status_mutex_);
 	status_ = CastStatus{};
+	volume_ = VolumeState{};
 	// The session is over, so anything it had to say is stale; a client
 	// restoring one has nothing to be told about.
 	notice_.clear();

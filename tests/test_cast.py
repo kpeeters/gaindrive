@@ -148,6 +148,44 @@ if bad:
     sys.exit(1)
 print("\ncastSession agrees with castLoad on every field.")
 
+# The snapshot must carry the device's model, because it is what a reloaded
+# page decides WiiM-or-not from; and the volume key must be present even
+# before the receiver has reported one, since null is how "not reported yet"
+# is spelled.
+model = found[0].get("model") or ""
+if sess.get("deviceModel", None) != model:
+    print(f"deviceModel {sess.get('deviceModel')!r} does not match the "
+          f"list's model {model!r}")
+    sys.exit(1)
+if "volume" not in sess:
+    print("castSession carries no volume key at all.")
+    sys.exit(1)
+print(f"deviceModel matches the list; volume is {sess['volume']!r}.")
+
+# volume without a level must be refused, not clamped to something.
+bad = get_json("castControl", action="volume", castController=CONTROLLER)
+if bad.get("status") != "failed" or bad.get("error", {}).get("code") != 10:
+    print("castControl action=volume without level was not refused with "
+          "error 10.")
+    sys.exit(1)
+print("castControl action=volume without level is refused.")
+
+# Read-only look at the WiiM relay on a WiiM; on anything else the endpoint
+# still answers, with whatever the device's port 443 made of it.  Nothing
+# here mutates the equalizer: this test runs against somebody's real
+# listening setup.
+if "wiim" in model.lower():
+    eq = get_json("castWiimEq", action="state",
+                  castController=CONTROLLER).get("wiimEq")
+    if eq is None:
+        print("castWiimEq action=state answered without a wiimEq object.")
+        sys.exit(1)
+    print(f"WiiM EQ: on={eq.get('on')!r} preset={eq.get('preset')!r} "
+          f"bands={eq.get('bands')!r}")
+    pr = get_json("castWiimEq", action="presets",
+                  castController=CONTROLLER).get("wiimEq", {}).get("presets")
+    print(f"WiiM presets: {pr!r}")
+
 # A receiver demuxes no more containers than a browser does, so a video whose
 # container a browser will not take must still be remuxed for it — whatever any
 # *client* said about what it can demux itself.  `playable` on

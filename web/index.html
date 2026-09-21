@@ -231,26 +231,62 @@
            left, while a button sitting in the middle of the bar does not.
            The faders themselves are built from EQ_BANDS in app.js, so a label
            cannot end up naming a frequency its filter does not have. -->
+      <!-- One panel, three contents, chosen by eqOpen() from what is making
+           the sound: this browser, a WiiM, or another cast receiver.  One
+           panel rather than siblings so the anchoring, the outside-click
+           wiring and the opener button are shared rather than triplicated. -->
       <div id="eq-panel" class="hidden">
-         <div id="eq-head">
-            <label><input type="checkbox" id="eq-on"> Equaliser</label>
-            <!-- Derived, never typed into: see eqApply().  Shown because
-                 otherwise "I raised every band and nothing got louder" reads
-                 as a fault rather than as the clipping it avoids. -->
-            <span id="eq-preamp">Preamp 0 dB</span>
+         <div id="eq-local">
+            <div id="eq-head">
+               <label><input type="checkbox" id="eq-on"> Equaliser</label>
+               <!-- Derived, never typed into: see eqApply().  Shown because
+                    otherwise "I raised every band and nothing got louder" reads
+                    as a fault rather than as the clipping it avoids. -->
+               <span id="eq-preamp">Preamp 0 dB</span>
+            </div>
+            <div id="eq-bands"></div>
+            <div id="eq-preset-row">
+               <select id="eq-preset"></select>
+               <button id="eq-save"   class="mi" title="Save as a preset">save</button>
+               <button id="eq-delete" class="mi" title="Delete this preset">delete</button>
+            </div>
+            <!-- Naming is asked for rather than always on screen: the row below
+                 is wanted once per curve and the faders are wanted constantly. -->
+            <div id="eq-save-row" hidden>
+               <input id="eq-save-name" type="text" placeholder="Preset name…"
+                      spellcheck="false" autocomplete="off">
+               <button id="eq-save-go">Save</button>
+            </div>
          </div>
-         <div id="eq-bands"></div>
-         <div id="eq-preset-row">
-            <select id="eq-preset"></select>
-            <button id="eq-save"   class="mi" title="Save as a preset">save</button>
-            <button id="eq-delete" class="mi" title="Delete this preset">delete</button>
+         <!-- The WiiM's own equalizer, driven through the server's castWiimEq
+              relay.  The faders are built from WIIM_BANDS in app.js, like the
+              local ones from EQ_BANDS and for the same reason. -->
+         <div id="eq-wiim" hidden>
+            <div id="wiim-head">
+               <label><input type="checkbox" id="wiim-on"> Equaliser</label>
+               <span id="wiim-note"></span>
+            </div>
+            <div id="wiim-bands"></div>
+            <div id="eq-preset-row-wiim">
+               <select id="wiim-preset"></select>
+               <button id="wiim-save"   class="mi" title="Save as a preset">save</button>
+               <button id="wiim-delete" class="mi" title="Delete this preset">delete</button>
+            </div>
+            <div id="wiim-save-row" hidden>
+               <input id="wiim-save-name" type="text" placeholder="Preset name…"
+                      spellcheck="false" autocomplete="off">
+               <button id="wiim-save-go">Save</button>
+            </div>
          </div>
-         <!-- Naming is asked for rather than always on screen: the row below
-              is wanted once per curve and the faders are wanted constantly. -->
-         <div id="eq-save-row" hidden>
-            <input id="eq-save-name" type="text" placeholder="Preset name…"
-                   spellcheck="false" autocomplete="off">
-            <button id="eq-save-go">Save</button>
+         <!-- The receiver's volume, shown while casting to anything.  Buttons
+              and a bar rather than a slider, as the Android sheets have it:
+              the level lives on the device and arrives back over SSE, and a
+              slider that fights the echo is worse than steps that do not. -->
+         <div id="eq-volume-row" hidden>
+            <button id="cast-vol-down" class="mi" title="Volume down">volume_down</button>
+            <div id="cast-vol-bar"><div id="cast-vol-fill"></div></div>
+            <button id="cast-vol-up" class="mi" title="Volume up">volume_up</button>
+            <span id="cast-vol-pct"></span>
          </div>
       </div>
    </footer>

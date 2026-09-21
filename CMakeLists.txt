@@ -708,6 +708,7 @@ add_executable(gaindrive
 	src/apiplaylist.cc
 	src/apistream.cc
 	src/apicast.cc
+	src/wiimeq.cc
 	src/apiedit.cc
 	src/apifetch.cc
 	src/apifallback.cc

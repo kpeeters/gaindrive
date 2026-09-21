@@ -3576,6 +3576,20 @@ const CAST_OFF_NETWORK =
 // Id of the currently active cast device, or null when not casting.
 let castDeviceId        = null;
 let castDeviceName      = '';    // friendly name, for the panel that replaces the picture
+// The mDNS model string of the active device ("WiiM Amp Ultra"), empty for a
+// configured device.  It is the only thing that tells a WiiM from the rest,
+// which is why castSession repeats it: a reloaded page has no device list to
+// look the id up in.
+let castDeviceModel     = '';
+// The receiver's own volume, {level, muted, fixed} as the server relays it,
+// or null until the first RECEIVER_STATUS has carried one.  Null keeps the
+// volume buttons disabled: "not reported yet" is not level zero.
+let castVolume          = null;
+// What the WiiM said about its equalizer, {on, preset, bands?}, or null
+// before the panel has read it.  bands absent is the degraded mode: the
+// device answered but the band array was unusable.
+let wiimState           = null;
+let wiimDevicePresets   = null;  // names from EQGetList, or the documented fallback
 let castEventSrc        = null;   // EventSource receiving pushed status from server
 let castStartOffset     = 0;      // timeOffset used when cast started (seconds)
 let lastCastPosition    = 0;      // absolute position of last SSE push
@@ -3639,6 +3653,14 @@ function onCastStatus(s) {
    if (typeof s.noticeSeq === 'number' && s.noticeSeq !== castNoticeSeq) {
       castNoticeSeq = s.noticeSeq;
       if (s.notice) showError(s.notice);
+      }
+   // The receiver's volume, whenever the push carries the field.  Also above
+   // the transient gate below: a volume report is never a stale position, and
+   // dropping one with the status it rode in on would leave the row behind
+   // whatever the knob on the device just did.
+   if ('volume' in s) {
+      castVolume = s.volume;
+      castVolumeRender();
       }
    // Server tells us where the served stream begins in the song.  Native
    // seek (MP3) keeps this at 0; server-side seek (FLAC/other) sets it to
@@ -4705,6 +4727,7 @@ async function selectCastDevice(id, label = '') {
       await apiCall('startCast', {id});
       castDeviceId   = id;
       castDeviceName = label;
+      castDeviceModel = castDeviceCache.find(d => d.id === id)?.model ?? '';
       castButtonState(true);
       document.getElementById('cast-modal').classList.add('hidden');
       // Stop local playback and re-issue the stream request so the server
@@ -4756,6 +4779,10 @@ function castExit() {
    const resumeOffset = lastCastPosition || (castStartOffset + castBaseTime + elapsed);
    castDeviceId         = null;
    castDeviceName       = '';
+   castDeviceModel      = '';
+   castVolume           = null;
+   wiimState            = null;
+   wiimDevicePresets    = null;
    castStartOffset      = 0;
    lastCastPosition     = 0;
    castWasPlaying       = false;
@@ -5058,21 +5085,19 @@ function eqSyncFaders() {
       });
    }
 
-function eqFillPresets() {
-   const sel   = document.getElementById('eq-preset');
-   const saved = eqPrefs.slots();
+// Shared by the local and the WiiM preset menus.  "Custom" is a state and not
+// a choice (it is what the menu says while the curve matches nothing), so it
+// is present but never selectable.
+function presetFill(sel, groups) {
    sel.textContent = '';
-
-   // "Custom" is a state and not a choice — it is what the menu says while the
-   // curve matches nothing — so it is present but never selectable.
    const custom = document.createElement('option');
    custom.value = '';
    custom.textContent = 'Custom';
    custom.disabled = true;
    sel.appendChild(custom);
 
-   const group = (label, names) => {
-      if (!names.length) return;
+   for (const [label, names] of groups) {
+      if (!names.length) continue;
       const g = document.createElement('optgroup');
       g.label = label;
       for (const n of names) {
@@ -5082,9 +5107,13 @@ function eqFillPresets() {
          g.appendChild(o);
          }
       sel.appendChild(g);
-      };
-   group('Presets', Object.keys(EQ_PRESETS));
-   group('Saved',   Object.keys(saved));
+      }
+   }
+
+function eqFillPresets() {
+   presetFill(document.getElementById('eq-preset'),
+              [['Presets', Object.keys(EQ_PRESETS)],
+               ['Saved',   Object.keys(eqPrefs.slots())]]);
    }
 
 // Which entry the current curve *is*, so the menu stops claiming a preset the
@@ -5141,18 +5170,51 @@ function eqSaveSlot() {
 // by hand; see setupKeys() for the first and eqOutside for the second.
 let eqOutside = null;
 
+// The mode the panel was drawn for, so a cast starting or ending under an
+// open panel closes it rather than morphing it in place.
+let eqOpenMode = null;
+
+// The same contains-test the Android client uses (CastDeviceKind): WiiM ship
+// half a dozen models and the firmware spells "WiiM_AMP" with an underscore,
+// so anything looser than a substring would miss real devices.  A manually
+// configured device has no model and lands on generic, which only costs it
+// the equalizer it may not have.
+function isWiimCast() {
+   return castDeviceId !== null && /wiim/i.test(castDeviceModel);
+   }
+
+// Who is making the sound, and so which content the panel gets: this
+// browser's equaliser, the WiiM's own one plus the receiver volume, or the
+// receiver volume alone (volume is the only control the Cast protocol
+// offers a generic receiver).
+function eqPanelMode() {
+   if (castDeviceId === null) return 'local';
+   return isWiimCast() ? 'wiim' : 'cast';
+   }
+
 function eqIsOpen() {
    return !document.getElementById('eq-panel').classList.contains('hidden');
    }
 
 function eqOpen() {
    const panel = document.getElementById('eq-panel');
-   eqBuildFaders();
-   eqFillPresets();
-   eqSyncFaders();
-   eqShowPreset();
-   document.getElementById('eq-on').checked = eqPrefs.on();
-   eqApply();
+   const mode  = eqPanelMode();
+   eqOpenMode  = mode;
+   document.getElementById('eq-local').hidden      = mode !== 'local';
+   document.getElementById('eq-wiim').hidden       = mode !== 'wiim';
+   document.getElementById('eq-volume-row').hidden = mode === 'local';
+   if (mode === 'local') {
+      eqBuildFaders();
+      eqFillPresets();
+      eqSyncFaders();
+      eqShowPreset();
+      document.getElementById('eq-on').checked = eqPrefs.on();
+      eqApply();
+      }
+   else {
+      castVolumeRender();
+      if (mode === 'wiim') wiimOpen();
+      }
    panel.classList.remove('hidden');
 
    // Installed only while the panel is up.  A listener that spends the rest of
@@ -5169,25 +5231,35 @@ function eqOpen() {
 function eqClose() {
    document.getElementById('eq-panel').classList.add('hidden');
    document.getElementById('eq-save-row').hidden = true;
+   document.getElementById('wiim-save-row').hidden = true;
+   eqOpenMode = null;
    if (eqOutside) {
       document.removeEventListener('click', eqOutside);
       eqOutside = null;
       }
    }
 
-// The equaliser is a graph in this browser, so it can only touch sound this
-// browser is making.  While a receiver is playing, the faders would move and
-// nothing would happen, which is worse than a button that declines.
-//
-// This is also the seam a receiver-side equaliser goes behind later: the curve
-// in eqPrefs is already the whole description of what is wanted, and this is
-// the only function with an opinion about who is able to honour it.
+// The one function with an opinion about who is able to honour a curve.  The
+// button used to be disabled while casting; now it changes subject instead,
+// because a WiiM carries an equaliser of its own and every receiver carries
+// a volume.  The glyph and title say which control is behind it, as the
+// Android app's Tune icon does.
 function eqUpdateAvail() {
-   const btn = document.getElementById('player-eq-btn');
-   const casting = castDeviceId !== null;
-   btn.disabled = casting;
-   btn.title = casting ? 'Equaliser — not available while casting' : 'Equaliser';
-   if (casting) eqClose();
+   const btn  = document.getElementById('player-eq-btn');
+   const mode = eqPanelMode();
+   btn.textContent = mode === 'local' ? 'graphic_eq' : 'tune';
+   btn.title = mode === 'local' ? 'Equaliser'
+             : mode === 'wiim'  ? 'WiiM equaliser and volume'
+             :                    'Receiver volume';
+   // Accent means "an equaliser is engaged", whichever one.  Set here for
+   // every mode, not only the cast ones: a cast ending must not leave the
+   // WiiM's accent on a button that is the local equaliser again.
+   btn.classList.toggle('active',
+      mode === 'local' ? eqPrefs.on()
+                       : mode === 'wiim' && !!wiimState?.on);
+   // Drawn for another sound source: close rather than redraw under the
+   // hand, and the next click opens the right content.
+   if (eqIsOpen() && eqOpenMode !== mode) eqClose();
    }
 
 // Called once from setupPlayer().
@@ -5244,10 +5316,412 @@ function eqSetup() {
       eqShowPreset();
       });
 
+   wiimSetup();
+
    // The stored state has to reach the button on load, or a session that was
    // left with the equaliser engaged comes back looking as though it was not.
    eqApply();
    eqUpdateAvail();
+   }
+
+// ── Receiver volume and the WiiM equaliser ──────────────────────────────────
+//
+// Both live behind the same #eq-panel; eqPanelMode() above decides which of
+// the three contents a click gets.  The volume goes out as castControl
+// action=volume and the receiver's own report comes back over the SSE
+// stream; the WiiM equalizer goes through the server's castWiimEq relay,
+// because a browser cannot speak to the device itself (a self-signed
+// certificate, and no CORS).  The behaviour mirrors the Android client's
+// WiiMControlsSheet, and android/WIIM.md is the reference for the device's
+// quirks.
+
+function castVolumeRender() {
+   const row = document.getElementById('eq-volume-row');
+   if (row.hidden) return;
+   const v      = castVolume;
+   const usable = v !== null && !v.fixed;
+   document.getElementById('cast-vol-down').disabled = !usable;
+   document.getElementById('cast-vol-up').disabled   = !usable;
+   const pct  = document.getElementById('cast-vol-pct');
+   const fill = document.getElementById('cast-vol-fill');
+   if (v === null) {
+      // Nothing reported yet: blank rather than a guessed number.  The
+      // receiver only states its level once poll_loop asks it, which is
+      // after the first load.
+      pct.textContent  = '';
+      fill.style.width = '0';
+      row.title        = '';
+      return;
+      }
+   const n = Math.round(v.level * 100);
+   fill.style.width = `${n}%`;
+   pct.textContent  = `${n}%`;
+   // Report-only: the Cast protocol has a mute, but neither client offers it.
+   pct.classList.toggle('cast-vol-muted', !!v.muted);
+   row.title = v.fixed ? 'This receiver has a fixed volume' : '';
+   }
+
+function castVolumeStep(d) {
+   if (!castVolume || castVolume.fixed) return;
+   const lvl = Math.min(1, Math.max(0, castVolume.level + d * 0.01));
+   // Optimistic, so the bar moves under the finger; the receiver's own
+   // report arrives over SSE and confirms or corrects it.
+   castVolume.level = lvl;
+   castVolumeRender();
+   apiCall('castControl', {action: 'volume', level: lvl.toFixed(3)})
+      .catch(err => showError(err.message));
+   }
+
+// The WiiM's ten fixed bands, fader label per wire name, in device index
+// order.  Must match wiimeq.cc's table, which is the one EQSetBand is
+// spelled with.
+const WIIM_BANDS = [
+   ['band31hz',  '31'],
+   ['band63hz',  '63'],
+   ['band125hz', '125'],
+   ['band250hz', '250'],
+   ['band500hz', '500'],
+   ['band1khz',  '1k'],
+   ['band2khz',  '2k'],
+   ['band4khz',  '4k'],
+   ['band8khz',  '8k'],
+   ['band16khz', '16k'],
+];
+
+// 0..99 with 50 flat.  How that maps to decibels is unverified, which is why
+// the readouts show offsets from flat and not dB figures nobody can vouch
+// for.
+const WIIM_MAX  = 99;
+const WIIM_FLAT = 50;
+
+// The presets WiiM's own documentation lists.  Used only when EQGetList
+// fails, so the menu is never empty; the fetched list is the primary source
+// because firmware versions differ and owners create presets on the device.
+const WIIM_FALLBACK_PRESETS = [
+   'Flat', 'Acoustic', 'Bass Booster', 'Bass Reducer', 'Classical', 'Dance',
+   'Deep', 'Electronic', 'Hip-Hop', 'Jazz', 'Latin', 'Loudness', 'Lounge',
+   'Piano', 'Pop', 'R&B', 'Rock', 'Small Speakers', 'Spoken Word',
+   'Treble Booster', 'Treble Reducer', 'Vocal Booster',
+];
+
+// Saved WiiM curves live in this browser keyed by cast device id, never on
+// the device: the LinkPlay preset store has no documented write.  The id
+// survives a rename and a new DHCP lease, which the address does not.
+const wiimPrefs = {
+   all() {
+      try {
+         const o = JSON.parse(localStorage.getItem('gd_wiim_slots') || '{}');
+         return (o && typeof o === 'object') ? o : {};
+         }
+      catch (err) {
+         console.warn('[wiim] saved presets are unreadable, ignoring them', err);
+         return {};
+         }
+      },
+   slots(dev) {
+      const s = this.all()[dev];
+      return (s && typeof s === 'object') ? s : {};
+      },
+   setSlots(dev, s) {
+      const o = this.all();
+      if (Object.keys(s).length) o[dev] = s;
+      else                       delete o[dev];
+      if (Object.keys(o).length)
+         localStorage.setItem('gd_wiim_slots', JSON.stringify(o));
+      else
+         localStorage.removeItem('gd_wiim_slots');
+      },
+   };
+
+// A fader's readout, as the distance from flat: "+21" for 71.  Same signs as
+// the local column, via eqDb.
+function wiimOff(v) {
+   return eqDb(v - WIIM_FLAT);
+   }
+
+// One castWiimEq call, unwrapped to the state object every action answers
+// with.
+async function wiimCommand(params) {
+   const sr = await apiCall('castWiimEq', params);
+   return sr.wiimEq ?? {};
+   }
+
+// The band list out of a reply, or null: the server already enforces
+// all-ten-or-nothing, so anything else here is a malformed answer.
+function wiimBandsOf(eq) {
+   return Array.isArray(eq.bands) && eq.bands.length === WIIM_BANDS.length
+      ? eq.bands : null;
+   }
+
+function wiimBuildFaders() {
+   const wrap = document.getElementById('wiim-bands');
+   if (wrap.childElementCount) return;
+   WIIM_BANDS.forEach(([, label]) => {
+      const col = document.createElement('div');
+      // The local faders' classes on purpose: the CSS and its mobile
+      // overrides then apply unchanged.
+      col.className = 'eq-band';
+
+      const val = document.createElement('span');
+      val.className = 'eq-band-val';
+
+      const sl = document.createElement('input');
+      sl.type = 'range';
+      sl.min  = 0;
+      sl.max  = WIIM_MAX;
+      sl.step = 1;
+      const hz = label.endsWith('k') ? `${label.slice(0, -1)} kHz`
+                                     : `${label} Hz`;
+      sl.title = hz;
+      sl.setAttribute('aria-label', hz);
+      // input updates only the readout; the write goes out on release.  A
+      // LAN round trip per drag tick would queue commands behind each other
+      // on the device, which is why Android commits on finger-up too.
+      sl.addEventListener('input',  () => {
+         val.textContent = wiimOff(Number(sl.value));
+         });
+      sl.addEventListener('change', wiimCommitBands);
+
+      const lab = document.createElement('span');
+      lab.className = 'eq-band-label';
+      lab.textContent = label;
+
+      col.append(val, sl, lab);
+      wrap.appendChild(col);
+      });
+   }
+
+function wiimSyncFaders() {
+   const b = wiimState?.bands;
+   if (!b) return;
+   [...document.getElementById('wiim-bands').children].forEach((col, i) => {
+      col.querySelector('input').value = b[i];
+      col.querySelector('.eq-band-val').textContent = wiimOff(b[i]);
+      });
+   }
+
+function wiimFillPresets() {
+   presetFill(document.getElementById('wiim-preset'),
+              [['Device presets', wiimDevicePresets || []],
+               ['Saved', Object.keys(wiimPrefs.slots(castDeviceId))]]);
+   }
+
+// Which entry the current state *is*.  A saved slot is recognised by its
+// curve; a device preset only by the name the device (or the last load sent
+// from here) reports, because the device does not publish its presets'
+// curves.
+function wiimShowPreset() {
+   const sel   = document.getElementById('wiim-preset');
+   const saved = wiimPrefs.slots(castDeviceId);
+   const b     = wiimState?.bands;
+   const hit   = b ? Object.keys(saved).find(n =>
+      Array.isArray(saved[n]) && saved[n].length === b.length
+      && saved[n].every((v, i) => v === b[i])) : null;
+   if (hit) sel.value = hit;
+   else {
+      const name = wiimState?.preset ?? '';
+      sel.value = (wiimDevicePresets || []).includes(name) ? name : '';
+      }
+   document.getElementById('wiim-delete').disabled = !wiimState?.on || !hit;
+   }
+
+// Same shape as eqEnable(): everything describing a curve the switched-off
+// equaliser is not applying goes inert.  The preset menu stays live, because
+// choosing a preset is how the equaliser comes back on.
+function wiimEnable(on) {
+   const panel = document.getElementById('eq-panel');
+   panel.classList.toggle('wiim-off', !on);
+   panel.querySelectorAll('#wiim-bands input, #wiim-save,'
+      + ' #wiim-save-name, #wiim-save-go').forEach(el => el.disabled = !on);
+   wiimShowPreset();
+   }
+
+function wiimRender() {
+   const st = wiimState;
+   if (!st) return;
+   document.getElementById('wiim-on').checked = st.on;
+   const degraded = !st.bands;
+   document.getElementById('wiim-bands').hidden  = degraded;
+   document.getElementById('wiim-save').hidden   = degraded;
+   document.getElementById('wiim-delete').hidden = degraded;
+   document.getElementById('wiim-note').textContent = degraded
+      ? 'No band values from this device'
+      : castDeviceName;
+   if (!degraded) wiimSyncFaders();
+   wiimFillPresets();
+   wiimEnable(st.on);
+   // The player-bar button's accent follows the device's switch.
+   eqUpdateAvail();
+   }
+
+async function wiimOpen() {
+   wiimBuildFaders();
+   document.getElementById('wiim-note').textContent = 'Reading…';
+   const dev = castDeviceId;
+   try {
+      // The state read is the reachability test; a failure in the preset
+      // list is then about the list, and the documented names stand in.
+      const [eq, pr] = await Promise.all([
+         wiimCommand({action: 'state'}),
+         wiimCommand({action: 'presets'}).catch(() => null),
+         ]);
+      if (castDeviceId !== dev || eqOpenMode !== 'wiim') return;
+      wiimDevicePresets = pr?.presets?.length
+         ? pr.presets : WIIM_FALLBACK_PRESETS.slice();
+      wiimState = {on: !!eq.on, preset: eq.preset ?? '',
+                   bands: wiimBandsOf(eq)};
+      wiimRender();
+      }
+   catch (err) {
+      if (castDeviceId !== dev || eqOpenMode !== 'wiim') return;
+      eqClose();
+      showError(err.message);
+      }
+   }
+
+// The write on fader release: the whole curve, optimistic, put back on
+// failure.  The reply's preset name is ignored: the device keeps naming the
+// last EQLoad after the bands have moved on, so after a write the curve
+// decides the menu (wiimShowPreset) and the name is this page's bookkeeping.
+async function wiimCommitBands() {
+   if (!wiimState?.bands) return;
+   const vals = [...document.getElementById('wiim-bands')
+      .querySelectorAll('input')].map(el => Number(el.value));
+   const prev = wiimState.bands;
+   wiimState = {...wiimState, bands: vals};
+   wiimShowPreset();
+   try {
+      const eq = await wiimCommand({action: 'setBands', bands: vals.join(',')});
+      wiimState = {on: !!eq.on, preset: wiimState.preset,
+                   bands: wiimBandsOf(eq) ?? vals};
+      wiimRender();
+      }
+   catch (err) {
+      wiimState = {...wiimState, bands: prev};
+      wiimSyncFaders();
+      wiimShowPreset();
+      showError(err.message);
+      }
+   }
+
+async function wiimLoadDevicePreset(name) {
+   const prev = wiimState;
+   // Optimistic, name included: see wiimCommitBands on why the device's own
+   // Name field is not believed after a mutation.
+   wiimState = {...wiimState, on: true, preset: name};
+   wiimRender();
+   try {
+      const eq = await wiimCommand({action: 'load', name});
+      wiimState = {on: !!eq.on, preset: name, bands: wiimBandsOf(eq)};
+      wiimRender();
+      }
+   catch (err) {
+      wiimState = prev;
+      wiimRender();
+      showError(err.message);
+      }
+   }
+
+async function wiimApplySlot(name, curve) {
+   if (!Array.isArray(curve) || curve.length !== WIIM_BANDS.length) return;
+   const prev = wiimState;
+   wiimState = {...wiimState, bands: curve.slice()};
+   wiimRender();
+   try {
+      let eq = await wiimCommand({action: 'setBands', bands: curve.join(',')});
+      // A saved preset must also engage the equaliser, as loading a device
+      // preset does through the relay: applying a curve to a switched-off
+      // equaliser would be a silent no-op.
+      if (!eq.on) eq = await wiimCommand({action: 'on'});
+      wiimState = {on: !!eq.on, preset: prev?.preset ?? '',
+                   bands: wiimBandsOf(eq) ?? curve.slice()};
+      wiimRender();
+      }
+   catch (err) {
+      wiimState = prev;
+      wiimRender();
+      showError(err.message);
+      }
+   }
+
+function wiimSaveSlot() {
+   const field = document.getElementById('wiim-save-name');
+   const name  = field.value.trim();
+   if (!name || !wiimState?.bands) return;
+   // Same rule as the local menu: a saved curve under a device preset's name
+   // would leave that preset unreachable behind two identical entries.
+   if ((wiimDevicePresets || []).includes(name)) {
+      showError(`"${name}" is the name of a device preset. Pick another.`);
+      return;
+      }
+   const slots = wiimPrefs.slots(castDeviceId);
+   slots[name] = wiimState.bands.slice();
+   wiimPrefs.setSlots(castDeviceId, slots);
+   document.getElementById('wiim-save-row').hidden = true;
+   wiimFillPresets();
+   wiimShowPreset();
+   }
+
+// Called once from eqSetup().
+function wiimSetup() {
+   document.getElementById('cast-vol-down')
+      .addEventListener('click', () => castVolumeStep(-1));
+   document.getElementById('cast-vol-up')
+      .addEventListener('click', () => castVolumeStep(1));
+
+   document.getElementById('wiim-on').addEventListener('change', async e => {
+      const on = e.target.checked;
+      wiimEnable(on);
+      try {
+         const eq = await wiimCommand({action: on ? 'on' : 'off'});
+         wiimState = {on: !!eq.on, preset: wiimState?.preset ?? '',
+                      bands: wiimBandsOf(eq)};
+         wiimRender();
+         }
+      catch (err) {
+         e.target.checked = !on;
+         wiimEnable(!on);
+         showError(err.message);
+         }
+      });
+
+   document.getElementById('wiim-preset').addEventListener('change', e => {
+      const name  = e.target.value;
+      const slots = wiimPrefs.slots(castDeviceId);
+      if (name in slots) wiimApplySlot(name, slots[name]);
+      else               wiimLoadDevicePreset(name);
+      });
+
+   document.getElementById('wiim-save').addEventListener('click', () => {
+      const row = document.getElementById('wiim-save-row');
+      row.hidden = !row.hidden;
+      if (!row.hidden) {
+         const f = document.getElementById('wiim-save-name');
+         f.value = '';
+         f.focus();
+         }
+      });
+   document.getElementById('wiim-save-go')
+      .addEventListener('click', wiimSaveSlot);
+   document.getElementById('wiim-save-name').addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); wiimSaveSlot(); }
+      // As on the local field: while naming, Escape is a way out of the name
+      // and not out of the panel.
+      if (e.key === 'Escape') {
+         e.stopPropagation();
+         document.getElementById('wiim-save-row').hidden = true;
+         }
+      });
+
+   document.getElementById('wiim-delete').addEventListener('click', () => {
+      const name  = document.getElementById('wiim-preset').value;
+      const slots = wiimPrefs.slots(castDeviceId);
+      if (!(name in slots)) return;
+      delete slots[name];
+      wiimPrefs.setSlots(castDeviceId, slots);
+      wiimFillPresets();
+      wiimShowPreset();
+      });
    }
 
 // ── Star synchronisation across panes ─────────────────────────────────────
@@ -9446,13 +9920,15 @@ const SHORTCUTS = [
     when: () => keyShown('player-cast'),
     run:  () => { keyLeaveFullscreen();
                   document.getElementById('player-cast').click(); }},
-   {group: 'Elsewhere', key: 'e', show: 'E', label: 'Equaliser',
+   // Whatever the button currently is: the equaliser locally, the WiiM's
+   // controls or the receiver volume while casting.  The title is that
+   // answer already, so the label reads it rather than restating it.
+   {group: 'Elsewhere', key: 'e', show: 'E',
+    label: () => document.getElementById('player-eq-btn').title,
     // Not keyShown('player-eq-btn'): unlike the cast button this one is never
     // hidden, so that test is always true and would hand the key to the login
-    // screen.  The shell is what says the player is really there, and disabled
-    // is how this button spells "casting, so there is nothing to filter".
-    when: () => keyShown('app-shell')
-                && !document.getElementById('player-eq-btn').disabled,
+    // screen.  The shell is what says the player is really there.
+    when: () => keyShown('app-shell'),
     run:  () => { keyLeaveFullscreen();
                   document.getElementById('player-eq-btn').click(); }},
    // nav here is the hint's anchor alone: the field means "the sidebar entry
@@ -9953,6 +10429,8 @@ async function showShell() {
             const sess = sr.castSession;
             castDeviceId     = sess.deviceId;
             castDeviceName   = sess.deviceName ?? '';
+            castDeviceModel  = sess.deviceModel ?? '';
+            castVolume       = sess.volume ?? null;
             castStartOffset  = sess.startOffset;
             castBaseTime     = sess.currentTime;
             castBaseAt       = Date.now();
