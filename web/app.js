@@ -28,7 +28,7 @@
 // of this page could be pointed at any gaindrive anywhere — including one
 // hosted somewhere else entirely, which is a credential prompt for a server
 // the person reading it has no way to identify.  There is nothing to configure
-// now: the API lives under the origin the page was loaded from, and a build of
+// now: the API lives under the URL the page was loaded from, and a build of
 // this client that is not being served by a gaindrive has nothing to talk to.
 //
 // Not simply relative URLs, though these are all same-origin and could be.
@@ -36,8 +36,15 @@
 // compose, what ends up in a media element's src, and what the login log line
 // prints — and one that reads back as the address in the URL bar is easier to
 // believe than a relative path that resolves silently.
+//
+// The origin alone is not enough: a reverse proxy may mount the client under
+// a subpath, and the server's /rest/ lives under that same prefix.  So the
+// base keeps the directory of the page's own path, minus any filename such
+// as index.html, and no trailing slash so that callers can append "/rest/".
 function serverBase() {
-   return window.location.origin;
+   const path = window.location.pathname;
+   const dir  = path.endsWith('/') ? path : path.slice(0, path.lastIndexOf('/') + 1);
+   return window.location.origin + dir.replace(/\/$/, '');
    }
 
 const creds = {
@@ -4237,10 +4244,10 @@ let shareBase    = '';    // the link with no position
 let shareAt      = 0;     // seconds; 0 when there is nothing worth offering
 let shareChapter = null;  // {start (s), name} under the snapshot position
 
-// location.pathname rather than serverBase(): a proxy may mount the client
-// under a subpath and the origin alone would drop it.  It also drops any query
-// string, which is what stops a link made from a page that was itself opened
-// with ?track= from carrying two of them.
+// location.pathname rather than serverBase(): a share link points at the page
+// itself, filename and all, not at the API base.  Composing from the location
+// also drops any query string, which is what stops a link made from a page
+// that was itself opened with ?track= from carrying two of them.
 function infoShareSet(songId, seconds) {
    shareBase = `${window.location.origin}${window.location.pathname}`
              + `?track=${encodeURIComponent(songId)}`;
