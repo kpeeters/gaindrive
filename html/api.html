@@ -307,15 +307,32 @@
 <div class="doc-sec" id="playback">
 <h2>Playback</h2>
 <div class="api-ep">
+<h3 id="ep-reportPosition">reportPosition</h3>
+<p class="api-meta"><code>GET /rest/reportPosition.view</code></p>
+<p>The playhead of one paced stream, so the server throttles it against the real position.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>token</code></td><td>string</td><td>The <code>posToken</code> the stream URL carried. At most 64 characters.</td></tr>
+<tr><td><code>pos</code></td><td>float</td><td>The playhead in seconds, relative to the served stream (a <code>timeOffset</code> stream starts at the seek point).</td></tr>
+<tr><td><code>playing</code></td><td>bool</td><td>Whether the playhead is advancing. While <code>true</code> the server extrapolates between reports; while <code>false</code> it holds the reported position. default <code>false</code>.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>playing</code></p>
+<p>Send a report every few seconds while a <code>posToken</code> stream is open, paused included, because a paused report is what holds the stream at its lead instead of letting the wall clock drift it ahead. A report older than 30 seconds stops steering the stream, which then degrades to unpaced delivery; there is no need to unregister a finished stream.</p></div>
+</div>
+<div class="api-ep">
 <h3 id="ep-stream">stream</h3>
 <p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
 <p>Carried by <code>stream</code>. Only the gaindrive additions are listed here.</p>
-<p>Seven gaindrive parameters on the standard streaming endpoint.</p>
+<p>Eight gaindrive parameters on the standard streaming endpoint.</p>
 <h4>Parameters</h4>
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
 <tr><td><code>pace</code></td><td>bool</td><td>Deliver at roughly 1x playback rate rather than as fast as the socket takes it.</td></tr>
+<tr><td><code>posToken</code></td><td>string</td><td>Audio only. Names this stream so <code>reportPosition</code> calls can steer its pacing. An opaque client-chosen string, at most 64 characters.</td></tr>
 <tr><td><code>castToken</code></td><td>string</td><td>A token from <code>castLoad</code> or <code>getCastToken</code>, accepted in place of credentials.</td></tr>
 <tr><td><code>castController</code></td><td>string</td><td>The id given to <code>startCast</code>. Only the owner of a live cast session has its playback redirected to the receiver.</td></tr>
 <tr><td><code>castRedirect</code></td><td>bool</td><td>Send <code>false</code> to be served the stream even though you own the live cast session. default <code>true</code>.</td></tr>
@@ -328,6 +345,9 @@
 <div class="api-note"><p class="api-note-h"><code>pace</code></p>
 <p>Send it when the URL is being handed to something that will play it in real time and cannot be recognised from the request — a Cast receiver fetching for itself is the case it exists for. Without it such a receiver is sent the whole track at once, stops reading when its buffer fills, and the connection is then idle until its own 60-second no-data timeout, or a reverse proxy&#x27;s, kills it mid-track.</p>
 <p><b>Never send it on a download or a prefetch</b>: that would make the transfer take as long as the music. A browser is paced already, by its User-Agent, and video is never paced.</p></div>
+<div class="api-note"><p class="api-note-h"><code>posToken</code></p>
+<p>With it, the paced delivery is throttled against the playhead the client reports through <code>reportPosition</code>, instead of against a wall-clock estimate: the same mechanism a cast stream gets from the receiver&#x27;s status. The wall-clock estimate assumes 1x playback from the moment the request started, which drifts on a paused player and starves on a file whose front is not audio; the reported position does neither.</p>
+<p>Use a fresh random token per stream URL. Positions are read in the served stream&#x27;s own time frame, so a <code>timeOffset</code> re-fetch is a new stream and needs a new token. Scoped to the authenticated account: another account sending the same token names a different pacing session. If the reports stop, the stream degrades to unpaced delivery rather than stalling.</p></div>
 <div class="api-note"><p class="api-note-h"><code>castToken</code></p>
 <p>A receiver fetches the media for itself and has no account, so the token is what authorises it. It is not single-use per request — the receiver makes many range requests for one track — but it <b>is</b> scoped to one song and to a limited lifetime. Presenting it for a different <code>id</code> is refused as though it were absent.</p>
 <p><b>Two different tokens travel on this parameter</b>, and a URL looks the same whichever issued it. They are not interchangeable behind it:</p>
@@ -853,6 +873,53 @@
 <p>Send an empty value to clear a setting.</p>
 </div>
 <div class="api-ep">
+<h3 id="ep-getServerStatus">getServerStatus</h3>
+<p class="api-meta"><code>GET /rest/getServerStatus.view</code>
+<span class="api-badge">admin only</span>
+<span class="api-badge">JSON only</span></p>
+<p>Live load and capacity snapshot: HTTP workers, ffmpeg processes, caches, queues, uptime and memory.</p>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>serverStatus.uptimeSeconds</code></td><td>int</td><td>Seconds since the server process started.</td></tr>
+<tr><td><code>serverStatus.memoryRssBytes</code></td><td>int</td><td>Resident set size of the server process. Absent on a system without a proc filesystem.</td></tr>
+<tr><td><code>serverStatus.http.busy</code></td><td>int</td><td>HTTP worker threads currently handling a request, this one included.</td></tr>
+<tr><td><code>serverStatus.http.queued</code></td><td>int</td><td>Accepted requests waiting for a free worker.</td></tr>
+<tr><td><code>serverStatus.http.threads</code></td><td>int</td><td>Size of the worker pool.</td></tr>
+<tr><td><code>serverStatus.http.queueCap</code></td><td>int</td><td>Bound on the wait queue; a request past it is refused rather than queued.</td></tr>
+<tr><td><code>serverStatus.transcode.piped</code></td><td>int</td><td>ffmpeg processes streaming straight to a response: seeks, HLS segments, cast pipes and cache fallbacks.</td></tr>
+<tr><td><code>serverStatus.transcode.pipedMax</code></td><td>int</td><td>Ceiling on piped transcodes; one past it gets a 503.</td></tr>
+<tr><td><code>serverStatus.transcode.running</code></td><td>int</td><td>ffmpeg processes filling the on-disk transcode cache, background builds included.</td></tr>
+<tr><td><code>serverStatus.transcode.bgRunning</code></td><td>int</td><td>The background builds within <code>running</code>.</td></tr>
+<tr><td><code>serverStatus.transcode.jobsMax</code></td><td>int</td><td>The <code>--transcode-jobs</code> bound on <code>running</code>.</td></tr>
+<tr><td><code>serverStatus.transcode.cacheEnabled</code></td><td>bool</td><td>False when the on-disk cache is disabled; the byte fields then read zero.</td></tr>
+<tr><td><code>serverStatus.transcode.cacheBytes</code></td><td>int</td><td>Bytes on disk in the transcode cache, files still being written included.</td></tr>
+<tr><td><code>serverStatus.transcode.cacheCapBytes</code></td><td>int</td><td>The <code>--transcode-cache-mb</code> cap, in bytes.</td></tr>
+<tr><td><code>serverStatus.coverCache.memBytes</code></td><td>int</td><td>Memory held by the scaled-cover cache.</td></tr>
+<tr><td><code>serverStatus.coverCache.memCapBytes</code></td><td>int</td><td>Its cap; least-recently-used images are dropped past it.</td></tr>
+<tr><td><code>serverStatus.coverCache.entries</code></td><td>int</td><td>Scaled images currently held in memory.</td></tr>
+<tr><td><code>serverStatus.coverCache.building</code></td><td>int</td><td>Image decodes running right now.</td></tr>
+<tr><td><code>serverStatus.coverCache.jobsMax</code></td><td>int</td><td>Bound on concurrent decodes.</td></tr>
+<tr><td><code>serverStatus.fetch.queued</code></td><td>int</td><td>URL fetches waiting for the single fetch worker.</td></tr>
+<tr><td><code>serverStatus.fetch.queueCap</code></td><td>int</td><td>Bound on that queue.</td></tr>
+<tr><td><code>serverStatus.scan.scanning</code></td><td>bool</td><td>Whether a library scan is running.</td></tr>
+<tr><td><code>serverStatus.scan.count</code></td><td>int</td><td>Files seen by the scan so far, or by the last one.</td></tr>
+<tr><td><code>serverStatus.cast.active</code></td><td>bool</td><td>Whether a cast session is up.</td></tr>
+<tr><td><code>serverStatus.streamGrants</code></td><td>int</td><td>Unexpired one-song stream grants (see the Stream grants section).</td></tr>
+<tr><td><code>serverStatus.loginThrottle</code></td><td>int</td><td>Addresses in the login-throttle table. A spike means someone is guessing passwords.</td></tr>
+</tbody>
+</table>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>50</code></td><td>Subsonic</td><td>The caller is not an admin.</td></tr>
+</tbody>
+</table>
+<p>Every counter is instantaneous, read at the moment of the request. <code>http.busy</code> includes the worker answering this very request, so it never reads zero while a client is polling.</p>
+</div>
+<div class="api-ep">
 <h3 id="ep-startInfoLookup">startInfoLookup</h3>
 <p class="api-meta"><code>GET /rest/startInfoLookup.view</code>
 <span class="api-badge">admin only</span></p>
@@ -1315,14 +1382,15 @@ all.
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
-<tr><td><code>action</code> <b class="api-req">*</b></td><td>string</td><td>What to do. one of <code>play</code>, <code>pause</code>, <code>seek</code>, <code>captions</code>.</td></tr>
+<tr><td><code>action</code> <b class="api-req">*</b></td><td>string</td><td>What to do. one of <code>play</code>, <code>pause</code>, <code>seek</code>, <code>captions</code>, <code>volume</code>.</td></tr>
 <tr><td><code>time</code></td><td>float</td><td>Seconds, for <code>action=seek</code>.</td></tr>
 <tr><td><code>trackId</code></td><td>int</td><td>For <code>action=captions</code>, numbered as for <code>castLoad</code>. 0 or absent turns subtitles off.</td></tr>
+<tr><td><code>level</code></td><td>float</td><td>The absolute level, 0..1, required for <code>action=volume</code> (error 10 without it) and clamped into that range. Absolute rather than a step, so a client can show what it asked for and be corrected by the report.</td></tr>
 <tr><td><code>castController</code></td><td>string</td><td>The id given to <code>startCast</code>. Without a match this caller is treated as having no session.</td></tr>
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>action</code></p>
-<ul class="doc-list"><li><code>play</code> resumes a paused session. If the session has gone <code>IDLE</code> — the receiver times out during long pauses — this instead re-issues a full load from the last known position.</li><li><code>seek</code> is only for in-session seeks; the web client seeks via <code>castLoad</code>, which is a full reload.</li><li><code>captions</code> silently does nothing when the receiver has no media session yet. The track belongs on the <code>castLoad</code> in that case.</li></ul></div>
+<ul class="doc-list"><li><code>play</code> resumes a paused session. If the session has gone <code>IDLE</code> — the receiver times out during long pauses — this instead re-issues a full load from the last known position.</li><li><code>seek</code> is only for in-session seeks; the web client seeks via <code>castLoad</code>, which is a full reload.</li><li><code>captions</code> silently does nothing when the receiver has no media session yet. The track belongs on the <code>castLoad</code> in that case.</li><li><code>volume</code> sets the receiver&#x27;s own volume, the one its remote and Google Home move. The receiver reports the level back on its own schedule, so the confirmed value arrives as <code>volume</code> on <code>castEvents</code> rather than in this reply.</li></ul></div>
 <h4>Errors</h4>
 <table class="doc-table">
 <thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
@@ -1351,6 +1419,11 @@ all.
 <tr><td><code>castSession.active</code></td><td>bool</td><td>Whether a session exists <b>for this caller</b>. The remaining fields are present only when it does.</td></tr>
 <tr><td><code>castSession.deviceId</code></td><td>string</td><td>The device being cast to, as <code>listCastDevices</code> reports it.</td></tr>
 <tr><td><code>castSession.deviceName</code></td><td>string</td><td>Its friendly name.</td></tr>
+<tr><td><code>castSession.deviceModel</code></td><td>string</td><td>The model string from the device&#x27;s own mDNS announcement (&quot;WiiM Amp Ultra&quot;),
+empty for a manually configured device. It is what tells a client whether
+<code>castWiimEq</code> applies, and it is repeated here because a page restoring a
+session has no device list to look the id up in.
+</td></tr>
 <tr><td><code>castSession.songId</code></td><td>string</td><td>What is loaded.</td></tr>
 <tr><td><code>castSession.startOffset</code></td><td>float</td><td>Add this to the receiver&#x27;s reported <code>currentTime</code> to get the absolute position in the track. Zero under native seek, which is every codec today.</td></tr>
 <tr><td><code>castSession.playerState</code></td><td>string</td><td>As the receiver reports it: <code>PLAYING</code>, <code>PAUSED</code>, <code>BUFFERING</code>, <code>IDLE</code>.</td></tr>
@@ -1374,6 +1447,13 @@ diagnostic can be — and so does an encoded one, FLAC having no target rate at
 all.
 </td></tr>
 <tr><td><code>castSession.tier</code></td><td>string</td><td>Which of the three delivery tiers this fetch lands on: <code>direct</code> (the file as it stands, byte-ranged), <code>remux</code> (<code>-c copy</code> through the transcode cache, still seekable), or <code>encode</code> (re-encoded). The same two words apply to a soundtrack, and there they are the answer to &quot;why does this sound worse&quot;: <code>remux</code> is the track copied out of the film untouched, <code>encode</code> a lossless FLAC of it. A soundtrack is never re-encoded lossily — the source is already lossy, and this is the one route with no choice about transcoding.</td></tr>
+<tr><td><code>castSession.volume</code></td><td>object</td><td>The receiver&#x27;s own volume as it last reported it: <code>level</code> (0..1), <code>muted</code>,
+and <code>fixed</code>, true for a receiver whose volume nothing can move (its
+<code>controlType</code> is <code>fixed</code>, typically a television driving an amplifier).
+<code>null</code> until the first report arrives, so &quot;not reported yet&quot; and level zero
+stay distinguishable; a client should keep its volume controls disabled on
+<code>null</code>. The same object rides every <code>castEvents</code> payload.
+</td></tr>
 </tbody>
 </table>
 <p>Only the caller&#x27;s own session. Another owner&#x27;s is reported as <code>active: false</code> — otherwise a second browser would adopt it wholesale on page load and show itself as casting.</p>
@@ -1399,20 +1479,61 @@ all.
 <tr><td><code>204</code></td><td>HTTP</td><td>No cast session is active, or the caller does not own it. There is nothing to stream, so no event stream is opened.</td></tr>
 </tbody>
 </table>
-<p>An event is emitted whenever the receiver pushes a status change, and at least every 15 seconds otherwise. Each <code>data:</code> payload is a JSON object with <code>playerState</code>, <code>currentTime</code>, <code>duration</code>, <code>idleReason</code>, <code>startOffset</code>, <code>notice</code> and <code>noticeSeq</code>, plus the same stream description <code>castLoad</code> and <code>castSession</code> carry: <code>audioOnly</code>, <code>receiverShowsVideo</code>, <code>contentType</code>, <code>sentSuffix</code>, <code>sentBitRate</code> and <code>tier</code>.</p>
+<p>An event is emitted whenever the receiver pushes a status change, and at least every 15 seconds otherwise. Each <code>data:</code> payload is a JSON object with <code>playerState</code>, <code>currentTime</code>, <code>duration</code>, <code>idleReason</code>, <code>startOffset</code>, <code>notice</code> and <code>noticeSeq</code>, plus the same stream description <code>castLoad</code> and <code>castSession</code> carry (<code>audioOnly</code>, <code>receiverShowsVideo</code>, <code>contentType</code>, <code>sentSuffix</code>, <code>sentBitRate</code> and <code>tier</code>) and the same <code>volume</code> object <code>castSession</code> describes, <code>null</code> until the receiver has reported one. A volume change on the device itself arrives this way too.</p>
 <p><code>notice</code> and <code>noticeSeq</code> are as <code>castSession</code> describes them: a sentence about a load the receiver was never told about, and a number that changes when there is a new one. A client should show a notice once, when the number changes and the text is non-empty — an unchanged status is republished every 15 seconds, so acting on the text alone would repeat it for as long as the session lasted.</p>
 <p>Those six are repeated here rather than left to the <code>castLoad</code> reply because that reply describes an <em>attempt</em>. A receiver that refuses a LOAD is sent a degraded one instead — a film it cannot decode becomes its soundtrack — so the description a client read when it issued the load can already be describing something that is not playing. Reading them from each event is what keeps a client from having to reload the page to find out.</p>
 <div class="note"><p>The SSE connection doubles as the liveness signal for the cast session. Once the last listener disconnects, casting is torn down automatically after 30 seconds — so a client that wants the session to survive must keep this open.</p></div>
 <div class="note"><p>The stream also ends when another client takes the session over. A client should treat that as having left cast mode rather than as a transport error — the retry is answered 204, so <code>EventSource</code> reaches <code>CLOSED</code> and stops.</p></div>
 <p class="api-see">See also <a href="#ep-castSession"><code>castSession</code></a>.</p>
 </div>
+<div class="api-ep">
+<h3 id="ep-castWiimEq">castWiimEq</h3>
+<p class="api-meta"><code>GET /rest/castWiimEq.view</code>
+<span class="api-badge">castRole</span>
+<span class="api-badge">JSON only</span></p>
+<p>A relay to the session device&#x27;s own equalizer, for WiiM receivers.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>action</code> <b class="api-req">*</b></td><td>string</td><td>What to do. one of <code>state</code>, <code>presets</code>, <code>load</code>, <code>on</code>, <code>off</code>, <code>setBands</code>.</td></tr>
+<tr><td><code>name</code></td><td>string</td><td>The preset, for <code>action=load</code>, spelled as <code>presets</code> listed it.</td></tr>
+<tr><td><code>bands</code></td><td>string</td><td>For <code>action=setBands</code>: exactly ten comma-separated integers 0..99, in band order 31 Hz to 16 kHz.</td></tr>
+<tr><td><code>castController</code></td><td>string</td><td>The id given to <code>startCast</code>. Without a match this caller is treated as having no session.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>action</code></p>
+<ul class="doc-list"><li><code>state</code> reads the whole state; <code>presets</code> lists the device&#x27;s preset names, including ones its owner created on it.</li><li><code>load</code> loads the named device preset and switches the equalizer on.</li><li><code>on</code> / <code>off</code> move the switch alone.</li><li><code>setBands</code> writes the whole curve, always all ten bands.</li></ul>
+<p><code>load</code>, <code>on</code>, <code>off</code> and <code>setBands</code> answer with the same fields as <code>state</code>, freshly re-read; <code>presets</code> answers with <code>presets</code> alone.</p></div>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>wiimEq.on</code></td><td>bool</td><td>Whether the equalizer is engaged. Independent of <code>preset</code>: the device keeps reporting the loaded preset while switched off.</td></tr>
+<tr><td><code>wiimEq.preset</code></td><td>string</td><td>The preset name the device reports, possibly stale after <code>setBands</code>; see the notes.</td></tr>
+<tr><td><code>wiimEq.bands</code></td><td>array</td><td>The ten fader positions, 0..99, or absent when the device did not report a usable set.</td></tr>
+<tr><td><code>wiimEq.presets</code></td><td>array</td><td>For <code>action=presets</code>: the preset names, as the device lists them.</td></tr>
+</tbody>
+</table>
+<h4>Errors</h4>
+<table class="doc-table">
+<thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
+<tbody>
+<tr><td><code>0</code></td><td>Subsonic</td><td>No cast session is active, the caller does not own it, or the device did not answer.</td></tr>
+<tr><td><code>10</code></td><td>Subsonic</td><td><code>name</code> missing for <code>load</code>, or <code>bands</code> missing or malformed for <code>setBands</code>.</td></tr>
+</tbody>
+</table>
+<p>A WiiM is a Chromecast receiver and a LinkPlay device on one address, and its ten-band equalizer is reachable only over the latter&#x27;s private HTTP API, which a browser cannot speak to (a self-signed certificate, and no CORS). So the server relays, and only to the device of the caller&#x27;s own active cast session: the address is never a parameter.</p>
+<p>Whether a device answers this is inferred from its model string containing <code>wiim</code> (case-insensitive); <code>listCastDevices</code> and <code>castSession.deviceModel</code> both carry it. A manually configured device has no model string and is assumed not to.</p>
+<p>Bands are the device&#x27;s fixed ten, 31 Hz to 16 kHz, each 0..99 with 50 flat. How that maps to decibels is undocumented, so a client should show offsets from flat rather than dB figures. <code>bands</code> may be absent from a reply: the device answered but did not report a usable band array (all ten or nothing), and a client should degrade to the on/off switch and the preset list.</p>
+<p>Every mutating action re-reads the device state afterwards and answers with what the device said, not what was asked. The reported <code>preset</code> name goes stale after <code>setBands</code> (the device keeps naming the last load), so a client that wrote the curve itself should keep its own bookkeeping for the name.</p>
+<p class="api-see">See also <a href="#ep-listCastDevices"><code>listCastDevices</code></a>, <a href="#ep-castSession"><code>castSession</code></a>.</p>
+</div>
 </div>
 <div class="doc-sec" id="unimplemented">
 <h2>Not implemented</h2>
 <p>Everything above is what GainDrive <b>adds</b> to Subsonic. This last section is the other side of the same question: the Subsonic and OpenSubsonic endpoints GainDrive does <b>not</b> answer. They are listed so that a client author can tell a deliberate gap from a server too old for a feature, and so that nobody has to discover one by calling it.</p>
 <p>A <code>GET</code> for any of them reaches a catch-all and is answered <b>HTTP 200 carrying Subsonic error 0, <code>Not implemented.</code></b> — always as XML, whatever <code>f</code> asked for. A <code>POST</code> matches no route at all and gets a bare 404 with no body, which behind a reverse proxy configured to serve a single-page client on 404 arrives as 200 and a page of HTML.</p>
-<p><b>Browsing, lists and similarity.</b></p>
-<ul class="doc-list"><li><code>getNowPlaying</code>. <code>scrobble</code> records a now-playing event and nothing reads it back.</li></ul>
 <p><b>Retrieval and annotation.</b></p>
 <ul class="doc-list"><li><code>getLyrics</code>, and <code>getLyricsBySongId</code> of the OpenSubsonic <code>songLyrics</code> extension. No lyric tag and no <code>.lrc</code> sidecar is read.</li><li><code>getAvatar</code>. An account carries no picture.</li></ul>
 <p><b>The play queue.</b></p>
