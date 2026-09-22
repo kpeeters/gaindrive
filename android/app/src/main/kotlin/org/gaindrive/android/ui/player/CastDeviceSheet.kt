@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.playback.cast.CastDevice
+import org.gaindrive.android.ui.rememberLocalNetworkPermission
 
 /**
  * Picks a Chromecast.
@@ -47,12 +48,17 @@ fun CastDeviceSheet(
 	val manual by viewModel.manualDevices.collectAsStateWithLifecycle()
 	val connected by viewModel.connected.collectAsStateWithLifecycle()
 	val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+	val networkGranted = rememberLocalNetworkPermission()
 
 	// Scanning costs a live multicast conversation, so it lasts exactly as long
-	// as this sheet does.
-	DisposableEffect(Unit) {
-		viewModel.startDiscovery()
-		onDispose { viewModel.stopDiscovery() }
+	// as this sheet does. It waits for Android 17's local-network grant: started
+	// without it, the scan either fails silently or drags a system consent
+	// dialog into every open of this sheet.
+	DisposableEffect(networkGranted) {
+		if (networkGranted == true) viewModel.startDiscovery()
+		onDispose {
+			if (networkGranted == true) viewModel.stopDiscovery()
+		}
 	}
 
 	ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -63,10 +69,24 @@ fun CastDeviceSheet(
 				modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp),
 			)
 
+			// Denial kills more than the scan: the Cast connection itself is a
+			// LAN socket, so even a manually added device is out of reach. Said
+			// here in full, because the sheet is otherwise an eternal spinner.
+			if (networkGranted == false) {
+				Text(
+					text = "Casting needs access to devices on your local " +
+						"network, which is denied. Allow it for Gaindrive in " +
+						"the system app settings.",
+					style = MaterialTheme.typography.bodyMedium,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+					modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+				)
+			}
+
 			// The spinner is about discovery alone, so it keeps running while
 			// manual devices are listed below it — a device that was added by
 			// hand is no reason to stop looking for the others.
-			if (devices.isEmpty()) {
+			if (devices.isEmpty() && networkGranted != false) {
 				Row(
 					modifier = Modifier
 						.fillMaxWidth()
@@ -119,9 +139,10 @@ fun CastDeviceSheet(
 						},
 					)
 				}
-			} else if (devices.isEmpty()) {
+			} else if (devices.isEmpty() && networkGranted != false) {
 				// Only worth saying when the sheet is otherwise empty: this is
 				// exactly the moment someone needs to know the option exists.
+				// Not said over a denial, where adding an address fixes nothing.
 				Text(
 					text = "A device that has stopped announcing itself can be added " +
 						"by address in Settings → Casting.",

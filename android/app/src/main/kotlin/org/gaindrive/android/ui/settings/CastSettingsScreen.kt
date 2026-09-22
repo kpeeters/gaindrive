@@ -32,6 +32,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.DEFAULT_CAST_PORT
 import org.gaindrive.android.data.ManualCastDevice
+import org.gaindrive.android.ui.rememberLocalNetworkPermission
 
 /** What a Chromecast is sent, which is not always what this phone would play. */
 @Composable
@@ -44,6 +45,10 @@ fun CastSettingsScreen(
 	val devices by devicesViewModel.devices.collectAsStateWithLifecycle()
 	val draft by devicesViewModel.draft.collectAsStateWithLifecycle()
 
+	// Asked here as well as in the picker, because the Test button below opens
+	// its own LAN sockets and this screen may well be visited first.
+	val networkGranted = rememberLocalNetworkPermission()
+
 	SettingsScaffold(
 		title = "Casting",
 		onBack = onBack,
@@ -53,6 +58,20 @@ fun CastSettingsScreen(
 			}
 		},
 	) {
+		if (networkGranted == false) {
+			item {
+				Text(
+					// First, because nothing on this screen works around it: a
+					// denied local network fails the Test button and every cast.
+					text = "Local network access is denied, so casting cannot " +
+						"reach any device. Allow it for Gaindrive in the system " +
+						"app settings.",
+					style = MaterialTheme.typography.bodySmall,
+					color = MaterialTheme.colorScheme.error,
+				)
+			}
+		}
+
 		item {
 			SwitchRow(
 				title = "Cast at original quality",

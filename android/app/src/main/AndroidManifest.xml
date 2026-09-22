@@ -20,9 +20,16 @@
 	<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
 	<!-- For the cast bridge's WifiLock, which stops Wi-Fi power saving stalling
-	     the relay once the screen goes off. Discovery needs nothing: NsdManager
-	     works off ACCESS_NETWORK_STATE, declared above. -->
+	     the relay once the screen goes off. -->
 	<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+	<!-- Android 17 gates every LAN socket behind this runtime permission at
+	     targetSdk 37: mDNS discovery, the Cast connection itself, the probes.
+	     Left undeclared, the system asks for session consent on every scan.
+	     Declared and granted once, it persists like any runtime permission.
+	     Unknown to older releases, where declaring it is harmless. Requested
+	     from the cast UI, the only place that needs the LAN. -->
+	<uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
 
 	<!-- Declared not-required, or Play filters the app off Chromebooks and
 	     every other large-screen device without one. Nothing in the app needs
