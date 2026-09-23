@@ -116,6 +116,21 @@ fun GainDriveApp(
 		if (settings.servers.isEmpty()) Route.Settings else Route.Artists()
 	}
 
+	// On a TV, first run goes one step further, straight into the form: the
+	// add button is d-pad legwork a phone's tap is not, and an empty app has
+	// nothing else to offer. Pushed over Settings rather than made the start
+	// destination, so finishing or backing out of the form lands somewhere.
+	// The saveable flag keeps a restored process from pushing a second copy
+	// over the one being filled in.
+	val isTv = LocalIsTv.current
+	var tvFirstRunShown by rememberSaveable { mutableStateOf(false) }
+	LaunchedEffect(Unit) {
+		if (isTv && !tvFirstRunShown && settings.servers.isEmpty()) {
+			tvFirstRunShown = true
+			navController.navigate(Route.ServerEdit())
+		}
+	}
+
 	// One path per tab — see PaneStack. Held here rather than inside each tab
 	// for two reasons: a tab keeps its drill-down while the user is away from
 	// it without depending on the navigation library's saveState/restoreState

@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.net.ConnectionTest
+import org.gaindrive.android.ui.LocalIsTv
 
 /**
  * Adding a server and editing one are the same screen. That is deliberate:
@@ -48,6 +49,10 @@ fun ServerEditScreen(
 	viewModel: ServerEditViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
+	// The TV form is trimmed to fit a 540dp screen whole: the column has no
+	// scroll, so anything below the fold — the test result above all — would
+	// simply be invisible there.
+	val isTv = LocalIsTv.current
 
 	LaunchedEffect(state.saved) {
 		if (state.saved) onDone()
@@ -132,16 +137,26 @@ fun ServerEditScreen(
 				// The subtitle carries the consequence because saving applies it
 				// with no confirmation of its own, and this server's stored library
 				// goes when it changes.
-				SwitchRow(
-					title = "Browse by folder",
-					subtitle = "Uses the server's folders instead of its tags. Turn this " +
-						"on for a library whose tags are patchy. Changing it reloads " +
-						"this server's library; downloads are kept.",
-					checked = state.browseByFolder,
-					onCheckedChange = viewModel::onBrowseByFolder,
-				)
+				//
+				// Not on TV, for space and for sense: the tall subtitle is what
+				// pushes the test result off a 540dp screen, and folder browsing
+				// is a curation concern nobody settles from a sofa. A server
+				// edited on TV keeps whatever the setting already is.
+				if (!isTv) {
+					SwitchRow(
+						title = "Browse by folder",
+						subtitle = "Uses the server's folders instead of its tags. Turn this " +
+							"on for a library whose tags are patchy. Changing it reloads " +
+							"this server's library; downloads are kept.",
+						checked = state.browseByFolder,
+						onCheckedChange = viewModel::onBrowseByFolder,
+					)
+				}
 
-				Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+				Row(
+					horizontalArrangement = Arrangement.spacedBy(12.dp),
+					verticalAlignment = Alignment.CenterVertically,
+				) {
 					OutlinedButton(
 						// Testing an edit with a blank password would test the
 						// wrong thing, so it needs one typed in either way.
@@ -165,9 +180,18 @@ fun ServerEditScreen(
 					) {
 						Text("Save")
 					}
+
+					// Beside the buttons on TV rather than under them, so the
+					// verdict is on screen the moment it lands; below them
+					// otherwise, where a phone has the height and not the width.
+					if (isTv) {
+						state.testResult?.let {
+							Box(modifier = Modifier.weight(1f)) { TestResult(it) }
+						}
+					}
 				}
 
-				state.testResult?.let { TestResult(it) }
+				if (!isTv) state.testResult?.let { TestResult(it) }
 			}
 		}
 	}
