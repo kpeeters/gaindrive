@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!--
+  The Android TV launcher banner. The launcher shows it at 160x90dp and the
+  convention is a 320x180 PNG at drawable-xhdpi, which is what `make
+  create-play-assets` at the repository root renders this into.
+
+  Not a composition of its own: it letterboxes graphics/play-feature.svg
+  into 16:9, so the banner *is* the Play listing's artwork and cannot drift
+  from it. The bands the letterboxing adds are the feature graphic's own
+  paper colour, so no seam shows. The wordmark the TV guidelines ask for is
+  the feature graphic's, already set in outlines.
+-->
+<svg
+   version="1.1"
+   width="320"
+   height="180"
+   viewBox="0 0 1024 576"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:xlink="http://www.w3.org/1999/xlink">
+  <rect width="1024" height="576" fill="#f6efe0" />
+  <image xlink:href="play-feature.svg" x="0" y="38" width="1024" height="500" />
+</svg>

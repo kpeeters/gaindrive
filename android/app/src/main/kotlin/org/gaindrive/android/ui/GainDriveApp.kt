@@ -48,6 +48,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.flow.StateFlow
+import org.gaindrive.android.data.PairLink
 import org.gaindrive.android.data.TrackLink
 import org.gaindrive.android.data.TrackLinkResult
 import org.gaindrive.android.data.model.ServerId
@@ -94,6 +95,8 @@ fun GainDriveApp(
 	onSharedUrlHandled: () -> Unit,
 	trackLink: StateFlow<TrackLink?>,
 	onTrackLinkHandled: () -> Unit,
+	pairLink: StateFlow<PairLink?>,
+	onPairLinkHandled: () -> Unit,
 ) {
 	val settings by settingsViewModel.state.collectAsStateWithLifecycle()
 	val navController = rememberNavController()
@@ -291,6 +294,21 @@ fun GainDriveApp(
 				Toast.makeText(context, r.message, Toast.LENGTH_LONG).show()
 		}
 		trackLinkViewModel.consumeResult()
+	}
+
+	// A scanned TV pairing QR. Moved into dialog state and marked handled at
+	// once - the track link's fire-once discipline - because what happens
+	// next is a question, and a question must not be re-asked by a
+	// configuration change replaying the intent.
+	val pendingPairLink by pairLink.collectAsStateWithLifecycle()
+	var pairRequest by remember { mutableStateOf<PairLink?>(null) }
+	LaunchedEffect(pendingPairLink) {
+		val link = pendingPairLink ?: return@LaunchedEffect
+		onPairLinkHandled()
+		pairRequest = link
+	}
+	pairRequest?.let { link ->
+		PairSendDialog(link = link, onDone = { pairRequest = null })
 	}
 
 	// Compact windows get a bottom bar, medium and expanded a navigation rail.

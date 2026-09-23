@@ -18,8 +18,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.gaindrive.android.data.PairLink
 import org.gaindrive.android.data.TrackLink
 import org.gaindrive.android.data.extractSharedUrl
+import org.gaindrive.android.data.parsePairLink
 import org.gaindrive.android.data.parseTrackLink
 import org.gaindrive.android.ui.AvailabilityViewModel
 import org.gaindrive.android.ui.GainDriveApp
@@ -48,6 +50,12 @@ class MainActivity : ComponentActivity() {
 	 */
 	private val trackLink = MutableStateFlow<TrackLink?>(null)
 
+	/**
+	 * A gaindrive://pair link - a TV's QR, scanned - not yet confirmed or
+	 * declined. Third holder, same bargain.
+	 */
+	private val pairLink = MutableStateFlow<PairLink?>(null)
+
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
 		enableEdgeToEdge()
@@ -60,6 +68,7 @@ class MainActivity : ComponentActivity() {
 		if (savedInstanceState == null) {
 			takeSharedUrl(intent)
 			takeTrackLink(intent)
+			takePairLink(intent)
 		}
 
 		setContent {
@@ -91,6 +100,8 @@ class MainActivity : ComponentActivity() {
 							onSharedUrlHandled = { sharedUrl.value = null },
 							trackLink = trackLink.asStateFlow(),
 							onTrackLinkHandled = { trackLink.value = null },
+							pairLink = pairLink.asStateFlow(),
+							onPairLinkHandled = { pairLink.value = null },
 						)
 					}
 				}
@@ -114,6 +125,7 @@ class MainActivity : ComponentActivity() {
 		setIntent(intent)
 		takeSharedUrl(intent)
 		takeTrackLink(intent)
+		takePairLink(intent)
 	}
 
 	private fun takeSharedUrl(intent: Intent?) {
@@ -134,6 +146,15 @@ class MainActivity : ComponentActivity() {
 		// answer extractSharedUrl gives prose with no link in it.
 		parseTrackLink(intent.data?.toString())?.let {
 			trackLink.value = it
+		}
+	}
+
+	private fun takePairLink(intent: Intent?) {
+		if (intent?.action != Intent.ACTION_VIEW) return
+		// Shares the one VIEW filter with track links; the parsers split the
+		// scheme between them by authority, so at most one of these takes.
+		parsePairLink(intent.data?.toString())?.let {
+			pairLink.value = it
 		}
 	}
 }

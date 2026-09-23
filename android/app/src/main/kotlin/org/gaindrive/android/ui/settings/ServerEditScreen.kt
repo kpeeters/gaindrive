@@ -50,7 +50,7 @@ fun ServerEditScreen(
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
 	// The TV form is trimmed to fit a 540dp screen whole: the column has no
-	// scroll, so anything below the fold — the test result above all — would
+	// scroll, so anything below the fold - the test result above all - would
 	// simply be invisible there.
 	val isTv = LocalIsTv.current
 
@@ -70,9 +70,13 @@ fun ServerEditScreen(
 			)
 		},
 	) { insets ->
+		// The pairing pane rides on the TV form only: pairing exists to spare
+		// the d-pad typing, and an edit of an existing server has nothing to
+		// receive. The form shifts from centered to leading to make the room.
+		val paired = isTv && state.isNew
 		Box(
 			modifier = Modifier.fillMaxSize().padding(insets),
-			contentAlignment = Alignment.TopCenter,
+			contentAlignment = if (paired) Alignment.TopStart else Alignment.TopCenter,
 		) {
 			Column(
 				modifier = Modifier
@@ -192,6 +196,16 @@ fun ServerEditScreen(
 				}
 
 				if (!isTv) state.testResult?.let { TestResult(it) }
+			}
+
+			if (paired) {
+				PairingPane(
+					// Imported servers land exactly where a saved form goes.
+					onImported = onDone,
+					modifier = Modifier
+						.align(Alignment.TopEnd)
+						.padding(top = 16.dp, end = 24.dp),
+				)
 			}
 		}
 	}
