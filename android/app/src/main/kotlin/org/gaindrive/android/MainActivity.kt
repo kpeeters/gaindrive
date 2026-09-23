@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
@@ -23,6 +24,8 @@ import org.gaindrive.android.data.parseTrackLink
 import org.gaindrive.android.ui.AvailabilityViewModel
 import org.gaindrive.android.ui.GainDriveApp
 import org.gaindrive.android.ui.LocalAvailability
+import org.gaindrive.android.ui.TvEnvironment
+import org.gaindrive.android.ui.isTvDevice
 import org.gaindrive.android.ui.settings.SettingsViewModel
 import org.gaindrive.android.ui.theme.GainDriveTheme
 
@@ -64,8 +67,13 @@ class MainActivity : ComponentActivity() {
 			// the theme cannot lag a change to the setting.
 			val viewModel: SettingsViewModel = hiltViewModel()
 			val state by viewModel.state.collectAsStateWithLifecycle()
+			val isTv = remember { isTvDevice(applicationContext) }
 
-			RequestNotificationPermission()
+			if (!isTv) {
+				// A TV has no notification shade, so the prompt would be the
+				// first thing a remote user sees and grant nothing visible.
+				RequestNotificationPermission()
+			}
 
 			// Collected once, at the root, and made ambient: every track row
 			// wants to know whether its audio is stored and whether there is a
@@ -74,14 +82,17 @@ class MainActivity : ComponentActivity() {
 			val availabilityState by availability.state.collectAsStateWithLifecycle()
 
 			GainDriveTheme(mode = state.themeMode) {
-				CompositionLocalProvider(LocalAvailability provides availabilityState) {
-					GainDriveApp(
-						settingsViewModel = viewModel,
-						sharedUrl = sharedUrl.asStateFlow(),
-						onSharedUrlHandled = { sharedUrl.value = null },
-						trackLink = trackLink.asStateFlow(),
-						onTrackLinkHandled = { trackLink.value = null },
-					)
+				// Inside the theme, so the TV indication wraps the themed ripple.
+				TvEnvironment(isTv) {
+					CompositionLocalProvider(LocalAvailability provides availabilityState) {
+						GainDriveApp(
+							settingsViewModel = viewModel,
+							sharedUrl = sharedUrl.asStateFlow(),
+							onSharedUrlHandled = { sharedUrl.value = null },
+							trackLink = trackLink.asStateFlow(),
+							onTrackLinkHandled = { trackLink.value = null },
+						)
+					}
 				}
 			}
 		}

@@ -37,6 +37,7 @@ import org.gaindrive.android.data.model.ArtistIndex
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.LibrarySection
 import org.gaindrive.android.ui.LocalAvailability
+import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.components.AlphabetRail
 import org.gaindrive.android.ui.components.ArtistRow
 import org.gaindrive.android.ui.components.EmptyMessage
@@ -194,8 +195,12 @@ fun ArtistsScreen(
 				// words down the edge of the screen, and it is for scrubbing a
 				// long alphabetical list rather than for jumping between four
 				// people.
+				// Not on TV: the rail is drag-only, so to a d-pad it is a dead
+				// strip that steals edge space. Holding a direction key scrolls
+				// the list itself, which is the remote's version of scrubbing.
 				val showRail = listing.artists.isNotEmpty() &&
-					listing.artists.all { it.label.length == 1 }
+					listing.artists.all { it.label.length == 1 } &&
+					!LocalIsTv.current
 
 				Box(modifier = Modifier.fillMaxSize()) {
 					LazyColumn(

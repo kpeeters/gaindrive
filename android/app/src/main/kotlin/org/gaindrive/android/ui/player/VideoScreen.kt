@@ -62,7 +62,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
@@ -79,7 +86,9 @@ import org.gaindrive.android.data.model.currentAt
 import org.gaindrive.android.data.model.nextAfter
 import org.gaindrive.android.data.model.previousTargetMs
 import org.gaindrive.android.playback.PlayerState
+import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.components.CoverArt
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * The picture, and controls over it.
@@ -123,6 +132,20 @@ fun VideoScreen(
 	// Bumped on every touch; the auto-hide effect restarts with it, so a tap
 	// during the countdown extends the reprieve rather than being ignored.
 	var interactionTick by remember { mutableIntStateOf(0) }
+
+	// On a TV the picture itself holds focus while the transport is hidden,
+	// so remote keys have somewhere to land; the play button takes over when
+	// the transport appears. Without this hand-off the first d-pad press
+	// after an auto-hide would go nowhere and the controls could never be
+	// brought back.
+	val isTv = LocalIsTv.current
+	val rootFocus = remember { FocusRequester() }
+	val playFocus = remember { FocusRequester() }
+	if (isTv) {
+		LaunchedEffect(controlsVisible) {
+			if (controlsVisible) playFocus.requestFocus() else rootFocus.requestFocus()
+		}
+	}
 
 	// What a side swipe is adjusting, and the last thing it adjusted — the
 	// second held separately so the indicator has something to draw through its
@@ -215,6 +238,55 @@ fun VideoScreen(
 		modifier = Modifier
 			.fillMaxSize()
 			.background(Color.Black)
+			// Before `clickable`, so the requester binds to the focusable that
+			// `clickable` itself brings: the screen-wide tap target doubles as
+			// the d-pad landing spot, rather than adding a second focus node.
+			.focusRequester(rootFocus)
+			.onPreviewKeyEvent { event ->
+				if (!isTv || event.type != KeyEventType.KeyDown) {
+					return@onPreviewKeyEvent false
+				}
+				when (event.key) {
+					// Play/pause is unconditional: a dedicated media key means
+					// the same thing whether or not the transport is showing.
+					Key.MediaPlayPause -> {
+						viewModel.togglePlayPause()
+						controlsVisible = true
+						interactionTick++
+						true
+					}
+					Key.DirectionCenter, Key.Enter -> {
+						if (!controlsVisible) {
+							// Toggle as well as reveal: the state of the film
+							// is invisible, so the press answers the question
+							// it asks instead of only showing the buttons.
+							viewModel.togglePlayPause()
+							controlsVisible = true
+							interactionTick++
+							true
+						} else {
+							// The focused button handles it; this only keeps
+							// the auto-hide countdown from swallowing it.
+							interactionTick++
+							false
+						}
+					}
+					Key.DirectionUp, Key.DirectionDown,
+					Key.DirectionLeft, Key.DirectionRight -> {
+						interactionTick++
+						if (!controlsVisible) {
+							// Hidden, a direction key's only meaning is "show
+							// me the controls". Visible, it is focus movement
+							// and must pass through untouched.
+							controlsVisible = true
+							true
+						} else {
+							false
+						}
+					}
+					else -> false
+				}
+			}
 			.clickable(
 				interactionSource = remember { MutableInteractionSource() },
 				// No ripple: this is the whole screen, and a ripple across the
@@ -308,6 +380,7 @@ fun VideoScreen(
 				hasChapters = chapters.isNotEmpty(),
 				chaptersOpen = chaptersOpen,
 				onToggleChapters = { chaptersOpen = !chaptersOpen },
+				playFocus = playFocus,
 			)
 		}
 
@@ -485,6 +558,7 @@ private fun Controls(
 	hasChapters: Boolean,
 	chaptersOpen: Boolean,
 	onToggleChapters: () -> Unit,
+	playFocus: FocusRequester,
 ) {
 	Box(
 		modifier = Modifier
@@ -499,7 +573,7 @@ private fun Controls(
 				.padding(horizontal = 4.dp),
 			verticalAlignment = Alignment.CenterVertically,
 		) {
-			IconButton(onClick = onBack) {
+			IconButton(onClick = onBack, modifier = Modifier.tvFocusHighlight()) {
 				Icon(
 					Icons.AutoMirrored.Filled.ArrowBack,
 					contentDescription = "Back",
@@ -542,7 +616,7 @@ private fun Controls(
 			// almost every film — the same rule the subtitle picker below
 			// follows, and for the same reason.
 			if (hasChapters) {
-				IconButton(onClick = onToggleChapters) {
+				IconButton(onClick = onToggleChapters, modifier = Modifier.tvFocusHighlight()) {
 					Icon(
 						imageVector = Icons.AutoMirrored.Filled.Toc,
 						contentDescription = "Chapters",
@@ -565,7 +639,7 @@ private fun Controls(
 			// Now Playing sheet is one a film never reaches. It answers most
 			// for a video, which is where remuxing and the cast route are
 			// hardest to guess at.
-			IconButton(onClick = onInfo) {
+			IconButton(onClick = onInfo, modifier = Modifier.tvFocusHighlight()) {
 				Icon(Icons.Default.Info, contentDescription = "Track info", tint = Color.White)
 			}
 			// The only way to reach a Chromecast from here. The Now Playing
@@ -579,7 +653,7 @@ private fun Controls(
 			// in words by PlayerConnection rather than by hiding the button,
 			// since deciding it here would need a reachability probe a
 			// composable cannot await.
-			IconButton(onClick = onCast) {
+			IconButton(onClick = onCast, modifier = Modifier.tvFocusHighlight()) {
 				Icon(
 					imageVector = if (casting) {
 						Icons.Default.CastConnected
@@ -602,7 +676,11 @@ private fun Controls(
 				horizontalArrangement = Arrangement.Center,
 				verticalAlignment = Alignment.CenterVertically,
 			) {
-				IconButton(onClick = onPrevious, enabled = state.hasPrevious) {
+				IconButton(
+					onClick = onPrevious,
+					enabled = state.hasPrevious,
+					modifier = Modifier.tvFocusHighlight(),
+				) {
 					Icon(
 						Icons.Default.SkipPrevious,
 						contentDescription = "Previous",
@@ -617,7 +695,11 @@ private fun Controls(
 				//
 				// Disabled on the same test the scrub bar uses, so the two agree
 				// about when there is a position to move within.
-				IconButton(onClick = { onSkip(-SKIP_MS) }, enabled = state.durationMs > 0) {
+				IconButton(
+					onClick = { onSkip(-SKIP_MS) },
+					enabled = state.durationMs > 0,
+					modifier = Modifier.tvFocusHighlight(),
+				) {
 					Icon(
 						Icons.Default.Replay10,
 						contentDescription = "Back 10 seconds",
@@ -625,7 +707,12 @@ private fun Controls(
 						modifier = Modifier.size(36.dp),
 					)
 				}
-				IconButton(onClick = onTogglePlay) {
+				IconButton(
+					onClick = onTogglePlay,
+					modifier = Modifier
+						.focusRequester(playFocus)
+						.tvFocusHighlight(),
+				) {
 					Icon(
 						imageVector = if (state.isPlaying) {
 							Icons.Default.Pause
@@ -637,7 +724,11 @@ private fun Controls(
 						modifier = Modifier.size(56.dp),
 					)
 				}
-				IconButton(onClick = { onSkip(SKIP_MS) }, enabled = state.durationMs > 0) {
+				IconButton(
+					onClick = { onSkip(SKIP_MS) },
+					enabled = state.durationMs > 0,
+					modifier = Modifier.tvFocusHighlight(),
+				) {
 					Icon(
 						Icons.Default.Forward10,
 						contentDescription = "Forward 10 seconds",
@@ -645,7 +736,11 @@ private fun Controls(
 						modifier = Modifier.size(36.dp),
 					)
 				}
-				IconButton(onClick = onNext, enabled = state.hasNext) {
+				IconButton(
+					onClick = onNext,
+					enabled = state.hasNext,
+					modifier = Modifier.tvFocusHighlight(),
+				) {
 					Icon(
 						Icons.Default.SkipNext,
 						contentDescription = "Next",
@@ -671,7 +766,7 @@ private fun SubtitleMenu(
 ) {
 	var open by remember { mutableStateOf(false) }
 	Box {
-		IconButton(onClick = { open = true }) {
+		IconButton(onClick = { open = true }, modifier = Modifier.tvFocusHighlight()) {
 			Icon(
 				Icons.Default.ClosedCaption,
 				contentDescription = "Subtitles",

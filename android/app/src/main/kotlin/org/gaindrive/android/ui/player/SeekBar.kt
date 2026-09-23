@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import org.gaindrive.android.playback.PlayerState
 import org.gaindrive.android.ui.components.formatDuration
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * The scrub bar, shared by the Now Playing sheet, the video screen and the
@@ -60,6 +61,9 @@ fun SeekBar(
 
 	Column(modifier = modifier) {
 		Slider(
+			// The slider steps on d-pad left/right by itself once focused; the
+			// highlight is what makes it visible that it is the thing focused.
+			modifier = Modifier.tvFocusHighlight(),
 			value = fraction,
 			onValueChange = {
 				dragging = true

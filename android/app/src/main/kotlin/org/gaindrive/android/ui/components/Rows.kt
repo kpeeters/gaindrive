@@ -18,10 +18,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,6 +45,8 @@ import org.gaindrive.android.playback.TrackState
 import org.gaindrive.android.ui.Availability
 import org.gaindrive.android.ui.ContainerMark
 import org.gaindrive.android.ui.LocalAvailability
+import org.gaindrive.android.ui.LocalIsTv
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /** Shared row composables. Every browse screen is built from these. */
 
@@ -237,6 +241,9 @@ fun TrackRow(
 ) {
 	val availability = LocalAvailability.current
 	val playable = availability.of(song.ref) != Availability.UNAVAILABLE
+	// A remote has no hold gesture, so on a TV the long-press actions move
+	// into a visible trailing button and leave the row's click alone.
+	val tvActions = LocalIsTv.current && onLongClick != null
 
 	Row(
 		modifier = modifier
@@ -248,7 +255,7 @@ fun TrackRow(
 			.combinedClickable(
 				enabled = playable,
 				onClick = onClick,
-				onLongClick = onLongClick,
+				onLongClick = if (tvActions) null else onLongClick,
 			)
 			.padding(horizontal = 16.dp, vertical = 12.dp),
 		verticalAlignment = Alignment.CenterVertically,
@@ -310,7 +317,32 @@ fun TrackRow(
 			style = MaterialTheme.typography.bodySmall,
 			color = MaterialTheme.colorScheme.onSurfaceVariant,
 		)
-		trailing?.invoke()
+		if (tvActions && trailing == null) {
+			RowOverflowButton(onClick = onLongClick!!)
+		} else {
+			trailing?.invoke()
+		}
+	}
+}
+
+/**
+ * The d-pad stand-in for long-press. Compact rather than the 48dp Material
+ * minimum, because there is no finger to miss with and the rows are dense.
+ */
+@Composable
+private fun RowOverflowButton(onClick: () -> Unit) {
+	IconButton(
+		onClick = onClick,
+		modifier = Modifier
+			.size(32.dp)
+			.tvFocusHighlight(),
+	) {
+		Icon(
+			imageVector = Icons.Default.MoreVert,
+			contentDescription = "Track actions",
+			tint = MaterialTheme.colorScheme.onSurfaceVariant,
+			modifier = Modifier.size(20.dp),
+		)
 	}
 }
 
@@ -347,6 +379,9 @@ fun SongRow(
 ) {
 	val availability = LocalAvailability.current
 	val playable = availability.of(song.ref) != Availability.UNAVAILABLE
+	// Same bargain as TrackRow: the remote gets a button for what a finger
+	// reaches by holding.
+	val tvActions = LocalIsTv.current && onLongClick != null
 
 	Row(
 		modifier = Modifier
@@ -355,7 +390,7 @@ fun SongRow(
 			.combinedClickable(
 				enabled = playable,
 				onClick = onClick,
-				onLongClick = onLongClick,
+				onLongClick = if (tvActions) null else onLongClick,
 			)
 			.padding(horizontal = 16.dp, vertical = 8.dp),
 		verticalAlignment = Alignment.CenterVertically,
@@ -418,7 +453,11 @@ fun SongRow(
 				color = MaterialTheme.colorScheme.onSurfaceVariant,
 			)
 		}
-		trailing?.invoke()
+		if (tvActions && trailing == null) {
+			RowOverflowButton(onClick = onLongClick!!)
+		} else {
+			trailing?.invoke()
+		}
 	}
 }
 
@@ -449,10 +488,17 @@ fun ChapterRow(
 	onClick: () -> Unit,
 	onLongClick: (() -> Unit)? = null,
 ) {
+	// A chapter's long-press reaches the recording's actions, which a remote
+	// needs a button for like any other row.
+	val tvActions = LocalIsTv.current && onLongClick != null
+
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
-			.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+			.combinedClickable(
+				onClick = onClick,
+				onLongClick = if (tvActions) null else onLongClick,
+			)
 			.padding(horizontal = 16.dp, vertical = 12.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -484,6 +530,7 @@ fun ChapterRow(
 			style = MaterialTheme.typography.bodySmall,
 			color = MaterialTheme.colorScheme.onSurfaceVariant,
 		)
+		if (tvActions) RowOverflowButton(onClick = onLongClick!!)
 	}
 }
 

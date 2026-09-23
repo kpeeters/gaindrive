@@ -15,6 +15,9 @@ PLAY_ICON := $(PLAY_DIR)/icon-512.png
 PLAY_FEAT := $(PLAY_DIR)/feature-1024x500.png
 PLAY_RAW  := $(PLAY_DIR)/.icon-raw.png
 FEAT_RAW  := $(PLAY_DIR)/.feature-raw.png
+BANNER    := graphics/tv-banner.svg
+TV_BANNER := android/app/src/main/res/drawable-xhdpi/tv_banner.png
+BANNER_RAW := $(PLAY_DIR)/.banner-raw.png
 
 .PHONY: help upload-web api-html create-play-assets
 
@@ -47,7 +50,7 @@ upload-web: $(API_HTML)
 # uploaded by hand through the Play Console, so this is a prerequisite of
 # nothing and no build needs Inkscape or ImageMagick. The screenshots belong
 # here too once they exist.
-create-play-assets: $(PLAY_ICON) $(PLAY_FEAT)
+create-play-assets: $(PLAY_ICON) $(PLAY_FEAT) $(TV_BANNER)
 
 # 512x512 is the only size Play accepts, and it wants a full square: it applies
 # its own rounded-corner mask and shadow, so the SVG's full-bleed red is already
@@ -93,3 +96,21 @@ $(PLAY_FEAT): $(FEATURE)
 	$(MAGICK) $(FEAT_RAW) -background '#f6efe0' -flatten -alpha off -strip $@
 	@rm -f $(FEAT_RAW)
 	@echo "Wrote $@ — upload it as the feature graphic in the same listing."
+
+# The Android TV home-screen banner, which graphics/tv-banner.svg letterboxes
+# out of the feature graphic. Unlike the listing assets above, this lands in
+# the app's res/ and is *checked in*: the Android build embeds it, and a fresh
+# clone must build without Inkscape.
+#
+# Rendered at final size like the feature graphic, and for the same reason:
+# the record's grooves are sub-pixel at 320 wide, and supersampling beats
+# their period against the pixel grid into moiré.
+#
+# FEATURE is a prerequisite because the SVG links it rather than copying it.
+$(TV_BANNER): $(BANNER) $(FEATURE)
+	@mkdir -p $(dir $@) $(PLAY_DIR)
+	$(INKSCAPE) $< --export-type=png -w 320 -h 180 \
+	 --export-filename=$(BANNER_RAW)
+	$(MAGICK) $(BANNER_RAW) -background '#f6efe0' -flatten -alpha off -strip $@
+	@rm -f $(BANNER_RAW)
+	@echo "Wrote $@ — commit it; the manifest names it as android:banner."
