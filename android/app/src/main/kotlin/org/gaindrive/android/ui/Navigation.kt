@@ -125,9 +125,13 @@ sealed interface Route {
 	@Serializable
 	data object SettingsAppearance : Route
 
-	/** Null [serverId] means "add a server" — the same screen serves both. */
+	/**
+	 * Null [serverId] means "add a server" — the same screen serves both.
+	 * [firstRun] marks the copy a TV's empty first launch pushes: that one
+	 * offers no way back, because behind it there is only an empty list.
+	 */
 	@Serializable
-	data class ServerEdit(val serverId: String? = null) : Route
+	data class ServerEdit(val serverId: String? = null, val firstRun: Boolean = false) : Route
 
 	/**
 	 * Handing a URL shared with the app to a server, which fetches it into the

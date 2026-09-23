@@ -130,7 +130,7 @@ fun GainDriveApp(
 	LaunchedEffect(Unit) {
 		if (isTv && !tvFirstRunShown && settings.servers.isEmpty()) {
 			tvFirstRunShown = true
-			navController.navigate(Route.ServerEdit())
+			navController.navigate(Route.ServerEdit(firstRun = true))
 		}
 	}
 

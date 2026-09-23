@@ -25,6 +25,8 @@ data class ServerEditUiState(
 	val password: String = "",
 	val browseByFolder: Boolean = false,
 	val isNew: Boolean = true,
+	/** The TV first-run copy of this screen, which offers no way back. */
+	val firstRun: Boolean = false,
 	val testing: Boolean = false,
 	val testResult: ConnectionTest? = null,
 	val saved: Boolean = false,
@@ -43,10 +45,12 @@ class ServerEditViewModel @Inject constructor(
 
 	// Read through the type-safe route rather than a string key, so renaming
 	// the route's field is a compile error instead of a silent null.
-	private val serverId: ServerId? =
-		savedStateHandle.toRoute<Route.ServerEdit>().serverId?.let { ServerId(it) }
+	private val route = savedStateHandle.toRoute<Route.ServerEdit>()
+	private val serverId: ServerId? = route.serverId?.let { ServerId(it) }
 
-	private val _state = MutableStateFlow(ServerEditUiState(isNew = serverId == null))
+	private val _state = MutableStateFlow(
+		ServerEditUiState(isNew = serverId == null, firstRun = route.firstRun)
+	)
 	val state: StateFlow<ServerEditUiState> = _state.asStateFlow()
 
 	init {

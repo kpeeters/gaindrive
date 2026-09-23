@@ -57,9 +57,21 @@ private val DarkScheme = darkColorScheme(
 	onError = Color(0xFF1A1A1A),
 )
 
+// The dark scheme with its dim roles lifted for a television. A TV panel
+// crushes the low greys a phone renders faithfully: #505050 outlines and
+// #888888 secondary text, fine at arm's length, read as near-black from a
+// sofa. Only the roles that sit close to the background move; onSurface and
+// the accent were already bright enough to survive the panel.
+private val TvDarkScheme = DarkScheme.copy(
+	onSurfaceVariant = Color(0xFFB4B4B4),
+	outline = Color(0xFF8A8A8A),
+	outlineVariant = Color(0xFF5A5A5A),
+)
+
 @Composable
 fun GainDriveTheme(
 	mode: ThemeMode = ThemeMode.AUTO,
+	isTv: Boolean = false,
 	content: @Composable () -> Unit,
 ) {
 	val dark = when (mode) {
@@ -68,7 +80,11 @@ fun GainDriveTheme(
 		ThemeMode.DARK -> true
 	}
 	MaterialTheme(
-		colorScheme = if (dark) DarkScheme else LightScheme,
+		colorScheme = when {
+			dark && isTv -> TvDarkScheme
+			dark -> DarkScheme
+			else -> LightScheme
+		},
 		content = content,
 	)
 }

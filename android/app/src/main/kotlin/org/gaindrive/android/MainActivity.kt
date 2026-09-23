@@ -90,7 +90,7 @@ class MainActivity : ComponentActivity() {
 			val availability: AvailabilityViewModel = hiltViewModel()
 			val availabilityState by availability.state.collectAsStateWithLifecycle()
 
-			GainDriveTheme(mode = state.themeMode) {
+			GainDriveTheme(mode = state.themeMode, isTv = isTv) {
 				// Inside the theme, so the TV indication wraps the themed ripple.
 				TvEnvironment(isTv) {
 					CompositionLocalProvider(LocalAvailability provides availabilityState) {
