@@ -1,9 +1,9 @@
 # GainDrive
 
-GainDrive is a Subsonic-compatible music server along with an embedded
-web player and native Android and iOS clients. The server and clients
-support most of the Subsonic protocol, along with some OpenSubsonic
-extensions. Key server features include:
+GainDrive is a Subsonic-compatible audio and video server along with
+an embedded web player and native Android and iOS clients. The server
+and clients support most of the Subsonic protocol, along with some
+OpenSubsonic extensions. Key server features include:
 
   * Single binary (about 10MB), written in modern C++,
   * Music catalogue stored in SQLite3 database,
@@ -230,10 +230,10 @@ then re-run the same command with `sudo` and `--install-service`:
 
       sudo systemctl start gaindrive
 
-The third step writes `/etc/gaindrive.conf` from the options you just proved,
-writes `/etc/systemd/system/gaindrive.service`, and enables it for the next
-boot. It does not start the service, because the server from step 2 may still
-be holding the port.
+The third step writes `/etc/gaindrive.conf` from the options you just
+provided, writes `/etc/systemd/system/gaindrive.service`, and enables
+it for the next boot. It does not start the service, because the
+server from step 2 may still be holding the port.
 
 
 # Licence
