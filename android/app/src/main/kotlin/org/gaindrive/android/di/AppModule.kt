@@ -67,9 +67,16 @@ object AppModule {
 			// Debug builds only: these URLs carry the auth token, so this must
 			// never be enabled in a release build.
 			if (BuildConfig.DEBUG) {
-				addInterceptor(
-					HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY)
-				)
+				// BODY buffers the whole response before passing it on, which
+				// for a passthrough movie means gigabytes on a heap of a few
+				// hundred megabytes. Media gets headers only.
+				val bodies = HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BODY)
+				val headers = HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.HEADERS)
+				addInterceptor { chain ->
+					val endpoint = chain.request().url.pathSegments.lastOrNull()
+					if (endpoint in MEDIA_ENDPOINTS) headers.intercept(chain)
+					else bodies.intercept(chain)
+				}
 			}
 		}
 		.build()
@@ -102,6 +109,10 @@ object AppModule {
 		CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
 	private const val HTTP_CACHE_BYTES = 32L * 1024 * 1024
+
+	private val MEDIA_ENDPOINTS = setOf(
+		"stream.view", "download.view", "getCoverArt.view", "hls.m3u8", "hls.view",
+	)
 
 	/**
 	 * Built from [AuthInterceptor.CLIENT_NAME] rather than repeating the name,
