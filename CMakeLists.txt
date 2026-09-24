@@ -770,9 +770,12 @@ target_link_libraries(gaindrive PRIVATE
 
 # FolderWatcher's macOS branch uses FSEvents, which lives in CoreServices
 # (CarbonCore). The framework also brings in CoreFoundation, which that branch
-# needs for the CFArray of watched roots.
+# needs for the CFArray of watched roots. Security is for httplib >= 0.15's
+# load_system_certs (SecTrustSettingsCopyCertificates and friends).
 if(APPLE)
-	target_link_libraries(gaindrive PRIVATE "-framework CoreServices")
+	target_link_libraries(gaindrive PRIVATE
+		"-framework CoreServices"
+		"-framework Security")
 endif()
 
 # OpenSSL/zlib are made static by the USE_STATIC_LIBS vars set before
