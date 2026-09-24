@@ -14,8 +14,8 @@ import Foundation
 /// **A closed enum where its predecessor (`LibraryMode`) was an open string
 /// wrapper.** The openness existed for the chip row, whose chips came from the
 /// server and so could name a kind this build had never heard of. With the
-/// chips gone there is nothing left to draw for an unknown kind — the merged
-/// list has exactly two groups, and uploads is its own screen — so a root
+/// chips gone there is nothing left to draw for an unknown kind - the merged
+/// list has exactly two groups, and uploads is its own screen - so a root
 /// typed with something new simply contributes nothing until the app learns
 /// what it means.
 ///
@@ -23,10 +23,10 @@ import Foundation
 /// `indexes-<section>` file names, and in the `album_sort` dictionary's keys.
 enum LibrarySection: String, Hashable, Sendable, Codable, CaseIterable {
 	/// Performers. Also where every root of a server that names no kind of
-	/// root lands — see `LibraryRoots.listingRequests`.
+	/// root lands - see `LibraryRoots.listingRequests`.
 	case artists
 
-	/// Sections rather than performers — Film, Series. Named separately
+	/// Sections rather than performers - Film, Series. Named separately
 	/// because downstream screens key on it: a section has no portrait and no
 	/// biography, and the server refuses to look one up
 	/// (`is_category_folder()`).
@@ -36,7 +36,7 @@ enum LibrarySection: String, Hashable, Sendable, Codable, CaseIterable {
 	/// keeps its uploads root out of `getMusicFolders`, and the listing
 	/// reaches the wire as `personal=true` rather than as a `contentType`.
 	/// It is a section like the others below that line, which is why the
-	/// mirror needed no key change — the file is simply `indexes-uploads`.
+	/// mirror needed no key change - the file is simply `indexes-uploads`.
 	case uploads
 
 	var id: String { rawValue }
@@ -53,7 +53,7 @@ enum LibrarySection: String, Hashable, Sendable, Codable, CaseIterable {
 /// The Library screen's one merged list: every category folder from every
 /// `categories` root, then the usual artist index buckets.
 ///
-/// `categories` is flat rather than bucketed — the whole group sits under a
+/// `categories` is flat rather than bucketed - the whole group sits under a
 /// single "Categories" header, since a library has a handful of sections, not
 /// hundreds. `artists` keeps the A–Z buckets the alphabet rail scrubs.
 struct LibraryListing: Hashable, Sendable {

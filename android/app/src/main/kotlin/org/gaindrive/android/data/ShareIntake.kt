@@ -3,7 +3,7 @@ package org.gaindrive.android.data
 /**
  * Pulling the URL out of text another app shared with us.
  *
- * Pure string work, no Android types, so it can be tested without a device —
+ * Pure string work, no Android types, so it can be tested without a device -
  * the same bargain `src/videoname.hh` strikes on the server for filename
  * parsing.
  *
@@ -25,7 +25,7 @@ package org.gaindrive.android.data
  *
  * Trailing punctuation is stripped, because a link at the end of a sentence
  * arrives with the full stop attached. Brackets are only stripped when
- * unbalanced — a closing one that has an opener inside the URL belongs to it,
+ * unbalanced - a closing one that has an opener inside the URL belongs to it,
  * which is how Wikipedia's `..._(disambiguation)` survives.
  */
 fun extractSharedUrl(shared: String?): String? {

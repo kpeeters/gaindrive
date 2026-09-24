@@ -19,7 +19,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 
 /**
- * Talks to a WiiM's own HTTP API — `https://<address>/httpapi.asp?command=…`.
+ * Talks to a WiiM's own HTTP API - `https://<address>/httpapi.asp?command=…`.
  *
  * This is a second protocol to a device that merely also happens to be a cast
  * target, so it lives beside the cast package rather than inside it, and knows
@@ -27,7 +27,7 @@ import javax.net.ssl.X509TrustManager
  * reasoning; `WiiMEq.kt` holds everything decidable without a socket.
  *
  * Failure is an exception rather than a null, so the caller can put
- * `Throwable.userMessage()` on screen — a handshake failure and an unplugged
+ * `Throwable.userMessage()` on screen - a handshake failure and an unplugged
  * speaker are different sentences and the user can act on the difference.
  */
 @Singleton
@@ -58,7 +58,7 @@ class WiiMClient @Inject constructor(
 		//
 		// The body is logged and not merely the fact, because it is the only
 		// thing that separates "this firmware has no EQGetBand" from "it answered
-		// in a shape parseEqBand does not read" — and that is the difference
+		// in a shape parseEqBand does not read" - and that is the difference
 		// between a sheet that can never tick the loaded preset and one line of
 		// parsing. A null here means it did not answer at all.
 		Log.i(
@@ -111,7 +111,7 @@ class WiiMClient @Inject constructor(
 	 * The body is logged when it is judged a failure, because that judgement is
 	 * the one thing here no test can settle. `isOk` knows the two shapes WiiM
 	 * document, and a firmware that performs the command while answering in a
-	 * third is indistinguishable from one that refused — which is exactly the
+	 * third is indistinguishable from one that refused - which is exactly the
 	 * fault this replaced, and it took a device to find because every body the
 	 * documentation describes was handled.
 	 */
@@ -128,7 +128,7 @@ class WiiMClient @Inject constructor(
 	 * That order is `CastChannel.connectPlain()`'s, and it is there for the same
 	 * measured reason: binding to the Wi-Fi network is what reaches a LAN device
 	 * under a full-tunnel VPN, but an ordinary `VpnService` that has not called
-	 * `allowBypass()` — WireGuard does not — makes `Network.bindSocket` throw
+	 * `allowBypass()` - WireGuard does not - makes `Network.bindSocket` throw
 	 * `EPERM` inside `createSocket()`, so the bound attempt cannot even begin.
 	 * Unbound then works. `CastProbe.nameClient()` binds with no fallback and is
 	 * deliberately *not* the model here: it is a nicety that may quietly fail,
@@ -160,7 +160,7 @@ class WiiMClient @Inject constructor(
 		}
 	}
 
-	/** An answer, just not a usable one — as opposed to never reaching the device. */
+	/** An answer, just not a usable one - as opposed to never reaching the device. */
 	private class Refused(message: String) : IOException(message)
 
 	/**
@@ -187,7 +187,7 @@ class WiiMClient @Inject constructor(
 	 *
 	 * WiiM present a self-signed LinkPlay certificate (`CN=www.linkplay.com`)
 	 * that is in neither the system nor the user trust store, so ordinary
-	 * verification cannot succeed — the same situation `CastChannel` is in with
+	 * verification cannot succeed - the same situation `CastChannel` is in with
 	 * Chromecast device certificates, and it resolves it the same way. What
 	 * authenticates the exchange is not the certificate: the user picked this
 	 * device off their own network, and nothing secret is sent to it.
@@ -235,8 +235,8 @@ class WiiMClient @Inject constructor(
 
 		/**
 		 * Enough of an unexpected body to recognise its shape. An `EQGetBand`
-		 * answer carries every band value, and the interesting part — `status`,
-		 * `EQStat`, `Name` — is at the front.
+		 * answer carries every band value, and the interesting part - `status`,
+		 * `EQStat`, `Name` - is at the front.
 		 */
 		const val BODY_LOG_CHARS = 300
 	}

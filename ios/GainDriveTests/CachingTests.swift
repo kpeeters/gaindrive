@@ -39,7 +39,7 @@ struct PartialReadTests {
 
 	/// **The read the whole thing hung on.** The server writes MP4 with its
 	/// index at the end, so AVFoundation asks for the tail early and that
-	/// request cannot be answered until the last byte lands — it has to become
+	/// request cannot be answered until the last byte lands - it has to become
 	/// satisfiable the moment it does.
 	///
 	/// Worth being clear that this test would not have caught the bug: the
@@ -103,7 +103,7 @@ struct EvictionTests {
 	}
 
 	/// The caller passes only what may go, so an empty list over the cap is a
-	/// library that is entirely pinned — which is a refusal to pin more, not a
+	/// library that is entirely pinned - which is a refusal to pin more, not a
 	/// reason to delete something.
 	@Test func nothingEvictableMeansNothingEvicted() {
 		#expect(AudioStore.victims([], total: 500, cap: 100).isEmpty)
@@ -140,7 +140,7 @@ struct StoreLayoutTests {
 /// What AVFoundation is told the bytes are.
 struct ContentTypeTests {
 	/// **A UTI, not a MIME type.** AVFoundation takes a MIME type here without
-	/// complaint and then plays nothing — the same silent stall a file stored
+	/// complaint and then plays nothing - the same silent stall a file stored
 	/// without an extension produces, and with as little to catch.
 	@Test func aKnownFormatAnswersAUti() {
 		let uti = CachingResourceLoader.uti(
@@ -177,7 +177,7 @@ struct ContentTypeTests {
 				== "mp3")
 	}
 
-	/// With nothing to read, the format is still the best answer available —
+	/// With nothing to read, the format is still the best answer available -
 	/// the fallback the inversion above kept rather than replaced.
 	@Test func withNoResponseTheFormatStillNames() {
 		#expect(

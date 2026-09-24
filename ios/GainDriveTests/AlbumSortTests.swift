@@ -56,7 +56,7 @@ struct AlbumSortTests {
 	/// **The property that makes it a total order.** With duplicate merging
 	/// switched off the same record on two servers is two rows with the same
 	/// title and year, and their order would otherwise depend on which server
-	/// answered first. The ref decides it — which one wins is arbitrary, that
+	/// answered first. The ref decides it - which one wins is arbitrary, that
 	/// it is always the same one is not.
 	@Test func twoIdenticalAlbumsOnDifferentServersHaveAStableOrder() {
 		let other = ServerId()

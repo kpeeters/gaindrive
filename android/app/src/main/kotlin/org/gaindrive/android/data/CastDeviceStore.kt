@@ -103,7 +103,7 @@ class CastDeviceStore @Inject constructor(
 	suspend fun remove(id: String) = mutate { current -> current.filterNot { it.id == id } }
 
 	/**
-	 * Read, apply, write — the idiom [ServerRegistry] uses. Writing back an
+	 * Read, apply, write - the idiom [ServerRegistry] uses. Writing back an
 	 * unchanged list would wake every collector for nothing.
 	 */
 	private suspend fun mutate(block: (List<ManualCastDevice>) -> List<ManualCastDevice>) {

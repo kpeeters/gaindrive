@@ -45,7 +45,7 @@ data class SideAdjustment(val control: SideControl, val fraction: Float)
  * brightens, the right is the volume.
  *
  * It exists because the two controls most wanted during a film are the two
- * hardest to reach — on a tablet the volume rocker is small and awkwardly
+ * hardest to reach - on a tablet the volume rocker is small and awkwardly
  * placed, and brightness is behind a swipe down into Quick Settings, which
  * takes the viewer out of the picture altogether.
  *
@@ -53,17 +53,17 @@ data class SideAdjustment(val control: SideControl, val fraction: Float)
  * visibility and can be given a double-tap listener, but no version of it has a
  * brightness or volume gesture; every app that has one wrote it. That costs
  * nothing, since this player is deliberately not `PlayerView` in the first
- * place — see [VideoScreen].
+ * place - see [VideoScreen].
  *
  * What a swipe is worth is [sideControlAt] and [travelFraction], which are pure
  * arithmetic and tested as such. This is the part that cannot be: a pointer
  * stream, a window attribute and an `AudioManager`.
  *
- * It reports what it is doing through [onAdjust] — and `null` when the gesture
+ * It reports what it is doing through [onAdjust] - and `null` when the gesture
  * ends, which is what starts the indicator's countdown.
  *
  * **Attach it after `clickable`, not before**, which is not a preference.
- * Later in a chain is the inner pointer node, and it sees the main pass first —
+ * Later in a chain is the inner pointer node, and it sees the main pass first -
  * while `clickable` consumes the *down* the moment it is handed one, so from
  * outside it this would be waiting for an unconsumed down that never arrives,
  * and would do nothing whatsoever. From inside, the tap cancels itself instead:
@@ -86,7 +86,7 @@ fun Modifier.videoSideGestures(
 	}
 
 	// A window attribute outlives the composable that set it, so leaving the
-	// film has to hand the brightness back — which is what the override value
+	// film has to hand the brightness back - which is what the override value
 	// meaning "none" does, restoring adaptive brightness along with it.
 	// Unconditional for the reason the system bars are restored
 	// unconditionally: a screen that kept the display dimmed on its way out
@@ -99,8 +99,8 @@ fun Modifier.videoSideGestures(
 		if (!enabled) return@pointerInput
 		val inset = EDGE_INSET.toPx()
 		awaitEachGesture {
-			// requireUnconsumed, so a down already claimed by a control — the
-			// back button, the transport, the captions menu — never starts one
+			// requireUnconsumed, so a down already claimed by a control - the
+			// back button, the transport, the captions menu - never starts one
 			// of these. The same rule the tap handler relies on.
 			val down = awaitFirstDown(requireUnconsumed = true)
 			val control = sideControlAt(down.position.x, size.width.toFloat(), inset)
@@ -156,7 +156,7 @@ fun Modifier.videoSideGestures(
 }
 
 /**
- * The transient indicator, in `StalledNotice`'s clothes — this screen draws in
+ * The transient indicator, in `StalledNotice`'s clothes - this screen draws in
  * literal white over a black scrim rather than from the colour scheme, because
  * everything here sits over a picture rather than a surface.
  */
@@ -213,7 +213,7 @@ private fun SideAdjustment.icon(): ImageVector = when {
  * Where a brightness gesture starts from.
  *
  * The window's own override once there is one. Before that there is not, and
- * the honest starting point is the system's setting — which is readable without
+ * the honest starting point is the system's setting - which is readable without
  * permission, unlike writing it. Its scale is *not* guaranteed to be 0..255:
  * the real maximum is a hidden `PowerManager` value, and 255 is only the usual
  * one. That approximation decides where the first drag of a session begins and

@@ -75,7 +75,7 @@ fun SettingsScaffold(
  *
  * [summary] is the current state, not a description of the category. It is what
  * makes the top level worth reading rather than a list of words you already
- * know — most visits are to check a value, not to change one.
+ * know - most visits are to check a value, not to change one.
  */
 @Composable
 fun CategoryRow(title: String, summary: String, onClick: () -> Unit) {

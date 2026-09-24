@@ -15,7 +15,7 @@ enum TrackState: Sendable {
 
 /// **The UI's only route to playback.**
 ///
-/// On Android that boundary is the framework's — the UI holds a
+/// On Android that boundary is the framework's - the UI holds a
 /// `MediaController` and cannot reach the player. iOS has no such boundary, so
 /// this type is it.
 ///
@@ -23,7 +23,7 @@ enum TrackState: Sendable {
 /// the seam a cast player drops into, and this class is deliberately the half
 /// that has nothing to do with how the sound is made: the queue, what every
 /// command means, every published property, and the four collaborators that
-/// attach to the **role** rather than to the player — `Scrobbler`,
+/// attach to the **role** rather than to the player - `Scrobbler`,
 /// `PlaybackWatchdog`, `TranscodePrewarmer` and `NowPlayingCenter`. Android
 /// hung two of those off its `ExoPlayer` and had to repair it when the session
 /// swapped; here they never touch an engine.
@@ -43,7 +43,7 @@ final class PlayerConnection {
 	private(set) var current: Song?
 	private(set) var isPlaying = false
 	private(set) var isBuffering = false
-	/// Set the instant a tap is handled, before anything is resolved — that
+	/// Set the instant a tap is handled, before anything is resolved - that
 	/// wait is precisely what the spinner exists to explain.
 	private(set) var loadingRef: ItemRef?
 	private(set) var position: Double = 0
@@ -56,7 +56,7 @@ final class PlayerConnection {
 	/// Whether the picture is on screen.
 	///
 	/// **Owned here because this is where a video becomes current**, whether by
-	/// a tap or by the queue advancing — which is what "entered from one place
+	/// a tap or by the queue advancing - which is what "entered from one place
 	/// in the shell" means. Leaving does not stop the film: a concert is
 	/// listened to as often as it is watched, so this goes false and playback
 	/// carries on.
@@ -91,7 +91,7 @@ final class PlayerConnection {
 	/// A film whose **sound alone** went to the receiver.
 	///
 	/// Worth surfacing rather than leaving as a surprise: the picture is not
-	/// missing, it was never sent — the device announced no screen, so the
+	/// missing, it was never sent - the device announced no screen, so the
 	/// server's own rule is to extract the soundtrack. Read from what was
 	/// actually loaded rather than re-derived from the device, because the
 	/// decision is `CastEngine`'s and a second copy of it would be a second
@@ -106,8 +106,8 @@ final class PlayerConnection {
 	@ObservationIgnored private let registry: ServerRegistry
 	@ObservationIgnored private let nowPlaying = NowPlayingCenter()
 	// The three that attach to the **role** rather than to the player: swapping
-	// in a cast engine must not silence any of them. `PLAN.md` states the rule;
-	// Android is where it was learned, by breaking it.
+	// in a cast engine must not silence any of them. Android is where that
+	// rule was learned, by breaking it.
 	@ObservationIgnored private let scrobbler: Scrobbler
 	@ObservationIgnored private let watchdog = PlaybackWatchdog()
 	@ObservationIgnored private let prewarmer = TranscodePrewarmer()
@@ -154,11 +154,11 @@ final class PlayerConnection {
 		// playing in another room. The web client keeps a muted local copy
 		// slaved to the receiver's clock and Android draws a "casting
 		// elsewhere" panel; neither is built here, so the honest thing is to
-		// close it. See `CAST.md`.
+		// close it.
 		showingVideo = false
 		// **It plays, whatever was happening here.** A LOAD autoplays by
 		// construction, so preserving a paused state would mean sending a PAUSE
-		// chasing after it — and choosing a device is in any case an act that
+		// chasing after it - and choosing a device is in any case an act that
 		// means "play this over there".
 		Task { await reconcile(thenPlay: true, forceRebuild: true, offset: resumeAt) }
 	}
@@ -186,7 +186,7 @@ final class PlayerConnection {
 	///
 	/// **The old engine is unwired and stopped first.** Its callbacks are
 	/// closures over this object, so an engine left connected goes on advancing
-	/// a queue it is no longer playing — which is the shape of every "two
+	/// a queue it is no longer playing - which is the shape of every "two
 	/// players at once" bug, and here it would be two things making noise in two
 	/// rooms.
 	private func adopt(_ next: any PlaybackEngine) {
@@ -204,12 +204,12 @@ final class PlayerConnection {
 	// MARK: - Commands
 
 	/// `startIndex` is an index into `songs`. Callers rendering a grouped list
-	/// must map back to the flat order first — see `AlbumDetailView`.
+	/// must map back to the flat order first - see `AlbumDetailView`.
 	///
 	/// `startPosition` is what a chapter marker asks for: play this recording,
 	/// but from the song inside it that was tapped. Defaulted, so every caller
 	/// meaning "from the beginning" is unchanged. How it is honoured is the
-	/// engine's business — locally it waits for the item to become seekable,
+	/// engine's business - locally it waits for the item to become seekable,
 	/// on a receiver it rides in the LOAD.
 	func play(_ songs: [Song], startIndex: Int, startPosition: Double = 0) {
 		guard songs.indices.contains(startIndex) else { return }
@@ -310,7 +310,7 @@ final class PlayerConnection {
 	/// hole in "the UI's only route to playback" and the same one Android
 	/// punched: its `VideoSurface` attaches to the `ExoPlayer` rather than
 	/// negotiating `COMMAND_SET_VIDEO_SURFACE` through the session. Nothing
-	/// else may reach for it — the queue, the transport and the seek all go
+	/// else may reach for it - the queue, the transport and the seek all go
 	/// through this class as before.
 	///
 	/// It names the **local** engine rather than whatever is playing, and that
@@ -319,7 +319,7 @@ final class PlayerConnection {
 	var videoPlayer: AVPlayer { local.videoPlayer }
 
 	/// Cover art for a queue entry. Exposed here so the player surfaces need no
-	/// registry of their own — the connection already holds one, and handing
+	/// registry of their own - the connection already holds one, and handing
 	/// them a second route to it would be a second place to get the per-server
 	/// lookup wrong.
 	func coverSource(for song: Song, size: Int) -> CoverSource? {
@@ -329,7 +329,7 @@ final class PlayerConnection {
 	/// What was, or would be, asked of that track's own server.
 	///
 	/// Exposed for the track-info view, which answers "why does this sound
-	/// different here" and cannot answer it without the *capped* quality — the
+	/// different here" and cannot answer it without the *capped* quality - the
 	/// account ceiling belongs to that track's server and is not a setting
 	/// anyone can read off the Settings screen. It asks the **current** engine,
 	/// so once there is a second one this answers about the route in use.
@@ -337,7 +337,7 @@ final class PlayerConnection {
 		await engine.target(for: song)?.quality
 	}
 
-	/// Reads `loadingRef`, `current` and `isBuffering` — and deliberately not
+	/// Reads `loadingRef`, `current` and `isBuffering` - and deliberately not
 	/// `position`.
 	func trackState(of ref: ItemRef) -> TrackState {
 		if loadingRef == ref { return .loading }
@@ -360,7 +360,7 @@ final class PlayerConnection {
 
 	/// Brings the engine's window in line with the queue.
 	///
-	/// `forceRebuild` is for the moves the window cannot express — going
+	/// `forceRebuild` is for the moves the window cannot express - going
 	/// backwards, jumping, or replacing the track that is playing.
 	///
 	/// **The window size is the engine's**, which is the whole of what differs
@@ -379,7 +379,7 @@ final class PlayerConnection {
 		guard await engine.apply(resolve(refEdit), startingAt: offset > 0 ? offset : nil) else {
 			// Only the head failing gets here, and it is the one worth a
 			// message: the user asked for that track. **The engine's own words
-			// win** where it has any — "this video has to be converted as it
+			// win** where it has any - "this video has to be converted as it
 			// plays, which a Cast device cannot do" tells somebody what to do,
 			// and the generic sentence does not.
 			errorMessage = engine.failure ?? "That track could not be played."
@@ -406,7 +406,7 @@ final class PlayerConnection {
 
 	/// **Every callback says only "something changed".** No engine pushes a
 	/// value, so there is one copy of the publishing logic whichever is playing
-	/// — which is the rule that stopped this class needing `@unchecked` anywhere
+	/// - which is the rule that stopped this class needing `@unchecked` anywhere
 	/// when the callbacks were KVO blocks, and the reason it will not need a
 	/// second publish path when the callbacks are cast statuses.
 	private func wireEngine() {
@@ -451,7 +451,7 @@ final class PlayerConnection {
 		watchdog.sample = { [weak self] in
 			guard let self else { return PlaybackWatchdog.Sample(stalled: false, position: 0) }
 			// **Local playback only.** A receiver cannot stall on a stream this
-			// device is feeding it, because this device is feeding it nothing —
+			// device is feeding it, because this device is feeding it nothing -
 			// it fetches for itself, and whatever it is doing meanwhile is its
 			// business. Watching it anyway pauses a cast that is merely slow to
 			// start: a receiver reports IDLE/LOADING while it resolves a name
@@ -459,14 +459,14 @@ final class PlayerConnection {
 			// every signal this class has, and thirty seconds of that is
 			// ordinary rather than wedged.
 			//
-			// Android reaches the same rule from the other end — its watchdog
+			// Android reaches the same rule from the other end - its watchdog
 			// is registered against the `ExoPlayer` and never against
 			// `CastPlayer`.
 			guard !self.isCasting else {
 				return PlaybackWatchdog.Sample(stalled: false, position: self.position)
 			}
 			// `isBuffering` is already "waiting to play in order to minimise
-			// stalls", which is buffering *and* wanting to play — the pair the
+			// stalls", which is buffering *and* wanting to play - the pair the
 			// watchdog needs, and the same predicate Android spells as
 			// `STATE_BUFFERING && playWhenReady`.
 			return PlaybackWatchdog.Sample(stalled: self.isBuffering, position: self.position)
@@ -504,7 +504,7 @@ final class PlayerConnection {
 		if changed {
 			scrobbler.trackChanged(to: song?.ref)
 			prewarmNext()
-			// The one place a video becomes current, however it got there — a
+			// The one place a video becomes current, however it got there - a
 			// tap, or the queue reaching it. **Not while casting**, where there
 			// is no local picture to show and raising the surface would cover
 			// the app with a rectangle that never fills in.
@@ -544,7 +544,7 @@ final class PlayerConnection {
 		nowPlaying.setAvailability(hasNext: model.hasNext, canSeek: canSeek)
 		// **The watchdog is armed from here and nowhere else.** A poll over
 		// `position` would compile and never fire: progress is reported as the
-		// timeline advances, so during a stall — the one case that matters —
+		// timeline advances, so during a stall - the one case that matters -
 		// there is no tick to poll on. This is driven by the engine's transport
 		// notifications instead.
 		watchdog.update()
@@ -554,7 +554,7 @@ final class PlayerConnection {
 	/// plays, so the wait for it lands somewhere nobody is looking.
 	///
 	/// The first transition fires when playback begins, so the second track of
-	/// a queue is prepared while the first plays — the case that matters.
+	/// a queue is prepared while the first plays - the case that matters.
 	private func prewarmNext() {
 		guard model.hasNext else { return }
 		let next = model.songs[model.index + 1]

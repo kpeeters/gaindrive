@@ -57,7 +57,7 @@ class FolderAlbumsTest {
 	 * rule is per folder: a disc whose tracks never had one must not acquire one
 	 * from its position, or a two-CD album becomes a television series. A folder
 	 * whose tracks all had one keeps it, so a show with an unnumbered `Specials`
-	 * folder still heads that one group "Disc" — the same answer the server
+	 * folder still heads that one group "Disc" - the same answer the server
 	 * gives. Mixed input is therefore allowed to produce mixed headings.
 	 */
 	@Test

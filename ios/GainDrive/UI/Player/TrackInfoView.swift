@@ -8,7 +8,7 @@
 
 import SwiftUI
 
-/// What this track is, and what was asked of the server for it — the
+/// What this track is, and what was asked of the server for it - the
 /// counterpart of `ui/player/TrackInfoDialog.kt`.
 ///
 /// The last row is the reason the screen exists. "Why does this sound different
@@ -43,8 +43,8 @@ struct TrackInfoView: View {
 				Section {
 					row("Stored", stored)
 					// **Where, before what.** With a receiver in the picture
-					// "Sent" is answering a different question — what went over
-					// the network to something else — and reading it without
+					// "Sent" is answering a different question - what went over
+					// the network to something else - and reading it without
 					// knowing that is how "why does this sound different"
 					// acquires a wrong answer.
 					row("Playing on", player.castDevice?.name)
@@ -71,7 +71,7 @@ struct TrackInfoView: View {
 	}
 
 	/// The last row is the reason the screen exists, so the footer is what makes
-	/// it readable — and while casting there are two facts to state rather than
+	/// it readable - and while casting there are two facts to state rather than
 	/// one, because the second is the likelier surprise.
 	private var footer: String {
 		let base =

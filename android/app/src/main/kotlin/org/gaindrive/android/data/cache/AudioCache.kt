@@ -28,7 +28,7 @@ import javax.inject.Singleton
  * The audio byte cache: what is stored, how much of it there is, and the
  * [DataSource.Factory] that fills it.
  *
- * The Media3 [SimpleCache] is the only record of what has been stored — it
+ * The Media3 [SimpleCache] is the only record of what has been stored - it
  * already tracks cached ranges and total size per key, so none of that is
  * mirrored into a database. Room holds metadata and pins; this holds bytes.
  */
@@ -56,7 +56,7 @@ class AudioCache @Inject constructor(
 
 	/**
 	 * Keys held in full, i.e. the tracks that will play with no network at all.
-	 * A partially cached track — one that was skipped part-way through — is
+	 * A partially cached track - one that was skipped part-way through - is
 	 * absent, since offline it would stall where the bytes ran out.
 	 */
 	val cachedKeys: StateFlow<Set<String>> = _cachedKeys.asStateFlow()
@@ -117,7 +117,7 @@ class AudioCache @Inject constructor(
 	 * Whether [key] is held in full.
 	 *
 	 * The cache's own record of the response length is preferred, because it is
-	 * the only figure guaranteed to describe what was actually stored — the
+	 * the only figure guaranteed to describe what was actually stored - the
 	 * server's song size disagrees the moment a bitrate cap transcodes the
 	 * stream. [fallbackLength] is used only when the cache has no length at all,
 	 * which for this server is the common case rather than the exception.
@@ -148,13 +148,13 @@ class AudioCache @Inject constructor(
 
 	/**
 	 * A read-only source over the stored bytes, for serving a downloaded track to
-	 * something that is not ExoPlayer — the Cast bridge, when the track being cast
+	 * something that is not ExoPlayer - the Cast bridge, when the track being cast
 	 * is already on the device.
 	 *
 	 * Deliberately given **no upstream factory**: a read that runs off the end of
 	 * what is stored then throws rather than quietly going to the network. For a
 	 * cast with no connectivity that is the difference between a clear failure and
-	 * a stall, which the receiver would eventually report as its own timeout —
+	 * a stall, which the receiver would eventually report as its own timeout -
 	 * error 103, and nothing in the log to say why.
 	 */
 	fun readOnlySource(): DataSource =
@@ -167,7 +167,7 @@ class AudioCache @Inject constructor(
 	 * began declaring what it takes as it stands that no longer decides what
 	 * arrived: an `@opus160` key may hold the original MP3. Anything that has to
 	 * put a type on these bytes therefore has to look, and the Cast bridge has to
-	 * — a receiver cannot sniff, and one told `audio/ogg` over MP3 refuses the
+	 * - a receiver cannot sniff, and one told `audio/ogg` over MP3 refuses the
 	 * media outright, on a television, with nothing on the phone to say why.
 	 *
 	 * Reading the container is the whole answer, and there is no need to work out
@@ -234,7 +234,7 @@ class AudioCache @Inject constructor(
 	/**
 	 * Removes everything unpinned.
 	 *
-	 * [keepKeys] spares tracks the player is holding — removing a resource that
+	 * [keepKeys] spares tracks the player is holding - removing a resource that
 	 * is being written throws, and taking the floor out from under playback is
 	 * not what "free some space" should mean.
 	 */
@@ -242,7 +242,7 @@ class AudioCache @Inject constructor(
 		withContext(Dispatchers.IO) {
 			cache.keys.forEach { key ->
 				// keepKeys arrives as bare refs from the player's queue, while
-				// cache keys carry a quality — spare every quality of a track
+				// cache keys carry a quality - spare every quality of a track
 				// that is in use, not just the one currently set.
 				if (pinned.isPinned(key) || CacheKeys.refKeyOf(key) in keepKeys) return@forEach
 				// One locked or vanished key must not abort the whole flush.

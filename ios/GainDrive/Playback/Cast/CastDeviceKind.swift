@@ -25,7 +25,7 @@ enum CastDeviceKind: String, Hashable, Sendable {
 ///
 /// **The match is a loose case-insensitive `contains` on purpose.** WiiM ship at
 /// least Mini, Pro, Pro Plus, Amp, Amp Pro and Ultra, and the model string is
-/// whatever the firmware puts in a TXT record rather than anything specified —
+/// whatever the firmware puts in a TXT record rather than anything specified -
 /// their own HTTP API reports the same devices as `WiiM_AMP`, underscore and
 /// all. A prefix or an exact table would quietly return `generic` for a model
 /// that had not been seen when this was written, which is the failure that looks

@@ -17,21 +17,21 @@ inline constexpr float CAST_POS_BUFFERING = -1.0f;  // receiver seeking → supp
 
 // The video-only knobs of one request.  Grouped rather than passed alongside
 // everything else because these are precisely the parameters Streamer::serve()
-// ignores for audio — and because a third positional argument appended to its
+// ignores for audio - and because a third positional argument appended to its
 // trailing run of bool/string/int is a mis-ordering that compiles.  Fill it
 // with designated initialisers.
 //
 // Namespace scope rather than nested in Streamer, which is not a style
 // preference: a nested struct carrying a default member initialiser cannot be
 // spelled `= {}` as a default argument, so `serve()` would have had to demand
-// it from every caller — and the cast probe getting the empty set *by leaving
+// it from every caller - and the cast probe getting the empty set *by leaving
 // it out* is the property worth keeping.
 struct VideoOptions {
 	// Caps the output frame size ("1280x720"); empty keeps the source size.
 	// Any value disqualifies the direct and remux tiers.
 	std::string      size;
 	// > 0 bounds the output to that many seconds from time_offset and switches
-	// the container to MPEG-TS — that is one HLS segment.
+	// the container to MPEG-TS - that is one HLS segment.
 	int              segment_duration = 0;
 	// "I would rather have bytes now than a seekable stream."  Only the remux
 	// tier reads it: with the cache cold, this request is answered from a
@@ -42,7 +42,7 @@ struct VideoOptions {
 	// the client it would guess wrong about is a television.  Note pace's
 	// User-Agent sniff is no guide: a Chromecast's media player sends a UA
 	// containing Mozilla/.  Guessing wrong about pacing costs pacing; guessing
-	// wrong about this costs a film that will not seek on a TV — and it would
+	// wrong about this costs a film that will not seek on a TV - and it would
 	// silently defeat the Android client's warmTranscode(), which fetches one
 	// byte precisely *because* the build blocks.
 	bool             start_immediately = false;
@@ -94,7 +94,7 @@ class Streamer {
 		                                    const Playable& playable = {});
 
 		// Materialises the cache entry `plan` describes, running ffmpeg first
-		// if it is not already there — so this blocks for the length of a
+		// if it is not already there - so this blocks for the length of a
 		// transcode.  Empty when the cache is disabled, the plan needs no
 		// transcode, or ffmpeg failed; never fatal, the caller streams instead.
 		static std::shared_ptr<const TranscodeCache::Entry>
@@ -155,7 +155,7 @@ class Streamer {
 	private:
 		// keepalive, when set, is held for the lifetime of the response so a
 		// transcode-cache entry cannot be pruned while it is being sent.  It is
-		// otherwise unused — the throttle and range handling are untouched.
+		// otherwise unused - the throttle and range handling are untouched.
 		// pace_lead is the throttle's target lead in seconds -- how far ahead
 		// of the playback position (reported or estimated) the sender stays.
 		static void serve_direct(const httplib::Request& req, httplib::Response& res,
@@ -187,7 +187,7 @@ class Streamer {
 
 		// Runs `args` and pipes its stdout to the client.  Takes a prebuilt
 		// argv rather than building one, so the audio and video paths share
-		// the process lifecycle — the SIGKILL-on-abort and the reproc++ EOF
+		// the process lifecycle - the SIGKILL-on-abort and the reproc++ EOF
 		// guard are subtle enough that a second copy would be a liability.
 		// bps paces the throttle; est_length > 0 switches from a chunked
 		// response to a known-length one carrying that Content-Length,

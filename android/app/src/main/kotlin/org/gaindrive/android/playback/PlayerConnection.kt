@@ -42,8 +42,8 @@ data class PlayerState(
 	 *
 	 * Set the instant a tap is handled, before the session is even bound, so
 	 * the row that was tapped can say so. Everything between the tap and the
-	 * first sound — binding the controller, resolving a stream URL, preparing,
-	 * buffering — happens with no other visible change.
+	 * first sound - binding the controller, resolving a stream URL, preparing,
+	 * buffering - happens with no other visible change.
 	 */
 	val loadingRef: ItemRef? = null,
 	val positionMs: Long = 0,
@@ -55,13 +55,13 @@ data class PlayerState(
 	/**
 	 * The subtitle tracks the current item offers, and which one is on. Empty
 	 * for audio, and for a video whose captions could not be listed or whose
-	 * source has none — a DVD always lands here, since its subtitles are
+	 * source has none - a DVD always lands here, since its subtitles are
 	 * bitmaps the server cannot turn into WebVTT.
 	 */
 	val textTracks: List<TextTrack> = emptyList(),
 	/**
 	 * The codec the local player is actually decoding, as media3 names a
-	 * sample type — `audio/opus`, `audio/mpeg`, `audio/flac`.
+	 * sample type - `audio/opus`, `audio/mpeg`, `audio/flac`.
 	 *
 	 * The request no longer settles this. A playback request declares the
 	 * formats media3 takes as they stand, so a track asked for at Opus 160 may
@@ -69,9 +69,9 @@ data class PlayerState(
 	 * was *asked for*. This is the answer from the decoder, which is the one
 	 * party that cannot be wrong about it.
 	 *
-	 * Null until the tracks are known — they arrive shortly after playback
+	 * Null until the tracks are known - they arrive shortly after playback
 	 * starts rather than when the item is queued, the same reason
-	 * [textTracks] is published state — and while casting, where nothing is
+	 * [textTracks] is published state - and while casting, where nothing is
 	 * being decoded here.
 	 */
 	val deliveredMime: String? = null,
@@ -91,7 +91,7 @@ data class PlayerState(
 	val isVideo: Boolean get() = current?.isVideo == true
 
 	/**
-	 * Whether the stream the server would send is seekable by byte range —
+	 * Whether the stream the server would send is seekable by byte range -
 	 * true for audio, and for the video tiers that arrive as a real MP4.
 	 *
 	 * No longer what decides whether the cast button is drawn: a film the
@@ -208,7 +208,7 @@ class PlayerConnection @Inject constructor(
 
 	// Last, and deliberately: the collector runs eagerly on Main.immediate and
 	// a StateFlow replays at once, so publish() is called before this
-	// constructor returns — with everything above it already initialised.
+	// constructor returns - with everything above it already initialised.
 	init {
 		// The watchdog fires from the service, on no player event this class
 		// would otherwise hear about, so its message has to push a republish
@@ -233,7 +233,7 @@ class PlayerConnection @Inject constructor(
 		val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
 		val future = MediaController.Builder(context, token)
 			// The service releases its session when the task is swiped away,
-			// and this singleton usually outlives that — the process survives
+			// and this singleton usually outlives that - the process survives
 			// the swipe. A dead controller kept here would make every later
 			// connect() return early on it, so it is dropped the moment the
 			// session goes; PlayerViewModel calls connect() again on reopen.
@@ -273,14 +273,14 @@ class PlayerConnection @Inject constructor(
 	 * Whether [songs] can be played where playback is currently going.
 	 *
 	 * A video the server can only re-encode is cast as `hls.m3u8`, where
-	 * seeking is picking a segment — so it plays and seeks on a receiver that
+	 * seeking is picking a segment - so it plays and seeks on a receiver that
 	 * fetches from the server itself. Through the bridge it cannot: the
 	 * playlist's segment URIs are relative and the bridge's flat
 	 * `/<token>/<key>` grammar 404s them. That is the only case left to refuse,
 	 * and [CastUrls.videoIsCastable] is the one place the rule is written.
 	 *
 	 * The refusal used to cover every such video on both routes, which meant
-	 * the common case — a receiver that can reach the server — was turned away
+	 * the common case - a receiver that can reach the server - was turned away
 	 * for a limitation belonging to the rarer one.
 	 *
 	 * None of it applies when videos are being played for their soundtrack:
@@ -311,7 +311,7 @@ class PlayerConnection @Inject constructor(
 	 * implementations already accept: `CastPlayer` forwards it into the LOAD it
 	 * sends, and locally ExoPlayer applies it as it prepares. On a film the
 	 * server can only re-encode, playback goes through `hls.m3u8` and the seek
-	 * lands once the playlist has loaded, so the first frame is slower — that is
+	 * lands once the playlist has loaded, so the first frame is slower - that is
 	 * the tier, not the offset.
 	 */
 	fun play(songs: List<Song>, startIndex: Int, startPositionMs: Long = 0L) = scope.launch {
@@ -375,7 +375,7 @@ class PlayerConnection @Inject constructor(
 
 	/**
 	 * Restart the current track when more than [MAX_SEEK_TO_PREVIOUS_MS] in,
-	 * otherwise go to the one before — the convention every physical transport
+	 * otherwise go to the one before - the convention every physical transport
 	 * and every music app on both platforms follows, and the reason "previous"
 	 * pressed twice reaches the previous track.
 	 *
@@ -389,7 +389,7 @@ class PlayerConnection @Inject constructor(
 	 * Media3's own version of exactly this rule and would otherwise be the right
 	 * call. It differs in one case that matters: `getPreviousMediaItemIndex()`
 	 * is `INDEX_UNSET` on the first item of a queue with repeat off, and
-	 * `seekToPrevious()` returns immediately on that — so the button would do
+	 * `seekToPrevious()` returns immediately on that - so the button would do
 	 * *nothing at all* on the first track of an album, at any position, where
 	 * the other two clients restart it. Spelling the rule out is what makes the
 	 * three agree, which is the whole point of changing it.
@@ -412,7 +412,7 @@ class PlayerConnection @Inject constructor(
 	fun seekTo(positionMs: Long) = controller?.seekTo(positionMs)
 
 	/**
-	 * Move [deltaMs] from wherever the player is now — the skip buttons over a
+	 * Move [deltaMs] from wherever the player is now - the skip buttons over a
 	 * picture.
 	 *
 	 * The position comes from the controller rather than from [PlayerState],
@@ -425,7 +425,7 @@ class PlayerConnection @Inject constructor(
 	 * one, and a forward skip is not a request to leave the film. A duration
 	 * that is not known yet leaves the upper bound to the player.
 	 *
-	 * Works while casting for the reason [previous] does — an ordinary seek is
+	 * Works while casting for the reason [previous] does - an ordinary seek is
 	 * something `CastPlayer` already serves.
 	 */
 	fun seekBy(deltaMs: Long) {
@@ -441,7 +441,7 @@ class PlayerConnection @Inject constructor(
 	 * Starts the stopped queue again from where it was.
 	 *
 	 * `stop()` keeps the media items and the current index, so preparing again
-	 * is the whole recovery — there is nothing to rebuild and no position to
+	 * is the whole recovery - there is nothing to rebuild and no position to
 	 * restore by hand.
 	 */
 	fun retry() {
@@ -523,7 +523,7 @@ class PlayerConnection @Inject constructor(
 	private fun publish() {
 		val controller = controller
 		if (controller == null) {
-			// Nothing to report but the pending track — which is the whole
+			// Nothing to report but the pending track - which is the whole
 			// state there is before the session binds.
 			_state.value = PlayerState(loadingRef = pendingRef, error = watchdog.message.value)
 			return
@@ -564,7 +564,7 @@ class PlayerConnection @Inject constructor(
 	 * One entry per subtitle group the player has resolved. Side-loaded tracks
 	 * only appear once the source has been prepared, so the picker fills in
 	 * shortly after playback starts rather than at the moment the item is
-	 * queued — which is why this is published state and not a one-shot query.
+	 * queued - which is why this is published state and not a one-shot query.
 	 */
 	private fun MediaController.textTracks(): List<TextTrack> =
 		textGroups().mapIndexed { index, group ->
@@ -581,7 +581,7 @@ class PlayerConnection @Inject constructor(
 	 *
 	 * [VideoSurface] applies [subtitleGroups] to the *player's* `currentTracks`
 	 * to resolve that number back to a group. The two lists hold different
-	 * objects — the controller's are rebuilt from a bundle — but they hold them
+	 * objects - the controller's are rebuilt from a bundle - but they hold them
 	 * in the same order, since one is a copy of the other, and the order is all
 	 * an index needs.
 	 */
@@ -598,8 +598,8 @@ class PlayerConnection @Inject constructor(
 	 * for. `Format.sampleMimeType` is what the extractor settled on, which
 	 * cannot disagree with what is being heard.
 	 *
-	 * The *selected* group only. A container can offer several audio tracks —
-	 * a film played for its soundtrack is the case here — and the one being
+	 * The *selected* group only. A container can offer several audio tracks -
+	 * a film played for its soundtrack is the case here - and the one being
 	 * decoded is the answer; the others describe bytes nobody is reading.
 	 */
 	private fun MediaController.deliveredAudioMime(): String? =
@@ -656,7 +656,7 @@ class PlayerConnection @Inject constructor(
 		 * How far into a track "previous" stops meaning "go back" and starts
 		 * meaning "start this one again".
 		 *
-		 * Three seconds, matching `web/app.js` and the iOS client — and, as it
+		 * Three seconds, matching `web/app.js` and the iOS client - and, as it
 		 * happens, Media3's own `C.DEFAULT_MAX_SEEK_TO_PREVIOUS_POSITION_MS`,
 		 * which is what `seekToPrevious()` would have used. The same number as
 		 * [org.gaindrive.android.data.model.CHAPTER_RESTART_MS], for the same

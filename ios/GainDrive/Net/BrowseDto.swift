@@ -22,7 +22,7 @@ import Foundation
 //	`decodeIfPresent` already handles an absent or null nested object, and one
 //	arriving as a scalar *should* fail loudly. The consequence of the rule is
 //	that a browse DTO has no throwing path at all except a container that is
-//	not an object — which is precisely the tolerance property, and what the
+//	not an object - which is precisely the tolerance property, and what the
 //	tests assert.
 //
 //	Deciding what an absent field *means* is `LibraryMapper`'s job, not a
@@ -69,7 +69,7 @@ struct AlbumDto: Decodable, Sendable {
 	@Loose var album: String?
 	@Loose var songCount: Int?
 	/// A gaindrive extension, and **absent on the directory-shaped listings**
-	/// — search, starred, playlists — where it must be read as "not said"
+	/// - search, starred, playlists - where it must be read as "not said"
 	/// rather than as zero.
 	@Loose var videoCount: Int?
 	@Loose var duration: Int?
@@ -105,7 +105,7 @@ struct SongDto: Decodable, Sendable {
 
 	@Loose var isVideo: Bool?
 	/// Computed server-side from codec columns that only `getAlbum`,
-	/// `getSong`, `getMusicDirectory` and `getVideos` select — so it is absent,
+	/// `getSong`, `getMusicDirectory` and `getVideos` select - so it is absent,
 	/// and therefore taken as false, on recents, starred, search and
 	/// playlists. That is the safe direction (the video plays and seeks by
 	/// re-request), and the flag is trusted as given rather than
@@ -118,7 +118,7 @@ struct SongDto: Decodable, Sendable {
 struct ChapterDto: Decodable, Sendable {
 	@Loose var index: Int?
 	/// Seconds with milliseconds. **A decimal fraction of a second**, not a
-	/// count of them — the same rule the server's `chapters.hh` states.
+	/// count of them - the same rule the server's `chapters.hh` states.
 	@Loose var start: Double?
 	/// Whole seconds, derived. Absent on a search hit, which carries only
 	/// where the marker starts.
@@ -127,7 +127,7 @@ struct ChapterDto: Decodable, Sendable {
 	/// is the client's to draw, never to store.
 	@Loose var name: String?
 	/// Search hits only. `track` is the *recording's* title there, not a track
-	/// number — the one field name in this file that means something other
+	/// number - the one field name in this file that means something other
 	/// than what it means on `SongDto`.
 	@Loose var songId: String?
 	@Loose var parent: String?
@@ -203,7 +203,7 @@ struct MusicFolderDto: Decodable, Sendable {
 	@Loose var id: String?
 	@Loose var name: String?
 	/// A gaindrive extension: `artists` or `categories`. Absent on a server
-	/// that has no concept of root kinds — which is not the same as having
+	/// that has no concept of root kinds - which is not the same as having
 	/// none of that kind. See `MusicFolderTypes`.
 	@Loose var contentType: String?
 }
@@ -259,7 +259,7 @@ struct GetAlbumBody: Decodable, Sendable {
 }
 
 /// The grant `getCastToken` mints, or nil from a server too old to have the
-/// endpoint — which answers a failed envelope, so this type is never reached
+/// endpoint - which answers a failed envelope, so this type is never reached
 /// in that case and the caller sees a thrown `SubsonicError` instead.
 struct CastTokenBody: Decodable, Sendable {
 	let castToken: String?

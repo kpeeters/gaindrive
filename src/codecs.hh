@@ -7,7 +7,7 @@
 #include <string>
 #include <string_view>
 
-// Audio format table — the single source of truth for "what is this format
+// Audio format table - the single source of truth for "what is this format
 // called, and how do we ask ffmpeg for it".
 //
 // The `codec` column in the songs table holds a lowercased *file extension*,
@@ -35,7 +35,7 @@ struct Target
 // report at github.com/navidrome/navidrome/issues/2563, where the dedicated
 // muxer produced unseekable streams for Symfonium and Substreamer).
 //
-// wma has an empty encoder — ffmpeg can decode it, so it is a valid *source*
+// wma has an empty encoder - ffmpeg can decode it, so it is a valid *source*
 // for copy mode, but there is no free encoder and it must never be a target.
 inline constexpr std::array<Target, 10> TARGETS = {{
 	{ "opus",   "opus", "libopus",   ".opus", "audio/ogg",       true  },
@@ -58,7 +58,7 @@ std::optional<Target> target_for(std::string_view name);
 // rows in TARGETS: target_for() is what validates the `format` parameter of
 // stream.view, and a video extension must never resolve there as an audio
 // encode target.  These entries describe what a file *is*, not what ffmpeg can
-// be asked to produce — the two video output formats (fragmented MP4 for
+// be asked to produce - the two video output formats (fragmented MP4 for
 // progressive playback, MPEG-TS for HLS segments) are chosen by the streamer,
 // never by the client naming an extension.
 struct VideoTarget
@@ -84,14 +84,14 @@ std::optional<VideoTarget> video_target_for(std::string_view ext);
 
 bool is_video_ext(std::string_view ext);
 
-// A container a *client* may declare it demuxes for itself — see
+// A container a *client* may declare it demuxes for itself - see
 // video_direct_playable_for() below.  Every video container qualifies except
 // vob, and that exclusion is not caution.
 //
 // A DVD titleset's songs.path names only the *first* VOB of a set that is one
 // continuous stream split at 1 GB boundaries; dvd_input() is what hands ffmpeg
 // the concat: list of the rest.  Served untouched, that is twenty minutes of a
-// two-hour film — and nothing anywhere reports an error, because what goes out
+// two-hour film - and nothing anywhere reports an error, because what goes out
 // is a valid program stream that simply ends.
 bool container_declarable(std::string_view ext);
 
@@ -166,7 +166,7 @@ bool browser_container(std::string_view ext);
 // as the untouched original.  Only a re-encode is chunked and unseekable.
 // Conflating the two would make a client send timeOffset for a remuxable MKV,
 // which sets partial=true in serve_video() and demotes a cheap -c copy into a
-// full re-encode — the exact opposite of what the tier ladder is for.
+// full re-encode - the exact opposite of what the tier ladder is for.
 //
 // An empty audio codec counts as playable: a silent video is fine, and a file
 // the scanner could not probe at all is better handled by the fallbacks in
@@ -180,12 +180,12 @@ bool webm_codecs(std::string_view video_codec,
                  std::string_view audio_codec);
 
 // True when the file can go to a browser untouched.  Two callers must agree on
-// this — serve_video()'s tier choice and the transcoded* fields the API
-// advertises — for the same reason as video_seeks_natively() above.
+// this - serve_video()'s tier choice and the transcoded* fields the API
+// advertises - for the same reason as video_seeks_natively() above.
 //
 // The .mkv case is not a technicality: a VP9/Opus Matroska (yt-dlp's usual
 // output) would otherwise pay a whole-file remux to produce something it
-// already is.  It must be *relabelled* video/webm when served, though —
+// already is.  It must be *relabelled* video/webm when served, though -
 // browsers reject video/x-matroska on the MIME alone, whatever the bytes hold.
 bool video_direct_playable(std::string_view container,
                            std::string_view video_codec,
@@ -213,7 +213,7 @@ using Playable = std::set<std::string, std::less<>>;
 //
 // video_direct_playable() says two callers must agree on it: serve_video()'s
 // tier choice and the transcoded* fields the API advertises.  That stays true
-// only while those two ask the *same* question — and a defaulted argument is
+// only while those two ask the *same* question - and a defaulted argument is
 // exactly how one of them quietly stops.  transcode_target() fills
 // transcodedContentType/transcodedSuffix, which a client caches and which the
 // Android app hands a Cast receiver as the LOAD's contentType; cast_tier_for()
@@ -225,7 +225,7 @@ using Playable = std::set<std::string, std::less<>>;
 // that is the whole safety argument: the two tiers this moves a file between
 // are both seekable, so nativeSeek is identical either side of it and no
 // advertised field becomes client-dependent.  Widening the *codec* pair could
-// not be done this way — nativeSeek is what a client picks its transport with,
+// not be done this way - nativeSeek is what a client picks its transport with,
 // and what the Android app refuses to cast on.
 //
 // container_declarable() is re-checked here rather than trusted from whoever
@@ -263,8 +263,8 @@ bool audio_declared(const AudioForm& form, const Playable& client);
 
 // Which of serve_video()'s three tiers a Chromecast's fetch will land on.
 //
-// A cast URL carries no format, no size, no maxBitRate and no timeOffset — the
-// receiver seeks natively and the account ceiling is skipped for a cast token —
+// A cast URL carries no format, no size, no maxBitRate and no timeOffset - the
+// receiver seeks natively and the account ceiling is skipped for a cast token -
 // so `constrained` and `partial` are both false in serve_video() and the tier
 // follows from the codec pair alone.  That is what makes it answerable here,
 // before a byte is served, which two things need: the LOAD message announces a
@@ -272,7 +272,7 @@ bool audio_declared(const AudioForm& form, const Playable& client);
 // client rather than letting it work the ladder out a second time.
 //
 // The third caller of the tier predicate, after serve_video() and
-// transcode_target() — the same drift rule those two document applies here.
+// transcode_target() - the same drift rule those two document applies here.
 // Note it is written the way serve_video() writes it, on video_seeks_natively()
 // *and* video_direct_playable(), rather than on the second alone: those two
 // disagree exactly on the remux tier, which is a file whose codecs a browser
@@ -302,7 +302,7 @@ std::string_view cast_mime_for(std::string_view container,
                                std::string_view audio_codec);
 
 // The format a server-driven cast asks for when the receiver cannot show a
-// picture and the soundtrack cannot be copied out as it stands — see
+// picture and the soundtrack cannot be copied out as it stands - see
 // audio_copy_target() below, which is tried first and covers AAC, MP3, FLAC,
 // Opus and Vorbis.  So this is reached only for AC3, DTS, TrueHD and PCM,
 // which is to say most disc rips.
@@ -312,16 +312,16 @@ std::string_view cast_mime_for(std::string_view container,
 // the only route that had no choice about transcoding.  Everything that argued
 // for mp3 here has since stopped applying:
 //
-//  * "every receiver takes mp3" — FLAC is in Google Cast's baseline audio
+//  * "every receiver takes mp3" - FLAC is in Google Cast's baseline audio
 //    support (documented to 96 kHz / 24-bit; a film's track is 48 kHz), so it
 //    no longer selects for the least capable device.
 //  * "the extraction is a full transcode whatever it lands in, so nothing is
-//    preserved by choosing a fancier one" — true before the copy tier existed
+//    preserved by choosing a fancier one" - true before the copy tier existed
 //    and false now.  This constant is what is left *after* copying has been
 //    ruled out, which is exactly when the choice of encoder decides how much
 //    is thrown away.
 //  * "CBR mp3's length is predictable, which serve()'s estimate_length path
-//    would need if the cache warm were given up" — a cast URL never sets
+//    would need if the cache warm were given up" - a cast URL never sets
 //    estimateContentLength, so that was hypothetical.  What it points at is
 //    real and worth knowing: an unwarmed FLAC pipe carries no Content-Length
 //    and no seek table, so a failed warm degrades further than it used to.
@@ -336,12 +336,12 @@ inline constexpr const char* CAST_AUDIO_ONLY_FORMAT = "flac";
 //
 // This is what makes a film's soundtrack cheap.  Extracting it is otherwise a
 // demux plus a decode plus a LAME encode of a two-hour track, materialised in
-// full before the receiver is told anything — minutes, on a path whose whole
+// full before the receiver is told anything - minutes, on a path whose whole
 // purpose is that the wait happens before the LOAD.  When the track is already
 // in a codec the receiver decodes, `-c:a copy` reduces that to the demux.
 //
 // The codec set is the one browser_audio_codec() lists, and for the same
-// reason — a Cast receiver is a Chrome media stack — but written out here
+// reason - a Cast receiver is a Chrome media stack - but written out here
 // rather than reused, because this has to name a container per codec and that
 // predicate has no notion of one.  Everything else (AC3, DTS, TrueHD, PCM, so
 // most DVD and Blu-ray rips) falls back to CAST_AUDIO_ONLY_FORMAT.
@@ -358,25 +358,25 @@ std::optional<Target> audio_copy_target(std::string_view audio_codec);
 // This is the whole audio-only contract, and it is deliberately spelled with
 // existing Subsonic parameters rather than an extension: `format` already
 // names an audio container, `target_for()` already validates it, and a client
-// asking for format=mp3 on a video is asking for exactly this.  VIDEO.md
-// specified it from the start — the unconditional `-vn` in
+// asking for format=mp3 on a video is asking for exactly this.  It was
+// specified from the start - the unconditional `-vn` in
 // Streamer::ffmpeg_argv() exists for m4a cover art, but on a video file it
 // *is* audio extraction, so the audio path needed almost nothing added to it.
 //
 // Two callers must agree on this, for the same reason as the two predicates
 // above: Streamer::serve() decides whether to take the video ladder at all,
 // and the stream.view handler decides whether the account's maxBitRate ceiling
-// applies — it must not for a video, and it must for the soundtrack of one.
+// applies - it must not for a video, and it must for the soundtrack of one.
 //
 // An empty audio_codec keeps the request on the video ladder.  A silent video
 // has nothing to extract, and `-map 0:a:0` against one makes ffmpeg exit
 // before writing a byte, which reaches the client as a 200 with an empty body
-// — the failure the format validation in stream.view exists to prevent.
+// - the failure the format validation in stream.view exists to prevent.
 bool audio_only_request(bool is_video, std::string_view format,
                         std::string_view audio_codec);
 
 // Which audio format a cast soundtrack is asked for, or empty when the film
-// has nothing to extract — a silent video, or one the scanner could not probe.
+// has nothing to extract - a silent video, or one the scanner could not probe.
 //
 // One definition because two callers must agree exactly: cast_load_song()
 // decides *whether* the receiver gets the soundtrack, and soundtrack_load()

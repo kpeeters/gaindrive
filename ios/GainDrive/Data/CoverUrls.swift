@@ -12,7 +12,7 @@ import Foundation
 ///
 /// The two are separate because **the URL is not stable across launches**. It
 /// carries `t=` and `s=`, and the salt is regenerated every session, so a
-/// URL-keyed cache — `URLCache`, or any off-the-shelf image loader's — sees a
+/// URL-keyed cache - `URLCache`, or any off-the-shelf image loader's - sees a
 /// different key for the same bytes on every cold start and re-downloads the
 /// entire grid. Naming what the bytes *are* instead is what makes the disk
 /// cache worth having.

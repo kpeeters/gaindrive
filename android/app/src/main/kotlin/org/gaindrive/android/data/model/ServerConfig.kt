@@ -15,7 +15,7 @@ data class ServerConfig(
 	val enabled: Boolean = true,
 	/**
 	 * Read the library from the server's directory tree rather than from its
-	 * tags — `getIndexes`/`getMusicDirectory` instead of
+	 * tags - `getIndexes`/`getMusicDirectory` instead of
 	 * `getArtists`/`getArtist`/`getAlbum`.
 	 *
 	 * Off by default, because the tag hierarchy is what a Subsonic client is
@@ -35,8 +35,8 @@ data class ServerConfig(
 
 		/**
 		 * No Subsonic username meaningfully starts or ends with a space, and
-		 * long opaque ones — Bandcamp issues a 32-character token as the
-		 * username — are pasted, which is exactly how a stray space gets in.
+		 * long opaque ones - Bandcamp issues a 32-character token as the
+		 * username - are pasted, which is exactly how a stray space gets in.
 		 * It then travels into `u=` on every request as `%20`, and a server
 		 * whose `ping` does not authenticate will accept the account and then
 		 * fail on the first endpoint that looks the user up.
@@ -51,7 +51,7 @@ data class ServerConfig(
 		 * A password *can* legitimately carry edge whitespace, so this does
 		 * throw away a theoretically valid one. That is the accepted trade:
 		 * nobody types a password that begins with a space on purpose, whereas
-		 * pasting one is a mistake that costs an afternoon — as this did. The
+		 * pasting one is a mistake that costs an afternoon - as this did. The
 		 * damage is bounded either way, since a wrong password is reported
 		 * cleanly as error 40.
 		 */

@@ -42,7 +42,7 @@ data class GetUserBody(
 
 /**
  * Roles are per server: the same person can be an admin on one and a
- * restricted account on another. `castRole` is deliberately absent — it gates
+ * restricted account on another. `castRole` is deliberately absent - it gates
  * the server-driven cast endpoints, which this app does not use.
  */
 @Serializable

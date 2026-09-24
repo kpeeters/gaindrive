@@ -26,8 +26,8 @@ import kotlin.coroutines.resume
  * `NsdManager` replaces roughly 270 lines of mDNS in `src/castmanager.cc` and
  * needs no permission, which is why it is tried first. It also has a long
  * reputation for flakiness across OEM builds; jmDNS is the documented fallback
- * (`CAST.md`), and it is deliberately not here yet, because it brings its own
- * Chromecast bug — a device that reboots is never re-announced — and a
+ * and is deliberately not here yet, because it brings its own
+ * Chromecast bug - a device that reboots is never re-announced - and a
  * `MulticastLock` besides. Add it if a real device proves it necessary, not
  * before.
  *
@@ -164,7 +164,7 @@ class CastDiscovery @Inject constructor(
 		// is a serial-number-ish string nobody would recognise. `id` is stable
 		// across a rename, which the service name is not. `md` is the model the
 		// receiver announces for itself, which is the only thing on the wire
-		// that tells a WiiM from a television — see `CastDeviceKind`.
+		// that tells a WiiM from a television - see `CastDeviceKind`.
 		val text = attributes.orEmpty()
 		val friendly = text["fn"].asText()
 		val id = text["id"].asText()

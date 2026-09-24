@@ -107,7 +107,7 @@ fun CastSettingsScreen(
 		item {
 			Text(
 				// Why the section exists at all. Discovery is a mechanism that
-				// can fail for reasons no client can fix — a device asleep
+				// can fail for reasons no client can fix - a device asleep
 				// enough not to wake for multicast, an access point that drops
 				// it, or a responder that has stopped answering even a direct
 				// unicast query. Naming the address sidesteps all of it.
@@ -153,7 +153,7 @@ fun CastSettingsScreen(
 }
 
 /**
- * One added device. Shaped like `ServerRow`, minus the reordering — the order
+ * One added device. Shaped like `ServerRow`, minus the reordering - the order
  * of cast devices means nothing, so there is nothing to move.
  */
 @Composable

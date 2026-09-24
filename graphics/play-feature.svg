@@ -3,7 +3,7 @@
   The Google Play feature graphic, 1024x500. Rasterised to PNG by
   `make create-play-assets` at the repository root.
 
-  The record is the website's hero rebuilt in SVG — see .vinyl in
+  The record is the website's hero rebuilt in SVG - see .vinyl in
   html/styles.css, whose numbers this follows: grooves as 2px rings on a
   540px disc, a label 36% of the disc across, the logo 56% of the label, a
   14px spindle hole. CSS has a conic-gradient sheen that SVG has no
@@ -13,8 +13,8 @@
   banner cannot drift from the icon. Its red square is the label's own
   crimson, which is what makes a square logo read as a round one.
 
-  The wordmark is Bricolage Grotesque ExtraBold — the website's display face,
-  https://fonts.google.com/specimen/Bricolage+Grotesque, SIL OFL 1.1 —
+  The wordmark is Bricolage Grotesque ExtraBold - the website's display face,
+  https://fonts.google.com/specimen/Bricolage+Grotesque, SIL OFL 1.1 -
   converted to outlines, so rendering this file needs no font installed and
   no font is vendored. To re-set the words, install that face, set them at
   96px in #18100c with -0.02em tracking, and convert to paths again.

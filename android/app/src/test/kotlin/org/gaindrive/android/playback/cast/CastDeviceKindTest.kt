@@ -10,7 +10,7 @@ import org.junit.Test
  *
  * The WiiM strings below are the shapes their firmware and their own HTTP API
  * use. If a real device turns out to announce something else, add it here as
- * well as fixing the matcher — the point of the table is that the next make of
+ * well as fixing the matcher - the point of the table is that the next make of
  * receiver is a row rather than an investigation.
  */
 class CastDeviceKindTest {

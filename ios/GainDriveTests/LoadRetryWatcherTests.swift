@@ -12,8 +12,8 @@ import Testing
 
 /// The decision table behind re-sending a LOAD.
 ///
-/// The behaviour it encodes was found by debugging a real receiver and is
-/// described at length in the root `CLAUDE.md`; the point of testing it here is
+/// The behaviour it encodes was found by debugging a real receiver;
+/// the point of testing it here is
 /// that the rediscovery cost real time, and the msid filter in particular looks
 /// like an optimisation right up until it is removed.
 struct LoadRetryWatcherTests {
@@ -35,7 +35,7 @@ struct LoadRetryWatcherTests {
 		var watcher = LoadRetryWatcher()
 		watcher.arm(superseding: 4)
 		#expect(watcher.consume(status(.idle, msid: 5, idleReason: "ERROR")))
-		// Once, and only once — a second error is a different failure and must
+		// Once, and only once - a second error is a different failure and must
 		// not loop.
 		#expect(!watcher.isArmed)
 		#expect(!watcher.consume(status(.idle, msid: 5, idleReason: "ERROR")))
@@ -44,7 +44,7 @@ struct LoadRetryWatcherTests {
 	/// **The load-bearing case.** A `GET_STATUS` poll fired just before the
 	/// receiver processed our LOAD comes back as a healthy `PLAYING` carrying
 	/// the *old* session id. Treating it as evidence disarms the watcher, and
-	/// the real error for the new session — which arrives later — is then
+	/// the real error for the new session - which arrives later - is then
 	/// ignored.
 	@Test func aStalePlayingStatusDoesNotDisarm() {
 		var watcher = LoadRetryWatcher()
@@ -55,7 +55,7 @@ struct LoadRetryWatcherTests {
 	}
 
 	/// The intermediate `IDLE`/`INTERRUPTED` push carries the old id too, and is
-	/// skipped for the same reason — which costs nothing, because the next push
+	/// skipped for the same reason - which costs nothing, because the next push
 	/// is the one that decides.
 	@Test func aStaleInterruptedStatusIsIgnored() {
 		var watcher = LoadRetryWatcher()
@@ -70,7 +70,7 @@ struct LoadRetryWatcherTests {
 		watcher.arm(superseding: 4)
 		#expect(!watcher.consume(status(state, msid: 5)))
 		#expect(!watcher.isArmed)
-		// And a later error is then somebody else's problem — a track that
+		// And a later error is then somebody else's problem - a track that
 		// played and then failed is not a load that never took.
 		#expect(!watcher.consume(status(.idle, msid: 5, idleReason: "ERROR")))
 	}

@@ -20,8 +20,8 @@ import retrofit2.Retrofit
  *
  * The parameter tests matter more than they look: `personal` and `contentType`
  * are both optional and both silently ignored by a server that has never heard
- * of them, so getting one wrong produces a *plausible* listing — the whole
- * shared library under the Uploads chip — rather than an error anybody would
+ * of them, so getting one wrong produces a *plausible* listing - the whole
+ * shared library under the Uploads chip - rather than an error anybody would
  * notice.
  */
 class UploadsApiTest {
@@ -111,9 +111,9 @@ class UploadsApiTest {
 	private val okEnvelope = """{"subsonic-response":{"status":"ok","version":"1.16.1"}}"""
 
 	/**
-	 * The whole destination, always. Both halves are required — they were
+	 * The whole destination, always. Both halves are required - they were
 	 * briefly optional and each default was a guess that filed things wrongly,
-	 * the root one unable to reach a `categories` root at all — which is why the
+	 * the root one unable to reach a `categories` root at all - which is why the
 	 * declaration takes them non-null rather than leaving it to a call site to
 	 * remember.
 	 */
@@ -130,7 +130,7 @@ class UploadsApiTest {
 
 	/**
 	 * Not an admin. The screen only draws the action for one, but the server
-	 * decides — and naming a destination root is the half of `moveAlbum` that
+	 * decides - and naming a destination root is the half of `moveAlbum` that
 	 * requires admin, since it is what puts something into the shared library.
 	 */
 	@Test
@@ -148,7 +148,7 @@ class UploadsApiTest {
 		}
 	}
 
-	/** An id that is not a browsable library root — including the uploads root. */
+	/** An id that is not a browsable library root - including the uploads root. */
 	@Test
 	fun `an unusable destination root is error 70`() = runTest {
 		respond(
@@ -174,7 +174,7 @@ class UploadsApiTest {
 	/**
 	 * The refusal that is the security boundary: an id naming anything but the
 	 * caller's own upload. One message covers "not an upload" and "not yours",
-	 * deliberately — the difference is only useful to somebody probing ids — so
+	 * deliberately - the difference is only useful to somebody probing ids - so
 	 * the client must show what the server said rather than inventing a reason.
 	 */
 	@Test
@@ -226,8 +226,8 @@ class UploadsApiTest {
 	 *
 	 * This replaced a test for "item is not in a personal library folder",
 	 * which `promoteAlbum` used to raise from a five-component source-path
-	 * check. `moveAlbum` has no such check — with it an admin could not move a
-	 * library album at all, which was the point of merging the two endpoints —
+	 * check. `moveAlbum` has no such check - with it an admin could not move a
+	 * library album at all, which was the point of merging the two endpoints -
 	 * so that message no longer exists on the server to assert against.
 	 */
 	@Test

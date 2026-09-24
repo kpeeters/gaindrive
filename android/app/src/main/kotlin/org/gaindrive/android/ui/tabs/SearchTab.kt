@@ -20,7 +20,7 @@ import org.gaindrive.android.ui.search.SearchScreen
  * Search results, and whatever a hit opens beside them.
  *
  * Three levels, because an artist hit opens that artist's albums and an album
- * from there opens its tracks — but the *results* are what must stay on
+ * from there opens its tracks - but the *results* are what must stay on
  * screen, which is why this is the one tab that does not use the ordinary
  * window rule. See [searchWindow].
  *
@@ -40,7 +40,7 @@ fun SearchTab(stack: PaneStack) {
 		// level, and here that matters: an album hit lands at level 1 and is a
 		// leaf, while an artist hit lands there as a list with albums below it.
 		// Without this, a wide window beside an album hit offers a third pane
-		// asking for an album — of a pane that is already one. Blank, not
+		// asking for an album - of a pane that is already one. Blank, not
 		// Gone: the pane must keep its width, it just must not ask.
 		slots = { depth, panes, levels ->
 			val base = searchWindow(depth, panes, levels)
@@ -67,7 +67,7 @@ fun SearchTab(stack: PaneStack) {
 						stack.show(1, Route.Album(ref.encode(), title))
 					},
 					// A marker is played by opening the recording's album and
-					// starting it partway in — see Route.Album for why that beats
+					// starting it partway in - see Route.Album for why that beats
 					// playing it from here. A hit inside a film then lands on the
 					// video screen by itself, through the same rule that sends any
 					// video there, with the results left beside it.

@@ -43,7 +43,7 @@ class ChapterTracks @Inject constructor(
 	/**
 	 * Never throws and never returns null. A recording with no markers, a
 	 * server too old for the endpoint and a request that failed are the same
-	 * thing here — no chapter list to draw — and none of them is a reason to
+	 * thing here - no chapter list to draw - and none of them is a reason to
 	 * refuse to play the item.
 	 */
 	suspend fun chaptersFor(ref: ItemRef): ChapterList = withContext(Dispatchers.IO) {

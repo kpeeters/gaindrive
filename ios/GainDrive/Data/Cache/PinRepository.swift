@@ -20,16 +20,16 @@ import Foundation
 final class PinRepository {
 	private(set) var pins: [Pin] = []
 	private(set) var usageBytes: Int64 = 0
-	/// A refusal worth showing — today only "this would not fit". Cleared when
+	/// A refusal worth showing - today only "this would not fit". Cleared when
 	/// the screen that showed it says so.
 	private(set) var message: String?
 
 	private var membership: [Pin.ID: [ItemRef]] = [:]
 	/// Pinned **and** here. Everything else on disk is `cached`, which the
-	/// store answers for directly — there is no list of it, because the list
+	/// store answers for directly - there is no list of it, because the list
 	/// would be out of date the moment eviction ran.
 	private var stored: Set<ItemRef> = []
-	/// Everything the store holds, pinned or not — a track kept by playing it
+	/// Everything the store holds, pinned or not - a track kept by playing it
 	/// belongs to no pin, so it is in nothing else this class computes.
 	///
 	/// **Read from the store, never asked for per row.** A row cannot await the
@@ -95,7 +95,7 @@ final class PinRepository {
 		return .absent
 	}
 
-	/// The store telling us what it holds has changed — a track finished
+	/// The store telling us what it holds has changed - a track finished
 	/// arriving, or eviction took one. Wired in the composition root.
 	func storeChanged() {
 		Task { await reloadHeld() }
@@ -108,14 +108,14 @@ final class PinRepository {
 
 	/// A whole pin's state, which is what the album screen's control shows.
 	///
-	/// **It reports what is happening, not what was asked for** — the reason
+	/// **It reports what is happening, not what was asked for** - the reason
 	/// `android/SCREENS.md` gives for the same control. A pin that is half here
 	/// is running, not done, and one whose last track failed is failed however
 	/// many succeeded.
 	func state(of pin: Pin) -> DownloadState {
 		let songs = Pins.expand([pin], membership: membership)
 		guard !songs.isEmpty else {
-			// Pinned, but never resolved — a pin whose album has not been read
+			// Pinned, but never resolved - a pin whose album has not been read
 			// yet protects nothing, and saying "here" would be a lie.
 			return .running(fraction: 0)
 		}
@@ -150,7 +150,7 @@ final class PinRepository {
 		let refs = pin.kind == .song ? [pin.ref] : songs.map(\.ref)
 
 		// **Refused rather than allowed to overrun.** Nothing here is evicted,
-		// so pinning past the cap would quietly turn the cap into a lie —
+		// so pinning past the cap would quietly turn the cap into a lie -
 		// `android/CACHING.md` reaches the same rule from the other direction,
 		// where eviction exists but cannot reclaim pinned bytes.
 		//
@@ -203,7 +203,7 @@ final class PinRepository {
 		await reloadHeld()
 	}
 
-	/// Everything, including the pins — there is nothing on disk that is not
+	/// Everything, including the pins - there is nothing on disk that is not
 	/// pinned, so a flush that kept them would re-download immediately.
 	func removeEverything() async {
 		queue.cancelAll()
@@ -227,7 +227,7 @@ final class PinRepository {
 
 	/// Re-reads what each pin covers and fetches anything missing.
 	///
-	/// This is what makes a pinned playlist cover a track added since — the
+	/// This is what makes a pinned playlist cover a track added since - the
 	/// reason a pin records intent rather than a song list. Run at launch and
 	/// whenever the Storage screen appears.
 	func refresh() async {
@@ -247,7 +247,7 @@ final class PinRepository {
 
 	// MARK: - Machinery
 
-	/// Empty for a song pin, which is its own membership — `Pins.expand` puts
+	/// Empty for a song pin, which is its own membership - `Pins.expand` puts
 	/// the ref straight in, so there is nothing to read and nothing to store.
 	private func resolve(_ pin: Pin) async -> [Song] {
 		switch pin.kind {

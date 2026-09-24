@@ -13,7 +13,7 @@ import Security
 /// Server passwords, one Keychain item per server.
 ///
 /// The Subsonic token scheme means the client must hold the plaintext password
-/// — it computes `md5(password + salt)` afresh for each session — so it cannot
+/// - it computes `md5(password + salt)` afresh for each session - so it cannot
 /// be hashed at rest. On Android that forced an AES key in the Keystore and a
 /// hand-rolled cipher; here the Keychain *is* that, so there is no
 /// `CredentialCipher` equivalent and nothing to test around one.
@@ -26,14 +26,14 @@ enum Keychain {
 	/// encrypted device backup, so restoring onto a new phone brings the
 	/// servers back configured. Android refuses that on purpose, because a
 	/// restored ciphertext with no key fails at first use rather than at
-	/// restore time and is indistinguishable from a genuine problem — a hazard
+	/// restore time and is indistinguishable from a genuine problem - a hazard
 	/// that does not exist here, since the Keychain restores the secret itself
 	/// rather than something that needs a key held elsewhere.
 	///
 	/// Computed rather than stored, because `CFString` is not `Sendable` and a
 	/// stored static of a non-`Sendable` type is shared mutable state as far as
 	/// strict concurrency is concerned. A computed property has no storage to
-	/// share, so this needs no `nonisolated(unsafe)` — the escape hatch would
+	/// share, so this needs no `nonisolated(unsafe)` - the escape hatch would
 	/// have silenced the check rather than answered it. The `kSec…` globals
 	/// themselves are fine to read: the importer already treats imported C
 	/// constants as safe, which is why the `query` dictionary below compiles.
@@ -45,8 +45,8 @@ enum Keychain {
 	///
 	/// Not diagnostics for their own sake: a rejected write and a successful one
 	/// are indistinguishable from the call site, and the *symptom* of a rejected
-	/// one appears much later and somewhere else — the server list saying "no
-	/// saved password", or a browse screen failing to build a client — which
+	/// one appears much later and somewhere else - the server list saying "no
+	/// saved password", or a browse screen failing to build a client - which
 	/// reads as a bug anywhere but here. `-34018` is `errSecMissingEntitlement`
 	/// and means the signed app may not reach the keychain it asked for.
 	private static let log = Logger(subsystem: "org.gaindrive.ios", category: "keychain")
@@ -71,7 +71,7 @@ enum Keychain {
 		var attributes = query(for: server)
 
 		// Update first, because SecItemAdd on an existing account fails with
-		// errSecDuplicateItem rather than replacing — which would silently
+		// errSecDuplicateItem rather than replacing - which would silently
 		// leave the old password in place after an edit.
 		let update: [String: Any] = [
 			kSecValueData as String: data,
@@ -101,7 +101,7 @@ enum Keychain {
 		var item: CFTypeRef?
 		let status = SecItemCopyMatching(attributes as CFDictionary, &item)
 		guard status == errSecSuccess, let data = item as? Data else {
-			// Absent is an ordinary answer — a server whose password was never
+			// Absent is an ordinary answer - a server whose password was never
 			// saved, or one restored without it. Anything else is not.
 			if status != errSecItemNotFound {
 				log.error("SecItemCopyMatching failed: \(status)")
@@ -115,7 +115,7 @@ enum Keychain {
 	static func removePassword(for server: ServerId) -> Bool {
 		let status = SecItemDelete(query(for: server) as CFDictionary)
 		// Deleting something that is not there is the desired end state, not a
-		// failure — removing a server whose password was never saved must not
+		// failure - removing a server whose password was never saved must not
 		// leave the configuration behind.
 		return status == errSecSuccess || status == errSecItemNotFound
 	}

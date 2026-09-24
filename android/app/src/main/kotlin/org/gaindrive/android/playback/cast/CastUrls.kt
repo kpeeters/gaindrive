@@ -29,8 +29,8 @@ import javax.inject.Singleton
  * apart: it is the branch that works with no connectivity, so a user asking
  * "why is this playing when the server is unreachable" has an answer.
  *
- * Note none of these is "the server drives the Chromecast" — that mode is the
- * web client's and is deliberately not ported; see `CAST.md`. The phone always
+ * Note none of these is "the server drives the Chromecast" - that mode is the
+ * web client's and is deliberately not ported. The phone always
  * holds the control channel.
  */
 enum class CastRoute {
@@ -49,7 +49,7 @@ enum class CastRoute {
  * MIME type to declare for it, and how it got to be that URL.
  *
  * [url] points at the owning server, or at the bridge relaying that server, or
- * at the bridge serving a copy already on the device — and the receiver cannot
+ * at the bridge serving a copy already on the device - and the receiver cannot
  * tell the three apart. The decision is made per track, so a queue that spans
  * servers may mix them, which is the one place several servers make casting
  * easier rather than harder. [route] is the same decision written down, for the
@@ -65,7 +65,7 @@ data class CastTarget(
 	 * The grant [url] carries, so that the artwork and subtitles built
 	 * afterwards can carry the same one. Null when this route hands the
 	 * receiver no server URL at all, and when the server is too old to mint
-	 * one — in both cases the ordinary credentials are what travel.
+	 * one - in both cases the ordinary credentials are what travel.
 	 *
 	 * It rides here because [CastUrls.artworkFor] and [CastUrls.captionsFor]
 	 * are separate calls made once this has returned, and minting a second and
@@ -83,7 +83,7 @@ data class CastTarget(
  *
  * The set is what the Default Media Receiver documents, intersected with the
  * types `src/codecs.hh` can report. It reports seven for audio and only
- * `audio/x-ms-wma` is missing here — but this is an allowlist rather than a
+ * `audio/x-ms-wma` is missing here - but this is an allowlist rather than a
  * one-entry denylist on purpose: a codec added to the server later would
  * otherwise be sent to a receiver that cannot play it, and demoting to a
  * transcode is the safe direction of a wrong guess.
@@ -97,7 +97,7 @@ data class CastTarget(
  * fine.
  *
  * Top-level rather than a member so it can be exercised without `android.util`
- * being loaded — the class it sits beside logs, this function does not.
+ * being loaded - the class it sits beside logs, this function does not.
  */
 internal fun castPlaysNatively(mime: String?): Boolean = mime in CAST_NATIVE_TYPES
 
@@ -119,14 +119,14 @@ internal fun castPlaysNatively(mime: String?): Boolean = mime in CAST_NATIVE_TYP
  * reads at 1x and stops reading once its buffer is full; unpaced, the server
  * writes the whole track into the socket within seconds and then blocks, and
  * from that moment the connection carries nothing. Something on the path is
- * counting — the receiver's own ~60 s no-data timeout, and a reverse proxy's
- * `ProxyTimeout`, which defaults to 60 s — and the track stops about ninety
+ * counting - the receiver's own ~60 s no-data timeout, and a reverse proxy's
+ * `ProxyTimeout`, which defaults to 60 s - and the track stops about ninety
  * seconds in. See `serve_direct()` in `src/streamer.cc`.
  *
  * Only ever on a URL a *receiver* fetches. Never on an ExoPlayer, download or
  * pin URL: nothing is playing off those in real time and pacing one would make
  * a pinned album take as long as it takes to listen to. That is why this is
- * applied here, at the route, rather than inside [StreamUrls] — whose builders
+ * applied here, at the route, rather than inside [StreamUrls] - whose builders
  * are shared with playback and the download queue.
  *
  * Top-level for the same reason as [castPlaysNatively]: it can then be
@@ -147,7 +147,7 @@ internal fun paced(url: String): String {
  * *receiver* fetches.
  *
  * What it replaces is worth stating plainly. `u`/`t`/`s` are the account's
- * password — `t` is md5(password + salt) and `s` is the salt — so a television
+ * password - `t` is md5(password + salt) and `s` is the salt - so a television
  * handed them can read the whole library as this person for as long as the
  * password stands, and does so from its own logs and whatever is between. The
  * grant is one song, twelve hours, and reaches nothing the account could not
@@ -200,7 +200,7 @@ class CastUrls @Inject constructor(
 	 * That order is the reverse of what this used to do, and it is the whole
 	 * shape of `SettingsStore.castOriginal`: the original file is worth sending
 	 * only to a receiver that pulls it off the server itself, so the route has
-	 * to be settled first. Asking costs nothing — [CastReachability] caches its
+	 * to be settled first. Asking costs nothing - [CastReachability] caches its
 	 * answer per server and network, not per track.
 	 *
 	 * Every other route resolves exactly as local playback would, same quality
@@ -211,8 +211,8 @@ class CastUrls @Inject constructor(
 	 * the bridge puts on the response are the same answer and cannot drift.
 	 */
 	suspend fun forCast(ref: ItemRef, source: CastSource): CastTarget? {
-		// One load starts here, and everything published for it — the stream,
-		// the artwork, each subtitle track — is pinned against eviction until
+		// One load starts here, and everything published for it - the stream,
+		// the artwork, each subtitle track - is pinned against eviction until
 		// the next one. A caption is published now and fetched only if somebody
 		// turns it on, which by use alone makes it the first thing thrown away.
 		bridge.beginLoad()
@@ -237,7 +237,7 @@ class CastUrls @Inject constructor(
 		val mime = target.mimeType ?: source.sourceMime
 
 		// Downloaded: serve the copy on the device rather than fetching it back
-		// from the server through the phone. Not an optimisation — it is the
+		// from the server through the phone. Not an optimisation - it is the
 		// only branch that works with no connectivity at all, which is the state
 		// a downloaded library exists for, and without it casting a downloaded
 		// track offline handed the receiver a server URL nothing could fetch.
@@ -249,7 +249,7 @@ class CastUrls @Inject constructor(
 			// **The stored bytes decide the type here, not the request.** This
 			// copy was written by local playback, which declares what media3
 			// takes as it stands, so an `@opus160` key can hold the original
-			// MP3 — while `mime` above was derived from the quality asked for
+			// MP3 - while `mime` above was derived from the quality asked for
 			// and would say Ogg. Everywhere else that mismatch is absorbed by
 			// an extractor sniffing; a receiver cannot, and one told audio/ogg
 			// over MP3 refuses the media outright, on a television, with
@@ -266,13 +266,13 @@ class CastUrls @Inject constructor(
 		// A bridge that will not start is not a reason to play nothing: the
 		// direct URL may still work, since the probe is a guess about the
 		// receiver, not a measurement of it. That fallback really does hand
-		// over a server URL, so it reports DIRECT — the route says what was
+		// over a server URL, so it reports DIRECT - the route says what was
 		// done, not what was intended.
 		//
 		// [paced] covers both uses of it, and the relay needs it for a
 		// different reason than the direct route does. The receiver never
 		// starves behind the bridge, which forwards at whatever rate the
-		// receiver reads — but that is exactly why the *upstream* leg goes
+		// receiver reads - but that is exactly why the *upstream* leg goes
 		// idle when the receiver stops reading, and that is the leg crossing
 		// a reverse proxy, since the relay exists for precisely the topologies
 		// that have one.
@@ -282,13 +282,13 @@ class CastUrls @Inject constructor(
 			// No token, and not an oversight: on this route the server URL
 			// never leaves the phone. The receiver is given a bridge URL and
 			// the bridge fetches upstream itself, so the credentials are on a
-			// request this device makes — which is the one place they belong.
+			// request this device makes - which is the one place they belong.
 			// Minting here would cost a round trip per track and one of the
 			// server's grant slots to protect nothing.
 			return CastTarget(relayed, mime, CastRoute.RELAY, target.quality)
 		}
 		// The bridge would not start, so the fallback really does hand a server
-		// URL to the receiver — and therefore really does need a credential of
+		// URL to the receiver - and therefore really does need a credential of
 		// its own, exactly as the direct branch above.
 		val token = castToken(ref)
 		return CastTarget(
@@ -304,8 +304,8 @@ class CastUrls @Inject constructor(
 	 * A grant for one track, or null to carry on with the ordinary credentials.
 	 *
 	 * Null is a normal answer rather than a failure. A server older than the
-	 * endpoint answers an error, and the behaviour that leaves — the URL keeps
-	 * `u`/`t`/`s` — is exactly what this app did before the endpoint existed,
+	 * endpoint answers an error, and the behaviour that leaves - the URL keeps
+	 * `u`/`t`/`s` - is exactly what this app did before the endpoint existed,
 	 * so there is nothing to tell the user and nothing to abandon the cast
 	 * over. It is logged, because "why is the password still going to the
 	 * television" deserves an answer in the log rather than a shrug.
@@ -330,7 +330,7 @@ class CastUrls @Inject constructor(
 	 * Two conditions have to hold before the original is sent, and the second
 	 * is not a caution but a fix: a `.wma` handed over as it stands fails the
 	 * `LOAD` with `IDLE`/`ERROR`, is retried once by [LoadRetryWatcher], fails
-	 * again and stalls — with nothing on screen to say why. Falling back to the
+	 * again and stalls - with nothing on screen to say why. Falling back to the
 	 * streaming quality plays the track instead, and the log line is what makes
 	 * "why is this one still Opus" answerable.
 	 */
@@ -377,7 +377,7 @@ class CastUrls @Inject constructor(
 	 *
 	 * **Two tiers are offered, and which one is available depends on the
 	 * route.** A file whose codec pair a browser takes arrives as a real MP4
-	 * with a `Content-Length` that answers byte ranges — that is what
+	 * with a `Content-Length` that answers byte ranges - that is what
 	 * `nativeSeek` names, and it is what the bridge already relays. Anything
 	 * else the server can only re-encode, and its progressive answer is chunked
 	 * with `Accept-Ranges: none`; the seekable form of it is `hls.m3u8`, where
@@ -386,15 +386,15 @@ class CastUrls @Inject constructor(
 	 * The playlist's segment URIs are **relative**, so they resolve against
 	 * whatever base served the playlist. On the direct route that base is the
 	 * gaindrive server's own `/rest/`, exactly as for any other client, and
-	 * nothing else is needed — the server already sends the CORS headers a
+	 * nothing else is needed - the server already sends the CORS headers a
 	 * receiver requires for an adaptive stream. Through the bridge, whose
 	 * grammar is a flat `/<token>/<key>`, a segment arrives as an unrecognised
 	 * key and 404s. So HLS is refused *there and only there*, below the route
-	 * decision rather than above it. See "What HLS would take" in `CAST.md`.
+	 * decision rather than above it.
 	 *
 	 * What that refusal used to be is worth knowing, because it is the shape to
 	 * avoid going back to: it sat at the top of this function, so it refused
-	 * the direct route too — for a limitation belonging only to the relay —
+	 * the direct route too - for a limitation belonging only to the relay -
 	 * and direct is the common case. The symptom was a film with no cast icon
 	 * and no explanation.
 	 *
@@ -404,7 +404,7 @@ class CastUrls @Inject constructor(
 	 * untouched.
 	 *
 	 * And there is no stored-copy branch, because video never enters the byte
-	 * cache — `GainDriveMediaSourceFactory` hands it the bare network factory —
+	 * cache - `GainDriveMediaSourceFactory` hands it the bare network factory -
 	 * so looking would only ever miss.
 	 *
 	 * No [paced] here, unlike the audio route, because the server honours it
@@ -417,7 +417,7 @@ class CastUrls @Inject constructor(
 	private suspend fun forVideo(ref: ItemRef, source: CastSource): CastTarget? {
 		// No `playable`, and that omission is the load-bearing one on this
 		// route. A receiver demuxes none of them, and [mime] below is
-		// `transcodedContentType` — `video/mp4` for exactly the files declaring
+		// `transcodedContentType` - `video/mp4` for exactly the files declaring
 		// would change. Adding the argument here announces MP4 and sends Matroska,
 		// which a receiver refuses outright: the film never starts and nothing
 		// anywhere says why. See `StreamUrls.forVideo`.
@@ -478,8 +478,8 @@ class CastUrls @Inject constructor(
 	 * Fetches one byte, so that a remux happens while the phone waits rather
 	 * than while the receiver does.
 	 *
-	 * An H.264/AAC `.mkv` is not directly playable — the container is not one a
-	 * browser takes — so the server remuxes it, and its transcode cache is
+	 * An H.264/AAC `.mkv` is not directly playable - the container is not one a
+	 * browser takes - so the server remuxes it, and its transcode cache is
 	 * *blocking*: nothing is sent until ffmpeg has written the whole file. For a
 	 * multi-gigabyte film that is minutes, and a receiver that has gone that long
 	 * without data gives up with a network error. Untreated, the first cast of
@@ -511,7 +511,7 @@ class CastUrls @Inject constructor(
 	 *
 	 * Both halves are required. A partial copy would play until the bytes ran
 	 * out, and a copy of unknown length cannot be given a `Content-Length` or a
-	 * ranged answer — which is most of what a receiver asks for.
+	 * ranged answer - which is most of what a receiver asks for.
 	 */
 	private suspend fun storedCopy(cacheKey: String): Long? =
 		// Off the main thread: this walks the cache index, the same reason
@@ -538,7 +538,7 @@ class CastUrls @Inject constructor(
 	}
 
 	/**
-	 * Subtitle tracks for the receiver, which fetches each one itself — so they
+	 * Subtitle tracks for the receiver, which fetches each one itself - so they
 	 * take the same road as the picture, for the reason [artworkFor] gives.
 	 *
 	 * The trackId is the position in [configs] plus one, and that is the whole
@@ -550,7 +550,7 @@ class CastUrls @Inject constructor(
 	 * Dropping would renumber everything after it while `CastPlayer` went on
 	 * numbering the full list, so a viewer choosing the third subtitle would
 	 * silently turn on the fourth. An unbridgeable track falls back to the
-	 * server URL — the same concession [artworkFor] makes — which at worst is
+	 * server URL - the same concession [artworkFor] makes - which at worst is
 	 * one track that does not load, not a picker that lies.
 	 */
 	fun captionsFor(

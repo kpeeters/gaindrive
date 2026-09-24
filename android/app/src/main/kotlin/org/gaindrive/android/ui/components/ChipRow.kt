@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
  * swipe.
  *
  * [selectedIndex] and [chipCount], when given, bring the selected chip into
- * view after the row is first measured — otherwise a setting near the end of a
+ * view after the row is first measured - otherwise a setting near the end of a
  * long row is invisible until the user thinks to swipe, which makes it look
  * unset. Only on first layout: re-running it on every tap would yank the row
  * sideways under the finger.
@@ -40,7 +40,7 @@ fun ChipRow(
 	LaunchedEffect(scroll.maxValue) {
 		if (scroll.maxValue == 0 || selectedIndex < 0 || chipCount < 2) return@LaunchedEffect
 		// Proportional rather than measured. Chips differ in width, so this is
-		// an approximation — but it is monotonic and lands exactly on 0 and on
+		// an approximation - but it is monotonic and lands exactly on 0 and on
 		// maxValue at the ends, which are the two cases that matter.
 		val fraction = selectedIndex.toFloat() / (chipCount - 1)
 		scroll.scrollTo((scroll.maxValue * fraction).toInt())

@@ -14,7 +14,7 @@ import UIKit
 /// system **launch it** and call this, handing over a completion handler. Until
 /// that handler is called back the system considers the app still working; not
 /// calling it makes the app look unresponsive and the system stops waking it
-/// for downloads at all — which is a failure that shows up as "downloads only
+/// for downloads at all - which is a failure that shows up as "downloads only
 /// progress while the app is open", days later, with nothing in the logs.
 ///
 /// It is the whole reason `@UIApplicationDelegateAdaptor` is here, and it is

@@ -19,7 +19,7 @@ enum BrowseScope: Hashable, Sendable {
 	case oneServer(ServerId)
 
 	/// The stored form. A sentinel rather than an empty string or a flag,
-	/// because it has to share a field with a `ServerId` — and `"all"` is not
+	/// because it has to share a field with a `ServerId` - and `"all"` is not
 	/// a UUID, so the two can never collide.
 	static let allStored = "all"
 
@@ -33,7 +33,7 @@ enum BrowseScope: Hashable, Sendable {
 	/// Resolves a stored choice against the servers that currently exist.
 	///
 	/// A choice whose server was removed or disabled falls back to all rather
-	/// than leaving the library permanently empty with no hint why — which is
+	/// than leaving the library permanently empty with no hint why - which is
 	/// what a scope pointing at a server that is not there would do.
 	static func restored(from stored: String?, available: [ServerId]) -> BrowseScope {
 		guard let stored, stored != allStored,

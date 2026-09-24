@@ -57,8 +57,8 @@ internal sealed interface CastRx {
  * Ported from the `Tls` struct and `cast_send`/`cast_recv` in
  * `src/castmanager.cc`, with one deliberate change: the C++ opens a fresh
  * connection for every command because a detached thread per command was the
- * simplest thing there. Here a single connection is multiplexed — which is what
- * pychromecast and node-castv2 do — so commands cost no handshake and cannot
+ * simplest thing there. Here a single connection is multiplexed - which is what
+ * pychromecast and node-castv2 do - so commands cost no handshake and cannot
  * race a reconnect. [send] is serialised; reads happen only on the session's
  * receive loop.
  */
@@ -90,7 +90,7 @@ internal class CastChannel private constructor(
 	/**
 	 * Blocking read of one message. Call from an IO dispatcher.
 	 *
-	 * A timeout waiting for the *first* byte is ordinary quiet — the receiver
+	 * A timeout waiting for the *first* byte is ordinary quiet - the receiver
 	 * only pushes on state changes. A timeout part-way through a frame is not
 	 * recoverable: the stream is then out of step with the length prefix and
 	 * there is no way to resync, so it is reported as [CastRx.Closed] and the
@@ -172,7 +172,7 @@ internal class CastChannel private constructor(
 		 *
 		 * Note the asymmetry, which is deliberate and matches [CastBridge]: this
 		 * channel and the reachability probe reach for the Wi-Fi network, while
-		 * fetches from the music server stay on the default route — that is how
+		 * fetches from the music server stay on the default route - that is how
 		 * the phone reaches a server over the VPN and a receiver over the LAN at
 		 * once.
 		 */
@@ -207,20 +207,20 @@ internal class CastChannel private constructor(
 		 * Binding to the Wi-Fi network is the right thing under a full tunnel,
 		 * where everything addressed to the LAN over the default route goes into
 		 * the tunnel and dies. But it is *refused outright* while an ordinary
-		 * `VpnService` is up. A VPN that has not called `allowBypass()` — and
-		 * WireGuard does not — makes every other network off limits to the apps
+		 * `VpnService` is up. A VPN that has not called `allowBypass()` - and
+		 * WireGuard does not - makes every other network off limits to the apps
 		 * it covers, and the refusal comes from `Network.bindSocket` inside
 		 * `createSocket()`:
 		 *
 		 *     java.net.SocketException: Binding socket to network 1084 failed:
 		 *     EPERM (Operation not permitted)
 		 *
-		 * So no route is consulted and no connection is attempted — which is why
+		 * So no route is consulted and no connection is attempted - which is why
 		 * this looked like an unreachable receiver and cost a long investigation.
 		 * An *unbound* socket is not covered by that restriction and reaches a
 		 * LAN address perfectly well, which is why the fallback works where the
-		 * binding does not, and why [CastBridge] — whose `ServerSocket` is bound
-		 * to an address rather than to a network — could serve the LAN all along
+		 * binding does not, and why [CastBridge] - whose `ServerSocket` is bound
+		 * to an address rather than to a network - could serve the LAN all along
 		 * while this channel could not reach it.
 		 *
 		 * Neither order suits every configuration, so both are tried. Wi-Fi goes
@@ -278,7 +278,7 @@ internal class CastChannel private constructor(
 		 *
 		 * Chromecasts present device certificates chaining to a Google root that
 		 * is not in the Android trust store, so ordinary verification cannot
-		 * succeed — the C++ uses `SSL_VERIFY_NONE` for the same reason. What
+		 * succeed - the C++ uses `SSL_VERIFY_NONE` for the same reason. What
 		 * authenticates the exchange is not the certificate: the user picked this
 		 * device off their own network, and the stream URL carries a per-session
 		 * token. Nothing else in the app goes near this factory.

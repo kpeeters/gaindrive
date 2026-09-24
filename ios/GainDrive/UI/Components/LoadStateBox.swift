@@ -17,7 +17,7 @@ import SwiftUI
 ///
 /// There is no `RefreshableLoadBox` counterpart. On iOS `.refreshable` has to
 /// sit on the scroll view itself, so a wrapper that is not the `List` could not
-/// host the indicator — and each screen writing `.refreshable` directly gets
+/// host the indicator - and each screen writing `.refreshable` directly gets
 /// the distinction that type existed to encode (content stays on screen during
 /// a refresh, and only a scope change or a retry blanks it) by construction.
 struct LoadStateBox<Value, Content: View>: View {

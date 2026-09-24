@@ -28,7 +28,7 @@ import org.gaindrive.android.data.model.ServerId
  * only what is stored on the device.
  *
  * Offline mode lives here rather than in Settings because it answers the same
- * question the server scope does — "what am I looking at" — and because it is
+ * question the server scope does - "what am I looking at" - and because it is
  * flipped situationally, before a flight or on expensive data, not configured
  * once. Settings has the same switch for completeness; both read the one stored
  * value, so they cannot disagree.

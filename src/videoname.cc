@@ -9,7 +9,7 @@
 // Tokens that mark the end of a title.  Everything from the first of these
 // onwards describes the *file* rather than the film, so the title is whatever
 // came before.  This is the whole trick, and it is the list that will need
-// extending as odd releases turn up — which is what --video-name-test is for.
+// extending as odd releases turn up - which is what --video-name-test is for.
 //
 // Kept as one table rather than several so there is one place to add to.
 static const std::set<std::string> STOP_WORDS = {
@@ -39,12 +39,12 @@ static const std::set<std::string> STOP_WORDS = {
 	};
 
 // The language names and the subtitle words beside them: junk in a release
-// name, but ordinary adjectives inside a real title — "La French", "The
+// name, but ordinary adjectives inside a real title - "La French", "The
 // English Patient" and "The Italian Job" all cut to their first word while
 // these counted unconditionally.  A weak stop word ends the title only in the
 // company of junk: when the next token is itself a stop word, or nothing
 // follows.  A following *year* keeps it, because "Title Year Junk" puts
-// everything before the year in the title — which is what separates
+// everything before the year in the title - which is what separates
 // "La French 2014 720p" (a film called La French) from
 // "Amelie 2001 FRENCH 1080p" (a language tag).  Edition words ("extended",
 // "final") stay strong deliberately: weakening them regresses
@@ -65,8 +65,8 @@ static const std::set<std::string> WEAK_STOP_WORDS = {
 //
 // The vts arm is spelled `vts[\s._\d-]*\d` (dash last, or the class is a
 // malformed range), not the `vts([\s._-]*\d+)+` it used to be.  The two
-// match the same names — vts, then separators and digits, ending on a
-// digit — but the second is a nested quantifier over a
+// match the same names - vts, then separators and digits, ending on a
+// digit - but the second is a nested quantifier over a
 // nullable inner part, which std::regex backtracks exponentially: a filename
 // of `vts` plus sixty digits and one letter, arriving in an uploaded archive,
 // parked a scan worker for longer than the server's lifetime.  Nothing else
@@ -102,7 +102,7 @@ static std::string to_lower(std::string s)
 
 // A token as the stop-word table wants to see it: lowercased, stripped of
 // surrounding punctuation, and cut at a '-' so "x264-GRP" tests as "x264".
-// Splitting the token itself on '-' is wrong — "Spider-Man" is one word — but
+// Splitting the token itself on '-' is wrong - "Spider-Man" is one word - but
 // testing only the part before the dash is safe, because a real title's first
 // hyphenated half is never a stop word.
 static std::string stop_key(const std::string& token)
@@ -160,7 +160,7 @@ static std::vector<std::string> tokenise(const std::string& s)
 	{
 	std::vector<std::string> out;
 	std::string cur;
-	// A token of pure punctuation — the lone "-" in "2x05 - Breakage" — is
+	// A token of pure punctuation - the lone "-" in "2x05 - Breakage" - is
 	// dropped rather than kept. Keeping it would end the title at the dash,
 	// since a token with nothing alphanumeric in it reads as a stop word.
 	auto flush = [&] {
@@ -217,7 +217,7 @@ static std::string clean_run(const std::string& text, int& year)
 	size_t cut = tokens.size();
 
 	// The first stop word ends the title.  A weak one only in the company of
-	// junk — see WEAK_STOP_WORDS; followed by a real word or a year it is
+	// junk - see WEAK_STOP_WORDS; followed by a real word or a year it is
 	// title text.
 	for (size_t i = 0; i < tokens.size(); ++i) {
 		if (!is_stop_word(tokens[i])) continue;
@@ -234,7 +234,7 @@ static std::string clean_run(const std::string& text, int& year)
 		cut = i; break;
 		}
 
-	// Unless it is the *first* word, in which case it is not junk at all —
+	// Unless it is the *first* word, in which case it is not junk at all -
 	// "4K Nature Scenes" and "HD Home Video" are titles that happen to open
 	// with a word the table calls release junk. Cutting there would leave
 	// nothing, and no name is improved by being emptied.
@@ -259,7 +259,7 @@ static std::string clean_run(const std::string& text, int& year)
 		cut--;
 		}
 	else {
-		// No junk to anchor against — a trailing year, as in "Film.1080p.1949".
+		// No junk to anchor against - a trailing year, as in "Film.1080p.1949".
 		// Here the year must have nothing but junk after it, which is what
 		// keeps "holiday 2019 crete" whole: a real word follows its 2019.
 		for (size_t i = tokens.size(); i-- > 0; ) {
@@ -303,7 +303,7 @@ VideoName parse_video_name(std::string_view name)
 	// marks where the title *ends*: "Title (Year)" is a human convention, not
 	// scene naming, so everything before it is the title verbatim and the junk
 	// after it is ignored.  That is the only rule that can save a title-final
-	// ambiguous word — "The Girl Who Was French (2037) DVDRip" is
+	// ambiguous word - "The Girl Who Was French (2037) DVDRip" is
 	// shape-identical to a language tag, and no token heuristic tells them
 	// apart.
 	static const std::regex paren_year(R"([\(\[]((?:19|20)\d{2})[\)\]])");
@@ -347,15 +347,15 @@ VideoName parse_video_name(std::string_view name)
 		out.episode_title = clean_run(em.suffix().str(), after_year);
 		if (out.year == 0) out.year = before_year ? before_year : after_year;
 		out.cleaned = true;
-		// Both empty is "S01E03.mkv" — a real and common shape. Leave them
+		// Both empty is "S01E03.mkv" - a real and common shape. Leave them
 		// empty rather than echoing the marker back as a title, so
 		// resolve_video_name() can reach for the folder and for "Episode 3".
 		return out;
 		}
 
 	// Everything before a bracketed year is the title, taken as it stands.  A
-	// zone that tokenises to nothing — "(2014) Some Movie", year-first
-	// naming — falls through to the token rules, which handle it.
+	// zone that tokenises to nothing - "(2014) Some Movie", year-first
+	// naming - falls through to the token rules, which handle it.
 	auto zone_tokens = tokenise(title_zone);
 	std::string zone_title = tidy(join(zone_tokens, zone_tokens.size()));
 
@@ -364,7 +364,7 @@ VideoName parse_video_name(std::string_view name)
 	out.year  = year;
 
 	// A leading number orders episodes that carry no other marker. It sets the
-	// episode number only — see the note above.
+	// episode number only - see the note above.
 	static const std::regex leading(R"(^(\d{1,3})[\s._-]+\S)");
 	if (std::regex_search(s, m, leading)) out.episode = std::stoi(m[1]);
 
@@ -402,7 +402,7 @@ VideoName resolve_video_name(std::string_view file_stem,
 		show_dir = std::string(parent_name);
 	VideoName folder = parse_video_name(show_dir);
 
-	// "Planet Earth/Season 2/03 Jungles.mkv" — the episodes of a season are
+	// "Planet Earth/Season 2/03 Jungles.mkv" - the episodes of a season are
 	// regularly named without repeating the season, so the folder is the only
 	// thing that says which one it is. Used below wherever the file itself did
 	// not say; a file that carries S03E01 while sitting in "Season 2" is a
@@ -419,7 +419,7 @@ VideoName resolve_video_name(std::string_view file_stem,
 		file.series_title = !file.title.empty() ? file.title : folder.title;
 		// What a client should show for an episode is the episode's own name;
 		// the show is already the album it sits in. With no name in the file
-		// at all — "S01E03.mkv" — "Episode 3" beats both echoing the marker
+		// at all - "S01E03.mkv" - "Episode 3" beats both echoing the marker
 		// back and repeating the show's name on every row.
 		if (!file.episode_title.empty())
 			file.title = file.episode_title;
@@ -448,7 +448,7 @@ VideoName resolve_video_name(std::string_view file_stem,
 			}
 		}
 
-	// A year on the folder still counts for a file that has none of its own —
+	// A year on the folder still counts for a file that has none of its own -
 	// "The Third Man (1949)/third man.mkv".
 	if (file.year == 0 && folder.year != 0) {
 		file.year    = folder.year;

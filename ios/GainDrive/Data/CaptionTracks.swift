@@ -12,7 +12,7 @@ import Foundation
 struct CaptionTrack: Identifiable, Hashable, Sendable {
 	/// The server's own caption id: an ffprobe stream index, or **−1** for the
 	/// sidecar file beside the video. Negative is a real id here, not a
-	/// sentinel — "no subtitles" is the absence of a selection, not a value.
+	/// sentinel - "no subtitles" is the absence of a selection, not a value.
 	let id: String
 	let name: String
 }

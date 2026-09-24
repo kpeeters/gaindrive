@@ -18,7 +18,7 @@ import javax.inject.Inject
  * should be visible and cancellable while it runs.
  *
  * No [Scheduler] is installed, so downloads do not resume on their own after a
- * reboot or after their network requirement stops being met — they resume when
+ * reboot or after their network requirement stops being met - they resume when
  * the app is next opened. Adding `PlatformScheduler` here is the fix if that
  * turns out to matter, at the cost of a boot receiver.
  */
@@ -43,7 +43,7 @@ class MediaDownloadService : DownloadService(
 	/**
 	 * Built by hand rather than with Media3's `DownloadNotificationHelper`,
 	 * which is not in any artifact this app depends on. Doing it here is a
-	 * handful of lines and says exactly what we want it to say — including the
+	 * handful of lines and says exactly what we want it to say - including the
 	 * waiting-for-Wi-Fi case, which the helper renders as a bare "waiting".
 	 *
 	 * The channel itself is created by [DownloadService] from the id and name
@@ -71,7 +71,7 @@ class MediaDownloadService : DownloadService(
 	}
 
 	/**
-	 * Null when nothing is downloading or no track has reported progress —
+	 * Null when nothing is downloading or no track has reported progress -
 	 * rendered as an indeterminate bar rather than a misleading 0%.
 	 */
 	private fun averagePercent(active: List<Download>): Int? {

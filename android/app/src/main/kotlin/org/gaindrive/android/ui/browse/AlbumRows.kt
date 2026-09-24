@@ -8,8 +8,8 @@ import org.gaindrive.android.data.model.Song
  * The album screen's track listing, flattened to one entry per row.
  *
  * It exists because a chaptered recording is not one row. Its markers stand in
- * for it — a concert is one file holding a dozen songs, and listing it as
- * `concert.mkv` names the file rather than the music — so one song can produce
+ * for it - a concert is one file holding a dozen songs, and listing it as
+ * `concert.mkv` names the file rather than the music - so one song can produce
  * many rows, and the screen's "one lazy item per song" shape no longer holds.
  * Precomputing here rather than nesting the markers inside their song's item is
  * what keeps every row individually keyed and recyclable: the server allows a
@@ -62,7 +62,7 @@ sealed interface AlbumListRow {
  * * a disc heading appears only when the album spans more than one disc, since
  *   a heading says *which* group a row belongs to and one group needs none. It
  *   reads "Series 2" rather than "Disc 2" when the server says that group is a
- *   season — checked per group, because a show's unnumbered `Specials` folder
+ *   season - checked per group, because a show's unnumbered `Specials` folder
  *   genuinely is a disc.
  * * a heading naming the recording appears only when **more than one** item in
  *   the album has markers, by exactly the same argument. Counted over what will

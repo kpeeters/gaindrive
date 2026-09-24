@@ -5,14 +5,14 @@
 
     -vf yadif=deint=interlaced,scale=<W>:<H>:force_original_aspect_ratio=decrease
 
-That is one argv element, so it was never shell injection — but a filtergraph
+That is one argv element, so it was never shell injection - but a filtergraph
 is its own language and `-vf` accepts source filters. `movie=` and
 `subtitles=` both name a file to read, and the trailing option could be
 absorbed by ending an injected chain with another scale, so the concatenation
 offered no accidental protection.
 
 The same value is echoed into the hls.m3u8 **body**, which is neither a URL
-nor XML, so nothing downstream would have caught a newline in it either — into
+nor XML, so nothing downstream would have caught a newline in it either - into
 a segment's query string, and, when bitRate is repeated, into a master
 playlist's BANDWIDTH and RESOLUTION attributes and its variant URIs.
 
@@ -130,7 +130,7 @@ def test_master_playlist_body_has_no_injected_lines():
     """A repeated bitRate opens a second body sink for the same two values.
 
     A master playlist writes the bitrate into a BANDWIDTH attribute and a
-    variant URI, and the frame size into a RESOLUTION attribute — none of which
+    variant URI, and the frame size into a RESOLUTION attribute - none of which
     the media-playlist test above can reach, since it never sends bitRate twice.
     """
     vid = _a_video_id()

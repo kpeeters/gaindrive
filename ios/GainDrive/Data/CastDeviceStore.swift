@@ -12,20 +12,20 @@ import Foundation
 ///
 /// **It exists for a measured failure rather than as belt and braces.** A
 /// Chromecast on the reference network answered `ping` and accepted TLS on 8009
-/// while `dig @<ip> -p 5353 _googlecast._tcp.local PTR` timed out — so its mDNS
+/// while `dig @<ip> -p 5353 _googlecast._tcp.local PTR` timed out - so its mDNS
 /// responder had stopped answering even a **direct unicast query**, which is the
 /// one form no access point and no multicast suppression can be blamed for.
 /// Chrome could not see it either. The same option exists on Android and in the
-/// server's own configuration; `android/CAST.md` holds the fuller account.
+/// server's own configuration.
 ///
 /// On iOS it is additionally the only route left when the Local Network
-/// permission has been refused. The connection fails there too — the permission
-/// gates reaching a LAN address, not merely browsing for one — but a list with
+/// permission has been refused. The connection fails there too - the permission
+/// gates reaching a LAN address, not merely browsing for one - but a list with
 /// an entry in it can explain that, and an empty one cannot.
 struct ManualCastDevice: Identifiable, Hashable, Sendable, Codable {
 	let id: UUID
-	/// **An IP literal.** A hostname is not refused here — `NWEndpoint.Host`
-	/// will take one and Bonjour or DNS may even resolve it — but the server
+	/// **An IP literal.** A hostname is not refused here - `NWEndpoint.Host`
+	/// will take one and Bonjour or DNS may even resolve it - but the server
 	/// rejects one at startup for its own cast list, because `tls_connect()`
 	/// calls `inet_pton` and never `getaddrinfo`. Keeping the same shape means
 	/// the two lists describe devices the same way.
@@ -40,7 +40,7 @@ struct ManualCastDevice: Identifiable, Hashable, Sendable, Codable {
 		self.port = port
 	}
 
-	/// Spelled exactly as the server spells it in `listCastDevices` — derived
+	/// Spelled exactly as the server spells it in `listCastDevices` - derived
 	/// rather than random, so it survives a restart and so the two describe the
 	/// same device by the same name.
 	var derivedCastId: String { "manual:\(address):\(port)" }
@@ -52,7 +52,7 @@ struct ManualCastDevice: Identifiable, Hashable, Sendable, Codable {
 			endpoint: .host(address, port: port),
 			model: nil,
 			// A configured device announces nothing, and the server reads that
-			// as *capable* — refusing the picture on a guess is worse than the
+			// as *capable* - refusing the picture on a guess is worse than the
 			// guess. Nil says "it never said", which is the same thing.
 			videoOut: nil,
 			address: address)
@@ -99,7 +99,7 @@ final class CastDeviceStore {
 
 	/// The configured devices a discovered one does not already stand for.
 	///
-	/// **Deduplicated by address, discovery winning** — as on Android, and for
+	/// **Deduplicated by address, discovery winning** - as on Android, and for
 	/// its reason: a discovered entry carries the friendly name from the
 	/// device's own `fn` record and its real Cast id, while a configured one has
 	/// only what somebody typed. So an entry left behind after a device starts
@@ -109,7 +109,7 @@ final class CastDeviceStore {
 	/// **The address, not the Cast id**, although the id is what the two lists
 	/// are keyed on elsewhere: a configured device has no announcement, so its
 	/// real Cast id is exactly the thing that cannot be known about it. The
-	/// address is the only fact both sides can hold — and a discovered device
+	/// address is the only fact both sides can hold - and a discovered device
 	/// only acquires one once something has connected to it, since `NWBrowser`
 	/// reports a service. Until then a device that is both configured and
 	/// announcing appears twice, which is untidy and not wrong.

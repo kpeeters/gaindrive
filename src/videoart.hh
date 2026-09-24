@@ -15,7 +15,7 @@
 // **Both tiers are off by default**, and each for its own reason.
 //
 // A frame (`allow_frames`) is a fine cover for a home video and a poor one for
-// a film or a documentary, where what is wanted is the poster — so it belongs
+// a film or a documentary, where what is wanted is the poster - so it belongs
 // *after* an online lookup, as the thing that runs only when nothing else
 // could identify the file at all.  Until that lookup existed, a frame grab was
 // the only tier most of a collection reached, which is worse than showing no
@@ -23,20 +23,20 @@
 //
 // An embedded cover (`allow_embedded`) is the better image when it is there,
 // but on a real collection it is almost never there, and finding out costs an
-// ffprobe run per video on *every* scan — a file that yields nothing is not
+// ffprobe run per video on *every* scan - a file that yields nothing is not
 // recorded, so the probe repeats for ever.  That is the whole cost of a
 // rescan for a large video library, paid for a tier that returns nothing.  It
 // is off until a collection is known to have such covers, which is what
 // --video-art-embedded and --video-art-test are for.
 //
 // With both off, generate() returns before probing at all, and the scan skips
-// Phase 3b entirely — that early return is the point of the flag.
+// Phase 3b entirely - that early return is the point of the flag.
 //
 // There is deliberately no third tier for Matroska cover *attachments*.  They
 // look like a separate mechanism (a whole file carried in the container, which
 // ffmpeg dumps with -dump_attachment rather than maps as a stream) but ffmpeg
 // presents an attachment carrying an image as an ordinary video stream with
-// attached_pic set, exactly like an MP4 covr atom — verified against ffmpeg
+// attached_pic set, exactly like an MP4 covr atom - verified against ffmpeg
 // 6.1.  The muxer also refuses to write an image attachment with no mimetype,
 // so the ambiguous case cannot exist in a file.  Tier 1 therefore already
 // covers Matroska, and -dump_attachment would only add a temp file and a
@@ -62,7 +62,7 @@ class VideoArt
 		// is passed through untouched unless it exceeds it: it was chosen by
 		// whoever made the file and re-encoding it can only lose.
 		//
-		// allow_frames and allow_embedded enable the two tiers — see the note
+		// allow_frames and allow_embedded enable the two tiers - see the note
 		// above for why both default off.
 		explicit VideoArt(int max_px = 640, bool allow_frames = false,
 		                   bool allow_embedded = false);
@@ -74,7 +74,7 @@ class VideoArt
 		// nothing and the caller should not walk any files for it.
 		bool enabled() const { return allow_frames_ || allow_embedded_; }
 
-		// Empty when every enabled tier failed, which is never fatal — the
+		// Empty when every enabled tier failed, which is never fatal - the
 		// caller just has no cover, exactly as before.  Never throws.
 		//
 		// ffmpeg_input differs from `path` only for a DVD titleset, where the

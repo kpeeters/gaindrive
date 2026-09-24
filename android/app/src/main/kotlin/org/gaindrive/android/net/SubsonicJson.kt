@@ -12,7 +12,7 @@ import kotlinx.serialization.json.Json
  *
  * All three settings exist because the payload comes from someone else's server
  * and this app is a reader, not a validator. Nothing is made safer by refusing
- * a response — the user just loses their library.
+ * a response - the user just loses their library.
  */
 val SubsonicJson: Json = Json {
 	// Servers add fields over time and OpenSubsonic extensions add more; an
@@ -24,7 +24,7 @@ val SubsonicJson: Json = Json {
 	// Ids are declared String throughout, because that is what they are to this
 	// app: opaque tokens handed back as query parameters. Subsonic's own XSD
 	// types several of them as integers, though, and servers predating the JSON
-	// API emit them unquoted — `{"id":1}` rather than `{"id":"1"}`. Without
+	// API emit them unquoted - `{"id":1}` rather than `{"id":"1"}`. Without
 	// this, one such field fails the whole response, which is how enabling a
 	// legacy server broke the artist list with "Expected quotation mark".
 	//

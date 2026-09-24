@@ -13,7 +13,7 @@ import UniformTypeIdentifiers
 /// Plays a track from the copy it is downloading.
 ///
 /// **One task, one growing file, one integer.** The track is fetched once, in
-/// order, at whatever speed the network gives — not at playback rate — and the
+/// order, at whatever speed the network gives - not at playback rate - and the
 /// player reads out of the file as it fills. When the fetch completes the file
 /// is adopted by `AudioStore` under the same key a pinned download uses, so a
 /// track cached by playing it satisfies a later pin without re-fetching.
@@ -62,7 +62,7 @@ final class CachingResourceLoader: NSObject, @unchecked Sendable {
 	private var contentUTI: String?
 	private var started = false
 	/// The fetch finished and the file was renamed into place. The handles stay
-	/// open — see `didCompleteWithError`.
+	/// open - see `didCompleteWithError`.
 	private var adopted = false
 	/// Set when this resource cannot be cached, after which every request is
 	/// handed back to AVFoundation to fetch for itself. See `giveUp`.
@@ -180,7 +180,7 @@ extension CachingResourceLoader: AVAssetResourceLoaderDelegate {
 				request.finishLoading()
 			} else {
 				// Held, and retried on the next chunk. A read past what has
-				// arrived waits — which for a fetch running at network speed is
+				// arrived waits - which for a fetch running at network speed is
 				// a moment, and is the one place a slow link is felt.
 				stillPending.append(request)
 			}
@@ -236,7 +236,7 @@ extension CachingResourceLoader: URLSessionDataDelegate {
 		guard let http = response as? HTTPURLResponse,
 			(200..<300).contains(http.statusCode), response.expectedContentLength > 0
 		else {
-			// **No length, no cache** — and that is a real case, not a
+			// **No length, no cache** - and that is a real case, not a
 			// defensive one: the server falls back to a piped transcode when
 			// its cache cannot produce a file (a full disk, a busy job queue,
 			// an ffmpeg error), and a piped response is chunked with no
@@ -277,7 +277,7 @@ extension CachingResourceLoader: URLSessionDataDelegate {
 		// **Answer everything before the file moves, and keep answering
 		// after.** This is the step whose absence hung playback: the server
 		// writes MP4 with its index at the end, so AVFoundation's early read is
-		// for the *tail* — a request that is necessarily still pending when the
+		// for the *tail* - a request that is necessarily still pending when the
 		// last byte arrives. Dropping the file here left it unanswered for
 		// ever, and the spinner never stopped.
 		serve()
@@ -295,12 +295,12 @@ extension CachingResourceLoader: URLSessionDataDelegate {
 	///
 	/// The format usually settles it; the original's container is whatever the
 	/// server holds, so the response's MIME type is asked. Both paths end in a
-	/// UTI, which is what the content information request wants — see `serve`.
+	/// UTI, which is what the content information request wants - see `serve`.
 	static func uti(for response: URLResponse?, quality: AudioQuality) -> String? {
 		// **The response first, the quality only as a fallback.** The order
 		// used to be reversed, which was right while the format settled what
 		// arrived. It no longer does: a request that declared what it takes as
-		// it stands — see `PlayableAudio` — may be answered with the file the
+		// it stands - see `PlayableAudio` - may be answered with the file the
 		// server holds rather than the format asked for, and telling
 		// AVFoundation the wrong one plays nothing, silently, exactly as the
 		// note on the content-information request above warns.

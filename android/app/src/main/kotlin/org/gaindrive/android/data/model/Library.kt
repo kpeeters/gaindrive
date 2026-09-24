@@ -2,7 +2,7 @@ package org.gaindrive.android.data.model
 
 /**
  * Domain models. Every one carries an [ItemRef] rather than a bare id, so the
- * server an item came from travels with it — which is what makes a merged
+ * server an item came from travels with it - which is what makes a merged
  * library, a mixed-server queue and per-item actions possible at all.
  *
  * Separate from the DTOs on purpose: Phase 6's cache will produce these from
@@ -35,7 +35,7 @@ data class Artist(
 /**
  * One configured library root, from `getMusicFolders`.
  *
- * [contentType] is a gaindrive extension and is null everywhere else — which is
+ * [contentType] is a gaindrive extension and is null everywhere else - which is
  * the whole of what tells a server that knows about kinds of root from one that
  * only has folders. See `data/browse/LibraryRoots.kt`.
  */
@@ -61,7 +61,7 @@ data class Album(
 	 * How many of this album's tracks are video, which is the only thing that
 	 * distinguishes a season or a film from a record before its tracks are
 	 * fetched: `isVideo` is a per-song field. Zero on a server that does not
-	 * send it, and on the listings gaindrive does not carry it in — see
+	 * send it, and on the listings gaindrive does not carry it in - see
 	 * `API-CLIENT.md`.
 	 */
 	val videoCount: Int = 0,
@@ -72,8 +72,8 @@ data class Album(
 	val starredAt: String?,
 	/**
 	 * Every server holding this album. One entry unless duplicates have been
-	 * collapsed, in which case [ref] is the copy that won — the one highest in
-	 * registry order — and the rest are kept so the row can still say who else
+	 * collapsed, in which case [ref] is the copy that won - the one highest in
+	 * registry order - and the rest are kept so the row can still say who else
 	 * has it.
 	 */
 	val refs: List<ItemRef> = listOf(ref),
@@ -90,8 +90,8 @@ data class Song(
 	/** Who made this track, which on a compilation is not [albumArtistName]. */
 	val artistName: String,
 	/**
-	 * Who the album is by. Blank when the server did not say — an older one, or
-	 * a listing built offline before this was mirrored — which is why
+	 * Who the album is by. Blank when the server did not say - an older one, or
+	 * a listing built offline before this was mirrored - which is why
 	 * [differingArtist] insists on having it before drawing anything.
 	 */
 	val albumArtistName: String = "",
@@ -129,7 +129,7 @@ data class Song(
 	 * Casting is the reason it exists, and the reason casting does not have to
 	 * work out the tier for itself: the receiver picks its decode pipeline from
 	 * the declared type, and for a video the *source* `contentType` is wrong in
-	 * exactly the common case — an H.264/AAC `.mkv` is remuxed and arrives as
+	 * exactly the common case - an H.264/AAC `.mkv` is remuxed and arrives as
 	 * `video/mp4`, not as `video/x-matroska`.
 	 *
 	 * It describes what **any** client would be sent, and deliberately stays that
@@ -147,7 +147,7 @@ data class Song(
 
 	/**
 	 * The track's own artist when the album is not by them, and null otherwise
-	 * — so a row can draw it without deciding anything.
+	 * - so a row can draw it without deciding anything.
 	 *
 	 * An exact comparison on purpose. The server already answered the hard
 	 * half: it sends the folder's spelling in [artistName] whenever the file's
@@ -204,7 +204,7 @@ data class AlbumNotes(
 }
 
 /**
- * An album and its tracks — the part of the detail screen that is worth
+ * An album and its tracks - the part of the detail screen that is worth
  * blocking on. The notes are fetched separately (see [AlbumNotes]) because
  * they can be slow and are never essential.
  */

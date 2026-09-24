@@ -13,7 +13,7 @@ import Foundation
 ///
 /// Owns no playback state. It reaches `PlayerConnection` through three
 /// callbacks, so the rule that the facade is the only route to playback
-/// survives — this type asks for a pause, it does not perform one.
+/// survives - this type asks for a pause, it does not perform one.
 @MainActor
 final class AudioSessionController {
 	var onPause: (() -> Void)?
@@ -28,11 +28,11 @@ final class AudioSessionController {
 	init() {
 		// Setting the category is free and has no effect on other apps.
 		// *Activating* it is what takes the route, and that waits for the first
-		// play — see `activate()`.
+		// play - see `activate()`.
 		//
 		// `.playback` alone: not `.mixWithOthers` (we are the primary audio),
 		// not `.duckOthers`, and none of the AirPlay or Bluetooth options,
-		// which belong to `.playAndRecord` — `.playback` already routes to
+		// which belong to `.playAndRecord` - `.playback` already routes to
 		// AirPlay and A2DP.
 		try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
 		observe()
@@ -43,7 +43,7 @@ final class AudioSessionController {
 	/// An app that takes the session when it starts stops whatever the user was
 	/// already listening to, for a launch that may never play anything.
 	///
-	/// Throws when another app holds a non-mixable session — a phone call. That
+	/// Throws when another app holds a non-mixable session - a phone call. That
 	/// has to surface rather than be swallowed: it is the one case where "I
 	/// pressed play and nothing happened" has an explanation the user can act
 	/// on.
@@ -123,7 +123,7 @@ final class AudioSessionController {
 		else { return }
 
 		// The becoming-noisy equivalent: headphones pulled out must not carry
-		// on through the speaker. Deliberately no `.newDeviceAvailable` case —
+		// on through the speaker. Deliberately no `.newDeviceAvailable` case -
 		// plugging headphones *in* is not a request to start playing.
 		guard reason == .oldDeviceUnavailable else { return }
 		onPause?()

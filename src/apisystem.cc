@@ -36,7 +36,7 @@ void GainDrive::routes_system()
 	// reached the server from a network the server is itself attached to.
 	//
 	// It rides here rather than beside castRole on getUser because it is a
-	// fact about the *request*, not about the account — the same person is on
+	// fact about the *request*, not about the account - the same person is on
 	// the home network in the morning and not in the afternoon. Folding it
 	// into castRole would be worse than untidy: web/app.js reads that field
 	// into the admin edit form and writes it back, so an admin editing their
@@ -57,7 +57,7 @@ void GainDrive::routes_system()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getOpenSubsonicExtensions — no auth required; clients call this before login.
+	// getOpenSubsonicExtensions - no auth required; clients call this before login.
 	server_.Get("/rest/getOpenSubsonicExtensions.view",
 	            [this](const httplib::Request& req, httplib::Response& res) {
 		bool use_json = (fmt_of(req) == "json");
@@ -74,7 +74,7 @@ void GainDrive::routes_system()
 				//
 				// transcodeOffset is the standard extension meaning no more
 				// than that stream honours timeOffset for audio, which it has
-				// always done — so it names behaviour rather than adding any.
+				// always done - so it names behaviour rather than adding any.
 				r["openSubsonicExtensions"] = {
 					{{"name", "gaindrive"},
 					 {"versions", nlohmann::json::array({1})}},
@@ -95,7 +95,7 @@ void GainDrive::routes_system()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getLicense — perpetually-valid dummy.
+	// getLicense - perpetually-valid dummy.
 	server_.Get("/rest/getLicense.view", [this](const httplib::Request& req,
 	                                             httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -124,8 +124,7 @@ void GainDrive::routes_system()
 	//
 	// Both take no parameters and answer with the same <scanStatus> element.
 	// `scanning` is a real boolean and `count` a real number in JSON: a strict
-	// client throws on a type mismatch before any of the response is usable,
-	// which is what the whole of SPEC-AUDIT.md is about.
+	// client throws on a type mismatch before any of the response is usable.
 	auto scan_status_body = [this](bool use_json) {
 		auto st = store_.scan_status();
 		if (use_json)
@@ -150,7 +149,7 @@ void GainDrive::routes_system()
 		                use_json ? "application/json" : "application/xml");
 		});
 
-	// startScan — admin only, matching the rule that settingsRole mirrors
+	// startScan - admin only, matching the rule that settingsRole mirrors
 	// adminRole. Note --no-scan suppresses only the scan at start-up; asking
 	// for one explicitly still works.
 	server_.Get("/rest/startScan.view",
@@ -169,8 +168,8 @@ void GainDrive::routes_system()
 			}
 
 		// Already scanning: report that rather than starting a second walk
-		// over the same tree. Nothing would break — the scan is idempotent and
-		// SQLite serialises the writes — but it would double the I/O and make
+		// over the same tree. Nothing would break - the scan is idempotent and
+		// SQLite serialises the writes - but it would double the I/O and make
 		// `count` jump about between two walks sharing one counter.
 		if (!store_.scan_status().scanning)
 			std::thread([this]{
@@ -189,14 +188,14 @@ void GainDrive::routes_system()
 		                use_json ? "application/json" : "application/xml");
 		});
 
-	// startInfoLookup — queue an online lookup for everything that has no
+	// startInfoLookup - queue an online lookup for everything that has no
 	// words yet. A gaindrive extension, and startScan's sibling: the same
 	// shape, the same admin gate, the same "it is running, come back later"
 	// answer.
 	//
 	// Admin because it rewrites the shared library and because it spends hours
-	// of this server's single MusicBrainz budget — one artist or album every
-	// two seconds — which is not a thing one account should be able to do to
+	// of this server's single MusicBrainz budget - one artist or album every
+	// two seconds - which is not a thing one account should be able to do to
 	// everybody else's browsing.
 	//
 	// It reports what it queued and nothing further. There is no status
@@ -328,7 +327,7 @@ void GainDrive::routes_system()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getUsers — returns all users; admin only.
+	// getUsers - returns all users; admin only.
 	server_.Get("/rest/getUsers.view", [this](const httplib::Request& req,
 	                                           httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -398,7 +397,7 @@ void GainDrive::routes_system()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// createUser — creates a new user; admin only.
+	// createUser - creates a new user; admin only.
 	server_.Get("/rest/createUser.view", [this](const httplib::Request& req,
 	                                             httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -416,7 +415,7 @@ void GainDrive::routes_system()
 		if (!ri || !ri->is_admin) { err(50, "User is not authorized for this operation."); return; }
 
 		std::string username = qp("username");
-		// enc: decoded before storing — validate_auth decodes it on the way
+		// enc: decoded before storing - validate_auth decodes it on the way
 		// in, so storing the encoded spelling stores a different password.
 		auto decoded = MediaStore::decode_enc_password(qp("password"));
 		if (!decoded) { err(10, "Malformed enc: password."); return; }
@@ -445,7 +444,7 @@ void GainDrive::routes_system()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// updateUser — updates an existing user; admin only.
+	// updateUser - updates an existing user; admin only.
 	server_.Get("/rest/updateUser.view", [this](const httplib::Request& req,
 	                                             httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -490,7 +489,7 @@ void GainDrive::routes_system()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// changePassword — change a user's password; admins can change any user's,
+	// changePassword - change a user's password; admins can change any user's,
 	// regular users can only change their own.
 	server_.Get("/rest/changePassword.view", [this](const httplib::Request& req,
 	                                                 httplib::Response& res) {
@@ -530,7 +529,7 @@ void GainDrive::routes_system()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getServerSettings / saveServerSettings — admin-only server configuration.
+	// getServerSettings / saveServerSettings - admin-only server configuration.
 	server_.Get("/rest/getServerSettings.view", [this](const httplib::Request& req,
 	                                                    httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -548,7 +547,7 @@ void GainDrive::routes_system()
 
 		// Whether each is set, never what it is.  A secret the server can
 		// hand back is a secret in an API response, in the browser's memory
-		// and in whatever cache sits between — and, because the web client
+		// and in whatever cache sits between - and, because the web client
 		// filled a masked box with it, one the browser's own password manager
 		// offered to store as a login.  Nothing needs to read these back: they
 		// are written once and used server-side, so the client only has to

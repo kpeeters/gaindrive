@@ -66,8 +66,8 @@ std::vector<UrlHandler> UrlFetcher::default_handlers()
 	//
 	// --audio-format / --merge-output-format pin the *extension*, and that is a
 	// correctness requirement rather than a preference.  A bare -x keeps
-	// whatever container the site served — for YouTube frequently .webm holding
-	// Opus — and MediaStore's extension tables are what decide whether a file is
+	// whatever container the site served - for YouTube frequently .webm holding
+	// Opus - and MediaStore's extension tables are what decide whether a file is
 	// a song or a film (is_video_ext() in codecs.hh derives it from the
 	// extension alone).  A .webm song is filed as a video, probed with ffprobe,
 	// given a video ladder and drawn as a black rectangle behind a play
@@ -86,7 +86,7 @@ std::vector<UrlHandler> UrlFetcher::default_handlers()
 	//
 	// --newline turns the tool's \r progress into whole lines and --progress
 	// asks for that progress at all, which it otherwise suppresses when its
-	// stdout is not a terminal — as it is not here.  (Nothing asks for colour
+	// stdout is not a terminal - as it is not here.  (Nothing asks for colour
 	// to be off: a pipe already gets none.)  --no-playlist and --max-filesize
 	// are the only things bounding what one pasted URL can write into the
 	// uploads root, and the "--" is what stops a URL beginning with a dash
@@ -118,7 +118,7 @@ std::vector<UrlHandler> UrlFetcher::default_handlers()
 	// three fields rather than as one channel name.
 	//
 	// The site supplies `artist` and `album` only for tracks it serves with
-	// music metadata — the auto-generated "Topic" channels. For everything else
+	// music metadata - the auto-generated "Topic" channels. For everything else
 	// those fields are absent and the output template falls through to the
 	// *channel*, which is why an ordinary music video used to land under the
 	// name of whoever posted it. The title is the only description there is, so
@@ -141,7 +141,7 @@ std::vector<UrlHandler> UrlFetcher::default_handlers()
 	//     what 3 wrote when it applies.
 	//
 	// 3 and 4 both read the *original* title and neither writes it back, so the
-	// specific one does not depend on the general one having run — the two are
+	// specific one does not depend on the general one having run - the two are
 	// ordered only so the more specific result wins. A rule that matches
 	// nothing is not an error; yt-dlp says so on stdout and carries on.
 	//
@@ -171,7 +171,7 @@ std::vector<UrlHandler> UrlFetcher::default_handlers()
 		"--parse-metadata",      split_album };
 
 	// Falling back through album_artist before the channel, and to the channel
-	// only when the title said nothing at all — at which point it is usually
+	// only when the title said nothing at all - at which point it is usually
 	// not music, and a lecture or podcast really is best filed under whoever
 	// published it. An operator who would rather see them collected together
 	// can end the chain with a literal instead: %(artist|Unknown Artist)s.
@@ -225,7 +225,7 @@ UrlFetcher::UrlFetcher(const std::optional<std::vector<UrlHandler>>& handlers,
 			}
 		// Compiled here rather than at match time.  A std::regex_error thrown
 		// on an httplib thread is a bare 500 with nothing in the log, and the
-		// operator's mistake deserves to be named at startup — the same reason
+		// operator's mistake deserves to be named at startup - the same reason
 		// roots and cast devices are validated before listen().
 		try {
 			h.re = std::regex(h.pattern, std::regex::ECMAScript
@@ -289,7 +289,7 @@ bool UrlFetcher::cancel(const std::string& job_id)
 	if (!child_ || child_id_ != job_id) return false;
 	// SIGKILL, not SIGTERM, for the reason serve_transcoded gives: a tool
 	// asked politely may sit flushing to a pipe nobody is reading.  Killing
-	// under the mutex is what makes the pointer safe — run() clears it under
+	// under the mutex is what makes the pointer safe - run() clears it under
 	// the same mutex before its Child leaves scope.
 	child_->proc.kill();
 	return true;

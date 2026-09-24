@@ -11,15 +11,15 @@ import Foundation
 /// What the user has starred, over what the last fetch said.
 ///
 /// **A deviation from Android, and the server's semantics are the reason.**
-/// gaindrive stores stars by *path* rather than by row id — deliberately, since
-/// folder and song rowids are not stable across a rescan — and an id that does
+/// gaindrive stores stars by *path* rather than by row id - deliberately, since
+/// folder and song rowids are not stable across a rescan - and an id that does
 /// not resolve to a path is **silently ignored**. There is no error 70 and no
 /// other signal, so `star` returning `ok` is not evidence that anything
 /// changed. Android's model, trusting `starredAt` from the last fetch, cannot
 /// be right against that.
 ///
 /// So the client keeps its own record, shows it immediately, and confirms it
-/// against `getStarred2` — the only thing that can actually answer the
+/// against `getStarred2` - the only thing that can actually answer the
 /// question.
 @MainActor
 @Observable
@@ -51,7 +51,7 @@ final class StarStore {
 	///
 	/// The reconciliation is not belt and braces: it is the only way to find out
 	/// whether the write took, given that the endpoint cannot say. A star the
-	/// server did not record silently reverts a moment later, which is honest —
+	/// server did not record silently reverts a moment later, which is honest -
 	/// the alternative is a star that lies for the rest of the session.
 	func toggle(_ ref: ItemRef, kind: StarKind, currently starred: Bool) async {
 		guard !inFlight.contains(ref) else { return }
@@ -70,7 +70,7 @@ final class StarStore {
 		await reconcile(server: ref.server)
 	}
 
-	/// Folds a `getStarred2` answer in, and — as importantly — drops overrides
+	/// Folds a `getStarred2` answer in, and - as importantly - drops overrides
 	/// for that server which it does *not* mention. An override that survived a
 	/// contradicting fetch would be the client insisting on something the
 	/// server has already denied.
@@ -82,7 +82,7 @@ final class StarStore {
 		for (ref, value) in overrides where ref.server == server {
 			let actually = truth.contains(ref)
 			if actually == value {
-				// Agreed — the model's own `starredAt` will say so on the next
+				// Agreed - the model's own `starredAt` will say so on the next
 				// fetch, so nothing needs remembering.
 				overrides[ref] = nil
 			} else {

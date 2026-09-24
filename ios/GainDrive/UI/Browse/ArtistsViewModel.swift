@@ -8,19 +8,19 @@
 
 import Foundation
 
-/// The merged library listing — or, with `uploads` set, the account's own
-/// uploads — mirroring `ui/browse/ArtistsViewModel.kt`.
+/// The merged library listing - or, with `uploads` set, the account's own
+/// uploads - mirroring `ui/browse/ArtistsViewModel.kt`.
 ///
 /// **State is a plain held value**, not something derived from a subscription.
 /// Android reversed away from `stateIn(WhileSubscribed)` here because leaving
 /// for an album dropped the last subscriber, the share stopped, and returning
-/// restarted the upstream — a full re-read of the library every time the screen
+/// restarted the upstream - a full re-read of the library every time the screen
 /// came back into view. SwiftUI has the identical trap wearing a different hat:
 /// `.task` runs again on every re-appearance. `loadedFor` is what closes it.
 ///
 /// **The initialiser stores references and does nothing else.** `RootView.init`
-/// re-runs whenever `GainDriveApp.body` re-evaluates — which
-/// `preferredColorScheme` guarantees on every theme change — and `@State` keeps
+/// re-runs whenever `GainDriveApp.body` re-evaluates - which
+/// `preferredColorScheme` guarantees on every theme change - and `@State` keeps
 /// the first instance and discards the rest. Any work started in an initialiser
 /// would happen once per discarded copy.
 @MainActor
@@ -32,14 +32,14 @@ final class ArtistsViewModel {
 	private(set) var badgeNames: [ServerId: String] = [:]
 
 	/// Whether the upload icon is worth drawing. Never true on the uploads
-	/// instance — the icon is how you get there. A failed check leaves the
+	/// instance - the icon is how you get there. A failed check leaves the
 	/// last answer standing: the icon is navigation, and taking it away
 	/// because one request timed out would strand the user out of their own
 	/// uploads.
 	private(set) var canUpload = false
 
 	/// Whether this instance is the uploads listing rather than the library.
-	/// The listing it loads is the whole difference — the pushed uploads
+	/// The listing it loads is the whole difference - the pushed uploads
 	/// screen and the Library tab share every other line of this class.
 	let uploads: Bool
 
@@ -70,7 +70,7 @@ final class ArtistsViewModel {
 	}
 
 	/// `.refreshable` awaits this, or the pull indicator snaps back before the
-	/// request has even left. A refresh keeps the list on screen — blanking it
+	/// request has even left. A refresh keeps the list on screen - blanking it
 	/// would hide the very thing the user pulled to update.
 	func refresh() async {
 		isRefreshing = true

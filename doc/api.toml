@@ -1,4 +1,4 @@
-# The gaindrive API extensions — the single source of truth.
+# The gaindrive API extensions - the single source of truth.
 #
 # Everything gaindrive adds to the Subsonic/OpenSubsonic surface is written
 # here and nowhere else, in the same sense that VERSION is the only place the
@@ -11,7 +11,7 @@
 # ---------------------------------------------------------------------------
 # Two rules that are not style preferences:
 #
-#  * Prose uses TOML *literal* strings — '...' and '''...'''.  A basic
+#  * Prose uses TOML *literal* strings - '...' and '''...'''.  A basic
 #    (double-quoted) string processes backslash escapes and a lone \ is a
 #    parse error, and some of the prose below contains one verbatim.  Double
 #    quotes are for identifiers, which never contain a backslash.
@@ -59,7 +59,7 @@ carry. The standard endpoints themselves behave as specified and are not
 repeated here.
 
 Everything is served at `/rest/<name>.view` unless stated otherwise, answers
-in XML or in JSON (`f=json`), and requires authentication — either `u` and `p`
+in XML or in JSON (`f=json`), and requires authentication - either `u` and `p`
 or the token scheme `u`, `t` and `s`. A parameter marked with a `*` is
 required.
 
@@ -82,12 +82,12 @@ version 1. No authentication is needed for that call, so a client can negotiate
 before login. Everything on this page is version 1.
 
 Beside it the standard `transcodeOffset` is advertised, also at version 1. It
-names behaviour rather than adding any — `stream` honours `timeOffset` for
-audio, and always has — so nothing on this page depends on it.
+names behaviour rather than adding any - `stream` honours `timeOffset` for
+audio, and always has - so nothing on this page depends on it.
 
 A new *endpoint* will earn a new version, because a client cannot discover one
 without being told. A new *optional parameter* on an endpoint an existing
-version already names will not — a client that ignores it gets exactly what it
+version already names will not - a client that ignores it gets exactly what it
 got before, so nothing it was told has been redefined.
 
 A client that does not know the extension will not call any of these, so there
@@ -177,7 +177,7 @@ id    = "settings"
 title = "Server settings"
 group = "Editing"
 blurb = '''
-Admin only, and JSON only — these carry credentials for third-party services
+Admin only, and JSON only - these carry credentials for third-party services
 and have no XML representation.
 '''
 
@@ -217,7 +217,7 @@ four endpoints require `uploadRole` or admin and return error 50 without it.
 
 The server matches the URL against a table of handlers configured by the
 operator. **A URL matching no handler is refused, and that refusal is the
-security boundary** — without it, any account allowed to upload could make the
+security boundary** - without it, any account allowed to upload could make the
 server issue outbound requests to anywhere it can reach, including hosts
 unreachable from outside the network. Only `http` and `https` URLs are
 considered at all.
@@ -239,7 +239,7 @@ Chromecast, and the device then fetches the media from `stream` itself using a
 token. All seven endpoints require `castRole` in addition to authentication,
 and return error 50 without it. `stream` and `getCaptions` are exempt when
 called with a valid `castToken`, since a token is only ever issued to a caller
-that has already passed those checks — see `getCastToken` for the other issuer
+that has already passed those checks - see `getCastToken` for the other issuer
 and for what it is bounded by instead.
 
 **Every one of them except `stopCast` also requires the caller to be on a
@@ -249,8 +249,8 @@ anywhere, because refusing it would leave the music playing in the house with
 no way to end it from wherever the person holding the client now is. A client
 discovers the answer in advance from `localNetwork` on `ping`.
 
-The rule is the client's address — `X-Forwarded-For` where a trusted proxy
-supplied one, otherwise the peer — falling inside a subnet the server is
+The rule is the client's address - `X-Forwarded-For` where a trusted proxy
+supplied one, otherwise the peer - falling inside a subnet the server is
 directly attached to. **A VPN deliberately does not qualify.** Casting exists
 to make sound come out of a device in the room, and a full tunnel from a hotel
 on another continent reaches the speakers just as well as standing next to
@@ -259,7 +259,7 @@ accident. Interfaces are selected by flag rather than by name, so a
 point-to-point tunnel is excluded whatever it is called.
 
 What the check cannot see is a VPN bridged into the LAN, or a router handing
-VPN clients addresses out of the LAN's own pool — such a client is on the
+VPN clients addresses out of the LAN's own pool - such a client is on the
 subnet by every question available at this layer.
 
 **A refused call also ends the session it owns.** Somebody who walks out of
@@ -268,7 +268,7 @@ the house mid-album wants the music to stop, and leaving it to the
 route. A refused caller that owns nothing tears down nothing.
 
 **A session belongs to one account *and* one client instance.** The client half
-is the `castController` parameter — an opaque id the client makes up once and
+is the `castController` parameter - an opaque id the client makes up once and
 keeps. `startCast` requires it and records the pair; every other endpoint here
 compares against it, and a caller that does not match is treated as having no
 session at all: `castSession` reports inactive, `castEvents` answers 204,
@@ -282,7 +282,7 @@ every caller in the server, so playing a track in one client sent it to
 whatever receiver another client had most recently picked.
 
 The id cannot be the standard `c=` parameter, which names the kind of client
-rather than the instance — every browser sends the same value, so two of one
+rather than the instance - every browser sends the same value, so two of one
 user's browsers could not be told apart. For the same reason there is no
 fallback to `c=` when `castController` is absent: two installs of one app would
 collapse into a single identity. A caller that sends none simply never owns a
@@ -296,7 +296,7 @@ channel. `startCast` from a different owner therefore takes the session over:
 the previous owner's receiver is stopped and its `castEvents` stream is
 dropped, so its UI leaves cast mode by itself.
 
-The token is minted per `castLoad` and is scoped to what that load declared —
+The token is minted per `castLoad` and is scoped to what that load declared -
 one song, and the caption ids offered for it. It is not a general credential:
 presenting it for any other id is refused exactly as if it were absent.
 '''
@@ -371,7 +371,7 @@ summary    = 'Says whether this request reached the server from a network the se
 It rides on `ping` because it is a fact about the **request**, not about the
 account: the same person is on the home network in the morning and not in the
 afternoon. That is also why it is not folded into `castRole`, which names what
-an account is allowed and must keep meaning that — a client reading a role
+an account is allowed and must keep meaning that - a client reading a role
 that changed with the weather would write the change back the next time
 somebody edited the user.
 
@@ -398,8 +398,8 @@ summary    = 'Each root says which of the two library layouts it holds.'
   on    = "musicFolder"
   doc   = '`artists` or `categories`.'
   notes = '''
-Artist and category roots cannot be told apart by shape — both are
-`L1/L2/[L3]/files` — so which one a root is has to be configured, and a client
+Artist and category roots cannot be told apart by shape - both are
+`L1/L2/[L3]/files` - so which one a root is has to be configured, and a client
 that wants to draw them differently has to be told.
 
 The uploads root, if configured, is never listed: it holds per-user personal
@@ -413,7 +413,7 @@ section    = "browsing"
 summary    = 'Narrow the listing to one kind of root, or replace it with the uploads area.'
 notes      = '''
 Root folders themselves never appear as artists. Both endpoints return the
-*level-1 entries* of every root flattened into one list — musicians from
+*level-1 entries* of every root flattened into one list - musicians from
 artist roots and sections such as Film or Series from category roots.
 
 Nothing below the top level is affected: `getArtist`, `getAlbum` and
@@ -428,7 +428,7 @@ side of the library one came from.
   doc    = 'Restrict to roots of one kind.'
   notes  = '''
 It complements `musicFolderId` rather than replacing it: a kind may span
-several roots — two artist roots must list together — which a single folder id
+several roots - two artist roots must list together - which a single folder id
 cannot express.
 
 Omitting it returns every root's children mixed, which is what a client with
@@ -442,17 +442,17 @@ pseudo-artists.
   values = ["true", "*"]
   doc    = 'Replace the shared library with the uploads area.'
   notes  = '''
-* `personal=true` — the calling account's own uploads.
-* `personal=*` — **every** account's, and **admin only**; anything else gets
+* `personal=true` - the calling account's own uploads.
+* `personal=*` - **every** account's, and **admin only**; anything else gets
   error 50. An admin is the only account that can `moveAlbum` an upload
   into the shared library, so without this a non-admin's upload is visible to
   its owner and to nobody able to act on it.
 
 **`personal=*` groups the response by owner rather than by first letter**, so
 the `index` labels come back as usernames instead of `A`, `B`, `#`. That is
-what makes two accounts' identically named folders tellable apart — grouped by
+what makes two accounts' identically named folders tellable apart - grouped by
 letter they would interleave under one heading with nothing saying whose is
-whose — and it needs nothing new from a client, since an index label was
+whose - and it needs nothing new from a client, since an index label was
 always an arbitrary string.
 
 NOTE: A client drawing an alphabet scrubber from those labels will want to
@@ -528,8 +528,8 @@ gone.
   doc   = 'Present and true while the providers have yet to be asked about this artist. Absent means the answer above is final, empty or not.'
   notes = '''
 gaindrive never queries a metadata provider from a request thread. The lookup
-runs on the same background resolver that finds artist portraits — one artist
-at a time, paced against MusicBrainz's rate limit — and asking for an artist it
+runs on the same background resolver that finds artist portraits - one artist
+at a time, paced against MusicBrainz's rate limit - and asking for an artist it
 has not reached yet is what pushes them to the front of its queue. So a first
 request for an unknown artist returns at once with an empty biography and this
 field set, and a later one returns the biography.
@@ -560,8 +560,8 @@ lookup, Wikidata and Wikipedia on the request thread, so one album nobody had
 looked up could hold an HTTP worker for minutes. It reads `album_info_cache` and
 queues the lookup instead.
 
-The chain is shorter than the artist one — MusicBrainz, then Wikidata and
-Wikipedia — and there is no image, so an album carries no `coverArt` answer from
+The chain is shorter than the artist one - MusicBrainz, then Wikidata and
+Wikipedia - and there is no image, so an album carries no `coverArt` answer from
 this endpoint either way.
 '''
 
@@ -575,8 +575,8 @@ there was none: the row was written whatever MusicBrainz had said, including
 nothing at all, and no read ever consulted its age. An album viewed once while
 MusicBrainz was shedding load therefore had no description for good.
 
-That half is fixed too — a row is written only when MusicBrainz actually
-answered, so a failed lookup is retried on the next view — but a *successful*
+That half is fixed too - a row is written only when MusicBrainz actually
+answered, so a failed lookup is retried on the next view - but a *successful*
 lookup that found nothing is final, and `force` is how to ask again.
 
 **Admin only**, on the same terms as `getArtistInfo`'s: the endpoint stays open
@@ -615,7 +615,7 @@ summary    = 'Say how much of an album is video, before its tracks are fetched.'
   doc   = "How many of the album's songs are video. 0 for an ordinary record."
   notes = '''
 `isVideo` is a property of a *song*, so nothing on an album entry otherwise
-says that opening it will start a film — a client would have to fetch every
+says that opening it will start a film - a client would have to fetch every
 album's tracks to find out. A count rather than a flag because the two cases
 differ: a folder holding one bonus documentary beside its songs is not a
 folder of films, and `videoCount` equal to `songCount` is what a season of a
@@ -690,7 +690,7 @@ summary    = 'Eight gaindrive parameters on the standard streaming endpoint.'
   doc   = 'Deliver at roughly 1x playback rate rather than as fast as the socket takes it.'
   notes = '''
 Send it when the URL is being handed to something that will play it in real
-time and cannot be recognised from the request — a Cast receiver fetching for
+time and cannot be recognised from the request - a Cast receiver fetching for
 itself is the case it exists for. Without it such a receiver is sent the whole
 track at once, stops reading when its buffer fills, and the connection is then
 idle until its own 60-second no-data timeout, or a reverse proxy's, kills it
@@ -726,8 +726,8 @@ degrades to unpaced delivery rather than stalling.
   doc   = 'A token from `castLoad` or `getCastToken`, accepted in place of credentials.'
   notes = '''
 A receiver fetches the media for itself and has no account, so the token is
-what authorises it. It is not single-use per request — the receiver makes many
-range requests for one track — but it **is** scoped to one song and to a
+what authorises it. It is not single-use per request - the receiver makes many
+range requests for one track - but it **is** scoped to one song and to a
 limited lifetime. Presenting it for a different `id` is refused as though it
 were absent.
 
@@ -736,12 +736,12 @@ whichever issued it. They are not interchangeable behind it:
 
 * `castLoad`'s belongs to the server's own cast session. There is genuinely
   no account behind a request carrying it, so it skips the account bitrate
-  ceiling, and the request is also subject to the session's own offset — the
+  ceiling, and the request is also subject to the session's own offset - the
   receiver probes with `timeOffset` stripped, and the server answers from what
   the `LOAD` declared rather than from the URL. On `getCaptions` it authorises
   the caption ids that `LOAD` declared, and nothing else.
 * `getCastToken`'s belongs to an account, for a cast some *other* sender is
-  driving. So the ceiling **is** applied — there is somebody to apply it to —
+  driving. So the ceiling **is** applied - there is somebody to apply it to -
   and nothing about a session applies: such a request is an ordinary one that
   happens to carry a token where a password would be, `timeOffset` and all.
   It also reaches `getCoverArt`, which the session token does not, because the
@@ -755,8 +755,8 @@ whichever issued it. They are not interchangeable behind it:
   notes = '''
 While a cast session is live, a request from the client that **owns** it is
 answered `204` and the track is sent to the Chromecast instead, so that client
-does not play it a second time itself. Every other caller — a client that sent
-no `castController`, one whose id does not match, or a different account — is
+does not play it a second time itself. Every other caller - a client that sent
+no `castController`, one whose id does not match, or a different account - is
 served the stream normally.
 
 Without this the redirect was global: any request in the server was answered
@@ -784,13 +784,13 @@ playing.
   [[endpoint.param]]
   name  = "size"
   type  = "string"
-  doc   = 'Video only. A cap on the output frame size, as `WxH` — `640x480`.'
+  doc   = 'Video only. A cap on the output frame size, as `WxH` - `640x480`.'
   notes = '''
 Any value here disqualifies the direct and remux tiers, so the video is
 re-encoded on the fly and the response is chunked with no `Content-Length`.
 
 Strictly `WxH`, both between 16 and 7680/4320. Anything else is ignored rather
-than rejected, and means "do not scale" — the same as omitting it.
+than rejected, and means "do not scale" - the same as omitting it.
 '''
 
   [[endpoint.param]]
@@ -801,27 +801,27 @@ than rejected, and means "do not scale" — the same as omitting it.
   [[endpoint.param]]
   name  = "playable"
   type  = "string"
-  doc   = 'A comma list of what this client can be sent untouched, so the server skips work it would otherwise pay — `mpeg/mp3,mp4/aac` for audio, `mkv,mov,avi` for video.'
+  doc   = 'A comma list of what this client can be sent untouched, so the server skips work it would otherwise pay - `mpeg/mp3,mp4/aac` for audio, `mkv,mov,avi` for video.'
   notes = '''
 Most players handle more than a browser does, and a server that cannot be told
 so re-encodes for no reason. An MP3 played through a client that decodes MP3
 is the plain case: asking for `format=opus` converts every track, including the
-ones that needed nothing. Matroska is the video case — an H.264/AAC `.mkv` is
+ones that needed nothing. Matroska is the video case - an H.264/AAC `.mkv` is
 remuxed to MP4 only because no browser reads Matroska, and that remux is a
 whole-file `-c copy` the client waits out before it hears anything.
 
 **A token is a bare container for video, and a `container/codec` pair for
 audio.** The split is by medium, not by anything about the file:
 
-* **Video, bare** — every video container except `vob`. Video is a
+* **Video, bare** - every video container except `vob`. Video is a
   container-only declaration by design: the server keeps its own codec test, so
   naming `mkv` says which containers may be served untouched and nothing more.
-* **Audio, paired** — `mpeg/mp3`, `mp4/aac`, `ogg/vorbis`, `flac/flac` and so
+* **Audio, paired** - `mpeg/mp3`, `mp4/aac`, `ogg/vorbis`, `flac/flac` and so
   on. Both halves are compared against what the scan **observed** and recorded,
   never against a filename.
 
 That is why audio has no bare form. A `.ogg` and a `.oga` are one container
-under two extensions, and a `.m4a` is an MP4 — so a token naming an extension
+under two extensions, and a `.m4a` is an MP4 - so a token naming an extension
 would reach some of a container's files and not others. Naming the container
 itself, `ogg` or `mp4`, reaches all of them, and `mp3` alongside `mpeg/mp3`
 would be two spellings of one thing.
@@ -848,7 +848,7 @@ What it does is narrow, and deliberately so.
   transcode, and `size` and `duration` do on video. A declared 320 kbps MP3
   under a 160 ceiling is still converted.
 * On video the codec pair still has to be one the server would have served
-  directly anyway, so an HEVC or AC3 file is unaffected — the saving is the
+  directly anyway, so an HEVC or AC3 file is unaffected - the saving is the
   container work alone.
 * An unrecognised token is ignored rather than rejected, so naming a new one
   costs nothing against an older server.
@@ -858,19 +858,19 @@ What it does is narrow, and deliberately so.
   reporting an error.
 * A pair naming `riff` or `asf` will never match. Those forms are recorded, but
   a client that wants a lossless or legacy file untouched asks for the original
-  instead — no `format` at all, which is served straight off disk.
+  instead - no `format` at all, which is served straight off disk.
 
 `transcodedContentType`, `transcodedSuffix`, `transcodedBitRate` and
 `nativeSeek` are **not** affected by it, deliberately. They describe what any
 client would be sent, so they stay cacheable and stay right for the one
-consumer that is not you — a Cast receiver being told what it is about to
+consumer that is not you - a Cast receiver being told what it is about to
 fetch.
 
 Ignored when a `castToken` is presented, and ignored on `hls.m3u8`, where every
 segment is bounded by `duration` and is therefore an encode whatever the
 container holds.
 
-NOTE: **Never put this on a URL you are handing to something else** — a Cast
+NOTE: **Never put this on a URL you are handing to something else** - a Cast
 receiver above all. The `LOAD` you sent it declared a `contentType` taken from
 `transcodedContentType`, and a receiver told `video/mp4` while being sent
 Matroska refuses the media outright, which looks like a broken file rather than
@@ -893,7 +893,7 @@ the seekable file beside it, for the next request.
 
 The one response that produces is **not seekable**: chunked,
 `Accept-Ranges: none`, no `Content-Length`. `nativeSeek` still describes the
-file rather than this one request, deliberately — see below — so a client
+file rather than this one request, deliberately - see below - so a client
 sending this must be ready for a stream it cannot seek, and must find out by
 testing rather than by asking. In a browser that is `HTMLMediaElement.seekable`
 being empty; a refused seek raises nothing.
@@ -914,13 +914,13 @@ being empty; a refused seek raises nothing.
 `transcodedContentType`, `transcodedSuffix` and `nativeSeek` are **not**
 affected by it. They describe what any client would be sent, which is what
 keeps them cacheable and keeps them right for the one consumer that is not
-you — a Cast receiver being told what it is about to fetch.
+you - a Cast receiver being told what it is about to fetch.
 
 NOTE: **Never send it on a URL something else will fetch**, a Cast receiver
 above all. Two things break rather than one: the receiver is handed a stream
 with no length that it was told was MP4, and a client that fetches one byte
 ahead of a `LOAD` in order to *make the build happen* gets an instant reply
-having warmed nothing — so the first cast of every affected film fails and the
+having warmed nothing - so the first cast of every affected film fails and the
 second works, which reads as a random fault rather than as a setting.
 '''
 
@@ -932,12 +932,12 @@ path       = "/rest/hls.m3u8"
 summary    = 'Also served at `hls.view`, and a frame size may ride along with each variant bitrate.'
 notes      = '''
 The spec spells this endpoint `hls.m3u8`, and that spelling is the one to
-prefer — a player often infers HLS from the `.m3u8` extension alone. But a
+prefer - a player often infers HLS from the `.m3u8` extension alone. But a
 client that composes every URL as `<name>.view` would otherwise be unable to
 reach it at all, so the same playlist is served at `/rest/hls.view`, and at
 `/rest/hls`, which the server rewrites to the latter.
 
-The playlist is stateless — it is arithmetic over the stored duration, and
+The playlist is stateless - it is arithmetic over the stored duration, and
 every segment is an ordinary `stream` request bounded by `timeOffset` and
 `duration`. Nothing is written to disk and nothing needs cleaning up if a
 client stops mid-playlist.
@@ -951,14 +951,14 @@ names it with the spelling the request arrived on.
   name       = "bitRate"
   type       = "string"
   repeatable = true
-  doc        = 'May carry an `@WxH` suffix naming the frame size for that variant — `1000@640x480`.'
+  doc        = 'May carry an `@WxH` suffix naming the frame size for that variant - `1000@640x480`.'
   notes      = '''
 Given once, it caps the segments of an ordinary media playlist. Given twice or
 more, the answer is a master playlist instead: one `EXT-X-STREAM-INF` per
 distinct bitrate, ascending, each naming this endpoint again with that one
 bitrate. `RESOLUTION` is announced only for a variant that supplied `@WxH`.
 
-A value that names no bitrate — `0`, or anything unparseable — cannot be a
+A value that names no bitrate - `0`, or anything unparseable - cannot be a
 variant, since `BANDWIDTH` is required of one. `0@640x480` is still honoured
 on a media playlist, where `0` is the spec's "no limit" and the frame size
 governs on its own.
@@ -978,7 +978,7 @@ notes      = '''
 Both fields are populated wherever a song entry appears. That was not always
 so: they once came only from `getAlbum`, `getMusicDirectory`, `getVideos` and
 `getSong`, and a video reached any other way reported `nativeSeek: false`
-whatever its codecs were — so the same file answered differently depending on
+whatever its codecs were - so the same file answered differently depending on
 which endpoint was asked.
 '''
 
@@ -993,7 +993,7 @@ with `timeOffset`.
 
 It is **not** the same question as "will ffmpeg run": the remux tier runs
 ffmpeg but writes a real file, so it seeks as well as an untouched original.
-Only a re-encode is unseekable. `transcodedSuffix` cannot be used for this —
+Only a re-encode is unseekable. `transcodedSuffix` cannot be used for this -
 it is present for both the remux and re-encode tiers, which differ precisely
 here.
 
@@ -1007,8 +1007,8 @@ A client that sends `timeOffset` for a remuxable file demotes it from a
   on    = "Child"
   doc   = 'The season an episode belongs to; present only when the entry is one.'
   notes = '''
-`discNumber` already carries the same number — that is the field every
-Subsonic client groups and sorts by, and none of them knows what a season is —
+`discNumber` already carries the same number - that is the field every
+Subsonic client groups and sorts by, and none of them knows what a season is -
 so a client that ignores `season` groups a series correctly and simply calls
 the groups discs. A client that reads it can head them "Series 2" instead.
 
@@ -1033,8 +1033,8 @@ The same two words `getChapters` uses for the same distinction, and it matters
 for the same kind of client: one that demuxes the container itself.
 
 Every caption listed here can be fetched as WebVTT from `getCaptions`,
-whichever it is. But a client playing the container directly — see
-`playable` on `stream` — is handed the embedded tracks by its own
+whichever it is. But a client playing the container directly - see
+`playable` on `stream` - is handed the embedded tracks by its own
 demuxer, so side-loading those as well lists every subtitle twice. The sidecar
 is the half no container carries, so it still has to come from here.
 
@@ -1059,8 +1059,8 @@ Scoped as it is on `stream`, and the two issuers differ by one notch here.
 `castLoad`'s is additionally scoped to the caption ids that LOAD declared: a
 track the LOAD did not offer is one the receiver has no reason to ask for, so
 the token does not authorise it. `getCastToken`'s authorises any caption of
-its song, because there is no LOAD of ours to scope it against — the client
-builds its own — and a subtitle of a song that account may read is no wider a
+its song, because there is no LOAD of ours to scope it against - the client
+builds its own - and a subtitle of a song that account may read is no wider a
 reach than the song.
 
 The converted result is cached, because ffmpeg has to demux the whole
@@ -1221,8 +1221,8 @@ were the obvious shape and do not work here: the server drops an exact
 duplicate pair, so two chapters both called `Encore` would lose one, and the
 urlencoded body limit is 8 kB whatever the configured payload limit says.
 
-The body is bounded at 1 MiB — a request naming more `Content-Length` than
-that is answered `413`, and one naming none at all `411` — which clears any
+The body is bounded at 1 MiB - a request naming more `Content-Length` than
+that is answered `413`, and one naming none at all `411` - which clears any
 real chapter list by three orders of magnitude, the marker cap being 1000.
 
 The parse is deliberately liberal, so a block pasted out of a video
@@ -1493,7 +1493,7 @@ since that is a chapter sidecar rather than prose. The suffix is matched
 rather than the whole name because the rest of it is the media file's stem.
 
 NOTE: **An album that is a single media file has no folder to list.** Its notes
-are the sidecar named after it — `makingcheese.txt` beside `makingcheese.mp4` —
+are the sidecar named after it - `makingcheese.txt` beside `makingcheese.mp4` -
 and that one file is what this returns, if it is there. The chapter sidecar
 cannot be confused with it: that is `makingcheese.chapters.txt`, a different
 name.
@@ -1539,7 +1539,7 @@ kind     = 'endpoint'
 name     = "getAlbumImages"
 section  = "albumtext"
 response = 'subsonic-json'
-summary  = 'How many images an album holds — the cover plus any extras.'
+summary  = 'How many images an album holds - the cover plus any extras.'
 notes    = '''
 Use it to drive the `index` parameter of `getCoverArt`.
 
@@ -1570,13 +1570,13 @@ Supply exactly one of `file` or `url`.
 
 A `url` must be `http` or `https` and must resolve to a globally routable
 address. Loopback, link-local, RFC1918 and other private ranges are refused,
-and a redirect into one is refused at the hop that names it — the server is
+and a redirect into one is refused at the hop that names it - the server is
 reachable from places the caller is not, and an image fetch is not a reason to
 lend it out. The refusal is deliberately worded the same as a fetch that
 simply failed, so the endpoint cannot be used to tell one host or port from
 another. The response body is also size-capped.
 
-**JPEG and PNG only** — the format is taken from the magic bytes, not from the
+**JPEG and PNG only** - the format is taken from the magic bytes, not from the
 declared content type, and anything else is rejected. That is not a new
 restriction so much as the removal of a trap: the scanner indexes only
 `.jpg`, `.jpeg` and `.png`, so a WebP written as `cover.jpg` used to become a
@@ -1586,19 +1586,19 @@ If the upload changes the format, the file it replaces is removed, since
 `cover.jpg` outranks `cover.png` when the scanner looks for a cover.
 
 A cover set this way is marked as chosen by a person and is never overwritten
-by a scan — which for a film is the only way to correct a wrong TMDB match.
+by a scan - which for a film is the only way to correct a wrong TMDB match.
 
 NOTE: **Where it is written depends on what the album is.** An ordinary album
 is a directory and gets `cover.jpg` or `cover.png` inside it. An album that is
-a single media file gets the sidecar named after it — `makingcheese.jpg` beside
-`makingcheese.mp4` — because there is no inside. For the sidecar the scanner's
+a single media file gets the sidecar named after it - `makingcheese.jpg` beside
+`makingcheese.mp4` - because there is no inside. For the sidecar the scanner's
 preference order is `.jpg`, `.jpeg`, `.png`, so uploading a PNG removes both
 earlier spellings; the `-poster.*` forms rank below all three and are left
 alone.
 
 This is what makes the note above true of a loose film at all. Under the rule
 this replaced, a media file sitting directly in a section was not an album, so
-an upload here reached only the section's own cover — and a wrongly matched
+an upload here reached only the section's own cover - and a wrongly matched
 film could not be given the right poster by any means.
 '''
 see = ["getAlbumImages"]
@@ -1721,11 +1721,11 @@ were the same operation described two ways.
 
 **Where it lands** is the one rule worth reading:
 
-* **`musicFolderId` given** — the album goes to `<that root>/<folder>/<album>`,
+* **`musicFolderId` given** - the album goes to `<that root>/<folder>/<album>`,
   exactly two levels under the root. Both library layouts are `L1/L2/[L3]/
   files`, L2 is the album being moved, and L3 is only ever a disc or season
   directory inside it.
-* **`musicFolderId` omitted** — everything above the artist level is left
+* **`musicFolderId` omitted** - everything above the artist level is left
   alone: the library root, and for an upload the owner and the batch id. The
   album goes to `<all of that>/<folder>/<album>`.
 
@@ -1733,31 +1733,31 @@ So a plain rename sends `album`; a re-file sends `folder`; a promote sends
 `musicFolderId` and `folder`; and moving a film out of the music root and
 under a `categories` one sends all three.
 
-Artist and album names are directory names — the scanner never reads them from
-tags — so this is the only way to correct them, and it is necessarily a
+Artist and album names are directory names - the scanner never reads them from
+tags - so this is the only way to correct them, and it is necessarily a
 filesystem move.
 
 It re-files **only the album it is given**: changing `folder` moves that one
 album and leaves the artist's other albums alone. A whole-artist rename is
-deliberately not offered — an album edit screen silently rewriting other
+deliberately not offered - an album edit screen silently rewriting other
 albums is too easy to do by accident.
 
 The directory move happens first and is the authoritative act; the database
 rows are then repaired to carry the new paths, so stars, play counts, playlist
 entries, the queue and bookmarks all survive. Tags are rewritten afterwards
 and a file TagLib will not write is counted in `tagFailures` rather than
-failing the call — the opposite order to `updateSong`, where the database
+failing the call - the opposite order to `updateSong`, where the database
 mirrors the tag rather than the directory.
 
 NOTE: **The artist tag is only rewritten under an `artists` root.** Under a
-`categories` root the level is a category — Film, Series — and writing that
+`categories` root the level is a category - Film, Series - and writing that
 into an artist tag would stamp "Film" across every file of a promoted
 documentary. The album tag is rewritten whenever `album` changes.
 
 NOTE: **An artist tag naming somebody other than the old folder is left
 alone.** Only a tag that already held the old folder's name is rewritten,
-because anything else is a real credit — every track of a compilation has
-one — and overwriting it would report the whole album as by one artist ever
+because anything else is a real credit - every track of a compilation has
+one - and overwriting it would report the whole album as by one artist ever
 after. The comparison ignores case and punctuation, the same rule that decides
 a song entry's `artist`.
 
@@ -1769,14 +1769,14 @@ an artist or category folder is an album of its own, and this endpoint moves
 and renames it like any other. Three things follow. The file keeps its
 extension: `album` is a *name*, so the source's extension is put back, and a
 name that already ends in it does not acquire a second one. The `album` field
-in the response is the name without the extension, and it is that name — not
-the on-disk leaf — that is written into the album tag. And the file's sidecars
+in the response is the name without the extension, and it is that name - not
+the on-disk leaf - that is written into the album tag. And the file's sidecars
 travel with it: its cover and poster, its subtitle files, its chapter markers
 and its liner notes.
 
 NOTE: **A single file sitting directly in a library root can be renamed in
 place**, with no `musicFolderId`. Such an item has no artist directory of its
-own — the root plays that part — so `folder`, if given, must name that root.
+own - the root plays that part - so `folder`, if given, must name that root.
 A directory in the same position still cannot: there is no artist level to
 change, and the error says so.
 '''
@@ -1793,7 +1793,7 @@ see = ["updateSong", "deleteUpload"]
   type  = "string"
   doc   = 'The destination root, as `getMusicFolders` reports it. Omitted keeps the album where it is.'
   notes = '''
-Error 70 if it names anything that is not a browsable library root —
+Error 70 if it names anything that is not a browsable library root -
 including the uploads root, which that listing excludes and which is never a
 destination.
 
@@ -1844,7 +1844,7 @@ to decide rather than have it decided badly for them.
   type  = "int"
   doc   = 'How many files could not have their tags rewritten. The move still happened.'
   notes = '''
-Zero when no tag needed changing — a move that alters neither name opens no
+Zero when no tag needed changing - a move that alters neither name opens no
 files at all.
 '''
 
@@ -1874,7 +1874,7 @@ response = 'subsonic-json'
 summary  = 'Reports whether the server holds each third-party API credential.'
 notes    = '''
 **The credentials themselves are never returned**, only whether each is set.
-Nothing needs to read one back — they are written once and used server-side —
+Nothing needs to read one back - they are written once and used server-side -
 and a secret the server hands out is one in an API response, in the client's
 memory and in every cache between. It also stopped a browser's own password
 manager offering to store the value as a login, the web client having put it in
@@ -2084,7 +2084,7 @@ notes    = '''
 The remedy for a library full of blank biographies, which happens because a
 lookup that only half succeeded was cached as a complete answer: the artist chain
 writes its row as soon as the MusicBrainz *search* has worked, so an artist whose
-Wikipedia or TheAudioDB request fell over keeps an empty `biography` — and
+Wikipedia or TheAudioDB request fell over keeps an empty `biography` - and
 nothing re-asks, since the background resolver's own seed query is about missing
 *portraits*, which that artist has. `force` on `getArtistInfo2` fixes one artist.
 This fixes all of them.
@@ -2102,13 +2102,13 @@ server. The queue is in memory, so a restart simply forgets the rest of the pass
 and pressing the button again re-queues whatever is still missing. The server log
 names each artist and album as it is resolved.
 
-An entry with no words is re-asked on **every** press — no interval is
+An entry with no words is re-asked on **every** press - no interval is
 remembered. That is deliberate: it is what makes a spell of provider failure
 recoverable, and the cost is that a second press also re-asks about everyone
 nobody has written about.
 
 Video is untouched. A film's or series' description comes from TMDB during the
-scan, and the two seed queries only look at *artists* roots — asking MusicBrainz
+scan, and the two seed queries only look at *artists* roots - asking MusicBrainz
 about a categories section called "Film" is the mistake `getCoverArt` already
 avoids. A concert filed under the performer rather than under a category *is*
 included, since that test is on the root and not on whether an album holds video.
@@ -2234,13 +2234,13 @@ kind    = 'endpoint'
 name    = "deleteUpload"
 section = "upload"
 auth    = 'uploadRole'
-summary = 'Removes an uploaded album, files and all. Irreversible — there is no trash behind it.'
+summary = 'Removes an uploaded album, files and all. Irreversible - there is no trash behind it.'
 notes   = '''
 The id must resolve to a path of exactly the shape
 `<uploads root>/<owner>/<batch>/<artist>/<album>`, and the owner must be the
 calling account **unless the caller is an admin**.
 
-**That shape check is the security boundary**, not a validation nicety —
+**That shape check is the security boundary**, not a validation nicety -
 without it this is "delete the folder with this id", which is "delete any
 folder on the server", reachable by any account with upload rights guessing
 integers. One message covers both "not an upload" and "not yours", since
@@ -2253,7 +2253,7 @@ able to clear it would leave them asking its owner to do it.
 It tidies upwards. An artist directory left empty by the deletion is removed
 too, or it would remain in the listing as an artist showing no albums; the
 batch directory goes after it. Stars, play counts, playlist entries, the queue
-and bookmarks naming the deleted files are deleted with them — those live in
+and bookmarks naming the deleted files are deleted with them - those live in
 the client database, which no scan has ever touched.
 '''
 
@@ -2265,7 +2265,7 @@ the client database, which no scan has ever touched.
 
   [[endpoint.error]]
   code = '0'
-  when = 'Not an upload, or not yours — "Item is not in your uploads."'
+  when = 'Not an upload, or not yours - "Item is not in your uploads."'
 
 
 # ===========================================================================
@@ -2283,7 +2283,7 @@ An empty list means the feature is unavailable, either because no handlers are
 configured or because the tool they name is not installed; a client should
 then not offer the option at all.
 
-The pattern and the command line are deliberately not reported — a handler's
+The pattern and the command line are deliberately not reported - a handler's
 argv can carry cookies, a proxy credential or an API key.
 '''
 
@@ -2314,8 +2314,8 @@ tool exits and before the library scan, so they cost nothing and can never be
 seen half-applied. Three consequences are worth stating because none of them
 is guessable:
 
-* Where a fetch produced several directories at a level — a playlist, or a
-  handler that splits by uploader — they are **merged** into the one name
+* Where a fetch produced several directories at a level - a playlist, or a
+  handler that splits by uploader - they are **merged** into the one name
   given, and files that then collide are suffixed rather than overwritten.
 * Giving only `artist` keeps the handler's album names; giving only `album`
   applies that name inside *every* artist directory.
@@ -2439,7 +2439,7 @@ Finished jobs are kept for fifteen minutes, or the last ten per user.
   on    = "fetchJob"
   doc   = "The tool's last output line."
   notes = '''
-Paths in it are rewritten to their stored form — a root path is never
+Paths in it are rewritten to their stored form - a root path is never
 surfaced in an API response.
 '''
 
@@ -2501,7 +2501,7 @@ response = 'subsonic-json'
 summary  = 'Mints a token that lets a receiver fetch one track without credentials.'
 notes    = '''
 For a cast this server is not driving. A client that holds its own Cast
-control channel — the Android and iOS apps both do — builds the receiver's
+control channel - the Android and iOS apps both do - builds the receiver's
 URLs itself, and the receiver has no account to build them with. Before this
 existed those URLs carried `u`/`t`/`s`, which is to say the account's
 password: `t` is md5(password + salt) and `s` is the salt, and together they
@@ -2513,7 +2513,7 @@ client casting for itself is not asking this server to cast, so the permission
 to drive *this* server's Chromecast, and the question of which network this
 server is on, are both beside the point.
 
-What bounds it instead is the grant — one song, one account, twelve hours —
+What bounds it instead is the grant - one song, one account, twelve hours -
 and the read-permission check below, which is the load-bearing one, since what
 comes back opens URLs needing no credentials at all.
 
@@ -2522,11 +2522,11 @@ would have defeated the exercise: the sleeve travels in the LOAD's metadata
 and the receiver fetches that too, so a stream-only grant would have left the
 password on the television regardless.
 
-* `stream` — the song the grant names.
-* `getCoverArt` — that song's own artwork, resolved when the grant is minted
+* `stream` - the song the grant names.
+* `getCoverArt` - that song's own artwork, resolved when the grant is minted
   rather than named by the caller, so asking for a grant can never be a way to
   name somebody else's.
-* `getCaptions` — any caption of that song. Deliberately one notch wider than
+* `getCaptions` - any caption of that song. Deliberately one notch wider than
   the session token, which scopes to the ids one `LOAD` declared: there is no
   `LOAD` here to mirror, and a subtitle of a song the account may read is no
   wider a reach than the song.
@@ -2538,13 +2538,13 @@ It widens one thing deliberately: any account can now produce such a URL,
 where before only a `castRole` one could. The floor under that is that anyone
 who can read a song can already download it.
 
-Mint one per track. Unlike `castLoad`'s, a seek does not need a fresh one — a
+Mint one per track. Unlike `castLoad`'s, a seek does not need a fresh one - a
 client that owns the control channel seeks the receiver rather than reloading
 it, and the receiver goes on fetching the URL it already has, which is why the
 lifetime is hours rather than minutes.
 
-Do not put `startImmediately` or `playable` on a URL built with it —
-see those parameters for what a receiver does with the response they produce —
+Do not put `startImmediately` or `playable` on a URL built with it -
+see those parameters for what a receiver does with the response they produce -
 and do put `pace=true` on it, since the server otherwise paces only for a
 browser's own User-Agent.
 '''
@@ -2590,7 +2590,7 @@ The port belongs in that comparison because a Cast multizone group lives at
 its leader's address on a different one.
 
 Configured devices exist because discovery can fail for reasons no client can
-fix — a device that answers TLS on 8009 while its mDNS responder has stopped
+fix - a device that answers TLS on 8009 while its mDNS responder has stopped
 replying even to a direct unicast query. The address must be an IP literal; a
 hostname is refused at startup.
 '''
@@ -2633,7 +2633,7 @@ hostname is refused at startup.
   [[endpoint.field]]
   name = "castDevices.castDevice.videoPref"
   type = "string"
-  doc  = '`auto`, `send` or `sound` — what a person decided about this device with `setCastDevicePref`, which overrides `videoOut`. `auto` when nobody has.'
+  doc  = '`auto`, `send` or `sound` - what a person decided about this device with `setCastDevicePref`, which overrides `videoOut`. `auto` when nobody has.'
 
 [[endpoint]]
 kind    = 'endpoint'
@@ -2657,7 +2657,7 @@ soundtrack. What it buys is that nothing has to be demuxed first.
 
 `send` only ever *raises* a device that announced no screen, and only for a
 file that can be sent untouched. Anything needing a remux or a re-encode falls
-back to the soundtrack — a remux reads and writes the whole film, and a
+back to the soundtrack - a remux reads and writes the whole film, and a
 re-encode re-encodes a picture nobody can see, so both are worse than
 extracting the sound. So this cannot be used to force a re-encode, and on a DVD
 rip or an HEVC film it will appear to do nothing, which is the intended
@@ -2669,7 +2669,7 @@ announced a screen, or announced nothing.
 Calling this also **clears what the device has been recorded as refusing**. A
 LOAD the receiver rejects is remembered per codec pair so it is not attempted
 again, and changing your mind about a device is the only place that judgement
-is reconsidered — otherwise new firmware, or a different device that inherited
+is reconsidered - otherwise new firmware, or a different device that inherited
 the address and with it the id, would be judged for ever on what its
 predecessor could not play.
 '''
@@ -2718,12 +2718,12 @@ see = ["stopCast", "castLoad"]
   name     = "castController"
   type     = "string"
   required = true
-  doc      = 'An opaque id identifying this client instance, which together with the account becomes the owner of the session. Make one up once and keep it — the web client stores eight random bytes in `localStorage`, so it survives a page reload.'
+  doc      = 'An opaque id identifying this client instance, which together with the account becomes the owner of the session. Make one up once and keep it - the web client stores eight random bytes in `localStorage`, so it survives a page reload.'
   notes    = '''
 Required, and deliberately without a fallback to `c=`. A client asking the
 server to drive a Chromecast already speaks this extension, so it can be asked
 to name itself, and refusing the nameless case is what guarantees a caller that
-sends no id can never own a session — and so can never be confused with another
+sends no id can never own a session - and so can never be confused with another
 that also sent none.
 
 It is not a credential. It authorises nothing and only distinguishes one
@@ -2763,7 +2763,7 @@ section = "cast"
 auth    = 'castRole'
 summary = 'Tells the Chromecast to fetch and play a track.'
 notes   = '''
-**Seeking is also a `castLoad`**, not a `castControl` with `action=seek` —
+**Seeking is also a `castLoad`**, not a `castControl` with `action=seek` -
 every seek is a full reload. The server returns as soon as the load is queued;
 the actual Cast message goes out on a background connection.
 
@@ -2779,14 +2779,14 @@ soundtrack**, and the reply says so in `castLoad.audioOnly`. Which receivers
 those are is bit 0 of the `ca` record `listCastDevices` reports as `videoOut`,
 overridden by whatever `setCastDevicePref` recorded for that device. The
 decision is made here rather than by the client, so that a client draws what
-happened instead of deciding it a second time from the device list — and no
+happened instead of deciding it a second time from the device list - and no
 subtitle tracks are declared for such a load, there being no picture to put
 them on.
 
 **A LOAD the receiver refuses outright is retried one rung down**, rather than
 replayed. The first rung drops the subtitle tracks, since one unreachable track
 URL fails the whole thing. The second applies only where the picture was sent
-to a device that announced no screen — `videoPref = send` — and replaces the
+to a device that announced no screen - `videoPref = send` - and replaces the
 film with its soundtrack: the picture was never going to be seen there, so
 nothing anyone was looking at is lost. Watch `castEvents` for the description
 that results.
@@ -2805,7 +2805,7 @@ Such a load does not begin immediately: the soundtrack is produced in full
 before the receiver is told anything, because a receiver abandons a session
 after about a minute with no data on the HTTP body and a feature-length film
 takes longer than that to convert. How long that is depends on `tier`. A track
-already in a codec the receiver decodes — AAC, MP3, FLAC, Opus or Vorbis — is
+already in a codec the receiver decodes - AAC, MP3, FLAC, Opus or Vorbis - is
 copied out of the container, which is `remux` and costs one pass over the file.
 Anything else (AC3, DTS, TrueHD, PCM, so most disc rips) is decoded and
 re-encoded, which is `encode` and is several times slower.
@@ -2833,7 +2833,7 @@ see = ["castControl", "castSession"]
   doc     = 'Subtitle track to start with, numbered from 1 in the order `getVideoInfo` lists captions. 0 or absent means none.'
   notes   = '''
 `trackId`, not `captionId`: the cast API numbers tracks 1..n by position, and
-0 means off. `captionId` cannot express "off" — the sidecar caption index and
+0 means off. `captionId` cannot express "off" - the sidecar caption index and
 a missing parameter are both -1, so "no subtitles" and "the sidecar file"
 would be one value.
 '''
@@ -2857,8 +2857,8 @@ Whether a picture will actually appear on the receiver. **Not** the negation of
 `audioOnly`: a device whose `videoPref` is `send` is handed the whole film to
 save extracting its soundtrack and displays none of it, so there the file goes
 out as video and this is still false. A client deciding where to draw the
-picture — keeping its own copy locally, muted, or showing a "playing on the
-television" panel — keys on this. `audioOnly` describes the bytes on the wire
+picture - keeping its own copy locally, muted, or showing a "playing on the
+television" panel - keys on this. `audioOnly` describes the bytes on the wire
 and is the info-panel's business, not the picture's.
 '''
 
@@ -2877,19 +2877,19 @@ and is the info-panel's business, not the picture's.
   type = "int"
   doc  = '''
 Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
-file byte-ranged — no `format`, no `maxBitRate`, and the account ceiling is
-exempt for a cast token — so this is the file's own bitrate rather than anything
+file byte-ranged - no `format`, no `maxBitRate`, and the account ceiling is
+exempt for a cast token - so this is the file's own bitrate rather than anything
 the `transcoded*` fields describe. A video remux keeps the source's rate and a
-re-encode is not fixed-rate, so both report 0. So does a copied soundtrack — the
+re-encode is not fixed-rate, so both report 0. So does a copied soundtrack - the
 track's own rate is not the container's, and nearly right is the worst thing a
-diagnostic can be — and so does an encoded one, FLAC having no target rate at
+diagnostic can be - and so does an encoded one, FLAC having no target rate at
 all.
 '''
 
   [[endpoint.field]]
   name = "castLoad.tier"
   type = "string"
-  doc  = 'Which of the three delivery tiers this fetch lands on: `direct` (the file as it stands, byte-ranged), `remux` (`-c copy` through the transcode cache, still seekable), or `encode` (re-encoded). The same two words apply to a soundtrack, and there they are the answer to "why does this sound worse": `remux` is the track copied out of the film untouched, `encode` a lossless FLAC of it. A soundtrack is never re-encoded lossily — the source is already lossy, and this is the one route with no choice about transcoding.'
+  doc  = 'Which of the three delivery tiers this fetch lands on: `direct` (the file as it stands, byte-ranged), `remux` (`-c copy` through the transcode cache, still seekable), or `encode` (re-encoded). The same two words apply to a soundtrack, and there they are the answer to "why does this sound worse": `remux` is the track copied out of the film untouched, `encode` a lossless FLAC of it. A soundtrack is never re-encoded lossily - the source is already lossy, and this is the one route with no choice about transcoding.'
 
   [[endpoint.error]]
   code = '0'
@@ -2909,8 +2909,8 @@ summary = 'Transport control for the active session.'
   values   = ["play", "pause", "seek", "captions", "volume"]
   doc      = 'What to do.'
   notes    = '''
-* `play` resumes a paused session. If the session has gone `IDLE` — the
-  receiver times out during long pauses — this instead re-issues a full load
+* `play` resumes a paused session. If the session has gone `IDLE` - the
+  receiver times out during long pauses - this instead re-issues a full load
   from the last known position.
 * `seek` is only for in-session seeks; the web client seeks via `castLoad`,
   which is a full reload.
@@ -2955,7 +2955,7 @@ response = 'subsonic-json'
 summary  = 'A non-blocking snapshot of the current session, for restoring the UI after a page reload.'
 notes    = '''
 Only the caller's own session. Another owner's is reported as
-`active: false` — otherwise a second browser would adopt it wholesale on page
+`active: false` - otherwise a second browser would adopt it wholesale on page
 load and show itself as casting.
 '''
 
@@ -3042,7 +3042,7 @@ session has no device list to look the id up in.
   [[endpoint.field]]
   name = "castSession.receiverShowsVideo"
   type = "bool"
-  doc  = 'The same answer `castLoad` returned for the load now playing. Whether a picture is appearing on the receiver, which is not the negation of `audioOnly` — see there.'
+  doc  = 'The same answer `castLoad` returned for the load now playing. Whether a picture is appearing on the receiver, which is not the negation of `audioOnly` - see there.'
 
   [[endpoint.field]]
   name = "castSession.contentType"
@@ -3059,19 +3059,19 @@ session has no device list to look the id up in.
   type = "int"
   doc  = '''
 Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
-file byte-ranged — no `format`, no `maxBitRate`, and the account ceiling is
-exempt for a cast token — so this is the file's own bitrate rather than anything
+file byte-ranged - no `format`, no `maxBitRate`, and the account ceiling is
+exempt for a cast token - so this is the file's own bitrate rather than anything
 the `transcoded*` fields describe. A video remux keeps the source's rate and a
-re-encode is not fixed-rate, so both report 0. So does a copied soundtrack — the
+re-encode is not fixed-rate, so both report 0. So does a copied soundtrack - the
 track's own rate is not the container's, and nearly right is the worst thing a
-diagnostic can be — and so does an encoded one, FLAC having no target rate at
+diagnostic can be - and so does an encoded one, FLAC having no target rate at
 all.
 '''
 
   [[endpoint.field]]
   name = "castSession.tier"
   type = "string"
-  doc  = 'Which of the three delivery tiers this fetch lands on: `direct` (the file as it stands, byte-ranged), `remux` (`-c copy` through the transcode cache, still seekable), or `encode` (re-encoded). The same two words apply to a soundtrack, and there they are the answer to "why does this sound worse": `remux` is the track copied out of the film untouched, `encode` a lossless FLAC of it. A soundtrack is never re-encoded lossily — the source is already lossy, and this is the one route with no choice about transcoding.'
+  doc  = 'Which of the three delivery tiers this fetch lands on: `direct` (the file as it stands, byte-ranged), `remux` (`-c copy` through the transcode cache, still seekable), or `encode` (re-encoded). The same two words apply to a soundtrack, and there they are the answer to "why does this sound worse": `remux` is the track copied out of the film untouched, `encode` a lossless FLAC of it. A soundtrack is never re-encoded lossily - the source is already lossy, and this is the one route with no choice about transcoding.'
 
   [[endpoint.field]]
   name = "castSession.volume"
@@ -3106,22 +3106,22 @@ volume change on the device itself arrives this way too.
 `notice` and `noticeSeq` are as `castSession` describes them: a sentence about
 a load the receiver was never told about, and a number that changes when there
 is a new one. A client should show a notice once, when the number changes and
-the text is non-empty — an unchanged status is republished every 15 seconds,
+the text is non-empty - an unchanged status is republished every 15 seconds,
 so acting on the text alone would repeat it for as long as the session lasted.
 
 Those six are repeated here rather than left to the `castLoad` reply because
 that reply describes an *attempt*. A receiver that refuses a LOAD is sent a
-degraded one instead — a film it cannot decode becomes its soundtrack — so the
+degraded one instead - a film it cannot decode becomes its soundtrack - so the
 description a client read when it issued the load can already be describing
 something that is not playing. Reading them from each event is what keeps a
 client from having to reload the page to find out.
 
 NOTE: The SSE connection doubles as the liveness signal for the cast session.
 Once the last listener disconnects, casting is torn down automatically after
-30 seconds — so a client that wants the session to survive must keep this open.
+30 seconds - so a client that wants the session to survive must keep this open.
 
 NOTE: The stream also ends when another client takes the session over. A client
-should treat that as having left cast mode rather than as a transport error —
+should treat that as having left cast mode rather than as a transport error -
 the retry is answered 204, so `EventSource` reaches `CLOSED` and stops.
 '''
 see = ["castSession"]
@@ -3235,7 +3235,7 @@ freshly re-read; `presets` answers with `presets` alone.
 # Not implemented" is indistinguishable from a server too old for a feature.
 #
 # Keep it in step with the endpoint index at
-# https://opensubsonic.netlify.app/docs/endpoints/ — an endpoint that starts
+# https://opensubsonic.netlify.app/docs/endpoints/ - an endpoint that starts
 # being answered must be struck from here in the same commit, or the page
 # says gaindrive cannot do something it does.
 # ===========================================================================
@@ -3252,7 +3252,7 @@ tell a deliberate gap from a server too old for a feature, and so that nobody
 has to discover one by calling it.
 
 A `GET` for any of them reaches a catch-all and is answered **HTTP 200
-carrying Subsonic error 0, `Not implemented.`** — always as XML, whatever `f`
+carrying Subsonic error 0, `Not implemented.`** - always as XML, whatever `f`
 asked for. A `POST` matches no route at all and gets a bare 404 with no body,
 which behind a reverse proxy configured to serve a single-page client on 404
 arrives as 200 and a page of HTML.
@@ -3277,7 +3277,7 @@ the roles GainDrive already reports say so: `shareRole`, `podcastRole`,
 `jukeboxRole` and `commentRole` are false on every account, so a client that
 reads them need not probe.
 
-* The jukebox — `jukeboxControl`, which plays through the sound card of the
+* The jukebox - `jukeboxControl`, which plays through the sound card of the
   machine running the server. Casting is GainDrive's answer to playing
   somewhere other than the client.
 
@@ -3294,7 +3294,7 @@ reads them need not probe.
 `getOpenSubsonicExtensions` names `gaindrive` and `transcodeOffset`.
 `topSongsByArtistId` is one parameter away, but `getTopSongs` answers an
 empty list here, so advertising it would promise data that does not exist.
-`formPost` is not supported — every standard endpoint is `GET`.
+`formPost` is not supported - every standard endpoint is `GET`.
 '''
 
 [[section]]
@@ -3327,15 +3327,15 @@ specification.
 
 **Whole subsystems.**
 
-* Sharing — `getShares`, `createShare`, `updateShare` and `deleteShare`.
-* Podcasts — `getPodcasts`, `getNewestPodcasts`, `refreshPodcasts`,
+* Sharing - `getShares`, `createShare`, `updateShare` and `deleteShare`.
+* Podcasts - `getPodcasts`, `getNewestPodcasts`, `refreshPodcasts`,
   `createPodcastChannel`, `deletePodcastChannel`, `deletePodcastEpisode`,
   `downloadPodcastEpisode`, and `getPodcastEpisode` of the OpenSubsonic
   extension of the same name. Fetching a URL into personal files is the
   nearest thing GainDrive has, and it is not a subscription.
-* Internet radio — `getInternetRadioStations`, `createInternetRadioStation`,
+* Internet radio - `getInternetRadioStations`, `createInternetRadioStation`,
   `updateInternetRadioStation` and `deleteInternetRadioStation`. A station is
   not a library file, so it would need storage of its own.
-* Chat — `getChatMessages` and `addChatMessage`.
+* Chat - `getChatMessages` and `addChatMessage`.
 
 '''

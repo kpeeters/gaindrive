@@ -11,7 +11,7 @@ import Foundation
 /// The three states every browse screen has, mirroring `ui/Load.kt`.
 ///
 /// An enum rather than a struct with nullable fields, so **"loaded but empty"
-/// and "not loaded yet" cannot be confused** — that confusion is the bug that
+/// and "not loaded yet" cannot be confused** - that confusion is the bug that
 /// produces a flash of "nothing here" on every screen open.
 enum Load<Value> {
 	case loading

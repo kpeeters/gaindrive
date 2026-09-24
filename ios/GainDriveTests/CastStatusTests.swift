@@ -15,7 +15,7 @@ import Testing
 ///
 /// These are payloads a device we do not control puts on the wire, so what is
 /// tested is mostly what happens when one of them is not the shape the happy
-/// path assumes — a malformed push must cost one message, never the receive
+/// path assumes - a malformed push must cost one message, never the receive
 /// loop.
 struct CastStatusTests {
 	private func json(_ text: String) throws -> [String: Any] {
@@ -40,8 +40,8 @@ struct CastStatusTests {
 		#expect(status.isLive)
 	}
 
-	/// A push during playback omits `media` entirely — the receiver only repeats
-	/// it when the item changes — so zero here means "not stated", and the
+	/// A push during playback omits `media` entirely - the receiver only repeats
+	/// it when the item changes - so zero here means "not stated", and the
 	/// session carries the last known value forward rather than believing it.
 	@Test func aPushWithoutMediaReportsNoDuration() throws {
 		let status = try #require(
@@ -108,7 +108,7 @@ struct CastStatusTests {
 
 	@Test func garbageIsNotAMessage() {
 		#expect(castJSON("not json at all") == nil)
-		// Valid JSON that is not an object — a peer is allowed to be wrong in
+		// Valid JSON that is not an object - a peer is allowed to be wrong in
 		// more ways than one.
 		#expect(castJSON("[1,2,3]") == nil)
 	}
@@ -116,7 +116,7 @@ struct CastStatusTests {
 	// MARK: - RECEIVER_STATUS
 
 	/// **The trap this exists to prevent.** A television sitting idle runs its
-	/// own ambient app — `E8C28D3C`, "Backdrop" — which publishes a
+	/// own ambient app - `E8C28D3C`, "Backdrop" - which publishes a
 	/// `transportId` like any other. Taking the first entry sends the LOAD to a
 	/// screensaver, which ignores the media namespace: no status, no fetch, no
 	/// error and nothing in any log.
@@ -144,7 +144,7 @@ struct CastStatusTests {
 	}
 
 	/// A truly idle receiver reports no applications at all, which is the signal
-	/// to launch ours — and is why the Backdrop bug survived so long, since
+	/// to launch ours - and is why the Backdrop bug survived so long, since
 	/// whether it bit depended on what the television happened to be showing.
 	@Test func anIdleReceiverOffersNoTransport() throws {
 		let message = try json(#"{"type":"RECEIVER_STATUS","status":{"volume":{"level":1}}}"#)

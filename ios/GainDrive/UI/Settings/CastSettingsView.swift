@@ -12,7 +12,7 @@ import SwiftUI
 ///
 /// **Managing devices, not choosing one.** Where to play is the player's
 /// question and is answered by `CastDeviceSheet` behind the cast button; this
-/// screen exists for the devices themselves — seeing what the network offers,
+/// screen exists for the devices themselves - seeing what the network offers,
 /// naming one that will not announce itself, and asking whether it answers.
 ///
 /// The Test button is what proves the two assumptions everything downstream
@@ -73,7 +73,7 @@ struct CastSettingsView: View {
 				// **Denial is a state, not a timeout.** A refused Local Network
 				// permission and a network with no receivers on it both produce
 				// an empty list, and only one of them is worth telling somebody
-				// about — so the failure says what to do rather than leaving a
+				// about - so the failure says what to do rather than leaving a
 				// spinner running over nothing.
 				Label(message, systemImage: "exclamationmark.triangle")
 					.foregroundStyle(.secondary)
@@ -87,7 +87,7 @@ struct CastSettingsView: View {
 					// **What a refused Local Network permission actually looks
 					// like.** There is no API to ask whether it was granted, and
 					// denied, the browser reports zero results rather than
-					// failing — so a silence that has gone on too long is the
+					// failing - so a silence that has gone on too long is the
 					// only signal there is. It claims nothing: a network with no
 					// receivers on it looks exactly the same, which is why this
 					// says what to check rather than what is wrong.
@@ -145,7 +145,7 @@ struct CastSettingsView: View {
 			Text(
 				"""
 				For a receiver that does not announce itself. Give its IP \
-				address — a name will not do. A device added here stops \
+				address - a name will not do. A device added here stops \
 				appearing twice once you have tested the discovered one.
 				"""
 			)
@@ -173,7 +173,7 @@ struct CastSettingsView: View {
 					// player's business and lives behind the cast button in Now
 					// Playing; this screen is for the devices themselves. The
 					// two are different enough acts that one gesture meaning
-					// either would sometimes mean the wrong one — which is the
+					// either would sometimes mean the wrong one - which is the
 					// same reason `CastProbe` is a separate type from the
 					// session in the first place.
 					Button("Test") { test(device) }
@@ -189,7 +189,7 @@ struct CastSettingsView: View {
 		}
 	}
 
-	/// The model ahead of the address, as Android's picker does — `WiiM Pro`
+	/// The model ahead of the address, as Android's picker does - `WiiM Pro`
 	/// says far more about which box this is than a number does, and the address
 	/// is only known once something has connected.
 	private func subtitle(_ device: CastDevice) -> String? {
@@ -206,7 +206,7 @@ struct CastSettingsView: View {
 			guard case .answered(_, let address) = result, let address else { return }
 			// The address the connection reached, written back to the discovered
 			// entry. `NWBrowser` never reports one, so this is the only way the
-			// list learns which box a name refers to — and it is what lets a
+			// list learns which box a name refers to - and it is what lets a
 			// device somebody also added by hand stop appearing twice.
 			discovery.note(address: address, for: device.id)
 		}
@@ -220,7 +220,7 @@ struct CastSettingsView: View {
 			// service, not a host.
 			let at = address.map { " at \($0)" } ?? ""
 			guard let runningApp else { return "Answered\(at)" }
-			return "Answered\(at) — showing \(runningApp)"
+			return "Answered\(at) - showing \(runningApp)"
 		case .silent:
 			// Different advice from unreachable, which is the whole reason the
 			// two are separate outcomes: the address is live, and something

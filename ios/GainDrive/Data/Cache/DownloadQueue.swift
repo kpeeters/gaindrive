@@ -41,7 +41,7 @@ enum DownloadState: Hashable, Sendable {
 ///
 /// * **The delegate is the only way results arrive.** There is no `await` form,
 ///   and callbacks can land in a process that has just launched with no memory
-///   of asking — which is why the cache key travels in `taskDescription` rather
+///   of asking - which is why the cache key travels in `taskDescription` rather
 ///   than in a map. It is the only state that survives.
 /// * **A task may sit with no bytes for a long time and be perfectly healthy.**
 ///   The server materialises a transcode in full before sending any of it, so
@@ -147,7 +147,7 @@ extension DownloadQueue: URLSessionDownloadDelegate {
 			(200..<300).contains(response.statusCode)
 		else {
 			// A Subsonic error is a 200 carrying a failure envelope, so this
-			// catches only transport-level refusals — the rest is caught by
+			// catches only transport-level refusals - the rest is caught by
 			// what lands on disk being unplayable, which is a stage 2 concern.
 			report { self.onFailed?(parsed.ref) }
 			return
@@ -175,7 +175,7 @@ extension DownloadQueue: URLSessionDownloadDelegate {
 			return
 		}
 		// `URLSessionTaskDelegate` reports continuous byte progress, which is
-		// the second thing this beats Android at — Media3 could only report
+		// the second thing this beats Android at - Media3 could only report
 		// whole tracks.
 		let fraction =
 			totalBytesExpectedToWrite > 0
@@ -206,7 +206,7 @@ extension DownloadQueue: URLSessionDownloadDelegate {
 	/// **The response is asked first, and the quality is only the fallback.**
 	/// That order used to be the other way round, on the reasoning that the
 	/// format says what it will be and only `.original` cannot. Since requests
-	/// began declaring what they take as it stands — see `PlayableAudio` — the
+	/// began declaring what they take as it stands - see `PlayableAudio` - the
 	/// format no longer says: a request at AAC 160 may be answered with the
 	/// MP3 the server holds, and naming that file `.m4a` is exactly the hang
 	/// above.

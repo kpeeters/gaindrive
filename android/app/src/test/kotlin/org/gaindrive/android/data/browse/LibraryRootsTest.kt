@@ -8,8 +8,8 @@ import org.junit.Test
 /**
  * What one server is asked for the merged library list, and for uploads.
  *
- * The rule has to serve three kinds of server at once — one that names kinds of
- * root, one that has several untyped libraries, and one that has neither — so
+ * The rule has to serve three kinds of server at once - one that names kinds of
+ * root, one that has several untyped libraries, and one that has neither - so
  * most of these tests exist to pin the cases that must *not* change.
  */
 class LibraryRootsTest {
@@ -52,7 +52,7 @@ class LibraryRootsTest {
 	}
 
 	/**
-	 * The group a server lacks is not asked for at all — asking would come
+	 * The group a server lacks is not asked for at all - asking would come
 	 * back empty at best, and on a server predating roots as the entire
 	 * library, putting the same folders in both groups.
 	 */
@@ -138,7 +138,7 @@ class LibraryRootsTest {
 
 	/**
 	 * An admin gets everybody's, because an admin is the only account that can
-	 * promote one into the library — without this a non-admin's upload is
+	 * promote one into the library - without this a non-admin's upload is
 	 * visible to its owner and to nobody who can act on it.
 	 */
 	@Test

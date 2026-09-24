@@ -32,7 +32,7 @@ import org.gaindrive.android.ui.PinViewModel
  *
  * Three states, because "I tapped it and nothing visibly changed" is the
  * complaint a plain toggle earns: nothing yet, arriving, here. The middle one
- * is a ring showing how many of the tracks have landed — progress is counted in
+ * is a ring showing how many of the tracks have landed - progress is counted in
  * whole tracks, since that is the granularity both Media3 and the cache report.
  *
  * Refusals go out as a toast rather than a snackbar: there is no snackbar host
@@ -91,7 +91,7 @@ fun DownloadIndicator(
 	when (status.phase) {
 		PinPhase.COMPLETE -> Icon(
 			imageVector = Icons.Default.DownloadDone,
-			contentDescription = "Downloaded — tap to remove",
+			contentDescription = "Downloaded - tap to remove",
 			modifier = modifier,
 		)
 
@@ -101,14 +101,14 @@ fun DownloadIndicator(
 		// obedient one.
 		PinPhase.WAITING -> Icon(
 			imageVector = Icons.Default.Schedule,
-			contentDescription = "Waiting for Wi-Fi — tap to remove",
+			contentDescription = "Waiting for Wi-Fi - tap to remove",
 			tint = MaterialTheme.colorScheme.onSurfaceVariant,
 			modifier = modifier,
 		)
 
 		PinPhase.FAILED -> Icon(
 			imageVector = Icons.Default.ErrorOutline,
-			contentDescription = "Download failed — tap to try again",
+			contentDescription = "Download failed - tap to try again",
 			tint = MaterialTheme.colorScheme.error,
 			modifier = modifier,
 		)
@@ -139,9 +139,9 @@ private val RING_SIZE = 20.dp
 fun downloadActionLabel(status: PinStatus?): String = when (status?.phase) {
 	null -> "Download"
 	PinPhase.COMPLETE -> "Remove download"
-	PinPhase.WAITING -> "Waiting for Wi-Fi — remove"
-	PinPhase.FAILED -> "Download failed — try again"
-	// Says what tapping does, not what is happening — the ring already says
+	PinPhase.WAITING -> "Waiting for Wi-Fi - remove"
+	PinPhase.FAILED -> "Download failed - try again"
+	// Says what tapping does, not what is happening - the ring already says
 	// that, and "Downloading…" as a menu item invites a tap that then cancels.
 	PinPhase.RUNNING -> "Cancel download (${status.stored} of ${status.total})"
 }

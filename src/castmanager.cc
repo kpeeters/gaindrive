@@ -1,6 +1,6 @@
 // Chromecast device discovery (mDNS) and playback control (Cast v2 over TLS).
 //
-// Cast protocol wire format is hand-encoded protobuf — the CastMessage schema
+// Cast protocol wire format is hand-encoded protobuf - the CastMessage schema
 // has only six fields, so we avoid a full protobuf library dependency.
 
 #define MDNS_IMPLEMENTATION
@@ -49,9 +49,8 @@ static const char* MEDIA_APP_ID = "CC1AD845";
 // ---- The deadlines around a LOAD ----------------------------------
 //
 // Each waits for something specific, and each was once shorter than the thing
-// it waits for — which is the whole of the "casting a film does not start it
-// on the first play" fault, fixed on the Android side first (see the same
-// section in android/CAST.md).
+// it waits for - which is the whole of the "casting a film does not start it
+// on the first play" fault, fixed on the Android side first.
 //
 // Waiting longer costs nothing here: every wait ends the instant the message
 // it wants arrives, nobody is blocked on the thread doing it, and a newer load
@@ -67,7 +66,7 @@ static constexpr int STATUS_WAIT_MS = 4000;
 // How long to wait for the receiver app after LAUNCH.
 //
 // **This is a television changing HDMI input and cold-starting a web app, not
-// a network round trip** — measured at 10-20 s on the reference device. What
+// a network round trip** - measured at 10-20 s on the reference device. What
 // this replaced was bounded by the socket's own 5 s timeout, so the set was
 // still starting up when the LOAD was abandoned; the receiver then finished
 // launching, published its transport, and sat on the Chromecast backdrop with
@@ -79,7 +78,7 @@ static constexpr int LAUNCH_WAIT_MS = 45000;
 //
 // See load_worker(): the receiver that has published its transport but is not
 // yet consuming the media namespace drops the LOAD on the floor, and there is
-// no ack to wait on — a send reports only that the bytes left this machine.
+// no ack to wait on - a send reports only that the bytes left this machine.
 static constexpr int LOAD_ACK_WAIT_MS = 8000;
 
 // ---- mDNS discovery -----------------------------------------------
@@ -173,7 +172,7 @@ static int open_ipv6_on(unsigned int ifidx)
 	}
 
 // A socket opened for one discovery pass. `iface` is the interface it *sends*
-// on — a per-interface IPv4 socket still binds INADDR_ANY:5353 (mdns.h rewrites
+// on - a per-interface IPv4 socket still binds INADDR_ANY:5353 (mdns.h rewrites
 // sin_addr after setting IP_MULTICAST_IF and the group membership), so every
 // such socket also hears every interface's replies. The duplicates are free:
 // DiscState is keyed on the service instance name.
@@ -190,7 +189,7 @@ static const char kCastSvc[] = "_googlecast._tcp.local.";
 // ASCII case fold.  DNS names are case-insensitive (RFC 4343) while a
 // std::map key is not, so one device answering with two spellings of its
 // instance name would otherwise be two devices.  ASCII-only is not a
-// limitation — it is exactly what RFC 4343 specifies, and it leaves the UTF-8
+// limitation - it is exactly what RFC 4343 specifies, and it leaves the UTF-8
 // in a friendly name alone.
 static std::string lc(std::string s)
 	{
@@ -213,7 +212,7 @@ static bool is_cast_instance(const std::string& name)
 	return ends_with(dotted) || ends_with(dotted.substr(0, dotted.size() - 1));
 	}
 
-// The instance label of a Cast service instance name — everything before
+// The instance label of a Cast service instance name - everything before
 // "._googlecast._tcp.local.".  Used as the device's name when it sends no
 // `fn`, which is what the Android client does (CastDiscovery.kt: `name =
 // friendly ?: serviceName`), so a discovered device is never labelled by its
@@ -259,7 +258,7 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 	std::string raw(rname.str, rname.length);
 	std::string key = lc(raw);
 
-	// Extract sender IP — used as address fallback and for AAAA scope IDs.
+	// Extract sender IP - used as address fallback and for AAAA scope IDs.
 	std::string src_ip4, src_ip6;
 	if (from) {
 		if (from->sa_family == AF_INET) {
@@ -295,7 +294,7 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 	// device.  The socket is joined to the multicast group and mdns_query_recv
 	// hands us every record of every packet on the wire, so without this any
 	// service announcing a TXT `id` is assembled into a nameless "Chromecast"
-	// — HomeKit's _hap._tcp being the one that shows up on every LAN.
+	// - HomeKit's _hap._tcp being the one that shows up on every LAN.
 	//
 	// The reason is logged rather than the record dropped silently: these
 	// per-record lines are how a device that is not appearing gets diagnosed,
@@ -323,7 +322,7 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 			}
 		// `ca` is a decimal bitmask; bit 0 is video_out.  Parsed by hand
 		// rather than with std::stoi, which *throws* on a receiver that
-		// announces something unexpected — this runs on the discovery
+		// announces something unexpected - this runs on the discovery
 		// thread, where that is a dead server rather than an odd device.
 		int caps = -1;
 		if (!ca.empty()
@@ -495,7 +494,7 @@ std::vector<CastManager::CastDevice> CastManager::discover(const DiscoverOpts& o
 	std::vector<uint8_t> sendbuf(2048);
 	// RFC 6762 §17 caps an mDNS message at 9000 bytes. recvfrom truncates a
 	// larger datagram silently, and mdns_query_recv then abandons the whole
-	// packet at the first section that fails to parse — losing every device
+	// packet at the first section that fails to parse - losing every device
 	// described in it. Sizing to the protocol maximum removes the failure
 	// mode rather than trying to detect it.
 	std::vector<uint8_t> recvbuf(9000);
@@ -551,7 +550,7 @@ std::vector<CastManager::CastDevice> CastManager::discover(const DiscoverOpts& o
 			          << ")" << std::endl;
 			break;
 			}
-		// A quiet interval is not the end of the pass — with queries > 1 there
+		// A quiet interval is not the end of the pass - with queries > 1 there
 		// is another round still to send. This is why the old `break` here had
 		// to go; it would have made every repeat unreachable.
 		if (r == 0) continue;
@@ -578,7 +577,7 @@ std::vector<CastManager::CastDevice> CastManager::discover(const DiscoverOpts& o
 		if (hi6 != state.hosts6.end()) dev.address = hi6->second;
 		}
 
-	std::cout << stamp() << "Cast: discovery done — "
+	std::cout << stamp() << "Cast: discovery done - "
 	          << state.devs.size() << " instance(s) seen, "
 	          << state.ignored << " record(s) ignored" << std::endl;
 	for (auto& [inst, dev] : state.devs)
@@ -639,7 +638,7 @@ std::vector<CastManager::CastDevice> CastManager::discover(const DiscoverOpts& o
 		if (into.model.empty()) into.model = dev.model;
 		if (into.capabilities < 0) into.capabilities = dev.capabilities;
 		if (into.address.empty()) into.address = dev.address;
-		// Prefer IPv4, as the address fallbacks above already do — an IPv6
+		// Prefer IPv4, as the address fallbacks above already do - an IPv6
 		// link-local carries a scope suffix that nothing else here matches on.
 		else if (into.address.find(':') != std::string::npos &&
 		         dev.address.find(':') == std::string::npos)
@@ -649,7 +648,7 @@ std::vector<CastManager::CastDevice> CastManager::discover(const DiscoverOpts& o
 		}
 
 	// A device that sent no `fn` anywhere is named by its instance label rather
-	// than left nameless, which is what the Android client does — the
+	// than left nameless, which is what the Android client does - the
 	// alternative is a row a client can only label with an IP address. Last,
 	// so that a real `fn` from any of the merged duplicates wins over it.
 	for (size_t i = 0; i < result.size(); i++)
@@ -697,7 +696,7 @@ std::vector<CastManager::CastDevice> CastManager::cached_devices() const
 	std::lock_guard<std::mutex> lk(manual_mutex_);
 	for (const auto& m : manual_devices_) {
 		// Deduplicated on the address and port, the only fields the two kinds
-		// have in common — a configured device has no Cast id to match on.
+		// have in common - a configured device has no Cast id to match on.
 		// The port is part of it because a Cast group lives at its leader's
 		// address on a different one, and on the address alone a group in
 		// range would suppress a configured entry for the leader itself.
@@ -712,12 +711,12 @@ std::vector<CastManager::CastDevice> CastManager::cached_devices() const
 // ---- Protobuf helpers (CastMessage encoding / decoding) -----------
 //
 // CastMessage schema (cast_channel.proto):
-//   field 1 varint  — protocol_version (0 = CASTV2_1_0)
-//   field 2 string  — source_id
-//   field 3 string  — destination_id
-//   field 4 string  — namespace
-//   field 5 varint  — payload_type (0 = STRING)
-//   field 6 string  — payload_utf8
+//   field 1 varint  - protocol_version (0 = CASTV2_1_0)
+//   field 2 string  - source_id
+//   field 3 string  - destination_id
+//   field 4 string  - namespace
+//   field 5 varint  - payload_type (0 = STRING)
+//   field 6 string  - payload_utf8
 
 static void pb_varint(std::vector<uint8_t>& out, uint64_t v)
 	{
@@ -862,7 +861,7 @@ static bool cast_send(SSL* ssl, const std::string& ns,
 // The distinction only became load-bearing with cast_wait_for(): a loop that
 // waits up to forty-five seconds must keep waiting through a socket timeout,
 // must keep waiting through a frame it cannot read as JSON, and must *not*
-// keep waiting on a closed connection — which would spin for the rest of the
+// keep waiting on a closed connection - which would spin for the rest of the
 // deadline, since a clean EOF sets no errno to notice it by.
 enum class Recv { Message, Timeout, Closed, Unusable };
 
@@ -898,12 +897,12 @@ static nlohmann::json cast_recv(SSL* ssl, Recv* why = nullptr)
 		got += (size_t)r;
 		}
 	std::string payload = pb_payload(msg);
-	// A whole message that says nothing we can read — a binary payload, say.
+	// A whole message that says nothing we can read - a binary payload, say.
 	// The framing is intact, so the next one may well be fine.
 	if (payload.empty()) return fail(Recv::Unusable);
 	// Null for anything unusable, because that is what every caller already
 	// tests. A failed parse yields a *discarded* value, and `is_null()` is
-	// false for one — so returning it directly would send a body we could not
+	// false for one - so returning it directly would send a body we could not
 	// read past the "did we receive a message" check and into a value() call
 	// that throws, on the poll thread, where an exception is std::terminate.
 	auto j = nlohmann::json::parse(payload, nullptr, false);
@@ -929,7 +928,7 @@ static std::chrono::steady_clock::time_point in_ms(int ms)
 //  * **The deadline is wall clock**, not a count of reads. cast_recv() returns
 //    null when the socket's own SO_RCVTIMEO fires, and reading that as failure
 //    is what capped every one of these waits at five seconds however long they
-//    asked for. Only Recv::Closed ends the wait — see there for why that has to
+//    asked for. Only Recv::Closed ends the wait - see there for why that has to
 //    be cast_recv()'s answer rather than this loop's guess at errno.
 //  * **It can be cancelled**, so a load the user has already replaced does not
 //    sit here for the rest of the deadline.
@@ -967,7 +966,7 @@ static nlohmann::json cast_wait_for(
 //
 // **Never applications[0]**, which is a fix rather than a refinement: an idle
 // television runs its own ambient app (E8C28D3C, Backdrop), which publishes a
-// transportId like any other and ignores the media namespace — so a LOAD sent
+// transportId like any other and ignores the media namespace - so a LOAD sent
 // there produces no MEDIA_STATUS, no fetch, no error and nothing in any log.
 static const nlohmann::json& running_app(const nlohmann::json& msg,
                                           const char* app_id)
@@ -984,8 +983,8 @@ static const nlohmann::json& running_app(const nlohmann::json& msg,
 //
 // The distinction running_app() cannot express: it yields nothing both for
 // "our app is not running" and for "this status was not about applications".
-// A volume-change push is the second — it carries `volume` and no applications
-// array — and reading it as the first discards a transport that is still
+// A volume-change push is the second - it carries `volume` and no applications
+// array - and reading it as the first discards a transport that is still
 // perfectly good, which costs the *next* load the whole GET_STATUS-and-LAUNCH
 // path this file's deadlines exist for.
 static bool lists_applications(const nlohmann::json& msg)
@@ -1039,7 +1038,7 @@ CastManager::Probe CastManager::probe(const CastDevice& dev, int timeout_ms)
 	}
 
 // How long a minted stream token stays usable. Generous, because it has to
-// outlast the film it was minted for, and a seek mints a fresh one anyway —
+// outlast the film it was minted for, and a seek mints a fresh one anyway -
 // this is a backstop for a session someone walked away from, not a timeout the
 // receiver will ever notice.
 static constexpr auto CAST_TOKEN_TTL = std::chrono::hours(12);
@@ -1049,7 +1048,7 @@ std::string CastManager::mint_token(int song_id,
 	{
 	// 128 bits from the CSPRNG. **The return value is checked**: RAND_bytes
 	// answers 0 on failure, and ignoring that leaves `bytes` holding whatever
-	// was on the stack — a token an attacker may well be able to predict, for
+	// was on the stack - a token an attacker may well be able to predict, for
 	// a credential that skips authentication entirely.
 	uint8_t bytes[16];
 	if (RAND_bytes(bytes, sizeof(bytes)) != 1) {
@@ -1076,8 +1075,8 @@ std::string CastManager::token() const
 	return token_;
 	}
 
-// Constant-time over the token, which is not really about timing — 128 bits
-// makes that academic — but about not having the wrong primitive sitting in
+// Constant-time over the token, which is not really about timing - 128 bits
+// makes that academic - but about not having the wrong primitive sitting in
 // the one place that decides whether an unauthenticated request is served.
 static bool token_eq(const std::string& a, const std::string& b)
 	{
@@ -1169,7 +1168,7 @@ nlohmann::json CastManager::build_load(const LoadRequest& req, int request_id)
 		{"media",     media}
 		};
 	// currentTime tells the receiver to start playback at this offset
-	// within the loaded media — the receiver handles the seek itself
+	// within the loaded media - the receiver handles the seek itself
 	// using the file's XING/seek tables.  This avoids server-side
 	// transcoding and gives the receiver real duration metadata.
 	if (req.current_time > 0.0f) msg["currentTime"] = req.current_time;
@@ -1234,8 +1233,8 @@ std::string CastManager::ensure_transport(Tls& t, const std::string& src,
 	cast_send(t.ssl, NS_CONN, src, "receiver-0", {{"type", "CONNECT"}});
 
 	// Ask before launching. A LAUNCH against a running app *recreates* it, so a
-	// receiver already showing ours would pay the whole cold start again — ten
-	// to twenty seconds of black on a television — and the media session it was
+	// receiver already showing ours would pay the whole cold start again - ten
+	// to twenty seconds of black on a television - and the media session it was
 	// holding would go with it.
 	//
 	// Waited for by requestId, which the receiver echoes on a reply and sets to
@@ -1244,7 +1243,7 @@ std::string CastManager::ensure_transport(Tls& t, const std::string& src,
 	// is idle or showing something else is launched at once rather than after
 	// the full STATUS_WAIT_MS. Matching on "any RECEIVER_STATUS" instead would
 	// be satisfied by a volume push, which says nothing about applications and
-	// would send a LAUNCH into a running app — the one thing this step exists
+	// would send a LAUNCH into a running app - the one thing this step exists
 	// to avoid.
 	const int status_req = next_request_id();
 	cast_send(t.ssl, NS_RECV, src, "receiver-0",
@@ -1349,7 +1348,7 @@ int CastManager::send_load_once(const LoadRequest& req, int gen,
 	const int attempt = ++load_attempt_;
 
 	// poll_loop() receives the MEDIA_STATUS response and updates status_. There
-	// is nothing to read here — but there is something to wait for; see
+	// is nothing to read here - but there is something to wait for; see
 	// await_load_ack().
 	std::cout << stamp() << "Cast: → " << req.url << std::endl;
 	return attempt;
@@ -1384,7 +1383,7 @@ void CastManager::load_worker(LoadRequest req, int gen)
 	// Make the URL answerable before anyone is told to fetch it.  A receiver
 	// gives up after about a minute of silence on the HTTP body, and a film's
 	// soundtrack takes longer than that to transcode, so the wait has to
-	// happen here — with nothing yet loaded — rather than on the socket.
+	// happen here - with nothing yet loaded - rather than on the socket.
 	//
 	// This thread is detached: an exception escaping it is std::terminate, a
 	// dead server rather than a failed load.
@@ -1414,7 +1413,7 @@ void CastManager::load_worker(LoadRequest req, int gen)
 	if (await_load_ack(gen, attempt)) return;
 
 	// A *cached* transport that answered nothing is the one most likely to be
-	// dead — the receiver tore the app down and nothing told us — so throw it
+	// dead - the receiver tore the app down and nothing told us - so throw it
 	// away and let the second attempt resolve a fresh one. One we had just
 	// resolved is reused as it is.
 	if (cached) {
@@ -1429,7 +1428,7 @@ void CastManager::load_worker(LoadRequest req, int gen)
 	// Once, never a loop. What this recovers from is a receiver that was a
 	// moment too early; if the second is ignored too then something else is
 	// wrong and repeating would bury it. The wait still has to happen, because
-	// retry_pending_ must be resolved either way — a flag left armed is
+	// retry_pending_ must be resolved either way - a flag left armed is
 	// consumed by an unrelated status minutes later and re-LOADs whatever is
 	// playing then.
 	if (await_load_ack(gen, attempt)) return;
@@ -1440,7 +1439,7 @@ void CastManager::load_worker(LoadRequest req, int gen)
 void CastManager::note_load_abandoned(const char* what)
 	{
 	// **Never degrade_load().** Every rung of that ladder answers "the receiver
-	// refused this" — drop the subtitle tracks, become the soundtrack — and
+	// refused this" - drop the subtitle tracks, become the soundtrack - and
 	// none of them answers "the receiver was never told". The flag still has to
 	// be cleared, or it survives to be consumed by an unrelated status minutes
 	// later and re-LOADs whatever is playing then.
@@ -1454,7 +1453,7 @@ void CastManager::note_load_abandoned(const char* what)
 	notice_      = what;
 	notice_seq_ += 1;
 	}
-	std::cout << stamp() << "Cast: LOAD abandoned — " << what << std::endl;
+	std::cout << stamp() << "Cast: LOAD abandoned - " << what << std::endl;
 
 	// The status the receiver never sent, published the way note_load_failure()
 	// publishes the one a refused LOAD never sends. Without it nothing on the
@@ -1509,11 +1508,11 @@ void CastManager::update_status(const nlohmann::json& msg)
 
 	// Auto-retry decision: only consider pushes for the NEW media session
 	// (msid != last_load_old_msid_).  Otherwise a stale PLAYING update for
-	// the old session — typically poll_loop's GET_STATUS reply that
-	// crosses our LOAD on the wire — would clear the flag prematurely and
+	// the old session - typically poll_loop's GET_STATUS reply that
+	// crosses our LOAD on the wire - would clear the flag prematurely and
 	// the real IDLE/ERROR for the new msid would arrive too late to
 	// trigger a retry.  IDLE/INTERRUPTED also carries the old msid, so it
-	// is skipped here as well; that's fine — the next push (the new msid
+	// is skipped here as well; that's fine - the next push (the new msid
 	// going to PLAYING or ERROR) is the one we actually need.
 	if (retry_pending_ && cs.media_session_id != last_load_old_msid_) {
 		if (cs.player_state == "IDLE" && cs.idle_reason == "ERROR") {
@@ -1528,7 +1527,7 @@ void CastManager::update_status(const nlohmann::json& msg)
 			// ever observed, because spawn_retry() goes straight to
 			// load_worker() rather than back through load().  Bounded by the
 			// ladder running out, and cleared below the moment the receiver
-			// reports it is playing — which is what the note about a stale
+			// reports it is playing - which is what the note about a stale
 			// flag being consumed by an unrelated status minutes later relies
 			// on, and why it is set only when there is a further rung.
 			if (do_retry) {
@@ -1544,7 +1543,7 @@ void CastManager::update_status(const nlohmann::json& msg)
 		}
 	else if (retry_pending_ && cs.player_state == "IDLE"
 	      && cs.idle_reason == "ERROR") {
-		// An IDLE/ERROR carrying the *old* msid — both are 0 on a receiver
+		// An IDLE/ERROR carrying the *old* msid - both are 0 on a receiver
 		// with no session yet, which is the ordinary shape of a first LOAD
 		// failing outright.  No retry, because this cannot be told apart
 		// from a stale push about the session being replaced; but the flag
@@ -1569,7 +1568,7 @@ const char* CastManager::degrade_load(LoadRequest& req)
 		}
 	if (req.fallback) {
 		// A reference-counted copy of the pointer first.  `req = *req.fallback`
-		// would destroy the pointee — through the member being overwritten —
+		// would destroy the pointee - through the member being overwritten -
 		// partway through reading it.  The fallback's own `fallback`, usually
 		// null, is what bounds the ladder.
 		auto next = req.fallback;
@@ -1586,7 +1585,7 @@ void CastManager::spawn_retry(const LoadRequest& req, const char* why,
 	// user-driven load() has bumped load_gen_ in the meantime, so an unwanted
 	// retry can never race with a newer LOAD the user just clicked.
 	int gen = load_gen_.load();
-	std::cout << stamp() << "Cast: auto-retry LOAD (gen=" << gen << ") — "
+	std::cout << stamp() << "Cast: auto-retry LOAD (gen=" << gen << ") - "
 	          << why << " (" << how << ")" << std::endl;
 	std::thread([this, req, gen]{
 		if (load_gen_.load() != gen) return;
@@ -1632,7 +1631,7 @@ void CastManager::note_load_failure(int media_session_id)
 	// Re-armed only *after* update_status has run, and that ordering is the
 	// whole reason this is a second critical section rather than part of the
 	// one above.  The synthetic status published there is an IDLE/ERROR, so a
-	// flag already re-armed would be consumed by it — degrading a second rung
+	// flag already re-armed would be consumed by it - degrading a second rung
 	// and firing a second load for one refusal.  It is the same hazard the
 	// note at the top of this function describes, one step further along:
 	// claiming the flag first is what stops update_status acting on it, and
@@ -1718,7 +1717,7 @@ bool CastManager::cast_tracks(const std::vector<int>& track_ids)
 	}
 	// EDIT_TRACKS_INFO names the session it edits, and there is no session
 	// until the receiver has answered a LOAD with one.  media_session_id is 0
-	// until then, and a command naming session 0 is dropped without a reply —
+	// until then, and a command naming session 0 is dropped without a reply -
 	// so a track chosen in the second before playback starts would silently do
 	// nothing.  The caller turns false into "ask again after the LOAD" rather
 	// than into an error.
@@ -1839,7 +1838,7 @@ void CastManager::poll_loop()
 		// The receiver's messages are the only untrusted input on this thread,
 		// and this thread is detached: anything escaping it is std::terminate, a
 		// dead server rather than a failed request. Nothing in here should throw
-		// — every field is read through jsonread.hh — so this is a backstop, and
+		// - every field is read through jsonread.hh - so this is a backstop, and
 		// it drops out to the reconnect above rather than ending the loop, since
 		// a thread that has quietly stopped polling looks exactly like a
 		// Chromecast that has stopped answering.
@@ -1854,19 +1853,19 @@ void CastManager::poll_loop()
 				Recv why = Recv::Message;
 				auto m = cast_recv(t.ssl, &why);
 				if (m.is_null()) {
-					// A timeout is SO_RCVTIMEO firing with no data — loop to
+					// A timeout is SO_RCVTIMEO firing with no data - loop to
 					// re-check poll_active_ and transport_id_ before blocking
 					// again. Unusable is a message we could not read, which
 					// says nothing about the ones after it.
 					if (why == Recv::Timeout) {
 						// Chromecast only pushes MEDIA_STATUS on state changes, not
-						// during continuous playback — poll for position explicitly.
+						// during continuous playback - poll for position explicitly.
 						cast_send(t.ssl, NS_MEDIA, src, tid,
 						          {{"type", "GET_STATUS"}, {"requestId", 101}});
 						continue;
 						}
 					if (why == Recv::Unusable) continue;
-					break;  // closed connection — reconnect
+					break;  // closed connection - reconnect
 					}
 
 				std::string type = jstr(m, "type");
@@ -1887,7 +1886,7 @@ void CastManager::poll_loop()
 						          << (idle_reason.empty() ? std::string{}
 						                                  : " idleReason=" + idle_reason)
 						          << std::endl;
-						// Dump the full payload for every push — fields like autoplay,
+						// Dump the full payload for every push - fields like autoplay,
 						// loadingItemId, extendedStatus, supportedMediaCommands and
 						// preloadedItemId reveal what the receiver thinks it's doing
 						// and are essential for diagnosing stuck-IDLE sessions.
@@ -1901,7 +1900,7 @@ void CastManager::poll_loop()
 					std::cout << stamp() << "Cast rx " << type << ": "
 					          << m.dump() << std::endl;
 					// A failed LOAD comes back on this branch, not as a
-					// MEDIA_STATUS — so before this, status_ stayed at its
+					// MEDIA_STATUS - so before this, status_ stayed at its
 					// default: IDLE with an *empty* idle_reason, which the SSE
 					// reports as a track that is simply not playing yet. The
 					// browser parked on a dead progress bar with nothing
@@ -1914,7 +1913,7 @@ void CastManager::poll_loop()
 				else if (type == "RECEIVER_STATUS") {
 					// Dump the full payload so we can see whether the Default
 					// Media Receiver app is still running and what transportId
-					// it's advertising — STOP can trigger an idle-app teardown
+					// it's advertising - STOP can trigger an idle-app teardown
 					// that invalidates our cached transport_id.
 					std::cout << stamp() << "Cast rx RECEIVER_STATUS: "
 					          << m.dump() << std::endl;
@@ -1923,14 +1922,14 @@ void CastManager::poll_loop()
 					// transport_id_ was written only by a load and cleared only
 					// by stop(), so a receiver that tore the app down left a
 					// dead transport cached for the rest of the session and
-					// every LOAD after it went into the void — no MEDIA_STATUS,
+					// every LOAD after it went into the void - no MEDIA_STATUS,
 					// no error, nothing in the log past "Cast: LOAD {…}".
 					//
 					// Only when the status actually enumerated what the
 					// receiver is running. A volume-change push carries
 					// `volume` and no applications array at all, and reading
 					// that as "our app is gone" throws away a transport that is
-					// still perfectly good — which costs the *next* load the
+					// still perfectly good - which costs the *next* load the
 					// whole GET_STATUS-and-LAUNCH path.
 					if (lists_applications(m)) {
 						std::string tid_now =
@@ -1963,12 +1962,12 @@ void CastManager::poll_loop()
 			}
 		catch (const std::exception& e) {
 			std::cout << stamp() << "Cast: poll_loop error: " << e.what()
-			          << " — reconnecting" << std::endl;
+			          << " - reconnecting" << std::endl;
 			std::this_thread::sleep_for(std::chrono::milliseconds(500));
 			}
 		catch (...) {
 			std::cout << stamp() << "Cast: poll_loop error: unknown exception"
-			          << " — reconnecting" << std::endl;
+			          << " - reconnecting" << std::endl;
 			std::this_thread::sleep_for(std::chrono::milliseconds(500));
 			}
 		}

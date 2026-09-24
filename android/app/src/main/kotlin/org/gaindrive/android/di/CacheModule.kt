@@ -49,7 +49,7 @@ object CacheModule {
 	 * Lives in `filesDir`, not `cacheDir`.
 	 *
 	 * The system empties `cacheDir` under storage pressure, which would delete
-	 * pinned downloads without warning — precisely when someone is offline and
+	 * pinned downloads without warning - precisely when someone is offline and
 	 * relying on them. The cost is that Android's "clear cache" no longer
 	 * touches this, which is why Settings has a flush of its own.
 	 */

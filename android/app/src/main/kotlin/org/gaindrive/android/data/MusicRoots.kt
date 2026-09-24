@@ -14,7 +14,7 @@ import javax.inject.Singleton
  * someone is browsing it. Re-asking on every chip press would put a request in
  * front of a control that should feel instant.
  *
- * It lives here rather than inside `LibraryRepository` — where it began — for
+ * It lives here rather than inside `LibraryRepository` - where it began - for
  * one structural reason: the repository injects `ServerRegistry`, so the
  * registry cannot reach back into it to invalidate a server whose browse mode
  * has just changed. A singleton of its own is injectable by both, and it is the
@@ -31,7 +31,7 @@ class MusicRoots @Inject constructor() {
 	 * The roots of [server], fetching them with [load] the first time.
 	 *
 	 * A failure caches nothing, so a server that was briefly unreachable is
-	 * asked again rather than being remembered as having no roots at all — which
+	 * asked again rather than being remembered as having no roots at all - which
 	 * would quietly hold its chips back for the rest of the session.
 	 */
 	suspend fun of(server: ServerId, load: suspend () -> List<MusicRoot>): List<MusicRoot> {

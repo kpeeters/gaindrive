@@ -7,8 +7,8 @@ import org.junit.Test
 
 /**
  * The wire format is hand-encoded, so nothing else checks it. A frame the
- * receiver cannot parse produces silence rather than an error — it simply
- * ignores the message — which is exactly the failure that is impossible to
+ * receiver cannot parse produces silence rather than an error - it simply
+ * ignores the message - which is exactly the failure that is impossible to
  * diagnose from the outside.
  */
 class CastMessageTest {
@@ -31,7 +31,7 @@ class CastMessageTest {
 	 */
 	@Test
 	fun `multi-byte characters round trip`() {
-		val payload = """{"title":"Björk — Jóga","artist":"日本語"}"""
+		val payload = """{"title":"Björk - Jóga","artist":"日本語"}"""
 		val body = CastMessage.body(CastNs.MEDIA, CastNs.SENDER, "transport-1", payload)
 		assertEquals(payload, CastMessage.payloadOf(body))
 	}

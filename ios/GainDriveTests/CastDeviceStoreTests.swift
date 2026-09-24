@@ -15,7 +15,7 @@ import Testing
 @MainActor
 struct CastDeviceStoreTests {
 	/// A defaults suite of its own per test, so nothing here reads or writes the
-	/// user's own — the shape `ServerConfigTests` uses.
+	/// user's own - the shape `ServerConfigTests` uses.
 	private func store() -> CastDeviceStore {
 		let suite = UserDefaults(suiteName: "cast-store-\(UUID().uuidString)")!
 		return CastDeviceStore(defaults: suite)
@@ -27,7 +27,7 @@ struct CastDeviceStoreTests {
 		store.save(device)
 		#expect(store.devices.count == 1)
 
-		// Saving the same id edits rather than appending — the editor hands
+		// Saving the same id edits rather than appending - the editor hands
 		// back the value it was given.
 		var edited = device
 		edited.name = "Kitchen speaker"
@@ -59,7 +59,7 @@ struct CastDeviceStoreTests {
 	}
 
 	/// The id is spelled exactly as the server spells it in `listCastDevices`,
-	/// so the two describe the same device by the same name — and it is derived
+	/// so the two describe the same device by the same name - and it is derived
 	/// rather than random, so it survives a restart.
 	@Test func theDerivedIdMatchesTheServersSpelling() {
 		let device = ManualCastDevice(address: "192.168.1.50", name: "Kitchen")
@@ -67,8 +67,8 @@ struct CastDeviceStoreTests {
 	}
 
 	/// A device that announces nothing is *capable* as far as anything acting on
-	/// it is concerned — refusing the picture on a guess is worse than the
-	/// guess — so nil is carried rather than false.
+	/// it is concerned - refusing the picture on a guess is worse than the
+	/// guess - so nil is carried rather than false.
 	@Test func aConfiguredDeviceAnnouncesNoCapabilities() {
 		let device = ManualCastDevice(address: "192.168.1.50", name: "Kitchen").device
 		#expect(device.videoOut == nil)
@@ -98,7 +98,7 @@ struct CastDeviceStoreTests {
 	}
 
 	/// A discovered device has no address until something has connected to it,
-	/// since `NWBrowser` reports a service — so before that both entries show,
+	/// since `NWBrowser` reports a service - so before that both entries show,
 	/// which is untidy and not wrong.
 	@Test func anUnprobedDiscoverySuppressesNothing() {
 		let store = store()

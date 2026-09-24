@@ -66,7 +66,7 @@ struct ChapterTests {
 	}
 
 	@Test func previousRestartsTheMarkerBeingPlayed() {
-		// Deep into chapter 2, "previous" means "start this song again" — the
+		// Deep into chapter 2, "previous" means "start this song again" - the
 		// behaviour every physical transport has.
 		#expect(set.previousTarget(from: 200) == 100)
 	}
@@ -121,7 +121,7 @@ struct ChapterTests {
 	}
 
 	@Test func containerMarkersSayWhereTheyCameFrom() throws {
-		// Worth carrying, because such a list is not in the scan's index — it
+		// Worth carrying, because such a list is not in the scan's index - it
 		// appears in the player and not in the album listing, which reads as a
 		// bug unless the panel says so.
 		let body: ChaptersBody = try decode(
@@ -217,7 +217,7 @@ struct ChapterTests {
 
 	@Test func untaggedAlbumsAreNumberedByPosition() {
 		// Every track tagged 1, or none tagged at all, carries no usable
-		// numbering — the same rule the web client and Android apply.
+		// numbering - the same rule the web client and Android apply.
 		let songs = [song("1", track: 1), song("2", track: 1), song("3")]
 		let rows = albumListRows(songs: songs, chapters: [:])
 		let numbers = rows.compactMap { row -> Int? in

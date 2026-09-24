@@ -25,7 +25,7 @@ import javax.inject.Singleton
  * the user tapped play is the worst possible place for it; doing it for the
  * *next* track while the current one plays moves it somewhere nobody is looking.
  *
- * Nothing here touches the audio cache. The response is thrown away — the point
+ * Nothing here touches the audio cache. The response is thrown away - the point
  * is the work the server does on the way to producing it.
  */
 @Singleton
@@ -41,8 +41,8 @@ class TranscodePrewarmer @Inject constructor(
 	/**
 	 * Cache keys warmed, or being warmed, this process.
 	 *
-	 * Transitions can fire more than once for the same track — a repeat, a seek
-	 * back across a boundary — and a second request would be wasted even though
+	 * Transitions can fire more than once for the same track - a repeat, a seek
+	 * back across a boundary - and a second request would be wasted even though
 	 * the server would answer it from its own cache. Synchronised because
 	 * [warm] can be entered concurrently for different tracks.
 	 */
@@ -74,8 +74,8 @@ class TranscodePrewarmer @Inject constructor(
 		// The original is served straight off disk with no ffmpeg involved, so
 		// there is no transcode to build and nothing to wait for. A declared
 		// format the server passes through costs the same nothing, but it
-		// cannot be recognised from here — whether a `.m4a` holds AAC or ALAC
-		// is not on a song entry — so that request goes out and finds a 206
+		// cannot be recognised from here - whether a `.m4a` holds AAC or ALAC
+		// is not on a song entry - so that request goes out and finds a 206
 		// waiting for it.
 		if (target.quality.format == AudioFormat.ORIGINAL) return
 

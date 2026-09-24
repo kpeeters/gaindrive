@@ -18,8 +18,8 @@ struct Cue: Hashable, Sendable {
 /// Reading the subtitles the server sends.
 ///
 /// **This exists because AVFoundation cannot be given one.** Its legible tracks
-/// come from the asset — embedded in the container, or declared as an HLS
-/// `EXT-X-MEDIA` rendition — and there is no API to attach an external file to
+/// come from the asset - embedded in the container, or declared as an HLS
+/// `EXT-X-MEDIA` rendition - and there is no API to attach an external file to
 /// a player item. `AVMutableComposition` composes tracks out of other *assets*
 /// and will not make one from a bare `.vtt`; `textStyleRules` styles cues that
 /// already exist; `AVPlayerItemLegibleOutput` reads them out rather than
@@ -28,7 +28,7 @@ struct Cue: Hashable, Sendable {
 /// ports here.
 ///
 /// The alternative was an HLS subtitle rendition, which the server could be
-/// taught to emit — but it would reach only the re-encode tier, since a direct
+/// taught to emit - but it would reach only the re-encode tier, since a direct
 /// or remuxable film is served as a file and never sees a playlist. Pushing
 /// those through HLS to gain captions would re-encode what could be served
 /// untouched, which is exactly what `nativeSeek` exists to prevent. Drawing the
@@ -41,12 +41,12 @@ enum WebVTT {
 	///
 	/// A cue is the only thing in the format containing `-->`, so this skips
 	/// the `WEBVTT` header, `NOTE` comments, `STYLE` blocks and optional cue
-	/// identifiers without needing to recognise any of them — which is what
+	/// identifiers without needing to recognise any of them - which is what
 	/// keeps a file with something unexpected in it from losing the cues that
 	/// are fine.
 	static func parse(_ source: String) -> [Cue] {
 		// A conversion upstream can emit CRLF, and a `\r` left on the end of a
-		// timestamp makes it unparseable — which loses every cue rather than
+		// timestamp makes it unparseable - which loses every cue rather than
 		// one.
 		let lines =
 			source
@@ -77,7 +77,7 @@ enum WebVTT {
 	/// What is on screen at `time`, or nothing.
 	///
 	/// The end is **exclusive**, so two cues that abut do not both show for the
-	/// instant they share. Genuinely overlapping cues do, joined — that is what
+	/// instant they share. Genuinely overlapping cues do, joined - that is what
 	/// overlapping means, and dropping one would silently lose a speaker.
 	static func showing(at time: Double, in cues: [Cue]) -> String? {
 		let active = cues.filter { time >= $0.start && time < $0.end }
@@ -88,7 +88,7 @@ enum WebVTT {
 	/// `hh:mm:ss.mmm` or `mm:ss.mmm`.
 	///
 	/// The fraction is a **decimal fraction of a second**, not a count of
-	/// milliseconds — `00:00.5` is half a second. The same trap the server's
+	/// milliseconds - `00:00.5` is half a second. The same trap the server's
 	/// `chapters.hh` calls out for the same reason.
 	static func timestamp(_ raw: String) -> Double? {
 		let parts = raw.trimmingCharacters(in: .whitespaces).components(separatedBy: ":")
@@ -106,7 +106,7 @@ enum WebVTT {
 		let halves = line.components(separatedBy: "-->")
 		guard halves.count == 2 else { return nil }
 		// **Cue settings follow the end time on the same line**, space
-		// separated — `line:0 position:20%`. Handing the whole remainder to the
+		// separated - `line:0 position:20%`. Handing the whole remainder to the
 		// timestamp parser fails, and failing here drops the cue rather than
 		// the setting.
 		let end = halves[1].trimmingCharacters(in: .whitespaces)
@@ -115,7 +115,7 @@ enum WebVTT {
 		return (start, finish)
 	}
 
-	/// ffmpeg's webvtt muxer carries inline markup through — `<i>`, and a
+	/// ffmpeg's webvtt muxer carries inline markup through - `<i>`, and a
 	/// `<v Name>` voice span. Nothing here renders it, so showing it literally
 	/// would be worse than dropping it.
 	private static func strippingTags(_ line: String) -> String {

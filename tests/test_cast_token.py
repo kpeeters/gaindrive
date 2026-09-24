@@ -3,16 +3,16 @@
 
 It exists for a cast this server is not driving. The Android and iOS apps hold
 their own Cast control channel and build the receiver's URLs themselves, and a
-receiver has no account — so those URLs used to carry `u`/`t`/`s`, which is the
+receiver has no account - so those URLs used to carry `u`/`t`/`s`, which is the
 account's password. The endpoint is therefore gated on authentication and
 **nothing else**: not `castRole`, and not the local-network rule the other cast
 endpoints carry, since a client casting for itself is not asking this server to
 cast. These tests are mostly about proving those two gates really are absent,
-and that the grant is bounded the way the absence assumes — one song, and that
+and that the grant is bounded the way the absence assumes - one song, and that
 song's stream, cover art and captions, and nothing else.
 
 The script creates a throwaway non-castRole account, uses it, and disables it
-on the way out — Subsonic has no deleteUser, the same compromise
+on the way out - Subsonic has no deleteUser, the same compromise
 `tests/test_authz.py` makes.
 
 Needs an admin account and at least one song. Start the server, then:
@@ -166,7 +166,7 @@ def test_token_is_scoped_to_one_song():
     tok = _get("getCastToken", {"id": SONGS[0]},
                user=PLAIN, password=PPASS)["castToken"]
     # Presenting it for another id must be refused exactly as if it were
-    # absent — which, with no credentials on the request, means unauthorised.
+    # absent - which, with no credentials on the request, means unauthorised.
     status, _, body = _raw("stream", {"id": SONGS[1], "castToken": tok})
     assert status != 200 or b"failed" in body[:400], (
         f"a grant for {SONGS[0]} served {SONGS[1]}: HTTP {status} {body[:200]!r}")
@@ -216,7 +216,7 @@ def test_the_cover_is_scoped_to_the_grant():
 
 
 def test_captions_get_past_authentication():
-    """Authorisation, not content — most test libraries have no subtitles.
+    """Authorisation, not content - most test libraries have no subtitles.
 
     Without a credential getCaptions answers a Subsonic auth error; with a
     valid grant it gets as far as looking, and answers 404 when there is
@@ -275,7 +275,7 @@ def test_the_account_ceiling_still_applies():
         return
     assert len(capped) < len(uncapped), (
         f"a 32 kbps cap produced {len(capped)} bytes against an uncapped "
-        f"{len(uncapped)} — the ceiling does not appear to be applied")
+        f"{len(uncapped)} - the ceiling does not appear to be applied")
 
 
 TESTS = [

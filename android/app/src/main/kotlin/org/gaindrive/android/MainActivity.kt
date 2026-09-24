@@ -63,7 +63,7 @@ class MainActivity : ComponentActivity() {
 		// Only on a genuinely new instance. A configuration change or a restore
 		// after process death arrives with the same intent still attached, and
 		// the navigation back stack has already been restored with the panel on
-		// it — reading the intent again would push a second copy of it, in front
+		// it - reading the intent again would push a second copy of it, in front
 		// of a user who may have backed out of the first.
 		if (savedInstanceState == null) {
 			takeSharedUrl(intent)

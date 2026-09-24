@@ -16,7 +16,7 @@ import Foundation
 ///
 /// A store rather than a fetcher, unlike `Accounts`: the caller does the
 /// request and only hands back what succeeded. That is what keeps the rule
-/// simple — **a failure caches nothing**, so a server that was briefly
+/// simple - **a failure caches nothing**, so a server that was briefly
 /// unreachable is asked again rather than remembered as having no roots at all,
 /// which would quietly hold its chips back for the rest of the session.
 ///
@@ -24,7 +24,7 @@ import Foundation
 /// is what waits on them: the first stream URL of a session blocks on an
 /// account's ceiling, where two concurrent asks would be two requests before
 /// the first note. Roots are read by a fan-out that already asks each server
-/// once, so the worst case is one extra `getMusicFolders` — cheap, idempotent,
+/// once, so the worst case is one extra `getMusicFolders` - cheap, idempotent,
 /// and not worth the machinery.
 actor MusicRoots {
 	private var cache: [ServerId: [MusicRoot]] = [:]

@@ -74,7 +74,7 @@ class RecentsViewModel @Inject constructor(
 
 	/**
 	 * Plays [song] with the rest of its album queued behind it, which is what
-	 * the web client does when a track is opened from a listing — playing a
+	 * the web client does when a track is opened from a listing - playing a
 	 * lone track and falling silent at the end of it is not what picking
 	 * something out of a history means.
 	 *

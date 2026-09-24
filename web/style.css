@@ -10,7 +10,7 @@
 
 /* ── Icons ─────────────────────────────────────────────────────────────────
    Material Symbols Rounded, served from the binary rather than from Google's
-   CDN — a server on a LAN with no route out still has to draw its own UI.
+   CDN - a server on a LAN with no route out still has to draw its own UI.
    Icons are named by ligature (<span class="mi">library_music</span>), so
    `font-feature-settings: 'liga'` is what makes them render at all.
 
@@ -302,12 +302,12 @@ body {
 
 /* The key cap beside a sidebar entry, drawn by keysNavHints() out of the
    shortcut table.  The overlay's cap (#keys-list kbd) fills with var(--bg),
-   which is the exact colour the two rules above paint — so a cap sharing that
+   which is the exact colour the two rules above paint - so a cap sharing that
    fill would disappear on the row the viewer is standing on, which is why this
    is its own rule rather than a second selector on that one.  Unfilled and
    outlined instead: --border reads against the sidebar's --surface and against
    the active row's --bg alike, so one cap works on both grounds.  It stays
-   --text-dim on the active row too — this is a hint, not part of the label.
+   --text-dim on the active row too - this is a hint, not part of the label.
 
    No mobile override is needed: the rule can only match inside #sidebar, which
    is display:none below 650px, and the caps are never built into #bottom-nav. */
@@ -691,7 +691,7 @@ body {
 }
 
 /* Casting: the panel replaces the picture, and the <video> is hidden rather
-   than removed — it is never re-parented, for the same reason the two surface
+   than removed - it is never re-parented, for the same reason the two surface
    states are a CSS change and not a DOM one. */
 #video-cast-panel { display: none; }
 
@@ -733,7 +733,7 @@ body {
 
 /* The second line of the panel, saying why there is no picture.  A shade below
    the device name above it, because it is the explanation and not the heading
-   — but only a shade: it was 0.75 opacity on top of an already dim colour,
+   - but only a shade: it was 0.75 opacity on top of an already dim colour,
    which compounded to roughly #666 on black and was the least readable thing
    on screen.  Stated as a colour rather than an opacity so the two cannot
    multiply again. */
@@ -762,7 +762,7 @@ body {
 }
 
 /* Both are absolute and inset:0, and while casting the panel is the one with
-   a background — so centring the notice too would print it over the device
+   a background - so centring the notice too would print it over the device
    name. It goes below the panel's centred column instead. */
 #video-surface.casting #video-preparing {
    align-items: flex-end;
@@ -827,7 +827,7 @@ body {
 }
 
 /* Transport over the picture: back 10, play/pause, forward 10.  Revealed by
-   exactly the four rules #video-close uses above, and for the same bargain —
+   exactly the four rules #video-close uses above, and for the same bargain -
    nothing is drawn over a film until the pointer says otherwise, and a touch
    device never hovers so it gets them unconditionally.
 
@@ -838,7 +838,7 @@ body {
    is where a transport is looked for, and it is the one region of the picture
    that is never a black bar.
 
-   z-index puts it over three siblings that are all absolute and inset:0 —
+   z-index puts it over three siblings that are all absolute and inset:0 -
    #video-restore, #video-preparing and #video-cast-panel, none of which
    declares one.  The panel matters: while the sound is on a receiver these
    still drive it, which is the case where the viewer is looking at this
@@ -908,7 +908,7 @@ body {
    and expand the surface. */
 #video-surface[data-state="minimised"] #video-controls { display: none; }
 
-/* Fullscreen is requested on the frame, which has no background of its own —
+/* Fullscreen is requested on the frame, which has no background of its own -
    it was showing the surface's until it became the fullscreen element. */
 #video-frame:fullscreen { background: #000; }
 
@@ -1132,8 +1132,8 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 #video-captions-menu button.current { color: var(--accent); }
 
-/* Same anchoring as the captions menu — this bar is the bottom edge, so both
-   open upward — but a panel rather than a list. */
+/* Same anchoring as the captions menu - this bar is the bottom edge, so both
+   open upward - but a panel rather than a list. */
 #video-sync-menu {
    position: absolute;
    right: 0;
@@ -1401,7 +1401,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
    color: var(--text-dim);
    line-height: 1.5;
    /* These fields are several paragraphs of plain text whose breaks are the
-      only structure they have, and a <p> collapses them — so a multi-paragraph
+      only structure they have, and a <p> collapses them - so a multi-paragraph
       biography used to render as one blob however it was inserted.  The server
       keeps \n through clean_prose() for this. */
    white-space: pre-line;
@@ -1491,7 +1491,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 /* Back out of the Uploads listing. Sits left of the title, so no auto
    margin; a plain icon button rather than a .back-link, which paneNav hides
-   whenever the leftmost pane is 0 — and this listing is pane 0. */
+   whenever the leftmost pane is 0 - and this listing is pane 0. */
 .uploads-back-btn {
    background: none;
    border: none;
@@ -1587,7 +1587,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
    than as an action available on them.
 
    The auto margin comes with .promote-btn and pushes whichever control is first
-   to the right edge — which matters because promote is admin-only and delete is
+   to the right edge - which matters because promote is admin-only and delete is
    not, so delete is often the only one there. Zeroed on the *second* of the
    pair, or the two would be split across the row. */
 .promote-btn + .delete-btn { margin-left: 0; }
@@ -1845,7 +1845,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
    background: var(--surface);
 }
 
-/* Column 1: icon slot — shows "add" on hover, "play_arrow" when playing.
+/* Column 1: icon slot - shows "add" on hover, "play_arrow" when playing.
 
    A box of fixed size that centres whatever is put in it, the same technique
    .mi and .sq-remove use to keep a glyph's own metrics out of the layout.  The
@@ -1897,7 +1897,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
    font-size: 1.5rem;
 }
 
-/* The track has been asked for but nothing is audible yet — most often the
+/* The track has been asked for but nothing is audible yet - most often the
    server transcoding it, which it does in full before sending a single byte,
    so there is nothing the browser can show from the response.  Everything but
    the glyph is inherited from the rule above; the slot's own size is fixed by
@@ -1929,7 +1929,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 /* The track's own artist, under its title. Always in a playlist, where every
    row may be by someone else; in an album listing only where the file's tag
-   names someone other than the folder — a guest, or a whole compilation. */
+   names someone other than the folder - a guest, or a whole compilation. */
 .track-artist {
    font-size: 0.75rem;
    color: var(--text-dim);
@@ -1941,7 +1941,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
    font-variant-numeric: tabular-nums;
 }
 
-/* Action icons — hidden until row is hovered */
+/* Action icons - hidden until row is hovered */
 .track-action {
    width: 1em;
    font-size: 0.95rem;
@@ -2000,7 +2000,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
    opacity: 1;
 }
 
-/* In the album detail header the star sits next to the title — always
+/* In the album detail header the star sits next to the title - always
    visible regardless of starred state. */
 .album-star-header {
    font-size: 1.5rem;
@@ -2033,7 +2033,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 .editing-tracks .view-header .refresh-btn { display: none; }
 
 /* Album title and artist, editable. They replace the .view-title heading inside
-   .view-header, which is a wrapping flex row — flex-basis pushes the artist onto
+   .view-header, which is a wrapping flex row - flex-basis pushes the artist onto
    its own line on a narrow pane rather than squeezing both to nothing. */
 .album-title-input {
    flex: 1 1 12ch;
@@ -2210,7 +2210,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 }
 
 /* Promote destination. .modal-box is a flex column with its own gap, so the
-   controls need no margins — only a width, since a bare select shrinks to its
+   controls need no margins - only a width, since a bare select shrinks to its
    longest option and a root named "music" would make a box narrower than the
    sentence above it. */
 #promote-root,
@@ -2463,7 +2463,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 /* ── Equaliser ─────────────────────────────────────── */
 
-/* Accent means engaged, exactly as it does on the cast button above — not
+/* Accent means engaged, exactly as it does on the cast button above - not
    "the panel is open", which the panel being on screen already says. */
 #player-eq-btn.active {
    color: var(--accent);
@@ -2471,7 +2471,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 /* Same upward-opening panel as #video-sync-menu, and for the same reason: the
    bar it hangs from is the bottom edge of the window.  Anchored to the bar
-   rather than to its own button, which is what makes it survive a phone — the
+   rather than to its own button, which is what makes it survive a phone - the
    right edge of the bar always has a panel's width to its left, while a button
    sitting in the middle of the bar does not.  z-index sits above the video
    surface (40) and below the modals (100), which is where it belongs in both
@@ -2588,7 +2588,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 }
 
 /* Off.  Dimmed as whole rows rather than control by control, so the panel
-   reads as one inert block below a checkbox that is still live — the head,
+   reads as one inert block below a checkbox that is still live - the head,
    which carries that checkbox and the preamp readout, keeps its colour. */
 #eq-panel.eq-off #eq-bands,
 #eq-panel.eq-off #eq-preset-row,
@@ -2667,14 +2667,14 @@ input.chapter-time.bad { border-color: #e06c6c; }
 }
 
 /* Delete is disabled for a built-in and for "Custom", which is most of the
-   time — so it has to look inert rather than merely unresponsive. */
+   time - so it has to look inert rather than merely unresponsive. */
 #eq-preset-row .mi:disabled {
    opacity: 0.4;
    cursor: default;
 }
 
 /* A bordered text button, the same one the dialogs use for Close and Stop
-   casting — this one commits something, so it should not read as an icon. */
+   casting - this one commits something, so it should not read as an icon. */
 #eq-save-go,
 #wiim-save-go {
    background: none;
@@ -2811,14 +2811,14 @@ input.chapter-time.bad { border-color: #e06c6c; }
    margin: 0;
 }
 
-/* Two columns — the device, and what to send it — and every row contributes
+/* Two columns - the device, and what to send it - and every row contributes
    its two cells directly.  A grid rather than a flex row per device because
    the widths have to agree *between* rows: the menu carries one of two pairs
    of phrases depending on what the receiver announced, so per-row boxes left
    every select a different width and the column visibly wandered.
 
    max-content on the second column is what makes them agree, sizing it to the
-   widest menu — the heading included — while the device takes the rest. */
+   widest menu - the heading included - while the device takes the rest. */
 #cast-device-list {
    display: grid;
    grid-template-columns: 1fr max-content;
@@ -2884,7 +2884,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 /* The number that picks this row.  Outlined and unfilled for the reason the
    sidebar's caps are: #cast-device-list button:hover fills with var(--bg), so a
    cap sharing that fill would vanish under the pointer.  It keeps --text-dim on
-   the connected row too, where the name goes accent — the number is not part of
+   the connected row too, where the name goes accent - the number is not part of
    what the row says, only of how to reach it. */
 .cast-row-key {
    flex-shrink: 0;
@@ -3046,7 +3046,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 /* The keyboard cursor.  A mark of its own rather than reusing .selected, which
    already means "this row's children are in the pane to the right", or
-   .playing, which means what it says — the cursor sits on a row that is
+   .playing, which means what it says - the cursor sits on a row that is
    neither, as often as not, so it has to compose with both instead of
    competing.  Hence an edge bar rather than a third background fill.
 
@@ -3061,17 +3061,17 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 /* Shortcut list.  Same two-column grid as the track-info modal, because it is
    the same shape of content: a short fixed label against prose.  Unavailable
-   shortcuts are dimmed rather than dropped — see the note in app.js. */
+   shortcuts are dimmed rather than dropped - see the note in app.js. */
 /* Wide enough for two columns of groups, and capped so it cannot outgrow a
    phone.  A definite width rather than shrink-to-fit, because a multi-column
-   container's column count is decided from the width it is given — left to
+   container's column count is decided from the width it is given - left to
    size itself from its own content that is circular, and browsers resolve it
    inconsistently.
 
    The height cap is the other half of the same complaint: .modal centres its
    box with no overflow of its own, so a box taller than the viewport is
    clipped at *both* ends and cannot be scrolled to. The box scrolls rather
-   than the list inside it — a multi-column container given a definite height
+   than the list inside it - a multi-column container given a definite height
    does not scroll down, it lays out *more columns* and overflows sideways,
    which would trade a clipped dialog for a horizontal scrollbar. */
 #keys-modal .modal-box {
@@ -3217,7 +3217,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
    background: var(--border);
 }
 /* Hide the broken-image icon before a portrait loads, and again whenever one
-   404s — which for an artist means "the server has not resolved this one yet",
+   404s - which for an artist means "the server has not resolved this one yet",
    not "there is none". app.js re-asks on a timer and clears .is-missing when a
    picture finally arrives. */
 .search-artist-img:not([src]),
@@ -3326,7 +3326,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 /* ── Admin / upload ────────────────────────────────── */
 
 /* The archive-upload form, at the top of the Library view's Uploads mode. No
-   horizontal padding of its own — .pane already provides it — and a bottom
+   horizontal padding of its own - .pane already provides it - and a bottom
    border so it reads as part of the header above rather than as the first row
    of the list below. */
 .upload-bar {
@@ -3401,10 +3401,10 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 /* ── Fetching from a URL ────────────────────────────── */
 
-/* min-width: 0 as well as flex: 1 — without it a long URL sets the input's
+/* min-width: 0 as well as flex: 1 - without it a long URL sets the input's
    min-content width and pushes the Fetch button out of the row. */
 /* A secret shown as discs without being an <input type="password">, which is
-   the point — see makeSecretInput() in app.js: a password field makes the
+   the point - see makeSecretInput() in app.js: a password field makes the
    browser's own manager treat the page as a login form and offer to store the
    token.  Only the prefixed property exists; where it is unsupported the box
    is a real password field instead, so there is nothing to fall back to here. */
@@ -3443,7 +3443,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 .name-clear:hover { color: var(--text); }
 
 /* "You already have this." Full-strength text rather than the dim of a hint,
-   so it is noticed — but deliberately *not* --accent, which is the red this
+   so it is noticed - but deliberately *not* --accent, which is the red this
    theme uses for errors: nothing here refuses an upload, and colouring it that
    way would read as a refusal. Reserves no height when empty, since it is empty
    most of the time and a permanent gap under the fields would be worse than a
@@ -3581,7 +3581,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
    height: 6px;
    }
 
-/* ── Admin — users ──────────────────────────────────── */
+/* ── Admin - users ──────────────────────────────────── */
 
 .admin-section {
    padding: 1rem 1.5rem;

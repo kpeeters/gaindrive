@@ -16,13 +16,13 @@ import Foundation
 /// that server as needing its credentials re-entered, 50 disables the offending
 /// feature for it, 70 is an ordinary "not found". The other servers carry on.
 enum SubsonicError: Error, Equatable, Sendable {
-	/// 10 — a required parameter was missing.
+	/// 10 - a required parameter was missing.
 	case missingParameter(String?)
-	/// 40 — wrong username or password.
+	/// 40 - wrong username or password.
 	case wrongCredentials(String?)
-	/// 50 — the account is not authorised for this operation.
+	/// 50 - the account is not authorised for this operation.
 	case notAuthorised(String?)
-	/// 70 — the requested data does not exist.
+	/// 70 - the requested data does not exist.
 	case notFound(String?)
 	/// Any other code the server chose to send.
 	case server(code: Int, message: String?)

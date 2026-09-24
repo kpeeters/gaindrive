@@ -51,7 +51,7 @@ data class StorageUiState(
 
 /**
  * Switches that share a slot in the outer `combine`, which is full at its typed
- * limit of five flows — the same squeeze [StoragePrefs] answers. They ride
+ * limit of five flows - the same squeeze [StoragePrefs] answers. They ride
  * together because there was room for one more value, not because they belong
  * together; all are unpacked into [SettingsUiState], which stays flat.
  */
@@ -181,7 +181,7 @@ class SettingsViewModel @Inject constructor(
 	 * with it off it stops being covered again. Without the refresh a pin would
 	 * only pick the change up the next time it was touched for another reason.
 	 *
-	 * Playback follows separately — `PlaybackService` watches the same flow and
+	 * Playback follows separately - `PlaybackService` watches the same flow and
 	 * re-resolves what is already queued.
 	 */
 	fun setVideoAudioOnly(enabled: Boolean) = viewModelScope.launch {
@@ -204,7 +204,7 @@ class SettingsViewModel @Inject constructor(
 	/**
 	 * Existing downloads are re-fetched at the new quality, since the bytes on
 	 * the device are the old one and a pin means "keep this, at the quality I
-	 * asked for". The old copies are not deleted — they stop being protected,
+	 * asked for". The old copies are not deleted - they stop being protected,
 	 * so eviction reclaims them when the space is next needed, and until then
 	 * they keep playing.
 	 */
@@ -231,7 +231,7 @@ class SettingsViewModel @Inject constructor(
 	 * Throws away every stored cover and portrait. No confirmation anywhere in
 	 * the UI: unlike the music cache this costs nothing but the next few
 	 * requests, and being able to press it twice without thinking is the point
-	 * — it exists for the case where the art on screen disagrees with the
+	 * - it exists for the case where the art on screen disagrees with the
 	 * server and nobody wants to work out why.
 	 */
 	fun clearImageCache() = viewModelScope.launch {

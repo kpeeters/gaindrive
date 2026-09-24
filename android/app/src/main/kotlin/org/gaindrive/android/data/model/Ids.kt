@@ -5,7 +5,7 @@ import java.util.UUID
 
 /**
  * Identifies a configured server. Generated locally when the server is added,
- * never derived from its URL — a server that moves from a LAN address to a
+ * never derived from its URL - a server that moves from a LAN address to a
  * domain name is still the same server, and its ids, starred items and queue
  * references have to survive the move.
  */
@@ -21,8 +21,8 @@ value class ServerId(val value: String) {
 
 /**
  * A Subsonic id together with the server that issued it. Subsonic ids are only
- * meaningful relative to their server — two servers will both have an artist
- * with id 42 — so no bare id may cross a layer boundary.
+ * meaningful relative to their server - two servers will both have an artist
+ * with id 42 - so no bare id may cross a layer boundary.
  */
 data class ItemRef(val server: ServerId, val id: String) {
 

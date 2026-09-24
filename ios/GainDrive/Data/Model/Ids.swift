@@ -40,8 +40,8 @@ struct ServerId: Hashable, Sendable, Codable, CustomStringConvertible {
 
 /// Every identifier that crosses a layer boundary.
 ///
-/// Subsonic ids are only meaningful relative to the server that issued them —
-/// two servers will both have an artist with id 42 — so a bare id string is
+/// Subsonic ids are only meaningful relative to the server that issued them -
+/// two servers will both have an artist with id 42 - so a bare id string is
 /// never enough. This is a value type, not a convention: bare ids must not
 /// appear in domain models, view-model state or navigation paths. The rule is
 /// enforceable by inspection. **If a function takes a `String` id and no

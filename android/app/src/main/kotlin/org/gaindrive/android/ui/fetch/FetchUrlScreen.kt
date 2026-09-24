@@ -61,7 +61,7 @@ import org.gaindrive.android.ui.components.relativeTime
  * confirmation. A fetch is a download and a scan on the far side, so it can take
  * minutes, and the shared URL has by then been consumed.
  *
- * **It does not own the job — `FetchMonitor` does, and leaving now stops
+ * **It does not own the job - `FetchMonitor` does, and leaving now stops
  * nothing.** This used to run the poll itself, in its own `viewModelScope`, on a
  * route that is a drill-down: leaving cancelled the poll and coming back built a
  * fresh view model with no job in it, so a fetch still downloading looked
@@ -108,8 +108,8 @@ fun FetchUrlScreen(
 				verticalArrangement = Arrangement.spacedBy(12.dp),
 			) {
 				// Editable, and pre-filled when a share supplied it. Two entry points
-				// share this screen — a share sheet, and the uploads listing's own
-				// row, which opens it with nothing — and the second needs a field
+				// share this screen - a share sheet, and the uploads listing's own
+				// row, which opens it with nothing - and the second needs a field
 				// here whatever the first would have preferred.
 				OutlinedTextField(
 					value = state.url,
@@ -127,7 +127,7 @@ fun FetchUrlScreen(
 
 				// Directly under the URL, not down with the names' own note.
 				// That one answers a question about the two name fields and sits
-				// under them; this answers a question about the URL — and unlike
+				// under them; this answers a question about the URL - and unlike
 				// that one it can disable the button, so it has to be beside the
 				// thing it disables rather than stacked into a paragraph the
 				// reader has to sort through.
@@ -191,8 +191,8 @@ private fun FetchForm(state: FetchUrlUiState, viewModel: FetchUrlViewModel) {
 		)
 	}
 
-	// What the two fields are called. Not a destination — an admin picks that
-	// when they promote this — only which words fit what is being filed.
+	// What the two fields are called. Not a destination - an admin picks that
+	// when they promote this - only which words fit what is being filed.
 	if (state.showKinds) {
 		Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
 			state.kinds.forEach { kind ->
@@ -206,7 +206,7 @@ private fun FetchForm(state: FetchUrlUiState, viewModel: FetchUrlViewModel) {
 		}
 	}
 
-	// Completed against the whole library — every slice, every server — and
+	// Completed against the whole library - every slice, every server - and
 	// against staging, so a name typed a second time in a different spelling is
 	// caught before it becomes a second artist.
 	SuggestingField(
@@ -243,7 +243,7 @@ private fun FetchForm(state: FetchUrlUiState, viewModel: FetchUrlViewModel) {
 	// Two things people get wrong about this screen and cannot tell by looking:
 	// that the names persist to the next fetch, and that nothing here reaches
 	// the shared library on its own. "Uploads" reads like part of the library
-	// and is not — only an admin can move something out of it.
+	// and is not - only an admin can move something out of it.
 	val handlers = state.target?.handlerNames.orEmpty().joinToString()
 	Text(
 		text = buildString {
@@ -301,7 +301,7 @@ private fun FetchForm(state: FetchUrlUiState, viewModel: FetchUrlViewModel) {
  *
  * A field rather than a picker, because most of what is filed here is new: the
  * suggestions exist to stop a *second spelling* of something already present,
- * not to constrain the answer. Each one says where it was found — a staging hit
+ * not to constrain the answer. Each one says where it was found - a staging hit
  * is a different fact from a library hit, and only the second means the thing is
  * actually in the shared library.
  */
@@ -399,8 +399,8 @@ private fun ServerPicker(
  * Every job the chosen server is reporting, newest first.
  *
  * A list rather than the single panel this replaced, because the screen adopts
- * whatever the account already has running — including a fetch begun in another
- * client — and a second one would otherwise be invisible. The web client's own
+ * whatever the account already has running - including a fetch begun in another
+ * client - and a second one would otherwise be invisible. The web client's own
  * bar has always drawn a list, for the same reason.
  */
 @Composable
@@ -439,7 +439,7 @@ private fun JobRow(job: FetchJobDto, onCancel: () -> Unit) {
 					// the library knows about it, which is the whole reason the
 					// server reports this state separately.
 					FetchState.SCANNING -> "Adding to the library"
-					FetchState.DONE -> "Done — ${job.files} file(s)"
+					FetchState.DONE -> "Done - ${job.files} file(s)"
 					FetchState.ERROR -> "Failed"
 					FetchState.CANCELLED -> "Cancelled"
 					// A state this build predates. Shown raw rather than hidden:
@@ -453,7 +453,7 @@ private fun JobRow(job: FetchJobDto, onCancel: () -> Unit) {
 			}
 		}
 
-		// What it is, so several rows are told apart — and so a job this panel
+		// What it is, so several rows are told apart - and so a job this panel
 		// did not start says what it is rather than only how far along it is.
 		Text(
 			text = jobLabel(job),
@@ -487,7 +487,7 @@ private fun JobRow(job: FetchJobDto, onCancel: () -> Unit) {
 
 		if (state == FetchState.DONE) {
 			// The names the *server* recorded, which are the typed ones only when
-			// they were typed — otherwise the handler took them from the title
+			// they were typed - otherwise the handler took them from the title
 			// and the phone never saw them.
 			val artist = job.artist.ifBlank { "the title's artist" }
 			val album = job.album.ifBlank { "the title's album" }
@@ -511,20 +511,20 @@ private fun jobLabel(job: FetchJobDto): String =
  * What to say about a URL that has been fetched before, or is being fetched now.
  *
  * **Advisory in every case except the live one**, which is the single refusal
- * the server would issue anyway — see `FetchUrlUiState.canSubmit`. A finished
+ * the server would issue anyway - see `FetchUrlUiState.canSubmit`. A finished
  * fetch is only reported: the panel cannot know that a second copy is not what
  * was wanted, which is the same rule the names' own note follows.
  *
  * A failed or cancelled attempt is phrased as neither a warning nor an
  * apology. It is a reason to try again, and it also explains why nothing turned
- * up in uploads — which is otherwise the most confusing outcome of the three.
+ * up in uploads - which is otherwise the most confusing outcome of the three.
  */
 private fun duplicateNote(job: FetchJobDto?): String? {
 	if (job == null) return null
 	val state = FetchState.of(job.state)
 	val when_ = relativeTime(job.finished) ?: "recently"
 	return when {
-		state.isLive -> "You are already fetching this URL — it is listed below."
+		state.isLive -> "You are already fetching this URL - it is listed below."
 		state == FetchState.DONE ->
 			"You fetched this URL $when_, and it produced ${job.files} file(s). " +
 				"Fetching it again makes a second copy."

@@ -10,7 +10,7 @@ import org.junit.Test
 
 /**
  * Status parsing reads JSON from a device we do not control, and every field is
- * optional in practice. The payloads below are shaped like real ones — see the
+ * optional in practice. The payloads below are shaped like real ones - see the
  * `Cast rx MEDIA_STATUS payload` lines the server logs.
  */
 class CastStatusTest {
@@ -44,7 +44,7 @@ class CastStatusTest {
 
 	/**
 	 * The receiver omits `media` on every push after the first, so duration
-	 * reads as zero. It is [CastSession]'s job to carry the old value forward —
+	 * reads as zero. It is [CastSession]'s job to carry the old value forward -
 	 * this only pins down that the parser reports "not stated" rather than
 	 * inventing something.
 	 */
@@ -153,7 +153,7 @@ class CastStatusTest {
 	 * both for "our app is not running" and for "this status was not about
 	 * applications at all". Only the first means the cached transport is stale.
 	 *
-	 * A volume push is the case that matters — it arrives during ordinary
+	 * A volume push is the case that matters - it arrives during ordinary
 	 * playback, and reading it as an app teardown threw away a working
 	 * transport, pushing the next load onto the slow LAUNCH path.
 	 */

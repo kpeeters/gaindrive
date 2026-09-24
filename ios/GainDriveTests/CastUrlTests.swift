@@ -13,7 +13,7 @@ import Testing
 
 /// The two pure decisions behind a URL a receiver fetches.
 ///
-/// Neither can be checked against hardware in any useful way — a missing `pace`
+/// Neither can be checked against hardware in any useful way - a missing `pace`
 /// shows up as music stopping ninety seconds in, half a minute after the cause,
 /// and a wrong codec verdict as a LOAD that fails twice and then says nothing.
 /// So they are checked here.
@@ -30,7 +30,7 @@ struct CastUrlTests {
 	}
 
 	/// **The existing query has to survive**, and all of it. `paced(_:)` must
-	/// not lose anything it is handed, whatever that is — which by the time a
+	/// not lose anything it is handed, whatever that is - which by the time a
 	/// cast URL is finished is a `castToken` rather than the credentials tested
 	/// here, since `withCastToken(_:_:)` swaps those out afterwards. The
 	/// assertion is about `paced` keeping its hands to itself, not about which
@@ -52,7 +52,7 @@ struct CastUrlTests {
 	}
 
 	/// A private address with a port is the ordinary shape of a self-hosted
-	/// server, and the one `NSAllowsLocalNetworking` does not cover — so it is
+	/// server, and the one `NSAllowsLocalNetworking` does not cover - so it is
 	/// worth knowing it survives this untouched.
 	@Test func pacingLeavesTheHostAlone() throws {
 		let paced = paced(try url("http://192.0.2.9:4040/rest/stream.view?id=7"))
@@ -112,7 +112,7 @@ struct CastUrlTests {
 	}
 
 	/// **Nil is the ordinary answer from a server too old to mint one**, and it
-	/// has to leave the URL exactly as it was — that URL still carries the
+	/// has to leave the URL exactly as it was - that URL still carries the
 	/// credentials and still works, which is what this app did before the
 	/// endpoint existed.
 	@Test func noTokenLeavesTheUrlAlone() throws {

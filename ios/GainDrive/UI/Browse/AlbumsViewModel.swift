@@ -34,7 +34,7 @@ final class AlbumsViewModel {
 	/// so there is no portrait to fetch and no biography to wait for.
 	@ObservationIgnored private let fromCategories: Bool
 	/// Which section's preference the sort belongs to, derived from the route
-	/// flags the listing was drilled in from — this used to read a stored
+	/// flags the listing was drilled in from - this used to read a stored
 	/// "current chip", which could disagree with the listing on screen.
 	@ObservationIgnored private let section: LibrarySection
 	@ObservationIgnored private var loaded = false
@@ -108,7 +108,7 @@ final class AlbumsViewModel {
 			//
 			// **Not at all for a categories section.** The server refuses the
 			// lookup for one (`is_category_folder()`), so the avatar would sit
-			// as a placeholder for ever while the fetch retried a 404 — and
+			// as a placeholder for ever while the fetch retried a 404 - and
 			// `AlbumsView` draws no header when both of these stay nil.
 			guard !self.fromCategories, let primary = refs.first else { return }
 			self.portrait = covers.source(primary, size: CoverSize.portrait)

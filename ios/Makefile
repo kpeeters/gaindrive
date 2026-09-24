@@ -1,5 +1,5 @@
 # Convenience targets for the iOS client. The server itself is built with
-# CMake — see CLAUDE.md. Everything here but `icon` runs on the macOS build
+# CMake. Everything here but `icon` runs on the macOS build
 # machine, which has its own checkout.
 
 # A formatter in the pipe below must not be able to turn a failed build into a
@@ -32,20 +32,20 @@ LOGO_ASSET := Resources/Assets.xcassets/Logo.imageset/gaindrive.svg
 #   make test DEST='platform=iOS Simulator,name=iPad Pro 13-inch (M4)'
 DEST ?= platform=iOS Simulator,name=iPhone 16
 
-# The Mac Catalyst destination — Xcode's "My Mac (Mac Catalyst)". The variant
+# The Mac Catalyst destination - Xcode's "My Mac (Mac Catalyst)". The variant
 # is what distinguishes it from a native macOS build, which this project does
 # not have; omitting it asks for a platform the target does not support.
 DEST_MAC ?= platform=macOS,variant=Mac Catalyst
 
 # xcodebuild echoes the entire compiler invocation for every file it touches,
-# which buries the handful of lines that matter — a failing build is thousands
+# which buries the handful of lines that matter - a failing build is thousands
 # of lines with four that say `error:`, and they are not at the end. `-quiet`
 # prints warnings, errors and the result and nothing else; what is left is
 # already clang-shaped, source line and caret included.
 #
 # `make build V=1` restores the full output, for when the problem is the build
-# system rather than the code — a missing file, a signing failure, a script
-# phase — which is exactly what -quiet hides.
+# system rather than the code - a missing file, a signing failure, a script
+# phase - which is exactly what -quiet hides.
 ifeq ($(V),1)
 XCFLAGS :=
 else
@@ -55,7 +55,7 @@ endif
 # Let xcodebuild create or update the provisioning profile itself.
 #
 # Xcode's GUI does this silently; xcodebuild refuses unless asked, and says so
-# with an error that names neither the cause nor the fix — "no profiles for
+# with an error that names neither the cause nor the fix - "no profiles for
 # org.gaindrive.ios were found". The cause is always the same: the entitlements
 # changed, so the existing profile no longer matches the app. `keychain-access-
 # groups` was the change that first triggered it, and any future capability will
@@ -84,7 +84,7 @@ generate: Local.xcconfig
 	  echo "Could not read version and build from ../VERSION."; exit 1; }
 	$(XCODEGEN) generate
 	@grep -q 'MARKETING_VERSION = $(GAINDRIVE_VERSION);' $(PROJECT)/project.pbxproj || { \
-	  echo "xcodegen did not substitute the version into the project — it is"; \
+	  echo "xcodegen did not substitute the version into the project - it is"; \
 	  echo "probably too old for \$${VAR} expansion in project.yml."; exit 1; }
 
 open: generate
@@ -119,8 +119,8 @@ test-mac: generate
 # artwork changes, and commit what it produces.
 art: icon logo
 
-# The app icon. graphics/gaindrive.svg is already a full-bleed square — brand
-# red to the edge, sand disc inside — so this is a straight rasterise with no
+# The app icon. graphics/gaindrive.svg is already a full-bleed square - brand
+# red to the edge, sand disc inside - so this is a straight rasterise with no
 # padding or background of its own.
 icon: $(ICON)
 
@@ -166,7 +166,7 @@ Local.xcconfig:
 	 '// Set DEVELOPMENT_TEAM to your ten-character Apple Developer Team ID to' \
 	 '// build on a device. The simulator does not need one.' \
 	 'DEVELOPMENT_TEAM =' > $@
-	@echo "Wrote $@ — set DEVELOPMENT_TEAM in it to build on a device."
+	@echo "Wrote $@ - set DEVELOPMENT_TEAM in it to build on a device."
 
 help:
 	@echo "Targets:"

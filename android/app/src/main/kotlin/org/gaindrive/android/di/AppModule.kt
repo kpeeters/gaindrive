@@ -32,7 +32,7 @@ object AppModule {
 	 *
 	 * Its settings are argued in `SubsonicJson`, because reading other people's
 	 * servers is the strictest constraint on it; the cast channel and the stored
-	 * server list also use it, and neither cares — leniency is a decoding
+	 * server list also use it, and neither cares - leniency is a decoding
 	 * concession and what this app writes it also wrote.
 	 */
 	@Provides
@@ -90,7 +90,7 @@ object AppModule {
 		}
 
 	/**
-	 * Application-lifetime scope for work that outlives any screen — the player
+	 * Application-lifetime scope for work that outlives any screen - the player
 	 * connection in particular, which must survive navigation.
 	 *
 	 * `Main.immediate` because most of it drives a [androidx.media3.session.MediaController],
@@ -105,7 +105,7 @@ object AppModule {
 
 	/**
 	 * Built from [AuthInterceptor.CLIENT_NAME] rather than repeating the name,
-	 * so the `c=` query parameter and the User-Agent cannot drift apart — a
+	 * so the `c=` query parameter and the User-Agent cannot drift apart - a
 	 * server reading one or the other should see the same client.
 	 *
 	 * Must not contain "Mozilla/": gaindrive tests the User-Agent for that

@@ -111,8 +111,8 @@ fun CoverThumb(url: String?, contentDescription: String?, size: Dp = 48.dp) {
  * circle. Layering means a failed load falls back for free.
  *
  * **A portrait 404 does not mean there is no portrait.** Unlike an album cover,
- * which is a file the server already has, an artist portrait has to be found —
- * MusicBrainz, then Wikidata, then Wikipedia, then a couple of others — and the
+ * which is a file the server already has, an artist portrait has to be found -
+ * MusicBrainz, then Wikidata, then Wikipedia, then a couple of others - and the
  * server does that on a background thread. The first request only pushes that
  * artist to the front of the queue and answers 404; the picture exists seconds
  * later. Without a retry nothing ever asks again, so the portrait appears only

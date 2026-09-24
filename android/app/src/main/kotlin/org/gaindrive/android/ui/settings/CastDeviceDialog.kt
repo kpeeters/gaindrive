@@ -24,7 +24,7 @@ import org.gaindrive.android.playback.cast.CastProbeResult
  *
  * A dialog rather than a screen of its own: three fields, one of them usually
  * left at its default, opened from a list that is itself a section of a larger
- * screen. It carries the only "Test" in the feature — a row is opened by
+ * screen. It carries the only "Test" in the feature - a row is opened by
  * tapping it, so testing a saved device costs the same one tap either way, and
  * one test surface means one piece of in-flight state to reason about.
  */

@@ -151,7 +151,7 @@ class DownloadQueue @Inject constructor(
 	 * existing download rather than create a second one: Media3's
 	 * `copyWithMergedRequest` keeps the new request's URI and custom cache key
 	 * when the ids match, so re-adding replaces the target in place. Everything
-	 * keyed by download id — `DownloadStates`, `pinPhaseOf`, the progress UI —
+	 * keyed by download id - `DownloadStates`, `pinPhaseOf`, the progress UI -
 	 * therefore needs no knowledge of quality at all.
 	 */
 	fun add(ref: ItemRef, target: StreamTarget) {

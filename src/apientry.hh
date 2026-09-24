@@ -35,7 +35,7 @@ std::string playlist_body(const MediaStore::PlaylistInfo& pl, bool use_json,
                           int max_bitrate);
 
 // Bridges MediaStore's song record to the streamer's.  Written once because
-// the video fields are easy to forget in an aggregate initialiser — and a
+// the video fields are easy to forget in an aggregate initialiser - and a
 // dropped is_video sends a video down the audio ladder, where TARGETS has no
 // entry for its container and the whole tier decision is skipped.
 // size_override exists for the Cast probe, which deliberately serves a slice.
@@ -50,14 +50,14 @@ int request_max_bitrate(const httplib::Request& req, MediaStore& store);
 //
 // This is validation rather than parsing, and it is load-bearing: `size`
 // reaches Streamer::video_ffmpeg_argv(), which splices it either side of the
-// `x` into an ffmpeg **filtergraph** — `scale=<W>:<H>:force_original_...`. A
+// `x` into an ffmpeg **filtergraph** - `scale=<W>:<H>:force_original_...`. A
 // filtergraph is its own language, it is not the shell but it is not inert
 // either, and `-vf` accepts source filters: `movie=` and `subtitles=` both
 // name a file to read, the latter rendering a text file straight into the
 // frames. The trailing option can be absorbed by ending an injected chain with
 // another scale, so there is no accidental protection in the concatenation.
 //
-// Everything else on that path was already safe — maxBitRate, timeOffset and
+// Everything else on that path was already safe - maxBitRate, timeOffset and
 // duration go through to_int() and come back out through std::to_string, and
 // `format` is whitelisted by target_for(). This was the one that was not.
 std::string sane_video_size(const std::string& s);

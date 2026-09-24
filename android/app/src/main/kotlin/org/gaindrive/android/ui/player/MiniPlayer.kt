@@ -34,15 +34,15 @@ import org.gaindrive.android.ui.components.CoverThumb
 /**
  * The persistent bar at the bottom of the content column. Sits in the app shell
  * rather than in the NavHost, so it survives navigation the way the web
- * client's fixed footer does — above the navigation bar on a phone, and beside
+ * client's fixed footer does - above the navigation bar on a phone, and beside
  * the rail on a tablet, which is where the web client's `#player` sits too.
  *
  * It draws no surface of its own and applies no window insets. Both belong to
  * the shell, which wraps this and the offline note in one surface and pads that
- * clear of the system bars — see the bottom bar in `GainDriveApp`. A second
+ * clear of the system bars - see the bottom bar in `GainDriveApp`. A second
  * tonal surface here would only double the tint.
  *
- * It has two forms, and it decides between them with [paneCount] — the same
+ * It has two forms, and it decides between them with [paneCount] - the same
  * threshold the pane strip uses, since "is there room for a second pane" and
  * "is there room for a real transport" are the same question and deserve one
  * answer. (Not quite the same *measurement*: the strip sits inside the
@@ -158,8 +158,8 @@ fun MiniPlayer(
 					}
 					// Offered for every video now that a film the server can
 					// only re-encode is cast as HLS. The one case left that
-					// cannot be cast — no direct route to the server, so the
-					// bridge would have to carry a playlist it cannot resolve —
+					// cannot be cast - no direct route to the server, so the
+					// bridge would have to carry a playlist it cannot resolve -
 					// is refused in words by PlayerConnection, because
 					// answering it here would mean a reachability probe this
 					// composable cannot await.
@@ -194,7 +194,7 @@ fun MiniPlayer(
 	}
 }
 
-/** Enough for a title and an artist, and no more — the rest is the scrub bar's. */
+/** Enough for a title and an artist, and no more - the rest is the scrub bar's. */
 private val WIDE_TITLE_WIDTH = 220.dp
 
 /** Zero rather than NaN before the player knows the duration. */

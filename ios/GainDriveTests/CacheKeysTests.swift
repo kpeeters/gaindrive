@@ -13,7 +13,7 @@ import Testing
 
 /// The key a download travels under.
 ///
-/// `ios/PLAN.md` asks for this by name, and the reason is that the failure is
+/// This test exists because the failure is
 /// silent: a key that does not round-trip matches nothing rather than
 /// throwing, and the symptom is a download that completes and then plays from
 /// the network anyway.

@@ -12,7 +12,7 @@ import Foundation
 ///
 /// There is a class of failure where **nothing fails**. The server keeps
 /// sending, the player keeps loading, no read times out and no error is ever
-/// raised — but the clock does not advance, so the spinner stays up for good.
+/// raised - but the clock does not advance, so the spinner stays up for good.
 /// HLS segments carrying the wrong timestamps did exactly this on Android. The
 /// loading machinery cannot notice, because from its point of view everything
 /// is working; only the position gives it away. That is a property of the
@@ -23,7 +23,7 @@ import Foundation
 /// for the same reason ExoPlayer's own flags were: they answer a different
 /// question, and are false in states that are not stalls.
 ///
-/// Shaped like `AudioSessionController` and `NowPlayingCenter` — callbacks as
+/// Shaped like `AudioSessionController` and `NowPlayingCenter` - callbacks as
 /// properties, wired once in `PlayerConnection.wireCallbacks()`.
 ///
 /// This is a safety net, not a diagnosis. It says only that something is
@@ -45,8 +45,8 @@ final class PlaybackWatchdog {
 	/// An init parameter so the tests can drive it in milliseconds.
 	///
 	/// Thirty seconds is long enough that a slow link is not mistaken for a
-	/// broken one — the player starts on a couple of seconds of buffer, so half
-	/// a minute without reaching that is not a bandwidth problem — and short
+	/// broken one - the player starts on a couple of seconds of buffer, so half
+	/// a minute without reaching that is not a bandwidth problem - and short
 	/// enough that nobody sits watching a spinner wondering.
 	///
 	/// **Video will need a second, much longer tier**, and phase 6 is where it
@@ -65,7 +65,7 @@ final class PlaybackWatchdog {
 	}
 
 	/// Called whenever the transport changes. Arms while stalled, disarms
-	/// otherwise — so a slow link that manages a second of playback between
+	/// otherwise - so a slow link that manages a second of playback between
 	/// stalls is never touched, because the timer measures one *continuous*
 	/// stretch.
 	func update() {
@@ -100,7 +100,7 @@ final class PlaybackWatchdog {
 	///
 	/// The position comparison is exact, and it can be. `PlayerConnection`
 	/// publishes `position` from the periodic time observer, which fires as the
-	/// timeline *advances* and therefore not at all during a stall — so a
+	/// timeline *advances* and therefore not at all during a stall - so a
 	/// changed value here means playback resumed, and an unchanged one means
 	/// nothing has moved since the timer was armed.
 	private func expire(startedAt position: Double) {

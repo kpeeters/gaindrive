@@ -82,7 +82,7 @@ class ChaptersApiTest {
 	fun `getChapters tolerates a bare marker and a zero duration`() = runTest {
 		// Both are ordinary rather than errors: the server reports an empty name
 		// exactly as the file holds it, and gives 0 for a span that is not
-		// positive — a marker past the end, or two on one timestamp.
+		// positive - a marker past the end, or two on one timestamp.
 		respond(
 			"""{"subsonic-response":{"status":"ok","chapters":{
 			     "id":"7","source":"sidecar","writable":true,"chapter":[

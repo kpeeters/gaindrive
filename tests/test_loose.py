@@ -7,7 +7,7 @@ album, so every loose file in it collapsed into one listing; the tests here are
 the shape of the difference, and each of them fails under the old rule.
 
 The load-bearing implementation fact is that such an album is an ordinary
-`folders` row whose `path` names the media file rather than a directory — so
+`folders` row whose `path` names the media file rather than a directory - so
 these also check the places that used to do filesystem work on a folder path
 and would now be handed a file: getAlbumTexts, getAlbumImages, getCoverArt.
 
@@ -50,7 +50,7 @@ def _get(endpoint, extra=None):
 
 
 def _raw(endpoint, extra=None):
-    """(status, content-type, body) — for the endpoints that return bytes."""
+    """(status, content-type, body) - for the endpoints that return bytes."""
     p = {"u": USER, "p": PASS, "v": VER, "c": CLIENT}
     if extra:
         p.update(extra)
@@ -87,7 +87,7 @@ def _find_file_album():
     the album is a file-album exactly when getAlbum returns one song whose
     `path` is the album's own folder path. `path` is not on the wire, so the
     proxy used here is a one-song album whose single song's suffix makes the
-    album's title plus that suffix the on-disk name — which is what the
+    album's title plus that suffix the on-disk name - which is what the
     scanner derives it from.
     """
     for artist in _artists():
@@ -155,7 +155,7 @@ def test_album_texts_of_a_file_album():
     It runs directory_iterator on the album folder, which throws for a file;
     the throw is swallowed, so the failure mode is a silent empty list rather
     than an error. What must hold is that it answers at all, and that whatever
-    it lists is the sidecar named after the file — never a `.chapters.txt`.
+    it lists is the sidecar named after the file - never a `.chapters.txt`.
     """
     album, _ = _find_file_album()
     if album is None:
@@ -213,7 +213,7 @@ def test_a_root_used_flat_lists_its_files_as_albums():
 
     This is the level-1 case, and the one that breaks silently: such an album
     is a level-1 folder row, which scan() reinstates from the database and
-    would otherwise hand to scan_artist_dir() — where fs::is_directory fails,
+    would otherwise hand to scan_artist_dir() - where fs::is_directory fails,
     the row reads as deleted, and every root-level album is pruned on every
     full scan. Run a full scan twice before trusting a pass here.
     """

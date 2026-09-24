@@ -9,13 +9,13 @@
 import Foundation
 
 extension Error {
-	/// A user-facing sentence for anything a request can fail with — the
+	/// A user-facing sentence for anything a request can fail with - the
 	/// counterpart of `Throwable.userMessage()` in `net/Errors.kt`.
 	///
 	/// Transport failures matter as much as Subsonic ones here, and more
 	/// often: the common case for a self-hosted server is that it is simply
 	/// switched off. `localizedDescription` alone would say "could not connect
-	/// to the server", which is true and useless — the question a user has at
+	/// to the server", which is true and useless - the question a user has at
 	/// that moment is whether they typed the address wrong or the machine is
 	/// down, and those are different sentences.
 	var userMessage: String {
@@ -51,7 +51,7 @@ extension Error {
 	/// would flash "this server did not answer" over the results on every
 	/// keystroke in search and on every change of scope.
 	///
-	/// Two types have to be checked because the two layers disagree —
+	/// Two types have to be checked because the two layers disagree -
 	/// `Task.checkCancellation` throws `CancellationError`, while `URLSession`
 	/// reports the same event as `URLError.cancelled`. Android needed
 	/// `runCatchingCancellable` for exactly this, having found that

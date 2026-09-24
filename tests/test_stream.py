@@ -104,7 +104,7 @@ def _read_for(endpoint, extra, secs):
 
 
 def _need_song():
-    assert SONG_ID, "no songs in the library — scan a collection first"
+    assert SONG_ID, "no songs in the library - scan a collection first"
 
 
 # ---- raw streaming ----------------------------------------------------
@@ -137,7 +137,7 @@ def test_opus_transcode_has_length():
                                "maxBitRate": "128"})
     assert status == 200, status
     assert hdrs.get("Transfer-Encoding") != "chunked", \
-        "transcoded response is still chunked — the cache did not engage"
+        "transcoded response is still chunked - the cache did not engage"
     clen = hdrs.get("Content-Length")
     assert clen and int(clen) == len(body), f"Content-Length {clen} vs {len(body)}"
     assert body.startswith(b"OggS"), f"not an Ogg stream: {body[:8]!r}"
@@ -217,8 +217,8 @@ def test_malformed_params_do_not_break_the_handler():
 # ---- pacing -----------------------------------------------------------
 #
 # pace=true asks the server to deliver at roughly 1x playback rate.  It exists
-# for a client that hands the URL to something else — a Cast receiver fetching
-# for itself — which the server cannot recognise from the request alone.  The
+# for a client that hands the URL to something else - a Cast receiver fetching
+# for itself - which the server cannot recognise from the request alone.  The
 # property being asserted is that the server *stops*: unpaced it writes the
 # whole track into the socket at once, blocks, and the idle connection is then
 # torn down by the receiver's own no-data timeout or by a reverse proxy's.

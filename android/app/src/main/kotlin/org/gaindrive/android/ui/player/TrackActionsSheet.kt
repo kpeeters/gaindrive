@@ -136,7 +136,7 @@ fun TrackActionsSheet(
 				// No download for a video being played as one. The byte cache is
 				// sized for tracks, and a video the server can only re-encode
 				// arrives with no Content-Length, so nothing could ever call the
-				// copy complete — the row would sit at "downloading" for good.
+				// copy complete - the row would sit at "downloading" for good.
 				// With "Play videos as audio only" on, what would be fetched is
 				// an ordinary audio transcode and neither objection holds.
 				if (!song.isVideo || videoDownloadable) {
@@ -156,7 +156,7 @@ fun TrackActionsSheet(
 
 /**
  * The playlists on the track's own server, plus a field for a new one. Only
- * that server's playlists are offered — one cannot hold a song from elsewhere.
+ * that server's playlists are offered - one cannot hold a song from elsewhere.
  */
 @Composable
 private fun PlaylistPicker(song: Song, playlists: AddToPlaylistViewModel) {

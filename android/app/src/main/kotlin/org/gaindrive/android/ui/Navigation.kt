@@ -14,11 +14,11 @@ import kotlinx.serialization.Serializable
  *
  * The interface itself is `@Serializable`, not only its members: the pane
  * strip stores a tab's path as a list of routes and needs the sealed
- * hierarchy's polymorphic serializer to write it. Navigation is unaffected —
+ * hierarchy's polymorphic serializer to write it. Navigation is unaffected -
  * it has always resolved each concrete member's own serializer.
  *
  * Detail routes carry an encoded [org.gaindrive.android.data.model.ItemRef]
- * rather than a bare id — a bare id would be ambiguous the moment a second
+ * rather than a bare id - a bare id would be ambiguous the moment a second
  * server is configured. The display name travels alongside so the app bar has
  * something to show before the body has loaded.
  */
@@ -27,7 +27,7 @@ sealed interface Route {
 
 	/**
 	 * The library's top-level list. With [uploads] set it is the account's
-	 * own uploads instead — same screen, same pane strip, different listing.
+	 * own uploads instead - same screen, same pane strip, different listing.
 	 * A route argument rather than two routes, because everything below the
 	 * top pane (albums, tracks) is identical.
 	 */
@@ -40,14 +40,14 @@ sealed interface Route {
 	 * has to ask all of them.
 	 *
 	 * [fromUploads] travels down from the Library tab's Uploads slice, and is
-	 * the *only* way anything below knows an album is a personal upload — an
+	 * the *only* way anything below knows an album is a personal upload - an
 	 * album ref says which server and which id, never where in the library it
 	 * sits, and the same album is reachable from search, starred and the play
 	 * queue where the answer would be no. Defaulted, so every one of those call
 	 * sites is unchanged and gets the safe answer.
 	 *
 	 * [fromCategories] is the same bargain for the Categories slice, and says
-	 * the artist is a *section* — Film, Series — rather than a performer. It
+	 * the artist is a *section* - Film, Series - rather than a performer. It
 	 * decides whether the header has a portrait and a biography to wait for:
 	 * a section has neither by construction, since the server refuses the
 	 * lookup for one. Defaulted for the same reason, so a section reached from
@@ -73,7 +73,7 @@ sealed interface Route {
 	 * about there being no `getSong` here, and about the queue: reading the
 	 * listing gives it the rest of the recording's album.
 	 *
-	 * It used to have a third reason, now gone — `nativeSeek` was false on
+	 * It used to have a third reason, now gone - `nativeSeek` was false on
 	 * every search result, because only `getAlbum`, `getMusicDirectory`,
 	 * `getVideos` and `getSong` selected the codec columns it is computed
 	 * from, so playing a hit directly sent a perfectly remuxable concert down
@@ -126,7 +126,7 @@ sealed interface Route {
 	data object SettingsAppearance : Route
 
 	/**
-	 * Null [serverId] means "add a server" — the same screen serves both.
+	 * Null [serverId] means "add a server" - the same screen serves both.
 	 * [firstRun] marks the copy a TV's empty first launch pushes: that one
 	 * offers no way back, because behind it there is only an empty list.
 	 */
@@ -140,7 +140,7 @@ sealed interface Route {
 	 * The URL travels in the route rather than in a holder somewhere, so
 	 * `SavedStateHandle.toRoute` restores it after a configuration change or
 	 * process death without the sharing app being involved again. It is already
-	 * the extracted link, not the shared text — see
+	 * the extracted link, not the shared text - see
 	 * [org.gaindrive.android.data.extractSharedUrl].
 	 *
 	 * A URL is full of characters a path segment cares about. That is safe for
@@ -155,7 +155,7 @@ sealed interface Route {
 	 *
 	 * Carries no argument: the surface shows what the player is playing, and an
 	 * id here could disagree with that the moment the queue advances. Leaving
-	 * the screen does not stop playback — the sound continues and the
+	 * the screen does not stop playback - the sound continues and the
 	 * mini-player takes over.
 	 */
 	@Serializable
@@ -164,7 +164,7 @@ sealed interface Route {
 	/**
 	 * The uploads listing, pushed from the Library screen's upload icon. A
 	 * shell destination rather than a pane, because it hosts a pane strip of
-	 * its own — the same artists/albums/tracks drill-down the Library tab has,
+	 * its own - the same artists/albums/tracks drill-down the Library tab has,
 	 * rooted at [Artists] with `uploads = true`.
 	 */
 	@Serializable
@@ -177,8 +177,8 @@ enum class TopLevel(
 	val label: String,
 	val icon: ImageVector,
 ) {
-	// The destination shows the whole library — categories and artists in one
-	// list — so the label names the place rather than one of the things it
+	// The destination shows the whole library - categories and artists in one
+	// list - so the label names the place rather than one of the things it
 	// holds. Route.Artists keeps its name to avoid churning navigation for a
 	// wording change.
 	ARTISTS(Route.Artists(), "Library", Icons.Default.LibraryMusic),

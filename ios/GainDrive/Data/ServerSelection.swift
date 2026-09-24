@@ -13,7 +13,7 @@ import Foundation
 ///
 /// **Every property here is computed.** There is no stored copy of the scope,
 /// the available servers or the badge names, so there is nothing that can fall
-/// out of step with the registry — disabling a server in Settings changes what
+/// out of step with the registry - disabling a server in Settings changes what
 /// this answers on the next read, with no notification to wire up. Because both
 /// `ServerRegistry` and `SettingsStore` are `@Observable`, that propagates to
 /// the views transitively.
@@ -45,7 +45,7 @@ final class ServerSelection {
 		}
 	}
 
-	/// Server names by id, for the row badges — **empty unless several servers
+	/// Server names by id, for the row badges - **empty unless several servers
 	/// are genuinely in play**. Badges therefore suppress themselves both in
 	/// single-server scope and when only one server is configured, without any
 	/// screen having to know that rule.
@@ -59,7 +59,7 @@ final class ServerSelection {
 	/// nothing.
 	var showsSelector: Bool { available.count > 1 }
 
-	/// Nothing to browse at all — which a fan-out cannot tell apart from a
+	/// Nothing to browse at all - which a fan-out cannot tell apart from a
 	/// library that is simply empty, since both come back with no rows and no
 	/// failures.
 	var hasNoServers: Bool { available.isEmpty }

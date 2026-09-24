@@ -11,7 +11,7 @@ import Foundation
 /// Where the hand-picked part of the queue ends and the automatic tail begins.
 ///
 /// A verbatim port of `playback/QueueBoundary.kt`, and pure arithmetic on
-/// purpose: these are one-line rules whose failure mode is severe — an
+/// purpose: these are one-line rules whose failure mode is severe - an
 /// off-by-one in `afterAppend` or `tailToDrop` means "add to queue" quietly
 /// deletes tracks the user still wanted.
 ///
@@ -40,7 +40,7 @@ struct QueueBoundary: Hashable, Sendable {
 	}
 
 	/// Removing *at* the boundary is a removal from the tail, not from the
-	/// manual region — the boundary is the first automatic entry, so it is
+	/// manual region - the boundary is the first automatic entry, so it is
 	/// itself automatic.
 	func afterRemove(at index: Int) -> QueueBoundary {
 		index < value ? QueueBoundary(value - 1) : self

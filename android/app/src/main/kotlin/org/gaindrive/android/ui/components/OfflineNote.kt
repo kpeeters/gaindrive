@@ -30,8 +30,8 @@ fun OfflineNote(online: Boolean, byChoice: Boolean) {
 		modifier = Modifier.fillMaxWidth(),
 	) {
 		Text(
-			text = if (byChoice) "Offline mode — only stored music can play"
-			else "No network — only stored music can play",
+			text = if (byChoice) "Offline mode - only stored music can play"
+			else "No network - only stored music can play",
 			style = MaterialTheme.typography.bodySmall,
 			textAlign = TextAlign.Center,
 			modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),

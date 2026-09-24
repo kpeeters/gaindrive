@@ -20,7 +20,7 @@ class MediaStore;
 // cover_thumbs table, and imagescale in front of both.
 //
 // It knows MediaStore and it knows how to run ffmpeg, but it knows nothing
-// about HTTP — the handler resolves an id into a CoverSource and then asks
+// about HTTP - the handler resolves an id into a CoverSource and then asks
 // only for bytes.
 class CoverArtCache
 	{

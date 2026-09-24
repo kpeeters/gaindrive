@@ -7,7 +7,7 @@
 // Chapter markers for a single-file concert or film.
 //
 // The list lives in a sidecar `<stem>.chapters.txt` beside the video, in the
-// format mp4chaps(1) exports — `HH:MM:SS.mmm Title`, one marker a line.  That
+// format mp4chaps(1) exports - `HH:MM:SS.mmm Title`, one marker a line.  That
 // is not an invention: `mp4chaps --export` writes exactly this file and
 // `--import` reads it back, so the markers can be moved into the container by
 // someone who wants them there.  Chapters are deliberately *not* written into
@@ -16,7 +16,7 @@
 // multi-gigabyte concert, needing that much free space as well as the time.
 //
 // Pure string work: no database, no filesystem, no ffmpeg.  Same reasoning as
-// videoname.hh — the rules get tuned against real files people typed by hand,
+// videoname.hh - the rules get tuned against real files people typed by hand,
 // and they are worth being able to test by running --chapters-test over one.
 //
 // The parse is deliberately liberal, because the other thing that lands in
@@ -36,7 +36,7 @@ struct Chapter
 	};
 
 // `skipped` counts lines that held no timestamp.  It exists so a caller can
-// tell a hand-written file that yielded nothing from no file at all — which
+// tell a hand-written file that yielded nothing from no file at all - which
 // matters here, because an *empty* sidecar is the tombstone meaning "this film
 // has no chapters" and must not be confused with a file full of typos.
 struct ChapterParse
@@ -49,7 +49,7 @@ struct ChapterParse
 // write path, because the format is line-based and has no escape syntax: a
 // newline inside a title would silently become another marker.  This is not
 // the same job as utf8_clean(), which validates the *encoding* and passes
-// control characters straight through — both are needed, and the endpoint does
+// control characters straight through - both are needed, and the endpoint does
 // the other one.
 std::string chapter_clean_name(std::string_view s);
 

@@ -14,7 +14,7 @@ import SwiftUI
 /// automatic eviction always earns is that it deletes the thing you were about
 /// to want, and pinning answers it from the other end: instead of policing what
 /// gets removed, you name what may never be removed. So this shows how much is
-/// used, lists the pins you placed, and has one button that empties the lot —
+/// used, lists the pins you placed, and has one button that empties the lot -
 /// `android/CACHING.md` reaches the same three.
 struct StorageSettingsView: View {
 	@Environment(SettingsStore.self) private var settings
@@ -35,7 +35,7 @@ struct StorageSettingsView: View {
 						Text(PinRepository.readable(choice)).tag(choice)
 					}
 				}
-				// The store enforces the cap, so lowering it has to reach it —
+				// The store enforces the cap, so lowering it has to reach it -
 				// otherwise the new limit takes effect only after something
 				// else happens to push the limits down.
 				.onChange(of: settings.cacheCapBytes) {

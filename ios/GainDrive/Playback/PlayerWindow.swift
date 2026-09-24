@@ -11,7 +11,7 @@ import Foundation
 /// What to do to the player's item list to make it match the queue.
 enum WindowEdit: Equatable {
 	case none
-	/// Keep the current item — and its buffer, and its playback position —
+	/// Keep the current item - and its buffer, and its playback position -
 	/// and replace what follows it.
 	case replaceTail([ItemRef])
 	case rebuild([ItemRef])
@@ -22,7 +22,7 @@ enum WindowEdit: Equatable {
 ///
 /// The distinction that matters is between `replaceTail` and `rebuild`.
 /// Rebuilding on every queue edit would remove and re-insert the head, which
-/// **restarts the track the user is listening to** — the kind of bug that is
+/// **restarts the track the user is listening to** - the kind of bug that is
 /// obvious the moment it happens and invisible in code review.
 enum PlayerWindow {
 	static func plan(current: [ItemRef], desired: [ItemRef]) -> WindowEdit {

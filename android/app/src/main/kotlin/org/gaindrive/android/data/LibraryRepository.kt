@@ -102,10 +102,10 @@ class LibraryRepository @Inject constructor(
 
 	/**
 	 * The Library screen's merged list: every category folder from every
-	 * `categories` root, and every artist — including all roots of a server
+	 * `categories` root, and every artist - including all roots of a server
 	 * that names no kinds; see `listingRequests`.
 	 *
-	 * A typed server is asked once per kind it has, concurrently — the halves
+	 * A typed server is asked once per kind it has, concurrently - the halves
 	 * are independent requests against the same session. A kind the server
 	 * lacks is not asked for at all rather than filtered out of an answer:
 	 * a server predating library roots ignores the unknown contentType
@@ -156,7 +156,7 @@ class LibraryRepository @Inject constructor(
 	}
 
 	/**
-	 * The uploads listing — this account's own on every server it may upload
+	 * The uploads listing - this account's own on every server it may upload
 	 * to, or everyone's where it is the admin. A server where it may not
 	 * upload contributes nothing rather than a failure: having no upload
 	 * rights on one server of several is a fact, not an outage.
@@ -196,8 +196,8 @@ class LibraryRepository @Inject constructor(
 
 	/**
 	 * Which sections the scope's roots offer, for the fetch panel's field
-	 * labels. Never contains [LibrarySection.UPLOADS] — uploads is not a kind
-	 * of root — and never empty: a server nothing is known about is assumed to
+	 * labels. Never contains [LibrarySection.UPLOADS] - uploads is not a kind
+	 * of root - and never empty: a server nothing is known about is assumed to
 	 * hold artists, which is what every Subsonic server without roots is.
 	 */
 	suspend fun availableSections(scope: BrowseScope): List<LibrarySection> {
@@ -229,7 +229,7 @@ class LibraryRepository @Inject constructor(
 	 * The union of one artist's albums across every server that has them.
 	 *
 	 * Takes a list because a merged artist row stands for several servers'
-	 * artists at once. Albums are not deduplicated — the same album on two
+	 * artists at once. Albums are not deduplicated - the same album on two
 	 * servers is two rows, each badged.
 	 */
 	suspend fun albumsOfArtist(refs: List<ItemRef>): MergedResult<List<Album>> {
@@ -286,13 +286,13 @@ class LibraryRepository @Inject constructor(
 		}
 
 	/**
-	 * Album with its tracks — one request, so the detail screen has something
+	 * Album with its tracks - one request, so the detail screen has something
 	 * to show as soon as possible. The notes live in [albumNotes] and must be
 	 * fetched separately: a lookup that may never succeed cannot be allowed to
 	 * cost the user their track list.
 	 *
 	 * "One request" holds for the tag hierarchy and for the common folder case.
-	 * An album whose discs are subfolders costs one more round — see
+	 * An album whose discs are subfolders costs one more round - see
 	 * `FolderSource`, which is where that is arranged rather than here.
 	 */
 	suspend fun albumDetail(album: ItemRef): AlbumDetail? =
@@ -320,7 +320,7 @@ class LibraryRepository @Inject constructor(
 	 *
 	 * Read from the scan's index rather than from each file, which is what
 	 * makes it affordable on a browse path: `getChapters` per item would be a
-	 * file read — or an `ffprobe` for a video without a sidecar — every time
+	 * file read - or an `ffprobe` for a video without a sidecar - every time
 	 * somebody opens an album. The playback path uses the file instead; see
 	 * [ChapterTracks].
 	 *
@@ -341,7 +341,7 @@ class LibraryRepository @Inject constructor(
 					.map { it.toDomain(album.server) }
 			}
 		}.getOrElse { return local.chaptersOfAlbum(album) }
-		// An entry with no markers cannot happen — the server omits those — but
+		// An entry with no markers cannot happen - the server omits those - but
 		// dropping one here is what lets every caller treat "in the map" and
 		// "has chapters" as the same question.
 		val bySong = found.filter { it.chapters.isNotEmpty() }
@@ -375,7 +375,7 @@ class LibraryRepository @Inject constructor(
 	}
 
 	/**
-	 * One server's playlists, for the "add to playlist" picker — it can only
+	 * One server's playlists, for the "add to playlist" picker - it can only
 	 * offer the playlists of the server that owns the track.
 	 */
 	suspend fun playlistsOf(server: ServerId): List<Playlist> {
@@ -411,7 +411,7 @@ class LibraryRepository @Inject constructor(
 	): LibrarySelection = withServer(server) { client, config ->
 		// Which search endpoint is asked follows the browse mode, because a
 		// result is only useful if the id it carries is one the rest of the mode
-		// can open — see BrowseSource.search.
+		// can open - see BrowseSource.search.
 		val found = config.browseSource
 			.search(client, server, query, artistCount, albumCount, songCount, chapterCount)
 		// Any chapter hits ride along in `found` and are dropped here: the
@@ -422,7 +422,7 @@ class LibraryRepository @Inject constructor(
 
 	/**
 	 * Emits a cumulative result as each server answers rather than waiting for
-	 * the slowest — with several servers configured, the fastest usually has
+	 * the slowest - with several servers configured, the fastest usually has
 	 * what the user was looking for.
 	 *
 	 * Every emission is rebuilt in registry order from what has arrived so far,
@@ -515,7 +515,7 @@ class LibraryRepository @Inject constructor(
 	/**
 	 * Recently played, grouped by server. A gaindrive extension, so a server
 	 * that does not implement it contributes an empty section rather than a
-	 * failure — the feature being absent is not the server being down.
+	 * failure - the feature being absent is not the server being down.
 	 */
 	suspend fun recentSongs(scope: BrowseScope, size: Int = 50): MergedResult<List<ServerSection<Song>>> =
 		fanOutSections(scope) { client, config ->
@@ -527,7 +527,7 @@ class LibraryRepository @Inject constructor(
 
 	/**
 	 * Reports a play. Failures are swallowed: a lost scrobble costs a play
-	 * count, whereas letting it propagate would interrupt playback — a bad
+	 * count, whereas letting it propagate would interrupt playback - a bad
 	 * trade in a music player.
 	 */
 	suspend fun scrobble(ref: ItemRef, submission: Boolean) {
@@ -551,7 +551,7 @@ class LibraryRepository @Inject constructor(
 	/**
 	 * Moves an album out of the account's uploads into the shared library.
 	 *
-	 * Admin only, and the server is the one that enforces that — asking here as
+	 * Admin only, and the server is the one that enforces that - asking here as
 	 * well would be a second copy of a rule that can change under us. A refusal
 	 * arrives as a [org.gaindrive.android.net.SubsonicException] for the caller
 	 * to show.
@@ -560,13 +560,13 @@ class LibraryRepository @Inject constructor(
 	 * mirror of that server is dropped, because the move happened on its disk
 	 * and every stored id and index bucket beneath the album now names something
 	 * that is not there. And [LibraryRevision] is bumped, because the two
-	 * listings that changed — the uploads slice it left and the library slice it
-	 * joined — are both screens the user is *not* looking at, so nothing else
+	 * listings that changed - the uploads slice it left and the library slice it
+	 * joined - are both screens the user is *not* looking at, so nothing else
 	 * would ever correct them.
 	 */
 	/**
 	 * Whether this account administers [server], which is what [promoteAlbum]
-	 * needs. False for a server that is not configured or did not answer — a
+	 * needs. False for a server that is not configured or did not answer - a
 	 * permission guessed present would be an action that fails when used.
 	 */
 	suspend fun isAdminOn(server: ServerId): Boolean {
@@ -584,8 +584,8 @@ class LibraryRepository @Inject constructor(
 		withServer(server) { client, config -> rootsOf(client, config) }
 
 	/**
-	 * The existing level-1 folders of one root — artists under an `artists`
-	 * root, categories under a `categories` one — for the promote picker's
+	 * The existing level-1 folders of one root - artists under an `artists`
+	 * root, categories under a `categories` one - for the promote picker's
 	 * suggestions.
 	 *
 	 * Asked by `musicFolderId` rather than by content type, because a
@@ -603,13 +603,13 @@ class LibraryRepository @Inject constructor(
 	/**
 	 * Moves an album out of the account's uploads into the shared library.
 	 *
-	 * Admin only, and the server is the one that enforces that — asking here as
+	 * Admin only, and the server is the one that enforces that - asking here as
 	 * well would be a second copy of a rule that can change under us. A refusal
 	 * arrives as a [org.gaindrive.android.net.SubsonicException] for the caller
 	 * to show.
 	 *
 	 * [musicFolderId] and [folder] say where it lands: a root, and one level
-	 * under it. Both are required by the server, and non-null here to say so —
+	 * under it. Both are required by the server, and non-null here to say so -
 	 * they were briefly optional and each default was a guess that filed things
 	 * wrongly, the root one unable to reach a `categories` root at all.
 	 *
@@ -621,8 +621,8 @@ class LibraryRepository @Inject constructor(
 	 * mirror of that server is dropped, because the move happened on its disk
 	 * and every stored id and index bucket beneath the album now names something
 	 * that is not there. And [LibraryRevision] is bumped, because the two
-	 * listings that changed — the uploads slice it left and the library slice it
-	 * joined — are both screens the user is *not* looking at, so nothing else
+	 * listings that changed - the uploads slice it left and the library slice it
+	 * joined - are both screens the user is *not* looking at, so nothing else
 	 * would ever correct them.
 	 */
 	suspend fun promoteAlbum(album: ItemRef, musicFolderId: String, folder: String) {
@@ -637,7 +637,7 @@ class LibraryRepository @Inject constructor(
 	/**
 	 * Removes one of the account's own uploaded albums from the server.
 	 *
-	 * Irreversible — the files go from the server's disk — and the server is
+	 * Irreversible - the files go from the server's disk - and the server is
 	 * what enforces that this is the caller's own upload rather than anything
 	 * else with a folder id. A refusal arrives as a
 	 * [org.gaindrive.android.net.SubsonicException] for the caller to show.
@@ -686,12 +686,12 @@ class LibraryRepository @Inject constructor(
 	/** Only after the call succeeds: a failed edit changed nothing. */
 	private fun bumpPlaylists() = _playlistRevision.update { it + 1 }
 
-	/** The configured servers, in registry order — which is the merge tie-break. */
+	/** The configured servers, in registry order - which is the merge tie-break. */
 	suspend fun enabledServers(): List<ServerConfig> = registry.enabledServers.first()
 
 	/**
 	 * A URL builder covering every enabled server. Resolve once per screen
-	 * load and reuse for the whole list — see [CoverUrls] on why not per item.
+	 * load and reuse for the whole list - see [CoverUrls] on why not per item.
 	 */
 	suspend fun coverUrls(): CoverUrls = withContext(Dispatchers.IO) {
 		CoverUrls(enabledServers().associate { it.id to clients.clientFor(it) })
@@ -709,7 +709,7 @@ class LibraryRepository @Inject constructor(
 	): T = withServer(server) { client, _ -> block(client) }
 
 	/**
-	 * As [onServer], but handing the block the configuration too — which the
+	 * As [onServer], but handing the block the configuration too - which the
 	 * hierarchy queries need in order to know which of the two ways of reading
 	 * it this server is set to. A sibling rather than a wider [onServer]: most
 	 * of its callers name an endpoint that works the same either way, and would
@@ -827,7 +827,7 @@ class LibraryRepository @Inject constructor(
 	): Gathered<T> = coroutineScope {
 		// Offline: no request, and no failure note either. A per-server
 		// "unreachable" banner on every screen would be noise when being
-		// offline is the state the user asked for — the one banner above the
+		// offline is the state the user asked for - the one banner above the
 		// player has already said it.
 		if (offline) {
 			return@coroutineScope Gathered(
@@ -865,7 +865,7 @@ class LibraryRepository @Inject constructor(
 	)
 
 	/**
-	 * The server first, the mirror only if it fails — and the original error if
+	 * The server first, the mirror only if it fails - and the original error if
 	 * the mirror has nothing either.
 	 *
 	 * Rethrowing matters: "the server is unreachable" and "there is no such

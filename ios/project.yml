@@ -1,6 +1,5 @@
 # The single source of truth for the Xcode project. GainDrive.xcodeproj is
-# generated from this file and is not committed — see PLAN.md, "Project
-# generation", for why.
+# generated from this file and is not committed.
 #
 # Run `make` after changing anything here.
 
@@ -60,7 +59,7 @@ settings:
   #     SWIFT_ACTIVE_COMPILATION_CONDITIONS: GD_GLASS_HEADERS
 
 # Mac Catalyst, giving the "My Mac (Mac Catalyst)" destination from the same
-# single target and the same sources. PLAN.md, "Mac Catalyst", records why this
+# single target and the same sources. Why this
 # rather than a native macOS target: AVAudioSession, which the interruption and
 # route-change handling is built on, does not exist on macOS.
 #
@@ -77,7 +76,7 @@ settingGroups:
     # The default (YES) would ship the Mac build as
     # `maccatalyst.org.gaindrive.ios`. One identifier across both is what
     # universal purchase expects, and it keeps `Bundle.main.bundleIdentifier`
-    # the same constant everywhere — the tests assert on it and would otherwise
+    # the same constant everywhere - the tests assert on it and would otherwise
     # need a platform branch.
     DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
     # The macOS contemporary of the iOS 18 floor, so an availability guard never
@@ -96,7 +95,7 @@ targets:
         excludes:
           - ".gitkeep"
           - "**/.gitkeep"
-      # Neither of these is a bundle resource — the plist is the target's own,
+      # Neither of these is a bundle resource - the plist is the target's own,
       # and the entitlements are consumed by the code signer. Including either
       # as a resource would copy a second, redundant, confusing copy into the
       # app. PrivacyInfo.xcprivacy is the one file here that *is* a resource.
@@ -124,7 +123,7 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Resources/Info.plist
         # iPhone and iPad from one adaptive layout. The iPad idiom is also what
-        # makes Mac Catalyst possible at all — a phone-only target is not
+        # makes Mac Catalyst possible at all - a phone-only target is not
         # offered the destination.
         TARGETED_DEVICE_FAMILY: "1,2"
 
@@ -134,7 +133,7 @@ targets:
         #
         # Scoped to the Mac build rather than applied to both. A Catalyst
         # target compiles against the macOS SDK, which is what the condition
-        # keys on, and the two entitlements in the file mean nothing on iOS —
+        # keys on, and the two entitlements in the file mean nothing on iOS -
         # where the app is sandboxed unconditionally and may open outgoing
         # connections without asking. Handing them to the iOS signer instead of
         # withholding them buys nothing and gives provisioning one more thing

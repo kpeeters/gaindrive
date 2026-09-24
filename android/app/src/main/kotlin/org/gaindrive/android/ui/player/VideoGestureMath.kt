@@ -7,8 +7,8 @@ enum class SideControl { Brightness, Volume }
  * The control a touch at [x] starts, or null where a touch starts nothing.
  *
  * Pure arithmetic over pixels, and separate from the gesture that calls it
- * because the two things most easily got wrong here — which side is which, and
- * where the zones stop — are silent when wrong and cheap to test.
+ * because the two things most easily got wrong here - which side is which, and
+ * where the zones stop - are silent when wrong and cheap to test.
  *
  * Two parts of the width are deliberately not zones. The outer [edgeInset] is
  * left to the system: from Android 10 the screen edges are the back-gesture

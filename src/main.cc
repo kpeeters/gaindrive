@@ -203,7 +203,7 @@ static bool validate_cast_devices(
 			return false;
 			}
 		// Named separately from any other failure, because "use the IP" is the
-		// fix and nothing else would suggest it — a hostname otherwise reaches
+		// fix and nothing else would suggest it - a hostname otherwise reaches
 		// the startup probe and comes back as an ordinary "unreachable".
 		if (!is_ip_literal(d.address)) {
 			err = "cast device address '" + d.address
@@ -216,7 +216,7 @@ static bool validate_cast_devices(
 			return false;
 			}
 		// Two entries at one address would carry the same derived id, and
-		// startCast picks the first id that matches — so the second would be
+		// startCast picks the first id that matches - so the second would be
 		// unselectable rather than merely redundant.
 		if (!addresses.insert(d.address).second) {
 			err = "duplicate cast device address '" + d.address + "'";
@@ -251,7 +251,7 @@ static void restore_termios_and_die(int sig)
 
 // Reads one line with terminal echo turned off, so a password never lands on
 // screen or in a scrollback buffer. Falls back to an ordinary read when stdin
-// is not a terminal — callers only get here after checking isatty(), so that
+// is not a terminal - callers only get here after checking isatty(), so that
 // is a redirected-stdin corner case rather than the normal path.
 static bool read_hidden(const char* prompt, std::string& out)
 	{
@@ -354,7 +354,7 @@ static int run_chapters_test(const std::string& target)
 // one line of output each so a table in tests/test_untrusted.py can compare
 // them. It exists for the reason --artist-pick-test and --video-name-test do:
 // this is where a wrong answer would come from, so it is the part worth being
-// able to exercise directly — and a rule about hostile input is only as good
+// able to exercise directly - and a rule about hostile input is only as good
 // as the cases somebody wrote down.
 //
 // Non-printable input has to survive getting here, so a value may carry \xNN,
@@ -373,7 +373,7 @@ static std::string untrusted_unescape(const std::string& in)
 			case 't':  out += '\t'; break;
 			case '\\': out += '\\'; break;
 			// Parsed by hand rather than with std::stoi, which *throws* on a
-			// pair that is not hex — in a mode whose whole subject is
+			// pair that is not hex - in a mode whose whole subject is
 			// malformed input, a fixture typo should be a visible passthrough
 			// and not an abort.
 			case 'x': {
@@ -568,7 +568,7 @@ static int run_tmdb_pick_test(const std::string& title, int year, bool tv)
 	}
 
 // --url-fetch-test: which handler claims a URL, and exactly what would be run
-// for it. A dry run — nothing is fetched and nothing is written.
+// for it. A dry run - nothing is fetched and nothing is written.
 //
 // This is where an operator's own handler entry is debugged. The mistakes it
 // catches are the ones that are otherwise invisible: a pattern that matches
@@ -667,7 +667,7 @@ int main(int argc, char* argv[])
 	// socket BIO and httplib both pass MSG_NOSIGNAL there; Darwin has no such
 	// flag and issues a plain write(), so a Chromecast dropping its TLS
 	// connection during SSL_write would take the whole process down.
-	// ffmpeg inherits this — SIG_IGN survives exec — which is also what we
+	// ffmpeg inherits this - SIG_IGN survives exec - which is also what we
 	// want: it exits non-zero on a closed pipe instead of dying by signal, and
 	// every ffmpeg call site already handles a non-zero exit.
 	signal(SIGPIPE, SIG_IGN);
@@ -763,7 +763,7 @@ int main(int argc, char* argv[])
 			}
 		CastManager cast;
 		auto result = cast.probe(one.front());
-		std::cout << one.front().address << ":" << one.front().port << " — "
+		std::cout << one.front().address << ":" << one.front().port << " - "
 		          << CastManager::probe_text(result) << std::endl;
 		return result == CastManager::Probe::ANSWERED ? 0 : 1;
 		}
@@ -777,7 +777,7 @@ int main(int argc, char* argv[])
 		bool        frames = args.count("video-art-frames") > 0;
 		// The embedded tier is forced on here whatever the configuration says,
 		// because answering "is there a cover inside this file" is the whole
-		// job of this flag — with the tier off as it is by default, the tool
+		// job of this flag - with the tier off as it is by default, the tool
 		// would report nothing for every file and tell you nothing about your
 		// collection. --video-art-frames is still honoured, so what this
 		// prints for the *second* tier is what a scan would store.
@@ -806,8 +806,8 @@ int main(int argc, char* argv[])
 
 	// Standalone check of what the scaler makes of one image, with no server,
 	// no database and no library.  Every future report about cover art on this
-	// path is really asking one of two questions — can gaindrive decode this
-	// file, and what does it produce — and this answers both without needing
+	// path is really asking one of two questions - can gaindrive decode this
+	// file, and what does it produce - and this answers both without needing
 	// the file to be in a collection first.
 	if (args.count("image-scale-test")) {
 		std::string in = args["image-scale-test"].as<std::string>();
@@ -837,7 +837,7 @@ int main(int argc, char* argv[])
 		for (int px : {64, 80, 96, 128, 144, 160, 256, 288, 320, 512, 640, 800}) {
 			auto s = imagescale::scale_to_fit(raw, px, imagescale::Fit::Short);
 			std::cout << "  size=" << px << ": ";
-			if (!s.ok) { std::cout << "FAILED — " << s.error << "\n"; continue; }
+			if (!s.ok) { std::cout << "FAILED - " << s.error << "\n"; continue; }
 			std::cout << s.width << "x" << s.height << ", " << s.bytes.size()
 			          << " bytes, " << s.mime
 			          << (s.bytes.size() == raw.size()
@@ -882,7 +882,7 @@ int main(int argc, char* argv[])
 	}
 
 	// Which peers' X-Forwarded-For may be believed. Empty here means "leave
-	// the built-in default", which is loopback — the reverse proxy the
+	// the built-in default", which is loopback - the reverse proxy the
 	// packaging sets up. It is a list rather than a flag because the header is
 	// what the login throttle keys on, so believing it from the wrong peer
 	// means an attacker choosing their own rate-limit bucket.
@@ -891,7 +891,7 @@ int main(int argc, char* argv[])
 		trusted_proxies = args["trusted-proxy"].as<std::vector<std::string>>();
 
 	// The origin this server is reachable at, when it is not the one clients
-	// name in Host — i.e. behind a reverse proxy. Everything a Chromecast is
+	// name in Host - i.e. behind a reverse proxy. Everything a Chromecast is
 	// told to fetch is built on it; the fallback is the request's own Host
 	// header, which is right on a LAN and attacker-chosen on the internet.
 	std::string public_url;
@@ -923,7 +923,7 @@ int main(int argc, char* argv[])
 	    ? 0 : args["video-art-px"].as<int>();
 	bool        video_art_frames    = args.count("video-art-frames") > 0;
 	bool        video_art_embedded  = args.count("video-art-embedded") > 0;
-	// nullopt until the config file says otherwise — see the note at the read.
+	// nullopt until the config file says otherwise - see the note at the read.
 	std::optional<std::vector<UrlHandler>> url_handlers;
 	int         url_fetch_timeout   = 2 * 60 * 60;
 
@@ -1021,7 +1021,7 @@ int main(int argc, char* argv[])
 				video_art_frames = cfg["video_art_frames"].get<bool>();
 			if (cfg.contains("video_art_embedded") && !args.count("video-art-embedded"))
 				video_art_embedded = cfg["video_art_embedded"].get<bool>();
-			// Config file only — a regex plus an argv template is not a sane
+			// Config file only - a regex plus an argv template is not a sane
 			// command-line argument, and a cxxopts vector option splits on
 			// commas anyway. Follows flat_multi_disc, which has no flag either.
 			//
@@ -1197,7 +1197,7 @@ int main(int argc, char* argv[])
 	// Clamped rather than rejected: a number out of range is a typo, most
 	// likely in a config file whose author may not be reading this log, and
 	// refusing to start over it is worse than starting sensibly and saying so.
-	// The upper bound is about the disk, not the machine — see
+	// The upper bound is about the disk, not the machine - see
 	// MediaStore::scan_jobs_, which is also where 0 is resolved, so it must
 	// pass through here rather than being warned up to 1.
 	if (scan_jobs < 0 || scan_jobs > 16) {
@@ -1264,8 +1264,8 @@ int main(int argc, char* argv[])
 		}
 
 	// --add-user: create a user in the DB and exit without starting the server.
-	// Opening the database writes — the journal_mode pragma, the ATTACH, the
-	// schema DDL, the root reconciliation — so a database locked by another
+	// Opening the database writes - the journal_mode pragma, the ATTACH, the
+	// schema DDL, the root reconciliation - so a database locked by another
 	// process, or a corrupt one, throws out here. Report it instead of letting
 	// it reach the default terminate handler and abort.
 	try {
@@ -1312,7 +1312,7 @@ int main(int argc, char* argv[])
 
 		// A library root can only come from the command line or the config
 		// file, so a server started without one has nothing to serve and no
-		// way of being given anything — hence an error rather than an empty
+		// way of being given anything - hence an error rather than an empty
 		// library. It is checked here rather than with the rest of the root
 		// validation because a first start reads no music: it creates the
 		// account and stops, and complaining about a library it was never

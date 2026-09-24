@@ -58,7 +58,7 @@ def test_get_indexes():
         for a in artists:
             assert a.get("id"), "Artist missing id"
             assert a.get("name"), "Artist missing name"
-    print(f"PASS  getIndexes — {len(index_list)} index letters, "
+    print(f"PASS  getIndexes - {len(index_list)} index letters, "
           f"{sum(len(i.findall(f'{{{NS}}}artist')) for i in index_list)} artists")
 
 
@@ -67,7 +67,7 @@ def test_get_indexes_ignoredArticles():
     indexes = root.find(f"{{{NS}}}indexes")
     arts = indexes.get("ignoredArticles", "")
     assert "The" in arts, "ignoredArticles should contain 'The'"
-    print("PASS  getIndexes — ignoredArticles present")
+    print("PASS  getIndexes - ignoredArticles present")
 
 
 def test_get_music_directory_artist():
@@ -75,7 +75,7 @@ def test_get_music_directory_artist():
     root = _get("getIndexes.view")
     indexes = root.find(f"{{{NS}}}indexes")
     first_artist = indexes.find(f".//{{{NS}}}artist")
-    assert first_artist is not None, "No artists found — run scan first"
+    assert first_artist is not None, "No artists found - run scan first"
 
     artist_id = first_artist.get("id")
     droot = _get("getMusicDirectory.view", {"id": artist_id})
@@ -86,7 +86,7 @@ def test_get_music_directory_artist():
     assert len(children) > 0, "Artist directory has no children"
     dirs = [c for c in children if c.get("isDir") == "true"]
     assert len(dirs) > 0, "Expected album sub-directories"
-    print(f"PASS  getMusicDirectory (artist) — {len(dirs)} albums in "
+    print(f"PASS  getMusicDirectory (artist) - {len(dirs)} albums in "
           f"'{directory.get('name')}'")
 
 
@@ -95,7 +95,7 @@ def test_get_music_directory_album():
     root = _get("getIndexes.view")
     indexes = root.find(f"{{{NS}}}indexes")
     first_artist = indexes.find(f".//{{{NS}}}artist")
-    assert first_artist is not None, "No artists found — run scan first"
+    assert first_artist is not None, "No artists found - run scan first"
 
     # Drill into first artist, grab first album.
     droot = _get("getMusicDirectory.view", {"id": first_artist.get("id")})
@@ -117,7 +117,7 @@ def test_get_music_directory_album():
         assert s.get("title"), "Song missing title"
         assert s.get("duration"), "Song missing duration"
         assert s.get("contentType"), "Song missing contentType"
-    print(f"PASS  getMusicDirectory (album) — {len(songs)} songs in "
+    print(f"PASS  getMusicDirectory (album) - {len(songs)} songs in "
           f"'{adirectory.get('name')}'")
 
 
@@ -126,7 +126,7 @@ def _artist_fields_ok(song, where):
     with the rule the server applies to them."""
     for f in ("artist", "displayArtist", "displayAlbumArtist"):
         assert song.get(f) is not None, (
-            f"{where}: song {song.get('id')} has no {f} attribute — "
+            f"{where}: song {song.get('id')} has no {f} attribute - "
             "OpenSubsonic requires a supported field to be sent even when empty"
         )
     assert song.get("displayArtist") == song.get("artist"), (
@@ -134,7 +134,7 @@ def _artist_fields_ok(song, where):
         f"artist {song.get('artist')!r}"
     )
     # artist falls back to the folder's artist, so it is empty only when that
-    # is too — never merely because the file carries no tag.
+    # is too - never merely because the file carries no tag.
     if song.get("displayAlbumArtist"):
         assert song.get("artist"), (
             f"{where}: song {song.get('id')} has an album artist but no artist"
@@ -145,7 +145,7 @@ def _first_album_songs():
     """The songs of the first album the library offers, however it is shaped."""
     root = _get("getIndexes.view")
     first_artist = root.find(f".//{{{NS}}}artist")
-    assert first_artist is not None, "No artists found — run scan first"
+    assert first_artist is not None, "No artists found - run scan first"
     droot = _get("getMusicDirectory.view", {"id": first_artist.get("id")})
     directory = droot.find(f"{{{NS}}}directory")
     album = next(
@@ -154,7 +154,7 @@ def _first_album_songs():
     )
     # Every album is a child directory now, a loose file's own album included,
     # so an artist with nothing under it has nothing to test.
-    assert album is not None, "First artist holds no albums — run scan first"
+    assert album is not None, "First artist holds no albums - run scan first"
     target = album.get("id")
     aroot = _get("getMusicDirectory.view", {"id": target})
     adir = aroot.find(f"{{{NS}}}directory")
@@ -168,12 +168,12 @@ def test_song_artist_fields():
     This is the contract of artist_of() seen from outside: displayAlbumArtist
     is the folder-derived artist, artist is the file's own when it names
     somebody else, and both OpenSubsonic fields are always present. Checked on
-    more than one endpoint deliberately — the columns are selected by thirteen
+    more than one endpoint deliberately - the columns are selected by thirteen
     separate queries, and one of them forgetting is exactly the failure this
     catches.
     """
     album_id, songs = _first_album_songs()
-    assert songs, "No songs found — run scan first"
+    assert songs, "No songs found - run scan first"
     for s in songs:
         _artist_fields_ok(s, "getMusicDirectory")
 
@@ -212,7 +212,7 @@ def test_song_artist_fields():
         for s in root.findall(f".//{{{NS}}}{tag}"):
             _artist_fields_ok(s, endpoint)
 
-    print(f"PASS  song artist fields — {len(songs)} songs, "
+    print(f"PASS  song artist fields - {len(songs)} songs, "
           f"endpoints: {', '.join(checked)}")
 
 
@@ -220,7 +220,7 @@ def test_album_video_count():
     """videoCount agrees with the album's own tracks, on all three endpoints.
 
     The field is emitted from three separate queries, so the failure this
-    catches is one of them forgetting the column — which looks like "some
+    catches is one of them forgetting the column - which looks like "some
     albums have no icon" rather than like an error.
 
     Videos are a property of the collection, so a library with none skips
@@ -276,9 +276,9 @@ def test_album_video_count():
             f"getAlbumList album {a.get('id')} has no videoCount"
 
     if not checked:
-        print("SKIP  album videoCount — no albums found")
+        print("SKIP  album videoCount - no albums found")
         return
-    print(f"PASS  album videoCount — {checked} albums checked, "
+    print(f"PASS  album videoCount - {checked} albums checked, "
           f"{with_video} holding video")
 
 

@@ -10,9 +10,9 @@ import Foundation
 
 /// Which order an artist's albums are listed in.
 ///
-/// `year` is what the server answers with — `get_artist()` in
+/// `year` is what the server answers with - `get_artist()` in
 /// `src/mediastore.cc` ends its query `ORDER BY al.year, al.title COLLATE
-/// NOCASE` — and is the default here for that reason. It is right for a
+/// NOCASE` - and is the default here for that reason. It is right for a
 /// discography and useless for a film category, where the only thing anyone
 /// knows about an item is its name.
 ///
@@ -41,7 +41,7 @@ enum AlbumSort: String, CaseIterable, Sendable {
 	/// The year arm reproduces the server's own `ORDER BY`: an album with no
 	/// year sorts first, as it does under SQLite, where the column is NULL
 	/// rather than zero. `caseInsensitiveCompare` stands in for `COLLATE
-	/// NOCASE`, and is deliberately the *non*-localised comparison — a sort
+	/// NOCASE`, and is deliberately the *non*-localised comparison - a sort
 	/// that changed with the phone's region would make a test that passes here
 	/// fail there.
 	///
@@ -52,7 +52,7 @@ enum AlbumSort: String, CaseIterable, Sendable {
 	///
 	/// Sorting is worth doing even under `year`, which is what the server
 	/// already answered with: a merged artist's albums arrive as one server's
-	/// list concatenated with another's — `Merge.albums` keeps arrival order —
+	/// list concatenated with another's - `Merge.albums` keeps arrival order -
 	/// so the union was never in year order at all.
 	func precedes(_ lhs: Album, _ rhs: Album) -> Bool {
 		switch self {

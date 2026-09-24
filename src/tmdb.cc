@@ -28,7 +28,7 @@ static const char* POSTER_SIZE = "w500";
 
 // Minimum gap between requests. TMDB has relaxed its published rate limits,
 // but a first scan of a large library is a long burst from one address and
-// there is nothing to gain by hurrying it — the scan is already in the
+// there is nothing to gain by hurrying it - the scan is already in the
 // background.
 static constexpr auto REQUEST_GAP = std::chrono::milliseconds(250);
 
@@ -46,8 +46,8 @@ static constexpr time_t READ_TIMEOUT_S    = 20;
 // socket that was already dead and reconnected anyway, which looks identical
 // from here and costs exactly what it cost before.
 //
-// A keep-alive socket does die — the peer or something between it and us can
-// close it while nothing is in flight — and httplib handles that itself: it
+// A keep-alive socket does die - the peer or something between it and us can
+// close it while nothing is in flight - and httplib handles that itself: it
 // polls the socket before writing, and closes and reconnects when it finds it
 // gone.  So there is no retry to add here.
 //
@@ -69,7 +69,7 @@ static httplib::SSLClient& client_for(
 
 // How many search results to consider before giving up. TMDB sorts by
 // popularity, and the right answer for a badly named file is regularly not
-// first — "Zulu" (1964) sits behind "Zulu" (2013).
+// first - "Zulu" (1964) sits behind "Zulu" (2013).
 static constexpr int MAX_CANDIDATES = 10;
 
 // Containment only counts when the shorter folded title is at least this
@@ -83,8 +83,8 @@ static constexpr size_t MIN_CONTAIN_FOLD = 5;
 // Non-ASCII bytes are dropped rather than kept, which is weakly better in
 // every case: when both sides carry the same accents they still agree, and
 // when they do not, keeping the bytes would not have made them agree either.
-// It does mean a title whose accents the filename lost — "Amelie" against
-// "Amélie" — will not match here, and is left to be rejected. That is the
+// It does mean a title whose accents the filename lost - "Amelie" against
+// "Amélie" - will not match here, and is left to be rejected. That is the
 // safe direction, and it is what an explicit [tmdbid=…] in the filename is
 // for. Real Unicode folding would need a dependency this does not justify.
 static std::string fold(const std::string& s)
@@ -104,9 +104,9 @@ static int year_of(const std::string& date)
 	}
 
 // Every field here goes through jsonread.hh, never through value(): TMDB
-// sends null rather than omitting — a search result with no poster is
+// sends null rather than omitting - a search result with no poster is
 // "poster_path": null, and a film with no announced date is
-// "release_date": null — and value() throws on that, which aborted a whole
+// "release_date": null - and value() throws on that, which aborted a whole
 // scan on the first such result. The rule and the rest of the reasoning are
 // at the definitions.
 static TmdbMatch match_from(const nlohmann::json& j, bool tv)
@@ -114,8 +114,8 @@ static TmdbMatch match_from(const nlohmann::json& j, bool tv)
 	TmdbMatch m;
 	m.is_tv       = tv;
 	m.id          = jint(j, "id");
-	// Cleaned here because this is where both shapes land — the search result
-	// and the detail body — so one site covers every route a match arrives by.
+	// Cleaned here because this is where both shapes land - the search result
+	// and the detail body - so one site covers every route a match arrives by.
 	// untrusted.hh says what a control character costs in each response
 	// format; the title is the sharper case of the two, since it overwrites
 	// albums.title and songs.title and so appears as an XML *attribute* in
@@ -163,7 +163,7 @@ void Tmdb::set_api_key(std::string api_key)
 	std::lock_guard<std::mutex> lock(mu_);
 	api_key_ = std::move(api_key);
 	// A different key is a different account, and the map may never have been
-	// fetched successfully under the old one — an empty map that believes it
+	// fetched successfully under the old one - an empty map that believes it
 	// is loaded would silently drop every genre for the rest of the run.
 	genre_names_.clear();
 	genre_names_loaded_ = false;
@@ -208,7 +208,7 @@ std::optional<std::string> Tmdb::get(const std::string& path,
 	if (r->status == 401) {
 		// Worth its own line: every lookup will fail the same way, and the
 		// cause is a setting rather than anything about the file.
-		std::cout << stamp() << "tmdb: HTTP 401 — the API key is not accepted"
+		std::cout << stamp() << "tmdb: HTTP 401 - the API key is not accepted"
 		          << std::endl;
 		return std::nullopt;
 		}
@@ -234,7 +234,7 @@ static std::optional<TmdbMatch> pick_impl(const std::string& results_json,
 	std::string want = fold(title);
 
 	if (year > 0) {
-		// A year within one is a match. The gap is normal — TMDB records the
+		// A year within one is a match. The gap is normal - TMDB records the
 		// release date, and a filename usually carries the production year.
 		//
 		// The year alone is not enough: a parse that mangled the title still
@@ -269,7 +269,7 @@ static std::optional<TmdbMatch> pick_impl(const std::string& results_json,
 	// With no year there is nothing to verify against but the title itself, so
 	// the bar is an exact one. Anything looser confidently attaches the wrong
 	// plot and poster to a vaguely named file, and nothing in the UI would
-	// signal that it is wrong — which is worse than leaving it bare.
+	// signal that it is wrong - which is worse than leaving it bare.
 	for (int i = 0; i < n; ++i) {
 		TmdbMatch m = match_from(results[i], tv);
 		if (fold(m.title) == want) return m;
@@ -304,7 +304,7 @@ std::optional<TmdbMatch> tmdb_pick(const std::string& results_json,
 // they do not, so a per-type map would only make the lookup need a media type
 // that resolve_genres() does not have to hand.
 //
-// Not called with mu_ held — get() takes it itself, and pace() sleeps while
+// Not called with mu_ held - get() takes it itself, and pace() sleeps while
 // holding it. The flag is set only after both requests have been attempted,
 // and only when at least one produced names: an empty map marked loaded would
 // silently drop every genre for the life of the object, which is the failure
@@ -379,8 +379,8 @@ std::optional<TmdbMatch> Tmdb::search(const std::string& title, int year,
 
 	// The year is deliberately *not* sent as a query parameter. TMDB treats it
 	// as a hard filter, so a film whose release year differs from the one in
-	// the filename by one — a festival year against a general release, which
-	// is common — would come back empty rather than come back close.
+	// the filename by one - a festival year against a general release, which
+	// is common - would come back empty rather than come back close.
 	//
 	// encode_query_component, not encode_uri: the latter leaves '&' and '='
 	// alone, which a film title can contain. space_as_plus=false keeps the

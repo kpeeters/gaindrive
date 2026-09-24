@@ -2,7 +2,7 @@
 """Query listCastDevices and print any Chromecast devices found on the LAN.
 
 Given a device and a song as well, start a session and check that castLoad and
-castSession describe it identically — they must, since castSession exists only
+castSession describe it identically - they must, since castSession exists only
 so a reloaded page can recover what castLoad already said, and a disagreement
 would show as a client whose info panel changed on refresh.
 
@@ -119,7 +119,7 @@ if before is not None:
     print(f"videoPref restored to {before!r}.\n")
 
 # castLoad's reply and castSession's snapshot describe the same load and are
-# required to agree — the second exists only because a reloaded page has no
+# required to agree - the second exists only because a reloaded page has no
 # first to have read. Nothing else checks that, and a client drawing one thing
 # before a reload and another after would be reporting the reload rather than
 # the stream. So compare them here rather than by eye in a browser.
@@ -187,7 +187,7 @@ if "wiim" in model.lower():
     print(f"WiiM presets: {pr!r}")
 
 # A receiver demuxes no more containers than a browser does, so a video whose
-# container a browser will not take must still be remuxed for it — whatever any
+# container a browser will not take must still be remuxed for it - whatever any
 # *client* said about what it can demux itself.  `playable` on
 # stream.view moves an .mkv to the direct tier for the request that sent it, and
 # it must never reach this decision: the LOAD above announced a contentType

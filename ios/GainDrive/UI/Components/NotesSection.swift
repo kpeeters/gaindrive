@@ -24,7 +24,7 @@ struct ExternalLink: Identifiable, Hashable, Sendable {
 /// Prose plus its external links, mirroring `ui/components/Notes.kt`.
 ///
 /// Shared between the artist biography and the album notes so the two cannot
-/// drift — they are the same shape and came from the same upstream.
+/// drift - they are the same shape and came from the same upstream.
 struct NotesSection: View {
 	let text: String?
 	let links: [ExternalLink]

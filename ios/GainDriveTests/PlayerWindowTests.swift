@@ -11,7 +11,7 @@ import Testing
 
 @testable import GainDrive
 
-/// The reconcile decision, tested without a player — which is the reason it was
+/// The reconcile decision, tested without a player - which is the reason it was
 /// extracted from one.
 struct PlayerWindowTests {
 	private let server = ServerId()

@@ -17,7 +17,7 @@ import Foundation
 /// supplies both halves.
 ///
 /// **Every token is a `container/codec` pair**, compared against the container
-/// and codec the server's scan *observed* — `songs.audio_container` and
+/// and codec the server's scan *observed* - `songs.audio_container` and
 /// `songs.audio_codec`, never the filename. That is why there is no bare
 /// `mp3`: the server reads a bare token as a *video* container, and `mp3`
 /// beside `mpeg/mp3` would be two spellings of one thing. Containers are the
@@ -37,7 +37,7 @@ import Foundation
 ///
 /// **No `ogg/` token of any kind**, and that is the one place this diverges
 /// from Android rather than merely restating it. Apple ships no Ogg demuxer, as
-/// `AudioFormat` already records — declaring Vorbis or Opus here would be
+/// `AudioFormat` already records - declaring Vorbis or Opus here would be
 /// asking for silence, which is exactly the failure the enum's missing cases
 /// exist to prevent.
 ///
@@ -45,7 +45,7 @@ import Foundation
 /// the package whose player makes it true, exercisable without building an app.
 let avfoundationAudioLossy: Set<String> = ["mpeg/mp3", "adts/aac", "mp4/aac"]
 
-/// The lossless half, declared only for `.original` — see
+/// The lossless half, declared only for `.original` - see
 /// `avfoundationAudioLossy` for why that gate exists rather than a blanket
 /// "everything AVFoundation decodes".
 ///

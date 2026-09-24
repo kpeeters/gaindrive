@@ -5,7 +5,7 @@ package org.gaindrive.android.playback
  * automatic tail begins, as the web client models it.
  *
  * Pure arithmetic, separated from [PlayerConnection] so it can be tested: these
- * are one-line rules whose failure mode is severe — an off-by-one in
+ * are one-line rules whose failure mode is severe - an off-by-one in
  * [afterAppend] or [tailToDrop] means "add to queue" quietly deletes tracks the
  * user still wanted.
  *

@@ -30,7 +30,7 @@ import org.gaindrive.android.data.model.FetchState
  * **It sits with the player, for the reason `OfflineNote` beside it gives**: a
  * fetch in progress is a fact about the whole app rather than about one screen,
  * and one strip is better than five that have to agree. Being outside the
- * `NavHost` is the substantive part — a fetch outlives the panel that started
+ * `NavHost` is the substantive part - a fetch outlives the panel that started
  * it, and the panel's poll dying on navigation is exactly how someone came to
  * fetch the same URL twice.
  *
@@ -80,7 +80,7 @@ fun FetchStrip(
 					modifier = Modifier.weight(1f),
 				)
 				// Only a finished one can be dismissed. A running fetch is not the
-				// user's to hide from themselves — Cancel, in the panel, is the
+				// user's to hide from themselves - Cancel, in the panel, is the
 				// control that ends it.
 				if (live.isEmpty() && notice != null) {
 					IconButton(onClick = { onDismiss(notice.job.id) }) {
@@ -95,7 +95,7 @@ fun FetchStrip(
 
 			// Determinate only for a single job actually moving, which is the one
 			// case a percentage describes. Queued work has none, and a bar frozen
-			// at zero reads as a stall — the same argument the player bar makes
+			// at zero reads as a stall - the same argument the player bar makes
 			// for showing an indeterminate one while buffering.
 			if (moving != null && live.size == 1) {
 				LinearProgressIndicator(
@@ -117,7 +117,7 @@ private fun label(
 	if (live.isEmpty()) {
 		val job = notice?.job ?: return ""
 		return if (FetchState.of(job.state) == FetchState.ERROR) "Fetch failed"
-		else "Fetched — ${job.files} file(s)"
+		else "Fetched - ${job.files} file(s)"
 	}
 
 	// Named after the one that is moving, not the first in the list: the server
@@ -135,5 +135,5 @@ private fun label(
 		else -> "Fetching"
 	}
 	val rest = live.size - 1
-	return if (rest > 0) "$verb $name — and $rest more queued" else "$verb $name"
+	return if (rest > 0) "$verb $name - and $rest more queued" else "$verb $name"
 }

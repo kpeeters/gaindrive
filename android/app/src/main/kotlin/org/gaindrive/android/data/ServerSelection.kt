@@ -19,8 +19,8 @@ import javax.inject.Singleton
  * What the library screens are currently showing: one named server, or all of
  * them merged.
  *
- * The choice is remembered, and a stored choice that no longer resolves — the
- * server was disabled or removed — falls back to all servers rather than
+ * The choice is remembered, and a stored choice that no longer resolves - the
+ * server was disabled or removed - falls back to all servers rather than
  * leaving the library permanently empty with no hint as to why.
  */
 @Singleton
@@ -64,12 +64,12 @@ class ServerSelection @Inject constructor(
 	 * therefore have to trigger the same reload. Screens watch this rather than
 	 * [scope] so none can be honoured while the others are quietly ignored.
 	 *
-	 * [LibraryRevision] is the app's own writes — an album promoted out of the
+	 * [LibraryRevision] is the app's own writes - an album promoted out of the
 	 * uploads area is missing from one listing and new in another, and a screen
 	 * that holds its list until its scope changes would show neither correctly.
 	 *
-	 * Deliberately sourced from [Connectivity.online] — losing the network and
-	 * choosing offline mode are the same thing to a browse screen — and not
+	 * Deliberately sourced from [Connectivity.online] - losing the network and
+	 * choosing offline mode are the same thing to a browse screen - and not
 	 * from the offline setting directly. That is what makes this the *same*
 	 * value `LibraryRepository` reads when it decides whether to trim a listing
 	 * to what is stored. Two flows computed separately from the same setting
@@ -86,14 +86,14 @@ class ServerSelection @Inject constructor(
 		) { current, online, servers, library ->
 			// Summed into the one field the screens already compare. Both
 			// counters only ever increase, so the sum strictly increases
-			// whenever either does — which is all `distinctUntilChanged`
+			// whenever either does - which is all `distinctUntilChanged`
 			// needs. That two different pairs could add to the same number is
 			// harmless: they cannot occur in that order.
 			BrowseState(current, offline = !online, revision = servers + library)
 		}
 
 	/**
-	 * The servers the current scope covers, in registry order — which is what
+	 * The servers the current scope covers, in registry order - which is what
 	 * every fan-out iterates and what breaks ties when rows merge.
 	 */
 	val scoped: Flow<List<ServerConfig>> =
@@ -105,7 +105,7 @@ class ServerSelection @Inject constructor(
 		}
 
 	/**
-	 * Server names by id, for the row badges — empty unless several servers are
+	 * Server names by id, for the row badges - empty unless several servers are
 	 * genuinely in play, since a single-server library must look like one.
 	 * Badges are therefore suppressed both in single-server scope and when only
 	 * one server is configured, without any screen having to know that rule.
@@ -116,7 +116,7 @@ class ServerSelection @Inject constructor(
 
 	/**
 	 * Nothing to browse at all, which a fan-out cannot distinguish from a
-	 * library that is simply empty — both come back with no rows and no
+	 * library that is simply empty - both come back with no rows and no
 	 * failures.
 	 */
 	suspend fun hasNoServers(): Boolean = available.first().isEmpty()
@@ -128,7 +128,7 @@ class ServerSelection @Inject constructor(
 	/**
 	 * The same state Settings shows, so the two controls cannot disagree.
 	 *
-	 * The *switch*, not the effective state — this backs a toggle, and a toggle
+	 * The *switch*, not the effective state - this backs a toggle, and a toggle
 	 * that moved on its own because the signal dropped would be lying about
 	 * what the user chose. [browse] is the one that folds in the network.
 	 */

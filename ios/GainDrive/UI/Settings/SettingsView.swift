@@ -9,7 +9,7 @@
 import SwiftUI
 
 /// Categories with a summary line of their current state, each opening a
-/// screen of its own — the shape `android/SCREENS.md` settled on, for the same
+/// screen of its own - the shape `android/SCREENS.md` settled on, for the same
 /// reason: the sections outgrow one screen well before casting, editing and
 /// administration arrive.
 ///
@@ -18,7 +18,7 @@ import SwiftUI
 struct SettingsView: View {
 	/// On a fresh install the user is dropped here with Servers already
 	/// pushed, since there is exactly one useful thing to do and that is where
-	/// its button is. Consumed once, at construction — see `RootView`.
+	/// its button is. Consumed once, at construction - see `RootView`.
 	let startOnServers: Bool
 
 	@Environment(ServerRegistry.self) private var registry
@@ -112,7 +112,7 @@ struct SettingsView: View {
 		return total == 1 ? "1 device added" : "\(total) devices added"
 	}
 
-	/// The figure, not the word "Storage" said twice — a summary line states
+	/// The figure, not the word "Storage" said twice - a summary line states
 	/// the current value, which is the whole reason these rows have one.
 	private var storageSummary: String {
 		PinRepository.readable(pins.usageBytes)

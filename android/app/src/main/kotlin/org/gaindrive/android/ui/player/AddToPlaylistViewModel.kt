@@ -20,7 +20,7 @@ import javax.inject.Inject
  * Backs the playlist picker inside [TrackActionsSheet].
  *
  * A playlist cannot hold a song from another server, so everything here is
- * scoped to the server that owns the track — including a new playlist, which is
+ * scoped to the server that owns the track - including a new playlist, which is
  * created there without asking.
  */
 @HiltViewModel
@@ -87,7 +87,7 @@ class AddToPlaylistViewModel @Inject constructor(
 		viewModelScope.launch {
 			runCatchingCancellable { block() }.fold(
 				onSuccess = {
-					// The list just changed — drop the cached one so the next
+					// The list just changed - drop the cached one so the next
 					// track's picker shows the playlist that was created here.
 					loadedFor = null
 					// The repository's revision bump refreshes the playlists

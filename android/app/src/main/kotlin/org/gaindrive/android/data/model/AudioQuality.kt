@@ -8,7 +8,7 @@ package org.gaindrive.android.data.model
  * happens to be and extractor sniffing is the only honest answer.
  *
  * [sampleMime] is the *codec* inside that container, which is a different
- * string for Opus and the same one for MP3 — Ogg is a container and MPEG audio
+ * string for Opus and the same one for MP3 - Ogg is a container and MPEG audio
  * is not. It exists so the track info dialog can compare what the decoder
  * reports against what was asked for: since a request declares the formats
  * media3 takes as they stand, the two no longer have to agree, and a mismatch
@@ -19,7 +19,7 @@ enum class AudioFormat(val param: String, val mime: String?, val sampleMime: Str
 	OPUS("opus", "audio/ogg", "audio/opus"),
 
 	/**
-	 * Never chosen directly — it is what an account bitrate cap turns a request
+	 * Never chosen directly - it is what an account bitrate cap turns a request
 	 * for [ORIGINAL] into, because that is what the server sends in that case.
 	 * See [AudioQuality.cappedBy].
 	 */
@@ -27,7 +27,7 @@ enum class AudioFormat(val param: String, val mime: String?, val sampleMime: Str
 }
 
 /**
- * What quality to ask the server for, and — via [tag] — how to tell bytes of one
+ * What quality to ask the server for, and - via [tag] - how to tell bytes of one
  * quality apart from another in the cache.
  *
  * One value governs downloads, cache-on-play and streaming alike. There is
@@ -39,7 +39,7 @@ data class AudioQuality(val format: AudioFormat, val bitRate: Int) {
 
 	/**
 	 * Short, stable and filename-safe. Forms the suffix of a cache key, so
-	 * changing how this is spelled orphans every stored track — which is
+	 * changing how this is spelled orphans every stored track - which is
 	 * survivable (LRU reclaims them) but not free.
 	 */
 	val tag: String
@@ -75,7 +75,7 @@ data class AudioQuality(val format: AudioFormat, val bitRate: Int) {
 	 *
 	 * [AudioFormat.ORIGINAL] cannot mean anything here. It is expressed by
 	 * sending no `format` at all, and for a video that is a request for the
-	 * film — the opposite of what was asked for. There is no "the original
+	 * film - the opposite of what was asked for. There is no "the original
 	 * audio track" the server can be asked for either: extracting a soundtrack
 	 * is a re-encode, so a container has to be named. [DEFAULT] is that name.
 	 *

@@ -21,7 +21,7 @@ import org.gaindrive.android.ui.settings.StorageSettingsScreen
  * Settings: the category list, and the category being read beside it.
  *
  * This is the shape Android's own Settings has on a tablet, and it needed no
- * new screen — the section was already a list of categories each opening a
+ * new screen - the section was already a list of categories each opening a
  * screen of its own, which is a list and a detail written down as a stack.
  *
  * Two levels, not three. [Route.ServerEdit] would fit a third pane, and is

@@ -6,7 +6,7 @@ import org.junit.Test
 
 /**
  * The retry rules are the part of casting that took real debugging on the
- * server (root `CLAUDE.md`), and the failure they guard against is a track that
+ * server, and the failure they guard against is a track that
  * silently never starts. The decision is pure state, so it is checked here
  * rather than rediscovered against a receiver.
  *
@@ -34,7 +34,7 @@ class LoadRetryWatcherTest {
 	 * The whole reason the msid filter exists: a `GET_STATUS` poll fired just
 	 * before the receiver processed our LOAD comes back as a healthy PLAYING for
 	 * the *old* session. Acting on it would disarm the watcher, and the real
-	 * error — which arrives afterwards, on the new session — would be ignored.
+	 * error - which arrives afterwards, on the new session - would be ignored.
 	 */
 	@Test
 	fun `a stale PLAYING for the old session does not disarm`() {

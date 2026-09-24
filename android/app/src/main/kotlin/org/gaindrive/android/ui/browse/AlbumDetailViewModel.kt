@@ -54,7 +54,7 @@ data class AlbumExtrasUi(
  *
  * Only a chapter search hit produces one: a marker has no id anything can
  * stream, so acting on one means opening the recording's album and starting the
- * recording at that point. Consumed once — see [AlbumDetailViewModel.autoPlay].
+ * recording at that point. Consumed once - see [AlbumDetailViewModel.autoPlay].
  */
 data class AutoPlay(val songIndex: Int, val positionMs: Long)
 
@@ -76,7 +76,7 @@ class AlbumDetailViewModel @Inject constructor(
 	 *
 	 * Both halves are needed and neither is guessable from the ref: the route
 	 * says the user reached this through Uploads, and the server says this
-	 * account administers it. The server checks the second one again — this only
+	 * account administers it. The server checks the second one again - this only
 	 * decides whether to draw a control, never whether the move is allowed.
 	 */
 	private val _canPromote = MutableStateFlow(false)
@@ -89,7 +89,7 @@ class AlbumDetailViewModel @Inject constructor(
 	 * album through Uploads is ownership**, since every personal listing keys on
 	 * the caller's own username, and deleting your own staging area is not an
 	 * administrative act the way promoting into the shared library is. The
-	 * server checks again regardless — this only decides whether to draw a
+	 * server checks again regardless - this only decides whether to draw a
 	 * control.
 	 */
 	val canDelete: Boolean = route.fromUploads
@@ -111,9 +111,9 @@ class AlbumDetailViewModel @Inject constructor(
 	 * Where it could go: the destination roots, and the level-1 folders of
 	 * whichever is chosen.
 	 *
-	 * A root and one level is the whole of the destination — both layouts are
+	 * A root and one level is the whole of the destination - both layouts are
 	 * `L1/L2/[L3]/files`, L2 is this album, and L3 is only ever a disc or season
-	 * directory inside it — so this is two controls rather than a folder
+	 * directory inside it - so this is two controls rather than a folder
 	 * browser.
 	 */
 	private val _roots = MutableStateFlow<List<MusicRoot>>(emptyList())
@@ -258,7 +258,7 @@ class AlbumDetailViewModel @Inject constructor(
 		_destRoot.value = root
 		// An artists root defaults to what the album is already filed under. A
 		// categories root deliberately does not: L1 there is a *category*, and
-		// the batch's artist is whatever the source called it — for a fetched
+		// the batch's artist is whatever the source called it - for a fetched
 		// video, the channel name, which is never the answer.
 		_folder.value = if (root.contentType == "categories") "" else currentArtist.orEmpty()
 		_folderSuggestions.value = emptyList()
@@ -283,7 +283,7 @@ class AlbumDetailViewModel @Inject constructor(
 	fun promote() {
 		if (_promoting.value || _deleting.value) return
 		// Both halves of the destination are required by the server, and the
-		// dialog keeps its Move button disabled until they are set — so these
+		// dialog keeps its Move button disabled until they are set - so these
 		// guard against a caller that is not the dialog, rather than a case the
 		// user can reach. Checked before anything is marked in flight.
 		val root = _destRoot.value ?: return
@@ -310,7 +310,7 @@ class AlbumDetailViewModel @Inject constructor(
 	 * Shares [promoted] with the move above rather than having a flag of its
 	 * own: both mean "this album is not here any more, leave", and the screen
 	 * does the same thing for each. [promoteError] is shared for the same
-	 * reason — one dialog saying what the server said.
+	 * reason - one dialog saying what the server said.
 	 */
 	fun deleteUpload() {
 		if (_deleting.value || _promoting.value) return

@@ -16,13 +16,13 @@ data class PinnedItem(val pin: Pin, val label: String)
  * What each pin covers: its own encoded ref, to the encoded refs of the songs
  * under it.
  *
- * Bare refs on both sides, not cache keys — quality belongs to the bytes, not
+ * Bare refs on both sides, not cache keys - quality belongs to the bytes, not
  * to what a pin covers, and the same pin protects whichever quality is set at
  * the time. `PinRepository.applyProtection` is where the union is turned into
  * cache keys for the evictor. See `CacheKeys` for why the distinction matters.
  *
  * Kept per pin rather than flattened, because the two questions want different
- * shapes — eviction needs the union ([allKeys]), while the download indicator
+ * shapes - eviction needs the union ([allKeys]), while the download indicator
  * needs to know how much of *this* album has arrived.
  */
 @JvmInline
@@ -35,7 +35,7 @@ value class PinCoverage(val byPin: Map<String, List<String>>) {
  *
  * Pure, and takes membership already resolved, so the rule that decides what
  * survives eviction can be tested without a database or a cache. Membership is
- * passed in rather than looked up because it changes underneath a pin — a
+ * passed in rather than looked up because it changes underneath a pin - a
  * playlist gains a track and the pin has to cover it.
  *
  * Unknown members are simply absent: pinning an album that has never been
@@ -86,7 +86,7 @@ fun artRefsOf(pin: Pin, album: Album?, songs: List<Song>): List<ItemRef> = when 
 
 /**
  * A video is part of what a pin covers only when it is being played for its
- * soundtrack — `SettingsStore.videoAudioOnly`.
+ * soundtrack - `SettingsStore.videoAudioOnly`.
  *
  * Otherwise it could never complete: a video the server can only re-encode has
  * no `Content-Length`, so nothing downstream can decide the copy is whole, and
@@ -98,13 +98,13 @@ fun artRefsOf(pin: Pin, album: Album?, songs: List<Song>): List<ItemRef> = when 
  *
  * Turning the setting back off leaves the stored bytes behind but stops the pin
  * covering them, so eviction reclaims them in its own time. That is the right
- * way round — a pin means "keep what I can play", and with the setting off the
+ * way round - a pin means "keep what I can play", and with the setting off the
  * film is not something this app plays from the cache.
  *
  * Here rather than private to `PinRepository`, and spelled as a predicate over
  * one track, because `StoredContainers` asks the same question of collections
  * nobody pinned and has rows rather than songs to ask it of. A second spelling
- * — an `isVideo = 0` in SQL, say — would make an album holding a film read as
+ * - an `isVideo = 0` in SQL, say - would make an album holding a film read as
  * complete in a list and as permanently incomplete on its own screen.
  */
 fun covered(isVideo: Boolean, audioOnly: Boolean): Boolean = !isVideo || audioOnly
@@ -133,7 +133,7 @@ const val REVISION_DEBOUNCE_MS = 500L
  * **An empty membership is not complete**, and that is the whole reason this is
  * a function rather than a `containsAll`. The mirror only holds the tracks of
  * collections visited while online, so an album never opened has no members at
- * all — and [PinStatus.fraction] reports exactly that case as 1f, which is the
+ * all - and [PinStatus.fraction] reports exactly that case as 1f, which is the
  * right answer for a pin the user placed and the wrong one here. Unknown has to
  * read as unknown, or every album in a fresh library claims to be downloaded.
  */
@@ -151,7 +151,7 @@ enum class PinPhase {
 	/** Downloading, or just asked for and not yet reported on. */
 	RUNNING,
 
-	/** Queued, but a requirement is unmet — in practice, waiting for Wi-Fi. */
+	/** Queued, but a requirement is unmet - in practice, waiting for Wi-Fi. */
 	WAITING,
 
 	/** At least one track failed and nothing is retrying it. */
@@ -179,7 +179,7 @@ data class PinStatus(
  * connection went metered.
  *
  * Anything else is [PinPhase.RUNNING], including the moment just after a tap
- * when the download manager has not reported anything yet — showing failure
+ * when the download manager has not reported anything yet - showing failure
  * there would flash an error on every single pin.
  */
 fun pinPhaseOf(

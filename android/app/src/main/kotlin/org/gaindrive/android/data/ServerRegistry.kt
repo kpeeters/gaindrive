@@ -49,7 +49,7 @@ class ServerRegistry @Inject constructor(
 	 * It has to exist because the scope alone cannot carry the change:
 	 * `BrowseScope.AllServers` is a singleton, so disabling one server and
 	 * enabling another produces an identical scope, an identical `BrowseState`,
-	 * and a `distinctUntilChanged` that swallows it — leaving the disabled
+	 * and a `distinctUntilChanged` that swallows it - leaving the disabled
 	 * server's artists on screen under the newly enabled server's badges. Every
 	 * other in-place edit has the same shape: a corrected URL, a reorder (which
 	 * is the tie-break for merged rows), a browse-mode flip.
@@ -124,7 +124,7 @@ class ServerRegistry @Inject constructor(
 
 		// A browse mode changed underneath everything derived from it. The two
 		// hierarchies are separate id spaces on a server that keeps them apart,
-		// so the mirrored library is not stale — it names things the new mode
+		// so the mirrored library is not stale - it names things the new mode
 		// will never ask for, and would answer offline browsing with rows that
 		// cannot be opened. The chips are computed from the roots and the flag
 		// together, so that cache goes too.
@@ -145,7 +145,7 @@ class ServerRegistry @Inject constructor(
 		clients.forget(id)
 		roots.forget(id)
 		// Its mirrored library would otherwise sit there forever, unreachable
-		// and unremovable — nothing else knows the server ever existed.
+		// and unremovable - nothing else knows the server ever existed.
 		local.forgetServer(id)
 	}
 
@@ -157,7 +157,7 @@ class ServerRegistry @Inject constructor(
 	/**
 	 * The single write path, so [revision] has one place to be bumped from.
 	 *
-	 * A change that changes nothing is dropped rather than announced — `move`
+	 * A change that changes nothing is dropped rather than announced - `move`
 	 * with out-of-range indices returns the list it was given, and re-saving an
 	 * editor without touching a field produces an identical one. DataStore
 	 * already declines to re-emit for an unchanged value, but [revision] is a

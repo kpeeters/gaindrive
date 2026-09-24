@@ -13,7 +13,7 @@ import Foundation
 /// **The whole of the cache's bookkeeping is one integer**, and that is the
 /// point of filling sequentially rather than by range. What is present is
 /// always a prefix, so "have I got this?" is a comparison rather than a search
-/// through a set of intervals — which is the part of a general byte cache that
+/// through a set of intervals - which is the part of a general byte cache that
 /// is hard to get right and impossible to eyeball.
 ///
 /// Pure, so the arithmetic the design rests on is tested by calling it.
@@ -21,7 +21,7 @@ enum PartialRead {
 	/// The bytes to hand over now. Possibly **shorter than asked for**: a read
 	/// straddling the boundary is served up to it and the rest waited for,
 	/// which is what keeps playback moving while the file is still arriving.
-	/// `AVAssetResourceLoadingDataRequest` is built for exactly this — it
+	/// `AVAssetResourceLoadingDataRequest` is built for exactly this - it
 	/// advances `currentOffset` and the request stays open.
 	static func chunk(currentOffset: Int, end: Int, received: Int) -> Range<Int>? {
 		guard currentOffset < end else { return nil }
@@ -37,7 +37,7 @@ enum PartialRead {
 	/// Where a read ends.
 	///
 	/// `requestsAllDataToEndOfResource` means "to the end", and the requested
-	/// length is not to be trusted in that case — AVFoundation puts a nominal
+	/// length is not to be trusted in that case - AVFoundation puts a nominal
 	/// figure there. Falling for it truncates the last read of every track,
 	/// which plays fine and then stops early.
 	static func end(

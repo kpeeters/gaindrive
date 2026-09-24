@@ -9,14 +9,14 @@ import org.junit.Test
 
 /**
  * The declaration that stops the server remuxing a container we demux
- * ourselves, and — the half worth testing — its absence everywhere else.
+ * ourselves, and - the half worth testing - its absence everywhere else.
  *
  * The same reasoning as `CastPacingTest`: the failure is silent and remote. A
  * cast URL that carries `playable` gets the receiver a `LOAD`
  * announcing `video/mp4` followed by Matroska, which it refuses outright. The
- * film never starts and nothing on the phone says why. The obvious refactor —
+ * film never starts and nothing on the phone says why. The obvious refactor -
  * moving the declaration into `StreamUrls.forVideo`'s default "because both
- * callers want it" — is exactly that bug, and `the cast route declares nothing`
+ * callers want it" - is exactly that bug, and `the cast route declares nothing`
  * below is what stands in its way.
  */
 class PlayableContainersTest {

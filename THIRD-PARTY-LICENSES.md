@@ -1,7 +1,7 @@
 # Third-party licences
 
 GainDrive itself is GPLv3-or-later (see `LICENSE`). It incorporates the
-components listed below, which keep their own licences — this file exists to
+components listed below, which keep their own licences - this file exists to
 retain their notices, as several of those licences require.
 
 Everything distributed here is one-way compatible into GPLv3: the combined
@@ -9,26 +9,25 @@ work is GPLv3, but the individual components are not relicensed and may still
 be taken from upstream under their own terms.
 
 Keep this file in step with `CMakeLists.txt`,
-`android/gradle/libs.versions.toml` and `android/app/build.gradle.kts`. See
-the licensing section of `CLAUDE.md`.
+`android/gradle/libs.versions.toml` and `android/app/build.gradle.kts`.
 
 
-## Server — vendored in this repository
+## Server - vendored in this repository
 
 Copied verbatim into `third_party/`, with their licence texts alongside. None of
 them can be relied on from a package manager; `third_party/README.md` explains
 why. A version change here is a manual `cp` and must be recorded in this file in
 the same commit.
 
-* cpp-httplib 0.54.1 — `third_party/httplib.h`, `third_party/httplib.LICENSE`
+* cpp-httplib 0.54.1 - `third_party/httplib.h`, `third_party/httplib.LICENSE`
   MIT · Copyright (c) 2025 Yuji Hirose
   https://github.com/yhirose/cpp-httplib
 
-* mdns 1.4.3 — `third_party/mdns.h`, `third_party/mdns.LICENSE`
+* mdns 1.4.3 - `third_party/mdns.h`, `third_party/mdns.LICENSE`
   Public domain (Unlicense) · Mattias Jansson
   https://github.com/mjansson/mdns
 
-* stb — `third_party/stb_image.h` (v2.30),
+* stb - `third_party/stb_image.h` (v2.30),
   `third_party/stb_image_resize2.h` (v2.18),
   `third_party/stb_image_write.h` (v1.16), `third_party/stb.LICENSE`
   Dual-licensed: public domain (Unlicense) *or* MIT, at the recipient's
@@ -43,7 +42,7 @@ The web client's icon font is vendored the same way, but lives in `web/`
 rather than `third_party/` because it is embedded into the binary by
 `cmake/embed_web.cmake` along with the rest of the client:
 
-* Material Symbols Rounded (Google Fonts release v368) —
+* Material Symbols Rounded (Google Fonts release v368) -
   `web/material-symbols-rounded.woff2`,
   `web/material-symbols-rounded.LICENSE`
   Apache-2.0 · Copyright Google LLC
@@ -53,20 +52,20 @@ rather than `third_party/` because it is embedded into the binary by
   icon set with `opsz`, `wght` and `GRAD` pinned and only `FILL` left as a
   variable axis. It is shipped whole rather than subset because the icons are
   addressed by ligature, so a subset keyed on the names actually used still
-  drags in every icon spellable from the same letters — measured at 374 KB
+  drags in every icon spellable from the same letters - measured at 374 KB
   against 537 KB, for the price of a build-time dependency on Python
   fontTools. Not worth it.
 
   **Two glyphs of it are also in the iOS app**, as
   `ios/Resources/Assets.xcassets/CastIcon.imageset/cast.svg` and
-  `CastConnectedIcon.imageset/cast_connected.svg` — extracted from this same
+  `CastConnectedIcon.imageset/cast_connected.svg` - extracted from this same
   file rather than vendored again, so there is one copy of the artwork and one
   licence entry. SF Symbols has no cast icon and will not get one, Cast being
   Google's mark. `ios/Resources/Assets.xcassets/README.md` says how to
   regenerate them; fontTools is needed then and not at build time.
 
 
-## Server — system packages
+## Server - system packages
 
 **Whether these are linked from the system or built from source is a property
 of the build host.** The default build takes whatever the distribution provides
@@ -123,7 +122,7 @@ of them, so for those every version below applies.
   https://www.openssl.org/
 
 
-## Server — reached only by static builds
+## Server - reached only by static builds
 
 Pulled in through libarchive and httplib when `GAINDRIVE_STATIC` is set
 (`CMakeLists.txt`). All GPL-compatible; versions are whatever the build host
@@ -160,7 +159,7 @@ build requires.
   https://github.com/facebook/zstd
 
 
-## Android app — shipped in the APK
+## Android app - shipped in the APK
 
 From `android/gradle/libs.versions.toml` and `android/app/build.gradle.kts`.
 **Every one of these is Apache-2.0.**
@@ -208,24 +207,24 @@ From `android/gradle/libs.versions.toml` and `android/app/build.gradle.kts`.
   coil-compose, coil-network-okhttp
   https://github.com/coil-kt/coil
 
-The Cast protocol is a port of `src/castmanager.cc`, not a dependency —
+The Cast protocol is a port of `src/castmanager.cc`, not a dependency -
 neither `media3-cast` nor `play-services-cast-framework` is used. That is
 deliberate: Google Play Services is proprietary and would be incompatible with
 GPLv3. Only the Apache-2.0 `androidx.mediarouter` route-picker UI is needed.
 
 
-## iOS app — shipped in the bundle
+## iOS app - shipped in the bundle
 
 The iOS app currently has **no third-party dependencies**; `ios/project.yml`
 declares no Swift packages, and the phase 0 skeleton links only Apple
-frameworks. Two are planned (`ios/PLAN.md`, "Dependencies"), recorded here so
+frameworks. Two are planned, recorded here so
 the licence question is settled before either is adopted:
 
 * GRDB · MIT · Copyright (c) Gwendal Roué
   https://github.com/groue/GRDB.swift
 
 * Nuke · MIT · Copyright (c) Alexander Grebenyuk
-  or Kingfisher · MIT · Copyright (c) Wei Wang — undecided
+  or Kingfisher · MIT · Copyright (c) Wei Wang - undecided
   https://github.com/kean/Nuke · https://github.com/onevcat/Kingfisher
 
 Both are MIT and therefore fine. Add them to this section when they actually
@@ -235,10 +234,10 @@ Note that `ios/` is GPLv3 **with the Application Distribution Exception**
 (`ios/LICENSE`), which permits app-store distribution of the binary but
 explicitly does not permit linking against non-free libraries. Google's Cast
 SDK for iOS is proprietary and so remains excluded, notwithstanding that it is
-an ordinary Swift Package Manager dependency — see `ios/PLAN.md` phase 7.
+an ordinary Swift Package Manager dependency.
 
 
-## Build- and test-only — not distributed
+## Build- and test-only - not distributed
 
 These never reach a release artifact, so their licences do not affect
 redistribution of GainDrive.
@@ -287,7 +286,7 @@ redistribution of GainDrive.
   https://github.com/swiftlang/swift-testing
   Used by `ios/GainDriveTests/`. It ships with the Xcode toolchain rather than
   being resolved as a package, and the framework is linked into the test
-  bundle only — never into the app. XCTest, likewise part of the toolchain, is
+  bundle only - never into the app. XCTest, likewise part of the toolchain, is
   in the same position. Note the contrast with JUnit above: this is the
   test-framework slot, and on iOS it happens to be GPL-compatible anyway.
 
@@ -305,7 +304,7 @@ redistribution of GainDrive.
   gaindrive runs this as a child process through reproc++ when a configured
   `url_handlers` entry matches a pasted URL. Same reasoning as ffmpeg: running
   a program is not linking against it, and no yt-dlp code is distributed here.
-  It is optional and named only by configuration — with no yt-dlp on PATH the
+  It is optional and named only by configuration - with no yt-dlp on PATH the
   URL-fetch endpoints report no handlers and the client does not offer the
   option. Note it invokes ffmpeg in turn, which gaindrive already requires.
   Nothing in the code depends on it specifically: the handler table names
@@ -332,7 +331,7 @@ These are the points worth not rediscovering.
 * **OpenSSL must be 3.x.** Version 3.0 relicensed to Apache-2.0. OpenSSL
   1.1.1 and earlier are under the OpenSSL and SSLeay licences, whose
   advertising clause makes them GPL-incompatible without a linking exception.
-  This is a real constraint on the build host, not a formality — a static
+  This is a real constraint on the build host, not a formality - a static
   build against 1.1.1 would not be redistributable under GPLv3.
 
 * MIT, BSD-2/3-Clause, zlib, 0BSD and public-domain components impose nothing

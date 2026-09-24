@@ -14,9 +14,9 @@
 // The point of materialising a transcode rather than piping it is that ffmpeg
 // cannot seek backwards in a pipe, so a piped MP3 has no XING header and a
 // piped FLAC/Ogg has no seektable.  Writing to a real file gives correct
-// headers, a known Content-Length, and byte-range support — which is what makes
+// headers, a known Content-Length, and byte-range support - which is what makes
 // a transcoded stream seekable for third-party clients and resumable for
-// offline downloads.  See CLAUDE.md for the history of the piped-output bugs.
+// offline downloads.
 //
 // The directory *is* the index: entry names encode everything needed to decide
 // whether a file is still valid, so there is no sidecar state to keep in sync
@@ -55,7 +55,7 @@ class TranscodeCache
 		//
 		// Written as two adjacent literals deliberately: in "\x01cache-out"
 		// the hex escape consumes *every* following hex digit, and c and a
-		// qualify — so it reads as \x01cac followed by "he-out", which is out
+		// qualify - so it reads as \x01cac followed by "he-out", which is out
 		// of range for a char and not the string it appears to be.  Splitting
 		// the literal terminates the escape at the quote.
 		static constexpr const char* OUT_PLACEHOLDER = "\x01" "cache-out\x01";
@@ -68,7 +68,7 @@ class TranscodeCache
 
 		// Returns the cached file for `key`, transcoding it with `argv` first if
 		// it is not already there.  Blocks for the duration of the transcode.
-		// Empty when the cache is disabled or the transcode failed — never fatal,
+		// Empty when the cache is disabled or the transcode failed - never fatal,
 		// the caller streams instead.
 		//
 		// `out_placeholder` is the token in argv to replace with the real output
@@ -81,13 +81,13 @@ class TranscodeCache
 		// The entry for `key` if it is already on disk, and nothing else: this
 		// never runs ffmpeg and never waits for a build somebody else started.
 		// Empty means "not there (yet)", which is the caller's cue to serve this
-		// one request another way — see serve_video()'s remux tier.
+		// one request another way - see serve_video()'s remux tier.
 		std::shared_ptr<const Entry> get_if_present(const std::string& key,
 		                                            const std::string& ext);
 
 		// Builds the entry for `key` on a detached thread and returns at once, so
 		// no request thread waits on it.  True when the entry may be expected to
-		// appear — a build was started, or one was already running; false when the
+		// appear - a build was started, or one was already running; false when the
 		// cache is disabled, the file is already there, or no slot was free.
 		//
 		// The answer is for the log rather than for control flow: the caller's
@@ -141,7 +141,7 @@ class TranscodeCache
 		// Background builds inside running_, capped separately.  A burst of first
 		// plays must not fill every --transcode-jobs slot and push the next
 		// *audio* transcode onto the piped path, which is the one with no XING
-		// header and no seektable — precisely what this cache exists to avoid.
+		// header and no seektable - precisely what this cache exists to avoid.
 		// Nobody is waiting on a background build, so losing the race costs it
 		// nothing; an audio request losing it costs seekability.
 		int                                    bg_running_ = 0;

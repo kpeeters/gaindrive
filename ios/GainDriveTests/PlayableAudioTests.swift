@@ -12,7 +12,7 @@ import Testing
 @testable import GainDrive
 
 /// The audio half of `playable`: what this device says it will take exactly as
-/// the server holds it, and — the half worth testing — what it must never say.
+/// the server holds it, and - the half worth testing - what it must never say.
 ///
 /// Three failures are guarded against and they fail in three different ways.
 /// Declaring too little wastes a re-encode, which is merely slow. Declaring
@@ -68,7 +68,7 @@ struct PlayableAudioTests {
 	}
 
 	/// Every audio token is a `container/codec` pair. A bare one would be read
-	/// by the server as a *video* container and match nothing at all —
+	/// by the server as a *video* container and match nothing at all -
 	/// silently, which is why this is asserted rather than left to the reader.
 	@Test func everyTokenIsOneContainerOverOneCodec() {
 		for token in avfoundationAudioLossy.union(avfoundationAudioLossless) {
@@ -114,8 +114,8 @@ struct PlayableAudioTests {
 	/// The audio twin of `castRouteDeclaresNothing`. A receiver handed a URL
 	/// that declares is sent the file the server holds while its `LOAD`
 	/// announced the transcode's type, and refuses the media. The obvious
-	/// refactor — filling the set in inside the resolver "because both callers
-	/// want it" — is exactly that bug, and this is what stands in its way.
+	/// refactor - filling the set in inside the resolver "because both callers
+	/// want it" - is exactly that bug, and this is what stands in its way.
 	@Test func castRouteDeclaresNothing() {
 		#expect(
 			StreamUrls.audioParameters(id: "7", quality: aac160, playable: [])
@@ -123,7 +123,7 @@ struct PlayableAudioTests {
 	}
 
 	/// The original is spelled by sending no `format` at all, so a request for
-	/// it carries no bitrate either — and may still declare.
+	/// it carries no bitrate either - and may still declare.
 	@Test func theOriginalSendsNoFormatAndNoBitrate() {
 		#expect(
 			StreamUrls.audioParameters(

@@ -11,7 +11,7 @@ import Testing
 
 @testable import GainDrive
 
-/// The stream URL, asserted directly — the same style as `AuthParametersTests`
+/// The stream URL, asserted directly - the same style as `AuthParametersTests`
 /// and `CoverUrlsTests`, and possible for the same reason: the builder is a
 /// pure function, so its return value *is* the request.
 struct StreamUrlsTests {
@@ -63,7 +63,7 @@ struct StreamUrlsTests {
 		#expect(parameters["id"] == "42")
 	}
 
-	/// `timeOffset` bypasses the transcode cache — every seek would become a
+	/// `timeOffset` bypasses the transcode cache - every seek would become a
 	/// fresh ffmpeg run over a response that cannot then be seeked.
 	/// `estimateContentLength` promises a length ffmpeg pads or truncates to,
 	/// with ranges already cleared, so a range request mis-seeks in silence.
@@ -85,7 +85,7 @@ struct StreamUrlsTests {
 	// MARK: - Caps
 
 	/// The cap belongs to *this track's* server, so it arrives as a parameter
-	/// rather than being read from anywhere — a queue spanning servers crosses
+	/// rather than being read from anywhere - a queue spanning servers crosses
 	/// caps at every boundary.
 	@Test func anAccountCapLowersTheRequestedBitrate() {
 		let built = target(.default, cap: 96)
@@ -114,7 +114,7 @@ struct StreamUrlsTests {
 	}
 
 	/// The key must not contain the salt, or phase 5's byte cache misses on
-	/// every launch — the same trap `CoverSource` exists to avoid.
+	/// every launch - the same trap `CoverSource` exists to avoid.
 	@Test func theCacheKeyIsStableAcrossSessions() {
 		let first = StreamUrls.target(
 			for: ItemRef(server: server, id: "42"), client: client(salt: "aaaa"),

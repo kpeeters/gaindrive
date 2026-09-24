@@ -73,7 +73,7 @@ class CastPlayer(
 	/**
 	 * Dispatched rather than immediate on purpose. The application scope uses
 	 * `Main.immediate`, which would run this collector inline during
-	 * construction — the flow has a current value the moment it is collected —
+	 * construction - the flow has a current value the moment it is collected -
 	 * and that would call `invalidateState()` on a player the caller does not
 	 * hold a reference to yet.
 	 */
@@ -97,8 +97,8 @@ class CastPlayer(
 	}
 
 	private fun itemData(position: Int, entry: Entry): MediaItemData {
-		// The receiver's own figure wins for the track playing — it read the
-		// file — and the server's estimate covers the rest of the queue.
+		// The receiver's own figure wins for the track playing - it read the
+		// file - and the server's estimate covers the rest of the queue.
 		val durationUs = when {
 			position == index && status.duration > 0f ->
 				(status.duration * 1_000_000).toLong()
@@ -115,7 +115,7 @@ class CastPlayer(
 			.setIsSeekable(true)
 			.setIsDynamic(false)
 			// Only for the track playing. Tracks carry which of them is
-			// selected, and the receiver has one selection — claiming it for a
+			// selected, and the receiver has one selection - claiming it for a
 			// queued item would tick a subtitle in a film nobody has reached.
 			.setTracks(if (position == index) captionTracks(entry.item) else Tracks.EMPTY)
 			.build()
@@ -128,7 +128,7 @@ class CastPlayer(
 	 * Manufactured rather than reported: the receiver renders the captions and
 	 * tells us only which trackIds are on, so there is nothing to read them
 	 * back from. What makes that safe is that both ends are built from
-	 * [captionConfigs] in its order — position i here is the index the picker
+	 * [captionConfigs] in its order - position i here is the index the picker
 	 * publishes and trackId i+1 on the wire.
 	 */
 	/**
@@ -136,7 +136,7 @@ class CastPlayer(
 	 * [entry] is the item already loaded, and none if it is a different one.
 	 *
 	 * A seek is a whole fresh LOAD, so without this every seek would turn the
-	 * subtitles off — the same fault, and the same fix, as `player.captionIndex`
+	 * subtitles off - the same fault, and the same fix, as `player.captionIndex`
 	 * in the web client. Moving to another film deliberately starts clean:
 	 * nothing here knows the viewer's language, and a track number means
 	 * something different in the next film.
@@ -153,7 +153,7 @@ class CastPlayer(
 		// The receiver's own answer when it has given one, and what we asked
 		// for until then. A receiver that never echoes `activeTrackIds` would
 		// otherwise leave the picker showing nothing selected however many
-		// times it was tapped — the exact shape of the local-playback fault
+		// times it was tapped - the exact shape of the local-playback fault
 		// this feature followed, and not one to reproduce remotely.
 		val active = status.activeTrackIds
 			?: session.loaded.value?.activeTrackIds.orEmpty()
@@ -180,7 +180,7 @@ class CastPlayer(
 
 	/**
 	 * Position comes from the receiver, which reports about once a second. It is
-	 * extrapolated while playing so the seek bar moves smoothly between pushes —
+	 * extrapolated while playing so the seek bar moves smoothly between pushes -
 	 * and corrected by the next one, which is the right way round for a clock we
 	 * do not own.
 	 */
@@ -198,7 +198,7 @@ class CastPlayer(
 		ended -> Player.STATE_ENDED
 		status.playerState == CastPlayerState.PLAYING ||
 			status.playerState == CastPlayerState.PAUSED -> Player.STATE_READY
-		// Anything else — BUFFERING, LOADING, or IDLE with a LOAD in flight —
+		// Anything else - BUFFERING, LOADING, or IDLE with a LOAD in flight -
 		// is work in progress, and saying READY would let the UI claim a
 		// position that does not exist yet.
 		else -> Player.STATE_BUFFERING
@@ -327,8 +327,8 @@ class CastPlayer(
 	/**
 	 * Resolves the current entry's stream URL and hands it to the receiver.
 	 *
-	 * [CastUrls] builds it the same way local playback would — same quality,
-	 * same per-server bitrate cap — and then decides whether the receiver
+	 * [CastUrls] builds it the same way local playback would - same quality,
+	 * same per-server bitrate cap - and then decides whether the receiver
 	 * fetches from the server or through the bridge.
 	 *
 	 * When it cannot build one at all, the entry is skipped rather than left to
@@ -414,7 +414,7 @@ class CastPlayer(
 		 * ordered list captions are numbered by**: position i is index i in
 		 * `PlayerState.textTracks`, the group at i in [captionTracks], and
 		 * trackId i+1 on the wire. Deriving either end from a second lookup
-		 * would be two numberings that agree until they do not — the same
+		 * would be two numberings that agree until they do not - the same
 		 * class of fault as the TrackGroup identity failure in `VideoSurface`.
 		 *
 		 * They are put there by `PlaybackService.resolveVideo`, so no extra
@@ -442,7 +442,7 @@ class CastPlayer(
 				Player.COMMAND_GET_METADATA,
 				// Without this the MediaController answers Tracks.EMPTY
 				// however well this player fills them in, and the subtitle
-				// picker — which reads controller.currentTracks — vanishes the
+				// picker - which reads controller.currentTracks - vanishes the
 				// moment playback goes remote.
 				Player.COMMAND_GET_TRACKS,
 				Player.COMMAND_RELEASE,

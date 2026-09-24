@@ -19,7 +19,7 @@ import Foundation
 //	`String` id, and nothing above it should either.
 //
 //	They are `Codable` for the mirror, which stores mapped domain values rather
-//	than raw responses — see `LibraryMirror`. That is also the whole of the
+//	than raw responses - see `LibraryMirror`. That is also the whole of the
 //	mirror's migration story: a value written by a build with a different shape
 //	fails to decode, which reads as a miss, which is a re-fetch. A cache is
 //	allowed to be thrown away.
@@ -30,13 +30,13 @@ import Foundation
 /// rule.** A root id is only meaningful to the server that issued it, and this
 /// one never travels: it is read from that server's `getMusicFolders` and put
 /// straight back into a request to the same server. Nothing above `Data` ever
-/// sees it — the merged listing is asked for by root *kind*
+/// sees it - the merged listing is asked for by root *kind*
 /// (`LibraryRoots.listingRequests`), never by a root's own id.
 struct MusicRoot: Hashable, Sendable, Codable {
 	let id: String
 	let name: String
 	/// A gaindrive extension: `artists` or `categories`. Absent on a server
-	/// with no concept of root kinds — which is **not** the same as having no
+	/// with no concept of root kinds - which is **not** the same as having no
 	/// roots of that kind.
 	let contentType: String?
 }
@@ -85,7 +85,7 @@ struct Album: Identifiable, Hashable, Sendable, Codable {
 	let artistRef: ItemRef?
 	let songCount: Int
 	/// How many of this album's tracks are video, which is the only thing that
-	/// tells a season or a film from a record before its tracks are fetched —
+	/// tells a season or a film from a record before its tracks are fetched -
 	/// `isVideo` is a per-song field.
 	///
 	/// **Zero does not mean "no video".** The server does not carry it on the
@@ -99,7 +99,7 @@ struct Album: Identifiable, Hashable, Sendable, Codable {
 	let genre: String?
 	let coverArt: ItemRef?
 	let starredAt: String?
-	/// As `Artist.refs` — a merged album row stands for the same record on
+	/// As `Artist.refs` - a merged album row stands for the same record on
 	/// several servers.
 	let refs: [ItemRef]
 
@@ -128,8 +128,8 @@ struct Album: Identifiable, Hashable, Sendable, Codable {
 	var sources: [ServerId] { refs.map(\.server) }
 }
 
-/// A track. **Songs never merge** — a track list always comes from one album on
-/// one server — so there is no `refs` here, and its absence is the rule.
+/// A track. **Songs never merge** - a track list always comes from one album on
+/// one server - so there is no `refs` here, and its absence is the rule.
 struct Song: Identifiable, Hashable, Sendable, Codable {
 	let ref: ItemRef
 	let title: String
@@ -149,7 +149,7 @@ struct Song: Identifiable, Hashable, Sendable, Codable {
 	let lastPlayedAt: String?
 	let isVideo: Bool
 	/// False whenever the endpoint did not select the codec columns, which is
-	/// the safe direction — the video still plays, it just seeks by
+	/// the safe direction - the video still plays, it just seeks by
 	/// re-request. Trusted as given rather than second-guessed.
 	let nativeSeek: Bool
 	let width: Int?

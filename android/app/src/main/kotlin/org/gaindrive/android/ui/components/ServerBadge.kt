@@ -16,7 +16,7 @@ import androidx.compose.ui.unit.dp
 /**
  * Which server a row came from.
  *
- * Deliberately quiet — a tinted label rather than a chip. It appears on every
+ * Deliberately quiet - a tinted label rather than a chip. It appears on every
  * row in merged scope, so anything louder would compete with the content it is
  * annotating. Callers pass null in single-server scope, and nothing renders.
  */

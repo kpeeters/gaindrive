@@ -80,8 +80,8 @@ data class FetchUrlUiState(
 	val status: FetchStatus = FetchStatus(),
 	val error: String? = null,
 	/**
-	 * The sections the library's roots offer — never Uploads. Chooses what the
-	 * two name fields are *called* and what the artist field pre-fills to —
+	 * The sections the library's roots offer - never Uploads. Chooses what the
+	 * two name fields are *called* and what the artist field pre-fills to -
 	 * and nothing else. It deliberately does not narrow the suggestions below.
 	 */
 	val kinds: List<LibrarySection> = emptyList(),
@@ -94,7 +94,7 @@ data class FetchUrlUiState(
 	val target: FetchTarget? get() = targets?.firstOrNull { it.id == server }
 
 	/**
-	 * What the chosen server is reporting, newest first — not only the job this
+	 * What the chosen server is reporting, newest first - not only the job this
 	 * panel submitted.
 	 *
 	 * A list rather than the single slot this used to be, because the panel now
@@ -108,7 +108,7 @@ data class FetchUrlUiState(
 	val contactLost: Boolean get() = server != null && server in status.contactLost
 
 	/**
-	 * The job this URL is already, or was recently, being fetched by — a live
+	 * The job this URL is already, or was recently, being fetched by - a live
 	 * one in preference to a finished one.
 	 *
 	 * **Exact equality after trimming, and no normalisation.** The blocking half
@@ -141,7 +141,7 @@ data class FetchUrlUiState(
 	 * Refused only for a URL that is *already* being fetched, which is the one
 	 * refusal the server would issue anyway.
 	 *
-	 * This used to be `!live` — no job of any kind may be running — and that was
+	 * This used to be `!live` - no job of any kind may be running - and that was
 	 * right only while `live` could mean nothing but "a job this panel started".
 	 * Now that the panel adopts whatever the account has running, the same rule
 	 * would let a fetch begun in the web client freeze the form on the phone,
@@ -187,7 +187,7 @@ class FetchUrlViewModel @Inject constructor(
 			// What just landed is now in staging, and the panel stays open for
 			// the next URL. Without this the suggestions are the ones loaded when
 			// the panel opened, so fetching the same thing twice in one sitting
-			// draws no warning at all — which is exactly how a duplicate gets
+			// draws no warning at all - which is exactly how a duplicate gets
 			// made. It hangs off the monitor rather than off a poll of our own,
 			// so it still fires for a fetch that finished while this panel was
 			// closed and is only being reopened now.
@@ -210,7 +210,7 @@ class FetchUrlViewModel @Inject constructor(
 			// Driven by connectivity rather than run once, and the flow is
 			// Eagerly started so this also *is* the first probe. A panel opened
 			// with no signal would otherwise stay on "no server can fetch this"
-			// after the signal came back — a statement about the network dressed
+			// after the signal came back - a statement about the network dressed
 			// up as one about the servers. Settled servers are never re-probed.
 			connectivity.online.collect { online ->
 				if (online && _state.value.targets.isNullOrEmpty()) loadTargets()
@@ -320,7 +320,7 @@ class FetchUrlViewModel @Inject constructor(
 				else "in ${hit.where}"
 
 			if (album.isNotBlank()) {
-				// That name's own albums — the precise question, and one call
+				// That name's own albums - the precise question, and one call
 				// however many servers hold the name, because a merged row
 				// carries each server's ref.
 				val albums = runCatchingCancellable {
@@ -328,7 +328,7 @@ class FetchUrlViewModel @Inject constructor(
 				}.getOrNull()?.items.orEmpty()
 				val match = albums.firstOrNull { it.title.equals(album, ignoreCase = true) }
 				if (match != null) {
-					return "You already have “${match.title}” under ${hit.name} — $place."
+					return "You already have “${match.title}” under ${hit.name} - $place."
 				}
 			}
 			return "“${hit.name}” is already $place."
@@ -379,7 +379,7 @@ class FetchUrlViewModel @Inject constructor(
 		// written back to settings: the strip in the app's bottom bar leads here,
 		// and it must land on a panel showing the job it was reporting. Where the
 		// user's attention is right now is a stronger statement than a preference
-		// written last week — but only for this visit.
+		// written last week - but only for this visit.
 		val busy = monitor.status.value.live.map { it.server }.toSet()
 		val chosen = targets.firstOrNull { it.id in busy }?.id
 			?: targets.firstOrNull { it.id == remembered }?.id
@@ -411,7 +411,7 @@ class FetchUrlViewModel @Inject constructor(
 
 	/**
 	 * Changes what the fields are called and what the artist field starts from,
-	 * and nothing else — in particular not what [FetchUrlUiState.suggestions]
+	 * and nothing else - in particular not what [FetchUrlUiState.suggestions]
 	 * holds. Not persisted either: a category one week and an album the next is
 	 * the ordinary case, and it costs one tap to say so.
 	 */
@@ -483,7 +483,7 @@ class FetchUrlViewModel @Inject constructor(
 
 	/**
 	 * Takes the id because there can be several rows now, one of which may be a
-	 * fetch this panel never started — which is exactly the one a person who has
+	 * fetch this panel never started - which is exactly the one a person who has
 	 * just found it running wants to be able to stop.
 	 */
 	fun cancel(id: String) {

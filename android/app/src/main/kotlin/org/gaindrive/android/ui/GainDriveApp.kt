@@ -111,10 +111,10 @@ fun GainDriveApp(
 
 	// Decided once, then held: NavHost rebuilds its graph when startDestination
 	// changes, which would reset the back stack the moment the first server is
-	// saved — throwing the user out of Settings just as they finish adding it.
+	// saved - throwing the user out of Settings just as they finish adding it.
 	val startDestination: Route = remember {
 		// Straight to Settings, whose own path starts at Servers when nothing
-		// is configured — see `stacks` below. There is exactly one useful
+		// is configured - see `stacks` below. There is exactly one useful
 		// thing to do on a first run and that is where its button lives.
 		if (settings.servers.isEmpty()) Route.Settings else Route.Artists()
 	}
@@ -134,7 +134,7 @@ fun GainDriveApp(
 		}
 	}
 
-	// One path per tab — see PaneStack. Held here rather than inside each tab
+	// One path per tab - see PaneStack. Held here rather than inside each tab
 	// for two reasons: a tab keeps its drill-down while the user is away from
 	// it without depending on the navigation library's saveState/restoreState
 	// bookkeeping, and tapping the tab you are already in can shed that
@@ -193,7 +193,7 @@ fun GainDriveApp(
 	// Which tab is lit. Tracked rather than derived from the current route,
 	// because four destinations are not tab roots and belong to no tab: the
 	// album the Now Playing sheet opens, the server editor, the fetch panel and
-	// the picture. A tab's own drill-down no longer comes into it — that is
+	// the picture. A tab's own drill-down no longer comes into it - that is
 	// inside the tab, which is why the effect below can be as narrow as it is.
 	var selectedTab by rememberSaveable {
 		mutableStateOf(if (settings.servers.isEmpty()) TopLevel.SETTINGS else TopLevel.ARTISTS)
@@ -204,7 +204,7 @@ fun GainDriveApp(
 	// the bar: a back press or back gesture out of Settings lands on the library
 	// with nothing to tell the bar it has left. A tab left lit that the user is
 	// no longer in makes the next tap on it take the "already here" branch, which
-	// sheds the drill-down instead of switching — and leaves them there, since
+	// sheds the drill-down instead of switching - and leaves them there, since
 	// every tap after that does the same nothing.
 	//
 	// Only tab roots. A detail is deliberately not matched: an album reached from
@@ -223,7 +223,7 @@ fun GainDriveApp(
 		destination?.hasRoute(Route.FetchUrl::class) != true &&
 		destination?.hasRoute(Route.Video::class) != true
 
-	// A refusal — today only "video cannot be cast" — outlives the sheet or row
+	// A refusal - today only "video cannot be cast" - outlives the sheet or row
 	// the tap came from, so it is shown from the shell rather than from there.
 	val playerMessage by playerViewModel.message.collectAsStateWithLifecycle()
 	val context = LocalContext.current
@@ -263,7 +263,7 @@ fun GainDriveApp(
 		navController.navigate(Route.FetchUrl(url))
 	}
 
-	// Opens the album a track link names and starts the track — the same
+	// Opens the album a track link names and starts the track - the same
 	// landing a chapter hit in search gets, through Route.Album's autoPlay
 	// parameters. Handing the link to the view model rather than resolving
 	// here is what survives a rotation mid-lookup; the result comes back as a
@@ -314,13 +314,13 @@ fun GainDriveApp(
 	// Compact windows get a bottom bar, medium and expanded a navigation rail.
 	// That is what Material 3's adaptive navigation guidance asks for, and it
 	// lands within 50dp of the web client's own 650px sidebar boundary. The
-	// default rule also keeps a *landscape phone* on the bottom bar — it tests
-	// compact height as well as compact width — which is right, since a rail
+	// default rule also keeps a *landscape phone* on the bottom bar - it tests
+	// compact height as well as compact width - which is right, since a rail
 	// there would take width from the one orientation that has least of it.
 	//
 	// None is how the full-window destinations are spelled. As a layout type
 	// rather than as a bar simply not drawn, the suite keeps one description of
-	// the shell instead of two — and it is also why ARCHITECTURE.md's "no
+	// the shell instead of two - and it is also why ARCHITECTURE.md's "no
 	// navigation drawer" rule is untouched by any of this: the rule rejects the
 	// drawer, and the suite is never asked for one.
 	val layoutType = if (showNavAndPlayer) {
@@ -360,7 +360,7 @@ fun GainDriveApp(
 			bottomBar = {
 				// Absent, not empty. Scaffold measures the bar to decide the
 				// body's bottom padding, and a bar holding nothing but an inset
-				// is a zero-height placeable — which fallback it then takes is
+				// is a zero-height placeable - which fallback it then takes is
 				// a question not worth having. Before the navigation bar moved
 				// into the suite this could not arise, because the bar was
 				// always there.
@@ -373,14 +373,14 @@ fun GainDriveApp(
 					// bar's height and leaves the bar itself to clear the
 					// system bars. NavigationBar used to do that for this
 					// column and cannot any more, having moved into the
-					// navigation suite — without this the player is drawn
+					// navigation suite - without this the player is drawn
 					// behind the system navigation bar, visible only as a
 					// sliver. Inside the surface rather than around it so the
 					// bar's own colour continues behind the gesture pill.
 					//
 					// windowInsetsPadding adds only what an ancestor has not
-					// already consumed, so at compact width — where the suite
-					// consumes the bottom inset for its own bar — this
+					// already consumed, so at compact width - where the suite
+					// consumes the bottom inset for its own bar - this
 					// correctly contributes nothing, and the rail layout,
 					// which consumes only the leading edge, gets the whole of
 					// it. The insets are named rather than taken from
@@ -411,7 +411,7 @@ fun GainDriveApp(
 								onOpen = { navController.navigate(Route.FetchUrl("")) },
 								onDismiss = fetchViewModel::dismiss,
 							)
-							// The bottom of the *content* column, not of the window —
+							// The bottom of the *content* column, not of the window -
 							// which at compact width is above the navigation bar, as
 							// before, and beside the rail at medium and expanded. Both
 							// match the web client, where #player is a grid row that
@@ -434,7 +434,7 @@ fun GainDriveApp(
 								onPrevious = playerViewModel::previous,
 								onSeek = playerViewModel::seekTo,
 								// The same two the Now Playing sheet opens, and
-								// the same state behind them — the bar only
+								// the same state behind them - the bar only
 								// draws them where there is room, which is
 								// where the web client's own player bar has
 								// carried them all along.
@@ -456,7 +456,7 @@ fun GainDriveApp(
 				// a descent, so it cross-fades instead.
 				// slideInHorizontally rather than slideIntoContainer: the latter
 				// derives its distance from the difference in container sizes, which
-				// between two full-screen destinations is nearly nothing — hence a
+				// between two full-screen destinations is nearly nothing - hence a
 				// slide you can barely see. These offsets are explicit multiples of
 				// the screen width.
 				enterTransition = {
@@ -495,7 +495,7 @@ fun GainDriveApp(
 				// padding() positions the content; consumeWindowInsets() tells the
 				// screens' own Scaffolds and TopAppBars that these insets are
 				// already accounted for. Without the second call each screen adds
-				// the status bar and navigation bar a second time — a doubled gap
+				// the status bar and navigation bar a second time - a doubled gap
 				// under the status bar, and a dead strip above the mini-player.
 				modifier = Modifier
 					.padding(insets)
@@ -514,7 +514,7 @@ fun GainDriveApp(
 
 				// The uploads listing: the Library tab's own pane strip a second
 				// time, rooted at the personal slice. The bottom bar and player
-				// stay — it is a listing, not a form.
+				// stay - it is a listing, not a form.
 				composable<Route.Uploads> {
 					LibraryTab(
 						stack = uploadsStack,
@@ -539,7 +539,7 @@ fun GainDriveApp(
 					SettingsTab(
 						stack = stacks.getValue(TopLevel.SETTINGS),
 						// A form with a validating action, so it takes the window
-						// rather than a pane — see SettingsTab.
+						// rather than a pane - see SettingsTab.
 						onEditServer = { id: ServerId? ->
 							navController.navigate(Route.ServerEdit(id?.value))
 						},
@@ -548,7 +548,7 @@ fun GainDriveApp(
 
 				// The one album that is not a pane of some tab. It is reached only
 				// from the Now Playing sheet, where there is no list beside it to
-				// go back to and no tab whose strip it belongs in — the sheet
+				// go back to and no tab whose strip it belongs in - the sheet
 				// covers whatever the user was doing, and Back should return them
 				// to exactly that. Leaving this path on the shell's own host is
 				// what keeps that true, and unchanged.
@@ -686,7 +686,7 @@ private const val TRANSITION_MS = 280
  * definition of "reached by drilling down". Both pops land in the same frame,
  * so the user sees one transition, not one per level.
  *
- * Only the four destinations that are not panes of a tab — the album the Now
+ * Only the four destinations that are not panes of a tab - the album the Now
  * Playing sheet opens, the server editor, the fetch panel and the picture.
  * A tab's own drill-down is its own `PaneStack`'s, and the caller resets that
  * beside this call.

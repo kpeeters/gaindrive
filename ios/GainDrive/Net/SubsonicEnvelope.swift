@@ -12,7 +12,7 @@ import Foundation
 ///
 /// The payload is a *sibling* of `status` inside the wrapper rather than
 /// nested under a key of its own, so `Body` is decoded from the same container
-/// — which is why this has a hand-written `init(from:)` instead of the
+/// - which is why this has a hand-written `init(from:)` instead of the
 /// synthesised one.
 struct SubsonicEnvelope<Body: Decodable & Sendable>: Decodable, Sendable {
 	let status: String
@@ -63,7 +63,7 @@ struct SubsonicEnvelope<Body: Decodable & Sendable>: Decodable, Sendable {
 	}
 }
 
-/// For endpoints whose success carries nothing but the status — `ping` being
+/// For endpoints whose success carries nothing but the status - `ping` being
 /// the one phase 1 uses. An empty struct decodes from any object.
 struct EmptyBody: Decodable, Sendable {}
 
@@ -73,7 +73,7 @@ struct EmptyBody: Decodable, Sendable {}
 ///
 /// Every field but `username` is optional. Almost everything in Subsonic's
 /// JSON beyond an id is, and a response carrying only the mandatory fields has
-/// to map without throwing — the alternative is an app that works against
+/// to map without throwing - the alternative is an app that works against
 /// gaindrive and crashes against something else.
 struct SubsonicUser: Decodable, Sendable, Equatable {
 	let username: String

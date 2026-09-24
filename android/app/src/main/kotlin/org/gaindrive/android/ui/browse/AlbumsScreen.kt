@@ -169,7 +169,7 @@ private fun SortAction(current: AlbumSort, onSelect: (AlbumSort) -> Unit) {
  * [showPortrait] is false for a section of a categories root, which has no
  * performer behind it: the avatar would stay a placeholder for ever, and
  * reserving 96dp for it says a picture is coming. The biography needs no such
- * flag — it is drawn only once one has arrived.
+ * flag - it is drawn only once one has arrived.
  */
 @Composable
 private fun ArtistHeader(

@@ -72,7 +72,7 @@ class PlaylistsViewModel @Inject constructor(
 				// changed, and blanking it there would flash the whole screen on
 				// every edit. Going offline counts as switching: the source
 				// changed even though the scope did not. So does a change to the
-				// server list, which is the case the scope cannot see — enabling
+				// server list, which is the case the scope cannot see - enabling
 				// one server and disabling another leaves the scope reading "all
 				// servers" throughout.
 				val switched = selected.scope != scope ||

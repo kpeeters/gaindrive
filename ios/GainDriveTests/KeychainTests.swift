@@ -12,7 +12,7 @@ import Testing
 @testable import GainDrive
 
 /// One gap closes for free relative to Android, where `CredentialCipher` is
-/// untestable because `AndroidKeyStore` does not exist on the JVM — and whose
+/// untestable because `AndroidKeyStore` does not exist on the JVM - and whose
 /// failure mode is "every saved password is unreadable", indistinguishable
 /// from a legitimate restore onto a new device. The Keychain works in the
 /// simulator, so that component is covered here.
@@ -31,7 +31,7 @@ struct KeychainTests {
 
 	/// `SecItemAdd` on an existing account fails with `errSecDuplicateItem`
 	/// rather than replacing, so a naive implementation silently keeps the old
-	/// password after an edit — the user changes it, and nothing changes.
+	/// password after an edit - the user changes it, and nothing changes.
 	@Test func overwritesAnExistingPassword() {
 		let id = ServerId()
 		defer { Keychain.removePassword(for: id) }

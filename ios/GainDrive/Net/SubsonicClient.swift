@@ -33,7 +33,7 @@ enum HTTP {
 	/// warm that never happens and is then attempted again on the next
 	/// transition. Android needed the same thing and spells it `@MediaHttp`.
 	///
-	/// Playback is unaffected either way — `AVURLAsset` does its own
+	/// Playback is unaffected either way - `AVURLAsset` does its own
 	/// networking and never touches a `URLSession` of ours.
 	static let media: URLSession = {
 		let config = URLSessionConfiguration.default
@@ -71,8 +71,8 @@ struct SubsonicClient: Sendable {
 	}
 
 	/// Builds the URL for an endpoint. Every request goes through here,
-	/// including the ones that are never fetched by this type — cover art and
-	/// stream URLs handed to the image loader and to `AVPlayer` — which is why
+	/// including the ones that are never fetched by this type - cover art and
+	/// stream URLs handed to the image loader and to `AVPlayer` - which is why
 	/// it is public rather than an implementation detail of `perform`.
 	///
 	/// The `suffix` exists for `hls.m3u8`, the one endpoint the spec does not
@@ -133,7 +133,7 @@ struct SubsonicClient: Sendable {
 	/// they are legal in a query *string*; they are not safe inside a single
 	/// value, and `URLComponents` does not encode them for you. A username
 	/// like `me+music@example.com` reaches the server as `me music@…`
-	/// otherwise — the same class of silent corruption as the untrimmed
+	/// otherwise - the same class of silent corruption as the untrimmed
 	/// username `AuthParameters` guards against.
 	private static let queryValueAllowed: CharacterSet = {
 		var set = CharacterSet.urlQueryAllowed
@@ -229,7 +229,7 @@ enum ConnectionTest: Sendable, Equatable {
 	/// Reachable, and the account was proved by a reply that named it.
 	case reachable(SubsonicUser)
 	/// Answered `ping`, but the call that would have proved the credentials
-	/// did not happen — this server does not implement `getUser`, or refused
+	/// did not happen - this server does not implement `getUser`, or refused
 	/// it. Not a failure, and not the reassurance the button exists to give
 	/// either, so it says so rather than claiming success.
 	case unverified

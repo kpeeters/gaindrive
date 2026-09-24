@@ -14,7 +14,7 @@ import org.gaindrive.android.net.SubsonicJson
 /**
  * The equalizer state a WiiM reports.
  *
- * [preset] is null when the device would not say which one is loaded — see
+ * [preset] is null when the device would not say which one is loaded - see
  * [parseEqStat]. That is a real state and not an error: the switch is still
  * worth showing.
  */
@@ -40,7 +40,7 @@ data class WiiMEqState(
  * testing goes in a pure function. Everything here is exercised by `WiiMEqTest`.
  *
  * Bodies are read with safe casts rather than `@Serializable` DTOs, the house
- * rule for a payload from a device we do not control — the same reasoning as
+ * rule for a payload from a device we do not control - the same reasoning as
  * `CastStatus.kt` and `CastProbe`. A malformed body must yield null, never an
  * exception: some of these calls run from a detached coroutine.
  */
@@ -52,7 +52,7 @@ private const val PATH = "httpapi.asp"
  * Builds the URL for one command.
  *
  * **The query must be assembled by `HttpUrl`, never concatenated.** Four of the
- * documented presets contain a space and one — `R&B` — contains an ampersand,
+ * documented presets contain a space and one - `R&B` - contains an ampersand,
  * which unencoded would start a second query parameter and deliver the device
  * `EQLoad:R`. `addQueryParameter` percent-encodes both.
  *
@@ -106,7 +106,7 @@ const val WIIM_LEVEL_FLAT = 50
  * The presets *HTTP API for WiiM Products v1.2* documents.
  *
  * Used only when `EQGetList` fails, so the sheet is never empty. It is not the
- * primary source because firmware versions differ and newer ones add presets —
+ * primary source because firmware versions differ and newer ones add presets -
  * a hardcoded list would silently hide them.
  */
 val DOCUMENTED_PRESETS: List<String> = listOf(
@@ -158,7 +158,7 @@ private fun parseBands(root: JsonObject): List<Int>? {
 }
 
 /**
- * Reads an `EQGetStat` response — `{"EQStat":"On"}` or `{"EQStat":"Off"}`.
+ * Reads an `EQGetStat` response - `{"EQStat":"On"}` or `{"EQStat":"Off"}`.
  *
  * The fallback. `EQGetBand` is documented by a third-party project rather than
  * by WiiM's own PDF, so a firmware without it is entirely possible; `EQGetStat`
@@ -171,7 +171,7 @@ fun parseEqStat(body: String): Boolean? =
  * Reads an `EQGetList` response: a JSON array of names, bare or wrapped.
  *
  * Served as `text/html` despite being JSON, which is why nothing here consults
- * the content type. An empty array is treated as a miss — a device with no
+ * the content type. An empty array is treated as a miss - a device with no
  * presets at all is not a state worth rendering, and the documented list is a
  * better answer than a blank sheet.
  *
@@ -179,7 +179,7 @@ fun parseEqStat(body: String): Boolean? =
  * one: the firmware measured here answers this command with a bare array while
  * wrapping `EQGetBand` and every mutation in `{"status":"OK", …}`, so the shape
  * is plainly within its repertoire. Accepting both costs three lines, and the
- * consequence of refusing is silent — `presets()` never throws, so an unread
+ * consequence of refusing is silent - `presets()` never throws, so an unread
  * list is indistinguishable on screen from a device offering exactly the
  * documented set, and the difference only surfaces as a preset the owner made
  * themselves being absent. The field is found by shape and not by name because
@@ -227,7 +227,7 @@ fun eqSetBandCommand(levels: List<Int>): String {
  *
  * **Both documented shapes are accepted, because a device sends the other one.**
  * The PDF describes a plain-text `OK`, the OpenAPI description types the
- * response as an object with a `status` field, and this code believed the PDF —
+ * response as an object with a `status` field, and this code believed the PDF -
  * so on real firmware every `EQLoad`, `EQOn` and `EQOff` was performed by the
  * device and reported to the user as "the device would not load that preset".
  * A command that is obeyed and then called a failure is the worst of the three

@@ -35,7 +35,7 @@
 // apibrowse.cc.
 
 // The ceiling on one upload archive as it streams through /upload, and
-// therefore also httplib's global payload cap — the content-reader path
+// therefore also httplib's global payload cap - the content-reader path
 // enforces that cap on what it hands the receiver. Every other route is
 // bounded far lower, before a byte of body is read, by the pre-request
 // handler and MAX_SMALL_BODY_BYTES.
@@ -123,7 +123,7 @@ class GainDrive {
 		bool            no_scan_ = false;
 		std::string     upload_dir_;
 		// Absolute path of the uploads root, or empty when none is configured
-		// — in which case the upload endpoints refuse rather than writing into
+		// - in which case the upload endpoints refuse rather than writing into
 		// a library root. Personal files live at <users_dir_>/<username>/.
 		std::string     users_dir_;
 		// Name of the uploads root, i.e. the first component of the stored
@@ -139,13 +139,13 @@ class GainDrive {
 		// as long as that LOAD is the current one.  TranscodeCache::Entry is
 		// an RAII in-use count and prune() skips in-use keys, so dropping it
 		// after the warm would let the file be evicted between the warm and
-		// the receiver's first GET — which is exactly the cold-entry wait the
+		// the receiver's first GET - which is exactly the cold-entry wait the
 		// warm exists to avoid.  Guarded by cast_warm_mu_ because the warm
 		// runs on CastManager's load worker while a teardown can arrive on an
 		// httplib thread.
 		std::mutex      cast_warm_mu_;
 		std::shared_ptr<const TranscodeCache::Entry> cast_warm_entry_;
-		// What the last LOAD decided — reported to the client rather than
+		// What the last LOAD decided - reported to the client rather than
 		// left for it to re-derive, for the reason cast_load_song() gives
 		// about audioOnly: the ladder these come off lives in codecs.hh, and
 		// a second copy of it in JavaScript is a copy that will drift.
@@ -170,8 +170,8 @@ class GainDrive {
 		// and the reason is the reason caption_ids is guarded: this holds three
 		// std::strings, so a torn read is not a wrong number but undefined
 		// behaviour.  It is written from httplib threads *and* from
-		// CastManager's load worker — the fallback's prepare hook swaps it when
-		// a refused film becomes its soundtrack — and read from the SSE thread
+		// CastManager's load worker - the fallback's prepare hook swaps it when
+		// a refused film becomes its soundtrack - and read from the SSE thread
 		// on every push.
 		mutable std::mutex cast_stream_mu_;
 		CastStreamInfo     last_cast_stream_;
@@ -185,7 +185,7 @@ class GainDrive {
 		// called startCast. Both halves are needed. The account alone is what
 		// this replaced, and it is why casting from the web client and then
 		// playing on the phone under the same login sent the track to the
-		// television — `active_` is one process-global bool, so every
+		// television - `active_` is one process-global bool, so every
 		// stream.view in the server was rerouted to whatever receiver anyone
 		// had most recently picked.
 		//
@@ -193,7 +193,7 @@ class GainDrive {
 		// Subsonic `c=` one, because `c=` names the *kind* of client: every
 		// browser sends `gaindrive-web`, so two browsers of one user would go
 		// on hijacking each other. startCast requires it, which is what makes
-		// the "sent no id" bucket incapable of owning anything — otherwise two
+		// the "sent no id" bucket incapable of owning anything - otherwise two
 		// installs of one app would collapse into a single identity and
 		// reproduce the same bug one scale down.
 		//
@@ -234,7 +234,7 @@ class GainDrive {
 		// This is the other half of what CastManager's token does for the
 		// server-driven cast, and it cannot be that token: CastManager holds a
 		// *single* one bound to the live session, and these belong to clients
-		// that hold the Cast control channel themselves — concurrent, and with
+		// that hold the Cast control channel themselves - concurrent, and with
 		// no session on this server at all.
 		//
 		// Scoped to one song, one account and a short life, because the point
@@ -244,7 +244,7 @@ class GainDrive {
 		//
 		// It covers three endpoints because a LOAD needs three things, and a
 		// grant that covered only the audio would leave the password on the
-		// television regardless — the sleeve travels in the LOAD's metadata
+		// television regardless - the sleeve travels in the LOAD's metadata
 		// and the receiver fetches that too.
 		struct StreamGrant
 			{
@@ -270,7 +270,7 @@ class GainDrive {
 		std::optional<StreamGrant> grant_lookup(const std::string& token);
 
 		// The account a grant authorises for `song_id`, or empty when none
-		// does — expired, for another song, or simply not a grant.
+		// does - expired, for another song, or simply not a grant.
 		std::string stream_grant_user(const std::string& token, int song_id);
 
 		// True when a grant covers this cover art. Separate from the above
@@ -311,7 +311,7 @@ class GainDrive {
 		//
 		// Any caption of it, deliberately unlike valid_caption_token(), which
 		// scopes to the ids one LOAD declared. There is no LOAD here to
-		// mirror — the client builds its own — and a subtitle of a song the
+		// mirror - the client builds its own - and a subtitle of a song the
 		// account may already read is not a wider reach than the song was.
 		bool grant_allows_captions(const std::string& token, int song_id);
 
@@ -329,8 +329,8 @@ class GainDrive {
 
 		// True when `req` is the client that owns the current cast session.
 		// False when it sent no castController at all, which is what keeps
-		// every client that does not speak the extension — the Android app, a
-		// third-party Subsonic client, curl — out of cast mode entirely.
+		// every client that does not speak the extension - the Android app, a
+		// third-party Subsonic client, curl - out of cast mode entirely.
 		bool cast_owned_by(const httplib::Request& req);
 
 		// Record the owner of a session just started, and bump the generation.
@@ -344,11 +344,11 @@ class GainDrive {
 		// receiver will fetch, the castToken standing in for credentials the
 		// television does not have, the contentType the stream will *actually*
 		// carry (see cast_mime_for), and the side-loaded subtitle tracks. Three
-		// endpoints need this — castLoad, castControl's IDLE recovery and
-		// stream.view's cast redirect — and they had three copies of the URL
+		// endpoints need this - castLoad, castControl's IDLE recovery and
+		// stream.view's cast redirect - and they had three copies of the URL
 		// construction between them, which is two places for a new query
 		// parameter to be forgotten.
-		// Returns the description of what was sent — whether it was the
+		// Returns the description of what was sent - whether it was the
 		// soundtrack alone (the session's device announced no video_out), the
 		// contentType declared, and the container, bitrate and tier the
 		// receiver will actually get.  castLoad and castSession report all of
@@ -366,8 +366,8 @@ class GainDrive {
 		// the format choice, the token minting and the cache warm would be two
 		// copies of something that has to agree with Streamer::serve() exactly.
 		//
-		// `url` comes back empty when there is nothing to send — no token, or a
-		// silent film with no audio stream to extract — and the caller decides
+		// `url` comes back empty when there is nothing to send - no token, or a
+		// silent film with no audio stream to extract - and the caller decides
 		// what that means.  `desc` is filled with what a client should be told.
 		//
 		// is_fallback does two extra things, and both are only knowable here:
@@ -387,7 +387,7 @@ class GainDrive {
 		// Without it every play of an undecodable film pays the failed LOAD
 		// again; with it the failure happens once, ever.  setCastDevicePref
 		// clears the row, since changing your mind about a device is the
-		// natural place to make it reconsider — and the only way a negative
+		// natural place to make it reconsider - and the only way a negative
 		// that has gone stale (new firmware, a different device at the same
 		// address) is ever forgotten.
 		bool cast_video_refused(const std::string& device_id,
@@ -405,14 +405,14 @@ class GainDrive {
 		// Wikipedia, then TheAudioDB, then Discogs, with two deliberate
 		// one-second pacing waits along the way. That ran inside the request
 		// thread, so a client showing a grid of artists could occupy the whole
-		// HTTP pool in network waits — and the bytes it fetched were kept only
+		// HTTP pool in network waits - and the bytes it fetched were kept only
 		// in memory, so a restart did it all again.
 		//
 		// It now happens here instead: one background thread works through the
 		// artists that have no portrait yet, writes both the metadata and the
 		// image to the DB, and getCoverArt does nothing but read. A request
 		// for an artist not yet resolved pushes it to the *front* of the
-		// queue — what somebody is looking at beats alphabetical order — and
+		// queue - what somebody is looking at beats alphabetical order - and
 		// answers 404 straight away.
 		//
 		// Same shape as TMDB's Phase 3c, and for the same reason: a slow first
@@ -465,7 +465,7 @@ class GainDrive {
 		// the info cache and the artist_art status still describe the
 		// previous answer until the worker replaces them, so a client polling
 		// after `force` would otherwise be told on its very next request that
-		// the work had finished — before it had started.
+		// the work had finished - before it had started.
 		//
 		// One set for both kinds: an album folder's path and an artist
 		// folder's path cannot be the same string.
@@ -473,7 +473,7 @@ class GainDrive {
 		// getArtistInfo / getArtistInfo2. A member rather than a free function
 		// because answering one now means *queueing* the lookup instead of
 		// performing it, and the queue is ours. `key` is "artistInfo" or
-		// "artistInfo2" — it names the XML element and the JSON key.
+		// "artistInfo2" - it names the XML element and the JSON key.
 		void handle_artist_info(const httplib::Request& req,
 		                        httplib::Response& res, const char* key);
 		// getAlbumInfo / getAlbumInfo2, a member for the same reason and since
@@ -494,7 +494,7 @@ class GainDrive {
 		// Set by lookup_wake(), cleared by the worker when it acts on it.
 		// A plain bool under lookup_mu_ rather than an atomic, because it is
 		// read inside the condition variable's predicate and so must be part
-		// of what the lock protects — a notify that races the predicate is a
+		// of what the lock protects - a notify that races the predicate is a
 		// wake-up the worker sleeps straight through.
 		bool                    lookup_reseed_ = false;
 
@@ -505,8 +505,8 @@ class GainDrive {
 		// cannot wait for it.
 		//
 		// The queue lives here rather than inside UrlFetcher because the work
-		// either side of the child process is gaindrive's — the uploads root,
-		// the username, the depth-two normalisation and scan_dirs() — while
+		// either side of the child process is gaindrive's - the uploads root,
+		// the username, the depth-two normalisation and scan_dirs() - while
 		// UrlFetcher knows the tool and nothing else. Owning the thread here is
 		// also what makes it safe: it is joined in the destructor *body*, so it
 		// cannot still be inside scan_dirs() when store_ is destroyed.
@@ -527,7 +527,7 @@ class GainDrive {
 			// What the user typed before pressing Fetch, each already
 			// sanitised into a single path component, and empty when they
 			// typed nothing. Applied by renaming the batch's two directory
-			// levels after the tool exits and before the scan — see
+			// levels after the tool exits and before the scan - see
 			// apply_batch_names(). Unlike url and handler these are cleaned on
 			// the way *in*, because they become directory names rather than
 			// only wire strings.
@@ -545,9 +545,9 @@ class GainDrive {
 		// normalise what was written into <artist>/<album>/file, apply any names
 		// the user typed by hand, then scan each artist directory in the batch.
 		// Shared with /upload, which is the same steps around a different
-		// producer — an archive rather than a fetched URL — and now passes the
+		// producer - an archive rather than a fetched URL - and now passes the
 		// same overrides. The defaults remain for a caller that has no names to
-		// give. Catches — a contended database must not take the server with
+		// give. Catches - a contended database must not take the server with
 		// it.
 		void scan_batch(const std::string& rel_batch,
 		                const std::filesystem::path& dest,

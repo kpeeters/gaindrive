@@ -51,8 +51,8 @@ fun ArtistsScreen(
 	/**
 	 * The third argument is the section the artist was opened from. The
 	 * section itself rather than a bool per case: two of them are interesting
-	 * below — Uploads decides what may be deleted, Categories decides whether
-	 * there is a performer to draw a portrait and a biography for — and a pair
+	 * below - Uploads decides what may be deleted, Categories decides whether
+	 * there is a performer to draw a portrait and a biography for - and a pair
 	 * of unlabelled booleans at a call site says neither.
 	 */
 	onOpenArtist: (List<ItemRef>, String, LibrarySection) -> Unit,
@@ -117,7 +117,7 @@ fun ArtistsScreen(
 
 			// Outside the list rather than an item in it, so it is there while
 			// the uploads are still loading, when the load failed, and when
-			// there is nothing in them yet — which is exactly when someone wants
+			// there is nothing in them yet - which is exactly when someone wants
 			// to put something there. The uploads listing is only reachable by
 			// an account that may upload, so reaching this means the rights
 			// exist.
@@ -135,7 +135,7 @@ fun ArtistsScreen(
 								live.isEmpty() ->
 									"The server downloads it into your uploads"
 								live.size == 1 ->
-									fetches.moving?.let { "Fetching — ${it.job.percent}%" }
+									fetches.moving?.let { "Fetching - ${it.job.percent}%" }
 										?: "1 fetch queued"
 								else -> "${live.size} fetches in progress"
 							}
@@ -157,7 +157,7 @@ fun ArtistsScreen(
 			) { listing ->
 				if (listing.isEmpty) {
 					// Offline the list is trimmed to what has stored audio, so
-					// empty means "nothing downloaded", not "empty library" —
+					// empty means "nothing downloaded", not "empty library" -
 					// and saying the latter would send the user hunting for a
 					// problem with their server.
 					EmptyMessage(
@@ -181,7 +181,7 @@ fun ArtistsScreen(
 				val hasCategories = listing.categories.isNotEmpty()
 
 				// Flat item index of each artist bucket's header, offset past
-				// the Categories section when there is one — its header plus
+				// the Categories section when there is one - its header plus
 				// its rows sit above the first artist bucket.
 				val headerPositions = remember(listing) {
 					val offset = if (hasCategories) 1 + listing.categories.size else 0
@@ -189,9 +189,9 @@ fun ArtistsScreen(
 				}
 
 				// Only when the labels really are letters, and only over the
-				// artist buckets — the Categories header is not a rail stop.
+				// artist buckets - the Categories header is not a rail stop.
 				// An admin's uploads listing is grouped by owner instead, so
-				// its labels are usernames — a rail of those is a strip of
+				// its labels are usernames - a rail of those is a strip of
 				// words down the edge of the screen, and it is for scrubbing a
 				// long alphabetical list rather than for jumping between four
 				// people.
@@ -214,7 +214,7 @@ fun ArtistsScreen(
 					) {
 						// The whole group under one heading: a library holds a
 						// handful of sections, not enough to bucket by letter.
-						// The key cannot collide with a bucket's "hdr-C" — no
+						// The key cannot collide with a bucket's "hdr-C" - no
 						// bucket label is more than one character when it is a
 						// letter at all.
 						if (hasCategories) {

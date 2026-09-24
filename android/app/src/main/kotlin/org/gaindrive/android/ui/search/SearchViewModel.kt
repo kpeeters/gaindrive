@@ -47,7 +47,7 @@ data class SearchResults(
 	val albums: List<AlbumUi> = emptyList(),
 	val songs: List<SongUi> = emptyList(),
 	/**
-	 * Chapter markers whose titles matched — the songs inside a concert, a
+	 * Chapter markers whose titles matched - the songs inside a concert, a
 	 * DJ set or a mixtape, which is one file and would otherwise be one
 	 * unsearchable row.
 	 *
@@ -74,7 +74,7 @@ sealed interface SearchPhase {
 
 	/**
 	 * [outstanding] is true while some servers have answered and others have
-	 * not — the results are usable but not yet complete, which the screen shows
+	 * not - the results are usable but not yet complete, which the screen shows
 	 * as a quiet indicator rather than by withholding what it has.
 	 */
 	data class Ready(
@@ -119,7 +119,7 @@ class SearchViewModel @Inject constructor(
 		// be: this combine has no distinctUntilChanged, so flatMapLatest
 		// restarts the search on every emission and the value is only carried
 		// for the header. Adding one here would need the server ids or
-		// `browse.revision` instead — swapping one server for another leaves
+		// `browse.revision` instead - swapping one server for another leaves
 		// the count untouched.
 		Search(query.trim(), filters, browse.scope, servers.size)
 	}
@@ -131,7 +131,7 @@ class SearchViewModel @Inject constructor(
 			results(search)
 		}
 		// Lazily, not WhileSubscribed: leaving the tab dropped the last
-		// subscriber, and returning restarted the upstream — silently re-running
+		// subscriber, and returning restarted the upstream - silently re-running
 		// the query and rebuilding results the user already had.
 		.stateIn(viewModelScope, SharingStarted.Lazily, SearchPhase.Idle)
 

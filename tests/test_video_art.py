@@ -2,7 +2,7 @@
 """Cover art manufactured from video files.
 
 Video containers carry no tag anything writes, so gaindrive derives a cover
-from the file itself — an embedded cover image, or failing that a frame — and
+from the file itself - an embedded cover image, or failing that a frame - and
 caches it in the music DB. A song or album whose art came from there has its
 cover_path set to the *media file's* own path, so what these tests really check
 is that such an id round-trips through getCoverArt as an image rather than
@@ -19,7 +19,7 @@ Everything here **skips** when no video in the library has art, rather than
 failing. That is a legitimate state, and with no TMDB key configured it is the
 usual one: both local tiers are off by default. Configure a key, or start the
 server with --video-art-embedded or --video-art-frames, to exercise these
-properly. The checks are the same whichever tier supplied the image — that is
+properly. The checks are the same whichever tier supplied the image - that is
 the point of routing all three through one convention.
 """
 
@@ -81,7 +81,7 @@ def _videos():
 
 def _need_video():
     assert _videos(), \
-        "no videos in the library — scan a collection with video first"
+        "no videos in the library - scan a collection with video first"
 
 
 def _with_art():
@@ -95,7 +95,7 @@ class Skip(Exception):
 def _need_art():
     _need_video()
     if not _with_art():
-        raise Skip("no video in the library has cover art — both local tiers "
+        raise Skip("no video in the library has cover art - both local tiers "
                    "are off by default; configure a TMDB key, or try "
                    "--video-art-embedded / --video-art-frames")
 
@@ -150,7 +150,7 @@ def test_cover_art_is_revalidated_not_cached_blindly():
 
 
 def test_size_parameter_is_accepted():
-    """The stored image is served at its stored size whatever `size` says —
+    """The stored image is served at its stored size whatever `size` says -
     what must not happen is a 500 or an empty body."""
     _need_art()
     got = _with_art()

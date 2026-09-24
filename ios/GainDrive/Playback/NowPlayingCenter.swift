@@ -53,7 +53,7 @@ final class NowPlayingCenter {
 		loadArtwork(cover, for: song.ref)
 	}
 
-	/// Patched on play, pause and seek — and **nowhere else**.
+	/// Patched on play, pause and seek - and **nowhere else**.
 	///
 	/// Not from the position tick: iOS extrapolates elapsed time from the rate
 	/// and the last update, so writing it twice a second is wasted work that
@@ -73,7 +73,7 @@ final class NowPlayingCenter {
 		// Always meaningful: with nothing before it, previous restarts the
 		// track.
 		centre.previousTrackCommand.isEnabled = true
-		// Inert exactly when a scrub would not work — which is the chunked
+		// Inert exactly when a scrub would not work - which is the chunked
 		// fallback, where the response has no length and no ranges.
 		centre.changePlaybackPositionCommand.isEnabled = canSeek
 	}
@@ -84,7 +84,7 @@ final class NowPlayingCenter {
 		MPNowPlayingInfoCenter.default().playbackState = .stopped
 	}
 
-	/// Fetched in its own task so the rest of the info publishes immediately —
+	/// Fetched in its own task so the rest of the info publishes immediately -
 	/// a lock screen that waited for a download would be blank for as long as
 	/// the download took.
 	private func loadArtwork(_ cover: CoverSource?, for ref: ItemRef) {
@@ -101,7 +101,7 @@ final class NowPlayingCenter {
 			//
 			// **`@Sendable` is load-bearing and looks like noise.** A closure
 			// literal that is not `@Sendable` inherits the isolation of the
-			// context it is written in — here `@MainActor` — but MediaPlayer
+			// context it is written in - here `@MainActor` - but MediaPlayer
 			// invokes this one on its own serial queue whenever the system asks
 			// for artwork. The runtime then traps on the executor assertion, and
 			// nothing warns beforehand because the isolation is inferred and the
@@ -121,7 +121,7 @@ final class NowPlayingCenter {
 	/// Every handler is `@Sendable` and hops explicitly, for the reason spelled
 	/// out on the artwork closure above: a plain closure literal here would
 	/// inherit `@MainActor` from this method and trap if MediaPlayer ever
-	/// invoked it on a queue of its own — which it makes no promise not to do.
+	/// invoked it on a queue of its own - which it makes no promise not to do.
 	/// Returning `.success` before the work happens is already the shape of the
 	/// seek command, so nothing about the behaviour changes.
 	private func registerCommands() {

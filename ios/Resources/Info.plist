@@ -3,7 +3,7 @@
 <!--
 	Hand-written rather than synthesised by Xcode, because the transport
 	security and local-network keys below want their reasoning next to them and
-	a stable diff. See PLAN.md, "App Store constraints".
+	a stable diff.
 -->
 <plist version="1.0">
 <dict>
@@ -57,8 +57,8 @@
 
 	<!-- `audio` only. Anything else is a review risk for no benefit while the
 	     app merely plays music. Note that this mode does not keep the app
-	     alive while casting, since the phone is then not playing audio —
-	     see PLAN.md, phase 7, and ios/CAST.md for what that costs. Nothing in
+	     alive while casting, since the phone is then not playing audio.
+	     Nothing in
 	     the cast work adds a mode here: a direct cast keeps playing when the
 	     app is suspended, because the receiver pulls from the server itself. -->
 	<key>UIBackgroundModes</key>
@@ -94,8 +94,8 @@
 	     from a network with no receivers on it.
 
 	     Note this is all that Bonjour discovery needs. The restricted
-	     com.apple.developer.networking.multicast entitlement — which requires a
-	     written request to Apple and is often refused — covers *raw* multicast,
+	     com.apple.developer.networking.multicast entitlement - which requires a
+	     written request to Apple and is often refused - covers *raw* multicast,
 	     NWConnectionGroup or a socket joining a group by hand. NWBrowser goes
 	     through the system's mDNSResponder, which does the multicast on the
 	     app's behalf. -->

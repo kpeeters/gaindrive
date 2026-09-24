@@ -5,7 +5,7 @@ getCoverArt is asked for a pixel size by every client gaindrive has, and each
 of those requests used to fork ffmpeg and decode the full-size source. Scaling
 now happens in process and the result is stored in the music DB, so what these
 tests check is that the answer is a real image *of the size that was asked
-for* — which nothing in tests/ checked before, because measuring pixels needs
+for* - which nothing in tests/ checked before, because measuring pixels needs
 a few lines of parser and asserting "some bytes came back" does not.
 
 Start the server first and let the startup scan finish:
@@ -14,8 +14,8 @@ Start the server first and let the startup scan finish:
 Then run:
     python3 tests/test_cover_art.py
 
-Tests that need material the library may not have — a PNG cover, a video with
-art, an artist with a portrait — skip rather than fail. Everything else runs
+Tests that need material the library may not have - a PNG cover, a video with
+art, an artist with a portrait - skip rather than fail. Everything else runs
 against any collection.
 """
 
@@ -163,7 +163,7 @@ def test_scaled_cover_has_the_requested_short_edge():
     """`size` is the SHORT edge, so a non-square source overshoots on the
     other one. That is the whole point: every client crops a cover to a
     square, and fitting the long edge instead leaves it enlarging a 2:3 poster
-    to fill its cell — blurred by the client however sharp what we sent was.
+    to fill its cell - blurred by the client however sharp what we sent was.
 
     LONG_EDGE_LIMIT caps the other edge at four times `size`, so a source wider
     than 4:1 legitimately comes back short of what was asked. Skipped here
@@ -250,7 +250,7 @@ def test_sizes_are_independent():
 
 
 def test_scaled_response_revalidates():
-    """The 304 path, *with* a size — the existing suite only tests it without."""
+    """The 304 path, *with* a size - the existing suite only tests it without."""
     cid, _, _ = _cover_id()
     status, hdrs, _ = _raw("getCoverArt.view", {"id": cid, "size": 80})
     assert status == 200
@@ -286,7 +286,7 @@ def test_full_size_content_type_matches_the_bytes():
             assert ct.startswith("image/jpeg"), \
                 f"a JPEG cover was served as {ct!r}"
     if not seen_png:
-        raise Skip("no PNG cover in the library — the JPEG half still ran")
+        raise Skip("no PNG cover in the library - the JPEG half still ran")
     print("PASS  full-size Content-Type follows the magic bytes")
 
 
@@ -307,7 +307,7 @@ def test_video_art_honours_size():
     w, h = _image_size(small)
     expect = min(80, max(fw, fh))
     assert max(w, h) == expect, \
-        f"a {fw}x{fh} video poster came back {w}x{h} at size=80 — video art " \
+        f"a {fw}x{fh} video poster came back {w}x{h} at size=80 - video art " \
         f"used to be served at its stored size whatever was asked"
     print(f"PASS  video art honours size ({fw}x{fh} -> {w}x{h})")
 
@@ -368,7 +368,7 @@ def test_pipelined_requests_are_not_off_by_one():
                 f"connection"
             w, h = _image_size(body)
             assert max(w, h) <= size, \
-                f"id={cid} size={size} came back {w}x{h} — this response " \
+                f"id={cid} size={size} came back {w}x{h} - this response " \
                 f"belongs to a different request"
     finally:
         conn.close()

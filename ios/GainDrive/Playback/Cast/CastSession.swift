@@ -24,7 +24,7 @@ struct CastMedia: Sendable, Equatable {
 	var artist: String?
 	var album: String?
 	var artwork: URL?
-	/// Selects which metadata block the receiver is given — see `metadata`.
+	/// Selects which metadata block the receiver is given - see `metadata`.
 	var isVideo = false
 	/// What the server was asked for. Kept because a `MEDIA_STATUS` cannot
 	/// answer it: the receiver reports no codec and no bitrate, and the
@@ -48,7 +48,7 @@ struct CastMedia: Sendable, Equatable {
 /// in flight **on the receiver**.
 ///
 /// What must not drift from the C++ is the retry behaviour in `LoadRetryWatcher`
-/// and the diagnostics — the whole `MEDIA_STATUS` and `RECEIVER_STATUS` payloads
+/// and the diagnostics - the whole `MEDIA_STATUS` and `RECEIVER_STATUS` payloads
 /// are logged for every push, because receiver-side regressions cannot be
 /// diagnosed from summarised state.
 @MainActor
@@ -57,7 +57,7 @@ final class CastSession {
 	/// The device being cast to, or nil when nothing is.
 	private(set) var device: CastDevice?
 	private(set) var status = CastStatus()
-	/// The parameters of the last LOAD, so a retry can repeat it verbatim — and
+	/// The parameters of the last LOAD, so a retry can repeat it verbatim - and
 	/// so a client can say what is playing and at what quality, neither of which
 	/// is recoverable from a status push.
 	private(set) var loaded: CastMedia?
@@ -73,7 +73,7 @@ final class CastSession {
 	@ObservationIgnored private var transportId: String?
 	@ObservationIgnored private var retry = LoadRetryWatcher()
 	/// Bumped by every user-initiated LOAD, so work started for an earlier one
-	/// abandons itself. **A retry deliberately does not bump it** — a retry is
+	/// abandons itself. **A retry deliberately does not bump it** - a retry is
 	/// the same intent as the load it repeats.
 	@ObservationIgnored private var loadGen = 0
 	/// The media session already given up on, so a receiver's repeated idle
@@ -124,7 +124,7 @@ final class CastSession {
 		// **Forgotten now, torn down in a moment.** The grace period below is
 		// three hundred milliseconds during which somebody may well choose a
 		// device again, and `connect` refuses a target it believes it is already
-		// connected to — so leaving this set makes the next cast a silent
+		// connected to - so leaving this set makes the next cast a silent
 		// no-op. The pending teardown checks the channel is still the one it
 		// started with, so it cannot take a newer session down with it.
 		device = nil
@@ -185,12 +185,12 @@ final class CastSession {
 	/// **Refused while there is no media session**, which is not defensiveness:
 	/// the media namespace requires a valid `mediaSessionId`, and 0 is what
 	/// `load()` resets the status to until the receiver answers with its own. A
-	/// command sent in that window is rejected as an invalid request — and the
+	/// command sent in that window is rejected as an invalid request - and the
 	/// one that lands there by construction is the PLAY that follows a LOAD,
 	/// which the LOAD's own `autoplay` has already made unnecessary.
 	private func mediaCommand(_ type: String, extra: [String: Any] = [:]) {
 		guard status.mediaSessionId != 0 else {
-			Self.log.info("cast \(type, privacy: .public) skipped — no media session yet")
+			Self.log.info("cast \(type, privacy: .public) skipped - no media session yet")
 			return
 		}
 		Task { [weak self] in
@@ -217,7 +217,7 @@ final class CastSession {
 		// **A reconnect uses the address the last connection reached**, not the
 		// Bonjour name it started from. Every use of a service endpoint is an
 		// mDNS lookup, and the responders that matter here are the ones that
-		// answer unreliably — `nw_resolver … did not receive all answers in
+		// answer unreliably - `nw_resolver … did not receive all answers in
 		// time` in the middle of a session is that, and it turns a reconnect
 		// that should be instant into one that may not happen at all.
 		var endpoint = target.endpoint
@@ -225,7 +225,7 @@ final class CastSession {
 			guard let open = try? await CastChannel.open(to: endpoint) else {
 				Self.log.warning("cast connect failed, retrying")
 				// Falling back to the name is what recovers a device that has
-				// changed address — the one case the remembered one is wrong.
+				// changed address - the one case the remembered one is wrong.
 				endpoint = target.endpoint
 				try? await Task.sleep(for: Self.reconnectDelay)
 				continue
@@ -252,7 +252,7 @@ final class CastSession {
 
 			// Reached only when the receiver closed on us. Logged because an
 			// idle connection and one silently reconnecting every few seconds
-			// look identical from outside — and this app sends nothing at all
+			// look identical from outside - and this app sends nothing at all
 			// between tracks, which is when a receiver is most likely to hang
 			// up.
 			Self.log.info("cast connection closed by receiver, reconnecting")
@@ -269,7 +269,7 @@ final class CastSession {
 	/// **The receiver pushes only on state changes**, so steady playback would
 	/// report no position at all without an explicit poll. Android gets this for
 	/// free from a socket read timeout; here the read waits indefinitely, so the
-	/// poll is a task of its own — which is the tidier half of that trade.
+	/// poll is a task of its own - which is the tidier half of that trade.
 	private func pollTask(_ open: CastChannel) -> Task<Void, Never> {
 		Task { [weak self] in
 			while !Task.isCancelled {
@@ -290,7 +290,7 @@ final class CastSession {
 			} catch {
 				return
 			}
-			// A frame we could not read is skipped, not fatal — the two nils
+			// A frame we could not read is skipped, not fatal - the two nils
 			// `CastChannel.receive()` distinguishes.
 			guard let payload = received, let message = castJSON(payload) else { continue }
 			await handle(message, on: open)
@@ -355,7 +355,7 @@ final class CastSession {
 
 		if retry.consume(merged), let media = loaded {
 			let generation = loadGen
-			Self.log.warning("cast auto-retry LOAD (gen=\(generation)) — receiver went IDLE/ERROR")
+			Self.log.warning("cast auto-retry LOAD (gen=\(generation)) - receiver went IDLE/ERROR")
 			Task { await sendLoad(media, generation: generation) }
 		} else if merged.isIdleError, merged.mediaSessionId != 0,
 			merged.mediaSessionId != gaveUpOn
@@ -369,7 +369,7 @@ final class CastSession {
 			// neutral: a receiver that cannot decode what it was given goes on
 			// fetching by itself, resetting the connection and asking again from
 			// a fresh offset, for as long as the session stands. Measured
-			// against a WiiM handed an AV1 film — thousands of ranged GETs, a
+			// against a WiiM handed an AV1 film - thousands of ranged GETs, a
 			// saturated link, and an app that reported only "loading".
 			//
 			// So the session is stopped rather than abandoned, and the failure
@@ -418,7 +418,7 @@ final class CastSession {
 		var payload: [String: Any] = [
 			"type": "LOAD",
 			"requestId": nextRequestId(),
-			// Explicit even though the spec defaults it true — some receiver
+			// Explicit even though the spec defaults it true - some receiver
 			// versions have been quirky about it, and it costs nothing.
 			"autoplay": true,
 			"media": content,
@@ -442,7 +442,7 @@ final class CastSession {
 
 		// **Ask before launching.** The connect already sent one GET_STATUS, but
 		// a LOAD can arrive before the answer does, and guessing wrong here is
-		// not a lost second — it is a torn-down session.
+		// not a lost second - it is a torn-down session.
 		try? await open.send(
 			namespace: CastNamespace.receiver, destination: CastNamespace.receiverId,
 			payload: request("GET_STATUS"))
@@ -469,8 +469,8 @@ final class CastSession {
 	///
 	/// The launch wait is generous on purpose: starting the Default Media
 	/// Receiver makes the television fetch a web app from Google, and several
-	/// seconds of nothing there is normal rather than a stall — it is the gap
-	/// `android/CAST.md` describes between `LAUNCH_STATUS` and the LOAD.
+	/// seconds of nothing there is normal rather than a stall - it is the
+	/// gap between `LAUNCH_STATUS` and the LOAD.
 	private func awaitTransport(for limit: Duration) async -> String? {
 		let deadline = ContinuousClock.now.advanced(by: limit)
 		while ContinuousClock.now < deadline {

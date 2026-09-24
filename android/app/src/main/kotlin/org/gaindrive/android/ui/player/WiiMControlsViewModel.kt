@@ -83,7 +83,7 @@ class WiiMControlsViewModel @Inject constructor(
 	 *
 	 * Not idempotent, unlike [AddToPlaylistViewModel.load]: the EQ can be changed
 	 * from the WiiM app or the device itself between openings, and this sheet is
-	 * cheap to fill. Nothing polls — a LAN round trip on a timer is not worth
+	 * cheap to fill. Nothing polls - a LAN round trip on a timer is not worth
 	 * what it would buy.
 	 */
 	fun refresh() {

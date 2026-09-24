@@ -11,7 +11,7 @@ import Foundation
 /// The endpoint surface, mirroring `net/SubsonicApi.kt`.
 ///
 /// These take bare `String` ids, and that is correct rather than a lapse: a
-/// `SubsonicClient` **is** one server — it carries the `ServerId` — so an id
+/// `SubsonicClient` **is** one server - it carries the `ServerId` - so an id
 /// here is already qualified by the receiver. The composite-id rule binds every
 /// layer above this one, which is where `LibraryRepository` enforces it.
 ///
@@ -32,7 +32,7 @@ extension SubsonicClient {
 	// MARK: - Browsing
 
 	/// `contentType` is a gaindrive extension restricting the listing to roots
-	/// of one kind. **Only send it to a server that advertises kinds** — one
+	/// of one kind. **Only send it to a server that advertises kinds** - one
 	/// that does not simply ignores it and answers with its whole library, and
 	/// filtering the reply is too late because nothing in it says which rows to
 	/// discard. `MusicFolderTypes` is what decides.
@@ -72,7 +72,7 @@ extension SubsonicClient {
 			.artistInfo2
 	}
 
-	/// As `artistInfo2` — same upstream, same latency.
+	/// As `artistInfo2` - same upstream, same latency.
 	func albumInfo2(id: String) async throws -> AlbumInfoDto? {
 		try await perform("getAlbumInfo2", parameters: ["id": id], expecting: GetAlbumInfoBody.self)
 			.albumInfo2
@@ -116,7 +116,7 @@ extension SubsonicClient {
 
 	/// The parameter *name* selects the kind, and all three may be mixed in one
 	/// call. Note the server stores stars **by path** and silently ignores an id
-	/// it cannot resolve rather than answering error 70 — so this succeeding is
+	/// it cannot resolve rather than answering error 70 - so this succeeding is
 	/// not evidence that anything changed. See `StarStore`.
 	func star(songIds: [String] = [], albumIds: [String] = [], artistIds: [String] = []) async throws {
 		try await setStarred("star", songIds: songIds, albumIds: albumIds, artistIds: artistIds)
@@ -156,7 +156,7 @@ extension SubsonicClient {
 		return try await perform("createPlaylist", items: items, expecting: GetPlaylistBody.self).playlist
 	}
 
-	/// **`playlistId`, not `id`** — the one endpoint that spells it
+	/// **`playlistId`, not `id`** - the one endpoint that spells it
 	/// differently, and it answers error 10 rather than doing something
 	/// surprising if you get it wrong.
 	///
@@ -183,7 +183,7 @@ extension SubsonicClient {
 	/// The subtitle tracks inside one video.
 	///
 	/// A film with none answers an empty list, and that is the whole of "this
-	/// has no captions" — there is no flag to check and no track invented for
+	/// has no captions" - there is no flag to check and no track invented for
 	/// it, unlike ExoPlayer's HLS extractor, which conjures a CEA-608 entry for
 	/// a playlist declaring none.
 	func videoInfo(id: String) async throws -> VideoInfoDto? {
@@ -193,7 +193,7 @@ extension SubsonicClient {
 
 	/// One caption track, as WebVTT.
 	///
-	/// Everything is converted through ffmpeg's webvtt muxer server-side —
+	/// Everything is converted through ffmpeg's webvtt muxer server-side -
 	/// including a file that was already `.vtt`, so a mislabelled one cannot be
 	/// served verbatim. That is what leaves the client one format to parse.
 	func captions(id: String, captionId: String) async throws -> String {
@@ -205,7 +205,7 @@ extension SubsonicClient {
 	/// The markers inside one recording.
 	///
 	/// **Reads the sidecar file on every call**, server-side, because a
-	/// playback lookup has to be right — the indexed copy is what
+	/// playback lookup has to be right - the indexed copy is what
 	/// `albumChapters` reads. That split is deliberate and the two must not be
 	/// collapsed here either: this is what a hand-edited sidecar shows up in
 	/// immediately.
@@ -218,7 +218,7 @@ extension SubsonicClient {
 			.chapters
 	}
 
-	/// Every chaptered recording in one album folder, from the indexed table —
+	/// Every chaptered recording in one album folder, from the indexed table -
 	/// one query rather than a file read per song, which is what makes drawing
 	/// markers as an album's rows affordable.
 	func albumChapters(id: String) async throws -> [AlbumChaptersBody.Recording] {
@@ -233,7 +233,7 @@ extension SubsonicClient {
 	///
 	/// `submission=false` is a now-playing notification. `submission=true`
 	/// records a **completed** play, and is what increments the play count and
-	/// sets `last_played` — which is therefore what makes `getRecentSongs`
+	/// sets `last_played` - which is therefore what makes `getRecentSongs`
 	/// non-empty, in this app and in the other two clients, which read the same
 	/// server-side state.
 	func scrobble(id: String, submission: Bool) async throws {
@@ -246,7 +246,7 @@ extension SubsonicClient {
 	// MARK: - Recents
 
 	/// A gaindrive extension. A server without it answers an error, which the
-	/// repository degrades to an empty section rather than a failure — the
+	/// repository degrades to an empty section rather than a failure - the
 	/// feature being absent is not the server being down.
 	func recentSongs(size: Int, offset: Int = 0) async throws -> [SongDto] {
 		try await perform(
@@ -262,14 +262,14 @@ extension SubsonicClient {
 	/// it need not carry ours.
 	///
 	/// This app holds the Cast control channel itself and builds the receiver's
-	/// URLs, and a receiver has no account — so those URLs used to carry
+	/// URLs, and a receiver has no account - so those URLs used to carry
 	/// `u`/`t`/`s`, which together are the password: `t` is md5(password + salt)
 	/// and `s` is the salt, and a television holding them reads the whole library
 	/// as this person until the password changes.
 	///
 	/// One token covers the track's stream, its cover art and its subtitles,
 	/// expires in twelve hours, and reaches nothing the account could not already
-	/// read. A gaindrive extension, and a server without it answers an error —
+	/// read. A gaindrive extension, and a server without it answers an error -
 	/// which `CastUrls.castToken(for:)` degrades to "carry on with the ordinary
 	/// credentials" rather than surfacing, since that is exactly what this app
 	/// did before the endpoint existed.

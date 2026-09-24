@@ -9,8 +9,8 @@ import java.time.ZoneOffset
  * "3 hours ago" for a server timestamp, or null when it cannot be read.
  *
  * Two formats are accepted on purpose. gaindrive writes `last_played` with
- * SQLite's `CURRENT_TIMESTAMP`, which is UTC in `yyyy-MM-dd HH:mm:ss` — no `T`,
- * no zone — while other Subsonic servers send ISO-8601. Parsing only one of
+ * SQLite's `CURRENT_TIMESTAMP`, which is UTC in `yyyy-MM-dd HH:mm:ss` - no `T`,
+ * no zone - while other Subsonic servers send ISO-8601. Parsing only one of
  * them would leave the column silently blank against the other.
  */
 fun relativeTime(timestamp: String?): String? {
@@ -23,7 +23,7 @@ fun relativeTime(timestamp: String?): String? {
 }
 
 /**
- * The same, for a Unix epoch **second** — which is what a fetch job's `started`
+ * The same, for a Unix epoch **second** - which is what a fetch job's `started`
  * and `finished` are, being `std::time(nullptr)` rather than a formatted stamp.
  *
  * Here rather than at the call site so there is one place that decides what

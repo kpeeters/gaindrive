@@ -6,7 +6,7 @@ there is, and it is usually a name meant for a tracker rather than for a
 person. These are the rules that turn it back into something a client can show
 and a metadata provider can be asked with.
 
-Unlike every other script in tests/, this one needs **no running server** — it
+Unlike every other script in tests/, this one needs **no running server** - it
 pipes names through the parser directly:
 
     python3 tests/test_video_names.py [path/to/gaindrive]
@@ -60,7 +60,7 @@ CASES = {
 
     # A title that is *only* a year, disambiguated by a bracketed one. The
     # bracketed year is authoritative, so no token in the title can be a
-    # second one — without that rule this loses its whole title.
+    # second one - without that rule this loses its whole title.
     "1917 (2019)":
         {"title": "1917", "year": "2019"},
     "Blade Runner 2049 (2017)":
@@ -134,13 +134,13 @@ CASES = {
     "Big Film 2019/VIDEO_TS":
         {"title": "Big Film", "year": "2019", "source": "folder"},
     # The vts arm of UNINFORMATIVE, both halves.  A short one still matches;
-    # the long one is the ReDoS regression — the old nested-quantifier
+    # the long one is the ReDoS regression - the old nested-quantifier
     # spelling took exponential time on exactly this shape (many digits, then
     # one letter that forces every partition to be tried), so the assertion
     # here is as much "the parser returns at all" as what it returns.
     "Big Film 2019/vts_01_2":
         {"title": "Big Film", "year": "2019", "source": "folder"},
-    # Asserts nothing about the parse — only that a line comes back, which
+    # Asserts nothing about the parse - only that a line comes back, which
     # the old spelling did not do within the age of the universe.
     "Junk 2020/vts111111111111111111111111111111111111111111111111111111111111111111111111x":
         {},
@@ -161,7 +161,7 @@ CASES = {
     # --- language words are title words, junk only in junk company -------
     # The reported file: "french" is a release tag in the stop-word table
     # and an ordinary adjective here. Followed by the year it stays title
-    # text, and the year then anchors the cut at 720p — which also recovers
+    # text, and the year then anchors the cut at 720p - which also recovers
     # the year the lowercase group tag ("titler") used to defeat.
     "La French [The Connection] 2014 720p BRRip x264 titler":
         {"title": "La French", "year": "2014"},
@@ -195,7 +195,7 @@ CASES = {
 
     # --- a bracketed year marks where the title ends ---------------------
     # "Title (Year)" is a human convention, so what precedes the bracket is
-    # the title verbatim — the only rule that can save a title-*final*
+    # the title verbatim - the only rule that can save a title-*final*
     # language word, which is shape-identical to a tag.
     "The.Girl.Who.Was.French.(2037).DVDRip":
         {"title": "The Girl Who Was French", "year": "2037"},
@@ -219,11 +219,11 @@ def run():
                            input=names, capture_output=True, text=True,
                            timeout=30)
     except FileNotFoundError:
-        print(f"FAIL  no binary at {BINARY} — pass its path as the first "
+        print(f"FAIL  no binary at {BINARY} - pass its path as the first "
               f"argument")
         return 1
     except subprocess.TimeoutExpired:
-        print("FAIL  parser did not finish in 30 s — a name in the table "
+        print("FAIL  parser did not finish in 30 s - a name in the table "
               "backtracks; see the ReDoS case")
         return 1
     if p.returncode != 0:

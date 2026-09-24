@@ -3,9 +3,8 @@
 
 These are the *standard* Subsonic endpoints (1.15.0), not gaindrive extensions:
 no parameters, and a <scanStatus> carrying `scanning` and `count`. What is worth
-testing is the shape and the typing rather than that a scan happens — a strict
-client throws on a type mismatch before any of the response is usable, which is
-the whole subject of SPEC-AUDIT.md.
+testing is the shape and the typing rather than that a scan happens - a strict
+client throws on a type mismatch before any of the response is usable.
 
 Start the server first, with a scanned collection, then run:
     python3 tests/test_scan.py
@@ -77,7 +76,7 @@ def _wait_idle(timeout=SCAN_TIMEOUT):
             return int(el.get("count") or 0)
         time.sleep(1)
     raise AssertionError(
-        f"a scan was still running after {timeout}s — raise SCAN_TIMEOUT if "
+        f"a scan was still running after {timeout}s - raise SCAN_TIMEOUT if "
         f"this collection is simply large")
 
 
@@ -104,7 +103,7 @@ def test_scan_status_shape():
 
 
 def test_scan_status_takes_no_auth_shortcut():
-    """It is an ordinary authenticated endpoint — bad credentials are refused."""
+    """It is an ordinary authenticated endpoint - bad credentials are refused."""
     url = (f"{BASE}/getScanStatus.view?"
            + urllib.parse.urlencode({"u": USER, "p": PASS + "x",
                                      "v": VER, "c": CLIENT, "f": "xml"}))
@@ -141,7 +140,7 @@ def test_start_scan_runs_and_finishes():
 
     count = _wait_idle()
     assert count > 0, (
-        "count stayed at 0 after a full scan — nothing incremented it, or the "
+        "count stayed at 0 after a full scan - nothing incremented it, or the "
         "collection is empty")
     print(f"PASS  startScan ran to completion, count={count}"
           + ("" if saw_running else " (finished too fast to observe running)"))

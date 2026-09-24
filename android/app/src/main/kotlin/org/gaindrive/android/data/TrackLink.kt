@@ -8,7 +8,7 @@ import java.net.URLDecoder
  *
  * Pure string work, no Android types, for the reason [extractSharedUrl] gives:
  * it can then be tested without a device. The link arrives as the data URI of
- * a VIEW intent — `gaindrive://<host>[:port]<path>?track=<id>[&t=<seconds>]` —
+ * a VIEW intent - `gaindrive://<host>[:port]<path>?track=<id>[&t=<seconds>]` -
  * composed by the server's chooser page from the URL the person actually
  * opened, so the authority and path are the server's public spelling of
  * itself, proxy subpath included.
@@ -25,7 +25,7 @@ data class TrackLink(
 )
 
 /**
- * The [TrackLink] in [uri], or null when it is not one — the wrong scheme, no
+ * The [TrackLink] in [uri], or null when it is not one - the wrong scheme, no
  * authority, or no usable `track` parameter. Null means "not for us", so the
  * intent is ignored rather than answered with an error: this activity's VIEW
  * filter admits only the scheme, but an intent is what another app says it is.
@@ -72,7 +72,7 @@ fun parseTrackLink(uri: String?): TrackLink? {
 /**
  * Whether the server configured at [configUrl] is the one [link] names.
  *
- * The authority is compared case-insensitively — a DNS name is — and the
+ * The authority is compared case-insensitively - a DNS name is - and the
  * link's path must sit at or under the configured one, so two instances
  * mounted under different subpaths of one host stay distinct. The scheme is
  * deliberately not part of it: the link travelled under the app's own scheme

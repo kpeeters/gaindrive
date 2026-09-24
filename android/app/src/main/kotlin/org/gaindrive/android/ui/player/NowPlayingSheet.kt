@@ -183,8 +183,8 @@ fun NowPlayingSheet(
 						verticalAlignment = Alignment.CenterVertically,
 					) {
 						// Always offered, unlike cast: it has no outcome that
-						// is only a refusal, and what it answers — how the
-						// audio is reaching the speaker, and in what format —
+						// is only a refusal, and what it answers - how the
+						// audio is reaching the speaker, and in what format -
 						// is nowhere else in the UI. On this side rather than
 						// with the device controls, because three trailing
 						// buttons ran into the transport on a phone.
@@ -210,7 +210,7 @@ fun NowPlayingSheet(
 						}
 					}
 					// A Row rather than two aligned buttons, so the transport
-					// stays centred whatever the trailing pair adds up to —
+					// stays centred whatever the trailing pair adds up to -
 					// which is the same reason the Box above exists.
 					Row(
 						modifier = Modifier
@@ -247,9 +247,9 @@ fun NowPlayingSheet(
 						// Offered for every video: one the server can only
 						// re-encode is cast as HLS, which plays and seeks on a
 						// receiver that fetches from the server itself. The one
-						// case that still cannot — no direct route, so the
+						// case that still cannot - no direct route, so the
 						// bridge would have to carry a playlist whose relative
-						// segment URIs it cannot resolve — is refused in words
+						// segment URIs it cannot resolve - is refused in words
 						// by PlayerConnection, since deciding it here would need
 						// a reachability probe a composable cannot await.
 						IconButton(onClick = onCast) {

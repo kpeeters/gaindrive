@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-	The Mac Catalyst build only — project.yml attaches this with an
+	The Mac Catalyst build only - project.yml attaches this with an
 	[sdk=macosx*] condition, because neither key means anything on iOS, where
 	the app is sandboxed unconditionally and may open outgoing connections
 	without asking.
 
 	Both keys are load-bearing on the Mac. A Catalyst app must adopt the App
 	Sandbox, and a sandboxed app with no network-client entitlement cannot open
-	an outgoing connection at all — so the app would launch, look entirely
+	an outgoing connection at all - so the app would launch, look entirely
 	healthy, and fail every request to the user's server with what appears to
 	be an unreachable-host error. That is the failure this file prevents, and
 	it is not one the iOS build can ever reproduce.
@@ -18,22 +18,22 @@
 	file-based macOS one, so that a password is the same item under both builds
 	and `kSecAttrAccessible` actually means something. A sandboxed Mac app may
 	use the file-based keychain freely, but the data protection keychain needs
-	the app to be signed into an access group — without one every write fails
+	the app to be signed into an access group - without one every write fails
 	with `errSecMissingEntitlement` and every read afterwards finds nothing.
 	Nothing reports that at the time; it surfaces later as a saved server whose
 	password has vanished, which reads as a bug in the editor.
 
 	`$(AppIdentifierPrefix)$(CFBundleIdentifier)` is the group every app
-	implicitly has. Declaring it explicitly asks for nothing new — it is not
-	the Keychain Sharing capability — it just makes the implicit group reachable
+	implicitly has. Declaring it explicitly asks for nothing new - it is not
+	the Keychain Sharing capability - it just makes the implicit group reachable
 	from the data protection keychain.
 
 	Nothing else is granted, and casting needs nothing more. Browsing for Cast
 	receivers and opening the TLS control channel to one are both *outgoing*,
 	which network.client already covers; com.apple.security.network.server is
 	for a listener, and this app has none. An earlier note here anticipated one
-	for a Cast bridge relaying audio through the phone — that was dropped, and
-	the receiver always fetches from the music server itself. See ios/CAST.md.
+	for a Cast bridge relaying audio through the phone - that was dropped, and
+	the receiver always fetches from the music server itself.
 
 	Reading files the user picks is still a separate entitlement, to be added
 	when the phase that needs it arrives.

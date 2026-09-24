@@ -19,7 +19,7 @@
 //
 // Every credential this server accepts rides in a query string and is checked
 // by one string comparison, so without this `ping.view` is an unmetered
-// password oracle — and `Access-Control-Allow-Origin: *` means any web page
+// password oracle - and `Access-Control-Allow-Origin: *` means any web page
 // can drive it. The pre-routing comment reasons the CORS choice through and
 // its conclusion holds on a LAN; a public address is what changes it.
 //
@@ -39,7 +39,7 @@ namespace {
 // attacker is the easy case. **One stale credential is not one failed
 // request**: a client whose saved password has gone bad opens an album grid
 // and fires a hundred cover-art requests in parallel, every one of which
-// fails auth — so thresholds sized for a human typing a password wrong would
+// fails auth - so thresholds sized for a human typing a password wrong would
 // lock a legitimate user out of their own server, from their own device,
 // for no reason they could act on.
 //
@@ -105,7 +105,7 @@ void throttle_sweep(std::chrono::steady_clock::time_point now)
 // thread and there are 32 of them: sleeping out a fifteen-minute block would
 // let 32 requests from one blocked address pin the entire pool, which is a
 // far better denial of service than the guessing it is meant to stop. The
-// delay is capped for the same reason — long enough to make a guessing rate
+// delay is capped for the same reason - long enough to make a guessing rate
 // useless, short enough that holding a thread for it does not matter.
 struct Penalty {
 	std::chrono::milliseconds delay{0};
@@ -208,7 +208,7 @@ bool check_auth(const httplib::Request& req, httplib::Response& res,
 
 	if (!store.validate_auth(u, pw, t, s)) {
 		throttle_record_failure(throttle_key);
-		// A distinct, greppable line — the response is a 200 carrying a
+		// A distinct, greppable line - the response is a 200 carrying a
 		// Subsonic failure envelope, as the spec requires, so this log line is
 		// the only thing a host-level blocker can see. The username is
 		// included and the credential deliberately is not.
@@ -255,7 +255,7 @@ bool check_upload_perm(const httplib::Request& req,
 // Returns true if the authenticated user may *modify* the library item stored
 // at `rel_path`. Admin may modify anything; an upload user may modify what is
 // inside their own batch, which is the same predicate moveAlbum applies at its
-// permission block and exists for the same reason — somebody who has just
+// permission block and exists for the same reason - somebody who has just
 // uploaded has to be able to fix the names. Everything else lives in a shared
 // root, so changing it is admin's alone.
 //
@@ -265,7 +265,7 @@ bool check_upload_perm(const httplib::Request& req,
 // encoding deleteUpload checks.
 //
 // Note the depth rule is deliberately weaker than deleteUpload's exact five
-// components. There the shape is the boundary — without it the endpoint is
+// components. There the shape is the boundary - without it the endpoint is
 // "delete any folder by guessing an integer". Here the item already exists and
 // has been resolved from an id, so ownership alone is the question, and a
 // stricter depth would refuse a cover on the user's own artist folder.
@@ -310,8 +310,8 @@ bool check_item_write_perm(const httplib::Request& req,
 // `rel_path`. Everything in a library root is shared and readable; the uploads
 // root is personal, so only its owner and an admin may reach it.
 //
-// This exists because the uploads root is kept out of *browsing* — see
-// not_uploads() and the skips in get_music_folders()/music_folder_by_id() —
+// This exists because the uploads root is kept out of *browsing* - see
+// not_uploads() and the skips in get_music_folders()/music_folder_by_id() -
 // but every id-addressed read went straight to `WHERE id = ?`. So the listing
 // hid another user's batch while stream, download, getCoverArt and
 // getMusicDirectory all served it to anyone who tried the number. Filtering

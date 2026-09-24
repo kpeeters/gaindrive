@@ -24,7 +24,7 @@ struct RelativeTimeTests {
 	}
 
 	/// Foundation's ISO 8601 parsing is all-or-nothing about fractional
-	/// seconds, where Java's `OffsetDateTime.parse` accepts either — so a
+	/// seconds, where Java's `OffsetDateTime.parse` accepts either - so a
 	/// second parser is needed rather than a second option.
 	@Test func parsesISO8601WithFractionalSeconds() throws {
 		let plain = try #require(parseTimestamp("2026-08-05T11:22:33Z"))
@@ -33,11 +33,11 @@ struct RelativeTimeTests {
 	}
 
 	/// **The one that matters.** gaindrive emits `lastPlayed` raw from SQLite's
-	/// `CURRENT_TIMESTAMP` — no `T`, no zone — and parsing only ISO would leave
+	/// `CURRENT_TIMESTAMP` - no `T`, no zone - and parsing only ISO would leave
 	/// the entire Recents column silently blank.
 	@Test func parsesTheSQLiteForm() throws {
 		let sqlite = try #require(parseTimestamp("2026-08-05 11:22:33"))
-		// Read as UTC, not as local time — the same instant whatever zone the
+		// Read as UTC, not as local time - the same instant whatever zone the
 		// test machine is in, which a formatter left on the current locale
 		// would get wrong by hours and only somewhere else.
 		#expect(abs(sqlite.timeIntervalSince1970 - reference) < 1)

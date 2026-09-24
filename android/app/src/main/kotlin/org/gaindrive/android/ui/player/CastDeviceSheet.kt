@@ -34,7 +34,7 @@ import org.gaindrive.android.ui.rememberLocalNetworkPermission
  * Picks a Chromecast.
  *
  * A plain sheet rather than the system route picker: `MediaRouteProvider` is
- * what `CAST.md` asks for and is still the destination, but it is a surface of
+ * still the destination, but it is a surface of
  * its own and the protocol underneath needs to be exercised first. Nothing here
  * is in the protocol's way when it lands.
  */
@@ -84,7 +84,7 @@ fun CastDeviceSheet(
 			}
 
 			// The spinner is about discovery alone, so it keeps running while
-			// manual devices are listed below it — a device that was added by
+			// manual devices are listed below it - a device that was added by
 			// hand is no reason to stop looking for the others.
 			if (devices.isEmpty() && networkGranted != false) {
 				Row(
@@ -200,7 +200,7 @@ private fun DeviceRow(device: CastDevice, connected: Boolean, onClick: () -> Uni
 			)
 			// The address is the one thing that distinguishes two devices the
 			// user gave the same name, and it is what a connection failure will
-			// be about. The announced model precedes it where there is one —
+			// be about. The announced model precedes it where there is one -
 			// a manually added device has no announcement, so it shows the
 			// address alone as it always has.
 			Text(

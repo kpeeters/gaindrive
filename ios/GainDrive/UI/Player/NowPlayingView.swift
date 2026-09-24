@@ -80,7 +80,7 @@ struct NowPlayingView: View {
 	}
 
 	/// **Bounded, not full width.** Left to fill, a square cover is as tall as
-	/// the sheet is wide and pushes the queue off the bottom entirely — so the
+	/// the sheet is wide and pushes the queue off the bottom entirely - so the
 	/// screen that exists to show what is playing *next* showed none of it.
 	///
 	/// A fixed size rather than a fraction of the container: a `GeometryReader`
@@ -174,7 +174,7 @@ struct NowPlayingView: View {
 		HStack(spacing: 32) {
 			// A second way back, the first being the mini player's own button.
 			// This one has to dismiss a sheet before a cover can present, which
-			// is the less reliable of the two — the bar's is one tap with no
+			// is the less reliable of the two - the bar's is one tap with no
 			// modal involved, and is the one to trust.
 			if song.isVideo {
 				Button {
@@ -192,8 +192,8 @@ struct NowPlayingView: View {
 				Image(systemName: "music.note.list")
 			}
 			.accessibilityLabel("Add to playlist")
-			// Always offered, and the reason is Android's: what it answers —
-			// how the audio is reaching the speaker and in what format — is
+			// Always offered, and the reason is Android's: what it answers -
+			// how the audio is reaching the speaker and in what format - is
 			// nowhere else in the UI.
 			Button {
 				showingInfo = song
@@ -237,7 +237,7 @@ struct NowPlayingView: View {
 /// written inline in `NowPlayingView.body` would re-render the queue list twice
 /// a second along with itself. `PlayerConnection`'s header states the same rule
 /// for `trackState(of:)`; this is the other half of it, and the symptom is
-/// identical — a list that stutters with nothing to say why.
+/// identical - a list that stutters with nothing to say why.
 struct NowPlayingScrubber: View {
 	@Environment(PlayerConnection.self) private var player
 
@@ -292,9 +292,9 @@ struct NowPlayingScrubber: View {
 
 /// The system route picker.
 ///
-/// AirPlay itself comes free with `AVPlayer` — the audio session routes itself
-/// — but the button does not, and `AVRoutePickerView` is UIKit. `PLAN.md` lists
-/// this as the one capability iOS gets that Android does not.
+/// AirPlay itself comes free with `AVPlayer` - the audio session routes itself
+/// - but the button does not, and `AVRoutePickerView` is UIKit. This is the
+/// one capability iOS gets that Android does not.
 struct AirPlayButton: UIViewRepresentable {
 	func makeUIView(context: Context) -> AVRoutePickerView {
 		let view = AVRoutePickerView()

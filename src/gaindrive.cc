@@ -62,7 +62,7 @@ GainDrive::GainDrive(const std::string& db_path,
 	// Personal uploads live in their own root rather than a hidden directory
 	// inside a library, so nothing there can be mistaken for someone's album.
 	// With no uploads root configured both stay empty and the upload endpoints
-	// refuse — better than silently writing into a library root.
+	// refuse - better than silently writing into a library root.
 	if (const auto* up = store_.uploads_root()) {
 		users_dir_         = up->path;
 		uploads_root_name_ = up->name;
@@ -92,7 +92,7 @@ GainDrive::GainDrive(const std::string& db_path,
 		          << std::endl;
 
 	// Background work (library scan, Cast discovery, folder watching) is NOT
-	// started here — listen() starts it once the port is actually held.
+	// started here - listen() starts it once the port is actually held.
 	// Starting it in the constructor meant a server that could not bind still
 	// spent minutes scanning, and could not exit promptly either: the detached
 	// scan holds db_mutex_, so the watcher's join in the destructor blocks
@@ -103,12 +103,12 @@ GainDrive::GainDrive(const std::string& db_path,
 GainDrive::~GainDrive()
 	{
 	// The fetch worker first: it is the one that can be inside scan_dirs(), and
-	// joining it here — in the destructor body — is what guarantees it is not
+	// joining it here - in the destructor body - is what guarantees it is not
 	// still holding store_ when the members are destroyed.
 	fetch_stop_ = true;
 	fetch_cv_.notify_all();
 	// A fetch is allowed to run for hours, and the worker checks the stop flag
-	// only between jobs — so without killing the child, this join is the
+	// only between jobs - so without killing the child, this join is the
 	// shutdown. The half-written batch is removed by the worker's own failure
 	// path on the way out.
 	url_fetcher_.cancel_any();
@@ -121,7 +121,7 @@ GainDrive::~GainDrive()
 
 // A statically linked binary resolves names through whatever its libc provides:
 // musl does it itself and works, a static glibc cannot do it at all. Either way
-// the failure is invisible — the library serves fine and only the MusicBrainz,
+// the failure is invisible - the library serves fine and only the MusicBrainz,
 // Wikidata, Discogs and cover-art-by-URL fetches quietly come back empty. One
 // lookup at startup turns that into a line in the log.
 static void check_dns_background()
@@ -187,7 +187,7 @@ bool GainDrive::listen(const std::string& host, int port)
 				}
 			// Outside the try, and on every path: an aborted scan still added
 			// whatever it got through, and those artists want portraits as
-			// much as any others.  Safe before the worker below has started —
+			// much as any others.  Safe before the worker below has started -
 			// it sets a flag the worker's first wait tests, so an early wake
 			// costs one extra seed rather than being lost.
 			lookup_wake();

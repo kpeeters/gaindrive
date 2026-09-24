@@ -14,7 +14,7 @@ import Testing
 /// Real payload shapes, per endpoint.
 ///
 /// The shapes here are the ones gaindrive actually emits, including the several
-/// places it is not uniform — which is precisely where a client goes wrong
+/// places it is not uniform - which is precisely where a client goes wrong
 /// silently and only against some endpoints.
 struct BrowseDtoTests {
 	private func decode<Body: Decodable & Sendable>(
@@ -59,7 +59,7 @@ struct BrowseDtoTests {
 		#expect(body.artist?.coverArt == nil)
 	}
 
-	/// `getAlbum` sends `name` and **no `title`** — the opposite of the
+	/// `getAlbum` sends `name` and **no `title`** - the opposite of the
 	/// directory-shaped endpoints.
 	@Test func getAlbumSendsNameWithoutTitle() throws {
 		let body: GetAlbumBody = try decode(
@@ -104,7 +104,7 @@ struct BrowseDtoTests {
 		#expect(body.playlist?.isPublic == false)
 	}
 
-	/// `lastPlayed` is raw SQLite — no `T`, no `Z` — unlike every other
+	/// `lastPlayed` is raw SQLite - no `T`, no `Z` - unlike every other
 	/// timestamp in the API. It has to survive as a string for `relativeTime`
 	/// to deal with.
 	@Test func recentSongsKeepTheSQLiteTimestamp() throws {
@@ -147,7 +147,7 @@ struct BrowseDtoTests {
 		#expect(body.albumImages?.count == 4)
 	}
 
-	/// An OpenSubsonic server adding fields — or a whole nested object — must
+	/// An OpenSubsonic server adding fields - or a whole nested object - must
 	/// be a non-event.
 	@Test func unknownFieldsAreIgnored() throws {
 		let body: GetAlbumBody = try decode(
@@ -160,7 +160,7 @@ struct BrowseDtoTests {
 	}
 
 	/// Every payload carrying only its mandatory field has to map without
-	/// throwing — the tolerance property, asserted at the DTO level.
+	/// throwing - the tolerance property, asserted at the DTO level.
 	@Test func minimalPayloadsDecode() throws {
 		_ = try decode(
 			#"{"subsonic-response":{"status":"ok","album":{"id":"2"}}}"#,
@@ -176,7 +176,7 @@ struct BrowseDtoTests {
 			expecting: Search3Body.self)
 	}
 
-	/// A body whose container is absent entirely — which is what a server
+	/// A body whose container is absent entirely - which is what a server
 	/// answers for a search that matched nothing.
 	@Test func absentContainerIsNil() throws {
 		let body: Search3Body = try decode(

@@ -70,8 +70,8 @@
    <a id="open-web" class="plain">Play in the browser</a>
 </main>
 <script>
-// The browser knows the public URL it opened — scheme, host, any subpath a
-// proxy mounts the client under, and the query — so the anchors are composed
+// The browser knows the public URL it opened - scheme, host, any subpath a
+// proxy mounts the client under, and the query - so the anchors are composed
 // here rather than by the server, which behind a proxy knows none of that
 // and would otherwise be splicing an untrusted query string into HTML.
 const here = new URL(location.href);

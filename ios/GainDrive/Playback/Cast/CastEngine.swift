@@ -15,7 +15,7 @@ import Foundation
 /// follows from: when the receiver reports `IDLE`/`FINISHED`, the connection is
 /// told to advance and hands down the next one. It costs a gap between tracks
 /// and buys a queue that is the same object whether playback is here or over
-/// there — which is what makes swapping engines at any moment safe.
+/// there - which is what makes swapping engines at any moment safe.
 ///
 /// It never touches `AVFoundation`, and `LocalEngine` never touches the network
 /// beyond a URL. Neither knows the other exists.
@@ -28,7 +28,7 @@ final class CastEngine: PlaybackEngine {
 	private(set) var isBuffering = false
 	private(set) var position: Double = 0
 	/// **Always true.** A receiver seeks using the file's own index, and every
-	/// URL sent to one is a real file with a `Content-Length` — the re-encode
+	/// URL sent to one is a real file with a `Content-Length` - the re-encode
 	/// tier, which is the only thing that would not be, is refused rather than
 	/// sent. So unlike the local engine there is nothing to discover here.
 	let canSeek = true
@@ -50,12 +50,11 @@ final class CastEngine: PlaybackEngine {
 	/// track and answers nothing at all until the file is complete. Point a
 	/// receiver at a cold one and it sits with no data for as long as that
 	/// takes, which trips its ~60 s no-data timeout and surfaces as a session
-	/// that says it is loading and never plays — the universal end-state for
+	/// that says it is loading and never plays - the universal end-state for
 	/// every cast failure in this codebase, arriving long after its cause.
 	///
 	/// `src/gaindrive.cc`'s own cast path does exactly this for exactly this
-	/// reason (see "Casting a video to a receiver that cannot show one" in the
-	/// root `CLAUDE.md`), and `android/CAST.md` lists its absence as an unbuilt
+	/// reason, and the Android client lists its absence as an unbuilt
 	/// remedy. Waiting here costs nothing that was not going to be waited for
 	/// anyway; it only moves the wait to a place where the receiver is not
 	/// counting.
@@ -65,7 +64,7 @@ final class CastEngine: PlaybackEngine {
 	private var playing: Song?
 	/// **The media session we have already acted on the end of.** A receiver
 	/// repeats its idle pushes, and without this each repeat would walk the
-	/// queue forward another track — an album skipping to its end in a second,
+	/// queue forward another track - an album skipping to its end in a second,
 	/// which is what this guard is worth.
 	private var advancedFrom = 0
 	/// Extrapolates between the receiver's roughly-1 Hz reports, so a seek bar
@@ -92,7 +91,7 @@ final class CastEngine: PlaybackEngine {
 		switch edit {
 		case .none:
 			// A window of one that has not changed still has to honour an
-			// offset — tapping a chapter of the track already playing is
+			// offset - tapping a chapter of the track already playing is
 			// exactly that, and here it is a seek rather than a reload.
 			if let offset, offset > 0 { seek(to: offset) }
 			return true
@@ -102,7 +101,7 @@ final class CastEngine: PlaybackEngine {
 			session.stopPlayback()
 			return true
 		case .rebuild(let songs), .replaceTail(let songs):
-			// `replaceTail` cannot arrive with a window of one — the tail of a
+			// `replaceTail` cannot arrive with a window of one - the tail of a
 			// single entry is empty, so `PlayerWindow.plan` answers `.none` or
 			// `.rebuild`. Handled together rather than with an unreachable
 			// branch that would rot.
@@ -118,20 +117,19 @@ final class CastEngine: PlaybackEngine {
 
 	private func load(_ song: Song, at offset: Double) async -> Bool {
 		// **A picture is never sent to a receiver that says it has no screen.**
-		// Its soundtrack is, which is what the server does — see "Casting a
-		// video to a receiver that cannot show one" in the root `CLAUDE.md` —
-		// and it is what `CastDiscovery` reads bit 0 of the `ca` record for.
+		// Its soundtrack is, which is what the server does, and it is what
+		// `CastDiscovery` reads bit 0 of the `ca` record for.
 		//
 		// Getting this wrong is not merely a lost picture. A WiiM amplifier
 		// handed a 2.5 GB AV1 film fetched it, failed to decode it, reset the
-		// connection, and asked again from a different offset — thousands of
+		// connection, and asked again from a different offset - thousands of
 		// times, filling the server's log and saturating the link, with the app
 		// meanwhile reporting a session that was simply loading. Android cannot
-		// make this decision at all and `android/CAST.md` names that as a gap;
+		// make this decision at all, a known gap;
 		// this is the one place the iOS client is ahead.
 		//
 		// `videoOut` nil means the device announced nothing, and is read as
-		// *capable* — the server's rule, because refusing the picture on a
+		// *capable* - the server's rule, because refusing the picture on a
 		// guess is worse than the guess.
 		let showsPicture = session.device?.videoOut ?? true
 		let asSound = song.isVideo && !showsPicture
@@ -172,7 +170,7 @@ final class CastEngine: PlaybackEngine {
 		if !sendsVideo {
 			// Said explicitly rather than left to the next status push: nothing
 			// arrives from the receiver during the warm, so a client would
-			// otherwise show whatever it was showing before — which after a
+			// otherwise show whatever it was showing before - which after a
 			// track change is the previous track, playing.
 			isBuffering = true
 			isPlaying = false
@@ -206,8 +204,8 @@ final class CastEngine: PlaybackEngine {
 				album: song.albumTitle.isEmpty ? nil : song.albumTitle,
 				artwork: urls.artwork(for: song).map { withCastToken($0, token) },
 				// What is being *sent*, not what the library calls it: a
-				// soundtrack wants the music metadata block, or the television —
-				// or the amp's app — is given a movie's fields and shows
+				// soundtrack wants the music metadata block, or the television -
+				// or the amp's app - is given a movie's fields and shows
 				// nothing.
 				isVideo: sendsVideo,
 				quality: sendsVideo ? nil : target.quality))
@@ -216,7 +214,7 @@ final class CastEngine: PlaybackEngine {
 	}
 
 	/// Always false: with a window of one there is never a loaded next item to
-	/// step to, so the connection rebuilds — which for this engine is the only
+	/// step to, so the connection rebuilds - which for this engine is the only
 	/// way forward anyway.
 	func advanceToNext() -> Bool { false }
 
@@ -264,7 +262,7 @@ final class CastEngine: PlaybackEngine {
 		isPlaying = status.playerState == .playing
 		// Everything that is neither playing nor paused is work in progress.
 		// Saying otherwise would let a client claim a position that does not
-		// exist yet — **but only while something is loaded**, or an idle
+		// exist yet - **but only while something is loaded**, or an idle
 		// receiver with nothing sent to it would spin a buffering indicator for
 		// ever.
 		isBuffering =
@@ -280,7 +278,7 @@ final class CastEngine: PlaybackEngine {
 
 		// **The end of a track, acted on once.** `mediaSessionId != 0` excludes
 		// the state a session starts in, and `advancedFrom` excludes the repeats
-		// a receiver sends while it sits idle — without which one finished track
+		// a receiver sends while it sits idle - without which one finished track
 		// walks the queue to its end.
 		if status.isIdleFinished, status.mediaSessionId != 0,
 			status.mediaSessionId != advancedFrom
@@ -293,7 +291,7 @@ final class CastEngine: PlaybackEngine {
 			// find there is none. **There is no `onEnded` here** and there does
 			// not need to be: `PlayQueue.advance` clamps at the last track, so
 			// running out re-plans to the window already loaded, produces
-			// `.none`, and simply stops — which is what parking at the end
+			// `.none`, and simply stops - which is what parking at the end
 			// means.
 			onAdvanced?(1)
 		}

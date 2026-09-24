@@ -24,7 +24,7 @@ struct ScrobbleRuleTests {
 	}
 
 	/// The four-minute cap is what stops a long track having to be listened to
-	/// halfway before it counts — an hour-long DJ set would otherwise need
+	/// halfway before it counts - an hour-long DJ set would otherwise need
 	/// thirty minutes.
 	@Test func aLongTrackCountsAfterFourMinutes() {
 		let hour: Double = 3600
@@ -41,7 +41,7 @@ struct ScrobbleRuleTests {
 	}
 
 	/// A position of zero is where every track starts, and starting a track is
-	/// not listening to it — which matters for a zero-length row, where the
+	/// not listening to it - which matters for a zero-length row, where the
 	/// halfway mark is also zero.
 	@Test func theStartOfATrackIsNotAPlay() {
 		#expect(!ScrobbleRule.shouldSubmit(position: 0, duration: 180))

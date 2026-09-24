@@ -50,7 +50,7 @@ data class CastDeviceDraft(
  * Its own view model rather than more state on [SettingsViewModel], which has
  * no room left: that class combines five flows at both of its levels and says
  * so in its own comments. There is precedent for keeping a collection beside
- * the main state there too — `pinStatuses` is separate for the same reason.
+ * the main state there too - `pinStatuses` is separate for the same reason.
  */
 @HiltViewModel
 class CastDevicesViewModel @Inject constructor(
@@ -89,7 +89,7 @@ class CastDevicesViewModel @Inject constructor(
 	fun onPort(v: String) = _draft.update { it?.copy(port = v, testResult = null) }
 
 	/**
-	 * Alone in not clearing the result — the name is a label we attach, not part
+	 * Alone in not clearing the result - the name is a label we attach, not part
 	 * of what was asked of the network.
 	 */
 	fun onName(v: String) = _draft.update { it?.copy(name = v) }

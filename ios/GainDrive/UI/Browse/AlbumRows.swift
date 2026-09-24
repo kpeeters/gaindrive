@@ -11,8 +11,8 @@ import Foundation
 /// The album screen's track listing, flattened to one entry per row.
 ///
 /// It exists because a chaptered recording is not one row. Its markers stand in
-/// for it — a concert is one file holding a dozen songs, and listing it as
-/// `concert.mkv` names the file rather than the music — so one song can produce
+/// for it - a concert is one file holding a dozen songs, and listing it as
+/// `concert.mkv` names the file rather than the music - so one song can produce
 /// many rows, and the screen's "one row per song" shape no longer holds.
 ///
 /// Pure, so the rules below can be tested without a screen or a player.
@@ -28,7 +28,7 @@ struct AlbumListRow: Identifiable, Hashable {
 	/// the only thing here with an id anything can stream.
 	let song: Song
 	/// Where that song is in the album, which is what playback queues from.
-	/// **Into the flat song list, never into a disc slice** — the same trap
+	/// **Into the flat song list, never into a disc slice** - the same trap
 	/// `AlbumDetailView` documents.
 	let queueIndex: Int
 	let kind: Kind

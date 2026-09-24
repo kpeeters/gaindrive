@@ -13,13 +13,13 @@ namespace httplib { class SSLClient; }
 // A film or series identified on The Movie Database.
 //
 // Video containers carry no tag anything writes, so everything here has to be
-// earned from the filename — which is what src/videoname.hh produces, and why
+// earned from the filename - which is what src/videoname.hh produces, and why
 // that had to exist first.  TMDB is then asked one question: is there a film
 // called this, released that year?
 //
 // This class knows the API and nothing else: no database, no scanner, no
 // MediaStore.  Same shape as VideoArt and the filename parser, and for the
-// same reason — the matching rule is the part that will need tuning against a
+// same reason - the matching rule is the part that will need tuning against a
 // real collection, and the whole class is what a different provider would
 // replace.
 struct TmdbMatch
@@ -49,7 +49,7 @@ struct TmdbMatch
 
 // The rule that decides which search result, if any, is the answer, split out
 // from the request that fetched them so it can be exercised without a network
-// or an API key — this is where a wrong poster would come from, so it is the
+// or an API key - this is where a wrong poster would come from, so it is the
 // part worth being able to test directly. `results_json` is a TMDB search
 // response body.
 std::optional<TmdbMatch> tmdb_pick(const std::string& results_json,
@@ -75,7 +75,7 @@ class Tmdb
 		// failure on every file.
 		bool configured() const;
 
-		// Empty when nothing matched *confidently* — which is a different
+		// Empty when nothing matched *confidently* - which is a different
 		// thing from nothing being found, and the distinction is the point.
 		// See the rule in tmdb.cc: a wrong poster is worse than none, because
 		// nothing in the UI signals that it is wrong.
@@ -83,7 +83,7 @@ class Tmdb
 		                                 bool tv) const;
 
 		// An explicit [tmdbid=550] from the filename. No verification, because
-		// the user said so — this is the override for whatever the rule above
+		// the user said so - this is the override for whatever the rule above
 		// gets wrong.
 		std::optional<TmdbMatch> by_id(int id, bool tv) const;
 
@@ -92,7 +92,7 @@ class Tmdb
 
 	private:
 		// One GET against api.themoviedb.org, paced. Returns the parsed body,
-		// or nothing on any failure — a network error and a 404 are the same
+		// or nothing on any failure - a network error and a 404 are the same
 		// thing to every caller here.
 		std::optional<std::string> get(const std::string& path,
 		                                const std::string& query) const;
@@ -140,7 +140,7 @@ class Tmdb
 		//
 		// An album costs two requests, one to each host, and building a client
 		// per request meant a DNS lookup, a TCP handshake and a TLS handshake
-		// for each of them — comparable to REQUEST_GAP itself, and paid a few
+		// for each of them - comparable to REQUEST_GAP itself, and paid a few
 		// thousand times over a first scan. httplib keeps the connection alive
 		// across Get() calls on one client, so holding them is the whole fix.
 		//

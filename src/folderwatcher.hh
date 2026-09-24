@@ -22,7 +22,7 @@ class FolderWatcher {
 		// is the depth-1 child; under an uploads root it is
 		// <user>/<uuid>/<artist>, two levels deeper. What used to keep this
 		// class out of the uploads root altogether was that a fetch still
-		// writing a batch must not have it indexed — apply_batch_names()' plain
+		// writing a batch must not have it indexed - apply_batch_names()' plain
 		// fs::rename is safe only while nothing under the batch has rows.
 		// batch_held() is what says so now, so the asymmetry is gone.
 		FolderWatcher(MediaStore& store, int debounce_ms = 2000);
@@ -33,7 +33,7 @@ class FolderWatcher {
 
 #if defined(__APPLE__)
 		// Entry point for the FSEvents C callback, which is a free function and
-		// so cannot reach a private member. Public for that reason only — it
+		// so cannot reach a private member. Public for that reason only - it
 		// takes one coalesced batch of changed directory paths and is not
 		// meant to be called from anywhere else.
 		void handle_paths(size_t n, const char* const* paths);
@@ -42,7 +42,7 @@ class FolderWatcher {
 	private:
 		// The library root containing `path`, or "" if none does.
 		std::string root_of(const std::string& path) const;
-		// The depth-1 child of the owning root that contains (or is) `path` —
+		// The depth-1 child of the owning root that contains (or is) `path` -
 		// the artist (or category) directory a change belongs to. Returns ""
 		// both when `path` lies outside every root and when it *is* a root,
 		// which callers treat as "rescan that whole root". Library roots only;
@@ -92,7 +92,7 @@ class FolderWatcher {
 
 		// FSEventStreamRef and dispatch_queue_t, held as void* so this header
 		// does not drag CoreServices into every translation unit that includes
-		// it — gaindrive.cc has no business seeing Carbon.
+		// it - gaindrive.cc has no business seeing Carbon.
 		void*                 stream_ = nullptr;
 		void*                 queue_  = nullptr;
 		// Both guarded by changed_mutex_. Swapping the set and testing

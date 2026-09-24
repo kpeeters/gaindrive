@@ -18,7 +18,7 @@ import javax.inject.Singleton
  * The key deliberately does not require user authentication: playback and
  * background sync have to work while the device is locked.
  *
- * `androidx.security:security-crypto` is not used — it is deprecated, and the
+ * `androidx.security:security-crypto` is not used - it is deprecated, and the
  * direct Keystore path is this file.
  */
 @Singleton
@@ -52,7 +52,7 @@ class CredentialCipher @Inject constructor() {
 	}
 
 	/**
-	 * Null when the stored value cannot be decrypted — which happens when the
+	 * Null when the stored value cannot be decrypted - which happens when the
 	 * Keystore key is gone but the ciphertext survived, e.g. after a restore
 	 * onto another device. The caller's job is to ask for the password again,
 	 * not to crash.

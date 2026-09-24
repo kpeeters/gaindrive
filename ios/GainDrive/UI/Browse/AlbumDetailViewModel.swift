@@ -14,7 +14,7 @@ import Foundation
 final class AlbumDetailViewModel {
 	private(set) var state: Load<AlbumDetail> = .loading
 	/// As in `AlbumsViewModel`, held apart from the tracks and never awaited
-	/// before them — `getAlbumInfo2` has the same MusicBrainz round trip behind
+	/// before them - `getAlbumInfo2` has the same MusicBrainz round trip behind
 	/// it as the artist biography.
 	private(set) var notes: AlbumNotes?
 	private(set) var heroes: [CoverSource] = []
@@ -83,7 +83,7 @@ final class AlbumDetailViewModel {
 			// Chapters first among them: they change what the *listing* is,
 			// while the others decorate the header, so arriving after a pause
 			// would redraw the rows under the reader's finger. It is also the
-			// cheapest of the three — one indexed query, against two lookups
+			// cheapest of the three - one indexed query, against two lookups
 			// that reach MusicBrainz.
 			chapters = await library.albumChapters(ref)
 			guard !Task.isCancelled else { return }

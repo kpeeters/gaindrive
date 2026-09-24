@@ -59,8 +59,8 @@ data class FetchStripState(
 }
 
 /**
- * The shell's view of [FetchMonitor], and — because collecting the monitor is
- * what makes it poll — the thing that decides when it runs at all.
+ * The shell's view of [FetchMonitor], and - because collecting the monitor is
+ * what makes it poll - the thing that decides when it runs at all.
  *
  * That is the point of putting it here rather than leaving the monitor to the
  * fetch panel. The shell is composed for as long as the app is on screen, so

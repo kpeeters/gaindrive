@@ -30,7 +30,7 @@ import org.gaindrive.android.ui.tvFocusHighlight
  * mini player where a tablet leaves room for one.
  *
  * While the user is dragging, the bar shows their finger rather than the
- * player's position — otherwise every position poll would yank the thumb back
+ * player's position - otherwise every position poll would yank the thumb back
  * under them.
  *
  * [textColor] exists for the video screen, where the controls sit over the
@@ -50,7 +50,7 @@ fun SeekBar(
 	var dragFraction by remember { mutableFloatStateOf(0f) }
 	// Shared with the thumb below rather than left to each of them. A thumb
 	// that remembers its own never hears about the drag, and the one piece of
-	// feedback Material's handle offers — narrowing while it is held — then
+	// feedback Material's handle offers - narrowing while it is held - then
 	// silently stops happening.
 	val interactionSource = remember { MutableInteractionSource() }
 	val enabled = state.durationMs > 0
@@ -106,7 +106,7 @@ fun SeekBar(
 /**
  * The scrub handle.
  *
- * Material 3's own is 4x44dp against a 16dp track — nearly three times its
+ * Material 3's own is 4x44dp against a 16dp track - nearly three times its
  * height, and about as tall as the whole mini-player row, where it reads as a
  * bar drawn *over* the player rather than a handle on it. At 24dp it clears the
  * track by 4dp either side instead of 14.
@@ -120,6 +120,6 @@ fun SeekBar(
  * and `SliderDefaults.Track` fixes its own height internally, so a modifier
  * aimed at it is overridden. A shorter row, or a thinner track, means drawing
  * both by hand and reimplementing the gap, the stop indicator and the press
- * animation — which is why neither was done here.
+ * animation - which is why neither was done here.
  */
 private val THUMB_SIZE = DpSize(4.dp, 24.dp)

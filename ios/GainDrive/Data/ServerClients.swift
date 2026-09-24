@@ -12,7 +12,7 @@ import Foundation
 ///
 /// The registry is `@MainActor` and the fan-out deliberately is not. Reaching
 /// back for a client per branch would mean a main-actor hop per server per
-/// request and — worse — **a registry edited mid-query would hand one branch a
+/// request and - worse - **a registry edited mid-query would hand one branch a
 /// different world from another's**, so a merged list could be built from two
 /// different sets of servers. The snapshot is not an optimisation; it is the
 /// consistency guarantee.
@@ -20,7 +20,7 @@ import Foundation
 /// Android's `SubsonicClientFactory` is a suspend lookup per call and needs
 /// neither property, which is why this has a different name for the same job.
 struct ServerClients: Sendable {
-	/// Enabled servers, **in registry order** — which is the merge tie-break,
+	/// Enabled servers, **in registry order** - which is the merge tie-break,
 	/// so the order is data rather than presentation.
 	let servers: [ServerConfig]
 

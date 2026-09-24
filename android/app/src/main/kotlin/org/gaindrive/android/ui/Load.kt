@@ -3,7 +3,7 @@ package org.gaindrive.android.ui
 /**
  * The three states every screen has. A sealed type rather than a data class
  * with nullable fields, so "loaded but empty" and "not loaded yet" cannot be
- * confused — which is the bug that produces a flash of "nothing here" on every
+ * confused - which is the bug that produces a flash of "nothing here" on every
  * screen open.
  */
 sealed interface Load<out T> {

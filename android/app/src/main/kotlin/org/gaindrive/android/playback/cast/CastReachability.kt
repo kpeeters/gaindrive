@@ -19,9 +19,9 @@ import javax.inject.Singleton
  * the server, the receiver almost certainly can too.
  *
  * It is not a proof. Client isolation can block the receiver while allowing the
- * phone, and the two can sit on different VLANs. `CAST.md` calls for a backstop
- * — a direct load that fails with a receiver-side network error should demote
- * that server to the bridge for this network — and that is **not wired yet**: it
+ * phone, and the two can sit on different VLANs. The design calls for a backstop
+ * - a direct load that fails with a receiver-side network error should demote
+ * that server to the bridge for this network - and that is **not wired yet**: it
  * has to be told apart from every other reason a LOAD fails, and it races the
  * protocol's own LOAD retry. It needs a real roaming test to get right.
  *
@@ -57,7 +57,7 @@ class CastReachability @Inject constructor(
 	 * "direct", which hands the receiver a URL only the phone can fetch.
 	 *
 	 * The consequence is that while an ordinary VPN is up the answer can only
-	 * ever be "bridge" — a VPN that has not called `allowBypass()` refuses the
+	 * ever be "bridge" - a VPN that has not called `allowBypass()` refuses the
 	 * bound socket outright, for the reasons set out on `CastChannel`'s
 	 * `connectPlain`. That is the right answer arrived at for the wrong reason,
 	 * and the log line below is what tells the two apart.
@@ -74,7 +74,7 @@ class CastReachability @Inject constructor(
 
 		return runCatching {
 			// Resolved on the Wi-Fi network too, not just connected over it. A
-			// name that only exists in the VPN's DNS must not resolve here — that
+			// name that only exists in the VPN's DNS must not resolve here - that
 			// it cannot is precisely the signal we are looking for.
 			val address = network.getAllByName(host).firstOrNull() ?: return false
 			network.socketFactory.createSocket().use { socket ->

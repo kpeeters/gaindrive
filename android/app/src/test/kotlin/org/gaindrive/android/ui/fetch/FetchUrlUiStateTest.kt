@@ -13,7 +13,7 @@ import org.junit.Test
 /**
  * What the panel refuses, now that it adopts jobs it did not start.
  *
- * The refusal is deliberately narrow — this URL, already being fetched — and
+ * The refusal is deliberately narrow - this URL, already being fetched - and
  * the two failures either side of that line are both real. Too wide and a fetch
  * begun in the web client freezes the form on the phone; too narrow and the
  * duplicate this whole change exists to prevent comes back.

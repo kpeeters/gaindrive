@@ -17,20 +17,20 @@ import javax.inject.Singleton
  *
  * There is a class of failure where nothing fails. The server keeps sending,
  * the player keeps loading, no read times out and no `PlaybackException` is
- * ever raised — but the clock does not advance, so the buffering spinner stays
+ * ever raised - but the clock does not advance, so the buffering spinner stays
  * up for good. HLS segments carrying the wrong timestamps did exactly this. The
  * loading machinery cannot notice, because from its point of view everything is
  * working; only the position gives it away.
  *
  * Stopping the player is what un-wedges it: the stall cannot clear itself,
  * and only the stop makes the retry the message offers start from a clean
- * player. (This stop once also carried a second job — `onTaskRemoved` used to
+ * player. (This stop once also carried a second job - `onTaskRemoved` used to
  * end the service only when the player was not `playWhenReady`, so a wedged
  * player survived swiping the app away until something stopped it. A swipe
  * now always pauses and ends the service, so that job is gone.)
  *
  * Attached to the [ExoPlayer] directly, like [VideoSurface] and for the same
- * reason — it has to work with nothing bound to the session, which is precisely
+ * reason - it has to work with nothing bound to the session, which is precisely
  * the case that got stuck.
  *
  * This is a safety net, not a diagnosis. It says only that something is wrong,
@@ -77,7 +77,7 @@ class PlaybackWatchdog @Inject constructor(
 	 * Not restarted on every event: `onEvents` fires repeatedly throughout a
 	 * stall, and re-arming each time would push the deadline out forever. The
 	 * timer therefore measures one *continuous* stretch of buffering, and any
-	 * other state disarms it — so a slow link that manages a second of playback
+	 * other state disarms it - so a slow link that manages a second of playback
 	 * between stalls is never touched.
 	 */
 	private fun arm(player: Player) {
@@ -111,8 +111,8 @@ class PlaybackWatchdog @Inject constructor(
 	 * How long this item is allowed to make no progress for.
 	 *
 	 * A film is the exception, whether it is being watched or played for its
-	 * soundtrack. gaindrive's transcode cache is blocking — it runs ffmpeg over
-	 * the whole source and sends nothing at all until the file is complete — so
+	 * soundtrack. gaindrive's transcode cache is blocking - it runs ffmpeg over
+	 * the whole source and sends nothing at all until the file is complete - so
 	 * a remux or an audio extraction of a multi-gigabyte file is minutes of
 	 * buffering in which no byte arrives and the position cannot move. That is
 	 * indistinguishable from a wedge by every signal this class has, and half a
@@ -130,9 +130,9 @@ class PlaybackWatchdog @Inject constructor(
 
 	private companion object {
 		/**
-		 * Long enough that a slow link is not mistaken for a broken one — the
+		 * Long enough that a slow link is not mistaken for a broken one - the
 		 * player starts on a couple of seconds of buffer, so half a minute
-		 * without reaching that is not a bandwidth problem — and short enough
+		 * without reaching that is not a bandwidth problem - and short enough
 		 * that nobody sits watching a spinner wondering.
 		 */
 		const val STALL_TIMEOUT_MS = 30_000L

@@ -34,7 +34,7 @@ struct LibraryMapperTests {
 	}
 
 	/// `artistId` is the ID3 field and `parent` the folder-browsing
-	/// equivalent — prefer the former, accept the latter, because search and
+	/// equivalent - prefer the former, accept the latter, because search and
 	/// starred results carry only `parent`.
 	@Test func artistRefPrefersArtistIdAndAcceptsParent() throws {
 		let both = try dto(#"{"id":"1","artistId":"7","parent":"9"}"#, as: AlbumDto.self)

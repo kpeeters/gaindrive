@@ -14,7 +14,7 @@ import Testing
 /// Reading the subtitles the server sends.
 ///
 /// AVFoundation cannot be handed an external subtitle track at all, so these
-/// cues are drawn by the app — which makes this parser the whole of the
+/// cues are drawn by the app - which makes this parser the whole of the
 /// subtitle feature, and the half of phase 6 that can be got right without a
 /// device.
 struct WebVTTTests {
@@ -36,7 +36,7 @@ struct WebVTTTests {
 	}
 
 	/// **The fraction is a decimal fraction of a second, not milliseconds.**
-	/// `00:00.5` is half a second — the same trap the server's `chapters.hh`
+	/// `00:00.5` is half a second - the same trap the server's `chapters.hh`
 	/// calls out.
 	@Test func theFractionIsDecimal() {
 		#expect(WebVTT.timestamp("00:00.5") == 0.5)
@@ -66,7 +66,7 @@ struct WebVTTTests {
 	}
 
 	/// A cue identifier, a `NOTE` and a `STYLE` block are all skipped without
-	/// being recognised — scanning for the one thing that contains `-->` is
+	/// being recognised - scanning for the one thing that contains `-->` is
 	/// what keeps something unexpected from losing the cues that are fine.
 	@Test func headersNotesAndIdentifiersAreSkipped() {
 		let cues = WebVTT.parse(
@@ -108,7 +108,7 @@ struct WebVTTTests {
 	}
 
 	/// ffmpeg's webvtt muxer carries inline markup through, and nothing here
-	/// renders it — so showing it literally would be worse than dropping it.
+	/// renders it - so showing it literally would be worse than dropping it.
 	@Test func inlineMarkupIsDropped() {
 		let cues = WebVTT.parse(
 			"""
@@ -139,14 +139,14 @@ struct WebVTTTests {
 	}
 
 	/// **The end is exclusive**, so two cues that abut do not both show for the
-	/// instant they share — which would flicker a doubled line at every
+	/// instant they share - which would flicker a doubled line at every
 	/// boundary.
 	@Test func abuttingCuesDoNotBothShow() {
 		#expect(WebVTT.showing(at: 3, in: cues) == "Two")
 	}
 
 	/// Genuinely overlapping cues both show, because that is what overlapping
-	/// means — dropping one would silently lose a speaker.
+	/// means - dropping one would silently lose a speaker.
 	@Test func overlappingCuesShowTogether() {
 		#expect(WebVTT.showing(at: 4.5, in: cues) == "Two\nOverlapping")
 	}

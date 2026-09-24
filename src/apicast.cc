@@ -53,7 +53,7 @@ static nlohmann::json volume_json(const CastManager::VolumeState& v)
 
 void GainDrive::routes_cast()
 	{
-	// getCastToken — a credential a receiver can fetch one track with, for a
+	// getCastToken - a credential a receiver can fetch one track with, for a
 	// cast this server is not driving.
 	//
 	// The Android and iOS apps hold their own Cast control channel and build
@@ -62,7 +62,7 @@ void GainDrive::routes_cast()
 	// that: it hands the television the account's password. This is the way
 	// out, and the phone apps are its callers.
 	//
-	// **Gated on authentication alone** — not castRole, and not the
+	// **Gated on authentication alone** - not castRole, and not the
 	// local-network rule the endpoints below carry. Neither would make sense
 	// here: a client casting for itself is not asking this server to cast, so
 	// neither the permission to drive this server's Chromecast nor the
@@ -76,7 +76,7 @@ void GainDrive::routes_cast()
 	// what comes back opens URLs that need no credentials at all.
 	//
 	// It does widen something, deliberately: any account can now produce such
-	// a URL, where before only a castRole one could. ISSUES.md carries it. The
+	// a URL, where before only a castRole one could. The
 	// floor under it is that anyone who can read a song can already download
 	// it.
 	//
@@ -99,7 +99,7 @@ void GainDrive::routes_cast()
 			}
 		const int song_id = to_int(it->second, -1);
 		// get_song_entry() rather than get_song(): both carry the path the
-		// permission check needs, and only this one carries cover_art_id —
+		// permission check needs, and only this one carries cover_art_id -
 		// which is what lets the grant cover the sleeve without the caller
 		// naming it, and so without a caller being able to name someone
 		// else's.
@@ -117,7 +117,7 @@ void GainDrive::routes_cast()
 			}), "application/json");
 		});
 
-	// listCastDevices — return the cached device list and kick off a background
+	// listCastDevices - return the cached device list and kick off a background
 	// refresh so the next call will have up-to-date results.
 	server_.Get("/rest/listCastDevices.view", [this](const httplib::Request& req,
 	                                                  httplib::Response& res) {
@@ -183,18 +183,18 @@ void GainDrive::routes_cast()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// setCastDevicePref — record what a person decided about one device.
+	// setCastDevicePref - record what a person decided about one device.
 	//
 	// Server-side rather than in each client's storage because it is a fact
 	// about the device, not about the viewer: whether a WiiM plays a video
 	// file's sound is the same answer in every browser and on the phone.  The
 	// per-viewer knob next to it in spirit, castSyncDelay, is client-side for
-	// exactly the opposite reason — it is about the screen you are watching.
+	// exactly the opposite reason - it is about the screen you are watching.
 	//
 	// Gated on castRole and deliberately not on admin, though the row is
 	// process-global: the person standing in front of the device is the one
 	// who knows whether it has a screen, and that is a cast user.  The write
-	// is bounded — the id must name a device in cached_devices(), the value
+	// is bounded - the id must name a device in cached_devices(), the value
 	// is one of three enumerated strings, and the worst a cast user can do
 	// with it is what the setting exists to do.  Decided during the security
 	// pass, not overlooked.
@@ -224,8 +224,8 @@ void GainDrive::routes_cast()
 			return;
 			}
 
-		// The id has to name a device we know about.  Not for authorisation —
-		// there is nothing to authorise — but because the key is composed from
+		// The id has to name a device we know about.  Not for authorisation -
+		// there is nothing to authorise - but because the key is composed from
 		// it, and an unvalidated one is an unbounded write into client.settings
 		// by any account with cast permission.  Same bound ladder_size() puts
 		// on the thumbnail table, for the same reason.
@@ -235,14 +235,14 @@ void GainDrive::routes_cast()
 		if (!known) { err(70, "Cast device not found."); return; }
 
 		// `auto` is stored as an empty value, which get_setting() cannot tell
-		// from an absent row — which is the point: a device nobody has decided
+		// from an absent row - which is the point: a device nobody has decided
 		// about and one reset to auto read the same, so `auto` needs no
 		// spelling of its own on the way back out.
 		store_.set_setting("cast_video:" + id, pref == "auto" ? "" : pref);
 		// Changing your mind about a device is the natural place to make it
 		// reconsider, and the only one: a codec pair recorded as refused is
-		// never re-tried otherwise, so new firmware — or a different device
-		// that inherited the address, and with it the id — would be judged for
+		// never re-tried otherwise, so new firmware - or a different device
+		// that inherited the address, and with it the id - would be judged for
 		// ever on what its predecessor could not play.
 		store_.set_setting(CAST_NOVIDEO_KEY + id, "");
 		std::cout << stamp() << "Cast: device " << id << " videoPref=" << pref
@@ -252,7 +252,7 @@ void GainDrive::routes_cast()
 		                use_json ? "application/json" : "application/xml");
 		});
 
-	// startCast — enter cast mode: subsequent stream requests go to the Chromecast.
+	// startCast - enter cast mode: subsequent stream requests go to the Chromecast.
 	server_.Get("/rest/startCast.view", [this](const httplib::Request& req,
 	                                            httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -271,7 +271,7 @@ void GainDrive::routes_cast()
 
 		// Required, not optional with a fallback to `c=`. A client asking the
 		// server to drive a Chromecast is already speaking the gaindrive
-		// extension, so it can be asked to name itself — and refusing the
+		// extension, so it can be asked to name itself - and refusing the
 		// nameless case is what guarantees that "sent no castController" can
 		// never own a session, and so can never collide with another client
 		// that also sent none. A `c=` fallback would put every install of one
@@ -321,7 +321,7 @@ void GainDrive::routes_cast()
 		                use_json ? "application/json" : "application/xml");
 		});
 
-	// stopCast — stop Chromecast playback and exit cast mode.
+	// stopCast - stop Chromecast playback and exit cast mode.
 	server_.Get("/rest/stopCast.view", [this](const httplib::Request& req,
 	                                           httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -336,7 +336,7 @@ void GainDrive::routes_cast()
 		                use_json ? "application/json" : "application/xml");
 		});
 
-	// castEvents — SSE stream that pushes MEDIA_STATUS updates to the browser.
+	// castEvents - SSE stream that pushes MEDIA_STATUS updates to the browser.
 	// Each event is a JSON object with playerState, currentTime, duration.
 	// The connection is kept alive by the Chromecast heartbeat; a 15-second
 	// keepalive comment is sent if no real update arrives in that window.
@@ -385,7 +385,7 @@ void GainDrive::routes_cast()
 		// shared_ptr because httplib stores the content provider in a
 		// std::function (which requires copyable callables); the guard's
 		// destructor still fires exactly once, when the last copy of the
-		// lambda is dropped — i.e. when the connection ends, regardless of
+		// lambda is dropped - i.e. when the connection ends, regardless of
 		// whether it ended via sink.write returning false (client gone),
 		// wait_status seeing !active(), or normal completion.
 		struct ListenerGuard {
@@ -434,8 +434,8 @@ void GainDrive::routes_cast()
 				if (cast_session_gen_.load() != session_gen) return false;
 				// The same description castLoad's reply carried, repeated on
 				// every push.  Not redundancy: a LOAD that was refused is
-				// retried one rung down the ladder — a film becoming its
-				// soundtrack — and the reply the client read describes the
+				// retried one rung down the ladder - a film becoming its
+				// soundtrack - and the reply the client read describes the
 				// attempt that failed.  Without this the info panel goes on
 				// claiming "as stored, MP4" over a FLAC soundtrack until the
 				// page is reloaded, which is precisely the "reporting the
@@ -443,7 +443,7 @@ void GainDrive::routes_cast()
 				// prevent.
 				const CastStreamInfo st = cast_stream();
 				// Something to say to the person, for the failures that produce
-				// no status of their own — a LOAD the receiver was never told
+				// no status of their own - a LOAD the receiver was never told
 				// about. `noticeSeq` is what lets a client show one exactly
 				// once: wait_status() republishes an unchanged status every
 				// fifteen seconds, and a notice without a sequence would be
@@ -469,7 +469,7 @@ void GainDrive::routes_cast()
 				});
 		});
 
-	// castSession — non-blocking snapshot of current cast session state.
+	// castSession - non-blocking snapshot of current cast session state.
 	// Used by the browser on page load to restore the cast UI after a reload.
 	server_.Get("/rest/castSession.view", [this](const httplib::Request& req,
 	                                             httplib::Response& res) {
@@ -479,7 +479,7 @@ void GainDrive::routes_cast()
 		if (!check_cast_local(req, res, use_json)) return;
 
 		// Someone else's session is not visible here. This is what stops a
-		// second browser adopting it wholesale on page load — showShell()
+		// second browser adopting it wholesale on page load - showShell()
 		// restores the cast UI from whatever this returns.
 		if (!cast_manager_.active() || !cast_owned_by(req)) {
 			res.set_content(subsonic_ok_json([](nlohmann::json& r) {
@@ -535,7 +535,7 @@ void GainDrive::routes_cast()
 			}), "application/json");
 		});
 
-	// castControl — send play/pause/seek to the Chromecast.
+	// castControl - send play/pause/seek to the Chromecast.
 	server_.Get("/rest/castControl.view", [this](const httplib::Request& req,
 	                                             httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -561,7 +561,7 @@ void GainDrive::routes_cast()
 			if (st.player_state == "PAUSED") {
 				cast_manager_.cast_play();
 				} else if (st.player_state == "IDLE" && !last_cast_song_id_.empty()) {
-				// Session timed out during a long pause — re-issue a full load from
+				// Session timed out during a long pause - re-issue a full load from
 				// the saved position so the Chromecast can restart the stream.
 				int  sid  = to_int(last_cast_song_id_, -1);
 				auto song = store_.get_song(sid);
@@ -591,7 +591,7 @@ void GainDrive::routes_cast()
 			if (track_id > 0) ids.push_back(track_id);
 			if (!cast_manager_.cast_tracks(ids))
 				std::cout << stamp() << "Cast: captions trackId=" << track_id
-				          << " not applied — no media session yet" << std::endl;
+				          << " not applied - no media session yet" << std::endl;
 			}
 		else if (action == "volume") {
 			// Absolute level, 0..1; the client does its own stepping. The
@@ -712,7 +712,7 @@ void GainDrive::routes_cast()
 		else err(0, "Unknown action.");
 		});
 
-	// castLoad — instruct the Chromecast to fetch and play a song.
+	// castLoad - instruct the Chromecast to fetch and play a song.
 	// Separate from stream.view so the browser triggers the cast load without
 	// making a Range request that httplib would reject (stream.view returns 204,
 	// but httplib overrides 204+Range to 416 when content_length is 0).
@@ -744,7 +744,7 @@ void GainDrive::routes_cast()
 		auto song = store_.get_song(to_int(it->second, -1));
 		if (!song) { err(70, "Song not found."); return; }
 		// The uploads root is personal, and this is an id-addressed read like
-		// stream.view — more so: the cast token it mints is then accepted by
+		// stream.view - more so: the cast token it mints is then accepted by
 		// stream.view with no account and no bitrate cap at all, so skipping
 		// the check here skips it everywhere downstream.
 		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
@@ -755,12 +755,12 @@ void GainDrive::routes_cast()
 		    ? to_float(to_it->second, 0.0f) : 0.0f;
 		// trackId, not captionId: the cast API numbers caption tracks 1..n in
 		// the order getVideoInfo lists them, and 0 means none.  captionId
-		// cannot say "none" — SIDECAR_CAPTION_INDEX is -1 and so is a missing
+		// cannot say "none" - SIDECAR_CAPTION_INDEX is -1 and so is a missing
 		// parameter, so "off" and "the sidecar file" would be one value.
 		int track_id = to_int(req.get_param_value("trackId"), 0);
-		// The reply says what was actually sent — the picture or only the
+		// The reply says what was actually sent - the picture or only the
 		// soundtrack, the contentType declared, and the container, bitrate and
-		// tier the receiver will get — so the client draws what happened
+		// tier the receiver will get - so the client draws what happened
 		// rather than deciding it a second time from the device list and the
 		// codec pair.
 		CastStreamInfo sent = cast_load_song(req, *song,
@@ -831,7 +831,7 @@ void GainDrive::cast_teardown()
 // channel does **not** re-issue the LOAD to seek: the receiver seeks by byte
 // range against the URL it already has, and goes on fetching that same URL for
 // as long as the track is open. So this is not a timeout nobody reaches, it is
-// the length of time a receiver may still come back — and shortening it would
+// the length of time a receiver may still come back - and shortening it would
 // break a seek an hour into a concert recording.
 static constexpr auto   STREAM_GRANT_TTL = std::chrono::hours(12);
 // A bound, because any authenticated account can mint and nothing else evicts.
@@ -866,7 +866,7 @@ std::string GainDrive::mint_stream_grant(const std::string& user, int song_id,
 	// The login throttle clears wholesale at its cap and is right to: every
 	// entry there is re-creatable at no cost. A grant is not. A receiver holds
 	// its URL for the length of a track and re-fetches it on every seek, with
-	// nothing on this server able to tell it to ask again — so clearing would
+	// nothing on this server able to tell it to ask again - so clearing would
 	// stop music that is playing, on a machine busy enough to reach the cap.
 	// Expiry order is mint order, the lifetime being fixed.
 	if (grants_.size() >= STREAM_GRANT_MAX) {
@@ -888,9 +888,9 @@ GainDrive::grant_lookup(const std::string& token)
 	{
 	std::lock_guard<std::mutex> lk(grant_mu_);
 	// Walked rather than looked up, so the comparison can be constant-time.
-	// CastManager's token_eq() gives the reasoning — 128 bits makes timing
+	// CastManager's token_eq() gives the reasoning - 128 bits makes timing
 	// academic, but the wrong primitive should not be the thing deciding
-	// whether an unauthenticated request is served — and the cap above is what
+	// whether an unauthenticated request is served - and the cap above is what
 	// keeps the walk bounded.
 	for (const auto& [tok, g] : grants_) {
 		if (tok.size() != token.size()) continue;
@@ -921,7 +921,7 @@ std::string GainDrive::stream_grant_user(const std::string& token, int song_id)
 	{
 	auto g = grant_lookup(token);
 	// Scoped to one song, so presenting it for another is refused exactly as
-	// if it were absent — the rule castToken already follows.
+	// if it were absent - the rule castToken already follows.
 	if (!g || g->song_id != song_id) return {};
 	return g->user;
 	}
@@ -959,7 +959,7 @@ bool GainDrive::cast_owned_by(const httplib::Request& req)
 //
 // The session is ended rather than merely frozen. Somebody who walks out of
 // the house mid-album wants the music to stop, and without this it would stop
-// anyway — but only once castEvents stopped being renewed and the
+// anyway - but only once castEvents stopped being renewed and the
 // CAST_IDLE_GRACE_S watchdog fired, which is a deterministic outcome reached
 // by an indeterminate route.
 bool GainDrive::check_cast_local(const httplib::Request& req,
@@ -1036,7 +1036,7 @@ GainDrive::soundtrack_load(const std::string& base,
 	desc = CastStreamInfo{};
 
 	// The same answer cast_load_song() reached when it decided this was worth
-	// doing at all — one definition, in codecs.hh, for the reason stated there.
+	// doing at all - one definition, in codecs.hh, for the reason stated there.
 	const std::string fmt = cast_soundtrack_format(song.audio_codec);
 	if (fmt.empty()) return lr;
 
@@ -1047,8 +1047,8 @@ GainDrive::soundtrack_load(const std::string& base,
 	if (token.empty()) return lr;
 
 	const std::string sid_s = std::to_string(song_id);
-	// Naming an audio format for a video *is* the request for its soundtrack —
-	// audio_only_request() in codecs.hh — so this one parameter is the whole of
+	// Naming an audio format for a video *is* the request for its soundtrack -
+	// audio_only_request() in codecs.hh - so this one parameter is the whole of
 	// it on the server side.
 	lr.url  = base + "stream.view?id=" + sid_s + "&castToken=" + token
 	        + "&format=" + fmt;
@@ -1068,7 +1068,7 @@ GainDrive::soundtrack_load(const std::string& base,
 	Streamer::SongInfo si = streamer_song(song, store_.abs_path(song.path));
 	// Resolved here rather than inside the lambda so the figures reported to
 	// the client are the ones the warm actually produces.  It is pure
-	// negotiation against the source — no I/O — so hoisting it costs nothing
+	// negotiation against the source - no I/O - so hoisting it costs nothing
 	// and two copies of it could disagree.
 	auto plan = Streamer::plan_transcode(si, fmt, 0, 0);
 	// A copy plan is exactly the one whose bitrate is 0.
@@ -1091,7 +1091,7 @@ GainDrive::soundtrack_load(const std::string& base,
 	const std::string pair = song.video_codec + "/" + song.audio_codec;
 
 	// The soundtrack of a film is a transcode of a two-hour AC3 track, and
-	// serve() answers it out of the transcode cache — which materialises the
+	// serve() answers it out of the transcode cache - which materialises the
 	// whole file before the first byte.  A receiver drops a session after about
 	// a minute with no data on the HTTP body, so that wait has to happen before
 	// it is told anything at all.  This runs on CastManager's load worker,
@@ -1105,7 +1105,7 @@ GainDrive::soundtrack_load(const std::string& base,
 		// Before the warm, not after: a client asking castSession during the
 		// minute ffmpeg takes should already be told what it is waiting for.
 		// This hook running at all is the proof that the first attempt was
-		// refused — CastManager only reaches a fallback down that path — which
+		// refused - CastManager only reaches a fallback down that path - which
 		// is why both of these live here and nowhere else.
 		if (is_fallback) {
 			cast_note_video_refused(dev, pair);
@@ -1118,7 +1118,7 @@ GainDrive::soundtrack_load(const std::string& base,
 			// asymmetry is the point: an *encode* that could not be cached may
 			// still play as a pipe, so the LOAD goes out.  A *copy* that could
 			// not be cached means the argv itself failed, and serve() would run
-			// the identical argv down the piped path and fail identically — so
+			// the identical argv down the piped path and fail identically - so
 			// pointing the receiver at that URL buys a dead session with
 			// nothing to explain it.
 			std::cout << stamp()
@@ -1151,7 +1151,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	// The configured public_url wins over the request's own Host header, and
 	// on a public deployment it must: Host and X-Forwarded-Proto are client
 	// input, so believing them let any cast-role account point the receiver
-	// at an origin of its choosing — which hands that origin the cast token
+	// at an origin of its choosing - which hands that origin the cast token
 	// in the query string, and the token is accepted by stream.view with no
 	// account attached. On a LAN with no public_url configured the header is
 	// the only source there is, and the peers who could abuse it are the
@@ -1171,7 +1171,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	// A receiver that cannot display a picture is sent the film's soundtrack
 	// rather than a video container it will drop the picture out of.  The
 	// decision is made here, in the one place that has both the song and the
-	// device, and reported to the client rather than re-derived there — the
+	// device, and reported to the client rather than re-derived there - the
 	// same rule the three callers of the tier predicate follow.
 	//
 	// `video_out()` reports true for a device that announced no capabilities,
@@ -1194,7 +1194,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	//  * `send` only ever *raises* a device that announced no screen, and only
 	//    for a file the Direct tier sends untouched.  A WiiM plays a video
 	//    file's sound perfectly well whatever the Cast documentation says, and
-	//    the raw file byte-ranged off disk costs nothing at all — no ffmpeg,
+	//    the raw file byte-ranged off disk costs nothing at all - no ffmpeg,
 	//    no wait before the LOAD.  It stops at the Direct tier because the
 	//    other two are worse than extracting the sound: a remux reads and
 	//    writes the whole film through the cache, and a re-encode re-encodes a
@@ -1213,15 +1213,15 @@ GainDrive::cast_load_song(const httplib::Request& req,
 		// The tier says the file can go out untouched; the second test says
 		// this device has not already proved it cannot decode it.  The Direct
 		// tier is built from *browser* predicates, and a Cast receiver's codec
-		// support is narrower — an AV1/Opus MP4 passes it and no amplifier
-		// plays it — so the tier alone is a hopeful answer rather than a
+		// support is narrower - an AV1/Opus MP4 passes it and no amplifier
+		// plays it - so the tier alone is a hopeful answer rather than a
 		// reliable one.  Being refused once is what makes it reliable.
 		shows_video = cast_tier_for(song.codec, song.video_codec,
 		                            song.audio_codec) == CastTier::Direct
 		           && !cast_video_refused(cast_manager_.get_device_id(),
 		                                  codec_pair);
 
-	// Empty when there is nothing to extract — a silent film, or one the
+	// Empty when there is nothing to extract - a silent film, or one the
 	// scanner could not probe.  Such a video stays on the video ladder, which
 	// is what keeps this predicate agreeing with the one Streamer::serve()
 	// applies: a LOAD announcing audio/flac while MP4 goes out is media a
@@ -1232,7 +1232,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 
 	// Two shapes, and they share only the description they produce.  The
 	// soundtrack is built by soundtrack_load(), which the fallback below builds
-	// again — that is why it is a function rather than a branch.
+	// again - that is why it is a function rather than a branch.
 	CastManager::LoadRequest lr;
 	CastStreamInfo stream;
 
@@ -1250,7 +1250,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	else {
 		// The caption list is resolved before the token is minted, because the
 		// token is scoped to this song *and* to the caption ids this LOAD is
-		// about to declare — getCaptions will accept it for those and nothing
+		// about to declare - getCaptions will accept it for those and nothing
 		// else.
 		MediaStore::VideoStreams streams;
 		std::vector<int> caption_ids;
@@ -1261,8 +1261,8 @@ GainDrive::cast_load_song(const httplib::Request& req,
 			}
 
 		// Minted per LOAD rather than per session. Everything the receiver
-		// fetches carries this rather than the account's credentials — a
-		// television is not a place to leave a password — so what it is worth is
+		// fetches carries this rather than the account's credentials - a
+		// television is not a place to leave a password - so what it is worth is
 		// what a leak costs: one song, for as long as this LOAD is current.
 		const std::string token = cast_manager_.mint_token(song_id, caption_ids);
 		if (token.empty()) {
@@ -1278,7 +1278,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 		// Native seek: the URL serves the whole file and the LOAD says where to
 		// begin, so the receiver's clock is absolute.  That is also why the
 		// caption cues need no shifting here, unlike the browser's own transcoded
-		// seek — see videoShiftCues() in web/app.js for the case where they do.
+		// seek - see videoShiftCues() in web/app.js for the case where they do.
 		lr.current_time = offset;
 		lr.duration     = song.duration;
 
@@ -1287,7 +1287,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 		// different question from whether it was sent one.  Under `send` a
 		// screenless device gets the whole video and displays none of it, so
 		// !audio_only would tell a client to drop its own picture exactly where
-		// it is most wanted — the bug that made this a separate field.
+		// it is most wanted - the bug that made this a separate field.
 		// device_video_out() is the raw announcement here on purpose: the
 		// preference decides what to send, and no preference gives a receiver a
 		// screen.
@@ -1348,7 +1348,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 		// picture to fall back to, and the panel would go on saying "Playing on
 		// your TV" over sound alone.  That case is a known gap: an AV1 film cast
 		// to a receiver that cannot decode it still fails, and the tier ladder
-		// has nothing better to offer it — a remux is -c copy, so it would send
+		// has nothing better to offer it - a remux is -c copy, so it would send
 		// the identical codecs a second time.
 		if (song.is_video && !cast_manager_.device_video_out()) {
 			CastStreamInfo fb;

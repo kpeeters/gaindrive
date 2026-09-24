@@ -13,7 +13,7 @@
 // A string safe to put in a log line: control characters replaced and the
 // length bounded.
 //
-// Everything logged here — a path, a parameter, a username — arrives from the
+// Everything logged here - a path, a parameter, a username - arrives from the
 // network, and it was written out raw. A CR or LF in any of it forges whole
 // log lines, which matters more once something downstream reads this log to
 // decide whom to block, and a long value simply makes the log useless.

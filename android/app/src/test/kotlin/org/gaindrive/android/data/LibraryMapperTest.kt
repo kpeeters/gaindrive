@@ -91,8 +91,8 @@ class LibraryMapperTest {
 	/**
 	 * An episode carries its season alongside the disc number, which holds the
 	 * same value. Null is what makes the album screen head a group "Disc"
-	 * rather than "Series", so the server omitting the field — for a film, or
-	 * on an endpoint that does not select it — has to arrive as null and not
+	 * rather than "Series", so the server omitting the field - for a film, or
+	 * on an endpoint that does not select it - has to arrive as null and not
 	 * as 0.
 	 */
 	@Test
@@ -138,7 +138,7 @@ class LibraryMapperTest {
 
 	/**
 	 * A folder-browsed album has no artist of its own, so it takes one from its
-	 * tracks — the *album* artist, not the first track's own, or a compilation
+	 * tracks - the *album* artist, not the first track's own, or a compilation
 	 * would be headed by whoever happens to sort first.
 	 */
 	@Test
@@ -226,7 +226,7 @@ class LibraryMapperTest {
 	/**
 	 * The sibling of `song album ref prefers albumId but accepts parent`, and
 	 * the reason that preference had to become overridable: a directory child
-	 * carries both fields, and in folder mode neither is the album — `albumId`
+	 * carries both fields, and in folder mode neither is the album - `albumId`
 	 * names the tag hierarchy's album, `parent` names the disc folder.
 	 */
 	@Test

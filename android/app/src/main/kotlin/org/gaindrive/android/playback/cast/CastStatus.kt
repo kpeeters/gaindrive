@@ -11,7 +11,7 @@ import kotlinx.serialization.json.intOrNull
 /**
  * A Chromecast on the network.
  *
- * [model] is the mDNS `md` record — the model name the receiver announces for
+ * [model] is the mDNS `md` record - the model name the receiver announces for
  * itself, `Chromecast` or `WiiM Pro` or a television's marketing name. It is
  * null for a manually added device, which has no announcement to read.
  *
@@ -54,7 +54,7 @@ enum class CastPlayerState { IDLE, PLAYING, PAUSED, BUFFERING, LOADING, UNKNOWN 
  *
  * Every accessor below reaches into JSON that came off the network from a
  * device we do not control, so the whole file uses safe casts rather than
- * kotlinx's throwing `jsonObject`/`jsonArray` helpers — a malformed push must
+ * kotlinx's throwing `jsonObject`/`jsonArray` helpers - a malformed push must
  * not take down the receive loop.
  */
 data class CastStatus(
@@ -68,7 +68,7 @@ data class CastStatus(
 	 *
 	 * **Nullable, and null is not empty.** The receiver states this when the
 	 * selection changes and omits it from the position pushes in between,
-	 * exactly as it does with `duration` — so reading an absent field as "none
+	 * exactly as it does with `duration` - so reading an absent field as "none
 	 * selected" would make the picker's tick, and the tinted CC icon, flicker
 	 * off once a second. [CastSession] carries the last stated value forward.
 	 */
@@ -99,8 +99,8 @@ data class CastStatus(
 			val entry = message.array("status")?.firstOrNull() as? JsonObject
 				?: return null
 
-			// A push during playback omits `media` entirely — the receiver only
-			// repeats it when the item changes — so a zero here means "not
+			// A push during playback omits `media` entirely - the receiver only
+			// repeats it when the item changes - so a zero here means "not
 			// stated", not "zero seconds". CastSession carries the last known
 			// value forward.
 			val duration = (entry.obj("media")?.get("duration") as? JsonPrimitive)
@@ -120,7 +120,7 @@ data class CastStatus(
 				duration = duration,
 				mediaSessionId = (entry["mediaSessionId"] as? JsonPrimitive)?.intOrNull ?: 0,
 				idleReason = entry.string("idleReason"),
-				// Absent stays null — see the field. An empty array *is* a
+				// Absent stays null - see the field. An empty array *is* a
 				// statement, and it means the viewer turned subtitles off.
 				activeTrackIds = entry.array("activeTrackIds")?.mapNotNull {
 					(it as? JsonPrimitive)?.intOrNull
@@ -145,8 +145,8 @@ data class CastStatus(
 		 *
 		 * The distinction [transportIdOf] cannot express: it answers null both
 		 * for "our app is not running" and for "this status was not about
-		 * applications at all". A volume-change push is the second — it carries
-		 * `volume` and nothing else — and treating it as the first discards a
+		 * applications at all". A volume-change push is the second - it carries
+		 * `volume` and nothing else - and treating it as the first discards a
 		 * transport that is still perfectly good.
 		 */
 		fun listsApplications(message: JsonObject): Boolean =
@@ -172,7 +172,7 @@ data class CastStatus(
 		 * fix and not a refinement.
 		 *
 		 * A television that has been sitting idle is running its own ambient
-		 * app — `E8C28D3C`, "Backdrop" — and it publishes a `transportId` like
+		 * app - `E8C28D3C`, "Backdrop" - and it publishes a `transportId` like
 		 * any other. Taking the first one made that look like a media receiver
 		 * ready to be loaded into, so the LOAD went to a screensaver, which
 		 * ignores the media namespace entirely: no `MEDIA_STATUS`, no fetch,

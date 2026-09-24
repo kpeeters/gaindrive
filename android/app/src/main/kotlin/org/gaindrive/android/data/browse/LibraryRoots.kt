@@ -23,7 +23,7 @@ enum class PersonalScope(
 	 * What the wire wants, or null to send no parameter at all.
 	 *
 	 * [NONE] is deliberately null rather than "false". The server tests for the
-	 * exact strings, so "false" would work — but it would also append a
+	 * exact strings, so "false" would work - but it would also append a
 	 * parameter to every ordinary library request that never carried one, which
 	 * is a gratuitous difference from what a third-party server has always seen.
 	 * Retrofit omits a null entirely.
@@ -40,7 +40,7 @@ enum class PersonalScope(
 	 * Every account's uploads, which the server allows only for an admin.
 	 *
 	 * It also groups the response by owner instead of by first letter, so the
-	 * index labels come back as usernames — which is what makes two people's
+	 * index labels come back as usernames - which is what makes two people's
 	 * identically named folders tellable apart, and needs no client change
 	 * because a label was always just a string.
 	 */
@@ -51,7 +51,7 @@ enum class PersonalScope(
  * How a top-level listing is narrowed. All three at their defaults means "the
  * whole shared library".
  *
- * [personal] is not a third way of naming a root — it switches to a different
+ * [personal] is not a third way of naming a root - it switches to a different
  * library altogether, and the server ignores the other two while it is set.
  * Kept in the same object regardless, because every caller wants exactly one of
  * these and a second parameter alongside would let them be passed
@@ -67,7 +67,7 @@ data class RootRequest(
 
 /**
  * The one or two requests one server's merged listing is built from. A null
- * half is a group this server lacks — it contributes nothing there, which is
+ * half is a group this server lacks - it contributes nothing there, which is
  * not a failure and must not be reported as one. Not asking is the point: a
  * request for a kind a server does not have would either come back empty or,
  * on a server predating library roots, come back as the *entire* library and
@@ -81,7 +81,7 @@ data class ListingRequests(
 /**
  * What to ask [roots]' server for the merged list.
  *
- * A typed server — any root naming a `contentType` — is asked per kind it
+ * A typed server - any root naming a `contentType` - is asked per kind it
  * actually has, because omitting the parameter there answers with every root
  * mixed together, which is exactly what the two-group list exists to avoid.
  * A root typed with a kind this build has never heard of contributes nothing;
@@ -89,7 +89,7 @@ data class ListingRequests(
  * merged list has nowhere meaningful to put one.
  *
  * An untyped server has no opinion about what its roots contain, so all of
- * them land in the artists group with one unnarrowed request — including a
+ * them land in the artists group with one unnarrowed request - including a
  * folder-mode server with several roots, whose per-folder chips this
  * replaced. In ID3 mode it keeps sending `contentType=artists`, which is
  * exactly what this app sent before folder browsing existed and which a

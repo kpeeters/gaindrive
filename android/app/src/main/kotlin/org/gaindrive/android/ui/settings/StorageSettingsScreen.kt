@@ -102,7 +102,7 @@ fun StorageSettingsScreen(
 
 		// Here rather than in a playback section of its own, because what it
 		// changes is what gets fetched and stored: with it on, a video becomes
-		// an ordinary track for every purpose on this screen — it is cached as
+		// an ordinary track for every purpose on this screen - it is cached as
 		// it plays, it counts against the cap, and it can be downloaded.
 		item {
 			SwitchRow(
@@ -384,7 +384,7 @@ private fun PinnedRow(
 
 /**
  * Kind alone was enough when a pin was just an intent. Now that a download can
- * be waiting or broken, this is the one screen that can say so in words — and
+ * be waiting or broken, this is the one screen that can say so in words - and
  * the one place a download you have given up on can be deleted.
  *
  * [quality] is the current setting, which is what a pin is kept at: changing it

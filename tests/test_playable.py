@@ -45,7 +45,7 @@ IMPLIED_FORMS = {
 }
 
 # What the scan has to open a file to learn, by extension.  The container it
-# will have recorded is the *real* one, so `.oga` and `.ogg` are both `ogg` —
+# will have recorded is the *real* one, so `.oga` and `.ogg` are both `ogg` -
 # which is the whole point of the pair being observed rather than derived.
 READ_CONTAINERS = {"m4a": "mp4", "ogg": "ogg", "oga": "ogg"}
 

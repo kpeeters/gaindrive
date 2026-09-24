@@ -22,7 +22,7 @@ import javax.inject.Singleton
 sealed interface CastProbeResult {
 	/**
 	 * It spoke Cast. [runningApp] is whatever the television is showing right
-	 * now — often its own ambient app rather than anything of ours — and [name]
+	 * now - often its own ambient app rather than anything of ours - and [name]
 	 * is set only when the best-effort lookup below happened to work.
 	 */
 	data class Answered(val runningApp: String?, val name: String?) : CastProbeResult
@@ -35,7 +35,7 @@ sealed interface CastProbeResult {
 	 */
 	data object Silent : CastProbeResult
 
-	/** No control channel at all — wrong address, device off, or blocked. */
+	/** No control channel at all - wrong address, device off, or blocked. */
 	data object Unreachable : CastProbeResult
 }
 
@@ -45,7 +45,7 @@ sealed interface CastProbeResult {
  * [CastSession.connect] cannot serve as a test button. It is a singleton that
  * publishes the target it was given, and `PlaybackService.watchCastDevice()`
  * reacts to that by handing the queue to a [CastPlayer] and swapping the
- * `MediaSession`'s player — so testing an address the user has merely typed
+ * `MediaSession`'s player - so testing an address the user has merely typed
  * would start casting to it. This runs the same opening exchange over its own
  * channel and throws the channel away.
  *
@@ -75,7 +75,7 @@ class CastProbe @Inject constructor(
 
 		open.use { channel ->
 			// The virtual connection to the platform must exist before anything
-			// else is accepted — the same order CastSession.runLoop uses.
+			// else is accepted - the same order CastSession.runLoop uses.
 			channel.send(CastNs.CONNECTION, CastNs.RECEIVER_ID, connectPayload())
 			channel.send(CastNs.RECEIVER, CastNs.RECEIVER_ID, request("GET_STATUS"))
 
@@ -101,7 +101,7 @@ class CastProbe @Inject constructor(
 	 * `withTimeoutOrNull`, and that is not a style choice.
 	 * [CastChannel.receive] *blocks* for up to `READ_TIMEOUT_MS` instead of
 	 * suspending, so a silent device produces a loop with no suspension point in
-	 * it at all — and cancellation, which is all a timeout has to work with,
+	 * it at all - and cancellation, which is all a timeout has to work with,
 	 * would never be observed. The wrapped version hangs for as long as the
 	 * device stays quiet, which is precisely the case this function exists for.
 	 *
@@ -133,7 +133,7 @@ class CastProbe @Inject constructor(
 	}
 
 	/**
-	 * The device's friendly name, if it will tell us — best effort, and often
+	 * The device's friendly name, if it will tell us - best effort, and often
 	 * not.
 	 *
 	 * A `RECEIVER_STATUS` carries no name: discovery gets it from the mDNS `fn`

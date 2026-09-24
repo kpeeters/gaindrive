@@ -39,7 +39,7 @@ data class CastCaption(
 	val label: String,
 	/**
 	 * Required by the receiver for a subtitle track, and a track without one
-	 * can be dropped with no diagnostic anywhere — hence the ISO 639-2 code
+	 * can be dropped with no diagnostic anywhere - hence the ISO 639-2 code
 	 * for "undetermined" rather than an empty string.
 	 */
 	val language: String = "und",
@@ -66,7 +66,7 @@ data class CastMedia(
 	val isVideo: Boolean = false,
 	/**
 	 * Who is serving [url]. Carried here rather than left in [CastUrls] because
-	 * this is the only record of what a live session is doing — the decision is
+	 * this is the only record of what a live session is doing - the decision is
 	 * made per track and there is nothing else holding it afterwards.
 	 */
 	val route: CastRoute = CastRoute.DIRECT,
@@ -76,7 +76,7 @@ data class CastMedia(
 	 * **Declared in every LOAD, whether or not one is switched on.**
 	 * `EDIT_TRACKS_INFO` can activate a trackId the LOAD declared but cannot
 	 * introduce one, so a track omitted here is one the viewer can never reach
-	 * without reloading the film — which shows up as subtitles that work when
+	 * without reloading the film - which shows up as subtitles that work when
 	 * chosen before playback and never when chosen during it.
 	 */
 	val captions: List<CastCaption> = emptyList(),
@@ -129,7 +129,7 @@ class CastSession @Inject constructor(
 	 * Something that could not be cast, in words, for the shell to show.
 	 *
 	 * Here rather than on [CastPlayer] because that object is rebuilt per
-	 * session while this one is the singleton every observer already holds —
+	 * session while this one is the singleton every observer already holds -
 	 * the same arrangement `PlaybackWatchdog.message` uses, and it is
 	 * `PlayerConnection` that collects both.
 	 *
@@ -148,7 +148,7 @@ class CastSession @Inject constructor(
 	/**
 	 * How many `MEDIA_STATUS` messages have arrived on this connection.
 	 *
-	 * Only [awaitLoadAck] reads it, and only as a before-and-after comparison —
+	 * Only [awaitLoadAck] reads it, and only as a before-and-after comparison -
 	 * the value itself means nothing, and it is deliberately not reset by
 	 * [teardown], since a wrap or a stale figure cannot make two reads taken
 	 * seconds apart look equal.
@@ -164,7 +164,7 @@ class CastSession @Inject constructor(
 	/**
 	 * Bumped by every user-initiated LOAD. A worker checks it before each
 	 * blocking step and abandons its LOAD if the user has since asked for
-	 * something else. Retries deliberately do not bump it — a retry is the same
+	 * something else. Retries deliberately do not bump it - a retry is the same
 	 * intent as the load it repeats.
 	 */
 	private val loadGen = AtomicInteger(0)
@@ -173,7 +173,7 @@ class CastSession @Inject constructor(
 	private val retry = LoadRetryWatcher()
 
 	/**
-	 * The parameters of the last LOAD, so a retry can repeat it verbatim — and
+	 * The parameters of the last LOAD, so a retry can repeat it verbatim - and
 	 * so the UI can say what the receiver is playing and where it is fetching
 	 * it from, neither of which is recoverable from a `MEDIA_STATUS`: the
 	 * receiver reports no codec and no bitrate, and the `contentType` it echoes
@@ -283,7 +283,7 @@ class CastSession @Inject constructor(
 	 * or turns subtitles off when it is null.
 	 *
 	 * An index rather than a trackId, because that is what the picker publishes
-	 * and what [CastPlayer] numbered its `Tracks` with — resolving it here,
+	 * and what [CastPlayer] numbered its `Tracks` with - resolving it here,
 	 * against the very list the LOAD went out with, is what keeps the two
 	 * numberings from being two numberings. The same reasoning as
 	 * `VideoSurface.selectTextTrack` for the local player.
@@ -359,7 +359,7 @@ class CastSession @Inject constructor(
 				pump(open)
 				// Reached only when the receiver closed on us. Logged because an
 				// idle connection and one that is silently reconnecting every few
-				// seconds otherwise look identical from outside — and the app
+				// seconds otherwise look identical from outside - and the app
 				// sends nothing at all between sessions, which is when a receiver
 				// is most likely to hang up.
 				Log.i(TAG, "connection closed by receiver, reconnecting")
@@ -429,7 +429,7 @@ class CastSession @Inject constructor(
 			// and ours was not among it. A RECEIVER_STATUS announcing a volume
 			// change carries no `applications` array at all, and reading that
 			// as "the app is gone" threw away a working transport mid-session
-			// — which cost the *next* load the whole GET_STATUS-and-LAUNCH
+			// - which cost the *next* load the whole GET_STATUS-and-LAUNCH
 			// path, the slow route this timing bug lives on.
 			if (CastStatus.listsApplications(message)) transportId.value = null
 			return
@@ -448,7 +448,7 @@ class CastSession @Inject constructor(
 		// A push mid-playback carries no `media` block, so duration arrives once
 		// and must be carried forward rather than collapsing to zero. The
 		// active subtitle tracks are stated on the same terms and carry forward
-		// for the same reason — see CastStatus.activeTrackIds.
+		// for the same reason - see CastStatus.activeTrackIds.
 		val previous = _status.value
 		val merged = fresh.copy(
 			duration = if (fresh.duration == 0f) previous.duration else fresh.duration,
@@ -459,7 +459,7 @@ class CastSession @Inject constructor(
 		if (retry.onStatus(merged)) {
 			val media = _loaded.value ?: return
 			val gen = loadGen.get()
-			Log.w(TAG, "auto-retry LOAD (gen=$gen) — receiver went IDLE/ERROR")
+			Log.w(TAG, "auto-retry LOAD (gen=$gen) - receiver went IDLE/ERROR")
 			scope.launch(Dispatchers.IO) { sendLoad(media, gen) }
 		}
 	}
@@ -467,7 +467,7 @@ class CastSession @Inject constructor(
 	private suspend fun sendLoad(media: CastMedia, gen: Int) {
 		if (loadGen.get() != gen) return
 		// Said out loud. This was the one abandon in the sequence that logged
-		// nothing at all, so a LOAD lost here left no trace anywhere — the
+		// nothing at all, so a LOAD lost here left no trace anywhere - the
 		// player simply never started and there was no line to search for.
 		val open = awaitChannel() ?: run {
 			Log.w(TAG, "no control channel after ${CHANNEL_WAIT_MS}ms; LOAD abandoned")
@@ -494,7 +494,7 @@ class CastSession @Inject constructor(
 	 *
 	 * Built by a function rather than inline because it is sent twice: once by
 	 * [sendLoad] and again by [awaitLoadAck] if the receiver never answered.
-	 * **The second must not be a byte-for-byte copy of the first** — a receiver
+	 * **The second must not be a byte-for-byte copy of the first** - a receiver
 	 * correlates its replies by `requestId`, so re-sending one it has already
 	 * seen is a worse thing to do than sending nothing.
 	 */
@@ -502,7 +502,7 @@ class CastSession @Inject constructor(
 		buildJsonObject {
 			put("type", "LOAD")
 			put("requestId", requestIds.getAndIncrement())
-			// Explicit even though the spec defaults it true — some receiver
+			// Explicit even though the spec defaults it true - some receiver
 			// versions have been quirky about it, and it costs nothing.
 			put("autoplay", true)
 			if (media.startSeconds > 0f) put("currentTime", media.startSeconds)
@@ -544,7 +544,7 @@ class CastSession @Inject constructor(
 	 * decides from `MEDIA_STATUS` pushes, and the failure here produces none: a
 	 * receiver that has published its transport but is not yet consuming the
 	 * media namespace drops the LOAD on the floor. There is no ack to wait for
-	 * — `send` reports only that the bytes left this phone — so elapsed time is
+	 * - `send` reports only that the bytes left this phone - so elapsed time is
 	 * the only evidence there is.
 	 *
 	 * Three rules keep it from becoming a source of its own problems:
@@ -556,7 +556,7 @@ class CastSession @Inject constructor(
 	 *    track the user chose in the meantime always wins.
 	 *  * **Judged on the message, not on a parsed status.** `CastStatus.parse`
 	 *    returns null for an empty `status` array, which is exactly what a
-	 *    freshly launched receiver with no media answers a `GET_STATUS` with —
+	 *    freshly launched receiver with no media answers a `GET_STATUS` with -
 	 *    so counting parsed statuses would call a healthy receiver silent and
 	 *    re-send against it. [mediaMessages] counts arrivals instead.
 	 */
@@ -634,7 +634,7 @@ class CastSession @Inject constructor(
 	 * A branch rather than a changed constant: `artist` and `albumName` are
 	 * fields of a music track and not of a movie, so sending them under
 	 * `metadataType: 1` would put nothing on screen. The album line carries a
-	 * film's section — `Documentaries`, a series name — which is what `subtitle`
+	 * film's section - `Documentaries`, a series name - which is what `subtitle`
 	 * is for.
 	 */
 	private fun CastMedia.metadata(): JsonObject? {
@@ -671,7 +671,7 @@ class CastSession @Inject constructor(
 		 * of the 5 s it started at: `CastChannel.open` spends up to
 		 * `CONNECT_TIMEOUT_MS` (5 s) on the Wi-Fi-bound connect, then
 		 * `FALLBACK_TIMEOUT_MS` (3 s) on the unbound one, and only then runs a
-		 * handshake under another 5 s `soTimeout` — about thirteen seconds
+		 * handshake under another 5 s `soTimeout` - about thirteen seconds
 		 * worst case. A ceiling below the work it bounds is not a timeout, it
 		 * is a race, and losing it abandoned the LOAD.
 		 */
@@ -681,7 +681,7 @@ class CastSession @Inject constructor(
 		 * How long to wait for a `RECEIVER_STATUS` naming our app *before*
 		 * launching it.
 		 *
-		 * Not about the launch at all — it is what decides whether an already
+		 * Not about the launch at all - it is what decides whether an already
 		 * running receiver is joined or torn down. `ensureTransport` sends
 		 * LAUNCH when this expires, and LAUNCH against a running app recreates
 		 * it, losing the session. 1.5 s is easily too short for a television
@@ -711,7 +711,7 @@ class CastSession @Inject constructor(
 		 * How long to give a LOAD that was *sent* before sending it once more.
 		 *
 		 * The gap `LoadRetryWatcher` cannot cover: it is fed by `MEDIA_STATUS`
-		 * pushes, so it sees nothing at all when the receiver drops the LOAD —
+		 * pushes, so it sees nothing at all when the receiver drops the LOAD -
 		 * which it does when the app has published its transport but is not yet
 		 * consuming the media namespace. There is no ack to wait on, so a timer
 		 * is the only evidence available.

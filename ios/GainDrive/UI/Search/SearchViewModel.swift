@@ -48,13 +48,13 @@ struct SearchResults: Sendable {
 	var artists: [ArtistUi] = []
 	var albums: [AlbumUi] = []
 	var songs: [SongUi] = []
-	/// Their own list, never folded in among the songs — which is how the
+	/// Their own list, never folded in among the songs - which is how the
 	/// server sends them and for its reason: a chapter has no id anything can
 	/// stream, star or queue.
 	var chapters: [ChapterHit] = []
 	var failures: [ServerFailure] = []
 	/// True while at least one server has not answered. Drives a quiet
-	/// indicator rather than a blocking one — the results already on screen are
+	/// indicator rather than a blocking one - the results already on screen are
 	/// usable while the slow server is still thinking.
 	var outstanding = false
 
@@ -93,7 +93,7 @@ final class SearchViewModel {
 	}
 
 	/// Called when the scope changes. An unchanged query against a different
-	/// set of servers is a different question — but with nothing typed there is
+	/// set of servers is a different question - but with nothing typed there is
 	/// no question to re-ask.
 	func scopeChanged() {
 		if case .idle = phase { return }
@@ -101,7 +101,7 @@ final class SearchViewModel {
 	}
 
 	/// Re-runs the current query. Needed as its own entry point because the
-	/// obvious alternative — reassigning `filters` — is guarded against an
+	/// obvious alternative - reassigning `filters` - is guarded against an
 	/// unchanged value and would silently do nothing.
 	func retry() {
 		restart()
@@ -135,7 +135,7 @@ final class SearchViewModel {
 		task?.cancel()
 		task = Task { [library] in
 			// The debounce lives here rather than in the view so that a
-			// cancelled task cancels the wait too — a `.task(id:)` would
+			// cancelled task cancels the wait too - a `.task(id:)` would
 			// restart the timer but leave the previous request running.
 			try? await Task.sleep(for: Self.debounce)
 			guard !Task.isCancelled else { return }

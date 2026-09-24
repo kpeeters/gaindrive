@@ -19,7 +19,7 @@ jobs:
           - {arch: x86_64, runner: ubuntu-24.04}
           # Re-enable once the repo is public: ubuntu-24.04-arm runners are
           # free for public repos only, and billed on a private one. Nothing
-          # else needs changing — the build is arch-agnostic.
+          # else needs changing - the build is arch-agnostic.
           # - {arch: arm64,  runner: ubuntu-24.04-arm}
     runs-on: ${{ matrix.runner }}
     steps:
@@ -38,7 +38,7 @@ jobs:
           echo "v=$v" >> "$GITHUB_OUTPUT"
 
       # The tag is what stamps the binary, so it keeps overriding the VERSION
-      # file — but the two disagreeing means someone tagged without bumping,
+      # file - but the two disagreeing means someone tagged without bumping,
       # and the release would then report a version no app built from the same
       # commit agrees with. This is the only place that can notice.
       - name: Tag agrees with VERSION
@@ -81,8 +81,8 @@ jobs:
           if-no-files-found: error
 
   # The default build: system packages, no network at configure time. Debian 13
-  # is the only Linux that satisfies all seven — Ubuntu 24.04 ships taglib 1.13
-  # against the taglib 2 API this code uses, and has no libreproc-dev — so the
+  # is the only Linux that satisfies all seven - Ubuntu 24.04 ships taglib 1.13
+  # against the taglib 2 API this code uses, and has no libreproc-dev - so the
   # runner's own image cannot serve and this runs in a container.
   system-deps:
     runs-on: ubuntu-24.04
@@ -116,7 +116,7 @@ jobs:
           test ! -d build/_deps
 
   # Compile-only guard for the Darwin branches. macOS is distributed through the
-  # Homebrew tap rather than as an artifact, so nothing is uploaded here — the
+  # Homebrew tap rather than as an artifact, so nothing is uploaded here - the
   # job exists because the Linux matrix cannot catch a Darwin regression, and
   # every one of them (TCP_KEEPIDLE, the timeval narrowing, FSEvents) is a hard
   # compile error that would otherwise surface in someone's `brew install`.
@@ -152,8 +152,8 @@ jobs:
           otool -L build/gaindrive | grep -q CoreServices
           test ! -d build/_deps
 
-  # A workflow artifact is always a zip — actions/upload-artifact zips on
-  # upload and offers no way not to — so it cannot be curl'd into place the way
+  # A workflow artifact is always a zip - actions/upload-artifact zips on
+  # upload and offers no way not to - so it cannot be curl'd into place the way
   # html/docs.html documents. A release asset is served as the bare file, which
   # is why an untagged master build is published as one:
   #

@@ -8,7 +8,7 @@ import org.gaindrive.android.data.model.ItemRef
  * **asked for**: `<serverId>/<songId>@opus160`.
  *
  * The quality has to be part of the key because the same track can be held at
- * more than one quality — changing the setting re-downloads pins, and the old
+ * more than one quality - changing the setting re-downloads pins, and the old
  * copies stay playable until eviction reclaims them.
  *
  * It names the request rather than the response, and that distinction became
@@ -16,7 +16,7 @@ import org.gaindrive.android.data.model.ItemRef
  * key can hold the original MP3. The key is still exactly as safe, because what
  * it has to keep apart is two requests that would store different bytes, and
  * every request for one track at one quality declares the same thing. What no
- * longer follows from it is the *format* — read that off the bytes with
+ * longer follows from it is the *format* - read that off the bytes with
  * `AudioCache.storedMimeType`, or off the decoder with
  * `PlayerState.deliveredMime`, and never off the tag.
  *
@@ -30,7 +30,7 @@ import org.gaindrive.android.data.model.ItemRef
  *
  * Everywhere else uses the bare `ref.encode()`: `PinCoverage`, all of
  * `DownloadStates`, `AudioCache.cachedKeys`, `StoredFilter`, `AvailabilityState`
- * and — most importantly — the `LibraryDao` queries that match
+ * and - most importantly - the `LibraryDao` queries that match
  * `serverId || '/' || id`.
  *
  * Those queries **fail silently** if a suffix reaches them: SQL matches nothing,
@@ -43,7 +43,7 @@ object CacheKeys {
 
 	/**
 	 * A server id is a UUID and a Subsonic id is an integer, so neither can
-	 * contain this — the same argument [ItemRef.decode] makes for '/'.
+	 * contain this - the same argument [ItemRef.decode] makes for '/'.
 	 */
 	private const val SEP = '@'
 

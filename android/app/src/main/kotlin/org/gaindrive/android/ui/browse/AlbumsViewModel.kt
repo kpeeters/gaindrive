@@ -33,7 +33,7 @@ import javax.inject.Inject
 /**
  * The artist header. Held separately from the album list because the server
  * may reach out to MusicBrainz and Wikipedia to build it, which can take
- * seconds or fail — neither of which may delay the albums.
+ * seconds or fail - neither of which may delay the albums.
  */
 data class ArtistHeaderUi(
 	val portraitUrl: String? = null,
@@ -58,7 +58,7 @@ class AlbumsViewModel @Inject constructor(
 
 	/**
 	 * The first contributor in registry order. Its server answers for the
-	 * portrait and biography — those are one server's opinion of the artist,
+	 * portrait and biography - those are one server's opinion of the artist,
 	 * and showing two of them stacked would be worse than picking one.
 	 */
 	private val primaryRef: ItemRef = artistRefs.first()
@@ -70,8 +70,8 @@ class AlbumsViewModel @Inject constructor(
 
 	/**
 	 * True when this "artist" is a section of a categories root. It has no
-	 * portrait and no biography — `is_category_folder()` on the server refuses
-	 * the lookup — so the header draws neither, and neither is asked for.
+	 * portrait and no biography - `is_category_folder()` on the server refuses
+	 * the lookup - so the header draws neither, and neither is asked for.
 	 */
 	val isCategory: Boolean = route.fromCategories
 
@@ -189,7 +189,7 @@ class AlbumsViewModel @Inject constructor(
 	 * biography, which may involve a lookup.
 	 *
 	 * Note that the portrait URL arriving is not the portrait arriving. Both
-	 * halves of this header come from a server-side lookup now — `getCoverArt`
+	 * halves of this header come from a server-side lookup now - `getCoverArt`
 	 * answers 404 for an artist it has not resolved yet, and only the request
 	 * itself puts them at the front of the queue. Re-running this function
 	 * cannot recover from that, because the URL it computes is identical and

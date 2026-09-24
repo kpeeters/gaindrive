@@ -24,7 +24,7 @@ interface SubsonicApi {
 	// ── Browsing ────────────────────────────────────────────────────────
 
 	// No default arguments anywhere in this interface. Kotlin implements them
-	// with a synthetic bridge, and Retrofit only proxies the abstract method —
+	// with a synthetic bridge, and Retrofit only proxies the abstract method -
 	// it works, but it is a subtlety not worth relying on. Callers pass null
 	// or an empty list explicitly.
 
@@ -39,13 +39,13 @@ interface SubsonicApi {
 		 * gaindrive extension: restricts the list to roots of one kind,
 		 * "artists" or "categories". Null returns every root's children mixed,
 		 * which is what a client with no concept of categories gets. In
-		 * practice mutually exclusive with [personal] — uploads are their own
+		 * practice mutually exclusive with [personal] - uploads are their own
 		 * root and are never part of the shared library.
 		 */
 		@Query("contentType") contentType: String?,
 		/**
 		 * Restricts to one root. Finer than [contentType], which names a *kind*
-		 * and may span several roots — and that is exactly why it is here: a
+		 * and may span several roots - and that is exactly why it is here: a
 		 * promote destination is one specific root, so the folder suggestions
 		 * for it cannot be asked for by kind.
 		 */
@@ -59,8 +59,8 @@ interface SubsonicApi {
 	suspend fun getAlbum(@Query("id") id: String): SubsonicEnvelope<GetAlbumBody>
 
 	/**
-	 * One track by id. Browsing never needs it — a listing already carries its
-	 * rows — so its caller is [org.gaindrive.android.data.TrackLinkResolver],
+	 * One track by id. Browsing never needs it - a listing already carries its
+	 * rows - so its caller is [org.gaindrive.android.data.TrackLinkResolver],
 	 * where a link arrives holding nothing but an id.
 	 */
 	@GET("rest/getSong.view")
@@ -77,7 +77,7 @@ interface SubsonicApi {
 
 	/**
 	 * The folder-browsing counterpart of [getArtists]: the level-1 entries of
-	 * every root, grouped into index buckets. Carries no `albumCount` — the
+	 * every root, grouped into index buckets. Carries no `albumCount` - the
 	 * server does not count albums it was not asked to enumerate.
 	 */
 	@GET("rest/getIndexes.view")
@@ -93,7 +93,7 @@ interface SubsonicApi {
 	/**
 	 * One directory's children: subdirectories and tracks in a single mixed
 	 * array, told apart by `isDir`. Serves as both "the albums of an artist"
-	 * and "the tracks of an album" — which level it is depends only on the id.
+	 * and "the tracks of an album" - which level it is depends only on the id.
 	 */
 	@GET("rest/getMusicDirectory.view")
 	suspend fun getMusicDirectory(@Query("id") id: String): SubsonicEnvelope<GetMusicDirectoryBody>
@@ -107,7 +107,7 @@ interface SubsonicApi {
 	 * The subtitle and audio streams inside one video.
 	 *
 	 * The server runs `ffprobe` on every call rather than answering from the
-	 * scan, so this is slower than it looks — call it once per video load, not
+	 * scan, so this is slower than it looks - call it once per video load, not
 	 * per listing. `getCaptions` is not here: it returns raw WebVTT rather than
 	 * a Subsonic envelope, and its URL is handed to the player rather than
 	 * fetched by the app.
@@ -117,15 +117,15 @@ interface SubsonicApi {
 
 	// ── Chapters ────────────────────────────────────────────────────────
 	//
-	// A gaindrive extension. The song boundaries inside one long recording — a
-	// concert, a DJ set, a mixtape — which are what let a listing name the
+	// A gaindrive extension. The song boundaries inside one long recording - a
+	// concert, a DJ set, a mixtape - which are what let a listing name the
 	// songs rather than the file. Neither endpoint is video-only: an audio
 	// track carries markers for exactly the same reason a film does.
 
 	/**
 	 * The markers inside one recording, read from the file itself.
 	 *
-	 * The authority, and the one that costs a file read — use it on the
+	 * The authority, and the one that costs a file read - use it on the
 	 * playback path, where the list has to be right, and not in a listing.
 	 * It is also the only one that can see a video's *container* chapters,
 	 * which the scan does not index.
@@ -149,7 +149,7 @@ interface SubsonicApi {
 
 	/**
 	 * [chapterCount] is a gaindrive extension and the server defaults it to 0,
-	 * unlike its three siblings — so asking for chapter matches is opt-in and a
+	 * unlike its three siblings - so asking for chapter matches is opt-in and a
 	 * client that does not want them pays for no extra query. `chapterOffset`
 	 * exists too and is deliberately not declared: nothing here pages a search,
 	 * and an unused parameter would suggest otherwise.
@@ -167,7 +167,7 @@ interface SubsonicApi {
 	 * The folder-browsing counterpart of [search3], and the reason it exists
 	 * here: `search3` answers with ID3 ids, which on a server that keeps the two
 	 * hierarchies apart are not the ids `getMusicDirectory` accepts. Tapping a
-	 * result would then open the wrong album rather than fail — both id spaces
+	 * result would then open the wrong album rather than fail - both id spaces
 	 * are integers, so nothing detects the mismatch. Folder mode asks the
 	 * endpoint that answers in its own ids.
 	 */
@@ -198,7 +198,7 @@ interface SubsonicApi {
 	suspend fun updatePlaylist(
 		@Query("playlistId") playlistId: String,
 		@Query("songIdToAdd") songIdToAdd: List<String>,
-		/** Positions, not ids — they shift as soon as one is removed. */
+		/** Positions, not ids - they shift as soon as one is removed. */
 		@Query("songIndexToRemove") songIndexToRemove: List<Int>,
 	): SubsonicEnvelope<EmptyBody>
 
@@ -231,7 +231,7 @@ interface SubsonicApi {
 	/**
 	 * `submission=false` is a now-playing notification; `submission=true`
 	 * records a completed play, which is what increments the play count and
-	 * sets `last_played` — and therefore what makes getRecentSongs non-empty.
+	 * sets `last_played` - and therefore what makes getRecentSongs non-empty.
 	 */
 	@GET("rest/scrobble.view")
 	suspend fun scrobble(
@@ -249,7 +249,7 @@ interface SubsonicApi {
 	 * it need not carry ours.
 	 *
 	 * This app holds the Cast control channel itself and builds the receiver's
-	 * URLs, and a receiver has no account — so those URLs used to carry
+	 * URLs, and a receiver has no account - so those URLs used to carry
 	 * `u`/`t`/`s`, which together are the password: `t` is md5(password + salt)
 	 * and `s` is the salt, and a television that has them reads the whole
 	 * library as this person until the password changes.
@@ -259,7 +259,7 @@ interface SubsonicApi {
 	 * already read. It does **not** cover `hls.m3u8`, whose playlist copies the
 	 * request's credentials onto every segment.
 	 *
-	 * Needs no `castRole` and no local network — a client casting for itself is
+	 * Needs no `castRole` and no local network - a client casting for itself is
 	 * not asking the server to cast. Older servers do not have it, which is why
 	 * every caller treats a failure as "carry on with the ordinary credentials"
 	 * rather than as an error.
@@ -273,7 +273,7 @@ interface SubsonicApi {
 	 * The server's one mover: `moveAlbum` also renames in place and re-files
 	 * under a different artist, since every parameter but the id is optional
 	 * and an omitted one means unchanged. This app uses only the promote
-	 * shape — out of the account's uploads and into the shared library — so
+	 * shape - out of the account's uploads and into the shared library - so
 	 * the destination halves are declared non-null here to say a call site
 	 * cannot forget them. Naming a root is admin's alone.
 	 *
@@ -281,7 +281,7 @@ interface SubsonicApi {
 	 * both listings have to be read again.
 	 *
 	 * The destination halves were briefly optional and both defaults were
-	 * guesses that put things in the wrong place — the first `artists` root
+	 * guesses that put things in the wrong place - the first `artists` root
 	 * declared, which cannot reach a `categories` root at all, and the batch's
 	 * own artist name, which for a fetched video is the channel that published
 	 * it. An omission now earns error 10 rather than a silent wrong answer.
@@ -305,7 +305,7 @@ interface SubsonicApi {
 	 * The server refuses anything whose stored path is not exactly
 	 * `<uploads root>/<this account>/<batch>/<artist>/<album>`, which is what
 	 * keeps an endpoint that deletes "the folder with this id" from being one
-	 * that deletes any folder on the server. Owner only — there is no admin
+	 * that deletes any folder on the server. Owner only - there is no admin
 	 * override, because no account can reach another's uploads to begin with.
 	 */
 	@GET("rest/deleteUpload.view")
@@ -323,8 +323,8 @@ interface SubsonicApi {
 	 * Which URLs this server can fetch, and whether each handler can produce
 	 * audio, video or both.
 	 *
-	 * An empty list is the server saying the feature is unavailable — no
-	 * handler table is configured — and is not an error.
+	 * An empty list is the server saying the feature is unavailable - no
+	 * handler table is configured - and is not an error.
 	 */
 	@GET("rest/getUrlHandlers.view")
 	suspend fun getUrlHandlers(): SubsonicEnvelope<GetUrlHandlersBody>

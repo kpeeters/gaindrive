@@ -11,8 +11,8 @@ import Foundation
 /// What was pinned: a track, an album, or a playlist.
 ///
 /// Not `StarKind`, which is song/album/**artist** and answers a different
-/// question. An artist cannot be pinned — a discography is not a unit anybody
-/// means to download in one gesture — and a playlist cannot be starred.
+/// question. An artist cannot be pinned - a discography is not a unit anybody
+/// means to download in one gesture - and a playlist cannot be starred.
 enum PinKind: String, Codable, Hashable, Sendable {
 	case song, album, playlist
 }
@@ -27,7 +27,7 @@ struct Pin: Codable, Hashable, Sendable, Identifiable {
 	let ref: ItemRef
 	let kind: PinKind
 	/// What it was called when it was pinned, so the Storage screen can list
-	/// pins without fetching every album to find out what they are — which
+	/// pins without fetching every album to find out what they are - which
 	/// offline, the one time that screen matters most, it could not do.
 	let name: String
 
@@ -46,7 +46,7 @@ struct Pin: Codable, Hashable, Sendable, Identifiable {
 /// database.
 enum Pins {
 	/// `membership` maps a pin's id to the songs it was last resolved to.
-	/// A song pin needs no entry — it is its own membership.
+	/// A song pin needs no entry - it is its own membership.
 	static func expand(_ pins: [Pin], membership: [Pin.ID: [ItemRef]]) -> Set<ItemRef> {
 		var wanted: Set<ItemRef> = []
 		for pin in pins {
@@ -63,8 +63,8 @@ enum Pins {
 	/// Folds a freshly resolved membership into the stored one.
 	///
 	/// **A pin that comes back empty keeps what it had.** An empty expansion is
-	/// a legitimate *state* — a pinned album whose tracks have never been
-	/// fetched protects nothing — but it is never a legitimate *transition* for
+	/// a legitimate *state* - a pinned album whose tracks have never been
+	/// fetched protects nothing - but it is never a legitimate *transition* for
 	/// a pin that already covered something. What produces one is a failed or
 	/// cancelled read, and letting that through would drop songs the user
 	/// explicitly asked to keep, silently, and only until they next happened to

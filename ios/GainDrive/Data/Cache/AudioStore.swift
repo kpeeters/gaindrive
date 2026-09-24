@@ -12,7 +12,7 @@ import Foundation
 ///
 /// **Under Application Support, not Caches.** The system purges `Caches` under
 /// storage pressure, which would delete downloads at exactly the moment
-/// somebody is offline and relying on them — the same reasoning that put
+/// somebody is offline and relying on them - the same reasoning that put
 /// Android's in `filesDir` rather than `cacheDir`. Excluded from backup, since
 /// it is all re-fetchable and a music library would dominate one.
 ///
@@ -22,7 +22,7 @@ import Foundation
 /// for filenames, and it makes dropping a removed server a directory removal.
 ///
 /// It backs both halves of the cache: a pinned download, and a track kept
-/// because it was played. Only completed files are ever visible — a `.part`
+/// because it was played. Only completed files are ever visible - a `.part`
 /// file belongs to a fetch in flight and is adopted or discarded, never
 /// listed.
 actor AudioStore {
@@ -30,7 +30,7 @@ actor AudioStore {
 	/// Pushed in by `PinRepository`, which is the only thing that knows both.
 	///
 	/// **The store is told what is protected; it does not ask.** It knows
-	/// nothing about pins and should not learn — the set is `Pins.expand`,
+	/// nothing about pins and should not learn - the set is `Pins.expand`,
 	/// computed where pins live, handed over as a plain set.
 	private var cap: Int64 = .max
 	private var protected: Set<ItemRef> = []
@@ -73,7 +73,7 @@ actor AudioStore {
 	///
 	/// Walked rather than kept as a running set. The set would have to be
 	/// updated from `adopt`, which is `nonisolated` and cannot touch actor
-	/// state, and from eviction — two places to forget. A directory of a few
+	/// state, and from eviction - two places to forget. A directory of a few
 	/// hundred files is not worth that.
 	func heldRefs() -> Set<ItemRef> {
 		guard
@@ -97,7 +97,7 @@ actor AudioStore {
 	/// The inverse of the layout: `<serverId>/<songId>@<tag>[.ext]`.
 	///
 	/// Both components were percent-encoded on the way in, so both are decoded
-	/// on the way out — the transformation has to be the same in both
+	/// on the way out - the transformation has to be the same in both
 	/// directions or a track reads as absent the moment its id is anything but
 	/// digits.
 	static func ref(of url: URL) -> ItemRef? {
@@ -125,7 +125,7 @@ actor AudioStore {
 	/// **Any stored copy of this song, whatever quality it is.**
 	///
 	/// The quality is in the key so two copies can coexist and neither is ever
-	/// mislabelled — but playback wants the music, and a copy pinned at one
+	/// mislabelled - but playback wants the music, and a copy pinned at one
 	/// setting must not stop being playable because the setting changed. That
 	/// is `android/CACHING.md`'s "copies already on the device stay playable",
 	/// reached here without an evictor to reclaim them.
@@ -153,7 +153,7 @@ actor AudioStore {
 	///
 	/// **`nonisolated`, and that is load-bearing.** `URLSession` deletes the
 	/// temporary file the moment its delegate returns, so awaiting an actor
-	/// before the rename would reliably lose every download — and only on a
+	/// before the rename would reliably lose every download - and only on a
 	/// device slow enough to notice, which is the worst way to find out.
 	nonisolated func adopt(
 		_ temporary: URL, for ref: ItemRef, quality: AudioQuality, fileExtension: String
@@ -161,7 +161,7 @@ actor AudioStore {
 		let manager = FileManager.default
 		// **The extension is not decoration.** AVFoundation types a local file
 		// by its path extension and has no header to fall back on, so a file
-		// without one is never reported as unplayable — the player just waits.
+		// without one is never reported as unplayable - the player just waits.
 		let destination = base(for: ref, quality: quality)
 			.appendingPathExtension(fileExtension)
 		try manager.createDirectory(
@@ -170,7 +170,7 @@ actor AudioStore {
 		try manager.moveItem(at: temporary, to: destination)
 	}
 
-	/// Every copy of the song, whatever quality. Unpinning removes the bytes —
+	/// Every copy of the song, whatever quality. Unpinning removes the bytes -
 	/// it is what "remove download" is taken to mean, and orphaned files that
 	/// nothing lists are worse.
 	func remove(_ ref: ItemRef) {
@@ -268,7 +268,7 @@ actor AudioStore {
 	/// Modification rather than access: `atime` is unreliable under the
 	/// filesystem's own optimisations, which is the same reason the server's
 	/// `TranscodeCache` evicts by `mtime`. A file is touched when it is
-	/// adopted, so "least recently modified" is "least recently arrived" —
+	/// adopted, so "least recently modified" is "least recently arrived" -
 	/// which is not quite "least recently played", and is the honest
 	/// approximation until something records a play.
 	private static func modified(of url: URL) -> Date {
@@ -294,7 +294,7 @@ actor AudioStore {
 	///
 	/// Version 1 stored files with no extension, and every one of them hung the
 	/// player. There is no repairing those in place without knowing what
-	/// container each holds, and re-downloading is cheap — the pins survive, so
+	/// container each holds, and re-downloading is cheap - the pins survive, so
 	/// `refresh()` fetches them again. This is the server's
 	/// `MUSIC_CACHE_VERSION` for the same reason: a cache is allowed to be
 	/// thrown away, and being wrong about one costs a re-fetch.
@@ -322,7 +322,7 @@ actor AudioStore {
 		try? String(Self.layoutVersion).write(to: marker, atomically: true, encoding: .utf8)
 	}
 
-	/// Shared with the mirror — see `FileNames`, which says why there is one
+	/// Shared with the mirror - see `FileNames`, which says why there is one
 	/// definition of this and not two.
 	static func component(_ raw: String) -> String {
 		FileNames.component(raw)

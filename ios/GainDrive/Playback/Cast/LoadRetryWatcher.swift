@@ -15,16 +15,15 @@ import Foundation
 /// for our LOAD, and that session goes from `IDLE`/`INTERRUPTED` straight to
 /// `IDLE`/`ERROR` without ever reaching `PLAYING`. Re-sending the same LOAD into
 /// the now-quiet receiver works, and matches what a person does by hand when
-/// they tap the same track twice. The behaviour and its diagnosis are documented
-/// at length in the root `CLAUDE.md`; this is the Swift half of the port from
-/// `CastManager::update_status`.
+/// they tap the same track twice. The behaviour took long debugging on the
+/// server; this is the Swift half of the port from `CastManager::update_status`.
 ///
 /// **The msid filter is the load-bearing part.** Statuses arriving for the
 /// *superseded* session must not be consulted at all. A `GET_STATUS` poll fired
 /// just before the receiver processed our LOAD comes back as a healthy `PLAYING`
 /// carrying the old session id; treating it as evidence would disarm the
-/// watcher, and the real `IDLE`/`ERROR` for the new session — which arrives
-/// later — would then be ignored. The intermediate `IDLE`/`INTERRUPTED` push
+/// watcher, and the real `IDLE`/`ERROR` for the new session - which arrives
+/// later - would then be ignored. The intermediate `IDLE`/`INTERRUPTED` push
 /// carries the old id too and is skipped for the same reason, which costs
 /// nothing: the next push, the new session reaching either `PLAYING` or `ERROR`,
 /// is the one that decides.
@@ -40,7 +39,7 @@ struct LoadRetryWatcher: Sendable {
 	var isArmed: Bool { pending }
 
 	/// Arms the watcher for a LOAD that is about to be sent. `currentMsid` is
-	/// the session the LOAD will replace — status pushes still carrying it are
+	/// the session the LOAD will replace - status pushes still carrying it are
 	/// stale by definition.
 	mutating func arm(superseding currentMsid: Int) {
 		pending = true

@@ -10,7 +10,7 @@ import org.junit.Test
  *
  * Worth a test of its own for the same reason [CastPacingTest] is: both
  * failures are silent and remote. Leaving `u`/`t`/`s` on means the password
- * goes to the receiver anyway and nothing anywhere says so — the cast works
+ * goes to the receiver anyway and nothing anywhere says so - the cast works
  * perfectly, which is exactly what makes it hard to notice. Dropping the id or
  * the pacing marker means a cast that fails minutes later for an unrelated
  * reason.

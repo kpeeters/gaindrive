@@ -24,7 +24,7 @@ import javax.inject.Singleton
  *
  * Separate from [LibraryRepository] rather than another dozen methods on it:
  * nothing here reads or writes the library, none of it fans out across servers
- * — a fetch lands on exactly one — and none of it has an offline story beyond
+ * - a fetch lands on exactly one - and none of it has an offline story beyond
  * refusing.
  */
 @Singleton
@@ -50,8 +50,8 @@ class UrlFetchRepository @Inject constructor(
 	 * server per launch, a server-side change picked up on the next launch, and
 	 * nothing to migrate.
 	 *
-	 * **Only a verdict is cached.** A server that answered — with handlers, or
-	 * with an error saying this account may not upload — has settled the
+	 * **Only a verdict is cached.** A server that answered - with handlers, or
+	 * with an error saying this account may not upload - has settled the
 	 * question and is not asked again. A timeout, a dead Wi-Fi or offline mode
 	 * has settled nothing, and caching it would leave the feature unavailable
 	 * until the app was restarted.
@@ -93,7 +93,7 @@ class UrlFetchRepository @Inject constructor(
 
 	/**
 	 * Queues a fetch and returns the job as the server created it. Its `id` is
-	 * the only handle on this one job — [jobs] returns everything the account
+	 * the only handle on this one job - [jobs] returns everything the account
 	 * has running.
 	 *
 	 * Blank [artist] or [album] is sent as nothing at all rather than as an
@@ -128,8 +128,8 @@ class UrlFetchRepository @Inject constructor(
 
 	/**
 	 * Resolves the client off the main thread and refuses up front when there is
-	 * no network. Nothing here can be queued for later — the work is the
-	 * server's — so failing at once is the honest answer, which is the same
+	 * no network. Nothing here can be queued for later - the work is the
+	 * server's - so failing at once is the honest answer, which is the same
 	 * reasoning as `LibraryRepository.requireOnline()`.
 	 */
 	private suspend fun <T> onServer(

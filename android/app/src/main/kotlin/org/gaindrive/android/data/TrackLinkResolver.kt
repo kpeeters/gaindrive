@@ -11,8 +11,8 @@ import javax.inject.Singleton
 
 /**
  * What acting on a [TrackLink] came to. [Album] carries exactly what
- * `Route.Album` wants — the album to open, and the track to start once its
- * listing has loaded — because opening the album *is* the action: playing the
+ * `Route.Album` wants - the album to open, and the track to start once its
+ * listing has loaded - because opening the album *is* the action: playing the
  * bare `getSong` entry would work, but the album route's own documentation
  * records why the listing is read again (`nativeSeek`), and it hands the queue
  * the rest of the album besides. The same path a chapter hit in search takes.
@@ -74,7 +74,7 @@ class TrackLinkResolver @Inject constructor(
 		} catch (e: Exception) {
 			// A song id is a rowid on the server and is reassigned when its
 			// music DB is rebuilt, so "not found" is a link that has outlived
-			// one — worth a message rather than a silent shrug, since from the
+			// one - worth a message rather than a silent shrug, since from the
 			// outside it reads as the feature being broken.
 			TrackLinkResult.Error(e.userMessage())
 		}

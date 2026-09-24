@@ -8,7 +8,7 @@ import java.io.IOException
  *
  * An IOException like [SubsonicException], so it travels the same path as a
  * transport failure and no call site has to catch a third family. The message
- * is written to be shown as-is — `Throwable.userMessage()` falls through to it.
+ * is written to be shown as-is - `Throwable.userMessage()` falls through to it.
  */
 class OfflineException(
 	override val message: String = "You are offline.",

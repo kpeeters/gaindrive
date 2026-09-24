@@ -21,7 +21,7 @@ struct MirrorKeyTests {
 
 	/// **A listing must never mix slices.** Categories stored over Artists
 	/// would be a chip showing the wrong library the moment its server went
-	/// away — which is precisely when nobody can check.
+	/// away - which is precisely when nobody can check.
 	@Test func eachSliceHasItsOwnIndex() {
 		let artists = LibraryMirror.Key.indexes(server, .artists).name
 		let categories = LibraryMirror.Key.indexes(server, .categories).name
@@ -53,7 +53,7 @@ struct MirrorKeyTests {
 /// That the mirror can actually store what it claims to.
 ///
 /// The models gained `Codable` for this, and a conformance that silently
-/// dropped a field would show up as a stored album with no tracks — which
+/// dropped a field would show up as a stored album with no tracks - which
 /// reads as an empty album rather than as a broken cache.
 struct MirroredValueTests {
 	private let server = ServerId()
@@ -112,7 +112,7 @@ struct StoredFailureTests {
 ///
 /// **The walk goes up, not down.** Asking every mirrored album whether any of
 /// its tracks landed is `O(library)`; starting from the files that are actually
-/// here — a few hundred at most — and walking song → album → artist is
+/// here - a few hundred at most - and walking song → album → artist is
 /// `O(files you have)`. Everything is unavailable until the walk reaches it,
 /// which is what makes the direction safe: a gap in the index hides something
 /// rather than offering something that will not play.
@@ -143,7 +143,7 @@ struct AvailabilityTests {
 		#expect(reach.artists == [ref("100")])
 	}
 
-	/// An album is one album however much of it is here — the listing asks
+	/// An album is one album however much of it is here - the listing asks
 	/// "is there anything for me", not "how much".
 	@Test func twoTracksOfOneAlbumReachOneAlbum() {
 		let reach = index.reachable(from: [ref("10"), ref("11")])
@@ -152,7 +152,7 @@ struct AvailabilityTests {
 	}
 
 	/// **The case the filter exists for.** An album with nothing stored is not
-	/// reached, so it does not appear — a shelf you cannot take anything down
+	/// reached, so it does not appear - a shelf you cannot take anything down
 	/// from is worse than a short shelf.
 	@Test func anAlbumWithNothingStoredIsNotReached() {
 		let reach = index.reachable(from: [ref("10")])
@@ -181,8 +181,8 @@ struct AvailabilityTests {
 	}
 
 	/// **The bug this method exists for.** Reach an album from search or
-	/// recents and `storeAlbum` records the way up — which is what puts the
-	/// artist on screen — while `storeAlbums` never runs, so there is no album
+	/// recents and `storeAlbum` records the way up - which is what puts the
+	/// artist on screen - while `storeAlbums` never runs, so there is no album
 	/// list to read. The artist screen has to be answerable from the index
 	/// alone, or exactly that artist shows nothing.
 	@Test func anArtistsAlbumsAreAnswerableWithoutAStoredList() {

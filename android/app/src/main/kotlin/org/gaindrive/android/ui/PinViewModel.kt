@@ -20,7 +20,7 @@ import org.gaindrive.android.ui.components.formatBytes
 import javax.inject.Inject
 
 /**
- * Pinning, shared by everything that offers it — the album bar, the playlist
+ * Pinning, shared by everything that offers it - the album bar, the playlist
  * bar and the track sheet all mean the same thing by "download".
  */
 @HiltViewModel
@@ -31,7 +31,7 @@ class PinViewModel @Inject constructor(
 
 	/**
 	 * Whether a video can be downloaded, which it can only when it is being
-	 * played for its soundtrack — see `PinRepository.downloadable`.
+	 * played for its soundtrack - see `PinRepository.downloadable`.
 	 *
 	 * Exposed here rather than read at each call site so the rule stays one
 	 * rule: what the sheet offers and what the pin actually covers have to be

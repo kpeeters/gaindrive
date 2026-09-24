@@ -24,7 +24,7 @@ struct StreamTarget: Hashable, Sendable {
 /// `<serverId>/<songId>@<qualityTag>`.
 ///
 /// **Never the URL.** A stream URL carries a per-session auth salt, so a
-/// URL-derived key would miss after every launch — the same trap
+/// URL-derived key would miss after every launch - the same trap
 /// `CoverSource.cacheKey` exists to avoid.
 enum CacheKeys {
 	static func of(_ ref: ItemRef, quality: AudioQuality) -> String {
@@ -34,7 +34,7 @@ enum CacheKeys {
 	/// The inverse, which a background download needs.
 	///
 	/// A `URLSessionDownloadTask` outlives the process, and its delegate
-	/// callbacks arrive after a relaunch with nothing but the task — so the key
+	/// callbacks arrive after a relaunch with nothing but the task - so the key
 	/// travels in `taskDescription` and has to survive the round trip. There is
 	/// no in-memory map that could do this job.
 	///
@@ -54,7 +54,7 @@ enum CacheKeys {
 ///
 /// A **pure function**, deliberately: it is the whole of the stream policy, and
 /// being pure is what lets it be tested by calling it rather than by observing
-/// a request — the same shape as `SubsonicClient.url`, `AuthParameters` and
+/// a request - the same shape as `SubsonicClient.url`, `AuthParameters` and
 /// `CoverUrls`.
 enum StreamUrls {
 	/// The account ceiling is passed in rather than looked up, because it
@@ -73,7 +73,7 @@ enum StreamUrls {
 		// `timeOffset` bypasses the transcode cache entirely, turning every
 		// seek into a fresh ffmpeg run over a chunked response that cannot then
 		// be seeked. `estimateContentLength` promises a length ffmpeg
-		// zero-pads or truncates to, with ranges already cleared — a range
+		// zero-pads or truncates to, with ranges already cleared - a range
 		// request gets a 200 from byte 0 and the player mis-seeks in silence.
 		// The duration comes from `Song.duration`, which the server already
 		// gave us and which is exact.
@@ -91,7 +91,7 @@ enum StreamUrls {
 	/// The query an audio request carries: the id, what to convert to, and what
 	/// not to convert at all.
 	///
-	/// Its own function for the reason `videoParameters` below is — a test can
+	/// Its own function for the reason `videoParameters` below is - a test can
 	/// assert the shape without building a `SubsonicClient`, and the assertion
 	/// worth having is that an empty `playable` emits no `playable` parameter
 	/// whatsoever. That is the audio twin of `castRouteDeclaresNothing`: a
@@ -129,7 +129,7 @@ enum StreamUrls {
 	/// **Neither `format` nor `maxBitRate` goes on a video URL**, and that is
 	/// not tidiness. `format` is validated against the *audio* target table, so
 	/// naming an audio one is the server's switch for sending the soundtrack
-	/// alone — a film played through `target(for:)` above comes back as sound
+	/// alone - a film played through `target(for:)` above comes back as sound
 	/// with no picture, which is what happened until this existed. And
 	/// `maxBitRate` sets `constrained` server-side, which disqualifies both the
 	/// direct and the remux tiers and forces a full re-encode of a file that
@@ -138,17 +138,17 @@ enum StreamUrls {
 	/// The transport follows `nativeSeek`, **trusted as given**: it is false on
 	/// a video reached through search, a playlist or starred, because the codec
 	/// columns it is computed from are not selected by those queries. That is
-	/// the safe direction — the film plays and seeks by re-request.
+	/// the safe direction - the film plays and seeks by re-request.
 	/// `transcoded` forces the HLS transport for a film the server says can be
 	/// served untouched.
 	///
 	/// **Because `nativeSeek` answers a browser's question, not this one.** It
 	/// derives from `video_direct_playable()`, built from `browser_video_codec()`
-	/// — and a browser plays AV1 anywhere because Chrome and Firefox bundle
+	/// - and a browser plays AV1 anywhere because Chrome and Firefox bundle
 	/// dav1d and decode in software. AVFoundation ships **no** software AV1
 	/// decoder: decode is hardware-only, arrived with the M3 family and A17 Pro,
 	/// and there is no fallback on anything older. A yt-dlp download is
-	/// frequently AV1, deliberately — forcing H.264 would cap YouTube at 1080p —
+	/// frequently AV1, deliberately - forcing H.264 would cap YouTube at 1080p -
 	/// so this is a common file rather than an exotic one, and the symptom is a
 	/// film that plays its sound over an audio placeholder with nothing
 	/// anywhere saying why.
@@ -159,7 +159,7 @@ enum StreamUrls {
 	///
 	/// `playable` is the one parameter that *is* sent, and only from
 	/// local playback. It names containers this player demuxes itself, so the
-	/// server hands the file over instead of remuxing it — see
+	/// server hands the file over instead of remuxing it - see
 	/// `LocalEngine.target(for:)`, which is the single call site that passes
 	/// one. It defaults to empty because **`CastUrls.video(for:)` calls this
 	/// same function**: a receiver demuxes none of them, and the `LOAD` it was
@@ -170,7 +170,7 @@ enum StreamUrls {
 	/// containers we told the server we demux ourselves.
 	///
 	/// Its own function so a test can assert the shape without building a
-	/// `SubsonicClient` — the failure it guards is silent and happens on a
+	/// `SubsonicClient` - the failure it guards is silent and happens on a
 	/// television, so the assertion that an empty set yields exactly `id` is
 	/// the one standing between a refactor and every cast of a `.mov` failing.
 	///

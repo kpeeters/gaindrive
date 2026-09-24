@@ -22,7 +22,7 @@ import org.gaindrive.android.ui.Load
  *
  * The [modifier] wraps *all three* arms. An earlier version applied it only to
  * loading and failure, which silently dropped the caller's inset padding once
- * content arrived — every list then scrolled up underneath the app bar.
+ * content arrived - every list then scrolled up underneath the app bar.
  */
 @Composable
 fun <T> LoadStateBox(

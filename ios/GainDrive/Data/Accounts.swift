@@ -10,8 +10,8 @@ import Foundation
 
 /// What the signed-in account may do on **one** server.
 ///
-/// Roles are per server — the same person can be an admin on one and a
-/// restricted account on another — so nothing here is a global fact about the
+/// Roles are per server - the same person can be an admin on one and a
+/// restricted account on another - so nothing here is a global fact about the
 /// user.
 struct AccountFacts: Hashable, Sendable {
 	/// 0 means no limit, and is also what every failure resolves to.
@@ -26,7 +26,7 @@ struct AccountFacts: Hashable, Sendable {
 	/// **The two halves are guessed in opposite directions on purpose.**
 	/// Uncapped is what the overwhelming majority of accounts are, and guessing
 	/// a cap that is not there would degrade every stream for the rest of the
-	/// session — while the server applies its own ceiling regardless of what
+	/// session - while the server applies its own ceiling regardless of what
 	/// the client asks for, so guessing wrong this way costs nothing but a
 	/// cache key naming a quality the bytes are not. A permission guessed
 	/// *present* would instead offer a control that fails when used, so those
@@ -37,7 +37,7 @@ struct AccountFacts: Hashable, Sendable {
 /// One `getUser` per server per session, answering everything the app needs to
 /// know about its own account there.
 ///
-/// The bit rate is the reason it exists — the server enforces its ceiling
+/// The bit rate is the reason it exists - the server enforces its ceiling
 /// whatever the client asks for, so the app has to know it before it can name
 /// the quality it is about to receive. The roles came with the chip row and
 /// **ride along rather than costing a second request**, which is why this
@@ -95,7 +95,7 @@ actor Accounts {
 	/// Nil when the server did not answer, which is not a fact about it.
 	///
 	/// The first play of a session waits for this, which is why the timeout is
-	/// short — and why `PlayerConnection` publishes `loadingRef` before
+	/// short - and why `PlayerConnection` publishes `loadingRef` before
 	/// reaching it.
 	private static func fetch(_ client: SubsonicClient) async -> AccountFacts? {
 		await withTaskGroup(of: AccountFacts?.self) { group in
@@ -104,7 +104,7 @@ actor Accounts {
 				return AccountFacts(
 					maxBitRate: max(user.maxBitRate ?? 0, 0),
 					// An admin may upload whether or not the role is set, which
-					// is how the server itself reads it — see
+					// is how the server itself reads it - see
 					// `check_upload_perm`.
 					canUpload: user.canUpload || user.isAdmin,
 					isAdmin: user.isAdmin)

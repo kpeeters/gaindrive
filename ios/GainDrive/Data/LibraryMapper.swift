@@ -61,7 +61,7 @@ enum LibraryMapper {
 			title: firstNonEmpty(dto.name, dto.title) ?? "",
 			artistName: dto.artist ?? "",
 			// `artistId` is the ID3 field and `parent` is the folder-browsing
-			// equivalent. Prefer the former, accept the latter — search and
+			// equivalent. Prefer the former, accept the latter - search and
 			// starred results carry only `parent`.
 			artistRef: server.ref(dto.artistId) ?? server.ref(dto.parent),
 			// Directory-shaped results carry no count, so fall back to what
@@ -167,7 +167,7 @@ enum LibraryMapper {
 	/// One marker.
 	///
 	/// Nothing here carries the recording's ref, unlike every other mapper in
-	/// this file — a chapter has none, and the caller always holds the item it
+	/// this file - a chapter has none, and the caller always holds the item it
 	/// read the list for. `chapterHit` below is the one shape that needs it,
 	/// and it takes it from the payload's own `songId`.
 	static func chapter(_ dto: ChapterDto) -> Chapter? {
@@ -237,8 +237,8 @@ enum LibraryMapper {
 }
 
 /// Mirrors Android's `private fun ServerId.ref(id: String?)`. A method rather
-/// than a free function so a local named `ref` — which every mapper below has
-/// — cannot shadow it.
+/// than a free function so a local named `ref` - which every mapper below has
+/// - cannot shadow it.
 extension ServerId {
 	/// Blank-safe: a field the server sent as an empty string means the same
 	/// as one it omitted, and an `ItemRef` with an empty id builds a URL that

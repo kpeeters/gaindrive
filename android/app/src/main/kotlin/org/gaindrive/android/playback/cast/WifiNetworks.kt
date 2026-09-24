@@ -20,7 +20,7 @@ import javax.inject.Singleton
  *
  * Casting needs this distinction and nothing else in the app does. A Chromecast
  * is only ever reachable over the LAN, so both the reachability probe and the
- * bridge have to talk on Wi-Fi specifically — which, under a full-tunnel VPN, is
+ * bridge have to talk on Wi-Fi specifically - which, under a full-tunnel VPN, is
  * not where traffic goes by default.
  */
 @Singleton
@@ -54,7 +54,7 @@ class WifiNetworks @Inject constructor(
 	}
 
 	/**
-	 * The phone's own IPv4 address on the Wi-Fi network — what a receiver has to
+	 * The phone's own IPv4 address on the Wi-Fi network - what a receiver has to
 	 * be given to fetch from the bridge. IPv6 is skipped deliberately: a literal
 	 * v6 address in a URL is a bracketed nuisance and every Cast receiver has a
 	 * v4 address on the same LAN.

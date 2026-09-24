@@ -1,5 +1,5 @@
-# The Xcode project is generated from project.yml — see PLAN.md, "Project
-# generation". Committing it would reintroduce the .pbxproj merge problem the
+# The Xcode project is generated from project.yml. Committing it would
+# reintroduce the .pbxproj merge problem the
 # generator exists to avoid.
 *.xcodeproj
 *.xcworkspace

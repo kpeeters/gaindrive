@@ -10,20 +10,20 @@ import org.gaindrive.android.data.model.Playlist
  * What is worth showing when nothing can be fetched.
  *
  * Offline, a library listing every artist on the server is mostly rows that do
- * nothing — the shelf is full and almost none of it can be taken down. So an
+ * nothing - the shelf is full and almost none of it can be taken down. So an
  * artist, album or playlist appears only when there is stored audio behind it.
  *
  * Individual *tracks* are not filtered by this. Inside an album that survived,
  * knowing which three of its twelve tracks are here is useful, and dropping the
  * rest would misreport the album's length and renumber it. Those rows are dimmed
- * instead — see `AvailabilityState`.
+ * instead - see `AvailabilityState`.
  *
  * Applied only when genuinely offline. A server that merely failed while online
  * still shows its whole stored library: the connection may come back, and
  * hiding rows because one request timed out would be a strange thing to do.
  */
 data class StoredFilter(
-	/** Encoded refs of songs held in full — the audio cache's own keys. */
+	/** Encoded refs of songs held in full - the audio cache's own keys. */
 	val songs: Set<String>,
 	val albums: Set<String>,
 	val artists: Set<String>,
@@ -55,7 +55,7 @@ data class StoredFilter(
 
 	// Rebuilt field by field rather than copied, so a new one is dropped unless
 	// it is named here. `chapters` is the case that exists today and the omission
-	// is deliberate: nothing mirrors a marker — it has no id to key a row on — so
+	// is deliberate: nothing mirrors a marker - it has no id to key a row on - so
 	// there are never any to filter, and the section simply does not appear
 	// offline. Anything that changes that has to add a line here.
 	fun filterSelection(selection: LibrarySelection): LibrarySelection = LibrarySelection(

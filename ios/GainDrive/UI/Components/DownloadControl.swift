@@ -10,7 +10,7 @@ import SwiftUI
 
 /// Keep this, or stop keeping it.
 ///
-/// **It reports what is actually happening rather than what was asked for** —
+/// **It reports what is actually happening rather than what was asked for** -
 /// `android/SCREENS.md`'s rule for the same control, and the reason it is a
 /// state and not a checkbox. An outline for nothing yet, a ring while tracks
 /// arrive, a red outline when one failed, a filled tick when it is all here.
@@ -79,7 +79,7 @@ struct DownloadStateIcon: View {
 				.foregroundStyle(Color.accentColor)
 		case .cached:
 			// Reachable only for a track pinned *and* evicted, which cannot
-			// happen — pinned bytes are never victims. Drawn as the dot the
+			// happen - pinned bytes are never victims. Drawn as the dot the
 			// mark uses rather than as an assertion.
 			Image(systemName: "circle.fill")
 				.font(.caption2)
@@ -96,7 +96,7 @@ struct DownloadStateIcon: View {
 /// **Two marks, and the difference is a promise.** A tick means downloaded:
 /// asked for, and safe from eviction. A dot means merely kept from having been
 /// played, which can go tonight when the cap is reached. Collapsing them would
-/// promise a permanence the dot does not have — which is why stage 1 shipped
+/// promise a permanence the dot does not have - which is why stage 1 shipped
 /// one mark and said so rather than drawing a tick for both.
 struct StoredMark: View {
 	let song: ItemRef

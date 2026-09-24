@@ -8,8 +8,8 @@
 // Decoding, scaling and re-encoding a cover image, in this process.
 //
 // What this replaces is a fork of ffmpeg per request.  Every client asks
-// getCoverArt for a specific pixel size — 64, 80, 256 and 400 from the web
-// client, 144/288/512 from Android, 144/288/800 from iOS — and each of those
+// getCoverArt for a specific pixel size - 64, 80, 256 and 400 from the web
+// client, 144/288/512 from Android, 144/288/800 from iOS - and each of those
 // used to spawn ffmpeg, decode the full-size source, scale, encode an MJPEG
 // frame and throw the result away.  A folder cover is routinely 3000x3000, so
 // an album grid was a few hundred process launches and a few hundred full
@@ -33,7 +33,7 @@ namespace imagescale {
 //
 // Both claims available elsewhere are worth less than this.  An upload's
 // multipart content_type is whatever the client typed, and getCoverArt did
-// not even have that — it labelled every full-size cover image/jpeg whatever
+// not even have that - it labelled every full-size cover image/jpeg whatever
 // was on disk.
 std::string sniff_mime(std::string_view bytes);
 
@@ -66,21 +66,21 @@ struct Scaled
 // Which edge max_px applies to.  There is no default, because the two
 // callers want opposite things and a default would hide that.
 //
-//   Long  — neither edge exceeds max_px.  The bound for *storing* an image
+//   Long  - neither edge exceeds max_px.  The bound for *storing* an image
 //           whose shape nobody has chosen: the artist portrait normalisation
 //           wants "no bigger than 800 either way".
 //
-//   Short — the *short* edge becomes max_px, so the long one overshoots.
+//   Short - the *short* edge becomes max_px, so the long one overshoots.
 //           The bound for a thumbnail that will be cropped to a square, which
 //           is every cover surface in every gaindrive client.  Fitting the
 //           long edge there hands back a 2:3 poster as 107x160 for a 160
-//           request, and the client then upscales it to fill the square — the
+//           request, and the client then upscales it to fill the square - the
 //           picture is blurred by the *client* however sharp what we sent was.
 enum class Fit { Long, Short };
 
 // How far past max_px the long edge may run under Fit::Short.  Fit::Long
 // bounds the output at max_px squared; Fit::Short bounds it at max_px squared
-// times the aspect ratio, which is bounded by nothing but MAX_PIXELS — an
+// times the aspect ratio, which is bounded by nothing but MAX_PIXELS - an
 // 8000x1000 gatefold scan asked for at 800 would otherwise come back as five
 // megapixels of "thumbnail".  Past 4:1 a square crop is showing an eighth of
 // the picture and nobody is judging its sharpness, so the clamp costs only
@@ -90,7 +90,7 @@ constexpr int LONG_EDGE_LIMIT = 4;
 // Scales to max_px on the edge Fit names, preserving the aspect ratio.
 //
 // **Never upscales.**  An image already inside max_px on that edge is
-// returned unchanged, with its own MIME — so a 60x60 cover asked for at
+// returned unchanged, with its own MIME - so a 60x60 cover asked for at
 // size=400 comes back as the original 60x60 PNG rather than a blurred JPEG,
 // and it also means a small cover costs no decode at all.
 //

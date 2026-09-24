@@ -33,7 +33,7 @@ private const val KEY_CONTENT_TYPE = "org.gaindrive.contentType"
  *
  * Also read only by casting, and it is what saves the cast path from working
  * out the server's tier for itself: an H.264/AAC `.mkv` is remuxed and reaches
- * the receiver as `video/mp4`, so [KEY_CONTENT_TYPE] — the *source* container —
+ * the receiver as `video/mp4`, so [KEY_CONTENT_TYPE] - the *source* container -
  * is wrong in exactly the case that matters most. Deriving it here instead
  * would be a second copy of `video_direct_playable()`, in another language.
  */
@@ -57,8 +57,8 @@ private const val KEY_ASPECT = "org.gaindrive.aspect"
  * Set when this item is a video resolved for its soundtrack alone.
  *
  * It is deliberately *not* [KEY_IS_VIDEO]. Such an item is an audio stream in
- * every way that matters downstream — it goes through the byte cache, it draws
- * no surface, it can be downloaded — so leaving the video flag off is what
+ * every way that matters downstream - it goes through the byte cache, it draws
+ * no surface, it can be downloaded - so leaving the video flag off is what
  * makes all of that fall out with no consumer needing to know the setting
  * exists.
  *
@@ -94,7 +94,7 @@ const val ARTWORK_PX = 512
 /**
  * Song ↔ MediaItem. The `mediaId` carries the encoded [ItemRef], because it is
  * the only context Media3 hands back on notification actions and session
- * restore — a bare song id there would be ambiguous the moment a second server
+ * restore - a bare song id there would be ambiguous the moment a second server
  * is configured.
  *
  * Items leave here with **no URI**. The service resolves that in
@@ -152,7 +152,7 @@ fun MediaItem.sourceContentType(): String? =
  * It travels as one value rather than four arguments because the four are only
  * meaningful together: whether this is a video decides which stream builder to
  * use, whether it seeks natively decides whether it can be cast at all, and the
- * two MIME types are a pair — the second overrides the first exactly when the
+ * two MIME types are a pair - the second overrides the first exactly when the
  * server is going to convert.
  */
 data class CastSource(
@@ -170,7 +170,7 @@ data class CastSource(
  * A queue the system restored from bare media ids after process death carries
  * no extras, and so reports no video, no native seek and no types. For casting
  * that is the safe direction and lands such an item on the same path as a file
- * the receiver could not have played anyway — the service re-derives `isVideo`
+ * the receiver could not have played anyway - the service re-derives `isVideo`
  * from the mirror for *local* playback, which is where it matters.
  */
 fun MediaItem.castSource(): CastSource = CastSource(
@@ -207,7 +207,7 @@ fun MediaItem.markedAsAudioOnlyVideo(): MediaItem {
 
 /**
  * Whether this item is a video, or null when the item carries no extras at all
- * — a queue the system restored from bare media ids after process death.
+ * - a queue the system restored from bare media ids after process death.
  *
  * Null is not false, and the difference matters: resolving a video as audio
  * gets the soundtrack alone, so the caller has to go and find out rather than
@@ -260,8 +260,8 @@ fun MediaItem.withQuality(quality: AudioQuality): MediaItem {
  * The same item, now saying it is a video.
  *
  * For the queue the system restored from bare media ids: the service works out
- * what such an item is by asking the mirror, and everything downstream — which
- * data source loads it, whether the UI offers a picture — reads the flag off
+ * what such an item is by asking the mirror, and everything downstream - which
+ * data source loads it, whether the UI offers a picture - reads the flag off
  * the item rather than repeating that lookup. Without this the answer would be
  * found once and then thrown away.
  */
@@ -287,7 +287,7 @@ data class NowPlaying(
 	val album: String,
 	/**
 	 * Null when the server gave the song no album id, or for a queue the system
-	 * restored from a bare media id after process death — the player then simply
+	 * restored from a bare media id after process death - the player then simply
 	 * offers no way through to the album.
 	 */
 	val albumRef: ItemRef?,

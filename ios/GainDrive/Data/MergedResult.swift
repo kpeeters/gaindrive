@@ -27,7 +27,7 @@ struct ServerFailure: Identifiable, Hashable, Sendable {
 	///
 	/// **Carried in the message rather than as a flag on `MergedResult`.** Every
 	/// screen already draws these notes, so putting it here means all of them
-	/// say it without any of them learning what a mirror is — which is the
+	/// say it without any of them learning what a mirror is - which is the
 	/// reasoning `android/CACHING.md` gives for the same choice.
 	var showingStored: ServerFailure {
 		ServerFailure(

@@ -19,7 +19,7 @@ import javax.inject.Singleton
  *
  * The captions themselves are never fetched here. `getCaptions` answers with
  * raw WebVTT rather than a Subsonic envelope, so the honest thing is to hand
- * the player a URL and let it load the track if and when the user selects it —
+ * the player a URL and let it load the track if and when the user selects it -
  * which also means a subtitle file that is slow to convert costs nothing until
  * it is wanted.
  *
@@ -67,7 +67,7 @@ class CaptionTracks @Inject constructor(
 			//
 			// That is also what makes an older server safe rather than lucky. One
 			// that does not report `source` does not honour `playable`
-			// either, so it remuxes — and a remux drops the embedded tracks, which
+			// either, so it remuxes - and a remux drops the embedded tracks, which
 			// is exactly when every caption has to be side-loaded. The two halves
 			// arrived together and degrade together.
 			val captions =
@@ -87,7 +87,7 @@ class CaptionTracks @Inject constructor(
 				)
 				MediaItem.SubtitleConfiguration.Builder(Uri.parse(url))
 					// Always WebVTT: the server normalises every source format
-					// — embedded streams, .srt, .ass sidecars — through ffmpeg
+					// - embedded streams, .srt, .ass sidecars - through ffmpeg
 					// before it answers.
 					.setMimeType(MimeTypes.TEXT_VTT)
 					.setLabel(caption.name.ifBlank { "Subtitles" })

@@ -11,8 +11,8 @@ before ownership the redirect in `stream.view` fired for every caller in the
 server. Casting from the web client and then playing a track in the Android app
 under the same login sent that track to the television instead of the phone.
 
-**No Chromecast is needed.** `CastManager::start()` never opens a connection —
-it only sets a flag and detaches the poll loop — so a configured device is
+**No Chromecast is needed.** `CastManager::start()` never opens a connection -
+it only sets a flag and detaches the poll loop - so a configured device is
 enough to drive the whole matrix. Start the server with one at an address
 nothing will answer on:
 
@@ -67,7 +67,7 @@ def _get(endpoint, controller=None, extra=None):
 
 def _raw(endpoint, controller=None, extra=None):
     """(status, bytes seen) for stream.view, which answers 204 to the session
-    owner and real audio to everyone else. Only the first few kB are read —
+    owner and real audio to everyone else. Only the first few kB are read -
     the point is whether a body exists, and a whole FLAC is a lot of it."""
     req = urllib.request.Request(_url(endpoint, controller, extra))
     try:
@@ -140,7 +140,7 @@ def test_owner_sees_its_session():
 
 def test_others_see_no_session():
     """Another controller, and a client that sends none at all, are both told
-    there is nothing — otherwise a second browser adopts the session on load."""
+    there is nothing - otherwise a second browser adopts the session on load."""
     _stop_all()
     _ok(_get("startCast", CTRL_A, {"id": DEVICE_ID}), "startCast A")
     assert _active(CTRL_B) is False, "B can see A's session"

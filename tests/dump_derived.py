@@ -6,7 +6,7 @@ work trades accuracy for speed, and the argument for whether that trade is safe
 should be a measurement over the whole library rather than a reading of upstream
 source. So: dump before, change, rescan, dump after, compare.
 
-Unlike most scripts in tests/, this one needs no running server — it reads the
+Unlike most scripts in tests/, this one needs no running server - it reads the
 music database directly, read-only, which is safe while gaindrive is running
 because both databases are WAL.
 
@@ -17,11 +17,11 @@ because both databases are WAL.
 
 `examples` caps how many differing rows are printed per column (default 5); pass
 0 for all of them. **Both dumps must come from the same version of this script**
-— it decides how a tag's control characters are rendered, so comparing across a
+- it decides how a tag's control characters are rendered, so comparing across a
 change to that shows differences the library does not have.
 
-**Keyed on path, never on id.** A rowid is reassigned by a rebuild — that is the
-same instability stars and playlists key around — so two dumps of the same
+**Keyed on path, never on id.** A rowid is reassigned by a rebuild - that is the
+same instability stars and playlists key around - so two dumps of the same
 library have unrelated ids and identical paths.
 
 Only what a scan derives from opening the file is included. Ids, `last_scanned`
@@ -61,7 +61,7 @@ NULL = "\\N"
 #
 # **Escaped and not flattened to a space**, which is the second lesson. A
 # trailing \r in a genre tag rendered as " " reads in a diff as "Blues" against
-# "Blues " — a difference nobody can see, in a tool whose entire job is showing
+# "Blues " - a difference nobody can see, in a tool whose entire job is showing
 # differences. Real trailing whitespace exists in tags too, so the two must not
 # render alike.
 CONTROL = {c: "\\x%02x" % c for c in range(0x20)}
@@ -94,7 +94,7 @@ def dump(db_path, out):
 def load(path):
 	# newline="\n" and not the default: universal newline mode would split a row
 	# at a bare \r, and dumps taken before render() flattened those still have
-	# them. Note "" does not do this — it keeps universal newline *detection*
+	# them. Note "" does not do this - it keeps universal newline *detection*
 	# and only skips the translation.
 	with open(path, encoding="utf-8", newline="\n") as f:
 		header = f.readline().rstrip("\n").split("\t")

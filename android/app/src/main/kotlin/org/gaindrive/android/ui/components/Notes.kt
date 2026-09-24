@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
 data class ExternalLink(val label: String, val url: String)
 
 /**
- * Prose with outbound links, clamped to a few lines and expandable — the same
+ * Prose with outbound links, clamped to a few lines and expandable - the same
  * treatment the web client gives album notes and artist biographies.
  *
  * Shared between the artist header and album detail so the two cannot drift
@@ -71,7 +71,7 @@ fun NotesSection(
 					AssistChip(
 						onClick = { uriHandler.openUri(link.url) },
 						label = {
-							// A chip label is a proper noun — breaking it across
+							// A chip label is a proper noun - breaking it across
 							// two lines is never the right answer, so if one is
 							// ever narrow enough to need it, ellipsise instead.
 							Text(link.label, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -19,7 +19,7 @@ namespace {
 // asks in *device* pixels, so each of its boxes contributes two: a 48px
 // player thumbnail, an 80px grid cell, an 80px and a 120px artist portrait
 // and a 320px hero give 64/80/128/320 on a 1x screen and 96/160/640 on a 2x
-// one, the 2x portrait's 240 being the one that rounds — on to 256, which is
+// one, the 2x portrait's 240 being the one that rounds - on to 256, which is
 // also its mediaSession artwork (an OS hint rather than a box, so it is not
 // doubled). Android adds 144/288/512 and iOS 144/288/800. The rest fill the
 // gaps closely enough that rounding up is never a visible loss.
@@ -41,7 +41,7 @@ constexpr reproc::milliseconds FFMPEG_TIMEOUT(30 * 1000);
 std::optional<std::string> scale_with_ffmpeg(const std::string& path, int size)
 	{
 	// The short edge becomes `size` and the long one follows, matching
-	// imagescale's Fit::Short — the two paths produce bytes under the same
+	// imagescale's Fit::Short - the two paths produce bytes under the same
 	// cache key, so a rung has to mean the same thing in both.
 	//
 	// force_original_aspect_ratio=increase says that in one word and is not
@@ -52,7 +52,7 @@ std::optional<std::string> scale_with_ffmpeg(const std::string& path, int size)
 	//
 	// LONG_EDGE_LIMIT is deliberately not mirrored here. Expressing it costs
 	// a nested min in both branches, and this path is reached only for an
-	// image stb cannot decode at all — so a wider-than-4:1 one of those is a
+	// image stb cannot decode at all - so a wider-than-4:1 one of those is a
 	// case that has never occurred rather than one being tolerated.
 	const std::string px = std::to_string(size);
 	std::vector<std::string> args = {
@@ -294,7 +294,7 @@ std::optional<CoverArtCache::Result> CoverArtCache::build(const Source& src,
 	// to a square: the album row, the hero, the player bar and both artist
 	// portraits in the web client, and the same shapes on Android and iOS.
 	// The long edge overshoots and the crop throws it away, which is the point
-	// — fitting the long edge instead leaves the *client* upscaling a poster
+	// - fitting the long edge instead leaves the *client* upscaling a poster
 	// to fill its cell, however sharp what we sent it was.
 	auto s = imagescale::scale_to_fit(raw, size, imagescale::Fit::Short);
 
@@ -310,8 +310,8 @@ std::optional<CoverArtCache::Result> CoverArtCache::build(const Source& src,
 		return r;
 		}
 
-	// stb could not read it. That is rare — it handles progressive JPEG,
-	// 16-bit PNG and Adobe CMYK — but a portrait fetched from a provider can
+	// stb could not read it. That is rare - it handles progressive JPEG,
+	// 16-bit PNG and Adobe CMYK - but a portrait fetched from a provider can
 	// be a format the scanner would never have indexed.
 	if (src.kind == Source::Kind::File) {
 		if (auto jpg = scale_with_ffmpeg(src.abs_path, size)) {
@@ -328,7 +328,7 @@ std::optional<CoverArtCache::Result> CoverArtCache::build(const Source& src,
 		}
 
 	// Record the failure, or every request for this image would try again for
-	// ever. A negative result is a result — the same reasoning that puts an
+	// ever. A negative result is a result - the same reasoning that puts an
 	// 'unmatched' row in video_meta.
 	std::cout << stamp() << "cover art: " << src.key << ": cannot scale ("
 	          << s.error << "); serving it at full size" << std::endl;

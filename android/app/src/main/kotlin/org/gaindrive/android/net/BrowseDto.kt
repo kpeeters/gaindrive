@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 
 /**
  * DTOs for the browsing endpoints, shaped to the JSON the server actually
- * emits rather than to the spec's prose. Since `SPEC-AUDIT.md` these agree:
+ * emits rather than to the spec's prose. The two agree these days:
  * ids are strings and `starred` is an ISO 8601 timestamp.
  *
  * Nearly every field is optional, so everything has a default. Deciding what
@@ -62,7 +62,7 @@ data class SongDto(
 	 * Defaulting to false is a decision, not an oversight: `coerceInputValues`
 	 * turns an explicit null into the default, so a server that sends
 	 * `"isDir": null` has its children read as songs. That is the safe
-	 * direction — a directory misread as a song is one visible unplayable row,
+	 * direction - a directory misread as a song is one visible unplayable row,
 	 * whereas a song misread as a directory disappears from the track list and
 	 * provokes a pointless request.
 	 */
@@ -99,7 +99,7 @@ data class SongDto(
 	// The server derives isVideo from the file extension, so it is right on
 	// every endpoint, and nativeSeek is now too: every query that returns a
 	// song selects the codec columns it is computed from. It was not always
-	// so — only getVideos, getMusicDirectory, getAlbum and getSong did, and
+	// so - only getVideos, getMusicDirectory, getAlbum and getSong did, and
 	// the rest reported false whatever the codecs were, so the same film was
 	// castable from its album and not from a playlist.
 	//
@@ -116,8 +116,8 @@ data class SongDto(
 	val nativeSeek: Boolean = false,
 	/**
 	 * gaindrive extension: the season an episode belongs to, absent for
-	 * anything that is not one. `discNumber` already carries the same number —
-	 * it is what orders and groups the tracks — so this only decides whether a
+	 * anything that is not one. `discNumber` already carries the same number -
+	 * it is what orders and groups the tracks - so this only decides whether a
 	 * group is headed "Series 2" or "Disc 2". Populated alongside
 	 * [nativeSeek], so on an older server it is absent and a season reads as
 	 * a disc; that is cosmetic and the ordering is unaffected.
@@ -182,7 +182,7 @@ data class GetIndexesBody(
  * One directory and its children.
  *
  * `parent` is absent at a root rather than null, and `coverArt` is absent when
- * the folder has no image — both are omitted by the server, which the defaults
+ * the folder has no image - both are omitted by the server, which the defaults
  * already cover.
  *
  * [child] is deliberately typed as [SongDto] even though it holds directories
@@ -257,7 +257,7 @@ data class GetAlbumBody(
 	val album: AlbumDto? = null,
 ) : SubsonicBody
 
-/** One track, the full entry — the same rows `getAlbum` sends. */
+/** One track, the full entry - the same rows `getAlbum` sends. */
 @Serializable
 data class GetSongBody(
 	override val status: String = "failed",
@@ -283,7 +283,7 @@ data class GetAlbumInfoBody(
 /**
  * Portrait URLs here point at MusicBrainz/Wikipedia, not at the server. The
  * app ignores them and asks `getCoverArt` for the artist folder instead, which
- * keeps the fetch on one authenticated path the server can cache — and working
+ * keeps the fetch on one authenticated path the server can cache - and working
  * when the phone reaches the server over a VPN the image host is not on.
  */
 @Serializable
@@ -309,7 +309,7 @@ data class GetArtistInfoBody(
  * falling back to its language.
  *
  * [source] is `"container"` for a track inside the video and `"sidecar"` for a
- * subtitle file beside it — the same two words `getChapters` uses. It only
+ * subtitle file beside it - the same two words `getChapters` uses. It only
  * matters when we are demuxing the container ourselves, where the embedded
  * tracks arrive twice unless these are filtered out; see [CaptionTracks].
  *
@@ -347,7 +347,7 @@ data class GetVideoInfoBody(
  * One marker, as `getChapters` and `getAlbumChapters` report it.
  *
  * [start] is a JSON number in seconds carrying milliseconds, not a count of
- * milliseconds and not a string. [name] may be empty and is left that way —
+ * milliseconds and not a string. [name] may be empty and is left that way -
  * the placeholder is drawn by the client.
  */
 @Serializable
@@ -406,7 +406,7 @@ data class GetAlbumChaptersBody(
  *
  * [songId] is what to stream and [parent] is its album folder. There is no id
  * for the marker itself, which is why these matches never arrive as `song`
- * entries — a client told one was a song would be handed a track that does not
+ * entries - a client told one was a song would be handed a track that does not
  * work.
  */
 @Serializable
@@ -489,7 +489,7 @@ data class GetRecentSongsBody(
 
 /**
  * The token [SubsonicApi.getCastToken] mints, or null on a server too old to
- * have the endpoint — which answers an error rather than a token, and which
+ * have the endpoint - which answers an error rather than a token, and which
  * every caller is expected to shrug off.
  */
 @Serializable

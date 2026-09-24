@@ -11,7 +11,7 @@ import org.gaindrive.android.net.SubsonicClient
  * reading DataStore and decrypting a password, which is far too expensive to
  * repeat for every row in a list.
  *
- * Keyed by server so a merged list works unchanged — each row's URL comes from
+ * Keyed by server so a merged list works unchanged - each row's URL comes from
  * the server that owns it.
  */
 class CoverUrls internal constructor(

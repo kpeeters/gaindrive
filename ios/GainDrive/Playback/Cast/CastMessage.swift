@@ -14,15 +14,15 @@ import Foundation
 /// Hand-encoded rather than generated, and ported from `src/castmanager.cc`
 /// (`pb_varint`, `pb_string_field`, `pb_payload`) by way of Android's
 /// `CastMessage.kt`. The schema is six fields, so a protobuf dependency and its
-/// code generation would buy nothing — and this app has no package
+/// code generation would buy nothing - and this app has no package
 /// dependencies at all, which is worth keeping.
 ///
-/// * field 1 varint — `protocol_version` (0 = `CASTV2_1_0`)
-/// * field 2 string — `source_id`
-/// * field 3 string — `destination_id`
-/// * field 4 string — `namespace`
-/// * field 5 varint — `payload_type` (0 = `STRING`)
-/// * field 6 string — `payload_utf8`
+/// * field 1 varint - `protocol_version` (0 = `CASTV2_1_0`)
+/// * field 2 string - `source_id`
+/// * field 3 string - `destination_id`
+/// * field 4 string - `namespace`
+/// * field 5 varint - `payload_type` (0 = `STRING`)
+/// * field 6 string - `payload_utf8`
 ///
 /// Only field 6 is ever read back. The rest are written and never inspected,
 /// which is why `payload(of:)` skips fields rather than parsing a whole
@@ -30,7 +30,7 @@ import Foundation
 enum CastMessage {
 	/// Refuse a frame claiming more than this. **A bad length must not
 	/// allocate**: the four bytes come off the network before anything has
-	/// authenticated them, and a receiver — or something pretending to be one —
+	/// authenticated them, and a receiver - or something pretending to be one -
 	/// announcing four gigabytes must cost nothing.
 	static let maxFrame = 1 << 20
 
@@ -151,7 +151,7 @@ enum CastMessage {
 }
 
 //	Internal rather than fileprivate so `CastMessageTests` can build the shapes a
-//	receiver may send and this file never writes — a message with no payload
+//	receiver may send and this file never writes - a message with no payload
 //	field, a truncated one. The names carry `cast` for the same reason the
 //	visibility is wider than it wants to be: these sit on `Data`, and a bare
 //	`appendVarint` would read as a general utility.
@@ -173,7 +173,7 @@ extension Data {
 	mutating func appendCastStringField(_ field: UInt64, _ value: String) {
 		let bytes = Data(value.utf8)
 		appendCastVarint(field << 3 | 2)
-		// The length is in **bytes, not characters** — a non-ASCII device name
+		// The length is in **bytes, not characters** - a non-ASCII device name
 		// or track title would otherwise produce a frame the receiver cannot
 		// parse, and it would do so only for some users' libraries.
 		appendCastVarint(UInt64(bytes.count))
@@ -185,7 +185,7 @@ extension Data {
 ///
 /// `CC1AD845` is Google's **Default Media Receiver**, a generic app any Cast
 /// device can launch, which is why none of this needs a Cast developer
-/// registration — `src/castmanager.cc` launches the same one. It is also the app
+/// registration - `src/castmanager.cc` launches the same one. It is also the app
 /// *we* launch, so the LAUNCH and the `appId` match in `CastStatus` both read
 /// this constant and cannot drift.
 enum CastNamespace {

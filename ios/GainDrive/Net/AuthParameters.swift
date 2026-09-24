@@ -11,8 +11,8 @@ import Foundation
 
 /// The one place credentials become query parameters.
 ///
-/// Every request the app makes — API calls, cover-art URLs, stream URLs handed
-/// to `AVPlayer` — is built through this type, so credentials cannot leak from
+/// Every request the app makes - API calls, cover-art URLs, stream URLs handed
+/// to `AVPlayer` - is built through this type, so credentials cannot leak from
 /// one server's request to another's by construction rather than by
 /// discipline. Android achieves the same thing with a per-server OkHttp
 /// interceptor; here it is a value each `SubsonicClient` holds.
@@ -29,7 +29,7 @@ struct AuthParameters: Sendable {
 	private let password: String
 
 	/// Generated once per client, which means once per server per app session
-	/// — deliberately *not* per request. A per-request salt gives every
+	/// - deliberately *not* per request. A per-request salt gives every
 	/// cover-art URL a unique query string, so a URL-keyed image cache misses
 	/// every single time and re-downloads every thumbnail on every scroll.
 	let salt: String
@@ -39,7 +39,7 @@ struct AuthParameters: Sendable {
 	/// in; it would then travel as `%20` on every request, and a server whose
 	/// `ping` does not authenticate accepts the account and fails later on the
 	/// first endpoint that looks the user up. Trimming the password discards a
-	/// theoretically valid one — that is the accepted trade, and the same one
+	/// theoretically valid one - that is the accepted trade, and the same one
 	/// Android made.
 	init(username: String, password: String, salt: String = AuthParameters.makeSalt()) {
 		self.username = username.trimmingCharacters(in: .whitespacesAndNewlines)

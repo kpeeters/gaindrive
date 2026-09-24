@@ -95,8 +95,8 @@ import org.gaindrive.android.ui.tvFocusHighlight
  *
  * Deliberately not media3's `PlayerView`. Its controls are its own, not
  * Material 3, and they would be the one part of the app that does not look like
- * the rest; the pieces actually needed here — a surface, a subtitle view and a
- * scrub bar — are three composables and the [SeekBar] already existed.
+ * the rest; the pieces actually needed here - a surface, a subtitle view and a
+ * scrub bar - are three composables and the [SeekBar] already existed.
  *
  * Backing out does not stop playback: the surface detaches, the sound carries
  * on, and the mini-player offers the way back in. That is the choice made for
@@ -147,7 +147,7 @@ fun VideoScreen(
 		}
 	}
 
-	// What a side swipe is adjusting, and the last thing it adjusted — the
+	// What a side swipe is adjusting, and the last thing it adjusted - the
 	// second held separately so the indicator has something to draw through its
 	// own fade-out. Deliberately *not* bumping `interactionTick`: nudging the
 	// volume must not drag the whole transport back over the picture, which is
@@ -172,7 +172,7 @@ fun VideoScreen(
 	//
 	// The wait is what makes it safe to fire while casting. Connecting a device
 	// swaps the session's player, and the new one publishes an empty queue for
-	// the instant between being installed and being given the items — which
+	// the instant between being installed and being given the items - which
 	// reads here as "no longer a video" and would drop the user off this screen
 	// the moment they cast. A key change cancels the pending coroutine, so the
 	// flicker back to true simply calls this off.
@@ -192,7 +192,7 @@ fun VideoScreen(
 
 	// The screen must not sleep while a film is on: nothing is touching it, so
 	// the system has no other reason to believe it is being watched. This is
-	// the one thing PlayerView would have done for us. Not while casting — the
+	// the one thing PlayerView would have done for us. Not while casting - the
 	// picture is on the television and there is nothing here to keep awake.
 	val view = LocalView.current
 	val keepAwake = castDevice == null
@@ -203,7 +203,7 @@ fun VideoScreen(
 
 	// In landscape the picture is the whole screen, and the activity is
 	// edge-to-edge, so the system bars sit *over* the film rather than beside
-	// it — a navigation triplet down one corner of every shot. Hidden rather
+	// it - a navigation triplet down one corner of every shot. Hidden rather
 	// than dimmed, and swipeable back transiently, which is what a video player
 	// is expected to do.
 	//
@@ -501,7 +501,7 @@ private fun StalledNotice(message: String, onRetry: () -> Unit, onDismiss: () ->
  * Both are plain Android views inside one [AndroidView], because a
  * [SurfaceView] has to be a real view for the decoder to render into and
  * subtitle cues arrive as `Cue` objects that `SubtitleView` already knows how
- * to lay out. The factory runs once — recreating a `SurfaceView` tears down and
+ * to lay out. The factory runs once - recreating a `SurfaceView` tears down and
  * restarts the decoder's output, which shows as a black flash.
  */
 @Composable
@@ -514,8 +514,8 @@ private fun VideoOutput(
 		// **No `fillMaxWidth`.** With the width pinned, `aspectRatio` has only
 		// the height left to solve for, and in landscape the height it arrives
 		// at is taller than the screen: the picture is cropped top and bottom,
-		// and the SubtitleView — which draws its cues near its own bottom edge
-		// — puts them below the display entirely. Left free, the modifier tries
+		// and the SubtitleView - which draws its cues near its own bottom edge
+		// - puts them below the display entirely. Left free, the modifier tries
 		// the width first and falls back to the height, which is letterbox in
 		// portrait and pillarbox in landscape. The parent Box centres it.
 		modifier = Modifier.aspectRatio(aspectRatio),
@@ -597,7 +597,7 @@ private fun Controls(
 						overflow = TextOverflow.Ellipsis,
 					)
 				}
-				// Which song inside the recording is playing — the web client's
+				// Which song inside the recording is playing - the web client's
 				// video bar says the same thing. A line of its own rather than
 				// folded into the subtitle, so nothing is lost on a recording
 				// whose markers happen to be unnamed, and tinted because it
@@ -613,7 +613,7 @@ private fun Controls(
 				}
 			}
 			// Absent rather than disabled when nothing has markers, which is
-			// almost every film — the same rule the subtitle picker below
+			// almost every film - the same rule the subtitle picker below
 			// follows, and for the same reason.
 			if (hasChapters) {
 				IconButton(onClick = onToggleChapters, modifier = Modifier.tvFocusHighlight()) {
@@ -644,12 +644,12 @@ private fun Controls(
 			}
 			// The only way to reach a Chromecast from here. The Now Playing
 			// sheet has the other one, and this screen is not reached through
-			// it — a video takes the app straight here — so without this the
+			// it - a video takes the app straight here - so without this the
 			// button exists in a place a film never visits.
 			//
 			// Offered for every film, on the same rule the sheet uses: one the
 			// server can only re-encode is cast as HLS. The single case that
-			// still cannot be cast — no direct route to the server — is refused
+			// still cannot be cast - no direct route to the server - is refused
 			// in words by PlayerConnection rather than by hiding the button,
 			// since deciding it here would need a reachability probe a
 			// composable cannot await.
@@ -689,8 +689,8 @@ private fun Controls(
 					)
 				}
 				// Inside previous/next rather than replacing them: this screen is
-				// the only transport a film ever reaches — a video opens it
-				// directly, never through the Now Playing sheet — and a series or
+				// the only transport a film ever reaches - a video opens it
+				// directly, never through the Now Playing sheet - and a series or
 				// a concert recording is still a queue.
 				//
 				// Disabled on the same test the scrub bar uses, so the two agree
@@ -848,7 +848,7 @@ private const val CONTROLS_SCRIM = 0.4f
 
 /**
  * How long the brightness/volume readout stays after the finger lifts. Long
- * enough to see where it ended up, short enough not to become furniture — it
+ * enough to see where it ended up, short enough not to become furniture - it
  * sits over the film, unlike the controls, which dim it first.
  */
 private const val HUD_LINGER_MS = 600L

@@ -88,7 +88,7 @@ fun AlbumDto.toDomain(server: ServerId) = Album(
  * [albumRef] overrides where the track says it belongs, and folder browsing has
  * to pass it. Two reasons the fields below cannot be trusted there: a directory
  * child carries *both* `albumId` and `parent` on a server that keeps the ID3 and
- * folder hierarchies apart, and the ID3 one wins here — pointing the track at an
+ * folder hierarchies apart, and the ID3 one wins here - pointing the track at an
  * album no folder-mode listing will ever produce. And a track inside a disc
  * subfolder has `parent` set to that subfolder rather than to the album.
  *
@@ -199,7 +199,7 @@ fun MusicFolderDto.toDomain() = MusicRoot(id = id, name = name, contentType = co
  * A child directory of an artist's listing, read as one of their albums.
  *
  * The folder listing does not count tracks or sum durations, so both are zero
- * and the row simply omits them — `AlbumRow` already draws a subtitle from
+ * and the row simply omits them - `AlbumRow` already draws a subtitle from
  * whichever parts it has. The cover falls back to the folder's own id, the same
  * convention `ArtistDto.toDomain` relies on.
  */
@@ -226,14 +226,14 @@ fun DirectoryDto.toArtist(server: ServerId) = Artist(
 )
 
 /**
- * A directory reached as an album, with the tracks that were found under it —
+ * A directory reached as an album, with the tracks that were found under it -
  * which may have come from disc subfolders rather than from this listing, so
  * they are passed in rather than read from [child].
  */
 fun DirectoryDto.toAlbum(server: ServerId, songs: List<Song>) = Album(
 	ref = ItemRef(server, id),
 	title = name,
-	// The folder says nothing about who made the record; its tracks do — but
+	// The folder says nothing about who made the record; its tracks do - but
 	// the album's artist, not the first one's own. On a compilation those
 	// differ, and taking `artistName` here headed the whole album with whoever
 	// track 1 happened to be. Falling back to it covers a server too old to

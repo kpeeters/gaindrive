@@ -8,7 +8,7 @@ import java.security.SecureRandom
 
 /**
  * Adds the Subsonic authentication and protocol parameters to every request,
- * so no call site has to think about them. One instance per server — there is
+ * so no call site has to think about them. One instance per server - there is
  * no global "current credentials", and credentials therefore cannot leak from
  * one server's request into another's by construction.
  *
@@ -31,7 +31,7 @@ class AuthInterceptor(
 
 	/**
 	 * Also used by [SubsonicClient.url] for the URLs that are fetched outside
-	 * Retrofit — cover art and streams. Sharing this method is what keeps the
+	 * Retrofit - cover art and streams. Sharing this method is what keeps the
 	 * hand-built URLs and the intercepted ones from drifting apart.
 	 */
 	fun applyTo(builder: HttpUrl.Builder): HttpUrl.Builder = builder

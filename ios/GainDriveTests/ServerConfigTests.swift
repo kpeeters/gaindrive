@@ -36,7 +36,7 @@ struct ServerConfigTests {
 
 	/// Note what is *not* here: a bare word like `nonsense`. It normalises to
 	/// `http://nonsense`, which is a perfectly well-formed address for a host
-	/// on the local network — whether it resolves is the connection test's
+	/// on the local network - whether it resolves is the connection test's
 	/// question, not this one's.
 	@Test(arguments: ["", "   ", "ftp://example.com", "http://", ":4040"])
 	func rejectsUnusableAddresses(input: String) {

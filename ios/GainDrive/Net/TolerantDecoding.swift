@@ -13,8 +13,8 @@ import Foundation
 ///
 /// Android gets four tolerances free from `kotlinx.serialization`:
 /// `ignoreUnknownKeys`, `coerceInputValues`, `isLenient`, and a default on
-/// every field. Swift's `Codable` gives exactly one of them — a keyed container
-/// ignores unknown keys — and throws on the rest. These two wrappers cover the
+/// every field. Swift's `Codable` gives exactly one of them - a keyed container
+/// ignores unknown keys - and throws on the rest. These two wrappers cover the
 /// gap, and nothing else is needed.
 
 /// A list-valued field.
@@ -56,7 +56,7 @@ struct Listed<Element: Decodable & Sendable>: Decodable, Sendable {
 /// This is the half Android never had to write. `isLenient` reads an unquoted
 /// `42` into a `String` field and `coerceInputValues` turns an explicit `null`
 /// into the declared default; Swift has neither, so an id emitted as a number
-/// throws `typeMismatch` and takes **the entire response** down with it — one
+/// throws `typeMismatch` and takes **the entire response** down with it - one
 /// odd field costs the whole artist list. That is not hypothetical: enabling a
 /// legacy server is exactly how Android discovered it needed `isLenient`.
 ///
@@ -115,7 +115,7 @@ extension Int: LooseScalar {
 
 /// Added for a chapter's `start`, which is the first fractional number in the
 /// API. It is a **decimal fraction of a second** and the server sends three
-/// places on purpose — reading it as an `Int` would round a marker at 90.4 s to
+/// places on purpose - reading it as an `Int` would round a marker at 90.4 s to
 /// a minute and a half, and a client that saved back what it read would move
 /// every marker it did not touch.
 extension Double: LooseScalar {

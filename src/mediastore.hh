@@ -47,7 +47,7 @@ struct AlbumReadData;
 class MediaStore {
 	public:
 		// One configured library root. `name` is the identifier the user chose
-		// and is also the first component of every path stored for this root —
+		// and is also the first component of every path stored for this root -
 		// that is what lets songs.path stay a single string, so the cross-DB
 		// joins against client.* (which are direct string equality) never
 		// needed to become two-column joins.
@@ -70,12 +70,12 @@ class MediaStore {
 		//
 		// video_art_px of 0 disables manufacturing cover art for videos
 		// entirely; nothing else about a scan changes. video_art_frames and
-		// video_art_embedded enable the two tiers, both off by default — see
+		// video_art_embedded enable the two tiers, both off by default - see
 		// videoart.hh. Turning either off also purges what it stored on an
 		// earlier run, since leaving those images is indistinguishable from
 		// still having the tier on.
 		// scan_jobs bounds how many files the scan reads metadata from at
-		// once; 0 derives it from the core count, capped — see scan_jobs_
+		// once; 0 derives it from the core count, capped - see scan_jobs_
 		// below for why the cap is about the disk. Appended rather than
 		// inserted: the other construction sites pass positionally.
 		MediaStore(const std::string& db_path, const std::vector<Root>& roots,
@@ -107,7 +107,7 @@ class MediaStore {
 		void refresh_album(const std::string& rel);
 
 		// What getScanStatus reports. `count` is songs processed, and it keeps
-		// the finished total once a scan ends — which is what the spec's
+		// the finished total once a scan ends - which is what the spec's
 		// "scanning: false, count: N" is for.
 		struct ScanStatus { bool scanning; long long count; };
 		ScanStatus scan_status() const;
@@ -180,13 +180,13 @@ class MediaStore {
 
 		// One root, by the id get_music_folders() reported for it.
 		//
-		// Answers nullopt for anything that is not a browsable library root —
+		// Answers nullopt for anything that is not a browsable library root -
 		// a folder deeper in the tree, an id that resolves to nothing, and the
 		// uploads root, which that listing excludes for the same reason. Both
 		// go through the same rule so a caller cannot be handed a root the
 		// listing would never have offered: moveAlbum takes this id straight
 		// from a client, and the uploads root is per-user space rather than a
-		// destination anyone browses to — moving something *into* it would put
+		// destination anyone browses to - moving something *into* it would put
 		// a shared-library album inside somebody's personal area.
 		std::optional<MusicFolder> music_folder_by_id(int id);
 
@@ -202,7 +202,7 @@ class MediaStore {
 
 		// True when folder_id is a level-1 entry of a "categories" root, i.e.
 		// a section like Film or Series rather than a musician. Such a folder
-		// must never be looked up as an artist — the visible symptom of that
+		// must never be looked up as an artist - the visible symptom of that
 		// bug was a MusicBrainz query for a thing called "Movies".
 		bool is_category_folder(int folder_id);
 
@@ -224,7 +224,7 @@ class MediaStore {
 		// MusicBrainz. Empty when the folder's tracks carried none or did not
 		// agree; both callers then fall back to the online search.
 		//
-		// Keyed on the folder id, which is what every caller has in hand — the
+		// Keyed on the folder id, which is what every caller has in hand - the
 		// artist and album rows are reached from it, not the other way about.
 		//
 		// The album one returns the *release group*, not the release, because
@@ -358,7 +358,7 @@ class MediaStore {
 
 		// One folder for the online resolver to work through: an artist to be
 		// looked up, or an album. Only ever produced by the three queries
-		// below, all of which restrict themselves to *artists* roots — a
+		// below, all of which restrict themselves to *artists* roots - a
 		// categories section is called "Film", and asking MusicBrainz about
 		// that is the mistake is_category_folder() exists to prevent, while a
 		// film's own description comes from TMDB during the scan instead.
@@ -373,7 +373,7 @@ class MediaStore {
 			std::string name;
 			std::string path;
 			};
-		// Artist folders with no usable portrait yet, in name order — what the
+		// Artist folders with no usable portrait yet, in name order - what the
 		// background resolver works through on its own timer.
 		std::vector<LookupTarget> artists_needing_art(int64_t retry_none_before);
 
@@ -381,7 +381,7 @@ class MediaStore {
 		// artists_needing_art() does not: not "has this ever been resolved"
 		// but "are there any *words*". An artist whose portrait arrived while
 		// Wikipedia was down has a cached row, an 'ok' art verdict, an empty
-		// biography and nothing that will ever ask again — which is how a
+		// biography and nothing that will ever ask again - which is how a
 		// library ends up with hundreds of them.
 		//
 		// Neither consults fetched_at. An admin pressing the button means it,
@@ -444,7 +444,7 @@ class MediaStore {
 			std::string name;
 			int album_count = 0;
 			// Which account's uploads this came from. Empty for the shared
-			// library, and empty for a single-user personal listing too — the
+			// library, and empty for a single-user personal listing too - the
 			// caller already knows whose that is. Set only under
 			// PERSONAL_ALL_USERS, where it is the only thing telling two
 			// identically named folders apart.
@@ -466,7 +466,7 @@ class MediaStore {
 		// music_folder_id > 0 restricts to one root (the Subsonic
 		// musicFolderId filter); <= 0 spans every root, which is what an
 		// unfiltered request means.
-		// content_type non-empty restricts to roots of that kind — "artists"
+		// content_type non-empty restricts to roots of that kind - "artists"
 		// or "categories". Complementary to music_folder_id rather than a
 		// replacement: a kind may span several roots, which a single folder id
 		// cannot express, and two artist roots must list together.
@@ -483,7 +483,7 @@ class MediaStore {
 			std::string artist;   // the folder-derived artist
 			// The file's own ARTIST tag, raw and undecided.  Whether it
 			// differs from `artist` above is a presentation question, answered
-			// in one place — the song entry writers in gaindrive.cc, which are
+			// in one place - the song entry writers in gaindrive.cc, which are
 			// the only code holding both facts at once.
 			//
 			// Every ChildEntry query selects it, as they now all select the
@@ -507,10 +507,10 @@ class MediaStore {
 			std::string starred;
 			// Video only, and populated only by the paths where a client can
 			// act on them: get_videos(), get_song_entry() and the browse
-			// queries. Zero elsewhere — unlike the codec pair below, which
-			// every song query now selects — which is why the API emits
+			// queries. Zero elsewhere - unlike the codec pair below, which
+			// every song query now selects - which is why the API emits
 			// originalWidth/originalHeight conditionally. Whether an entry
-			// *is* video is not stored here — it is derived from `codec` via
+			// *is* video is not stored here - it is derived from `codec` via
 			// is_video_ext() in codecs.hh, so every existing query that
 			// already selects the codec answers it for free.
 			int         width  = 0;
@@ -522,7 +522,7 @@ class MediaStore {
 			// that is newer than it looks.  Four queries used to, and a video
 			// reached through getStarred, getPlaylist, getPlayQueue,
 			// getBookmarks, getSongsByGenre, getRecentSongs or search came back
-			// with both empty — so video_seeks_natively() answered false for a
+			// with both empty - so video_seeks_natively() answered false for a
 			// file that seeks perfectly well.  The same file therefore answered
 			// differently depending on which endpoint was asked, which is not a
 			// difference any client can be expected to reason about: the
@@ -531,8 +531,8 @@ class MediaStore {
 			std::string video_codec;
 			std::string audio_codec;
 			// The season an episode belongs to; 0 for anything that is not
-			// one. disc_number carries the same number — it is what clients
-			// group and sort by — and this says that grouping is a season
+			// one. disc_number carries the same number - it is what clients
+			// group and sort by - and this says that grouping is a season
 			// rather than a disc, which is all that separates "Series 2" from
 			// "Disc 2" in a listing. Selected by the same fragment as the two
 			// codecs above, and for the same reason.
@@ -573,8 +573,8 @@ class MediaStore {
 			int         id;           // folder_id (used as Subsonic album id)
 			// Artist folder_id: the folder above the album, always. A loose
 			// file is its own album and its parent is the section, so the
-			// case this used to carry — a folder that was an album *and* an
-			// artist folder — no longer exists. Emitted as `parent` and
+			// case this used to carry - a folder that was an album *and* an
+			// artist folder - no longer exists. Emitted as `parent` and
 			// `artistId`; folder-model navigation uses DirInfo::parent_id
 			// instead, which is the same folder here.
 			int         parent_id;
@@ -714,7 +714,7 @@ class MediaStore {
 
 		// A sidecar is not a stream, so it needs an id no stream can have, and
 		// it has to survive the round trip through the wire as a plain integer
-		// — which is why it is negative rather than, say, a name. getCaptions
+		// - which is why it is negative rather than, say, a name. getCaptions
 		// reads any index < 0 as "the sidecar", so an old client that omits
 		// captionId altogether still lands on the same file.
 		static constexpr int SIDECAR_CAPTION_INDEX = -1;
@@ -1050,7 +1050,7 @@ class MediaStore {
 		// something other than data loss: every reference to a media file in
 		// either DB is the path string itself, so the rename invalidates the
 		// key. The caller MUST have verified that nothing already lives at
-		// new_rel — see the note in the definition on why that precondition is
+		// new_rel - see the note in the definition on why that precondition is
 		// what keeps these plain UPDATEs safe.
 		//
 		// Anything new that persists a path belongs in this function's list.
@@ -1065,7 +1065,7 @@ class MediaStore {
 		// The music DB is deliberately absent: a following scan_dirs() prunes
 		// the folder, its songs and every derived cache keyed on the path
 		// (video_art, video_meta, cover_thumbs, artist_art). **Nothing anywhere
-		// prunes the client schema** — the scanner never touches it — which is
+		// prunes the client schema** - the scanner never touches it - which is
 		// the whole reason this exists.
 		//
 		// Leaving those rows behind is not merely untidy. They are read through
@@ -1119,9 +1119,9 @@ class MediaStore {
 		std::mutex       db_mutex_;  // guards db_music_ across scan thread + API threads
 
 		// What scan_status() reports. Held here rather than in GainDrive
-		// because this is where all four scan entry points converge — the
+		// because this is where all four scan entry points converge - the
 		// startup scan, the folder watcher, the upload handler and the URL
-		// fetch worker — and any of them can be running at once.
+		// fetch worker - and any of them can be running at once.
 		//
 		// A depth *count*, not a flag: scan_dirs() falls back to calling
 		// scan() when it cannot resolve a path, so a bool would be cleared by
@@ -1133,7 +1133,7 @@ class MediaStore {
 		// scan_artist_dir(), reported on the "Scan complete" line.  Purely
 		// diagnostic, and it exists because a first scan of a cold library is
 		// minutes of work with nothing anywhere saying which phase they were
-		// spent in — so every judgement about scan cost was a guess, including
+		// spent in - so every judgement about scan cost was a guess, including
 		// the obvious ones.
 		//
 		// Atomic for the reason scan_items_ is, and for one more: the phases
@@ -1141,8 +1141,8 @@ class MediaStore {
 		// accumulator that had to be revisited then would be the wrong shape.
 		//
 		// They inherit scan_items_' caveat.  scans_active_ is a depth count and
-		// not an exclusion lock — the folder watcher can start a rescan while
-		// the start-up scan is still running — so two overlapping scans add
+		// not an exclusion lock - the folder watcher can start a rescan while
+		// the start-up scan is still running - so two overlapping scans add
 		// into one set of figures.  That is acceptable for a diagnostic, but it
 		// is worth knowing before reading a surprising number.
 		struct ScanTimes {
@@ -1160,7 +1160,7 @@ class MediaStore {
 			// Phase 3 split by what actually read the file: TagLib in this
 			// process against an ffprobe fork.  Summed per file across the
 			// workers, so these are **thread**-microseconds and do not add up
-			// to `meta`, which is the phase's wall clock — with N jobs
+			// to `meta`, which is the phase's wall clock - with N jobs
 			// saturated they approach N times it.  That is the point: the
 			// ratio between them says which half of the library the phase is
 			// actually spent on, which one wall-clock figure covering 25k
@@ -1190,7 +1190,7 @@ class MediaStore {
 		std::unordered_map<std::string, std::chrono::steady_clock::time_point>
 			last_access_seen_;
 
-		// How wide Phase 3 of a scan runs — the TagLib and ffprobe reads,
+		// How wide Phase 3 of a scan runs - the TagLib and ffprobe reads,
 		// which measured 80% of a cold scan.
 		//
 		// Derived from the core count when the caller passes 0, but **capped
@@ -1211,7 +1211,7 @@ class MediaStore {
 		// Converted WebVTT, kept because producing it is not cheap: ffmpeg has
 		// to demux the whole container to collect one subtitle stream, which on
 		// a feature-length mkv is seconds, and getCaptions is asked for the
-		// same track repeatedly — by a <track> element that reloads on every
+		// same track repeatedly - by a <track> element that reloads on every
 		// transcoded seek, and by a Chromecast that fetches it the moment the
 		// viewer turns captions on and would give up long before a cold
 		// conversion finished.
@@ -1220,7 +1220,7 @@ class MediaStore {
 		// file is tens of kilobytes, it is derived data that costs one ffmpeg
 		// run to rebuild, and a process that has just started has nothing to
 		// serve stale. Keyed on file_modified as well as the id, so re-tagging
-		// or replacing the file invalidates it — the same key TranscodeCache
+		// or replacing the file invalidates it - the same key TranscodeCache
 		// entries carry, for the same reason.
 		//
 		// Bounded because nothing else bounds it: a library has as many
@@ -1290,7 +1290,7 @@ class MediaStore {
 		// file directly in a root is an album in exactly the way a loose file
 		// in a section is, and the copy this replaced in scan_root_files()
 		// quietly skipped apply_album_video_name() and the year and genre
-		// roll-ups — so a film in a flat library was the one film that never
+		// roll-ups - so a film in a flat library was the one film that never
 		// got its parsed title.
 		void commit_album(const AlbumReadData& adat, int parent_folder_id,
 		                   int artist_id,

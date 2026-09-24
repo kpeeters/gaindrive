@@ -39,7 +39,7 @@ data class Chapter(
 	 * Derived by the server, which is the only side that knows the item's own
 	 * length. **0** when that span is not positive, which is what a marker past
 	 * the end of the file gives and what two markers on one timestamp give.
-	 * Neither is an error — a hand-typed file is allowed to be wrong.
+	 * Neither is an error - a hand-typed file is allowed to be wrong.
 	 */
 	val duration: Int,
 	/** The title on that line, which may be empty. See [displayName]. */
@@ -73,7 +73,7 @@ enum class ChapterSource {
 	/**
 	 * Read out of the container itself, which is reachable for a video only.
 	 * Worth telling the reader, because such a list is **not** in the scan's
-	 * index and so does not appear in the album listing — see `ISSUES.md`.
+	 * index and so does not appear in the album listing.
 	 */
 	CONTAINER,
 
@@ -100,9 +100,9 @@ data class SongChapters(
  * A marker whose title matched a search.
  *
  * A different shape from [Chapter] rather than the same one with holes, and the
- * difference is not merely a missing field. A search hit *is* its own context —
+ * difference is not merely a missing field. A search hit *is* its own context -
  * it names the recording, the album and the artist, because a marker means
- * nothing without knowing which concert it is in — while a [Chapter] is always
+ * nothing without knowing which concert it is in - while a [Chapter] is always
  * read alongside the item the caller already holds. It also carries no
  * duration, which cannot be known without the rest of the list, so folding the
  * two together would make `duration == 0` mean "no next marker" in one case and
@@ -139,8 +139,8 @@ private fun chapterLabel(name: String, index: Int): String =
  * A marker counts as reached slightly early.
  *
  * Without the tolerance, seeking to a marker frequently lands a few
- * milliseconds short of it — the player rounds, and a re-encoded stream starts
- * at the nearest keyframe — so the list would highlight the *previous* song for
+ * milliseconds short of it - the player rounds, and a re-encoded stream starts
+ * at the nearest keyframe - so the list would highlight the *previous* song for
  * a moment after jumping to one.
  */
 const val CHAPTER_TOLERANCE_MS = 250L
@@ -169,7 +169,7 @@ fun List<Chapter>.nextAfter(positionMs: Long): Chapter? =
 /**
  * Where "previous chapter" should seek to from [positionMs].
  *
- * The start of the chapter being played, unless we are already at it — and 0
+ * The start of the chapter being played, unless we are already at it - and 0
  * when nothing has started yet, so the control is never inert.
  */
 fun List<Chapter>.previousTargetMs(positionMs: Long): Long {

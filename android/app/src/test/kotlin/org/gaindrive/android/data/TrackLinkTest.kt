@@ -8,7 +8,7 @@ import org.junit.Test
 
 /**
  * The URIs the server's chooser page actually composes, plus the shapes a
- * hostile or confused sender could put in a VIEW intent — the filter admits
+ * hostile or confused sender could put in a VIEW intent - the filter admits
  * anything under the scheme, so the parser is the boundary.
  */
 class TrackLinkTest {

@@ -10,7 +10,7 @@ import Foundation
 
 /// Settings that are not about any one server.
 ///
-/// Deliberately Foundation-only — the mapping from `ThemeMode` to SwiftUI's
+/// Deliberately Foundation-only - the mapping from `ThemeMode` to SwiftUI's
 /// `ColorScheme` lives in the UI layer, so the dependency direction stays
 /// `UI → Data → Net`.
 @MainActor
@@ -20,7 +20,7 @@ final class SettingsStore {
 		didSet { defaults.set(themeMode.rawValue, forKey: Self.themeKey) }
 	}
 
-	/// The browse scope, as `BrowseScope.stored` — a server's UUID or the
+	/// The browse scope, as `BrowseScope.stored` - a server's UUID or the
 	/// `"all"` sentinel. Kept as a string rather than as a `BrowseScope`
 	/// because resolving it needs the current server list, which this type
 	/// deliberately knows nothing about. `ServerSelection` does the resolving.
@@ -29,21 +29,21 @@ final class SettingsStore {
 	}
 
 	/// **On by default here, off by default on Android.** The two apps
-	/// genuinely differ: `ios/PLAN.md` says "Albums merge, on by default" and
+	/// genuinely differ: merging is on by default here, and
 	/// `android/data/Merge.kt` says the opposite. Recorded so the next reader
 	/// does not "fix" one of them into agreement.
 	var mergeDuplicateAlbums: Bool {
 		didSet { defaults.set(mergeDuplicateAlbums, forKey: Self.mergeAlbumsKey) }
 	}
 
-	/// One global quality, capped per track by *that track's* account ceiling —
+	/// One global quality, capped per track by *that track's* account ceiling -
 	/// a queue spanning servers crosses caps at every boundary, so this is
 	/// deliberately not per server.
 	var audioQuality: AudioQuality {
 		didSet { defaults.set(audioQuality.tag, forKey: Self.audioQualityKey) }
 	}
 
-	/// Stored music only — no server is contacted at all.
+	/// Stored music only - no server is contacted at all.
 	///
 	/// **A mode, not a display filter.** The repository skips the request
 	/// rather than making it and hiding the answer: a manual offline mode on a
@@ -60,7 +60,7 @@ final class SettingsStore {
 	/// Album order, **per library section**, so films can sit A–Z while a
 	/// musician's albums stay chronological. A single global setting would
 	/// make one of those two wrong every time the other was set. The caller
-	/// names the section it drilled in from — this used to key on a stored
+	/// names the section it drilled in from - this used to key on a stored
 	/// "current mode", which could disagree with the listing on screen.
 	private(set) var albumSorts: [String: String] {
 		didSet { defaults.set(albumSorts, forKey: Self.albumSortsKey) }
@@ -76,7 +76,7 @@ final class SettingsStore {
 
 	/// How much downloaded audio may sit on the device.
 	///
-	/// **A ceiling on a refusal, not on an evictor** — for now. Nothing here is
+	/// **A ceiling on a refusal, not on an evictor** - for now. Nothing here is
 	/// cached-on-play yet, so everything stored was explicitly asked for and
 	/// nothing may be reclaimed; pinning past the cap is refused instead. When
 	/// cache-on-play arrives this becomes the evictor's bound as well, and the
@@ -119,13 +119,13 @@ final class SettingsStore {
 		// the opposite of what is intended.
 		mergeDuplicateAlbums =
 			defaults.object(forKey: Self.mergeAlbumsKey) as? Bool ?? true
-		// Stored as the tag so it is a single value — a format and a bitrate
+		// Stored as the tag so it is a single value - a format and a bitrate
 		// that could disagree would be two settings pretending to be one.
 		audioQuality =
 			defaults.string(forKey: Self.audioQualityKey).flatMap(AudioQuality.parse) ?? .default
 		albumSorts = defaults.dictionary(forKey: Self.albumSortsKey) as? [String: String] ?? [:]
 		// `double(forKey:)` answers 0 for an absent key, which would be a cap
-		// of nothing rather than the default — the same trap the merge switch
+		// of nothing rather than the default - the same trap the merge switch
 		// above avoids with `object(forKey:)`.
 		offlineMode = defaults.bool(forKey: Self.offlineKey)
 		let storedCap = defaults.object(forKey: Self.cacheCapKey) as? Double

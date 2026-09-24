@@ -11,7 +11,7 @@ import Foundation
 /// Where a receiver is, in the form something can connect to.
 ///
 /// Two cases because there are two ways to learn about a device, and
-/// Network.framework takes either directly — **a discovered one needs no
+/// Network.framework takes either directly - **a discovered one needs no
 /// resolution step at all**, which is most of what this port saves over
 /// Android's. There, `NsdManager.resolveService` cannot be called concurrently,
 /// so `CastDiscovery` carries a serialised resolve queue, a five-second timeout
@@ -24,12 +24,12 @@ enum CastEndpoint: Hashable, Sendable, Codable {
 
 /// A Cast receiver on the network.
 ///
-/// `model` is the mDNS `md` record — the model name the receiver announces for
+/// `model` is the mDNS `md` record - the model name the receiver announces for
 /// itself, `Chromecast` or `WiiM Pro` or a television's marketing name. It is
 /// nil for a manually added device, which has no announcement to read.
 struct CastDevice: Identifiable, Hashable, Sendable {
 	/// The Cast id from the `id` TXT record, or `manual:<address>:<port>` for a
-	/// configured one — **derived rather than random**, and spelled exactly as
+	/// configured one - **derived rather than random**, and spelled exactly as
 	/// the server spells it in `listCastDevices`, so the two describe the same
 	/// device by the same name.
 	let id: String
@@ -39,17 +39,16 @@ struct CastDevice: Identifiable, Hashable, Sendable {
 	/// Whether the device can show a picture, from **bit 0 of the `ca` record**.
 	///
 	/// `nil` means it announced nothing, which is every manually added device.
-	/// The server treats that as *true* — refusing the picture on a guess is
-	/// worse than the guess — and so must anything here that acts on it.
+	/// The server treats that as *true* - refusing the picture on a guess is
+	/// worse than the guess - and so must anything here that acts on it.
 	///
 	/// `CastEngine` acts on it: a film going to a device with no screen is sent
 	/// as its **soundtrack** instead, which is what the server does with the
-	/// same bit — see "Casting a video to a receiver that cannot show one" in
-	/// the root `CLAUDE.md`. What that prevents is not a lost picture but a
+	/// same bit. What that prevents is not a lost picture but a
 	/// receiver that fetches a film it cannot decode, resets, and asks again,
 	/// for as long as the session stands.
 	var videoOut: Bool? = nil
-	/// Filled in once something has actually connected — `NWBrowser` reports a
+	/// Filled in once something has actually connected - `NWBrowser` reports a
 	/// service, not an address. It is diagnostic rather than functional: nothing
 	/// connects by it, but "which box did I just reach" is the question a device
 	/// that half-works raises, and nothing else can answer it.
@@ -93,7 +92,7 @@ struct CastStatus: Hashable, Sendable {
 	///
 	/// **Optional, and nil is not empty.** The receiver states this when the
 	/// selection changes and omits it from the position pushes in between,
-	/// exactly as it does with `duration` — so reading an absent field as "none
+	/// exactly as it does with `duration` - so reading an absent field as "none
 	/// selected" would make a caption picker's tick flicker off once a second.
 	/// The session carries the last stated value forward. An empty array *is* a
 	/// statement, and it means subtitles were turned off.
@@ -126,8 +125,8 @@ struct CastStatus: Hashable, Sendable {
 		return CastStatus(
 			playerState: CastPlayerState.from(entry.string("playerState")),
 			currentTime: entry.number("currentTime") ?? 0,
-			// A push during playback omits `media` entirely — the receiver only
-			// repeats it when the item changes — so a zero here means "not
+			// A push during playback omits `media` entirely - the receiver only
+			// repeats it when the item changes - so a zero here means "not
 			// stated", not "zero seconds", and the session carries the last
 			// known value forward.
 			duration: entry.object("media")?.number("duration") ?? 0,
@@ -151,8 +150,8 @@ struct CastStatus: Hashable, Sendable {
 	/// **Matched on `appId` rather than taken as the first entry, which is a fix
 	/// and not a refinement.**
 	///
-	/// A television that has been sitting idle is running its own ambient app —
-	/// `E8C28D3C`, "Backdrop" — and it publishes a `transportId` like any
+	/// A television that has been sitting idle is running its own ambient app -
+	/// `E8C28D3C`, "Backdrop" - and it publishes a `transportId` like any
 	/// other. Taking the first one makes that look like a media receiver ready
 	/// to be loaded into, so the LOAD goes to a screensaver, which ignores the
 	/// media namespace entirely: no `MEDIA_STATUS`, no fetch, no error, and
@@ -175,7 +174,7 @@ struct CastStatus: Hashable, Sendable {
 //	── Reading JSON somebody else wrote ────────────────────────────────────────
 //
 //	`JSONSerialization` rather than `Codable`, because these messages are
-//	heterogeneous and only ever read a field at a time — a `Decodable` shape per
+//	heterogeneous and only ever read a field at a time - a `Decodable` shape per
 //	message type would be a dozen structs to reach six values. Every accessor
 //	answers nil rather than throwing, which is the whole point.
 
@@ -199,7 +198,7 @@ extension Dictionary where Key == String, Value == Any {
 	}
 
 	func number(_ key: String) -> Double? {
-		// A JSON number arrives as `NSNumber`, which bridges to `Double` — but
+		// A JSON number arrives as `NSNumber`, which bridges to `Double` - but
 		// so does a JSON *boolean*, so `true` would read as 1. Nothing here
 		// wants a number where a bool may appear, and being explicit costs
 		// nothing.

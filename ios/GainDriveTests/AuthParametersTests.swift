@@ -15,7 +15,7 @@ import Testing
 /// The test that proves the security property, so it asserts on the outgoing
 /// URL rather than on an object.
 ///
-/// `PLAN.md` expected this to need `URLProtocol` stubbing or a loopback
+/// This was expected to need `URLProtocol` stubbing or a loopback
 /// server. It does not, and the reason is a real difference from Android: there
 /// the parameters are added by an OkHttp interceptor, which can only be
 /// observed by making a request. Here `SubsonicClient.url` is a pure function
@@ -51,7 +51,7 @@ struct AuthParametersTests {
 	}
 
 	/// The whole point of the token scheme is defeated the moment a plaintext
-	/// password reaches a URL — where it would land in logs, in image-cache
+	/// password reaches a URL - where it would land in logs, in image-cache
 	/// keys and in the media stack.
 	@Test func neverSendsThePlaintextPassword() {
 		let url = client(password: "hunter2").url("getUser", parameters: ["username": "admin"])
@@ -90,7 +90,7 @@ struct AuthParametersTests {
 	}
 
 	/// `URLComponents` leaves `+` alone because it is legal in a query string,
-	/// but a form decoder reads it as a space — so `me+music@example.com`
+	/// but a form decoder reads it as a space - so `me+music@example.com`
 	/// would arrive as `me music@example.com`.
 	@Test func escapesPlusInValues() {
 		let url = client(username: "me+music@example.com").url("ping")
@@ -106,8 +106,8 @@ struct AuthParametersTests {
 		#expect(client().url("hls", suffix: ".m3u8").path() == "/rest/hls.m3u8")
 	}
 
-	/// A base URL with a path of its own — a server behind a reverse proxy at
-	/// /music — must keep it.
+	/// A base URL with a path of its own - a server behind a reverse proxy at
+	/// /music - must keep it.
 	@Test func preservesABasePath() {
 		let nested = SubsonicClient(
 			serverId: ServerId(),
@@ -117,7 +117,7 @@ struct AuthParametersTests {
 		#expect(nested.url("ping").path() == "/music/rest/ping.view")
 	}
 
-	/// Same logical request, same URL — which is what a URL-keyed cache needs,
+	/// Same logical request, same URL - which is what a URL-keyed cache needs,
 	/// and what a dictionary's iteration order does not give you.
 	@Test func parameterOrderIsDeterministic() {
 		let one = client(salt: "00").url("getAlbum", parameters: ["id": "7", "size": "64"])

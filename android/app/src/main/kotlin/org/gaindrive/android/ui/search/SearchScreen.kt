@@ -154,7 +154,7 @@ fun SearchScreen(
 				) {
 					if (current.results.isEmpty) {
 						// Not "nothing matched" while servers are still
-						// answering — that would be a claim we cannot make yet.
+						// answering - that would be a claim we cannot make yet.
 						if (current.outstanding) {
 							EmptyMessage("Searching…")
 						} else if (LocalAvailability.current.online) {
@@ -225,7 +225,7 @@ private fun SearchHeader(
 				singleLine = true,
 				keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
 				// Results are already live as you type, so the Search key has
-				// nothing to submit — its useful job is getting the keyboard
+				// nothing to submit - its useful job is getting the keyboard
 				// out of the way of them.
 				keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
 				modifier = Modifier
@@ -254,7 +254,7 @@ private fun SearchHeader(
 				)
 				Spacer(modifier = Modifier.weight(1f))
 				// Search has no app bar of its own, so the scope lives with the
-				// filters — it is one more thing narrowing what comes back.
+				// filters - it is one more thing narrowing what comes back.
 				LibrarySelector(
 					servers = servers,
 					scope = scope,

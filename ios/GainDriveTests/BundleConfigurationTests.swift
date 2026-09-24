@@ -32,8 +32,8 @@ struct BundleConfigurationTests {
 	/// **Exactly, not merely containing.** Casting adds none: a direct cast
 	/// keeps playing when the app is suspended because the receiver pulls from
 	/// the server itself, and keeping a silent audio session alive to hold the
-	/// app awake is fragile and a review risk. If this ever needs to change, the
-	/// reasoning in `PLAN.md` has to change with it.
+	/// app awake is fragile and a review risk. If this ever needs to change,
+	/// that reasoning has to change with it.
 	@Test func backgroundAudioIsDeclared() {
 		let modes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String]
 		#expect(modes == ["audio"])
@@ -41,7 +41,7 @@ struct BundleConfigurationTests {
 
 	/// Browsing for Cast receivers finds nothing and reports no error when the
 	/// service is not declared, which is indistinguishable from a network with
-	/// no receivers on it — so the spelling is asserted rather than trusted.
+	/// no receivers on it - so the spelling is asserted rather than trusted.
 	@Test func castBonjourServiceIsDeclared() {
 		let services = Bundle.main.object(forInfoDictionaryKey: "NSBonjourServices") as? [String]
 		#expect(services?.contains(CastDiscovery.serviceType) == true)

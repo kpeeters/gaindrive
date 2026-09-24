@@ -21,7 +21,7 @@ object DatabaseModule {
 	fun database(@ApplicationContext context: Context): GainDriveDatabase =
 		Room.databaseBuilder(context, GainDriveDatabase::class.java, "library.db")
 			// A mirror is rebuilt by browsing, so throwing it away on a schema
-			// change costs nothing but the next few requests — far less than
+			// change costs nothing but the next few requests - far less than
 			// hand-writing migrations for a cache would. dropAllTables because
 			// nothing in this database is worth more than the tables Room
 			// knows about; keeping unknown ones would only preserve debris.

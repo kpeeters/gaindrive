@@ -38,11 +38,11 @@ void GainDrive::routes_fetch()
 	// table and runs whatever tool that handler names.
 	//
 	// **A URL matching no handler is refused, and that refusal is the security
-	// boundary** — see urlfetch.hh. There is no fallback handler, and adding one
+	// boundary** - see urlfetch.hh. There is no fallback handler, and adding one
 	// would turn any account allowed to upload into a way of making the server
 	// issue arbitrary outbound requests from inside the network.
 
-	// getUrlHandlers — what this server can fetch. Any account that may upload
+	// getUrlHandlers - what this server can fetch. Any account that may upload
 	// can ask; an empty list is what a client keys "do not offer the row" on,
 	// which is what makes an install with no yt-dlp simply not show it.
 	//
@@ -82,7 +82,7 @@ void GainDrive::routes_fetch()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// fetchUrl — queue a fetch. Params: url, mode (audio|video, default audio).
+	// fetchUrl - queue a fetch. Params: url, mode (audio|video, default audio).
 	// Returns at once with a job id; getFetchJobs reports on it.
 	server_.Get("/rest/fetchUrl.view", [this](const httplib::Request& req,
 	                                           httplib::Response& res) {
@@ -131,7 +131,7 @@ void GainDrive::routes_fetch()
 		// be refused for the URL should say so rather than complain about a
 		// name it would never have used.
 		//
-		// Blank — absent, or nothing but whitespace — means "keep whatever the
+		// Blank - absent, or nothing but whitespace - means "keep whatever the
 		// handler chose", so a client can send both fields unconditionally. A
 		// name that is *not* blank but sanitises away to nothing was typed and
 		// is wrong; moveAlbum answers the identical question the same way,
@@ -173,7 +173,7 @@ void GainDrive::routes_fetch()
 		{
 		std::lock_guard<std::mutex> lk(fetch_mu_);
 		// The same URL twice is a double-click, not two wants. Two batches of
-		// one video is the outcome without this — the same reason the portrait
+		// one video is the outcome without this - the same reason the portrait
 		// worker keeps a queued set.
 		for (const auto& j : fetch_jobs_)
 			if (j.user == uname && j.url == url
@@ -220,7 +220,7 @@ void GainDrive::routes_fetch()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getFetchJobs — the caller's own jobs, newest first. Admins see their own
+	// getFetchJobs - the caller's own jobs, newest first. Admins see their own
 	// too and not everyone else's: this is a progress display, not an audit log.
 	server_.Get("/rest/getFetchJobs.view", [this](const httplib::Request& req,
 	                                                httplib::Response& res) {
@@ -237,7 +237,7 @@ void GainDrive::routes_fetch()
 		}
 		// Scrubbed on the way out rather than on the way in: the stored url is
 		// what gets fetched and must stay byte-exact, while what leaves here is
-		// serialised — and a percent-decoded query parameter is arbitrary
+		// serialised - and a percent-decoded query parameter is arbitrary
 		// bytes. See utf8_clean.
 		//
 		// artist and album are absent from this list on purpose. They were
@@ -297,7 +297,7 @@ void GainDrive::routes_fetch()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// cancelFetch — stop a queued or running fetch. Param: id.
+	// cancelFetch - stop a queued or running fetch. Param: id.
 	//
 	// The ownership check is not a formality: without it any account that may
 	// upload could cancel anybody else's fetch by guessing nothing at all, since
@@ -369,13 +369,13 @@ void GainDrive::scan_batch(const std::string& rel_batch,
 		reorganise_by_tags(dest);
 		// The typed artist doubles as the fallback, so a stray file is filed
 		// under it directly rather than under the handler's name and renamed a
-		// moment later. Cosmetic — the rename below would fix it either way —
+		// moment later. Cosmetic - the rename below would fix it either way -
 		// but it makes the log read sanely.
 		reparent_loose_media(dest, artist_override.empty() ? fallback_artist
 		                                                   : artist_override);
 		apply_batch_names(dest, artist_override, album_override);
 
-		// One entry per artist directory, so artist names — not the UUID — are
+		// One entry per artist directory, so artist names - not the UUID - are
 		// what appears as a top-level entry in personal mode. Which batch each
 		// one ends up in is the fold's answer, not this batch's: an artist the
 		// user already has under some earlier batch is merged into it, so the
@@ -416,7 +416,7 @@ std::string GainDrive::sanitise_detail(const std::string& line,
                                        const std::filesystem::path& dest,
                                        const std::string& rel_batch) const
 	{
-	// A tool announces the file it is writing, absolutely — "[download]
+	// A tool announces the file it is writing, absolutely - "[download]
 	// Destination: /srv/uploads/alice/9c3a…/Artist/Album/Track.opus". Root
 	// paths are private to MediaStore and are never surfaced in an API
 	// response, so the batch's absolute path becomes its stored form and
@@ -436,7 +436,7 @@ std::string GainDrive::sanitise_detail(const std::string& line,
 	// looks absolute is replaced.
 	//
 	// Matched as a whole token beginning with '/', not merely as a line
-	// containing one — "[download] 42% of 5.00MiB at 1.00MiB/s" is the most
+	// containing one - "[download] 42% of 5.00MiB at 1.00MiB/s" is the most
 	// common line there is, and truncating it at the first slash would throw
 	// away the part worth showing.
 	std::string out;
@@ -456,7 +456,7 @@ std::string GainDrive::sanitise_detail(const std::string& line,
 //
 // Serialised deliberately: a fetch is bandwidth- and CPU-heavy (a merge runs
 // ffmpeg), and one running job is also what makes the progress reporting
-// unambiguous — UrlFetcher tracks a single child, which is what cancel() names.
+// unambiguous - UrlFetcher tracks a single child, which is what cancel() names.
 void GainDrive::fetch_worker()
 	{
 	namespace fs = std::filesystem;
@@ -559,7 +559,7 @@ void GainDrive::fetch_worker()
 						break;
 						}
 				}
-				// Synchronously, and only then "done" — this is already a
+				// Synchronously, and only then "done" - this is already a
 				// background thread, so there is nothing to gain by detaching
 				// and everything to gain by "done" meaning the library is
 				// actually correct. The client re-renders rather than guessing.

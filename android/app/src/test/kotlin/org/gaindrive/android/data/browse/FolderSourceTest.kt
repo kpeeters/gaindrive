@@ -23,7 +23,7 @@ import retrofit2.Retrofit
  * Reading the hierarchy through the folder endpoints.
  *
  * Driven against a real Retrofit and the production parser, the same harness
- * `BrowseApiTest` uses — which is why [BrowseSource] takes [SubsonicApi] rather
+ * `BrowseApiTest` uses - which is why [BrowseSource] takes [SubsonicApi] rather
  * than the client wrapping it: there is no mocking library in this project, and
  * none is needed.
  */
@@ -60,8 +60,8 @@ class FolderSourceTest {
 	 * were queued.
 	 *
 	 * MockWebServer's default dispatcher is FIFO, so a caller that fetches
-	 * concurrently — [FolderSource.albumDetail] does, one request per disc
-	 * folder — can be handed the body belonging to the other request. That is a
+	 * concurrently - [FolderSource.albumDetail] does, one request per disc
+	 * folder - can be handed the body belonging to the other request. That is a
 	 * coin flip, not a test. Setting a dispatcher replaces the queue, but
 	 * [setUp] builds a fresh server per test, so the sequential tests above keep
 	 * their [respond].
@@ -131,7 +131,7 @@ class FolderSourceTest {
 	@Test
 	fun `an album directory of subfolders is flattened into discs`() = runTest {
 		// The two disc folders are fetched concurrently, so the mock has to
-		// answer by id — see respondById.
+		// answer by id - see respondById.
 		respondById(
 			mapOf(
 				// The album folder: two discs and no tracks of its own.
@@ -190,13 +190,13 @@ class FolderSourceTest {
 		)
 		val detail = FolderSource.albumDetail(api, ref("77"))!!
 		assertEquals(listOf("Black Cow"), detail.songs.map { it.title })
-		// One request only — nothing went looking inside "Scans".
+		// One request only - nothing went looking inside "Scans".
 		assertEquals(1, server.requestCount)
 	}
 
 	/**
-	 * A reference from the tag hierarchy — the mirror written before the switch
-	 * was flipped, or a starred album — still opens.
+	 * A reference from the tag hierarchy - the mirror written before the switch
+	 * was flipped, or a starred album - still opens.
 	 */
 	@Test
 	fun `a directory that is not found falls back to getAlbum`() = runTest {

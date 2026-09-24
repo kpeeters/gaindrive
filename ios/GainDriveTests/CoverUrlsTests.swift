@@ -53,7 +53,7 @@ struct CoverUrlsTests {
 	///
 	/// The salt is regenerated every session, so the URL differs between two
 	/// runs for the same bytes. The key must not, or the cache misses on every
-	/// cold start — which is the entire reason `ImageStore` exists rather than
+	/// cold start - which is the entire reason `ImageStore` exists rather than
 	/// a URL-keyed loader.
 	@Test func theCacheKeyDoesNotContainTheSalt() throws {
 		let first = try #require(urls(salt: "aaaa").source(ItemRef(server: server, id: "42"), size: 144))
@@ -64,7 +64,7 @@ struct CoverUrlsTests {
 		#expect(!first.cacheKey.contains("aaaa"))
 	}
 
-	/// Size is part of the key, so a thumbnail and a hero are two entries — and
+	/// Size is part of the key, so a thumbnail and a hero are two entries - and
 	/// asking for a different size each time would be a cache that never hits.
 	@Test func theCacheKeyVariesBySizeAndIndex() throws {
 		let ref = ItemRef(server: server, id: "42")

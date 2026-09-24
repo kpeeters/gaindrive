@@ -36,7 +36,7 @@ enum class Availability {
  * The two levels deliberately speak the same language: [Pinned] is the tick
  * (and, before it, the ring) a track gets for being asked for, [StoredOnly] is
  * the quieter dot for being here anyway. Null is not "no", it is "nothing to
- * say" — which is also the answer for a collection never opened, whose tracks
+ * say" - which is also the answer for a collection never opened, whose tracks
  * the mirror does not know.
  */
 sealed interface ContainerMark {
@@ -53,7 +53,7 @@ data class AvailabilityState(
 	val pinnedKeys: Set<String> = emptySet(),
 	/**
 	 * Offline because the user said so, rather than because there is no signal.
-	 * Only the banner cares — everything else treats the two the same.
+	 * Only the banner cares - everything else treats the two the same.
 	 */
 	val offlineByChoice: Boolean = false,
 	/** Tracks being fetched right now, keyed by encoded ref. */
@@ -103,7 +103,7 @@ data class AvailabilityState(
 	 * Worth its own mark rather than none at all: it is the difference between
 	 * a track that will play offline and one that will not, which is exactly
 	 * what someone about to lose signal wants to see. It is a weaker promise
-	 * than [isDownloaded] though — eviction may reclaim it — so the two do not
+	 * than [isDownloaded] though - eviction may reclaim it - so the two do not
 	 * share a symbol.
 	 */
 	fun isCachedOnly(ref: ItemRef): Boolean {

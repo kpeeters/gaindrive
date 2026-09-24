@@ -8,7 +8,7 @@ import org.junit.Test
 /**
  * Which side does what, and which way is up.
  *
- * Both are wrong silently rather than loudly — a swapped pair of zones is a
+ * Both are wrong silently rather than loudly - a swapped pair of zones is a
  * player where the volume dims the screen, an inverted sign is one where
  * swiping up turns the sound down, and neither crashes, logs or fails to
  * compile. They are also the only part of the gesture that can be reached from
@@ -35,7 +35,7 @@ class VideoGestureMathTest {
 	}
 
 	/**
-	 * The outer margin belongs to the system's back gesture, on both edges —
+	 * The outer margin belongs to the system's back gesture, on both edges -
 	 * the trailing one carries it too from Android 10.
 	 */
 	@Test

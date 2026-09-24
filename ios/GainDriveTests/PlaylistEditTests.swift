@@ -12,7 +12,7 @@ import Testing
 @testable import GainDrive
 
 /// The endpoints whose parameter names and ordering are traps, asserted on the
-/// outgoing URL — the same style as `AuthParametersTests`, and for the same
+/// outgoing URL - the same style as `AuthParametersTests`, and for the same
 /// reason: `SubsonicClient.url` is a pure function, so its output *is* the
 /// request.
 struct PlaylistEditTests {
@@ -73,7 +73,7 @@ struct PlaylistEditTests {
 	}
 
 	/// The parameter *name* selects the kind, and the wrong one silently stars
-	/// nothing — the server ignores an id it cannot resolve rather than
+	/// nothing - the server ignores an id it cannot resolve rather than
 	/// answering an error.
 	@Test func starNamesTheParameterByKind() {
 		let song = client.url("star", items: [URLQueryItem(name: "id", value: "3")])
@@ -88,7 +88,7 @@ struct PlaylistEditTests {
 		#expect(values(artist, "artistId") == ["1"])
 	}
 
-	/// The auth parameters still arrive, and the password still does not — the
+	/// The auth parameters still arrive, and the password still does not - the
 	/// query-item overload must not have opened a hole in what phase 1 proved.
 	@Test func theItemOverloadStillCarriesAuth() {
 		let url = client.url("updatePlaylist", items: [URLQueryItem(name: "playlistId", value: "7")])

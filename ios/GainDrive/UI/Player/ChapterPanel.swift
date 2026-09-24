@@ -27,7 +27,7 @@ struct ChapterPanel: View {
 			rows
 			// The one thing the source is worth saying out loud: these markers
 			// are inside the file rather than in a sidecar beside it, which is
-			// also why they do not appear in the album listing — that reads the
+			// also why they do not appear in the album listing - that reads the
 			// scan's index, and only sidecars are indexed.
 			if list.source == .container {
 				Divider()
@@ -79,7 +79,7 @@ struct ChapterPanel: View {
 	/// **The position the two step buttons work from is the marker's own
 	/// start**, not the player's clock, and that is deliberate: this view is
 	/// handed `currentIndex` rather than a live position, so it cannot read one
-	/// — and it must not, or the panel would redraw twice a second while it is
+	/// - and it must not, or the panel would redraw twice a second while it is
 	/// being scrolled. Stepping from the start of the marker being played gives
 	/// the same answer everywhere except within `chapterRestartWindow` of it,
 	/// where "previous" would restart the marker instead of leaving it; that is
@@ -91,7 +91,7 @@ struct ChapterPanel: View {
 	private var rows: some View {
 		ScrollViewReader { proxy in
 			// Enumerated because "which one is playing" is a *position* in the
-			// list, while `index` is the server's own numbering — which is the
+			// list, while `index` is the server's own numbering - which is the
 			// same thing today and need not be if a list ever arrives with a
 			// gap in it.
 			List(Array(list.chapters.enumerated()), id: \.element.index) { entry in

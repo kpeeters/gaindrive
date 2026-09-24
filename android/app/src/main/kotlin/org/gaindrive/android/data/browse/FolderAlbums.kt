@@ -10,7 +10,7 @@ import org.gaindrive.android.net.SongDto
  */
 
 /**
- * Past this many subdirectories the thing being listed is not an album — it is
+ * Past this many subdirectories the thing being listed is not an album - it is
  * a library root someone navigated into. Recursing over all of it would fire a
  * request per entry to build a track list nobody wants.
  */
@@ -42,7 +42,7 @@ val DISC_ORDER: Comparator<SongDto> = compareBy { naturalKey(it.title) }
  *   the same number and `season` only decides whether the group is headed
  *   "Series 2" or "Disc 2", so synthesising one would label a two-CD album a
  *   television series. Keeping it where it was already unanimous preserves a
- *   real series read through folders — including a show with an unnumbered
+ *   real series read through folders - including a show with an unnumbered
  *   `Specials` folder, which heads that one group "Disc" and the rest "Series",
  *   exactly as the server does.
  */

@@ -2,13 +2,13 @@
 # std::string_view constants in the embedded:: namespace.
 #
 # Called at build time via add_custom_command; expects:
-#   OUTPUT  — full path to write the generated .cc file
-#   WEB_DIR — directory containing the web files
+#   OUTPUT  - full path to write the generated .cc file
+#   WEB_DIR - directory containing the web files
 
 set(TEXT_FILES index.html link.html style.css app.js theme.js favicon.svg)
 
-# A binary file cannot go in a raw string literal — it contains NUL bytes, and
-# no compiler is obliged to carry those through a source file — so these are
+# A binary file cannot go in a raw string literal - it contains NUL bytes, and
+# no compiler is obliged to carry those through a source file - so these are
 # emitted as byte arrays instead.
 set(BIN_FILES material-symbols-rounded.woff2)
 

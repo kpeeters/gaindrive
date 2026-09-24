@@ -23,7 +23,7 @@ import Foundation
 /// **This type must stay stateless.** It is `Sendable` and deliberately not
 /// isolated to any actor, which is what lets the fan-out run entirely off the
 /// main thread; the moment someone adds a `private var cache`, it stops being
-/// `Sendable` and the fan-out closures stop compiling — with an error that
+/// `Sendable` and the fan-out closures stop compiling - with an error that
 /// reads as being about the closure. Anything that genuinely needs to remember
 /// something gets its own isolation domain.
 final class LibraryRepository: Sendable {
@@ -52,13 +52,13 @@ final class LibraryRepository: Sendable {
 
 	/// **What can be played, walked upwards from what is on disk.**
 	///
-	/// The obvious direction is down — every mirrored album, asked whether any
-	/// of its tracks landed — and it is `O(library)`. This is `O(files you
+	/// The obvious direction is down - every mirrored album, asked whether any
+	/// of its tracks landed - and it is `O(library)`. This is `O(files you
 	/// have)`, which in practice is a few hundred: everything starts
 	/// unavailable and the walk is what enables an album and its artist.
 	///
 	/// An album whose tracks were never mirrored lights up nothing, and that is
-	/// right rather than a gap — it has no stored listing either, so it could
+	/// right rather than a gap - it has no stored listing either, so it could
 	/// not be shown. A track pinned from a playlist whose album was never
 	/// opened is therefore playable from that playlist and absent from the
 	/// artist tree.
@@ -86,16 +86,16 @@ final class LibraryRepository: Sendable {
 	}
 
 	/// The Library screen's merged list: every category folder from every
-	/// `categories` root, and every artist — including all roots of a server
+	/// `categories` root, and every artist - including all roots of a server
 	/// that names no kinds; see `LibraryRoots.listingRequests`.
 	///
-	/// A typed server is asked once per kind it has, concurrently — the halves
+	/// A typed server is asked once per kind it has, concurrently - the halves
 	/// are independent requests against the same session. A kind the server
 	/// lacks is not asked for at all rather than filtered out of an answer:
 	/// one predating library roots ignores an unknown `contentType` and
 	/// answers with its **entire** library, so the request itself is what
 	/// would put the same folders in both groups. If either half fails the
-	/// whole server falls back to its mirror — the same all-or-nothing
+	/// whole server falls back to its mirror - the same all-or-nothing
 	/// failure reporting one request had.
 	func libraryListing(scope: BrowseScope) async -> MergedResult<LibraryListing> {
 		let clients = await registry.clientsSnapshot()
@@ -146,7 +146,7 @@ final class LibraryRepository: Sendable {
 			}
 
 			// The two halves are independent requests against one session, so
-			// they run together — the same shape as Android's `async` pair.
+			// they run together - the same shape as Android's `async` pair.
 			async let categories = fetch(requests.categories, .categories)
 			async let artists = fetch(requests.artists, .artists)
 			return ServerListing(categories: try await categories, artists: try await artists)
@@ -162,7 +162,7 @@ final class LibraryRepository: Sendable {
 			artists: Merge.artistIndexes(perServer: perServer.map(\.artists)))
 	}
 
-	/// The uploads listing — this account's own on every server it may upload
+	/// The uploads listing - this account's own on every server it may upload
 	/// to, or everyone's where it is the admin. A server where it may not
 	/// upload contributes nothing rather than a failure: having no upload
 	/// rights on one server of several is a fact, not an outage. It also
@@ -189,7 +189,7 @@ final class LibraryRepository: Sendable {
 			let facts = await accounts.facts(for: config.id, using: clients)
 			// **Typed, not `[]`.** This closure's return type is inferred, and
 			// an untyped empty literal unifies with the real return below as
-			// `[Any]` — which then fails `gather`'s `Sendable` bound several
+			// `[Any]` - which then fails `gather`'s `Sendable` bound several
 			// lines away, naming neither this line nor the reason.
 			guard facts.canUpload else { return [ArtistIndex]() }
 			let request = LibraryRoots.uploadsRequest(isAdmin: facts.isAdmin)
@@ -205,7 +205,7 @@ final class LibraryRepository: Sendable {
 			// **Not merged by name.** Everywhere else, two servers holding an
 			// artist of the same name are holding the same artist. In uploads
 			// they are two people's folders, and the owner buckets exist to
-			// keep them apart — merging by name would file one person's upload
+			// keep them apart - merging by name would file one person's upload
 			// under another's heading. (A deliberate divergence from Android,
 			// which merges here.)
 			items: Merge.concatenatedIndexes(perServer: gathered.answers.map(\.1)),
@@ -215,7 +215,7 @@ final class LibraryRepository: Sendable {
 	/// Whether the upload icon is worth drawing: some server in `scope` takes
 	/// uploads from this account. Offline the account facts are unreachable,
 	/// so the honest answer is whether some server's uploads listing was ever
-	/// mirrored — an empty stored list still counts, since it was listable.
+	/// mirrored - an empty stored list still counts, since it was listable.
 	func canUpload(scope: BrowseScope) async -> Bool {
 		let clients = await registry.clientsSnapshot()
 		if await offline {
@@ -241,7 +241,7 @@ final class LibraryRepository: Sendable {
 	}
 
 	/// Drops artists the walk did not reach, and buckets that empty as a
-	/// result — a heading over nothing is noise.
+	/// result - a heading over nothing is noise.
 	private static func keepingReachable(
 		_ indexes: [ArtistIndex], artists: Set<ItemRef>
 	) -> [ArtistIndex] {
@@ -258,7 +258,7 @@ final class LibraryRepository: Sendable {
 	///
 	/// A failure propagates rather than resolving to "no roots": that reaches
 	/// the caller's `catch` and is reported as a server that did not answer,
-	/// which is true — whereas an empty list would silently mean "this server
+	/// which is true - whereas an empty list would silently mean "this server
 	/// offers only Artists" and would be indistinguishable from a real answer.
 	private static func rootsOf(
 		_ client: SubsonicClient, _ server: ServerId, cache: MusicRoots
@@ -270,7 +270,7 @@ final class LibraryRepository: Sendable {
 	}
 
 	/// Takes a *list* of refs because a merged artist row stands for the same
-	/// artist on several servers, each with its own id — so the albums screen
+	/// artist on several servers, each with its own id - so the albums screen
 	/// has to ask all of them, not just the one whose row was tapped.
 	func albumsOfArtist(_ refs: [ItemRef]) async -> MergedResult<[Album]> {
 		let clients = await registry.clientsSnapshot()
@@ -294,8 +294,8 @@ final class LibraryRepository: Sendable {
 			// **And anything reachable the list did not mention.** An artist
 			// can be reachable without its album list ever having been
 			// mirrored: reach an album through search or recents and
-			// `storeAlbum` records the way up — which is what puts the artist
-			// on screen — while `storeAlbums` never runs. Building this screen
+			// `storeAlbum` records the way up - which is what puts the artist
+			// on screen - while `storeAlbums` never runs. Building this screen
 			// from the list alone left exactly that artist with no albums.
 			let index = await mirror.availability(for: refs.map(\.server))
 			for albumRef in index.albums(of: Set(refs), within: reach.albums) {
@@ -387,7 +387,7 @@ final class LibraryRepository: Sendable {
 	/// user's finger the moment the second server lands.
 	///
 	/// Unlike Android, which guards the same accumulation with a `Mutex`, the
-	/// results are folded in by a single serial loop — structured concurrency
+	/// results are folded in by a single serial loop - structured concurrency
 	/// is the lock, so there is nothing to hold.
 	func searchProgressively(
 		scope: BrowseScope, query: String, limits: SearchLimits
@@ -447,9 +447,9 @@ final class LibraryRepository: Sendable {
 						case .ok(_, let selection): arrived[index] = selection
 						case .failed(let failure): failed[index] = failure
 						case .recovered(_, let selection, let failure):
-							// Search is not mirrored — a search of a library
+							// Search is not mirrored - a search of a library
 							// you cannot reach is not a question the mirror can
-							// answer — so this cannot arrive today. Handled as
+							// answer - so this cannot arrive today. Handled as
 							// what it *means* rather than ignored, so if search
 							// ever gains a fallback this arm is already right
 							// instead of silently dropping its rows.
@@ -487,7 +487,7 @@ final class LibraryRepository: Sendable {
 				// Not merged across servers the way albums are. Two servers
 				// holding the same concert hold the same *file*, but a marker
 				// is identified by its recording's ref, so collapsing them
-				// would have to pick a server — and the one it dropped might be
+				// would have to pick a server - and the one it dropped might be
 				// the one whose copy is stored on this device.
 				chapters: selections.flatMap(\.chapters)),
 			failures: failures.compactMap { $0 })
@@ -557,7 +557,7 @@ final class LibraryRepository: Sendable {
 	//	Never essential and possibly slow: answering these may send the *server*
 	//	out to MusicBrainz and Wikipedia. They return nil on failure rather than
 	//	throwing, and **must never be awaited before the thing the user asked
-	//	for** — a biography that fails should cost the biography, not the album
+	//	for** - a biography that fails should cost the biography, not the album
 	//	list.
 
 	func artistInfo(_ ref: ItemRef) async -> ArtistInfo? {
@@ -579,7 +579,7 @@ final class LibraryRepository: Sendable {
 	///
 	/// Read from the scan's index rather than from each file, which is what
 	/// makes it affordable on a browse path: `getChapters` per item would be a
-	/// file read — or an `ffprobe` for a video without a sidecar — every time
+	/// file read - or an `ffprobe` for a video without a sidecar - every time
 	/// somebody opens an album. The playback path uses the file instead; see
 	/// `ChapterTracks`.
 	///
@@ -592,7 +592,7 @@ final class LibraryRepository: Sendable {
 		if await offline { return [:] }
 		guard let client = await client(for: ref.server) else { return [:] }
 		guard let found = try? await client.albumChapters(id: ref.id) else { return [:] }
-		// An entry with no markers cannot happen — the server omits those — but
+		// An entry with no markers cannot happen - the server omits those - but
 		// dropping one here is what lets every caller treat "in the map" and
 		// "has chapters" as the same question.
 		return found
@@ -682,14 +682,14 @@ final class LibraryRepository: Sendable {
 	/// Deliberately **not** `Result<T, any Error>`: an existential `Error` is
 	/// not `Sendable`, so a `Result` carrying one cannot cross a task-group
 	/// boundary at all. Converting the error to its user-facing sentence inside
-	/// the child task is what makes the value `Sendable` — and it is the right
+	/// the child task is what makes the value `Sendable` - and it is the right
 	/// place for the conversion anyway.
 	private enum Answer<Value: Sendable>: Sendable {
 		case ok(ServerId, Value)
 		case failed(ServerFailure)
 		/// The server did not answer and the mirror did. **Both halves are
 		/// kept**: the rows so the screen is not blank, and the failure so it
-		/// still says what happened — reworded, not suppressed.
+		/// still says what happened - reworded, not suppressed.
 		case recovered(ServerId, Value, ServerFailure)
 		/// Not a failure. A cancelled branch is the user having moved on, and
 		/// recording it would flash "this server did not answer" over the
@@ -720,10 +720,10 @@ final class LibraryRepository: Sendable {
 		await withTaskGroup(of: Answer<Value>.self) { group in
 			for config in servers {
 				guard let client = clients.client(for: config.id) else {
-					// The configuration is there but the Keychain item is not —
+					// The configuration is there but the Keychain item is not -
 					// what a restore onto a new device looks like when the
 					// password did not travel with it. A different sentence
-					// from "unreachable", on purpose — and one the mirror can
+					// from "unreachable", on purpose - and one the mirror can
 					// still answer around, since the rows were fetched before
 					// the password went missing.
 					group.addTask {
@@ -807,8 +807,8 @@ final class LibraryRepository: Sendable {
 	/// This is the one place Swift and Kotlin differ dangerously. Kotlin's
 	/// `awaitAll()` preserves the input order for free; `for await … in group`
 	/// yields as each child finishes. Taking the group's order would make the
-	/// merge tie-break — and so which server's artwork and index letter a
-	/// merged row takes — depend on which server happened to answer first, and
+	/// merge tie-break - and so which server's artwork and index letter a
+	/// merged row takes - depend on which server happened to answer first, and
 	/// the list would visibly reshuffle whenever one was slow. It looks correct
 	/// in every single-server and every fast-LAN test.
 	private static func assemble<Value: Sendable>(

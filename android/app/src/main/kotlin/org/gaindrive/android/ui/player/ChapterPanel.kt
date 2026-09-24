@@ -111,7 +111,7 @@ fun ChapterPanel(
 
 			// The one thing the source is worth saying out loud: these markers
 			// are inside the file rather than in a sidecar beside it, which is
-			// also why they do not appear in the album listing — that reads the
+			// also why they do not appear in the album listing - that reads the
 			// scan's index, and only sidecars are indexed.
 			if (source == ChapterSource.CONTAINER) {
 				HorizontalDivider()

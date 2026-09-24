@@ -2,7 +2,7 @@
 """Video endpoint tests.
 
 Covers the tier ladder (direct / remux / re-encode), the Child fields that
-mark an entry as video, and the stateless HLS playlist — every segment URL it
+mark an entry as video, and the stateless HLS playlist - every segment URL it
 emits must resolve, because nothing materialises them in advance. The playlist
 answers at three paths and, given a repeated bitRate, as a master playlist.
 
@@ -81,7 +81,7 @@ def _json(endpoint, extra=None):
         return json.loads(body)["subsonic-response"]
     except (json.JSONDecodeError, KeyError):
         # An XML body here almost always means the endpoint fell through to
-        # the catch-all, which ignores f=json — i.e. the running server
+        # the catch-all, which ignores f=json - i.e. the running server
         # predates the build. Look for "NOT IMPLEMENTED" in its log.
         raise AssertionError(
             f"{endpoint} returned HTTP {status} with a non-JSON body: "
@@ -115,7 +115,7 @@ def _video():
 
 def _need_video():
     assert _video(), \
-        "no videos in the library — scan a collection with video first"
+        "no videos in the library - scan a collection with video first"
 
 
 # ---- getVideos --------------------------------------------------------
@@ -133,7 +133,7 @@ def test_get_videos_reports_dimensions():
     _need_video()
     sized = [v for v in _videos()
              if v.get("originalWidth") and v.get("originalHeight")]
-    assert sized, "no video reported originalWidth/originalHeight — ffprobe " \
+    assert sized, "no video reported originalWidth/originalHeight - ffprobe " \
                   "did not run during the scan, or ffprobe is missing"
     print(f"PASS  {len(sized)}/{len(_videos())} videos report their dimensions")
 
@@ -187,7 +187,7 @@ def test_transcoded_tier_returns_video():
                               {"id": _video()["id"], "size": "320x240"})
     assert status == 200, status
     assert hdrs.get("Content-Type") == "video/mp4", hdrs.get("Content-Type")
-    assert len(body) > 0, "empty body — ffmpeg produced nothing"
+    assert len(body) > 0, "empty body - ffmpeg produced nothing"
     print("PASS  a constrained request re-encodes to fragmented mp4")
 
 
@@ -210,8 +210,8 @@ def test_segment_request_returns_mpegts():
 # skip a remux it would otherwise pay.  The audio half of the same parameter is
 # covered by tests/test_playable.py.  What is worth testing here is
 # almost entirely the boundaries: that it never widens the codec test, never
-# beats a constraint, never admits `vob`, and — the one with the worst blast
-# radius — never changes what the browse endpoints advertise, because that is
+# beats a constraint, never admits `vob`, and - the one with the worst blast
+# radius - never changes what the browse endpoints advertise, because that is
 # what a Cast receiver is told it is about to fetch.
 
 
@@ -301,7 +301,7 @@ def test_declared_container_still_honours_constraints():
                                "playable": v["suffix"]})
     assert status == 200, status
     assert hdrs.get("Content-Type") == "video/mp4", hdrs.get("Content-Type")
-    assert len(body) > 0, "empty body — ffmpeg produced nothing"
+    assert len(body) > 0, "empty body - ffmpeg produced nothing"
     print("PASS  a declaration does not beat size=")
 
 
@@ -331,7 +331,7 @@ def test_garbage_declaration_is_ignored():
 #
 # `startImmediately` asks the server not to wait out a whole-file `-c copy`
 # before sending anything: it answers from a fragmented pipe and builds the
-# seekable cache entry beside it.  What is worth testing is the boundaries —
+# seekable cache entry beside it.  What is worth testing is the boundaries -
 # that it touches no other tier, overrides no constraint, changes nothing the
 # API advertises, and is refused for a cast token, which is the one whose
 # failure would only ever show up on somebody's television.
@@ -349,7 +349,7 @@ def test_start_immediately_streams_and_then_caches():
     assert status == 200, status
     assert len(body) > 0, "empty body"
     # Two well-formed answers, and which one arrives depends on whether the
-    # cache happened to be warm — so accept either rather than demanding a
+    # cache happened to be warm - so accept either rather than demanding a
     # cold cache the test cannot arrange.
     state = hdrs.get("X-Gaindrive-Transcode")
     assert state in ("building", "hit", "miss"), state
@@ -359,7 +359,7 @@ def test_start_immediately_streams_and_then_caches():
         # A fragmented MP4: ftyp first, and a moof rather than a moov, which
         # is what distinguishes it from the cache entry's layout.
         assert body[4:8] == b"ftyp", f"not MP4: {body[:12]!r}"
-        assert b"moof" in body[:65536], "no moof — not fragmented"
+        assert b"moof" in body[:65536], "no moof - not fragmented"
     else:
         assert "Content-Length" in hdrs, hdrs
 
@@ -416,7 +416,7 @@ def test_start_immediately_does_not_beat_a_constraint():
                                "startImmediately": "true"})
     assert status == 200, status
     assert hdrs.get("Content-Type") == "video/mp4", hdrs.get("Content-Type")
-    assert len(body) > 0, "empty body — ffmpeg produced nothing"
+    assert len(body) > 0, "empty body - ffmpeg produced nothing"
     print("PASS  startImmediately does not override size=")
 
 
@@ -440,8 +440,8 @@ def test_start_immediately_only_accepts_true():
 # ---- audio only -------------------------------------------------------
 #
 # Naming an audio format for a video asks for its soundtrack alone.  This is
-# not an extension: `format` is an ordinary Subsonic parameter, and VIDEO.md
-# specified the behaviour from the start — the `-vn` the audio path already
+# not an extension: `format` is an ordinary Subsonic parameter, and the
+# behaviour was specified from the start - the `-vn` the audio path already
 # passes *is* the extraction.  What makes it worth having is everything that
 # follows from being ordinary audio: the transcode cache materialises it, so
 # it carries a real Content-Length, answers Range requests, and is a fraction
@@ -457,7 +457,7 @@ def test_audio_format_returns_the_soundtrack():
     assert hdrs.get("Content-Type") == "audio/ogg", hdrs.get("Content-Type")
     # The cache path is the whole point: a piped transcode has no length.
     assert hdrs.get("Content-Length"), \
-        "no Content-Length — the transcode cache did not produce a file"
+        "no Content-Length - the transcode cache did not produce a file"
     assert body[:4] == b"OggS", f"not an Ogg stream: {body[:8]!r}"
     print("PASS  an audio format on a video returns its soundtrack, with a length")
 
@@ -556,7 +556,7 @@ def test_hls_segments_carry_absolute_timestamps():
     -ss before -i rebases the output, so without -output_ts_offset every
     segment starts at PTS 0.  A player seeds its timestamp adjuster from the
     first segment it loads and reuses it, so the second maps to the same
-    instant as the first and the timeline stops advancing — playback stalls
+    instant as the first and the timeline stops advancing - playback stalls
     with no error at all, because bytes keep arriving and nothing has failed.
     """
     _need_video()
@@ -591,7 +591,7 @@ def test_hls_segments_carry_absolute_timestamps():
     gap = later - start
     assert gap > 10.0, (
         f"segments start {gap:.2f}s apart; two segments should be ~20s. "
-        "Timestamps are being rebased to zero — see -output_ts_offset in "
+        "Timestamps are being rebased to zero - see -output_ts_offset in "
         "video_ffmpeg_argv.")
     print(f"PASS  HLS segments advance ({gap:.1f}s across two segments)")
 
@@ -756,7 +756,7 @@ def test_video_fields_agree_across_endpoints():
     """The same file must answer the same way whichever endpoint was asked.
 
     Only four queries used to select video_codec/audio_codec/season, so a video
-    reached through a playlist or a search hit came back with empty codecs —
+    reached through a playlist or a search hit came back with empty codecs -
     reporting nativeSeek: false however seekable it was, advertising a
     transcode that would not happen, and (for a loose file) its section's cover
     instead of its own. The Android app hides its cast button on that flag, so
@@ -771,7 +771,7 @@ def test_video_fields_agree_across_endpoints():
 
     seen = {}
 
-    # search3 — no mutation needed.
+    # search3 - no mutation needed.
     r = _json("search3.view", {"query": v.get("title", ""),
                                "songCount": 500, "artistCount": 0,
                                "albumCount": 0})
@@ -779,7 +779,7 @@ def test_video_fields_agree_across_endpoints():
     if hit is not None:
         seen["search3"] = hit
 
-    # getStarred2 — star it, then leave the star exactly as it was found.
+    # getStarred2 - star it, then leave the star exactly as it was found.
     was_starred = bool(v.get("starred"))
     if not was_starred:
         _json("star.view", {"id": vid})
@@ -829,7 +829,7 @@ def test_direct_video_advertises_no_transcode_from_a_playlist():
     """transcode_target() reads the same codec pair, so it had the same gap.
 
     A directly-playable file advertises no transcodedContentType at all. With
-    the codecs empty it advertised video/mp4 — and the Android app hands that
+    the codecs empty it advertised video/mp4 - and the Android app hands that
     value to a Cast receiver as the LOAD's contentType, so it is not cosmetic.
     """
     _need_video()

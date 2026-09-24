@@ -11,7 +11,7 @@ import SwiftUI
 struct AlbumDetailView: View {
 	let ref: ItemRef
 	let albumTitle: String
-	/// A track to start once the listing has loaded — see `Route.album`.
+	/// A track to start once the listing has loaded - see `Route.album`.
 	var autoPlay: ItemRef?
 	/// Where in that track to start, in seconds. Non-zero for a chapter hit,
 	/// which names a marker inside a recording rather than the recording.
@@ -61,8 +61,8 @@ struct AlbumDetailView: View {
 		// per row. It cannot come from `trackState(of:)`, which answers about a
 		// song: every marker of a playing concert would be current at once.
 		//
-		// **The empty branch is what keeps an album with no chapters — nearly
-		// every album — costing exactly what it did before.** `position` is
+		// **The empty branch is what keeps an album with no chapters - nearly
+		// every album - costing exactly what it did before.** `position` is
 		// never read there, so the twice-a-second tick does not invalidate a
 		// listing that has nothing to highlight. That is the rule
 		// `PlayerConnection` states about `trackState(of:)`, applied to the one
@@ -144,7 +144,7 @@ struct AlbumDetailView: View {
 		let unplayable = settings.offlineMode && !pins.state(for: row.song.ref).isHere
 		return Button {
 			// The album queue, starting at the recording, positioned at the
-			// marker — which is what tapping a song of a concert should mean.
+			// marker - which is what tapping a song of a concert should mean.
 			player.play(detail.songs, startIndex: row.queueIndex, startPosition: chapter.start)
 		} label: {
 			ChapterRow(
@@ -155,7 +155,7 @@ struct AlbumDetailView: View {
 		.disabled(unplayable)
 		.opacity(unplayable ? 0.4 : 1)
 		// The recording's own row is gone, so this is the only way left to
-		// reach its actions — starring the concert, queueing it, downloading it.
+		// reach its actions - starring the concert, queueing it, downloading it.
 		.trackActions(for: row.song)
 	}
 
@@ -172,8 +172,8 @@ struct AlbumDetailView: View {
 	private func header(_ detail: AlbumDetail, model: AlbumDetailViewModel) -> some View {
 		VStack(alignment: .leading, spacing: 12) {
 			if model.heroes.count > 1 {
-				// The extras `getAlbumImages` counted — booklet scans, a back
-				// cover — as a pager rather than a wall of thumbnails.
+				// The extras `getAlbumImages` counted - booklet scans, a back
+				// cover - as a pager rather than a wall of thumbnails.
 				TabView {
 					ForEach(model.heroes, id: \.cacheKey) { CoverHero(source: $0) }
 				}
@@ -202,7 +202,7 @@ struct AlbumDetailView: View {
 
 	/// **`queueIndex` is into the flat `detail.songs`, never into the disc
 	/// slice.** The multi-disc branch renders a grouped slice, and taking the
-	/// slice index would play the wrong track on every disc after the first —
+	/// slice index would play the wrong track on every disc after the first -
 	/// silently, and invisibly to anyone testing with a single-disc album.
 	/// `albumListRows` computes it once, before any grouping, which is what
 	/// makes it right for a marker too.
@@ -210,7 +210,7 @@ struct AlbumDetailView: View {
 		-> some View
 	{
 		// **Dimmed and inert, not hidden.** Inside an album, knowing what is
-		// missing is the useful part — and dropping rows would renumber the
+		// missing is the useful part - and dropping rows would renumber the
 		// record. `android/CACHING.md` draws the same line between a listing,
 		// which shrinks, and a track list, which does not.
 		let unplayable = settings.offlineMode && !pins.state(for: song.ref).isHere

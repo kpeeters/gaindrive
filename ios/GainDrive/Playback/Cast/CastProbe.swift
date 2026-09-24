@@ -17,7 +17,7 @@ import OSLog
 /// away.
 enum CastProbeResult: Equatable, Sendable {
 	/// It spoke Cast. `runningApp` is whatever the television is showing right
-	/// now — often its own ambient app rather than anything of ours — and
+	/// now - often its own ambient app rather than anything of ours - and
 	/// `address` is what the connection actually reached.
 	case answered(runningApp: String?, address: String?)
 	/// Something accepted a TLS connection on the cast port and then said
@@ -25,7 +25,7 @@ enum CastProbeResult: Equatable, Sendable {
 	/// address is live and reachable, but whatever is there is not a Cast
 	/// receiver.
 	case silent
-	/// No control channel at all — wrong address, device off, or blocked.
+	/// No control channel at all - wrong address, device off, or blocked.
 	case unreachable
 }
 
@@ -50,7 +50,7 @@ struct CastProbe: Sendable {
 
 	/// Connect, ask for a receiver status, report what came back.
 	///
-	/// This exercises TCP reachability, the TLS handshake and the Cast framing —
+	/// This exercises TCP reachability, the TLS handshake and the Cast framing -
 	/// which are the three things a wrong address fails at, in that order.
 	func probe(_ device: CastDevice) async -> CastProbeResult {
 		let channel: CastChannel
@@ -65,7 +65,7 @@ struct CastProbe: Sendable {
 		let address = await channel.remoteAddress
 		do {
 			// The virtual connection to the platform must exist before anything
-			// else is accepted — the same order the session's loop uses.
+			// else is accepted - the same order the session's loop uses.
 			try await channel.send(
 				namespace: CastNamespace.connection, destination: CastNamespace.receiverId,
 				payload: #"{"type":"CONNECT"}"#)
@@ -88,7 +88,7 @@ struct CastProbe: Sendable {
 	/// What the receiver said, reduced to the one fact worth reporting.
 	///
 	/// A `Sendable` value rather than the parsed message, so nothing
-	/// non-`Sendable` crosses back out of this function — the same reason
+	/// non-`Sendable` crosses back out of this function - the same reason
 	/// `CastChannel.receive()` hands back a `String` and lets its caller parse.
 	private struct ReceiverAnswer: Sendable {
 		let runningApp: String?
@@ -102,7 +102,7 @@ struct CastProbe: Sendable {
 	/// abandoning the wait would leave the read outstanding; closing is what
 	/// makes it return, and this is the caller the channel's documentation means
 	/// when it says a deadline is the caller's to impose. Android has the
-	/// mirror-image problem for the mirror-image reason — its read blocks a
+	/// mirror-image problem for the mirror-image reason - its read blocks a
 	/// thread, so a `withTimeoutOrNull` around the loop finds no suspension
 	/// point to cancel at.
 	private func awaitReceiverStatus(on channel: CastChannel) async -> ReceiverAnswer? {
@@ -116,7 +116,7 @@ struct CastProbe: Sendable {
 		while true {
 			// **Two different nils, kept apart.** `receive()` throws when the
 			// connection has gone, and answers nil for a frame that carried
-			// nothing readable — which is not fatal and is simply skipped.
+			// nothing readable - which is not fatal and is simply skipped.
 			// Folding both into `try?` would end the probe on the first frame
 			// we did not understand.
 			let received: String?

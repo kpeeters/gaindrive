@@ -11,8 +11,8 @@ import javax.inject.Singleton
 /**
  * Whether the app should be talking to servers at all.
  *
- * Two reasons it might not be — there is no network, or the user asked for
- * offline mode — and almost nothing cares which. Everything therefore reads
+ * Two reasons it might not be - there is no network, or the user asked for
+ * offline mode - and almost nothing cares which. Everything therefore reads
  * [online] rather than [NetworkMonitor] directly, so the manual switch is not
  * something each call site has to remember to honour.
  *

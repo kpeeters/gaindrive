@@ -6,15 +6,15 @@
 // Turning an artist folder's name into a MusicBrainz artist id.
 //
 // Pure string and JSON work: no network, no database, no MediaStore.  That is
-// the shape tmdb_pick() has, and for the reason its comment gives — this is
+// the shape tmdb_pick() has, and for the reason its comment gives - this is
 // where a wrong answer comes from, so it is the part worth being able to
 // exercise directly.  --artist-pick-test pipes a canned search response
 // through it and tests/test_artist_pick.py is a regression table over the
 // rules.
 //
 // The fact the whole file exists for: **MusicBrainz's `artist` search field
-// holds an artist's primary name and nothing else.**  Every other spelling —
-// a romanization, a stage name, a translation — is in the `alias` field.  So
+// holds an artist's primary name and nothing else.**  Every other spelling -
+// a romanization, a stage name, a translation - is in the `alias` field.  So
 // a folder called "Hiromi Uehara" scores zero against artist:"Hiromi Uehara",
 // because her primary name is 上原ひろみ and the romanization everyone files
 // her under is an alias.  Searching only the one field made every such artist
@@ -70,7 +70,7 @@ std::string mb_artist_query(const std::string& name);
 //
 // With no exact match at all the top hit is taken only if it reaches
 // MB_MIN_SCORE, and otherwise nothing is: a wrong id is worse than none,
-// because everything downstream — biography, portrait, Last.fm link — is
+// because everything downstream - biography, portrait, Last.fm link - is
 // confidently attributed to whoever it named.
 std::optional<MbArtistMatch> mb_pick_artist(const std::string& body,
                                              const std::string& name);

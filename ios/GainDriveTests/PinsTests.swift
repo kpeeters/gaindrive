@@ -48,7 +48,7 @@ struct PinsTests {
 	}
 
 	/// **The one that loses data when it is wrong.** An empty expansion is a
-	/// legitimate state — a pinned album never read protects nothing — but
+	/// legitimate state - a pinned album never read protects nothing - but
 	/// never a legitimate transition for a pin that already covered something.
 	/// A failed read must not be allowed to look like an emptied album.
 	@Test func anEmptyResolutionKeepsWhatThePinAlreadyCovered() {

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """moveAlbum tests.
 
-The point of these is not that the move works — that is visible by eye — but
+The point of these is not that the move works - that is visible by eye - but
 that the client state hanging off the old path survives it. Every reference to a
 media file in either database is the path string itself, so a directory move
 invalidates the key; stars, play counts, playlist entries and bookmarks are read
@@ -17,7 +17,7 @@ Start the server first, with a scanned collection, then run:
     python3 tests/test_move.py
 
 Everything moved here is moved back, so the collection is left as it was found
-— but point this at a scratch library rather than your own.
+- but point this at a scratch library rather than your own.
 """
 
 import sys
@@ -34,7 +34,7 @@ CLIENT = "test"
 NS = "http://subsonic.org/restapi"
 
 # The album to exercise. Must exist in the scanned collection. A single-file
-# album is a valid target now — a media file sitting directly in an artist or
+# album is a valid target now - a media file sitting directly in an artist or
 # category folder is an album of its own, and _first_album() may well pick one,
 # since it reports isDir=true like any other album.
 ALBUM_TITLE = None   # None = use the first album of the first artist
@@ -75,7 +75,7 @@ def _first_album():
 
 
 def _roots():
-    """[(id, name, contentType)] from getMusicFolders — never the uploads root."""
+    """[(id, name, contentType)] from getMusicFolders - never the uploads root."""
     root = _get("getMusicFolders.view")
     _check(root)
     return [(f.get("id"), f.get("name"), f.get("contentType"))
@@ -148,7 +148,7 @@ def test_star_survives_rename():
         titles = [s.get("title") for s
                   in starred.find(f"{{{NS}}}starred").findall(f"{{{NS}}}song")]
         assert songs[0].get("title") in titles, (
-            "Track lost its star across the move — relocate_prefix did not "
+            "Track lost its star across the move - relocate_prefix did not "
             "rewrite client.stars.song_path")
         print("PASS  star survives a rename")
         _move(new_id, album=title)
@@ -159,7 +159,7 @@ def test_star_survives_rename():
 
 
 def test_star_survives_cross_root_move():
-    """The same, across roots — the move renameAlbum could never do.
+    """The same, across roots - the move renameAlbum could never do.
 
     Worth its own case rather than trusting the rename one: re-rooting takes the
     other branch of the destination rule, so it builds a completely different
@@ -230,7 +230,7 @@ def test_refile_removes_emptied_artist():
     """Re-filing an artist's only album must not strand the old artist.
 
     The relocate moves the album folder's path but leaves its parent_id on the
-    old artist row, and folders.parent_id has no ON DELETE CASCADE — so if the
+    old artist row, and folders.parent_id has no ON DELETE CASCADE - so if the
     emptied source directory is rescanned before the destination, the prune's
     DELETE FROM folders trips a foreign key, the whole prune rolls back, and the
     old artist survives reading "0 albums" with nothing in the log.
@@ -264,7 +264,7 @@ def test_refile_removes_emptied_artist():
         after = _artists()
         assert old_artist not in after, (
             f"'{old_artist}' survived with albumCount="
-            f"{after.get(old_artist)} — the emptied artist folder was not "
+            f"{after.get(old_artist)} - the emptied artist folder was not "
             f"pruned (destination must be rescanned before the source)")
         assert after.get(new_artist) == 1, (
             f"'{new_artist}' should hold exactly one album, got "
@@ -342,7 +342,7 @@ def test_reroot_without_folder_is_refused():
 
 
 def test_bad_music_folder_is_refused():
-    """An id that is not a browsable library root — the uploads root included."""
+    """An id that is not a browsable library root - the uploads root included."""
     album_id, _title, _aid, artist = _first_album()
     root = _get("moveAlbum.view",
                 {"id": album_id, "musicFolderId": "99999999", "folder": artist})

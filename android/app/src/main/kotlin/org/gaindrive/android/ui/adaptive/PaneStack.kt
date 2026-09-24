@@ -22,15 +22,15 @@ import org.gaindrive.android.ui.Route
  *
  * **This is the only state a tab has.** Which panes are on screen, how many,
  * where the back arrow goes and what each pane draws are all derived from it
- * per frame — see [PaneStrip]. That is what makes a rotation, a fold or a
+ * per frame - see [PaneStrip]. That is what makes a rotation, a fold or a
  * split-screen drag change no state at all: the pane count recomputes and
  * panes appear or disappear, while the path they were drawn from is untouched.
  * Going from three panes to one and back again therefore loses nothing, which
  * a "current route" could not promise.
  *
  * The invariant that makes back trivial is in [show]: a level is *replaced*,
- * never stacked onto. It is the web client's rule — rendering a pane clears
- * every pane deeper than it — and it means [back] can never be a move the user
+ * never stacked onto. It is the web client's rule - rendering a pane clears
+ * every pane deeper than it - and it means [back] can never be a move the user
  * cannot see.
  */
 @Stable
@@ -53,21 +53,21 @@ class PaneStack internal constructor(private val state: MutableState<List<Route>
 	}
 
 	/**
-	 * Put [route] at [level], keeping everything deeper — the web client's
+	 * Put [route] at [level], keeping everything deeper - the web client's
 	 * pane-1 back-fill (`viewTracks` filling the albums pane), for a level
 	 * whose content only becomes known after the level below it has loaded.
 	 * [show] is the wrong tool for that: it discards the deeper levels, which
 	 * here are the very pane the user is reading.
 	 *
 	 * It inserts rather than replaces, so the caller must check the level does
-	 * not already hold what is being added — see RecentsTab, whose guard is
+	 * not already hold what is being added - see RecentsTab, whose guard is
 	 * also what stops a late load rewriting a path the user has moved on from.
 	 */
 	fun insert(level: Int, route: Route) {
 		state.value = state.value.take(level) + route + state.value.drop(level)
 	}
 
-	/** One level up. Nothing to do at the root — the tab itself is the floor. */
+	/** One level up. Nothing to do at the root - the tab itself is the floor. */
 	fun back() {
 		if (state.value.size > 1) state.value = state.value.dropLast(1)
 	}
@@ -80,7 +80,7 @@ class PaneStack internal constructor(private val state: MutableState<List<Route>
 
 /**
  * [initial] is the whole path, not just the root, so a tab can start somewhere
- * other than its own list — which is how a first run opens on Settings →
+ * other than its own list - which is how a first run opens on Settings →
  * Servers with no conditional start destination anywhere.
  *
  * A lambda, and evaluated once: after process death the saved path wins, and a
@@ -99,7 +99,7 @@ fun rememberPaneStack(initial: () -> List<Route>): PaneStack {
 
 /**
  * Back for the whole strip: one level of the path, whichever pane is showing
- * it. There is deliberately one of these per tab and none per pane — see
+ * it. There is deliberately one of these per tab and none per pane - see
  * [PaneHost] on why a pane's own nav host must not claim the gesture.
  *
  * **Call it from the tab, outside the panes.** The guard is that only a tab
@@ -130,7 +130,7 @@ fun PaneBackHandler(stack: PaneStack) {
  * nothing, and dropping the path lands the user on the tab's own list, which
  * is somewhere. Throwing here would instead crash the app on the way back from
  * process death, which is the worst moment to do it. Logged rather than
- * swallowed — a path that will not decode is a real fault, just not one worth
+ * swallowed - a path that will not decode is a real fault, just not one worth
  * a crash.
  */
 private val routeListSaver: Saver<List<Route>, Any> = listSaver(

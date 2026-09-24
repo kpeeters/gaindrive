@@ -13,7 +13,7 @@
 // This knows how to match a URL against a configured table, expand an argv
 // template and run the result, and nothing else: no database, no MediaStore, no
 // HTTP, no job queue.  Same shape as Tmdb and VideoArt, and for the same
-// reason — the table is what an operator tunes against the sites they actually
+// reason - the table is what an operator tunes against the sites they actually
 // use, and the whole class is what a different tool would replace.
 // --url-fetch-test exercises it standalone.
 //
@@ -30,7 +30,7 @@
 //   * the scheme is checked **before** the table is consulted, so a pattern
 //     cannot admit anything but http and https however loosely it is written.
 //
-// There is no shell anywhere in this path — reproc takes an argv vector — so
+// There is no shell anywhere in this path - reproc takes an argv vector - so
 // nothing about a URL needs quoting or escaping.  The one thing that does need
 // care is a URL beginning with a dash, which a tool reads as an option; the
 // templates end with a literal "--" before %URL% for that.
@@ -48,14 +48,14 @@ struct UrlHandler
 // problem) and UrlFetcher::match() have to agree about it.
 bool urlfetch_http_url(const std::string& url);
 
-// The percentage this output line reports, or nothing when it carries none — in
+// The percentage this output line reports, or nothing when it carries none - in
 // which case the caller **keeps the value it had**.  A tool's post-processing
 // lines ("[ExtractAudio] Destination: …") carry no percentage, and resetting to
 // zero for them would snap the bar back for the slowest visible phase of a
 // fetch.
 //
 // Free, and declared here, so the rule can be exercised against canned tool
-// output with no child process — the same bargain tmdb_pick() strikes.
+// output with no child process - the same bargain tmdb_pick() strikes.
 std::optional<int> urlfetch_progress(const std::string& line);
 
 // An argv template with %URL% and %DIR% substituted.  Whole elements only: a
@@ -87,7 +87,7 @@ class UrlFetcher
 		static std::vector<UrlHandler> default_handlers();
 
 		// False when the table is empty, every pattern failed to compile or
-		// every tool is missing from PATH — in which case nothing here does
+		// every tool is missing from PATH - in which case nothing here does
 		// anything at all.  Callers check this rather than discovering it as a
 		// failure on every request, and it is what getUrlHandlers reports so a
 		// client can leave the row undrawn.
@@ -114,7 +114,7 @@ class UrlFetcher
 		// Runs one fetch to completion.  `progress` is called for every line the
 		// tool writes, with the running percentage and the raw line; it runs on
 		// the calling thread, so the caller owns any locking and any sanitising
-		// of what it stores — a progress line names the file being written, and
+		// of what it stores - a progress line names the file being written, and
 		// that is an absolute path.
 		//
 		// `job_id` is the name cancel() uses.  Blocking and slow by nature: this

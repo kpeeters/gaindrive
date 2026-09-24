@@ -9,7 +9,7 @@
 // one failure produces one log line.
 //
 // This lives in a header of its own rather than in any one caller because three
-// unrelated subsystems — the streamer, the transcode cache and the URL fetcher —
+// unrelated subsystems - the streamer, the transcode cache and the URL fetcher -
 // each run a child with its stderr redirected to a std::tmpfile() and each wants
 // the same answer when it exits non-zero.  A pipe is deliberately not used at
 // any of the three: nothing drains one, so a chatty child blocks for ever once

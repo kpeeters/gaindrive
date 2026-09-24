@@ -93,7 +93,7 @@ fun SettingsScreen(
  * The GPL asks that an interactive program tell the user it is free software
  * and where the terms are; a settings screen is the only place this app has to
  * say so. The website is the one line that is a control rather than prose, so
- * it is the only one coloured and clickable — a whole paragraph in link blue
+ * it is the only one coloured and clickable - a whole paragraph in link blue
  * reads as a mis-styled screen.
  */
 @Composable

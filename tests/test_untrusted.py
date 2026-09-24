@@ -3,7 +3,7 @@
 
 Every field gaindrive takes from MusicBrainz, Wikidata, Wikipedia, TheAudioDB,
 Discogs or TMDB is stored in a cache table and served to every client there is
-— the web client, the iOS app, and any third-party Subsonic app. The server is
+- the web client, the iOS app, and any third-party Subsonic app. The server is
 therefore the only place a guarantee about one can be made, and `src/untrusted.hh`
 is where it is made. This is the table of cases it has to keep answering the
 same way.
@@ -79,7 +79,7 @@ CASES = [
     ("prose", "a\\xffb",                              "ab"),
     ("prose", "a\\xc3b",                              "ab"),
     # Valid multi-byte UTF-8 survives, and comes back as the character rather
-    # than as its bytes — the output escape covers control characters only.
+    # than as its bytes - the output escape covers control characters only.
     ("prose", "Ry\\xc5\\xabichi Sakamoto",            "Ry\u016bichi Sakamoto"),
     # Markup is *not* stripped: the guards make a value safe to serialise, and
     # rendering it as text is the client's job. Stripping here would silently
@@ -89,7 +89,7 @@ CASES = [
 
     # --- Genres: a label, not prose ------------------------------------
     # video_meta.genre is a pipe-joined list, so a name carrying one would not
-    # corrupt a row, it would silently become two genres — in a table that is
+    # corrupt a row, it would silently become two genres - in a table that is
     # aggregated across the whole library.
     ("genre", "Science|Fiction",                      ""),
     ("genre", "|",                                    ""),

@@ -24,7 +24,7 @@ struct SectionHeading: View {
 extension View {
 	/// For the pinned header of a `.plain` list, and nowhere else. iOS 26
 	/// pins those on translucent Liquid Glass, so the rows scroll visibly
-	/// through the letter — hence an opaque, full-bleed background instead.
+	/// through the letter - hence an opaque, full-bleed background instead.
 	/// `Color(.systemBackground)` is the plain list's own background in both
 	/// appearances, so the header matches the rows either side of it.
 	///
@@ -35,7 +35,7 @@ extension View {
 	///
 	/// An extension rather than part of `SectionHeading`, because that view
 	/// is also drawn *inside* rows (the recording headings in
-	/// `AlbumDetailView`), where this treatment would be wrong — and two of
+	/// `AlbumDetailView`), where this treatment would be wrong - and two of
 	/// the artist list's headers are bare `Text`.
 	///
 	/// Define `GD_GLASS_HEADERS` (commented out in `project.yml`, then
@@ -55,7 +55,7 @@ extension View {
 	}
 }
 
-/// **No artwork, deliberately** — as `ArtistRow` on Android, which takes no
+/// **No artwork, deliberately** - as `ArtistRow` on Android, which takes no
 /// cover either.
 ///
 /// `getArtists` hands out a `coverArt` id for *every* artist whether or not any
@@ -106,7 +106,7 @@ struct AlbumRow: View {
 					//
 					// **Only ever added.** `videoCount` is absent on the
 					// directory-shaped listings, so no icon does not mean no
-					// video — a wrong positive would be a lie, a missing one is
+					// video - a wrong positive would be a lie, a missing one is
 					// silence, and there is deliberately no audio counterpart.
 					if item.album.videoCount > 0 {
 						Image(systemName: "film")
@@ -156,7 +156,7 @@ struct TrackRow: View {
 	var trailing: AnyView?
 	/// The number column scales with Dynamic Type: a fixed 24 pt box clips a
 	/// three-digit track number at the accessibility sizes, and this column
-	/// exists precisely so the row does not reflow — so it has to grow with the
+	/// exists precisely so the row does not reflow - so it has to grow with the
 	/// text rather than crop it.
 	///
 	/// **Not `private`, and declared last.** A private stored property makes
@@ -169,7 +169,7 @@ struct TrackRow: View {
 		HStack(spacing: 12) {
 			if showNumber {
 				// A fixed box rather than an intrinsic width, so the row does
-				// not reflow when the indicator replaces the number — which is
+				// not reflow when the indicator replaces the number - which is
 				// exactly what this column was reserved for.
 				numberOrIndicator
 					.frame(width: numberWidth, alignment: .trailing)
@@ -220,7 +220,7 @@ struct TrackRow: View {
 	}
 }
 
-/// A track **outside** its album — in search, recents or starred — so it needs
+/// A track **outside** its album - in search, recents or starred - so it needs
 /// the cover, the artist and the album to be identifiable on its own.
 struct SongRow: View {
 	let item: SongUi
@@ -270,7 +270,7 @@ struct PlaylistRow: View {
 		.contentShape(.rect)
 	}
 
-	/// Hours and minutes rather than `formatDuration`'s mm:ss — "184:07" is not
+	/// Hours and minutes rather than `formatDuration`'s mm:ss - "184:07" is not
 	/// a length anyone reads.
 	private var subtitle: String {
 		let tracks = playlist.songCount == 1 ? "1 track" : "\(playlist.songCount) tracks"
@@ -310,8 +310,8 @@ struct ChapterRow: View {
 				.lineLimit(1)
 				.foregroundStyle(playing ? Color.accentColor : Color.primary)
 			Spacer(minLength: 0)
-			// 0 is what the server sends for a span that is not positive — two
-			// markers on one timestamp, or one past the end of the file — and
+			// 0 is what the server sends for a span that is not positive - two
+			// markers on one timestamp, or one past the end of the file - and
 			// `--:--` beside a row that plays perfectly well would read as a
 			// fault rather than as a hand-typed list being allowed to be odd.
 			if chapter.duration > 0 {
@@ -326,7 +326,7 @@ struct ChapterRow: View {
 
 /// A chapter match in a search listing.
 ///
-/// Shaped like `SongRow` minus the artwork, which a marker has none of — its
+/// Shaped like `SongRow` minus the artwork, which a marker has none of - its
 /// recording's cover is the album's, and drawing it on every row would say the
 /// hits were albums.
 ///
@@ -355,8 +355,8 @@ struct ChapterHitRow: View {
 
 	/// Artist, album, then the recording itself: a marker means nothing without
 	/// knowing which concert it is in. The album is what the folder is called
-	/// and the track what the file is called, and they coincide often enough —
-	/// a folder holding one recording named after it — that an exact duplicate
+	/// and the track what the file is called, and they coincide often enough -
+	/// a folder holding one recording named after it - that an exact duplicate
 	/// is dropped rather than printed twice.
 	private var subtitle: String {
 		var parts = [hit.artistName, hit.albumTitle]

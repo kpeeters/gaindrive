@@ -6,7 +6,7 @@ on:
     tags: ['v*']
   # The path filter is on pull_request only, deliberately. A tag push can
   # present an empty changed-file set, and a filtered job would then be skipped
-  # — taking the release upload with it.
+  # - taking the release upload with it.
   pull_request:
     paths:
       - 'android/**'
@@ -24,7 +24,7 @@ jobs:
       run:
         working-directory: android
     # Job level rather than step level, so the decode step's own `if:` can read
-    # KEYSTORE_B64 — a step's own env is not in scope for its condition.
+    # KEYSTORE_B64 - a step's own env is not in scope for its condition.
     env:
       KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
       GAINDRIVE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -44,7 +44,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       # Without these secrets the step is skipped and the release variant falls
-      # back to the debug key — see the signingConfigs comment in
+      # back to the debug key - see the signingConfigs comment in
       # app/build.gradle.kts. That is not a failure, but it does mean the APK
       # this workflow produces is debug-signed until the secrets exist.
       #
@@ -73,7 +73,7 @@ jobs:
 
       # Same version derivation as build.yml, so the APK and the server
       # binaries of one run are recognisable as a pair. Untagged, that is
-      # VERSION plus the commit rather than a literal 0.0 — nothing here stamps
+      # VERSION plus the commit rather than a literal 0.0 - nothing here stamps
       # a version into the APK (app/build.gradle.kts reads ../VERSION itself),
       # so a 0.0 filename was a name the installed app disagreed with.
       - id: name
@@ -97,7 +97,7 @@ jobs:
   # `gh release create` for the same tag fails, and this job usually finishes
   # first because the server build compiles nine dependencies from source. So
   # wait for the release to exist rather than creating it. Do not "simplify"
-  # this into a create — merge the two workflows instead.
+  # this into a create - merge the two workflows instead.
   release:
     needs: apk
     if: github.ref_type == 'tag'
@@ -118,8 +118,8 @@ jobs:
         env: {GH_TOKEN: '${{ github.token }}'}
 
   # The same thing for an untagged master build, because a workflow artifact is
-  # *always* a zip — actions/upload-artifact zips on upload and offers no way
-  # not to — and a phone cannot install one. A release asset is served as the
+  # *always* a zip - actions/upload-artifact zips on upload and offers no way
+  # not to - and a phone cannot install one. A release asset is served as the
   # bare file, so publishing one is the only way to get an installable link.
   #
   # `latest` is a rolling prerelease, so the page to bookmark on the phone
@@ -131,7 +131,7 @@ jobs:
   # this used to begin with is gone: the two workflows run concurrently on the
   # same push, and deleting the release to recreate it would take whichever
   # asset the other one had just uploaded. Everything that made the delete
-  # necessary now lives in .github/actions/rolling-release — it moves the tag
+  # necessary now lives in .github/actions/rolling-release - it moves the tag
   # by hand rather than recreating it, and stale-suffix is what stops the
   # version-and-commit APK names accumulating, which is the other job the
   # delete was doing.

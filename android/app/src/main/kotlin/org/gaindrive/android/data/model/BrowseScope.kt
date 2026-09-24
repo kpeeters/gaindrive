@@ -31,7 +31,7 @@ data class BrowseState(
 	val scope: BrowseScope,
 	val offline: Boolean,
 	/**
-	 * Bumped on every change to the server list — see `ServerRegistry.revision`,
+	 * Bumped on every change to the server list - see `ServerRegistry.revision`,
 	 * which explains why the scope alone cannot carry one.
 	 *
 	 * Mostly it is here so that a change compares unequal and the screens

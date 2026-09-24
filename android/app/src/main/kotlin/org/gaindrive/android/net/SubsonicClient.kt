@@ -5,7 +5,7 @@ import org.gaindrive.android.data.model.ServerId
 
 /**
  * One server's API surface. Holds the Retrofit-generated [SubsonicApi] and the
- * knowledge needed to build URLs that are fetched outside Retrofit — cover art
+ * knowledge needed to build URLs that are fetched outside Retrofit - cover art
  * for Coil, and streams for ExoPlayer and the cast bridge.
  */
 class SubsonicClient(
@@ -18,13 +18,13 @@ class SubsonicClient(
 
 	/**
 	 * Builds a URL for an endpoint fetched by something other than Retrofit.
-	 * Carries the same auth parameters the interceptor would have added — this
+	 * Carries the same auth parameters the interceptor would have added - this
 	 * is the one place they are constructed by hand.
 	 *
 	 * [suffix] exists for `hls.m3u8`, the one endpoint the spec does not spell
 	 * `<name>.view`. Passing an empty string leaves the endpoint name alone.
 	 * The server now answers `hls.view` too, so this is no longer what makes
-	 * the playlist reachable — the reason to keep it is the extension itself,
+	 * the playlist reachable - the reason to keep it is the extension itself,
 	 * which is what lets ExoPlayer recognise a playlist it was handed without
 	 * being told.
 	 */
@@ -52,8 +52,8 @@ sealed interface ConnectionTest {
 
 	/**
 	 * The server is there and answered `ping`, but the call that would have
-	 * proved the credentials took too long to wait for. Not a failure — a large
-	 * library can legitimately be slow — but not the reassurance the button
+	 * proved the credentials took too long to wait for. Not a failure - a large
+	 * library can legitimately be slow - but not the reassurance the button
 	 * exists to give either, so it says so rather than claiming success.
 	 */
 	data object Unverified : ConnectionTest

@@ -38,7 +38,7 @@
 
 using namespace tinyxml2;
 
-// An artist portrait is stored at this bound on its long edge — comfortably
+// An artist portrait is stored at this bound on its long edge - comfortably
 // above the largest any client asks for (iOS wants 800 for a hero), so the
 // stored image is never the limiting factor, and small enough that a database
 // row stays a sensible place to keep it.
@@ -66,8 +66,8 @@ static constexpr auto LOOKUP_GAP = std::chrono::milliseconds(2000);
 // **One gate for the whole process, and every request to musicbrainz.org goes
 // through it.** The limit is per IP address, not per caller, so pacing each
 // caller separately does not add up to anything: the artist chain paced itself
-// through the resolver thread, while getAlbumInfo — which makes two more
-// MusicBrainz requests per album — ran straight off the HTTP thread pool with
+// through the resolver thread, while getAlbumInfo - which makes two more
+// MusicBrainz requests per album - ran straight off the HTTP thread pool with
 // no pacing at all, up to 32 at a time (both are on the one queue now, but the
 // gate is what made this survivable before that). A client browsing would then
 // spend the whole budget, and the next artist lookup got a 503 on its *first*
@@ -86,7 +86,7 @@ static constexpr auto MB_REQUEST_GAP = std::chrono::milliseconds(1100);
 // ---- Metadata provider timeouts ---------------------------------------
 //
 // **httplib's client defaults are 300 s to connect and 300 s to read**, and
-// the provider clients in resolve_artist_info() set neither — so a host that
+// the provider clients in resolve_artist_info() set neither - so a host that
 // black-holed packets rather than refusing them parked the caller for five
 // minutes per request. That was a latent hang on an HTTP worker until the
 // lookup moved to the resolver thread, and it would still be one there: the
@@ -94,7 +94,7 @@ static constexpr auto MB_REQUEST_GAP = std::chrono::milliseconds(1100);
 // job behind it.
 //
 // The numbers are the ones portrait_fetch() and setCoverArt's url= already use
-// for the same kind of request, and nothing here is worth waiting longer for —
+// for the same kind of request, and nothing here is worth waiting longer for -
 // a provider that has not answered in fifteen seconds is not going to.
 //
 // Note this reads correctly through mb_get(): a timeout makes Get() return a
@@ -138,8 +138,8 @@ static void mb_pace()
 // were is what made artist lookups fail wholesale.
 //
 // Measured against the live service: a successful response carries
-// `X-RateLimit-Limit: 1200` with `remaining` in the hundreds — our per-address
-// budget is barely touched — while a 503 carries a *different* header,
+// `X-RateLimit-Limit: 1200` with `remaining` in the hundreds - our per-address
+// budget is barely touched - while a 503 carries a *different* header,
 // `X-RateLimit-Limit: 15` with `remaining: 11`, `Retry-After: 0`, and a body
 // reading "The MusicBrainz web server is currently busy. Please try again
 // later." That is their global load shedding, not our quota, and at the time of
@@ -147,7 +147,7 @@ static void mb_pace()
 // lookup endpoint.
 //
 // So the right answer to a 503 is to **ask again for the same thing**, not to
-// give up on this artist and move to the next one — which merely spends
+// give up on this artist and move to the next one - which merely spends
 // another attempt on the same busy server and makes the whole pass look like a
 // permanent failure.
 static constexpr int  MB_MAX_ATTEMPTS   = 4;
@@ -218,7 +218,7 @@ static httplib::Result mb_get(httplib::SSLClient& cli, const std::string& path,
 // thread and nowhere else; it is paced, it sleeps, and it must never be reached
 // from a request handler again.
 //
-// `provider_error`, when given, is set true if any provider failed to answer —
+// `provider_error`, when given, is set true if any provider failed to answer -
 // no response, or a status that is neither 200 nor 404. That distinction is the
 // whole point of the parameter: **a provider that says "no" is a fact, and a
 // provider that says nothing is not.** Without it a caller cannot tell "nobody
@@ -230,7 +230,7 @@ static httplib::Result mb_get(httplib::SSLClient& cli, const std::string& path,
 // that rule rather than an omission. Its one caller is lookup_worker(), which
 // always wanted the providers asked: resolve_artist_info() caches whenever the
 // MusicBrainz *search* succeeded, so an artist whose image providers were the
-// ones that fell over — then or in any earlier version of gaindrive — has a
+// ones that fell over - then or in any earlier version of gaindrive - has a
 // cached row with an empty image_url, and reading that back would find no image
 // and conclude there is none. That is the very confusion artist_art exists to
 // record correctly. It costs one lookup per artist, once, and the answer is
@@ -239,10 +239,10 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
                                                          MediaStore& store,
                                                          bool* provider_error = nullptr)
 	{
-	// A level-1 folder of a categories root is a section — Film, Series,
-	// Documentary — not a performer.  Looking it up would query MusicBrainz
+	// A level-1 folder of a categories root is a section - Film, Series,
+	// Documentary - not a performer.  Looking it up would query MusicBrainz
 	// for "Film" and cache whatever came back as that section's biography.
-	// Same failure shape as the CD1 lookup recorded in ISSUES.md.
+	// Same failure shape as the CD1 lookup.
 	if (store.is_category_folder(id)) {
 		std::cout << stamp() << "getArtistInfo [" << name
 		          << "] is a category, not an artist; skipping lookup"
@@ -267,8 +267,8 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 		{"limit", "8"},
 		{"fmt",   "json"}
 		};
-	// 404 is an answer: this artist is not there. Anything else — no response
-	// at all, 503, 429, 500 — means we did not get to ask, and the caller must
+	// 404 is an answer: this artist is not there. Anything else - no response
+	// at all, 503, 429, 500 - means we did not get to ask, and the caller must
 	// not record the silence as a result.
 	auto note = [&](const httplib::Result& res) {
 		if (provider_error && (!res || (res->status != 200 && res->status != 404)))
@@ -329,7 +329,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 			// is_uuid because this is about to be concatenated into a
 			// MusicBrainz URL *path* below.  mb_uuid() has applied the same
 			// check to a file's tag since that path existed, on the stated
-			// grounds that a tag is arbitrary bytes somebody else wrote — a
+			// grounds that a tag is arbitrary bytes somebody else wrote - a
 			// search result is that too, and was the half being trusted.
 			if (pick && !is_uuid(pick->mbid)) {
 				std::cout << stamp() << "getArtistInfo [" << name
@@ -354,7 +354,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 			}
 		}
 
-	// Step 2 — MusicBrainz URL relations → Wikipedia article URL.
+	// Step 2 - MusicBrainz URL relations → Wikipedia article URL.
 	if (!info.mbid.empty()) {
 		// The one-second wait that used to sit here is mb_get()'s job now;
 		// doing it in both places only made every lookup a second slower.
@@ -461,7 +461,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 					}
 				}
 
-			// Step 3 — Wikipedia REST summary → bio + thumbnail.
+			// Step 3 - Wikipedia REST summary → bio + thumbnail.
 			if (!wiki_title.empty()) {
 				httplib::SSLClient wp("en.wikipedia.org");
 				provider_timeouts(wp);
@@ -522,8 +522,8 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 			// picture, and one with no article at all reaches here for both.
 			//
 			// That second case is not exotic. A folder tagged with a
-			// MusicBrainz *group* id — "Stevie Ray Vaughan and Double
-			// Trouble" rather than the person — commonly reaches a Wikidata
+			// MusicBrainz *group* id - "Stevie Ray Vaughan and Double
+			// Trouble" rather than the person - commonly reaches a Wikidata
 			// item with no enwiki sitelink, and Wikipedia being the only bio
 			// tier meant such an artist could never have one. The tag id is
 			// still the authority and the name search is still not retried;
@@ -557,7 +557,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 						// Both spellings, in this order. strBiographyEN is the
 						// language-tagged field and the one to prefer, but
 						// records exist where it is null while strBiography
-						// holds the English prose — reading only the tagged
+						// holds the English prose - reading only the tagged
 						// name yields nothing for those.
 						info.biography = clean_prose(jstr(ta, "strBiographyEN"),
 						                             MAX_PROSE_BYTES);
@@ -648,20 +648,20 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 	}
 
 // Shared implementation for getArtistInfo and getArtistInfo2.
-// key is "artistInfo" or "artistInfo2" — controls the XML element / JSON key.
+// key is "artistInfo" or "artistInfo2" - controls the XML element / JSON key.
 //
 // **This reads the database and nothing else**, which is the whole point of it
 // and was not true until recently. It used to call resolve_artist_info() right
 // here, on the httplib worker: MusicBrainz (paced against a process-global gate
 // that sleeps under its own mutex, and retried four times when the service says
-// it is busy — which is roughly one request in three), then Wikidata, Wikipedia,
+// it is busy - which is roughly one request in three), then Wikidata, Wikipedia,
 // TheAudioDB and Discogs, two unconditional one-second courtesy sleeps included.
 // One uncached artist held a worker for tens of seconds.
 //
 // That did not merely make *this* endpoint slow. httplib dispatches one task per
 // *connection* rather than per request, and a browser gets about six connections
 // to an origin, so clicking through three or four unresolved artists spent most
-// of the budget and the cover-art requests queued up behind them — in the
+// of the budget and the cover-art requests queued up behind them - in the
 // browser, where nothing on the server can see it. The symptom is an album grid
 // crawling while serving images that are sitting in memory.
 //
@@ -674,8 +674,8 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 //
 // That side effect is also the whole reason startInfoLookup exists: what the
 // resolver's own seed asks about is a missing *portrait*, so an artist who has
-// a picture and an empty biography — the providers for the two are not the
-// same, and they do not fail together — is never asked about again.
+// a picture and an empty biography - the providers for the two are not the
+// same, and they do not fail together - is never asked about again.
 void GainDrive::handle_artist_info(const httplib::Request& req,
                                     httplib::Response& res, const char* key)
 	{
@@ -694,7 +694,7 @@ void GainDrive::handle_artist_info(const httplib::Request& req,
 	std::string name = store_.get_folder_name(id);
 	if (name.empty()) { err(70, "Artist not found."); return; }
 	// An id under another user's uploads must answer exactly like a missing
-	// one — this endpoint both leaks the directory name and pushes it onto
+	// one - this endpoint both leaks the directory name and pushes it onto
 	// the provider queue, so it is a read like any other.
 	if (!item_read_allowed(req, store_, uploads_root_name_,
 	                       store_.get_folder_path(id))) {
@@ -705,7 +705,7 @@ void GainDrive::handle_artist_info(const httplib::Request& req,
 	          && req.params.find("force")->second != "0";
 	// The read stays open to everyone; the re-ask does not. It spends the single
 	// paced MusicBrainz gate every other pane is waiting on, and it overwrites a
-	// cache the whole server shares — so one account could keep re-resolving an
+	// cache the whole server shares - so one account could keep re-resolving an
 	// artist nobody else wanted re-resolved. Refused rather than quietly ignored:
 	// a client that asked for a fresh lookup should hear that it did not get one.
 	if (force) {
@@ -718,8 +718,8 @@ void GainDrive::handle_artist_info(const httplib::Request& req,
 	MediaStore::CachedArtistInfo info;
 	bool resolving = false;
 
-	// A level-1 folder of a categories root is a section — Film, Series,
-	// Documentary — not a performer. This test used to live inside
+	// A level-1 folder of a categories root is a section - Film, Series,
+	// Documentary - not a performer. This test used to live inside
 	// resolve_artist_info(); it has to be made here now, or a section would be
 	// pushed onto the resolver queue to have MusicBrainz asked about "Film".
 	// Nothing is resolving and nothing ever will be, so say so: a client that
@@ -737,7 +737,7 @@ void GainDrive::handle_artist_info(const httplib::Request& req,
 		// Whether the resolver has *finished* with this artist, which is not
 		// the same question as whether it found anything. store_artist_art()
 		// is called on every pass whatever the outcome, so a row saying "ok"
-		// or "none" means the answer above — including an empty one — is
+		// or "none" means the answer above - including an empty one - is
 		// final, while a missing row or "error" means it has yet to run or
 		// could not reach a provider. Conflating the two is the failure the
 		// artist_art status column exists to prevent, one endpoint over: an
@@ -922,12 +922,12 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 	// about.
 	bool mb_ok = false;
 
-	// Step 1 — search for the release-group by title + artist, unless the
+	// Step 1 - search for the release-group by title + artist, unless the
 	// files already said which one it is.
 	//
 	// **The tag that answers this is MUSICBRAINZ_RELEASEGROUPID and not
-	// MUSICBRAINZ_ALBUMID.** The latter is a *release* — one pressing of
-	// one edition — and asking /ws/2/release-group for it is a 404. Both
+	// MUSICBRAINZ_ALBUMID.** The latter is a *release* - one pressing of
+	// one edition - and asking /ws/2/release-group for it is a 404. Both
 	// are stored, on albums.musicbrainz_id and
 	// albums.musicbrainz_releasegroup_id respectively; only the second one
 	// is usable here, so a file tagged with the release alone keeps the
@@ -1084,7 +1084,7 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 			          << "] no release-group taken from the search" << std::endl;
 		}
 
-	// Step 2 — fetch URL relations for the release-group.
+	// Step 2 - fetch URL relations for the release-group.
 	if (!info.mbid.empty()) {
 		// The one-second wait that used to sit here is mb_get()'s job now;
 		// doing it in both places only made every lookup a second slower.
@@ -1167,7 +1167,7 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 					}
 				}
 
-			// Step 3 — Wikipedia REST summary → notes text.
+			// Step 3 - Wikipedia REST summary → notes text.
 			if (wiki_title.empty())
 				std::cout << stamp() << "getAlbumInfo [" << title
 				          << "] no Wikipedia or Wikidata relation on this"
@@ -1178,7 +1178,7 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 				wp.set_default_headers({
 					{"User-Agent",USER_AGENT}
 					});
-				// Percent-encoded before it becomes a request line — see
+				// Percent-encoded before it becomes a request line - see
 				// the artist chain above for what a CR/LF there would be.
 				std::string path_title = wiki_title;
 				for (char& c : path_title) if (c == ' ') c = '_';
@@ -1210,7 +1210,7 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 
 	// **Gated on MusicBrainz having answered**, exactly as
 	// resolve_artist_info() is. Writing the row either way is what made one
-	// 503 — and MusicBrainz sheds load at roughly one request in three — into
+	// 503 - and MusicBrainz sheds load at roughly one request in three - into
 	// a permanent "this album has nothing", with no `force` and no TTL to undo
 	// it. A row that is not written is asked about again on the next view;
 	// that is the whole mechanism.
@@ -1228,12 +1228,12 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 	}
 
 // Shared implementation for getAlbumInfo and getAlbumInfo2.
-// key is "albumInfo" or "albumInfo2" — controls the XML element / JSON key.
+// key is "albumInfo" or "albumInfo2" - controls the XML element / JSON key.
 //
 // **This reads the database and nothing else**, which is the whole point of it
 // and was not true until recently. It used to run the MusicBrainz release-group
 // search, the url-rels lookup, Wikidata and Wikipedia right here, on the
-// httplib worker, with no timeouts set on any of the three clients — so one
+// httplib worker, with no timeouts set on any of the three clients - so one
 // uncached album could hold a pool thread for minutes, and httplib dispatches
 // one task per *connection*, which means every request a browser had queued
 // behind it on that connection waited too. handle_artist_info() had exactly
@@ -1269,7 +1269,7 @@ void GainDrive::handle_album_info(const httplib::Request& req,
 	          && req.params.find("force")->second != "0";
 	// The read stays open to everyone; the re-ask does not. It spends the single
 	// paced MusicBrainz gate every other pane is waiting on, and it overwrites a
-	// cache the whole server shares — so one account could keep re-resolving an
+	// cache the whole server shares - so one account could keep re-resolving an
 	// album nobody else wanted re-resolved. Refused rather than quietly ignored:
 	// a client that asked for a fresh lookup should hear that it did not get one.
 	if (force) {
@@ -1316,7 +1316,7 @@ void GainDrive::handle_album_info(const httplib::Request& req,
 	// `resolving` is emitted only when it is true, so its absence means the
 	// same to a client that has never heard of it as to one that has: this is
 	// everything there is. A standard Subsonic client ignores it and gets empty
-	// notes on the first view and real ones on the next — the same bargain
+	// notes on the first view and real ones on the next - the same bargain
 	// getArtistInfo2 already makes.
 	std::string body;
 	if (use_json)
@@ -1365,7 +1365,7 @@ void GainDrive::lookup_seed()
 	// A failed seed costs this pass and nothing else: the fifteen-minute timer
 	// asks again.
 	try {
-		// A 'none' — the providers had nothing — is worth re-asking about
+		// A 'none' - the providers had nothing - is worth re-asking about
 		// after a month; an 'error' says the network failed and is retried at
 		// once, which artists_needing_art() handles by not excluding it at all.
 		const int64_t month_ago = static_cast<int64_t>(std::time(nullptr))
@@ -1397,7 +1397,7 @@ void GainDrive::lookup_seed()
 // a first scan of an empty library it asks a database with no artists in it,
 // finds nothing, and sleeps.  Nothing in the scanner knew this thread existed,
 // so the first portrait was fetched up to fifteen minutes after the artists it
-// wanted had appeared — on a cold start, always.
+// wanted had appeared - on a cold start, always.
 //
 // This is the notification the scanner owes it.  Deliberately only "look
 // again", not a queue: what needs looking up is a database question that
@@ -1504,7 +1504,7 @@ MediaStore::ArtistArtRow GainDrive::portrait_fetch(const std::string& url)
 		std::string fetch_url = url;
 		// Ask Wikimedia for a render, never the original. Special:FilePath
 		// with no width serves the *file* behind a P18 claim, which is quite
-		// often an SVG or a multi-megabyte TIFF — undecodable here and a waste
+		// often an SVG or a multi-megabyte TIFF - undecodable here and a waste
 		// of bandwidth even when it is a JPEG. With a width it rasterises.
 		if (fetch_url.find("wikimedia.org/wiki/Special:FilePath") != std::string::npos
 		    && fetch_url.find("width=") == std::string::npos)
@@ -1516,7 +1516,7 @@ MediaStore::ArtistArtRow GainDrive::portrait_fetch(const std::string& url)
 		// because a public URL that 302s to 127.0.0.1 is the ordinary way a
 		// check that only looks at the first address is defeated.  Commons
 		// answers Special:FilePath with a 302, so a portrait genuinely needs
-		// the hops — set_follow_location(true) was how they were taken, which
+		// the hops - set_follow_location(true) was how they were taken, which
 		// meant no hop was checked at all.
 		//
 		// This URL is not typed by anyone: it arrives in a provider's JSON,
@@ -1655,7 +1655,7 @@ void GainDrive::lookup_run_job(const LookupJob& job)
 		row.status = "none";
 		}
 	else {
-		// Always the providers and never artist_info_cache — see the note on
+		// Always the providers and never artist_info_cache - see the note on
 		// resolve_artist_info(). This call is also what fills that cache, so
 		// it resolves the biography getArtistInfo2 serves as much as it
 		// resolves the picture.
@@ -1663,7 +1663,7 @@ void GainDrive::lookup_run_job(const LookupJob& job)
 		auto info = resolve_artist_info(job.folder_id, job.name, store_,
 		                                &provider_error);
 		if (provider_error && info.image_url.empty()) {
-			// A provider did not answer — a 503 from MusicBrainz is the usual
+			// A provider did not answer - a 503 from MusicBrainz is the usual
 			// one, since it rate-limits hard. We have learnt nothing about
 			// this artist, so record that rather than a verdict: 'error' is
 			// retried, 'none' is not touched for a month. Getting this wrong
@@ -1689,8 +1689,8 @@ void GainDrive::lookup_run_job(const LookupJob& job)
 		          << row.width << "x" << row.height << ", "
 		          << row.bytes.size() << " bytes" << std::endl;
 	else
-		// Which of the two it is matters — "error" will be asked again, "none"
-		// will not for a month — so say which, rather than leaving the
+		// Which of the two it is matters - "error" will be asked again, "none"
+		// will not for a month - so say which, rather than leaving the
 		// difference to be inferred from behaviour a month later.
 		std::cout << stamp() << "Artist portrait: " << job.name
 		          << ": " << row.status
@@ -1704,8 +1704,8 @@ void GainDrive::lookup_run_job(const LookupJob& job)
 // **Two guards, and they are not redundant.** The inner one is around
 // lookup_run_job(), and it is the one that matters: a provider's malformed JSON
 // or a contended store_artist_art() costs that artist or album and the loop
-// carries on. The outer one is here only for what the inner one cannot reach —
-// the queue's own mutex and condition variable — and it ends the thread,
+// carries on. The outer one is here only for what the inner one cannot reach -
+// the queue's own mutex and condition variable - and it ends the thread,
 // because a loop whose lock does not work has nothing useful left to do.
 //
 // This used to be the outer guard alone, and that is the shape to keep away
@@ -1724,7 +1724,7 @@ void GainDrive::lookup_worker()
 		if (lookup_queue_.empty()) {
 			// Nothing to do: sleep, then look again. That is how an artist
 			// added by a scan since the last pass is found, and the timer is
-			// the fallback for a scan nothing told us about — the folder
+			// the fallback for a scan nothing told us about - the folder
 			// watcher's, an upload's, a URL fetch's.
 			//
 			// lookup_reseed_ is in the predicate because the queue is still
@@ -1778,7 +1778,7 @@ void GainDrive::lookup_worker()
 		// MusicBrainz allows one request a second per address and answers 503
 		// when that is exceeded. Either chain makes two MusicBrainz requests
 		// per job, the artist one with a one-second sleep between them, so this
-		// wait is what keeps the sustained rate under the limit — and being
+		// wait is what keeps the sustained rate under the limit - and being
 		// rate-limited is not a harmless slowdown here, because a 503 is
 		// indistinguishable from "this artist has no picture" unless the code
 		// is careful, and one full-speed pass over a library would earn a great
@@ -1787,7 +1787,7 @@ void GainDrive::lookup_worker()
 		// An earlier version skipped the wait whenever the queue was not empty,
 		// meaning to let a user who was waiting jump ahead. But a seeded
 		// backlog leaves the queue permanently non-empty, so the pacing never
-		// applied at all during precisely the pass that needed it — and
+		// applied at all during precisely the pass that needed it - and
 		// startInfoLookup seeds one deliberately. A demand request already gets
 		// what it needs by going to the front of the queue; it does not also
 		// need to outrun the rate limit.

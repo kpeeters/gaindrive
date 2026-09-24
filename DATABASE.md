@@ -23,8 +23,8 @@ back: every row is derived either from the filesystem or from an online lookup
 that will simply be made again. Nothing a person typed or chose lives here.
 
 That is a rule to keep rather than an accident. The two things that used to
-break it were `albums.cover_manual` — a hand-picked cover, which a rebuild
-threw away and a wrong TMDB match then overwrote — and a video's title, year
+break it were `albums.cover_manual` - a hand-picked cover, which a rebuild
+threw away and a wrong TMDB match then overwrote - and a video's title, year
 and episode number, which cannot be written back to the file because the
 scanner reads a video's metadata from its filename and never opens it with
 TagLib. Both now live in the user/state DB as `client.manual_covers` and
@@ -64,7 +64,7 @@ CREATE INDEX idx_folders_parent
 -- Distinct people/ensembles.
 -- One row per unique name. The same person
 -- can appear as composer on one track and
--- performer on another — the role lives in
+-- performer on another - the role lives in
 -- the junction tables, not here.
 CREATE TABLE artists (
     id          INTEGER PRIMARY KEY,
@@ -182,7 +182,7 @@ CREATE TABLE songs (
     channels      INTEGER,
     codec         TEXT,      -- "flac","mp3","mkv", etc. (the extension)
     file_size     INTEGER,   -- bytes
-    -- video; see VIDEO.md.  Videos share this table with audio because every
+    -- video.  Videos share this table with audio because every
     -- piece of client state joins on songs.path, so a separate table would
     -- mean duplicating stars, play counts, playlists, queue and bookmarks.
     -- For video rows, bitrate/duration come from ffprobe rather than TagLib,
@@ -215,7 +215,7 @@ CREATE TABLE songs (
     -- not a season, and neither is an unnumbered "Specials".
     season        INTEGER DEFAULT 0,
     -- Sidecar image beside this file, stored form; empty for a song that
-    -- inherits its album's cover. Set for a loose file — one sitting directly
+    -- inherits its album's cover. Set for a loose file - one sitting directly
     -- in a section or a root, whose folder cover belongs to the whole section
     -- rather than to it. Reached as cover art id
     -- MediaStore::SONG_COVER_ID_BASE + songs.id, since a cover art id is
@@ -279,7 +279,7 @@ CREATE INDEX idx_song_artists_role
 
 -- Cover art for a video: a poster fetched from TMDB
 -- (source 'tmdb'), or one of the two local tiers of
--- VideoArt (src/videoart.hh) — the image embedded in
+-- VideoArt (src/videoart.hh) - the image embedded in
 -- the container, with --video-art-embedded, or a
 -- representative frame, with --video-art-frames.
 -- Both local tiers are off by default; turning one
@@ -330,7 +330,7 @@ CREATE TABLE video_art (
 -- Scaled cover art. Every client asks getCoverArt
 -- for a pixel size, and before this table each of
 -- those requests forked ffmpeg and decoded the
--- full-size source — on every request, for ever.
+-- full-size source - on every request, for ever.
 --
 -- Keyed on the stored path, like video_art and for
 -- the same reason: a rowid moves across a rescan.
@@ -435,7 +435,7 @@ CREATE TABLE artist_art (
 -- runs again.
 --
 -- status: matched | unmatched | error. Only 'error'
--- is retried (after a day) — 'unmatched' is a
+-- is retried (after a day) - 'unmatched' is a
 -- judgement about the name, and asking again
 -- tomorrow would get the same answer.
 CREATE TABLE video_meta (

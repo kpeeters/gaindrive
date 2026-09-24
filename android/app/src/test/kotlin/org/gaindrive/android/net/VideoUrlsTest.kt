@@ -54,7 +54,7 @@ class VideoUrlsTest {
 	/**
 	 * `hls.m3u8` is the one endpoint the spec does not spell `<name>.view`.
 	 * The server answers `hls.view` as well, so appending the suffix would no
-	 * longer break playback — but the file extension is what lets ExoPlayer
+	 * longer break playback - but the file extension is what lets ExoPlayer
 	 * recognise the playlist without being told, so this URL keeps it.
 	 */
 	@Test

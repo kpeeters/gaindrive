@@ -234,7 +234,7 @@ class BrowseApiTest {
 	// gaindrive quotes every id, but Subsonic's own XSD types several of them
 	// as integers and older servers emit them unquoted. One such field used to
 	// fail the whole response, which surfaced as "Expected quotation mark but
-	// had '1'" the moment a legacy server was enabled — and the artist list
+	// had '1'" the moment a legacy server was enabled - and the artist list
 	// went with it, because getMusicFolders is fetched first to learn which
 	// root kinds the server has.
 
@@ -302,8 +302,8 @@ class BrowseApiTest {
 	/**
 	 * Only four server queries select the codec columns `nativeSeek` is derived
 	 * from, so a video reached through search or a playlist arrives without it.
-	 * False is the safe reading — such a video is played over HLS, which works
-	 * for everything — and the parser must produce that rather than a default
+	 * False is the safe reading - such a video is played over HLS, which works
+	 * for everything - and the parser must produce that rather than a default
 	 * of true.
 	 */
 	@Test

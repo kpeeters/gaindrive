@@ -39,7 +39,7 @@ data class FetchJobRef(
  * Every fetch job this account has, across servers, as one value.
  *
  * [contactLost] names servers whose polls have been failing long enough to say
- * so. Their jobs are still listed — the last thing we knew is better than
+ * so. Their jobs are still listed - the last thing we knew is better than
  * nothing, and a fetch does not stop because the phone lost the Wi-Fi.
  */
 data class FetchStatus(
@@ -48,7 +48,7 @@ data class FetchStatus(
 ) {
 	val live: List<FetchJobRef> get() = jobs.filter { it.state.isLive }
 
-	/** The one actually doing something, if any — the server runs one at a time. */
+	/** The one actually doing something, if any - the server runs one at a time. */
 	val moving: FetchJobRef?
 		get() = jobs.firstOrNull {
 			it.state == FetchState.RUNNING || it.state == FetchState.SCANNING
@@ -63,7 +63,7 @@ data class FetchStatus(
  *
  * **It exists because a fetch outlives the screen that started it.** The panel
  * used to own the polling in its own `viewModelScope`, and `Route.FetchUrl` is a
- * drill-down — so leaving it cancelled the poll, returning built a fresh view
+ * drill-down - so leaving it cancelled the poll, returning built a fresh view
  * model with no job in it, and the panel then looked exactly like a first visit
  * while the download went on running. Pasting the same URL again is the obvious
  * next move, and it makes a second copy: the server's duplicate check covers
@@ -71,8 +71,8 @@ data class FetchStatus(
  * what a scan has already filed. Between submitting and being indexed a fetch
  * was invisible to both.
  *
- * In `data/` rather than beside the panel because three consumers now want it —
- * the panel, the shell's strip and the uploads listing — and because it must not
+ * In `data/` rather than beside the panel because three consumers now want it -
+ * the panel, the shell's strip and the uploads listing - and because it must not
  * be scoped to any of them.
  *
  * Separate from [UrlFetchRepository], which stays the transport. That class's
@@ -117,7 +117,7 @@ class FetchMonitor @Inject constructor(
 	 *
 	 * The shell subscribes for as long as the app is composed, so backgrounding
 	 * stops the polling after the grace window and foregrounding restarts the
-	 * loop — whose first act is a sweep. **"The app came back" and "find out what
+	 * loop - whose first act is a sweep. **"The app came back" and "find out what
 	 * is fetching" are therefore the same event**, which is what notices a job
 	 * started in the web client, or one that outlived the process, without any
 	 * lifecycle plumbing of its own. Polling while the app is away would be
@@ -161,8 +161,8 @@ class FetchMonitor @Inject constructor(
 	}
 
 	private suspend fun loop(servers: List<ServerConfig>) {
-		// Whether an account may upload is the endpoint's own precondition —
-		// getFetchJobs runs check_upload_perm before it answers — so a server
+		// Whether an account may upload is the endpoint's own precondition -
+		// getFetchJobs runs check_upload_perm before it answers - so a server
 		// without it would cost one guaranteed error 50 per tick. Accounts is
 		// warm by now: the first browse load asks canUploadTo of every scoped
 		// server to decide whether to offer an Uploads chip.
@@ -228,12 +228,12 @@ class FetchMonitor @Inject constructor(
 		// The listing that has to change is the uploads one, and this is the
 		// mechanism that already exists for it: ServerSelection.browse combines
 		// LibraryRevision, and every browse screen collects that. So
-		// ArtistsViewModel needs no change — its deliberate "kept until
+		// ArtistsViewModel needs no change - its deliberate "kept until
 		// something asks for it again" cache is right, and this is something
 		// asking.
 		//
 		// No delay before it, and no forgetLibrary(): the server scans before it
-		// reports done — which is what the separate `scanning` state is for — so
+		// reports done - which is what the separate `scanning` state is for - so
 		// the library is already correct, and a fetch only adds a batch rather
 		// than moving ids about as a promote does.
 		if (done.isNotEmpty()) libraryRevision.bump()
@@ -272,7 +272,7 @@ class FetchMonitor @Inject constructor(
  * was watching, and the browse load that follows launch includes it anyway.
  *
  * Deliberately *not* also gated on the loop's first pass. A fetch that finishes
- * while the app is backgrounded is the commonest completion there is — the poll
+ * while the app is backgrounded is the commonest completion there is - the poll
  * stops, the job ends, and the first sweep after foregrounding is the only
  * chance anything has to notice it. The caller's map outlives its loop for
  * exactly that reason.

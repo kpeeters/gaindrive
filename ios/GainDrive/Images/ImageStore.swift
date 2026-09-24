@@ -13,12 +13,12 @@ import UIKit
 /// Cover art: memory cache, disk cache, and one request per image no matter how
 /// many rows ask for it.
 ///
-/// **Why this is written rather than taken from a package.** `PLAN.md` left
+/// **Why this is written rather than taken from a package.** The plan left
 /// Nuke against Kingfisher open, with "which points at a shared `URLSession`
-/// most cleanly" as the deciding factor — and neither does, since both build
+/// most cleanly" as the deciding factor - and neither does, since both build
 /// their own session from a configuration. The sharper reason is the cache key.
 /// A cover URL carries `t=` and `s=`, and the salt is regenerated every launch,
-/// so *any* URL-keyed cache — `URLCache` included — sees a different key for
+/// so *any* URL-keyed cache - `URLCache` included - sees a different key for
 /// the same bytes on every cold start and re-downloads the whole grid. Owning
 /// the loader means owning the key, and `CoverSource.cacheKey` names what the
 /// bytes are rather than how they were fetched.
@@ -31,8 +31,8 @@ import UIKit
 /// rather than together.
 actor ImageStore {
 	/// A single shared instance, as `HTTP.shared` is. This is a cache rather
-	/// than a dependency — there is exactly one, it lives as long as the
-	/// process, and nothing about it varies per server or per user — so
+	/// than a dependency - there is exactly one, it lives as long as the
+	/// process, and nothing about it varies per server or per user - so
 	/// threading it through the environment would be ceremony around a global
 	/// that is already global.
 	static let shared = ImageStore()
@@ -50,8 +50,8 @@ actor ImageStore {
 
 	/// Keys the server has answered 404 for.
 	///
-	/// Not every id has art — an album folder with no cover file, an artist
-	/// with no portrait — and without remembering that, every miss is re-asked
+	/// Not every id has art - an album folder with no cover file, an artist
+	/// with no portrait - and without remembering that, every miss is re-asked
 	/// on every re-appearance, every scroll pass and every screen visit. In
 	/// memory only, deliberately: art can be added to a folder, and a
 	/// relaunch is a reasonable moment to look again.
@@ -60,14 +60,14 @@ actor ImageStore {
 	/// The cache's size on disk, measured once and then tracked.
 	///
 	/// It used to be recomputed by walking the whole directory after *every*
-	/// download — two files per image, so a few hundred covers meant ~600 stats
+	/// download - two files per image, so a few hundred covers meant ~600 stats
 	/// per download, and at thumbnail sizes the cap needs thousands of files to
 	/// trip, so essentially all of that work was thrown away every time.
 	private var diskBytes: Int?
 
 	// The gate. `httpMaximumConnectionsPerHost` is 6, and
 	// `timeoutIntervalForRequest` counts **while a request waits for a free
-	// connection** — so handing `URLSession` a screenful of covers at once made
+	// connection** - so handing `URLSession` a screenful of covers at once made
 	// the tail time out having never been sent, and the row then showed the
 	// placeholder for ever because nothing retries. Four also leaves slots for
 	// the API calls, which share the session and were being starved by artwork.
@@ -124,7 +124,7 @@ actor ImageStore {
 	private func finish(_ fetched: Fetched, for key: String) {
 		release()
 		if let image = fetched.image {
-			// The decoded footprint, not the transferred bytes — those are zero
+			// The decoded footprint, not the transferred bytes - those are zero
 			// on the 304 and disk paths, which would let the cache fill with
 			// images it believes are free.
 			let pixels = image.size.width * image.size.height * image.scale * image.scale
@@ -151,7 +151,7 @@ actor ImageStore {
 		}
 		await withCheckedContinuation { waiting.append($0) }
 		// Resumed by `release`, which hands the slot over rather than freeing
-		// it — so `active` is already correct and must not be incremented here.
+		// it - so `active` is already correct and must not be incremented here.
 	}
 
 	private func release() {
@@ -169,7 +169,7 @@ actor ImageStore {
 	/// `static`, so it is outside the actor's isolation, and `async`, so
 	/// awaiting it from an isolated context hops to the cooperative pool. That
 	/// pair is what keeps the disk read, the decode and the write off the
-	/// actor's serial executor — where they used to make disk concurrency
+	/// actor's serial executor - where they used to make disk concurrency
 	/// exactly one.
 	private static func load(
 		_ source: CoverSource, session: URLSession, directory: URL
@@ -180,14 +180,14 @@ actor ImageStore {
 		var request = URLRequest(url: source.url)
 		// **Our `ETag` is the authoritative one.** Left on the default policy,
 		// `URLCache` holds its own entry for the same URL and can satisfy or
-		// revalidate the request itself, handing back a synthesised 200 — so
+		// revalidate the request itself, handing back a synthesised 200 - so
 		// the 304 branch below never runs and the body is re-decoded anyway.
 		// Nothing is lost by opting out: the server sends `Cache-Control:
 		// no-cache` and the URL carries a per-launch salt, so `URLCache` could
 		// never hit for a cover in the first place.
 		request.cachePolicy = .reloadIgnoringLocalCacheData
 		// gaindrive sends an `ETag` over the file's mtime, size and the
-		// requested dimensions — deliberately, since `folders.id` is a rowid
+		// requested dimensions - deliberately, since `folders.id` is a rowid
 		// that changes across a rescan and a blindly cached cover would show
 		// the previous album's art after a rebuild. Revalidating rather than
 		// trusting the stored copy is what keeps the stable key honest.
@@ -199,7 +199,7 @@ actor ImageStore {
 			let http = response as? HTTPURLResponse
 		else {
 			// Unreachable, not absent. Show what is on disk and do not record a
-			// miss — the next attempt may well succeed.
+			// miss - the next attempt may well succeed.
 			return Fetched(
 				image: stored.flatMap { UIImage(data: $0.data) }, bytesWritten: 0,
 				isMissing: false)
@@ -210,7 +210,7 @@ actor ImageStore {
 		}
 		guard (200..<300).contains(http.statusCode), let image = UIImage(data: data) else {
 			// 404 is the ordinary answer for a folder with no artwork, so it is
-			// not worth logging or retrying — the caller draws a placeholder.
+			// not worth logging or retrying - the caller draws a placeholder.
 			return Fetched(image: nil, bytesWritten: 0, isMissing: http.statusCode == 404)
 		}
 		entry.write(data: data, etag: http.value(forHTTPHeaderField: "ETag"))
@@ -228,12 +228,12 @@ actor ImageStore {
 
 		private var name: String {
 			// The key contains `/` and `#`, neither of which can be in a file
-			// name, and a hash also bounds the length — a server UUID plus a
+			// name, and a hash also bounds the length - a server UUID plus a
 			// long album id does not.
 			//
 			// **SHA-256 rather than `hashValue`.** Swift seeds `Hasher` per
 			// process, so `hashValue` gives a different answer on every launch
-			// — which would miss the entire disk cache exactly when it is
+			// - which would miss the entire disk cache exactly when it is
 			// supposed to hit, and this cache exists for no other reason.
 			SHA256.hash(data: Data(key.utf8))
 				.prefix(16)
@@ -269,8 +269,8 @@ actor ImageStore {
 	/// the new total.
 	///
 	/// Only the data files are ranked, and each one's `ETag` file goes with it.
-	/// Treating the two kinds as independent entries — which an earlier version
-	/// did — can delete an `ETag` while keeping its data, after which every
+	/// Treating the two kinds as independent entries - which an earlier version
+	/// did - can delete an `ETag` while keeping its data, after which every
 	/// request for that cover re-downloads the whole body instead of
 	/// revalidating.
 	///

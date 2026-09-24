@@ -38,8 +38,8 @@ import androidx.compose.ui.unit.dp
  * the easier thumb reach for most people.
  *
  * Only letters the list actually contains are shown, so no tap is ever a no-op.
- * A tap and a drag are handled identically — a tap is just a press that never
- * moved — which is what makes scrubbing down the rail feel continuous.
+ * A tap and a drag are handled identically - a tap is just a press that never
+ * moved - which is what makes scrubbing down the rail feel continuous.
  */
 @Composable
 fun AlphabetRail(

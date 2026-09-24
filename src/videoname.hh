@@ -6,13 +6,13 @@
 // What a video's filename says it is.
 //
 // Video containers carry no tag anything writes, so the name is the only
-// metadata there is — and it is usually a name meant for a torrent tracker
+// metadata there is - and it is usually a name meant for a torrent tracker
 // rather than for a person: "The.Third.Man.1949.1080p.BluRay.x264-GRP".  This
 // turns that back into a title and a year, which is what a client should show
 // and what an online provider has to be asked with.
 //
 // Pure string work: no database, no filesystem, no ffmpeg.  That is deliberate
-// — these rules get tuned repeatedly against real filenames, and they are worth
+// - these rules get tuned repeatedly against real filenames, and they are worth
 // being able to test by piping a list through --video-name-test.
 //
 // **When nothing matches, the name comes back unchanged** with `cleaned`
@@ -24,7 +24,7 @@ struct VideoName
 	std::string title;          // cleaned; the raw name when nothing matched
 	int         year    = 0;
 	// 0 = not an episode. From a marker in the name (S02E03, 2x03, Season 2
-	// Episode 3), or — only through resolve_video_name() — from a folder that
+	// Episode 3), or - only through resolve_video_name() - from a folder that
 	// says which season it is. A "Disc 2" or "CD1" folder is *not* a season:
 	// see SEASON_FOLDER_NUM in videoname.cc.
 	int         season  = 0;
@@ -37,7 +37,7 @@ struct VideoName
 	bool        from_folder = false;  // title came from the folder, not the file
 	};
 
-// One name, parsed on its own.  `name` is a bare name — no directory, no
+// One name, parsed on its own.  `name` is a bare name - no directory, no
 // extension.
 VideoName parse_video_name(std::string_view name);
 

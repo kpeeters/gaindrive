@@ -29,11 +29,11 @@ val gdBuild: Int = versionProps.getProperty("build")?.trim()?.toIntOrNull()
 //
 // Each field also outweighs the largest value below it (999 < 1000, 99999 <
 // 100000, 9999999 < 10000000), which is what makes it safe to reset `build` on
-// a version bump — the code still increases.
+// a version bump - the code still increases.
 //
 // The bounds are all load-bearing. A versionCode is a signed 32-bit int that
 // Play caps at 2100000000, so a major of 210 is already past the cap and Kotlin
-// would wrap silently to a negative number rather than complain — which is the
+// would wrap silently to a negative number rather than complain - which is the
 // one failure this whole scheme exists to make impossible.
 val gdVersionCode: Int = run {
 	val p = gdVersionName.split(".").mapNotNull { it.toIntOrNull() }
@@ -46,7 +46,7 @@ val gdVersionCode: Int = run {
 	p[0] * 10_000_000 + p[1] * 100_000 + p[2] * 1_000 + gdBuild
 }
 
-// Release signing. The keystore itself is never in the repository — only a
+// Release signing. The keystore itself is never in the repository - only a
 // pointer to it, from android/keystore.properties or from the environment, so a
 // build machine can supply the same thing without a file. Absent both, the
 // release variant falls back to the debug key (see buildTypes below), which is
@@ -86,7 +86,7 @@ android {
 				keyAlias = keystoreValue("keyAlias", "GAINDRIVE_KEY_ALIAS") ?: "upload"
 				// The same password, because there is only one. keytool has
 				// produced PKCS12 keystores since Java 9 whatever the file is
-				// named, and PKCS12 has no separate per-key password — which
+				// named, and PKCS12 has no separate per-key password - which
 				// is why it prompts once. Gradle still wants the field set.
 				keyPassword = storePassword
 			}

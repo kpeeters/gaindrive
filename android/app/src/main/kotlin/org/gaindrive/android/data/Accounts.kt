@@ -14,8 +14,8 @@ import javax.inject.Singleton
 /**
  * What the signed-in account may do on one server.
  *
- * Roles are per server — the same person can be an admin on one and a
- * restricted account on another — so nothing here is a global fact about the
+ * Roles are per server - the same person can be an admin on one and a
+ * restricted account on another - so nothing here is a global fact about the
  * user.
  */
 data class AccountFacts(
@@ -46,7 +46,7 @@ data class AccountFacts(
  *
  * The bit rate is the reason this exists: the server enforces its ceiling
  * whatever the client asks for, so the app has to know it before it can name
- * the quality it is about to receive — a request for the original file on a
+ * the quality it is about to receive - a request for the original file on a
  * capped account comes back as MP3 at the cap, and bytes stored under the wrong
  * quality key are worse than bytes not stored at all. The roles came later and
  * ride along rather than costing a second request: [canUpload] decides whether
@@ -56,7 +56,7 @@ data class AccountFacts(
  * Held in memory for the process rather than persisted: it is one cheap call
  * per server per launch, it picks up a change made on the server without any
  * invalidation logic, and there is nothing to migrate. The first stream URL of
- * a session waits for it, which is why the timeout is short — offline playback
+ * a session waits for it, which is why the timeout is short - offline playback
  * comes from the cache anyway, and a slice that fails to appear is recovered by
  * relaunching rather than by waiting.
  */
@@ -102,7 +102,7 @@ class Accounts @Inject constructor(
 				AccountFacts(
 					maxBitRate = user.maxBitRate.takeIf { it > 0 } ?: 0,
 					// An admin may upload whether or not the role is set, which
-					// is how the server itself reads it — see check_upload_perm.
+					// is how the server itself reads it - see check_upload_perm.
 					canUpload = user.uploadRole || user.adminRole,
 					isAdmin = user.adminRole,
 				)

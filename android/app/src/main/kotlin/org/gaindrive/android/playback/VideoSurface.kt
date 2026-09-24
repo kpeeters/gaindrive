@@ -17,7 +17,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Connects the video screen's output — picture and subtitles — to the player
+ * Connects the video screen's output - picture and subtitles - to the player
  * producing them.
  *
  * Everything else in the UI reaches playback through [PlayerConnection]'s
@@ -28,7 +28,7 @@ import javax.inject.Singleton
  *
  * That is deliberate, and it covers three things at once. A `MediaController`
  * can carry a surface only if the session grants `COMMAND_SET_VIDEO_SURFACE`,
- * and cues and video-size events have to survive the session boundary as well —
+ * and cues and video-size events have to survive the session boundary as well -
  * three negotiations whose failure mode is a black rectangle with nothing in
  * the log. The service and the UI share a process (`PlaybackService` declares
  * no `android:process`), so the direct reference is available, exact, and has
@@ -37,9 +37,9 @@ import javax.inject.Singleton
  * instead of the surface, so nothing attaches here at all and the question of
  * which player owns it does not arise.
  *
- * Both ends can arrive in either order — the screen can be composed before the
+ * Both ends can arrive in either order - the screen can be composed before the
  * service exists, and the service can be destroyed while the screen is still up
- * — so both halves are held and applied whenever both are present. Every method
+ * - so both halves are held and applied whenever both are present. Every method
  * runs on the main thread; the service's `onCreate` and Compose's effects both
  * do.
  */
@@ -54,7 +54,7 @@ class VideoSurface @Inject constructor() {
 
 	/**
 	 * The picture's shape once the decoder has reported it. Null until then, at
-	 * which point the screen falls back to the figure the server gave — which
+	 * which point the screen falls back to the figure the server gave - which
 	 * is what stops the surface starting square and snapping.
 	 */
 	val aspectRatio: StateFlow<Float?> = _aspectRatio.asStateFlow()
@@ -72,7 +72,7 @@ class VideoSurface @Inject constructor() {
 
 		/**
 		 * Every text track the player resolved, including the ones
-		 * [subtitleGroups] declines to offer — which is the whole reason to log
+		 * [subtitleGroups] declines to offer - which is the whole reason to log
 		 * it. A side-loaded WebVTT, a track inside the container and a caption
 		 * stream ExoPlayer invented for an HLS playlist are indistinguishable
 		 * in the picker and differ only by MIME type, so a report of "the
@@ -132,14 +132,14 @@ class VideoSurface @Inject constructor() {
 	 * Applied to the player for the same reason the surface is: a controller
 	 * can only carry this if the session grants
 	 * `COMMAND_SET_TRACK_SELECTION_PARAMETERS`, and a refused command is a
-	 * silent no-op — the user would tap a subtitle track and see nothing happen.
+	 * silent no-op - the user would tap a subtitle track and see nothing happen.
 	 *
 	 * **An index rather than the `TrackGroup` itself, and that is the whole
 	 * fix.** `DefaultTrackSelector` looks an override up in a `HashMap` keyed on
 	 * `TrackGroup`, whose equality compares the group's id and every field of
 	 * every `Format`. A group read from the `MediaController` is rebuilt from
 	 * the `PlayerInfo` bundle, so anything that does not survive that round trip
-	 * makes the lookup miss — and a missed override throws nothing, logs
+	 * makes the lookup miss - and a missed override throws nothing, logs
 	 * nothing, and selects nothing. Resolving here, against the player's own
 	 * `currentTracks`, makes the key the very object the selector will compare
 	 * against. The index is what is safe to carry across the session boundary;
@@ -188,12 +188,12 @@ class VideoSurface @Inject constructor() {
 	 * ffmpeg's own "best stream" rule scores by channel count and would take a
 	 * 5.1 director's commentary over the stereo mix. Since the server started
 	 * handing over whole containers (see `PlayableContainers`), the same choice
-	 * falls to `DefaultTrackSelector` — which scores by preferred language, then
+	 * falls to `DefaultTrackSelector` - which scores by preferred language, then
 	 * by channel count, so it can reach the same wrong answer and there is no
 	 * picker to undo it with.
 	 *
 	 * Guarded on there being more than one group rather than applied always, so
-	 * the single-track case — every remux, every HLS stream — keeps whatever the
+	 * the single-track case - every remux, every HLS stream - keeps whatever the
 	 * selector would have done and this cannot regress a path it has no business
 	 * touching.
 	 *
@@ -207,7 +207,7 @@ class VideoSurface @Inject constructor() {
 		val audio = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
 		if (audio.size < 2) return
 		val first = audio.first().mediaTrackGroup
-		// Nothing to do if it is already the selection — onTracksChanged fires
+		// Nothing to do if it is already the selection - onTracksChanged fires
 		// again for our own override, and re-applying it would loop.
 		if (audio.first().isSelected) return
 		Log.d(TAG, "pinning the first of ${audio.size} audio tracks:" +

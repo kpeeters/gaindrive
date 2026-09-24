@@ -25,7 +25,7 @@ enum Merge {
 	///
 	/// The first contributor in registry order wins the ref, the artwork and
 	/// the index letter; only the album count and the ref list grow. Starred
-	/// anywhere is starred — the alternative is a star that depends on which
+	/// anywhere is starred - the alternative is a star that depends on which
 	/// server happened to answer first.
 	static func artists(perServer: [[Artist]]) -> [Artist] {
 		// One server is not a merge. Returning it untouched also preserves the
@@ -98,7 +98,7 @@ enum Merge {
 	/// same-named sections collapsed across servers.
 	///
 	/// Built on `artistIndexes`, which already keys artists by name across all
-	/// buckets — a "Film" section on two servers becomes one row carrying both
+	/// buckets - a "Film" section on two servers becomes one row carrying both
 	/// refs, the first contributor in registry order winning the ref. The
 	/// explicit sort is load-bearing: the single-server shortcut in that
 	/// function returns the server's own bucket order untouched, and the
@@ -114,14 +114,14 @@ enum Merge {
 	/// Collapses albums that two *different* servers both hold.
 	///
 	/// Matched on artist and title through `matchKey`, which keeps letters and
-	/// digits and discards everything else — that is what makes "Vol. 2" match
+	/// digits and discards everything else - that is what makes "Vol. 2" match
 	/// "Vol 2", and curly quotes match straight ones.
 	///
 	/// Deliberately **not** matched on year: a remaster disagrees about it
 	/// between servers, which would split exactly the pairs worth collapsing.
 	///
 	/// Across servers only. Two same-titled albums on one server are two
-	/// albums — separately filed editions — and collapsing them would hide one.
+	/// albums - separately filed editions - and collapsing them would hide one.
 	static func albums(_ albums: [Album]) -> [Album] {
 		guard Set(albums.map(\.ref.server)).count > 1 else { return albums }
 
@@ -172,8 +172,8 @@ enum Merge {
 	///
 	/// For the uploads slice, where two accounts' identically named folders are
 	/// not the same artist. The owner buckets exist precisely to keep them
-	/// apart — `personal=*` groups the response by username rather than by
-	/// first letter — so collapsing rows by name across servers would file one
+	/// apart - `personal=*` groups the response by username rather than by
+	/// first letter - so collapsing rows by name across servers would file one
 	/// person's upload under another's heading, which is the one thing that
 	/// listing has to get right.
 	static func concatenatedIndexes(perServer: [[ArtistIndex]]) -> [ArtistIndex] {
@@ -201,7 +201,7 @@ enum Merge {
 	}
 
 	/// Letters first, `#` at the end of the rail rather than where its code
-	/// point would put it — which is before "A", and looks like a mistake.
+	/// point would put it - which is before "A", and looks like a mistake.
 	private static func labelPrecedes(_ lhs: String, _ rhs: String) -> Bool {
 		let lhsIsHash = lhs == "#"
 		let rhsIsHash = rhs == "#"

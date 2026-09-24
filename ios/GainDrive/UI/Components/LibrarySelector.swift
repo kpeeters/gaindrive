@@ -20,8 +20,8 @@ import SwiftUI
 /// switch has to be.
 ///
 /// **Offline lives here rather than in Settings**, as Android's does and for
-/// its reason: it answers the same question the scope does — which library am
-/// I looking at — and it is flipped before a flight rather than configured
+/// its reason: it answers the same question the scope does - which library am
+/// I looking at - and it is flipped before a flight rather than configured
 /// once.
 struct LibrarySelector: View {
 	@Environment(ServerSelection.self) private var selection
@@ -30,7 +30,7 @@ struct LibrarySelector: View {
 	var body: some View {
 		Menu {
 			// **Offline first, and always present.** The menu used to render
-			// nothing below two servers, which is the common case — so a mode
+			// nothing below two servers, which is the common case - so a mode
 			// that stops every request would have been unreachable on exactly
 			// the install most likely to want it. The *server* half keeps that
 			// rule; the menu itself no longer does.

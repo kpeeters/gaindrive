@@ -24,7 +24,7 @@ import javax.inject.Inject
  * what the player already publishes.
  *
  * [song] is null until the mirror answers, and stays null for a track that was
- * never stored there — the dialog then shows what the queue entry carries and
+ * never stored there - the dialog then shows what the queue entry carries and
  * omits the rest, which is the same rule the web client's modal follows for a
  * missing field.
  */
@@ -46,7 +46,7 @@ data class TrackInfoState(
  * refresh `transcodedSuffix`/`transcodedBitRate`, and this app needs neither:
  * the phone decides the quality itself, through `AudioQuality.cappedBy`, and
  * records the answer on the item. So a local read is both sufficient and the
- * only version that works with no connectivity — which is exactly the state a
+ * only version that works with no connectivity - which is exactly the state a
  * downloaded library, and the cast route that serves it, exist for.
  */
 @HiltViewModel

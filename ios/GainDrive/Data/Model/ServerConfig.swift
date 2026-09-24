@@ -8,7 +8,7 @@
 
 import Foundation
 
-/// One configured server. **The password is not here** — it lives in the
+/// One configured server. **The password is not here** - it lives in the
 /// Keychain under the server's id, so this record can be written to
 /// `UserDefaults`, logged and inspected without leaking anything.
 struct ServerConfig: Identifiable, Codable, Hashable, Sendable {
@@ -45,7 +45,7 @@ struct ServerConfig: Identifiable, Codable, Hashable, Sendable {
 		return urlString
 	}
 
-	/// Host and port, for the second line of a list row — enough to tell two
+	/// Host and port, for the second line of a list row - enough to tell two
 	/// servers apart when both are named after the same thing.
 	var displayAddress: String {
 		guard let baseURL, let host = baseURL.host() else { return urlString }
@@ -70,7 +70,7 @@ struct ServerConfig: Identifiable, Codable, Hashable, Sendable {
 	///
 	/// The scheme is supplied because the overwhelmingly common input is a
 	/// bare `192.0.2.9:4040` typed from memory, and `URL(string:)` accepts
-	/// that as a *relative* URL with no host rather than rejecting it — which
+	/// that as a *relative* URL with no host rather than rejecting it - which
 	/// would surface much later as an unexplained request failure. `http` and
 	/// not `https`, because a LAN server without TLS is the case that needs
 	/// the help; anyone who has TLS types the scheme.

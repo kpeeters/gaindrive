@@ -17,14 +17,14 @@ import org.gaindrive.android.ui.recents.RecentsScreen
 
 /**
  * Recently played, the album a row opens, and that album's artist between
- * the two — which is what the web client shows for the same tap, its
+ * the two - which is what the web client shows for the same tap, its
  * `viewTracks` back-filling pane 1 with the artist's albums.
  *
  * The middle level cannot be built when the row is tapped: a song row
  * carries the artist's *name* and nothing addressable, and the artist
  * folder id arrives only with the album detail. So the tap opens the album
  * directly under the list, exactly as before, and the album pane reports
- * the artist upward once it has loaded — [PaneStack.insert] then grows the
+ * the artist upward once it has loaded - [PaneStack.insert] then grows the
  * path a level *under* the reader, without moving what they are looking at.
  */
 @Composable

@@ -33,7 +33,7 @@ api-html: $(API_HTML)
 # so nothing in the repo reads them and a binary diff is worthless. This is a
 # page of the site, `upload-web` ships whatever html/ holds, and a gitignored
 # api.html would publish a dead link from a fresh clone. It is also text, so
-# the diff is the review — which is the only check a mistake in api.toml gets.
+# the diff is the review - which is the only check a mistake in api.toml gets.
 #
 # html/docs.html is a prerequisite because the page's <head>, nav and footer
 # are lifted from it rather than kept as a ninth copy, so a restyle of the site
@@ -62,7 +62,7 @@ create-play-assets: $(PLAY_ICON) $(PLAY_FEAT) $(TV_BANNER)
 # `-flatten` onto the same brand red is not cosmetic: the SVG's rectangle stops
 # half a pixel short of its canvas, and a transparent edge under Play's mask
 # shows as a pale hairline. The alpha channel is then put back, opaque, and the
-# colour type forced, because Play asks for a 32-bit PNG — flattening alone
+# colour type forced, because Play asks for a 32-bit PNG - flattening alone
 # would write a 24-bit one.
 $(PLAY_ICON): $(LOGO)
 	@mkdir -p $(PLAY_DIR)
@@ -71,14 +71,14 @@ $(PLAY_ICON): $(LOGO)
 	$(MAGICK) $(PLAY_RAW) -background '#a31623' -flatten -resize 512x512 \
 	 -alpha set -strip -define png:color-type=6 $@
 	@rm -f $(PLAY_RAW)
-	@echo "Wrote $@ — upload it as the app icon in the Play Console listing."
+	@echo "Wrote $@ - upload it as the app icon in the Play Console listing."
 
 # The banner across the top of the listing. Its layout is graphics/play-feature.svg
 # rather than an ImageMagick composition here, because a banner is design work
 # and belongs in a file that can be opened and moved around; that file in turn
 # clips the icon artwork rather than copying it, so the two stay one set.
 #
-# Rendered at final size, where the icon is supersampled — the opposite choice,
+# Rendered at final size, where the icon is supersampled - the opposite choice,
 # for the opposite reason. The record's grooves are 2px rings roughly 5px
 # apart, and averaging a 2x render of them down beats the ring period against
 # the pixel grid: the result is moiré, blotchy arcs across the disc that look
@@ -95,7 +95,7 @@ $(PLAY_FEAT): $(FEATURE)
 	 --export-filename=$(FEAT_RAW)
 	$(MAGICK) $(FEAT_RAW) -background '#f6efe0' -flatten -alpha off -strip $@
 	@rm -f $(FEAT_RAW)
-	@echo "Wrote $@ — upload it as the feature graphic in the same listing."
+	@echo "Wrote $@ - upload it as the feature graphic in the same listing."
 
 # The Android TV home-screen banner, which graphics/tv-banner.svg letterboxes
 # out of the feature graphic. Unlike the listing assets above, this lands in
@@ -113,4 +113,4 @@ $(TV_BANNER): $(BANNER) $(FEATURE)
 	 --export-filename=$(BANNER_RAW)
 	$(MAGICK) $(BANNER_RAW) -background '#f6efe0' -flatten -alpha off -strip $@
 	@rm -f $(BANNER_RAW)
-	@echo "Wrote $@ — commit it; the manifest names it as android:banner."
+	@echo "Wrote $@ - commit it; the manifest names it as android:banner."

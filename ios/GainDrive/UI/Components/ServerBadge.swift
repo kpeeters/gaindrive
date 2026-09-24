@@ -10,7 +10,7 @@ import SwiftUI
 
 /// Which server a row came from.
 ///
-/// Deliberately quiet — a tinted label rather than a chip. It appears on every
+/// Deliberately quiet - a tinted label rather than a chip. It appears on every
 /// row in merged scope, so anything louder would compete with the content it is
 /// annotating.
 ///
@@ -37,7 +37,7 @@ struct ServerBadge: View {
 }
 
 /// Plural, because a row whose duplicates were collapsed stands for every
-/// server that has the album — and hiding that would make the missing second
+/// server that has the album - and hiding that would make the missing second
 /// row look like a bug.
 struct ServerBadges: View {
 	let names: [String]

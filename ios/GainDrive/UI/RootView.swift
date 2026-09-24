@@ -12,7 +12,7 @@ import SwiftUI
 /// bar and `android/SCREENS.md`.
 struct RootView: View {
 	/// Decided **once**, by the composition root, from the registry as it was
-	/// at launch — and then frozen. Re-deriving it from `servers.isEmpty`
+	/// at launch - and then frozen. Re-deriving it from `servers.isEmpty`
 	/// would move the user out from under themselves the moment they saved
 	/// their first server, resetting the navigation stack mid-task.
 	let firstRun: Bool
@@ -22,7 +22,7 @@ struct RootView: View {
 	@State private var tab: Destination
 	/// The tab-root view model is built here rather than inside `ArtistsView`
 	/// because a `@State` initial value cannot read `@Environment`, and the
-	/// usual workaround — an optional filled in from `.task` — puts a spinner
+	/// usual workaround - an optional filled in from `.task` - puts a spinner
 	/// in front of the tab for a frame and an unwrap at every use site.
 	///
 	/// This initialiser runs again on **every** re-evaluation of
@@ -53,7 +53,7 @@ struct RootView: View {
 
 	/// Not called `Tab`: SwiftUI's own `Tab` is what the builder below
 	/// constructs, and a nested type of that name shadows it inside this
-	/// scope — which surfaces as "cannot be constructed because it has no
+	/// scope - which surfaces as "cannot be constructed because it has no
 	/// accessible initializers" pointing at the wrong thing entirely.
 	enum Destination: Hashable {
 		case artists, playlists, recents, search, settings
@@ -89,7 +89,7 @@ struct RootView: View {
 		// The iOS 18 idiom for a tabbed app on a wide screen: the tab bar
 		// becomes a sidebar on iPad and under Catalyst, and stays a tab bar on
 		// a phone. It is also what makes the Mac build look like a Mac app
-		// rather than a stretched phone, which `PLAN.md` lists as the whole
+		// rather than a stretched phone, which is the whole
 		// point of taking the Catalyst destination.
 		.tabViewStyle(.sidebarAdaptable)
 		// **These are alerts and not a sheet, and that is why they may live
@@ -97,12 +97,12 @@ struct RootView: View {
 		// resolved in this view's scope, so nothing performs an environment
 		// lookup at presentation time. A sheet whose content is a *view* does,
 		// and one presented from a `TabView` under `.sidebarAdaptable` is not
-		// given the environment to look in — which is why the Now Playing sheet
+		// given the environment to look in - which is why the Now Playing sheet
 		// is raised from `MiniPlayer` instead.
 		//
 		// **Playback errors belong to the shell, not to a screen.** They arrive
 		// from the audio session, from an item that failed to load and from the
-		// watchdog, none of which is any one screen's business — and a track
+		// watchdog, none of which is any one screen's business - and a track
 		// that could not be played leaves no mini player to hang an alert on,
 		// which is exactly when there is something to say.
 		.alert(

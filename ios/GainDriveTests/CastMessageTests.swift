@@ -14,8 +14,8 @@ import Testing
 /// The Cast v2 wire format.
 ///
 /// Hand-encoded protobuf is exactly the kind of code that is either right or
-/// silently wrong — a receiver answers a malformed frame by saying nothing at
-/// all — so the encoder and the decoder are checked against each other and
+/// silently wrong - a receiver answers a malformed frame by saying nothing at
+/// all - so the encoder and the decoder are checked against each other and
 /// against the shapes a hostile or broken peer can send.
 struct CastMessageTests {
 	private func roundTrip(_ payload: String) -> String? {
@@ -33,7 +33,7 @@ struct CastMessageTests {
 		// The length prefix is in **bytes, not characters**. Getting that wrong
 		// produces a frame the receiver cannot parse, and only for the users
 		// whose libraries contain one.
-		#expect(roundTrip(#"{"title":"Björk — Jóga"}"#) == #"{"title":"Björk — Jóga"}"#)
+		#expect(roundTrip(#"{"title":"Björk - Jóga"}"#) == #"{"title":"Björk - Jóga"}"#)
 	}
 
 	@Test func anEmptyPayloadIsStillAPayload() {
@@ -88,7 +88,7 @@ struct CastMessageTests {
 	/// A wire type we do not write means this is not a message we understand;
 	/// stopping beats walking off into the payload.
 	@Test func anUnknownWireTypeStops() {
-		// Field 6, wire type 5 (32-bit) — a shape the real protocol never uses.
+		// Field 6, wire type 5 (32-bit) - a shape the real protocol never uses.
 		let body = Data([6 << 3 | 5, 0, 0, 0, 0])
 		#expect(CastMessage.payload(of: body) == nil)
 	}

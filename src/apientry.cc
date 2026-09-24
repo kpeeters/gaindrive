@@ -10,7 +10,7 @@
 using namespace tinyxml2;
 
 // What stream.view would actually send for this song, when that differs from
-// the stored file.  Mirrors the branch order in Streamer::serve() — a format
+// the stored file.  Mirrors the branch order in Streamer::serve() - a format
 // override wins over the per-user bitrate cap, and the cap alone means mp3.
 // Empty when the source is served as-is.
 struct TranscodeInfo
@@ -28,7 +28,7 @@ static std::optional<TranscodeInfo> transcode_target(
 	// the negotiation below applies.  Anything that is not already in a
 	// browser-playable container arrives as MP4, whether that took a remux or
 	// a full re-encode.  Whether it is *seekable* is a different question and
-	// is answered separately by nativeSeek — see song_entry_json().
+	// is answered separately by nativeSeek - see song_entry_json().
 	if (is_video_ext(c.codec)) {
 		// Same predicate serve_video() picks its tier with, so the advertised
 		// type cannot disagree with what the stream turns out to be.
@@ -138,8 +138,8 @@ nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
 	if (auto t = transcode_target(c, max_bitrate, format)) {
 		s["transcodedContentType"] = std::string(t->mime);
 		s["transcodedSuffix"]      = std::string(t->suffix);
-		// Video has no meaningful single bitrate to promise — the encode is
-		// CRF-driven — so the field is omitted rather than sent as 0.
+		// Video has no meaningful single bitrate to promise - the encode is
+		// CRF-driven - so the field is omitted rather than sent as 0.
 		if (t->bitrate > 0) s["transcodedBitRate"] = t->bitrate;
 		}
 	// gaindrive extension.  Says whether the stream this entry would produce
@@ -288,18 +288,18 @@ std::string sane_video_size(const std::string& s)
 // Two token shapes, and the split is by *medium* rather than by anything about
 // the file:
 //
-//  * bare — a video container (every VIDEO_TARGETS name but vob). Video is a
+//  * bare - a video container (every VIDEO_TARGETS name but vob). Video is a
 //    container-only declaration by design: the server keeps its own codec test,
 //    so declaring `mkv` widens which containers may be served untouched and
 //    nothing else.
-//  * `container/codec` — audio, always. Both halves are compared against what
+//  * `container/codec` - audio, always. Both halves are compared against what
 //    the scan observed and stored, so there is no bare audio form: `mp3` and
 //    `mpeg/mp3` would be two spellings of one thing, which is the class of bug
 //    that made a `.oga` and a `.ogg` disagree about the same container.
 //
 // Validated here rather than in Streamer for the reason sane_video_size() above
 // gives: the one caller reachable from outside is the one that checks. What is
-// bounded is the whole parameter, at 128 characters — that caps the token count
+// bounded is the whole parameter, at 128 characters - that caps the token count
 // and every token length at once, so there are no separate counters to keep
 // agreeing with each other. 128 rather than the 64 a container-only list needed:
 // a realistic audio declaration runs to about seventy.
@@ -311,7 +311,7 @@ std::string sane_video_size(const std::string& s)
 //
 // **Neither half of a pair is checked against a vocabulary.** Both are compared
 // for equality with what the scan stored, so a spelling this server does not use
-// simply fails to match and the file transcodes as it always did — a better
+// simply fails to match and the file transcodes as it always did - a better
 // failure than two more tables to keep in step with ffprobe's names and with
 // whatever container the next format turns out to be. What is checked is only
 // that each half is *shaped* like one: non-empty, letters, digits and
@@ -358,7 +358,7 @@ Playable parse_playable(const std::string& s)
 // It exists because the answer stopped being the server's business alone. A
 // client that demuxes the container itself (see `playable` on
 // stream.view) is handed those streams by its own demuxer, so side-loading
-// them through getCaptions as well would list every subtitle twice — while the
+// them through getCaptions as well would list every subtitle twice - while the
 // sidecar, which no container carries, still has to come from here.
 //
 // A pure derivation: SIDECAR_CAPTION_INDEX is negative precisely so it can

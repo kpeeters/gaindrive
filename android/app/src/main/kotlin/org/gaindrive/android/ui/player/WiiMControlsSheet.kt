@@ -46,7 +46,7 @@ import kotlin.math.roundToInt
  * to the switch and the preset dropdown; saving needs a curve to save.
  *
  * A second [ModalBottomSheet] beside the Now Playing one, hosted from
- * `GainDriveApp` exactly as [CastDeviceSheet] is — not a sheet opened from
+ * `GainDriveApp` exactly as [CastDeviceSheet] is - not a sheet opened from
  * inside another, which `TrackActionsSheet` explains this codebase avoids.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -97,7 +97,7 @@ fun WiiMControlsSheet(
 			}
 
 			// LoadStateBox fills whatever it is given, and a bottom sheet's
-			// Column is as tall as its content — so the height has to be stated
+			// Column is as tall as its content - so the height has to be stated
 			// or the panel would run off the bottom of the sheet. A fixed block
 			// rather than a bound is the better of the two: the spinner then
 			// sits in the space the panel is about to occupy, and the sheet

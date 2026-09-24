@@ -3,13 +3,13 @@ package org.gaindrive.android.net
 import kotlinx.serialization.Serializable
 
 /**
- * DTOs for the URL-fetch endpoints — the gaindrive extension that has the
+ * DTOs for the URL-fetch endpoints - the gaindrive extension that has the
  * server download a pasted URL into the user's own upload area. Shaped to what
  * `src/gaindrive.cc` emits; the wire contract is in `API.md`.
  *
  * As in [BrowseDto.kt], everything is optional with a default. The server
  * always writes real JSON arrays, so the single-element collapsing that bites
- * other Subsonic implementations does not arise here — but the defaults mean a
+ * other Subsonic implementations does not arise here - but the defaults mean a
  * server that omitted a container entirely would still parse.
  */
 
@@ -28,7 +28,7 @@ data class UrlHandlerDto(
  * adding to it must not fail the whole response.
  * `data.model.FetchState` is where it is given meaning.
  *
- * [percent] is the tool's own progress and is deliberately allowed to stall —
+ * [percent] is the tool's own progress and is deliberately allowed to stall -
  * the server keeps the last figure rather than resetting to zero for a line
  * carrying no percentage, because post-processing is the slowest visible part
  * of an audio fetch and a bar snapping back to 0 there reads as a failure.

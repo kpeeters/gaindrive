@@ -4,8 +4,8 @@
 A video's filename is parsed into a title and a year, TMDB is asked whether
 there is such a film, and a match supplies the poster, the plot and the
 canonical title. What these tests check is that a match arrives through the
-channels that already existed — the ordinary `coverArt` id, and the `notes`
-field of `getAlbumInfo2` where an album's liner notes go — because that is what
+channels that already existed - the ordinary `coverArt` id, and the `notes`
+field of `getAlbumInfo2` where an album's liner notes go - because that is what
 let this land without an API change or a client change.
 
 Needs a server with a TMDB key configured (Settings → Server) and a scan that
@@ -84,7 +84,7 @@ def _albums_with_video():
 
 
 def _described():
-    """Albums holding video whose getAlbumInfo2 carries notes — i.e. matched."""
+    """Albums holding video whose getAlbumInfo2 carries notes - i.e. matched."""
     if "described" not in _CACHE:
         out = []
         for aid in list(_albums_with_video())[:40]:
@@ -101,7 +101,7 @@ def _need_key():
     # back, so this can no longer check that it looks plausible.
     r = _json("getServerSettings.view")
     if not (r.get("serverSettings") or {}).get("tmdbKeySet"):
-        raise Skip("no TMDB key configured — Settings → Server")
+        raise Skip("no TMDB key configured - Settings → Server")
 
 
 def _need_match():
@@ -109,7 +109,7 @@ def _need_match():
     if not _videos():
         raise Skip("no videos in the library")
     if not _described():
-        raise Skip("no video album has a description — nothing matched yet; "
+        raise Skip("no video album has a description - nothing matched yet; "
                    "check the scan log for 'tmdb:' lines")
 
 
@@ -180,7 +180,7 @@ def test_matched_video_has_a_genre():
     _need_match()
     genred = [v for v in _videos() if v.get("genre")]
     if not genred:
-        raise Skip("no video carries a genre — if films are otherwise matched, "
+        raise Skip("no video carries a genre - if films are otherwise matched, "
                    "the genre back-fill may not have run yet; rescan and look "
                    "for 'tmdb:' lines in the log")
     print(f"PASS  {len(genred)} of {len(_videos())} videos carry a genre, "
@@ -188,7 +188,7 @@ def test_matched_video_has_a_genre():
 
 
 def test_video_genre_is_browsable():
-    """The genre a film got must appear in getGenres and lead back to it —
+    """The genre a film got must appear in getGenres and lead back to it -
     the single-valued `genre` field on the entry and the song_genres table the
     browse endpoints read are two different paths to the same fact."""
     _need_match()
@@ -218,7 +218,7 @@ def test_saving_nothing_keeps_both_settings():
     """saveServerSettings writes only the settings it is given, so a call
     naming neither must leave both alone.
 
-    This used to read both values, re-send one and compare — which it cannot
+    This used to read both values, re-send one and compare - which it cannot
     do now that getServerSettings reports only whether each is set. Sending
     nothing tests the same property and is the safer shape besides: the
     regression guarded against is the handler writing unconditionally, and

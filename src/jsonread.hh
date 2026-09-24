@@ -13,14 +13,14 @@
 //
 // * `value(key, default)` substitutes the default only when the key is
 //   *absent*, and throws type_error.302 when the key is present holding null
-//   — which is exactly how a provider says it has nothing. TheAudioDB answers
+//   - which is exactly how a provider says it has nothing. TheAudioDB answers
 //   a miss with `"artists": null`, and a TMDB result with no poster carries
 //   `"poster_path": null`; that one killed an entire scan.
 // * `operator[]` throws type_error.305 on a string or an array, so one field
 //   arriving in an unexpected shape takes down a whole chain such as
 //   `claims["P18"][0]["mainsnak"]["datavalue"]`. The non-const overload also
 //   silently *inserts* nulls into the parsed document as it walks, and the
-//   const one is undefined behaviour — not an exception — on a missing key.
+//   const one is undefined behaviour - not an exception - on a missing key.
 //
 // A field that is missing, null or the wrong type is worth exactly as much as
 // an empty one at every one of these call sites: the metadata lookups are
@@ -30,7 +30,7 @@
 // when it does not find it.
 //
 // Where it matters most: both the scan and the Cast poll loop run in detached
-// threads, where an escaping exception is std::terminate — a dead server, not
+// threads, where an escaping exception is std::terminate - a dead server, not
 // a failed request.
 
 // A member of an object, or a null that stays null. Chainable.
@@ -43,7 +43,7 @@ const nlohmann::json& jidx(const nlohmann::json& j, size_t i);
 // A string member, or empty.
 std::string jstr(const nlohmann::json& j, const std::string& key);
 
-// A numeric member, or 0. A number arriving as a JSON string stays 0 — every
+// A numeric member, or 0. A number arriving as a JSON string stays 0 - every
 // caller here would rather see the absent value than guess.
 double jnum(const nlohmann::json& j, const std::string& key);
 

@@ -16,7 +16,7 @@ class AudioQualityTest {
 	@Test
 	fun `original is unusable for a video and becomes the default`() {
 		// ORIGINAL is spelled by sending no `format` at all, which for a video
-		// fetches the film — the opposite of asking for its soundtrack.
+		// fetches the film - the opposite of asking for its soundtrack.
 		assertEquals(AudioQuality.DEFAULT, AudioQuality.ORIGINAL.forVideoAudio())
 		assertNotEquals(AudioFormat.ORIGINAL, AudioQuality.ORIGINAL.forVideoAudio().format)
 	}

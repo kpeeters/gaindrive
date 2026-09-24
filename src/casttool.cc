@@ -1,4 +1,4 @@
-// gaindrive-cast — a command-line front end to the Chromecast code, for
+// gaindrive-cast - a command-line front end to the Chromecast code, for
 // working out why we see fewer devices than the Google Cast SDK does.
 //
 // Two subcommands, deliberately different in kind:
@@ -9,7 +9,7 @@
 //   browse    does *not* go through CastManager. It opens its own sockets on
 //             every interface and prints every _googlecast._tcp record as it
 //             arrives, indefinitely. That is the ground truth to measure
-//             discover() against — run it beside `avahi-browse -rt
+//             discover() against - run it beside `avahi-browse -rt
 //             _googlecast._tcp` and the gap is the bug.
 //
 // This binary links only castmanager.cc and stamp.cc: no database, no HTTP
@@ -94,7 +94,7 @@ static int browse_cb(int, const struct sockaddr* from, size_t,
 	std::cout << stamp() << "[" << iface << "] " << sect
 	          << " from=" << src << " ttl=" << ttl << " " << name << " ";
 
-	// Every record type is printed, including the ones discover() ignores —
+	// Every record type is printed, including the ones discover() ignores -
 	// a PTR-only responder is one of the things we are looking for.
 	if (rtype == MDNS_RECORDTYPE_PTR) {
 		mdns_string_t p = mdns_record_parse_ptr(data, size, rec_off, rec_len,
@@ -333,7 +333,7 @@ static int run_probe(const std::string& target, int timeout_ms)
 
 	CastManager cm;
 	auto result = cm.probe(dev, timeout_ms);
-	std::cout << dev.address << ":" << dev.port << " — "
+	std::cout << dev.address << ":" << dev.port << " - "
 	          << CastManager::probe_text(result) << std::endl;
 	return result == CastManager::Probe::ANSWERED ? 0 : 1;
 	}

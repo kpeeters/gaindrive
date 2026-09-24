@@ -30,7 +30,7 @@ import javax.inject.Singleton
  * them here is how the stored view and the live view would start to disagree.
  *
  * Reads return empty rather than null when a server has simply not been browsed
- * yet — "nothing stored" is not an error, it is the state everyone starts in.
+ * yet - "nothing stored" is not an error, it is the state everyone starts in.
  */
 @Singleton
 class LocalLibrary @Inject constructor(
@@ -87,7 +87,7 @@ class LocalLibrary @Inject constructor(
 	 */
 	suspend fun saveArtist(server: ServerId, artist: Artist) = write {
 		// Preserve the stored kind. @Upsert replaces the whole row, and this
-		// path has no idea which root the artist came from — overwriting it
+		// path has no idea which root the artist came from - overwriting it
 		// with the default would move a category section into the Artists
 		// list the next time the app is offline.
 		val kind = dao.artist(server.value, artist.ref.id)?.contentType
@@ -243,7 +243,7 @@ class LocalLibrary @Inject constructor(
 		// Artists from a search have no index bucket of their own; the first
 		// letter is what the rail would have put them under anyway.
 		//
-		// Nor do they carry a root kind — search spans every root — so they
+		// Nor do they carry a root kind - search spans every root - so they
 		// land under artists. A category section found this way is mislabelled
 		// in the mirror until the Categories list is browsed and rewrites it.
 		// Accepted rather than paid for with a lookup per result: search
@@ -259,7 +259,7 @@ class LocalLibrary @Inject constructor(
 	 * Which artists, albums and playlists have stored audio behind them.
 	 *
 	 * Takes the cache's keys as a parameter rather than reading the cache, so
-	 * the mirror stays ignorant of how bytes are stored — the one direction
+	 * the mirror stays ignorant of how bytes are stored - the one direction
 	 * that dependency must not run.
 	 */
 	suspend fun storedFilter(storedSongKeys: Set<String>): StoredFilter = io {
@@ -339,7 +339,7 @@ class LocalLibrary @Inject constructor(
 	/**
 	 * Drops the mirrored hierarchy of one server, keeping its playlists.
 	 *
-	 * For a move that happened on the server's disk — `promoteAlbum` — after
+	 * For a move that happened on the server's disk - `promoteAlbum` - after
 	 * which every stored id and index bucket below the moved folder names
 	 * something that is no longer there. Coarse on purpose: the app cannot tell
 	 * which rows moved without re-reading them, and re-reading them is what the
@@ -387,7 +387,7 @@ private fun indexLabelFor(name: String): String {
 private fun Artist.toEntity(
 	server: ServerId,
 	indexLabel: String,
-	/** Defaulted for the paths that genuinely cannot know — see saveSelection. */
+	/** Defaulted for the paths that genuinely cannot know - see saveSelection. */
 	contentType: String = LibrarySection.ARTISTS.id,
 ) = ArtistEntity(
 	serverId = server.value,

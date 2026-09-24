@@ -3,8 +3,8 @@ package org.gaindrive.android.data.cache
 /**
  * What the download manager is doing, as far as anything outside needs to know.
  *
- * Deliberately free of Media3 types: the rules that read this — `pinPhaseOf`,
- * the row indicators — are then testable without an Android runtime, and the
+ * Deliberately free of Media3 types: the rules that read this - `pinPhaseOf`,
+ * the row indicators - are then testable without an Android runtime, and the
  * mapping from `Download.STATE_*` lives in exactly one place.
  */
 data class DownloadStates(
@@ -15,7 +15,7 @@ data class DownloadStates(
 	 *
 	 * Load-bearing, not a convenience. `AudioCache.isFullyCached` can only judge
 	 * a track when the cache recorded a content length, and gaindrive's
-	 * `stream.view` answers through a content provider — so cpp-httplib sends it
+	 * `stream.view` answers through a content provider - so cpp-httplib sends it
 	 * chunked, with no `Content-Length`, and the length stays unset for ever.
 	 * Without this, a download that finished perfectly well never counted as
 	 * stored: the progress ring sat at "0 of 9" and offline dimming would have
@@ -24,7 +24,7 @@ data class DownloadStates(
 	val completed: Set<String> = emptySet(),
 	val failed: Set<String> = emptySet(),
 	/**
-	 * Requirement flags that are *not* currently met — non-zero means every
+	 * Requirement flags that are *not* currently met - non-zero means every
 	 * queued download is waiting rather than progressing. Usually the Wi-Fi-only
 	 * setting on a metered connection.
 	 */

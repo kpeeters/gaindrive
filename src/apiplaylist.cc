@@ -15,7 +15,7 @@ using namespace tinyxml2;
 
 void GainDrive::routes_playlist()
 	{
-	// savePlayQueue — persist the client's current queue and playback position.
+	// savePlayQueue - persist the client's current queue and playback position.
 
 	server_.Get("/rest/savePlayQueue.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
@@ -26,7 +26,7 @@ void GainDrive::routes_playlist()
 			return it != req.params.end() ? it->second : def;
 			};
 
-		// Collect all song IDs — the parameter may be repeated. Resolve
+		// Collect all song IDs - the parameter may be repeated. Resolve
 		// each to its filesystem path (the durable key the user-state DB
 		// stores). Unresolvable ids are dropped silently.
 		std::vector<std::string> paths;
@@ -54,7 +54,7 @@ void GainDrive::routes_playlist()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getPlayQueue — retrieve the user's saved play queue and position.
+	// getPlayQueue - retrieve the user's saved play queue and position.
 	server_.Get("/rest/getPlayQueue.view", [this](const httplib::Request& req,
 	                                              httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -98,8 +98,8 @@ void GainDrive::routes_playlist()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// createBookmark — mark a playback position within a song.
-	// scrobble — record a play (submission=true) or now-playing event (submission=false).
+	// createBookmark - mark a playback position within a song.
+	// scrobble - record a play (submission=true) or now-playing event (submission=false).
 	server_.Get("/rest/scrobble.view", [this](const httplib::Request& req,
 	                                          httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -276,7 +276,7 @@ void GainDrive::routes_playlist()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getStarred / getStarred2 — identical content, only the response key differs.
+	// getStarred / getStarred2 - identical content, only the response key differs.
 	auto starred_handler = [this](const httplib::Request& req, httplib::Response& res,
 	                               const char* key) {
 		if (!check_auth(req, res, store_)) return;
@@ -408,7 +408,7 @@ void GainDrive::routes_playlist()
 		bool use_json = (fmt_of(req) == "json");
 		std::string user = req.params.find("u")->second;
 
-		// item_read_allowed on every kind of id — see scrobble.
+		// item_read_allowed on every kind of id - see scrobble.
 		auto readable = [&](const std::string& path) {
 			return item_read_allowed(req, store_, uploads_root_name_, path);
 			};
@@ -459,7 +459,7 @@ void GainDrive::routes_playlist()
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
-	// getBookmarks — list all bookmarks for the authenticated user.
+	// getBookmarks - list all bookmarks for the authenticated user.
 
 	server_.Get("/rest/getBookmarks.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
@@ -504,7 +504,7 @@ void GainDrive::routes_playlist()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// deleteBookmark — remove a bookmark by song id.
+	// deleteBookmark - remove a bookmark by song id.
 	server_.Get("/rest/deleteBookmark.view", [this](const httplib::Request& req,
 	                                                 httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -533,7 +533,7 @@ void GainDrive::routes_playlist()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// deletePlaylist — remove a playlist owned by the authenticated user.
+	// deletePlaylist - remove a playlist owned by the authenticated user.
 	server_.Get("/rest/deletePlaylist.view", [this](const httplib::Request& req,
 	                                                 httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;

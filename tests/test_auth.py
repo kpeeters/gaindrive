@@ -201,7 +201,7 @@ def test_login_throttle():
 
     Every credential here rides in a query string and is checked by one string
     comparison, so without a throttle ping.view is an unmetered password
-    oracle — and the CORS policy makes it reachable from any web page.
+    oracle - and the CORS policy makes it reachable from any web page.
     """
     import time
 
@@ -220,7 +220,7 @@ def test_login_throttle():
     print(f"PASS  repeated failed logins are throttled "
           f"({elapsed:.1f}s for {attempts})")
     # The correct password must still work afterwards, and must clear the
-    # counter — a throttle that locks out the real user is a denial of service
+    # counter - a throttle that locks out the real user is a denial of service
     # rather than a defence.
     _check(_get("ping.view"))
     print("PASS  a correct password still works, and resets the counter")
@@ -233,7 +233,7 @@ def test_xff_does_not_move_the_throttle_bucket():
 
     The header is believed only from a configured trusted proxy, and even
     then the entry taken is the rightmost one that is not itself a trusted
-    proxy — proxies append the real peer, so the leftmost entry is the one
+    proxy - proxies append the real peer, so the leftmost entry is the one
     string the attacker composed in full. From this test's direct connection
     the header must simply be ignored; if it were honoured, each request
     below would land in a fresh bucket and the throttle test at the end of
@@ -322,9 +322,9 @@ def test_security_headers_present():
         assert h.get("X-Content-Type-Options") == "nosniff", h
         assert h.get("Referrer-Policy") == "no-referrer", h
         assert h.get("Access-Control-Allow-Origin") is None, (
-            "ping.view must not be CORS-readable — it is the password oracle")
+            "ping.view must not be CORS-readable - it is the password oracle")
     # The header is set pre-routing, so it must be there whatever the
-    # status — a missing id answering 404 still carries it.
+    # status - a missing id answering 404 still carries it.
     try:
         r = urllib.request.urlopen(f"{BASE}/getCaptions.view?{params}&id=0")
         headers = r.headers
@@ -339,7 +339,7 @@ def test_web_assets_revalidate():
     """A rebuilt binary must not be able to serve a browser its old client.
 
     The assets carried no cache headers at all, which does not mean "do not
-    cache" — the browser picks a lifetime by heuristic. Since the SPA talks to
+    cache" - the browser picks a lifetime by heuristic. Since the SPA talks to
     the API it shipped with, a stale app.js against an upgraded server is a
     client out of step with its server with nothing saying so.
     """

@@ -37,7 +37,7 @@ struct LibraryRootsTests {
 
 	// MARK: - The merged listing's requests
 
-	/// A server naming both kinds is asked once per kind — and the *distinct*
+	/// A server naming both kinds is asked once per kind - and the *distinct*
 	/// kinds, not once per root: two music roots are one artists request,
 	/// because a kind may span several roots and the server filters on the
 	/// kind.
@@ -51,7 +51,7 @@ struct LibraryRootsTests {
 		#expect(requests.artists?.personal == PersonalScope.none)
 	}
 
-	/// The group a server lacks is not asked for at all — asking would come
+	/// The group a server lacks is not asked for at all - asking would come
 	/// back empty at best, and on a server predating roots as the entire
 	/// library, putting the same folders in both groups.
 	@Test func aServerWithoutCategoriesContributesNothingToThatGroup() {
@@ -114,7 +114,7 @@ struct LibraryRootsTests {
 	}
 
 	/// An admin gets everybody's, because an admin is the only account that
-	/// can promote an upload into the shared library — without this a
+	/// can promote an upload into the shared library - without this a
 	/// non-admin's upload is visible to its owner and to nobody able to act
 	/// on it.
 	@Test func anAdminAsksForEveryAccountsUploads() {

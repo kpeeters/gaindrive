@@ -24,7 +24,7 @@
 #include <tpropertymap.h>
 
 // What one uploaded archive may expand to. An archive's compressed size bounds
-// nothing — the ratio is the attack — so the extraction has to carry its own
+// nothing - the ratio is the attack - so the extraction has to carry its own
 // limit or a few megabytes fills the uploads volume, which is a filesystem
 // other people's music is also on.
 static constexpr uint64_t MAX_ARCHIVE_BYTES   = 8ull * 1024 * 1024 * 1024;
@@ -34,9 +34,9 @@ static constexpr int      MAX_ARCHIVE_ENTRIES = 20000;
 //
 // It was mt19937_64 seeded from a single 32-bit random_device draw, which is
 // trivially predictable. Neither of the two things it names is a capability
-// today — an upload batch directory sits under a path already scoped by the
+// today - an upload batch directory sits under a path already scoped by the
 // authenticated username, and a fetch job id is looked up within the caller's
-// own list — so this is not a fix for a live hole. It is that both are ids
+// own list - so this is not a fix for a live hole. It is that both are ids
 // handed back to a client, which is exactly the shape of thing that later
 // grows into a credential, and OpenSSL is already linked.
 std::string make_uuid()
@@ -73,7 +73,7 @@ std::string make_uuid()
 // caller reports as a success carrying a file count of zero -- the shape the
 // symlink bug below wore for as long as it lasted, visible only in this log.
 // libarchive's error string can embed an entry's own name, and an entry name
-// is attacker bytes that may hold newlines — a forged log line, in the log a
+// is attacker bytes that may hold newlines - a forged log line, in the log a
 // host-level blocker reads. NULL when there is no message.
 static std::string archive_err(struct archive* a)
    {
@@ -114,8 +114,8 @@ int extract_archive_to_dir(const std::filesystem::path& archive_file,
    // reject every entry, because we set an absolute destination path
    // ourselves.
    //
-   // SECURE_SYMLINKS **is** now set, and the note that used to be here — that
-   // path traversal is prevented entirely by the sanitisation loop below — was
+   // SECURE_SYMLINKS **is** now set, and the note that used to be here - that
+   // path traversal is prevented entirely by the sanitisation loop below - was
    // true of an entry's *pathname* and false of a symlink's *target*, which
    // the loop never looked at. An archive holding
    //
@@ -183,7 +183,7 @@ int extract_archive_to_dir(const std::filesystem::path& archive_file,
 
       // Only ordinary files and the directories holding them. A symlink or a
       // hardlink entry names a *target*, which is a second path the
-      // sanitisation above never sees — and following one is how an extraction
+      // sanitisation above never sees - and following one is how an extraction
       // escapes a directory it cannot traverse out of. Nothing an uploader
       // legitimately sends is either.
       const auto ft = archive_entry_filetype(entry);
@@ -198,7 +198,7 @@ int extract_archive_to_dir(const std::filesystem::path& archive_file,
          skipped++;
          continue;
          }
-      // `entries` counts everything written, directories included — counting
+      // `entries` counts everything written, directories included - counting
       // only files let a zip of a few hundred kilobytes create millions of
       // directories, which is inode exhaustion on a filesystem other people's
       // music is also on, with the byte cap never tripping because a
@@ -235,7 +235,7 @@ int extract_archive_to_dir(const std::filesystem::path& archive_file,
          // The declared block offset counts against the budget as well as the
          // data: a sparse tar entry placing a few bytes at offset 2^50 makes
          // a file of that apparent length for almost nothing, and everything
-         // downstream — songs.file_size, the transcode planner — believes the
+         // downstream - songs.file_size, the transcode planner - believes the
          // fiction.
          if (written + sz > MAX_ARCHIVE_BYTES
              || off < 0
@@ -330,7 +330,7 @@ void reorganise_by_tags(const std::filesystem::path& batch_root)
       return AUDIO_EXT.count(ext) > 0;
       };
    // A tag that sanitises away to nothing still has to land somewhere, so this
-   // path substitutes a name. moveAlbum deliberately does not — there a name
+   // path substitutes a name. moveAlbum deliberately does not - there a name
    // was typed, and silently filing it under "Unknown" would hide the mistake.
    auto sanitise = [](const std::string& s) -> std::string {
       std::string r = sanitise_component(s);
@@ -391,7 +391,7 @@ void reorganise_by_tags(const std::filesystem::path& batch_root)
             fs::rename(e.path(), target / e.path().filename(), ec);
       }
 
-   // Prune empty directories — collect them all first, then sort deepest-first
+   // Prune empty directories - collect them all first, then sort deepest-first
    // so children are removed before parents.
    std::vector<fs::path> dirs;
    for (auto& e : fs::recursive_directory_iterator(batch_root, ec))
@@ -588,15 +588,15 @@ void sweep_held_batches(const std::string& users_dir)
 // Pushes anything still loose in a batch down to <artist>/<album>/file.
 //
 // Two invariants downstream want exactly that depth and neither of them says so
-// out loud. The batch is scanned by enumerating its *directories* — a file
-// sitting at the batch root is never scanned at all — and deleteUpload accepts
+// out loud. The batch is scanned by enumerating its *directories* - a file
+// sitting at the batch root is never scanned at all - and deleteUpload accepts
 // only a five-component path, so an album one level too shallow can never be
 // removed by its owner. Handing scan_dirs() the batch directory itself
 // would fix the first and make the second permanent: whatever directory it is
 // given becomes an artist row named by its basename, and the user would be
 // looking at a UUID in their artist list.
 //
-// A file directly in the batch is filed under `fallback_artist` — a handler's
+// A file directly in the batch is filed under `fallback_artist` - a handler's
 // name reads far better than a UUID; a file one level down keeps the directory
 // it is in, since something chose that name. Grouping by stem is what keeps a
 // sidecar image with the video it belongs to.
@@ -711,7 +711,7 @@ static void batch_merge_into(const std::filesystem::path& src,
 	}
 
 // Renames every directory directly inside `parent` to `name`, merging where
-// that collides. Never recurses — see apply_batch_names for why the depth
+// that collides. Never recurses - see apply_batch_names for why the depth
 // matters.
 static void batch_rename_level(const std::filesystem::path& parent,
                                const std::string& name)
@@ -748,7 +748,7 @@ static void batch_rename_level(const std::filesystem::path& parent,
 	for (const auto& d : dirs) {
 		if (d.filename() == name) continue;   // already the typed name
 
-		// On a case-insensitive filesystem — macOS by default — exists() is
+		// On a case-insensitive filesystem - macOS by default - exists() is
 		// true for "artist" while "Artist" is what is on disk. Merging a
 		// directory into itself would move each child into the directory it is
 		// already in and then remove it, so the two are told apart by identity
@@ -779,9 +779,9 @@ static void batch_rename_level(const std::filesystem::path& parent,
 // Nothing under the batch has been indexed yet, and that is what BatchHold
 // guarantees: both producers take a hold before the batch directory exists and
 // scan_batch() releases it only after the fold, so every path that walks the
-// uploads root — scan(), scan_dirs() and the watcher through them — skips this
+// uploads root - scan(), scan_dirs() and the watcher through them - skips this
 // batch whole for the whole of the window these renames happen in. There is
-// therefore no row holding any of these paths to repair — and relocate_prefix's
+// therefore no row holding any of these paths to repair - and relocate_prefix's
 // plain UPDATEs are safe only because its callers first checked the destination
 // was free, which merging deliberately does not do.
 //
@@ -855,8 +855,8 @@ void apply_batch_names(const std::filesystem::path& batch_root,
 // scan_artist_dir() parents an artist directory straight to the root
 // (`upsert_folder(artist_path, root_id)`), skipping the <user>/<uuid> levels, so
 // two batches naming the same artist become two folder rows with the same name
-// and the personal listing shows both. Fetching six tracks of one concert — the
-// case the sticky name fields exist for — produced six artists holding one
+// and the personal listing shows both. Fetching six tracks of one concert - the
+// case the sticky name fields exist for - produced six artists holding one
 // one-track album each.
 //
 // So the isolation is kept exactly where it is needed and dropped afterwards.
@@ -864,7 +864,7 @@ void apply_batch_names(const std::filesystem::path& batch_root,
 // or timed-out job does remove_all() on it, and a shared directory would let a
 // failure delete files an earlier fetch had already put there.
 //
-// batch_merge_into() does the work and already has the right semantics — it
+// batch_merge_into() does the work and already has the right semantics - it
 // recurses where both sides are directories, so an album inside a merged artist
 // merges too, and it suffixes colliding *files* rather than overwriting them,
 // which it does because the built-in handler writes a cover.<ext> into every
@@ -889,7 +889,7 @@ void fold_batch_into_siblings(const std::filesystem::path& batch_root,
 	// The user's other batches, in a fixed order so that repeated fetches
 	// converge on the same one rather than picking a different target each
 	// time. In practice at most one holds any given name, because this runs
-	// after every successful batch — the ordering matters only for batches
+	// after every successful batch - the ordering matters only for batches
 	// that predate it.
 	std::vector<fs::path> siblings;
 	for (auto& e : fs::directory_iterator(batch_root.parent_path(), ec)) {
@@ -915,7 +915,7 @@ void fold_batch_into_siblings(const std::filesystem::path& batch_root,
 	//
 	// Closing it properly means telling "incomplete" from "busy", which is a
 	// second marker or a DB test in the sweep. Not worth it for a window this
-	// short, and recorded in ISSUES.md rather than left to be rediscovered.
+	// short, and recorded here rather than left to be rediscovered.
 
 	// Collected before anything moves: merging mutates the directory this would
 	// otherwise still be iterating.
@@ -929,7 +929,7 @@ void fold_batch_into_siblings(const std::filesystem::path& batch_root,
 		const std::string name = a.filename().string();
 
 		// Every earlier batch already holding this name. Normally at most one,
-		// since this runs after every successful batch — but a library that
+		// since this runs after every successful batch - but a library that
 		// predates the fold can hold several, and merging *all* of them is what
 		// clears those up instead of leaving the strays there for ever.
 		std::vector<fs::path> holders;
@@ -948,14 +948,14 @@ void fold_batch_into_siblings(const std::filesystem::path& batch_root,
 
 		// The strays first, so the survivor holds everything before this batch
 		// joins it. Each of *these* was scanned when it was made, unlike the
-		// batch being folded — so its own path goes into the scan set too: the
+		// batch being folded - so its own path goes into the scan set too: the
 		// directory is about to stop existing, and scan_artist_dir() finding it
 		// gone is what prunes the folder row that still names it. Leaving that
 		// out would swap one visible duplicate for one invisible phantom.
 		//
 		// A stray's stars and play counts do not survive, and cannot: they are
-		// keyed on the path, and the one tool for moving that key —
-		// relocate_prefix() — is safe only when the destination is free, which
+		// keyed on the path, and the one tool for moving that key -
+		// relocate_prefix() - is safe only when the destination is free, which
 		// is precisely what merging is not. Accepted rather than worked around,
 		// because this is pre-promotion staging: the rows can only exist if
 		// somebody played a duplicate they had not filed yet, and the
@@ -966,9 +966,9 @@ void fold_batch_into_siblings(const std::filesystem::path& batch_root,
 			               + "/" + name);
 			}
 
-		// Nothing under *this* batch was ever indexed — it has been held since
+		// Nothing under *this* batch was ever indexed - it has been held since
 		// before it existed, and scan_batch() does not release until this
-		// returns — so the source needs no prune, only the destination a
+		// returns - so the source needs no prune, only the destination a
 		// rescan.
 		batch_merge_into(a, keep);
 		to_scan.insert(keep_rel);

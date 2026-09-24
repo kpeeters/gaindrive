@@ -21,7 +21,7 @@ import javax.inject.Singleton
  * asked for them.
  *
  * The unpinned half of the question [PinRepository.statuses] answers. That one
- * is about intent — this album was asked for, and here is how far it has got —
+ * is about intent - this album was asked for, and here is how far it has got -
  * and so knows nothing about a record played straight through, which is on the
  * device just as completely and which the listings should say so about.
  *
@@ -46,7 +46,7 @@ class StoredContainers @Inject constructor(
 		downloads.states,
 		settings.videoAudioOnly,
 	) { members, cached, downloadStates, audioOnly ->
-		// A finished download counts even when the cache cannot vouch for it —
+		// A finished download counts even when the cache cannot vouch for it -
 		// see DownloadStates.completed on why it so often cannot. The same
 		// union PinRepository.statuses takes, and for the same reason.
 		val here = cached + downloadStates.completed

@@ -49,7 +49,7 @@ struct ServerEditView: View {
 			_urlText = State(initialValue: config.urlString)
 			_username = State(initialValue: config.username)
 			// Prefilled from the Keychain so "Test connection" works on an
-			// existing server without retyping the password — which is the
+			// existing server without retyping the password - which is the
 			// main reason anyone opens this screen a second time.
 			_password = State(initialValue: Keychain.password(for: config.id) ?? "")
 		}
@@ -178,8 +178,8 @@ struct ServerEditView: View {
 		// Read the password back rather than trusting that writing it worked.
 		//
 		// The Keychain can refuse a write for reasons that have nothing to do
-		// with this screen — a signing or entitlement problem being the usual
-		// one — and the symptom appears much later and somewhere else: the
+		// with this screen - a signing or entitlement problem being the usual
+		// one - and the symptom appears much later and somewhere else: the
 		// server list saying it has no saved password, or every browse screen
 		// failing to build a client. Catching it here names the right thing at
 		// the moment it happened, and is robust to whatever the cause turns out
@@ -251,7 +251,7 @@ private struct TestResultRow: View {
 			return "The server did not report account details."
 		case .rejected(let message):
 			// The server's own wording, when it sent one that says more than
-			// our title already does — a self-hoster fixing something needs
+			// our title already does - a self-hoster fixing something needs
 			// the server's sentence, not ours.
 			return message == title ? nil : message
 		case .unreachable(let message):

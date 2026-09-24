@@ -13,7 +13,7 @@ import SwiftUI
 ///
 /// **A destination of its own, not part of Now Playing.** That sheet is
 /// square-artwork-shaped and modal, which is the wrong host for a landscape
-/// picture — and a surface that moved between two hosts would either be
+/// picture - and a surface that moved between two hosts would either be
 /// re-parented, which restarts the stream on some devices, or exist twice.
 ///
 /// **`AVPlayerViewController` rather than a custom surface**, which is the
@@ -23,8 +23,8 @@ import SwiftUI
 /// Picture-in-Picture, the AirPlay route button, the system scrubber and
 /// accessibility, none of which is worth rebuilding.
 ///
-/// Leaving does not stop the film — a concert is listened to as often as it is
-/// watched — and the mini player leads back in.
+/// Leaving does not stop the film - a concert is listened to as often as it is
+/// watched - and the mini player leads back in.
 struct VideoView: View {
 	let song: Song
 
@@ -56,7 +56,7 @@ struct VideoView: View {
 			// **`getChapters`, not the album index.** A jump list has to be
 			// right about a sidecar somebody edited a moment ago, and it is the
 			// only endpoint that can see a video's own container chapters at
-			// all — which the scan does not index, so they appear here and not
+			// all - which the scan does not index, so they appear here and not
 			// in the album listing.
 			//
 			// Cleared first, so one recording's markers are never on screen
@@ -71,7 +71,7 @@ struct VideoView: View {
 				if chapters.isEmpty { chaptersOpen = false }
 			}
 			// **Nothing is fetched until a track is chosen.** Listing costs one
-			// request; a track costs another, and only then — the same bargain
+			// request; a track costs another, and only then - the same bargain
 			// the web client strikes by leaving a `<track>` disabled.
 			.task(id: chosen) {
 				guard let chosen else {
@@ -162,7 +162,7 @@ struct VideoView: View {
 	}
 
 	/// Drawn only when there is something to choose. A film with no captions
-	/// gets no control — there is no invented track to offer, unlike
+	/// gets no control - there is no invented track to offer, unlike
 	/// ExoPlayer's HLS extractor, which conjures one for a playlist declaring
 	/// none.
 	@ViewBuilder
@@ -198,7 +198,7 @@ struct VideoView: View {
 /// That view exists for content-related overlays, which is what a subtitle is.
 /// What it costs, stated plainly: the cues do not move when the transport
 /// controls appear, and they do not follow the picture into Picture-in-Picture
-/// or onto an AirPlay screen. Native HLS subtitles would do both — but they
+/// or onto an AirPlay screen. Native HLS subtitles would do both - but they
 /// would reach only the re-encode tier, so this is the right trade rather than
 /// a good one. See `WebVTT`.
 private struct VideoSurface: UIViewControllerRepresentable {
@@ -255,7 +255,7 @@ private struct VideoSurface: UIViewControllerRepresentable {
 	///
 	/// **`@MainActor` because `UILabel()` is.** A stored default value is
 	/// initialised in the enclosing type's isolation, and a plain class has
-	/// none — so the property would be constructing a main-actor type from
+	/// none - so the property would be constructing a main-actor type from
 	/// nowhere. Both methods that touch it, `makeCoordinator` and
 	/// `updateUIViewController`, are main-actor already, so nothing else moves.
 	@MainActor

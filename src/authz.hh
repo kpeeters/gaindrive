@@ -30,7 +30,7 @@ bool check_cast_perm(const httplib::Request& req, httplib::Response& res,
                      MediaStore& store, bool use_json);
 
 // Returns true if the authenticated user may write into their personal uploads
-// folder. Admins may regardless — the same rule /upload has applied inline
+// folder. Admins may regardless - the same rule /upload has applied inline
 // since it was written, lifted out here because four more endpoints now need it
 // and a permission check with five copies is a permission check with four
 // chances of being forgotten.

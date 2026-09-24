@@ -15,7 +15,7 @@ import javax.inject.Singleton
  * area and puts it in the shared library. Two listings are wrong the moment it
  * succeeds and neither is the one the user is looking at, so nothing else would
  * ever correct them: a browse screen holds its list until its scope changes, by
- * design — see the comment on `ArtistsViewModel._state`.
+ * design - see the comment on `ArtistsViewModel._state`.
  *
  * A separate object rather than a field on [LibraryRepository] because
  * [ServerSelection] is what browse screens watch and it must not depend on the

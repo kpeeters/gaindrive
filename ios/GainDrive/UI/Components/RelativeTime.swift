@@ -17,7 +17,7 @@ import Foundation
 /// * …except with fractional seconds, because Foundation's ISO 8601 parsing is
 ///   all-or-nothing about them where Java's `OffsetDateTime.parse` is not; and
 /// * `yyyy-MM-dd HH:mm:ss` in UTC, because gaindrive emits `lastPlayed` raw
-///   from SQLite's `CURRENT_TIMESTAMP` — no `T`, no zone — and parsing only ISO
+///   from SQLite's `CURRENT_TIMESTAMP` - no `T`, no zone - and parsing only ISO
 ///   would leave the entire Recents column silently blank.
 func relativeTime(_ timestamp: String?) -> String? {
 	guard let date = parseTimestamp(timestamp) else { return nil }
@@ -41,16 +41,16 @@ func parseTimestamp(_ timestamp: String?) -> Date? {
 
 /// Foundation's ISO 8601 parsing is all-or-nothing about fractional seconds
 /// where Java's `OffsetDateTime.parse` is not, so this is a second strategy
-/// rather than a second option. gaindrive never emits them — its `iso8601()`
-/// only inserts a `T` and appends a `Z` — but other Subsonic servers do.
+/// rather than a second option. gaindrive never emits them - its `iso8601()`
+/// only inserts a `T` and appends a `Z` - but other Subsonic servers do.
 private let fractionalISO = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
 
 /// `yyyy-MM-dd HH:mm:ss` in UTC, which is what gaindrive sends for
 /// `lastPlayed`: SQLite's `CURRENT_TIMESTAMP`, raw, with no `T` and no zone.
 /// Parsing only ISO would leave the whole Recents column silently blank.
 ///
-/// Parsed by hand rather than with a `DateFormatter` — which is the other class
-/// that cannot live in a global — and strictly, which a formatter is not: a
+/// Parsed by hand rather than with a `DateFormatter` - which is the other class
+/// that cannot live in a global - and strictly, which a formatter is not: a
 /// fixed machine format has no reason to accept month 13, and `Calendar` would
 /// quietly roll it over into the next year rather than refusing it.
 private func parseSQLiteTimestamp(_ text: String) -> Date? {
@@ -69,7 +69,7 @@ private func parseSQLiteTimestamp(_ text: String) -> Date? {
 
 	var calendar = Calendar(identifier: .gregorian)
 	// Read as UTC. Left on the device's zone this would be wrong by hours, and
-	// only for people who are not on GMT — the kind of bug that never shows up
+	// only for people who are not on GMT - the kind of bug that never shows up
 	// where it was written.
 	calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
 	return calendar.date(

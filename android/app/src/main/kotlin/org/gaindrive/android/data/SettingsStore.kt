@@ -50,7 +50,7 @@ class SettingsStore @Inject constructor(
 	 * Kept per library section, because they are browsed for different
 	 * reasons: a discography is chronological, while a film category is
 	 * findable only by name. The caller names the section it drilled in from
-	 * — this used to key on a stored "current mode" preference, which could
+	 * - this used to key on a stored "current mode" preference, which could
 	 * disagree with the listing actually on screen.
 	 */
 	fun albumSort(section: LibrarySection): Flow<AlbumSort> =
@@ -64,8 +64,8 @@ class SettingsStore @Inject constructor(
 	 * Whether an album held on several servers collapses to one row.
 	 *
 	 * On by default. Anyone running two servers at once is likely to have the
-	 * same album on both — a streaming collection beside locally downloaded
-	 * copies of it — and seeing every one of them twice is the worse default.
+	 * same album on both - a streaming collection beside locally downloaded
+	 * copies of it - and seeing every one of them twice is the worse default.
 	 * The badges on a collapsed row keep it honest about what was folded away.
 	 */
 	val mergeDuplicateAlbums: Flow<Boolean> =
@@ -77,7 +77,7 @@ class SettingsStore @Inject constructor(
 
 	/**
 	 * How much audio the cache may hold. Pinned downloads can push it past this
-	 * — see `PinAwareEvictor` — but nothing else may.
+	 * - see `PinAwareEvictor` - but nothing else may.
 	 */
 	val cacheMaxBytes: Flow<Long> =
 		dataStore.data.map { it[CACHE_MAX_BYTES] ?: DEFAULT_CACHE_BYTES }
@@ -127,7 +127,7 @@ class SettingsStore @Inject constructor(
 	}
 
 	/**
-	 * What quality to fetch audio at — downloads, cache-on-play and plain
+	 * What quality to fetch audio at - downloads, cache-on-play and plain
 	 * streaming alike.
 	 *
 	 * One setting rather than one per connection type: everything played is
@@ -135,7 +135,7 @@ class SettingsStore @Inject constructor(
 	 * different from what a download of the same track produces, and then
 	 * holding both.
 	 *
-	 * Stored as [AudioQuality.tag] so it is a single value — a format and a
+	 * Stored as [AudioQuality.tag] so it is a single value - a format and a
 	 * bitrate written separately could be observed half-applied.
 	 */
 	val audioQuality: Flow<AudioQuality> = dataStore.data.map { prefs ->
@@ -157,7 +157,7 @@ class SettingsStore @Inject constructor(
 	 * costs fidelity.
 	 *
 	 * It applies only to that route. A cast relayed through the phone crosses
-	 * this phone's Wi-Fi and, when roaming, its VPN and mobile data — the
+	 * this phone's Wi-Fi and, when roaming, its VPN and mobile data - the
 	 * situation the bridge exists for, and the last place to start sending
 	 * FLAC. `CastUrls` is where that distinction is made.
 	 *
@@ -173,7 +173,7 @@ class SettingsStore @Inject constructor(
 	/**
 	 * Whether a video is played for its soundtrack alone.
 	 *
-	 * Backing out of the video surface does not do this — the whole picture
+	 * Backing out of the video surface does not do this - the whole picture
 	 * still arrives over the network, and nothing is kept afterwards, because
 	 * video deliberately never enters the byte cache. Asking the server for an
 	 * audio `format` instead makes it send only the audio track (see
@@ -203,7 +203,7 @@ class SettingsStore @Inject constructor(
 	 * for the same reason: several tracks going into one album is the ordinary
 	 * case, and retyping the album for each of them is the whole friction the
 	 * fields were added to remove. The panel's Clear button is the safeguard
-	 * against a name outliving its usefulness — see `web/app.js`, whose comment
+	 * against a name outliving its usefulness - see `web/app.js`, whose comment
 	 * notes the names "deliberately survive".
 	 *
 	 * The server is stored as a raw [org.gaindrive.android.data.model.ServerId]

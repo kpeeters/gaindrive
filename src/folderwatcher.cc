@@ -147,7 +147,7 @@ void FolderWatcher::artist_dirs_for_path(const std::string& path,
 #include <system_error>
 
 // Self-pipe wakeup.  A one-byte write to a pipe with room cannot fail for any
-// reason worth handling except EINTR, but the result must still be consumed —
+// reason worth handling except EINTR, but the result must still be consumed -
 // write() is warn_unused_result, and a lost wakeup here would hang the join in
 // stop() rather than fail visibly.
 static void poke(int fd)
@@ -174,8 +174,8 @@ void FolderWatcher::add_watch(const std::string& path)
 		// A directory that has just been deleted is the ordinary case here,
 		// not a failure: every removal ends with a rescan of the folder that
 		// went away, and the rewatch afterwards asks for a watch on a path
-		// that is gone by definition. Reporting it — twice, with the walk
-		// below — made a normal `rmdir` look like something had broken.
+		// that is gone by definition. Reporting it - twice, with the walk
+		// below - made a normal `rmdir` look like something had broken.
 		if (errno == ENOENT)
 			return;
 		if (errno == ENOSPC)
@@ -273,7 +273,7 @@ void FolderWatcher::stop()
 void FolderWatcher::run()
 	{
 	// Build the inotify watch set on this thread rather than in start(), so
-	// the GainDrive constructor — and therefore listen() — isn't blocked by
+	// the GainDrive constructor - and therefore listen() - isn't blocked by
 	// a multi-second recursive walk on large libraries.
 	for (const auto& r : roots_)
 		add_watches_recursive(r);
@@ -295,7 +295,7 @@ void FolderWatcher::run()
 				Clock::now() - *last_event).count();
 			long remaining = debounce_ms_ - elapsed;
 			if (remaining <= 0) {
-				// Debounce period expired — start a rescan if none is running.
+				// Debounce period expired - start a rescan if none is running.
 				if (!scan_running_.exchange(true)) {
 					auto abs_dirs = std::move(changed_artists_);
 					changed_artists_.clear();
@@ -316,7 +316,7 @@ void FolderWatcher::run()
 					             abs_dirs = std::move(abs_dirs)]{
 						// Only the scan is guarded: an exception escaping this
 						// thread would terminate the server, but the bookkeeping
-						// below must run either way — leaving scan_running_ set
+						// below must run either way - leaving scan_running_ set
 						// would stop the watcher ever scanning again.
 						try {
 							// Defensive: last_event is only armed when
@@ -509,13 +509,13 @@ void FolderWatcher::run()
 //
 // kqueue would have been the portable-to-BSD choice and was rejected on cost.
 // EVFILT_VNODE needs one open fd per watched directory, and this watcher covers
-// every directory at every depth — roots, artists, albums, disc subfolders — so
+// every directory at every depth - roots, artists, albums, disc subfolders - so
 // a 3,000-album library means several thousand permanently-held descriptors.
 // inotify pays one fd total for the same job. On macOS that difference is not
 // merely wasteful:
 //   * CastManager's discovery loop uses select(), and FD_SETSIZE is 1024. Once
 //     the watcher holds more descriptors than that, sockets opened afterwards
-//     get numbers past the end of an fd_set and FD_SET() corrupts the stack —
+//     get numbers past the end of an fd_set and FD_SET() corrupts the stack -
 //     a bug that only appears above a library-size threshold.
 //   * macOS ships a soft RLIMIT_NOFILE of 256, shared with httplib's workers,
 //     SQLite handles, ffmpeg pipes and transcode-cache files.
@@ -529,13 +529,13 @@ static void fsevents_cb(ConstFSEventStreamRef, void* info, size_t n,
 	// Flags are deliberately ignored. The only one that would change our
 	// behaviour is kFSEventStreamEventFlagMustScanSubDirs (the daemon dropped
 	// events, as IN_Q_OVERFLOW does on Linux), and it already reports the
-	// subtree's directory — which maps to the same artist directory any
+	// subtree's directory - which maps to the same artist directory any
 	// ordinary event under it would, so the rescan covers it either way.
 	static_cast<FolderWatcher*>(info)->handle_paths(n, static_cast<char**>(paths));
 	}
 
-// FSEvents reports fully RESOLVED paths, while MediaStore::rel_path() — which
-// drain_and_scan() has to call to get stored-form paths — keys off the
+// FSEvents reports fully RESOLVED paths, while MediaStore::rel_path() - which
+// drain_and_scan() has to call to get stored-form paths - keys off the
 // CONFIGURED root path. Those differ whenever a root is reached through a
 // symlink, and on macOS that is not exotic: /tmp and /var are symlinks into
 // /private on every install. Without this translation root_of() would match
@@ -606,7 +606,7 @@ void FolderWatcher::drain_and_scan()
 
 		// This is a detached thread touching the DB: an escaping exception
 		// calls std::terminate and takes the server down with it. Both arms log
-		// — a silent catch turns a dead watcher into a mystery.
+		// - a silent catch turns a dead watcher into a mystery.
 		try {
 			// scan_dirs() expects stored-form paths ("<root>/<dir>"); MediaStore
 			// owns that mapping, so ask it rather than reimplementing the prefix
@@ -657,7 +657,7 @@ void FolderWatcher::start()
 	// The stream's latency IS the debounce: FSEvents coalesces everything inside
 	// the window into one callback, which is what the inotify branch assembles
 	// by hand out of poll() timeouts. kFSEventStreamCreateFlagNoDefer is
-	// deliberately NOT set — without it the callback fires at the END of the
+	// deliberately NOT set - without it the callback fires at the END of the
 	// window, so a long file copy produces periodic batches instead of one
 	// callback per write. kFSEventStreamCreateFlagWatchRoot additionally reports
 	// a root that is itself moved or deleted.

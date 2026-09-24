@@ -139,7 +139,7 @@ struct ServersSettingsView: View {
 				continue
 			}
 			guard let password = registry.password(for: config.id) else {
-				// The Keychain item is gone but the configuration is not —
+				// The Keychain item is gone but the configuration is not -
 				// what a restore onto a new device looks like if the password
 				// did not travel with it.
 				statuses[config.id] = .unreachable("No saved password. Open the server to enter it again.")

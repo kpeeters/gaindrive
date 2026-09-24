@@ -16,7 +16,7 @@ import androidx.media3.extractor.text.SubtitleParser
  * tracks, so a single film would evict the whole stored library on its way past;
  * and a video the server can only re-encode arrives with no `Content-Length` at
  * all, so `AudioCache.isFullyCached` could never call it complete and the
- * evictor would churn the partial spans forever. Neither is a tuning problem —
+ * evictor would churn the partial spans forever. Neither is a tuning problem -
  * caching video simply does not mean anything here.
  *
  * Both branches are [DefaultMediaSourceFactory], which reads the item's MIME

@@ -11,7 +11,7 @@ import SwiftUI
 /// The fast-scroll index down the side of the artist list.
 ///
 /// Hand-rolled because iOS 18 exposes no SwiftUI equivalent of
-/// `UITableView.sectionIndexTitles` — this is not a case of ignoring a
+/// `UITableView.sectionIndexTitles` - this is not a case of ignoring a
 /// built-in.
 ///
 /// **Trailing edge**, for the same reason Android puts it there and a different
@@ -40,7 +40,7 @@ struct AlphabetRail: View {
 				// drag lands on the list underneath.
 				.contentShape(.rect)
 				// A tap and a drag are the *same* gesture, with a zero minimum
-				// distance — which is what makes scrubbing feel continuous
+				// distance - which is what makes scrubbing feel continuous
 				// rather than needing a separate tap handler that behaves
 				// subtly differently.
 				.highPriorityGesture(

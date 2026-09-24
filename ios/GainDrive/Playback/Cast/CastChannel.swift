@@ -17,8 +17,8 @@ import Security
 /// `src/castmanager.cc` by way of Android's `CastChannel.kt`, with the same
 /// deliberate change the Kotlin made: the C++ opens a fresh connection for every
 /// command, because a detached thread each was the simplest thing there. Here a
-/// single connection is multiplexed — which is what pychromecast and node-castv2
-/// do — so commands cost no handshake and cannot race a reconnect.
+/// single connection is multiplexed - which is what pychromecast and node-castv2
+/// do - so commands cost no handshake and cannot race a reconnect.
 ///
 /// **An actor, with its `NWConnection` confined to it.** This is the app's first
 /// socket and it lands under `SWIFT_STRICT_CONCURRENCY: complete`, so the
@@ -36,7 +36,7 @@ actor CastChannel {
 
 	/// The address the connection actually reached.
 	///
-	/// Diagnostic rather than functional — nothing connects by it. It exists
+	/// Diagnostic rather than functional - nothing connects by it. It exists
 	/// because `NWBrowser` reports a *service*, so until something connects the
 	/// app does not know which box on the network a name refers to, and "which
 	/// one did I just reach" is the question a half-working device raises.
@@ -46,7 +46,7 @@ actor CastChannel {
 	///
 	/// **A reconnect should not re-resolve a name.** `CastEndpoint.service`
 	/// costs an mDNS lookup every time it is used, and the responders this app
-	/// has to deal with are exactly the ones that answer unreliably — a WiiM's
+	/// has to deal with are exactly the ones that answer unreliably - a WiiM's
 	/// had stopped answering even a direct unicast query, which is why
 	/// configured devices exist at all. Once a connection has been made, the
 	/// address it reached is a better thing to reconnect to than the name it
@@ -79,7 +79,7 @@ actor CastChannel {
 	/// Note there is no Wi-Fi binding here, and its absence is a decision rather
 	/// than an omission. Android must try a Wi-Fi-bound socket first, because
 	/// under a full-tunnel VPN everything addressed to the LAN over the default
-	/// route goes into the tunnel and dies — and must then fall back to an
+	/// route goes into the tunnel and dies - and must then fall back to an
 	/// unbound one, because a `VpnService` that has not called `allowBypass()`
 	/// refuses the binding outright with `EPERM`. Nothing here binds, so neither
 	/// half applies. `NWParameters.requiredInterfaceType = .wifi` is the lever if
@@ -102,7 +102,7 @@ actor CastChannel {
 		// as unreachable.
 		//
 		// The connection is captured rather than `self`, which keeps the task
-		// clear of any question about actor identity — and it is the connection
+		// clear of any question about actor identity - and it is the connection
 		// this needs to reach anyway. `close()` does the same thing plus a flag
 		// that only refuses later writes.
 		let connection = self.connection
@@ -129,7 +129,7 @@ actor CastChannel {
 		try await withCheckedThrowingContinuation {
 			(continuation: CheckedContinuation<Void, any Error>) in
 			// Resumed exactly once: `OneShot` takes the continuation before
-			// resuming, so a later state change cannot resume it a second time —
+			// resuming, so a later state change cannot resume it a second time -
 			// which traps rather than erring.
 			let resume = OneShot(continuation)
 			connection.stateUpdateHandler = { state in
@@ -174,13 +174,13 @@ actor CastChannel {
 	// MARK: - Receiving
 
 	/// One message's `payload_utf8`, or nil for a frame that carried nothing
-	/// readable — which is not fatal and the caller simply skips.
+	/// readable - which is not fatal and the caller simply skips.
 	///
 	/// **Waits indefinitely, deliberately.** The receiver only pushes on a state
 	/// change, so quiet is the normal condition and a timeout here would mean
 	/// nothing; Android needs a one-second socket timeout and a `CastRx.Idle`
 	/// pseudo-event only because its read blocks a thread. A caller that wants a
-	/// deadline — the probe does — races one and calls `close()`, which is what
+	/// deadline - the probe does - races one and calls `close()`, which is what
 	/// makes this return.
 	func receive() async throws -> String? {
 		let header = try await receiveExactly(4)
@@ -234,7 +234,7 @@ actor CastChannel {
 				//
 				// Cast receivers present device certificates chaining to a
 				// Google root that is in no system trust store, so ordinary
-				// verification cannot succeed — `src/castmanager.cc` uses
+				// verification cannot succeed - `src/castmanager.cc` uses
 				// `SSL_VERIFY_NONE` and Android installs a permissive
 				// `X509TrustManager` for exactly this reason.
 				//
@@ -242,7 +242,7 @@ actor CastChannel {
 				// person picked this device off their own network, and the
 				// stream URL will carry a per-session token. This is the
 				// documented per-connection hook and nothing else in the app
-				// goes near these parameters — it is never a global default,
+				// goes near these parameters - it is never a global default,
 				// which is the distinction that matters.
 				complete(true)
 			},
@@ -298,7 +298,7 @@ extension CastEndpoint {
 /// resumed exactly once.
 ///
 /// Network.framework will happily call a handler again after a state change, and
-/// resuming a `CheckedContinuation` twice is a trap rather than an error — so
+/// resuming a `CheckedContinuation` twice is a trap rather than an error - so
 /// this is a correctness device, not tidiness.
 private final class OneShot<Value: Sendable>: @unchecked Sendable {
 	private var continuation: CheckedContinuation<Value, any Error>?

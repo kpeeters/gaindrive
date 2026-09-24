@@ -4,7 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * A *position* inside a recording, which is not the same thing as a length —
+ * A *position* inside a recording, which is not the same thing as a length -
  * see the note on [formatChapterTime]. The hour boundary is the whole point:
  * [formatDuration] has no rollover, so it names the 90-minute mark of a concert
  * "90:00".

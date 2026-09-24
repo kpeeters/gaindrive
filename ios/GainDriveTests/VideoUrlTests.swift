@@ -33,7 +33,7 @@ struct VideoUrlTests {
 
 	/// **Neither parameter, ever.** `format` is validated against the *audio*
 	/// target table, so naming an audio one is the server's switch for sending
-	/// the soundtrack alone — a film played through the audio URL comes back as
+	/// the soundtrack alone - a film played through the audio URL comes back as
 	/// sound with no picture, which is what happened until this existed. And
 	/// `maxBitRate` sets `constrained` server-side, forcing a full re-encode of
 	/// a file that could have been served off disk.
@@ -48,7 +48,7 @@ struct VideoUrlTests {
 
 	/// Trusted as given: `nativeSeek` is false on a video reached through
 	/// search, a playlist or starred, because the codec columns it is computed
-	/// from are not selected by those queries. That is the safe direction — the
+	/// from are not selected by those queries. That is the safe direction - the
 	/// film plays and seeks by re-request.
 	@Test func nativeSeekPicksTheTransport() {
 		let direct = StreamUrls.video(for: video(nativeSeek: true), client: client).url

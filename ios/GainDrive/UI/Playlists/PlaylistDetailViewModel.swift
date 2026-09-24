@@ -67,7 +67,7 @@ final class PlaylistDetailViewModel {
 	/// Removes the track at `index`.
 	///
 	/// **Serialised, and that is the whole point of `isRemoving`.** The endpoint
-	/// removes by *position*, and positions shift the moment one is gone — so a
+	/// removes by *position*, and positions shift the moment one is gone - so a
 	/// second removal issued before the first has landed would carry an index
 	/// computed against the pre-removal list and delete the wrong track. The
 	/// guard is correctness, not a progress indicator.

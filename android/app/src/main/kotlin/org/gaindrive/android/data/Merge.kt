@@ -11,11 +11,11 @@ import org.gaindrive.android.data.model.ArtistIndex
  * * Artists collapse when their names match after case-folding and trimming.
  *   The merged row sums the album counts and remembers every contributing ref.
  * * Albums collapse on artist and title, but only when [mergeDuplicateAlbums]
- *   is on — it is off by default, because the collapse hides one server's copy
+ *   is on - it is off by default, because the collapse hides one server's copy
  *   of an album behind another's on nothing more than a title match.
  * * Songs never merge; a track list always comes from one album on one server.
  *
- * Every `perServer` argument must arrive in registry order — it is the tie-break
+ * Every `perServer` argument must arrive in registry order - it is the tie-break
  * for which server's ref, artwork and index letter a merged row takes.
  */
 fun mergeArtists(perServer: List<List<Artist>>): List<Artist> {
@@ -58,7 +58,7 @@ fun mergeArtistIndexes(perServer: List<List<ArtistIndex>>): List<ArtistIndex> {
  * same-named sections collapsed across servers.
  *
  * Built on [mergeArtistIndexes], which already keys artists by name across all
- * buckets — a "Film" section on two servers becomes one row carrying both
+ * buckets - a "Film" section on two servers becomes one row carrying both
  * refs. The explicit sort is load-bearing: the single-server short-circuit in
  * that function returns the server's own bucket order untouched, and the
  * merged list draws these under one header where only alphabetical reads as
@@ -72,7 +72,7 @@ fun mergeCategories(perServer: List<List<ArtistIndex>>): List<Artist> =
 /**
  * Collapses copies of the same album held on more than one server, keeping the
  * copy from the server highest in registry order. That order is the user's
- * stated preference — it is what the Settings list reorders — so "my own server
+ * stated preference - it is what the Settings list reorders - so "my own server
  * before Bandcamp" is expressed by putting it first rather than by a separate
  * favourite-server setting that could disagree with it.
  *
@@ -80,7 +80,7 @@ fun mergeCategories(perServer: List<List<ArtistIndex>>): List<Artist> =
  * whitespace and punctuation. Deliberately *not* on year: a remaster or a
  * re-release disagrees about it between servers, which would split exactly the
  * pairs worth collapsing. The cost is that two genuinely different albums
- * sharing a title under one artist collapse into one — hence the setting that
+ * sharing a title under one artist collapse into one - hence the setting that
  * turns this off, and the badges that keep the survivors honest about who else
  * has a copy.
  *
@@ -88,7 +88,7 @@ fun mergeCategories(perServer: List<List<ArtistIndex>>): List<Artist> =
  */
 fun mergeAlbums(albums: List<Album>): List<Album> {
 	// Across servers only. Two same-titled albums on one server are two albums
-	// — separately filed editions — and collapsing them would delete a row the
+	// - separately filed editions - and collapsing them would delete a row the
 	// user's own library deliberately has twice.
 	if (albums.distinctBy { it.ref.server }.size < 2) return albums
 
@@ -112,7 +112,7 @@ fun mergeAlbums(albums: List<Album>): List<Album> {
 /**
  * Letters and digits only, lower-cased: everything else is thrown away.
  *
- * Two servers describing the same record rarely punctuate it the same way —
+ * Two servers describing the same record rarely punctuate it the same way -
  * "Vol. 2" against "Vol 2", an ellipsis against three dots, a stray trailing
  * space, straight quotes against curly ones. Keeping only letters and digits
  * catches that whole class at once and needs no list of the punctuation anyone
@@ -131,7 +131,7 @@ private fun matchKey(raw: String): String {
 
 /**
  * Collapses same-named artists, keeping first-seen order. The first
- * contributor — earliest server in registry order — wins the ref, artwork and
+ * contributor - earliest server in registry order - wins the ref, artwork and
  * index letter; only the album count and the ref list grow.
  */
 private fun fold(perServer: List<List<Pair<String, Artist>>>): List<Pair<String, Artist>> {
@@ -161,7 +161,7 @@ private fun fold(perServer: List<List<Pair<String, Artist>>>): List<Pair<String,
 private const val NO_LABEL = ""
 
 /**
- * Letters first, alphabetically, then everything else — "#" belongs at the end
+ * Letters first, alphabetically, then everything else - "#" belongs at the end
  * of the rail, not in front of "A" where its ASCII value would put it.
  */
 private val LABEL_ORDER = Comparator<String> { a, b ->

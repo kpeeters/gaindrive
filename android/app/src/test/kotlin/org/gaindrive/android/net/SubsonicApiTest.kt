@@ -24,7 +24,7 @@ class SubsonicApiTest {
 	private lateinit var server: MockWebServer
 	private lateinit var api: SubsonicApi
 
-	// The production parser, not a copy of its settings — see BrowseApiTest.
+	// The production parser, not a copy of its settings - see BrowseApiTest.
 	private val json = SubsonicJson
 
 	@Before

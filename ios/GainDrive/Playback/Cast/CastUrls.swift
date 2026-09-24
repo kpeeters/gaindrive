@@ -27,8 +27,8 @@ import OSLog
 /// reads at 1x and stops reading once its buffer is full; unpaced, the server
 /// writes the whole track into the socket within seconds and then blocks in one
 /// `sink.write`, and from that moment the connection carries no bytes at all.
-/// Things on the path are counting — the receiver's own ~60 s no-data timeout,
-/// and a reverse proxy's `ProxyTimeout`, which defaults to 60 s — so the music
+/// Things on the path are counting - the receiver's own ~60 s no-data timeout,
+/// and a reverse proxy's `ProxyTimeout`, which defaults to 60 s - so the music
 /// stops about ninety seconds in, half a minute after the cause. That failure
 /// was measured against a WiiM; see `serve_direct()` in `src/streamer.cc`.
 ///
@@ -47,7 +47,7 @@ func paced(_ url: URL) -> URL {
 /// track and nothing else.
 ///
 /// **What it replaces is the password.** `u`/`t`/`s` are the account's
-/// credentials — `t` is md5(password + salt) and `s` is the salt — so a
+/// credentials - `t` is md5(password + salt) and `s` is the salt - so a
 /// television handed them reads the whole library as this person for as long as
 /// the password stands, from its own logs and from anything on the path. The
 /// grant is one song, twelve hours, and reaches nothing the account could not
@@ -59,7 +59,7 @@ func paced(_ url: URL) -> URL {
 /// first, so applying this twice cannot leave two for the server to pick between.
 ///
 /// **A nil token returns the URL untouched**, which is what keeps the call sites
-/// free of branches — a server too old to mint one is not an error, it is the
+/// free of branches - a server too old to mint one is not an error, it is the
 /// behaviour this app had before the endpoint existed.
 ///
 /// Applied at the cast route rather than in `StreamUrls`, for the reason
@@ -113,7 +113,7 @@ private let castNativeTypes: Set<String> = [
 ///
 /// * **No stored file.** `LocalEngine` substitutes a `file:` URL when a copy is
 ///   on the device; a receiver cannot fetch one. Android could, through its
-///   bridge, and that branch is gone with the bridge — see `ios/CAST.md`.
+///   bridge, and that branch is gone with the bridge.
 /// * **No rewritten scheme.** Local playback goes through
 ///   `CachingResourceLoader` under `gaindrive-cache://`, which exists precisely
 ///   because AVFoundation will not consult a delegate for a scheme it knows. A
@@ -133,7 +133,7 @@ struct CastUrls {
 	/// The audio a receiver should fetch.
 	///
 	/// Returns the same `StreamTarget` shape the local engine deals in, so the
-	/// track-info view and the prewarmer need no second vocabulary — the URL is
+	/// track-info view and the prewarmer need no second vocabulary - the URL is
 	/// simply one a receiver can use.
 	func audio(for song: Song) async -> StreamTarget? {
 		// **No `playable` here either, and by the same omission.** This reaches
@@ -141,7 +141,7 @@ struct CastUrls {
 		// thing keeping them apart is that this one passes no declaration. With
 		// one, a receiver asked for AAC 160 would be sent the MP3 the server
 		// holds while the `LOAD` below announced `audio/mp4`, and refuse the
-		// media outright — the audio shape of the QuickTime failure on
+		// media outright - the audio shape of the QuickTime failure on
 		// `video(for:)`. `PlayableAudioTests.castRouteDeclaresNothing` guards
 		// the seam; there is nothing to assert at this line itself.
 		guard var target = await targets.target(for: song.ref) else { return nil }
@@ -173,7 +173,7 @@ struct CastUrls {
 	func video(for song: Song) -> StreamTarget? {
 		// No `playable`, and that omission is the load-bearing one on
 		// this route. A receiver demuxes none of them, and the `contentType`
-		// below is the entry's `transcodedContentType` — `video/mp4` for
+		// below is the entry's `transcodedContentType` - `video/mp4` for
 		// exactly the files a declaration would change. Adding the argument
 		// here announces MP4 and sends QuickTime, which a receiver refuses
 		// outright: the film never starts and nothing on the phone says why.
@@ -188,15 +188,15 @@ struct CastUrls {
 	///
 	/// **The mechanism is one query parameter**, and `audio(for:)` already
 	/// produces it: naming an audio `format` for a video *is* the server's
-	/// request for its soundtrack, and `CLAUDE.md` says so in those words. So
-	/// this is a name rather than an implementation — the call site should read
+	/// request for its soundtrack. So
+	/// this is a name rather than an implementation - the call site should read
 	/// as the decision it is making, and "ask for the audio of a video" is not
 	/// obviously that.
 	func soundtrack(for song: Song) async -> StreamTarget? {
 		await audio(for: song)
 	}
 
-	/// The sleeve the television shows. An ordinary cover URL — the receiver
+	/// The sleeve the television shows. An ordinary cover URL - the receiver
 	/// fetches it from the same server as the audio, so if it can reach one it
 	/// can reach the other.
 	///
@@ -213,8 +213,8 @@ struct CastUrls {
 	/// A grant for one track, or nil to carry on with the ordinary credentials.
 	///
 	/// **Nil is a normal answer rather than a failure.** A server older than the
-	/// endpoint answers a failed envelope, and what that leaves — a URL still
-	/// carrying `u`/`t`/`s` — is exactly what this app did before the endpoint
+	/// endpoint answers a failed envelope, and what that leaves - a URL still
+	/// carrying `u`/`t`/`s` - is exactly what this app did before the endpoint
 	/// existed. There is nothing to tell the person holding the phone and
 	/// nothing to abandon a cast over. It is logged, because "why is the password
 	/// still going to the television" should be answerable from the log rather
@@ -222,7 +222,7 @@ struct CastUrls {
 	///
 	/// **One per track, and not per seek.** This app seeks the receiver rather
 	/// than re-issuing the LOAD, so the receiver goes on fetching the URL it
-	/// already holds for as long as the track is open — which is why the server's
+	/// already holds for as long as the track is open - which is why the server's
 	/// grant lasts hours, and why it evicts its oldest rather than clearing its
 	/// table when full.
 	func castToken(for song: Song) async -> String? {

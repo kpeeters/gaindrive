@@ -51,7 +51,7 @@ import org.gaindrive.android.ui.components.formatDuration
  *
  * Neither is recoverable after the fact. The route is decided per track in
  * `CastUrls.forCast`, and the receiver reports no codec and no bitrate of its
- * own — the `contentType` it echoes is only what the `LOAD` told it. So both
+ * own - the `contentType` it echoes is only what the `LOAD` told it. So both
  * are read from what the phone recorded when it built the load, not from the
  * receiver.
  *
@@ -158,7 +158,7 @@ private fun PlaybackRows(
 	}
 
 	// While casting the receiver's copy is the one that matters, and it is
-	// resolved separately from the local player's — a queue may have been
+	// resolved separately from the local player's - a queue may have been
 	// playing locally at a quality the cast path then re-decided.
 	val quality = if (casting) loaded?.quality else current.quality
 	InfoRow("Sent", sentLabel(current, song, quality, casting, deliveredMime))
@@ -166,7 +166,7 @@ private fun PlaybackRows(
 	if (casting) {
 		InfoRow(
 			"Declared type",
-			loaded?.let { it.mimeType ?: "Not declared — the player sniffs it" },
+			loaded?.let { it.mimeType ?: "Not declared - the player sniffs it" },
 		)
 	}
 }
@@ -179,18 +179,18 @@ private fun fileLabel(song: Song): String? {
 }
 
 /**
- * What was actually sent — which is no longer the same question as what was
+ * What was actually sent - which is no longer the same question as what was
  * asked for.
  *
- * Video has no such choice — `format` and `maxBitRate` are never sent, because
- * either one demotes a file that could have been served off disk — so its
+ * Video has no such choice - `format` and `maxBitRate` are never sent, because
+ * either one demotes a file that could have been served off disk - so its
  * answer comes from `nativeSeek`, which is the same flag `StreamUrls.forVideo`
  * branches on and therefore cannot drift from what actually happens.
  *
  * Within `nativeSeek` there are still two tiers, and which one this playback
  * got is not a property of the file alone: local playback declares the
  * containers media3 demuxes and is handed those untouched, while the cast route
- * declares nothing and takes the remux. Hence [casting] — the same track can
+ * declares nothing and takes the remux. Hence [casting] - the same track can
  * honestly answer this differently depending on who is reading the bytes.
  *
  * **Audio is now the same shape.** A local playback request declares the
@@ -199,7 +199,7 @@ private fun fileLabel(song: Song): String? {
  * [deliveredMime] is the decoder's own answer and overrules it: anything that
  * is not the codec the conversion would have produced means no conversion
  * happened. Null before the tracks are known and whenever casting, where
- * nothing is being decoded here — and then the request is the best available
+ * nothing is being decoded here - and then the request is the best available
  * answer, which is what this said before.
  *
  * One case it cannot resolve, and nothing could: a *capped* account is sent
@@ -238,15 +238,15 @@ private fun sentLabel(
 private fun routeLabel(route: CastRoute, serverName: String?): String {
 	val server = serverName ?: "the server"
 	return when (route) {
-		CastRoute.DIRECT -> "Direct — the player fetches from $server"
-		CastRoute.RELAY -> "Through this phone — relayed from $server"
-		CastRoute.LOCAL -> "Through this phone — from the downloaded copy"
+		CastRoute.DIRECT -> "Direct - the player fetches from $server"
+		CastRoute.RELAY -> "Through this phone - relayed from $server"
+		CastRoute.LOCAL -> "Through this phone - from the downloaded copy"
 	}
 }
 
 /**
  * The web dialog's Share section, with the platform's own ending: no copy
- * button, a share icon firing the standard sheet — which itself offers copy.
+ * button, a share icon firing the standard sheet - which itself offers copy.
  * Same rules otherwise: the position is a snapshot taken as the dialog opens
  * (PlayerState ticks twice a second, and a label that crept on would name
  * some other moment by the time it was ticked); the chapter is the marker
@@ -347,7 +347,7 @@ private fun Heading(text: String) {
 /**
  * One label/value pair, in the shape of the web modal's `dt`/`dd` grid. A row
  * with nothing to say is not drawn at all, which is the same rule that modal
- * follows — a dialog of empty labels tells the reader less than a short one.
+ * follows - a dialog of empty labels tells the reader less than a short one.
  */
 @Composable
 private fun InfoRow(label: String, value: String?) {

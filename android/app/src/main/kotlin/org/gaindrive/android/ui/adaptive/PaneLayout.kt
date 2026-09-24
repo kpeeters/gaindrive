@@ -35,7 +35,7 @@ import kotlin.math.min
  * The pane strip: `web/app.js`'s `paneNav`, in Compose.
  *
  * The web client is three fixed slots side by side, of which a window slides
- * across as the user drills in — the visible count a function of the content
+ * across as the user drills in - the visible count a function of the content
  * width, and the level being read always the rightmost visible one. That is
  * also exactly what Material 3's [ListDetailPaneScaffold] draws, so the two
  * agree without either being bent to fit: a level is a pane role (0 List, 1
@@ -44,7 +44,7 @@ import kotlin.math.min
  *
  * What is deliberately *not* here is `ThreePaneScaffoldNavigator`. It keeps a
  * destination history of its own, which beside a tab's [PaneStack] would be a
- * second back stack — two things to keep in step through forward, back, a tab
+ * second back stack - two things to keep in step through forward, back, a tab
  * switch, a resize and process death. Everything below is derived from the
  * stack per frame instead, so there is nothing to drift.
  */
@@ -97,13 +97,13 @@ private fun Pane.adaptedValue(): PaneAdaptedValue =
  * The stock directive with the partition count and the pane widths replaced.
  *
  * `copy` rather than a fresh [PaneScaffoldDirective] because the default
- * carries `excludedBounds` — the bounds of a foldable's hinge, which is what
+ * carries `excludedBounds` - the bounds of a foldable's hinge, which is what
  * stops a pane being laid out across it. Building one from scratch loses that
  * silently, on the one class of device where it is visible.
  *
  * The widths are replaced because the stock ones are not equal and not even
  * consistent. The scaffold gives every pane a preferred 360dp and then hands
- * *all* surplus to its highest-priority pane — the detail — so a 900dp pane
+ * *all* surplus to its highest-priority pane - the detail - so a 900dp pane
  * area draws list 360 / detail 540; only in deficit does it scale the panes
  * evenly, which is why narrow windows looked right while tablets did not.
  * And the stock gutter keys on the *window* size class (0dp below EXPANDED,
@@ -111,7 +111,7 @@ private fun Pane.adaptedValue(): PaneAdaptedValue =
  * between two panes appeared and vanished with the window. The web client
  * divides `#pane-viewport` into exact equal panes with no gutter, each pane
  * padding its own content (`paneNav._apply()`), and the screens here pad
- * their own content the same way — so the directive says the same thing:
+ * their own content the same way - so the directive says the same thing:
  * preferred widths that sum to the whole area, leaving no surplus for the
  * priority rule to misplace.
  *
@@ -119,7 +119,7 @@ private fun Pane.adaptedValue(): PaneAdaptedValue =
  * keep every visible window full: [leadingWindow] and [searchWindow] mark a
  * level too deep to choose yet as [Pane.Blank] rather than [Pane.Gone], so
  * the number of expanded panes always equals [panes] and the widths are a
- * function of the window and the tab alone — they must never jump as the
+ * function of the window and the tab alone - they must never jump as the
  * user drills in. PaneWindowTest pins that invariant.
  */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
@@ -136,18 +136,18 @@ fun paneDirective(panes: Int, paneAreaWidth: Dp): PaneScaffoldDirective =
  * Draws [stack] as a strip of panes, one per level of its path.
  *
  * [titles] names each level, leading first, and its *size* is how deep the tab
- * goes — two for Playlists, three for the Library and Recents. One list rather
+ * goes - two for Playlists, three for the Library and Recents. One list rather
  * than a count and a lookup because the two could not then disagree. The names
  * reach the panes as `paneTitle`, which is what TalkBack announces when a pane
  * changes underneath the user; on a phone only one pane exists and it is the
  * screen, so this is a large-screen affordance specifically.
  *
  * [slots] is the mapping from "how deep are we, and how many panes fit" to what
- * each role shows. It is a parameter because Search needs a different one —
+ * each role shows. It is a parameter because Search needs a different one -
  * see [searchWindow], which is the only other implementation.
  *
  * [pane] is handed one route and draws it. It should go through [PaneHost], so
- * that the screen gets a back stack entry of its own — see that function for
+ * that the screen gets a back stack entry of its own - see that function for
  * why that is not optional.
  */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
@@ -173,7 +173,7 @@ fun PaneStrip(
 		val path = stack.path
 
 		// The back affordance goes on the leftmost visible pane, and only when
-		// that is not the tab's own root — the web client's rule for its
+		// that is not the tab's own root - the web client's rule for its
 		// `.back-link` spans. At two or three panes up, the level above is on
 		// screen beside this one and an arrow pointing at it would be noise.
 		val leading = listOf(assigned.list, assigned.detail, assigned.extra)
@@ -219,7 +219,7 @@ private fun Slot(
 ) {
 	when (content) {
 		is Pane.Gone -> Unit
-		// The blank bar with nothing under it — present for its width alone.
+		// The blank bar with nothing under it - present for its width alone.
 		is Pane.Blank -> PaneWaiting("")
 		is Pane.Waiting -> waiting(level)
 		// Guarded because a pane and the stack can disagree for one frame while
@@ -237,8 +237,8 @@ private fun Slot(
  * What this pane's app bar should put behind its back arrow, or null when it
  * should draw none.
  *
- * Ambient rather than a parameter because it is a fact about the *layout* —
- * whether the level above is already on screen — which changes as the window
+ * Ambient rather than a parameter because it is a fact about the *layout* -
+ * whether the level above is already on screen - which changes as the window
  * resizes, while the pane's own graph must not. A tab declares its
  * destinations in a `NavGraphBuilder` lambda that `NavHost` remembers; a
  * lambda capturing a value that moves with the width would rebuild the graph
@@ -249,7 +249,7 @@ val LocalPaneBack = compositionLocalOf<(() -> Unit)?> { null }
 
 /**
  * `getOrElse` rather than an index: a tab with two levels still declares three
- * pane roles, and the third is always [Pane.Gone] — but the modifier is built
+ * pane roles, and the third is always [Pane.Gone] - but the modifier is built
  * before anything knows that.
  */
 private fun Modifier.paneName(titles: List<String>, level: Int): Modifier =

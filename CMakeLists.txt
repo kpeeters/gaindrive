@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 set(CMAKE_POLICY_DEFAULT_CMP0148 NEW)
 # The root VERSION file is the only place a version is written; the Android and
-# iOS builds read the same file. Only the `version` line is of interest here —
+# iOS builds read the same file. Only the `version` line is of interest here -
 # `build` numbers a store upload and means nothing to the server.
 file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/VERSION _gd_version REGEX "^version=")
 string(REGEX REPLACE "^version=" "" _gd_version "${_gd_version}")
 # file(STRINGS) reads the file but creates no dependency on it, so nothing about
-# editing VERSION makes the build re-run cmake — an existing build/ went on
+# editing VERSION makes the build re-run cmake - an existing build/ went on
 # compiling the version it was last configured with, and `cmake --build` said
 # everything was up to date. This is the line that makes a bump take effect.
 set_property(DIRECTORY APPEND PROPERTY
@@ -25,14 +25,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #
 # -DGAINDRIVE_VERSION= still wins, which is how a release binary is stamped with
 # its git tag (.github/workflows/build.yml, via cmake/static_build.cmake) and how
-# the Homebrew formula stamps its own — the `if` sees the cache entry that -D
+# the Homebrew formula stamps its own - the `if` sees the cache entry that -D
 # creates.
 #
 # **The entry is then removed again, and that is the whole point.** An override
 # is a property of one configure, not of the build directory, but -D has no way
 # to say so: the value it writes is indistinguishable on the next configure from
 # one someone meant. Dropping `CACHE STRING` from the set() below was an earlier
-# attempt at this and does not work — removing it from the source does not
+# attempt at this and does not work - removing it from the source does not
 # remove an entry an earlier configure already wrote, and `if(NOT
 # GAINDRIVE_VERSION)` goes on reading it. That is not hypothetical: this tree
 # carried GAINDRIVE_VERSION:STRING=0.1 for months while VERSION said 1.0.1, so
@@ -74,11 +74,11 @@ option(GAINDRIVE_STATIC
 # fully static binary. This is what the release artifacts are built with; see
 # cmake/static_build.cmake for the Alpine container that provides the toolchain.
 option(GAINDRIVE_STATIC_LIBC
-	"Also link libc statically. Requires a musl toolchain — a fully static glibc breaks NSS, so getaddrinfo() stops resolving and the MusicBrainz/Wikidata/Discogs lookups fail."
+	"Also link libc statically. Requires a musl toolchain - a fully static glibc breaks NSS, so getaddrinfo() stops resolving and the MusicBrainz/Wikidata/Discogs lookups fail."
 	OFF)
 
 # Implied, not independent: a static libc cannot be combined with a dynamic
-# OpenSSL/zlib. A plain set() is enough — it shadows the cache entry for the
+# OpenSSL/zlib. A plain set() is enough - it shadows the cache entry for the
 # rest of this file, which is all the GAINDRIVE_STATIC blocks below need.
 if(GAINDRIVE_STATIC_LIBC)
 	set(GAINDRIVE_STATIC ON)
@@ -88,7 +88,7 @@ endif()
 # and -z stack-size are all rejected by ld64. Fail here rather than at link time
 # with an error that reads like a toolchain problem. macOS distribution goes
 # through the Homebrew formula instead, which wants a normal dynamic link
-# against brew's own openssl@3 — see README.
+# against brew's own openssl@3 - see README.
 if(GAINDRIVE_STATIC AND APPLE)
 	message(FATAL_ERROR
 		"GAINDRIVE_STATIC/GAINDRIVE_STATIC_LIBC are Linux-only: Apple ships no "
@@ -103,7 +103,7 @@ endif()
 # The remaining seven come from system packages by default. Building from source
 # is per-dependency, not all-or-nothing: a distribution that is merely behind on
 # one library should not force every other one to be rebuilt too. Ubuntu 24.04 is
-# the case that shaped this — it has five of the seven, but TagLib only at 1.13
+# the case that shaped this - it has five of the seven, but TagLib only at 1.13
 # and no reproc++ package at all, so
 #
 #     cmake -B build -DGAINDRIVE_BUNDLED_DEPS="TagLib;reproc++"
@@ -113,8 +113,8 @@ set(GAINDRIVE_BUNDLED_DEPS "" CACHE STRING
 	"Dependencies to build from source even when the system provides them: a list of names from GD_ALL_DEPS, or ALL. Empty (the default) takes whatever the system has and builds only the rest.")
 
 # Anything not found is built from source rather than refused. A distribution
-# that is merely behind on one library — Ubuntu 24.04 has no reproc package at
-# all and TagLib only at 1.13 — should still give a working `cmake -B build`.
+# that is merely behind on one library - Ubuntu 24.04 has no reproc package at
+# all and TagLib only at 1.13 - should still give a working `cmake -B build`.
 #
 # Turning this OFF is how the stricter guarantee is asserted by the people who
 # actually need it. A distribution packager must not ship convenience copies and
@@ -150,7 +150,7 @@ else()
 	endforeach()
 endif()
 
-# Minimum versions. These are not decoration — they are what keeps a system-first
+# Minimum versions. These are not decoration - they are what keeps a system-first
 # default safe on an older distribution. Ubuntu 24.04 ships taglib 1.13.1, and
 # the code uses the taglib 2 API, so without a floor find_package() would accept
 # it and the failure would surface as a compile error in mediastore.cc instead of
@@ -166,7 +166,7 @@ set(GD_MIN_nlohmann_json 3.11)
 # Deliberately outside both branches below, and ahead of them. FindOpenSSL and
 # FindZLIB pick shared-vs-static for their imported targets the first time they
 # run, and that is either the find_package(OpenSSL) at the end of this section or
-# one that libarchive/taglib run internally during MakeAvailable — whichever
+# one that libarchive/taglib run internally during MakeAvailable - whichever
 # comes first. Nesting this inside the bundled branch would leave
 # -DGAINDRIVE_STATIC=ON with a system dependency set silently linking shared
 # OpenSSL, which is exactly the sort of "nothing failed, the result is just
@@ -224,7 +224,7 @@ set(_gd_brew    "")
 #
 # Getting a find_package name wrong reports "not found" for something that is in
 # fact installed, so: TagLib is spelled capitalised even though the file is
-# taglib-config.cmake — CMake also searches the lowercase-dashed form, and
+# taglib-config.cmake - CMake also searches the lowercase-dashed form, and
 # taglib's own config calls check_required_components("TagLib"), so the
 # capitalised spelling is the one its internals agree with. LibArchive is
 # CMake's bundled find module rather than an upstream config package.
@@ -232,7 +232,7 @@ set(_gd_brew    "")
 # The apt names are for Debian 13 and newer, and the advisory below says so.
 # Older releases differ: Ubuntu 24.04 calls taglib libtag1-dev (and ships 1.13
 # anyway) and has no reproc package at all. An install command must never mix
-# names that do and do not exist on the target release — apt aborts the entire
+# names that do and do not exist on the target release - apt aborts the entire
 # transaction on one unknown name, so the user installs nothing, and the next
 # configure then reports every package missing including the available ones.
 foreach(dep
@@ -254,7 +254,7 @@ foreach(dep
 	else()
 		# No version is passed to find_package, deliberately. The COMPATIBILITY
 		# mode of a package's version file is its upstream author's choice, not
-		# ours, and several of these use SameMajorVersion — under which a
+		# ours, and several of these use SameMajorVersion - under which a
 		# "minimum" request is really a major-version match. Asking for
 		# tinyxml2 >= 9.0 therefore REJECTED the installed 11.0.0, and reproc's
 		# floor of 14.2 only works because 14 is still the current major. Ask
@@ -265,8 +265,8 @@ foreach(dep
 		# Installed, but older than we can use. This cannot fall back to a source
 		# build the way an absent package can: a successful find_package has
 		# already created imported targets, and the bundled build would then try
-		# to create targets of the same names — plain `SQLiteCpp` and `reproc++`
-		# collide directly, tinyxml2 collides on its ::tinyxml2 alias — which
+		# to create targets of the same names - plain `SQLiteCpp` and `reproc++`
+		# collide directly, tinyxml2 collides on its ::tinyxml2 alias - which
 		# CMake rejects with an "add_library cannot create target" error that
 		# reads like a bug in this file. A failed find_package never loads the
 		# config at all, which is why the absent case is safe and this one is not.
@@ -280,7 +280,7 @@ foreach(dep
 				"  (That flag skips the system probe for ${_name} entirely, "
 				"which is what makes the source build possible here.)\n")
 		endif()
-		# A package that ships no version file at all leaves _ver empty — cxxopts
+		# A package that ships no version file at all leaves _ver empty - cxxopts
 		# upstream is one. Accept it rather than rebuild a library that is
 		# probably fine; the compile would catch a genuinely too-old one.
 
@@ -477,8 +477,8 @@ if("LibArchive" IN_LIST GD_BUNDLED)
 	)
 
 	# Trim optional backends gaindrive never uses. This only applies when we
-	# build libarchive ourselves — with a system one the distribution has
-	# already chosen its backends — and it matters most for the static link.
+	# build libarchive ourselves - with a system one the distribution has
+	# already chosen its backends - and it matters most for the static link.
 	# The worst offender is libarchive's xar reader: its libxml2 pulls in ICU
 	# (libicuuc/libicudata), and because ICU is C++ it drags libstdc++/libgcc_s
 	# back into an otherwise static link even with -static-libstdc++.
@@ -571,7 +571,7 @@ endif()
 
 if("TagLib" IN_LIST GD_BUNDLED)
 	# Reproduce, for the in-tree build, the include layout taglib's INSTALLED
-	# form provides — its exported target offers both <prefix>/include and
+	# form provides - its exported target offers both <prefix>/include and
 	# <prefix>/include/taglib, and its PUBLIC_HEADER install flattens
 	# toolkit/tpropertymap.h to include/taglib/tpropertymap.h. The source tree
 	# keeps the toolkit headers in a subdirectory instead, so without these three
@@ -604,7 +604,7 @@ find_package(Threads REQUIRED)
 # plain in-tree, while SQLiteCpp and reproc++ set no NAMESPACE on their
 # install(EXPORT ...) at all and so are unnamespaced in both. Taking the first
 # candidate that exists beats hardcoding a spelling per mode, and absorbs a
-# distribution — or a future release — adding a namespace.
+# distribution - or a future release - adding a namespace.
 #
 # SQLiteCpp's config already does find_dependency(SQLite3) when it was not built
 # against its bundled amalgamation, so nothing here needs to chase sqlite3.
@@ -818,7 +818,7 @@ endif()
 # A diagnostic front end to the Chromecast code, for investigating mDNS
 # discovery from the command line. It links castmanager.cc and stamp.cc and
 # nothing else: castmanager includes no project header but those two, so no
-# database, no HTTP server and — note the absence of ${EMBEDDED_WEB_CC} — not
+# database, no HTTP server and - note the absence of ${EMBEDDED_WEB_CC} - not
 # even the embedded web client, whose custom command fires only for a target
 # that lists its output. Not installed; this is a tool, not a program we ship.
 option(GAINDRIVE_CAST_TOOL "Build the gaindrive-cast discovery diagnostic" ON)

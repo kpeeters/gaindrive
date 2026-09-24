@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Chapter marker endpoints — getChapters and saveChapters.
+"""Chapter marker endpoints - getChapters and saveChapters.
 
 A concert is one file, and these are the markers that say where each song
 starts. They live in a sidecar `<stem>.chapters.txt` beside the video, never
@@ -103,7 +103,7 @@ def _video():
 
 def _vid():
     v = _video()
-    assert v, "no videos in the library — scan a collection with video first"
+    assert v, "no videos in the library - scan a collection with video first"
     return v["id"]
 
 
@@ -290,7 +290,7 @@ def test_empty_body_is_a_tombstone():
     after = _get(_vid())
     assert _pairs(after) == [], _pairs(after)
     assert after["chapters"]["source"] == "sidecar", \
-        f"source={after['chapters']['source']} — the tombstone was not kept"
+        f"source={after['chapters']['source']} - the tombstone was not kept"
     print("PASS  an empty save leaves an empty sidecar, not the container list")
 
 
@@ -454,7 +454,7 @@ if __name__ == "__main__":
         v = _video()
         if _original()["chapters"]["source"] == "none":
             print(f"\nNOTE  an empty <stem>.chapters.txt is left beside "
-                  f"{v['title']!r} — remove it by hand if you would rather "
+                  f"{v['title']!r} - remove it by hand if you would rather "
                   f"it were not there.")
         else:
             print(f"\nRestored the original markers on {v['title']!r}.")

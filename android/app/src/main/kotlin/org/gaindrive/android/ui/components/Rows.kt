@@ -68,7 +68,7 @@ fun ArtistRow(artist: Artist, onClick: () -> Unit, badges: List<String> = emptyL
 			.fillMaxWidth()
 			// heightIn rather than generous padding: it holds the 48dp minimum
 			// touch target even at large font scales, while letting the rows sit
-			// close together. There is no divider between them — with rows this
+			// close together. There is no divider between them - with rows this
 			// dense, one line per artist reads better than a ruled list.
 			.heightIn(min = 40.dp)
 			.clickable(onClick = onClick)
@@ -142,7 +142,7 @@ fun AlbumRow(
  * two icons for it would read as two different things.
  *
  * Absent rather than zero on the listings the server does not carry the count
- * in — folder browsing, starred, search — so a missing mark is not a promise
+ * in - folder browsing, starred, search - so a missing mark is not a promise
  * that an album has no video. See `API-CLIENT.md`.
  */
 @Composable
@@ -204,7 +204,7 @@ fun PlaylistRow(
 }
 
 /**
- * Hours and minutes rather than [formatDuration]'s mm:ss — a playlist runs for
+ * Hours and minutes rather than [formatDuration]'s mm:ss - a playlist runs for
  * hours, and "184:07" is not a length anyone reads.
  */
 private fun playlistSubtitle(playlist: Playlist): String {
@@ -297,7 +297,7 @@ fun TrackRow(
 					MaterialTheme.colorScheme.primary
 				},
 			)
-			// Only where it says something the album heading does not — a
+			// Only where it says something the album heading does not - a
 			// guest, or every track of a compilation. The server decides what
 			// counts as a difference; see Song.differingArtist.
 			song.differingArtist?.let {
@@ -349,8 +349,8 @@ private fun RowOverflowButton(onClick: () -> Unit) {
 /**
  * Marks a row that will take over the screen when tapped.
  *
- * Videos sit in the same listings as tracks — a concert lives under its
- * performer, a film is an album with one track — so without this the only
+ * Videos sit in the same listings as tracks - a concert lives under its
+ * performer, a film is an album with one track - so without this the only
  * warning is the film starting.
  */
 @Composable
@@ -464,8 +464,8 @@ fun SongRow(
 /**
  * One marker inside a recording, drawn as a row of the album it sits in.
  *
- * Shaped like [TrackRow] — the same number box, the same title weight, the same
- * trailing duration — because in a listing that is exactly what it stands for:
+ * Shaped like [TrackRow] - the same number box, the same title weight, the same
+ * trailing duration - because in a listing that is exactly what it stands for:
  * a chaptered concert's markers replace its single row, so they have to read as
  * the album's tracks and not as an annotation on one.
  *
@@ -537,7 +537,7 @@ fun ChapterRow(
 /**
  * A chapter match in a search listing.
  *
- * Shaped like [SongRow] minus the artwork, which a marker has none of — its
+ * Shaped like [SongRow] minus the artwork, which a marker has none of - its
  * recording's cover is the album's, and drawing it on every row would say the
  * hits were albums.
  *
@@ -565,8 +565,8 @@ fun ChapterHitRow(hit: ChapterHit, onClick: () -> Unit) {
 				// Artist, album, then the recording itself: a marker means
 				// nothing without knowing which concert it is in. The album is
 				// what the folder is called and the track what the file is
-				// called, and they coincide often enough — a folder holding one
-				// recording named after it — that an exact duplicate is dropped
+				// called, and they coincide often enough - a folder holding one
+				// recording named after it - that an exact duplicate is dropped
 				// rather than printed twice.
 				text = buildList {
 					add(hit.artistName)
@@ -590,7 +590,7 @@ fun ChapterHitRow(hit: ChapterHit, onClick: () -> Unit) {
 /**
  * Where a whole album or playlist stands, in the same two marks its tracks use.
  *
- * A tick means downloaded — asked for, and safe from eviction — and before it
+ * A tick means downloaded - asked for, and safe from eviction - and before it
  * the ring, clock or error the album's own screen shows, so a row never
  * disagrees with the screen it opens. A dot means every track is here without
  * anything keeping it that way, which is what a record played straight through
@@ -628,7 +628,7 @@ private fun ContainerDownloadMark(refs: List<ItemRef>) {
  * Where a track stands with respect to being downloaded: waiting its turn, being
  * fetched, or here.
  *
- * Two kinds of "here", deliberately distinct. A tick means downloaded — asked
+ * Two kinds of "here", deliberately distinct. A tick means downloaded - asked
  * for, and safe from eviction. A small dot means merely cached from having been
  * played, which will still play offline but may be reclaimed when the cache
  * fills. Collapsing them would promise permanence the second kind does not have.
@@ -651,7 +651,7 @@ private fun TrackDownloadMark(ref: ItemRef) {
 
 		// Cached by being played rather than downloaded on purpose. A smaller,
 		// quieter mark: it says the track will play offline, without claiming
-		// the permanence a download has — eviction may take it back.
+		// the permanence a download has - eviction may take it back.
 		download == null && availability.isCachedOnly(ref) -> Icon(
 			imageVector = Icons.Default.Circle,
 			contentDescription = "Stored, but not downloaded",
@@ -741,7 +741,7 @@ fun formatDuration(seconds: Int): String {
  * A *position* inside a recording: `H:MM:SS` past an hour, `M:SS` below it.
  *
  * [formatDuration] is not reusable here, twice over. It has no hour rollover,
- * so it prints 5400 seconds as "90:00" — unreadable as a place in a two-hour
+ * so it prints 5400 seconds as "90:00" - unreadable as a place in a two-hour
  * concert. And it returns "" for zero, which is right for a length and wrong
  * for a position: 0:00 is a real one, and the first marker is usually at it.
  *

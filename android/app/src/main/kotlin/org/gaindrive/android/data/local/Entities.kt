@@ -10,7 +10,7 @@ import androidx.room.Entity
  * rule that holds everywhere else in the app has to hold in storage too.
  *
  * References to other items are stored as bare ids rather than encoded refs,
- * because the server is already the row's own [serverId] — an album's artist
+ * because the server is already the row's own [serverId] - an album's artist
  * and cover art always belong to the server that issued the album.
  */
 
@@ -25,7 +25,7 @@ data class ArtistEntity(
 	/** The `getArtists` index bucket, kept so the letter rail works offline. */
 	val indexLabel: String,
 	/**
-	 * Which kind of root this came from — "artists", "categories". Stored so
+	 * Which kind of root this came from - "artists", "categories". Stored so
 	 * the offline list can be filtered the same way the online one is:
 	 * without it, going offline would silently show artists and categories
 	 * mixed together, which is the thing the mode toggle exists to prevent.
@@ -83,7 +83,7 @@ data class SongEntity(
 	 * `nativeSeek` and the frame size are deliberately not mirrored: they only
 	 * matter once a stream URL is being built, and no video can be played
 	 * without the network anyway. Reading false for one that is in fact
-	 * seekable costs the expensive tier and nothing else — it no longer costs
+	 * seekable costs the expensive tier and nothing else - it no longer costs
 	 * the ability to cast the film.
 	 */
 	val isVideo: Boolean = false,
@@ -97,7 +97,7 @@ data class SongEntity(
 	val transcodedContentType: String?,
 	/**
 	 * Mirrored so an album read offline heads its groups the same way an online
-	 * one does. Unlike `nativeSeek` this costs nothing to keep — the ordering
+	 * one does. Unlike `nativeSeek` this costs nothing to keep - the ordering
 	 * already relies on `discNumber` being stored, and this is the one bit that
 	 * says the same number is a season.
 	 */
@@ -189,7 +189,7 @@ data class ChapterEntity(
 /**
  * What the user asked to keep.
  *
- * Records the *intent* — this album, that playlist — rather than the songs it
+ * Records the *intent* - this album, that playlist - rather than the songs it
  * currently expands to. A playlist gaining a track should extend the pin, which
  * it only can if the pin is on the playlist.
  */

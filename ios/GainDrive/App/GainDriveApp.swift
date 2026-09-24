@@ -11,12 +11,12 @@ import SwiftUI
 /// The composition root. Objects that are genuinely global are built here and
 /// handed down through the environment; anything that depends on *which*
 /// server is asked of the registry, which is why there is no container and no
-/// DI framework — `android/ARCHITECTURE.md` describes Hilt doing manual
+/// DI framework - `android/ARCHITECTURE.md` describes Hilt doing manual
 /// composition in all but name, for the same reason.
 @main
 struct GainDriveApp: App {
 	/// Only so a background download finishing while the app is not running
-	/// can be acknowledged — see `AppDelegate`.
+	/// can be acknowledged - see `AppDelegate`.
 	@UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
 	@State private var registry: ServerRegistry
@@ -76,7 +76,7 @@ struct GainDriveApp: App {
 		// arrived or was evicted reaches the marks on screen.
 		Task { await store.setChangeHandler { Task { @MainActor in pins.storeChanged() } } }
 		// Built here, never in `RootView.init`, which re-runs on every
-		// re-evaluation of this body — `@State` would keep the first player and
+		// re-evaluation of this body - `@State` would keep the first player and
 		// silently discard the rest, each with its own audio session.
 		_castDevices = State(initialValue: CastDeviceStore())
 		_player = State(
@@ -111,7 +111,7 @@ struct GainDriveApp: App {
 			.preferredColorScheme(settings.themeMode.colorScheme)
 			// Re-reads what each pin covers and fetches anything missing, which
 			// is what makes a pinned playlist cover a track added since it was
-			// pinned — and what re-adopts a background download the system
+			// pinned - and what re-adopts a background download the system
 			// carried on with while the app was not running.
 			.task { await pins.refresh() }
 		}

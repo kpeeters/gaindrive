@@ -16,7 +16,7 @@
 // Naming, for reference:
 //   VIDEO_TS.IFO / .BUP    disc-level metadata
 //   VIDEO_TS.VOB           first-play / disc menu
-//   VTS_nn_0.VOB           titleset nn's *menu* — never content
+//   VTS_nn_0.VOB           titleset nn's *menu* - never content
 //   VTS_nn_m.VOB (m >= 1)  titleset nn's programme, part m
 //
 // Both the scanner and the streamer need the same ordered part lists, so the

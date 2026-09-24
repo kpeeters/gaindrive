@@ -242,7 +242,7 @@ class PinsTest {
 
 	/**
 	 * A queued track has no figure to draw, and a determinate ring pinned at
-	 * zero looks stalled rather than starting — so the row falls back to a
+	 * zero looks stalled rather than starting - so the row falls back to a
 	 * spinner until there is something real to show.
 	 */
 	@Test
@@ -302,7 +302,7 @@ class PinsTest {
 	/**
 	 * The one that matters. The mirror only holds the tracks of collections
 	 * visited while online, so an album nobody has opened has no members at all
-	 * — and `containsAll` over an empty list is vacuously true. Without the
+	 * - and `containsAll` over an empty list is vacuously true. Without the
 	 * guard every album in a fresh library would claim to be downloaded.
 	 *
 	 * Note this is the opposite answer to `a pin covering nothing counts as

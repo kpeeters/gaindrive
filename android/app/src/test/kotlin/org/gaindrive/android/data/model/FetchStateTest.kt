@@ -46,8 +46,8 @@ class FetchStateTest {
 	}
 
 	/**
-	 * The server refuses to cancel a scan — the download is already done and the
-	 * files are being indexed — so offering the button there would be a control
+	 * The server refuses to cancel a scan - the download is already done and the
+	 * files are being indexed - so offering the button there would be a control
 	 * that fails.
 	 */
 	@Test

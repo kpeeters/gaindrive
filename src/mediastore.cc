@@ -166,7 +166,7 @@ static bool iends_with(const std::string& s, const std::string& suffix)
 
 // Only ever called for a folder that is an album and nothing else, which is
 // why pass 5 may recurse freely.  It used to take a `recurse` flag, for the
-// one folder that was an album *and* a parent of albums — a section holding
+// one folder that was an album *and* a parent of albums - a section holding
 // loose files beside its subfolders, under the rule where such a folder was
 // itself an album.  Pass 5 would have handed that section one of its own
 // albums' covers.  A loose file is its own album now, so no such folder
@@ -211,7 +211,7 @@ static std::string find_cover(const fs::path& dir)
 // A poster belonging to one file rather than to a folder: "film.mp4" is
 // matched by "film.jpg" or "film-poster.jpg".  That is what Kodi and Jellyfin
 // read beside a flat movie file, and it is the only way a loose file can carry
-// a cover of its own — a folder cover belongs to the whole section it sits in.
+// a cover of its own - a folder cover belongs to the whole section it sits in.
 static std::string find_song_cover(const fs::path& file)
 	{
 	static const std::vector<std::string> SUFFIXES = {
@@ -244,8 +244,8 @@ static const std::string SONG_COVER_ART_SQL =
 //
 // It is a *suffix*, with a leading comma, and every caller appends it to the
 // very end of its SELECT list.  That is not stylistic: several of these queries
-// carry their own columns in the middle — pq.is_current, b.position, an
-// explicitly unused f.parent_id — so appending is what keeps every existing
+// carry their own columns in the middle - pq.is_current, b.position, an
+// explicitly unused f.parent_id - so appending is what keeps every existing
 // getColumn() index valid.  Inserting these beside the other song columns would
 // silently renumber the rest.
 //
@@ -262,7 +262,7 @@ static const std::string SONG_VIDEO_COLS_SQL =
 // it, always.
 //
 // It used to have a second arm, for a folder that was an album *and* its own
-// artist — a section that directly contained media, under the rule where such
+// artist - a section that directly contained media, under the rule where such
 // a folder was itself an album.  Reporting the parent there named the *root*,
 // and a client anchoring its album list on this field landed on the list of
 // sections.  A loose file is its own album now and its parent is the section,
@@ -292,7 +292,7 @@ static const std::string ALBUM_VIDEO_COUNT_SQL =
 	"         WHERE sv.album_id = al.id AND sv.is_video = 1)";
 
 // Returns sorted list of image paths in dir, excluding cover_path.  Recursive
-// unless the caller says otherwise — see get_extra_image_paths(), where a
+// unless the caller says otherwise - see get_extra_image_paths(), where a
 // folder with subfolders is a section whose albums' images are not its own.
 static std::vector<std::string> find_extra_images(const fs::path& dir,
                                                    const std::string& cover_path,
@@ -377,7 +377,7 @@ struct VideoProbe
 // probe actually costs: measured per video, 483 ms in a scan against 111 ms
 // with the file already in page cache and 89 ms for a bare `ffprobe -version`,
 // so ~77% of it is disk.  Across ~2000 films that is 10 GB read to extract a
-// duration, two codec names and a resolution — and 10 GB pushed through the
+// duration, two codec names and a resolution - and 10 GB pushed through the
 // page cache is also what evicts the directory metadata Phase 1 lives on.
 static const char* PROBE_SIZE_FAST     = "1000000";   // bytes
 static const char* PROBE_DURATION_FAST = "1000000";   // microseconds
@@ -389,7 +389,7 @@ static std::optional<VideoProbe> probe_video(const std::string& path,
 		// -fpsprobesize 0 because nothing here stores a frame rate.  It is the
 		// AVFormatContext `fps_probe_size` option, the number of frames
 		// avformat_find_stream_info() reads to establish avg_frame_rate, and
-		// decoding those frames is a large part of what a probe costs — 491.7
+		// decoding those frames is a large part of what a probe costs - 491.7
 		// ms a file, measured, against ~86 ms for a TagLib read.  Every field
 		// this function does read comes from somewhere else: duration and
 		// bit_rate from the container header, width, height and the codec
@@ -398,7 +398,7 @@ static std::optional<VideoProbe> probe_video(const std::string& path,
 		// **No -threads 1 here, and it is not an oversight.**  It was tried,
 		// on the theory that eight concurrent probes each defaulting their
 		// decoder pool to the core count was scheduler thrash.  Two clean runs
-		// either side of it — every other phase matching within 10% — put
+		// either side of it - every other phase matching within 10% - put
 		// `meta` 31 s worse with it than without, so forcing each probe
 		// single-threaded cost more than the oversubscription did.  The
 		// evidence for the theory never appeared either: `ps -eLf` showed 3-4
@@ -410,7 +410,7 @@ static std::optional<VideoProbe> probe_video(const std::string& path,
 	// The narrowed window is a *first* attempt, never the only one: see
 	// read_video_probe() below, which re-runs at ffmpeg's defaults whenever the
 	// cheap pass came back without the fields that matter.  That is what makes
-	// this a latency change rather than an accuracy trade — the files a small
+	// this a latency change rather than an accuracy trade - the files a small
 	// window cannot describe pay for two probes, and nothing is quietly lost.
 	if (!thorough) {
 		args.push_back("-probesize");
@@ -428,7 +428,7 @@ static std::optional<VideoProbe> probe_video(const std::string& path,
 	reproc::options opts;
 	opts.redirect.err.type = reproc::redirect::type::discard;
 	// A deadline, for the reason VideoArt::run() has one: this runs inside a
-	// scan, and a corrupt file — or one on a mount that has gone away — must
+	// scan, and a corrupt file - or one on a mount that has gone away - must
 	// not stall it.  Parallelising Phase 3 downgraded that from "the scan
 	// stops" to "one worker stops", which is better and still wrong.
 	opts.deadline = PROBE_TIMEOUT;
@@ -486,7 +486,7 @@ static std::optional<VideoProbe> probe_video(const std::string& path,
 // One file's probe: cheap window first, ffmpeg's defaults only when the cheap
 // one came back unusable.
 //
-// "Unusable" is deliberately narrow — no duration at all, or no stream of
+// "Unusable" is deliberately narrow - no duration at all, or no stream of
 // either kind found.  Those are the two shapes a probe window that was too
 // small actually takes, and both break something downstream: hls.m3u8 is
 // arithmetic over the duration, and the codec pair is what picks the serving
@@ -495,9 +495,9 @@ static std::optional<VideoProbe> probe_video(const std::string& path,
 // header or the stream parameters rather than from analysis.
 //
 // Note what is deliberately *not* a retry: a container with audio and no video
-// stream.  Those exist and reach here — a `.webm` holding Opus is filed as a
+// stream.  Those exist and reach here - a `.webm` holding Opus is filed as a
 // video by extension alone, which is why the URL-fetch handler pins its output
-// format — and re-probing one on every scan would buy nothing, since the wide
+// format - and re-probing one on every scan would buy nothing, since the wide
 // window would find no video stream either.
 static std::optional<VideoProbe> read_video_probe(const std::string& path)
 	{
@@ -551,7 +551,7 @@ const MediaStore::RootRec* MediaStore::root_for_rel(const std::string& rel) cons
 std::string MediaStore::strip_root(const std::string& abs) const
 	{
 	const RootRec* r = root_for_abs(abs);
-	if (!r) return abs;   // outside every root — shouldn't happen; pass through
+	if (!r) return abs;   // outside every root - shouldn't happen; pass through
 	if (abs == r->cfg.path) return r->cfg.name;
 	return r->cfg.name + "/" + abs.substr(r->path_slash.size());
 	}
@@ -571,7 +571,7 @@ std::string MediaStore::join_root(const std::string& rel) const
 
 // Defence-in-depth: returns true iff the canonicalised candidate sits within
 // the (already-canonicalised) base. Used to refuse any filesystem operation on
-// a path that — after symlink resolution — escapes every root. The bases are
+// a path that - after symlink resolution - escapes every root. The bases are
 // canonicalised once at MediaStore ctor; the candidate is canonicalised every
 // call.
 static bool is_within(const fs::path& candidate, const fs::path& canonical_base)
@@ -604,7 +604,7 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
                        const std::string& user_db_path, int video_art_px,
                        bool video_art_frames, bool video_art_embedded,
                        int scan_jobs)
-	// The third argument is the busy timeout, and it defaults to 0 — meaning
+	// The third argument is the busy timeout, and it defaults to 0 - meaning
 	// SQLite gives up on a contended write *immediately* and SQLiteCpp turns
 	// that into a throw.  Any external writer (a second gaindrive, or sqlite3
 	// running BEGIN IMMEDIATE) would therefore kill a scan in progress, even
@@ -612,8 +612,8 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	// fix for the common case; the exception handling around the scan covers
 	// a writer that genuinely sits on the lock.
 	//
-	// Set here rather than by PRAGMA because the pragmas below — including
-	// journal_mode=WAL — can themselves hit a locked database.  The timeout is
+	// Set here rather than by PRAGMA because the pragmas below - including
+	// journal_mode=WAL - can themselves hit a locked database.  The timeout is
 	// a property of the connection, so it also covers the attached client
 	// schema.  db_mutex_ is no help: it serialises our own threads, and this
 	// contention is between processes.
@@ -625,18 +625,18 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	// Clamped as well as resolved, because this is public API and main() is not
 	// its only possible caller.
 	//
-	// **Capped, and the cap is about the disk rather than the CPU** — which is
+	// **Capped, and the cap is about the disk rather than the CPU** - which is
 	// the half a later reader is most likely to "fix". Measured on one library:
 	// the knee was at 8 on an eight-core machine and 16 bought nothing, so the
 	// spindle was already at its limit well below the core count. What was
 	// never separated is whether that knee was the cores or the disk, and this
-	// shape is right either way — if it was the cores, scaling with them is
+	// shape is right either way - if it was the cores, scaling with them is
 	// correct and the cap only bites on large machines where the disk would
 	// bind anyway; if it was the disk, the cap does the work and the scaling
 	// only keeps a two-core NAS from oversubscribing itself.
 	//
 	// hardware_concurrency() returns 0 when it cannot tell, which the lower
-	// bound absorbs, and it reports *host* cores rather than a cgroup quota —
+	// bound absorbs, and it reports *host* cores rather than a cgroup quota -
 	// so a CPU-limited container over-reports, and the cap bounds how wrong
 	// that can be.
 	scan_jobs_ = scan_jobs > 0
@@ -656,7 +656,7 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	// the always-has-one form used to compose and strip absolute paths, and
 	// canonicalise once. path_is_within_root() compares against the canonical
 	// forms, so a symlink inside a root that escapes it is caught at every
-	// file open — while a root that is *itself* a symlink still works, since
+	// file open - while a root that is *itself* a symlink still works, since
 	// its own canonical form is one of the bases.
 	for (const auto& r : roots) {
 		RootRec rec;
@@ -687,16 +687,16 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	// point of stating both rather than leaving either to the default.
 	//
 	// Under WAL, synchronous=FULL fsyncs the write-ahead log on every commit.
-	// The scan commits once per album — measured at 33 ms each on a spinning
+	// The scan commits once per album - measured at 33 ms each on a spinning
 	// disk, which is one seek and a platter flush, against maybe a millisecond
-	// of actual inserts — so it was 67 s of a 1660 s scan spent waiting for the
+	// of actual inserts - so it was 67 s of a 1660 s scan spent waiting for the
 	// platter.  NORMAL syncs at checkpoints instead, and what it costs is that
 	// a power loss or a kernel panic can lose the last few commits.  The
 	// database is not corrupted by that, and an ordinary process crash loses
 	// nothing at all, since the WAL is already in the page cache.
 	//
 	// That trade is only acceptable because of what this file is: the music DB
-	// is a cache, and DATABASE.md says so as an invariant — delete it, rescan,
+	// is a cache, and DATABASE.md says so as an invariant - delete it, rescan,
 	// and everything comes back.  Losing the last few album commits costs a
 	// rescan and nothing else.
 	db_music_.exec("PRAGMA synchronous=NORMAL");
@@ -706,8 +706,8 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	// FULL is already the default here; it is written out because the line
 	// above changed the other half, and a reader who finds only that one has to
 	// guess whether the client DB was considered.  It was: this is the half
-	// nothing can rebuild — stars, playlists, play counts, a hand-picked cover,
-	// a typed video title — so it keeps the fsync per commit.  Its writes are
+	// nothing can rebuild - stars, playlists, play counts, a hand-picked cover,
+	// a typed video title - so it keeps the fsync per commit.  Its writes are
 	// small and rare, and a scan does not touch it.
 	db_music_.exec("PRAGMA client.synchronous=FULL");
 	create_schema();
@@ -719,8 +719,8 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 //
 // Leaving them would make "off" mean only "stop making new ones", which is not
 // what anybody asking for it wants: the images would go on being the cover art
-// for the whole collection. They are cheap to get back — one rescan with the
-// tier enabled — which is what makes deleting them the right default rather
+// for the whole collection. They are cheap to get back - one rescan with the
+// tier enabled - which is what makes deleting them the right default rather
 // than a destructive one.
 //
 // A TMDB poster is never touched here. It is not manufactured from the file
@@ -747,7 +747,7 @@ void MediaStore::purge_disabled_video_art()
 
 	// Whatever the reason a row went away, the cover_path pointing at it has
 	// to go too. A cover_path that is also a songs.path is by construction the
-	// video-art convention — a real image is never a song — so this repairs
+	// video-art convention - a real image is never a song - so this repairs
 	// exactly the dangling pointers and nothing else. Without it the art is
 	// gone but every affected album still claims to have some, and getCoverArt
 	// answers 404 for a cover the client was told existed.
@@ -973,7 +973,7 @@ void MediaStore::create_schema()
 		-- artist_info_cache stores an image_url, which is a promise a third
 		-- party may not keep. The bytes lived only in a std::unordered_map in
 		-- the HTTP server, so every restart re-fetched every portrait from
-		-- Wikimedia, TheAudioDB or Discogs — and a getCoverArt for an artist
+		-- Wikimedia, TheAudioDB or Discogs - and a getCoverArt for an artist
 		-- nobody had resolved yet ran the whole MusicBrainz -> Wikidata ->
 		-- Wikipedia -> TheAudioDB -> Discogs chain *inside the request
 		-- thread*, two one-second pacing sleeps included. An artist grid could
@@ -985,8 +985,8 @@ void MediaStore::create_schema()
 		-- cost one lookup to rebuild and these cost a download.
 		--
 		-- The image is normalised to at most 800px on the long edge when it is
-		-- stored, so whatever a provider sent — a PNG, a Wikimedia render of
-		-- an SVG, a 4000px Discogs scan — what is kept is one predictable
+		-- stored, so whatever a provider sent - a PNG, a Wikimedia render of
+		-- an SVG, a 4000px Discogs scan - what is kept is one predictable
 		-- thing that can be scaled again without another download.
 		--
 		-- status records a failure as much as a success, the same reasoning as
@@ -1007,8 +1007,8 @@ void MediaStore::create_schema()
 		);
 
 		-- Scaled cover art. getCoverArt is asked for a specific pixel size by
-		-- every client there is — 64, 80, 256 and 400 from the web client,
-		-- 144/288/512 from Android, 144/288/800 from iOS — and before this
+		-- every client there is - 64, 80, 256 and 400 from the web client,
+		-- 144/288/512 from Android, 144/288/800 from iOS - and before this
 		-- table each of those forked ffmpeg and decoded the full-size source,
 		-- on every request, for ever. A folder cover is routinely 3000x3000,
 		-- so an album grid was a few hundred process launches.
@@ -1034,7 +1034,7 @@ void MediaStore::create_schema()
 		--
 		-- status 'unscalable' records an image neither stb nor ffmpeg could
 		-- decode, with a zero-length blob. Without it a file nothing can read
-		-- would be retried on every single request for ever — a negative
+		-- would be retried on every single request for ever - a negative
 		-- result is a result, the same reasoning as video_meta's 'unmatched'.
 		CREATE TABLE IF NOT EXISTS cover_thumbs (
 			source_key   TEXT    NOT NULL,   -- "<root>/<rest>"
@@ -1061,7 +1061,7 @@ void MediaStore::create_schema()
 		-- it every scan would re-ask about the same unmatchable file forever,
 		-- and this is the table that makes a rescan cost no traffic at all.
 		-- `query` is what was asked; when the parser produces a different
-		-- question — because the file was renamed — the old answer no longer
+		-- question - because the file was renamed - the old answer no longer
 		-- applies and the lookup runs again.
 		CREATE TABLE IF NOT EXISTS video_meta (
 			path       TEXT PRIMARY KEY,   -- "<root>/<rest>"
@@ -1498,9 +1498,9 @@ static std::string phase_secs(const std::atomic<long long>& us)
 // The breakdown, as the second line of a scan's completion message.
 //
 // The phases deliberately do not sum to the wall time and are not meant to:
-// they are the timed parts of scan_artist_dir(), and everything between them —
+// they are the timed parts of scan_artist_dir(), and everything between them -
 // the per-song diff, the log lines, scan()'s own enumeration of level-1
-// directories — is not attributed anywhere.  A large gap is itself a finding.
+// directories - is not attributed anywhere.  A large gap is itself a finding.
 //
 // Reported as one string so the whole breakdown reaches the log as a single
 // line even when another thread is logging beside it.
@@ -1634,7 +1634,7 @@ void MediaStore::scan()
 		{
 		std::lock_guard<std::mutex> lock(db_mutex_);
 		// **Not the file-albums.** A loose file directly in a root is an album
-		// of its own, so it has a level-1 folder row whose path names a file —
+		// of its own, so it has a level-1 folder row whose path names a file -
 		// and scan_root_files() owns it.  Handed to scan_artist_dir() instead,
 		// its fs::is_directory() test fails, the row is read as deleted, and
 		// every root-level album is pruned on every full scan.
@@ -1722,7 +1722,7 @@ void MediaStore::scan_dirs(const std::set<std::string>& dirs)
 			return;
 			}
 		}
-	// Known to the DB as a folder — which is what tells a section that has just
+	// Known to the DB as a folder - which is what tells a section that has just
 	// been deleted apart from a file that never was one.
 	auto is_known_folder = [&](const std::string& rel) {
 		std::lock_guard<std::mutex> lock(db_mutex_);
@@ -1763,7 +1763,7 @@ void MediaStore::scan_dirs(const std::set<std::string>& dirs)
 			if (r && r->cfg.type == "uploads") forget_prefix(d);
 			}
 		// A depth-1 entry that is not a directory is a loose file sitting in
-		// the root itself — added, changed or deleted.  The watcher reports
+		// the root itself - added, changed or deleted.  The watcher reports
 		// the file, since there is no directory between it and the root.
 		//
 		// Three cases have to be told apart, and the folder row alone cannot
@@ -1772,7 +1772,7 @@ void MediaStore::scan_dirs(const std::set<std::string>& dirs)
 		// its own album, present or just deleted.  Both belong to
 		// scan_root_files(), which walks the root and re-stamps or prunes.
 		// Known and *not* a file-album: a section directory that has just been
-		// deleted, which must still reach scan_artist_dir() to be pruned —
+		// deleted, which must still reach scan_artist_dir() to be pruned -
 		// nothing else will ever remove it.
 		if (!fs::is_directory(abs) && (!is_known_folder(d) || is_file_album(d))) {
 			const RootRec* r = root_for_rel(d);
@@ -1786,7 +1786,7 @@ void MediaStore::scan_dirs(const std::set<std::string>& dirs)
 		}
 
 	// The same breakdown a full scan prints.  A live rescan is normally a
-	// handful of files, so this is mostly noise — but it is the only way to
+	// handful of files, so this is mostly noise - but it is the only way to
 	// see the cost of the watcher's own work, and it is what makes an upload
 	// or a URL fetch say how long its scan took rather than only that it ran.
 	double wall = std::chrono::duration<double>(
@@ -1830,7 +1830,7 @@ struct SongReadData {
 	bool        audio_form_read    = false;
 
 	// MusicBrainz identifiers out of the file's own tags. Empty when the tag
-	// is absent, unreadable, or names more than one entity — see mb_uuid().
+	// is absent, unreadable, or names more than one entity - see mb_uuid().
 	// These are what let getArtistInfo2 and getAlbumInfo2 skip their
 	// search-by-name step, which is the half of the lookup that can silently
 	// attach the wrong artist to a name collision.
@@ -1911,14 +1911,14 @@ struct AlbumReadData {
 	// extension would answer wrongly for a directory called "Best of 1999.mp3".
 	bool                      loose = false;
 	// Filled by Phase 3c when TMDB identified this album, consumed by the
-	// album transaction in Phase 4 — which is where the folder id, and so the
+	// album transaction in Phase 4 - which is where the folder id, and so the
 	// row to attach a description to, finally exists.
 	std::string               tmdb_title;
 	int                       tmdb_year = 0;
 	std::string               overview;
 	};
 
-// A leading number on an audio filename — "05 - Song.flac" — is a track number
+// A leading number on an audio filename - "05 - Song.flac" - is a track number
 // as often as a tag is, and for a file with no tags at all it is the only one
 // there is.  One regex answers both questions the prefix raises: a title
 // stripped of digits that yielded no number is the two halves disagreeing
@@ -2045,7 +2045,7 @@ static SongReadData read_song_file(const fs::path& p,
 	// guarded UPDATE in upsert_song_with_data() is what carries it to those.
 	//
 	// The folder and the one above it are passed because the title is often on
-	// the folder rather than on the file — "The Third Man (1949)/title00.mkv" —
+	// the folder rather than on the file - "The Third Man (1949)/title00.mkv" -
 	// and because a "Season 01" folder means the show's name is one level up.
 	if (sdat.is_video) {
 		auto vn = resolve_video_name(
@@ -2073,7 +2073,7 @@ static SongReadData read_song_file(const fs::path& p,
 		// name, and Phase 3 would be too late to look: that runs for
 		// changed files alone, so a derivation living there would never
 		// reach a library already scanned.  A tag still wins where there
-		// is one — read_song_metadata() overwrites this only for a
+		// is one - read_song_metadata() overwrites this only for a
 		// non-zero track().
 		sdat.track_nr = track_prefix_number(p.stem().string());
 		}
@@ -2096,7 +2096,7 @@ static SongReadData read_song_file(const fs::path& p,
 // PropertyMap values are StringLists, and a collaboration carries an artist id
 // per performer, which cannot identify the one artist a folder stands for. And
 // **anything that is not shaped like a UUID is discarded**, because these reach
-// a MusicBrainz URL *path* in resolve_artist_info() — checking the shape here is
+// a MusicBrainz URL *path* in resolve_artist_info() - checking the shape here is
 // cheaper than having to think about it there, and a tag is arbitrary bytes
 // somebody else wrote.
 static std::string mb_uuid(const TagLib::PropertyMap& props, const char* key)
@@ -2206,7 +2206,7 @@ static void fill_audio_form(SongReadData& sdat)
 static void read_song_metadata(SongReadData& sdat)
 	{
 	// A DVD titleset: dimensions and codecs are identical across the parts,
-	// but the duration is not — probing only the first would report a 1 GB
+	// but the duration is not - probing only the first would report a 1 GB
 	// fragment's length as the whole title, so sum them.  Title and track
 	// number came from the titleset number in Phase 1 and must not be
 	// overwritten by the filename-based rules below.
@@ -2231,7 +2231,7 @@ static void read_song_metadata(SongReadData& sdat)
 
 	// Video takes a different reader entirely: TagLib cannot open these
 	// containers, so ffprobe supplies duration, bitrate and dimensions.  Title,
-	// year and episode number came from the filename back in Phase 1 — see
+	// year and episode number came from the filename back in Phase 1 - see
 	// read_song_file().  A probe failure still leaves a usable row.
 	if (sdat.is_video) {
 		if (auto vp = read_video_probe(sdat.path)) {
@@ -2274,7 +2274,7 @@ static void read_song_metadata(SongReadData& sdat)
 		}
 	// Materialised once and read twice.  It used to sit inside the disc-number
 	// guard; hoisting it costs nothing in practice, because a track outside a
-	// disc subdirectory has disc_number == 0 and so already took this path —
+	// disc subdirectory has disc_number == 0 and so already took this path -
 	// which is most of a library.
 	if (!f.isNull()) {
 		auto props = f.file()->properties();
@@ -2361,7 +2361,7 @@ static void read_song_artist_tag(SongReadData& sdat)
 // What read_one_song() feeds, gathered into one reference so the call site does
 // not grow a parameter per statistic.  References rather than a pointer to
 // ScanTimes because that type is private to MediaStore and this is a free
-// function — which it is so that both scan entry points share one definition of
+// function - which it is so that both scan entry points share one definition of
 // the work rather than two copies of it.
 struct SongReadStats {
 	std::atomic<long long>& files;
@@ -2381,7 +2381,7 @@ struct SongReadStats {
 // registers a file-type resolver, string handler or debug listener;
 // probe_video() forks through reproc, which closes inherited descriptors in the
 // child, and catches its own JSON. The counters are atomic, and the log line
-// goes through log_line() — a bare std::cout would splice two workers' paths
+// goes through log_line() - a bare std::cout would splice two workers' paths
 // together, and a path is the entire content of that message.
 //
 // The caller filters to `changed || artist_missing || audio_form_missing`, so
@@ -2392,8 +2392,8 @@ struct SongReadStats {
 static void read_one_song(const MediaStore& store, SongReadData& sdat,
                           const SongReadStats& st)
 	{
-	// Defence-in-depth: refuse to open any file that — after symlink
-	// resolution — sits outside every root.  Deliberately outside the timing
+	// Defence-in-depth: refuse to open any file that - after symlink
+	// resolution - sits outside every root.  Deliberately outside the timing
 	// below, which is meant to say what TagLib and ffprobe cost and nothing
 	// else; the check is charged to `meta` as a whole like the dispatch is.
 	if (!store.path_is_within_root(sdat.path)) {
@@ -2426,8 +2426,8 @@ static void read_one_song(const MediaStore& store, SongReadData& sdat,
 	(sdat.is_video ? st.video_us : st.audio_us).fetch_add(us);
 	}
 
-// A film's title is as often on the folder as on the file — "The.Third.Man.
-// 1949.1080p.BluRay/movie.mkv" — so the album name gets the same treatment the
+// A film's title is as often on the folder as on the file - "The.Third.Man.
+// 1949.1080p.BluRay/movie.mkv" - so the album name gets the same treatment the
 // song titles get.
 //
 // Only for albums that actually hold video.  A music album folder legitimately
@@ -2442,7 +2442,7 @@ static void read_one_song(const MediaStore& store, SongReadData& sdat,
 // the *first* write per album through: a corrected TMDB match, or a match
 // arriving after a keyless first scan, could never replace what an earlier
 // scan wrote.
-// A TMDB match, when there is one, supersedes the filename parse — that is the
+// A TMDB match, when there is one, supersedes the filename parse - that is the
 // whole point of asking, and it is what turns "THE.THIRD.MAN.1949" into "The
 // Third Man".
 static void apply_album_video_name(SQLite::Database& db, int album_id,
@@ -2484,7 +2484,7 @@ static void apply_album_video_name(SQLite::Database& db, int album_id,
 //
 // ON CONFLICT rather than INSERT OR REPLACE so a row a MusicBrainz lookup
 // already created keeps its other columns. Called from inside the album
-// transaction, so it takes the database directly — cache_album_info() would
+// transaction, so it takes the database directly - cache_album_info() would
 // deadlock, taking db_mutex_ a second time on a non-recursive mutex.
 static void apply_album_overview(SQLite::Database& db, int folder_id,
                                   const std::string& overview)
@@ -2499,15 +2499,15 @@ static void apply_album_overview(SQLite::Database& db, int folder_id,
 	}
 
 // A season is parsed, everything else is positional, and the two numberings
-// share one column — so in an album that has both they can collide. "Extras"
+// share one column - so in an album that has both they can collide. "Extras"
 // sorts before "Season 1" and takes disc number 1 from it, merging a season
 // into a bonus folder; the same happens to a loose film sitting beside an
 // episode, since a song with no disc folder is written as disc 1.
 //
 // Anything with no season in an album that has one is therefore renumbered
 // above the highest season. That also sorts it last, which is where a specials
-// or extras folder belongs. Albums with no season at all — every music album,
-// and every film split across discs — are left completely alone.
+// or extras folder belongs. Albums with no season at all - every music album,
+// and every film split across discs - are left completely alone.
 //
 // Runs after Phase 3, because the disc number 0 it reads is also what makes
 // read_song_metadata() consult an audio file's DISCNUMBER tag.
@@ -2530,14 +2530,14 @@ static void renumber_unseasoned(std::vector<SongReadData>& songs)
 
 // Phase 3b for one album's worth of files: manufacture cover art for the videos
 // that have none.  Returns the path whose art should also serve as the album's,
-// or "" — chosen by sort order rather than by re-running find_cover(), whose
+// or "" - chosen by sort order rather than by re-running find_cover(), whose
 // pass 3 takes whatever directory_iterator hands it first, so a season folder
 // would otherwise get a different episode's frame on different machines.
 //
 // It runs for *unchanged* songs too.  The guard is "has no cover and has no
 // cached image", not sdat.changed, so switching the feature on back-fills an
 // existing library on the next scan without anything having to be re-tagged or
-// touched — the unchanged-song UPDATE writes cover_path unconditionally for
+// touched - the unchanged-song UPDATE writes cover_path unconditionally for
 // exactly this class of reason.
 //
 // The image is written immediately rather than carried into Phase 4: a season
@@ -2551,7 +2551,7 @@ static std::string make_video_art_songs(
 	std::string album_art;
 
 	for (auto& sdat : songs) {
-		// A sidecar image beside the file always wins — this tier exists only
+		// A sidecar image beside the file always wins - this tier exists only
 		// for the files that have nothing at all.
 		if (!sdat.is_video || !sdat.cover.empty()) continue;
 
@@ -2559,7 +2559,7 @@ static std::string make_video_art_songs(
 		auto        it  = known.find(rel);
 		if (it == known.end() || it->second != sdat.mtime) {
 			// A DVD titleset is one stream split across VOBs, so the whole
-			// concat: list is the input — seeking into the first part alone
+			// concat: list is the input - seeking into the first part alone
 			// would land inside a 1 GB fragment rather than inside the film.
 			std::string input;
 			if (!sdat.parts.empty()) input = dvd_input(sdat.parts.front());
@@ -2647,7 +2647,7 @@ static void make_video_art(MediaStore& store, const VideoArt& art,
 
 // An 'error' row is a network failure, which is temporary by nature. An
 // 'unmatched' one is a judgement about the name, and re-asking tomorrow would
-// get the same answer — only a rename changes it, and a rename changes the
+// get the same answer - only a rename changes it, and a rename changes the
 // stored query, which re-asks anyway.
 static constexpr int64_t TMDB_ERROR_RETRY_S = 24 * 60 * 60;
 
@@ -2683,7 +2683,7 @@ static MediaStore::VideoMetaRow tmdb_lookup(
 		// A matched row written before the genre column existed is owed one
 		// more question, once. This is the *only* thing that re-asks about a
 		// title the cache has already answered, and it terminates because the
-		// answer is stored even when it is empty — genre_known, not a
+		// answer is stored even when it is empty - genre_known, not a
 		// non-empty genre, is the test. Without it the feature would do
 		// nothing at all on an existing library, which is the failure mode
 		// the songs.artist back-fill exists to avoid.
@@ -2765,7 +2765,7 @@ static bool tmdb_fetch_poster(MediaStore& store, const Tmdb& tmdb,
 //
 // **One lookup per album, not per file, with no exception left.** A film is a
 // folder, so "Movies/The Third Man (1949)/" is one question however many parts
-// the film was split into — and a loose file is an album of its own now, so
+// the film was split into - and a loose file is an album of its own now, so
 // "each loose file in a section is its own work" says the same thing rather
 // than contradicting it. The per-file branch this replaced was the only reason
 // this function needed to know which album was the section's.
@@ -2809,7 +2809,7 @@ static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
 			// not the one this album title parses to. read_song_file() runs
 			// resolve_video_name() over the stem *with the folder and the one
 			// above it*, so for an uninformative name it has an answer this
-			// parse of the bare stem does not — and, more importantly, it is
+			// parse of the bare stem does not - and, more importantly, it is
 			// the same string the per-file lookup this replaced composed. The
 			// stored `query` is what decides whether a cached answer still
 			// applies, so asking differently would re-ask TMDB about every
@@ -2826,7 +2826,7 @@ static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
 			                           catch (...) {} }
 
 			// The key stays adat.path, which for a file-album is the media
-			// file's own path — the very key the per-file lookup used, so
+			// file's own path - the very key the per-file lookup used, so
 			// every cached match and every cached rejection survives.
 			auto row = tmdb_lookup(store, tmdb, store.rel_path(adat.path),
 			                        title, year, is_tv, explicit_id);
@@ -2875,7 +2875,7 @@ static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
 				// film.mkv), so they fall through to the album's cover, which
 				// is now the poster. Without this a matched film shows the
 				// poster in the album grid and the sidecar on the video entry
-				// — the same film with two covers, which is worse than either
+				// - the same film with two covers, which is worse than either
 				// image winning outright. Audio in the folder keeps its art:
 				// none of this reasoning applies to it.
 				for (auto& sdat : adat.songs)
@@ -2897,7 +2897,7 @@ static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
 //
 // The predicate is "one distinct value, and it is on every track that has one".
 // A folder holding two releases, or one whose tags are half filled in with
-// different ids, therefore keeps NULL and keeps the online lookup — which is
+// different ids, therefore keeps NULL and keeps the online lookup - which is
 // the right way round: a wrong id is worse than no id, because nothing
 // downstream can tell it is wrong.
 //
@@ -2934,7 +2934,7 @@ static void apply_album_mbid(SQLite::Database& db, int album_id,
 //
 // Joined through album_artists rather than through the folder tree, because
 // that link is what an artist row actually means here. A compilation folder
-// disagrees by construction — that is what a compilation is — so "Various
+// disagrees by construction - that is what a compilation is - so "Various
 // Artists" ends up NULL and keeps the online lookup, which is right.
 //
 // Runs after the album loop rather than in the artist transaction above it:
@@ -2968,7 +2968,7 @@ static void apply_artist_mbid(SQLite::Database& db, int artist_id)
 // values this scan just derived from their filenames.
 //
 // This is what keeps the music DB a cache. A video's edit cannot go back into
-// the file — the scanner never reads a video's tags — so it lives in
+// the file - the scanner never reads a video's tags - so it lives in
 // client.song_meta, and running it here means the *music* DB still holds the
 // effective title. Deleting the music DB and rescanning therefore reproduces
 // it, and no read query has to know the override exists.
@@ -3113,13 +3113,13 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 		// below deletes whatever is left marked unvisited.  Disc number, season
 		// and sidecar cover come from the folder layout and the filename, not
 		// from the file's contents, so they can change while the file itself
-		// does not — and a library scanned before any of them existed is
+		// does not - and a library scanned before any of them existed is
 		// back-filled here rather than needing every file touched.
 		//
 		// **Which album a song belongs to is the same kind of fact**, and it
 		// is written here for the same reason.  A loose file is its own album
 		// now; before that it belonged to one album on the whole section, so
-		// on an upgrade every loose row in the library has to move — and none
+		// on an upgrade every loose row in the library has to move - and none
 		// of those files has changed, so this is the only branch that will
 		// ever see them.  Omitting it leaves the songs on the old section
 		// album and every new file-album empty, on a library that reports a
@@ -3128,7 +3128,7 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 		// The track number is the same kind of thing, and is back-filled only
 		// into a row that has none: unlike the video title below, a tag is the
 		// authority here and the row is already holding it, so only an untagged
-		// file has nothing to lose.  A number someone typed survives anyway —
+		// file has nothing to lose.  A number someone typed survives anyway -
 		// apply_song_meta_overrides() re-asserts client.song_meta over this in
 		// the same transaction.
 		SQLite::Statement upd(db,
@@ -3156,7 +3156,7 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 		// The back-fill: songs.artist is NULL on every row scanned before the
 		// column existed, and those files have not changed, so Phase 3 would
 		// never re-read them.  Written whenever the read happened, empty tag
-		// included — guarding this on a non-empty tag would leave an untagged
+		// included - guarding this on a non-empty tag would leave an untagged
 		// file NULL and put it back in the pass on every scan for ever.
 		if (sdat.artist_read) {
 			SQLite::Statement a(db,
@@ -3182,7 +3182,7 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 			}
 
 		// A video's title is derived from its filename, so it can improve
-		// without the file changing — which is how a library scanned before
+		// without the file changing - which is how a library scanned before
 		// the parser existed gets back-filled.  Unguarded, unlike the version
 		// this replaced: a title a person typed is no longer in this row's
 		// past, it is in client.song_meta, and apply_song_meta_overrides()
@@ -3213,14 +3213,14 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 
 	// Audio only.  A video title has already been through the filename parser,
 	// which takes a leading number as an episode number without touching the
-	// title — applying this to it as well would turn "12 Angry Men" into
+	// title - applying this to it as well would turn "12 Angry Men" into
 	// "Angry Men".
 	std::string title = sdat.is_video
 	    ? sdat.title : strip_track_prefix(sdat.title);
 
 	// `artist` sits at the end of the list rather than beside `genre` where it
 	// belongs by subject: the binds below are hand-numbered and positional, so
-	// inserting a column mid-list means renumbering fifteen of them — an edit
+	// inserting a column mid-list means renumbering fifteen of them - an edit
 	// that neither fails to compile nor throws when it goes wrong, it just
 	// writes bitrate into duration.  The order of an INSERT's column list
 	// carries no meaning, so this costs nothing.
@@ -3264,7 +3264,7 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 	// Appended after `artist` rather than placed beside musicbrainz_id's
 	// neighbours in the schema, for the reason given above: the binds are
 	// positional and hand-numbered, so a column added mid-list renumbers
-	// everything after it — an edit that compiles, does not throw, and writes
+	// everything after it - an edit that compiles, does not throw, and writes
 	// the wrong field. Bound even when empty, so a re-tagged file that lost
 	// its ids does not keep the old ones.
 	ins.bind(25, sdat.mb_track_id);
@@ -3291,8 +3291,8 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 // untouched.
 //
 // Structured in four phases so slow filesystem I/O never holds db_mutex_:
-//   1. Walk disk — collect album/song paths, mtimes, file sizes (no lock)
-//   2. Brief read lock — fetch known mtimes to identify changed files
+//   1. Walk disk - collect album/song paths, mtimes, file sizes (no lock)
+//   2. Brief read lock - fetch known mtimes to identify changed files
 //   3. TagLib (audio) or ffprobe (video) reads for changed files only (no lock)
 //   4. Short write txns: one per album, plus the unvisited-mark and the
 //      artist-level prune.  Per-album commits keep the mutex hold time
@@ -3307,7 +3307,7 @@ void MediaStore::commit_album(const AlbumReadData& adat, int parent_folder_id,
 		SQLite::Transaction txn(db_music_);
 
 		// Every album gets its own folder row under the folder above it,
-		// including a loose file's — whose row names the file itself, and
+		// including a loose file's - whose row names the file itself, and
 		// so needs the title passed in rather than derived from
 		// "film.mp4".  What this replaced special-cased the loose album,
 		// whose folder *was* the artist folder and could not be upserted
@@ -3572,7 +3572,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	bool exists = fs::is_directory(artist_path);
 
 	// The owning root, needed to re-create the root folder row below. A path
-	// outside every root cannot be scanned — refuse rather than inventing one.
+	// outside every root cannot be scanned - refuse rather than inventing one.
 	const RootRec* root = root_for_abs(artist_path.string());
 	if (!root) {
 		std::cout << stamp() << "Rescan: ignoring path outside every root: "
@@ -3595,22 +3595,22 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			}
 
 		// Media files sitting directly in the artist/section folder, with no
-		// folder of their own — one documentary, one home video, one clip.
+		// folder of their own - one documentary, one home video, one clip.
 		// **Each is an album of its own, holding that one track**, whose
 		// `folders` row is the media file's own path.  A file can never
 		// collide with a directory, so folders.path stays UNIQUE and
 		// albums.folder_id needs no schema change; the section itself is left
 		// as a pure parent with no albums row.
 		//
-		// What this replaced was Subsonic's and Airsonic's rule — a folder
-		// that directly contains media is itself an album — under which every
+		// What this replaced was Subsonic's and Airsonic's rule - a folder
+		// that directly contains media is itself an album - under which every
 		// loose file in a section collapsed into one album named after the
 		// section.  That made the section its own album *and* the parent of
 		// the albums below it, which is where the parenting, prune and
 		// flattening special cases all came from, and it left a loose film
 		// with no id of its own to star, move or set art on.  setCoverArt is
 		// folder-level, so a wrongly matched film could not be given the right
-		// poster at all — and setCoverArt is the only remedy for a bad TMDB
+		// poster at all - and setCoverArt is the only remedy for a bad TMDB
 		// match.
 		for (auto& e : fs::directory_iterator(artist_path)) {
 			if (!e.is_regular_file() || !is_media_file(e.path())) continue;
@@ -3620,7 +3620,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			}
 		}
 
-	// ---- Phase 2: brief read lock — identify changed files ----
+	// ---- Phase 2: brief read lock - identify changed files ----
 	// Keyed by the same absolute-path form as sdat.path so the per-song lookup
 	// below stays a direct comparison. The DB column is relative; compose
 	// absolute via join_root() on the way in.
@@ -3669,25 +3669,25 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// Only under a categories root. A concert or a music video sitting under a
 	// performer stays local: both layouts are L1/L2/files and the scanner
 	// cannot tell a concert film from a documentary by shape, which is the
-	// same reason is_category_folder() exists — pointed the other way.
+	// same reason is_category_folder() exists - pointed the other way.
 	//
 	// **Started here, before Phase 3, and joined after it.**  This is the only
-	// phase whose cost is not the disk's — 250 ms of deliberate pacing plus a
-	// round trip, twice per album — so it is the only one that overlapping can
+	// phase whose cost is not the disk's - 250 ms of deliberate pacing plus a
+	// round trip, twice per album - so it is the only one that overlapping can
 	// hide, and it measured 213 s of a 1660 s scan spent waiting on a socket
 	// with the disk idle.
 	//
 	// It reads what Phase 1 produced and writes adat.tmdb_title, tmdb_year,
 	// overview and cover, plus title/year/cover on the loose branch's songs.
 	// Phase 3 writes duration, bitrate, dimensions and codecs. The two sets are
-	// disjoint — but only because read_song_metadata() returns before its
+	// disjoint - but only because read_song_metadata() returns before its
 	// TagLib block for a video, and 3c touches nothing else. **Teaching the
 	// video branch to read a title out of the container would break this
 	// silently**, so it is said here rather than left to be rediscovered.
 	//
 	// Not overlapped when Phase 3b is on, and that is not only about the race.
 	// 3b and 3c both write sdat.cover, and each skips work the other has
-	// already done — so running 3c first does not merely reorder two writes, it
+	// already done - so running 3c first does not merely reorder two writes, it
 	// changes which tier ends up owning the art on an album holding more than
 	// one video. Both tiers are off by default, so the common case overlaps and
 	// the configured case keeps exactly the behaviour it had.
@@ -3697,7 +3697,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	std::thread        tmdb_thread;
 	std::exception_ptr tmdb_err;
 	// Joins however this function leaves, because Phase 3 can throw and a
-	// std::thread destroyed while still joinable is std::terminate — a dead
+	// std::thread destroyed while still joinable is std::terminate - a dead
 	// server rather than a failed scan.
 	struct Joiner {
 		std::thread& t;
@@ -3718,7 +3718,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// back-fill an ARTIST tag its row has never held, which happens once per
 	// file over the life of the library.
 	//
-	// This is the phase a cold scan is made of — measured at 80% of it — and
+	// This is the phase a cold scan is made of - measured at 80% of it - and
 	// what it costs is seeks: the open, the tag at the head of the file and the
 	// ID3v1/APE trailer at the tail, two or three of them per file with nothing
 	// else in flight.  Run one at a time that is a queue one deep, which is the
@@ -3728,7 +3728,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// is a few albums of a dozen files each and a per-album dispatch would
 	// leave every thread but one idle on the last album.  The pointers are
 	// stable for the whole phase: **nothing appends to `albums`, or to any
-	// adat.songs, between Phase 1 and Phase 4** — that is the invariant this
+	// adat.songs, between Phase 1 and Phase 4** - that is the invariant this
 	// rests on.
 	{
 	PhaseTimer pt(scan_times_.meta);
@@ -3811,7 +3811,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			// One album's transaction failing must not cost the rest of the
 			// scan.  A full scan of a large library is minutes of work, and
 			// the usual cause here is an external writer holding the lock for
-			// longer than the busy timeout — momentary, and specific to this
+			// longer than the busy timeout - momentary, and specific to this
 			// commit.  Note the prune at the end of this function is then
 			// skipped: a failed album leaves its folder row still marked
 			// unvisited, and pruning on incomplete information would delete an
@@ -3830,7 +3830,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		// Now that every album of this artist has been committed, the
 		// tag-derived artist id can be settled: it reads the song rows the
 		// loop above wrote, which is why it cannot live in the artist
-		// transaction further up — that commits before any of them exist.
+		// transaction further up - that commits before any of them exist.
 		//
 		// Its own transaction rather than the prune's, because the prune is
 		// skipped after a failed album and this is unaffected by that; and its
@@ -3850,7 +3850,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		}
 
 	// Prune stale entries within this artist's subtree.  Anything still
-	// last_scanned IS NULL after the album commits above is genuinely gone —
+	// last_scanned IS NULL after the album commits above is genuinely gone -
 	// but only if every album actually committed.  After a failure the mark
 	// cannot distinguish "deleted from disk" from "we could not write it", so
 	// pruning would remove an album that is still there.  Leave the subtree
@@ -3863,7 +3863,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 
 	// One artist's prune failing must not take the scan with it. It is a
 	// single transaction, so a failure part-way puts this subtree back exactly
-	// as it was — including rows this pass has already logged as pruned — and
+	// as it was - including rows this pass has already logged as pruned - and
 	// the next scan retries it. What must not happen is the exception escaping
 	// into scan(), which abandons every root after this one: a stale folder is
 	// a wrong listing, an abandoned scan is a library that stops updating.
@@ -3953,7 +3953,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// construction does not match `<section>` itself.  A library scanned under
 	// the old rule has one album on every section holding loose files, and its
 	// songs have already been re-pointed to their own file-albums by the
-	// unchanged branch of upsert_song_with_data() a few lines above — so what
+	// unchanged branch of upsert_song_with_data() a few lines above - so what
 	// is left here is an empty album row and, for any loose file deleted from
 	// disk since, its orphaned song.
 	std::string artist_rel = strip_root(artist_path.string());
@@ -3991,7 +3991,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 		// And the *album* info cache on the same folder, which is not the
 		// same row and not reachable by the prefix prune above. A folder that
 		// directly holds media is its own album, so a loose-file section's
-		// notes — a film's TMDB plot, or whatever getAlbumInfo cached — are
+		// notes - a film's TMDB plot, or whatever getAlbumInfo cached - are
 		// keyed on the section folder itself, and "<section>/%" never matches
 		// it. Both caches reference folders(id) with no cascade, so leaving
 		// this row behind made the DELETE below fail with FOREIGN KEY
@@ -4013,7 +4013,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			std::cout << stamp() << "  pruned artist folder" << std::endl;
 		}
 		// Both caches are keyed by path, and the two prunes below can only see
-		// paths *under* this folder — "video/Road/%" does not match
+		// paths *under* this folder - "video/Road/%" does not match
 		// "video/Road". Nothing writes a row on a section folder today, since
 		// the loose-file album is looked up per song, but a row that did land
 		// there would otherwise outlive the folder with nothing able to reach
@@ -4050,14 +4050,14 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// The two derived caches go last, and that ordering is the whole of their
 	// correctness: both ask "is there still a song (or folder) at this path",
 	// so they have to run once every delete above has happened. They used to
-	// sit in the middle, where the loose-file album's song and folder rows —
-	// which go last, because nothing marks them unvisited — were still there
+	// sit in the middle, where the loose-file album's song and folder rows -
+	// which go last, because nothing marks them unvisited - were still there
 	// to be found, and a section deleted from disk left its posters and its
 	// TMDB answers behind for ever.
 	{
 	// Keyed on "no song has this path any more" rather than on the folder
 	// marks, so it also catches a single file deleted from an album that is
-	// still there — the folder-level prune never reaches those.
+	// still there - the folder-level prune never reaches those.
 	SQLite::Statement s(db_music_,
 		"DELETE FROM video_art WHERE path LIKE ?"
 		"  AND path NOT IN (SELECT path FROM songs)");
@@ -4066,7 +4066,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	}
 	{
 	// video_meta is keyed by *either* an album folder or a song, so unlike
-	// video_art it cannot key its prune on songs alone — that would delete
+	// video_art it cannot key its prune on songs alone - that would delete
 	// every film, all of which are folders.
 	SQLite::Statement s(db_music_,
 		"DELETE FROM video_meta WHERE path LIKE ?"
@@ -4116,7 +4116,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	std::cout << stamp() << "Rescan complete" << std::endl;
 	}
 
-// Media files sitting directly in a root, with no section folder above them —
+// Media files sitting directly in a root, with no section folder above them -
 // a root used as one flat library, which is how Plex and Jellyfin organise a
 // movie library.  Same rule as the loose files inside a section: the folder
 // that directly contains media is itself an album.  Here the root row plays
@@ -4141,15 +4141,15 @@ void MediaStore::scan_root_files(const RootRec& root)
 
 	// A flat view of the same songs, for the phases that do not care which
 	// album a file belongs to.  Valid because nothing appends to `albums`, or
-	// to any adat.songs, between here and Phase 4 — the same invariant
+	// to any adat.songs, between here and Phase 4 - the same invariant
 	// scan_artist_dir()'s Phase 3 work list depends on.
 	std::vector<SongReadData*> all_songs;
 	for (auto& adat : albums)
 		for (auto& sdat : adat.songs) all_songs.push_back(&sdat);
 
-	// ---- Phase 2: brief read lock — identify changed files ----
-	// Keyed on the *path shape* — directly in the root and not below a
-	// subdirectory — rather than on the folder id, which is what it used to
+	// ---- Phase 2: brief read lock - identify changed files ----
+	// Keyed on the *path shape* - directly in the root and not below a
+	// subdirectory - rather than on the folder id, which is what it used to
 	// be.  Under the old rule every such song hung off the root's own folder
 	// row and "f.path = <root>" found them all; each now hangs off its own
 	// file-album instead, so a folder-keyed query would return nothing, take
@@ -4215,7 +4215,7 @@ void MediaStore::scan_root_files(const RootRec& root)
 	// ---- Phase 3b: cover art for videos that have none (no lock) ----
 	// The prefix takes in the whole root rather than just its loose files.
 	// That over-fetches (path, mtime) pairs for the sections below, which is
-	// cheap, and there is no narrower LIKE — "<root>/%" is the entire root,
+	// cheap, and there is no narrower LIKE - "<root>/%" is the entire root,
 	// which is the same reason this function exists at all.
 	if (video_art_ && video_art_->enabled()) {
 		PhaseTimer pt(scan_times_.art);
@@ -4254,7 +4254,7 @@ void MediaStore::scan_root_files(const RootRec& root)
 		//
 		// The folders one is the ordinary mark→sweep, restricted to level-1
 		// rows that name a media file.  **That test is `folders.path` being a
-		// `songs.path`, not "has an albums row"** — the latter is true of a
+		// `songs.path`, not "has an albums row"** - the latter is true of a
 		// file-album but it is also true of a *section* on a database scanned
 		// under the old rule, and marking a section here would sweep a folder
 		// that still has children.  folders.parent_id has no ON DELETE
@@ -4305,7 +4305,7 @@ void MediaStore::scan_root_files(const RootRec& root)
 	std::string fid = std::to_string(folder_id);
 
 	// The file-albums that have gone.  Collected as ids first, because the
-	// predicate that identifies them — the folder's path is a song's path —
+	// predicate that identifies them - the folder's path is a song's path -
 	// stops holding the moment the songs are deleted.
 	std::string dead;
 	{
@@ -4337,7 +4337,7 @@ void MediaStore::scan_root_files(const RootRec& root)
 		}
 
 	// What is left marked on the root's own folder row is a song an old-rule
-	// scan put there and this pass did not re-home — its file is gone.  The
+	// scan put there and this pass did not re-home - its file is gone.  The
 	// album row beside it is the old rule's one-album-per-root, which goes as
 	// soon as nothing points at it.  Together they are the upgrade.
 	db_music_.exec(("DELETE FROM songs WHERE last_scanned IS NULL"
@@ -4350,7 +4350,7 @@ void MediaStore::scan_root_files(const RootRec& root)
 	                " WHERE songs.album_id = albums.id)").c_str());
 
 	// The derived caches go last, after every DELETE FROM songs *and* every
-	// DELETE FROM folders above — they ask whether anything still owns a path,
+	// DELETE FROM folders above - they ask whether anything still owns a path,
 	// so a sweep that ran earlier would keep rows whose owner was about to go.
 	// video_meta's folders clause is load-bearing here now, unlike before: a
 	// file-album's path is a folders.path as well as a songs.path.
@@ -4392,7 +4392,7 @@ void MediaStore::scan_root_files(const RootRec& root)
 	}
 	{
 	// Scaled art for a loose file that has gone. Restricted to things sitting
-	// *directly* in the root — "root/%" but not "root/%/%" — because the
+	// *directly* in the root - "root/%" but not "root/%/%" - because the
 	// artist prune already owns everything in a subfolder and does it far more
 	// precisely, through the unvisited marks.
 	//
@@ -4540,7 +4540,7 @@ int MediaStore::upsert_folder(const fs::path& path, int parent_id,
 	// up with path == name and no parent.
 	std::string path_str = strip_root(path.string());
 	// The name is the last component, except where the caller knows better.
-	// A folder row may name a *media file* — a loose file is its own album —
+	// A folder row may name a *media file* - a loose file is its own album -
 	// and "film.mp4" is nobody's title.  The caller passes the name rather
 	// than it being derived here, because only the caller knows whether this
 	// path is a file; a directory legitimately named "Best of 1999.mp3" would
@@ -4638,14 +4638,14 @@ int MediaStore::upsert_album(int folder_id, const std::string& title,
 // A username that can safely be a path component and a comparison key.
 //
 // The uploads tree is <uploads root>/<username>/<batch>/..., so a username is a
-// directory name — and nothing validated it. A '/' in one made the join in the
+// directory name - and nothing validated it. A '/' in one made the join in the
 // upload handler write outside the user's area, with no path_is_within_root()
 // on it, and silently broke the `parts[1] == uname` ownership tests that
 // deleteUpload and moveAlbum use: those do not error when they stop matching,
 // they just stop granting.
 //
 // Checked here rather than only at the endpoint so that `--add-user` is covered
-// too — it is the one path that creates the very first account.
+// too - it is the one path that creates the very first account.
 bool MediaStore::valid_username(const std::string& u)
 	{
 	if (u.empty() || u.size() > 64) return false;
@@ -4664,7 +4664,7 @@ bool MediaStore::add_user(const std::string& username, const std::string& passwo
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	// Refused case-insensitively, though the column collates by bytes: each
 	// user's uploads live at <uploads>/<username>, and on a case-insensitive
-	// filesystem — macOS is a supported host — "alice" and "Alice" are one
+	// filesystem - macOS is a supported host - "alice" and "Alice" are one
 	// directory on disk while every permission check here compares bytes.
 	// Two accounts sharing a directory neither may read is not a state worth
 	// being able to create.
@@ -4777,7 +4777,7 @@ bool MediaStore::update_user(const std::string& username,
 // unchanged when it does not carry the prefix; nullopt for a malformed hex
 // body. One definition, because two callers need it and they must agree:
 // validate_auth() reads it off the wire, and the user-management endpoints
-// decode it before *storing* — a spec-compliant client that sent
+// decode it before *storing* - a spec-compliant client that sent
 // password=enc:… to changePassword used to have the literal string stored,
 // which validate_auth then decoded on the next login and matched nothing;
 // the account was locked out of the password path by its own password
@@ -4823,7 +4823,7 @@ bool MediaStore::validate_auth(const std::string& username,
 	// Comparison that does not stop at the first differing byte.
 	//
 	// A network timing attack on a string compare is a marginal threat and
-	// this is a cheap way to stop thinking about it — but the *length* leak is
+	// this is a cheap way to stop thinking about it - but the *length* leak is
 	// the one worth naming: std::string::operator== compares sizes first and
 	// returns immediately when they differ, so the obvious spelling tells an
 	// attacker the length of the stored password before anything else.
@@ -4863,7 +4863,7 @@ bool MediaStore::validate_auth(const std::string& username,
 		// One write per minute per user, not one per request.
 		//
 		// Every authenticated request came through here, and an album grid is
-		// a hundred of them — so loading one page was a hundred writes to a
+		// a hundred of them - so loading one page was a hundred writes to a
 		// single row, each taking the WAL write lock while still holding
 		// db_mutex_, in exactly the window where a scan wants both. The Users
 		// list shows this to the minute, so a minute is all the resolution
@@ -4919,7 +4919,7 @@ std::optional<MediaStore::CachedArtistInfo> MediaStore::get_cached_artist_info(i
 	// providers were being cleaned would go on serving whatever they sent,
 	// for ever.  Bumping MUSIC_CACHE_VERSION is how this codebase normally
 	// drops cache rows that were made under an older rule, and is deliberately
-	// not used here — these rows cost the whole paced provider chain per
+	// not used here - these rows cost the whole paced provider chain per
 	// artist to rebuild, which is minutes of network for a real library,
 	// against a string pass on read.
 	//
@@ -5031,8 +5031,8 @@ void MediaStore::store_video_art(const std::string& rel_path, int64_t mtime,
 	ins.bind(6, poster_path);
 	ins.exec();
 
-	// Anything scaled from the old blob is now wrong. A better tier winning —
-	// a TMDB poster replacing a frame grab — changes the image without the
+	// Anything scaled from the old blob is now wrong. A better tier winning -
+	// a TMDB poster replacing a frame grab - changes the image without the
 	// media file's mtime moving, so the stamp check in the serving path
 	// cannot see it. Inlined rather than calling drop_cover_thumbs(), which
 	// would take db_mutex_ a second time; it is not recursive.
@@ -5067,7 +5067,7 @@ MediaStore::get_video_art(const std::string& rel_path)
 	if (!q.executeStep()) return std::nullopt;
 	auto blob = q.getColumn(1);
 	// A zero-length blob would hand assign() a null pointer, and would reach a
-	// client as a 200 with an empty body — which renders as a broken image and
+	// client as a 200 with an empty body - which renders as a broken image and
 	// looks like a missing file rather than like a bad row.
 	if (blob.getBytes() <= 0 || blob.getBlob() == nullptr) return std::nullopt;
 	VideoArtRow r;
@@ -5098,7 +5098,7 @@ MediaStore::get_cover_thumb(const std::string& source_key, int size)
 	auto blob = q.getColumn(2);
 	// An 'unscalable' row carries no image on purpose; anything else with an
 	// empty blob is a bad row and is treated as a miss, for the reason
-	// get_video_art() gives — a 200 with no body reads as a missing file.
+	// get_video_art() gives - a 200 with no body reads as a missing file.
 	if (blob.getBytes() > 0 && blob.getBlob() != nullptr)
 		r.bytes.assign(static_cast<const char*>(blob.getBlob()),
 		               static_cast<size_t>(blob.getBytes()));
@@ -5219,7 +5219,7 @@ void MediaStore::store_artist_art(const std::string& folder_path,
 	}
 	{
 	// Anything scaled from the previous portrait. fetched_at is this row's
-	// stamp in cover_thumbs, so a stale thumbnail would miss on its own — but
+	// stamp in cover_thumbs, so a stale thumbnail would miss on its own - but
 	// only after the second in which both were written, and a re-fetch is
 	// exactly when somebody is looking.
 	SQLite::Statement del(db_music_,
@@ -5236,7 +5236,7 @@ MediaStore::artists_needing_art(int64_t retry_none_before)
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	// "Needing" means: no row, or a row that says the network failed, or a
 	// 'none' old enough to be worth asking about again. An 'ok' is never
-	// re-asked — a portrait does not go stale on its own, and the way to
+	// re-asked - a portrait does not go stale on its own, and the way to
 	// replace one is to change what the provider chain finds.
 	std::string sql =
 		"SELECT f.id, f.name, f.path FROM folders f"
@@ -5401,8 +5401,8 @@ MediaStore::get_cached_album_info(int folder_id)
 	q.bind(1, folder_id);
 	if (!q.executeStep()) return std::nullopt;
 	// On read for the reason get_cached_artist_info() gives.  notes has two
-	// independent providers writing it — Wikipedia here and TMDB through
-	// apply_album_overview() — which is one more reason not to rely on every
+	// independent providers writing it - Wikipedia here and TMDB through
+	// apply_album_overview() - which is one more reason not to rely on every
 	// write path having remembered.
 	CachedAlbumInfo a;
 	std::string mbid = q.getColumn(0).getString();
@@ -5500,7 +5500,7 @@ std::vector<std::string> MediaStore::get_extra_image_paths(int folder_id)
 	// are the images sitting beside that file rather than the contents of a
 	// directory.  Answered explicitly instead of being left to
 	// find_extra_images(), whose directory_iterator would throw and be
-	// swallowed — the right answer by accident, and only for as long as that
+	// swallowed - the right answer by accident, and only for as long as that
 	// catch stays.
 	std::string abs_folder = abs_path(folder);
 	std::error_code fec;
@@ -5575,7 +5575,7 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_videos()
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	// Same shape as the other ChildEntry queries, with the two video columns
 	// appended.  COALESCE on the album folder for parent and cover art for the
-	// same reason documented in ISSUES.md: a song's own folder_id is the disc
+	// same reason: a song's own folder_id is the disc
 	// (or season) subdirectory, which has no albums row to resolve a cover on.
 	SQLite::Statement q(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
@@ -5749,7 +5749,7 @@ std::string MediaStore::sidecar_captions(const std::string& abs) const
 	{
 	// Preference order, not merely a list: a .vtt is what the endpoint answers
 	// with, so it is asked for first.  Every one of them still goes through
-	// ffmpeg, including the .vtt — the response is then normalised, and a
+	// ffmpeg, including the .vtt - the response is then normalised, and a
 	// mislabelled file cannot be served verbatim.
 	fs::path base = fs::path(abs);
 	for (const char* ext : { ".vtt", ".srt", ".ass", ".ssa" }) {
@@ -5776,7 +5776,7 @@ std::string MediaStore::sidecar_chapters_path(const std::string& abs)
 std::string MediaStore::sidecar_text_path(const std::string& abs)
 	{
 	// The liner notes of a file-album.  A plain <stem>.txt, which is exactly
-	// what sidecar_chapters_path() goes out of its way *not* to be — see the
+	// what sidecar_chapters_path() goes out of its way *not* to be - see the
 	// note there.  The two cannot collide: ".chapters.txt" is a different
 	// filename, and getAlbumTexts() excludes it by suffix in the folder case
 	// for the same reason.
@@ -5788,8 +5788,8 @@ std::string MediaStore::sidecar_text_path(const std::string& abs)
 std::vector<std::string> MediaStore::sidecars_of(const std::string& abs) const
 	{
 	// Everything that lives beside a media file and belongs to it, absolute
-	// and existing only.  One definition, because CLAUDE.md's rule is that one
-	// place knows what "beside" means — and because a mover that misses one
+	// and existing only.  One definition, because the rule is that one
+	// place knows what "beside" means - and because a mover that misses one
 	// leaves a poster or a subtitle track orphaned in the old directory, which
 	// nothing afterwards will ever reconnect.
 	std::vector<std::string> out;
@@ -5857,10 +5857,10 @@ MediaStore::VideoChapters MediaStore::get_chapters(int song_id)
 	// **Video only, and this is the one gate that must not be lifted.** The
 	// sidecar branch above is a file that is nearly always absent, which costs
 	// a failed open; this is an ffprobe. Videos are a small minority of a
-	// library, so asking about each one is affordable — asking about every
+	// library, so asking about each one is affordable - asking about every
 	// audio track that has no sidecar, which is essentially all of them, is a
 	// process spawn per getChapters call. An M4B audiobook is the audio format
-	// that genuinely does carry container chapters; see ISSUES.md.
+	// that genuinely does carry container chapters.
 	if (!song->is_video) return vc;
 
 	std::vector<std::string> args = {
@@ -6060,14 +6060,14 @@ std::string MediaStore::get_captions_vtt(int song_id, int stream_index)
 	auto [status, wec] = proc.wait(reproc::infinite);
 	if (ec || wec || status != 0) out.clear();
 
-	// A failure *is* cached, as an empty entry — the reversal of what this
+	// A failure *is* cached, as an empty entry - the reversal of what this
 	// used to say ("ffmpeg not answering is transient, try again"). That
 	// reasoning made every failing request a fresh fork: a captionId naming
 	// no stream fails identically every time, so an authenticated client
 	// could run one ffmpeg per request for ever. An empty entry answers 404
 	// like a missing sidecar does, and a genuinely transient failure costs
 	// one film's captions until the entry ages out of the bounded queue or
-	// the file's mtime changes the key — against an unbounded fork
+	// the file's mtime changes the key - against an unbounded fork
 	// amplifier, that is the right trade.
 	{
 	std::lock_guard<std::mutex> lk(captions_mutex_);
@@ -6076,7 +6076,7 @@ std::string MediaStore::get_captions_vtt(int song_id, int stream_index)
 		// Oldest out first rather than least-recently-used: the access
 		// pattern is one film at a time, so age and use order are the same
 		// thing here, and a plain queue needs no bookkeeping on the read
-		// path — which is the path that has to be fast.
+		// path - which is the path that has to be fast.
 		while (captions_order_.size() > CAPTION_CACHE_MAX) {
 			captions_cache_.erase(captions_order_.front());
 			captions_order_.erase(captions_order_.begin());
@@ -6158,8 +6158,8 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	// Count albums per artist via the child folders: an album folder is always
 	// one level down, a loose file's own album included.  The extra term this
-	// used to carry — an album on the folder *itself*, for loose files sitting
-	// beside its subdirectories — is gone with the rule that put one there.
+	// used to carry - an album on the folder *itself*, for loose files sitting
+	// beside its subdirectories - is gone with the rule that put one there.
 	//
 	// "IN (…roots…)" rather than "= root": level-1 entries now come from every
 	// configured root, and which root a folder belongs to is visible in its
@@ -6171,7 +6171,7 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
 	// never exposed.
 	//
 	// **A level-1 folder that has an albums row is excluded**, because under
-	// the new rule it is a loose file in a root used as one flat library — an
+	// the new rule it is a loose file in a root used as one flat library - an
 	// album, not an artist.  No level-1 *directory* can satisfy that test: its
 	// files are their own albums and its subdirectories are albums, so it
 	// never acquires an albums row of its own.  Without the exclusion such a
@@ -6229,7 +6229,7 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
 		             sel.getColumn(2).getInt(),
 		             "" };
 		if (all_users) {
-			// "<uploads root>/<user>/<batch>/<artist>" — the owner is the
+			// "<uploads root>/<user>/<batch>/<artist>" - the owner is the
 			// component after the prefix. Anything without one cannot be an
 			// upload, so it is dropped rather than shown under a blank heading.
 			const std::string path = sel.getColumn(3).getString();
@@ -6288,7 +6288,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		}
 	bool flatten = flat_multi_disc && is_album && !has_child_album;
 
-	// Child directories — skipped in flat mode for album folders (disc subdirs
+	// Child directories - skipped in flat mode for album folders (disc subdirs
 	// are absorbed into the song list below).
 	if (!flatten) {
 		SQLite::Statement dsel(db_music_,
@@ -6321,7 +6321,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 
 	// Child songs. In flat mode for album folders, also include songs from disc
 	// subfolders (one level down), ordered by disc then track. Those songs report
-	// the album folder as parent, not the disc subfolder they physically sit in —
+	// the album folder as parent, not the disc subfolder they physically sit in -
 	// the listing claims to be the album's, and parent is emitted as albumId.
 	const char* song_sql_flat =
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
@@ -6379,7 +6379,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		e.video_codec  = ssel.getColumn(15).isNull() ? "" : ssel.getColumn(15).getString();
 		e.audio_codec  = ssel.getColumn(16).isNull() ? "" : ssel.getColumn(16).getString();
 		// Songs inherit cover art from their parent album folder, unless they
-		// have a sidecar image of their own — a loose file's folder cover
+		// have a sidecar image of their own - a loose file's folder cover
 		// belongs to the whole section it sits in.
 		if (!ssel.getColumn(17).isNull() && ssel.getColumn(17).getString() != "")
 			e.cover_art_id = SONG_COVER_ID_BASE + e.id;
@@ -6405,7 +6405,7 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
-	// Base SELECT — common to all types. The trailing column is a per-user
+	// Base SELECT - common to all types. The trailing column is a per-user
 	// album-star flag, populated from a LEFT JOIN on client.stars.
 	std::string sql =
 		"SELECT f.id,"
@@ -6564,7 +6564,7 @@ std::vector<MediaStore::RecentSongEntry> MediaStore::get_recent_songs(
 		e.song.artist       = q.getColumn(11).getString();
 		e.song.album        = q.getColumn(12).getString();
 		e.song.cover_art_id = q.getColumn(13).getInt();
-		// column 14 (f.parent_id) unused — parent_id is already the album folder
+		// column 14 (f.parent_id) unused - parent_id is already the album folder
 		e.last_played       = q.getColumn(15).isNull() ? "" : q.getColumn(15).getString();
 		e.song.track_artist = q.getColumn(16).getString();
 		e.song.video_codec  = q.getColumn(17).isNull() ? "" : q.getColumn(17).getString();
@@ -6656,7 +6656,7 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id,
 	info.artist.name = fsel.getColumn(1).getString();
 
 	// Fetch albums whose folder is a direct child of this artist folder, plus
-	// an album on the folder itself — the loose files that sit beside the
+	// an album on the folder itself - the loose files that sit beside the
 	// albums rather than inside one.
 	// Trailing column is the per-user album-star flag.
 	SQLite::Statement asel(db_music_,
@@ -6898,7 +6898,7 @@ std::optional<MediaStore::PlayQueue> MediaStore::get_play_queue(
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
-	// al.folder_id, not s.folder_id — songs on a multi-disc album live in disc
+	// al.folder_id, not s.folder_id - songs on a multi-disc album live in disc
 	// subfolders, which have no albums row to resolve cover art or getAlbum against.
 	SQLite::Statement q(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
@@ -6996,7 +6996,7 @@ void MediaStore::scrobble(const std::string& username, const std::string& song_p
 	int user_id = uid_q.getColumn(0).getInt();
 
 	if (submission) {
-		// Completed play — increment count and record timestamp.
+		// Completed play - increment count and record timestamp.
 		SQLite::Statement ins(db_music_,
 			"INSERT INTO client.play_counts (user_id, song_path, count, last_played)"
 			" VALUES (?, ?, 1, CURRENT_TIMESTAMP)"
@@ -7007,7 +7007,7 @@ void MediaStore::scrobble(const std::string& username, const std::string& song_p
 		ins.bind(2, song_path);
 		ins.exec();
 		} else {
-		// Now-playing notification — update or replace the single row.
+		// Now-playing notification - update or replace the single row.
 		SQLite::Statement ins(db_music_,
 			"INSERT OR REPLACE INTO client.now_playing (user_id, song_path, client, started)"
 			" VALUES (?, ?, ?, CURRENT_TIMESTAMP)");
@@ -7080,8 +7080,8 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	StarredResult result;
 
-	// Starred songs — cover art inherited from album folder if present.
-	// al.folder_id, not s.folder_id — songs on a multi-disc album live in disc
+	// Starred songs - cover art inherited from album folder if present.
+	// al.folder_id, not s.folder_id - songs on a multi-disc album live in disc
 	// subfolders, which have no albums row to resolve cover art or getAlbum against.
 	SQLite::Statement sq(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
@@ -7125,7 +7125,7 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 		result.songs.push_back(std::move(e));
 		}
 
-	// Starred albums — stars.album_folder_path stores the album folder path.
+	// Starred albums - stars.album_folder_path stores the album folder path.
 	SQLite::Statement aq(db_music_,
 		"SELECT f.id,"
 		+ ALBUM_ARTIST_ID_SQL +
@@ -7154,7 +7154,7 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 		result.albums.push_back(std::move(e));
 		}
 
-	// Starred artists — stars.artist_folder_path stores the artist folder path.
+	// Starred artists - stars.artist_folder_path stores the artist folder path.
 	SQLite::Statement arq(db_music_,
 		"SELECT f.id, f.name"
 		" FROM client.stars st"
@@ -7219,7 +7219,7 @@ MediaStore::PlaylistInfo MediaStore::create_playlist(const std::string& username
 		}
 
 	// Fetch songs with full metadata, same joins as get_directory.
-	// al.folder_id, not s.folder_id — songs on a multi-disc album live in disc
+	// al.folder_id, not s.folder_id - songs on a multi-disc album live in disc
 	// subfolders, which have no albums row to resolve cover art or getAlbum against.
 	SQLite::Statement sq(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
@@ -7305,7 +7305,7 @@ bool MediaStore::is_category_folder(int folder_id)
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	// A root row is never a performer either: loose files directly in a root
 	// make the root itself the artist, and looking that up would query
-	// MusicBrainz for a thing called "movies" — the failure this function
+	// MusicBrainz for a thing called "movies" - the failure this function
 	// exists to prevent.
 	{
 	SQLite::Statement r(db_music_,
@@ -7342,8 +7342,8 @@ void MediaStore::sync_roots()
 
 	std::set<std::string> configured;
 	for (const auto& r : roots_) {
-		// The uploads root counts as configured — otherwise it would be judged
-		// stale below and every user's personal library deleted at startup —
+		// The uploads root counts as configured - otherwise it would be judged
+		// stale below and every user's personal library deleted at startup -
 		// but no row is created for it here. Its row appears only when the
 		// upload handler scans a batch, and it is filtered out of
 		// get_music_folders() so it is never offered as a library to browse.
@@ -7383,7 +7383,7 @@ void MediaStore::sync_roots()
 		          << "' is no longer configured; removing its entries"
 		          << std::endl;
 		// Descend the folder tree by id rather than matching a path prefix.
-		// A root row is not guaranteed to prefix the paths beneath it — rows
+		// A root row is not guaranteed to prefix the paths beneath it - rows
 		// written before roots had names store the root's *absolute* path
 		// while their descendants are stored relative, so a prefix match finds
 		// none of them, leaves them orphaned, and the delete then trips the
@@ -7405,7 +7405,7 @@ void MediaStore::sync_roots()
 			}
 		{
 		// cover_thumbs hangs off a path rather than folders.id, so it cannot
-		// join the subtree walk above — and the reason that walk exists (rows
+		// join the subtree walk above - and the reason that walk exists (rows
 		// written before roots had names store an absolute path) cannot apply
 		// here, because every source_key was written in stored form by this
 		// version or later. A prefix match is therefore exactly right.
@@ -7423,7 +7423,7 @@ void MediaStore::sync_roots()
 		}
 		{
 		// Same shape, same reason. Note video_art and video_meta are *not*
-		// torn down here and should be -- see ISSUES.md; a de-configured root
+		// torn down here and should be; a de-configured root
 		// leaves its posters and TMDB answers behind with nothing able to
 		// reach them. Matching that gap rather than fixing it would only have
 		// made it wider.
@@ -7525,7 +7525,7 @@ bool MediaStore::relocate_prefix(const std::string& old_rel,
 			};
 
 		// Client tables first. The two databases are both in WAL mode, and
-		// SQLite gives no atomic commit across attached databases in WAL — so
+		// SQLite gives no atomic commit across attached databases in WAL - so
 		// this transaction can tear on a crash and the order decides which way.
 		// A client row naming a path that does not exist yet is invisible and
 		// repairable; a music row moved ahead of its client rows orphans them
@@ -7540,7 +7540,7 @@ bool MediaStore::relocate_prefix(const std::string& old_rel,
 		rewrite("client.bookmarks",      "song_path");
 		// These two used to move for free: the flag was a column on the albums
 		// row and the title was the songs row. Both are paths in a separate
-		// WAL file now, so they belong in this list — and a miss is a cover a
+		// WAL file now, so they belong in this list - and a miss is a cover a
 		// scan silently overwrites, or a typed title that reverts.
 		rewrite("client.manual_covers",  "album_folder_path");
 		rewrite("client.song_meta",      "song_path");
@@ -7562,15 +7562,15 @@ bool MediaStore::relocate_prefix(const std::string& old_rel,
 		// The three things below are what a following rescan will NOT repair,
 		// because every upsert in the scanner is INSERT OR IGNORE and so only
 		// ever populates a row that did not exist. Relocating rather than
-		// rebuilding is what preserves the row — and therefore also what makes
+		// rebuilding is what preserves the row - and therefore also what makes
 		// its derived columns our problem.
 		// The leaf, minus a media extension: a folder row may name a media
 		// file, because a loose file is its own album, and neither
 		// "The Third Man.mkv" nor anything else with an extension on it is a
 		// title.  Tested on the extension rather than on the filesystem
 		// because these two UPDATEs match nothing at all when new_rel names a
-		// sidecar — which is exactly what makes moveAlbum's per-sidecar calls
-		// safe — so there would be no file to stat in that case anyway.
+		// sidecar - which is exactly what makes moveAlbum's per-sidecar calls
+		// safe - so there would be no file to stat in that case anyway.
 		std::string leaf = fs::path(new_rel).filename().string();
 		if (is_media_file(fs::path(new_rel)))
 			leaf = fs::path(new_rel).stem().string();
@@ -7680,8 +7680,8 @@ void MediaStore::forget_prefix(const std::string& rel)
 	catch (const std::exception& e) {
 		// Not fatal to the caller: the files are already gone, and a client row
 		// left behind is invisible rather than broken. Logged because the one
-		// case where it matters — a later batch folding a new file onto this
-		// exact path — would otherwise present as a track that is mysteriously
+		// case where it matters - a later batch folding a new file onto this
+		// exact path - would otherwise present as a track that is mysteriously
 		// already starred.
 		std::cout << stamp() << "Forget client rows under " << rel
 		          << " failed: " << e.what() << std::endl;
@@ -7732,7 +7732,7 @@ std::optional<int> MediaStore::folder_id_by_path(const std::string& rel)
 std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	// al.folder_id, not s.folder_id — songs on a multi-disc album live in disc
+	// al.folder_id, not s.folder_id - songs on a multi-disc album live in disc
 	// subfolders, which have no albums row to resolve cover art or getAlbum against.
 	SQLite::Statement q(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
@@ -7788,7 +7788,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 	// The client's query is a substring to look for, not a pattern to run:
 	// `%` and `_` are LIKE metacharacters, so without escaping them a query of
 	// a single "%" matches every row in the library. That is not an injection
-	// — the value is still bound — but it is the difference between a search
+	// - the value is still bound - but it is the difference between a search
 	// and a full table scan a client can ask for at will, and it is what makes
 	// the count clamp in search2/search3 worth having.
 	//
@@ -7814,7 +7814,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		? not_uploads("s.path")
 		: " AND s.path LIKE ?";
 
-	// Artists — folder-level, depth-1 children of the root.
+	// Artists - folder-level, depth-1 children of the root.
 	std::string aq_sql =
 		"SELECT f.id, f.name"
 		" FROM folders f"
@@ -7871,7 +7871,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		result.albums.push_back(std::move(e));
 		}
 
-	// Songs — use al.folder_id as parent so the client can call getAlbum directly.
+	// Songs - use al.folder_id as parent so the client can call getAlbum directly.
 	// For multi-disc albums songs live in disc subfolders, so s.folder_id would be
 	// wrong; al.folder_id is always the album root folder that getAlbum expects.
 	std::string sq_sql =
@@ -7920,7 +7920,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		result.songs.push_back(std::move(e));
 		}
 
-	// Chapters. A fourth scan, over a table far smaller than songs — and the
+	// Chapters. A fourth scan, over a table far smaller than songs - and the
 	// cost model is unchanged either way, since there is no index on
 	// songs.title and every search here is already a full scan.
 	//
@@ -7970,7 +7970,7 @@ std::vector<MediaStore::BookmarkInfo> MediaStore::get_bookmarks(
 	const std::string& username)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
-	// al.folder_id, not s.folder_id — songs on a multi-disc album live in disc
+	// al.folder_id, not s.folder_id - songs on a multi-disc album live in disc
 	// subfolders, which have no albums row to resolve cover art or getAlbum against.
 	SQLite::Statement q(db_music_,
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
@@ -8153,13 +8153,13 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 
 	// The owner predicate is what makes this a *read* of your own playlist
 	// rather than of anyone's. Without it the id is the only thing protecting
-	// a private playlist, and playlist ids are small sequential integers —
+	// a private playlist, and playlist ids are small sequential integers -
 	// get_playlists() hides them from the listing, which made this an
 	// enumeration away rather than a link away.
 	//
 	// `username` used to reach only the starred join below; the empty case is
 	// an internal caller that wants no starred column, and it is deliberately
-	// *not* a way past this — it selects nothing rather than everything.
+	// *not* a way past this - it selects nothing rather than everything.
 	SQLite::Statement pmeta(db_music_,
 		"SELECT p.name, COALESCE(p.comment,''), u.username, p.is_public,"
 		"       p.created, p.updated"
@@ -8187,7 +8187,7 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 		: " LEFT JOIN client.stars st ON st.song_path = s.path"
 		  " AND st.user_id = (SELECT id FROM client.users WHERE username = ?)";
 
-	// al.folder_id, not s.folder_id — songs on a multi-disc album live in disc
+	// al.folder_id, not s.folder_id - songs on a multi-disc album live in disc
 	// subfolders, which have no albums row to resolve cover art or getAlbum against.
 	std::string pl_sql =
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
@@ -8280,7 +8280,7 @@ bool MediaStore::update_song_meta(int song_id,
 		q.bind(2, song_id);
 		q.exec();
 
-		// Propagate to the album: use the same strategy as the scanner —
+		// Propagate to the album: use the same strategy as the scanner -
 		// take the year of the first track (disc/track order) with year > 0.
 		SQLite::Statement upd(db_music_,
 			"UPDATE albums SET year = ("
@@ -8305,7 +8305,7 @@ bool MediaStore::update_song_meta(int song_id,
 
 // The manual_covers row is written here and nowhere else: this is called only
 // by setCoverArt, so the row means exactly "a person chose this image". The
-// scan reads it to keep a TMDB poster off a hand-picked cover — see
+// scan reads it to keep a TMDB poster off a hand-picked cover - see
 // lookup_video_meta().
 bool MediaStore::set_cover_art_path(const std::string& rel_folder,
                                      const std::string& path)
@@ -8335,7 +8335,7 @@ bool MediaStore::set_cover_art_path(const std::string& rel_folder,
 	bool changed = db_music_.getChanges() > 0;
 
 	// Whatever was scaled from the previous image at this path is now wrong.
-	// The mtime moved too, so the serving path's stamp check would catch it —
+	// The mtime moved too, so the serving path's stamp check would catch it -
 	// except on a filesystem with one-second timestamps and a second upload
 	// inside the same tick, which is precisely the case where somebody is
 	// watching to see whether their new cover took.
@@ -8349,9 +8349,9 @@ bool MediaStore::set_cover_art_path(const std::string& rel_folder,
 	}
 
 // Keyed on the album's folder path rather than on an id, because the scan asks
-// this in Phase 3c — before Phase 4 has upserted the folder and so before any
+// this in Phase 3c - before Phase 4 has upserted the folder and so before any
 // id for it exists. Paths are stable across a rescan and rowids are not, which
-// is the same reason stars and playlists key on them — and the reason this
+// is the same reason stars and playlists key on them - and the reason this
 // lives in the client DB rather than beside the album it describes.
 bool MediaStore::cover_is_manual(const std::string& rel_album_path)
 	{

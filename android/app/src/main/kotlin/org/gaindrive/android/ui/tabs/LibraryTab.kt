@@ -18,13 +18,13 @@ import org.gaindrive.android.ui.browse.ArtistsScreen
 /**
  * The library: artists, an artist's albums, and an album's tracks.
  *
- * The only three-level tab, and the one the pane strip exists for — this is
+ * The only three-level tab, and the one the pane strip exists for - this is
  * the web client's `#pane-artists` / `#pane-albums` / `#pane-tracks` strip,
  * with the same rule about which of them are on screen at a given width.
  *
  * Hosted twice: as the Library tab itself, and as the pushed uploads listing
  * (`Route.Uploads`), whose [stack] is rooted at `Route.Artists(uploads =
- * true)`. [onOpenUploads] belongs to the first, [onBack] to the second —
+ * true)`. [onOpenUploads] belongs to the first, [onBack] to the second -
  * the tab has no back, and the uploads listing has no deeper uploads.
  *
  * [onFetchUrl] leaves the tab entirely: the fetch panel is a form that wants

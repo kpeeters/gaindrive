@@ -32,7 +32,7 @@ class PinAwareEvictor(
 		Comparator { a, b ->
 			val delta = a.lastTouchTimestamp - b.lastTouchTimestamp
 			// Falls back to the span's own ordering so two spans touched in the
-			// same millisecond are still distinct — a TreeSet drops "equal"
+			// same millisecond are still distinct - a TreeSet drops "equal"
 			// entries, and a dropped span would leak from the size accounting.
 			when {
 				delta < 0 -> -1
@@ -48,7 +48,7 @@ class PinAwareEvictor(
 	/**
 	 * Notified after any change to what is cached, so the usage readout and the
 	 * "is this track available offline" index can catch up. Called with the
-	 * cache lock held, so it must not block — post and return.
+	 * cache lock held, so it must not block - post and return.
 	 */
 	@Volatile
 	var onChanged: (() -> Unit)? = null
@@ -56,8 +56,8 @@ class PinAwareEvictor(
 	/**
 	 * Takes the cache's own monitor before ours, deliberately.
 	 *
-	 * That is the order a cache writer thread arrives in — cache lock held,
-	 * then a callback into here — and taking the two in the opposite order from
+	 * That is the order a cache writer thread arrives in - cache lock held,
+	 * then a callback into here - and taking the two in the opposite order from
 	 * this side would eventually deadlock the player against a settings change.
 	 */
 	fun setMaxBytes(cache: Cache, bytes: Long) {

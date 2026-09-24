@@ -9,7 +9,7 @@
 import SwiftUI
 
 /// The Library tab: the merged listing, one artist's albums, and one album's
-/// tracks — and, presented over it, the same three panes a second time for
+/// tracks - and, presented over it, the same three panes a second time for
 /// the account's own uploads.
 ///
 /// **The only tab with three panes**, and that is a decision rather than an
@@ -26,8 +26,8 @@ import SwiftUI
 /// floating overlay that hides the albums column, and the visible columns get
 /// unequal, width-dependent sizes. An `HStack` of three equal panes has no
 /// such state machine. The split view survives on compact for the one thing
-/// it did reliably — collapsing to a push stack driven by the same
-/// `List(selection:)` bindings — so the iPhone behaves as it always did,
+/// it did reliably - collapsing to a push stack driven by the same
+/// `List(selection:)` bindings - so the iPhone behaves as it always did,
 /// which is the thing most worth checking.
 struct ArtistsView: View {
 	let model: ArtistsViewModel
@@ -41,7 +41,7 @@ struct ArtistsView: View {
 	@Environment(\.library) private var library
 	@Environment(\.horizontalSizeClass) private var sizeClass
 	/// **The selections carry the domain values, not ids.** A `List` would
-	/// default to the element's `id`, which here is an `ItemRef` — and both
+	/// default to the element's `id`, which here is an `ItemRef` - and both
 	/// trailing panes need more than that: the albums pane wants the
 	/// artist's `refs`, name and the section the row was picked from, and the
 	/// tracks pane wants the album's title for its bar before the load
@@ -51,7 +51,7 @@ struct ArtistsView: View {
 	@State private var selectedAlbum: Album?
 
 	/// The uploads listing's own model, built when the icon is tapped and
-	/// discarded on dismiss — Android's fresh-listing-per-visit lifecycle,
+	/// discarded on dismiss - Android's fresh-listing-per-visit lifecycle,
 	/// and what stops a stale `loadedFor` surviving a re-presentation.
 	@State private var uploadsModel: ArtistsViewModel?
 	@State private var showingUploads = false
@@ -68,8 +68,8 @@ struct ArtistsView: View {
 			// A different artist cannot still have the same album showing.
 			.onChange(of: selectedChoice) { selectedAlbum = nil }
 			// A cover rather than a sheet: this hosts a second pane layout, which
-			// needs the full width on an iPad — a centred sheet card cannot give
-			// it three panes — and collapses to a stack on a phone exactly like
+			// needs the full width on an iPad - a centred sheet card cannot give
+			// it three panes - and collapses to a stack on a phone exactly like
 			// the view underneath. Presented from within the tab's content, so it
 			// inherits the environment; the caveat in RootView about sheets losing
 			// it applies only to presentations hung off the TabView itself.
@@ -95,7 +95,7 @@ struct ArtistsView: View {
 	}
 
 	/// Three equal panes, by hand. One `NavigationStack` *per pane*, so each
-	/// pane hosts exactly the bar its view already declares — which is what
+	/// pane hosts exactly the bar its view already declares - which is what
 	/// leaves `ArtistsList`, `AlbumsView` and `AlbumDetailView` untouched,
 	/// and with them the phone path. Nothing ever pushes: a non-nil selection
 	/// binding makes `AlbumsView` render tagged rows rather than links, so
@@ -125,7 +125,7 @@ struct ArtistsView: View {
 	/// each expression the body has to solve, the better.
 	///
 	/// Clipped, because a pane flush against a safe-area edge is extended
-	/// into it by SwiftUI's full-bleed rule for scrollables — the artists
+	/// into it by SwiftUI's full-bleed rule for scrollables - the artists
 	/// list's selection highlight drew under (and in the floating gap left
 	/// of) the TabView sidebar, through its translucent material. Row
 	/// content was already safe-area inset; only the background leaked, so
@@ -142,7 +142,7 @@ struct ArtistsView: View {
 	/// collapsing to a push stack derived from the live selections, so
 	/// shrinking into a multitasking split lands on the screen that was
 	/// showing. A hand-built `NavigationStack` path would need pops
-	/// synchronised back to the selection clearing — exactly the identity-bug
+	/// synchronised back to the selection clearing - exactly the identity-bug
 	/// class the `.id()` comments below warn about. No visibility binding:
 	/// compact ignores it.
 	private var splitView: some View {
@@ -196,7 +196,7 @@ struct ArtistsView: View {
 			// **A fresh identity per artist.** `AlbumsView` builds its view
 			// model once and keeps it in `@State`, so without this SwiftUI
 			// reuses the view across a change of artist and it goes on showing
-			// the previous one's albums — which reads as a stale list rather
+			// the previous one's albums - which reads as a stale list rather
 			// than as an error, and is the failure here most likely to be
 			// missed.
 			.id(choice.artist.ref)
@@ -226,7 +226,7 @@ struct ArtistsView: View {
 
 /// A picked row and the section it was picked from. The section travels with
 /// the selection because an artist ref says which folder, never which listing
-/// it was reached through — and two downstream screens key on that: a
+/// it was reached through - and two downstream screens key on that: a
 /// category has no portrait or biography, and an upload's album sort has a
 /// key of its own. The same reason Android's `onOpenArtist` passes a
 /// `LibrarySection` beside the refs.
@@ -235,19 +235,19 @@ struct ArtistChoice: Hashable {
 	let section: LibrarySection
 }
 
-/// The merged listing — categories under one header, then every artist in
-/// index buckets with a fast-scroll rail — or the uploads listing.
+/// The merged listing - categories under one header, then every artist in
+/// index buckets with a fast-scroll rail - or the uploads listing.
 ///
 /// The first pane on a wide screen, and the tab's first screen on a phone.
 /// `.listStyle(.plain)` stays for that reason: `.sidebar` is the iPad idiom,
-/// but this is the same view the phone shows — and the pane it fills is a
+/// but this is the same view the phone shows - and the pane it fills is a
 /// third of the window, not a sidebar.
 private struct ArtistsList: View {
 	let model: ArtistsViewModel
 	let uploads: Bool
 	@Binding var selection: ArtistChoice?
 	/// The way into the uploads listing, present only on the library
-	/// instance — on the uploads listing the icon would be a door into the
+	/// instance - on the uploads listing the icon would be a door into the
 	/// room you are standing in.
 	let onOpenUploads: (() -> Void)?
 
@@ -277,7 +277,7 @@ private struct ArtistsList: View {
 					Button(action: onOpenUploads) {
 						// Not `square.and.arrow.up`, which is the share glyph
 						// and would read as "share this screen": this is the
-						// Android app's Upload icon — putting something into
+						// Android app's Upload icon - putting something into
 						// a holding area.
 						Label("Uploads", systemImage: "tray.and.arrow.up")
 					}
@@ -310,7 +310,7 @@ private struct ArtistsList: View {
 		} else {
 			ScrollViewReader { proxy in
 				List(selection: $selection) {
-					// Untagged, and so not selectable — which is what keeps a
+					// Untagged, and so not selectable - which is what keeps a
 					// dismissible note out of the selection model without it
 					// having to know there is one.
 					if !model.failures.isEmpty, !notesDismissed {
@@ -321,7 +321,7 @@ private struct ArtistsList: View {
 						)
 						.listRowSeparator(.hidden)
 					}
-					// The whole group under one heading — a library holds a
+					// The whole group under one heading - a library holds a
 					// handful of sections, not enough to bucket by letter.
 					// The header carries no `.id`, so it is not a rail stop;
 					// the rail belongs to the artist buckets below.
@@ -372,7 +372,7 @@ private struct ArtistsList: View {
 	/// empty list is the ordinary state of somewhere nothing has been put yet.
 	private var emptyText: String {
 		if servers.hasNoServers { return "No servers configured" }
-		// Offline, an empty list is not a library with no artists in it — it is
+		// Offline, an empty list is not a library with no artists in it - it is
 		// a library with nothing downloaded. "No artists" would send somebody
 		// looking for a server problem that is not there.
 		if settings.offlineMode { return "Nothing downloaded yet" }
@@ -382,7 +382,7 @@ private struct ArtistsList: View {
 	/// The rail is for scrubbing a long alphabetical list, not for jumping
 	/// between four people. An admin's uploads listing comes back bucketed by
 	/// **username**, and a vertical strip of those reads as a mistake. It
-	/// scans the artist buckets only — the Categories header above them is
+	/// scans the artist buckets only - the Categories header above them is
 	/// not a stop.
 	private func showsRail(_ indexes: [ArtistIndex]) -> Bool {
 		indexes.count > 1 && indexes.allSatisfy { $0.label.count == 1 }

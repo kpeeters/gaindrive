@@ -521,7 +521,7 @@ def main():
 
     args.out.write_text(_page(meta, sections, endpoints, args.chrome),
                         encoding="utf-8")
-    print(f"Wrote {args.out} — {len(endpoints)} entries in "
+    print(f"Wrote {args.out} - {len(endpoints)} entries in "
           f"{len(sections)} sections.")
 
 

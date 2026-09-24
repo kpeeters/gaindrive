@@ -19,7 +19,7 @@ internal const val SNIFF_BYTES = 12
  *
  * Only the *container* is answered, and only the container is wanted. A
  * `Content-Type` names a container, and the question "did the server convert
- * this?" does not have to be asked to answer it — an Opus transcode and a
+ * this?" does not have to be asked to answer it - an Opus transcode and a
  * passed-through `.ogg` are both `audio/ogg`, an MP3 transcode and a
  * passed-through `.mp3` are both `audio/mpeg`.
  *
@@ -43,7 +43,7 @@ internal fun sniffAudioMime(head: ByteArray, read: Int): String? {
 	// tag sits in front of it and can be any length.
 	if (at(0, 'I', 'D', '3')) return "audio/mpeg"
 
-	// A bare frame sync — eleven set bits — is MPEG audio or ADTS AAC, and the
+	// A bare frame sync - eleven set bits - is MPEG audio or ADTS AAC, and the
 	// two are told apart by the layer field that follows it. ADTS leaves those
 	// bits zero, which is not a legal layer for an MPEG frame, so the test is
 	// exact rather than a heuristic.

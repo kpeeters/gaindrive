@@ -21,7 +21,7 @@ class CastManager {
 		struct CastDevice {
 			std::string id;
 			std::string name;
-			// The `md` TXT record — "WiiM Amp Ultra", "Chromecast Ultra". The
+			// The `md` TXT record - "WiiM Amp Ultra", "Chromecast Ultra". The
 			// only thing on the wire that tells one kind of receiver from
 			// another, and what the picker draws ahead of the address. Empty
 			// for a configured device: there is no announcement to read.
@@ -34,14 +34,14 @@ class CastManager {
 			bool        manual = false;
 			// The `ca` TXT record, a bitmask of what the receiver can do.
 			// -1 means "not announced", which is every configured device and
-			// any receiver that omits the record — treated as capable, since
+			// any receiver that omits the record - treated as capable, since
 			// refusing the picture on a guess is worse than the guess.
 			int         capabilities = -1;
 
 			// Bit 0 of `ca` is video_out. A WiiM amp clears it; a Chromecast
 			// or a television sets it. This is the whole of what distinguishes
 			// a receiver that can show a film from one that can only play its
-			// soundtrack — nothing in a LOAD's reply says so, and a receiver
+			// soundtrack - nothing in a LOAD's reply says so, and a receiver
 			// that cannot display simply drops the picture.
 			bool video_out() const
 				{
@@ -104,8 +104,8 @@ class CastManager {
 
 		// The discovery cache merged with the configured devices.
 		//
-		// Every caller goes through here — listCastDevices and startCast's id
-		// lookup both scan it — so the merge happening in one place is what lets
+		// Every caller goes through here - listCastDevices and startCast's id
+		// lookup both scan it - so the merge happening in one place is what lets
 		// the endpoints stay as they are.  A configured device whose address
 		// discovery also found is dropped in discovery's favour: that entry
 		// carries the friendly name from the device's own TXT record and its
@@ -121,7 +121,7 @@ class CastManager {
 		enum class Probe { ANSWERED, SILENT, UNREACHABLE };
 
 		// Connect, ask for a receiver status, disconnect.  Touches none of the
-		// session state — deliberately not start(), which sets active_ and
+		// session state - deliberately not start(), which sets active_ and
 		// detaches poll_loop(), so probing a typed-in address would begin
 		// casting to it.
 		//
@@ -139,8 +139,8 @@ class CastManager {
 		// Everything one LOAD message says.
 		//
 		// A struct rather than a parameter list because this value is needed in
-		// four places at once — the call, the worker thread, the retry copy and
-		// the JSON builder — so every field added as a parameter had to be
+		// four places at once - the call, the worker thread, the retry copy and
+		// the JSON builder - so every field added as a parameter had to be
 		// added four times, and a field forgotten in the retry copy is silently
 		// dropped only when a LOAD fails and is re-sent. One assignment now
 		// carries all of it.
@@ -163,14 +163,14 @@ class CastManager {
 			std::vector<int> caption_ids;
 			// Run on the worker thread before the LOAD is sent; false aborts
 			// the load.  It exists so a caller can make `url` answerable
-			// *before* the receiver is told to fetch it — materialising a
+			// *before* the receiver is told to fetch it - materialising a
 			// transcode-cache entry, which takes minutes for a film's
 			// soundtrack and would otherwise happen while a receiver that
 			// gives up after ~60 s of silence is waiting on the socket.
 			// CastManager deliberately does not know what is being prepared.
 			std::function<bool()> prepare;
 			// What to try instead when this LOAD is refused outright, one rung
-			// further down the ladder degrade_load() walks — see there.  A
+			// further down the ladder degrade_load() walks - see there.  A
 			// shared_ptr because the type cannot contain itself, and because
 			// both failure sites copy the whole request out under
 			// status_mutex_ before acting on it.
@@ -191,14 +191,14 @@ class CastManager {
 		// Stop Chromecast playback and exit cast mode.
 		void stop();
 
-		// Playback controls — each opens a fresh connection.
+		// Playback controls - each opens a fresh connection.
 		void cast_pause();
 		void cast_play();
 		void cast_seek(float seconds);
 
 		// Turn subtitle tracks on or off without reloading, by trackId; an
 		// empty list means none. Returns false when the receiver has no media
-		// session to edit yet, which is not an error — see the definition.
+		// session to edit yet, which is not an error - see the definition.
 		bool cast_tracks(const std::vector<int>& track_ids);
 
 		// The caption mapping the last LOAD went out with, and which of them is
@@ -226,7 +226,7 @@ class CastManager {
 		// look for it: update_status() assigns status_ wholesale from each
 		// push, so a notice living there would be wiped by the very status
 		// published to announce it. The sequence number is what lets a client
-		// show one exactly once — wait_status() republishes an unchanged status
+		// show one exactly once - wait_status() republishes an unchanged status
 		// every fifteen seconds.
 		struct Notice
 			{
@@ -280,7 +280,7 @@ class CastManager {
 		//
 		// It used to be one string per cast session, minted in start() and
 		// bound to nothing: while any session was live, that one value read
-		// the whole library — every root and every user's private uploads —
+		// the whole library - every root and every user's private uploads -
 		// with no account, no bitrate cap and no expiry. It travels in cleartext
 		// to a television and appears in the LOAD message, so "it never leaves
 		// the LAN" was the only thing limiting it.
@@ -364,7 +364,7 @@ class CastManager {
 		// correlates its replies by requestId, so a re-send repeating one it
 		// has already seen is worse than sending nothing. Every LOAD used to be
 		// requestId 2, which was harmless only because nothing was ever sent
-		// twice. Starts clear of every fixed id still in use — the playback
+		// twice. Starts clear of every fixed id still in use - the playback
 		// commands' 10-13 and poll_loop's 100-102.
 		std::atomic<int> request_id_{1000};
 
@@ -391,7 +391,7 @@ class CastManager {
 		void note_load_failure(int media_session_id);
 
 		// One rung down after a refused LOAD, rewriting `req` in place.  The
-		// rungs, in order, and each is "degrade rather than repeat" — replaying
+		// rungs, in order, and each is "degrade rather than repeat" - replaying
 		// a LOAD the receiver has already rejected only fails again:
 		//
 		//   1. drop the subtitle tracks.  One unreachable track URL fails the
@@ -420,7 +420,7 @@ class CastManager {
 		// responds to PING heartbeats, and processes pushed MEDIA_STATUS messages.
 		void poll_loop();
 
-		// Worker spawned by load() — does the actual TLS connect + LOAD.
+		// Worker spawned by load() - does the actual TLS connect + LOAD.
 		// Checks load_gen_ against gen at each blocking step and aborts early if
 		// a newer load() has been called.
 		void load_worker(LoadRequest req, int gen);
@@ -450,7 +450,7 @@ class CastManager {
 		// a receiver that dropped the LOAD still answers those, so a bare
 		// arrival proves nothing. retry_pending_ is armed by load() and cleared
 		// by update_status() only for a status carrying the *new*
-		// mediaSessionId, which is exactly the question being asked — with the
+		// mediaSessionId, which is exactly the question being asked - with the
 		// stale-push filtering already written and already commented there.
 		bool await_load_ack(int gen, int attempt);
 

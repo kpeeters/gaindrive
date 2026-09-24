@@ -12,9 +12,9 @@ import Foundation
 ///
 /// **Opus, Vorbis and Ogg are absent, and their absence is the point.** The
 /// server offers all three and Android's default is Opus 160, but Apple ships
-/// no Ogg demuxer — `AVPlayer` cannot play any of them. Leaving them out of the
+/// no Ogg demuxer - `AVPlayer` cannot play any of them. Leaving them out of the
 /// enum rather than merely out of the picker means the app cannot be configured
-/// into silence, and `ios/PLAN.md` is corrected to match.
+/// into silence.
 enum AudioFormat: String, CaseIterable, Sendable {
 	/// `raw` is the server's spelling for "no format change".
 	case original = "raw"
@@ -45,14 +45,14 @@ enum AudioFormat: String, CaseIterable, Sendable {
 
 	/// What a downloaded file of this format must be **named**.
 	///
-	/// AVFoundation determines a local file's type from its path extension —
-	/// there is no header to read — and a file with none is not reported as
+	/// AVFoundation determines a local file's type from its path extension -
+	/// there is no header to read - and a file with none is not reported as
 	/// unplayable. The player simply waits, for ever, which reads as a track
 	/// that never starts rather than as a track that failed. That was a real
 	/// bug: downloads landed as `<songId>@m4a160` and every one of them hung.
 	///
 	/// Nil for the original, whose container is whatever the server holds and
-	/// is only known from the response — see `DownloadQueue`.
+	/// is only known from the response - see `DownloadQueue`.
 	var fileExtension: String? {
 		switch self {
 		case .original: nil
@@ -70,7 +70,7 @@ struct AudioQuality: Hashable, Sendable {
 	/// on the server's chunked fallback.
 	///
 	/// AAC-LC at 160 beats MP3 at 160 audibly, and the transcode cache writes a
-	/// real MP4 with a sample table, so seeking is exact rather than estimated —
+	/// real MP4 with a sample table, so seeking is exact rather than estimated -
 	/// which ADTS, having no index at all, cannot offer. The objection to MP4 is
 	/// that ffmpeg writes its index at the end and a pipe cannot seek back; the
 	/// server already answers it by adding `frag_keyframe+empty_moov` on the

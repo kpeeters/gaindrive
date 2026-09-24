@@ -26,8 +26,8 @@ import Foundation
 actor TranscodePrewarmer {
 	/// Cache keys warmed, or being warmed, this process.
 	///
-	/// Transitions fire more than once for the same track — a repeat, a seek
-	/// back across a boundary — and a second request would be wasted even
+	/// Transitions fire more than once for the same track - a repeat, a seek
+	/// back across a boundary - and a second request would be wasted even
 	/// though the server would answer it from its own cache.
 	private var attempted: Set<String> = []
 	private let session: URLSession
@@ -47,7 +47,7 @@ actor TranscodePrewarmer {
 		// mode, which means requests are not to be made at all rather than
 		// expected to fail.
 		//
-		// The other — a track already on disk — is handled a step earlier, in
+		// The other - a track already on disk - is handled a step earlier, in
 		// `PlayerConnection.streamTarget`: a stored track comes back with a
 		// file URL, and a `file:` URL is not something to warm. That is why
 		// there is no check for it here.
@@ -63,7 +63,7 @@ actor TranscodePrewarmer {
 		// One byte is enough: `Streamer::serve` runs the transcode to
 		// completion before it reaches the code that honours the range, so the
 		// cache is warm however little of the response is asked for. The body
-		// is discarded — the point is the work the server does on the way to
+		// is discarded - the point is the work the server does on the way to
 		// producing it.
 		// Belt and braces for the sentence above: a file URL means the bytes
 		// are already here, and asking `URLSession` to range-request one would
@@ -78,7 +78,7 @@ actor TranscodePrewarmer {
 			// Nothing here is worth interrupting playback for: the only cost of
 			// failing is that the wait happens when the track is reached, which
 			// is what happened before this existed. Dropped from the set so a
-			// track missed while the network was down can be warmed later —
+			// track missed while the network was down can be warmed later -
 			// which covers cancellation too, since a cancelled warm has done
 			// none of the work it claimed.
 			attempted.remove(claim)

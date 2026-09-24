@@ -15,12 +15,12 @@ import javax.inject.Singleton
 
 /**
  * One server as persisted. The password is already ciphertext by the time it
- * reaches here — see [org.gaindrive.android.data.crypto.CredentialCipher].
+ * reaches here - see [org.gaindrive.android.data.crypto.CredentialCipher].
  *
  * Every field beyond the first four has a default so that adding fields later
  * (cast mode, LAN address) reads older documents without a migration. That is
  * not merely convenient: a decode failure falls back to an empty list below, so
- * a field added *without* a default would not fail loudly — it would silently
+ * a field added *without* a default would not fail loudly - it would silently
  * discard every configured server.
  */
 @Serializable
@@ -40,7 +40,7 @@ data class StoredServer(
  *
  * A handful of records does not justify Room. Phase 6's Room database is for
  * cached library metadata, which is a different concern with a different
- * lifetime — clearing that cache must not log anyone out.
+ * lifetime - clearing that cache must not log anyone out.
  */
 @Singleton
 class ServerStore @Inject constructor(

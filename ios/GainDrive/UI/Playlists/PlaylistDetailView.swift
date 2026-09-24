@@ -54,7 +54,7 @@ struct PlaylistDetailView: View {
 			EmptyMessage(text: "This playlist is empty")
 		} else {
 			List {
-				// Indices, because removal is positional — the row has to know
+				// Indices, because removal is positional - the row has to know
 				// where it sits, not just what it is. A track added twice
 				// appears twice, so the id alone would not be unique either.
 				ForEach(Array(songs.enumerated()), id: \.offset) { index, item in
@@ -64,7 +64,7 @@ struct PlaylistDetailView: View {
 					// album to route through and *is* a queue already, so
 					// playing it here is both possible and what is meant.
 					// A playlist is kept whole offline even when only some of
-					// it is here — it is a list somebody made, not a record —
+					// it is here - it is a list somebody made, not a record -
 					// so the rows that cannot be played are dimmed rather than
 					// dropped.
 					Button {

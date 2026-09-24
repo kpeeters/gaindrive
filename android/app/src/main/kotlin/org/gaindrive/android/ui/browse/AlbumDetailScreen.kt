@@ -82,8 +82,8 @@ fun AlbumDetailScreen(
 	onPromoted: () -> Unit,
 	/**
 	 * Called when the loaded album names its artist. The artist folder id
-	 * travels only on the album detail — a recents or search row carries the
-	 * name and nothing addressable — so this is the first moment the level
+	 * travels only on the album detail - a recents or search row carries the
+	 * name and nothing addressable - so this is the first moment the level
 	 * above can learn who the album belongs to. The Recents tab uses it to
 	 * back-fill that level with the artist's albums, the way the web client's
 	 * `viewTracks` fills pane 1; null everywhere the level above already
@@ -197,7 +197,7 @@ fun AlbumDetailScreen(
 		)
 	}
 
-	// One dialog for both failures — it says whatever the server said, and
+	// One dialog for both failures - it says whatever the server said, and
 	// "Could not move it" / "Could not delete it" is already in the message.
 	promoteError?.let { message ->
 		AlertDialog(
@@ -308,8 +308,8 @@ fun AlbumDetailScreen(
 			// about a song: every marker of a playing concert would be current
 			// at once.
 			//
-			// The empty branch is what keeps an album with no chapters — nearly
-			// every album — costing exactly what it did before: the position is
+			// The empty branch is what keeps an album with no chapters - nearly
+			// every album - costing exactly what it did before: the position is
 			// never read there, so the twice-a-second tick does not recompose a
 			// listing that has nothing to highlight.
 			val playingMarker: Pair<ItemRef, Int>? = if (extras.chapters.isEmpty()) {
@@ -348,8 +348,8 @@ fun AlbumDetailScreen(
 				item(key = "hero") {
 					// Capped and centred rather than simply filling the width.
 					// A 1:1 ratio over fillMaxWidth makes the cover as tall as
-					// its pane is wide, so on a wide one — or on the
-					// full-window album the Now Playing sheet opens — it pushes
+					// its pane is wide, so on a wide one - or on the
+					// full-window album the Now Playing sheet opens - it pushes
 					// the entire track list below the fold.
 					Box(
 						modifier = Modifier.fillMaxWidth(),
@@ -452,7 +452,7 @@ fun AlbumDetailScreen(
  * Two controls, not a folder browser, and that is not a simplification: both
  * layouts are `L1/L2/[L3]/files`, the album being moved *is* L2, and L3 is only
  * ever a disc or season directory inside it. So a root and one level under it is
- * the whole of the destination — there is no third level to walk to.
+ * the whole of the destination - there is no third level to walk to.
  *
  * The root picker is hidden when there is only one, the same rule the library
  * selector and the fetch panel's server picker use.
@@ -595,6 +595,6 @@ private const val SUGGESTION_LIMIT = 6
 
 /**
  * About what the cover occupies on a phone today, which is as large as it
- * wants to be — beyond this it is only crowding the tracks out.
+ * wants to be - beyond this it is only crowding the tracks out.
  */
 private val HERO_MAX_WIDTH = 400.dp

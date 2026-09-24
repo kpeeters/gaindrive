@@ -56,8 +56,8 @@ class PlaybackService : MediaLibraryService() {
 
 	/**
 	 * [MediaHttp], not the shared client: the first play of anything the server
-	 * has to build — a remux, or a film's soundtrack under
-	 * `SettingsStore.videoAudioOnly` — sends no bytes at all until ffmpeg has
+	 * has to build - a remux, or a film's soundtrack under
+	 * `SettingsStore.videoAudioOnly` - sends no bytes at all until ffmpeg has
 	 * finished, which is minutes for a large file and well past the shared
 	 * client's 30 s read timeout.
 	 */
@@ -131,7 +131,7 @@ class PlaybackService : MediaLibraryService() {
 		// Streams go through the same OkHttp as everything else, so the
 		// connection pool is shared; AudioCache then wraps it so playing a
 		// track also stores it, and a stored track plays with no network.
-		// Video takes the unwrapped one — see GainDriveMediaSourceFactory.
+		// Video takes the unwrapped one - see GainDriveMediaSourceFactory.
 		val network = OkHttpDataSource.Factory(httpClient)
 
 		val player = ExoPlayer.Builder(this)
@@ -151,7 +151,7 @@ class PlaybackService : MediaLibraryService() {
 		startScrobbleWatcher()
 		// The video screen may already be waiting for this; see VideoSurface.
 		videoSurface.registerPlayer(player)
-		// Only the local player can stall on a stream — the Chromecast fetches
+		// Only the local player can stall on a stream - the Chromecast fetches
 		// its own, and nothing here would see it.
 		watchdog.registerPlayer(player)
 		// Likewise local-only: the effect lives on this player's audio
@@ -173,7 +173,7 @@ class PlaybackService : MediaLibraryService() {
 	 * Re-resolves the queue when `videoAudioOnly` changes.
 	 *
 	 * Items are resolved once, when they are added, so without this the switch
-	 * would only reach the track *after* the one playing — and the gesture it
+	 * would only reach the track *after* the one playing - and the gesture it
 	 * replaces (backing out of the video surface) acts on the film in front of
 	 * you. The position is carried across, so a film picks up its soundtrack
 	 * where the picture stopped.
@@ -196,7 +196,7 @@ class PlaybackService : MediaLibraryService() {
 			val position = player.currentPosition.coerceAtLeast(0)
 			val wasPlaying = player.isPlaying
 			// Anything that fails to resolve keeps the URL it has, which is
-			// still playable — a re-resolve is an improvement, not a repair.
+			// still playable - a re-resolve is an improvement, not a repair.
 			val resolved = items.map { callback.resolve(it, audioOnly) ?: it }
 
 			// setMediaItems with an index and a position, the same shape the
@@ -311,7 +311,7 @@ class PlaybackService : MediaLibraryService() {
 	 * because [Player.Listener] is handed only the item that just started and
 	 * the player underneath may since have become the Chromecast. The first
 	 * transition fires when playback begins, so the second track of a queue is
-	 * being prepared while the first plays — the case that matters.
+	 * being prepared while the first plays - the case that matters.
 	 *
 	 * Worth doing while casting too: the receiver fetches from the same server,
 	 * so a transcode warmed now is one it will not wait for.
@@ -339,7 +339,7 @@ class PlaybackService : MediaLibraryService() {
 	/**
 	 * Submits a completed play once the track has been listened to.
 	 *
-	 * Half the track, or four minutes, whichever comes first — the convention
+	 * Half the track, or four minutes, whichever comes first - the convention
 	 * scrobbling services have used for years, and it stops a long track
 	 * needing to finish before it counts.
 	 */
@@ -365,14 +365,14 @@ class PlaybackService : MediaLibraryService() {
 		session
 
 	/**
-	 * Swiping the app out of recents means quit: pause whatever is playing —
+	 * Swiping the app out of recents means quit: pause whatever is playing -
 	 * the cast player included, since the session holds whichever one is
-	 * active — and end the service, so no playing notification outlives the
+	 * active - and end the service, so no playing notification outlives the
 	 * app. This only covers a user-initiated task removal; a system memory
 	 * kill never calls onTaskRemoved, so restore-after-restart is unaffected.
 	 *
 	 * The release is done here rather than left to onDestroy, because
-	 * stopSelf() cannot destroy a service that still has bound clients — and
+	 * stopSelf() cannot destroy a service that still has bound clients - and
 	 * [PlayerConnection]'s app-context MediaController is exactly that, with
 	 * nobody left to release it once the task is gone (the process survives
 	 * the swipe; the foreground service is what keeps it alive). Waiting for
@@ -420,13 +420,13 @@ class PlaybackService : MediaLibraryService() {
 		/**
 		 * Items arrive carrying only a media id, and leave with a playable URI.
 		 * Doing it here rather than in the UI means the stream policy has one
-		 * home, and that items restored by the system — from a notification
-		 * action, or after process death — get resolved too.
+		 * home, and that items restored by the system - from a notification
+		 * action, or after process death - get resolved too.
 		 *
 		 * The cache key is set here too, and it is derived from the [ItemRef]
 		 * and the quality rather than from the URL. Stream URLs carry a
 		 * per-client-instance auth salt (see `API-CLIENT.md`), so the default
-		 * URL-derived key would miss after every process restart — and would
+		 * URL-derived key would miss after every process restart - and would
 		 * not match what a download stored.
 		 *
 		 * [StreamUrls.forPlayback] pairs the URL, the key and the MIME type, so
@@ -446,7 +446,7 @@ class PlaybackService : MediaLibraryService() {
 		 * One item, from a bare media id to a playable URI.
 		 *
 		 * Split out of [onAddMediaItems] because re-resolving the queue after
-		 * `videoAudioOnly` changes has to make exactly the same decision — a
+		 * `videoAudioOnly` changes has to make exactly the same decision - a
 		 * second copy of this branch is how the two would drift into resolving
 		 * the same film differently.
 		 */
@@ -457,7 +457,7 @@ class PlaybackService : MediaLibraryService() {
 				video && !audioOnly -> resolveVideo(item, ref)
 				// Everything downstream reads the item rather than the setting:
 				// with the video flag cleared, the byte cache takes it, no
-				// surface is drawn and it can be downloaded — all of which is
+				// surface is drawn and it can be downloaded - all of which is
 				// the point.
 				video -> resolveAudio(item, ref, audioOnlyVideo = true)
 				else -> resolveAudio(item, ref, audioOnlyVideo = false)
@@ -499,7 +499,7 @@ class PlaybackService : MediaLibraryService() {
 		}
 
 		/**
-		 * No cache key, because video never enters the byte cache — see
+		 * No cache key, because video never enters the byte cache - see
 		 * [GainDriveMediaSourceFactory], which reads the same flag to decide
 		 * which data source the item loads through.
 		 *
@@ -513,7 +513,7 @@ class PlaybackService : MediaLibraryService() {
 		private suspend fun resolveVideo(item: MediaItem, ref: ItemRef): MediaItem? {
 			// The one call site that declares what this player can demux. Local
 			// playback is the only route where that is true of whoever reads the
-			// bytes — the cast route deliberately declares nothing.
+			// bytes - the cast route deliberately declares nothing.
 			val target = streamUrls.forVideo(ref, item.nativeSeek(), MEDIA3_CONTAINERS)
 				?: return null
 
@@ -540,7 +540,7 @@ class PlaybackService : MediaLibraryService() {
 		 * Items the system restored after process death carry only a media id,
 		 * so the extra that would answer this is gone. Falling back to audio
 		 * would resolve a film to `format=opus` and play its soundtrack under a
-		 * black screen — the exact failure video support exists to remove — so
+		 * black screen - the exact failure video support exists to remove - so
 		 * the mirror is consulted instead. A local read, no network.
 		 *
 		 * The audio-only flag is checked first and is not redundant with it: an

@@ -70,8 +70,8 @@ struct AudioQualityTests {
 
 	/// **Every format the app can ask for must name a file extension**, because
 	/// AVFoundation types a local file by its extension and has no header to
-	/// fall back on. A stored file without one is not reported as unplayable —
-	/// the player waits for ever — so this is the check that keeps a new format
+	/// fall back on. A stored file without one is not reported as unplayable -
+	/// the player waits for ever - so this is the check that keeps a new format
 	/// from reintroducing a silent hang.
 	@Test func everyTranscodeFormatNamesAFileExtension() {
 		for format in AudioFormat.allCases where format != .original {
@@ -80,7 +80,7 @@ struct AudioQualityTests {
 	}
 
 	/// The original's container is whatever the server holds, so it genuinely
-	/// cannot be known here — `DownloadQueue` reads it off the response.
+	/// cannot be known here - `DownloadQueue` reads it off the response.
 	@Test func theOriginalNamesNoExtension() {
 		#expect(AudioFormat.original.fileExtension == nil)
 	}

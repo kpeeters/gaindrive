@@ -1,5 +1,5 @@
 # Versions are pinned to a set that is known to work together. AGP, Kotlin,
-# KSP and the Compose compiler plugin are coupled — bump them as a group, not
+# KSP and the Compose compiler plugin are coupled - bump them as a group, not
 # individually.
 
 [versions]
@@ -49,7 +49,7 @@ androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
 androidx-compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
 
 # Adaptive layouts for large screens. All three are managed by the Compose BOM
-# above — the adaptive pair at 1.0.0, the navigation suite at 1.3.1 — so they
+# above - the adaptive pair at 1.0.0, the navigation suite at 1.3.1 - so they
 # carry no version of their own, exactly like material3 beside them.
 #
 # Do not pin the adaptive pair to 1.1.x on this BOM. Its floor is Compose 1.8,
@@ -74,7 +74,7 @@ hilt-lifecycle-viewmodel-compose = { module = "androidx.hilt:hilt-lifecycle-view
 
 media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }
 # Video the server can only re-encode arrives chunked with no Content-Length,
-# so it is played through hls.m3u8 instead — the one way to get a working seek
+# so it is played through hls.m3u8 instead - the one way to get a working seek
 # bar over it. DefaultMediaSourceFactory picks HlsMediaSource up from the
 # classpath, so nothing but this line is needed to enable it.
 media3-exoplayer-hls = { module = "androidx.media3:media3-exoplayer-hls", version.ref = "media3" }
@@ -82,11 +82,11 @@ media3-session = { module = "androidx.media3:media3-session", version.ref = "med
 media3-ui = { module = "androidx.media3:media3-ui", version.ref = "media3" }
 media3-datasource-okhttp = { module = "androidx.media3:media3-datasource-okhttp", version.ref = "media3" }
 # Reached transitively through media3-exoplayer, but declared because the cache
-# uses them directly — SimpleCache, CacheDataSource and the index database.
+# uses them directly - SimpleCache, CacheDataSource and the index database.
 media3-datasource = { module = "androidx.media3:media3-datasource", version.ref = "media3" }
 media3-database = { module = "androidx.media3:media3-database", version.ref = "media3" }
 
-# Cast (deferred, see CAST.md). Only the FOSS route-picker UI is needed —
+# Cast (deferred). Only the FOSS route-picker UI is needed -
 # the Cast protocol itself is ported from src/castmanager.cc, so neither
 # media3-cast nor play-services-cast-framework is a dependency. Not yet
 # wired into :app.

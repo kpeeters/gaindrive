@@ -13,7 +13,7 @@ import SwiftUI
 /// One global setting rather than one per server: a queue may span servers and
 /// would otherwise change quality at every boundary. The account's own
 /// `maxBitRate` still applies on top, per track, from that track's own
-/// server — which is why the effective figure is shown in the track-info view
+/// server - which is why the effective figure is shown in the track-info view
 /// and not here, where it could only be a guess.
 struct PlaybackSettingsView: View {
 	@Environment(SettingsStore.self) private var settings

@@ -39,7 +39,7 @@ class ArtistsViewModel @Inject constructor(
 	/**
 	 * Whether this instance is the uploads listing rather than the library.
 	 * From the route, so the pushed `Route.Uploads` host and the Library tab
-	 * share every line of this class — the listing they load is the whole
+	 * share every line of this class - the listing they load is the whole
 	 * difference.
 	 */
 	val uploads: Boolean = savedStateHandle.toRoute<Route.Artists>().uploads
@@ -48,7 +48,7 @@ class ArtistsViewModel @Inject constructor(
 	 * What is being fetched, for the uploads listing's own row.
 	 *
 	 * Here as well as in the shell's strip because this is where somebody looks
-	 * when they wonder whether a fetch is running — the report that prompted all
+	 * when they wonder whether a fetch is running - the report that prompted all
 	 * of this was "came back to my uploads folder and saw nothing in progress".
 	 * The strip answers it from every screen; this answers it at the place the
 	 * question is actually asked.
@@ -81,7 +81,7 @@ class ArtistsViewModel @Inject constructor(
 
 	/**
 	 * Whether the upload icon is worth drawing. Never true on the uploads
-	 * listing itself — the icon is how you get there.
+	 * listing itself - the icon is how you get there.
 	 */
 	private val _canUpload = MutableStateFlow(false)
 	val canUpload: StateFlow<Boolean> = _canUpload.asStateFlow()
@@ -98,7 +98,7 @@ class ArtistsViewModel @Inject constructor(
 				scope = selected.scope
 				refreshCanUpload()
 				// A different scope is a different library, and going offline
-				// is the same library from a different source — either way the
+				// is the same library from a different source - either way the
 				// old list must go rather than linger under a spinner.
 				startLoad(clearFirst = true)
 			}

@@ -23,8 +23,8 @@ import org.gaindrive.android.net.requireOk
 /**
  * The hierarchy as the directory tree describes it.
  *
- * `getMusicDirectory` does all three jobs — an artist's albums and an album's
- * tracks are the same request against different ids — so the work here is not
+ * `getMusicDirectory` does all three jobs - an artist's albums and an album's
+ * tracks are the same request against different ids - so the work here is not
  * fetching but deciding what a listing *is*, and assembling an album that was
  * split across disc subfolders back into one track list.
  */
@@ -52,7 +52,7 @@ object FolderSource : BrowseSource {
 	 * in disc subfolders.
 	 *
 	 * The fallback to the tag hierarchy at either end is for a reference that
-	 * came from somewhere other than this mode's own browsing — the offline
+	 * came from somewhere other than this mode's own browsing - the offline
 	 * mirror written before the switch was flipped, a starred album, a
 	 * back-stack entry. It is a safety net and not the mechanism: search already
 	 * answers in folder ids (see [search]), because on a server whose two id

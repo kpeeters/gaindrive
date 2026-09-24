@@ -7,7 +7,7 @@ user, so they are about a compromised or careless account rather than about a
 stranger.
 
 Needs an admin account and at least one album in a library root. The script
-creates a throwaway non-admin user, uses it, and deletes it — except that
+creates a throwaway non-admin user, uses it, and deletes it - except that
 Subsonic has no deleteUser, so it disables the account instead and leaves it.
 
 Start the server first, then:
@@ -81,7 +81,7 @@ def setup_plain_user():
                              "adminRole": "false", "uploadRole": "false",
                              "castRole": "false"})
     # Whether it was just created or already existed, make sure it is enabled
-    # and has no roles — a previous run disables it on the way out.
+    # and has no roles - a previous run disables it on the way out.
     _, root = _get("updateUser.view", {"username": PLAIN, "password": PPASS,
                                        "adminRole": "false",
                                        "uploadRole": "false",
@@ -159,7 +159,7 @@ def test_get_album_reports_writability():
     """The Edit affordance is drawn from this flag, not from the caller's roles.
 
     Without it the web client offered Edit on every album to everybody and let
-    the save fail — the same gap as updateSong above, one screen earlier. A
+    the save fail - the same gap as updateSong above, one screen earlier. A
     role test cannot stand in for it: uploadRole makes an account's own
     uploads writable and the shared library not, so the answer differs per
     album rather than per account.
@@ -204,7 +204,7 @@ def test_album_info_force_needs_admin():
     )
     print("PASS  getAlbumInfo2 refuses force= from a non-admin")
 
-    # The read itself stays open — the gate is on the re-ask alone, and a
+    # The read itself stays open - the gate is on the re-ask alone, and a
     # non-admin who can no longer see album notes would be a worse bug.
     _, root = _get("getAlbumInfo2.view", {"id": folder_id},
                    user=PLAIN, password=PPASS)
@@ -233,7 +233,7 @@ def test_artist_info_force_needs_admin():
 def test_cover_art_url_refuses_private_addresses():
     """setCoverArt's url= made the server fetch anything it could reach.
 
-    No host allow-list, no private-IP block, and redirects followed — so it
+    No host allow-list, no private-IP block, and redirects followed - so it
     reached 127.0.0.1, link-local metadata and the whole LAN, and its two
     distinct error messages made it a working port scanner. Run as admin,
     because the permission gate above would otherwise be what refuses it.
@@ -260,7 +260,7 @@ def test_playlist_is_not_readable_by_id():
     """get_playlist's query was `WHERE p.id = ?` with no owner predicate.
 
     getPlaylists correctly hides other people's playlists from the listing,
-    which made this an enumeration away rather than a link away — and playlist
+    which made this an enumeration away rather than a link away - and playlist
     ids are small sequential integers.
     """
     _, root = _get("createPlaylist.view", {"name": "authz private playlist"})

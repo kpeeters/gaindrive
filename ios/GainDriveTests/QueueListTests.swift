@@ -15,7 +15,7 @@ import Testing
 ///
 /// `PlayQueueTests` covers the model; this covers the translation on top of it,
 /// which is a separate off-by-one and fails in a way that reads as a laggy
-/// gesture rather than as a bug — the row simply lands one place short of where
+/// gesture rather than as a bug - the row simply lands one place short of where
 /// it was let go.
 struct QueueListTests {
 	private let server = ServerId()
@@ -47,7 +47,7 @@ struct QueueListTests {
 		#expect(QueueMove.destination(from: 4, insertingBefore: 0) == 0)
 	}
 
-	/// The degenerate case, which `PlayQueue.move` refuses anyway — but it must
+	/// The degenerate case, which `PlayQueue.move` refuses anyway - but it must
 	/// be refused rather than turned into a move by one.
 	@Test func droppingARowWhereItAlreadyIsGoesNowhere() {
 		#expect(QueueMove.destination(from: 2, insertingBefore: 2) == 2)
@@ -91,7 +91,7 @@ struct QueueListTests {
 	}
 
 	/// A caption on row 0 would be captioning the whole queue, which says
-	/// nothing — hence the `index > 0` guard in `QueueList.row`.
+	/// nothing - hence the `index > 0` guard in `QueueList.row`.
 	@Test func aQueueThatIsEntirelyAutomaticHasNoDividerToDraw() {
 		var queue = PlayQueue()
 		queue.play(album(4), startIndex: 0)

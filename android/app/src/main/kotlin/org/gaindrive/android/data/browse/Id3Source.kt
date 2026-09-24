@@ -15,7 +15,7 @@ import org.gaindrive.android.net.requireOk
  * The hierarchy as the server's tags describe it, which is what this app has
  * always used and remains the default.
  *
- * Every method is one request and one mapper — there is nothing to arrange,
+ * Every method is one request and one mapper - there is nothing to arrange,
  * because these endpoints already answer in the shape the screens want.
  */
 object Id3Source : BrowseSource {

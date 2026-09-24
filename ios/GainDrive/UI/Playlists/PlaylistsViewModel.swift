@@ -72,7 +72,7 @@ final class PlaylistsViewModel {
 
 	/// **No optimistic removal.** The reload that the revision bump triggers is
 	/// what takes the row away, so the list can never claim a deletion the
-	/// server refused — which is a promise the UI is in no position to make,
+	/// server refused - which is a promise the UI is in no position to make,
 	/// given it cannot know the playlist was someone else's.
 	func delete(_ playlist: Playlist) async {
 		do {

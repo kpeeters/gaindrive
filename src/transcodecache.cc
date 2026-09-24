@@ -236,7 +236,7 @@ bool TranscodeCache::build_in_background(
 	// Closes the race with a build that landed between the caller's
 	// get_if_present() and this call.
 	if (fs::exists(final, ec))  return false;
-	// Already being built — by another viewer of the same film, most likely.
+	// Already being built - by another viewer of the same film, most likely.
 	// The answer is still "expect it".
 	if (building_.count(key))   return true;
 
@@ -264,7 +264,7 @@ bool TranscodeCache::build_in_background(
 	std::string              ph  = out_placeholder;
 	// Detached rather than joined: the request that asked for this is already
 	// being answered from a pipe and must not wait.  It catches for the reason
-	// every detached thread here does — an exception leaving a thread's
+	// every detached thread here does - an exception leaving a thread's
 	// top-level function is std::terminate, so a bad argv would take the
 	// server down rather than lose one cache entry.
 	//
@@ -313,7 +313,7 @@ bool TranscodeCache::run_ffmpeg(const std::vector<std::string>& argv,
 		}
 	else
 		opts.redirect.err.type = reproc::redirect::type::discard;
-	// Nothing reads stdout — ffmpeg writes the file itself.
+	// Nothing reads stdout - ffmpeg writes the file itself.
 	opts.redirect.out.type = reproc::redirect::type::discard;
 
 	if (auto ec = proc.start(argv, opts)) {

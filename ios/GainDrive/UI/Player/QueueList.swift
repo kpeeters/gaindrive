@@ -12,7 +12,7 @@ import SwiftUI
 ///
 /// A view of its own rather than a method on `NowPlayingView`, so that reading
 /// `queue`, `queueIndex` and `autoFrom` here does not put those reads in the
-/// same view as the scrubber's `position` — see `NowPlayingScrubber`. **It must
+/// same view as the scrubber's `position` - see `NowPlayingScrubber`. **It must
 /// never read `position`.**
 ///
 /// Reordering is a capability Android's queue does not have; `PlayQueue.move`
@@ -24,7 +24,7 @@ struct QueueList: View {
 	var body: some View {
 		Section {
 			// Indices, because every edit below is positional and because a
-			// track queued twice appears twice — the ref alone is not a unique
+			// track queued twice appears twice - the ref alone is not a unique
 			// identity here, the same reason Recents enumerates.
 			ForEach(Array(player.queue.enumerated()), id: \.offset) { index, song in
 				row(index: index, song: song)
@@ -50,7 +50,7 @@ struct QueueList: View {
 				// Everything from here down is the album's own tail, which
 				// "add to queue" **replaces** rather than appends behind.
 				// Saying so is what stops that replacement reading as tracks
-				// going missing — which is the complaint the boundary exists
+				// going missing - which is the complaint the boundary exists
 				// to answer in the first place.
 				Text("Continuing from the album")
 					.font(.caption2)
@@ -79,7 +79,7 @@ enum QueueMove {
 	/// **before**, counted in the list as it stands *with the row still in
 	/// it*. `PlayQueue.move` takes the index the row ends up at. For a move
 	/// downwards those differ by one, and getting it wrong drops the track one
-	/// place short of where it was let go — which looks like a laggy gesture
+	/// place short of where it was let go - which looks like a laggy gesture
 	/// rather than like a bug.
 	static func destination(from source: Int, insertingBefore offset: Int) -> Int {
 		source < offset ? offset - 1 : offset

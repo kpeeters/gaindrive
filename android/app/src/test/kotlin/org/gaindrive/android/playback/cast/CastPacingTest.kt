@@ -10,8 +10,8 @@ import org.junit.Test
  * Worth a test of its own because the failure it prevents is silent and
  * remote: a URL that reaches a receiver without `pace=true` plays for about
  * ninety seconds and stops, with the reason a minute of server log away. The
- * cases below are the three ways the string could be mangled — a lost query,
- * a lost path, a URL that is not one — each of which would look like the
+ * cases below are the three ways the string could be mangled - a lost query,
+ * a lost path, a URL that is not one - each of which would look like the
  * parameter simply not working.
  */
 class CastPacingTest {
@@ -24,7 +24,7 @@ class CastPacingTest {
 
 	/**
 	 * The credentials and the id travel in the same query string, so appending
-	 * has to preserve what is already there — a receiver handed a URL with the
+	 * has to preserve what is already there - a receiver handed a URL with the
 	 * auth dropped gets a 401 rather than a track.
 	 */
 	@Test

@@ -50,7 +50,7 @@ int Streamer::piped_ffmpeg_running()
 
 // A declaration as one log token.  Both ladders print it, because "the client
 // sent playable and the server transcoded anyway" is the same question on
-// either — and nine times in ten the answer is a proxy dropping the query
+// either - and nine times in ten the answer is a proxy dropping the query
 // string rather than anything here.
 //
 // Printed verbatim: the handler dropped every token that was not declarable,
@@ -94,7 +94,7 @@ Streamer::TranscodePlan Streamer::plan_transcode(const SongInfo& song,
 	bool bitrate_limit = max_bitrate > 0 && song.bitrate > 0 && song.bitrate > max_bitrate;
 
 	// A video's soundtrack already in a codec the requested container can hold
-	// is a remux, not an encode — see audio_copy_target() in codecs.hh for
+	// is a remux, not an encode - see audio_copy_target() in codecs.hh for
 	// what that saves.  Two things about the shape of this test:
 	//
 	//  * It is expressible from `format` alone, and has to be.  A Chromecast
@@ -128,7 +128,7 @@ Streamer::TranscodePlan Streamer::plan_transcode(const SongInfo& song,
 		// meaningless there and ffmpeg_argv() does not pass it; the figure only
 		// has to be non-zero, which is what tells that function to encode
 		// rather than copy.  Pinned rather than following the account ceiling,
-		// so a given file has one cache key whoever asks for it — and reported
+		// so a given file has one cache key whoever asks for it - and reported
 		// to clients as 0, since a number that describes nothing is worse than
 		// no number.
 		plan.bitrate = wanted->lossy
@@ -191,8 +191,8 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	//    direct route, where the receiver fetches from us for itself.
 	//
 	// Opt-in rather than sniffed, because a receiver cannot be recognised: a
-	// WiiM sends no Mozilla/, and — fetching a URL the app built with ordinary
-	// u/t/s credentials — no castToken either, so it is indistinguishable from
+	// WiiM sends no Mozilla/, and - fetching a URL the app built with ordinary
+	// u/t/s credentials - no castToken either, so it is indistinguishable from
 	// a third-party Subsonic client, which wants the opposite treatment.  What
 	// goes wrong without it is set out in serve_direct().
 	auto pace_it = req.params.find("pace");
@@ -208,14 +208,14 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 
 	// A video whose request names an audio format is a request for its
 	// soundtrack alone, and falling through to the audio path below is the
-	// entire implementation of that — see audio_only_request() in codecs.hh.
+	// entire implementation of that - see audio_only_request() in codecs.hh.
 	// It works because target_for() has no entry for a video container, so
 	// `wanted` always counts as a format change and the encode branch is
 	// taken; the `-vn` that path already passes is the extraction.
 	bool audio_only = audio_only_request(song.is_video, format,
 	                                     song.audio_codec);
 
-	// Video otherwise takes a different ladder entirely — see VIDEO.md.  None
+	// Video otherwise takes a different ladder entirely.  None
 	// of the negotiation below applies to it: TARGETS has no entry for a video
 	// container, and format/maxBitRate here are about audio muxers.
 	if (song.is_video && !audio_only) {
@@ -231,8 +231,8 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	const int             target_bitrate  = plan.bitrate;
 
 	// The User-Agent is logged because the process that fetches a stream is
-	// very often not the one that asked for it — a Cast receiver fetches for
-	// itself — and nothing else in the log records what it is.  Behind a
+	// very often not the one that asked for it - a Cast receiver fetches for
+	// itself - and nothing else in the log records what it is.  Behind a
 	// reverse proxy the address does not answer that either: client_addr() in
 	// gaindrive.cc reports X-Forwarded-For when there is one and the proxy's
 	// own address when there is not, and "which of those is this" was the
@@ -271,15 +271,15 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	// seek, so needs_transcode is already false and this branch is not reached.
 	//
 	// **The audio_only exception is only sound because cast_load_song() warms
-	// the entry before the receiver is told anything** — see the `prepare` hook
+	// the entry before the receiver is told anything** - see the `prepare` hook
 	// on CastManager::LoadRequest.  A cold entry answers nothing until ffmpeg
 	// has finished, which for a film's soundtrack is minutes; a receiver drops
 	// the session after ~60 s with no data on the HTTP body, which surfaces as
 	// error 103 and reads as a metadata bug.  Remove the warm and this line
 	// silently becomes that bug.  With the warm in place the lookup here is a
 	// hit, and serving a real file is what gives the receiver a Content-Length
-	// and a XING header — without which a piped MP3 of a two-hour film is the
-	// dur=0 saga in CLAUDE.md all over again.
+	// and a XING header - without which a piped MP3 of a two-hour film is the
+	// dur=0 saga all over again.
 	//
 	// It does **not** cover the Android app's direct route, and that is worth
 	// knowing before trusting this guard.  The app runs its own cast session,
@@ -287,7 +287,7 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	// send format+maxBitRate whenever castOriginal is off, the item is a
 	// video's soundtrack, or the type is not one the receiver plays.  Such a
 	// request goes through the cache like any other, and a cold entry answers
-	// nothing until ffmpeg has finished — the same >60 s of silence, arriving
+	// nothing until ffmpeg has finished - the same >60 s of silence, arriving
 	// before the first byte, where pacing cannot help.  The remedy if it ever
 	// bites is CastUrls.warmTranscode for audio, which already exists on the
 	// video side for exactly this reason.
@@ -305,10 +305,10 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 			// entry has a known size and a known duration, so serve_direct's
 			// size/duration fallback is *exact* and beats any nominal figure.
 			// It is also the only correct answer for a lossless target, where
-			// target_bitrate is a marker rather than a rate — pacing a ~1000
+			// target_bitrate is a marker rather than a rate - pacing a ~1000
 			// kbps FLAC at the 320 that marker holds feeds a receiver at a
 			// third of real time, which drains its buffer and ends as the ~60 s
-			// no-data timeout every cast failure in CLAUDE.md turns out to be.
+			// no-data timeout every cast failure turns out to be.
 			SongInfo cached{ entry->path().string(), std::string(target->name),
 			                 0, song.duration, entry->size(),
 			                 song.id, song.file_modified };
@@ -326,7 +326,7 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	// last byte exceeds the response's known length.  Our transcoded output
 	// uses a chunked content provider with unknown length (= 0 in the
 	// check), so a browser's automatic "Range: bytes=0-" lands as 416.
-	// Drop the parsed ranges before the check runs — the transcoded stream
+	// Drop the parsed ranges before the check runs - the transcoded stream
 	// is sequential anyway and there is nothing to seek into byte-wise.
 	const_cast<httplib::Request&>(req).ranges.clear();
 
@@ -375,11 +375,11 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 	//   *reported* playback position.
 	// - Paced without one: the same throttle, with wall-clock elapsed time
 	//   standing in for a position we cannot observe.  Asked for by the web
-	//   player — whose <audio> element would otherwise evict and re-fetch
-	//   buffered content, the root cause of intermittent MEDIA_ERR_NETWORK —
+	//   player - whose <audio> element would otherwise evict and re-fetch
+	//   buffered content, the root cause of intermittent MEDIA_ERR_NETWORK -
 	//   and by a Cast receiver the Android app has pointed straight at this
 	//   server on its direct route.
-	// - Everything else — download.view, pinning, ExoPlayer, third-party
+	// - Everything else - download.view, pinning, ExoPlayer, third-party
 	//   Subsonic clients: no throttle at all.  Nothing is playing off the
 	//   connection in real time and they want the bytes as fast as the socket
 	//   takes them.
@@ -387,8 +387,8 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 	// Why a Cast receiver has to be paced even though it is not a browser, and
 	// why TCP backpressure is not enough on its own.  A receiver reads at 1x
 	// and stops reading once its buffer is full.  Unthrottled we fill the
-	// kernel send buffer and the receiver's window within seconds — 21.8 MB,
-	// 208 s of a 261 s FLAC, measured against a WiiM — and then block inside
+	// kernel send buffer and the receiver's window within seconds - 21.8 MB,
+	// 208 s of a 261 s FLAC, measured against a WiiM - and then block inside
 	// one sink.write with nothing left to do.  From that moment the connection
 	// carries no bytes at all, and things on the path are counting: a
 	// Chromecast-built-in receiver gives up after ~60 s with no data on the
@@ -404,7 +404,7 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 	//
 	// Pacing was unconditional for non-cast streams until 81e428b gated it on
 	// the User-Agent, which is what put a receiver in the third bucket.  The
-	// gate was right — a download must not be paced — but the discriminator
+	// gate was right - a download must not be paced - but the discriminator
 	// was wrong, because a User-Agent cannot tell a receiver from a Subsonic
 	// client.  It is now `pace`, set by whoever hands the URL to something
 	// that will read it at 1x, which is knowledge only the client has.
@@ -471,7 +471,7 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 						// the real reason the far end went away: EPIPE or
 						// ECONNRESET when it closed, ETIMEDOUT when the kernel
 						// gave up retransmitting into a window that never
-						// reopened — the signature of a client that stopped
+						// reopened - the signature of a client that stopped
 						// reading and was then killed by somebody's idle timer.
 						// The elapsed time says whether we died at the far end's
 						// timeout or at our own; they differ by an hour.
@@ -497,7 +497,7 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 						float pos = get_position();
 						if (pos < CAST_POS_BUFFERING) return false;
 						// Throttling only runs while the receiver is actually PLAYING.
-						// During IDLE/BUFFERING (pos < 0) we send freely — TCP
+						// During IDLE/BUFFERING (pos < 0) we send freely - TCP
 						// backpressure paces us once the receiver's buffer fills, but
 						// any explicit throttle here causes the receiver to time out
 						// while we sleep, which manifests as "track click → never
@@ -545,7 +545,7 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 						// request starting at byte `offset` the estimated absolute
 						// position is offset/bps + elapsed: exactly right for a player
 						// that started there and has been playing since, optimistic for
-						// one that has not started yet — so we send too much, never too
+						// one that has not started yet - so we send too much, never too
 						// little.  That is the right direction to be wrong in; sending
 						// early costs buffer, sending late costs a dropout.
 						//
@@ -589,14 +589,14 @@ std::vector<std::string> Streamer::ffmpeg_argv(const SongInfo& song,
 		}
 	args.push_back("-i");
 	// A DVD titleset is split across 1 GB VOBs that are one continuous stream,
-	// so its soundtrack is the concatenated list rather than the first part —
+	// so its soundtrack is the concatenated list rather than the first part -
 	// otherwise the extracted audio reports and stops after twenty minutes.
 	// dvd_input() returns the plain path for everything else, so this is a
 	// no-op for audio files.
 	args.push_back(song.is_video ? dvd_input(song.path) : song.path);
 	// Drop attached pictures (m4a album art is exposed as a video stream)
 	// and source metadata.  Without -vn, ffmpeg copies embedded JPEG/PNG
-	// art into the mp3's ID3v2 tag at the *start* of the stream — Firefox
+	// art into the mp3's ID3v2 tag at the *start* of the stream - Firefox
 	// must download the whole tag before reaching the first audio frame,
 	// which delays playback by seconds for tracks with large art.
 	//
@@ -617,7 +617,7 @@ std::vector<std::string> Streamer::ffmpeg_argv(const SongInfo& song,
 		// browsers play the stereo mix regardless.
 		//
 		// Only when something is being encoded.  -ac is an encoder option and
-		// a stream copy has no encoder to give it to — ffmpeg accepts it and
+		// a stream copy has no encoder to give it to - ffmpeg accepts it and
 		// ignores it, so leaving it here would only make the argv claim a
 		// downmix that is not happening.  Nothing is lost by that: decoding a
 		// multichannel track purely to fold it down is the entire cost the
@@ -645,7 +645,7 @@ std::vector<std::string> Streamer::ffmpeg_argv(const SongInfo& song,
 			}
 		}
 	else {
-		// Seek only — copy audio without re-encoding.
+		// Seek only - copy audio without re-encoding.
 		args.push_back("-c:a");
 		args.push_back("copy");
 		}
@@ -711,7 +711,7 @@ std::vector<std::string> Streamer::video_ffmpeg_argv(
 		a.push_back("-crf");
 		a.push_back("23");
 		// yadif=deint=interlaced only touches frames the decoder flagged as
-		// interlaced, so this can be unconditional — no stored per-file flag,
+		// interlaced, so this can be unconditional - no stored per-file flag,
 		// and progressive material passes through untouched.
 		std::string vf = "yadif=deint=interlaced";
 		if (!size.empty()) {
@@ -753,7 +753,7 @@ std::vector<std::string> Streamer::video_ffmpeg_argv(
 	// starts at PTS 0 while the playlist says segment 190 belongs at 1900s.  A
 	// player seeds its timestamp adjuster from the first segment it loads and
 	// reuses it for the rest, so the second segment maps to the same instant as
-	// the first and the timeline simply stops advancing — the stream stalls
+	// the first and the timeline simply stops advancing - the stream stalls
 	// with no error, because bytes are still arriving and nothing has failed.
 	//
 	// NOT -copyts, which is the more accurate answer: it keeps the input's own
@@ -814,7 +814,7 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
                            std::function<float()> get_position)
 	{
 	// Same predicate the API uses to tell the client whether it may seek
-	// natively — see video_seeks_natively() in codecs.hh for why the two must
+	// natively - see video_seeks_natively() in codecs.hh for why the two must
 	// not drift apart.
 	bool codecs_ok = video_seeks_natively(song.video_codec, song.audio_codec);
 	// Anything that changes the picture or bounds the output forces a real
@@ -832,8 +832,8 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	// video_direct_playable_for(), not video_direct_playable(): a client may
 	// have said it demuxes this container itself, which moves the file from
 	// Remux to Direct and changes nothing else.  Both tiers are
-	// video_seeks_natively()-true, so nativeSeek — which the API advertised
-	// before this request existed — is right either way.  See codecs.hh.
+	// video_seeks_natively()-true, so nativeSeek - which the API advertised
+	// before this request existed - is right either way.  See codecs.hh.
 	enum class Tier { Direct, Remux, Encode };
 	Tier tier = Tier::Encode;
 	if (codecs_ok && !constrained && !partial)
@@ -848,7 +848,7 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	std::string ua = req.get_header_value("User-Agent");
 
 	// What the client said it can be sent untouched, which is the only way "the
-	// app sent playable and the server remuxed anyway" gets diagnosed — nine
+	// app sent playable and the server remuxed anyway" gets diagnosed - nine
 	// times in ten a proxy dropping the query string.  Printed verbatim, unlike
 	// the id on the audio line: the handler dropped every token that was not
 	// declarable, so there is nothing here for log_safe() to clean.
@@ -875,8 +875,8 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 		// link that could do far better.
 		//
 		// Note what that leaves.  A cast video has exactly the shape the audio
-		// path was fixed for — a receiver that stops reading, a connection that
-		// then goes idle past somebody's 60 s timeout — because serve_video
+		// path was fixed for - a receiver that stops reading, a connection that
+		// then goes idle past somebody's 60 s timeout - because serve_video
 		// honours no pace= at any tier.  If a cast film ever dies about a
 		// minute in, this is the first place to look, and the answer is a
 		// video-sized pacing window, not the absence of one.
@@ -916,15 +916,15 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 		// goes out is *fragmented* MP4, which streams as it is produced, while
 		// the entry being built beside it has its moov at the end, which is
 		// what makes every later play Range-seekable.  A moov-at-end file
-		// cannot be streamed as it grows — the player fetches the tail for the
-		// index first — and a fragmented one carries no index at all, so
+		// cannot be streamed as it grows - the player fetches the tail for the
+		// index first - and a fragmented one carries no index at all, so
 		// neither layout can do both jobs.
 		//
 		// Two independent ffmpegs rather than one with -f tee, deliberately.
 		// A tee's outputs share one loop, so the client draining the pipe
 		// would pace the cache write too: a paused viewer stalls the build and
 		// holds its slot, and the SIGKILL this path sends on disconnect would
-		// truncate the .part — making whether the cache is ever populated a
+		// truncate the .part - making whether the cache is ever populated a
 		// function of whether somebody watched to the end.  Separate runs give
 		// each half the lifecycle it needs, and cost a second read of the
 		// source that the page cache largely absorbs.
@@ -944,7 +944,7 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 			             entry);
 			return;
 			}
-		// Asked to start now, or the cache is disabled, full or unhappy —
+		// Asked to start now, or the cache is disabled, full or unhappy -
 		// fall through and pipe it instead.  The user still sees the video.
 		//
 		// `building` rather than hit/miss, and it is not decoration: this
@@ -994,8 +994,8 @@ void Streamer::serve_transcoded(httplib::Response& res,
 	}
 
 	// A ceiling on concurrent *piped* transcodes.  TranscodeCache bounds its
-	// own ffmpegs with --transcode-jobs; this path — seeks, HLS segments,
-	// cast pipes, cache fallbacks — forked with no bound at all, so one
+	// own ffmpegs with --transcode-jobs; this path - seeks, HLS segments,
+	// cast pipes, cache fallbacks - forked with no bound at all, so one
 	// account fanning stream.view requests out over the 32 workers could put
 	// an encoder on every one of them.  The slot rides in the releaser and so
 	// is freed when the response finishes, however it finishes; a request
@@ -1041,7 +1041,7 @@ void Streamer::serve_transcoded(httplib::Response& res,
 	auto total_sent = std::make_shared<size_t>(0);
 
 	// Content-length is unknown for transcoded output.  Use the *chunked*
-	// content-provider variant, not the plain unknown-length one — the
+	// content-provider variant, not the plain unknown-length one - the
 	// latter sets neither Content-Length nor Transfer-Encoding, leaving
 	// the response close-delimited (HTTP/1.0-style framing).  Firefox
 	// waits for connection close before starting playback in that mode,
@@ -1110,7 +1110,7 @@ void Streamer::serve_transcoded(httplib::Response& res,
 					float effective_pos = (pos >= 0.0f) ? pos : 0.0f;
 					float buf_secs   = audio_sent - effective_pos;
 					if (buf_secs > pace_lead) {
-						// Cap single-sleep at 2 s — see serve_direct comment.
+						// Cap single-sleep at 2 s - see serve_direct comment.
 						auto sleep_ms = std::min(static_cast<long>(
 						    (buf_secs - pace_lead) * 1000.0f), 2000L);
 						auto deadline = std::chrono::steady_clock::now()
@@ -1163,8 +1163,8 @@ void Streamer::serve_transcoded(httplib::Response& res,
 	if (est_length > 0) {
 		// estimateContentLength: the client asked for a Content-Length on a
 		// stream whose true size is not knowable until ffmpeg finishes.  The
-		// estimate becomes a contract — a client promised N bytes and given
-		// fewer treats the connection as broken — so an overrun is truncated
+		// estimate becomes a contract - a client promised N bytes and given
+		// fewer treats the connection as broken - so an overrun is truncated
 		// and an underrun is zero-padded.  Trailing zeros fail MP3 frame-sync
 		// and Ogg page-sync, so decoders discard them rather than play noise.
 		//

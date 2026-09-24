@@ -6,7 +6,7 @@
 //
 // Subsonic offers two ways to present credentials: `p=<password>` and the token
 // scheme, `t=md5(password + salt)` with `s=<salt>`. This client used the first,
-// which put the password into every request URL — and a URL is the least
+// which put the password into every request URL - and a URL is the least
 // private thing in a browser. It reaches the server's access log, the reverse
 // proxy's log, the browser's own history, the Referer header of anything the
 // page loads, and every cache in between. Over HTTPS that is not an
@@ -14,8 +14,8 @@
 //
 // So the salt and the token are computed once at login and those are what
 // localStorage holds. The token is still equivalent to the password *for this
-// server* — that is inherent to the scheme, and no client-side arithmetic can
-// change it — but it is not the password itself, which is the part a person is
+// server* - that is inherent to the scheme, and no client-side arithmetic can
+// change it - but it is not the password itself, which is the part a person is
 // liable to have reused somewhere that matters more than their music.
 //
 // The salt is per login rather than per request, matching AuthInterceptor.kt in
@@ -25,7 +25,7 @@
 // The server this client talks to, which is always the one that served it.
 //
 // It used to be typed into the login form and kept in localStorage, so a copy
-// of this page could be pointed at any gaindrive anywhere — including one
+// of this page could be pointed at any gaindrive anywhere - including one
 // hosted somewhere else entirely, which is a credential prompt for a server
 // the person reading it has no way to identify.  There is nothing to configure
 // now: the API lives under the URL the page was loaded from, and a build of
@@ -34,7 +34,7 @@
 // Not simply relative URLs, though these are all same-origin and could be.
 // An absolute base is what the four multipart and body-carrying fetches
 // compose, what ends up in a media element's src, and what the login log line
-// prints — and one that reads back as the address in the URL bar is easier to
+// prints - and one that reads back as the address in the URL bar is easier to
 // believe than a relative path that resolves silently.
 //
 // The origin alone is not enough: a reverse proxy may mount the client under
@@ -57,7 +57,7 @@ const creds = {
    },
    // Stores the derived pair rather than the password, which never reaches
    // here. tryLogin() derives it, proves it against the server, and then saves
-   // that exact pair — deriving a second time would store a token the login
+   // that exact pair - deriving a second time would store a token the login
    // never tested.
    save(user, salt, token) {
       localStorage.setItem('gd_user',   user);
@@ -73,7 +73,7 @@ const creds = {
       // sitting in localStorage for ever.
       localStorage.removeItem('gd_password');
       // Likewise a server address from before this client stopped asking for
-      // one.  Nothing reads it, so it is only clutter — but clutter naming a
+      // one.  Nothing reads it, so it is only clutter - but clutter naming a
       // host somebody's library is on.
       localStorage.removeItem('gd_server');
    },
@@ -86,7 +86,7 @@ const creds = {
 // parameter, which is `gaindrive-web` for every browser in the world: the
 // server would then be unable to tell this browser from another of the same
 // user's, and playing a track in one would push it onto the other's Chromecast
-// — which is the bug this exists to fix, seen from one machine over.
+// - which is the bug this exists to fix, seen from one machine over.
 //
 // Deliberately outside `creds` and never cleared on logout. It identifies the
 // browser, not the account, and ownership is the pair, so carrying it across a
@@ -184,8 +184,8 @@ function md5(str) {
 // ── Playback preferences ────────────────────────────────────────────────────
 
 // "Play videos as audio only": ask the server for the soundtrack alone rather
-// than the picture.  Backing out of the video surface does not do this — the
-// whole stream still arrives — so it is a request-level choice, not a UI one.
+// than the picture.  Backing out of the video surface does not do this - the
+// whole stream still arrives - so it is a request-level choice, not a UI one.
 const videoAudioOnly = {
    get()   { return localStorage.getItem('gd_video_audio_only') === '1'; },
    set(on) {
@@ -203,7 +203,7 @@ const videoAudioOnly = {
 // Kept per library section, because they are browsed for different reasons:
 // a discography is chronological, while a film category is findable only by
 // name.  The caller names the section it drilled in from ('artists',
-// 'categories' or 'uploads') — this used to key on a stored "current mode",
+// 'categories' or 'uploads') - this used to key on a stored "current mode",
 // which could disagree with the listing actually on screen.
 const albumSort = {
    get(section)  {
@@ -217,8 +217,8 @@ const albumSort = {
       },
    };
 
-// The year arm reproduces the server's own ORDER BY exactly — year, then title
-// case-insensitively — so toggling back to Year restores the list the server
+// The year arm reproduces the server's own ORDER BY exactly - year, then title
+// case-insensitively - so toggling back to Year restores the list the server
 // sent rather than a subtly different one.  Sorts a copy, leaving the fetched
 // array as the server's answer.
 function sortedAlbums(list, mode) {
@@ -258,7 +258,7 @@ const _canPlayProbe = document.createElement('audio');
 // `src/codecs.hh` names the containers whose codec follows from the extension,
 // and `audio_form_needs_read()` the ones that have to be opened to find out.
 // These are the same two lists seen from the client, and they have to stay in
-// step by eye — there is no shared definition to lean on across the languages.
+// step by eye - there is no shared definition to lean on across the languages.
 const UNAMBIGUOUS_AUDIO_MIMES = new Set([
    'audio/mpeg',   // MPEG audio, and nothing else
    'audio/flac',
@@ -272,13 +272,13 @@ const UNAMBIGUOUS_AUDIO_MIMES = new Set([
 //
 // **'maybe' is a hedge about the payload, not about the codec**, and which of
 // those it is depends on the container. For audio/mp4 it is genuinely about the
-// codec — AAC or ALAC — and Firefox on Linux answers 'maybe' there and then
+// codec - AAC or ALAC - and Firefox on Linux answers 'maybe' there and then
 // fails on the AAC payload with a scary "could not be decoded" console message.
 // audio/ogg is ambiguous the same way: Vorbis, Opus, FLAC or Speex. Those two
 // still need 'probably'.
 //
 // For a container that can only hold one codec there is nothing to be ambiguous
-// about, so a hedge is not a refusal — and treating it as one is expensive.
+// about, so a hedge is not a refusal - and treating it as one is expensive.
 // Firefox answers 'maybe' for audio/mpeg, which had the whole library requested
 // as format=mp3: harmless for an MP3, which the server passes through untouched
 // because the encoder matches, but a real re-encode of every FLAC.
@@ -316,7 +316,7 @@ const FORMAT_ENCODERS = {
 // Whether asking for `fmt` leaves a `.suffix` file untouched.
 //
 // The server treats a format that resolves to the same muxer *and* encoder as
-// the source as no change at all — see `plan_transcode` in `src/streamer.cc`,
+// the source as no change at all - see `plan_transcode` in `src/streamer.cc`,
 // and API.md: "format=ogg on a .oga file does not re-encode". So a request can
 // name a format and still be answered with the original bytes.
 //
@@ -357,12 +357,12 @@ function servedUnchanged(fmt, song) {
 // Deliberately not pickStreamFormat(): that probes the song's own type, which
 // for a video is a *video* container, so an audio element answers "no" and it
 // would land on mp3 by accident rather than by decision.  Opus is the better
-// answer where it decodes — a film's soundtrack is long, and this is a
+// answer where it decodes - a film's soundtrack is long, and this is a
 // re-encode either way, so the container is a free choice.
 // Keep the picture in this player when the sound is going to a receiver that
 // cannot show it.  Default **on**: the alternative is a black panel, the film
-// is being read off the server's disk either way, and the one cost — a second
-// stream to this browser — is the thing the setting exists to decline.
+// is being read off the server's disk either way, and the one cost - a second
+// stream to this browser - is the thing the setting exists to decline.
 const castLocalVideo = {
    get()   { return localStorage.getItem('gd_cast_local_video') !== '0'; },
    set(on) {
@@ -376,7 +376,7 @@ const castLocalVideo = {
 //
 // This is the one quantity nothing here can compute.  What a receiver reports
 // is where its *decoder* is, and the sound leaves the speakers some unknown
-// time later — a Chromecast's own output buffer plus, on an amplifier, its
+// time later - a Chromecast's own output buffer plus, on an amplifier, its
 // DSP.  It is a constant for a given device, so it is calibrated once by the
 // person watching and kept against that device's id.  Everything else about
 // the drift is measured and corrected continuously; see castSyncTick().
@@ -396,7 +396,7 @@ const castSyncDelay = {
 // constants, although they read as one family: castSyncStep is initialised at
 // module load and those sit two thousand lines below, which is a temporal dead
 // zone and a ReferenceError before the client has drawn anything.  The split is
-// honest anyway — these describe the control, those describe the loop.
+// honest anyway - these describe the control, those describe the loop.
 //
 // castSyncPhase is what the buttons read:
 //
@@ -407,7 +407,7 @@ const castSyncDelay = {
 //               inside SYNC_DEAD
 //
 // The last state is the signal that was missing entirely.  The loop takes 5-15 s
-// to absorb anything it is given, and nothing anywhere said so — so the natural
+// to absorb anything it is given, and nothing anywhere said so - so the natural
 // thing to do was adjust again, and overshoot.  castSyncTick() is the settle
 // detector because it is the only thing that knows.
 // A press moves this far, halving on every reversal.  400 ms is big enough to
@@ -424,7 +424,7 @@ let castSyncLastDir = 0;
 let castSyncRun     = 0;
 let castSyncPhase   = 'idle';
 // Latched per stream: a chunked re-encode cannot be seeked outside what it has
-// buffered, and a refused seek is silent — no 'seeked' event, no error.
+// buffered, and a refused seek is silent - no 'seeked' event, no error.
 let castSyncNoSeek  = false;
 let castSyncSettleAt = 0;
 
@@ -441,7 +441,7 @@ function apiUrl(endpoint, extra = {}) {
       v: '1.16.1',
       c: 'gaindrive-web',
       // Sent on everything rather than threaded through the seven cast calls
-      // by hand — the same bargain authParams() strikes, and stream.view needs
+      // by hand - the same bargain authParams() strikes, and stream.view needs
       // it too since that is where the server decides whether to redirect
       // playback to the Chromecast. It is constant, so it costs the image
       // cache nothing.
@@ -485,7 +485,7 @@ const HERO_BOX = 320;
 // An artist portrait is not a file on the server, it is something the server
 // has to go and find: MusicBrainz, then Wikidata, then Wikipedia, then a
 // couple of others. That runs on a background thread now, so asking for one
-// that has not been resolved yet gets a 404 rather than a stalled request —
+// that has not been resolved yet gets a 404 rather than a stalled request -
 // and the request itself is what pushes that artist to the front of the
 // resolver's queue.
 //
@@ -588,13 +588,13 @@ function showError(msg) {
    document.getElementById('error-modal').classList.remove('hidden');
    }
 
-// A box holding a secret — an API token, not a login credential.
+// A box holding a secret - an API token, not a login credential.
 //
 // It is masked by CSS rather than by being <input type="password">, and that is
 // the whole point: a browser's own password manager classifies a *page* by
 // looking for a password field, and having found one offers to store whatever
 // was typed in it as a login.  That is what made leaving Settings pop "Store
-// your login details?", and no attribute prevents it — there is no autocomplete
+// your login details?", and no attribute prevents it - there is no autocomplete
 // token meaning "a secret that is not a credential".  `off` is ignored on
 // principle, `current-password` invites a fill, and `new-password` invites
 // precisely that save, being the token for a password *being set*.
@@ -658,7 +658,7 @@ function _closeCoverArtDialog() {
 let _promoteCb = null;
 
 // Suggestions for the chosen root, so that "type a name not in the list" is how
-// a new artist or category is made — the server creates the directory, and
+// a new artist or category is made - the server creates the directory, and
 // there is no separate operation for it.
 async function _fillPromoteFolders(rootId) {
    const list = document.getElementById('promote-folder-list');
@@ -677,7 +677,7 @@ async function _fillPromoteFolders(rootId) {
 
 // [artist] is what the batch is currently filed under, used as the default for
 // an artists root only. Under a categories root L1 is a *category*, and the
-// batch's artist is whatever the source called it — a channel name, usually,
+// batch's artist is whatever the source called it - a channel name, usually,
 // which is never the answer.
 function showPromoteDialog(album, artist, onGo) {
    _promoteCb = onGo;
@@ -789,7 +789,7 @@ async function tryLogin(user, password) {
 }
 
 // Verify credentials already in localStorage. Separate from tryLogin() because
-// there is no password to derive from at this point — the stored token is the
+// there is no password to derive from at this point - the stored token is the
 // credential, and this only asks the server whether it still works.
 async function verifySaved() {
    const {user, salt, token} = creds.load();
@@ -799,7 +799,7 @@ async function verifySaved() {
    });
    // Against the origin, which for a token saved by a client that still asked
    // for a server address may not be the server it was issued by.  It fails
-   // auth there, the restore path clears it, and the user logs in again — the
+   // auth there, the restore path clears it, and the user logs in again - the
    // one thing that must not happen is it being sent to whatever host that
    // client was pointed at.
    const resp = await fetch(`${serverBase()}/rest/ping.view?${p}`);
@@ -853,7 +853,7 @@ const paneNav = {
          requestAnimationFrame(() => { strip.style.transition = ''; });
       },
 
-   // Returns true only when navigating to newDepth would move the strip —
+   // Returns true only when navigating to newDepth would move the strip -
    // i.e. the leftmost visible pane index changes. Used to decide whether
    // a history entry is worth pushing.
    willSlide(newDepth) {
@@ -865,13 +865,13 @@ const paneNav = {
       this.depth = depth;
       this._apply(true);
       // The cursor belongs to whichever pane is active, so a pane change moves
-      // it — which is what makes Enter on an artist land on the first album
+      // it - which is what makes Enter on an artist land on the first album
       // rather than leaving the mark behind on the artist that opened it.
       //
       // Here rather than at the call sites because a view renders its pane and
       // slides last, so this is the one moment at which both halves are true:
       // the new pane holds its rows and it is the pane the keys now drive.  The
-      // click handler's deferred paint cannot do it — a view is a fetch away,
+      // click handler's deferred paint cannot do it - a view is a fetch away,
       // and by the time its rows exist that timeout has long since fired.
       navPaint();
       },
@@ -888,8 +888,8 @@ const paneNav = {
 //
 // Every view empties its pane, awaits the server, and only then appends what it
 // drew. Those two halves are separated by an await, so the browser is free to
-// start a *second* render in between — a click on another row, a Back, an
-// upload poller's redraw — and that one appends into the pane the first is
+// start a *second* render in between - a click on another row, a Back, an
+// upload poller's redraw - and that one appends into the pane the first is
 // still filling. Both listings then sit in the pane, stacked, which is exactly
 // the doubled track listing and doubled uploads listing this guards against.
 //
@@ -899,7 +899,7 @@ let renderGen = 0;
 
 // Bumped by the two navigations that move the strip without drawing anything:
 // Back/Forward, and the pane keys. Neither starts a render, so neither bumps
-// renderGen — which is how a slow viewTracks() used to finish after a Back and
+// renderGen - which is how a slow viewTracks() used to finish after a Back and
 // slide the user straight back out of the pane they had just returned to.
 //
 // The content it drew is not wrong, though, and Forward is one keypress away,
@@ -911,7 +911,7 @@ let renderNavEpoch = 0;
 
 // Entry points call this with nothing. A view that renders another view passes
 // its own generation down instead, so the inner render does not declare the
-// outer one stale — viewTracks() -> viewAlbums() is the only such call.
+// outer one stale - viewTracks() -> viewAlbums() is the only such call.
 function beginRender(inherit = null) {
    if (inherit !== null) return inherit;
    renderNavEpoch = navEpoch;
@@ -1023,7 +1023,7 @@ async function showView(name) {
 // for nesting into the strip rather than swapping one pane's contents.
 //
 // The archive-upload form used to sit in here. It now lives at the top of the
-// Uploads listing — see makeUploadBar() — because that is the listing it fills.
+// Uploads listing - see makeUploadBar() - because that is the listing it fills.
 
 async function viewSettings() {
    const gen = beginRender();
@@ -1097,7 +1097,7 @@ async function viewSettings() {
    if (admin) {
       apiCall('getUsers').then(sr => {
          if (renderStale(gen)) return;
-         // getUsers returns {users: {user: [...]}} — user may be absent if empty.
+         // getUsers returns {users: {user: [...]}} - user may be absent if empty.
          const u   = sr.users?.user ?? [];
          const arr = Array.isArray(u) ? u : [u];
          const off = arr.filter(x => x.disabled).length;
@@ -1261,7 +1261,7 @@ function viewSettingsPlayback() {
    localVidHint.textContent =
       'A speaker or amplifier that cannot show a picture is sent the '
       + 'soundtrack. With this on the film also plays here, muted and kept in '
-      + 'step with it — which means streaming it to this device as well. '
+      + 'step with it - which means streaming it to this device as well. '
       + 'Takes effect on the next track.';
    sec.appendChild(localVidHint);
 
@@ -1324,7 +1324,7 @@ async function viewSettingsUsers() {
       userList.innerHTML = '';
       try {
          const sr = await apiCall('getUsers');
-         // getUsers returns {users: {user: [...]}} — user may be absent if empty.
+         // getUsers returns {users: {user: [...]}} - user may be absent if empty.
          const users = sr.users?.user ?? [];
          const arr = Array.isArray(users) ? users : [users];
          for (const u of arr) {
@@ -1430,7 +1430,7 @@ async function viewSettingsServer() {
    metaHint.textContent =
       'Queues an online lookup for every artist with no biography and every '
       + 'album with no description. MusicBrainz allows one request a second, '
-      + 'so a whole library takes hours — leave it running. Progress is in '
+      + 'so a whole library takes hours - leave it running. Progress is in '
       + 'the server log; the only way to stop it is to restart the server.';
    metaSection.appendChild(metaHint);
 
@@ -1462,9 +1462,9 @@ async function viewSettingsServer() {
    try {
       const sr = await apiCall('getServerSettings');
       tokenInput.placeholder =
-         sr.serverSettings?.discogsTokenSet ? '(set — type to replace)' : '(not set)';
+         sr.serverSettings?.discogsTokenSet ? '(set - type to replace)' : '(not set)';
       tmdbInput.placeholder  =
-         sr.serverSettings?.tmdbKeySet      ? '(set — type to replace)' : '(not set)';
+         sr.serverSettings?.tmdbKeySet      ? '(set - type to replace)' : '(not set)';
       }
    catch (e) {
       // Not fatal: the boxes still save. Logged rather than shown, since the
@@ -1475,7 +1475,7 @@ async function viewSettingsServer() {
    // Saving a box the user did not type into would clear the stored secret,
    // which it never could while the box arrived holding it.  So an empty box
    // saves nothing and says so, and clearing is asked for rather than fallen
-   // into — the API still takes an empty value for it.
+   // into - the API still takes an empty value for it.
    const saveSecret = async (input, status, name, param, ok) => {
       const typed = input.value;
       if (!typed) {
@@ -1494,10 +1494,10 @@ async function viewSettingsServer() {
          // so sending both would let a stale input overwrite the other setting.
          await apiCall('saveServerSettings', {[param]: typed});
          // Emptied on success, so the secret does not sit in the DOM for the
-         // rest of the session — the same reason the login form's fields are
+         // rest of the session - the same reason the login form's fields are
          // wiped, and now the only thing the placeholder has to convey.
          input.value = '';
-         input.placeholder = '(set — type to replace)';
+         input.placeholder = '(set - type to replace)';
          status.textContent = ok;
          }
       catch (e) { status.textContent = `Error: ${e.message}`; }
@@ -1516,7 +1516,7 @@ async function viewSettingsServer() {
       });
 
    // Confirmed rather than fired on the first click: it commits the server to
-   // hours of paced network, and — having no stop — a mis-click is not
+   // hours of paced network, and - having no stop - a mis-click is not
    // undoable except by restarting.
    const startLookup = (what, label) => {
       const msg = `Look up missing ${label} for the whole library?`;
@@ -1686,7 +1686,7 @@ async function viewUserEdit(user, refreshFn) {
    // Pane 2, under the Users category on pane 1: the only place in Settings
    // that goes a level deeper than a category.
    //
-   // Nothing here awaits before it paints, so it cannot be interrupted — but
+   // Nothing here awaits before it paints, so it cannot be interrupted - but
    // the pane it empties may well be mid-render from something else, and the
    // bump is what stops that render appending on top of this form.
    beginRender();
@@ -1877,7 +1877,7 @@ let uploadsSignature = '';
 let uploadsPollTimer = null;
 
 // What this server can fetch from a URL: null until asked, [] when the feature
-// is unavailable — no handlers configured, or the tool they name is not
+// is unavailable - no handlers configured, or the tool they name is not
 // installed. An empty list is what keeps the row undrawn, so the client never
 // offers something the server would only refuse.
 //
@@ -1890,7 +1890,7 @@ let fetchPollTimer = null;
 let fetchLastState = {};
 // Which call to pollFetchJobs() a tick belongs to. One timer slot is shared by
 // every render of the upload bar, and a tick captures its host node *before*
-// awaiting getFetchJobs — so a tick from an earlier render can wake after a
+// awaiting getFetchJobs - so a tick from an earlier render can wake after a
 // newer call has installed its own interval, render into a detached node and
 // then clearInterval the timer it never owned.
 let fetchPollGen   = 0;
@@ -1902,14 +1902,14 @@ let statusPollGen   = 0;
 // A fetch finished while the user was reading an album, so the uploads listing
 // on pane 0 is stale. Not redrawn there and then: viewArtists() slides back to
 // pane 0, which would yank the album out from under them. Deferred to the next
-// return to pane 0 rather than to "a later tick" — there is no later tick,
+// return to pane 0 rather than to "a later tick" - there is no later tick,
 // because the poll stops on the very tick that sees the last job end.
 let uploadsStale   = false;
 
 // Whose uploads the uploads listing shows.
 //
 // An admin gets everybody's, because an admin is the only account that can
-// promote one into the shared library — without this a non-admin's upload is
+// promote one into the shared library - without this a non-admin's upload is
 // stranded, visible to its owner and to nobody who can act on it.
 //
 // The server groups the listing by owner for '*' instead of by first letter, so
@@ -1932,7 +1932,7 @@ let _dupeTimer = null;
 // marked as such: something fetched a fortnight ago and never promoted is the
 // likeliest duplicate of all, and it is the one no library listing would show.
 //
-// The map is name → {id, label}, lowercased for lookup, first slice winning —
+// The map is name → {id, label}, lowercased for lookup, first slice winning -
 // the same "registry order decides" tie-break used everywhere a merge happens.
 function loadNameSuggestions(list) {
    const types = [...new Set((musicFolders ?? [])
@@ -1961,7 +1961,7 @@ function loadNameSuggestions(list) {
             const opt = document.createElement('option');
             opt.value = entry.name;
             // Shown as secondary text where the browser supports it, ignored
-            // where it does not — the value is what gets inserted either way.
+            // where it does not - the value is what gets inserted either way.
             opt.label = entry.label;
             list.appendChild(opt);
             }
@@ -1982,14 +1982,14 @@ async function checkExisting(knownPromise, artist, album) {
       : hit && `already in ${hit.label}`;
 
    if (hit && album) {
-      // That artist's own albums, which is the precise question — and cheap,
+      // That artist's own albums, which is the precise question - and cheap,
       // because it is one request against an id we already have.
       try {
          const r = await apiCall('getArtist', {id: hit.id});
          const match = (r.artist?.album ?? [])
             .find(a => (a.name ?? a.title ?? '').toLowerCase() === album.toLowerCase());
          if (match) return `You already have “${match.name ?? match.title}” under ` +
-                           `${hit.name} — ${where}.`;
+                           `${hit.name} - ${where}.`;
          }
       catch { /* fall through to the weaker signals */ }
       }
@@ -2024,16 +2024,16 @@ function personalSignature(indexes) {
       .join('|');
    }
 
-// The upload response returns before the server has scanned — scan_dirs() runs
-// on a detached thread — so there is nothing to show at the moment of success.
+// The upload response returns before the server has scanned - scan_dirs() runs
+// on a detached thread - so there is nothing to show at the moment of success.
 // Poll until the listing actually changes rather than re-rendering once into
 // the same list.
 function pollForUpload(status, files) {
    let tries = 0;
    clearInterval(uploadsPollTimer);
    uploadsPollTimer = setInterval(async () => {
-      // Pane 0 holds something else once another view has rewritten it — the
-      // library, or Settings/Playlists/Recents — and a re-render then would
+      // Pane 0 holds something else once another view has rewritten it - the
+      // library, or Settings/Playlists/Recents - and a re-render then would
       // drag the user back here.
       //
       // The stamp rather than the upload bar's node, which this used to look
@@ -2080,7 +2080,7 @@ function pollFetchJobs() {
 
    const tick = async () => {
       if (gen !== fetchPollGen) return;
-      // Gone once anything else has rewritten pane 0 — the library, or
+      // Gone once anything else has rewritten pane 0 - the library, or
       // Settings/Playlists/Recents. Same guard pollForUpload() uses, and for the
       // same reason: a re-render then would drag the user back here.
       let host = document.querySelector('#pane-artists .fetch-jobs');
@@ -2092,7 +2092,7 @@ function pollFetchJobs() {
       if (gen !== fetchPollGen) return;
       // Looked up again after the await: a re-render during the request has
       // replaced the node found above, and writing into the detached one is
-      // silent — the rows are built, appended to nothing, and never seen.
+      // silent - the rows are built, appended to nothing, and never seen.
       host = document.querySelector('#pane-artists .fetch-jobs');
       if (!host) { clearInterval(fetchPollTimer); return; }
       const jobs = r.fetchJobs?.fetchJob ?? [];
@@ -2123,7 +2123,7 @@ function pollFetchJobs() {
          const state = document.createElement('span');
          state.className = 'fetch-state';
          state.textContent = j.state === 'done'
-            ? `done — ${j.files} file(s)`
+            ? `done - ${j.files} file(s)`
             : (j.state === 'error' ? (j.error || 'error') : j.state);
          head.appendChild(state);
          if (j.state === 'queued' || j.state === 'running') {
@@ -2162,7 +2162,7 @@ function pollFetchJobs() {
       // stops two lines below because nothing is live any more. So the listing
       // was never redrawn at all for anyone who was deeper in when a fetch
       // landed. pollForUpload() gets away with the same shape only because its
-      // trigger — a changed listing signature — is not consumed by reading it.
+      // trigger - a changed listing signature - is not consumed by reading it.
       if (finished) {
          if (paneNav.depth === 0) {
             clearInterval(fetchPollTimer);
@@ -2177,24 +2177,24 @@ function pollFetchJobs() {
    fetchPollTimer = setInterval(tick, 2000);
    // Deferred rather than called: makeUploadBar() starts the poll while its own
    // node is still detached, so a tick right now would find no .fetch-jobs and
-   // stop the interval it just set. A macrotask is enough — the caller appends
+   // stop the interval it just set. A macrotask is enough - the caller appends
    // the fragment before yielding.
    setTimeout(tick, 0);
    }
 
-// Landing back on pane 0 without re-rendering it — which is what Back does,
+// Landing back on pane 0 without re-rendering it - which is what Back does,
 // since viewAlbums() only ever writes pane 1 and the popstate handler slides
 // rather than redraws when pane 0 already has children.
 //
 // Two things the slide alone does not do. A batch that landed while the user
 // was deeper in leaves the listing stale, and the poll that would have noticed
-// a *new* job stopped itself the moment nothing was live — so a fetch started
+// a *new* job stopped itself the moment nothing was live - so a fetch started
 // meanwhile, here or in another client, is never picked up. Restarting it costs
 // one getFetchJobs and it stops itself again if there is nothing to watch.
 async function returnedToArtists() {
-   // The flag can only have been set while pane 0 held the uploads listing —
+   // The flag can only have been set while pane 0 held the uploads listing -
    // the poll checks for its own .fetch-jobs node at the top of every tick,
-   // and any other pane-0 render clears the flag — so uploads is always the
+   // and any other pane-0 render clears the flag - so uploads is always the
    // right flavour to redraw. Which also clears the flag.
    if (uploadsStale) { await viewArtists(true); return; }
    if (document.querySelector('#pane-artists .fetch-jobs'))
@@ -2208,7 +2208,7 @@ function makeUploadBar() {
    bar.className = 'upload-bar';
 
    // Nothing here appends as it is built.  Every piece is constructed and the
-   // whole panel's order is then stated once, at the foot of this function —
+   // whole panel's order is then stated once, at the foot of this function -
    // which is the only way to read what the thing looks like without following
    // a dozen appendChild calls through four hundred lines, and the reason it
    // came to interleave a producer, its caption, the shared name fields and
@@ -2261,7 +2261,7 @@ function makeUploadBar() {
    // is one flex line, and a URL box squeezed between two name boxes and a
    // button is unusable on a phone.
    //
-   // The names override whatever the source would have called this — for a
+   // The names override whatever the source would have called this - for a
    // fetch, what the handler parsed out of the video title; for an archive, its
    // own folders and the files' tags. Blank keeps that, which is why neither
    // field is marked required.
@@ -2276,7 +2276,7 @@ function makeUploadBar() {
 
    // Sticky, unlike the URL: fetching six tracks off one concert should mean
    // typing the names once, and only the URL is cleared on success, since that
-   // one genuinely differs every time. The album is the exception — a finished
+   // one genuinely differs every time. The album is the exception - a finished
    // archive upload forgets it, because the next zip is almost never the same
    // album and a leftover name would quietly file it under the last one. The
    // check below is what keeps a stale name from being applied unnoticed.
@@ -2311,7 +2311,7 @@ function makeUploadBar() {
    nameRow.appendChild(clearBtn);
 
    // What the library already has under these names. Advisory and never
-   // blocking: nothing can collide here — the batch is a fresh UUID directory —
+   // blocking: nothing can collide here - the batch is a fresh UUID directory -
    // and the destination root is not chosen until an admin promotes it, so
    // whether that will be refused is genuinely unpredictable from here.
    const dupeNote = document.createElement('p');
@@ -2319,7 +2319,7 @@ function makeUploadBar() {
 
    const known = loadNameSuggestions(nameList);
    // Debounced the way the search box is, with a module-level timer rather than
-   // a generic helper — same reason, which is that every keystroke would
+   // a generic helper - same reason, which is that every keystroke would
    // otherwise be a request.
    const recheck = () => {
       clearTimeout(_dupeTimer);
@@ -2336,11 +2336,11 @@ function makeUploadBar() {
    recheck();
 
    // The URL row, drawn only when the server says it can fetch something. An
-   // empty handler list is the server saying the feature is unavailable — no
-   // handlers configured, or the tool they name is not installed — and offering
+   // empty handler list is the server saying the feature is unavailable - no
+   // handlers configured, or the tool they name is not installed - and offering
    // a box that can only be refused would be worse than offering nothing.
    // Held out here so the order at the foot can place them, and null when the
-   // server cannot fetch anything — which is what makes that list able to skip
+   // server cannot fetch anything - which is what makes that list able to skip
    // the pair without knowing why they are absent.
    let urlRow  = null;
    let urlHint = null;
@@ -2352,7 +2352,7 @@ function makeUploadBar() {
 
       // The running fetches, drawn at the foot.  Built here with the rest of
       // the URL half rather than in a second block on the same condition, and
-      // the poll started with it — unconditionally, not only after a Fetch, or
+      // the poll started with it - unconditionally, not only after a Fetch, or
       // a page reload part-way through a ten-minute download would show
       // nothing at all.  Starting it while this node is still detached is what
       // pollFetchJobs() defers its first tick for.
@@ -2376,7 +2376,7 @@ function makeUploadBar() {
 
       if (canAudio && canVideo) {
          // The .library-modes segmented control, whose only remaining user
-         // this is — the Library's own mode switcher became the merged list.
+         // this is - the Library's own mode switcher became the merged list.
          const seg = document.createElement('div');
          seg.className = 'library-modes';
          for (const m of ['audio', 'video']) {
@@ -2406,7 +2406,7 @@ function makeUploadBar() {
       // telling you to leave them blank lives with them, in stagingHint.
       urlHint.textContent = `Or paste a URL of a page containing a video/audio file:`;
 
-		//— handled by: ${names}
+		// - handled by: ${names}
 		
       const submit = async () => {
          const url = urlInput.value.trim();
@@ -2422,7 +2422,7 @@ function makeUploadBar() {
             const b = albumInput.value.trim();
             if (a) p.artist = a;
             if (b) p.album  = b;
-            // apiCall, not XHR: there is no upload progress to report here —
+            // apiCall, not XHR: there is no upload progress to report here -
             // the server does the fetching, and getFetchJobs reports on it.
             await apiCall('fetchUrl', p);
             // Only the URL is cleared, so a re-render cannot resurrect a stale
@@ -2447,7 +2447,7 @@ function makeUploadBar() {
    // The panel's order, in one place.  What happens to whatever arrives and
    // the names that apply to both producers come first: you say where it goes,
    // then pick how it gets here.  The two producers follow, adjacent, because
-   // they are alternatives — upload an archive, or paste a URL — and nothing
+   // they are alternatives - upload an archive, or paste a URL - and nothing
    // else in here says so.  Then the progress of the one you started.
    bar.append(stagingHint, nameRow, nameList, dupeNote);
    bar.append(hint);
@@ -2468,7 +2468,7 @@ function makeUploadBar() {
       // The same rule the fetch uses: an untouched field sends nothing at all
       // rather than an empty value, because the server is entitled to treat a
       // present-but-empty name as a mistake. Query parameters rather than form
-      // fields — the multipart body is the archive, and the handler reads these
+      // fields - the multipart body is the archive, and the handler reads these
       // from req.params.
       const a = artistInput.value.trim();
       const b = albumInput.value.trim();
@@ -2527,7 +2527,7 @@ function makeUploadBar() {
 
 async function viewArtists(uploads = false) {
    // Whatever a finished fetch left behind is about to be re-read, however the
-   // user got here — so the deferred redraw is owed to nobody any more.
+   // user got here - so the deferred redraw is owed to nobody any more.
    uploadsStale = false;
    const gen = beginRender();
    const pane = paneReset('pane-artists', uploads ? 'uploads' : 'artists');
@@ -2578,7 +2578,7 @@ async function viewArtists(uploads = false) {
             ]);
          artistIndexes = art?.artists?.index ?? [];
          // The whole group sits under one heading, where only alphabetical
-         // reads as an order at all — so the server's buckets are flattened
+         // reads as an order at all - so the server's buckets are flattened
          // and re-sorted rather than kept.
          categoryList = (cat?.artists?.index ?? []).flatMap(i => i.artist ?? [])
             .sort((a, b) =>
@@ -2612,7 +2612,7 @@ async function viewArtists(uploads = false) {
    header.appendChild(title);
 
    // The one control the segmented mode row left behind: the way into the
-   // uploads listing. On the role, not on the roots — see canUpload().
+   // uploads listing. On the role, not on the roots - see canUpload().
    if (!uploads && canUpload()) {
       const up = document.createElement('button');
       up.className = 'mi uploads-open-btn';
@@ -2626,7 +2626,7 @@ async function viewArtists(uploads = false) {
 
    // The form belongs to the listing it fills. Role-gated rather than
    // root-gated: getMusicFolders omits the uploads root, so the client cannot
-   // tell whether one is configured — the server says so on submit. The role
+   // tell whether one is configured - the server says so on submit. The role
    // test is not redundant with the entry points being gated the same way:
    // a {view:'uploads'} history entry can be popped after upload rights were
    // revoked, and must not draw a form the server would only refuse.
@@ -2670,7 +2670,7 @@ async function viewArtists(uploads = false) {
       };
 
    if (uploads) {
-      // Letter buckets — or usernames, for an admin's everyone view.
+      // Letter buckets - or usernames, for an admin's everyone view.
       for (const index of upIndexes) {
          if (!index.artist?.length) continue;
          addHeading(index.name);
@@ -2678,7 +2678,7 @@ async function viewArtists(uploads = false) {
          }
       }
    else {
-      // Categories first, the whole group under one heading — a library holds
+      // Categories first, the whole group under one heading - a library holds
       // a handful of sections, not enough to bucket by letter. An empty group
       // draws nothing, so an artists-only server looks exactly as it did.
       if (categoryList.length) {
@@ -2697,7 +2697,7 @@ async function viewArtists(uploads = false) {
 
 // The way into the uploads listing: showView's uploads case, plus the history
 // entry that makes Back return to the library. Everything else a view switch
-// owes — the nav highlight, ending a search, forgetting the cursor — is
+// owes - the nav highlight, ending a search, forgetting the cursor - is
 // showView's, and was duplicated here until it had a case to go to.
 async function openUploads() {
    history.pushState({view: 'uploads'}, '');
@@ -3078,8 +3078,8 @@ async function viewPlaylistTracks(playlistId, playlistName) {
       });
 }
 
-// isCategory says this level-1 folder is a section of a categories root —
-// Film, Series — rather than a performer. Such a folder has no biography and
+// isCategory says this level-1 folder is a section of a categories root -
+// Film, Series - rather than a performer. Such a folder has no biography and
 // no portrait by construction: is_category_folder() on the server refuses the
 // MusicBrainz lookup, so asking anyway only reserves a shimmer and an empty
 // circle that never fill in.
@@ -3230,8 +3230,8 @@ async function viewAlbums(artistId, artistName, isCategory = false,
                e.stopPropagation();
                // The dialog rather than a one-click move: the server requires a
                // destination root and folder, and there is nothing in an upload
-               // that says which. It used to guess — the first artists root
-               // declared, under the batch's own name — which could not reach a
+               // that says which. It used to guess - the first artists root
+               // declared, under the batch's own name - which could not reach a
                // categories root at all, so a film went into the music library and
                // was then looked up as a musical artist.
                //
@@ -3251,7 +3251,7 @@ async function viewAlbums(artistId, artistName, isCategory = false,
                      // It is in the shared library now, so staying in Uploads
                      // would leave the user looking at the listing it just left.
                      // The merged library shows both sections, so there is no
-                     // mode to switch — render it and walk in to where the
+                     // mode to switch - render it and walk in to where the
                      // album landed, with the flags of the destination root's
                      // kind. The ids to do that are what moveAlbum returns
                      // and promoteAlbum never did.
@@ -3334,7 +3334,7 @@ async function viewAlbums(artistId, artistName, isCategory = false,
    renderRows();
 
    sortBtn.addEventListener('click', () => {
-      // Which album pane 2 is showing has to survive the reorder — the rows
+      // Which album pane 2 is showing has to survive the reorder - the rows
       // are new nodes, so the highlight would otherwise be dropped on a
       // listing whose tracks are still on screen beside it.
       const sel = list.querySelector('.album-row.selected')?.dataset.id;
@@ -3354,7 +3354,7 @@ async function viewAlbums(artistId, artistName, isCategory = false,
 
    // Fetch artist info without blocking the album list.
    //
-   // The server does not query MusicBrainz while we wait any more — it queues
+   // The server does not query MusicBrainz while we wait any more - it queues
    // the artist onto the same background resolver that finds portraits and
    // answers at once with `resolving` set. That is what stops three or four
    // unresolved artists eating this browser's six connections to the origin and
@@ -3391,7 +3391,7 @@ async function viewAlbums(artistId, artistName, isCategory = false,
       if (force) params.force = '1';
       apiCall('getArtistInfo2', params).then(srInfo => {
          // Navigated away, or this pane has been reused for another artist.
-         // Nobody can see this, so stop asking — the same test portraitPending
+         // Nobody can see this, so stop asking - the same test portraitPending
          // makes, against the marker set just above.
          if (!document.contains(bioSlot)
              || pane.dataset.artistId !== String(artistId)) return;
@@ -3410,7 +3410,7 @@ async function viewAlbums(artistId, artistName, isCategory = false,
 
          // A poll that learnt nothing must not redraw. Rebuilding the row
          // replaces the portrait <img>, which drops one that is still loading
-         // and hands portraitPending a fresh element to chase — two pollers on
+         // and hands portraitPending a fresh element to chase - two pollers on
          // the same picture, restarted every fifteen seconds.
          if (bioTries > 0 && resolving && !bio && !wikiUrl && !allMusicUrl) {
             bioTimer = setTimeout(() => { bioTries++; requestBio(false); },
@@ -3458,8 +3458,8 @@ async function viewAlbums(artistId, artistName, isCategory = false,
             bioP = document.createElement('p');
             bioP.className = 'artist-bio-text';
             // Text, not markup.  A provider's biography is somebody else's
-            // editable content — Wikipedia's extract and TheAudioDB's, which
-            // is community-edited — and this was the one place it was treated
+            // editable content - Wikipedia's extract and TheAudioDB's, which
+            // is community-edited - and this was the one place it was treated
             // as HTML and so the one place it could run: innerHTML does not
             // execute a <script> tag, but <img src=x onerror=…> fires, on
             // this origin, with the auth token in localStorage in reach.
@@ -3467,7 +3467,7 @@ async function viewAlbums(artistId, artistName, isCategory = false,
             // The comment here used to say "Last.fm-supplied HTML" and was
             // wrong twice over: Last.fm supplies only a URL now, and the field
             // is prose.  The server also cleans it (src/untrusted.hh), so this
-            // is the second of two locks rather than the only one — but the
+            // is the second of two locks rather than the only one - but the
             // first one cannot know what a client will do with the string.
             //
             // Consistent with the rest of the client rather than a new rule:
@@ -3513,7 +3513,7 @@ async function viewAlbums(artistId, artistName, isCategory = false,
             block.appendChild(body);
             }
          else if (wikiUrl || allMusicUrl) {
-            // No bio text — just show the links directly on the block.
+            // No bio text - just show the links directly on the block.
             const linksRow = document.createElement('div');
             linksRow.className = 'links-row';
             if (wikiUrl) {
@@ -3578,7 +3578,7 @@ let musicFolders = null;
 // Whether this browser reached the server from a network the server is itself
 // attached to, as `ping` last reported it.  Casting is refused from anywhere
 // else, so that opening this client from a hotel abroad cannot start music
-// playing in an empty house — and a VPN deliberately does not count, since a
+// playing in an empty house - and a VPN deliberately does not count, since a
 // full tunnel from that same hotel would reach the speakers just as well.
 //
 // Optimistic until the first ping answers, because the alternative is a
@@ -3621,7 +3621,7 @@ let castBaseAt          = 0;      // Date.now() (ms) when castBaseTime was recor
 let castSongDuration    = 0;      // total song duration; fallback when queue is not loaded
 let castEndStallTime    = null;   // Date.now() when BUFFERING-at-end stall started
 // True when the current LOAD sent the receiver a film's soundtrack rather than
-// the film.  Purely a statement about the bytes on the wire — the info dialog
+// the film.  Purely a statement about the bytes on the wire - the info dialog
 // and the "Preparing sound…" label are all that read it, since a screenless
 // device may equally be sent the whole file.  Where the picture goes is
 // castReceiverVideo below.
@@ -3639,14 +3639,14 @@ let castReceiverVideo   = true;
 // container, bitrate and tier, as castLoad and castSession both report them.
 // Null when nothing has been loaded this session.
 //
-// Held rather than recomputed because the decision is the server's — it is the
+// Held rather than recomputed because the decision is the server's - it is the
 // one place holding both the song and the device, and the tier ladder it comes
 // off lives in src/codecs.hh.  Working it out again here from the device list
 // and the codec pair would be a second copy of that ladder in another
 // language, which is the drift every predicate in codecs.hh warns about.
 let castStream          = null;
 // True while this session is showing the film here, muted, slaved to the
-// receiver's clock — the mode castSyncTick() below drives.  Distinct from
+// receiver's clock - the mode castSyncTick() below drives.  Distinct from
 // castReceiverVideo, which says whether a picture is appearing over there:
 // this one can be declined by setting, and is impossible for an audio track.
 let castVideoLocal      = false;
@@ -3658,8 +3658,8 @@ let castExpectedPosition = null;  // absolute position we asked the receiver to
                                   // once the receiver reports playback near it
 // The last server notice sequence this page has acted on.  The notice itself
 // is what the server has to say about a load that produced no status of its
-// own — a television that never finished starting up, so the LOAD was never
-// sent — and it is repeated on every push, since a push is the only thing that
+// own - a television that never finished starting up, so the LOAD was never
+// sent - and it is repeated on every push, since a push is the only thing that
 // carries it.  Without the sequence the same sentence would be shown again
 // every fifteen seconds, which is how often the SSE republishes an unchanged
 // status.
@@ -3689,8 +3689,8 @@ function onCastStatus(s) {
    // receiver's reported currentTime.
    if (typeof s.startOffset === 'number') castStartOffset = s.startOffset;
    // The stream description, repeated on every push.  castLoad's reply is the
-   // *attempt*, and a receiver that refuses it gets a second, different load —
-   // a film becoming its soundtrack — so the reply the client read can already
+   // *attempt*, and a receiver that refuses it gets a second, different load -
+   // a film becoming its soundtrack - so the reply the client read can already
    // be describing something that is not playing.  Read unconditionally rather
    // than only on a change: it costs an assignment, and a version test would be
    // one more thing able to drift.
@@ -3703,7 +3703,7 @@ function onCastStatus(s) {
    // an audio-only load is the end of a transcode that ran before the LOAD was
    // sent.  Cleared here, above the transient gate below: that gate drops the
    // statuses of the outgoing session, and a load that errors never produces a
-   // matching one — the notice would then sit there for ever.
+   // matching one - the notice would then sit there for ever.
    if (s.playerState !== 'IDLE' || s.idleReason === 'ERROR')
       videoPreparing(false);
    // After every LOAD the receiver emits a transient sequence: an
@@ -3713,7 +3713,7 @@ function onCastStatus(s) {
    // castBaseTime and make the seek bar flash back to 0 (or near 0).
    // While castExpectedPosition is set we ignore anything more than a few
    // seconds away from it.  IDLE/FINISHED is the one IDLE we must NOT
-   // drop — it drives the end-of-track auto-advance below.
+   // drop - it drives the end-of-track auto-advance below.
    if (castExpectedPosition !== null) {
       if (s.playerState === 'IDLE') {
          if (s.idleReason !== 'FINISHED') return;
@@ -3731,7 +3731,7 @@ function onCastStatus(s) {
    if (s.playerState === 'IDLE') {
       castEndStallTime = null;
       // Advance on a clean end-of-track (FINISHED) or on ERROR when the
-      // last known position was within 10 s of the end — the Chromecast
+      // last known position was within 10 s of the end - the Chromecast
       // sometimes raises IDLE/ERROR instead of IDLE/FINISHED for OGG/FLAC
       // streams whose HTTP connection closes without a recognised EOS frame.
       const song      = player.queue[player.index];
@@ -3804,14 +3804,14 @@ function startCastEvents() {
    //
    // Without this handler nothing would notice. castDeviceId would stay set,
    // the cast button would stay lit, and the interpolation timer below would
-   // go on advancing a seek bar for a session that is now someone else's —
+   // go on advancing a seek bar for a session that is now someone else's -
    // which reads as the player having frozen rather than as having been taken
    // over. No local resume: the user is at another device, and starting audio
    // here would be a surprise.
    src.onerror = () => {
       // Only a permanent close. onerror also fires when the connection merely
       // dropped and EventSource is about to retry, which is readyState
-      // CONNECTING and is what a momentary network blip looks like — acting on
+      // CONNECTING and is what a momentary network blip looks like - acting on
       // that would throw the user out of cast mode for a hiccup. A takeover
       // reaches CLOSED, because the retry is answered 204 and the spec fails
       // the connection for good on any non-200.
@@ -3824,7 +3824,7 @@ function startCastEvents() {
       videoSurfaceSet(null);
       // Worth the round trip before saying which it was.  The server refuses
       // castEvents off its own network, and that close arrives here looking
-      // exactly like a takeover — so telling somebody who has just carried
+      // exactly like a takeover - so telling somebody who has just carried
       // the laptop out of the house that another device took their session is
       // a confident answer to a question they never asked.  A ping that fails
       // leaves the flag alone and the takeover wording stands, which is the
@@ -3840,7 +3840,7 @@ function startCastEvents() {
 // ── Picture here, sound on the receiver ──────────────────────────────────────
 //
 // When the receiver cannot show a film (see castReceiverVideo) the picture can
-// stay in this player instead of being lost — whether the receiver was sent
+// stay in this player instead of being lost - whether the receiver was sent
 // the soundtrack alone or the whole file it can only hear.  The two then have
 // to be kept together, and the reason that is tractable at all is that **the
 // local element is muted**: the correction knob is
@@ -3852,21 +3852,21 @@ function startCastEvents() {
 // way round.  Nothing here can ask a Chromecast to speed up, and would not want
 // to: the sound is what a listener notices.
 
-const SYNC_DEAD = 0.03;   // s — inside this, leave the rate alone
-const SYNC_HARD = 1.00;   // s — beyond this, jump rather than crawl
+const SYNC_DEAD = 0.03;   // s - inside this, leave the rate alone
+const SYNC_HARD = 1.00;   // s - beyond this, jump rather than crawl
 const SYNC_GAIN = 0.20;   // rate change per second of error
 const SYNC_MAX  = 0.05;   // ±5%, comfortably below what an eye can see
 
 // Whether the element can be moved to `t` at all.  A Range-capable stream can:
 // the browser re-requests whatever it needs.  A re-encoded one is chunked with
-// no Range support, so a seek outside what it can reach does nothing —
+// no Range support, so a seek outside what it can reach does nothing -
 // silently, which is why this is a test and not an attempt.
 //
 // The test is `seekable` and not `buffered`, which is not a distinction without
 // a difference: `seekable` is what the browser will honour, and for a chunked
 // response of unknown duration it can be empty while `buffered` holds seconds
 // of decoded video.  Asking the wrong one reports yes where the seek is then
-// refused — and a refused seek fires no event and raises nothing, so it was
+// refused - and a refused seek fires no event and raises nothing, so it was
 // invisible from here.  castSyncNoSeek latches on the read-back check in
 // castSyncStepMove(), which is the only thing that ever finds out.
 function castSyncCanSeek(el, t) {
@@ -3880,16 +3880,16 @@ function castSyncCanSeek(el, t) {
 // ---- The two adjustment buttons ---------------------------------------
 //
 // What this replaced was a slider feeding the loop's setpoint, and it could not
-// be used.  Moving it changed `target` and nothing else, so a 25 ms move — the
-// slider's own step — sat inside SYNC_DEAD and was discarded for ever, anything
+// be used.  Moving it changed `target` and nothing else, so a 25 ms move - the
+// slider's own step - sat inside SYNC_DEAD and was discarded for ever, anything
 // under a second crawled in over 5-15 s at ±5%, and only a move past SYNC_HARD
 // produced the jump the control appeared to promise.  Nothing distinguished
 // "settled" from "still moving", so the natural response to seeing nothing was
 // to move it again, and overshoot.
 //
 // Two things fix it.  An adjustment is applied as a *step*, by the element,
-// leaving the rate loop the job it was written for — absorbing drift over the
-// length of a film — rather than being the mechanism by which a person's input
+// leaving the rate loop the job it was written for - absorbing drift over the
+// length of a film - rather than being the mechanism by which a person's input
 // arrives.  And the buttons are disabled until the picture has actually got
 // there, so adjusting into an unsettled picture is not possible.
 
@@ -3906,7 +3906,7 @@ function castSyncDone() {
 }
 
 // One press.  `dir` is +1 for "the sound is late" and -1 for "the sound is
-// early" — the symptom, never the correction.  A positive delay holds the
+// early" - the symptom, never the correction.  A positive delay holds the
 // picture back, so late sound *increases* it; wired the other way round the
 // control diverges under someone who is pressing correctly.
 //
@@ -3914,7 +3914,7 @@ function castSyncDone() {
 // so its first move would be a jump to the middle of the whole range, and one
 // mistaken press near the end is unrecoverable.  Halving the step on every
 // change of direction needs no bracket, converges in six to eight presses from
-// anywhere, and a mistake is undone by the next press — which also refines it.
+// anywhere, and a mistake is undone by the next press - which also refines it.
 function castSyncAdjust(dir) {
    if (!castVideoLocal || castSyncPhase !== 'idle') return;
    if (castSyncLastDir && dir !== castSyncLastDir) {
@@ -3925,7 +3925,7 @@ function castSyncAdjust(dir) {
       // Halving alone is a one-way ratchet, so one mistaken press early on
       // would cap the step for the rest of the calibration and leave a long
       // haul to be walked in 25 ms increments.  Three presses the same way is
-      // not homing in on anything — it is travelling — so let it coarsen again.
+      // not homing in on anything - it is travelling - so let it coarsen again.
       castSyncStep = Math.min(castSyncStep * 2, SYNC_STEP_START);
       castSyncRun  = 0;
       }
@@ -3970,7 +3970,7 @@ function castSyncStepMove(el, delta) {
          el.removeEventListener('seeked',  onSeeked);
          if (ok) { castSyncSetPhase('settling'); return; }
          // A seek the browser will not perform raises nothing and fires
-         // nothing — the failure this control had no way of noticing.  Latch
+         // nothing - the failure this control had no way of noticing.  Latch
          // it so the next press does not pay the timeout again, and take the
          // route that needs no seek.
          castSyncNoSeek = true;
@@ -3998,7 +3998,7 @@ function castSyncStepMove(el, delta) {
       // No seek available, but holding the picture still while the receiver
       // plays on *is* delaying it by that much: exact, and asking nothing of
       // the stream.  It is also what a viewer expects a positive adjustment to
-      // look like — a brief freeze.
+      // look like - a brief freeze.
       castSyncSetPhase('moving');
       const from = el.currentTime;
       const at   = Date.now();
@@ -4025,7 +4025,7 @@ function castSyncStepMove(el, delta) {
 }
 
 // One step of the loop, off the interpolation timer below.  `absCurrent` is
-// the receiver's extrapolated position — the same value the seek bar is drawn
+// the receiver's extrapolated position - the same value the seek bar is drawn
 // from, so there is one clock here and not two.
 function castSyncTick(absCurrent) {
    if (!castVideoLocal) return;
@@ -4075,7 +4075,7 @@ function castSyncTick(absCurrent) {
 
    // The loop is the settle detector, and that is the signal the control never
    // had.  A change takes 5-15 s to be absorbed when it cannot be stepped, and
-   // nothing said so — so the natural thing to do was change it again.  The
+   // nothing said so - so the natural thing to do was change it again.  The
    // buttons stay disabled until the picture is actually where the setting
    // says, or until the cap, because a settle that never converges must not
    // leave them dead.
@@ -4098,7 +4098,7 @@ function castSyncTick(absCurrent) {
       if (!castSyncWarned) {
          castSyncWarned = true;
          console.warn('[cast] picture', err.toFixed(2),
-                      's out and cannot seek — this stream is chunked');
+                      's out and cannot seek - this stream is chunked');
          }
       }
 
@@ -4116,7 +4116,7 @@ function castSyncTick(absCurrent) {
 function castApplyLocalVideo(song, offset) {
    // "Is a picture appearing over there", never "was only sound sent".  A
    // screenless device set to `videoPref = send` is handed the whole film to
-   // save extracting its soundtrack, and shows none of it — so keying this on
+   // save extracting its soundtrack, and shows none of it - so keying this on
    // audioOnly threw the picture away precisely where it was still wanted.
    const local = !castReceiverVideo && castLocalVideo.get();
    if (local) {
@@ -4133,7 +4133,7 @@ function castApplyLocalVideo(song, offset) {
       castLocalVideoStop();
       videoCastPanel(true, !castReceiverVideo);
       // No picture anywhere means no subtitles to offer, and an unselected
-      // <track> costs a request either way — so the picker is not drawn rather
+      // <track> costs a request either way - so the picker is not drawn rather
       // than drawn and inert.
       if (!castReceiverVideo) videoClearCaptions(song);
       else                    videoLoadCaptions(song);
@@ -4150,12 +4150,12 @@ function castApplyLocalVideo(song, offset) {
 // a transcode that can take a minute.
 //
 // Everything about the stream is decided exactly as playerPlay()'s local
-// branch decides it, because it *is* that stream — a divergence here would be
+// branch decides it, because it *is* that stream - a divergence here would be
 // a second answer to "which tier does this video take".
 function castLocalVideoStart(song, offset) {
    // castRedirect=false is not optional here.  apiUrl() puts castController on
    // every URL, and stream.view answers the owner of a live cast session with
-   // 204 — pushing the track to the receiver instead, on the assumption that
+   // 204 - pushing the track to the receiver instead, on the assumption that
    // an owner asking for a stream is about to play it a second time.  This
    // request is the opposite: it is the picture belonging to the soundtrack
    // the receiver is already playing.  Without the parameter the picture never
@@ -4164,7 +4164,7 @@ function castLocalVideoStart(song, offset) {
    // No startImmediately here, unlike playerPlay(), and the difference is
    // deliberate: this element is a muted picture chasing the receiver's clock,
    // and castSyncTick() seeks it whenever the two drift past SYNC_HARD.  It
-   // wants the seekable file, not the earliest byte — and waiting costs
+   // wants the seekable file, not the earliest byte - and waiting costs
    // nothing anyway, because the soundtrack the receiver is playing has its
    // own transcode to get through first.
    const streamParams = {id: song.id, castRedirect: 'false'};
@@ -4178,7 +4178,7 @@ function castLocalVideoStart(song, offset) {
    castSyncWarned = false;
    // Per stream, not per device: whether a seek lands is a property of the tier
    // this film is being served at, and the staircase starts coarse again for a
-   // fresh calibration.  The delay itself is deliberately kept — it is the
+   // fresh calibration.  The delay itself is deliberately kept - it is the
    // device's, and lives in gd_cast_sync_<id>.
    castSyncNoSeek  = false;
    castSyncStep    = SYNC_STEP_START;
@@ -4188,7 +4188,7 @@ function castLocalVideoStart(song, offset) {
    playerSelectMedia(true);
    // Not a courtesy to the room: this element and the amplifier are playing
    // the same film, and the whole design rests on only one of them being
-   // audible — muting is what makes playbackRate a free correction.
+   // audible - muting is what makes playbackRate a free correction.
    player.videoEl.muted = true;
    player.videoEl.playbackRate = 1;
    player.videoEl.src = apiUrl('stream', streamParams);
@@ -4208,7 +4208,7 @@ function castLocalVideoStop() {
    const el = player.videoEl;
    if (el) {
       el.pause();
-      el.removeAttribute('src');   // never src='' — that resolves to GET /
+      el.removeAttribute('src');   // never src='' - that resolves to GET /
       el.load();
       el.playbackRate = 1;
       el.muted = false;
@@ -4216,7 +4216,7 @@ function castLocalVideoStop() {
    videoSyncButton();
 }
 
-// Local interpolation timer — keeps the progress bar smooth between SSE pushes.
+// Local interpolation timer - keeps the progress bar smooth between SSE pushes.
 // Only active while casting; reads local vars, makes no network requests.
 setInterval(() => {
    if (castDeviceId === null || castBaseAt === 0) return;
@@ -4389,10 +4389,10 @@ async function openInfoModal() {
       // a separate Route row because a phone can also relay or serve a
       // downloaded copy; the server-driven path has none of those, so a row
       // of its own would read the same sentence on every cast.
-      output = `Chromecast “${dev}” — sound fetched from this `
+      output = `Chromecast “${dev}” - sound fetched from this `
              + 'server, picture playing in this browser';
    else
-      output = `Chromecast “${dev}” — fetching from this server`;
+      output = `Chromecast “${dev}” - fetching from this server`;
 
    // What is actually going out.  While casting that is the server's answer,
    // read back rather than worked out again here: a cast URL carries no
@@ -4404,8 +4404,8 @@ async function openInfoModal() {
          ? `${castStream.sentSuffix?.toUpperCase() ?? ''} ${castStream.sentBitRate} kbps`.trim()
          : (castStream.sentSuffix?.toUpperCase() ?? '');
       // A soundtrack still says which tier produced it.  That is the whole
-      // question this row exists to answer — "why does this sound worse on
-      // the television" — and a copied track and a 320 kbps re-encode are
+      // question this row exists to answer - "why does this sound worse on
+      // the television" - and a copied track and a 320 kbps re-encode are
       // exactly the two answers, so collapsing them into one phrase would
       // leave the row unable to say the thing it is for.
       const how = castStream.audioOnly
@@ -4415,11 +4415,11 @@ async function openInfoModal() {
                 : castStream.tier === 'remux'  ? 'remuxed to MP4'
                 : castStream.tier === 'encode' ? 're-encoded as it plays'
                 :                                'as stored';
-      sent = kbps ? `${kbps} — ${how}` : how;
+      sent = kbps ? `${kbps} - ${how}` : how;
       }
    else {
       // Local playback.  Two independent transcode triggers exist: (a) the
-      // server caps bitrate per user — reflected in the transcoded* fields;
+      // server caps bitrate per user - reflected in the transcoded* fields;
       // (b) the browser asked for format=mp3 because it cannot decode the
       // source codec (or fell back after a decode error), which only the
       // client knows about.  player.streamFormat is the format the player
@@ -4468,7 +4468,7 @@ async function openInfoModal() {
       };
    fill(list, rows);
    // The section is unconditional, and so is its heading: the modal opens only
-   // with a current track, and Output always has an answer for one — "this
+   // with a current track, and Output always has an answer for one - "this
    // browser" is as much a fact as a device name. The other two rows drop
    // themselves when empty, as every row in the first list does.
    fill(play, playRows);
@@ -4482,9 +4482,9 @@ async function openInfoModal() {
 
 // One row of the cast picker, laid out as the Android sheet lays it out: the
 // friendly name, and under it the model and address joined with " · ". The
-// port is deliberately absent — it is never the thing that tells two devices
+// port is deliberately absent - it is never the thing that tells two devices
 // apart, and 8009 on every row is noise.
-// `n` is the row's position in the whole list, counted across both groups —
+// `n` is the row's position in the whole list, counted across both groups -
 // see renderCastDevices.  It is drawn as the key that picks the row, for the
 // first nine only: past that there is no single keystroke to offer, and a cap
 // naming a key that does nothing is worse than no cap.
@@ -4519,7 +4519,7 @@ function castDeviceRow(dev, n) {
 
    // "Sound only" on a receiver that announced no screen, so a film cast to
    // an amplifier is a known choice rather than a surprise after the first
-   // load — which is the only place it showed before.  Tested against an
+   // load - which is the only place it showed before.  Tested against an
    // explicit false: video_out() reports true for a device that announced
    // nothing, which is every manually configured one, and marking those would
    // be a guess presented as a fact.
@@ -4550,7 +4550,7 @@ function castDeviceRow(dev, n) {
    // offering the inert one would invite the question of what it does.
    //
    // The label says what is *saved*, not what is shown.  A screenless device
-   // cannot show a picture whichever of these is chosen — the difference is
+   // cannot show a picture whichever of these is chosen - the difference is
    // that "send" hands it the file and lets it ignore the picture, instead of
    // demuxing the soundtrack out first and making the listener wait for it.
    // And "if it can" is not hedging: the file goes out untouched or not at
@@ -4569,8 +4569,8 @@ function castDeviceRow(dev, n) {
    // Anything the two options above cannot express reads as auto, which is
    // also what the server does with a value it does not recognise.
    sel.value = opts.some(o => o[0] === dev.videoPref) ? dev.videoPref : 'auto';
-   // The column heading is not programmatically tied to these — a CSS grid has
-   // no th for it to be — so each one says which device it belongs to.
+   // The column heading is not programmatically tied to these - a CSS grid has
+   // no th for it to be - so each one says which device it belongs to.
    sel.setAttribute('aria-label', `What to send to ${label}`);
    sel.addEventListener('change', async () => {
       try {
@@ -4585,7 +4585,7 @@ function castDeviceRow(dev, n) {
 
    // The two cells go into the grid as siblings, not wrapped in a row: it is
    // the grid that lines the selects up with each other and with the heading
-   // above them, and a wrapper would put each row in a box of its own again —
+   // above them, and a wrapper would put each row in a box of its own again -
    // which is what made the widths ragged, the two option sets being different
    // lengths.  The select stays *outside* the button, as it always had to: a
    // <select> inside a <button> is invalid and behaves unpredictably, and the
@@ -4638,7 +4638,7 @@ function renderCastDevices(devices) {
    // One counter across both groups, because the number is "the nth row of
    // this list" and the heading between them is not a row.  Numbering each
    // group from 1 would give two rows the same key, and the dispatcher picks
-   // by position in the DOM — so the duplicate would silently be unreachable.
+   // by position in the DOM - so the duplicate would silently be unreachable.
    let n = 0;
    for (const dev of found) list.appendChild(castDeviceRow(dev, ++n));
 
@@ -4711,7 +4711,7 @@ function castAvailUpdate() {
 // Ask the server whether we are still on its network and redraw the button.
 //
 // `ping` answers it because it is a fact about the request rather than about
-// the account — see the endpoint's own comment.  Called on the events that
+// the account - see the endpoint's own comment.  Called on the events that
 // mean the answer may have changed: coming back online, and returning to a tab
 // that may have been asleep in a bag on the way home.
 async function refreshLocalNetwork() {
@@ -4731,7 +4731,7 @@ async function refreshLocalNetwork() {
 
 // The cast button is both the state and the control: the filled
 // "cast_connected" glyph is what says a session is live, and the accent colour
-// alone did not — a red "cast" reads as an available device on every other
+// alone did not - a red "cast" reads as an available device on every other
 // platform. One helper, because the three callers that toggle it (start,
 // teardown, page-reload restore) must not be able to set glyph and class apart.
 function castButtonState(on) {
@@ -4783,7 +4783,7 @@ async function selectCastDevice(id, label = '') {
 // Split out of stopCast() because there are now two ways out of cast mode. One
 // is the user pressing stop, which also tells the server. The other is being
 // displaced by another client taking the session over, where there is nothing
-// to tell the server — the session is already someone else's, and stopCast
+// to tell the server - the session is already someone else's, and stopCast
 // from a non-owner is a no-op by design.
 //
 // Returns the absolute position the receiver had reached, so a caller that
@@ -4812,7 +4812,7 @@ function castExit() {
    castExpectedPosition = null;
    // Before castAudioOnly is cleared, and before any resume: a muted film left
    // with a src goes on downloading for nobody.  stopCast({resumeLocal:false})
-   // — logging out — has nothing else that would stop it.  The surface's own
+   // - logging out - has nothing else that would stop it.  The surface's own
    // close button calls castLocalVideoStop() directly, since it no longer
    // comes through here.
    castLocalVideoStop();
@@ -4850,7 +4850,7 @@ async function stopCast({resumeLocal = true} = {}) {
 // ── Equaliser ───────────────────────────────────────────────────────────────
 
 // Ten octave bands, and the single table the filters, the fader labels and
-// the presets are all built from — a second list of frequencies written out
+// the presets are all built from - a second list of frequencies written out
 // somewhere else is a second list that can disagree with this one.
 //
 // The two ends are shelves and not peaks.  A peaking filter at 32 Hz or
@@ -4917,7 +4917,7 @@ const eqPrefs = {
          });
       },
    setGains(g) {
-      // Flat is the default, so it is the absent key — same spelling as every
+      // Flat is the default, so it is the absent key - same spelling as every
       // other preference here.
       if (g.some(v => v !== 0)) localStorage.setItem('gd_eq_gains', g.join(','));
       else                      localStorage.removeItem('gd_eq_gains');
@@ -4942,7 +4942,7 @@ const eqPrefs = {
 // is a one-way door: after it, the element's sound leaves only through the
 // graph, and there is no call that puts it back.  So it is built the first
 // time the equaliser is actually switched on, and anyone who never touches the
-// panel keeps the untouched native path.  That is not tidiness — a media
+// panel keeps the untouched native path.  That is not tidiness - a media
 // element routed through Web Audio loses AirPlay on Safari and behaves badly
 // on the lock screen, which is a steep price for a feature never used.
 //
@@ -5008,8 +5008,8 @@ function eqEnsureGraph() {
 // playing is an audible break.
 //
 // The preamp is derived and not offered, because there is only one right
-// answer.  A boosted band asks for headroom the output does not have — the
-// browser is already handing the device something close to full scale — so
+// answer.  A boosted band asks for headroom the output does not have - the
+// browser is already handing the device something close to full scale - so
 // the loudest thing the curve asks for is exactly what has to come off the
 // whole of it.  Only positive gain counts; cutting a band cannot clip.
 function eqApply() {
@@ -5024,14 +5024,14 @@ function eqApply() {
       eqPreamp.gain.setTargetAtTime(Math.pow(10, cut / 20), t, 0.01);
       }
    document.getElementById('eq-preamp').textContent = `Preamp ${eqDb(cut)} dB`;
-   // Accent means engaged, as it does on the cast button — not "the panel is
+   // Accent means engaged, as it does on the cast button - not "the panel is
    // open", which the panel being on screen already says.
    document.getElementById('player-eq-btn').classList.toggle('active', on);
    eqEnable(on);
    }
 
 // Everything under the checkbox describes a curve that, while the equaliser
-// is off, is not reaching the ear — so it is made inert rather than left
+// is off, is not reaching the ear - so it is made inert rather than left
 // looking live.  Actually disabled and not merely dimmed: a fader that moves
 // and changes nothing is the thing the greying is there to prevent, and the
 // keyboard would still reach it behind a pointer-events rule.
@@ -5072,7 +5072,7 @@ function eqBuildFaders() {
       sl.max   = EQ_RANGE;
       sl.step  = 1;
       // Spelled out from the frequency rather than from the fader's own label,
-      // which is the abbreviation a column of ten has room for — "16k Hz" is
+      // which is the abbreviation a column of ten has room for - "16k Hz" is
       // not a unit anybody writes.
       const hz = b.f >= 1000 ? `${b.f / 1000} kHz` : `${b.f} Hz`;
       sl.title = hz;
@@ -5187,7 +5187,7 @@ function eqSaveSlot() {
 // The panel is not a .modal on purpose: that class carries a backdrop that
 // dims the library and swallows clicks, and this is a control meant to be
 // used while the music plays.  The price is that the two things a dialog gets
-// for free here — Escape and dismissal on an outside click — have to be wired
+// for free here - Escape and dismissal on an outside click - have to be wired
 // by hand; see setupKeys() for the first and eqOutside for the second.
 let eqOutside = null;
 
@@ -5291,7 +5291,7 @@ function eqSetup() {
 
    document.getElementById('eq-on').addEventListener('change', e => {
       // The graph is built the first time it is genuinely wanted, which is
-      // here — and this is a click, which is what an AudioContext needs to
+      // here - and this is a click, which is what an AudioContext needs to
       // start in a state that makes sound.
       if (e.target.checked && !eqEnsureGraph()) {
          e.target.checked = false;
@@ -5780,14 +5780,14 @@ document.addEventListener('cover-art-changed', e => {
          el.src = src;
          continue;
          }
-      // Placeholder div — replace with a real image, preserving size class.
+      // Placeholder div - replace with a real image, preserving size class.
       const isHero = el.classList.contains('album-hero');
       const img = document.createElement('img');
       img.className = isHero ? 'album-hero' : 'album-cover';
       img.dataset.albumId   = albumId;
       img.dataset.coverSize = size;
       if (!isHero) {
-         // The box, not the fetched size — those parted company at 2x.
+         // The box, not the fetched size - those parted company at 2x.
          img.width  = ALBUM_COVER_BOX;
          img.height = ALBUM_COVER_BOX;
          }
@@ -6026,7 +6026,7 @@ const player = {
    // Two concrete elements, one active pointer.  `media` is whichever element
    // is currently playing and is what every control below drives; audioEl and
    // videoEl are the elements themselves.  Splitting it this way means the
-   // audio path runs exactly the code it ran before video existed — the
+   // audio path runs exactly the code it ran before video existed - the
    // alternative, teaching one element to do both jobs, would have put video's
    // quirks in the way of audio playback.
    audioEl: new Audio(),
@@ -6041,14 +6041,14 @@ const player = {
    // rather than from a media event, because the wait worth reporting happens
    // before the element has anything to fire about: the server transcodes a
    // whole track to a file before sending its first byte, so even the response
-   // headers are late.  Nothing in the response can say so — see the note on
+   // headers are late.  Nothing in the response can say so - see the note on
    // the event handlers in bindMediaEvents().
    buffering: false,
    // Transcoded chunked streams have no Range support, so the browser
    // can't seek into un-buffered audio.  When streamIsTranscoded is true,
    // every seek re-fetches from the server with ?timeOffset=N (same trick
    // as the Cast path).  localOffset is the seek point we asked the server
-   // to start at — added to audio.currentTime for absolute-time display.
+   // to start at - added to audio.currentTime for absolute-time display.
    streamIsTranscoded: false,
    localOffset: 0,
    streamFallbackTried: false,
@@ -6082,7 +6082,7 @@ const player = {
 player.media = player.audioEl;
 
 // Points player.media at the element the given song needs, stopping the other
-// one first — leaving the outgoing element with a live src means two streams
+// one first - leaving the outgoing element with a live src means two streams
 // playing at once, and the second one is inaudible but still downloading.
 // Returns true when the active element changed.
 function playerSelectMedia(isVideo) {
@@ -6118,7 +6118,7 @@ function videoSurfaceSet(state) {
    // The button does two different things and must not claim otherwise: it
    // stops local playback, but while casting it only puts the picture away.
    // Set here rather than in the handler because a title is read before the
-   // click, and this runs on every load and on the reload restore — which is
+   // click, and this runs on every load and on the reload restore - which is
    // every path that can change which of the two is in force.
    const close = document.getElementById('video-close');
    const label = castDeviceId !== null ? 'Close' : 'Stop and close';
@@ -6128,7 +6128,7 @@ function videoSurfaceSet(state) {
 
 function videoSurfaceCaption(song) {
    document.getElementById('video-caption').textContent =
-      song ? [song.title, song.album].filter(Boolean).join(' — ') : '';
+      song ? [song.title, song.album].filter(Boolean).join(' - ') : '';
 }
 
 // Swaps the surface between showing the picture and saying where the picture
@@ -6136,7 +6136,7 @@ function videoSurfaceCaption(song) {
 //
 // The surface is composed while casting rather than hidden, and that is not
 // decoration: #video-bar is where the subtitle picker lives, and a film on a
-// television is exactly when someone wants it. It also fixes a stranded state —
+// television is exactly when someone wants it. It also fixes a stranded state -
 // starting a cast mid-film used to leave the surface up with a <video> whose
 // source had been taken away, showing black under a live-looking title.
 // `note` is the receiver's inability to show a picture, which is a different
@@ -6151,8 +6151,8 @@ function videoCastPanel(on, note = false) {
    const noteEl = document.getElementById('video-cast-note');
    noteEl.hidden = !(on && note);
    noteEl.textContent = castDeviceName
-      ? `${castDeviceName} cannot show video — playing the soundtrack only.`
-      : 'This device cannot show video — playing the soundtrack only.';
+      ? `${castDeviceName} cannot show video - playing the soundtrack only.`
+      : 'This device cannot show video - playing the soundtrack only.';
    // Fullscreen would ask the browser to blow up an element with no source,
    // and close means "stop the film", which while casting is the television's
    // film and not this element's.
@@ -6162,7 +6162,7 @@ function videoCastPanel(on, note = false) {
 // Shown rather than a black rectangle that looks broken.
 //
 // It used to cover the remux tier blocking on ffmpeg copying a whole film into
-// the transcode cache before it sent a byte — tens of seconds of nothing.
+// the transcode cache before it sent a byte - tens of seconds of nothing.
 // playerPlay() now sends startImmediately, so that wait is gone and this is
 // back to covering the ordinary gap before the first frame decodes.  It still
 // earns its place on the re-encode tier, and on the cast paths, where the
@@ -6170,7 +6170,7 @@ function videoCastPanel(on, note = false) {
 //
 // Note it is cleared only by `loadeddata` and `error`, so a stream that
 // arrives and then stalls leaves it up indefinitely; there is no watchdog here
-// the way PlaybackWatchdog is one on Android.  See ISSUES.md.
+// the way PlaybackWatchdog is one on Android.
 function videoPreparing(on, label = 'Preparing…') {
    const el = document.getElementById('video-preparing');
    el.hidden = !on;
@@ -6201,9 +6201,9 @@ function videoSyncButton() {
 const SKIP_SECS = 10;
 
 // The two play/pause glyphs are one piece of state, so they are written
-// together.  #player-playpause stays the source of truth — the cast branch of
+// together.  #player-playpause stays the source of truth - the cast branch of
 // its own click handler reads its textContent back to decide which way to
-// flip — and this only keeps the copy on the picture in step with it.
+// flip - and this only keeps the copy on the picture in step with it.
 function playerPlayGlyph(name) {
    document.getElementById('player-playpause').textContent = name;
    const v = document.getElementById('video-play');
@@ -6219,7 +6219,7 @@ function playerPlayGlyph(name) {
 // Turns the playing row's triangle into a spinner, and back.
 //
 // The class goes on the row rather than on the icon because the icon is an
-// empty span whose ::before is the whole glyph — there is nothing else in
+// empty span whose ::before is the whole glyph - there is nothing else in
 // there to mark.  Applied directly instead of through playerUpdateUI(), which
 // rebuilds the player bar: `waiting` fires often enough on a marginal
 // connection that doing so would rewrite the cover art and the media session
@@ -6235,7 +6235,7 @@ function playerBuffering(on) {
 //
 // While casting the receiver is the clock and the local element is either
 // silent or absent, so this is the same extrapolation the 100 ms interpolation
-// timer draws the seek bar from — one clock, one more consumer.  castBaseAt is
+// timer draws the seek bar from - one clock, one more consumer.  castBaseAt is
 // in the guard as well as the state: it is 0 until the first status arrives,
 // and Date.now() - 0 is fifty-six years of playback.  Locally the element's own
 // clock is rebased whenever the server started ffmpeg at a seek point, which is
@@ -6288,14 +6288,14 @@ function playerSeekTo(target) {
 // could be.
 //
 // `nativeSeek` promises a Content-Length and Range support, and it is right
-// about the file — but the server can still answer a remuxable video from a
+// about the file - but the server can still answer a remuxable video from a
 // pipe, and does whenever the transcode cache is disabled, full, unable to run
 // ffmpeg, or still building after its 20 s wait.  The assignment below this
 // then sets currentTime on a chunked stream, which the browser refuses
 // silently: no event, no exception, a scrub bar that simply does not move.
 //
 // The test is `seekable` and not `buffered`, for the reason spelled out at
-// castSyncCanSeek() — and it is made here, at the point of use, rather than
+// castSyncCanSeek() - and it is made here, at the point of use, rather than
 // latched on an event, because nothing fires when `seekable` changes.
 //
 // readyState is checked first because before metadata `seekable` is
@@ -6310,20 +6310,20 @@ function mediaStreamSeekable(el) {
 
 // A seek on a video the server promised was seekable and then piped anyway.
 //
-// The remux is very likely being built right now — serve_video starts one in
-// the background when it answers from a pipe — and a -c copy runs far faster
+// The remux is very likely being built right now - serve_video starts one in
+// the background when it answers from a pipe - and a -c copy runs far faster
 // than playback, so the answer is usually "it is there now, ask again".  What
 // must not happen is re-fetching blind: a re-fetch that comes back piped
 // restarts the film from zero, which is worse than the seek doing nothing.
 //
 // So ask first and read the header the server sets.  A `fetch` rather than the
 // element, because a page cannot see response headers for anything a
-// <video src> loads — the same trick the Android client's warmTranscode() uses
+// <video src> loads - the same trick the Android client's warmTranscode() uses
 // for a different question.
 //
 // startImmediately is on the probe deliberately: it must never be the request
 // that waits.  What that costs is one short-lived ffmpeg, because a piped
-// answer ignores the Range and starts producing — the body is cancelled the
+// answer ignores the Range and starts producing - the body is cancelled the
 // moment the header has been read, which aborts it.  The background build is a
 // separate process and is not touched.  One per seek attempt a person actually
 // made, which is the bound that makes it affordable.
@@ -6347,7 +6347,7 @@ async function videoRemuxSeek(target) {
       return;
       }
    if (!ready) {
-      videoPreparing(true, 'Still preparing — seeking will work shortly');
+      videoPreparing(true, 'Still preparing - seeking will work shortly');
       setTimeout(() => videoPreparing(false), 2500);
       return;
       }
@@ -6402,7 +6402,7 @@ function playerStop() {
 
    playerPlayGlyph('play_arrow');
    playerBuffering(false);
-   document.getElementById('player-title').textContent     = '—';
+   document.getElementById('player-title').textContent     = '–';
    document.getElementById('player-artist').textContent    = '';
    document.getElementById('player-info-btn').disabled     = true;
    document.getElementById('player-time').textContent      = '0:00 / 0:00';
@@ -6421,7 +6421,7 @@ function playerStop() {
 const VIDEO_CONTROLS_IDLE = 3000;
 let videoControlsTimer = null;
 
-// Shown on movement, hidden after a pause — which is what :hover alone could
+// Shown on movement, hidden after a pause - which is what :hover alone could
 // not express.  A pointer resting anywhere over the picture counts as hovering
 // it for as long as it sits there, and after using the transport that is
 // precisely where it is, so the controls stayed drawn over the film for the
@@ -6429,7 +6429,7 @@ let videoControlsTimer = null;
 //
 // The class goes on #video-surface rather than on the two clusters because
 // that is the element the CSS already descended from, and because fullscreen
-// is requested on #video-frame *inside* it — an ancestor keeps matching, and
+// is requested on #video-frame *inside* it - an ancestor keeps matching, and
 // pointer events from the frame keep bubbling here, so neither state needs a
 // case of its own.
 function videoControlsWake() {
@@ -6450,7 +6450,7 @@ function videoControlsSleep() {
 // the idle timer and leaving restarts it.
 //
 // This is what the CSS :hover and :has(button:hover) rules used to do, and it
-// had to move here once a faded control stopped taking pointer events — it
+// had to move here once a faded control stopped taking pointer events - it
 // cannot be hovered, so hover could never have brought it back.  Doing it from
 // JS is better than what it replaced on two counts: it draws the line at the
 // cluster's real bounds rather than at one disc, and it works for a finger,
@@ -6478,7 +6478,7 @@ function videoControlsPoint(ev) {
 // Requested on #video-frame rather than on the video element, so everything
 // absolutely positioned inside the frame goes fullscreen with the picture: the
 // transport cluster and the close button.  #video-bar is outside the frame and
-// so is still out of reach — the subtitle picker included, so choose the track
+// so is still out of reach - the subtitle picker included, so choose the track
 // before going in.  Cues keep drawing either way: the browser paints them into
 // the video box, not us.
 //
@@ -6486,7 +6486,7 @@ function videoControlsPoint(ev) {
 // second meaning, so pressing it again did nothing and the only way out was the
 // browser's own Escape; 'f' is expected to close what 'f' opened, and a button
 // that disagreed with the key would be the odd one out.  videoSurfaceSet(null)
-// keeps its own exit — that one fires when the surface goes away underneath a
+// keeps its own exit - that one fires when the surface goes away underneath a
 // fullscreen element, which is not a press of anything.
 function videoFullscreenToggle() {
    const frame = document.getElementById('video-frame');
@@ -6500,7 +6500,7 @@ function videoFullscreenToggle() {
 
 function setupVideoSurface() {
    // pointermove rather than mousemove so a pen counts too, and pointerdown so
-   // a touchscreen counts as well — which is the whole of what a tablet needs.
+   // a touchscreen counts as well - which is the whole of what a tablet needs.
    // It used to need more, because style.css pinned both clusters visible
    // under (hover: none) on the reasoning that a device which never hovers
    // could never reveal them.  That was true of hover and false of this: a tap
@@ -6509,7 +6509,7 @@ function setupVideoSurface() {
    // over the film for its whole length.
    //
    // Leaving the surface hides them at once, which is what :hover did and is
-   // still the right answer — the pointer has gone somewhere else entirely.
+   // still the right answer - the pointer has gone somewhere else entirely.
    const surf = document.getElementById('video-surface');
    surf.addEventListener('pointermove', videoControlsPoint);
    surf.addEventListener('pointerdown', videoControlsPoint);
@@ -6528,15 +6528,15 @@ function setupVideoSurface() {
    //
    // It used to, on the reasoning that playerStop() would stop a local element
    // that was not playing anything and leave the Chromecast running "with no
-   // way back to it".  The second half of that was never true — the cast
-   // button's Stop row is shown whenever a session is active — and the first
+   // way back to it".  The second half of that was never true - the cast
+   // button's Stop row is shown whenever a session is active - and the first
    // half stopped being true when the picture began staying here, muted, while
    // the sound went to an amplifier.  Closing that is a request to stop
    // watching, not to stop listening, and answering it by killing the sound in
    // another room is the one thing it cannot have meant.
    //
    // The local element still has to be stopped, or a hidden <video> goes on
-   // downloading a film for nobody — the same reason castExit() calls this.
+   // downloading a film for nobody - the same reason castExit() calls this.
    // castLocalVideoStop() returns immediately when no picture is running, so
    // the panel case needs no branch of its own.
    document.getElementById('video-close').addEventListener('click', () => {
@@ -6626,7 +6626,7 @@ function setupVideoSurface() {
 // Note <track> is subject to CORS even when <video src> is not, so captions
 // only load when the server and the page share an origin.  Fixing that means
 // crossorigin="anonymous" on the video element, which would then also apply to
-// the media request itself — not worth risking playback for subtitles.
+// the media request itself - not worth risking playback for subtitles.
 // The other half of videoLoadCaptions: what to do when there are deliberately
 // no captions to offer, i.e. a soundtrack on a receiver with no picture. It
 // has to do the same bookkeeping the film-changed branch below does, or the
@@ -6643,7 +6643,7 @@ function videoClearCaptions(song) {
 async function videoLoadCaptions(song) {
    player.videoEl.querySelectorAll('track').forEach(t => t.remove());
 
-   // A seek comes back through here for the *same* film — on a transcoded
+   // A seek comes back through here for the *same* film - on a transcoded
    // stream because it re-fetches, while casting because a seek is a fresh
    // LOAD. Two things follow. The chosen track is forgotten only when the film
    // changes, or every seek would silently turn the subtitles off. And the
@@ -6705,7 +6705,7 @@ async function videoLoadCaptions(song) {
 // transcoded seek that clock has been rebased: the server started ffmpeg at
 // the seek point, so currentTime is zero there.  The caption file still
 // describes the whole film, so without this a seek to twenty minutes shows the
-// opening lines — which is what `localOffset` corrects everywhere else.
+// opening lines - which is what `localOffset` corrects everywhere else.
 // Shifting the cues is the only lever, since nothing else about a <track> can
 // be offset.
 //
@@ -6714,7 +6714,7 @@ async function videoLoadCaptions(song) {
 // event, so this cannot apply twice.
 function videoShiftCues(track, offset) {
    if (!offset || !track?.cues) return;
-   // Snapshot first — removeCue mutates the live list underneath the loop.
+   // Snapshot first - removeCue mutates the live list underneath the loop.
    for (const cue of [...track.cues]) {
       if (cue.endTime <= offset) { track.removeCue(cue); continue; }
       cue.startTime = Math.max(0, cue.startTime - offset);
@@ -6726,7 +6726,7 @@ function videoShiftCues(track, offset) {
 //
 // Nothing is turned on: a <track> starts `disabled`, which is also what stops
 // the browser fetching it, so an unselected caption costs no request. The
-// Android app makes the same call — nothing here knows the viewer's language,
+// Android app makes the same call - nothing here knows the viewer's language,
 // and subtitles nobody asked for are more intrusive than subtitles one click
 // away.
 function videoCaptionsMenu(captions) {
@@ -6748,7 +6748,7 @@ function videoCaptionsMenu(captions) {
    captions.forEach((c, i) => add(c.name || `Track ${i + 1}`, i));
 
    // Put back the track a seek interrupted.  A film that has lost the track it
-   // had — a re-file, a different caption list — falls back to off rather than
+   // had - a re-file, a different caption list - falls back to off rather than
    // to whatever now sits at that index.
    //
    // send:false because this is a redisplay, not a choice: the local path needs
@@ -6772,7 +6772,7 @@ function videoSelectCaption(index, {send = true} = {}) {
    if (castDeviceId !== null && !castVideoLocal) {
       // The receiver owns the rendering, so the only thing to do here is tell
       // it which track.  trackId numbers the tracks 1..n as getVideoInfo lists
-      // them, and 0 is off — captionId could not say "off", since a missing
+      // them, and 0 is off - captionId could not say "off", since a missing
       // parameter and the sidecar file are both -1.
       //
       // `send` is false when the menu is merely being rebuilt with the same
@@ -6807,7 +6807,7 @@ function videoSelectCaption(index, {send = true} = {}) {
 //
 // Three pieces of state.  `player.chapters` is what the server last gave us,
 // which is also what Cancel restores to and what the dirty test compares
-// against — the role dataset.orig plays in album edit mode.  `chapterDraft` is
+// against - the role dataset.orig plays in album edit mode.  `chapterDraft` is
 // the working copy.  `chapterPanelOpen` survives a track change so the panel
 // does not shut itself every time the film advances.
 let chapterDraft     = [];
@@ -7050,7 +7050,7 @@ function videoChaptersToggle() {
    videoChaptersRender();
 }
 
-// Leaving edit mode discards, as Cancel does — but never silently: the panel
+// Leaving edit mode discards, as Cancel does - but never silently: the panel
 // can be several minutes of marking up a concert, and the Edit button is
 // directly beside the close button.
 function videoChaptersEditToggle() {
@@ -7084,7 +7084,7 @@ function videoChapterJump(i) {
 }
 
 // "Previous" means the start of the chapter being played, unless we are
-// already at it — the behaviour every physical transport has, and the reason
+// already at it - the behaviour every physical transport has, and the reason
 // a viewer can press it twice to go back one song.
 function videoChapterPrev() {
    const pos = playerPosition();
@@ -7101,8 +7101,8 @@ function videoChapterNext() {
    if (next) playerSeekTo(next.start);
 }
 
-// Called from both clocks — the local timeupdate handler and the 100 ms cast
-// interval — because neither knows about the other and the label would
+// Called from both clocks - the local timeupdate handler and the 100 ms cast
+// interval - because neither knows about the other and the label would
 // otherwise freeze the moment a cast starts.  Nothing here writes to a field:
 // a marker being typed in must not be rewritten underneath the caret.
 function videoChapterTick(abs) {
@@ -7282,7 +7282,7 @@ function playerPlay(offset = 0, forceMp3 = false) {
       // Reset so the IDLE status during Chromecast loading doesn't trigger a
       // spurious advance, and so interpolation starts fresh for the new track.
       // castStartOffset is the offset where the served stream begins in the
-      // song — 0 for MP3 (native seek) or the seek point for FLAC/other
+      // song - 0 for MP3 (native seek) or the seek point for FLAC/other
       // (server-side seek).  Initialise to 0; the next SSE push from
       // castEvents.view will overwrite it with the authoritative value.
       castWasPlaying      = false;
@@ -7307,7 +7307,7 @@ function playerPlay(offset = 0, forceMp3 = false) {
       // "Playing on <amp>" for as long as the reply takes.  The reply
       // overwrites both either way.
       //
-      // A cast URL names no format, so the receiver plays the source codec —
+      // A cast URL names no format, so the receiver plays the source codec -
       // except for a soundtrack on a device with no screen, where the server
       // adds one.  Cleared because it describes the *local* element's stream
       // and there is no local stream while casting; the info dialog reads
@@ -7321,7 +7321,7 @@ function playerPlay(offset = 0, forceMp3 = false) {
       const params = {id: song.id};
       if (offset > 0) params.timeOffset = Math.floor(offset);
       // Carried on the LOAD rather than sent afterwards, because a track has
-      // to be declared in the LOAD to exist at all — EDIT_TRACKS_INFO can turn
+      // to be declared in the LOAD to exist at all - EDIT_TRACKS_INFO can turn
       // one on but cannot introduce it.  This is also what makes the choice
       // survive a seek, which for a cast is a fresh LOAD.
       if (song.isVideo && player.captionSong === song.id
@@ -7332,7 +7332,7 @@ function playerPlay(offset = 0, forceMp3 = false) {
       // httplib converts to 416 because the stream endpoint returns 204 (no body).
       //
       // The reply says whether the receiver was given the film or only its
-      // soundtrack — a device with no video_out gets the latter.  That is the
+      // soundtrack - a device with no video_out gets the latter.  That is the
       // server's decision, taken where both the song and the device are known,
       // and read back here rather than worked out again from the device list.
       const loadSong   = song;
@@ -7350,7 +7350,7 @@ function playerPlay(offset = 0, forceMp3 = false) {
             castReceiverVideo = !!castStream?.receiverShowsVideo;
             if (!loadSong.isVideo) return;
             // The receiver is not showing the film, so the picture need not
-            // be lost — it can stay here, muted, following the receiver's
+            // be lost - it can stay here, muted, following the receiver's
             // clock.  Started from the reply rather than above it because
             // until the server has answered we do not know the receiver
             // cannot show it, and fetching a film to find out would be the
@@ -7362,14 +7362,14 @@ function playerPlay(offset = 0, forceMp3 = false) {
             console.warn('[cast] load failed', err);
             });
       // The picture is on the television, so the surface shows where it went
-      // instead — and it has to be composed at all, because it is the only
+      // instead - and it has to be composed at all, because it is the only
       // place the subtitle picker lives.
       if (song.isVideo) {
          const surf = document.getElementById('video-surface');
          videoSurfaceSet(surf.dataset.state || 'theatre');
          videoSurfaceCaption(song);
          // castLoad replies at once, but a soundtrack for a screenless
-         // receiver is transcoded in full before the LOAD is even sent — so
+         // receiver is transcoded in full before the LOAD is even sent - so
          // the wait is between the reply and the receiver making a sound.
          // onCastStatus clears this on the first status that is not IDLE,
          // which is the only thing that knows the film has actually started.
@@ -7409,7 +7409,7 @@ function playerPlay(offset = 0, forceMp3 = false) {
    // the pessimistic direction is not harmless: sending timeOffset for a
    // remuxable file demotes it from a cheap -c copy to a full re-encode.  It
    // describes the *video* stream, so it says nothing about an audio-only
-   // request — which seeks the way every other transcode does.
+   // request - which seeks the way every other transcode does.
    let fmt;
    if (audioOnly)         fmt = audioOnlyFormat();
    else if (song.isVideo) fmt = null;
@@ -7425,14 +7425,14 @@ function playerPlay(offset = 0, forceMp3 = false) {
       : (!!fmt && !servedUnchanged(fmt, song));
    // For transcoded streams the browser can't seek to un-buffered offsets
    // (chunked, no Range support), so ask the server to start ffmpeg at the
-   // seek point instead — the served stream is already the slice we want.
+   // seek point instead - the served stream is already the slice we want.
    if (chunked && offset > 0) streamParams.timeOffset = Math.floor(offset);
    // Ask the server not to wait out a whole-file remux before sending
    // anything: it answers from a fragmented pipe and builds the seekable
    // entry beside it.  The picture starts in about a second instead of tens.
    //
    // **Only on a fresh play.**  A seek needs the seekable file, so its
-   // re-fetch omits this and takes the waiting path — by which time the
+   // re-fetch omits this and takes the waiting path - by which time the
    // background build is done or nearly, because a -c copy far outruns
    // playback.  videoRemuxSeek() is what checks before getting there.
    if (song.isVideo && !audioOnly && offset === 0)
@@ -7471,13 +7471,13 @@ function playerPlay(offset = 0, forceMp3 = false) {
    if (eqPrefs.on() && eqEnsureGraph()) eqApply();
    player.media.src = apiUrl('stream', streamParams);
    if (offset > 0 && !chunked) {
-      // Range-capable stream — let the browser seek natively.  Keyed on
+      // Range-capable stream - let the browser seek natively.  Keyed on
       // `chunked` rather than on `fmt`: a video never sets fmt, so testing it
       // here would re-apply the offset to a stream that already starts there.
       player.media.currentTime = offset;
       }
    // Before play(), and unconditionally: on a cache miss the server answers
-   // nothing at all — not even headers — until ffmpeg has finished, so this
+   // nothing at all - not even headers - until ffmpeg has finished, so this
    // is the only moment at which anything is known to report.
    player.buffering = true;
    player.media.play().catch(err => console.warn('[player] play failed', err));
@@ -7494,7 +7494,7 @@ function playerUpdateUI() {
    document.getElementById('player-info-btn').disabled  = false;
 
    // 48 is #player-cover's box, set by the width/height attributes in
-   // index.html — its CSS rule gives it no dimensions of its own.
+   // index.html - its CSS rule gives it no dimensions of its own.
    const cover = document.getElementById('player-cover');
    cover.dataset.albumId   = song.albumId ?? song.coverArt ?? '';
    cover.dataset.coverSize = coverPx(48);
@@ -7552,7 +7552,7 @@ function sidebarQueueUpdate() {
       const title = document.createElement('span');
       title.className   = 'sq-title';
       title.textContent = song.title;
-      title.title       = song.artist ? `${song.artist} — ${song.title}` : song.title;
+      title.title       = song.artist ? `${song.artist} - ${song.title}` : song.title;
 
       const btn = document.createElement('button');
       btn.className = 'sq-remove mi';
@@ -7680,11 +7680,11 @@ setInterval(posReportNow, 5000);
 // Bound to both the audio and the video element, so whichever is active
 // behaves identically.  The handler bodies address player.media rather than
 // the element they are bound to, which is safe because only the active element
-// has a src — the idle one fires nothing.
+// has a src - the idle one fires nothing.
 function bindMediaEvents(el) {
 
-// A video resumed while its surface is hidden — paused away by a tab click in
-// showView() — would play sound-only, so bring the picture back.  Bound only
+// A video resumed while its surface is hidden - paused away by a tab click in
+// showView() - would play sound-only, so bring the picture back.  Bound only
 // meaningfully to the video element; the audio element never matches.
 el.addEventListener('play', () => {
    if (el === player.videoEl && !videoOnScreen()) videoSurfaceSet('theatre');
@@ -7706,7 +7706,7 @@ el.addEventListener('timeupdate', () => {
    if (castDeviceId !== null) return;
    const seek = document.getElementById('player-seek');
    const time = document.getElementById('player-time');
-   // localOffset > 0 when the server is transcoding from a seek point — the
+   // localOffset > 0 when the server is transcoding from a seek point - the
    // audio element's currentTime is relative to that slice, so add the
    // offset back to recover absolute song time.
    const cur  = player.media.currentTime + (player.localOffset || 0);
@@ -7727,8 +7727,8 @@ el.addEventListener('timeupdate', () => {
    });
 
 // Guarded like the rest, and it did not used to need to be: while casting the
-// element was paused with no src and so fired nothing.  It fires plenty now —
-// castSyncTick() pauses and plays the local picture to follow the receiver —
+// element was paused with no src and so fired nothing.  It fires plenty now -
+// castSyncTick() pauses and plays the local picture to follow the receiver -
 // and every one of those would fight onCastStatus for the glyph, which is
 // supposed to report what the *receiver* is doing.
 el.addEventListener('play',  () => {
@@ -7772,17 +7772,17 @@ for (const ev of ['playing', 'canplay', 'error']) {
       });
    }
 
-// canPlayType() lies in some browser/codec pairings — Firefox claims it can
+// canPlayType() lies in some browser/codec pairings - Firefox claims it can
 // play audio/mp4 ('maybe') but then fails on the AAC payload with
 // NS_ERROR_DOM_MEDIA_METADATA_ERR.  When the optimistic direct stream fails
 // to decode, retry once asking the server to transcode to mp3.  We don't
-// know up-front which (browser, container, codec) triples are bad — letting
+// know up-front which (browser, container, codec) triples are bad - letting
 // the actual decoder be the source of truth keeps this format-list free.
 el.addEventListener('error', () => {
    if (castDeviceId !== null) {
       // The sound is on the receiver and is unaffected; only the picture
       // failed.  Fall back to the panel rather than tearing down the session,
-      // and do not try the mp3 retry below — this element is already silent.
+      // and do not try the mp3 retry below - this element is already silent.
       if (!castVideoLocal) return;
       console.warn('[cast] local picture failed, showing the panel instead:',
                    player.videoEl.error?.message);
@@ -7803,7 +7803,7 @@ el.addEventListener('error', () => {
       }
    if (player.streamFallbackTried) return;
    // The fallback is format=mp3, which for a video would request the
-   // soundtrack alone — the picture would vanish and the player would look
+   // soundtrack alone - the picture would vanish and the player would look
    // like it had merely lost its cover art.  A video that will not decode is
    // a real failure and should say so.
    //
@@ -7995,7 +7995,7 @@ function setupPlayer() {
       const root = document.getElementById('promote-root').value;
       const name = document.getElementById('promote-folder').value.trim();
       // Both are required by the server, and showPromoteDialog keeps the button
-      // disabled until both are set — so this cannot fire without them.
+      // disabled until both are set - so this cannot fire without them.
       if (!root || !name) return;
       _closePromoteDialog();
       if (cb) cb(root, name);
@@ -8059,7 +8059,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
    // content (e.g. playlist tracks). We use album.parent (artist id from
    // getAlbum) so this also works when the caller passed a null artistId.
    // Pane 1 is considered fresh only when its dataset marker matches AND it
-   // still actually contains album rows — playlist track listings, search
+   // still actually contains album rows - playlist track listings, search
    // result lists, etc. all leave the marker irrelevant.
    const albumsPane = document.getElementById('pane-albums');
    const pane1Fresh = albumsPane.dataset.artistId === String(album.parent)
@@ -8241,7 +8241,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
       num.textContent = useSeq ? (i + 1) : (song.track ?? '');
 
       // Title and, when the file disagrees with its folder, the track's own
-      // artist stacked under it — the same shape the playlist listing uses.
+      // artist stacked under it - the same shape the playlist listing uses.
       // The wrap is the row's grid cell, not the title: edit mode swaps this
       // element for an <input>, and replaceChild only reaches a direct child.
       const titleWrap = document.createElement('span');
@@ -8250,9 +8250,9 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
       title.className = 'track-title';
       title.textContent = song.title;
       titleWrap.appendChild(title);
-      // The server decided what counts as a difference — it sends the folder's
+      // The server decided what counts as a difference - it sends the folder's
       // spelling in `artist` when the tag is merely another way of writing the
-      // same name — so this is an exact comparison and nothing more.
+      // same name - so this is an exact comparison and nothing more.
       row.dataset.trackArtist =
          (song.displayAlbumArtist && song.artist !== song.displayAlbumArtist)
             ? song.artist : '';
@@ -8338,7 +8338,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
       editLink.appendChild(cancelBtn);
 
       // Album title and artist become inputs. Both are *directory names* on the
-      // server — the scanner never reads them from tags — so saving them moves
+      // server - the scanner never reads them from tags - so saving them moves
       // files, which is why they are only editable here and not, say, inline.
       //
       // The artist comes from album.artist rather than the artistName argument:
@@ -8618,7 +8618,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
                   // No musicFolderId, so moveAlbum keeps everything above the
                   // artist level and this is a rename in place. `folder` is
                   // the artist level under whatever root the album is already
-                  // in — an artist here, since the edit screen is only drawn
+                  // in - an artist here, since the edit screen is only drawn
                   // for an album that has one.
                   const sr = await apiCall('moveAlbum',
                      {id: albumId, album: newName, folder: newArtist});
@@ -8643,10 +8643,10 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
                showError(`Renamed, but the tags in ${renamed.tagFailures} file(s) `
                   + 'could not be rewritten.');
             // Every id in this pane has just changed, so there is nothing to
-            // patch in place — re-render all three panes against the new ones.
+            // patch in place - re-render all three panes against the new ones.
             // Pane 0 too: re-filing may have created an artist or emptied one.
             // Which listing to rebuild comes from the stamp pane 1 carries
-            // from whichever viewAlbums rendered it — a rename in place keeps
+            // from whichever viewAlbums rendered it - a rename in place keeps
             // the same root, so the section is unchanged by the rename. Read
             // before the re-render replaces it.
             const section =
@@ -8660,7 +8660,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
 
          if (yearChanged || orderChanged) {
             // Pane 1 draws the album's own year and sorts on it, so a year
-            // edit rebuilds that listing too — and since viewAlbums() clears
+            // edit rebuilds that listing too - and since viewAlbums() clears
             // pane 2, the tracks have to follow. Guarded on pane 1 really
             // holding this album's row, so a listing that came from somewhere
             // else is not thrown away.
@@ -8692,7 +8692,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
       editLink.textContent = 'Edit';
 
       // Put the heading back. On a successful rename this function is not
-      // reached at all — the view is re-rendered instead — so keepValues here
+      // reached at all - the view is re-rendered instead - so keepValues here
       // only ever restores a name that was never sent.
       if (nameInput) {
          heading.textContent = keepValues ? nameInput.value : nameInput.dataset.orig;
@@ -8715,7 +8715,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
                                  {id: album.coverArt, size: coverPx(HERO_BOX)});
             }
          else if (!album.coverArt && heroImg) {
-            // A new image was previewed but the upload was cancelled — remove it.
+            // A new image was previewed but the upload was cancelled - remove it.
             heroImg.remove();
             heroImg = null;
             }
@@ -8785,7 +8785,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
    // Re-apply the playing highlight if a track from this album is active.
    playerUpdateUI();
 
-   // Album notes, fetched without blocking the track listing — and polled on
+   // Album notes, fetched without blocking the track listing - and polled on
    // `resolving`, exactly as loadBio() does for a biography. getAlbumInfo2
    // answers from album_info_cache now and queues the lookup rather than
    // performing it, so the first view of an album nobody has looked up has
@@ -8918,7 +8918,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
    // Fetch liner-note text files without blocking the track list.
    apiCall('getAlbumTexts', {id: albumId}).then(srTxt => {
       // The one late continuation that appends to the pane itself rather than
-      // into a slot this render already placed there — a detached slot is
+      // into a slot this render already placed there - a detached slot is
       // invisible, a second liner-notes panel under somebody else's album is
       // not.
       if (renderStale(gen)) return;
@@ -8995,7 +8995,7 @@ function closeSearchBar() {
    document.getElementById('search-bar').classList.remove('open');
    // Blurred, or the bar goes on owning the keyboard after it has gone.  It
    // collapses by animating grid-template-rows to 0fr rather than by being
-   // display:none — which is what makes the transition possible — so nothing
+   // display:none - which is what makes the transition possible - so nothing
    // takes focus off the box for us, and the dispatcher's typing guard reads a
    // focused INPUT and returns on every key that follows.  The symptom is a
    // client that stops answering the keyboard entirely once search has been
@@ -9084,7 +9084,7 @@ function renderSearchResults(res, gen) {
          // The portrait comes from our own server, not from the URL
          // getArtistInfo2 reports. That URL points at Wikimedia, so every
          // client of every install used to fetch a full-size original
-         // straight from the internet — slow on a LAN, impossible offline,
+         // straight from the internet - slow on a LAN, impossible offline,
          // and one getArtistInfo2 round trip per row on top. Same argument
          // that put the icon font in the binary.
          const img = artistPortrait(artist.id, coverPx(80),
@@ -9176,7 +9176,7 @@ function renderSearchResults(res, gen) {
          }
       }
 
-   // Songs inside a video — a section of their own, because that is how the
+   // Songs inside a video - a section of their own, because that is how the
    // server reports them. A chapter has no id anything can stream or star, so
    // it is not a song entry and must not be drawn as one; what it does have is
    // a film and a position in it, which is enough to play from.
@@ -9276,8 +9276,8 @@ function setupSearch() {
 //    do something the interface is not currently offering, and the overlay
 //    cannot claim it can.
 //  * `run` performs it, delegating to the button it mirrors wherever one
-//    exists.  That is the pattern the client already uses — #video-play clicks
-//    #player-playpause, the Media Session keys click #player-prev/-next — and
+//    exists.  That is the pattern the client already uses - #video-play clicks
+//    #player-playpause, the Media Session keys click #player-prev/-next - and
 //    it is what makes the gating free: #player-cast is hidden without castRole,
 //    both chapter buttons are hidden on a film with no markers, and
 //    #video-fullscreen is hidden while casting.  Testing the button is
@@ -9287,14 +9287,14 @@ function setupSearch() {
 //    the one that was pressed.  It exists so picking the fourth cast device is
 //    one row in the overlay reading "1…9" rather than nine rows reading "4".
 //  * `modal` names the dialog an entry belongs to, and is what lets a key work
-//    while that dialog is open — everything else is locked out, see the
+//    while that dialog is open - everything else is locked out, see the
 //    dispatcher.  It does *not* mean "only there": an entry with no dialog open
 //    is judged on `when` alone, which is what makes X stop a cast from
 //    anywhere while the number keys, whose `when` asks for the picker, work
 //    only in it.  `'*'` is every dialog, and only `?` wants it.
 //  * `nav` is optional and holds the CSS selector of the sidebar entry the
 //    key stands for.  It is one string doing two jobs: `run` clicks it, and
-//    keysNavHints() stamps `show` onto it as a key cap — so the letter printed
+//    keysNavHints() stamps `show` onto it as a key cap - so the letter printed
 //    in the sidebar is read out of the entry that makes the letter work, and a
 //    rebinding moves the hint with it rather than leaving a lie in the markup.
 //    `run` reaches it as `this.nav`, which is why those entries are written as
@@ -9310,7 +9310,7 @@ function setupSearch() {
 // which does not scale to a client meant to be driven from the keyboard, so
 // search now has a key of its own and the alphabet is free.
 
-// True when the element exists and is not hidden — the whole of most `when`
+// True when the element exists and is not hidden - the whole of most `when`
 // predicates, since the shortcut is only offering what the button offers.
 function keyShown(id) {
    const el = document.getElementById(id);
@@ -9322,12 +9322,12 @@ function keyShown(id) {
 // !videoCovering() is the Browsing rule, here for the Browsing reason: a
 // picture filling the content area is drawn over the panes, so switching which
 // list is underneath it changes something the viewer cannot see.  A minimised
-// picture is deliberately not covered — the panes are still there and still the
+// picture is deliberately not covered - the panes are still there and still the
 // thing being looked at.
 //
 // keyShown('app-shell') is the other half.  setupKeys() binds its listener once
 // per page load, inside showShell()'s wiredOnce block, and showLogin() only
-// sets the hidden attribute — so the keyboard outlives a logout.  Without this,
+// sets the hidden attribute - so the keyboard outlives a logout.  Without this,
 // Shift L on the login screen would rebuild a shell nobody is looking at and
 // fetch with credentials that were just dropped.  #app-shell carries the
 // attribute rather than a class, which is exactly what keyShown tests.
@@ -9349,7 +9349,7 @@ function videoOnScreen() {
 // The picture is over the lists, so the lists are not what the arrow keys are
 // pointed at.  Theatre fills the whole content area and fullscreen fills more
 // than that, while minimised is a thumbnail in the corner with the panes still
-// there and still usable — which is the whole reason this is a state test and
+// there and still usable - which is the whole reason this is a state test and
 // not videoOnScreen().
 function videoCovering() {
    if (document.fullscreenElement) return true;
@@ -9358,7 +9358,7 @@ function videoCovering() {
 }
 
 // Fullscreen renders only #video-frame's subtree, so a modal parented on <body>
-// is not drawn at all — the same constraint that put #video-chapters inside
+// is not drawn at all - the same constraint that put #video-chapters inside
 // the frame and gave the chapter toggle a second home there.  A key that opens
 // a dialog therefore has to leave fullscreen first, or it looks dead.
 function keyLeaveFullscreen() {
@@ -9373,8 +9373,8 @@ function keyLeaveFullscreen() {
 // a copy here would be a copy to keep in step.
 //
 // What was missing is a cursor *within* a pane, which is all this adds.  It is
-// a layer over the DOM the list builders already produce — not one of them is
-// touched — so a new kind of list becomes navigable by matching the selector
+// a layer over the DOM the list builders already produce - not one of them is
+// touched - so a new kind of list becomes navigable by matching the selector
 // rather than by remembering to wire something up.
 
 const NAV_PANES = ['pane-artists', 'pane-albums', 'pane-tracks'];
@@ -9390,8 +9390,8 @@ const NAV_ROW_SEL =
 // sensible rather than at the top.
 //
 // An index rather than a node, because these lists are rebuilt underneath the
-// viewer — refreshStarredSections() on any star change, the album sort toggle,
-// viewArtists() from the two upload pollers — and an index lands back on the
+// viewer - refreshStarredSections() on any star change, the album sort toggle,
+// viewArtists() from the two upload pollers - and an index lands back on the
 // same position where a detached node lands nowhere.  Keying on data-id was the
 // other candidate and cannot work: search rows carry no ids at all.
 const navCursor = [null, null, null];
@@ -9404,14 +9404,14 @@ const navCursor = [null, null, null];
 // having been left in some half-selected state.
 //
 // So it is raised by the things that move the cursor *with a key* and never by
-// the click listener.  Sticky once raised — someone who has reached for the
+// the click listener.  Sticky once raised - someone who has reached for the
 // keyboard once is entitled to keep seeing where they are, and blinking the
 // mark out on every click would be worse than either extreme.
 let navShown = false;
 
 // Visible rows only, and offsetParent is what decides it.  A track row is
-// hidden by CSS in two directions — .has-chapters outside edit mode and
-// .chapter-track inside it — so asking the layout is the only test that cannot
+// hidden by CSS in two directions - .has-chapters outside edit mode and
+// .chapter-track inside it - so asking the layout is the only test that cannot
 // drift from style.css.
 function navRows(depth) {
    const pane = document.getElementById(NAV_PANES[depth]);
@@ -9458,7 +9458,7 @@ function navHeaderH(depth) {
 }
 
 // How far a page step moves: as many rows as the pane can show, less one kept
-// for context — what stops a page from leaving the reader with nothing they
+// for context - what stops a page from leaving the reader with nothing they
 // recognise.
 //
 // A division rather than a walk over offsetTop, and that is a fact about these
@@ -9494,7 +9494,7 @@ function navPaint() {
    if (!row) return;
    row.classList.add('row-cursor');
    // A row scrolled to the top of a pane sits under the sticky header, and the
-   // browser counts that as visible — so 'nearest' would decline to scroll and
+   // browser counts that as visible - so 'nearest' would decline to scroll and
    // the cursor would be behind it.
    row.style.scrollMarginTop = `${navHeaderH(d)}px`;
    row.scrollIntoView({block: 'nearest'});
@@ -9510,7 +9510,7 @@ function navMoveRow(dir, page = false) {
    const fresh = navCursor[d] === null;
    const rows  = navSettle(d);
    if (!rows.length) return;
-   // The first press in a pane places the cursor rather than moving it —
+   // The first press in a pane places the cursor rather than moving it -
    // pressing Down on a list that has none should land on the first row, not
    // silently skip it for the second.  A page press is no different: it is
    // still the press that puts the cursor on screen.
@@ -9544,7 +9544,7 @@ function navMovePane(delta) {
 // Enter is the row's own click, which is the whole of it: every list builder
 // puts its handler on the row, and the controls inside one (star, enqueue, add
 // to playlist, promote) all stopPropagation, so a row-level click has exactly
-// one meaning per list.  Album edit mode needs no case here either — the row
+// one meaning per list.  Album edit mode needs no case here either - the row
 // handler already returns early on .editing.
 function navActivate() {
    navShown = true;
@@ -9571,7 +9571,7 @@ function navDrill() {
       return;
       }
    // Otherwise the click loads that pane and slides to it itself, and the
-   // cursor follows on that slide — which is a fetch away, so not now.
+   // cursor follows on that slide - which is a fetch away, so not now.
    row.click();
 }
 
@@ -9581,18 +9581,18 @@ function navDrill() {
 // whose text contains what has been typed, and moves again with each further
 // character.  Ctrl+S again advances to the next match, wrapping at the end;
 // Ctrl+R does the same backwards, and either turns a running search round
-// without losing what has been typed — which is what makes overshooting a
+// without losing what has been typed - which is what makes overshooting a
 // match cost one keystroke rather than the whole string.
 //
 // Ctrl+R is the browser's reload, and taking it is deliberate: reload is on a
 // toolbar button, on F5 and on Ctrl+Shift+R, while a search that can only go
 // forwards has nothing else to offer.  The shifted form is left alone for that
-// reason — it is the one a person reaches for when the page looks broken, which
+// reason - it is the one a person reaches for when the page looks broken, which
 // is exactly the moment not to be clever.
 //
 // It is not the search bar `/` opens.  That one asks the server and replaces
 // pane 0 with the answer; this one never leaves the listing already on screen,
-// which is the whole point — finding a row among the hundreds in front of you
+// which is the whole point - finding a row among the hundreds in front of you
 // should not cost you the listing.
 //
 // `origin` is captured on entry so Escape can put the cursor back, which is
@@ -9608,7 +9608,7 @@ const ISEARCH_HL = 'gd-isearch';
 // (makeTrackActions writes 'star', and 'close' for the remove button), so the
 // plain reading makes "star" match every track row and "close" every row of a
 // playlist.  Skipping .mi subtrees is generic, where a list of per-view title
-// classes would be one more thing to update per new list — the coupling the
+// classes would be one more thing to update per new list - the coupling the
 // navigation layer above was deliberately built without.
 //
 // Text nodes rather than a string, because the highlight needs the nodes.
@@ -9621,7 +9621,7 @@ function isearchNodes(el, out = []) {
    return out;
 }
 
-// Joined with a space so a match may run from one element into the next —
+// Joined with a space so a match may run from one element into the next -
 // an artist name beside a separate album title reads as two words, not one.
 function isearchText(row) {
    return isearchNodes(row).map(n => n.nodeValue).join(' ').toLowerCase();
@@ -9636,7 +9636,7 @@ function isearchMatches(row, needle) {
 // half-typed search worth reading.
 //
 // A range is built only where the match sits inside a single text node, which
-// is the ordinary case — a title is one node.  A match spanning two nodes still
+// is the ordinary case - a title is one node.  A match spanning two nodes still
 // counts and still moves the cursor; it simply is not painted, which is a great
 // deal cheaper than mapping an offset in the joined string back through the
 // separators to a pair of nodes.
@@ -9683,8 +9683,8 @@ function isearchDraw() {
       isearch.wrapped && !isearch.failing ? 'wrapped' : '';
 }
 
-// Looks from `start` for a row matching the current string — forward, or
-// backward when `back` — wrapping once through the whole pane.  Returns the
+// Looks from `start` for a row matching the current string - forward, or
+// backward when `back` - wrapping once through the whole pane.  Returns the
 // index, or null when nothing in the pane matches at all, which is what
 // "failing" means and is deliberately not the same as "no more this way".
 //
@@ -9706,7 +9706,7 @@ function isearchFind(rows, start, back) {
 // `from` is where the scan starts; which way it goes is isearch.back, so every
 // caller sets the direction before it and none of them passes it twice.
 // Typing passes the current row, so a row that still matches the longer string
-// keeps the cursor — the emacs feel, and what stops the cursor bolting away in
+// keeps the cursor - the emacs feel, and what stops the cursor bolting away in
 // the middle of a word.  Ctrl+S passes the row after it and Ctrl+R the one
 // before, which is what makes them "next" and "previous".
 function isearchStep(from) {
@@ -9767,7 +9767,7 @@ function isearchEnd(restore) {
 // The mode's whole keyboard.  Returns true when it has claimed the key.
 //
 // Anything it does not claim ends the search and is deliberately *not* claimed,
-// so the key then does its ordinary job in the same press — pressing Down after
+// so the key then does its ordinary job in the same press - pressing Down after
 // a search moves the cursor rather than being swallowed, which is what emacs
 // does and needs no case of its own.
 function isearchKey(e) {
@@ -9897,7 +9897,7 @@ const SHORTCUTS = [
 
    // Shift, because these are the one kind of jump that leaves whatever you
    // were doing for somewhere else entirely, and because plain l is already the
-   // chapter list — a letter meaning two things told apart by state the viewer
+   // chapter list - a letter meaning two things told apart by state the viewer
    // has to infer is what the shift avoids.
    //
    // Each mirrors its sidebar entry by clicking it, the table's usual bargain:
@@ -9917,13 +9917,13 @@ const SHORTCUTS = [
    {group: 'Views', key: 's', show: 'Shift S', shift: true, label: 'Settings',
     nav:  '#sidebar a[data-view="settings"]',
     when: keyCanSwitchView, run() { document.querySelector(this.nav).click(); }},
-   // Uploads is a listing of its own, entered through openUploads() — the
+   // Uploads is a listing of its own, entered through openUploads() - the
    // same function the upload icon in the Library header calls, which owns
    // the history entry and the .active mark, so the key cannot drift from the
    // mouse's way in.  It carries no `nav` and so draws no cap: there is no
    // sidebar row to hang one on, and the header icon is where it is offered.
    //
-   // Offered on exactly the terms the icon is, by asking the same predicate —
+   // Offered on exactly the terms the icon is, by asking the same predicate -
    // an account with no upload rights is shown the row dimmed rather than
    // given a key that lands on a listing it does not have.
    {group: 'Views', key: 'u', show: 'Shift U', shift: true, label: 'Uploads',
@@ -9965,7 +9965,7 @@ const SHORTCUTS = [
    // among four hinted neighbours, which reads as having no key.
    // One row in the overlay for nine keys.  The number a row answers to is
    // drawn on the row itself by castDeviceRow(), and both come from the
-   // same place — the order the picker appends them in — so the cap and the
+   // same place - the order the picker appends them in - so the cap and the
    // key cannot disagree.  Clicking the row rather than calling
    // selectCastDevice() keeps one definition of what picking one means.
    //
@@ -9978,7 +9978,7 @@ const SHORTCUTS = [
        document.querySelectorAll('#cast-device-list .cast-device-btn')
           [Number(pressed) - 1]?.click();
        }},
-   // Works from anywhere a cast is running, not only in the picker — which is
+   // Works from anywhere a cast is running, not only in the picker - which is
    // what `modal` naming the picker buys: with no dialog open the entry is
    // judged on `when` alone.  Mirrors the button, so it stops a cast by
    // exactly the path the mouse does, hidden row and all.
@@ -10023,7 +10023,7 @@ function keysRender() {
          // told not to break, so a group is never split down the fold with its
          // heading in one column and half its keys in the next.
          //
-         // It is also why #keys-list is a <div> and not a <dl> — a <dl> may
+         // It is also why #keys-list is a <div> and not a <dl> - a <dl> may
          // hold dt, dd and grouping divs, and a nested <dl> is not among them.
          const block = document.createElement('section');
          block.className = 'keys-group-block';
@@ -10054,7 +10054,7 @@ function keysRender() {
 // two files, and the copy in the one that cannot execute is the copy that goes
 // stale.
 //
-// Selecting through `nav` — which names a #sidebar element — is also what keeps
+// Selecting through `nav` - which names a #sidebar element - is also what keeps
 // the caps out of #bottom-nav, whose [data-view] markup is otherwise identical.
 // The layout that shows that bar is the phone layout, and a phone has no
 // keyboard to press: a media query would build the cap and then paint it away,
@@ -10062,8 +10062,8 @@ function keysRender() {
 // and would put a second definition of "this is a phone" beside the first.
 // This never builds it at all.
 //
-// Once per page load, from the wiredOnce block.  Nothing rebuilds these links —
-// showView only toggles .active on them — so once is enough, and twice would
+// Once per page load, from the wiredOnce block.  Nothing rebuilds these links -
+// showView only toggles .active on them - so once is enough, and twice would
 // stack a second cap on every entry.
 function keysNavHints() {
    for (const sc of SHORTCUTS) {
@@ -10078,7 +10078,7 @@ function keysNavHints() {
 
 // The topmost open dialog, or null.  Escape is the only way out of one by
 // keyboard, since none of them handles it themselves.  Document order is
-// stacking order here — every .modal shares one z-index — so the last is the
+// stacking order here - every .modal shares one z-index - so the last is the
 // one drawn on top.
 function keyOpenModal() {
    const open = document.querySelectorAll('.modal:not(.hidden)');
@@ -10131,7 +10131,7 @@ function setupKeys() {
          return;
          }
 
-      // Ctrl is no longer a reason to bail — it is part of a key's identity
+      // Ctrl is no longer a reason to bail - it is part of a key's identity
       // below, so only an entry that asks for it matches and every other Ctrl
       // combination still reaches the browser untouched.  Meta and Alt keep the
       // blanket return: nothing here wants them, and they carry the window and
@@ -10140,14 +10140,14 @@ function setupKeys() {
 
       // tagName is still the whole test: there is no contenteditable anywhere
       // in the client.  It covers the chapter time and name fields, the album,
-      // track and playlist edit inputs, and #player-seek — which is a range
+      // track and playlist edit inputs, and #player-seek - which is a range
       // input, and so keeps its own arrow-key behaviour for free.
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
       // A dialog locks the keyboard to the entries that belong to it, or Q
       // would close the film behind the cast chooser and Space would start
-      // playback under a confirmation prompt — a key changing something the
+      // playback under a confirmation prompt - a key changing something the
       // viewer cannot see is the one result a shortcut set must not produce.
       //
       // Folded into the match below rather than an early return, because the
@@ -10161,12 +10161,12 @@ function setupKeys() {
       // to be told apart from ← by the flag.  A letter is the same case: Shift L
       // and l are one letter in two cases, and the view keys have to be told
       // apart from f, l, q and c.  Punctuation is the exception that keeps its
-      // old rule — ? is Shift+/ on most layouts and arrives as ? already, so the
+      // old rule - ? is Shift+/ on most layouts and arrives as ? already, so the
       // character is the whole identity and testing shiftKey would stop it
       // matching at all.
       //
       // A letter is asked about e.shiftKey rather than about its own case,
-      // because Caps Lock changes the case with nobody having pressed Shift —
+      // because Caps Lock changes the case with nobody having pressed Shift -
       // and reading the case would then select the *wrong* entry rather than
       // merely fail to find one.
       const key   = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -10200,7 +10200,7 @@ let wiredOnce = false;
 // rather than merely hidden along with #login-screen.  A password manager
 // decides what a page *is* by looking for a live <input type="password">
 // anywhere in it, and having found one it treats every other text-ish box as
-// somewhere credentials might belong — which is why a saved login was being
+// somewhere credentials might belong - which is why a saved login was being
 // offered for #search-input, a box already declared type="search"
 // autocomplete="off".  That attribute is not the lever and never was: every
 // major manager ignores it on principle, sites having used it to fight them.
@@ -10212,7 +10212,7 @@ let wiredOnce = false;
 // "the login worked" signal before it offers to save: a navigation, the form
 // becoming invisible, or the form being removed.  Hiding an ancestor is the
 // weakest of the three, which is why the offer used to arrive at moments that
-// had nothing to do with logging in — the manager never got a resolution and
+// had nothing to do with logging in - the manager never got a resolution and
 // went on re-deciding all session.
 //
 // The same node is kept and put back rather than rebuilt from markup.  The
@@ -10228,7 +10228,7 @@ function loginFormDetach() {
    const form = document.getElementById('login-form');
    if (!form) return;
 
-   // Focus is inside the form here — the user has just pressed Connect — and
+   // Focus is inside the form here - the user has just pressed Connect - and
    // removing the subtree would hand it to <body> without saying so.  Said out
    // loud instead, because on iOS a focused control torn out from under the
    // soft keyboard leaves the visual viewport in a state it does not recover
@@ -10236,8 +10236,8 @@ function loginFormDetach() {
    document.activeElement?.blur();
 
    // remove() first and the wipe second, in that order deliberately.  Both
-   // Chrome and Firefox capture the values when they see the submit event —
-   // preventDefault() does not stop that — but it is this removal that fires
+   // Chrome and Firefox capture the values when they see the submit event -
+   // preventDefault() does not stop that - but it is this removal that fires
    // the offer to save, so a manager re-reading the fields as the node goes
    // should find the real ones.  For the same reason the wipe must never move
    // up into the submit handler: blanking before capture kills the prompt.
@@ -10246,7 +10246,7 @@ function loginFormDetach() {
 
    // Nothing outside this module can reach a detached node, so this is not
    // plugging a leak so much as declining to keep a typed password alive for
-   // the session after the single exchange that needed it — by here tryLogin()
+   // the session after the single exchange that needed it - by here tryLogin()
    // has already turned it into a salt and token, and neither field is read
    // again.  The username goes too, so a re-login starts from empty boxes.
    form.querySelector('#password').value = '';
@@ -10309,7 +10309,7 @@ async function showShell() {
    console.log('[shell] showing main shell');
    document.getElementById('login-screen').hidden = true;
    // Hidden first, then detached, so no ordering of the two can paint
-   // .login-card with its contents gone — the card is a fixed 320px box and
+   // .login-card with its contents gone - the card is a fixed 320px box and
    // would draw as an empty one holding just the title.  It cannot happen
    // today, [hidden]{display:none!important} applying in this same synchronous
    // task, and writing the safe order is what keeps that true if someone later
@@ -10322,7 +10322,7 @@ async function showShell() {
    // Once per page load, not once per login: logging out calls showLogin() and
    // logging back in returns here without a reload, so without the guard every
    // handler below is bound a second time.  That was survivable while they were
-   // all one-way — a doubled openSearchBar() opens the bar — and stops being so
+   // all one-way - a doubled openSearchBar() opens the bar - and stops being so
    // with keys that toggle, where the second call undoes the first and 'f' and
    // '?' simply appear dead.  Nothing in these depends on who logged in.
    if (!wiredOnce) {
@@ -10338,8 +10338,8 @@ async function showShell() {
       // These four were below, outside the guard, and so were re-bound on every
       // login: after one logout and back, a nav click pushed two history
       // entries and rendered twice, and Back popped through doubled handlers.
-      // They meet this block's own criterion — nothing in them depends on who
-      // logged in — and the view keys click that nav link, so a key would have
+      // They meet this block's own criterion - nothing in them depends on who
+      // logged in - and the view keys click that nav link, so a key would have
       // inherited the doubling exactly.
 
       // Wire up sidebar and bottom-nav links with history entries.
@@ -10352,14 +10352,14 @@ async function showShell() {
          });
 
       // Handle browser back/forward: slide to the pane when it already holds
-      // what the popped entry names, and draw it when it does not — a refresh
+      // what the popped entry names, and draw it when it does not - a refresh
       // that landed on a deep entry, or a pane since rewritten by another view.
       //
       // What it holds is read from the stamp paneReset() left, not from a child
       // count. A count says something is there; it never said *what*, so Back
       // slid to a pane 1 full of a playlist's tracks for an entry naming an
-      // artist's albums, and — with no branch for Recents or Settings, which
-      // fell through to the Library's — did nothing at all between the sidebar
+      // artist's albums, and - with no branch for Recents or Settings, which
+      // fell through to the Library's - did nothing at all between the sidebar
       // views.
       window.addEventListener('popstate', async e => {
          const s = e.state ?? {view: 'artists'};
@@ -10416,15 +10416,15 @@ async function showShell() {
 
       document.getElementById('logout-btn').addEventListener('click', async e => {
          e.preventDefault();
-         // Tear down any active cast session before dropping creds — otherwise
+         // Tear down any active cast session before dropping creds - otherwise
          // the Chromecast keeps playing and the SSE listener stays open server-side.
          if (castDeviceId !== null) await stopCast({resumeLocal: false});
          creds.clear();
          showLogin();
          });
 
-      // Both fire on the journey this exists for — shutting the lid at home
-      // and opening it somewhere else — and neither alone covers it: a laptop
+      // Both fire on the journey this exists for - shutting the lid at home
+      // and opening it somewhere else - and neither alone covers it: a laptop
       // waking on a new network raises `online`, one carried between two
       // networks it already knows may only ever raise `visibilitychange`.
       // Inside wiredOnce for the reason everything else here is: logging out
@@ -10468,11 +10468,11 @@ async function showShell() {
             castReceiverVideo = !!sess.receiverShowsVideo;
             // Adopted rather than acted on.  A notice describes the load it
             // belongs to, and this page has just arrived: reporting a failure
-            // the user has already seen elsewhere — or already worked around
-            // by loading something else — is worse than saying nothing.
+            // the user has already seen elsewhere - or already worked around
+            // by loading something else - is worse than saying nothing.
             castNoticeSeq    = sess.noticeSeq ?? 0;
             // The same description castLoad's reply carries, for the load
-            // that is already playing — this reload has no castLoad reply to
+            // that is already playing - this reload has no castLoad reply to
             // have read it from, which is why castSession repeats it.
             castStream       = sess;
             // The server numbers caption tracks from 1 and 0 means off; the
@@ -10584,7 +10584,7 @@ console.log('[boot] checking saved credentials');
    if (!/^https?:$/.test(window.location.protocol)) {
       console.error('[boot] not served over http(s):', window.location.protocol);
       const errEl = document.getElementById('login-error');
-      errEl.textContent = 'Open this page from your gaindrive server — '
+      errEl.textContent = 'Open this page from your gaindrive server - '
          + 'a copy opened from disk has no server to talk to.';
       errEl.hidden = false;
       document.getElementById('login-form')

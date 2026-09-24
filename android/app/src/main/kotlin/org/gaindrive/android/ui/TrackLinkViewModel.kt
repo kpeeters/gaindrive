@@ -16,7 +16,7 @@ import javax.inject.Inject
  * Resolving a track link involves a network call, so it runs here rather than
  * in the shell's own LaunchedEffect: this scope is activity-wide and survives
  * the recompositions a rotation brings, where an effect resolving the link
- * itself would be cancelled mid-call with the link already marked handled —
+ * itself would be cancelled mid-call with the link already marked handled -
  * silently lost. The result is a one-shot consumed the way the player's
  * message is.
  */

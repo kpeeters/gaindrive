@@ -16,13 +16,13 @@ import org.gaindrive.android.net.SubsonicApi
  * A Subsonic server exposes artists, albums and tracks twice: once derived from
  * the files' tags, and once from the directory tree they sit in. gaindrive
  * builds both from the tree, so the two agree and the choice does not matter.
- * Elsewhere it matters a great deal — a library whose tags are patchy browses
+ * Elsewhere it matters a great deal - a library whose tags are patchy browses
  * correctly through its folders and badly through its tags, which is what this
  * interface exists to switch between.
  *
  * Only the network-to-domain half lives here. Fanning out across servers,
  * writing the mirror and merging the results are the repository's, and are the
- * same either way — which is the point of putting the fork here rather than
+ * same either way - which is the point of putting the fork here rather than
  * inside each of those methods, where the two arms would have to be kept in step
  * by hand.
  *

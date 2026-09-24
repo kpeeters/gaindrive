@@ -91,8 +91,8 @@
    </nav>
 
    <!-- Video playback surface. The <video> element inside is never moved in
-        the DOM — some browsers tear down and restart the stream when a media
-        element is re-parented — so the two states are purely a CSS change
+        the DOM - some browsers tear down and restart the stream when a media
+        element is re-parented - so the two states are purely a CSS change
         driven by data-state on the container. Transport is on the picture
         itself (#video-controls) as well as on the player bar; the bar below
         owns the title, the subtitle picker, minimise and fullscreen. -->
@@ -179,9 +179,9 @@
             <div id="video-captions-menu" class="hidden"></div>
          </span>
          <!-- Shown only while the picture is here and the sound is on a
-              receiver. It calibrates the one thing nothing can measure — how
+              receiver. It calibrates the one thing nothing can measure - how
               far behind its reported position a device actually makes a
-              sound — so it has to be adjustable while watching, which is why
+              sound - so it has to be adjustable while watching, which is why
               it is here rather than in Settings. -->
          <span id="video-sync-wrap" hidden>
             <button id="video-sync" class="mi" title="Audio/video sync" aria-label="Audio/video sync">av_timer</button>
@@ -209,7 +209,7 @@
    <footer id="player">
       <img id="player-cover" src="" alt="" width="48" height="48">
       <div id="player-info">
-         <span id="player-title">—</span>
+         <span id="player-title">–</span>
          <span id="player-artist"></span>
       </div>
       <div id="player-controls">
@@ -227,7 +227,7 @@
            equaliser is adjusted while listening: the transport has to stay
            reachable and the library behind it must not dim.  It hangs off the
            footer and not off its own button, which is what lets it survive a
-           phone — the right edge of the bar always has a panel's width to its
+           phone - the right edge of the bar always has a panel's width to its
            left, while a button sitting in the middle of the bar does not.
            The faders themselves are built from EQ_BANDS in app.js, so a label
            cannot end up naming a frequency its filter does not have. -->
@@ -416,7 +416,7 @@
 
 <!-- Rendered from the SHORTCUTS table in app.js rather than written out
      here, so the list a viewer is shown cannot drift from what the keys
-     actually do — which is the whole reason the table exists. -->
+     actually do - which is the whole reason the table exists. -->
 <div id="keys-modal" class="modal hidden">
    <div class="modal-box">
       <h3>Keyboard shortcuts</h3>

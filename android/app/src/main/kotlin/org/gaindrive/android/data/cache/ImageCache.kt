@@ -22,7 +22,7 @@ import javax.inject.Singleton
  * the server is the one kind of staleness a user can see and cannot otherwise
  * do anything about. A cover art id is a folder id, so a poster replaced
  * server-side keeps its URL; `getCoverArt` sends an `ETag` and `no-cache` for
- * exactly that reason, and a revalidation still beats a stale image — but when
+ * exactly that reason, and a revalidation still beats a stale image - but when
  * something does go wrong, "delete the lot and fetch it again" is the only
  * remedy that needs no diagnosis.
  *
@@ -46,7 +46,7 @@ import javax.inject.Singleton
  * portrait is resolved server-side after the first request, and a 404 saying
  * "there is none" is cacheable for an hour, so a device can be holding a "no"
  * that the server has since changed its mind about. Note that this only drops
- * the stored answers — nothing is re-fetched until something asks again, which
+ * the stored answers - nothing is re-fetched until something asks again, which
  * for a portrait is `ArtistAvatar` next time it is composed.
  */
 @Singleton
@@ -115,7 +115,7 @@ class ImageCache @Inject constructor(
 		const val TAG = "ImageCache"
 
 		/**
-		 * The only endpoint this app loads an image from — `CoverUrls` builds
+		 * The only endpoint this app loads an image from - `CoverUrls` builds
 		 * nothing else. It covers album, video and per-song art and the artist
 		 * portraits, since an artist's cover art id is its folder id.
 		 */

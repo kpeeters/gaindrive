@@ -15,7 +15,7 @@ import org.junit.Test
 /**
  * Everything a WiiM answers with comes off the network from a device we do not
  * control, so the rule these tests exist to hold is that a surprise yields null
- * rather than an exception — some of these calls run from a coroutine whose
+ * rather than an exception - some of these calls run from a coroutine whose
  * failure would only surface as a blank sheet.
  *
  * The bodies below are the ones quoted in the WiiM HTTP API documentation.
@@ -69,7 +69,7 @@ class WiiMEqTest {
 	/**
 	 * Defensive rather than measured: the device sends a bare array here, but
 	 * wraps every other response. Refusing a wrapped one is not a visible
-	 * failure — the sheet falls back to the documented list and looks complete —
+	 * failure - the sheet falls back to the documented list and looks complete -
 	 * so it would cost only the presets the owner made themselves, which are the
 	 * ones they are looking for.
 	 */
@@ -227,7 +227,7 @@ class WiiMEqTest {
 	 * `EQLoad:R`, and four documented presets carry a space. Both are why the
 	 * URL is built by `HttpUrl` and never concatenated.
 	 *
-	 * Asserted as the failure mode — one parameter, no raw `&` — rather than as
+	 * Asserted as the failure mode - one parameter, no raw `&` - rather than as
 	 * a literal query string. `addQueryParameter` encodes against OkHttp's query
 	 * *component* set, which is deliberately wider than the reserved characters
 	 * and includes `:`, so the command goes out as `EQLoad%3AR%26B`. Pinning that

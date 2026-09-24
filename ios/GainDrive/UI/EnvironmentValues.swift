@@ -16,7 +16,7 @@ extension EnvironmentValues {
 	/// deliberately is not: it is stateless and `Sendable` precisely so the
 	/// fan-out can run off the main actor, and `@Observable` would give it
 	/// observation storage and take both properties away. Nothing observes it
-	/// anyway — it answers questions, it does not publish changes; the view
+	/// anyway - it answers questions, it does not publish changes; the view
 	/// models are what the views observe.
 	///
 	/// Optional only because an `EnvironmentValues` default has to exist

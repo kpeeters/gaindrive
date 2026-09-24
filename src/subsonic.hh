@@ -26,13 +26,13 @@ inline constexpr const char* USER_AGENT =
 	"GainDrive/" GAINDRIVE_VERSION " (info@phi-sci.com)";
 
 // Subsonic ids are strings in the API even though they are row ids here. Every
-// id crossing the wire in JSON goes through this — the XML path renders
+// id crossing the wire in JSON goes through this - the XML path renders
 // attributes as text anyway, so it needs no equivalent.
 std::string sid(int id);
 
 // Numeric query params, without letting a malformed one escape the handler.
 // std::stoi throws on garbage and on overflow; httplib turns that into a bare
-// HTTP 500, which no Subsonic client can interpret — they expect a 200 with an
+// HTTP 500, which no Subsonic client can interpret - they expect a 200 with an
 // <error> body.  Every request parameter goes through these; a bare std::stoi
 // below this point reads a value the server itself produced.
 int     to_int(const std::string& s, int def);

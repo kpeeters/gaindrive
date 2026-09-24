@@ -13,7 +13,7 @@ import org.junit.Test
  *
  * Worth pinning because the failure mode is silent and total: `ServerStore`
  * falls back to an empty list when the document does not decode, so a field
- * added without a default would not raise anything — it would quietly discard
+ * added without a default would not raise anything - it would quietly discard
  * every server the user had configured.
  */
 class StoredServerTest {

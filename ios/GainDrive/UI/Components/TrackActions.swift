@@ -13,12 +13,12 @@ import SwiftUI
 /// A context menu rather than Android's long-press sheet: it is what iOS users
 /// reach for, it needs no state of its own to present, and the same gesture
 /// works on Mac Catalyst as a right-click. Attached as a modifier so the four
-/// screens that show tracks cannot each grow a slightly different menu — which
+/// screens that show tracks cannot each grow a slightly different menu - which
 /// is the same reason `Rows.swift` exists.
 ///
 /// The queue pair comes first, matching `ui/player/TrackActionsSheet.kt`'s
-/// order. The star has no Android counterpart — that app has no starring UI at
-/// all — and neither does "Go to artist", which is *not* an omission here:
+/// order. The star has no Android counterpart - that app has no starring UI at
+/// all - and neither does "Go to artist", which is *not* an omission here:
 /// `Song` carries an album ref and no artist one, because `SongDto` does not
 /// decode `artistId`.
 struct TrackActions: ViewModifier {
@@ -74,7 +74,7 @@ struct TrackActions: ViewModifier {
 	}
 
 	/// The title is carried on the pin so Settings → Storage can list what was
-	/// pinned without a request per row — which offline, the one time that
+	/// pinned without a request per row - which offline, the one time that
 	/// screen matters most, it could not make.
 	private var pin: Pin {
 		Pin(ref: song.ref, kind: .song, name: song.title)
@@ -92,7 +92,7 @@ extension View {
 }
 
 /// The star as a control, for the places that show one on its face rather than
-/// behind a menu — an album header, an artist header.
+/// behind a menu - an album header, an artist header.
 struct StarButton: View {
 	let ref: ItemRef
 	let kind: StarKind

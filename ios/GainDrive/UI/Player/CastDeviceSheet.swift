@@ -11,13 +11,13 @@ import SwiftUI
 /// Where to play: this device, or a Cast receiver on the network.
 ///
 /// **A plain sheet rather than a system picker**, which is the one real loss in
-/// not taking the Google Cast SDK — `GCKUICastButton` would have brought the
-/// standard chooser with it, and `ios/LICENSE` clause 2 rules the SDK out. See
-/// `CAST.md`. Android is in the same position and reached the same shape.
+/// not taking the Google Cast SDK - `GCKUICastButton` would have brought the
+/// standard chooser with it, and `ios/LICENSE` clause 2 rules the SDK out.
+/// Android is in the same position and reached the same shape.
 ///
 /// It is deliberately *not* an AirPlay route picker with Cast devices added:
 /// `AVRoutePickerView` is UIKit's own and cannot be extended, and the two
-/// mechanisms are unrelated — AirPlay moves this device's audio output, casting
+/// mechanisms are unrelated - AirPlay moves this device's audio output, casting
 /// hands a URL to something that fetches for itself. They sit beside each other
 /// in Now Playing and stay distinct.
 struct CastDeviceSheet: View {
@@ -60,7 +60,7 @@ struct CastDeviceSheet: View {
 	// MARK: - Rows
 
 	/// **First, and always present.** Coming back is the action somebody is
-	/// most likely to want from this sheet — a device list with no way off it
+	/// most likely to want from this sheet - a device list with no way off it
 	/// makes leaving feel like a setting rather than a tap.
 	private var thisDevice: some View {
 		Section {
@@ -118,7 +118,7 @@ struct CastDeviceSheet: View {
 		}
 		// **What a refused Local Network permission actually looks like.**
 		// There is no API to ask whether it was granted, and denied, the browser
-		// reports zero results rather than failing — so a silence that has gone
+		// reports zero results rather than failing - so a silence that has gone
 		// on too long is the only signal there is. It claims nothing: a network
 		// with no receivers on it looks exactly the same.
 		if discovery.quiet {
@@ -183,7 +183,7 @@ struct CastDeviceSheet: View {
 /// **Not an SF Symbol, because there is none.** Cast is Google's mark and Apple
 /// ships no third-party trademarks in the symbol set; `AVRoutePickerView` draws
 /// the AirPlay triangle and knows nothing about Cast either. So the artwork is
-/// Material's own, extracted from the very font the web client renders from —
+/// Material's own, extracted from the very font the web client renders from -
 /// see `Resources/Assets.xcassets/README.md`. This is the one icon in the app
 /// where the shape *is* the meaning: every other platform has trained people to
 /// look for that rectangle with the three waves, and an approximation out of

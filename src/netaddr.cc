@@ -70,7 +70,7 @@ std::string client_addr(const httplib::Request& req)
 	const std::string xff = req.get_header_value("X-Forwarded-For");
 	if (xff.empty()) return req.remote_addr;
 
-	// Rightmost untrusted entry — see the comment on trusted_proxies_.
+	// Rightmost untrusted entry - see the comment on trusted_proxies_.
 	std::string addr = httplib::get_client_ip(xff, trusted_proxies_);
 	if (addr.empty()) return req.remote_addr;
 
@@ -98,8 +98,8 @@ std::string client_addr(const httplib::Request& req)
 //
 // What no test at this layer can see is a VPN bridged into the LAN, or a
 // router handing VPN clients addresses out of the LAN's own pool: such a
-// client *is* on the subnet by every question we are able to ask. ISSUES.md
-// carries it as an accepted risk.
+// client *is* on the subnet by every question we are able to ask; an
+// accepted risk.
 struct LocalNet { int family; size_t len; uint8_t addr[16], mask[16]; };
 
 static std::vector<LocalNet> local_nets()
@@ -233,7 +233,7 @@ static bool addr_is_global(const struct sockaddr* addr)
 			return false;
 		// Unique local (fc00::/7), and IPv4-mapped, which would otherwise be a
 		// straight bypass of every rule above. V4COMPAT is the deprecated
-		// spelling of the same idea (::1.2.3.4, RFC 4291 §2.5.5.1) — modern
+		// spelling of the same idea (::1.2.3.4, RFC 4291 §2.5.5.1) - modern
 		// stacks refuse to route it, but "refuse" is their promise, not
 		// ours, and the check costs one macro beside the one that matters.
 		if ((s6.s6_addr[0] & 0xfe) == 0xfc) return false;

@@ -115,7 +115,7 @@ CastTier cast_tier_for(std::string_view container,
 	{
 	// Audio is byte-ranged off disk: no format and no ceiling means
 	// needs_transcode is false and serve() never reaches a transcode at all.
-	// The film-soundtrack case is not this — it puts `format` on the URL, and
+	// The film-soundtrack case is not this - it puts `format` on the URL, and
 	// so is decided by cast_load_song() rather than by the codec pair.
 	if (!is_video_ext(container)) return CastTier::Direct;
 	if (!video_seeks_natively(video_codec, audio_codec))

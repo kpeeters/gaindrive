@@ -28,8 +28,8 @@ import javax.inject.Singleton
  * Relays audio from a GainDrive server to a Cast receiver that cannot reach that
  * server itself.
  *
- * Cast is pull-only — the sender hands over a URL and the receiver performs its
- * own HTTP GET — so when the phone is the only thing that can reach the server,
+ * Cast is pull-only - the sender hands over a URL and the receiver performs its
+ * own HTTP GET - so when the phone is the only thing that can reach the server,
  * the phone has to carry the bytes. This is the technique BubbleUPnP, LocalCast
  * and VLC all use; the Cast protocol neither provides it nor prevents it, since
  * the receiver only ever sees an ordinary HTTP endpoint.
@@ -40,7 +40,7 @@ import javax.inject.Singleton
  *
  * It serves two kinds of thing, and the receiver cannot tell them apart: bytes
  * fetched from the server on the phone's behalf, and bytes already on the device
- * because the track was downloaded. The second is not merely an optimisation —
+ * because the track was downloaded. The second is not merely an optimisation -
  * it is the only one that works with no connectivity at all, which is the state
  * a downloaded library exists for.
  *
@@ -48,7 +48,7 @@ import javax.inject.Singleton
  * library, so: an unguessable token, rotated per session, is required in the
  * path; requests from outside the local Wi-Fi subnet are refused; and only
  * resources that have been [publish]ed or [publishLocal]ed for the current queue
- * can be fetched at all — this is not a general gateway keyed on song id.
+ * can be fetched at all - this is not a general gateway keyed on song id.
  */
 @Singleton
 class CastBridge @Inject constructor(
@@ -63,8 +63,8 @@ class CastBridge @Inject constructor(
 	 * The shared client with a read timeout long enough for the server to build
 	 * a video remux, whose transcode cache does not answer until ffmpeg has
 	 * finished. [CastUrls] warms that before the receiver ever asks, so this is
-	 * the backstop for a warm that did not happen or did not work; 30 s — the
-	 * shared client's figure, sized for audio — would turn it into a failure.
+	 * the backstop for a warm that did not happen or did not work; 30 s - the
+	 * shared client's figure, sized for audio - would turn it into a failure.
 	 */
 	private val upstreamClient by lazy {
 		httpClient.newBuilder().readTimeout(UPSTREAM_TIMEOUT_MINUTES, TimeUnit.MINUTES).build()
@@ -87,7 +87,7 @@ class CastBridge @Inject constructor(
 		 * The length is carried rather than looked up because it is what decided
 		 * this resource could be published at all: the cache does not always know
 		 * one, and without it there is no `Content-Length` and no way to answer a
-		 * ranged request — which is most of what a receiver asks for.
+		 * ranged request - which is most of what a receiver asks for.
 		 */
 		class Local(val cacheKey: String, val mimeType: String?, val length: Long) : Resource
 	}
@@ -109,7 +109,7 @@ class CastBridge @Inject constructor(
 	 * eviction until the next one replaces them.
 	 *
 	 * **Subtitle tracks are why this exists.** The map is access-ordered, and a
-	 * caption is published at LOAD but not fetched until somebody turns it on —
+	 * caption is published at LOAD but not fetched until somebody turns it on -
 	 * so with only use to go by it is the least recently used thing there is,
 	 * and every seek publishes a fresh stream key that ages it further. A
 	 * viewer switching subtitles forty minutes into a film would find the key
@@ -142,8 +142,7 @@ class CastBridge @Inject constructor(
 			// Bound to the Wi-Fi address rather than to the Wi-Fi Network: there
 			// is no Network.bindSocket for a ServerSocket. Under a full-tunnel
 			// VPN the reply route is the remaining unknown, and the documented
-			// answer is to exclude the local subnet from AllowedIPs — see
-			// CAST.md, "The routing problem".
+			// answer is to exclude the local subnet from AllowedIPs.
 			val socket = ServerSocket(0, BACKLOG, address)
 			server = socket
 			token = newToken()
@@ -218,12 +217,12 @@ class CastBridge @Inject constructor(
 		val from = client.inetAddress?.hostAddress ?: "?"
 		client.use {
 			runCatching { handle(client) }.onFailure {
-				// A receiver closing mid-track is ordinary rather than an error —
-				// it does that on every seek — but an upstream failure arrives as
+				// A receiver closing mid-track is ordinary rather than an error -
+				// it does that on every seek - but an upstream failure arrives as
 				// an IOException too, so both are reported and the message tells
 				// them apart.
 				val level = if (it is IOException) Log.INFO else Log.WARN
-				Log.println(level, TAG, "bridge $from: ended — ${it.message}")
+				Log.println(level, TAG, "bridge $from: ended - ${it.message}")
 			}
 		}
 	}
@@ -303,7 +302,7 @@ class CastBridge @Inject constructor(
 
 		// Opened before a byte of the response is written. Committing to a status
 		// line and a Content-Length and only then discovering the bytes are not
-		// there would leave the receiver with a truncated body and no error —
+		// there would leave the receiver with a truncated body and no error -
 		// which it reports much later, as its own network timeout.
 		val source = audioCache.readOnlySource()
 		try {
@@ -348,7 +347,7 @@ class CastBridge @Inject constructor(
 
 	/**
 	 * `bytes=start-end`, `bytes=start-` or `bytes=-count`, and null for anything
-	 * else — including a range that runs off the end, which is answered whole
+	 * else - including a range that runs off the end, which is answered whole
 	 * rather than with a 416 no receiver is going to act on.
 	 */
 	private fun parseRange(header: String?, length: Long): LongRange? {
@@ -423,8 +422,8 @@ class CastBridge @Inject constructor(
 		/**
 		 * The peer opened a connection and closed it without sending anything.
 		 *
-		 * Receivers do this routinely — the Default Media Receiver opens a
-		 * speculative socket alongside the one it fetches on — so it is not a
+		 * Receivers do this routinely - the Default Media Receiver opens a
+		 * speculative socket alongside the one it fetches on - so it is not a
 		 * failure and must not read as one. On the first successful cast it was
 		 * reported as `unparseable request`, a warning and a 400 for something
 		 * that was never a request in the first place, sitting in a log where
@@ -467,7 +466,7 @@ class CastBridge @Inject constructor(
 	 *
 	 * A side-loaded subtitle track is fetched by XHR from the receiver app's
 	 * own origin, so without these the browser inside the Chromecast discards a
-	 * response it has already downloaded — and because declaring any track puts
+	 * response it has already downloaded - and because declaring any track puts
 	 * the media element into anonymous cross-origin mode, the film needs them
 	 * too. On the direct route the gaindrive server sends its own; here the
 	 * bridge is the origin, so it has to.

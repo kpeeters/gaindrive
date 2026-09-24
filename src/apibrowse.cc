@@ -29,8 +29,8 @@ using namespace tinyxml2;
 static constexpr int MAX_SEARCH_COUNT = 500;
 
 // The matching bound on every paging offset. Unbounded, OFFSET is a full
-// table walk inside SQLite — LIMIT 500 OFFSET 100000000 visits every row to
-// discard it — executed while holding db_mutex_, behind which every other
+// table walk inside SQLite - LIMIT 500 OFFSET 100000000 visits every row to
+// discard it - executed while holding db_mutex_, behind which every other
 // request in the server queues, authentication included. A million deep is
 // past the end of any real library and costs a bounded walk.
 static constexpr int MAX_LIST_OFFSET = 1000000;
@@ -56,7 +56,7 @@ static std::string sort_key(const std::string& name)
 // `getIndexes` both answer with.
 //
 // Shared because those two handlers held byte-identical copies of it, differing
-// only in the wrapper key of the response — and the first thing anyone edits one
+// only in the wrapper key of the response - and the first thing anyone edits one
 // of them for, they will not think to do twice.
 //
 // Two groupings, because there are two questions. Normally the bucket is the
@@ -96,8 +96,8 @@ index_buckets(std::vector<MediaStore::ArtistDir>& artists, bool by_owner)
 // unrelated reasons.  The response then goes out on a keep-alive connection
 // with nothing marking where the body ends, the client reads on into the
 // following response, and every image after the first on that connection is
-// the previous one's — which is what "all the thumbnails are wrong, and
-// reloading doesn't help" looks like.  CLAUDE.md records the same hazard for
+// the previous one's - which is what "all the thumbnails are wrong, and
+// reloading doesn't help" looks like.  The same hazard exists in
 // serve_transcoded; this call site cost a long investigation before it got it.
 //
 // The scaling itself now happens in process (see imagescale.hh) and its result
@@ -193,7 +193,7 @@ static void handle_album_list(const httplib::Request& req, httplib::Response& re
 
 void GainDrive::routes_browse()
 	{
-	// getMusicFolders — returns the configured music root(s).
+	// getMusicFolders - returns the configured music root(s).
 
 	server_.Get("/rest/getMusicFolders.view", [this](const httplib::Request& req,
 	                                                  httplib::Response& res) {
@@ -225,7 +225,7 @@ void GainDrive::routes_browse()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getIndexes — all artists grouped by first letter.
+	// getIndexes - all artists grouped by first letter.
 	server_.Get("/rest/getIndexes.view", [this](const httplib::Request& req,
 	                                             httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -285,7 +285,7 @@ void GainDrive::routes_browse()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getArtists — same artists as getIndexes but with albumCount per artist.
+	// getArtists - same artists as getIndexes but with albumCount per artist.
 	server_.Get("/rest/getArtists.view", [this](const httplib::Request& req,
 	                                            httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -347,7 +347,7 @@ void GainDrive::routes_browse()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getArtist — single artist with album list.
+	// getArtist - single artist with album list.
 	server_.Get("/rest/getArtist.view", [this](const httplib::Request& req,
 	                                           httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -432,7 +432,7 @@ void GainDrive::routes_browse()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getMusicDirectory — contents of a folder (album dirs or song files).
+	// getMusicDirectory - contents of a folder (album dirs or song files).
 	server_.Get("/rest/getMusicDirectory.view", [this](const httplib::Request& req,
 	                                                    httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -520,7 +520,7 @@ void GainDrive::routes_browse()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getAlbumList / getAlbumList2 — both use the same folder-based logic.
+	// getAlbumList / getAlbumList2 - both use the same folder-based logic.
 	server_.Get("/rest/getAlbumList.view", [this](const httplib::Request& req,
 	                                              httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -532,7 +532,7 @@ void GainDrive::routes_browse()
 		handle_album_list(req, res, store_, "albumList2");
 		});
 
-	// getRecentSongs — gaindrive extension; not in the OpenSubsonic spec.
+	// getRecentSongs - gaindrive extension; not in the OpenSubsonic spec.
 	// Returns songs ordered by most recently played (per-user play_counts).
 	server_.Get("/rest/getRecentSongs.view", [this](const httplib::Request& req,
 	                                                httplib::Response& res) {
@@ -626,7 +626,7 @@ void GainDrive::routes_browse()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getArtistInfo / getArtistInfo2 — answered from artist_info_cache, with the
+	// getArtistInfo / getArtistInfo2 - answered from artist_info_cache, with the
 	// lookup itself queued onto the info resolver. Both endpoints share
 	// identical logic; only the response key name differs.
 	server_.Get("/rest/getArtistInfo.view", [this](const httplib::Request& req,
@@ -640,7 +640,7 @@ void GainDrive::routes_browse()
 		handle_artist_info(req, res, "artistInfo2");
 		});
 
-	// getCoverArt — serve a cover image, optionally scaled.
+	// getCoverArt - serve a cover image, optionally scaled.
 	server_.Get("/rest/getCoverArt.view", [this](const httplib::Request& req,
 	                                              httplib::Response& res) {
 		auto it = req.params.find("id");
@@ -670,14 +670,14 @@ void GainDrive::routes_browse()
 		std::string rel_path = store_.get_cover_path(folder_id);
 
 		// A cover is as personal as the item it belongs to, and every stored
-		// path begins with its root's name — so `rel_path` answers the question
+		// path begins with its root's name - so `rel_path` answers the question
 		// on its own whenever there is one, whether it names an image, a loose
 		// file's sidecar or a video the art was extracted from.
 		//
 		// **Deliberately not an extra get_folder_path() here.** This is the
-		// album-grid hot path — a client asks for every cover at once and each
+		// album-grid hot path - a client asks for every cover at once and each
 		// query takes db_mutex_, which a scan holds across whole album
-		// transactions — so the only branch that costs a lookup is the one
+		// transactions - so the only branch that costs a lookup is the one
 		// with no cover_path at all, an artist folder, which the handler is
 		// about to look up anyway.
 		//
@@ -693,7 +693,7 @@ void GainDrive::routes_browse()
 
 		namespace fs = std::filesystem;
 
-		// The size the client asked for, rounded to the ladder — see
+		// The size the client asked for, rounded to the ladder - see
 		// CoverArtCache::ladder_size. 0 means "serve the source".
 		auto size_it = req.params.find("size");
 		int  ladder  = size_it != req.params.end()
@@ -718,7 +718,7 @@ void GainDrive::routes_browse()
 			// This reads the database and nothing else. It used to run the
 			// whole MusicBrainz -> Wikidata -> Wikipedia -> TheAudioDB ->
 			// Discogs chain right here, in the request thread, pacing sleeps
-			// included — so a client showing a grid of artists could hold the
+			// included - so a client showing a grid of artists could hold the
 			// entire HTTP pool in network waits.
 			std::string fpath = store_.get_folder_path(folder_id);
 			std::string name  = store_.get_folder_name(folder_id);
@@ -729,7 +729,7 @@ void GainDrive::routes_browse()
 			// **An album is not an artist, even when it has no cover.**  This
 			// branch is reached whenever get_cover_path() came back empty, and
 			// an album folder with no image at all lands here as readily as a
-			// real artist folder does — so a coverless album has always been
+			// real artist folder does - so a coverless album has always been
 			// answered with an artist portrait and pushed onto the MusicBrainz
 			// queue under its own title.  A pre-existing bug, but one this had
 			// to grow a guard for: a loose file is its own album now, so every
@@ -747,8 +747,8 @@ void GainDrive::routes_browse()
 
 			if (!state || state->status == "error") {
 				// Not resolved yet, or the network failed last time. Push this
-				// artist to the front of the queue — what somebody is looking
-				// at beats the alphabet — and say so at once.
+				// artist to the front of the queue - what somebody is looking
+				// at beats the alphabet - and say so at once.
 				//
 				// no-store, not no-cache: a client must be able to re-ask in a
 				// few seconds and get the picture. A cached 404 is how "the
@@ -762,14 +762,14 @@ void GainDrive::routes_browse()
 				}
 			if (state->status != "ok") {
 				// "none": every provider was asked and none had a picture.
-				// Cacheable on purpose — a client retrying on a timer would
+				// Cacheable on purpose - a client retrying on a timer would
 				// otherwise poll for ever over an artist nobody has a portrait
 				// of, and on a real library that is many of them.
 				//
 				// An hour, not a day. This is the one answer here a client is
 				// allowed to keep without asking, so its lifetime is also how
 				// long a *wrong* "none" survives on the device after the
-				// server has stopped believing it — and a wrong one is
+				// server has stopped believing it - and a wrong one is
 				// entirely possible, since it is what a provider outage looks
 				// like if anything upstream mistakes silence for a verdict.
 				// Deleting the row server-side cannot reach a cache on a
@@ -806,7 +806,7 @@ void GainDrive::routes_browse()
 				}
 
 			// A cover_path naming a *media* file means the art was manufactured
-			// from that file and lives in the video_art table — see videoart.hh.
+			// from that file and lives in the video_art table - see videoart.hh.
 			// Storing the media path rather than inventing a marker is what lets
 			// every cover-art query, and the whole web client, stay unchanged.
 			if (is_video_ext(ext_of(rel_path))) {
@@ -857,7 +857,7 @@ void GainDrive::routes_browse()
 
 		// Revalidate rather than trust the cache.  A cover URL is identified
 		// only by `id`, and folders.id is a rowid that is NOT stable across a
-		// rescan — which is exactly why stars and playlists key on paths
+		// rescan - which is exactly why stars and playlists key on paths
 		// instead.  Without a validator a browser caches the image
 		// heuristically and indefinitely, so after a rebuild reassigns ids it
 		// keeps showing the previous album's art with no way to notice.
@@ -907,7 +907,7 @@ void GainDrive::routes_browse()
 
 		// Serve the full-size image directly. This keeps the length-carrying
 		// content provider rather than buffering: a full-size cover can be
-		// twenty megabytes, and no UI asks for one — only the lightbox does.
+		// twenty megabytes, and no UI asks for one - only the lightbox does.
 		//
 		// The MIME comes from the magic bytes. It used to be image/jpeg
 		// whatever was on disk, which every browser renders anyway and every
@@ -946,7 +946,7 @@ void GainDrive::routes_browse()
 				});
 		});
 
-	// getAlbumTexts — list .txt files in an album folder.
+	// getAlbumTexts - list .txt files in an album folder.
 	server_.Get("/rest/getAlbumTexts.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -995,7 +995,7 @@ void GainDrive::routes_browse()
 			// A file-album: its liner notes are the sidecar named after it,
 			// <stem>.txt, and there is no directory to list.  Handled
 			// explicitly rather than left to the directory_iterator below
-			// throwing into the catch — which returns the right answer for the
+			// throwing into the catch - which returns the right answer for the
 			// wrong reason, and returns *nothing* where a real note exists.
 			//
 			// It cannot collide with the chapter sidecar: that is
@@ -1004,7 +1004,7 @@ void GainDrive::routes_browse()
 			std::string note = MediaStore::sidecar_text_path(folder);
 			if (fs::exists(note, fec)) {
 				// utf8_clean before json: a filename is arbitrary bytes on
-				// Linux, and one invalid sequence makes dump() throw — a
+				// Linux, and one invalid sequence makes dump() throw - a
 				// permanent 500 for this album's listing. A name the clean
 				// changes cannot be fetched back through getAlbumText anyway,
 				// so it is dropped rather than listed under a lie.
@@ -1043,7 +1043,7 @@ void GainDrive::routes_browse()
 			}), "application/json");
 		});
 
-	// getAlbumImages — return total image count for an album folder (cover + extras).
+	// getAlbumImages - return total image count for an album folder (cover + extras).
 	server_.Get("/rest/getAlbumImages.view", [this](const httplib::Request& req,
 	                                                httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -1065,7 +1065,7 @@ void GainDrive::routes_browse()
 			}), "application/json");
 		});
 
-	// getAlbumText — serve a single .txt file from an album folder.
+	// getAlbumText - serve a single .txt file from an album folder.
 	server_.Get("/rest/getAlbumText.view", [this](const httplib::Request& req,
 	                                              httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -1081,7 +1081,7 @@ void GainDrive::routes_browse()
 		// theoretical: a query parameter arrives percent-decoded, so
 		// `cover.jpg%00.txt` passes the suffix test as a C++ string and is
 		// then truncated at the NUL by every c_str() the filesystem layer
-		// takes — the file opened is cover.jpg, served as text/plain.
+		// takes - the file opened is cover.jpg, served as text/plain.
 		const std::string& name = name_it->second;
 		if (name.find('/') != std::string::npos  ||
 		    name.find('\\') != std::string::npos ||
@@ -1103,7 +1103,7 @@ void GainDrive::routes_browse()
 
 		namespace fs = std::filesystem;
 		// A file-album has no directory to compose against, so the note is
-		// taken from beside the media file — and `name` has to *be* that
+		// taken from beside the media file - and `name` has to *be* that
 		// sidecar's filename.  Composing from the parent directory instead
 		// would let this endpoint read any album's notes out of the section
 		// the file happens to sit in, which is a different album's content.
@@ -1127,7 +1127,7 @@ void GainDrive::routes_browse()
 			return;
 			}
 		// Bounded before it is read: liner notes are kilobytes, and the file
-		// is whatever an uploader put beside the album — an 8 GiB .txt inside
+		// is whatever an uploader put beside the album - an 8 GiB .txt inside
 		// an archive would otherwise become an 8 GiB allocation per request.
 		std::error_code sec;
 		const auto fsize = fs::file_size(full, sec);
@@ -1147,7 +1147,7 @@ void GainDrive::routes_browse()
 		                     std::istreambuf_iterator<char>());
 		res.set_content(content, "text/plain; charset=utf-8");
 		});
-	// getAlbum — single album with its track list.
+	// getAlbum - single album with its track list.
 
 	server_.Get("/rest/getAlbum.view", [this](const httplib::Request& req,
 	                                          httplib::Response& res) {
@@ -1174,7 +1174,7 @@ void GainDrive::routes_browse()
 		int mbr = request_max_bitrate(req, store_);
 		// Reported for the same reason chapters.writable is: the client draws an
 		// Edit affordance from this rather than guessing at the rule, which it
-		// cannot do — an album reached from search or from the player carries no
+		// cannot do - an album reached from search or from the player carries no
 		// trace of whether it came out of the caller's own uploads.
 		const bool writable = item_write_allowed(req, store_, uploads_root_name_,
 		                                         album_rel);
@@ -1230,7 +1230,7 @@ void GainDrive::routes_browse()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getAlbumInfo / getAlbumInfo2 — MusicBrainz lookup, result cached in DB.
+	// getAlbumInfo / getAlbumInfo2 - MusicBrainz lookup, result cached in DB.
 	// Both endpoints share identical logic; only the response key name differs.
 	// An album id here *is* a folder id, so there is no id3 album to look up
 	// separately and the older name answers the same question as the newer.
@@ -1245,7 +1245,7 @@ void GainDrive::routes_browse()
 		handle_album_info(req, res, "albumInfo2");
 		});
 
-	// getTopSongs — play-count tracking not implemented; return empty list.
+	// getTopSongs - play-count tracking not implemented; return empty list.
 	server_.Get("/rest/getTopSongs.view", [this](const httplib::Request& req,
 	                                             httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -1262,7 +1262,7 @@ void GainDrive::routes_browse()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getSong — full metadata for a single track.
+	// getSong - full metadata for a single track.
 	server_.Get("/rest/getSong.view", [this](const httplib::Request& req,
 	                                         httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -1296,7 +1296,7 @@ void GainDrive::routes_browse()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getGenres — every distinct genre in the shared library, with counts.
+	// getGenres - every distinct genre in the shared library, with counts.
 	//
 	// The tags are reported as they are, typos and "unknown" included: this
 	// endpoint is the only view anyone gets of their own tagging, and a list
@@ -1337,7 +1337,7 @@ void GainDrive::routes_browse()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getSongsByGenre — the songs carrying one genre.
+	// getSongsByGenre - the songs carrying one genre.
 	server_.Get("/rest/getSongsByGenre.view", [this](const httplib::Request& req,
 	                                                  httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -1379,7 +1379,7 @@ void GainDrive::routes_browse()
 				});
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
-	// search2 / search3 — title/name substring search across artists, albums, songs.
+	// search2 / search3 - title/name substring search across artists, albums, songs.
 	// Both share identical logic; only the response envelope key differs.
 
 	auto search_handler = [this](const httplib::Request& req, httplib::Response& res,

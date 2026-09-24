@@ -17,12 +17,12 @@ import Foundation
 /// Bandcamp's Subsonic bridge answers `ping` with `ok` whatever credentials it
 /// is handed, so a wrong password there passes the obvious test and then fails
 /// on the first endpoint that actually looks the account up. `getUser` is that
-/// endpoint, it is cheap, and it is the one whose reply the app wants anyway —
+/// endpoint, it is cheap, and it is the one whose reply the app wants anyway -
 /// roles are per server, and this is where they come from.
 ///
 /// Only a credentials failure from `getUser` is fatal. A server that does not
 /// implement it, or refuses it, has still proved it is there and listening, so
-/// that is `unverified` rather than a failure — see `ConnectionTest`.
+/// that is `unverified` rather than a failure - see `ConnectionTest`.
 enum ConnectionTester {
 	static func test(
 		url: URL,

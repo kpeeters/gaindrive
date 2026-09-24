@@ -12,19 +12,19 @@ import Testing
 @testable import GainDrive
 
 /// The declaration that stops the server remuxing a container AVFoundation
-/// demuxes, and — the half worth testing — its absence everywhere else.
+/// demuxes, and - the half worth testing - its absence everywhere else.
 ///
 /// The same reasoning as `CastUrlTests`: the failure is silent and remote. A
 /// cast URL carrying `playable` gets the receiver a `LOAD`
 /// announcing `video/mp4` followed by QuickTime, which it refuses outright.
 /// The film never starts and nothing on the phone says why. The obvious
-/// refactor — filling the set in inside `StreamUrls.video` "because both
-/// callers want it" — is exactly that bug, and `castRouteDeclaresNothing`
+/// refactor - filling the set in inside `StreamUrls.video` "because both
+/// callers want it" - is exactly that bug, and `castRouteDeclaresNothing`
 /// below is what stands in its way.
 struct PlayableContainersTests {
 	@Test func declaredSetBecomesOneSortedList() {
 		// Sorted, so a Set's iteration order cannot make one request build two
-		// different URLs — they reach a log line and a URL cache.
+		// different URLs - they reach a log line and a URL cache.
 		#expect(
 			StreamUrls.videoParameters(id: "7", containers: ["mov", "avi"])
 				== ["id": "7", "playable": "avi,mov"])
@@ -45,7 +45,7 @@ struct PlayableContainersTests {
 
 	/// Matroska is the container this cannot claim. AVFoundation does not
 	/// demux it at any version, so declaring it would trade a wait for a film
-	/// that does not play — and `.mkv` is the common case, which is what makes
+	/// that does not play - and `.mkv` is the common case, which is what makes
 	/// the temptation real.
 	@Test func matroskaIsNeverDeclared() {
 		#expect(!avfoundationContainers.contains("mkv"))

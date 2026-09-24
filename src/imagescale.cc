@@ -10,7 +10,7 @@
 #include <system_error>
 #include <vector>
 
-// The implementation macros live here and nowhere else — one translation unit
+// The implementation macros live here and nowhere else - one translation unit
 // owns the code these headers generate.
 //
 // Only the JPEG and PNG decoders are compiled.  The scanner admits nothing
@@ -19,7 +19,7 @@
 // hostile input is worth removing rather than carrying.
 //
 // STBI_MAX_DIMENSIONS matters as much as either.  stb's default is 1<<24, so
-// a 30000x30000 PNG header — a few hundred bytes on the wire — would ask an
+// a 30000x30000 PNG header - a few hundred bytes on the wire - would ask an
 // HTTP worker thread to allocate several gigabytes before anything noticed.
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_NO_STDIO
@@ -49,7 +49,7 @@ const unsigned char PNG_MAGIC[8] = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}
 // ---------------------------------------------------------------- EXIF ----
 //
 // ffmpeg applies EXIF orientation and stb does not, so without this a phone
-// photo used as a cover would start appearing sideways after this change —
+// photo used as a cover would start appearing sideways after this change -
 // the only way the new path could be worse than the fork it replaces.
 //
 // Everything here is parsing bytes a stranger wrote, so every read is bounds
@@ -215,7 +215,7 @@ Scaled scale_to_fit(std::string_view b, int max_px, Fit fit, int quality)
 	// The edge tested has to be the edge Fit names, or the two disagree about
 	// what "small enough" means.  Under Fit::Short a 1000x100 banner asked for
 	// at 160 cannot reach 160 on its short edge without being enlarged, so it
-	// is returned untouched — which is what the no-upscale rule says anyway.
+	// is returned untouched - which is what the no-upscale rule says anyway.
 	const int fitted = (fit == Fit::Short) ? std::min(sw, sh) : std::max(sw, sh);
 	if (orient == 1 && fitted <= max_px) {
 		Scaled s;
@@ -243,7 +243,7 @@ Scaled scale_to_fit(std::string_view b, int max_px, Fit fit, int quality)
 	if (req == 4) {
 		// Flatten onto white.  stb does not composite, so asking it for 3
 		// channels would hand back the raw colour beneath a transparent
-		// pixel — usually black, which turns a transparent logo into a black
+		// pixel - usually black, which turns a transparent logo into a black
 		// square.  ffmpeg's mjpeg path dropped alpha too, so this is a small
 		// improvement rather than a change of behaviour.
 		const unsigned char* s = raw.get();

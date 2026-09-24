@@ -15,7 +15,7 @@ import SwiftUI
 /// is down**.
 ///
 /// One line per server, named. "Two servers failed" tells the user nothing
-/// about which of their libraries is missing — and with several servers, which
+/// about which of their libraries is missing - and with several servers, which
 /// one it was is the whole question.
 struct PartialFailureNote: View {
 	let failures: [ServerFailure]

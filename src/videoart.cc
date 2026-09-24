@@ -45,7 +45,7 @@ static double num_of(const nlohmann::json& j, const char* key)
 	}
 
 // Caps the long edge without ever scaling up.  The commas inside min() are
-// escaped because a bare comma separates filters in a filtergraph — unescaped,
+// escaped because a bare comma separates filters in a filtergraph - unescaped,
 // ffmpeg reads "min(640" as a whole filter name and refuses the argument.
 static std::string scale_filter(int max_px)
 	{
@@ -77,8 +77,8 @@ std::optional<std::string> VideoArt::run(const std::vector<std::string>& argv)
 	std::string          out;
 	reproc::sink::string sink(out);
 	// drain() checks the error code itself.  Reading by hand needs
-	// `n == 0 || err`, because reproc wraps a negative return into size_t —
-	// see the reproc++ pitfall in CLAUDE.md.
+	// `n == 0 || err`, because reproc wraps a negative return into size_t, a
+	// known reproc++ pitfall.
 	auto ec = reproc::drain(proc, sink, reproc::sink::null);
 	if (ec) {
 		proc.kill();
@@ -114,7 +114,7 @@ std::optional<VideoArt::Probe> VideoArt::probe(const std::string& input) const
 			auto codec = s.value("codec_name", std::string());
 			int  index = static_cast<int>(num_of(s, "index"));
 
-			// An embedded cover is a video stream flagged attached_pic — the
+			// An embedded cover is a video stream flagged attached_pic - the
 			// same flag probe_video() checks so it does not describe an m4a
 			// cover as the movie.  A Matroska cover attachment arrives here
 			// too; see the note in videoart.hh.
@@ -153,7 +153,7 @@ std::optional<VideoArt::Probe> VideoArt::probe(const std::string& input) const
 	}
 
 // An embedded cover is passed through untouched when it is already a sensible
-// size — it was chosen by whoever made the file and re-encoding it can only
+// size - it was chosen by whoever made the file and re-encoding it can only
 // lose.  An oversized one is scaled, because these blobs live in the database
 // and a 3000x3000 poster per film is not a cache, it is a liability.
 std::optional<VideoArtResult> VideoArt::from_embedded(const std::string& input,

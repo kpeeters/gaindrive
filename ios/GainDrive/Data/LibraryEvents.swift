@@ -11,8 +11,8 @@ import Foundation
 /// Changes one screen makes that another screen has to notice.
 ///
 /// Android hangs this counter on the repository itself as a `StateFlow`.
-/// `LibraryRepository` here is `Sendable` and deliberately not isolated —
-/// which is what lets the fan-out leave the main actor — so it cannot hold
+/// `LibraryRepository` here is `Sendable` and deliberately not isolated -
+/// which is what lets the fan-out leave the main actor - so it cannot hold
 /// observable state, and the counter lives in its own small type instead.
 ///
 /// A counter rather than a list of what changed: the screens that care re-read
@@ -24,7 +24,7 @@ final class LibraryEvents {
 	/// Bumped after every successful playlist write, wherever it happened.
 	///
 	/// A track added from an album detail three screens away has to appear in
-	/// the playlist without the user pulling to refresh — and, more sharply,
+	/// the playlist without the user pulling to refresh - and, more sharply,
 	/// the playlists list must not keep showing a playlist that was just
 	/// deleted from inside it.
 	private(set) var playlistRevision = 0

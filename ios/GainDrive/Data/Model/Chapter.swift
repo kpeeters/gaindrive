@@ -39,7 +39,7 @@ struct Chapter: Hashable, Sendable, Codable {
 	/// Derived by the server, which is the only side that knows the item's own
 	/// length. **0** when that span is not positive, which is what a marker past
 	/// the end of the file gives and what two markers on one timestamp give.
-	/// Neither is an error — a hand-typed file is allowed to be wrong.
+	/// Neither is an error - a hand-typed file is allowed to be wrong.
 	let duration: Int
 	/// The title on that line, which may be empty. See `displayName`.
 	let name: String
@@ -66,7 +66,7 @@ enum ChapterSource: String, Sendable {
 	case sidecar
 	/// Read out of the container itself, which is reachable for a video only.
 	/// Worth telling the reader, because such a list is **not** in the scan's
-	/// index and so does not appear in the album listing — see `ISSUES.md`.
+	/// index and so does not appear in the album listing.
 	case container
 	/// No sidecar and nothing in the container, or the file could not be read.
 	case none
@@ -86,9 +86,9 @@ struct ChapteredRecording: Hashable, Sendable {
 /// A marker whose title matched a search.
 ///
 /// A different shape from `Chapter` rather than the same one with holes, and the
-/// difference is not merely a missing field. A search hit *is* its own context —
+/// difference is not merely a missing field. A search hit *is* its own context -
 /// it names the recording, the album and the artist, because a marker means
-/// nothing without knowing which concert it is in — while a `Chapter` is always
+/// nothing without knowing which concert it is in - while a `Chapter` is always
 /// read alongside the item the caller already holds. It also carries no
 /// duration, which cannot be known without the rest of the list, so folding the
 /// two together would make `duration == 0` mean "no next marker" in one case and
@@ -125,8 +125,8 @@ private func chapterLabel(_ name: String, _ index: Int) -> String {
 /// A marker counts as reached slightly early.
 ///
 /// Without the tolerance, seeking to a marker frequently lands a few
-/// milliseconds short of it — the player rounds, and a re-encoded stream starts
-/// at the nearest keyframe — so the list would highlight the *previous* song for
+/// milliseconds short of it - the player rounds, and a re-encoded stream starts
+/// at the nearest keyframe - so the list would highlight the *previous* song for
 /// a moment after jumping to one.
 let chapterTolerance: Double = 0.25
 
@@ -153,7 +153,7 @@ extension Array where Element == Chapter {
 
 	/// Where "previous chapter" should seek to from `position`.
 	///
-	/// The start of the chapter being played, unless we are already at it — and
+	/// The start of the chapter being played, unless we are already at it - and
 	/// 0 when nothing has started yet, so the control is never inert.
 	func previousTarget(from position: Double) -> Double {
 		guard let i = currentIndex(at: position) else { return 0 }
@@ -167,7 +167,7 @@ extension Array where Element == Chapter {
 /// **Not `formatDuration`**, for two reasons that both bite on the first marker
 /// of every list: that one answers `--:--` for zero, which is a length nobody
 /// knows rather than the start of a file, and it takes whole seconds. This one
-/// truncates a position — a marker at 90.9 s is at 1:30, which is where seeking
+/// truncates a position - a marker at 90.9 s is at 1:30, which is where seeking
 /// to it lands, and rounding up to 1:31 would name a second the player never
 /// sits at.
 func formatChapterTime(_ seconds: Double) -> String {

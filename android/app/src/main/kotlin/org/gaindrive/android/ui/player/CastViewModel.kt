@@ -18,8 +18,8 @@ import javax.inject.Inject
  * The device picker's view of casting: what is on the network, what the user
  * named by hand, and what we are connected to.
  *
- * All three collaborators are singletons — discovery and the control channel
- * outlive any screen — so this is nearly a pass-through, like [PlayerViewModel].
+ * All three collaborators are singletons - discovery and the control channel
+ * outlive any screen - so this is nearly a pass-through, like [PlayerViewModel].
  */
 @HiltViewModel
 class CastViewModel @Inject constructor(

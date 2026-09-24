@@ -28,7 +28,7 @@ data class SongSizeRow(val refKey: String, val sizeBytes: Long)
  *
  * [isVideo] travels with the row rather than being filtered in SQL because the
  * rule that decides whether a video counts is `Pins.downloadable`, and it has
- * to have one definition — see the comment there.
+ * to have one definition - see the comment there.
  */
 data class MemberRow(val containerKey: String, val refKey: String, val isVideo: Boolean)
 
@@ -70,8 +70,8 @@ interface LibraryDao {
 	 * The slices actually present in the mirror, for the chip row when offline.
 	 *
 	 * Scoped to the servers asked about, not the whole table: a server that has
-	 * been disabled keeps its mirrored rows — it may be enabled again, and
-	 * dropping them would mean re-browsing to get them back — so an unscoped
+	 * been disabled keeps its mirrored rows - it may be enabled again, and
+	 * dropping them would mean re-browsing to get them back - so an unscoped
 	 * query offers chips for a library that is not currently on offer.
 	 */
 	@Query("SELECT DISTINCT contentType FROM artists WHERE serverId IN (:servers)")
@@ -174,7 +174,7 @@ interface LibraryDao {
 	// ── What is reachable offline ───────────────────────────────────────────
 	//
 	// The audio cache knows nothing but encoded song refs, so these compare
-	// against `serverId || '/' || id` — the exact string `ItemRef.encode()`
+	// against `serverId || '/' || id` - the exact string `ItemRef.encode()`
 	// produces. Keeping the join in SQL avoids pulling the whole songs table
 	// into memory to intersect it.
 	//
@@ -196,7 +196,7 @@ interface LibraryDao {
 
 	// Whole membership rather than a count, because deciding what counts is
 	// `Pins.downloadable`'s job and restating it as an `isVideo = 0` here would
-	// be the same rule in two places — an album holding a film would then read
+	// be the same rule in two places - an album holding a film would then read
 	// as complete in a list and as permanently incomplete on its own screen.
 	// Bounded by what has been visited online: there is no whole-library sync.
 	//
@@ -222,7 +222,7 @@ interface LibraryDao {
 	 * The server's byte size for songs the cache is holding.
 	 *
 	 * The fallback for judging whether a cached track is complete when the cache
-	 * itself cannot say — see `AudioCache.refresh`.
+	 * itself cannot say - see `AudioCache.refresh`.
 	 */
 	@Query(
 		"SELECT serverId || '/' || id AS refKey, sizeBytes FROM songs " +

@@ -45,7 +45,7 @@ data class VideoTarget(
  * The query a progressive video request carries: the id, and the containers we
  * told the server we demux ourselves.
  *
- * Top-level and `internal` for the reason `CastUrls.paced()` is — it can then
+ * Top-level and `internal` for the reason `CastUrls.paced()` is - it can then
  * be exercised with no Hilt and no `android.util`, which matters here because
  * the failure it guards against is silent and happens on a television. The
  * test that asserts an empty set yields exactly `{id}` is the one standing
@@ -66,7 +66,7 @@ internal fun videoStreamParams(id: String, containers: Set<String>): Map<String,
  * The query an audio request carries: the id, what to convert to, and what not
  * to convert at all.
  *
- * Hoisted out of [StreamUrls.build] for the reason [videoStreamParams] is —
+ * Hoisted out of [StreamUrls.build] for the reason [videoStreamParams] is -
  * `build` needs Hilt and this does not, and the assertion worth having is that
  * an empty [playable] yields no `playable` parameter whatsoever. That is the
  * audio twin of `the cast route declares nothing`: a receiver handed a URL that
@@ -104,7 +104,7 @@ internal fun audioStreamParams(
  * caller does not have: `forPlayback` may build for a copy already held rather
  * than for the current setting, and the declaration has to match whatever it
  * lands on. A function rather than a flag, because [StreamUrls] must not be the
- * thing that knows — what media3 decodes is a claim about a player, and the
+ * thing that knows - what media3 decodes is a claim about a player, and the
  * same argument that keeps `MEDIA3_CONTAINERS` out of this file keeps its audio
  * counterpart out too. `PlaybackService` passes `::playableAudioFor`.
  *
@@ -123,7 +123,7 @@ val DECLARES_NOTHING: PlayableFor = { emptySet() }
  * player.
  *
  * Deliberately not reached through `LibraryRepository`: that class writes the
- * mirror `PinRepository` reads, and a dependency back would close the loop —
+ * mirror `PinRepository` reads, and a dependency back would close the loop -
  * the same reasoning that kept `PinRepository` from using `CoverUrls`.
  */
 @Singleton
@@ -156,8 +156,8 @@ class StreamUrls @Inject constructor(
 	 *
 	 * [playable] decides what the request may declare it takes as it stands,
 	 * and the default declares nothing. **This function serves the Cast route as
-	 * well as the local player** — `CastUrls.directTarget` reaches the server
-	 * through it in three of its branches — so the declaration cannot live in
+	 * well as the local player** - `CastUrls.directTarget` reaches the server
+	 * through it in three of its branches - so the declaration cannot live in
 	 * here, only at the call site that will read the bytes itself.
 	 */
 	suspend fun forPlayback(
@@ -185,8 +185,8 @@ class StreamUrls @Inject constructor(
 	 * to a different question here, and preferring it would defeat the setting
 	 * on precisely the tracks the user listens to most.
 	 *
-	 * The account ceiling still applies — `AudioQuality.cappedBy` turns a
-	 * request for the original into mp3 at the cap — because the server would
+	 * The account ceiling still applies - `AudioQuality.cappedBy` turns a
+	 * request for the original into mp3 at the cap - because the server would
 	 * enforce it whatever was asked for. So "original" means "as far as the
 	 * account allows", which the track info dialog's `Sent` row makes visible.
 	 *
@@ -206,8 +206,8 @@ class StreamUrls @Inject constructor(
 	 *
 	 *  - **`format`** is validated against the *audio* target table, so a video
 	 *    container name is rejected outright and an audio one asks the server
-	 *    for the soundtrack alone. That second behaviour is now a feature —
-	 *    `SettingsStore.videoAudioOnly` — but it is reached by resolving the
+	 *    for the soundtrack alone. That second behaviour is now a feature -
+	 *    `SettingsStore.videoAudioOnly` - but it is reached by resolving the
 	 *    item through the *audio* path instead, never from here. This builder
 	 *    is for someone who wants the picture, and a format here would take it
 	 *    away. `web/app.js` splits the same two cases the same way.
@@ -218,13 +218,13 @@ class StreamUrls @Inject constructor(
 	 *
 	 * [nativeSeek] comes from the entry the caller already has. False means the
 	 * server can only re-encode this file, which is chunked with no
-	 * `Content-Length` and no `Range` — unseekable as a progressive stream, so
+	 * `Content-Length` and no `Range` - unseekable as a progressive stream, so
 	 * it is played as HLS, where seeking is picking a segment.
 	 *
 	 * [playable] is a third parameter that is *usually* absent, and the default
-	 * is the safety. It tells the server we demux those containers ourselves —
+	 * is the safety. It tells the server we demux those containers ourselves -
 	 * the video half of one parameter that also carries the audio declaration,
-	 * see [audioStreamParams] — so it can skip a remux it would otherwise pay.
+	 * see [audioStreamParams] - so it can skip a remux it would otherwise pay.
 	 * But the same URL builder serves the Cast route, and a receiver demuxes
 	 * none of them. Worse,
 	 * the `LOAD` sent to that receiver declared a `contentType` taken from the
@@ -256,7 +256,7 @@ class StreamUrls @Inject constructor(
 					// No declared type: sniffing is the only honest answer, the
 					// same argument AudioFormat.ORIGINAL makes. The remux tier
 					// turns an .mkv into MP4, and a VP9/Opus .mkv is served
-					// relabelled video/webm — so the entry's own contentType is
+					// relabelled video/webm - so the entry's own contentType is
 					// wrong in exactly the cases that matter.
 					mimeType = null,
 					isHls = false,
@@ -275,9 +275,9 @@ class StreamUrls @Inject constructor(
 
 	/**
 	 * [audioOnlyVideo] says [ref] names a video and only its soundtrack is
-	 * wanted. It changes exactly one thing — [AudioQuality.ORIGINAL] cannot be
+	 * wanted. It changes exactly one thing - [AudioQuality.ORIGINAL] cannot be
 	 * expressed for a video, since it is spelled by sending no `format` and
-	 * that fetches the film — but it has to be threaded all the way here
+	 * that fetches the film - but it has to be threaded all the way here
 	 * because the cache key is derived from the same quality value.
 	 */
 	private suspend fun build(
@@ -314,8 +314,8 @@ class StreamUrls @Inject constructor(
 				cacheKey = CacheKeys.of(ref, quality),
 				// Null the moment anything was declared: the response may be the
 				// file as it stands rather than the format asked for, and this
-				// value reaches ExoPlayer, the download index and — where it
-				// cannot be sniffed away — a Cast receiver. Sniffing is then the
+				// value reaches ExoPlayer, the download index and - where it
+				// cannot be sniffed away - a Cast receiver. Sniffing is then the
 				// only honest answer, the same argument AudioFormat.ORIGINAL
 				// already makes for itself.
 				mimeType = if (declared.isEmpty()) quality.format.mime else null,

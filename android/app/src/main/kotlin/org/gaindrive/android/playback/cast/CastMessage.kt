@@ -10,12 +10,12 @@ import java.io.ByteArrayOutputStream
  * (`pb_varint`, `pb_string_field`, `pb_payload`). The schema is six fields, so
  * a protobuf dependency and its codegen would buy nothing:
  *
- * * field 1 varint — protocol_version (0 = CASTV2_1_0)
- * * field 2 string — source_id
- * * field 3 string — destination_id
- * * field 4 string — namespace
- * * field 5 varint — payload_type (0 = STRING)
- * * field 6 string — payload_utf8
+ * * field 1 varint - protocol_version (0 = CASTV2_1_0)
+ * * field 2 string - source_id
+ * * field 3 string - destination_id
+ * * field 4 string - namespace
+ * * field 5 varint - payload_type (0 = STRING)
+ * * field 6 string - payload_utf8
  *
  * Only field 6 is ever read back. The rest are written and never inspected,
  * which is why [payloadOf] skips fields rather than parsing a whole message.
@@ -112,7 +112,7 @@ internal object CastMessage {
 	private fun ByteArrayOutputStream.stringField(field: Int, value: String) {
 		val bytes = value.toByteArray(Charsets.UTF_8)
 		varint((field.toLong() shl 3) or WIRE_LENGTH_DELIMITED.toLong())
-		// The length is in bytes, not characters — a non-ASCII device name or
+		// The length is in bytes, not characters - a non-ASCII device name or
 		// track title would otherwise produce a frame the receiver cannot parse.
 		varint(bytes.size.toLong())
 		write(bytes)

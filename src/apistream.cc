@@ -34,7 +34,7 @@ static constexpr size_t MAX_CHAPTER_NAME_BYTES = 500;
 
 // The one place a chapter list becomes a response. Shared by getChapters,
 // saveChapters and getAlbumChapters, so none of the three can describe the
-// same markers differently — the panel is redrawn from the save's reply, and
+// same markers differently - the panel is redrawn from the save's reply, and
 // the album view from a fourth query, so a disagreement would show as the list
 // changing under the user for no reason.
 //
@@ -43,7 +43,7 @@ static constexpr size_t MAX_CHAPTER_NAME_BYTES = 500;
 // seconds here would quietly flatten every fractional timestamp in a
 // hand-written file. `duration` is whole seconds, matching Subsonic's Child,
 // which is what a chapter row would become if these are ever listed as tracks.
-// It is derived rather than stored — the next marker's start, or the video's
+// It is derived rather than stored - the next marker's start, or the video's
 // own duration for the last, which only the server knows.
 static nlohmann::json chapter_array_json(const std::vector<Chapter>& ch,
                                           double song_duration)
@@ -161,7 +161,7 @@ float GainDrive::web_position_lookup(const std::string& user,
 
 void GainDrive::routes_stream()
 	{
-	// stream — serve audio file directly or transcode via ffmpeg.
+	// stream - serve audio file directly or transcode via ffmpeg.
 	// In cast mode: redirect playback to the Chromecast and return 204 to the
 	// calling client.  The Chromecast authenticates its own request with a
 	// castToken query parameter instead of normal credentials.
@@ -181,7 +181,7 @@ void GainDrive::routes_stream()
 		bool cast_authed = tok_it != req.params.end()
 		                && cast_manager_.valid_token(tok_it->second, req_song_id);
 		// The browser-driven cast's grant travels on the same parameter, so a
-		// URL looks the same whichever cast built it — but it is a *different*
+		// URL looks the same whichever cast built it - but it is a *different*
 		// credential and must not collapse into cast_authed. Everything below
 		// that keys on cast_authed is about the server's own session: the
 		// offset the LOAD declared, and the receiver's habit of probing with
@@ -204,7 +204,7 @@ void GainDrive::routes_stream()
 			}
 
 		// A cast stream carries no user, so the token has to be the authority
-		// for it — CastManager::valid_token() has already bound it to this
+		// for it - CastManager::valid_token() has already bound it to this
 		// exact song id. For everyone else, another user's uploads are not
 		// readable by id.
 		// A grant skips it for the same reason and with the same safety: the
@@ -215,7 +215,7 @@ void GainDrive::routes_stream()
 		                             song->path, fmt_of(req) == "json")) return;
 
 		// Compose-and-validate the absolute song path once. Streamer reads from
-		// it (via std::ifstream and ffmpeg argv) — refuse anything outside
+		// it (via std::ifstream and ffmpeg argv) - refuse anything outside
 		// the configured roots before handing it off.
 		std::string song_abs = store_.abs_path(song->path);
 		if (!store_.path_is_within_root(song_abs)) {
@@ -229,9 +229,9 @@ void GainDrive::routes_stream()
 		// instruct the Chromecast to fetch the stream and return 204 here.
 		//
 		// Only for the client that *owns* the session. Without that test this
-		// is a process-global redirect: every stream request in the server —
+		// is a process-global redirect: every stream request in the server -
 		// the phone, a third-party client, curl, a different account entirely
-		// — was answered 204 and pushed onto whatever receiver anyone had most
+		// - was answered 204 and pushed onto whatever receiver anyone had most
 		// recently picked. A client that sent no castController is never the
 		// owner, so it simply plays locally, which is what every client that
 		// does not drive the server's cast endpoints wants.
@@ -240,7 +240,7 @@ void GainDrive::routes_stream()
 		// needs to: when the receiver has no screen it is sent the film's
 		// *soundtrack*, and the web client keeps the picture, muted and in
 		// step with it.  That request is not the client about to play the
-		// track a second time — it is the other half of one playback — and
+		// track a second time - it is the other half of one playback - and
 		// answering it 204 both loses the picture and, through the
 		// cast_load_song() below, re-issues the LOAD as a side effect.
 		if (cast_manager_.active() && !cast_authed
@@ -286,7 +286,7 @@ void GainDrive::routes_stream()
 		//
 		// Skipped for video, and that exemption is load-bearing rather than a
 		// policy preference.  Any non-zero max_bitrate sets `constrained` in
-		// serve_video and disqualifies both the direct and remux tiers — while
+		// serve_video and disqualifies both the direct and remux tiers - while
 		// nativeSeek is a pure function of the codec pair and never sees it.  A
 		// capped account would therefore be told every video is Range-seekable
 		// and handed a chunked stream with Accept-Ranges: none, and would have
@@ -295,8 +295,8 @@ void GainDrive::routes_stream()
 		// and a client that really wants a smaller picture still says so with
 		// size= or maxBitRate=, which constrains exactly as before.
 		//
-		// An audio-only request is *not* a video request — it produces an
-		// ordinary audio transcode through the ordinary audio path — so the
+		// An audio-only request is *not* a video request - it produces an
+		// ordinary audio transcode through the ordinary audio path - so the
 		// ceiling applies to it exactly as it does to a music track.  That is
 		// why the format is parsed above rather than below: the ceiling now
 		// depends on it.
@@ -338,7 +338,7 @@ void GainDrive::routes_stream()
 		// at LAN speed while throttle is suppressed during BUFFERING), but we also
 		// must not return an empty body (Content-Length: 0 makes the receiver treat
 		// the track as finished and abort the real seeked request).  Serve a small
-		// slice of the raw file from t=0 — enough for the receiver to validate the
+		// slice of the raw file from t=0 - enough for the receiver to validate the
 		// URL, well within the pre-buffer window (prebuf ≈ 30 s of audio).
 		if (cast_authed
 		        && req.params.find("timeOffset") == req.params.end()
@@ -375,7 +375,7 @@ void GainDrive::routes_stream()
 		if (cast_authed) {
 			int gen = cast_manager_.load_generation();
 			get_pos = [this, gen]{
-				// Return -2 when a newer stream has started — the streamer treats
+				// Return -2 when a newer stream has started - the streamer treats
 				// this as a stop signal so the old thread exits promptly.
 				if (cast_manager_.load_generation() != gen) return CAST_POS_STOP;
 				auto s = cast_manager_.get_status();
@@ -418,7 +418,7 @@ void GainDrive::routes_stream()
 		// every segment back here with a timeOffset and a length.
 		// Validated here rather than in Streamer, so the one caller that can be
 		// reached from outside is the one that checks. Anything unparseable
-		// becomes empty, which means "do not scale" — the same as omitting it.
+		// becomes empty, which means "do not scale" - the same as omitting it.
 		VideoOptions vopts{
 			.size             = sane_video_size(qp("size")),
 			.segment_duration = to_int(qp("duration"), 0),
@@ -476,7 +476,7 @@ void GainDrive::routes_stream()
 		                use_json ? "application/json" : "application/xml");
 		});
 
-	// download — the original file, never transcoded and never bitrate-capped.
+	// download - the original file, never transcoded and never bitrate-capped.
 	// The per-user max_bitrate is deliberately not consulted: "download" is
 	// defined by the API as the original media data, and a capped download
 	// would silently hand the user a different file than the one they asked
@@ -536,7 +536,7 @@ void GainDrive::routes_stream()
 		auto si = streamer_song(*song, song_abs);
 		Streamer::serve_raw(req, res, si);
 		});
-	// getVideos — every video in the library, as Child entries.  Videos share
+	// getVideos - every video in the library, as Child entries.  Videos share
 	// the songs table with audio, so this is the ordinary song serialiser with
 	// a different envelope key; isVideo and type are derived from the codec.
 
@@ -565,10 +565,10 @@ void GainDrive::routes_stream()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getVideoInfo — the subtitle and audio tracks inside one video file.
+	// getVideoInfo - the subtitle and audio tracks inside one video file.
 	// Runs ffprobe per call rather than caching: it is a per-playback lookup,
 	// not a browse path, and a stale track list is worse than a slow one.
-	// No <conversion> child is emitted — nothing pre-transcodes today, and
+	// No <conversion> child is emitted - nothing pre-transcodes today, and
 	// advertising a conversion that does not exist is worse than silence.
 	server_.Get("/rest/getVideoInfo.view", [this](const httplib::Request& req,
 	                                               httplib::Response& res) {
@@ -636,7 +636,7 @@ void GainDrive::routes_stream()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// getCaptions — WebVTT for one subtitle track.  Returns the file itself,
+	// getCaptions - WebVTT for one subtitle track.  Returns the file itself,
 	// not a Subsonic envelope, which is what the spec asks for.  `format` is
 	// accepted and ignored: WebVTT is what a <track> element can consume, and
 	// handing back SRT would only push the conversion onto the client.
@@ -658,7 +658,7 @@ void GainDrive::routes_stream()
 		    ? to_int(cid_it->second, -1) : -1;
 
 		// The Chromecast fetches its own subtitle track and has no credentials
-		// to do it with — the same problem stream.view solves the same way.
+		// to do it with - the same problem stream.view solves the same way.
 		// Handing the television the account's password instead would work,
 		// and is what the phone apps used to do for the URLs they built
 		// themselves; getCastToken is what stopped that, and the second
@@ -675,8 +675,8 @@ void GainDrive::routes_stream()
 		                                                     req_song_id, index);
 		// A grant is the other credential this parameter carries, and it is
 		// scoped one notch wider: any caption of its song, rather than the
-		// ids one LOAD declared. There is no LOAD here to mirror — the client
-		// that minted it builds its own — and a subtitle of a song the account
+		// ids one LOAD declared. There is no LOAD here to mirror - the client
+		// that minted it builds its own - and a subtitle of a song the account
 		// may already read is not a wider reach than the song was.
 		const bool grant_authed = !cast_authed && tok_it != req.params.end()
 		                       && grant_allows_captions(tok_it->second,
@@ -711,14 +711,14 @@ void GainDrive::routes_stream()
 		res.set_content(vtt, "text/vtt");
 		});
 
-	// getChapters / saveChapters — the song markers inside one video.
+	// getChapters / saveChapters - the song markers inside one video.
 	//
 	// A full concert is one file, and these are what let a client say where
 	// each song starts.  They live in a sidecar `<stem>.chapters.txt` beside
 	// the video, never inside the container: MP4 chapters are a track within
 	// the file, so writing one would be an `ffmpeg -c copy` rewrite of every
 	// byte of a multi-gigabyte concert on every save.  Nothing about them is
-	// stored in either database — the file on disk is the only copy, which is
+	// stored in either database - the file on disk is the only copy, which is
 	// what keeps the music DB a cache and relocate_prefix() unchanged.
 	//
 	// `name` is reported exactly as the file holds it, empty included.  A
@@ -753,14 +753,14 @@ void GainDrive::routes_stream()
 		                        use_json);
 		});
 
-	// getAlbumChapters — every chaptered video in one album folder.
+	// getAlbumChapters - every chaptered video in one album folder.
 	//
 	// A second endpoint rather than an albumId mode on getChapters, because
 	// the two read different things and the difference is the point:
 	// getChapters reads the sidecar and is therefore always right, which is
 	// what a playback path needs; this reads the `chapters` index the scan
 	// maintains, which is what a browse path needs. Listing a concert's songs
-	// must not cost a file read per video — or, for a rip with no sidecar, an
+	// must not cost a file read per video - or, for a rip with no sidecar, an
 	// ffprobe.
 	//
 	// The consequence, stated because it looks like a bug: a video whose
@@ -835,7 +835,7 @@ void GainDrive::routes_stream()
 	// The body is the chapter file itself, as text/plain, and it goes through
 	// the same parse_chapters() that reads one off disk.  That is one
 	// definition of the format rather than two, and it makes the round trip
-	// trivially a fixed point — but it is also the only shape that works here.
+	// trivially a fixed point - but it is also the only shape that works here.
 	// Repeated start=/name= parameters cannot be used:
 	//
 	//  * httplib's parse_query_text() keeps a set of each whole "key=value"
@@ -902,7 +902,7 @@ void GainDrive::routes_stream()
 		                        use_json);
 		});
 
-	// hls.m3u8 — a playlist computed from the stored duration.  Deliberately
+	// hls.m3u8 - a playlist computed from the stored duration.  Deliberately
 	// stateless: no segment directory, no session, no temp files.  Every
 	// segment URL is an ordinary stream.view transcode bounded by timeOffset
 	// and duration, which is exactly how Subsonic does it.  Nothing here needs
@@ -913,8 +913,8 @@ void GainDrive::routes_stream()
 	// infer HLS from that extension; `hls.view` is what a client composing
 	// every URL as <name>.view asks for, and it reached the "Not implemented"
 	// catch-all before.  One handler can serve both only because every URI in
-	// the body is *relative* — a segment resolves against /rest/ whichever
-	// path was fetched — and the one place that is not true, a variant URI
+	// the body is *relative* - a segment resolves against /rest/ whichever
+	// path was fetched - and the one place that is not true, a variant URI
 	// naming this endpoint again, spells itself from req.path.
 	auto hls_handler = [this](const httplib::Request& req,
 	                           httplib::Response& res) {
@@ -952,8 +952,8 @@ void GainDrive::routes_stream()
 		//
 		// Both halves are normalised through the same validators stream.view
 		// uses, and not merely escaped. They are written into the playlist
-		// *body* — a variant's URI and its RESOLUTION attribute as much as a
-		// segment's query string — which is not a URL and not XML, so nothing
+		// *body* - a variant's URI and its RESOLUTION attribute as much as a
+		// segment's query string - which is not a URL and not XML, so nothing
 		// downstream would have caught a newline in either: a forged "#EXT-X-"
 		// line, or a second URL of the sender's choosing. Round-tripping
 		// through to_int/sane_video_size means only a number and a WxH can
@@ -969,7 +969,7 @@ void GainDrive::routes_stream()
 				}
 			const Variant v{ to_int(kb, 0), sane_video_size(size) };
 			// Nothing to say: neither half survived validation.  Note a bare
-			// "bitRate=0@640x480" does survive — 0 is the spec's "no limit",
+			// "bitRate=0@640x480" does survive - 0 is the spec's "no limit",
 			// and the frame size still governs.
 			if (v.kbps <= 0 && v.size.empty()) continue;
 			if (std::none_of(variants.begin(), variants.end(),
@@ -987,9 +987,9 @@ void GainDrive::routes_stream()
 			}
 
 		// Credentials ride along on every URL in this body: the player fetches
-		// the segments — and any variant playlist — itself, and carries none
+		// the segments - and any variant playlist - itself, and carries none
 		// of this request's context.  Only the parameters actually present are
-		// echoed — an empty p= alongside t=/s= would send check_auth down the
+		// echoed - an empty p= alongside t=/s= would send check_auth down the
 		// password branch with a blank password and fail every segment.
 		std::string auth;
 		for (const char* k : { "u", "p", "t", "s", "c" }) {

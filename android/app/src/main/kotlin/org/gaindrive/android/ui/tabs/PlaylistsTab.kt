@@ -16,7 +16,7 @@ import org.gaindrive.android.ui.playlists.PlaylistsScreen
  * Playlists, and one playlist's tracks beside it where there is room.
  *
  * Two levels, so at any width above one pane this is a list and a detail and
- * never a third pane — which is what the two titles handed to [PaneStrip] say,
+ * never a third pane - which is what the two titles handed to [PaneStrip] say,
  * and why a wide window splits it in two rather than leaving an empty slot
  * inviting a choice that does not exist.
  */
@@ -30,7 +30,7 @@ fun PlaylistsTab(stack: PaneStack) {
 		waiting = { PaneWaiting("Choose a playlist to see its tracks") },
 	) { route ->
 		// Every route the tab can hold, declared once. Only the pane's own is
-		// ever built — it is the start destination and nothing navigates.
+		// ever built - it is the start destination and nothing navigates.
 		PaneHost(route) {
 			composable<Route.Playlists> {
 				PlaylistsScreen(

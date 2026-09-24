@@ -15,7 +15,7 @@ import Foundation
 /// drift.
 ///
 /// `cover` is a `CoverSource` rather than Android's plain URL string, because
-/// the cache key is not derivable from the URL — see `CoverUrls`.
+/// the cache key is not derivable from the URL - see `CoverUrls`.
 struct AlbumUi: Identifiable, Hashable, Sendable {
 	let album: Album
 	let cover: CoverSource?
@@ -33,7 +33,7 @@ struct AlbumUi: Identifiable, Hashable, Sendable {
 	var id: ItemRef { album.ref }
 }
 
-/// No `cover`, unlike `AlbumUi` — see `ArtistRow` for why an artist row shows
+/// No `cover`, unlike `AlbumUi` - see `ArtistRow` for why an artist row shows
 /// no artwork.
 struct ArtistUi: Identifiable, Hashable, Sendable {
 	let artist: Artist
@@ -66,7 +66,7 @@ struct SongUi: Identifiable, Hashable, Sendable {
 /// Cover sizes, requested per context rather than per caller's guess.
 ///
 /// The size is part of the cache key, so a row that asks for 144 and a hero
-/// that asks for 800 are two entries — and a row that asked for a different
+/// that asks for 800 are two entries - and a row that asked for a different
 /// size each time would be a cache that never hits.
 enum CoverSize {
 	static let thumb = 144

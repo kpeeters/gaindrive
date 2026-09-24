@@ -12,7 +12,7 @@ import Foundation
 ///
 /// Repositories take a `ServerId` and ask here for the client; nothing above
 /// this layer knows `URLSession` exists. Server-dependent objects cannot be
-/// plain singletons, because the set of servers changes at runtime — the
+/// plain singletons, because the set of servers changes at runtime - the
 /// registry hands out per-server clients itself, which is the whole of the
 /// dependency injection this app needs.
 @MainActor
@@ -61,7 +61,7 @@ final class ServerRegistry {
 	/// keyed on its id are dropped with its client.
 	///
 	/// A callback rather than references to `Accounts` and `MusicRoots`,
-	/// because the registry is built **before** either of them — it is what
+	/// because the registry is built **before** either of them - it is what
 	/// `LibraryRepository` is built from, and they are built alongside it. It
 	/// is also what keeps `Data`'s one stateless type stateless: the registry
 	/// knows that something wants telling, not what.
@@ -77,7 +77,7 @@ final class ServerRegistry {
 	}
 
 	/// `newPassword` is `nil` when the user did not touch the password field,
-	/// which must leave the stored one alone — an editor that saved an empty
+	/// which must leave the stored one alone - an editor that saved an empty
 	/// field as an empty password would lock the user out of a server they
 	/// only meant to rename.
 	func update(_ config: ServerConfig, newPassword: String?) {

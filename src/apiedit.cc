@@ -35,12 +35,12 @@ using namespace tinyxml2;
 
 void GainDrive::routes_edit()
 	{
-	// updateSong — update title and/or track number for a single song.
+	// updateSong - update title and/or track number for a single song.
 	//
 	// For audio the file is authoritative: the tags are written first and the
-	// database only mirrors them.  For video there is no tag worth writing —
+	// database only mirrors them.  For video there is no tag worth writing -
 	// the scanner reads a video's title, year and episode number from its
-	// filename and never opens it with TagLib — so the edit is recorded in the
+	// filename and never opens it with TagLib - so the edit is recorded in the
 	// client DB and re-applied by every scan instead.  Either way the music DB
 	// stays a cache that a full rescan can rebuild.
 
@@ -65,7 +65,7 @@ void GainDrive::routes_edit()
 		std::optional<int> disc_number;
 		// Typed by a person and stored raw until now: invalid UTF-8 in
 		// songs.title made every later JSON response holding the song throw
-		// out of dump() — a permanent 500 — and a C0 byte makes the XML
+		// out of dump() - a permanent 500 - and a C0 byte makes the XML
 		// envelope unparseable for every conformant client.
 		if (req.params.count("title")) title        = clean_name(req.params.find("title")->second);
 		if (req.params.count("track")) track_number = to_int(req.params.find("track")->second, 0);
@@ -77,7 +77,7 @@ void GainDrive::routes_edit()
 		if (!song) { err(70, "Song not found."); return; }
 
 		// This rewrites a tag on disk, so it is a library modification and not
-		// merely a read — check_auth alone would let any account retag any
+		// merely a read - check_auth alone would let any account retag any
 		// file in any root by guessing an id.
 		if (!check_item_write_perm(req, res, store_, uploads_root_name_,
 		                           song->path, use_json)) return;
@@ -85,14 +85,14 @@ void GainDrive::routes_edit()
 		if (song->is_video) {
 			// Record it where a rescan can find it again.  Note what is
 			// deliberately *not* done: TagLib can write an .mp4, but nothing
-			// ever reads that tag back — read_song_metadata() returns after
-			// the ffprobe branch — so writing it would leave two copies of one
+			// ever reads that tag back - read_song_metadata() returns after
+			// the ffprobe branch - so writing it would leave two copies of one
 			// fact, and the unread copy would be the one on disk.
 			store_.set_song_meta_override(song->path, title, track_number,
 			                               year, disc_number);
 			}
 		else {
-			// Write tags first — if this fails we must not update the database.
+			// Write tags first - if this fails we must not update the database.
 			try {
 				std::string song_abs = store_.abs_path(song->path);
 				if (!store_.path_is_within_root(song_abs)) {
@@ -127,14 +127,14 @@ void GainDrive::routes_edit()
 				}
 			}
 
-		// Persisted successfully — now mirror the change in the database.
+		// Persisted successfully - now mirror the change in the database.
 		store_.update_song_meta(song_id, title, track_number, year, disc_number);
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");
 		});
 
-	// setCoverArt — set a cover image for an album (identified by folder_id).
+	// setCoverArt - set a cover image for an album (identified by folder_id).
 	// Accepts either a multipart "file" part or a "url" form field; for the
 	// latter the server fetches the URL and validates it returned an image.
 	server_.Post("/rest/setCoverArt.view", [this](const httplib::Request& req,
@@ -167,7 +167,7 @@ void GainDrive::routes_edit()
 		// any of these ways. The first is the one that matters: a multipart part
 		// carrying no filename is a *text field*, and httplib files those under
 		// form.fields. Before 0.54.1 every part landed in form.files whatever it
-		// was, so has_file("url") alone used to be enough — the bump turned the
+		// was, so has_file("url") alone used to be enough - the bump turned the
 		// web client's FormData.append('url', …) into "Required parameter
 		// missing".
 		if (req.form.has_field("url"))     url = req.form.get_field("url");
@@ -176,7 +176,7 @@ void GainDrive::routes_edit()
 
 		if (req.form.has_file("file")) {
 			// A reference into the form map, not get_file(), which returns a
-			// copy — this part can be a whole image.
+			// copy - this part can be a whole image.
 			const auto& fp = req.form.files.find("file")->second;
 			if (fp.content_type.rfind("image/", 0) != 0) {
 				err(0, "Uploaded file must be an image."); return;
@@ -252,8 +252,8 @@ void GainDrive::routes_edit()
 			}
 
 		// The filename follows the bytes, not the claim.  Both checks above
-		// are claims — an upload's content_type is whatever the client typed
-		// and a provider's Content-Type is whatever it felt like — and this
+		// are claims - an upload's content_type is whatever the client typed
+		// and a provider's Content-Type is whatever it felt like - and this
 		// used to write everything as cover.jpg regardless.  That is not
 		// cosmetic: the scanner indexes only .jpg/.jpeg/.png, so a WebP
 		// written as cover.jpg became a cover nothing could decode.
@@ -266,7 +266,7 @@ void GainDrive::routes_edit()
 
 		namespace fs = std::filesystem;
 		// **A file-album's cover is the sidecar named after it**, not
-		// cover.jpg inside it — there is no inside.  This is the whole point
+		// cover.jpg inside it - there is no inside.  This is the whole point
 		// of the endpoint for a loose film: under the rule where a section
 		// holding loose films was itself the album, an upload here could only
 		// ever set the *section's* cover, so a film TMDB had matched wrongly
@@ -308,7 +308,7 @@ void GainDrive::routes_edit()
 		// order is .jpg, .jpeg, .png: writing the .png has to clear *both*
 		// earlier spellings or the stale one keeps winning, which is the same
 		// bug one rung further along.  The "-poster.*" forms are never touched
-		// — they rank below all three, so they cannot win anyway.
+		// - they rank below all three, so they cannot win anyway.
 		std::vector<std::string> outranked;
 		if (file_album) {
 			if (is_png) { outranked.push_back(beside(".jpg"));
@@ -329,7 +329,7 @@ void GainDrive::routes_edit()
 
 		// Unchanged, and it is what closes the gap above: the manual_covers row
 		// is keyed on `folder_rel`, which for a file-album is the media file's
-		// own stored path — the very string lookup_video_meta() passes to
+		// own stored path - the very string lookup_video_meta() passes to
 		// cover_is_manual() before it fetches a poster.  So a poster chosen
 		// here now survives every later scan.
 		store_.set_cover_art_path(folder_rel, cover_rel);
@@ -346,7 +346,7 @@ void GainDrive::routes_edit()
 	// of body, so auth and the upload permission are checked against the
 	// query-string credentials first, and an unauthenticated multi-gigabyte
 	// POST costs the server nothing. The archive then streams to a file on
-	// disk rather than through req.body — the old form buffered the whole
+	// disk rather than through req.body - the old form buffered the whole
 	// body in memory (and the multipart copy doubled it), which made /upload
 	// the cheapest OOM in the server.
 	server_.Post("/upload", [this](const httplib::Request& req, httplib::Response& res,
@@ -380,7 +380,7 @@ void GainDrive::routes_edit()
 			}
 		}
 
-		// Typed names, exactly as fetchUrl takes them — the two producers are
+		// Typed names, exactly as fetchUrl takes them - the two producers are
 		// the same steps around a different source of bytes, and scan_batch()
 		// below has always accepted these. Blank means "keep what the archive's
 		// own folders and the files' tags say", which is what every upload did
@@ -414,8 +414,8 @@ void GainDrive::routes_edit()
 		// Each upload lands in its own UUID subdirectory so that messy zip
 		// structures (missing artist/album dirs) are always isolated and the
 		// scanner has a stable "artist-level" root to work from. The archive
-		// itself streams to a sibling .part file — outside dest, so the
-		// extraction can never mistake it for content — and is deleted
+		// itself streams to a sibling .part file - outside dest, so the
+		// extraction can never mistake it for content - and is deleted
 		// whatever happens.
 		std::string uuid = make_uuid();
 		fs::path dest = fs::path(users_dir_) / uname / uuid;
@@ -494,8 +494,8 @@ void GainDrive::routes_edit()
 		std::cout << stamp() << "Upload: extracted " << n << " file(s) to " << dest << std::endl;
 
 		std::string rel_batch = uploads_root_name_ + "/" + uname + "/" + uuid;
-		// Normalising and scanning is the same three steps for both producers —
-		// an archive here, a URL fetch in fetch_worker() — so it lives in one
+		// Normalising and scanning is the same three steps for both producers -
+		// an archive here, a URL fetch in fetch_worker() - so it lives in one
 		// place. Detached here because this one is on an HTTP thread and the
 		// client is holding a request open; the fetch worker calls it directly,
 		// being a background thread already.
@@ -510,15 +510,15 @@ void GainDrive::routes_edit()
 		res.set_content(j.dump(), "application/json");
 		});
 
-	// moveAlbum — put an album somewhere, under a name.
+	// moveAlbum - put an album somewhere, under a name.
 	//
 	// Params: id (album folder_id), musicFolderId, folder, album.  Everything
 	// but the id is optional and every omitted part means "unchanged".
 	//
 	// This is one endpoint because it was always one operation.  It replaces
 	// renameAlbum and promoteAlbum, which were the same handler written twice
-	// — resolve the id, validate, move the directory, relocate_prefix, drop
-	// the emptied source, rescan destination-then-source — differing only in
+	// - resolve the id, validate, move the directory, relocate_prefix, drop
+	// the emptied source, rescan destination-then-source - differing only in
 	// how the destination was spelled.  Each also had a gap the other filled:
 	// a rename could not cross roots, so a film misfiled under a music root
 	// could not reach a categories root without shell access, and a promote
@@ -540,7 +540,7 @@ void GainDrive::routes_edit()
 	//
 	// Note what promoteAlbum's five-component source check does **not** become
 	// here: it is gone, deliberately, because with it an admin cannot move a
-	// library album at all — which is the gap being closed.  What it looked
+	// library album at all - which is the gap being closed.  What it looked
 	// like it was defending is defended by the admin requirement and by
 	// path_is_within_root() on the *destination*.  deleteUpload's
 	// identical-looking check is a different thing and must stay: there the
@@ -572,15 +572,15 @@ void GainDrive::routes_edit()
 		// const auto&, not auto&: path::iterator's reference type is
 		// implementation-defined. libstdc++ hands out a const path&, but libc++
 		// returns a path by value, and a non-const lvalue reference cannot bind
-		// to that temporary. const& works on both — it binds the reference on
+		// to that temporary. const& works on both - it binds the reference on
 		// libstdc++ and lifetime-extends the temporary on libc++.
 		for (const auto& c : fs::path(old_rel)) parts.push_back(c.string());
 		if (parts.size() < 2) { err(0, "Could not resolve the library path."); return; }
 
 		// ---- Permission, first cut -------------------------------------
 		//
-		// The full rule — an upload user may reorganise inside their own
-		// batch, naming a destination root is admin's alone — needs the
+		// The full rule - an upload user may reorganise inside their own
+		// batch, naming a destination root is admin's alone - needs the
 		// destination parsed and so still runs below.  What cannot wait is
 		// the refusal: the shape-specific errors between here and there (is
 		// it a file, how deep does it sit) were an oracle a non-admin could
@@ -604,7 +604,7 @@ void GainDrive::routes_edit()
 		}
 
 		// **The album may be a single media file.**  A loose file is its own
-		// album, so its folder row's path names the file — and every step
+		// album, so its folder row's path names the file - and every step
 		// below that assumes a directory has to be told.  The filesystem is
 		// asked rather than the database because what follows is filesystem
 		// work: what matters is what is actually there to move.
@@ -622,7 +622,7 @@ void GainDrive::routes_edit()
 			file_album ? fs::path(old_album).stem().string() : old_album;
 		// The artist level above the album.  A level-1 file-album has none of
 		// its own and the root plays the part, which is what parts[0] is here
-		// — the same thing ALBUM_ARTIST_ID_SQL reports as its artist.
+		// - the same thing ALBUM_ARTIST_ID_SQL reports as its artist.
 		const std::string old_folder = parts[parts.size() - 2];
 
 		// ---- Where it lands -------------------------------------------
@@ -647,7 +647,7 @@ void GainDrive::routes_edit()
 			// **folder is required when a root is named**, and that is not an
 			// oversight carried over.  It was briefly optional and defaulted to
 			// the source's own level-1 name, which for a fetched video is the
-			// channel that published it and never a category — a guess that
+			// channel that published it and never a category - a guess that
 			// filed documentaries under YouTube channel names.  A caller that
 			// does not know where something belongs should be made to decide.
 			if (new_folder.empty()) {
@@ -657,7 +657,7 @@ void GainDrive::routes_edit()
 			dest_root_type = mf->type;
 			}
 		else {
-			// Staying put: everything above the artist level is untouched — the
+			// Staying put: everything above the artist level is untouched - the
 			// library root, and for an upload the owner and the batch id.
 			//
 			// A level-1 file-album is the exception: a loose film in a root
@@ -687,7 +687,7 @@ void GainDrive::routes_edit()
 				new_parent_dir = above + "/" + new_folder;
 				}
 			// The uploads root is not in get_music_folders() by design, so it
-			// matches nothing here and falls through to "artists" — which is
+			// matches nothing here and falls through to "artists" - which is
 			// what an upload's level-1 directory is.
 			dest_root_type = "artists";
 			for (const auto& f : store_.get_music_folders())
@@ -706,7 +706,7 @@ void GainDrive::routes_edit()
 		// **The on-disk leaf carries the source's extension back.**
 		// sanitise_component() strips nothing but it is handed a *name*, and a
 		// file-album renamed to that name alone lands on disk with no
-		// extension — at which point is_media_file() stops recognising it and
+		// extension - at which point is_media_file() stops recognising it and
 		// the next scan prunes the film out of the library entirely.  A caller
 		// that typed the extension is not made to type it twice.
 		std::string new_leaf = new_album;
@@ -724,7 +724,7 @@ void GainDrive::routes_edit()
 		// ---- Permission ------------------------------------------------
 		//
 		// Admin, except that an upload user may reorganise their own batch
-		// inside itself — the case this feature exists for, since somebody who
+		// inside itself - the case this feature exists for, since somebody who
 		// has just uploaded has to be able to fix the names.  Anything that
 		// names a destination root is putting something into the shared
 		// library and is admin's alone.
@@ -819,8 +819,8 @@ void GainDrive::routes_edit()
 
 		// Carry the DB across with the directory.  Without this the rescan
 		// below deletes the old folder and inserts the new one cold, and every
-		// star, play count, playlist entry and bookmark — all keyed on the path
-		// string — quietly stops matching anything, along with the hand-picked
+		// star, play count, playlist entry and bookmark - all keyed on the path
+		// string - quietly stops matching anything, along with the hand-picked
 		// cover and any typed video title, and the derived art caches.
 		store_.relocate_prefix(old_rel, new_rel);
 
@@ -832,7 +832,7 @@ void GainDrive::routes_edit()
 		// first, so the thumbnails would go on being keyed on a path with no
 		// file at it.
 		//
-		// The suffix is whatever follows the old stem — ".jpg", but equally
+		// The suffix is whatever follows the old stem - ".jpg", but equally
 		// "-poster.jpg" or ".chapters.txt", which is why it is taken by length
 		// rather than by extension().
 		if (file_album) {
@@ -866,14 +866,14 @@ void GainDrive::routes_edit()
 		// desync.  Failures are counted, not fatal.
 		//
 		// **The artist tag is only written under an artists root.**  Under a
-		// categories root the level is a category — Film, Series — and writing
+		// categories root the level is a category - Film, Series - and writing
 		// that into an artist tag would stamp "Film" across every file of a
 		// promoted documentary.  Neither endpoint this replaces got that right:
 		// promote wrote no tags at all, so a promoted film kept its channel
 		// name, and rename wrote both unconditionally, which was safe only
 		// because it could never reach a categories root.
 		// Compared as *names*, so a file-album's extension does not make every
-		// rename look like an album change — and never reaches a tag.
+		// rename look like an album change - and never reaches a tag.
 		const bool write_album  = (new_album  != old_album_name);
 		const bool write_artist = (new_folder != old_folder)
 		                          && dest_root_type == "artists";
@@ -886,7 +886,7 @@ void GainDrive::routes_edit()
 					f.tag()->setAlbum(TagLib::String(new_album, TagLib::String::UTF8));
 				// Only overwrite an artist tag that was the old folder's
 				// name anyway.  A tag naming somebody else is a real
-				// credit — every track of a compilation has one — and this
+				// credit - every track of a compilation has one - and this
 				// used to flatten the lot to "Various Artists" on a move.
 				// Worse, saving bumps the mtime, so the next scan re-read
 				// the value it had just destroyed and the library
@@ -934,7 +934,7 @@ void GainDrive::routes_edit()
 		// every stranding here takes.
 		//
 		// **Only when there was an artist level to empty.**  A level-1
-		// file-album — a loose film in a root used as one flat library — leaves
+		// file-album - a loose film in a root used as one flat library - leaves
 		// parts.size() == 2, and its "parent" is the root itself, which
 		// fs::is_empty would happily report on and fs::remove would then delete
 		// out from under the server.  (Before a loose file became its own
@@ -949,8 +949,8 @@ void GainDrive::routes_edit()
 			old_parent_gone = true;
 			}
 		// And the batch directory above it, as deleteUpload does: the <uuid>
-		// level never gets a folder row of its own — scan_artist_dir parents an
-		// artist directory straight to the root — so there is nothing to
+		// level never gets a folder row of its own - scan_artist_dir parents an
+		// artist directory straight to the root - so there is nothing to
 		// rescan for it, only a directory to not leave behind.
 		if (old_parent_gone && !uploads_root_name_.empty()
 		        && parts[0] == uploads_root_name_ && parts.size() >= 5) {
@@ -995,8 +995,8 @@ void GainDrive::routes_edit()
 			}
 
 		// The client needs the new ids to navigate to what it just moved. They
-		// are usually unchanged — that is the point of relocating rather than
-		// letting the rescan rebuild — but a move into a directory that did not
+		// are usually unchanged - that is the point of relocating rather than
+		// letting the rescan rebuild - but a move into a directory that did not
 		// exist yet mints one.
 		int new_album_id  = 0;
 		int new_parent_id = 0;
@@ -1023,7 +1023,7 @@ void GainDrive::routes_edit()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
-	// deleteUpload — remove one of the caller's own uploaded albums.
+	// deleteUpload - remove one of the caller's own uploaded albums.
 	//
 	// Param: id (album folder_id). The way out of a fetch that produced the
 	// wrong thing; before this the only route out of the uploads area was
@@ -1035,7 +1035,7 @@ void GainDrive::routes_edit()
 	// rights guessing integers. Two things have to hold whoever is asking: the
 	// path is exactly five components, and the first is the uploads root.
 	//
-	// The third — that the second component is the caller — holds for everyone
+	// The third - that the second component is the caller - holds for everyone
 	// but an admin. An admin may delete anybody's upload, because an admin is
 	// who approves them: `personal=*` lets them see everyone's, and being able
 	// to see junk without being able to clear it would leave them asking its
@@ -1084,7 +1084,7 @@ void GainDrive::routes_edit()
 			return;
 			}
 		// The *owner's* name, which is the caller's own except for an admin
-		// clearing somebody else's — and it is the owner's directories that get
+		// clearing somebody else's - and it is the owner's directories that get
 		// tidied up below, not the caller's.
 		const std::string& owner       = parts[1];
 		const std::string& batch_uuid  = parts[2];
@@ -1121,7 +1121,7 @@ void GainDrive::routes_edit()
 		// scanner prunes the music DB and its derived caches but has never
 		// touched the client schema, so stars, play counts, playlist entries,
 		// the queue and bookmarks would outlive the files. That matters more
-		// than it used to — a later batch folded into an earlier one can put a
+		// than it used to - a later batch folded into an earlier one can put a
 		// new file at exactly this path, and a surviving star would attach
 		// itself to it.
 		store_.forget_prefix(item_rel);
@@ -1129,7 +1129,7 @@ void GainDrive::routes_edit()
 		// An emptied artist directory left in place is a folder row reading
 		// "0 albums" in the listing, which is the shape every stranding here
 		// takes. Removing it makes scan_artist_dir treat it as gone and prune
-		// it — the same two steps moveAlbum takes for the same reason.
+		// it - the same two steps moveAlbum takes for the same reason.
 		std::string artist_rel =
 			uploads_root_name_ + "/" + owner + "/" + batch_uuid + "/" + artist_name;
 		fs::path artist_abs = store_.abs_path(artist_rel);
@@ -1141,7 +1141,7 @@ void GainDrive::routes_edit()
 		// with fewer albums, or has gone and is pruned.
 		store_.scan_dirs({artist_rel});
 
-		// And the batch after it. Nothing to rescan for this one — the <uuid>
+		// And the batch after it. Nothing to rescan for this one - the <uuid>
 		// level never gets a folder row, because scan_artist_dir parents an
 		// artist directory straight to the root.
 		fs::path batch_abs = artist_abs.parent_path();

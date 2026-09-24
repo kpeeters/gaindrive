@@ -46,7 +46,7 @@ final class LocalEngine: PlaybackEngine {
 	/// mapping back to a ref has to be kept alongside.
 	///
 	/// **The loader is held here and nowhere else.** `AVURLAsset` keeps its
-	/// resource-loader delegate weakly, so nothing but this keeps it alive —
+	/// resource-loader delegate weakly, so nothing but this keeps it alive -
 	/// and dropping a window entry is what cancels the fetch behind a track that
 	/// has been skipped past.
 	private var window: [(ref: ItemRef, item: AVPlayerItem, loader: CachingResourceLoader?)] = []
@@ -71,7 +71,7 @@ final class LocalEngine: PlaybackEngine {
 	/// an hour in.
 	private var pendingSeek: Double?
 
-	/// Built once and never released — which is why there is no `deinit`
+	/// Built once and never released - which is why there is no `deinit`
 	/// removing the periodic time observer. That token must be removed before
 	/// the player is deallocated or the process traps, so if this type ever
 	/// becomes something with a shorter life, that is the first thing to add.
@@ -86,7 +86,7 @@ final class LocalEngine: PlaybackEngine {
 	/// hole in "the UI's only route to playback" and the same one Android
 	/// punched: its `VideoSurface` attaches to the `ExoPlayer` rather than
 	/// negotiating `COMMAND_SET_VIDEO_SURFACE` through the session. Nothing else
-	/// may reach for it — the queue, the transport and the seek all go through
+	/// may reach for it - the queue, the transport and the seek all go through
 	/// `PlayerConnection` as before.
 	var videoPlayer: AVPlayer { player }
 
@@ -98,7 +98,7 @@ final class LocalEngine: PlaybackEngine {
 
 	func apply(_ edit: EngineEdit, startingAt offset: Double?) async -> Bool {
 		// Armed before the items are built, because a stored file can be ready
-		// before this returns — and cleared by any edit that names no offset,
+		// before this returns - and cleared by any edit that names no offset,
 		// which is what stops one outliving the track it was meant for.
 		pendingSeek = (offset ?? 0) > 0 ? offset : nil
 
@@ -130,7 +130,7 @@ final class LocalEngine: PlaybackEngine {
 			}
 		}
 		// **The already-ready case.** An offset asked for on a window that did
-		// not change — tapping a chapter of the track already playing — produces
+		// not change - tapping a chapter of the track already playing - produces
 		// a `.none` edit and no new item, so no status change ever fires and the
 		// deferred seek would wait for ever. Applying it here covers that; when
 		// the item is not ready yet this does nothing and the status observer
@@ -164,7 +164,7 @@ final class LocalEngine: PlaybackEngine {
 	}
 
 	/// A stored track plays from disk. Anything else plays **through the caching
-	/// loader**, which fetches it once at network speed and keeps the copy — so
+	/// loader**, which fetches it once at network speed and keeps the copy - so
 	/// hearing a track is what puts it there.
 	///
 	/// The rewritten scheme is not decoration: AVFoundation handles `http` and
@@ -179,7 +179,7 @@ final class LocalEngine: PlaybackEngine {
 		// **Video is never cached**, and the test is the song rather than the
 		// URL. One film evicts the whole stored library, and a re-encoded one
 		// arrives with no `Content-Length` so completeness could never be
-		// established — the rule has held since downloads landed, and routing a
+		// established - the rule has held since downloads landed, and routing a
 		// film through the loader would break it silently.
 		//
 		// An HLS playlist is the second reason: the loader fetches one resource
@@ -205,22 +205,21 @@ final class LocalEngine: PlaybackEngine {
 	///
 	/// **`nativeSeek` answers a browser's question, and this is not a browser.**
 	/// It derives from the server's `video_direct_playable()`, which is built
-	/// from `browser_video_codec()` — and a browser plays AV1 anywhere because
+	/// from `browser_video_codec()` - and a browser plays AV1 anywhere because
 	/// Chrome and Firefox bundle dav1d and decode in software. AVFoundation
 	/// ships **no** software AV1 decoder: decode is hardware-only, arrived with
 	/// the M3 family and A17 Pro, and there is no fallback on anything older.
-	/// A yt-dlp download is frequently AV1, deliberately — forcing H.264 would
-	/// cap YouTube at 1080p — so this is a common file rather than an exotic
+	/// A yt-dlp download is frequently AV1, deliberately - forcing H.264 would
+	/// cap YouTube at 1080p - so this is a common file rather than an exotic
 	/// one, and the symptom is a film that plays its sound over an audio
 	/// placeholder with nothing anywhere saying why.
 	///
 	/// This is the same mistake the cast path made one level up, where a browser
-	/// predicate was read as a receiver's capability; the root `CLAUDE.md` warns
-	/// about it there in almost these words.
+	/// predicate was read as a receiver's capability.
 	///
 	/// **Asked rather than predicted.** A codec allowlist would have to know
 	/// which machine it is running on, and the API does not carry the codec pair
-	/// anyway — only `nativeSeek`. `isDecodable` is the platform answering for
+	/// anyway - only `nativeSeek`. `isDecodable` is the platform answering for
 	/// itself, on this hardware, which is the only form of the question with a
 	/// right answer.
 	///
@@ -242,8 +241,8 @@ final class LocalEngine: PlaybackEngine {
 
 	/// True only when the platform has *said* it cannot.
 	///
-	/// A failure to read the tracks at all is not evidence of anything — the
-	/// network, most likely — and re-encoding a film on a guess is the expensive
+	/// A failure to read the tracks at all is not evidence of anything - the
+	/// network, most likely - and re-encoding a film on a guess is the expensive
 	/// way to be wrong, so anything unclear answers false and the direct
 	/// transport stands.
 	private static func cannotDecode(_ asset: AVURLAsset) async -> Bool {
@@ -315,7 +314,7 @@ final class LocalEngine: PlaybackEngine {
 			window.removeFirst()
 		}
 		// `applyEdit` suppresses `currentItemChanged`, so nothing else here
-		// republishes — and the position would stay on the track that just
+		// republishes - and the position would stay on the track that just
 		// ended until the next periodic tick.
 		republish()
 		return true
@@ -340,8 +339,8 @@ final class LocalEngine: PlaybackEngine {
 	}
 
 	func seek(to seconds: Double) {
-		// The completion is delivered on an unspecified queue — unlike the
-		// periodic time observer, which documents `queue: .main` — so this hops
+		// The completion is delivered on an unspecified queue - unlike the
+		// periodic time observer, which documents `queue: .main` - so this hops
 		// rather than assuming.
 		player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) { [weak self] _ in
 			Task { @MainActor in
@@ -364,8 +363,8 @@ final class LocalEngine: PlaybackEngine {
 	}
 
 	/// Applied on the item's own `readyToPlay`, which is the first moment a seek
-	/// is honoured rather than dropped. Both entry points call it — the status
-	/// observer and `currentItemChanged` — since an item that was already ready
+	/// is honoured rather than dropped. Both entry points call it - the status
+	/// observer and `currentItemChanged` - since an item that was already ready
 	/// when it became current publishes no new status.
 	private func applyPendingSeek() {
 		guard let target = pendingSeek else { return }
@@ -378,8 +377,8 @@ final class LocalEngine: PlaybackEngine {
 
 	/// **Every callback says only "republish".**
 	///
-	/// A KVO block fires synchronously on whatever thread mutated the property —
-	/// not the main actor — and its payload is a non-`Sendable` `AVPlayerItem?`.
+	/// A KVO block fires synchronously on whatever thread mutated the property -
+	/// not the main actor - and its payload is a non-`Sendable` `AVPlayerItem?`.
 	/// Carrying nothing across and re-reading the state on the main actor is
 	/// what lets this whole class compile under complete concurrency checking
 	/// without a single `@unchecked`. It is also structurally what Android does
@@ -399,7 +398,7 @@ final class LocalEngine: PlaybackEngine {
 		// `waitingToPlayAtSpecifiedRate` indefinitely, so without this the
 		// failure below is only ever noticed if some unrelated event happens to
 		// republish. The symptom is a spinner that never stops and no error
-		// anywhere — which is exactly what a file stored with no extension
+		// anywhere - which is exactly what a file stored with no extension
 		// produced.
 		observations.append(
 			player.observe(\.currentItem?.status, options: [.new]) { [weak self] _, _ in
@@ -455,7 +454,7 @@ final class LocalEngine: PlaybackEngine {
 	private func republish() {
 		// **Read the clock here, not only on the periodic tick.** That observer
 		// fires twice a second, so between an item change and the next tick the
-		// position still describes the track that just ended — and
+		// position still describes the track that just ended - and
 		// `advanceToNextItem()` produces exactly that gap. Anything deciding on
 		// position in that window gets the wrong answer: `previous()` reads
 		// forty-odd seconds half a second into a new track and restarts it

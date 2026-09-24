@@ -130,7 +130,7 @@ struct SearchView: View {
 	}
 
 	/// As in Recents: a hit opens its album and starts there rather than
-	/// playing in place. `Route.album` records why, and it is not cosmetic —
+	/// playing in place. `Route.album` records why, and it is not cosmetic -
 	/// a video hit played where it stands is re-encoded rather than remuxed.
 	@ViewBuilder
 	private func songRow(_ item: SongUi) -> some View {
@@ -148,7 +148,7 @@ struct SearchView: View {
 		}
 	}
 
-	/// A marker cannot be played where it stands — it has no id to stream — so
+	/// A marker cannot be played where it stands - it has no id to stream - so
 	/// this opens the album its recording sits in and starts that recording at
 	/// the marker. The same detour `songRow` takes, and it buys the same thing
 	/// besides: read again through `getAlbum`, the recording carries

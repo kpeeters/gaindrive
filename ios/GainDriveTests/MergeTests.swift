@@ -44,7 +44,7 @@ struct MergeTests {
 		#expect(merged[0].name == "Pink Floyd")
 	}
 
-	/// Starred anywhere is starred — the alternative is a star that depends on
+	/// Starred anywhere is starred - the alternative is a star that depends on
 	/// which server happened to answer first.
 	@Test func starredAnywhereWins() {
 		let plain = artist(serverA, "1", "Pink Floyd")
@@ -62,7 +62,7 @@ struct MergeTests {
 	}
 
 	/// Two servers filing the same artist under different letters must produce
-	/// **one** row, in one bucket — otherwise merging has achieved nothing on
+	/// **one** row, in one bucket - otherwise merging has achieved nothing on
 	/// exactly the screen it exists for.
 	@Test func anArtistFiledUnderTwoLettersMergesIntoOne() {
 		let merged = Merge.artistIndexes(perServer: [
@@ -74,7 +74,7 @@ struct MergeTests {
 		#expect(merged[0].label == "P")
 	}
 
-	/// `#` belongs at the end of the rail, not where its code point puts it —
+	/// `#` belongs at the end of the rail, not where its code point puts it -
 	/// which is before "A", and reads as a mistake.
 	@Test func hashSortsLast() {
 		let merged = Merge.artistIndexes(perServer: [
@@ -140,8 +140,8 @@ struct MergeTests {
 		#expect(merged[0].sources == [serverA, serverB])
 	}
 
-	/// Two same-titled albums on **one** server are two albums — separately
-	/// filed editions — and collapsing them would hide one.
+	/// Two same-titled albums on **one** server are two albums - separately
+	/// filed editions - and collapsing them would hide one.
 	@Test func doesNotCollapseWithinOneServer() {
 		let merged = Merge.albums([
 			album(serverA, "1", "Live"),

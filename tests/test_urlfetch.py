@@ -15,7 +15,7 @@ have upload rights (or be an admin).
 
     python3 tests/test_urlfetch.py
 
-Set LIVE_URL to a real, short video to exercise the online half — an actual
+Set LIVE_URL to a real, short video to exercise the online half - an actual
 fetch, a promote and a cancel. It is None by default because it downloads,
 takes minutes and needs yt-dlp installed on the server.
 """
@@ -51,7 +51,7 @@ OTHER_PASS = "nobody"
 
 
 class Skip(Exception):
-    """Precondition absent — reported as a skip rather than a failure."""
+    """Precondition absent - reported as a skip rather than a failure."""
 
 
 def _get(endpoint, extra=None, *, user=USER, password=PASS):
@@ -128,7 +128,7 @@ def test_no_handler_refused():
 
 def test_pattern_is_anchored():
     _require_handlers()
-    # regex_search would accept this — the site name is in the fragment of a
+    # regex_search would accept this - the site name is in the fragment of a
     # URL pointing somewhere else entirely. regex_match must not.
     _err(_get("fetchUrl.view",
               {"url": "http://192.0.2.1/x#https://www.youtube.com/watch?v=a"}), 0)
@@ -139,7 +139,7 @@ def test_blank_names_are_not_an_error():
     """Absent and all-whitespace must both mean "keep what the handler chose",
     or a client cannot send the two fields unconditionally.
 
-    The assertion is that the request still fails for the *URL* — proving the
+    The assertion is that the request still fails for the *URL* - proving the
     names were accepted and that they are checked after the handler, not
     before."""
     _require_handlers()
@@ -325,8 +325,8 @@ def test_live_fetch_with_names():
     """The whole point: a typed name is what the batch is filed under, and the
     title parsing is not consulted.
 
-    A merge test proper — two directories at one level collapsing into the typed
-    name — needs a playlist, and the built-in handler passes --no-playlist, so
+    A merge test proper - two directories at one level collapsing into the typed
+    name - needs a playlist, and the built-in handler passes --no-playlist, so
     it cannot be exercised here without an operator-written handler."""
     if LIVE_URL is None:
         raise Skip("LIVE_URL is not set")
@@ -357,7 +357,7 @@ def test_live_fetch_with_names():
     names = {a["name"] for i in index for a in i.get("artist", [])}
     assert artist in names, f"typed artist not in the personal listing: {names}"
 
-    # Exactly one album, named as typed — and therefore still a five-component
+    # Exactly one album, named as typed - and therefore still a five-component
     # path, which is the only thing that makes it promotable.
     aid = next(a["id"] for i in index for a in i.get("artist", [])
                if a["name"] == artist)
@@ -384,7 +384,7 @@ def test_duplicate_refused():
 # A fetch asks yt-dlp for a .info.json and the batch pipeline turns its
 # `chapters` array into the sidecar gaindrive indexes. That conversion is keyed
 # on the *file* rather than on which handler ran, so an uploaded archive takes
-# the identical path — which is what makes it testable with no network, no
+# the identical path - which is what makes it testable with no network, no
 # yt-dlp and no waiting for a download.
 #
 # Not asserted here: that the .info.json is deleted afterwards. Nothing in the
@@ -416,7 +416,7 @@ def _upload_zip(entries):
         with urllib.request.urlopen(req) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
-        raise Skip(f"/upload returned HTTP {e.code} — is an uploads root "
+        raise Skip(f"/upload returned HTTP {e.code} - is an uploads root "
                    f"configured and does {USER} have upload rights?") from None
 
 
@@ -441,7 +441,7 @@ def _chapter_pairs(song_id):
 
 
 def _cleanup(song):
-    """Best effort — the album folder, which is what deleteUpload accepts."""
+    """Best effort - the album folder, which is what deleteUpload accepts."""
     try:
         _get("deleteUpload.view", {"id": song["parent"]})
     except Exception:                                    # noqa: BLE001
@@ -478,7 +478,7 @@ def test_info_json_becomes_a_chapter_sidecar():
 
 
 def test_info_json_without_chapters_writes_nothing():
-    """A video with none sends "chapters": null — the shape value() throws on,
+    """A video with none sends "chapters": null - the shape value() throws on,
     and an empty sidecar would be a tombstone the fetch has no right to set."""
     tag  = str(int(time.time())) + "b"
     name = f"Zqx Plain {tag}"
@@ -492,7 +492,7 @@ def test_info_json_without_chapters_writes_nothing():
     try:
         pairs, source = _chapter_pairs(song["id"])
         assert pairs == [], pairs
-        assert source == "none", f"source={source} — a tombstone was written"
+        assert source == "none", f"source={source} - a tombstone was written"
         print("PASS  chapters:null writes no sidecar, not an empty one")
     finally:
         _cleanup(song)
@@ -517,7 +517,7 @@ def test_loose_sidecar_follows_its_media():
     try:
         pairs, source = _chapter_pairs(song["id"])
         assert source == "sidecar", \
-            f"source={source} — the sidecar did not follow its media"
+            f"source={source} - the sidecar did not follow its media"
         assert pairs == [(0.0, "One"), (300.0, "Two")], pairs
         print("PASS  a loose sidecar is filed with the media it describes")
     finally:
@@ -537,7 +537,7 @@ def test_removed_batch_is_pruned():
 
     The uploads root is excluded from every automatic indexing path, so before
     MediaStore::reconcile_uploads() nothing in the server ever compared it with
-    the filesystem except scan_batch() and deleteUpload — and a directory
+    the filesystem except scan_batch() and deleteUpload - and a directory
     removed behind gaindrive's back kept its rows permanently.
 
     Two mechanisms answer it and this exercises whichever is quicker:
@@ -549,7 +549,7 @@ def test_removed_batch_is_pruned():
     one would leave the files somewhere other than the batch this removes.
     """
     if not os.path.isdir(UPLOAD_ROOT):
-        raise Skip(f"{UPLOAD_ROOT} is not there — the tests and the server "
+        raise Skip(f"{UPLOAD_ROOT} is not there - the tests and the server "
                    f"need a shared filesystem for this one")
 
     tag    = str(int(time.time())) + "d"
@@ -566,7 +566,7 @@ def test_removed_batch_is_pruned():
 
     batch = os.path.join(UPLOAD_ROOT, USER, uuid)
     if not os.path.isdir(batch):
-        raise Skip(f"{batch} is not there — is UPLOAD_ROOT right?")
+        raise Skip(f"{batch} is not there - is UPLOAD_ROOT right?")
     shutil.rmtree(batch)
 
     def gone(seconds):

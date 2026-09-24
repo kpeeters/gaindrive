@@ -17,7 +17,7 @@ import javax.inject.Singleton
  * Checks whether a set of credentials actually works, without saving them.
  *
  * The distinction the UI needs is between "the server said no" and "there was
- * no server" — those call for different fixes, and a single "failed" message
+ * no server" - those call for different fixes, and a single "failed" message
  * makes the user guess.
  */
 @Singleton
@@ -49,7 +49,7 @@ class ConnectionTester @Inject constructor(
 				// than IOException is deliberate: Retrofit's HttpException is a
 				// RuntimeException, and a bad URL throws IllegalArgumentException
 				// out of Retrofit's builder. Neither may reach the user as a
-				// crash — this dialog exists precisely to report them.
+				// crash - this dialog exists precisely to report them.
 				ConnectionTest.Unreachable(e.userMessage())
 			}
 		}
@@ -61,7 +61,7 @@ class ConnectionTester @Inject constructor(
 	 * Bandcamp's implementation answers `ping` with `ok` for any username and
 	 * password at all, and then fails every endpoint that actually looks the
 	 * user up. A test that only pinged went green on credentials the app could
-	 * not use — which is the one thing this button exists to catch.
+	 * not use - which is the one thing this button exists to catch.
 	 *
 	 * The artist list specifically: it is the first thing the app really does, so
 	 * a server that passes here cannot fail on the first screen. Which endpoint

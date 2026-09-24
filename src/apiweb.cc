@@ -23,7 +23,7 @@ void GainDrive::routes_web()
 	{
 	// Socket options, including the deliberate SO_REUSEADDR-not-SO_REUSEPORT
 	// choice that stops a second gaindrive silently sharing this port, are set
-	// further down alongside the TCP keepalive settings — set_socket_options()
+	// further down alongside the TCP keepalive settings - set_socket_options()
 	// takes a single callback, so they have to live together.
 
 	// A cache miss now blocks its request thread for the whole transcode
@@ -34,7 +34,7 @@ void GainDrive::routes_web()
 	// slowloris that pinned all 32 workers would go on accepting connections
 	// into an ever-growing deque, each holding a file descriptor, until
 	// EMFILE. Refusing the 129th queued request instead sheds load at the
-	// edge, which is the recoverable failure. max_n stays 0 — a fixed pool.
+	// edge, which is the recoverable failure. max_n stays 0 - a fixed pool.
 	server_.new_task_queue = [this]{
 		auto* q = new CountingPool(32, 0, 128);
 		http_pool_.store(q);
@@ -44,7 +44,7 @@ void GainDrive::routes_web()
 	// httplib's payload cap defaults to SIZE_MAX. Since 0.54 the body of a
 	// routed request is read only after the route has matched and the
 	// pre-request handler has approved it, so the cap no longer has to be
-	// small to protect unauthenticated callers — the pre-request handler
+	// small to protect unauthenticated callers - the pre-request handler
 	// below is that protection. What this still has to clear is the one
 	// legitimately large body, an archive streamed to /upload, because the
 	// content-reader path enforces the same cap on what it hands the
@@ -56,7 +56,7 @@ void GainDrive::routes_web()
 	// route but /upload gets a small one: the largest legitimate small body
 	// is a saveChapters file, which MAX_CHAPTERS bounds far below a megabyte.
 	// /upload is exempt because its handler streams the body through a
-	// content reader to disk under its own cap — it never buffers it — and
+	// content reader to disk under its own cap - it never buffers it - and
 	// authenticates from the query string before reading at all.
 	//
 	// Chunked (or otherwise length-less) bodies are refused outside /upload
@@ -95,18 +95,18 @@ void GainDrive::routes_web()
 	// In debug mode also strip Accept-Encoding: httplib swaps compressed bytes into
 	// res.body before firing the logger, making it unreadable (cpp-httplib#1656).
 	//
-	// Also the one place CORS is answered — and it is answered only for the
+	// Also the one place CORS is answered - and it is answered only for the
 	// endpoints a Cast receiver fetches for itself. **A Chromecast needs this
 	// to show a subtitle.** The receiver fetches a side-loaded WebVTT track by
 	// XHR, and declaring any track at all puts its media element into
-	// anonymous cross-origin mode — so the *film* needs the header as much as
+	// anonymous cross-origin mode - so the *film* needs the header as much as
 	// the captions do, on its 206 responses as much as its 200s.
 	//
 	// It used to be `*` on every endpoint, on the reasoning that credentials
 	// ride in query parameters so there is no ambient authority for a hostile
 	// page to borrow. That was true and still incomplete: the Subsonic
 	// envelope is HTTP 200 for success and failure alike, so only a
-	// CORS-readable body distinguishes a right password from a wrong one —
+	// CORS-readable body distinguishes a right password from a wrong one -
 	// `*` on ping.view made every web page a visitor opens a password oracle
 	// against this server, rate-limited only by the login throttle. And a
 	// leaked credentialed URL (a proxy log, a pasted link) was readable from
@@ -157,7 +157,7 @@ void GainDrive::routes_web()
 	// exception's what() into an `EXCEPTION_WHAT` **response header**. For a
 	// SQLite exception that string carries filesystem paths, and root paths
 	// are private to MediaStore and are deliberately never surfaced in an API
-	// response — so the fallback quietly undid that rule for every unexpected
+	// response - so the fallback quietly undid that rule for every unexpected
 	// throw. The detail belongs in the log, where it is useful, and the client
 	// gets an ordinary Subsonic error.
 	server_.set_exception_handler([](const httplib::Request& req,
@@ -178,7 +178,7 @@ void GainDrive::routes_web()
 		});
 
 	// The access log names every parameter, which is what makes it useful for
-	// diagnosing a client — and is why it has to redact. Credentials ride in
+	// diagnosing a client - and is why it has to redact. Credentials ride in
 	// the query string on every single request, so without this the journal is
 	// a second complete plaintext credential store, kept for longer than the
 	// database and usually readable by more people. `p` is the password
@@ -188,14 +188,14 @@ void GainDrive::routes_web()
 	// is a bearer credential in its own right.
 	//
 	// Values are also stripped of CR and LF: they are attacker-supplied and
-	// were written raw, so a parameter could forge whole log lines — which
+	// were written raw, so a parameter could forge whole log lines - which
 	// matters more once something is reading this log to decide who to block.
 	server_.set_logger([this](const httplib::Request& req, const httplib::Response& res) {
 		static const std::set<std::string> secret_params = {
 			"p", "password", "t", "s", "castToken",
 			// Server-side API keys arrive as ordinary GET parameters on
 			// saveServerSettings, and getServerSettings goes to some lengths
-			// never to read them back — a log line that printed them would
+			// never to read them back - a log line that printed them would
 			// undo that for every proxy and journal on the path.
 			"discogsToken", "tmdbKey"
 			};
@@ -232,7 +232,7 @@ void GainDrive::routes_web()
 	// Accepted sockets inherit SO_KEEPALIVE from the listening socket on Linux.
 	server_.set_socket_options([](int sock) {
 		// SO_REUSEADDR rather than httplib::default_socket_options(), which
-		// sets SO_REUSEPORT on Linux — see the note above and in CLAUDE.md.
+		// sets SO_REUSEPORT on Linux - see the note above.
 		// SO_REUSEPORT would let a second gaindrive bind this same port
 		// successfully and have the kernel split traffic between the two.
 		int reuse = 1;
@@ -254,22 +254,22 @@ void GainDrive::routes_web()
 		setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT,    &cnt,   sizeof(cnt));
 		});
 
-	// Web client — serve embedded static files.
+	// Web client - serve embedded static files.
 	//
 	// A track link opened on an Android device is answered with a chooser
-	// page — an intent:// anchor aimed at the app, and a browser link —
+	// page - an intent:// anchor aimed at the app, and a browser link -
 	// instead of the SPA.  web=1 is the loop-breaker: the chooser's own
 	// browser link and the intent's fallback URL both carry it, or an
 	// Android browser would be handed the chooser again for ever.  The page
 	// composes its anchors from location.href itself, so nothing from the
 	// query string is spliced into HTML here, and the public scheme and
-	// host — which behind a proxy this process does not know — come free.
+	// host - which behind a proxy this process does not know - come free.
 	//
 	// Every embedded asset is revalidated rather than cached blindly, which is
 	// the same bargain getCoverArt strikes and for a sharper reason.
 	//
-	// These files had no cache headers at all — no Cache-Control, no ETag, no
-	// Last-Modified — which does not mean "do not cache", it means the browser
+	// These files had no cache headers at all - no Cache-Control, no ETag, no
+	// Last-Modified - which does not mean "do not cache", it means the browser
 	// picks a lifetime by heuristic and nothing can correct it. **The SPA talks
 	// to the API it shipped with**, so a heuristically cached app.js run against
 	// an upgraded server is a client out of step with its server, with nothing
@@ -281,7 +281,7 @@ void GainDrive::routes_web()
 	// steady-state cost is a conditional request answered 304, not a download.
 	//
 	// The validator is the version *and* a hash of the bytes. The version alone
-	// would be wrong in the case it matters most — every build between releases
+	// would be wrong in the case it matters most - every build between releases
 	// carries the same VERSION, so changed bytes would keep their old validator
 	// during development. std::hash is enough for a cache validator: this is not
 	// a signature, and a collision costs one stale load, which is what the
@@ -295,7 +295,7 @@ void GainDrive::routes_web()
 		};
 	// True when the response has been completed as a 304, so the caller returns
 	// without writing a body. Headers that describe the *resource* rather than
-	// the payload — the CSP, X-Frame-Options — are already set by then, which is
+	// the payload - the CSP, X-Frame-Options - are already set by then, which is
 	// what a conformant 304 wants.
 	auto revalidated = [etag_of](const httplib::Request& req, httplib::Response& res,
 	                             std::string_view body) {
@@ -319,15 +319,15 @@ void GainDrive::routes_web()
 	// The two HTML pages carry a Content-Security-Policy; assets and API
 	// responses need none, since a policy governs only the document that a
 	// browser renders. frame-ancestors 'none' is the load-bearing directive:
-	// without it the Settings pane — delete user, move album — can be framed
+	// without it the Settings pane - delete user, move album - can be framed
 	// and overlaid by any origin, and one click on the overlay is a click on
 	// this UI. The SPA keeps its one inline script in theme.js precisely so
 	// script-src can be 'self' with no carve-out; img-src is the single
 	// exception to "nothing external", and it is one the cover-art dialog
 	// needs: it previews an image URL a person has typed, so the host is not
 	// knowable in advance and no list of them would do. An image is all the
-	// carve-out buys — script-src, connect-src and the rest stay 'self', so
-	// nothing reached this way can execute or be read back — and data: is
+	// carve-out buys - script-src, connect-src and the rest stay 'self', so
+	// nothing reached this way can execute or be read back - and data: is
 	// there for the same dialog's preview of a file picked off the device.
 	// http: matters only when gaindrive itself is served over plain http,
 	// where setCoverArt would accept such a URL and the preview should not
@@ -385,7 +385,7 @@ void GainDrive::routes_web()
 	// The one asset deliberately left out of the revalidation above, and
 	// `immutable` is why: it tells the browser never to consult a validator, so
 	// an ETag here would be decoration. That is the right trade for a font that
-	// has never changed — but it does mean a *replaced* font would be served
+	// has never changed - but it does mean a *replaced* font would be served
 	// stale for a year. Fixing that properly means versioning the URL, and this
 	// URL lives in style.css's @font-face, so it would need substituting at
 	// build time. Worth knowing before anyone swaps the font.

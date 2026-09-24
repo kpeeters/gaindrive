@@ -29,7 +29,7 @@ class FetchApiTest {
 	private lateinit var server: MockWebServer
 	private lateinit var api: SubsonicApi
 
-	// The production parser, not a copy of its settings — see BrowseApiTest.
+	// The production parser, not a copy of its settings - see BrowseApiTest.
 	private val json = SubsonicJson
 
 	@Before
@@ -107,7 +107,7 @@ class FetchApiTest {
 		assertFalse(handlers[1].video)
 	}
 
-	/** No handler table configured. Not an error — the feature is just off. */
+	/** No handler table configured. Not an error - the feature is just off. */
 	@Test
 	fun `an empty handler list is not an error`() = runTest {
 		respond(
@@ -165,7 +165,7 @@ class FetchApiTest {
 
 	/**
 	 * A state this build has never heard of must reach the UI as a string, not
-	 * take the response down with it — which is why the DTO does not type it as
+	 * take the response down with it - which is why the DTO does not type it as
 	 * an enum.
 	 */
 	@Test

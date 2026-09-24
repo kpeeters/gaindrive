@@ -85,14 +85,14 @@
     <div class="docs-main api-main">
 
 <p>GainDrive speaks the <a href="https://opensubsonic.netlify.app/">Subsonic</a> API, and this page documents only what it <em>adds</em> to it: the endpoints Subsonic does not define, and the extra parameters and response fields that standard endpoints carry. The standard endpoints themselves behave as specified and are not repeated here.</p>
-<p>Everything is served at <code>/rest/&lt;name&gt;.view</code> unless stated otherwise, answers in XML or in JSON (<code>f=json</code>), and requires authentication — either <code>u</code> and <code>p</code> or the token scheme <code>u</code>, <code>t</code> and <code>s</code>. A parameter marked with a <code>*</code> is required.</p>
+<p>Everything is served at <code>/rest/&lt;name&gt;.view</code> unless stated otherwise, answers in XML or in JSON (<code>f=json</code>), and requires authentication - either <code>u</code> and <code>p</code> or the token scheme <code>u</code>, <code>t</code> and <code>s</code>. A parameter marked with a <code>*</code> is required.</p>
 <p>Clients discover this whole surface through <code>getOpenSubsonicExtensions</code>, which advertises an extension named <code>gaindrive</code>.</p>
 
 <div class="doc-sec" id="extension">
 <h2>The gaindrive extension</h2>
 <p><code>getOpenSubsonicExtensions</code> advertises an extension named <code>gaindrive</code> at version 1. No authentication is needed for that call, so a client can negotiate before login. Everything on this page is version 1.</p>
-<p>Beside it the standard <code>transcodeOffset</code> is advertised, also at version 1. It names behaviour rather than adding any — <code>stream</code> honours <code>timeOffset</code> for audio, and always has — so nothing on this page depends on it.</p>
-<p>A new <em>endpoint</em> will earn a new version, because a client cannot discover one without being told. A new <em>optional parameter</em> on an endpoint an existing version already names will not — a client that ignores it gets exactly what it got before, so nothing it was told has been redefined.</p>
+<p>Beside it the standard <code>transcodeOffset</code> is advertised, also at version 1. It names behaviour rather than adding any - <code>stream</code> honours <code>timeOffset</code> for audio, and always has - so nothing on this page depends on it.</p>
+<p>A new <em>endpoint</em> will earn a new version, because a client cannot discover one without being told. A new <em>optional parameter</em> on an endpoint an existing version already names will not - a client that ignores it gets exactly what it got before, so nothing it was told has been redefined.</p>
 <p>A client that does not know the extension will not call any of these, so there is no conformance risk in advertising it. Nothing in the standard endpoints changes when the extension is present.</p>
 <div class="api-ep">
 <h3 id="ep-getopensubsonicextensions">getOpenSubsonicExtensions</h3>
@@ -146,7 +146,7 @@
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>contentType</code></p>
-<p>Artist and category roots cannot be told apart by shape — both are <code>L1/L2/[L3]/files</code> — so which one a root is has to be configured, and a client that wants to draw them differently has to be told.</p>
+<p>Artist and category roots cannot be told apart by shape - both are <code>L1/L2/[L3]/files</code> - so which one a root is has to be configured, and a client that wants to draw them differently has to be told.</p>
 <p>The uploads root, if configured, is never listed: it holds per-user personal files rather than shared library content.</p></div>
 </div>
 <div class="api-ep">
@@ -163,13 +163,13 @@
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>contentType</code></p>
-<p>It complements <code>musicFolderId</code> rather than replacing it: a kind may span several roots — two artist roots must list together — which a single folder id cannot express.</p>
+<p>It complements <code>musicFolderId</code> rather than replacing it: a kind may span several roots - two artist roots must list together - which a single folder id cannot express.</p>
 <p>Omitting it returns every root&#x27;s children mixed, which is what a client with no concept of categories should get. The sections browse perfectly well as pseudo-artists.</p></div>
 <div class="api-note"><p class="api-note-h"><code>personal</code></p>
-<ul class="doc-list"><li><code>personal=true</code> — the calling account&#x27;s own uploads.</li><li><code>personal=*</code> — <b>every</b> account&#x27;s, and <b>admin only</b>; anything else gets error 50. An admin is the only account that can <code>moveAlbum</code> an upload into the shared library, so without this a non-admin&#x27;s upload is visible to its owner and to nobody able to act on it.</li></ul>
-<p><b><code>personal=*</code> groups the response by owner rather than by first letter</b>, so the <code>index</code> labels come back as usernames instead of <code>A</code>, <code>B</code>, <code>#</code>. That is what makes two accounts&#x27; identically named folders tellable apart — grouped by letter they would interleave under one heading with nothing saying whose is whose — and it needs nothing new from a client, since an index label was always an arbitrary string.</p>
+<ul class="doc-list"><li><code>personal=true</code> - the calling account&#x27;s own uploads.</li><li><code>personal=*</code> - <b>every</b> account&#x27;s, and <b>admin only</b>; anything else gets error 50. An admin is the only account that can <code>moveAlbum</code> an upload into the shared library, so without this a non-admin&#x27;s upload is visible to its owner and to nobody able to act on it.</li></ul>
+<p><b><code>personal=*</code> groups the response by owner rather than by first letter</b>, so the <code>index</code> labels come back as usernames instead of <code>A</code>, <code>B</code>, <code>#</code>. That is what makes two accounts&#x27; identically named folders tellable apart - grouped by letter they would interleave under one heading with nothing saying whose is whose - and it needs nothing new from a client, since an index label was always an arbitrary string.</p>
 <div class="note"><p>A client drawing an alphabet scrubber from those labels will want to suppress it when they are not letters.</p></div></div>
-<p>Root folders themselves never appear as artists. Both endpoints return the <em>level-1 entries</em> of every root flattened into one list — musicians from artist roots and sections such as Film or Series from category roots.</p>
+<p>Root folders themselves never appear as artists. Both endpoints return the <em>level-1 entries</em> of every root flattened into one list - musicians from artist roots and sections such as Film or Series from category roots.</p>
 <p>Nothing below the top level is affected: <code>getArtist</code>, <code>getAlbum</code> and <code>getMusicDirectory</code> take plain ids and neither know nor need to know which side of the library one came from.</p>
 </div>
 <div class="api-ep">
@@ -225,7 +225,7 @@
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>resolving</code></p>
-<p>gaindrive never queries a metadata provider from a request thread. The lookup runs on the same background resolver that finds artist portraits — one artist at a time, paced against MusicBrainz&#x27;s rate limit — and asking for an artist it has not reached yet is what pushes them to the front of its queue. So a first request for an unknown artist returns at once with an empty biography and this field set, and a later one returns the biography.</p>
+<p>gaindrive never queries a metadata provider from a request thread. The lookup runs on the same background resolver that finds artist portraits - one artist at a time, paced against MusicBrainz&#x27;s rate limit - and asking for an artist it has not reached yet is what pushes them to the front of its queue. So a first request for an unknown artist returns at once with an empty biography and this field set, and a later one returns the biography.</p>
 <p>The field is emitted <b>only when it is true</b>, so its absence means the same thing to a client that has never heard of it as to one that has: this is everything there is. A client that ignores it sees an empty biography on the first view and a real one on the next.</p>
 <div class="note"><p>An artist the providers had nothing to say about settles with no biography and no <code>resolving</code>. That is a final answer and not a reason to keep polling.</p></div></div>
 <h4>Errors</h4>
@@ -250,7 +250,7 @@
 </table>
 <div class="api-note"><p class="api-note-h"><code>force</code></p>
 <p>This is the only way to correct a cached empty answer, and before it existed there was none: the row was written whatever MusicBrainz had said, including nothing at all, and no read ever consulted its age. An album viewed once while MusicBrainz was shedding load therefore had no description for good.</p>
-<p>That half is fixed too — a row is written only when MusicBrainz actually answered, so a failed lookup is retried on the next view — but a <em>successful</em> lookup that found nothing is final, and <code>force</code> is how to ask again.</p>
+<p>That half is fixed too - a row is written only when MusicBrainz actually answered, so a failed lookup is retried on the next view - but a <em>successful</em> lookup that found nothing is final, and <code>force</code> is how to ask again.</p>
 <p><b>Admin only</b>, on the same terms as <code>getArtistInfo</code>&#x27;s: the endpoint stays open to any user, the re-ask does not.</p></div>
 <h4>Response</h4>
 <table class="doc-table">
@@ -270,7 +270,7 @@
 </tbody>
 </table>
 <p>These behave exactly as the <code>getArtistInfo</code> pair above, and for the same reason: the endpoint used to run the MusicBrainz release-group search, the url-rels lookup, Wikidata and Wikipedia on the request thread, so one album nobody had looked up could hold an HTTP worker for minutes. It reads <code>album_info_cache</code> and queues the lookup instead.</p>
-<p>The chain is shorter than the artist one — MusicBrainz, then Wikidata and Wikipedia — and there is no image, so an album carries no <code>coverArt</code> answer from this endpoint either way.</p>
+<p>The chain is shorter than the artist one - MusicBrainz, then Wikidata and Wikipedia - and there is no image, so an album carries no <code>coverArt</code> answer from this endpoint either way.</p>
 </div>
 <div class="api-ep">
 <h3 id="ep-getalbumlist-getalbumlist2-getartist-getalbum">getAlbumList / getAlbumList2 / getArtist / getAlbum</h3>
@@ -285,7 +285,7 @@
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>videoCount</code></p>
-<p><code>isVideo</code> is a property of a <em>song</em>, so nothing on an album entry otherwise says that opening it will start a film — a client would have to fetch every album&#x27;s tracks to find out. A count rather than a flag because the two cases differ: a folder holding one bonus documentary beside its songs is not a folder of films, and <code>videoCount</code> equal to <code>songCount</code> is what a season of a series or a film looks like.</p>
+<p><code>isVideo</code> is a property of a <em>song</em>, so nothing on an album entry otherwise says that opening it will start a film - a client would have to fetch every album&#x27;s tracks to find out. A count rather than a flag because the two cases differ: a folder holding one bonus documentary beside its songs is not a folder of films, and <code>videoCount</code> equal to <code>songCount</code> is what a season of a series or a film looks like.</p>
 <div class="note"><p>The album entries returned by <code>getMusicDirectory</code>, <code>getStarred</code>, <code>getStarred2</code>, <code>search2</code> and <code>search3</code> do <b>not</b> carry it, so its absence there is not a claim that an album has no video.</p></div></div>
 </div>
 <div class="api-ep">
@@ -336,50 +336,50 @@
 <tr><td><code>castToken</code></td><td>string</td><td>A token from <code>castLoad</code> or <code>getCastToken</code>, accepted in place of credentials.</td></tr>
 <tr><td><code>castController</code></td><td>string</td><td>The id given to <code>startCast</code>. Only the owner of a live cast session has its playback redirected to the receiver.</td></tr>
 <tr><td><code>castRedirect</code></td><td>bool</td><td>Send <code>false</code> to be served the stream even though you own the live cast session. default <code>true</code>.</td></tr>
-<tr><td><code>size</code></td><td>string</td><td>Video only. A cap on the output frame size, as <code>WxH</code> — <code>640x480</code>.</td></tr>
+<tr><td><code>size</code></td><td>string</td><td>Video only. A cap on the output frame size, as <code>WxH</code> - <code>640x480</code>.</td></tr>
 <tr><td><code>duration</code></td><td>int</td><td>Video only. Bound the output to this many seconds from <code>timeOffset</code>, and switch the container to MPEG-TS. That is one HLS segment.</td></tr>
-<tr><td><code>playable</code></td><td>string</td><td>A comma list of what this client can be sent untouched, so the server skips work it would otherwise pay — <code>mpeg/mp3,mp4/aac</code> for audio, <code>mkv,mov,avi</code> for video.</td></tr>
+<tr><td><code>playable</code></td><td>string</td><td>A comma list of what this client can be sent untouched, so the server skips work it would otherwise pay - <code>mpeg/mp3,mp4/aac</code> for audio, <code>mkv,mov,avi</code> for video.</td></tr>
 <tr><td><code>startImmediately</code></td><td>bool</td><td>Video only. Be sent a stream that starts at once rather than one that can be seeked, when the two conflict.</td></tr>
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>pace</code></p>
-<p>Send it when the URL is being handed to something that will play it in real time and cannot be recognised from the request — a Cast receiver fetching for itself is the case it exists for. Without it such a receiver is sent the whole track at once, stops reading when its buffer fills, and the connection is then idle until its own 60-second no-data timeout, or a reverse proxy&#x27;s, kills it mid-track.</p>
+<p>Send it when the URL is being handed to something that will play it in real time and cannot be recognised from the request - a Cast receiver fetching for itself is the case it exists for. Without it such a receiver is sent the whole track at once, stops reading when its buffer fills, and the connection is then idle until its own 60-second no-data timeout, or a reverse proxy&#x27;s, kills it mid-track.</p>
 <p><b>Never send it on a download or a prefetch</b>: that would make the transfer take as long as the music. A browser is paced already, by its User-Agent, and video is never paced.</p></div>
 <div class="api-note"><p class="api-note-h"><code>posToken</code></p>
 <p>With it, the paced delivery is throttled against the playhead the client reports through <code>reportPosition</code>, instead of against a wall-clock estimate: the same mechanism a cast stream gets from the receiver&#x27;s status. The wall-clock estimate assumes 1x playback from the moment the request started, which drifts on a paused player and starves on a file whose front is not audio; the reported position does neither.</p>
 <p>Use a fresh random token per stream URL. Positions are read in the served stream&#x27;s own time frame, so a <code>timeOffset</code> re-fetch is a new stream and needs a new token. Scoped to the authenticated account: another account sending the same token names a different pacing session. If the reports stop, the stream degrades to unpaced delivery rather than stalling.</p></div>
 <div class="api-note"><p class="api-note-h"><code>castToken</code></p>
-<p>A receiver fetches the media for itself and has no account, so the token is what authorises it. It is not single-use per request — the receiver makes many range requests for one track — but it <b>is</b> scoped to one song and to a limited lifetime. Presenting it for a different <code>id</code> is refused as though it were absent.</p>
+<p>A receiver fetches the media for itself and has no account, so the token is what authorises it. It is not single-use per request - the receiver makes many range requests for one track - but it <b>is</b> scoped to one song and to a limited lifetime. Presenting it for a different <code>id</code> is refused as though it were absent.</p>
 <p><b>Two different tokens travel on this parameter</b>, and a URL looks the same whichever issued it. They are not interchangeable behind it:</p>
-<ul class="doc-list"><li><code>castLoad</code>&#x27;s belongs to the server&#x27;s own cast session. There is genuinely no account behind a request carrying it, so it skips the account bitrate ceiling, and the request is also subject to the session&#x27;s own offset — the receiver probes with <code>timeOffset</code> stripped, and the server answers from what the <code>LOAD</code> declared rather than from the URL. On <code>getCaptions</code> it authorises the caption ids that <code>LOAD</code> declared, and nothing else.</li><li><code>getCastToken</code>&#x27;s belongs to an account, for a cast some <em>other</em> sender is driving. So the ceiling <b>is</b> applied — there is somebody to apply it to — and nothing about a session applies: such a request is an ordinary one that happens to carry a token where a password would be, <code>timeOffset</code> and all. It also reaches <code>getCoverArt</code>, which the session token does not, because the server&#x27;s own cast sends a receiver no artwork and a client&#x27;s does.</li></ul></div>
+<ul class="doc-list"><li><code>castLoad</code>&#x27;s belongs to the server&#x27;s own cast session. There is genuinely no account behind a request carrying it, so it skips the account bitrate ceiling, and the request is also subject to the session&#x27;s own offset - the receiver probes with <code>timeOffset</code> stripped, and the server answers from what the <code>LOAD</code> declared rather than from the URL. On <code>getCaptions</code> it authorises the caption ids that <code>LOAD</code> declared, and nothing else.</li><li><code>getCastToken</code>&#x27;s belongs to an account, for a cast some <em>other</em> sender is driving. So the ceiling <b>is</b> applied - there is somebody to apply it to - and nothing about a session applies: such a request is an ordinary one that happens to carry a token where a password would be, <code>timeOffset</code> and all. It also reaches <code>getCoverArt</code>, which the session token does not, because the server&#x27;s own cast sends a receiver no artwork and a client&#x27;s does.</li></ul></div>
 <div class="api-note"><p class="api-note-h"><code>castController</code></p>
-<p>While a cast session is live, a request from the client that <b>owns</b> it is answered <code>204</code> and the track is sent to the Chromecast instead, so that client does not play it a second time itself. Every other caller — a client that sent no <code>castController</code>, one whose id does not match, or a different account — is served the stream normally.</p>
+<p>While a cast session is live, a request from the client that <b>owns</b> it is answered <code>204</code> and the track is sent to the Chromecast instead, so that client does not play it a second time itself. Every other caller - a client that sent no <code>castController</code>, one whose id does not match, or a different account - is served the stream normally.</p>
 <p>Without this the redirect was global: any request in the server was answered <code>204</code> while anyone was casting, so starting a track on a phone played it on whatever receiver a browser had picked earlier.</p></div>
 <div class="api-note"><p class="api-note-h"><code>castRedirect</code></p>
 <p>The redirect above assumes that an owner asking for a stream is about to play the track a second time. One request is not that: when the receiver cannot display video it is sent the film&#x27;s soundtrack, and the client can keep the picture, muted and in step with it. That is one playback in two halves, and the half that stays here has to be served rather than answered <code>204</code>.</p>
 <p>It matters more than a lost picture. The <code>204</code> path issues a fresh <code>castLoad</code> as a side effect, so the request would also restart what the receiver is playing.</p></div>
 <div class="api-note"><p class="api-note-h"><code>size</code></p>
 <p>Any value here disqualifies the direct and remux tiers, so the video is re-encoded on the fly and the response is chunked with no <code>Content-Length</code>.</p>
-<p>Strictly <code>WxH</code>, both between 16 and 7680/4320. Anything else is ignored rather than rejected, and means &quot;do not scale&quot; — the same as omitting it.</p></div>
+<p>Strictly <code>WxH</code>, both between 16 and 7680/4320. Anything else is ignored rather than rejected, and means &quot;do not scale&quot; - the same as omitting it.</p></div>
 <div class="api-note"><p class="api-note-h"><code>playable</code></p>
-<p>Most players handle more than a browser does, and a server that cannot be told so re-encodes for no reason. An MP3 played through a client that decodes MP3 is the plain case: asking for <code>format=opus</code> converts every track, including the ones that needed nothing. Matroska is the video case — an H.264/AAC <code>.mkv</code> is remuxed to MP4 only because no browser reads Matroska, and that remux is a whole-file <code>-c copy</code> the client waits out before it hears anything.</p>
+<p>Most players handle more than a browser does, and a server that cannot be told so re-encodes for no reason. An MP3 played through a client that decodes MP3 is the plain case: asking for <code>format=opus</code> converts every track, including the ones that needed nothing. Matroska is the video case - an H.264/AAC <code>.mkv</code> is remuxed to MP4 only because no browser reads Matroska, and that remux is a whole-file <code>-c copy</code> the client waits out before it hears anything.</p>
 <p><b>A token is a bare container for video, and a <code>container/codec</code> pair for audio.</b> The split is by medium, not by anything about the file:</p>
-<ul class="doc-list"><li><b>Video, bare</b> — every video container except <code>vob</code>. Video is a container-only declaration by design: the server keeps its own codec test, so naming <code>mkv</code> says which containers may be served untouched and nothing more.</li><li><b>Audio, paired</b> — <code>mpeg/mp3</code>, <code>mp4/aac</code>, <code>ogg/vorbis</code>, <code>flac/flac</code> and so on. Both halves are compared against what the scan <b>observed</b> and recorded, never against a filename.</li></ul>
-<p>That is why audio has no bare form. A <code>.ogg</code> and a <code>.oga</code> are one container under two extensions, and a <code>.m4a</code> is an MP4 — so a token naming an extension would reach some of a container&#x27;s files and not others. Naming the container itself, <code>ogg</code> or <code>mp4</code>, reaches all of them, and <code>mp3</code> alongside <code>mpeg/mp3</code> would be two spellings of one thing.</p>
+<ul class="doc-list"><li><b>Video, bare</b> - every video container except <code>vob</code>. Video is a container-only declaration by design: the server keeps its own codec test, so naming <code>mkv</code> says which containers may be served untouched and nothing more.</li><li><b>Audio, paired</b> - <code>mpeg/mp3</code>, <code>mp4/aac</code>, <code>ogg/vorbis</code>, <code>flac/flac</code> and so on. Both halves are compared against what the scan <b>observed</b> and recorded, never against a filename.</li></ul>
+<p>That is why audio has no bare form. A <code>.ogg</code> and a <code>.oga</code> are one container under two extensions, and a <code>.m4a</code> is an MP4 - so a token naming an extension would reach some of a container&#x27;s files and not others. Naming the container itself, <code>ogg</code> or <code>mp4</code>, reaches all of them, and <code>mp3</code> alongside <code>mpeg/mp3</code> would be two spellings of one thing.</p>
 <p>Containers are the real ones: <code>mpeg</code>, <code>flac</code>, <code>ogg</code>, <code>mp4</code>, <code>adts</code>, <code>riff</code>, <code>asf</code>. Codec names are lowercase and spelled as ffprobe spells them: <code>mp3</code>, <code>aac</code>, <code>alac</code>, <code>vorbis</code>, <code>opus</code>, <code>flac</code>, <code>speex</code>, <code>pcm</code>.</p>
 <p>Neither half is checked against a list. Both are compared for equality with what was stored, so a spelling this server does not use simply never matches and the file is converted exactly as it was before.</p>
 <p><b>Declaring something means &quot;send me this&quot;, not &quot;I can decode this.&quot;</b> They are different claims, and only the second is about your decoder. A client set to Opus 160 that also declares <code>flac</code> will be sent FLAC, which is the opposite of what it asked for. There is deliberately no server-side guard against that: a guard would be the server overruling the one party that knows what it wants.</p>
 <p>What it does is narrow, and deliberately so.</p>
-<ul class="doc-list"><li>It <b>only ever skips work</b>. On audio it skips a re-encode, on video a remux; it never changes what a transcode produces when one happens.</li><li>It <b>never beats a constraint</b>. <code>maxBitRate</code> and <code>timeOffset</code> each force a transcode, and <code>size</code> and <code>duration</code> do on video. A declared 320 kbps MP3 under a 160 ceiling is still converted.</li><li>On video the codec pair still has to be one the server would have served directly anyway, so an HEVC or AC3 file is unaffected — the saving is the container work alone.</li><li>An unrecognised token is ignored rather than rejected, so naming a new one costs nothing against an older server.</li><li><code>vob</code> is <b>refused</b>. A DVD titleset is one continuous stream split across numbered VOBs and the stored path names only the first, so serving it untouched would hand back twenty minutes of a two-hour film with nothing reporting an error.</li><li>A pair naming <code>riff</code> or <code>asf</code> will never match. Those forms are recorded, but a client that wants a lossless or legacy file untouched asks for the original instead — no <code>format</code> at all, which is served straight off disk.</li></ul>
-<p><code>transcodedContentType</code>, <code>transcodedSuffix</code>, <code>transcodedBitRate</code> and <code>nativeSeek</code> are <b>not</b> affected by it, deliberately. They describe what any client would be sent, so they stay cacheable and stay right for the one consumer that is not you — a Cast receiver being told what it is about to fetch.</p>
+<ul class="doc-list"><li>It <b>only ever skips work</b>. On audio it skips a re-encode, on video a remux; it never changes what a transcode produces when one happens.</li><li>It <b>never beats a constraint</b>. <code>maxBitRate</code> and <code>timeOffset</code> each force a transcode, and <code>size</code> and <code>duration</code> do on video. A declared 320 kbps MP3 under a 160 ceiling is still converted.</li><li>On video the codec pair still has to be one the server would have served directly anyway, so an HEVC or AC3 file is unaffected - the saving is the container work alone.</li><li>An unrecognised token is ignored rather than rejected, so naming a new one costs nothing against an older server.</li><li><code>vob</code> is <b>refused</b>. A DVD titleset is one continuous stream split across numbered VOBs and the stored path names only the first, so serving it untouched would hand back twenty minutes of a two-hour film with nothing reporting an error.</li><li>A pair naming <code>riff</code> or <code>asf</code> will never match. Those forms are recorded, but a client that wants a lossless or legacy file untouched asks for the original instead - no <code>format</code> at all, which is served straight off disk.</li></ul>
+<p><code>transcodedContentType</code>, <code>transcodedSuffix</code>, <code>transcodedBitRate</code> and <code>nativeSeek</code> are <b>not</b> affected by it, deliberately. They describe what any client would be sent, so they stay cacheable and stay right for the one consumer that is not you - a Cast receiver being told what it is about to fetch.</p>
 <p>Ignored when a <code>castToken</code> is presented, and ignored on <code>hls.m3u8</code>, where every segment is bounded by <code>duration</code> and is therefore an encode whatever the container holds.</p>
-<div class="note"><p><b>Never put this on a URL you are handing to something else</b> — a Cast receiver above all. The <code>LOAD</code> you sent it declared a <code>contentType</code> taken from <code>transcodedContentType</code>, and a receiver told <code>video/mp4</code> while being sent Matroska refuses the media outright, which looks like a broken file rather than a mislabelled one. The audio half is no safer: the same <code>LOAD</code> named the type the transcode was going to produce. Apply it where the request is made, not where the URL is built.</p></div></div>
+<div class="note"><p><b>Never put this on a URL you are handing to something else</b> - a Cast receiver above all. The <code>LOAD</code> you sent it declared a <code>contentType</code> taken from <code>transcodedContentType</code>, and a receiver told <code>video/mp4</code> while being sent Matroska refuses the media outright, which looks like a broken file rather than a mislabelled one. The audio half is no safer: the same <code>LOAD</code> named the type the transcode was going to produce. Apply it where the request is made, not where the URL is built.</p></div></div>
 <div class="api-note"><p class="api-note-h"><code>startImmediately</code></p>
 <p>Only the <b>remux</b> tier reads it, and only when its cached file is not there yet. That tier copies the whole film into a seekable MP4 before it sends a byte, which for a feature film is tens of seconds and for a disc rip minutes. With this, the server answers from a fragmented pipe straight away and builds the seekable file beside it, for the next request.</p>
-<p>The one response that produces is <b>not seekable</b>: chunked, <code>Accept-Ranges: none</code>, no <code>Content-Length</code>. <code>nativeSeek</code> still describes the file rather than this one request, deliberately — see below — so a client sending this must be ready for a stream it cannot seek, and must find out by testing rather than by asking. In a browser that is <code>HTMLMediaElement.seekable</code> being empty; a refused seek raises nothing.</p>
+<p>The one response that produces is <b>not seekable</b>: chunked, <code>Accept-Ranges: none</code>, no <code>Content-Length</code>. <code>nativeSeek</code> still describes the file rather than this one request, deliberately - see below - so a client sending this must be ready for a stream it cannot seek, and must find out by testing rather than by asking. In a browser that is <code>HTMLMediaElement.seekable</code> being empty; a refused seek raises nothing.</p>
 <ul class="doc-list"><li><code>X-Gaindrive-Transcode: building</code> marks such a response, which is how a client can tell before it tries. <code>hit</code> or <code>miss</code> means the seekable file was there after all and was sent instead.</li><li><b>Send it on a fresh play and not on a seek.</b> Omitting it is what asks for the seekable file, and by the time somebody seeks the background build is usually finished, so a seek costs the wait only once and often not at all.</li><li>It overrides nothing. <code>size</code>, <code>maxBitRate</code> and <code>timeOffset</code> each force a real re-encode, and this does not make one seekable or skip it.</li><li>It does nothing at all on the direct tier, where the file is already served off disk.</li><li>Ignored when a <code>castToken</code> is presented.</li><li>Only the literal <code>true</code> counts.</li></ul>
-<p><code>transcodedContentType</code>, <code>transcodedSuffix</code> and <code>nativeSeek</code> are <b>not</b> affected by it. They describe what any client would be sent, which is what keeps them cacheable and keeps them right for the one consumer that is not you — a Cast receiver being told what it is about to fetch.</p>
-<div class="note"><p><b>Never send it on a URL something else will fetch</b>, a Cast receiver above all. Two things break rather than one: the receiver is handed a stream with no length that it was told was MP4, and a client that fetches one byte ahead of a <code>LOAD</code> in order to <em>make the build happen</em> gets an instant reply having warmed nothing — so the first cast of every affected film fails and the second works, which reads as a random fault rather than as a setting.</p></div></div>
+<p><code>transcodedContentType</code>, <code>transcodedSuffix</code> and <code>nativeSeek</code> are <b>not</b> affected by it. They describe what any client would be sent, which is what keeps them cacheable and keeps them right for the one consumer that is not you - a Cast receiver being told what it is about to fetch.</p>
+<div class="note"><p><b>Never send it on a URL something else will fetch</b>, a Cast receiver above all. Two things break rather than one: the receiver is handed a stream with no length that it was told was MP4, and a client that fetches one byte ahead of a <code>LOAD</code> in order to <em>make the build happen</em> gets an instant reply having warmed nothing - so the first cast of every affected film fails and the second works, which reads as a random fault rather than as a setting.</p></div></div>
 </div>
 <div class="api-ep">
 <h3 id="ep-hls-m3u8">hls.m3u8</h3>
@@ -390,14 +390,14 @@
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
-<tr><td><code>bitRate</code></td><td>string</td><td>May carry an <code>@WxH</code> suffix naming the frame size for that variant — <code>1000@640x480</code>. may repeat.</td></tr>
+<tr><td><code>bitRate</code></td><td>string</td><td>May carry an <code>@WxH</code> suffix naming the frame size for that variant - <code>1000@640x480</code>. may repeat.</td></tr>
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>bitRate</code></p>
 <p>Given once, it caps the segments of an ordinary media playlist. Given twice or more, the answer is a master playlist instead: one <code>EXT-X-STREAM-INF</code> per distinct bitrate, ascending, each naming this endpoint again with that one bitrate. <code>RESOLUTION</code> is announced only for a variant that supplied <code>@WxH</code>.</p>
-<p>A value that names no bitrate — <code>0</code>, or anything unparseable — cannot be a variant, since <code>BANDWIDTH</code> is required of one. <code>0@640x480</code> is still honoured on a media playlist, where <code>0</code> is the spec&#x27;s &quot;no limit&quot; and the frame size governs on its own.</p></div>
-<p>The spec spells this endpoint <code>hls.m3u8</code>, and that spelling is the one to prefer — a player often infers HLS from the <code>.m3u8</code> extension alone. But a client that composes every URL as <code>&lt;name&gt;.view</code> would otherwise be unable to reach it at all, so the same playlist is served at <code>/rest/hls.view</code>, and at <code>/rest/hls</code>, which the server rewrites to the latter.</p>
-<p>The playlist is stateless — it is arithmetic over the stored duration, and every segment is an ordinary <code>stream</code> request bounded by <code>timeOffset</code> and <code>duration</code>. Nothing is written to disk and nothing needs cleaning up if a client stops mid-playlist.</p>
+<p>A value that names no bitrate - <code>0</code>, or anything unparseable - cannot be a variant, since <code>BANDWIDTH</code> is required of one. <code>0@640x480</code> is still honoured on a media playlist, where <code>0</code> is the spec&#x27;s &quot;no limit&quot; and the frame size governs on its own.</p></div>
+<p>The spec spells this endpoint <code>hls.m3u8</code>, and that spelling is the one to prefer - a player often infers HLS from the <code>.m3u8</code> extension alone. But a client that composes every URL as <code>&lt;name&gt;.view</code> would otherwise be unable to reach it at all, so the same playlist is served at <code>/rest/hls.view</code>, and at <code>/rest/hls</code>, which the server rewrites to the latter.</p>
+<p>The playlist is stateless - it is arithmetic over the stored duration, and every segment is an ordinary <code>stream</code> request bounded by <code>timeOffset</code> and <code>duration</code>. Nothing is written to disk and nothing needs cleaning up if a client stops mid-playlist.</p>
 <p>Every URI in the body is relative, so it resolves against <code>/rest/</code> whichever of the three paths was fetched. A variant URI names this endpoint again, and names it with the spelling the request arrived on.</p>
 </div>
 </div>
@@ -418,12 +418,12 @@
 </table>
 <div class="api-note"><p class="api-note-h"><code>nativeSeek</code></p>
 <p>A client can let its media element seek by itself instead of re-requesting with <code>timeOffset</code>.</p>
-<p>It is <b>not</b> the same question as &quot;will ffmpeg run&quot;: the remux tier runs ffmpeg but writes a real file, so it seeks as well as an untouched original. Only a re-encode is unseekable. <code>transcodedSuffix</code> cannot be used for this — it is present for both the remux and re-encode tiers, which differ precisely here.</p>
+<p>It is <b>not</b> the same question as &quot;will ffmpeg run&quot;: the remux tier runs ffmpeg but writes a real file, so it seeks as well as an untouched original. Only a re-encode is unseekable. <code>transcodedSuffix</code> cannot be used for this - it is present for both the remux and re-encode tiers, which differ precisely here.</p>
 <p>A client that sends <code>timeOffset</code> for a remuxable file demotes it from a <code>-c copy</code> remux to a full re-encode.</p></div>
 <div class="api-note"><p class="api-note-h"><code>season</code></p>
-<p><code>discNumber</code> already carries the same number — that is the field every Subsonic client groups and sorts by, and none of them knows what a season is — so a client that ignores <code>season</code> groups a series correctly and simply calls the groups discs. A client that reads it can head them &quot;Series 2&quot; instead.</p>
+<p><code>discNumber</code> already carries the same number - that is the field every Subsonic client groups and sorts by, and none of them knows what a season is - so a client that ignores <code>season</code> groups a series correctly and simply calls the groups discs. A client that reads it can head them &quot;Series 2&quot; instead.</p>
 <p>The number comes from an <code>S02E03</code>-style marker or from a folder naming its season. A <code>Disc 2</code> or <code>CD1</code> folder is deliberately not one, and neither is an unnumbered <code>Specials</code> folder, so both of those keep reporting a disc.</p></div>
-<p>Both fields are populated wherever a song entry appears. That was not always so: they once came only from <code>getAlbum</code>, <code>getMusicDirectory</code>, <code>getVideos</code> and <code>getSong</code>, and a video reached any other way reported <code>nativeSeek: false</code> whatever its codecs were — so the same file answered differently depending on which endpoint was asked.</p>
+<p>Both fields are populated wherever a song entry appears. That was not always so: they once came only from <code>getAlbum</code>, <code>getMusicDirectory</code>, <code>getVideos</code> and <code>getSong</code>, and a video reached any other way reported <code>nativeSeek: false</code> whatever its codecs were - so the same file answered differently depending on which endpoint was asked.</p>
 </div>
 <div class="api-ep">
 <h3 id="ep-getvideoinfo">getVideoInfo</h3>
@@ -439,7 +439,7 @@
 </table>
 <div class="api-note"><p class="api-note-h"><code>source</code></p>
 <p>The same two words <code>getChapters</code> uses for the same distinction, and it matters for the same kind of client: one that demuxes the container itself.</p>
-<p>Every caption listed here can be fetched as WebVTT from <code>getCaptions</code>, whichever it is. But a client playing the container directly — see <code>playable</code> on <code>stream</code> — is handed the embedded tracks by its own demuxer, so side-loading those as well lists every subtitle twice. The sidecar is the half no container carries, so it still has to come from here.</p>
+<p>Every caption listed here can be fetched as WebVTT from <code>getCaptions</code>, whichever it is. But a client playing the container directly - see <code>playable</code> on <code>stream</code> - is handed the embedded tracks by its own demuxer, so side-loading those as well lists every subtitle twice. The sidecar is the half no container carries, so it still has to come from here.</p>
 <p>A client that is being served a remux or a re-encode has no embedded tracks at all: the conversion keeps the first video and audio stream and drops the rest. So it should side-load every caption regardless of <code>source</code>, and only a client reading the original container should filter on it.</p></div>
 </div>
 <div class="api-ep">
@@ -455,7 +455,7 @@
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>castToken</code></p>
-<p>Scoped as it is on <code>stream</code>, and the two issuers differ by one notch here. <code>castLoad</code>&#x27;s is additionally scoped to the caption ids that LOAD declared: a track the LOAD did not offer is one the receiver has no reason to ask for, so the token does not authorise it. <code>getCastToken</code>&#x27;s authorises any caption of its song, because there is no LOAD of ours to scope it against — the client builds its own — and a subtitle of a song that account may read is no wider a reach than the song.</p>
+<p>Scoped as it is on <code>stream</code>, and the two issuers differ by one notch here. <code>castLoad</code>&#x27;s is additionally scoped to the caption ids that LOAD declared: a track the LOAD did not offer is one the receiver has no reason to ask for, so the token does not authorise it. <code>getCastToken</code>&#x27;s authorises any caption of its song, because there is no LOAD of ours to scope it against - the client builds its own - and a subtitle of a song that account may read is no wider a reach than the song.</p>
 <p>The converted result is cached, because ffmpeg has to demux the whole container to collect one subtitle stream and the receiver fetches the track the moment it is switched on.</p></div>
 </div>
 </div>
@@ -543,7 +543,7 @@
 </tbody>
 </table>
 <p><code>id</code> goes in the query string; the <b>body</b> is the contents of the sidecar, sent as <code>text/plain; charset=utf-8</code> and parsed by the same code that reads one off disk. That is one definition of the format rather than two that can drift, and it makes a round trip a fixed point. Repeated <code>start=</code>/<code>name=</code> parameters were the obvious shape and do not work here: the server drops an exact duplicate pair, so two chapters both called <code>Encore</code> would lose one, and the urlencoded body limit is 8 kB whatever the configured payload limit says.</p>
-<p>The body is bounded at 1 MiB — a request naming more <code>Content-Length</code> than that is answered <code>413</code>, and one naming none at all <code>411</code> — which clears any real chapter list by three orders of magnitude, the marker cap being 1000.</p>
+<p>The body is bounded at 1 MiB - a request naming more <code>Content-Length</code> than that is answered <code>413</code>, and one naming none at all <code>411</code> - which clears any real chapter list by three orders of magnitude, the marker cap being 1000.</p>
 <p>The parse is deliberately liberal, so a block pasted out of a video description works as it stands:</p>
 <ul class="doc-list"><li><code>MM:SS</code>, <code>H:MM:SS</code> and <code>HH:MM:SS.mmm</code>, with <code>,</code> accepted as the decimal point</li><li>a <code>-</code>, <code>|</code>, en dash or em dash between the time and the title is dropped, but only when whitespace follows it, so a title that genuinely begins with a dash keeps it</li><li>blank lines, <code>#</code> comments, a UTF-8 BOM and CRLF endings are all tolerated</li><li>everything after the first run of whitespace is the title, verbatim -- so a colon, a leading digit or a second timestamp in a title needs no escaping, and there is no escape syntax to learn</li><li>a line carrying no timestamp is skipped; it never fails the whole file</li></ul>
 <p>Four rules inside that are decisions rather than arithmetic, and each is the one a client is most likely to get wrong:</p>
@@ -653,7 +653,7 @@
 </tbody>
 </table>
 <p>Utility files that are not human-readable notes are excluded: currently <code>fingerprints.txt</code> by name, and <b>anything ending <code>.chapters.txt</code></b> by suffix, since that is a chapter sidecar rather than prose. The suffix is matched rather than the whole name because the rest of it is the media file&#x27;s stem.</p>
-<div class="note"><p><b>An album that is a single media file has no folder to list.</b> Its notes are the sidecar named after it — <code>makingcheese.txt</code> beside <code>makingcheese.mp4</code> — and that one file is what this returns, if it is there. The chapter sidecar cannot be confused with it: that is <code>makingcheese.chapters.txt</code>, a different name.</p></div>
+<div class="note"><p><b>An album that is a single media file has no folder to list.</b> Its notes are the sidecar named after it - <code>makingcheese.txt</code> beside <code>makingcheese.mp4</code> - and that one file is what this returns, if it is there. The chapter sidecar cannot be confused with it: that is <code>makingcheese.chapters.txt</code>, a different name.</p></div>
 </div>
 <div class="api-ep">
 <h3 id="ep-getAlbumText">getAlbumText</h3>
@@ -681,7 +681,7 @@
 <h3 id="ep-getAlbumImages">getAlbumImages</h3>
 <p class="api-meta"><code>GET /rest/getAlbumImages.view</code>
 <span class="api-badge">JSON only</span></p>
-<p>How many images an album holds — the cover plus any extras.</p>
+<p>How many images an album holds - the cover plus any extras.</p>
 <h4>Parameters</h4>
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
@@ -714,12 +714,12 @@
 </tbody>
 </table>
 <p>Supply exactly one of <code>file</code> or <code>url</code>.</p>
-<p>A <code>url</code> must be <code>http</code> or <code>https</code> and must resolve to a globally routable address. Loopback, link-local, RFC1918 and other private ranges are refused, and a redirect into one is refused at the hop that names it — the server is reachable from places the caller is not, and an image fetch is not a reason to lend it out. The refusal is deliberately worded the same as a fetch that simply failed, so the endpoint cannot be used to tell one host or port from another. The response body is also size-capped.</p>
-<p><b>JPEG and PNG only</b> — the format is taken from the magic bytes, not from the declared content type, and anything else is rejected. That is not a new restriction so much as the removal of a trap: the scanner indexes only <code>.jpg</code>, <code>.jpeg</code> and <code>.png</code>, so a WebP written as <code>cover.jpg</code> used to become a cover nothing could decode.</p>
+<p>A <code>url</code> must be <code>http</code> or <code>https</code> and must resolve to a globally routable address. Loopback, link-local, RFC1918 and other private ranges are refused, and a redirect into one is refused at the hop that names it - the server is reachable from places the caller is not, and an image fetch is not a reason to lend it out. The refusal is deliberately worded the same as a fetch that simply failed, so the endpoint cannot be used to tell one host or port from another. The response body is also size-capped.</p>
+<p><b>JPEG and PNG only</b> - the format is taken from the magic bytes, not from the declared content type, and anything else is rejected. That is not a new restriction so much as the removal of a trap: the scanner indexes only <code>.jpg</code>, <code>.jpeg</code> and <code>.png</code>, so a WebP written as <code>cover.jpg</code> used to become a cover nothing could decode.</p>
 <p>If the upload changes the format, the file it replaces is removed, since <code>cover.jpg</code> outranks <code>cover.png</code> when the scanner looks for a cover.</p>
-<p>A cover set this way is marked as chosen by a person and is never overwritten by a scan — which for a film is the only way to correct a wrong TMDB match.</p>
-<div class="note"><p><b>Where it is written depends on what the album is.</b> An ordinary album is a directory and gets <code>cover.jpg</code> or <code>cover.png</code> inside it. An album that is a single media file gets the sidecar named after it — <code>makingcheese.jpg</code> beside <code>makingcheese.mp4</code> — because there is no inside. For the sidecar the scanner&#x27;s preference order is <code>.jpg</code>, <code>.jpeg</code>, <code>.png</code>, so uploading a PNG removes both earlier spellings; the <code>-poster.*</code> forms rank below all three and are left alone.</p></div>
-<p>This is what makes the note above true of a loose film at all. Under the rule this replaced, a media file sitting directly in a section was not an album, so an upload here reached only the section&#x27;s own cover — and a wrongly matched film could not be given the right poster by any means.</p>
+<p>A cover set this way is marked as chosen by a person and is never overwritten by a scan - which for a film is the only way to correct a wrong TMDB match.</p>
+<div class="note"><p><b>Where it is written depends on what the album is.</b> An ordinary album is a directory and gets <code>cover.jpg</code> or <code>cover.png</code> inside it. An album that is a single media file gets the sidecar named after it - <code>makingcheese.jpg</code> beside <code>makingcheese.mp4</code> - because there is no inside. For the sidecar the scanner&#x27;s preference order is <code>.jpg</code>, <code>.jpeg</code>, <code>.png</code>, so uploading a PNG removes both earlier spellings; the <code>-poster.*</code> forms rank below all three and are left alone.</p></div>
+<p>This is what makes the note above true of a loose film at all. Under the rule this replaced, a media file sitting directly in a section was not an album, so an upload here reached only the section&#x27;s own cover - and a wrongly matched film could not be given the right poster by any means.</p>
 <p class="api-see">See also <a href="#ep-getAlbumImages"><code>getAlbumImages</code></a>.</p>
 </div>
 </div>
@@ -780,7 +780,7 @@
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>musicFolderId</code></p>
-<p>Error 70 if it names anything that is not a browsable library root — including the uploads root, which that listing excludes and which is never a destination.</p>
+<p>Error 70 if it names anything that is not a browsable library root - including the uploads root, which that listing excludes and which is never a destination.</p>
 <p>Naming a root requires admin, since it is what puts something into the shared library.</p></div>
 <div class="api-note"><p class="api-note-h"><code>folder</code></p>
 <p><b>Required when <code>musicFolderId</code> is given</b>, and omitted keeps the current one otherwise. It was briefly allowed to default when promoting and the default was a guess that filed things wrongly: it used the batch&#x27;s own artist name, which for a fetched video is the channel that published it and never a category. A caller that does not know where something belongs should be made to decide rather than have it decided badly for them.</p></div>
@@ -796,7 +796,7 @@
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>movedAlbum.tagFailures</code></p>
-<p>Zero when no tag needed changing — a move that alters neither name opens no files at all.</p></div>
+<p>Zero when no tag needed changing - a move that alters neither name opens no files at all.</p></div>
 <h4>Errors</h4>
 <table class="doc-table">
 <thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
@@ -809,22 +809,22 @@
 </table>
 <p>Every parameter but <code>id</code> is optional and every omitted one means <em>unchanged</em>, so this one endpoint covers renaming an album in place, re-filing it under a different artist, moving it between library roots, and promoting an upload into the shared library. It replaces <code>renameAlbum</code> and <code>promoteAlbum</code>, which were the same operation described two ways.</p>
 <p><b>Where it lands</b> is the one rule worth reading:</p>
-<ul class="doc-list"><li><b><code>musicFolderId</code> given</b> — the album goes to <code>&lt;that root&gt;/&lt;folder&gt;/&lt;album&gt;</code>, exactly two levels under the root. Both library layouts are <code>L1/L2/[L3]/ files</code>, L2 is the album being moved, and L3 is only ever a disc or season directory inside it.</li><li><b><code>musicFolderId</code> omitted</b> — everything above the artist level is left alone: the library root, and for an upload the owner and the batch id. The album goes to <code>&lt;all of that&gt;/&lt;folder&gt;/&lt;album&gt;</code>.</li></ul>
+<ul class="doc-list"><li><b><code>musicFolderId</code> given</b> - the album goes to <code>&lt;that root&gt;/&lt;folder&gt;/&lt;album&gt;</code>, exactly two levels under the root. Both library layouts are <code>L1/L2/[L3]/ files</code>, L2 is the album being moved, and L3 is only ever a disc or season directory inside it.</li><li><b><code>musicFolderId</code> omitted</b> - everything above the artist level is left alone: the library root, and for an upload the owner and the batch id. The album goes to <code>&lt;all of that&gt;/&lt;folder&gt;/&lt;album&gt;</code>.</li></ul>
 <p>So a plain rename sends <code>album</code>; a re-file sends <code>folder</code>; a promote sends <code>musicFolderId</code> and <code>folder</code>; and moving a film out of the music root and under a <code>categories</code> one sends all three.</p>
-<p>Artist and album names are directory names — the scanner never reads them from tags — so this is the only way to correct them, and it is necessarily a filesystem move.</p>
-<p>It re-files <b>only the album it is given</b>: changing <code>folder</code> moves that one album and leaves the artist&#x27;s other albums alone. A whole-artist rename is deliberately not offered — an album edit screen silently rewriting other albums is too easy to do by accident.</p>
-<p>The directory move happens first and is the authoritative act; the database rows are then repaired to carry the new paths, so stars, play counts, playlist entries, the queue and bookmarks all survive. Tags are rewritten afterwards and a file TagLib will not write is counted in <code>tagFailures</code> rather than failing the call — the opposite order to <code>updateSong</code>, where the database mirrors the tag rather than the directory.</p>
-<div class="note"><p><b>The artist tag is only rewritten under an <code>artists</code> root.</b> Under a <code>categories</code> root the level is a category — Film, Series — and writing that into an artist tag would stamp &quot;Film&quot; across every file of a promoted documentary. The album tag is rewritten whenever <code>album</code> changes.</p></div>
-<div class="note"><p><b>An artist tag naming somebody other than the old folder is left alone.</b> Only a tag that already held the old folder&#x27;s name is rewritten, because anything else is a real credit — every track of a compilation has one — and overwriting it would report the whole album as by one artist ever after. The comparison ignores case and punctuation, the same rule that decides a song entry&#x27;s <code>artist</code>.</p></div>
+<p>Artist and album names are directory names - the scanner never reads them from tags - so this is the only way to correct them, and it is necessarily a filesystem move.</p>
+<p>It re-files <b>only the album it is given</b>: changing <code>folder</code> moves that one album and leaves the artist&#x27;s other albums alone. A whole-artist rename is deliberately not offered - an album edit screen silently rewriting other albums is too easy to do by accident.</p>
+<p>The directory move happens first and is the authoritative act; the database rows are then repaired to carry the new paths, so stars, play counts, playlist entries, the queue and bookmarks all survive. Tags are rewritten afterwards and a file TagLib will not write is counted in <code>tagFailures</code> rather than failing the call - the opposite order to <code>updateSong</code>, where the database mirrors the tag rather than the directory.</p>
+<div class="note"><p><b>The artist tag is only rewritten under an <code>artists</code> root.</b> Under a <code>categories</code> root the level is a category - Film, Series - and writing that into an artist tag would stamp &quot;Film&quot; across every file of a promoted documentary. The album tag is rewritten whenever <code>album</code> changes.</p></div>
+<div class="note"><p><b>An artist tag naming somebody other than the old folder is left alone.</b> Only a tag that already held the old folder&#x27;s name is rewritten, because anything else is a real credit - every track of a compilation has one - and overwriting it would report the whole album as by one artist ever after. The comparison ignores case and punctuation, the same rule that decides a song entry&#x27;s <code>artist</code>.</p></div>
 <p>An emptied source directory is removed, so it does not linger in the listing reading &quot;0 albums&quot;, and an upload&#x27;s batch directory goes with it.</p>
-<div class="note"><p><b>An album may be a single media file.</b> A media file sitting directly in an artist or category folder is an album of its own, and this endpoint moves and renames it like any other. Three things follow. The file keeps its extension: <code>album</code> is a <em>name</em>, so the source&#x27;s extension is put back, and a name that already ends in it does not acquire a second one. The <code>album</code> field in the response is the name without the extension, and it is that name — not the on-disk leaf — that is written into the album tag. And the file&#x27;s sidecars travel with it: its cover and poster, its subtitle files, its chapter markers and its liner notes.</p></div>
-<div class="note"><p><b>A single file sitting directly in a library root can be renamed in place</b>, with no <code>musicFolderId</code>. Such an item has no artist directory of its own — the root plays that part — so <code>folder</code>, if given, must name that root. A directory in the same position still cannot: there is no artist level to change, and the error says so.</p></div>
+<div class="note"><p><b>An album may be a single media file.</b> A media file sitting directly in an artist or category folder is an album of its own, and this endpoint moves and renames it like any other. Three things follow. The file keeps its extension: <code>album</code> is a <em>name</em>, so the source&#x27;s extension is put back, and a name that already ends in it does not acquire a second one. The <code>album</code> field in the response is the name without the extension, and it is that name - not the on-disk leaf - that is written into the album tag. And the file&#x27;s sidecars travel with it: its cover and poster, its subtitle files, its chapter markers and its liner notes.</p></div>
+<div class="note"><p><b>A single file sitting directly in a library root can be renamed in place</b>, with no <code>musicFolderId</code>. Such an item has no artist directory of its own - the root plays that part - so <code>folder</code>, if given, must name that root. A directory in the same position still cannot: there is no artist level to change, and the error says so.</p></div>
 <p class="api-see">See also <a href="#ep-updateSong"><code>updateSong</code></a>, <a href="#ep-deleteUpload"><code>deleteUpload</code></a>.</p>
 </div>
 </div>
 <div class="doc-sec" id="settings">
 <h2>Server settings</h2>
-<p>Admin only, and JSON only — these carry credentials for third-party services and have no XML representation.</p>
+<p>Admin only, and JSON only - these carry credentials for third-party services and have no XML representation.</p>
 <div class="api-ep">
 <h3 id="ep-getServerSettings">getServerSettings</h3>
 <p class="api-meta"><code>GET /rest/getServerSettings.view</code>
@@ -846,7 +846,7 @@
 <tr><td><code>50</code></td><td>Subsonic</td><td>The caller is not an admin.</td></tr>
 </tbody>
 </table>
-<p><b>The credentials themselves are never returned</b>, only whether each is set. Nothing needs to read one back — they are written once and used server-side — and a secret the server hands out is one in an API response, in the client&#x27;s memory and in every cache between. It also stopped a browser&#x27;s own password manager offering to store the value as a login, the web client having put it in a masked box.</p>
+<p><b>The credentials themselves are never returned</b>, only whether each is set. Nothing needs to read one back - they are written once and used server-side - and a secret the server hands out is one in an API response, in the client&#x27;s memory and in every cache between. It also stopped a browser&#x27;s own password manager offering to store the value as a login, the web client having put it in a masked box.</p>
 <p>Editing one is therefore blind: send a new value to <code>saveServerSettings</code>, or omit the field to leave it alone.</p>
 </div>
 <div class="api-ep">
@@ -947,12 +947,12 @@
 <tr><td><code>50</code></td><td>Subsonic</td><td>The caller is not an admin.</td></tr>
 </tbody>
 </table>
-<p>The remedy for a library full of blank biographies, which happens because a lookup that only half succeeded was cached as a complete answer: the artist chain writes its row as soon as the MusicBrainz <em>search</em> has worked, so an artist whose Wikipedia or TheAudioDB request fell over keeps an empty <code>biography</code> — and nothing re-asks, since the background resolver&#x27;s own seed query is about missing <em>portraits</em>, which that artist has. <code>force</code> on <code>getArtistInfo2</code> fixes one artist. This fixes all of them.</p>
+<p>The remedy for a library full of blank biographies, which happens because a lookup that only half succeeded was cached as a complete answer: the artist chain writes its row as soon as the MusicBrainz <em>search</em> has worked, so an artist whose Wikipedia or TheAudioDB request fell over keeps an empty <code>biography</code> - and nothing re-asks, since the background resolver&#x27;s own seed query is about missing <em>portraits</em>, which that artist has. <code>force</code> on <code>getArtistInfo2</code> fixes one artist. This fixes all of them.</p>
 <p><b>It takes hours, and it is meant to be left running.</b> MusicBrainz allows one request a second per address, the resolver waits two seconds between jobs on top of that, and each artist costs two MusicBrainz requests plus up to four more providers. A library of a few thousand artists is an overnight job.</p>
 <p>Everything is queued <em>behind</em> whatever a client is looking at, so browsing stays responsive while it runs.</p>
 <p><b>There is no status endpoint and no way to stop it</b> short of restarting the server. The queue is in memory, so a restart simply forgets the rest of the pass and pressing the button again re-queues whatever is still missing. The server log names each artist and album as it is resolved.</p>
-<p>An entry with no words is re-asked on <b>every</b> press — no interval is remembered. That is deliberate: it is what makes a spell of provider failure recoverable, and the cost is that a second press also re-asks about everyone nobody has written about.</p>
-<p>Video is untouched. A film&#x27;s or series&#x27; description comes from TMDB during the scan, and the two seed queries only look at <em>artists</em> roots — asking MusicBrainz about a categories section called &quot;Film&quot; is the mistake <code>getCoverArt</code> already avoids. A concert filed under the performer rather than under a category <em>is</em> included, since that test is on the root and not on whether an album holds video.</p>
+<p>An entry with no words is re-asked on <b>every</b> press - no interval is remembered. That is deliberate: it is what makes a spell of provider failure recoverable, and the cost is that a second press also re-asks about everyone nobody has written about.</p>
+<p>Video is untouched. A film&#x27;s or series&#x27; description comes from TMDB during the scan, and the two seed queries only look at <em>artists</em> roots - asking MusicBrainz about a categories section called &quot;Film&quot; is the mistake <code>getCoverArt</code> already avoids. A concert filed under the performer rather than under a category <em>is</em> included, since that test is on the root and not on whether an album holds video.</p>
 </div>
 </div>
 <div class="doc-sec" id="users">
@@ -1024,7 +1024,7 @@
 <h3 id="ep-deleteUpload">deleteUpload</h3>
 <p class="api-meta"><code>GET /rest/deleteUpload.view</code>
 <span class="api-badge">uploadRole</span></p>
-<p>Removes an uploaded album, files and all. Irreversible — there is no trash behind it.</p>
+<p>Removes an uploaded album, files and all. Irreversible - there is no trash behind it.</p>
 <h4>Parameters</h4>
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
@@ -1036,19 +1036,19 @@
 <table class="doc-table">
 <thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
 <tbody>
-<tr><td><code>0</code></td><td>Subsonic</td><td>Not an upload, or not yours — &quot;Item is not in your uploads.&quot;</td></tr>
+<tr><td><code>0</code></td><td>Subsonic</td><td>Not an upload, or not yours - &quot;Item is not in your uploads.&quot;</td></tr>
 </tbody>
 </table>
 <p>The id must resolve to a path of exactly the shape <code>&lt;uploads root&gt;/&lt;owner&gt;/&lt;batch&gt;/&lt;artist&gt;/&lt;album&gt;</code>, and the owner must be the calling account <b>unless the caller is an admin</b>.</p>
-<p><b>That shape check is the security boundary</b>, not a validation nicety — without it this is &quot;delete the folder with this id&quot;, which is &quot;delete any folder on the server&quot;, reachable by any account with upload rights guessing integers. One message covers both &quot;not an upload&quot; and &quot;not yours&quot;, since telling them apart is only useful to somebody probing ids.</p>
+<p><b>That shape check is the security boundary</b>, not a validation nicety - without it this is &quot;delete the folder with this id&quot;, which is &quot;delete any folder on the server&quot;, reachable by any account with upload rights guessing integers. One message covers both &quot;not an upload&quot; and &quot;not yours&quot;, since telling them apart is only useful to somebody probing ids.</p>
 <p>An admin may delete anybody&#x27;s because an admin is who approves them: with <code>personal=*</code> they can see everyone&#x27;s, and being able to see junk without being able to clear it would leave them asking its owner to do it.</p>
-<p>It tidies upwards. An artist directory left empty by the deletion is removed too, or it would remain in the listing as an artist showing no albums; the batch directory goes after it. Stars, play counts, playlist entries, the queue and bookmarks naming the deleted files are deleted with them — those live in the client database, which no scan has ever touched.</p>
+<p>It tidies upwards. An artist directory left empty by the deletion is removed too, or it would remain in the listing as an artist showing no albums; the batch directory goes after it. Stars, play counts, playlist entries, the queue and bookmarks naming the deleted files are deleted with them - those live in the client database, which no scan has ever touched.</p>
 </div>
 </div>
 <div class="doc-sec" id="urlfetch">
 <h2>Fetching from a URL</h2>
 <p>The second way something reaches a personal folder: instead of uploading an archive, paste a URL and let the server fetch it with an external tool. All four endpoints require <code>uploadRole</code> or admin and return error 50 without it.</p>
-<p>The server matches the URL against a table of handlers configured by the operator. <b>A URL matching no handler is refused, and that refusal is the security boundary</b> — without it, any account allowed to upload could make the server issue outbound requests to anywhere it can reach, including hosts unreachable from outside the network. Only <code>http</code> and <code>https</code> URLs are considered at all.</p>
+<p>The server matches the URL against a table of handlers configured by the operator. <b>A URL matching no handler is refused, and that refusal is the security boundary</b> - without it, any account allowed to upload could make the server issue outbound requests to anywhere it can reach, including hosts unreachable from outside the network. Only <code>http</code> and <code>https</code> URLs are considered at all.</p>
 <p>A fetch runs in the background, one at a time, and the request returns immediately with a job id. The job&#x27;s state is one of <code>queued</code>, <code>running</code>, <code>scanning</code>, <code>done</code>, <code>error</code> or <code>cancelled</code>; <b>the library scan happens before <code>done</code></b>, so a client seeing <code>done</code> can re-read the listing with no further wait. A failed, timed-out or cancelled job deletes its batch directory.</p>
 <div class="api-ep">
 <h3 id="ep-getUrlHandlers">getUrlHandlers</h3>
@@ -1065,7 +1065,7 @@
 </tbody>
 </table>
 <p>An empty list means the feature is unavailable, either because no handlers are configured or because the tool they name is not installed; a client should then not offer the option at all.</p>
-<p>The pattern and the command line are deliberately not reported — a handler&#x27;s argv can carry cookies, a proxy credential or an API key.</p>
+<p>The pattern and the command line are deliberately not reported - a handler&#x27;s argv can carry cookies, a proxy credential or an API key.</p>
 </div>
 <div class="api-ep">
 <h3 id="ep-fetchUrl">fetchUrl</h3>
@@ -1106,7 +1106,7 @@
 </tbody>
 </table>
 <p>The names are applied by renaming the batch&#x27;s two directory levels after the tool exits and before the library scan, so they cost nothing and can never be seen half-applied. Three consequences are worth stating because none of them is guessable:</p>
-<ul class="doc-list"><li>Where a fetch produced several directories at a level — a playlist, or a handler that splits by uploader — they are <b>merged</b> into the one name given, and files that then collide are suffixed rather than overwritten.</li><li>Giving only <code>artist</code> keeps the handler&#x27;s album names; giving only <code>album</code> applies that name inside <em>every</em> artist directory.</li><li>A third directory level, if the handler wrote one, is left alone. That is a disc directory to the scanner, and renaming it would fuse two discs.</li></ul>
+<ul class="doc-list"><li>Where a fetch produced several directories at a level - a playlist, or a handler that splits by uploader - they are <b>merged</b> into the one name given, and files that then collide are suffixed rather than overwritten.</li><li>Giving only <code>artist</code> keeps the handler&#x27;s album names; giving only <code>album</code> applies that name inside <em>every</em> artist directory.</li><li>A third directory level, if the handler wrote one, is left alone. That is a disc directory to the scanner, and renaming it would fuse two discs.</li></ul>
 <p>Note also that the duplicate guard keys on the URL alone, so the same URL cannot be fetched twice under two different names while one is in flight.</p>
 <p>Where the handler reports chapter markers of its own -- the built-in one asks for them -- they are written out as a sidecar beside the media, so a fetched concert or DJ set arrives with its markers already in place. An existing sidecar is never overwritten, and a fetch that reports no markers writes nothing rather than the empty file that would assert there are none.</p>
 <p class="api-see">See also <a href="#ep-getUrlHandlers"><code>getUrlHandlers</code></a>, <a href="#ep-getFetchJobs"><code>getFetchJobs</code></a>, <a href="#ep-cancelFetch"><code>cancelFetch</code></a>.</p>
@@ -1131,7 +1131,7 @@
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>detail</code></p>
-<p>Paths in it are rewritten to their stored form — a root path is never surfaced in an API response.</p></div>
+<p>Paths in it are rewritten to their stored form - a root path is never surfaced in an API response.</p></div>
 <p>Admins see their own and nobody else&#x27;s: this is a progress display, not an audit log.</p>
 <p>Finished jobs are kept for fifteen minutes, or the last ten per user.</p>
 </div>
@@ -1159,17 +1159,17 @@
 </div>
 <div class="doc-sec" id="cast">
 <h2>Chromecast</h2>
-<p>Casting is server-driven: the browser asks gaindrive to load a URL onto the Chromecast, and the device then fetches the media from <code>stream</code> itself using a token. All seven endpoints require <code>castRole</code> in addition to authentication, and return error 50 without it. <code>stream</code> and <code>getCaptions</code> are exempt when called with a valid <code>castToken</code>, since a token is only ever issued to a caller that has already passed those checks — see <code>getCastToken</code> for the other issuer and for what it is bounded by instead.</p>
+<p>Casting is server-driven: the browser asks gaindrive to load a URL onto the Chromecast, and the device then fetches the media from <code>stream</code> itself using a token. All seven endpoints require <code>castRole</code> in addition to authentication, and return error 50 without it. <code>stream</code> and <code>getCaptions</code> are exempt when called with a valid <code>castToken</code>, since a token is only ever issued to a caller that has already passed those checks - see <code>getCastToken</code> for the other issuer and for what it is bounded by instead.</p>
 <p><b>Every one of them except <code>stopCast</code> also requires the caller to be on a network the server is attached to</b>, and returns error 50 with a message naming the network rather than the role. <code>stopCast</code> is answered from anywhere, because refusing it would leave the music playing in the house with no way to end it from wherever the person holding the client now is. A client discovers the answer in advance from <code>localNetwork</code> on <code>ping</code>.</p>
-<p>The rule is the client&#x27;s address — <code>X-Forwarded-For</code> where a trusted proxy supplied one, otherwise the peer — falling inside a subnet the server is directly attached to. <b>A VPN deliberately does not qualify.</b> Casting exists to make sound come out of a device in the room, and a full tunnel from a hotel on another continent reaches the speakers just as well as standing next to them does; the point of the check is that the second case is almost always an accident. Interfaces are selected by flag rather than by name, so a point-to-point tunnel is excluded whatever it is called.</p>
-<p>What the check cannot see is a VPN bridged into the LAN, or a router handing VPN clients addresses out of the LAN&#x27;s own pool — such a client is on the subnet by every question available at this layer.</p>
+<p>The rule is the client&#x27;s address - <code>X-Forwarded-For</code> where a trusted proxy supplied one, otherwise the peer - falling inside a subnet the server is directly attached to. <b>A VPN deliberately does not qualify.</b> Casting exists to make sound come out of a device in the room, and a full tunnel from a hotel on another continent reaches the speakers just as well as standing next to them does; the point of the check is that the second case is almost always an accident. Interfaces are selected by flag rather than by name, so a point-to-point tunnel is excluded whatever it is called.</p>
+<p>What the check cannot see is a VPN bridged into the LAN, or a router handing VPN clients addresses out of the LAN&#x27;s own pool - such a client is on the subnet by every question available at this layer.</p>
 <p><b>A refused call also ends the session it owns.</b> Somebody who walks out of the house mid-album wants the music to stop, and leaving it to the <code>castEvents</code> idle watchdog would reach the same end by an indeterminate route. A refused caller that owns nothing tears down nothing.</p>
-<p><b>A session belongs to one account <em>and</em> one client instance.</b> The client half is the <code>castController</code> parameter — an opaque id the client makes up once and keeps. <code>startCast</code> requires it and records the pair; every other endpoint here compares against it, and a caller that does not match is treated as having no session at all: <code>castSession</code> reports inactive, <code>castEvents</code> answers 204, <code>castLoad</code> and <code>castControl</code> return error 0, and <code>stopCast</code> succeeds without stopping anything.</p>
+<p><b>A session belongs to one account <em>and</em> one client instance.</b> The client half is the <code>castController</code> parameter - an opaque id the client makes up once and keeps. <code>startCast</code> requires it and records the pair; every other endpoint here compares against it, and a caller that does not match is treated as having no session at all: <code>castSession</code> reports inactive, <code>castEvents</code> answers 204, <code>castLoad</code> and <code>castControl</code> return error 0, and <code>stopCast</code> succeeds without stopping anything.</p>
 <p>That is also what keeps <code>stream</code> honest. While a session is live, <code>stream</code> answers 204 to the session&#x27;s <b>owner</b> and redirects playback to the receiver; everyone else is served normally. Without the owner test it answered 204 to every caller in the server, so playing a track in one client sent it to whatever receiver another client had most recently picked.</p>
-<p>The id cannot be the standard <code>c=</code> parameter, which names the kind of client rather than the instance — every browser sends the same value, so two of one user&#x27;s browsers could not be told apart. For the same reason there is no fallback to <code>c=</code> when <code>castController</code> is absent: two installs of one app would collapse into a single identity. A caller that sends none simply never owns a session, which is what every client that does not drive these endpoints wants.</p>
+<p>The id cannot be the standard <code>c=</code> parameter, which names the kind of client rather than the instance - every browser sends the same value, so two of one user&#x27;s browsers could not be told apart. For the same reason there is no fallback to <code>c=</code> when <code>castController</code> is absent: two installs of one app would collapse into a single identity. A caller that sends none simply never owns a session, which is what every client that does not drive these endpoints wants.</p>
 <p><code>castController</code> is <b>not a credential</b> and authorises nothing. Authentication is unchanged, and the id only breaks ties among one account&#x27;s own devices.</p>
 <p>Only one session exists at a time, because the server holds one control channel. <code>startCast</code> from a different owner therefore takes the session over: the previous owner&#x27;s receiver is stopped and its <code>castEvents</code> stream is dropped, so its UI leaves cast mode by itself.</p>
-<p>The token is minted per <code>castLoad</code> and is scoped to what that load declared — one song, and the caption ids offered for it. It is not a general credential: presenting it for any other id is refused exactly as if it were absent.</p>
+<p>The token is minted per <code>castLoad</code> and is scoped to what that load declared - one song, and the caption ids offered for it. It is not a general credential: presenting it for any other id is refused exactly as if it were absent.</p>
 <div class="api-ep">
 <h3 id="ep-ping">ping</h3>
 <p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
@@ -1183,7 +1183,7 @@
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>localNetwork</code></p>
-<p>It rides on <code>ping</code> because it is a fact about the <b>request</b>, not about the account: the same person is on the home network in the morning and not in the afternoon. That is also why it is not folded into <code>castRole</code>, which names what an account is allowed and must keep meaning that — a client reading a role that changed with the weather would write the change back the next time somebody edited the user.</p>
+<p>It rides on <code>ping</code> because it is a fact about the <b>request</b>, not about the account: the same person is on the home network in the morning and not in the afternoon. That is also why it is not folded into <code>castRole</code>, which names what an account is allowed and must keep meaning that - a client reading a role that changed with the weather would write the change back the next time somebody edited the user.</p>
 <p>A client should re-ask when the answer may have changed rather than once at startup: the web client does so on <code>online</code> and when a hidden tab is shown again, which between them cover shutting a laptop at home and opening it elsewhere.</p>
 <p>Being told <code>true</code> is not permission. The seven casting endpoints test the same thing for themselves on every call, and this field exists so that a client can disable a control instead of offering one that fails.</p></div>
 </div>
@@ -1215,15 +1215,15 @@
 <tr><td><code>50</code></td><td>Subsonic</td><td>The song is a personal upload belonging to another account.</td></tr>
 </tbody>
 </table>
-<p>For a cast this server is not driving. A client that holds its own Cast control channel — the Android and iOS apps both do — builds the receiver&#x27;s URLs itself, and the receiver has no account to build them with. Before this existed those URLs carried <code>u</code>/<code>t</code>/<code>s</code>, which is to say the account&#x27;s password: <code>t</code> is md5(password + salt) and <code>s</code> is the salt, and together they read the whole library as that person until the password changes.</p>
+<p>For a cast this server is not driving. A client that holds its own Cast control channel - the Android and iOS apps both do - builds the receiver&#x27;s URLs itself, and the receiver has no account to build them with. Before this existed those URLs carried <code>u</code>/<code>t</code>/<code>s</code>, which is to say the account&#x27;s password: <code>t</code> is md5(password + salt) and <code>s</code> is the salt, and together they read the whole library as that person until the password changes.</p>
 <p><b>Requires only authentication.</b> Not <code>castRole</code>, and not the local-network rule the rest of this section carries. Neither would mean anything here: a client casting for itself is not asking this server to cast, so the permission to drive <em>this</em> server&#x27;s Chromecast, and the question of which network this server is on, are both beside the point.</p>
-<p>What bounds it instead is the grant — one song, one account, twelve hours — and the read-permission check below, which is the load-bearing one, since what comes back opens URLs needing no credentials at all.</p>
+<p>What bounds it instead is the grant - one song, one account, twelve hours - and the read-permission check below, which is the load-bearing one, since what comes back opens URLs needing no credentials at all.</p>
 <p><b>One grant covers the three things a LOAD needs</b>, and stopping at the audio would have defeated the exercise: the sleeve travels in the LOAD&#x27;s metadata and the receiver fetches that too, so a stream-only grant would have left the password on the television regardless.</p>
-<ul class="doc-list"><li><code>stream</code> — the song the grant names.</li><li><code>getCoverArt</code> — that song&#x27;s own artwork, resolved when the grant is minted rather than named by the caller, so asking for a grant can never be a way to name somebody else&#x27;s.</li><li><code>getCaptions</code> — any caption of that song. Deliberately one notch wider than the session token, which scopes to the ids one <code>LOAD</code> declared: there is no <code>LOAD</code> here to mirror, and a subtitle of a song the account may read is no wider a reach than the song.</li></ul>
+<ul class="doc-list"><li><code>stream</code> - the song the grant names.</li><li><code>getCoverArt</code> - that song&#x27;s own artwork, resolved when the grant is minted rather than named by the caller, so asking for a grant can never be a way to name somebody else&#x27;s.</li><li><code>getCaptions</code> - any caption of that song. Deliberately one notch wider than the session token, which scopes to the ids one <code>LOAD</code> declared: there is no <code>LOAD</code> here to mirror, and a subtitle of a song the account may read is no wider a reach than the song.</li></ul>
 <p><code>hls.m3u8</code> is <b>not</b> covered. Its playlist copies the request&#x27;s credentials onto every segment URL, which a grant would have to be propagated through.</p>
 <p>It widens one thing deliberately: any account can now produce such a URL, where before only a <code>castRole</code> one could. The floor under that is that anyone who can read a song can already download it.</p>
-<p>Mint one per track. Unlike <code>castLoad</code>&#x27;s, a seek does not need a fresh one — a client that owns the control channel seeks the receiver rather than reloading it, and the receiver goes on fetching the URL it already has, which is why the lifetime is hours rather than minutes.</p>
-<p>Do not put <code>startImmediately</code> or <code>playable</code> on a URL built with it — see those parameters for what a receiver does with the response they produce — and do put <code>pace=true</code> on it, since the server otherwise paces only for a browser&#x27;s own User-Agent.</p>
+<p>Mint one per track. Unlike <code>castLoad</code>&#x27;s, a seek does not need a fresh one - a client that owns the control channel seeks the receiver rather than reloading it, and the receiver goes on fetching the URL it already has, which is why the lifetime is hours rather than minutes.</p>
+<p>Do not put <code>startImmediately</code> or <code>playable</code> on a URL built with it - see those parameters for what a receiver does with the response they produce - and do put <code>pace=true</code> on it, since the server otherwise paces only for a browser&#x27;s own User-Agent.</p>
 <p class="api-see">See also <a href="#ep-castLoad"><code>castLoad</code></a>.</p>
 </div>
 <div class="api-ep">
@@ -1242,12 +1242,12 @@
 <tr><td><code>castDevices.castDevice.port</code></td><td>int</td><td>Usually 8009; a multizone group gets a dynamic one.</td></tr>
 <tr><td><code>castDevices.castDevice.manual</code></td><td>bool</td><td>True for a configured device.</td></tr>
 <tr><td><code>castDevices.castDevice.videoOut</code></td><td>bool</td><td>Whether the device can display a picture, from bit 0 of its <code>ca</code> record. True when it announced nothing, which is every configured device: refusing the picture on a guess is worse than the guess. <code>castLoad</code> sends a video to a device with this false as its soundtrack alone, unless <code>videoPref</code> overrules it.</td></tr>
-<tr><td><code>castDevices.castDevice.videoPref</code></td><td>string</td><td><code>auto</code>, <code>send</code> or <code>sound</code> — what a person decided about this device with <code>setCastDevicePref</code>, which overrides <code>videoOut</code>. <code>auto</code> when nobody has.</td></tr>
+<tr><td><code>castDevices.castDevice.videoPref</code></td><td>string</td><td><code>auto</code>, <code>send</code> or <code>sound</code> - what a person decided about this device with <code>setCastDevicePref</code>, which overrides <code>videoOut</code>. <code>auto</code> when nobody has.</td></tr>
 </tbody>
 </table>
 <p>Discovery assembles a device only from records belonging to <code>_googlecast._tcp</code>, and returns one entry per Cast id, so a device announcing several services or several spellings of its name still appears once.</p>
 <p>A configured device whose address and port were also discovered appears once, as the discovered one, since that carries the device&#x27;s own name and Cast id. The port belongs in that comparison because a Cast multizone group lives at its leader&#x27;s address on a different one.</p>
-<p>Configured devices exist because discovery can fail for reasons no client can fix — a device that answers TLS on 8009 while its mDNS responder has stopped replying even to a direct unicast query. The address must be an IP literal; a hostname is refused at startup.</p>
+<p>Configured devices exist because discovery can fail for reasons no client can fix - a device that answers TLS on 8009 while its mDNS responder has stopped replying even to a direct unicast query. The address must be an IP literal; a hostname is refused at startup.</p>
 </div>
 <div class="api-ep">
 <h3 id="ep-setCastDevicePref">setCastDevicePref</h3>
@@ -1265,9 +1265,9 @@
 <p>A device&#x27;s <code>ca</code> record is not always the last word. A Chromecast-built-in amplifier announces no video output and plays a video file&#x27;s sound perfectly well anyway, while a configured device announces nothing at all and so reads as capable even when it has no screen.</p>
 <p>The setting is held by the server rather than by each client, because it is a fact about the device: the answer is the same in every browser and on a phone.</p>
 <p><code>send</code> does not give the device a screen, and is not meant to: the picture is still not shown there, and <code>castLoad</code> goes on reporting <code>receiverShowsVideo</code> false so a client keeps its own copy of the picture exactly as it does for a soundtrack. What it buys is that nothing has to be demuxed first.</p>
-<p><code>send</code> only ever <em>raises</em> a device that announced no screen, and only for a file that can be sent untouched. Anything needing a remux or a re-encode falls back to the soundtrack — a remux reads and writes the whole film, and a re-encode re-encodes a picture nobody can see, so both are worse than extracting the sound. So this cannot be used to force a re-encode, and on a DVD rip or an HEVC film it will appear to do nothing, which is the intended behaviour rather than a failure.</p>
+<p><code>send</code> only ever <em>raises</em> a device that announced no screen, and only for a file that can be sent untouched. Anything needing a remux or a re-encode falls back to the soundtrack - a remux reads and writes the whole film, and a re-encode re-encodes a picture nobody can see, so both are worse than extracting the sound. So this cannot be used to force a re-encode, and on a DVD rip or an HEVC film it will appear to do nothing, which is the intended behaviour rather than a failure.</p>
 <p><code>sound</code> is the other direction: it forces the soundtrack for a device that announced a screen, or announced nothing.</p>
-<p>Calling this also <b>clears what the device has been recorded as refusing</b>. A LOAD the receiver rejects is remembered per codec pair so it is not attempted again, and changing your mind about a device is the only place that judgement is reconsidered — otherwise new firmware, or a different device that inherited the address and with it the id, would be judged for ever on what its predecessor could not play.</p>
+<p>Calling this also <b>clears what the device has been recorded as refusing</b>. A LOAD the receiver rejects is remembered per codec pair so it is not attempted again, and changing your mind about a device is the only place that judgement is reconsidered - otherwise new firmware, or a different device that inherited the address and with it the id, would be judged for ever on what its predecessor could not play.</p>
 <p class="api-see">See also <a href="#ep-listCastDevices"><code>listCastDevices</code></a>, <a href="#ep-castLoad"><code>castLoad</code></a>.</p>
 </div>
 <div class="api-ep">
@@ -1280,11 +1280,11 @@
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
 <tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>Device id from <code>listCastDevices</code>.</td></tr>
-<tr><td><code>castController</code> <b class="api-req">*</b></td><td>string</td><td>An opaque id identifying this client instance, which together with the account becomes the owner of the session. Make one up once and keep it — the web client stores eight random bytes in <code>localStorage</code>, so it survives a page reload.</td></tr>
+<tr><td><code>castController</code> <b class="api-req">*</b></td><td>string</td><td>An opaque id identifying this client instance, which together with the account becomes the owner of the session. Make one up once and keep it - the web client stores eight random bytes in <code>localStorage</code>, so it survives a page reload.</td></tr>
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>castController</code></p>
-<p>Required, and deliberately without a fallback to <code>c=</code>. A client asking the server to drive a Chromecast already speaks this extension, so it can be asked to name itself, and refusing the nameless case is what guarantees a caller that sends no id can never own a session — and so can never be confused with another that also sent none.</p>
+<p>Required, and deliberately without a fallback to <code>c=</code>. A client asking the server to drive a Chromecast already speaks this extension, so it can be asked to name itself, and refusing the nameless case is what guarantees a caller that sends no id can never own a session - and so can never be confused with another that also sent none.</p>
 <p>It is not a credential. It authorises nothing and only distinguishes one account&#x27;s devices from each other.</p></div>
 <h4>Errors</h4>
 <table class="doc-table">
@@ -1329,7 +1329,7 @@
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>trackId</code></p>
-<p><code>trackId</code>, not <code>captionId</code>: the cast API numbers tracks 1..n by position, and 0 means off. <code>captionId</code> cannot express &quot;off&quot; — the sidecar caption index and a missing parameter are both -1, so &quot;no subtitles&quot; and &quot;the sidecar file&quot; would be one value.</p></div>
+<p><code>trackId</code>, not <code>captionId</code>: the cast API numbers tracks 1..n by position, and 0 means off. <code>captionId</code> cannot express &quot;off&quot; - the sidecar caption index and a missing parameter are both -1, so &quot;no subtitles&quot; and &quot;the sidecar file&quot; would be one value.</p></div>
 <h4>Response</h4>
 <table class="doc-table">
 <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
@@ -1339,22 +1339,22 @@
 <code>audioOnly</code>: a device whose <code>videoPref</code> is <code>send</code> is handed the whole film to
 save extracting its soundtrack and displays none of it, so there the file goes
 out as video and this is still false. A client deciding where to draw the
-picture — keeping its own copy locally, muted, or showing a &quot;playing on the
-television&quot; panel — keys on this. <code>audioOnly</code> describes the bytes on the wire
+picture - keeping its own copy locally, muted, or showing a &quot;playing on the
+television&quot; panel - keys on this. <code>audioOnly</code> describes the bytes on the wire
 and is the info-panel&#x27;s business, not the picture&#x27;s.
 </td></tr>
 <tr><td><code>castLoad.contentType</code></td><td>string</td><td>The <code>contentType</code> declared in the Cast <code>LOAD</code>, which is what the receiver picks its decode pipeline from. Not the source container: everything the remux or re-encode tier touches is announced as <code>video/mp4</code>, and a VP9/Opus <code>.mkv</code> is announced as <code>video/webm</code> although its bytes go out untouched.</td></tr>
 <tr><td><code>castLoad.sentSuffix</code></td><td>string</td><td>The container the receiver actually receives. The source extension on the <code>direct</code> tier, <code>mp4</code> on the other two. A soundtrack reports whatever it was put in: <code>m4a</code>, <code>mp3</code>, <code>flac</code>, <code>opus</code> or <code>ogg</code> when the track was copied, and <code>flac</code> when it had to be encoded.</td></tr>
 <tr><td><code>castLoad.sentBitRate</code></td><td>int</td><td>Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
-file byte-ranged — no <code>format</code>, no <code>maxBitRate</code>, and the account ceiling is
-exempt for a cast token — so this is the file&#x27;s own bitrate rather than anything
+file byte-ranged - no <code>format</code>, no <code>maxBitRate</code>, and the account ceiling is
+exempt for a cast token - so this is the file&#x27;s own bitrate rather than anything
 the <code>transcoded*</code> fields describe. A video remux keeps the source&#x27;s rate and a
-re-encode is not fixed-rate, so both report 0. So does a copied soundtrack — the
+re-encode is not fixed-rate, so both report 0. So does a copied soundtrack - the
 track&#x27;s own rate is not the container&#x27;s, and nearly right is the worst thing a
-diagnostic can be — and so does an encoded one, FLAC having no target rate at
+diagnostic can be - and so does an encoded one, FLAC having no target rate at
 all.
 </td></tr>
-<tr><td><code>castLoad.tier</code></td><td>string</td><td>Which of the three delivery tiers this fetch lands on: <code>direct</code> (the file as it stands, byte-ranged), <code>remux</code> (<code>-c copy</code> through the transcode cache, still seekable), or <code>encode</code> (re-encoded). The same two words apply to a soundtrack, and there they are the answer to &quot;why does this sound worse&quot;: <code>remux</code> is the track copied out of the film untouched, <code>encode</code> a lossless FLAC of it. A soundtrack is never re-encoded lossily — the source is already lossy, and this is the one route with no choice about transcoding.</td></tr>
+<tr><td><code>castLoad.tier</code></td><td>string</td><td>Which of the three delivery tiers this fetch lands on: <code>direct</code> (the file as it stands, byte-ranged), <code>remux</code> (<code>-c copy</code> through the transcode cache, still seekable), or <code>encode</code> (re-encoded). The same two words apply to a soundtrack, and there they are the answer to &quot;why does this sound worse&quot;: <code>remux</code> is the track copied out of the film untouched, <code>encode</code> a lossless FLAC of it. A soundtrack is never re-encoded lossily - the source is already lossy, and this is the one route with no choice about transcoding.</td></tr>
 </tbody>
 </table>
 <h4>Errors</h4>
@@ -1364,13 +1364,13 @@ all.
 <tr><td><code>0</code></td><td>Subsonic</td><td>No cast session is active, or the caller does not own it.</td></tr>
 </tbody>
 </table>
-<p><b>Seeking is also a <code>castLoad</code></b>, not a <code>castControl</code> with <code>action=seek</code> — every seek is a full reload. The server returns as soon as the load is queued; the actual Cast message goes out on a background connection.</p>
+<p><b>Seeking is also a <code>castLoad</code></b>, not a <code>castControl</code> with <code>action=seek</code> - every seek is a full reload. The server returns as soon as the load is queued; the actual Cast message goes out on a background connection.</p>
 <p>Subtitle tracks are declared to the receiver in <b>every</b> load, whether or not one is switched on, because <code>castControl</code> with <code>action=captions</code> can only activate a track the load already declared. Emitting them only when a caption is already chosen works when the viewer picks before playing and never when they pick during, which reads as an intermittent fault rather than a missing feature.</p>
-<p><b>A video loaded onto a receiver that cannot display one is sent as its soundtrack</b>, and the reply says so in <code>castLoad.audioOnly</code>. Which receivers those are is bit 0 of the <code>ca</code> record <code>listCastDevices</code> reports as <code>videoOut</code>, overridden by whatever <code>setCastDevicePref</code> recorded for that device. The decision is made here rather than by the client, so that a client draws what happened instead of deciding it a second time from the device list — and no subtitle tracks are declared for such a load, there being no picture to put them on.</p>
-<p><b>A LOAD the receiver refuses outright is retried one rung down</b>, rather than replayed. The first rung drops the subtitle tracks, since one unreachable track URL fails the whole thing. The second applies only where the picture was sent to a device that announced no screen — <code>videoPref = send</code> — and replaces the film with its soundtrack: the picture was never going to be seen there, so nothing anyone was looking at is lost. Watch <code>castEvents</code> for the description that results.</p>
+<p><b>A video loaded onto a receiver that cannot display one is sent as its soundtrack</b>, and the reply says so in <code>castLoad.audioOnly</code>. Which receivers those are is bit 0 of the <code>ca</code> record <code>listCastDevices</code> reports as <code>videoOut</code>, overridden by whatever <code>setCastDevicePref</code> recorded for that device. The decision is made here rather than by the client, so that a client draws what happened instead of deciding it a second time from the device list - and no subtitle tracks are declared for such a load, there being no picture to put them on.</p>
+<p><b>A LOAD the receiver refuses outright is retried one rung down</b>, rather than replayed. The first rung drops the subtitle tracks, since one unreachable track URL fails the whole thing. The second applies only where the picture was sent to a device that announced no screen - <code>videoPref = send</code> - and replaces the film with its soundtrack: the picture was never going to be seen there, so nothing anyone was looking at is lost. Watch <code>castEvents</code> for the description that results.</p>
 <p>That second rung exists because the Direct tier is decided by <em>browser</em> codec support, which is wider than a Cast receiver&#x27;s: an AV1/Opus MP4 passes it and no amplifier plays it. The refusal is remembered per device and codec pair, so the same film goes straight to its soundtrack next time; <code>setCastDevicePref</code> clears what a device has refused.</p>
 <p>A video sent to a receiver that <em>did</em> announce a screen has no such fallback, and a film it cannot decode simply fails. There is nothing better to offer it: the remux tier is <code>-c copy</code>, so it would send the identical codecs again.</p>
-<p>Such a load does not begin immediately: the soundtrack is produced in full before the receiver is told anything, because a receiver abandons a session after about a minute with no data on the HTTP body and a feature-length film takes longer than that to convert. How long that is depends on <code>tier</code>. A track already in a codec the receiver decodes — AAC, MP3, FLAC, Opus or Vorbis — is copied out of the container, which is <code>remux</code> and costs one pass over the file. Anything else (AC3, DTS, TrueHD, PCM, so most disc rips) is decoded and re-encoded, which is <code>encode</code> and is several times slower.</p>
+<p>Such a load does not begin immediately: the soundtrack is produced in full before the receiver is told anything, because a receiver abandons a session after about a minute with no data on the HTTP body and a feature-length film takes longer than that to convert. How long that is depends on <code>tier</code>. A track already in a codec the receiver decodes - AAC, MP3, FLAC, Opus or Vorbis - is copied out of the container, which is <code>remux</code> and costs one pass over the file. Anything else (AC3, DTS, TrueHD, PCM, so most disc rips) is decoded and re-encoded, which is <code>encode</code> and is several times slower.</p>
 <p class="api-see">See also <a href="#ep-castControl"><code>castControl</code></a>, <a href="#ep-castSession"><code>castSession</code></a>.</p>
 </div>
 <div class="api-ep">
@@ -1390,7 +1390,7 @@ all.
 </tbody>
 </table>
 <div class="api-note"><p class="api-note-h"><code>action</code></p>
-<ul class="doc-list"><li><code>play</code> resumes a paused session. If the session has gone <code>IDLE</code> — the receiver times out during long pauses — this instead re-issues a full load from the last known position.</li><li><code>seek</code> is only for in-session seeks; the web client seeks via <code>castLoad</code>, which is a full reload.</li><li><code>captions</code> silently does nothing when the receiver has no media session yet. The track belongs on the <code>castLoad</code> in that case.</li><li><code>volume</code> sets the receiver&#x27;s own volume, the one its remote and Google Home move. The receiver reports the level back on its own schedule, so the confirmed value arrives as <code>volume</code> on <code>castEvents</code> rather than in this reply.</li></ul></div>
+<ul class="doc-list"><li><code>play</code> resumes a paused session. If the session has gone <code>IDLE</code> - the receiver times out during long pauses - this instead re-issues a full load from the last known position.</li><li><code>seek</code> is only for in-session seeks; the web client seeks via <code>castLoad</code>, which is a full reload.</li><li><code>captions</code> silently does nothing when the receiver has no media session yet. The track belongs on the <code>castLoad</code> in that case.</li><li><code>volume</code> sets the receiver&#x27;s own volume, the one its remote and Google Home move. The receiver reports the level back on its own schedule, so the confirmed value arrives as <code>volume</code> on <code>castEvents</code> rather than in this reply.</li></ul></div>
 <h4>Errors</h4>
 <table class="doc-table">
 <thead><tr><th>Code</th><th>Kind</th><th>When</th></tr></thead>
@@ -1434,19 +1434,19 @@ session has no device list to look the id up in.
 <tr><td><code>castSession.notice</code></td><td>string</td><td>Something a person should be told about the last load, or empty. It exists for the failures the receiver never reports, because it was never told: a television that had not finished starting up when the <code>LOAD</code> was due, or one that could not be reached at all. Cleared when a new load begins.</td></tr>
 <tr><td><code>castSession.noticeSeq</code></td><td>int</td><td>Changes whenever <code>notice</code> is a new one. Show a notice when this differs from the last value seen and the text is non-empty; a client restoring a session after a reload should adopt the value without acting on it, since the notice describes a load it was not there for.</td></tr>
 <tr><td><code>castSession.audioOnly</code></td><td>bool</td><td>The same answer <code>castLoad</code> returned for the load now playing. Present here because a client that has just reloaded has no <code>castLoad</code> reply to have read it from.</td></tr>
-<tr><td><code>castSession.receiverShowsVideo</code></td><td>bool</td><td>The same answer <code>castLoad</code> returned for the load now playing. Whether a picture is appearing on the receiver, which is not the negation of <code>audioOnly</code> — see there.</td></tr>
+<tr><td><code>castSession.receiverShowsVideo</code></td><td>bool</td><td>The same answer <code>castLoad</code> returned for the load now playing. Whether a picture is appearing on the receiver, which is not the negation of <code>audioOnly</code> - see there.</td></tr>
 <tr><td><code>castSession.contentType</code></td><td>string</td><td>The <code>contentType</code> declared in the Cast <code>LOAD</code>, which is what the receiver picks its decode pipeline from. Not the source container: everything the remux or re-encode tier touches is announced as <code>video/mp4</code>, and a VP9/Opus <code>.mkv</code> is announced as <code>video/webm</code> although its bytes go out untouched.</td></tr>
 <tr><td><code>castSession.sentSuffix</code></td><td>string</td><td>The container the receiver actually receives. The source extension on the <code>direct</code> tier, <code>mp4</code> on the other two. A soundtrack reports whatever it was put in: <code>m4a</code>, <code>mp3</code>, <code>flac</code>, <code>opus</code> or <code>ogg</code> when the track was copied, and <code>flac</code> when it had to be encoded.</td></tr>
 <tr><td><code>castSession.sentBitRate</code></td><td>int</td><td>Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
-file byte-ranged — no <code>format</code>, no <code>maxBitRate</code>, and the account ceiling is
-exempt for a cast token — so this is the file&#x27;s own bitrate rather than anything
+file byte-ranged - no <code>format</code>, no <code>maxBitRate</code>, and the account ceiling is
+exempt for a cast token - so this is the file&#x27;s own bitrate rather than anything
 the <code>transcoded*</code> fields describe. A video remux keeps the source&#x27;s rate and a
-re-encode is not fixed-rate, so both report 0. So does a copied soundtrack — the
+re-encode is not fixed-rate, so both report 0. So does a copied soundtrack - the
 track&#x27;s own rate is not the container&#x27;s, and nearly right is the worst thing a
-diagnostic can be — and so does an encoded one, FLAC having no target rate at
+diagnostic can be - and so does an encoded one, FLAC having no target rate at
 all.
 </td></tr>
-<tr><td><code>castSession.tier</code></td><td>string</td><td>Which of the three delivery tiers this fetch lands on: <code>direct</code> (the file as it stands, byte-ranged), <code>remux</code> (<code>-c copy</code> through the transcode cache, still seekable), or <code>encode</code> (re-encoded). The same two words apply to a soundtrack, and there they are the answer to &quot;why does this sound worse&quot;: <code>remux</code> is the track copied out of the film untouched, <code>encode</code> a lossless FLAC of it. A soundtrack is never re-encoded lossily — the source is already lossy, and this is the one route with no choice about transcoding.</td></tr>
+<tr><td><code>castSession.tier</code></td><td>string</td><td>Which of the three delivery tiers this fetch lands on: <code>direct</code> (the file as it stands, byte-ranged), <code>remux</code> (<code>-c copy</code> through the transcode cache, still seekable), or <code>encode</code> (re-encoded). The same two words apply to a soundtrack, and there they are the answer to &quot;why does this sound worse&quot;: <code>remux</code> is the track copied out of the film untouched, <code>encode</code> a lossless FLAC of it. A soundtrack is never re-encoded lossily - the source is already lossy, and this is the one route with no choice about transcoding.</td></tr>
 <tr><td><code>castSession.volume</code></td><td>object</td><td>The receiver&#x27;s own volume as it last reported it: <code>level</code> (0..1), <code>muted</code>,
 and <code>fixed</code>, true for a receiver whose volume nothing can move (its
 <code>controlType</code> is <code>fixed</code>, typically a television driving an amplifier).
@@ -1456,7 +1456,7 @@ stay distinguishable; a client should keep its volume controls disabled on
 </td></tr>
 </tbody>
 </table>
-<p>Only the caller&#x27;s own session. Another owner&#x27;s is reported as <code>active: false</code> — otherwise a second browser would adopt it wholesale on page load and show itself as casting.</p>
+<p>Only the caller&#x27;s own session. Another owner&#x27;s is reported as <code>active: false</code> - otherwise a second browser would adopt it wholesale on page load and show itself as casting.</p>
 </div>
 <div class="api-ep">
 <h3 id="ep-castEvents">castEvents</h3>
@@ -1480,10 +1480,10 @@ stay distinguishable; a client should keep its volume controls disabled on
 </tbody>
 </table>
 <p>An event is emitted whenever the receiver pushes a status change, and at least every 15 seconds otherwise. Each <code>data:</code> payload is a JSON object with <code>playerState</code>, <code>currentTime</code>, <code>duration</code>, <code>idleReason</code>, <code>startOffset</code>, <code>notice</code> and <code>noticeSeq</code>, plus the same stream description <code>castLoad</code> and <code>castSession</code> carry (<code>audioOnly</code>, <code>receiverShowsVideo</code>, <code>contentType</code>, <code>sentSuffix</code>, <code>sentBitRate</code> and <code>tier</code>) and the same <code>volume</code> object <code>castSession</code> describes, <code>null</code> until the receiver has reported one. A volume change on the device itself arrives this way too.</p>
-<p><code>notice</code> and <code>noticeSeq</code> are as <code>castSession</code> describes them: a sentence about a load the receiver was never told about, and a number that changes when there is a new one. A client should show a notice once, when the number changes and the text is non-empty — an unchanged status is republished every 15 seconds, so acting on the text alone would repeat it for as long as the session lasted.</p>
-<p>Those six are repeated here rather than left to the <code>castLoad</code> reply because that reply describes an <em>attempt</em>. A receiver that refuses a LOAD is sent a degraded one instead — a film it cannot decode becomes its soundtrack — so the description a client read when it issued the load can already be describing something that is not playing. Reading them from each event is what keeps a client from having to reload the page to find out.</p>
-<div class="note"><p>The SSE connection doubles as the liveness signal for the cast session. Once the last listener disconnects, casting is torn down automatically after 30 seconds — so a client that wants the session to survive must keep this open.</p></div>
-<div class="note"><p>The stream also ends when another client takes the session over. A client should treat that as having left cast mode rather than as a transport error — the retry is answered 204, so <code>EventSource</code> reaches <code>CLOSED</code> and stops.</p></div>
+<p><code>notice</code> and <code>noticeSeq</code> are as <code>castSession</code> describes them: a sentence about a load the receiver was never told about, and a number that changes when there is a new one. A client should show a notice once, when the number changes and the text is non-empty - an unchanged status is republished every 15 seconds, so acting on the text alone would repeat it for as long as the session lasted.</p>
+<p>Those six are repeated here rather than left to the <code>castLoad</code> reply because that reply describes an <em>attempt</em>. A receiver that refuses a LOAD is sent a degraded one instead - a film it cannot decode becomes its soundtrack - so the description a client read when it issued the load can already be describing something that is not playing. Reading them from each event is what keeps a client from having to reload the page to find out.</p>
+<div class="note"><p>The SSE connection doubles as the liveness signal for the cast session. Once the last listener disconnects, casting is torn down automatically after 30 seconds - so a client that wants the session to survive must keep this open.</p></div>
+<div class="note"><p>The stream also ends when another client takes the session over. A client should treat that as having left cast mode rather than as a transport error - the retry is answered 204, so <code>EventSource</code> reaches <code>CLOSED</code> and stops.</p></div>
 <p class="api-see">See also <a href="#ep-castSession"><code>castSession</code></a>.</p>
 </div>
 <div class="api-ep">
@@ -1533,16 +1533,16 @@ stay distinguishable; a client should keep its volume controls disabled on
 <div class="doc-sec" id="unimplemented">
 <h2>Not implemented</h2>
 <p>Everything above is what GainDrive <b>adds</b> to Subsonic. This last section is the other side of the same question: the Subsonic and OpenSubsonic endpoints GainDrive does <b>not</b> answer. They are listed so that a client author can tell a deliberate gap from a server too old for a feature, and so that nobody has to discover one by calling it.</p>
-<p>A <code>GET</code> for any of them reaches a catch-all and is answered <b>HTTP 200 carrying Subsonic error 0, <code>Not implemented.</code></b> — always as XML, whatever <code>f</code> asked for. A <code>POST</code> matches no route at all and gets a bare 404 with no body, which behind a reverse proxy configured to serve a single-page client on 404 arrives as 200 and a page of HTML.</p>
+<p>A <code>GET</code> for any of them reaches a catch-all and is answered <b>HTTP 200 carrying Subsonic error 0, <code>Not implemented.</code></b> - always as XML, whatever <code>f</code> asked for. A <code>POST</code> matches no route at all and gets a bare 404 with no body, which behind a reverse proxy configured to serve a single-page client on 404 arrives as 200 and a page of HTML.</p>
 <p><b>Retrieval and annotation.</b></p>
 <ul class="doc-list"><li><code>getLyrics</code>, and <code>getLyricsBySongId</code> of the OpenSubsonic <code>songLyrics</code> extension. No lyric tag and no <code>.lrc</code> sidecar is read.</li><li><code>getAvatar</code>. An account carries no picture.</li></ul>
 <p><b>The play queue.</b></p>
 <ul class="doc-list"><li><code>getPlayQueueByIndex</code> and <code>savePlayQueueByIndex</code> of the OpenSubsonic <code>indexBasedQueue</code> extension. The by-id pair is implemented; the index pair exists so a queue may hold the same track twice, which the by-id form cannot express.</li><li><code>reportPlayback</code> of the OpenSubsonic <code>playbackReport</code> extension. <code>scrobble</code> is the implemented equivalent, and it carries no playback timeline.</li></ul>
 <p><b>Whole subsystems.</b> Each of these is a feature rather than an endpoint, and the roles GainDrive already reports say so: <code>shareRole</code>, <code>podcastRole</code>, <code>jukeboxRole</code> and <code>commentRole</code> are false on every account, so a client that reads them need not probe.</p>
-<ul class="doc-list"><li>The jukebox — <code>jukeboxControl</code>, which plays through the sound card of the machine running the server. Casting is GainDrive&#x27;s answer to playing somewhere other than the client.</li></ul>
+<ul class="doc-list"><li>The jukebox - <code>jukeboxControl</code>, which plays through the sound card of the machine running the server. Casting is GainDrive&#x27;s answer to playing somewhere other than the client.</li></ul>
 <p><b>Users and system.</b></p>
 <ul class="doc-list"><li><code>deleteUser</code>, the only one of the six user endpoints missing. Removing an account means deciding what becomes of its stars, playlists, queue, bookmarks and uploaded files, every one of which is keyed on it.</li><li><code>tokenInfo</code> of the OpenSubsonic <code>apiKeyAuthentication</code> extension. GainDrive issues no API keys; <code>u</code> and <code>p</code>, or the token scheme, are the whole of authentication.</li></ul>
-<p><b>Extensions GainDrive could advertise and does not.</b> <code>getOpenSubsonicExtensions</code> names <code>gaindrive</code> and <code>transcodeOffset</code>. <code>topSongsByArtistId</code> is one parameter away, but <code>getTopSongs</code> answers an empty list here, so advertising it would promise data that does not exist. <code>formPost</code> is not supported — every standard endpoint is <code>GET</code>.</p>
+<p><b>Extensions GainDrive could advertise and does not.</b> <code>getOpenSubsonicExtensions</code> names <code>gaindrive</code> and <code>transcodeOffset</code>. <code>topSongsByArtistId</code> is one parameter away, but <code>getTopSongs</code> answers an empty list here, so advertising it would promise data that does not exist. <code>formPost</code> is not supported - every standard endpoint is <code>GET</code>.</p>
 </div>
 <div class="doc-sec" id="wontimplement">
 <h2>Outside scope</h2>
@@ -1552,7 +1552,7 @@ stay distinguishable; a client should keep its volume controls disabled on
 <p><b>Retrieval and annotation.</b></p>
 <ul class="doc-list"><li><code>getAvatar</code>. An account carries no picture.</li><li><code>setRating</code>. There is no rating column: <code>star</code> and <code>unstar</code> are the whole annotation surface, and no entry carries <code>userRating</code> or <code>averageRating</code>.</li><li><code>getTranscodeDecision</code> and <code>getTranscodeStream</code> of the OpenSubsonic <code>transcoding</code> extension. GainDrive decides what to transcode itself, from the request and the codecs recorded at scan time, so there is nothing here that would read a client&#x27;s capability payload.</li></ul>
 <p><b>Whole subsystems.</b></p>
-<ul class="doc-list"><li>Sharing — <code>getShares</code>, <code>createShare</code>, <code>updateShare</code> and <code>deleteShare</code>.</li><li>Podcasts — <code>getPodcasts</code>, <code>getNewestPodcasts</code>, <code>refreshPodcasts</code>, <code>createPodcastChannel</code>, <code>deletePodcastChannel</code>, <code>deletePodcastEpisode</code>, <code>downloadPodcastEpisode</code>, and <code>getPodcastEpisode</code> of the OpenSubsonic extension of the same name. Fetching a URL into personal files is the nearest thing GainDrive has, and it is not a subscription.</li><li>Internet radio — <code>getInternetRadioStations</code>, <code>createInternetRadioStation</code>, <code>updateInternetRadioStation</code> and <code>deleteInternetRadioStation</code>. A station is not a library file, so it would need storage of its own.</li><li>Chat — <code>getChatMessages</code> and <code>addChatMessage</code>.</li></ul>
+<ul class="doc-list"><li>Sharing - <code>getShares</code>, <code>createShare</code>, <code>updateShare</code> and <code>deleteShare</code>.</li><li>Podcasts - <code>getPodcasts</code>, <code>getNewestPodcasts</code>, <code>refreshPodcasts</code>, <code>createPodcastChannel</code>, <code>deletePodcastChannel</code>, <code>deletePodcastEpisode</code>, <code>downloadPodcastEpisode</code>, and <code>getPodcastEpisode</code> of the OpenSubsonic extension of the same name. Fetching a URL into personal files is the nearest thing GainDrive has, and it is not a subscription.</li><li>Internet radio - <code>getInternetRadioStations</code>, <code>createInternetRadioStation</code>, <code>updateInternetRadioStation</code> and <code>deleteInternetRadioStation</code>. A station is not a library file, so it would need storage of its own.</li><li>Chat - <code>getChatMessages</code> and <code>addChatMessage</code>.</li></ul>
 </div>
 
     </div>

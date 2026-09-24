@@ -11,7 +11,7 @@ import Foundation
 /// What is queued, where we are in it, and where the automatic tail begins.
 ///
 /// **This is the truth; the player is reconciled to it.** `AVQueuePlayer`
-/// cannot serve as the model — a played item is consumed and cannot be
+/// cannot serve as the model - a played item is consumed and cannot be
 /// re-enqueued, so it has no notion of "previous", and it cannot reorder.
 ///
 /// A pure value type, so every piece of queue arithmetic in the phase is a
@@ -39,7 +39,7 @@ struct PlayQueue: Equatable, Sendable {
 	/// two, because the second is what `AVQueuePlayer` pre-buffers and that
 	/// pre-buffering is the whole of the gapless story available on this
 	/// platform. A Cast receiver is told about **one** track at a time and the
-	/// next is sent when it reports the first finished — which is what keeps
+	/// next is sent when it reports the first finished - which is what keeps
 	/// this app the queue's owner, and what makes swapping engines mid-queue
 	/// safe at all.
 	func window(size: Int) -> [ItemRef] {
@@ -48,7 +48,7 @@ struct PlayQueue: Equatable, Sendable {
 		return songs[index..<end].map(\.ref)
 	}
 
-	/// The default two, for a caller that has no engine to ask — which in
+	/// The default two, for a caller that has no engine to ask - which in
 	/// practice is the tests.
 	var window: [ItemRef] { window(size: 2) }
 
@@ -65,7 +65,7 @@ struct PlayQueue: Equatable, Sendable {
 		autoFrom = autoFrom.afterPlay(startIndex: startIndex)
 	}
 
-	/// Drop the automatic tail, append, then move the boundary — **in that
+	/// Drop the automatic tail, append, then move the boundary - **in that
 	/// order**.
 	///
 	/// The truncation is the web client's rule and it is deliberate: without
@@ -98,7 +98,7 @@ struct PlayQueue: Equatable, Sendable {
 
 	/// A track the user dragged is a track the user chose, so the destination
 	/// counts as hand-picked in both directions. That is a decision rather than
-	/// a derivation — Android has no counterpart — and it is pinned by a test.
+	/// a derivation - Android has no counterpart - and it is pinned by a test.
 	mutating func move(from source: Int, to destination: Int) {
 		guard songs.indices.contains(source), songs.indices.contains(destination),
 			source != destination

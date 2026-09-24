@@ -20,8 +20,8 @@ import Foundation
 ///
 /// **A file per query, not a database**, which is a departure from the plan and
 /// from Android's Room mirror. Two things settled it. The mirror is a cache of
-/// *answers* — each browse call has a natural key, and storing the mapped
-/// domain value under it is the whole of the write path — so the relational
+/// *answers* - each browse call has a natural key, and storing the mapped
+/// domain value under it is the whole of the write path - so the relational
 /// shape buys nothing that is used. And it makes the migration story free: a
 /// value written by a build whose models had a different shape fails to decode,
 /// which reads as a miss, which is a re-fetch. That is exactly the destructive
@@ -30,7 +30,7 @@ import Foundation
 /// What a database *would* buy is queries across the mirror, and there is one
 /// that will want it: "which albums have any stored audio", for the offline
 /// listing filter. That is why this exposes `songs(of:)` and `albums(of:)`
-/// rather than only opaque blobs — the walk is possible, and whether it is fast
+/// rather than only opaque blobs - the walk is possible, and whether it is fast
 /// enough is a measurement for when the filter is built.
 ///
 /// Rows are keyed on `(serverId, …)` throughout, never on a bare Subsonic id.
@@ -72,21 +72,21 @@ actor LibraryMirror {
 	///
 	/// Offline, the question is "which albums have any stored audio", and the
 	/// cheap way to answer it is to start from the files that are actually
-	/// here — a few hundred at most — and walk up, rather than walking down
+	/// here - a few hundred at most - and walk up, rather than walking down
 	/// through every album the mirror holds asking whether any of its tracks
 	/// landed. Going up needs a reverse map, and the moment to build one is
 	/// while the album is being mirrored anyway.
 	///
 	/// Keyed by `ItemRef.encoded` rather than by `ItemRef`, because a
 	/// dictionary whose key is not a `String` encodes as an unkeyed array of
-	/// alternating keys and values — which round-trips, and is unreadable.
+	/// alternating keys and values - which round-trips, and is unreadable.
 	struct Availability: Codable, Sendable {
 		var albumOfSong: [String: ItemRef] = [:]
 		var artistOfAlbum: [String: ItemRef] = [:]
 
 		/// Everything reachable from what is on disk.
 		///
-		/// Two dictionary lookups per stored file and nothing else — no album
+		/// Two dictionary lookups per stored file and nothing else - no album
 		/// is opened, and an album whose tracks were never mirrored simply does
 		/// not appear, which is right: it cannot be listed either.
 		func reachable(from held: Set<ItemRef>) -> (albums: Set<ItemRef>, artists: Set<ItemRef>) {
@@ -105,7 +105,7 @@ actor LibraryMirror {
 		/// **Needed because the two halves are written at different moments.**
 		/// `storeAlbums` records an artist's album *list* when that screen is
 		/// opened; `storeAlbum` records the way up when an album is. Reach an
-		/// album from search or recents and only the second runs — so the
+		/// album from search or recents and only the second runs - so the
 		/// artist becomes reachable while its list was never stored, and an
 		/// offline album screen built from the list alone would be empty.
 		///
@@ -154,7 +154,7 @@ actor LibraryMirror {
 			at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
 		// Atomic, so a crash mid-write leaves the previous answer rather than
 		// half of the new one. A truncated file would decode to nothing, which
-		// is survivable — but a browse that silently lost a server's library
+		// is survivable - but a browse that silently lost a server's library
 		// because the app was killed is not worth the saved syscall.
 		try? data.write(to: url, options: .atomic)
 	}
@@ -168,7 +168,7 @@ actor LibraryMirror {
 	/// needs.
 	///
 	/// A method of its own rather than the generic `store`, so the blob and the
-	/// index cannot be written apart — a stored album whose tracks are not in
+	/// index cannot be written apart - a stored album whose tracks are not in
 	/// the index is an album that never appears offline, silently.
 	func storeAlbum(_ detail: AlbumDetail, for ref: ItemRef) {
 		store(detail, at: .album(ref))

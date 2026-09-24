@@ -12,7 +12,7 @@ import androidx.compose.runtime.Composable
  * Null draws nothing, which is the ordinary case on a tablet: with the level
  * above already on screen in the pane beside this one, an arrow pointing at it
  * is noise. Every screen that can be a non-root pane takes its `onBack` as a
- * nullable and hands it here, so the rule lives in one place —
+ * nullable and hands it here, so the rule lives in one place -
  * `LocalPaneBack`, which decides it from the layout.
  */
 @Composable

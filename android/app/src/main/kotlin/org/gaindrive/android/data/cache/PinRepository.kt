@@ -33,7 +33,7 @@ sealed interface PinResult {
 	/** Pinning this would put more than the cap out of eviction's reach. */
 	data class TooLarge(val neededBytes: Long, val capBytes: Long) : PinResult
 
-	/** Nothing stored to download yet — open it once while online first. */
+	/** Nothing stored to download yet - open it once while online first. */
 	data object NotKnownYet : PinResult
 }
 
@@ -59,7 +59,7 @@ class PinRepository @Inject constructor(
 
 	private val _pins = MutableStateFlow<List<Pin>>(emptyList())
 
-	/** The pins themselves, as placed — an album pin stays one entry. */
+	/** The pins themselves, as placed - an album pin stays one entry. */
 	val pins: StateFlow<List<Pin>> = _pins.asStateFlow()
 
 	private val _coverage = MutableStateFlow(PinCoverage(emptyMap()))
@@ -74,8 +74,8 @@ class PinRepository @Inject constructor(
 	 *
 	 * Progress is counted in whole tracks, not bytes: Media3 pushes download
 	 * state changes but not continuous progress, and the cache's own notion of
-	 * "stored" is per track anyway. For an album that reads naturally — three of
-	 * twelve — and for a single track it is the difference between a spinner and
+	 * "stored" is per track anyway. For an album that reads naturally - three of
+	 * twelve - and for a single track it is the difference between a spinner and
 	 * a tick, which is all that was missing.
 	 */
 	val statuses: StateFlow<Map<String, PinStatus>> = combine(
@@ -83,7 +83,7 @@ class PinRepository @Inject constructor(
 		audioCache.cachedKeys,
 		downloads.states,
 	) { coverage, stored, downloadStates ->
-		// A finished download counts even when the cache cannot vouch for it —
+		// A finished download counts even when the cache cannot vouch for it -
 		// see DownloadStates.completed on why it often cannot.
 		val here = stored + downloadStates.completed
 		coverage.byPin.mapValues { (_, keys) ->
@@ -196,7 +196,7 @@ class PinRepository @Inject constructor(
 	 *
 	 * Already-stored tracks cost nothing to re-request: the download manager
 	 * finds them complete in the cache and reports them done. Removal is not
-	 * offered here — the pin list in Settings is where a download you have
+	 * offered here - the pin list in Settings is where a download you have
 	 * given up on gets deleted.
 	 */
 	suspend fun retry(ref: ItemRef) {
@@ -210,13 +210,13 @@ class PinRepository @Inject constructor(
 	 * Pins with something readable attached, for the list in Settings.
 	 *
 	 * A pin whose item is no longer in the mirror still appears, named by its
-	 * kind alone — it is the only place it can be removed from, so hiding it
+	 * kind alone - it is the only place it can be removed from, so hiding it
 	 * would strand it.
 	 */
 	suspend fun describe(pins: List<Pin>): List<PinnedItem> = pins.map { pin ->
 		val label = when (pin.kind) {
 			PinKind.SONG -> local.song(pin.ref)?.title
-			PinKind.ALBUM -> local.album(pin.ref)?.let { "${it.artistName} — ${it.title}" }
+			PinKind.ALBUM -> local.album(pin.ref)?.let { "${it.artistName} - ${it.title}" }
 			PinKind.PLAYLIST -> local.playlists(pin.ref.server)
 				.firstOrNull { it.ref == pin.ref }?.name
 		}
@@ -230,8 +230,8 @@ class PinRepository @Inject constructor(
 		// Two forms of the same set, and they are no longer interchangeable.
 		//
 		// The evictor works in *cache* keys, which carry the quality, because
-		// that is what the stored bytes are filed under. Everything above —
-		// availability marks, pin coverage, the UI — works in bare refs, which
+		// that is what the stored bytes are filed under. Everything above -
+		// availability marks, pin coverage, the UI - works in bare refs, which
 		// is what the library mirror and the DAO understand.
 		//
 		// Only the quality currently set is protected: a copy left behind by an
@@ -241,7 +241,7 @@ class PinRepository @Inject constructor(
 		// A video's soundtrack is filed under the substituted quality (see
 		// AudioQuality.forVideoAudio), so protecting it under the plain one
 		// would name bytes that do not exist and leave the ones that do
-		// evictable — a downloaded film that quietly stops playing offline.
+		// evictable - a downloaded film that quietly stops playing offline.
 		// One bulk query rather than a lookup per ref: a playlist pin can
 		// cover hundreds.
 		val videos = local.videoRefKeys(keys)
@@ -290,7 +290,7 @@ class PinRepository @Inject constructor(
 	 * Re-fetches everything pinned, at whatever quality is now set.
 	 *
 	 * Protection is re-applied first so `PinnedKeys` holds the new keys before
-	 * any download starts writing under them — the same ordering [pin] relies
+	 * any download starts writing under them - the same ordering [pin] relies
 	 * on, for the same reason.
 	 */
 	suspend fun refreshDownloads() {
@@ -357,8 +357,8 @@ class PinRepository @Inject constructor(
 	/**
 	 * Keeps the previous membership of any pin that has just come back empty.
 	 *
-	 * An empty expansion is a legitimate *state* — pinning an album that has
-	 * never been opened protects nothing, which `expandPins` documents — but it
+	 * An empty expansion is a legitimate *state* - pinning an album that has
+	 * never been opened protects nothing, which `expandPins` documents - but it
 	 * is never a legitimate *transition* for a pin that already covered
 	 * something. What produces one is the mirror being emptied underneath it:
 	 * removing a server, or changing one's browse mode. Both write through
@@ -366,7 +366,7 @@ class PinRepository @Inject constructor(
 	 * recompute lands while the tables are bare.
 	 *
 	 * Without this the coverage collapses, `PinnedKeys` shrinks, and the evictor
-	 * is free to reclaim audio the user explicitly asked to keep — silently, and
+	 * is free to reclaim audio the user explicitly asked to keep - silently, and
 	 * only until they next happen to open the album. The stale membership is the
 	 * safer of the two wrong answers: it protects bytes that are already on
 	 * disk, and the next successful browse replaces it.
@@ -387,7 +387,7 @@ class PinRepository @Inject constructor(
 	private suspend fun enqueue(songs: List<Song>) {
 		songs.forEach { song ->
 			// A video only ever reaches here through downloadable(), which lets
-			// one past exactly when its soundtrack is what will be fetched — so
+			// one past exactly when its soundtrack is what will be fetched - so
 			// `isVideo` is the flag the URL builder wants, not a second reading
 			// of the setting that could disagree with the first.
 			// The same declaration playback makes, and it must be: both build
@@ -405,8 +405,8 @@ class PinRepository @Inject constructor(
 	/**
 	 * The quality this song's bytes are actually filed under.
 	 *
-	 * A video's soundtrack is always a transcode — `AudioFormat.ORIGINAL` for
-	 * one means "send the film", which is not a thing that can be stored — so
+	 * A video's soundtrack is always a transcode - `AudioFormat.ORIGINAL` for
+	 * one means "send the film", which is not a thing that can be stored - so
 	 * the substitution has to be applied wherever a cache key or a size is
 	 * derived, not only where the URL is built.
 	 */
@@ -417,7 +417,7 @@ class PinRepository @Inject constructor(
 	 * Roughly what this song will occupy once stored.
 	 *
 	 * [Song.sizeBytes] is the size of the file on the server, which is the wrong
-	 * number as soon as anything is transcoded — an album of FLACs would be
+	 * number as soon as anything is transcoded - an album of FLACs would be
 	 * refused for a pin that actually fits several times over at Opus. Bitrate
 	 * times duration is close enough for a capacity check.
 	 *

@@ -29,14 +29,14 @@ enum PersonalScope: Hashable, Sendable {
 	///
 	/// It also groups the response **by owner instead of by first letter**, so
 	/// the index labels come back as usernames. That needs no client change,
-	/// because a bucket label was always just a string — but it is why the
+	/// because a bucket label was always just a string - but it is why the
 	/// alphabet rail has to be suppressed when the labels are not letters.
 	case all
 
 	/// What goes on the wire, or nil to send no parameter at all.
 	///
 	/// `none` is deliberately nil rather than `"false"`. The server tests for
-	/// the exact strings, so `"false"` would work — but it would also append a
+	/// the exact strings, so `"false"` would work - but it would also append a
 	/// parameter to every ordinary library request that never carried one,
 	/// which is a gratuitous difference from what a third-party server has
 	/// always seen.
@@ -52,7 +52,7 @@ enum PersonalScope: Hashable, Sendable {
 /// How a top-level listing is narrowed. Everything at its default means "the
 /// whole shared library".
 ///
-/// `personal` is not a third way of naming a root — it switches to a different
+/// `personal` is not a third way of naming a root - it switches to a different
 /// library altogether, and the server ignores the other two while it is set.
 /// Kept in one value regardless, because every caller wants exactly one of
 /// these and separate parameters could be passed inconsistently.
@@ -63,7 +63,7 @@ struct RootRequest: Hashable, Sendable {
 }
 
 /// The one or two requests one server's merged listing is built from. A nil
-/// half is a group this server lacks — it contributes nothing there, which is
+/// half is a group this server lacks - it contributes nothing there, which is
 /// not a failure and must not be reported as one. Not asking is the point: a
 /// request for a kind a server does not have would either come back empty or,
 /// on a server predating library roots, come back as the **entire** library
@@ -77,7 +77,7 @@ struct ListingRequests: Hashable, Sendable {
 enum LibraryRoots {
 	/// What to ask `roots`' server for the merged list.
 	///
-	/// A typed server — any root naming a `contentType` — is asked per kind it
+	/// A typed server - any root naming a `contentType` - is asked per kind it
 	/// actually has, because omitting the parameter there answers with every
 	/// root mixed together, which is exactly what the two-group list exists to
 	/// avoid. A root typed with a kind this build has never heard of
@@ -90,7 +90,7 @@ enum LibraryRoots {
 	/// `contentType=artists`, which is exactly what this app sent before roots
 	/// existed and which a server that has never heard of it ignores. Android
 	/// distinguishes a folder-browsing server here and sends nothing at all;
-	/// iOS has no folder-browse mode, so there is no such case — the seam for
+	/// iOS has no folder-browse mode, so there is no such case - the seam for
 	/// it is `RootRequest.musicFolderId`, which nothing sends yet.
 	static func listingRequests(roots: [MusicRoot]) -> ListingRequests {
 		let types = Set(roots.compactMap(\.contentType))

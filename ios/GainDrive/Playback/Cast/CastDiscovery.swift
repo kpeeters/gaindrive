@@ -20,7 +20,7 @@ import OSLog
 /// that machinery is needed.
 ///
 /// The consequence is that a discovered device has **no address until something
-/// connects to it** — `CastDevice.address` is filled in by `CastProbe`, and by
+/// connects to it** - `CastDevice.address` is filled in by `CastProbe`, and by
 /// the session later. That is a fair trade: the address is diagnostic rather
 /// than functional, and buying it here would mean a TCP connection to every
 /// device every time the browser sees one.
@@ -35,7 +35,7 @@ final class CastDiscovery {
 
 	/// What the browser last said about itself.
 	///
-	/// **Denial is a state, not a timeout**, which is the rule `PLAN.md` sets
+	/// **Denial is a state, not a timeout**, which is the rule adopted
 	/// for the Local Network permission and the one thing about this feature
 	/// that has no Android counterpart at all. A denied prompt and a network
 	/// with no receivers on it both produce an empty list, and only one of them
@@ -46,8 +46,8 @@ final class CastDiscovery {
 		case idle
 		case browsing
 		/// The browser failed outright. On iOS a refused Local Network
-		/// permission *can* arrive this way — as `NWError.dns(-65570)`,
-		/// `kDNSServiceErr_PolicyDenied` — but see `quiet` below: it is not the
+		/// permission *can* arrive this way - as `NWError.dns(-65570)`,
+		/// `kDNSServiceErr_PolicyDenied` - but see `quiet` below: it is not the
 		/// shape that failure usually takes.
 		case failed(String)
 	}
@@ -67,8 +67,8 @@ final class CastDiscovery {
 	/// front of somebody who would otherwise watch a spinner.
 	///
 	/// Neither the simulator nor a Catalyst build launched from Xcode enforces
-	/// the permission — the first not at all, the second under Xcode's own
-	/// grant — so this path is reachable only on a real device.
+	/// the permission - the first not at all, the second under Xcode's own
+	/// grant - so this path is reachable only on a real device.
 	private(set) var quiet = false
 
 	/// How long counts as too long. Generous: a receiver waking from standby is
@@ -91,7 +91,7 @@ final class CastDiscovery {
 
 	// MARK: - Lifecycle
 
-	/// Browsing runs only while something is looking at the list — multicast is
+	/// Browsing runs only while something is looking at the list - multicast is
 	/// not free, and the picker is the only consumer.
 	func start() {
 		guard browser == nil else { return }
@@ -105,7 +105,7 @@ final class CastDiscovery {
 		}
 		browser.browseResultsChangedHandler = { [weak self] results, _ in
 			// The whole result set every time, so this rebuilds rather than
-			// diffing — which is also what makes a device disappearing work.
+			// diffing - which is also what makes a device disappearing work.
 			let devices = results.compactMap(Self.device(from:))
 			Task { @MainActor in self?.replace(with: devices) }
 		}
@@ -137,7 +137,7 @@ final class CastDiscovery {
 	/// **iOS suspends the app and Mac Catalyst does not**, so a browser is dead
 	/// after a background round trip on one platform and fine on the other. The
 	/// view cannot notice with `onAppear`, which does not fire again for a view
-	/// that never left the screen — it watches the scene phase and calls this.
+	/// that never left the screen - it watches the scene phase and calls this.
 	func restart() {
 		stop()
 		start()
@@ -193,7 +193,7 @@ final class CastDiscovery {
 			$0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
 		}
 		// One device arriving answers the question the hint was raising, and a
-		// list that then empties again — a receiver switched off — must not
+		// list that then empties again - a receiver switched off - must not
 		// bring back a permission warning that has been disproved.
 		if !devices.isEmpty {
 			quiet = false
@@ -207,16 +207,16 @@ final class CastDiscovery {
 	/// **The TXT record is the whole of what a device tells us about itself**,
 	/// and it arrives at the instant the device does, at no extra request:
 	///
-	/// * `fn` — the friendly name somebody set on the device. The service name
+	/// * `fn` - the friendly name somebody set on the device. The service name
 	///   is a serial-number-ish string nobody would recognise, so it is only the
 	///   fallback: a row must never be labelled by something meaningless, which
 	///   for Android was an IP address and here would be a hex blob.
-	/// * `id` — the Cast id, stable across a rename, which the service name is
+	/// * `id` - the Cast id, stable across a rename, which the service name is
 	///   not. It is the deduplication key, matching what the server's own
 	///   `listCastDevices` returns one entry per.
-	/// * `md` — the model the receiver announces for itself, and the only thing
+	/// * `md` - the model the receiver announces for itself, and the only thing
 	///   on the wire that tells a WiiM from a television. See `CastDeviceKind`.
-	/// * `ca` — capabilities. **Bit 0 is video output**, which the server reads
+	/// * `ca` - capabilities. **Bit 0 is video output**, which the server reads
 	///   to send a film's soundtrack to a screenless receiver and which Android
 	///   does not read at all, so casting a film from that phone to a WiiM loses
 	///   the picture silently. Nothing acts on it here yet; it is parsed now

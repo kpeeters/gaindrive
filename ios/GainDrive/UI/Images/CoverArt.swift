@@ -29,7 +29,7 @@ struct CoverArt: View {
 		// An overlay is sized to its base and cannot affect layout, which is
 		// exactly the "fill a fixed square, crop the overflow" primitive. A
 		// `ZStack` instead sizes to the union of its children, and
-		// `scaledToFill` *reports* the overflowed size — so a 3:2 cover in a
+		// `scaledToFill` *reports* the overflowed size - so a 3:2 cover in a
 		// 44 pt slot made the stack 66×44, `clipShape` laid its rounded
 		// rectangle out in that rect and clipped nothing, the artwork bled over
 		// the adjacent text, and `ArtistAvatar`'s `size/2` radius drew a
@@ -56,7 +56,7 @@ struct CoverArt: View {
 			.clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
 			// Keyed on the cache key: a reused cell whose source changed must
 			// drop the previous image, or a scrolling list shows the wrong
-			// artwork for a frame — and with `List` reuse, sometimes for longer.
+			// artwork for a frame - and with `List` reuse, sometimes for longer.
 			.task(id: source?.cacheKey) {
 				guard let source else {
 					image = nil
@@ -67,7 +67,7 @@ struct CoverArt: View {
 				// **Without this the cell can end up showing another artist's
 				// artwork indefinitely.** SwiftUI cancels this task when the row
 				// is recycled but does not wait for it, and awaiting a
-				// `Task<_, Never>` is not a cancellation point — so the old
+				// `Task<_, Never>` is not a cancellation point - so the old
 				// row's fetch always resumes, and would write its image into a
 				// cell that has since been given a different source.
 				guard !Task.isCancelled else { return }
@@ -94,7 +94,7 @@ struct CoverThumb: View {
 	}
 }
 
-/// Round, and with a person rather than a note behind it — an artist with no
+/// Round, and with a person rather than a note behind it - an artist with no
 /// portrait should not look like an album with no cover.
 struct ArtistAvatar: View {
 	let source: CoverSource?

@@ -33,8 +33,8 @@ class ChapterNavTest {
 
 	@Test
 	fun `a marker becomes current inside the tolerance`() {
-		// Seeking lands a few milliseconds short — the player rounds, and a
-		// re-encoded stream starts at the nearest keyframe — so without this the
+		// Seeking lands a few milliseconds short - the player rounds, and a
+		// re-encoded stream starts at the nearest keyframe - so without this the
 		// list would highlight the previous song for a moment after a jump.
 		assertEquals(1, list.currentAt(100_000 - CHAPTER_TOLERANCE_MS))
 	}

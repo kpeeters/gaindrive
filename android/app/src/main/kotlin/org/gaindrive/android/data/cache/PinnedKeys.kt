@@ -8,7 +8,7 @@ import javax.inject.Singleton
  *
  * A plain in-memory set rather than a query: [PinAwareEvictor] is called back on
  * cache writer threads, inside the cache's own lock, where it can neither
- * suspend nor touch a database. Whoever owns the pins keeps this in step —
+ * suspend nor touch a database. Whoever owns the pins keeps this in step -
  * see `PinRepository` from the downloads stage.
  *
  * Empty until pinning exists, which makes eviction plain LRU.

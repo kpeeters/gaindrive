@@ -12,12 +12,12 @@ import org.junit.Test
 
 /**
  * The audio half of `playable`: what this device says it will take as it
- * stands, and — the half worth testing — what it must never say.
+ * stands, and - the half worth testing - what it must never say.
  *
  * Two failures are being guarded against and they are opposites. Declaring too
  * little wastes a re-encode, which is slow and invisible. Declaring too much
  * hands someone who asked for Opus 160 a lossless file over mobile data, and
- * hands a Cast receiver a container its `LOAD` did not announce — which it
+ * hands a Cast receiver a container its `LOAD` did not announce - which it
  * refuses outright, on a television, with nothing on the phone to say why.
  */
 class PlayableAudioTest {
@@ -62,7 +62,7 @@ class PlayableAudioTest {
 	/**
 	 * `cappedBy` turns a request for the original into mp3 at the cap, so
 	 * reading the capped value would silently stop declaring lossless for every
-	 * capped account — the one group whose originals the server was going to
+	 * capped account - the one group whose originals the server was going to
 	 * convert anyway, but for a reason that has nothing to do with this.
 	 */
 	@Test
@@ -76,7 +76,7 @@ class PlayableAudioTest {
 
 	/**
 	 * "The original" for a film played as audio is the film, which is why
-	 * `forVideoAudio` substitutes before this is asked — and why asking after
+	 * `forVideoAudio` substitutes before this is asked - and why asking after
 	 * it gives the lossy set even for someone whose setting says Original.
 	 */
 	@Test
@@ -99,7 +99,7 @@ class PlayableAudioTest {
 	}
 
 	/**
-	 * The server refuses a bare `m4a` or `ogg` — the extension does not settle
+	 * The server refuses a bare `m4a` or `ogg` - the extension does not settle
 	 * the codec, and it must not guess. Declaring one bare would be dropped
 	 * silently, so this is the only thing that would notice.
 	 */
@@ -119,7 +119,7 @@ class PlayableAudioTest {
 	/**
 	 * A container is named once, whatever extension it is written under. The
 	 * server stores the container it observed, so `.ogg`, `.oga` and `.opus`
-	 * are all `ogg` — and a token naming an *extension* would reach none of
+	 * are all `ogg` - and a token naming an *extension* would reach none of
 	 * them. This is the assertion that fails if someone reintroduces one.
 	 */
 	@Test
@@ -133,7 +133,7 @@ class PlayableAudioTest {
 
 	/**
 	 * Every audio token is a pair. A bare one would be read by the server as a
-	 * *video* container and match nothing at all — silently, which is why this
+	 * *video* container and match nothing at all - silently, which is why this
 	 * is asserted rather than left to the reader of the set above.
 	 */
 	@Test
@@ -176,9 +176,9 @@ class PlayableAudioTest {
 	/**
 	 * The audio twin of `the cast route declares nothing`. A receiver handed a
 	 * URL that declares is sent the original while its `LOAD` announced the
-	 * transcode's type, and refuses the media. The obvious refactor — moving
+	 * transcode's type, and refuses the media. The obvious refactor - moving
 	 * the declaration into the builder's default "because both callers want
-	 * it" — is exactly that bug, and this is what stands in its way.
+	 * it" - is exactly that bug, and this is what stands in its way.
 	 */
 	@Test
 	fun `the cast route declares nothing`() {
@@ -190,7 +190,7 @@ class PlayableAudioTest {
 
 	/**
 	 * The original is spelled by sending no `format` at all, so a request for
-	 * it carries no bitrate either — the server serves the file directly with
+	 * it carries no bitrate either - the server serves the file directly with
 	 * no ffmpeg involved.
 	 */
 	@Test
