@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material3.DropdownMenu
@@ -36,6 +36,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.model.AlbumSort
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.ui.LocalAvailability
+import org.gaindrive.android.ui.claimsFocus
 import org.gaindrive.android.ui.components.AlbumRow
 import org.gaindrive.android.ui.components.ArtistAvatar
 import org.gaindrive.android.ui.components.EmptyMessage
@@ -111,7 +112,10 @@ fun AlbumsScreen(
 						}
 					}
 
-					items(albums, key = { it.album.ref.encode() }) { row ->
+					// The first album rather than the list: the header above it
+					// can hold a focusable biography, and landing there would
+					// cost a press before the albums are reached.
+					itemsIndexed(albums, key = { _, row -> row.album.ref.encode() }) { index, row ->
 						AlbumRow(
 							album = row.album,
 							coverUrl = row.coverUrl,
@@ -119,6 +123,7 @@ fun AlbumsScreen(
 							onOpenAlbum(row.album.ref, row.album.title, viewModel.fromUploads)
 						},
 							badges = row.badges,
+							modifier = if (index == 0) Modifier.claimsFocus() else Modifier,
 						)
 					}
 				}

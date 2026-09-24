@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import org.gaindrive.android.ui.claimsFocus
 
 /** Pieces every settings screen is built from. */
 
@@ -62,7 +63,7 @@ fun SettingsScaffold(
 		floatingActionButton = floatingActionButton,
 	) { insets ->
 		LazyColumn(
-			modifier = Modifier.fillMaxSize().padding(insets),
+			modifier = Modifier.fillMaxSize().padding(insets).claimsFocus(),
 			contentPadding = PaddingValues(16.dp),
 			verticalArrangement = Arrangement.spacedBy(12.dp),
 			content = content,

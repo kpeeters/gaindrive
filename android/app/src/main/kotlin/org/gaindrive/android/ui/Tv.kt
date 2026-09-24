@@ -4,6 +4,7 @@ import android.app.UiModeManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.util.Log
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.FocusInteraction
@@ -11,14 +12,20 @@ import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
@@ -86,6 +93,48 @@ fun Modifier.tvFocusHighlight(): Modifier = composed {
 			if (focused) drawFocusRing()
 		}
 }
+
+/**
+ * A request that the pane showing [route] take the d-pad focus, made when the
+ * user confirms a choice. Without it focus stays on the row just chosen, and
+ * reaching what that row opened is a sideways press the user has to know to
+ * make. One-shot: a pane rebuilt later, when the window slides back over it,
+ * must not pull focus the user has since moved elsewhere.
+ */
+class FocusClaim(val route: Route) {
+	internal var pending = true
+}
+
+/** The claim addressed to the pane being composed, or null. */
+val LocalFocusClaim = compositionLocalOf<FocusClaim?> { null }
+
+/**
+ * Where a claimed pane's focus lands. On a list it enters at the first
+ * visible row; on a row it lands on that row. A no-op off TV.
+ */
+fun Modifier.claimsFocus(): Modifier = composed {
+	if (!LocalIsTv.current) return@composed Modifier
+	val claim = LocalFocusClaim.current
+	val requester = remember { FocusRequester() }
+	LaunchedEffect(claim) {
+		if (claim == null || !claim.pending) return@LaunchedEffect
+		// Lazy rows are composed during layout, after this effect starts, so
+		// the first attempts can find nothing to focus yet.
+		repeat(CLAIM_FRAMES) {
+			withFrameNanos {}
+			if (requester.requestFocus(FocusDirection.Enter)) {
+				claim.pending = false
+				return@LaunchedEffect
+			}
+		}
+		claim.pending = false
+		Log.w(TAG, "focus claim for ${claim.route} found nothing to focus")
+	}
+	Modifier.focusRequester(requester)
+}
+
+private const val CLAIM_FRAMES = 10
+private const val TAG = "GainDriveTv"
 
 /**
  * The ripple, plus a ring while focused. The default ripple does mark focus,

@@ -13,6 +13,7 @@ import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import org.gaindrive.android.ui.FocusClaim
 import org.gaindrive.android.ui.Route
 
 /**
@@ -42,6 +43,13 @@ class PaneStack internal constructor(private val state: MutableState<List<Route>
 	val depth: Int get() = state.value.lastIndex
 
 	/**
+	 * Where the d-pad focus goes next. Not saved: a claim that outlived the
+	 * moment it was made would move focus the user did not ask to have moved.
+	 */
+	var focusClaim: FocusClaim? by mutableStateOf(null)
+		private set
+
+	/**
 	 * Put [route] at [level], discarding anything deeper.
 	 *
 	 * Never an append past `level`, which is what keeps the path a path rather
@@ -50,6 +58,7 @@ class PaneStack internal constructor(private val state: MutableState<List<Route>
 	 */
 	fun show(level: Int, route: Route) {
 		state.value = state.value.take(level) + route
+		focusClaim = FocusClaim(route)
 	}
 
 	/**
@@ -65,6 +74,11 @@ class PaneStack internal constructor(private val state: MutableState<List<Route>
 	 */
 	fun insert(level: Int, route: Route) {
 		state.value = state.value.take(level) + route + state.value.drop(level)
+	}
+
+	/** Hands the focus to the tab's own list, for when the tab is chosen. */
+	fun focusRoot() {
+		focusClaim = FocusClaim(state.value.first())
 	}
 
 	/** One level up. Nothing to do at the root - the tab itself is the floor. */

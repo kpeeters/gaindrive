@@ -105,9 +105,10 @@ fun AlbumRow(
 	coverUrl: String?,
 	onClick: () -> Unit,
 	badges: List<String> = emptyList(),
+	modifier: Modifier = Modifier,
 ) {
 	Row(
-		modifier = Modifier
+		modifier = modifier
 			.fillMaxWidth()
 			.clickable(onClick = onClick)
 			.padding(horizontal = 16.dp, vertical = 8.dp),

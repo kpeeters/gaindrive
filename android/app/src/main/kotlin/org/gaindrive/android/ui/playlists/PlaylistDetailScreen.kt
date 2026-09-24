@@ -28,6 +28,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.cache.PinKind
 import org.gaindrive.android.data.model.Song
+import org.gaindrive.android.ui.claimsFocus
 import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.components.PaneBackIcon
 import org.gaindrive.android.ui.components.PinAction
@@ -93,7 +94,7 @@ fun PlaylistDetailScreen(
 			}
 
 			LazyColumn(
-				modifier = Modifier.fillMaxSize(),
+				modifier = Modifier.fillMaxSize().claimsFocus(),
 				// Same tail gap as an album's tracks; see AlbumDetailScreen.
 				contentPadding = PaddingValues(bottom = 16.dp),
 			) {

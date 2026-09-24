@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Playlist
 import org.gaindrive.android.ui.LocalAvailability
+import org.gaindrive.android.ui.claimsFocus
 import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.components.PartialFailureNote
 import org.gaindrive.android.ui.components.PlaylistRow
@@ -127,7 +128,7 @@ fun PlaylistsScreen(
 					return@RefreshableLoadBox
 				}
 
-				LazyColumn(modifier = Modifier.fillMaxSize()) {
+				LazyColumn(modifier = Modifier.fillMaxSize().claimsFocus()) {
 					sections.forEach { section ->
 						// Named only when there is more than one server in
 						// play; otherwise the heading is a label on the

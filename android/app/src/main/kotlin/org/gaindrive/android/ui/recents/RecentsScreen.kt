@@ -19,6 +19,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
+import org.gaindrive.android.ui.claimsFocus
 import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.components.PartialFailureNote
 import org.gaindrive.android.ui.components.RefreshableLoadBox
@@ -91,7 +92,7 @@ fun RecentsScreen(
 					return@RefreshableLoadBox
 				}
 
-				LazyColumn(modifier = Modifier.fillMaxSize()) {
+				LazyColumn(modifier = Modifier.fillMaxSize().claimsFocus()) {
 					sections.forEach { section ->
 						badgeNames[section.server.id]?.let { name ->
 							item(key = "hdr-${section.server.id.value}") {

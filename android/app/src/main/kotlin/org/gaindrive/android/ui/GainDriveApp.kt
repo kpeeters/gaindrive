@@ -349,6 +349,7 @@ fun GainDriveApp(
 							selectedTab = tab
 							navController.switchTo(tab.route)
 						}
+						stacks.getValue(tab).focusRoot()
 					},
 					icon = { Icon(tab.icon, contentDescription = tab.label) },
 					label = { Text(tab.label) },
@@ -508,7 +509,10 @@ fun GainDriveApp(
 						// field. A form wants the whole window, so it is pushed onto
 						// the shell's own host rather than into a pane.
 						onFetchUrl = { navController.navigate(Route.FetchUrl("")) },
-						onOpenUploads = { navController.navigate(Route.Uploads) },
+						onOpenUploads = {
+							uploadsStack.focusRoot()
+							navController.navigate(Route.Uploads)
+						},
 					)
 				}
 

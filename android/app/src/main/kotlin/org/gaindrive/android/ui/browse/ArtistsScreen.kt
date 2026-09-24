@@ -38,6 +38,7 @@ import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.LibrarySection
 import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.LocalIsTv
+import org.gaindrive.android.ui.claimsFocus
 import org.gaindrive.android.ui.components.AlphabetRail
 import org.gaindrive.android.ui.components.ArtistRow
 import org.gaindrive.android.ui.components.EmptyMessage
@@ -207,6 +208,7 @@ fun ArtistsScreen(
 						state = listState,
 						modifier = Modifier
 							.fillMaxSize()
+							.claimsFocus()
 							// Keeps long artist names clear of the rail rather
 							// than letting them slide underneath it. With no
 							// rail it would only be a dead strip.

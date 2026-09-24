@@ -28,6 +28,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import org.gaindrive.android.ui.FocusClaim
+import org.gaindrive.android.ui.LocalFocusClaim
 import org.gaindrive.android.ui.Route
 import kotlin.math.min
 
@@ -171,6 +173,7 @@ fun PaneStrip(
 		val panes = min(paneCount(maxWidth), levels)
 		val assigned = slots(stack.depth, panes, levels)
 		val path = stack.path
+		val claim = stack.focusClaim
 
 		// The back affordance goes on the leftmost visible pane, and only when
 		// that is not the tab's own root - the web client's rule for its
@@ -189,17 +192,17 @@ fun PaneStrip(
 			value = assigned.scaffoldValue(),
 			listPane = {
 				AnimatedPane(modifier = Modifier.paneName(titles, 0)) {
-					Slot(assigned.list, 0, backAt, back, path, retention, waiting, pane)
+					Slot(assigned.list, 0, backAt, back, path, claim, retention, waiting, pane)
 				}
 			},
 			detailPane = {
 				AnimatedPane(modifier = Modifier.paneName(titles, 1)) {
-					Slot(assigned.detail, 1, backAt, back, path, retention, waiting, pane)
+					Slot(assigned.detail, 1, backAt, back, path, claim, retention, waiting, pane)
 				}
 			},
 			extraPane = {
 				AnimatedPane(modifier = Modifier.paneName(titles, 2)) {
-					Slot(assigned.extra, 2, backAt, back, path, retention, waiting, pane)
+					Slot(assigned.extra, 2, backAt, back, path, claim, retention, waiting, pane)
 				}
 			},
 		)
@@ -213,6 +216,7 @@ private fun Slot(
 	backAt: Int?,
 	back: () -> Unit,
 	path: List<Route>,
+	claim: FocusClaim?,
 	retention: PaneRetention,
 	waiting: @Composable (level: Int) -> Unit,
 	pane: @Composable (Route) -> Unit,
@@ -226,7 +230,10 @@ private fun Slot(
 		// a pop is recomposing, and an index past the end would be a crash where
 		// the right answer is an empty pane a moment early.
 		is Pane.At -> path.getOrNull(content.index)?.let { route ->
-			CompositionLocalProvider(LocalPaneBack provides back.takeIf { level == backAt }) {
+			CompositionLocalProvider(
+				LocalPaneBack provides back.takeIf { level == backAt },
+				LocalFocusClaim provides claim?.takeIf { it.route == route },
+			) {
 				retention.Retained(route) { pane(route) }
 			}
 		}

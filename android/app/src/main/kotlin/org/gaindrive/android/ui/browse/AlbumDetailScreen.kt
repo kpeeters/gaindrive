@@ -53,6 +53,7 @@ import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.MusicRoot
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.data.model.currentAt
+import org.gaindrive.android.ui.claimsFocus
 import org.gaindrive.android.ui.components.ChapterRow
 import org.gaindrive.android.ui.components.CoverHero
 import org.gaindrive.android.ui.components.ExternalLink
@@ -403,8 +404,13 @@ fun AlbumDetailScreen(
 				items(items = rows, key = { it.key }) { row ->
 					// The headings ride along with the row beneath them rather
 					// than being items of their own, so the list keys stay one
-					// per row.
-					Column {
+					// per row. The first row rather than the list takes a
+					// claimed focus: the hero and notes above it would
+					// otherwise put the tracks a press or more away.
+					Column(
+						modifier = if (row.key == rows.first().key) Modifier.claimsFocus()
+						else Modifier,
+					) {
 						row.headings.forEach { SectionHeading(it) }
 						when (row) {
 							is AlbumListRow.Track -> TrackRow(
