@@ -271,13 +271,28 @@ fun VideoScreen(
 							false
 						}
 					}
-					Key.DirectionUp, Key.DirectionDown,
 					Key.DirectionLeft, Key.DirectionRight -> {
 						interactionTick++
 						if (!controlsVisible) {
-							// Hidden, a direction key's only meaning is "show
-							// me the controls". Visible, it is focus movement
-							// and must pass through untouched.
+							// Hidden, left and right skip as the transport's
+							// buttons do; Play's TV review expects it (TV-PC).
+							// The controls come up to show where that landed.
+							// Visible, they are focus movement and must pass
+							// through untouched.
+							viewModel.seekBy(
+								if (event.key == Key.DirectionLeft) -SKIP_MS else SKIP_MS
+							)
+							controlsVisible = true
+							true
+						} else {
+							false
+						}
+					}
+					Key.DirectionUp, Key.DirectionDown -> {
+						interactionTick++
+						if (!controlsVisible) {
+							// Hidden, up and down only mean "show me the
+							// controls".
 							controlsVisible = true
 							true
 						} else {
@@ -819,9 +834,10 @@ private const val CONTROLS_TIMEOUT_MS = 3_500L
  * How far one press of the skip buttons moves, matching `SKIP_SECS` in
  * `web/app.js`. It lives here rather than beside `PlayerConnection.seekBy`,
  * which takes any delta: how far a *button* jumps is a decision about the
- * button, and the icons on these two say ten seconds.
+ * button, and the icons on these two say ten seconds. Internal because the
+ * seek bar's d-pad step on TV is the same jump, and should not drift from it.
  */
-private const val SKIP_MS = 10_000L
+internal const val SKIP_MS = 10_000L
 
 /**
  * The window this view belongs to, or null if there is somehow no Activity

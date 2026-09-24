@@ -14,6 +14,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.BuildConfig
 import org.gaindrive.android.data.model.ThemeMode
+import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.components.formatBytes
 
 /**
@@ -110,11 +111,16 @@ private fun AboutBlock() {
 			style = MaterialTheme.typography.bodySmall,
 			color = MaterialTheme.colorScheme.onSurfaceVariant,
 		)
+		// Plain text on TV: many have no browser, and Play's TV review fails
+		// an app that tries to launch one (TV-WB). The address still reads.
+		val isTv = LocalIsTv.current
 		Text(
 			text = WEBSITE,
 			style = MaterialTheme.typography.bodySmall,
-			color = MaterialTheme.colorScheme.primary,
-			modifier = Modifier.clickable { uriHandler.openUri(WEBSITE) },
+			color = if (isTv) MaterialTheme.colorScheme.onSurfaceVariant
+				else MaterialTheme.colorScheme.primary,
+			modifier = if (isTv) Modifier
+				else Modifier.clickable { uriHandler.openUri(WEBSITE) },
 		)
 	}
 }

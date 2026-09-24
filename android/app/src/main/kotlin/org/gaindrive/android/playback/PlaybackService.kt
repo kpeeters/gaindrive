@@ -1,5 +1,7 @@
 package org.gaindrive.android.playback
 
+import android.app.PendingIntent
+import android.content.Intent
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import org.gaindrive.android.MainActivity
 import org.gaindrive.android.data.CaptionTracks
 import org.gaindrive.android.data.Connectivity
 import org.gaindrive.android.data.LibraryRepository
@@ -164,6 +167,18 @@ class PlaybackService : MediaLibraryService() {
 		// stops a decode on every notification refresh.
 		session = MediaLibrarySession.Builder(this, player, callback)
 			.setBitmapLoader(CacheBitmapLoader(CoilBitmapLoader(this, scope, connectivity)))
+			// Set explicitly rather than left to Media3's default, so a tap
+			// on the notification or the TV's Now Playing card is sure to
+			// bring the app back with its transport (Play's TV review,
+			// TV-PA). singleTop lands it on the running activity.
+			.setSessionActivity(
+				PendingIntent.getActivity(
+					this,
+					0,
+					Intent(this, MainActivity::class.java),
+					PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+				)
+			)
 			.build()
 		watchCastDevice()
 		watchAudioOnly()

@@ -18,10 +18,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import org.gaindrive.android.playback.PlayerState
+import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.components.formatDuration
 import org.gaindrive.android.ui.tvFocusHighlight
 
@@ -37,6 +45,11 @@ import org.gaindrive.android.ui.tvFocusHighlight
  * picture and have to be legible against it rather than against a surface.
  *
  * The handle is Material's own, at [THUMB_SIZE] rather than its own size.
+ *
+ * On TV, d-pad left and right skip by [SKIP_MS] rather than the slider's own
+ * 1% step, and center runs [onPlayPause] when given: Play's TV review wants
+ * exactly that of a playing screen (TV-PC). [focusRequester] lets a screen
+ * land the d-pad here first.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,7 +58,10 @@ fun SeekBar(
 	onSeek: (Long) -> Unit,
 	modifier: Modifier = Modifier.padding(horizontal = 24.dp),
 	textColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+	onPlayPause: (() -> Unit)? = null,
+	focusRequester: FocusRequester? = null,
 ) {
+	val isTv = LocalIsTv.current
 	var dragging by remember { mutableStateOf(false) }
 	var dragFraction by remember { mutableFloatStateOf(0f) }
 	// Shared with the thumb below rather than left to each of them. A thumb
@@ -61,9 +77,32 @@ fun SeekBar(
 
 	Column(modifier = modifier) {
 		Slider(
-			// The slider steps on d-pad left/right by itself once focused; the
-			// highlight is what makes it visible that it is the thing focused.
-			modifier = Modifier.tvFocusHighlight(),
+			// The highlight is what makes it visible that the slider is the
+			// thing focused. The key up is eaten along with the down: the
+			// slider would otherwise finish a keyboard "drag" it never began
+			// and seek to wherever its stale drag fraction points.
+			modifier = Modifier
+				.then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
+				.onPreviewKeyEvent { event ->
+					if (!isTv || !enabled) return@onPreviewKeyEvent false
+					val down = event.type == KeyEventType.KeyDown
+					when (event.key) {
+						Key.DirectionLeft, Key.DirectionRight -> {
+							if (down) {
+								val step = if (event.key == Key.DirectionLeft) -SKIP_MS else SKIP_MS
+								onSeek((state.positionMs + step).coerceIn(0L, state.durationMs))
+							}
+							true
+						}
+						Key.DirectionCenter, Key.Enter -> {
+							val toggle = onPlayPause ?: return@onPreviewKeyEvent false
+							if (down) toggle()
+							true
+						}
+						else -> false
+					}
+				}
+				.tvFocusHighlight(),
 			value = fraction,
 			onValueChange = {
 				dragging = true

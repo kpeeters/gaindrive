@@ -1,5 +1,6 @@
 package org.gaindrive.android.ui.player
 
+import android.util.Log
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
@@ -31,13 +33,18 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.playback.PlayerState
+import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.components.CoverHero
 import org.gaindrive.android.ui.components.CoverThumb
 
@@ -70,8 +77,26 @@ fun NowPlayingSheet(
 		{ onOpenAlbum(ref, current.album) }
 	}
 
+	// On TV the sheet opens with the d-pad on the seek bar, where center
+	// pauses and left/right skip (TV-PC). The square cover is taller than a
+	// 540dp screen, so the bar is not composed until the list scrolls past
+	// the cover; the title stays in view above it.
+	val isTv = LocalIsTv.current
+	val listState = rememberLazyListState()
+	val seekFocus = remember { FocusRequester() }
+	if (isTv) {
+		LaunchedEffect(Unit) {
+			listState.scrollToItem(META_INDEX)
+			repeat(FOCUS_FRAMES) {
+				withFrameNanos {}
+				if (seekFocus.requestFocus()) return@LaunchedEffect
+			}
+			Log.w(TAG, "seek bar never became focusable")
+		}
+	}
+
 	ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-		LazyColumn(modifier = Modifier.fillMaxWidth()) {
+		LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
 			item(key = "art") {
 				CoverHero(
 					url = current.artworkUrl,
@@ -136,7 +161,14 @@ fun NowPlayingSheet(
 				}
 			}
 
-			item(key = "seek") { SeekBar(state, onSeek) }
+			item(key = "seek") {
+				SeekBar(
+					state,
+					onSeek,
+					onPlayPause = onTogglePlay,
+					focusRequester = if (isTv) seekFocus else null,
+				)
+			}
 
 			item(key = "controls") {
 				// A Box rather than one Row: the transport stays centred on the
@@ -340,3 +372,10 @@ fun NowPlayingSheet(
 	}
 }
 
+/** The title's row in the sheet's list: the cover is 0, the seek bar 2. */
+private const val META_INDEX = 1
+
+/** As in `claimsFocus`: lazy items are composed during layout, a frame late. */
+private const val FOCUS_FRAMES = 10
+
+private const val TAG = "GainDriveNowPlaying"

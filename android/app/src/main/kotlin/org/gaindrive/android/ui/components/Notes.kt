@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import org.gaindrive.android.ui.LocalIsTv
 
 /** An outbound link shown as a chip. */
 data class ExternalLink(val label: String, val url: String)
@@ -62,7 +63,9 @@ fun NotesSection(
 			)
 		}
 
-		if (links.isNotEmpty()) {
+		// Not on TV: many have no browser to open a link in, and Play's TV
+		// review fails an app that tries to launch one (TV-WB).
+		if (links.isNotEmpty() && !LocalIsTv.current) {
 			// Scrolls rather than wraps: four links do not fit across a phone,
 			// and a plain Row kept squeezing the last chip until its label
 			// broke mid-word.

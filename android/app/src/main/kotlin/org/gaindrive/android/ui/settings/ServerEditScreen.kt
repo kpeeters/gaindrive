@@ -1,6 +1,7 @@
 package org.gaindrive.android.ui.settings
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,9 +61,12 @@ fun ServerEditScreen(
 	}
 
 	// The first-run copy has nothing behind it but an empty server list, so
-	// backing out is a dead end dressed as an exit: the remote's BACK is
-	// swallowed and the arrow is not drawn. Saving still leaves via onDone.
-	BackHandler(enabled = state.firstRun) {}
+	// popping it would be a dead end dressed as an exit; the arrow is not
+	// drawn. The remote's BACK leaves the app instead: swallowing it fails
+	// Play's TV review (TV-DB), which wants BACK to reach the home screen.
+	// Saving still leaves via onDone.
+	val activity = LocalActivity.current
+	BackHandler(enabled = state.firstRun) { activity?.finish() }
 
 	Scaffold(
 		topBar = {
