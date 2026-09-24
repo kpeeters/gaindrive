@@ -106,7 +106,7 @@ class AlbumRowsTest {
 			listOf(plain, concert),
 			mapOf(concert.ref to markers("Echoes", "Astronomy")),
 		)
-		assertTrue(rows[0].headings.isEmpty())
+		assertEquals(listOf("Disc 1"), rows[0].headings)
 		assertEquals(listOf("Disc 2"), rows[1].headings)
 		assertTrue(rows[2].headings.isEmpty())
 	}

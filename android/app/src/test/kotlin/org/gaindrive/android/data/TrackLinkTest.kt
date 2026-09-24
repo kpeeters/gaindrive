@@ -50,14 +50,14 @@ class TrackLinkTest {
 
 	@Test
 	fun `junk positions mean zero`() {
-		assertEquals(0, parseTrackLink("gaindrive://host/?track=1&t=")?.positionMs)
-		assertEquals(0, parseTrackLink("gaindrive://host/?track=1&t=abc")?.positionMs)
-		assertEquals(0, parseTrackLink("gaindrive://host/?track=1&t=-5")?.positionMs)
+		assertEquals(0L, parseTrackLink("gaindrive://host/?track=1&t=")?.positionMs)
+		assertEquals(0L, parseTrackLink("gaindrive://host/?track=1&t=abc")?.positionMs)
+		assertEquals(0L, parseTrackLink("gaindrive://host/?track=1&t=-5")?.positionMs)
 	}
 
 	@Test
 	fun `a fractional position keeps its milliseconds`() {
-		assertEquals(12_500, parseTrackLink("gaindrive://host/?track=1&t=12.5")?.positionMs)
+		assertEquals(12_500L, parseTrackLink("gaindrive://host/?track=1&t=12.5")?.positionMs)
 	}
 
 	@Test
