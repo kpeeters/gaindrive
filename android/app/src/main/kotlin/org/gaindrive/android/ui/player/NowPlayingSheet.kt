@@ -53,7 +53,7 @@ fun NowPlayingSheet(
 	onPrevious: () -> Unit,
 	onSeek: (Long) -> Unit,
 	onJumpTo: (Int) -> Unit,
-	onCast: () -> Unit,
+	onCast: (() -> Unit)?,
 	onSpeakerControls: () -> Unit,
 	onEqualizer: () -> Unit,
 	onInfo: () -> Unit,
@@ -252,20 +252,22 @@ fun NowPlayingSheet(
 						// segment URIs it cannot resolve - is refused in words
 						// by PlayerConnection, since deciding it here would need
 						// a reachability probe a composable cannot await.
-						IconButton(onClick = onCast) {
-							Icon(
-								imageVector = if (casting) {
-									Icons.Default.CastConnected
-								} else {
-									Icons.Default.Cast
-								},
-								contentDescription = if (casting) "Casting" else "Cast",
-								tint = if (casting) {
-									MaterialTheme.colorScheme.primary
-								} else {
-									MaterialTheme.colorScheme.onSurfaceVariant
-								},
-							)
+						if (onCast != null) {
+							IconButton(onClick = onCast) {
+								Icon(
+									imageVector = if (casting) {
+										Icons.Default.CastConnected
+									} else {
+										Icons.Default.Cast
+									},
+									contentDescription = if (casting) "Casting" else "Cast",
+									tint = if (casting) {
+										MaterialTheme.colorScheme.primary
+									} else {
+										MaterialTheme.colorScheme.onSurfaceVariant
+									},
+								)
+							}
 						}
 					}
 				}

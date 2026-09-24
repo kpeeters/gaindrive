@@ -184,6 +184,10 @@ fun GainDriveApp(
 	val castViewModel: CastViewModel = hiltViewModel()
 	val castDevice by castViewModel.connected.collectAsStateWithLifecycle()
 	var castPickerOpen by remember { mutableStateOf(false) }
+	// Null hides every cast button. A TV is the screen a film is cast *to*,
+	// and audio-only casting, the one case that could make sense from there,
+	// does not exist yet.
+	val openCastPicker: (() -> Unit)? = if (isTv) null else ({ castPickerOpen = true })
 	var speakerControlsOpen by remember { mutableStateOf(false) }
 	var equalizerOpen by remember { mutableStateOf(false) }
 
@@ -440,7 +444,7 @@ fun GainDriveApp(
 								// where the web client's own player bar has
 								// carried them all along.
 								casting = castDevice != null,
-								onCast = { castPickerOpen = true },
+								onCast = openCastPicker,
 								onInfo = { trackInfoOpen = true },
 							)
 						}
@@ -577,7 +581,7 @@ fun GainDriveApp(
 				composable<Route.Video> {
 					VideoScreen(
 						onBack = { navController.popBackStack() },
-						onCast = { castPickerOpen = true },
+						onCast = openCastPicker,
 						onInfo = { trackInfoOpen = true },
 					)
 				}
@@ -604,7 +608,7 @@ fun GainDriveApp(
 			onPrevious = playerViewModel::previous,
 			onSeek = playerViewModel::seekTo,
 			onJumpTo = playerViewModel::jumpTo,
-			onCast = { castPickerOpen = true },
+			onCast = openCastPicker,
 			onSpeakerControls = { speakerControlsOpen = true },
 			onEqualizer = { equalizerOpen = true },
 			onInfo = { trackInfoOpen = true },

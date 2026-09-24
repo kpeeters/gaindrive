@@ -105,7 +105,7 @@ import org.gaindrive.android.ui.tvFocusHighlight
 @Composable
 fun VideoScreen(
 	onBack: () -> Unit,
-	onCast: () -> Unit,
+	onCast: (() -> Unit)?,
 	onInfo: () -> Unit,
 	viewModel: PlayerViewModel = hiltViewModel(),
 	castViewModel: CastViewModel = hiltViewModel(),
@@ -552,7 +552,7 @@ private fun Controls(
 	onSeek: (Long) -> Unit,
 	onSkip: (Long) -> Unit,
 	onSelectTextTrack: (Int?) -> Unit,
-	onCast: () -> Unit,
+	onCast: (() -> Unit)?,
 	onInfo: () -> Unit,
 	chapterName: String?,
 	hasChapters: Boolean,
@@ -653,16 +653,18 @@ private fun Controls(
 			// in words by PlayerConnection rather than by hiding the button,
 			// since deciding it here would need a reachability probe a
 			// composable cannot await.
-			IconButton(onClick = onCast, modifier = Modifier.tvFocusHighlight()) {
-				Icon(
-					imageVector = if (casting) {
-						Icons.Default.CastConnected
-					} else {
-						Icons.Default.Cast
-					},
-					contentDescription = if (casting) "Casting" else "Cast",
-					tint = Color.White,
-				)
+			if (onCast != null) {
+				IconButton(onClick = onCast, modifier = Modifier.tvFocusHighlight()) {
+					Icon(
+						imageVector = if (casting) {
+							Icons.Default.CastConnected
+						} else {
+							Icons.Default.Cast
+						},
+						contentDescription = if (casting) "Casting" else "Cast",
+						tint = Color.White,
+					)
+				}
 			}
 		}
 

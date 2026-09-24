@@ -65,7 +65,7 @@ fun MiniPlayer(
 	onPrevious: () -> Unit,
 	onSeek: (Long) -> Unit,
 	casting: Boolean,
-	onCast: () -> Unit,
+	onCast: (() -> Unit)?,
 	onInfo: () -> Unit,
 ) {
 	val current = state.current ?: return
@@ -163,20 +163,22 @@ fun MiniPlayer(
 					// is refused in words by PlayerConnection, because
 					// answering it here would mean a reachability probe this
 					// composable cannot await.
-					IconButton(onClick = onCast) {
-						Icon(
-							imageVector = if (casting) {
-								Icons.Default.CastConnected
-							} else {
-								Icons.Default.Cast
-							},
-							contentDescription = if (casting) "Casting" else "Cast",
-							tint = if (casting) {
-								MaterialTheme.colorScheme.primary
-							} else {
-								LocalContentColor.current
-							},
-						)
+					if (onCast != null) {
+						IconButton(onClick = onCast) {
+							Icon(
+								imageVector = if (casting) {
+									Icons.Default.CastConnected
+								} else {
+									Icons.Default.Cast
+								},
+								contentDescription = if (casting) "Casting" else "Cast",
+								tint = if (casting) {
+									MaterialTheme.colorScheme.primary
+								} else {
+									LocalContentColor.current
+								},
+							)
+						}
 					}
 				}
 
