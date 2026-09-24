@@ -371,6 +371,8 @@ class PlayerConnection @Inject constructor(
 		if (controller.isPlaying) controller.pause() else controller.play()
 	}
 
+	fun pause() = controller?.pause()
+
 	fun next() = controller?.seekToNextMediaItem()
 
 	/**

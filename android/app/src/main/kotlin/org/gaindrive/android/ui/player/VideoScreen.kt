@@ -79,6 +79,8 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.ui.SubtitleView
 import kotlinx.coroutines.delay
@@ -145,6 +147,15 @@ fun VideoScreen(
 		LaunchedEffect(controlsVisible) {
 			if (controlsVisible) playFocus.requestFocus() else rootFocus.requestFocus()
 		}
+	}
+
+	// On a TV, leaving the app while the film is on screen pauses it: Play's
+	// TV review requires it (TV-NP), and nobody is left watching a picture
+	// the launcher now covers. ON_STOP rather than disposal, so backing out
+	// of this screen still leaves the sound playing as it always has. Not
+	// while casting: the picture is on the other television.
+	LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+		if (isTv && castDevice == null) viewModel.pause()
 	}
 
 	// What a side swipe is adjusting, and the last thing it adjusted - the
