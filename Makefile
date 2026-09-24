@@ -18,6 +18,8 @@ FEAT_RAW  := $(PLAY_DIR)/.feature-raw.png
 BANNER    := graphics/tv-banner.svg
 TV_BANNER := android/app/src/main/res/drawable-xhdpi/tv_banner.png
 BANNER_RAW := $(PLAY_DIR)/.banner-raw.png
+PLAY_TV    := $(PLAY_DIR)/tv-banner-1280x720.png
+PLAY_TV_RAW := $(PLAY_DIR)/.tv-banner-raw.png
 
 .PHONY: help upload-web api-html create-play-assets
 
@@ -50,7 +52,7 @@ upload-web: $(API_HTML)
 # uploaded by hand through the Play Console, so this is a prerequisite of
 # nothing and no build needs Inkscape or ImageMagick. The screenshots belong
 # here too once they exist.
-create-play-assets: $(PLAY_ICON) $(PLAY_FEAT) $(TV_BANNER)
+create-play-assets: $(PLAY_ICON) $(PLAY_FEAT) $(TV_BANNER) $(PLAY_TV)
 
 # 512x512 is the only size Play accepts, and it wants a full square: it applies
 # its own rounded-corner mask and shadow, so the SVG's full-bleed red is already
@@ -114,3 +116,15 @@ $(TV_BANNER): $(BANNER) $(FEATURE)
 	$(MAGICK) $(BANNER_RAW) -background '#f6efe0' -flatten -alpha off -strip $@
 	@rm -f $(BANNER_RAW)
 	@echo "Wrote $@ - commit it; the manifest names it as android:banner."
+
+# The same banner at the 1280x720 Play asks for in the Android TV section of
+# the listing. It is a listing image like the feature graphic, so it stays in
+# the gitignored PLAY_DIR rather than next to the res/ copy above. Its own raw
+# file keeps `make -j` from racing the 320x180 rule over BANNER_RAW.
+$(PLAY_TV): $(BANNER) $(FEATURE)
+	@mkdir -p $(PLAY_DIR)
+	$(INKSCAPE) $< --export-type=png -w 1280 -h 720 \
+	 --export-filename=$(PLAY_TV_RAW)
+	$(MAGICK) $(PLAY_TV_RAW) -background '#f6efe0' -flatten -alpha off -strip $@
+	@rm -f $(PLAY_TV_RAW)
+	@echo "Wrote $@ - upload it as the TV banner in the Play Console listing."
