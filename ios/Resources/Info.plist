@@ -109,5 +109,11 @@
 	     compliance question once instead of at every upload. -->
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+
+	<!-- Required by the Mac App Store for the Catalyst build; iOS ignores
+	     it. Must be one of Apple's category UTIs. Music rather than video or
+	     entertainment because that is what the app is primarily for. -->
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.music</string>
 </dict>
 </plist>
