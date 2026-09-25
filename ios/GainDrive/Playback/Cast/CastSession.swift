@@ -88,6 +88,10 @@ final class CastSession {
 	/// The receiver's device volume. Nil until it has stated one; the
 	/// connect-time GET_STATUS answer carries the first.
 	private(set) var volume: CastVolume?
+	/// The address the control channel reached, for what speaks to the same
+	/// box over another protocol - a WiiM's HTTP API. Nil until connected: a
+	/// discovered device is a Bonjour name until something resolves it.
+	private(set) var address: String?
 
 	/// Fired for every status push, after `status` is updated.
 	@ObservationIgnored var onStatus: ((CastStatus) -> Void)?
@@ -181,6 +185,7 @@ final class CastSession {
 		loaded = nil
 		failure = nil
 		volume = nil
+		address = nil
 	}
 
 	// MARK: - Commands
@@ -307,6 +312,7 @@ final class CastSession {
 				continue
 			}
 			if let resolved = await open.resolvedEndpoint { endpoint = resolved }
+			if let reached = await open.remoteAddress { address = reached }
 			guard !Task.isCancelled else {
 				await open.close()
 				return

@@ -70,6 +70,18 @@ struct CastDeviceSheet: View {
 		if let device = player.castDevice {
 			Section {
 				CastVolumeRow(session: player.castSession)
+				// A WiiM also speaks a private HTTP API on the same address,
+				// which reaches the equalizer the Cast protocol cannot. Only
+				// once the channel has resolved an address to reach it on.
+				if device.kind == .wiim {
+					if let address = player.castSession.address {
+						NavigationLink("Equalizer") {
+							WiiMControlsView(deviceId: device.id, address: address)
+						}
+					} else {
+						Text("Equalizer").foregroundStyle(.secondary)
+					}
+				}
 			} header: {
 				Text(device.name)
 			}
