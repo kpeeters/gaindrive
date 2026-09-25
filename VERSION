@@ -9,5 +9,5 @@
 # a discarded internal-track release - Google Play refuses a versionCode it has
 # already seen. It may be reset when `version` changes; the derived code still
 # increases, because each field outweighs the largest value below it.
-version=1.0.5
+version=1.0.6
 build=1

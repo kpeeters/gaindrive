@@ -17,10 +17,7 @@ jobs:
       matrix:
         include:
           - {arch: x86_64, runner: ubuntu-24.04}
-          # Re-enable once the repo is public: ubuntu-24.04-arm runners are
-          # free for public repos only, and billed on a private one. Nothing
-          # else needs changing - the build is arch-agnostic.
-          # - {arch: arm64,  runner: ubuntu-24.04-arm}
+          - {arch: arm64,  runner: ubuntu-24.04-arm}
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
