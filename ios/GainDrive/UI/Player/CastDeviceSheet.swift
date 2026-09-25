@@ -256,31 +256,60 @@ struct CastButton: View {
 	}
 }
 
-/// A slider over the receiver's device volume, disabled until the receiver has
-/// said what it is: moving from a guess could jump the volume. SET_VOLUME is
-/// one code path for every receiver, a WiiM included.
+/// The receiver's device volume: a bar that shows it and two buttons that step
+/// it, one per cent a tap, as on Android.
+///
+/// **Deliberately not a slider.** A slider can take an amplifier from quiet to
+/// 100% in one careless drag or a stray tap at its end, and on a WiiM driving
+/// real speakers that is a way to damage them or somebody's ears. Steps make
+/// every change small and deliberate. The bar is information only.
+///
+/// Both buttons wait until the receiver has said what the volume is: stepping
+/// from a guess could jump it. SET_VOLUME is one code path for every receiver,
+/// a WiiM included.
 struct CastVolumeRow: View {
 	let session: CastSession
 
+	/// One per cent. The receiver's own step size is unknowable, so this is a
+	/// feel choice rather than a mapping - Android's `CAST_VOLUME_STEP`.
+	static let step = 0.01
+
 	var body: some View {
 		HStack(spacing: 12) {
-			Image(systemName: "speaker.fill").foregroundStyle(.secondary)
-			Slider(value: level, in: 0...1)
-				.disabled(session.volume == nil)
+			Button {
+				stepBy(-Self.step)
+			} label: {
+				Image(systemName: "speaker.minus.fill")
+			}
+			.disabled(level == nil || level == 0)
+			.accessibilityLabel("Volume down")
+			ProgressView(value: level ?? 0)
 				.accessibilityLabel("Volume")
-			Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
+				.accessibilityValue(level.map { "\(Int(($0 * 100).rounded())) per cent" } ?? "Unknown")
+			Text(level.map { "\(Int(($0 * 100).rounded()))%" } ?? "–")
+				.font(.footnote.monospacedDigit())
+				.foregroundStyle(.secondary)
+				.frame(minWidth: 36, alignment: .trailing)
+			Button {
+				stepBy(Self.step)
+			} label: {
+				Image(systemName: "speaker.plus.fill")
+			}
+			.disabled(level == nil || level == 1)
+			.accessibilityLabel("Volume up")
 		}
+		// In a List row, a plain button style keeps each button its own tap
+		// target rather than the whole row answering for the first one.
+		.buttonStyle(.borderless)
 	}
 
-	/// Rounded to a hundredth before it is sent, so one drag across is at
-	/// most a hundred messages rather than one per pixel.
-	private var level: Binding<Double> {
-		Binding(
-			get: { session.volume?.level ?? 0 },
-			set: { new in
-				let rounded = (new * 100).rounded() / 100
-				guard rounded != session.volume?.level else { return }
-				session.setVolume(rounded)
-			})
+	private var level: Double? { session.volume?.level }
+
+	/// Rounded to the step, so repeated taps land on whole per cents rather
+	/// than drifting with whatever fraction the receiver reported.
+	private func stepBy(_ delta: Double) {
+		guard let level else { return }
+		let next = ((level + delta) * 100).rounded() / 100
+		session.setVolume(min(max(next, 0), 1))
 	}
 }
