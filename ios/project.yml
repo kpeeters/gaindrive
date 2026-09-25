@@ -140,6 +140,15 @@ targets:
         # to have an opinion about.
         CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: Resources/GainDrive.entitlements
 
+        # No debug dylib on the Mac. With it, a debug build's main executable
+        # is a fixed stub with the same Mach-O UUID whatever the app, and
+        # macOS local network privacy identifies a Mac app by that UUID - so
+        # after the bundle id changed, nehelper mapped the new app to the old
+        # one's record, never prompted, and every request to a server on the
+        # LAN failed as "offline" (-1009, ENETDOWN, path satisfied). The dylib
+        # only serves SwiftUI previews, which this project does not use.
+        ENABLE_DEBUG_DYLIB[sdk=macosx*]: NO
+
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic
