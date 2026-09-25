@@ -7485,6 +7485,21 @@ function playerPlay(offset = 0, forceMp3 = false) {
    playerUpdateUI();
 }
 
+// Highlight active row in track list if it is currently visible.  Both
+// classes come off together: .buffering styles nothing on its own, but a
+// row left carrying it would light up again the moment it became the
+// playing one, before anything had asked for it.
+function markPlayingRow(id)
+   {
+   document.querySelector('.track-row.playing')
+      ?.classList.remove('playing', 'buffering');
+   if (id == null) return;
+   const activeRow = document.querySelector(`.track-row[data-id="${CSS.escape(String(id))}"]`);
+   activeRow?.classList.remove('queued');
+   activeRow?.classList.add('playing');
+   activeRow?.classList.toggle('buffering', player.buffering);
+   }
+
 function playerUpdateUI() {
    const song = player.queue[player.index];
    if (!song) return;
@@ -7510,16 +7525,7 @@ function playerUpdateUI() {
       artistName: song.artist ?? '',
       };
 
-   // Highlight active row in track list if it is currently visible.  Both
-   // classes come off together: .buffering styles nothing on its own, but a
-   // row left carrying it would light up again the moment it became the
-   // playing one, before anything had asked for it.
-   document.querySelector('.track-row.playing')
-      ?.classList.remove('playing', 'buffering');
-   const activeRow = document.querySelector(`.track-row[data-id="${song.id}"]`);
-   activeRow?.classList.remove('queued');
-   activeRow?.classList.add('playing');
-   activeRow?.classList.toggle('buffering', player.buffering);
+   markPlayingRow(song.id);
 
    if ('mediaSession' in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({
@@ -8307,6 +8313,10 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
       }
 
    pane.appendChild(frag);
+   // The rows are new nodes, so a track that was already playing when this
+   // listing was (re)built would otherwise lose its arrow until the next
+   // track starts.
+   markPlayingRow(player.queue[player.index]?.id);
    renderSlideTo(gen, 2);
 
    if (autoPlayId !== null) {
@@ -8601,8 +8611,9 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
             }
 
          // The rename goes last, and that ordering is load-bearing: it moves the
-         // directory, so every song id and the album id above it stop resolving.
-         // The per-track updateSong calls have to have happened already.
+         // directory, and a move into a directory that did not exist yet mints
+         // a new album id. The per-track updateSong calls have to have happened
+         // already.
          const newName   = nameInput.value.trim();
          const newArtist = artistInput.value.trim();
          const renaming  = errors.length === 0
