@@ -82,7 +82,7 @@ final class CastSession {
 	@ObservationIgnored private var gaveUpOn = 0
 	@ObservationIgnored private var requestId = 1
 
-	private static let log = Logger(subsystem: "org.gaindrive.ios", category: "cast")
+	private static let log = Logger(subsystem: "org.gaindrive.ios-player", category: "cast")
 	private static let reconnectDelay = Duration.milliseconds(500)
 	private static let pollInterval = Duration.seconds(1)
 	/// Long enough for a receiver that is already running our app to answer,

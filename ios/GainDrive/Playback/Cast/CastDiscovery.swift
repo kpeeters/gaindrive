@@ -87,7 +87,7 @@ final class CastDiscovery {
 	// `nonisolated` because the TXT parsing below runs off the browser's
 	// callback, before anything has hopped to the main actor. `Logger` is
 	// `Sendable`, so this is a statement of fact rather than an escape hatch.
-	nonisolated private static let log = Logger(subsystem: "org.gaindrive.ios", category: "cast")
+	nonisolated private static let log = Logger(subsystem: "org.gaindrive.ios-player", category: "cast")
 
 	// MARK: - Lifecycle
 

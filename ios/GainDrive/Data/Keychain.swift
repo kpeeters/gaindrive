@@ -39,7 +39,7 @@ enum Keychain {
 	/// constants as safe, which is why the `query` dictionary below compiles.
 	private static var accessibility: CFString { kSecAttrAccessibleAfterFirstUnlock }
 
-	private static let service = "org.gaindrive.ios.server-password"
+	private static let service = "org.gaindrive.ios-player.server-password"
 
 	/// Every failure is logged with its `OSStatus`.
 	///
@@ -49,7 +49,7 @@ enum Keychain {
 	/// saved password", or a browse screen failing to build a client - which
 	/// reads as a bug anywhere but here. `-34018` is `errSecMissingEntitlement`
 	/// and means the signed app may not reach the keychain it asked for.
-	private static let log = Logger(subsystem: "org.gaindrive.ios", category: "keychain")
+	private static let log = Logger(subsystem: "org.gaindrive.ios-player", category: "keychain")
 
 	private static func query(for server: ServerId) -> [String: Any] {
 		[

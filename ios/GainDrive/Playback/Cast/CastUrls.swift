@@ -128,7 +128,7 @@ struct CastUrls {
 	// `@MainActor` type is main-actor isolated otherwise, which is a constraint
 	// a logger has no reason to carry.
 	nonisolated private static let log = Logger(
-		subsystem: "org.gaindrive.ios", category: "cast")
+		subsystem: "org.gaindrive.ios-player", category: "cast")
 
 	/// The audio a receiver should fetch.
 	///

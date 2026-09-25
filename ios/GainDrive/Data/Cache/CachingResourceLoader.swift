@@ -47,7 +47,7 @@ final class CachingResourceLoader: NSObject, @unchecked Sendable {
 		return components?.url ?? url
 	}
 
-	let queue = DispatchQueue(label: "org.gaindrive.ios.resource-loader")
+	let queue = DispatchQueue(label: "org.gaindrive.ios-player.resource-loader")
 
 	private let source: URL
 	private let ref: ItemRef

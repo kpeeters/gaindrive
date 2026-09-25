@@ -46,7 +46,7 @@ struct CastProbe: Sendable {
 	/// seconds, and a receiver waking from standby answers slowly.
 	static let answerTimeout = Duration.seconds(6)
 
-	private static let log = Logger(subsystem: "org.gaindrive.ios", category: "cast")
+	private static let log = Logger(subsystem: "org.gaindrive.ios-player", category: "cast")
 
 	/// Connect, ask for a receiver status, report what came back.
 	///

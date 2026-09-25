@@ -21,10 +21,11 @@ struct BundleConfigurationTests {
 	/// second, empty app. A suffix added later would be a silent migration.
 	///
 	/// Run under `make test-mac` this also pins the Catalyst build to the same
-	/// identifier: Xcode's default would make it `maccatalyst.org.gaindrive.ios`,
-	/// and the Mac app would then be a stranger to every id the iOS one stores.
+	/// identifier: Xcode's default would make it
+	/// `maccatalyst.org.gaindrive.ios-player`, and the Mac app would then be a
+	/// stranger to every id the iOS one stores.
 	@Test func bundleIdentifierIsStable() {
-		#expect(Bundle.main.bundleIdentifier == "org.gaindrive.ios")
+		#expect(Bundle.main.bundleIdentifier == "org.gaindrive.ios-player")
 	}
 
 	/// Background audio is the one background mode the app claims.

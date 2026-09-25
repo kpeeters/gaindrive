@@ -74,7 +74,7 @@ settingGroups:
     # it later is a decision rather than a default.
     SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
     # The default (YES) would ship the Mac build as
-    # `maccatalyst.org.gaindrive.ios`. One identifier across both is what
+    # `maccatalyst.org.gaindrive.ios-player`. One identifier across both is what
     # universal purchase expects, and it keeps `Bundle.main.bundleIdentifier`
     # the same constant everywhere - the tests assert on it and would otherwise
     # need a platform branch.
@@ -110,7 +110,7 @@ targets:
         PRODUCT_NAME: GainDrive
         # Debug and release share this deliberately, so switching between them
         # replaces the app in place and keeps the configured servers.
-        PRODUCT_BUNDLE_IDENTIFIER: org.gaindrive.ios
+        PRODUCT_BUNDLE_IDENTIFIER: org.gaindrive.ios-player
         # From the repository's root VERSION file, which the Makefile reads and
         # exports before running xcodegen. These are not spelled out here on
         # purpose: the same two numbers drive the server and the Android app,
@@ -166,7 +166,7 @@ targets:
       groups:
         - catalyst
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.gaindrive.ios.tests
+        PRODUCT_BUNDLE_IDENTIFIER: org.gaindrive.ios-player.tests
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:

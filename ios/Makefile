@@ -56,10 +56,10 @@ endif
 #
 # Xcode's GUI does this silently; xcodebuild refuses unless asked, and says so
 # with an error that names neither the cause nor the fix - "no profiles for
-# org.gaindrive.ios were found". The cause is always the same: the entitlements
-# changed, so the existing profile no longer matches the app. `keychain-access-
-# groups` was the change that first triggered it, and any future capability will
-# do it again.
+# org.gaindrive.ios-player were found". The cause is always the same: the
+# entitlements changed, so the existing profile no longer matches the app.
+# `keychain-access-groups` was the change that first triggered it, and any
+# future capability will do it again.
 #
 # The cost, stated plainly: with this flag a build may contact Apple's developer
 # portal and create or modify a profile on the signed-in account. It does
