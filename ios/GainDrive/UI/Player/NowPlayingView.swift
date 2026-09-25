@@ -20,6 +20,7 @@ import UIKit
 /// all into a shared navigator for this one case.
 struct NowPlayingView: View {
 	@Environment(PlayerConnection.self) private var player
+	@Environment(CastDeviceStore.self) private var castDevices
 	@Environment(\.dismiss) private var dismiss
 	@Environment(\.verticalSizeClass) private var verticalSizeClass
 
@@ -55,7 +56,15 @@ struct NowPlayingView: View {
 		}
 		.sheet(item: $addingTo) { AddToPlaylistView(song: $0) }
 		.sheet(item: $showingInfo) { TrackInfoView(song: $0) }
-		.sheet(isPresented: $castPicker) { CastDeviceSheet() }
+		// Handed over explicitly rather than inherited: on the Mac this sheet
+		// was presented with an environment missing `PlayerConnection`, and
+		// crashed on its first lookup. Resolved here, where the lookup works -
+		// the cure `RootView` records for sheets under the sidebar `TabView`.
+		.sheet(isPresented: $castPicker) {
+			CastDeviceSheet()
+				.environment(player)
+				.environment(castDevices)
+		}
 	}
 
 	private func content(_ song: Song) -> some View {
