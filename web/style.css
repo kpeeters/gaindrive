@@ -1398,7 +1398,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 .artist-bio-text {
    font-size: 0.8rem;
-   color: var(--text-dim);
+   color: var(--text);
    line-height: 1.5;
    /* These fields are several paragraphs of plain text whose breaks are the
       only structure they have, and a <p> collapses them - so a multi-paragraph
@@ -1653,7 +1653,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 .album-meta {
    font-size: 0.75rem;
-   color: var(--text-dim);
+   color: var(--text);
 }
 
 /* Sized down from .mi's 1.25rem to sit with the meta line's 0.75rem text, and
