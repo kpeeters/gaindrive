@@ -27,6 +27,11 @@ final class PinRepository {
 	private(set) var message: String?
 
 	private var membership: [Pin.ID: [ItemRef]] = [:]
+	/// Pinned refs that are videos, kept for their soundtrack under "Play
+	/// videos as audio only". A ref alone cannot say, and a video resolved
+	/// through the ordinary audio path with "Original" set would download the
+	/// film.
+	private var videos: Set<ItemRef> = []
 	/// Pinned **and** here. Everything else on disk is `cached`, which the
 	/// store answers for directly - there is no list of it, because the list
 	/// would be out of date the moment eviction ran.
@@ -151,15 +156,16 @@ final class PinRepository {
 
 	// MARK: - Writing
 
-	func toggle(_ pin: Pin) async {
+	/// `isVideo` matters only for a song pin, whose ref is all it carries.
+	func toggle(_ pin: Pin, isVideo: Bool = false) async {
 		if isPinned(pin.ref, kind: pin.kind) {
 			await remove(pin)
 		} else {
-			await add(pin)
+			await add(pin, isVideo: isVideo)
 		}
 	}
 
-	private func add(_ pin: Pin) async {
+	private func add(_ pin: Pin, isVideo: Bool) async {
 		// A song pin is its own membership and needs no read, which is also
 		// why it is the one kind that cannot fail to resolve.
 		let songs = pin.kind == .song ? [] : await resolve(pin)
@@ -196,6 +202,8 @@ final class PinRepository {
 
 		pins.append(pin)
 		if pin.kind != .song { membership[pin.id] = refs }
+		if pin.kind == .song, isVideo { videos.insert(pin.ref) }
+		videos.formUnion(songs.filter(\.isVideo).map(\.ref))
 		persist()
 		await pushLimits()
 		await startMissing(refs)
@@ -276,7 +284,9 @@ final class PinRepository {
 
 		var resolved: [Pin.ID: [ItemRef]] = [:]
 		for pin in pins where pin.kind != .song {
-			resolved[pin.id] = await resolve(pin).map(\.ref)
+			let songs = await resolve(pin)
+			resolved[pin.id] = songs.map(\.ref)
+			videos.formUnion(songs.filter(\.isVideo).map(\.ref))
 		}
 		membership = Pins.pruned(
 			Pins.merging(membership, resolved: resolved), to: pins)
@@ -292,17 +302,22 @@ final class PinRepository {
 		switch pin.kind {
 		case .song:
 			return []
-		// **Videos are never downloaded**, whatever they are pinned inside. One
+		// **Films are never downloaded**, whatever they are pinned inside. One
 		// film evicts the whole stored library, and a re-encoded one arrives
 		// with no `Content-Length` so completeness could never be established.
 		// Dropped here rather than at the download, so a mostly-audio album
 		// pins cleanly and its film is simply not part of what the pin covers.
+		//
+		// A video played for its soundtrack is not a film here: that is an
+		// ordinary audio transcode, and Android downloads it too. Turning the
+		// setting off drops it from the next resolve, which leaves its bytes
+		// unprotected and so evictable.
 		case .album:
 			return ((try? await library.albumDetail(pin.ref))?.songs ?? [])
-				.filter { !$0.isVideo }
+				.filter { !settings.showsPicture($0) }
 		case .playlist:
 			return ((try? await library.playlist(pin.ref))?.songs ?? [])
-				.filter { !$0.isVideo }
+				.filter { !settings.showsPicture($0) }
 		}
 	}
 
@@ -311,10 +326,15 @@ final class PinRepository {
 			// The same declaration playback makes, and it must be the same:
 			// `StreamTargets` is shared precisely so a download and a play
 			// cannot ask for different bytes, and they derive one cache key.
-			guard
-				let target = await targets.target(
-					for: ref, playable: avfoundationPlayable(for:))
-			else { continue }
+			// A pinned video is its soundtrack, resolved exactly as playback
+			// resolves it so the two derive one cache key.
+			let resolved: StreamTarget?
+			if videos.contains(ref) {
+				resolved = await targets.soundtrack(for: ref)
+			} else {
+				resolved = await targets.target(for: ref, playable: avfoundationPlayable(for:))
+			}
+			guard let target = resolved else { continue }
 			progress[ref] = 0
 			queue.start(
 				ref, quality: target.quality, url: target.url,
@@ -344,6 +364,9 @@ final class PinRepository {
 	private struct Record: Codable {
 		var pins: [Pin] = []
 		var membership: [String: [ItemRef]] = [:]
+		/// Optional so a file written before it existed still decodes: the
+		/// synthesised decoder skips a missing key only for an optional.
+		var videos: [ItemRef]?
 	}
 
 	private func load() {
@@ -352,10 +375,14 @@ final class PinRepository {
 		else { return }
 		pins = record.pins
 		membership = record.membership
+		videos = Set(record.videos ?? [])
 	}
 
 	private func persist() {
-		let record = Record(pins: pins, membership: membership)
+		// Only what a pin still covers, so the set cannot grow without bound.
+		let covered = Pins.expand(pins, membership: membership)
+		videos = videos.intersection(covered)
+		let record = Record(pins: pins, membership: membership, videos: Array(videos))
 		guard let data = try? JSONEncoder().encode(record) else { return }
 		try? data.write(to: file, options: .atomic)
 	}
@@ -372,7 +399,11 @@ extension Pins {
 	/// AAC 160 of a FLAC album would then overestimate by five or six times and
 	/// refuse a pin that fits comfortably. The rate is the one actually being
 	/// requested, so the arithmetic is the same one the server will do.
-	static func estimatedBytes(of song: Song, quality: AudioQuality) -> Int64 {
+	///
+	/// A video is its soundtrack, never the film's own size - which with
+	/// "Original" set would refuse a concert for the size of its picture.
+	static func estimatedBytes(of song: Song, quality wanted: AudioQuality) -> Int64 {
+		let quality = song.isVideo ? wanted.forVideoAudio() : wanted
 		guard quality.format != .original else { return Int64(song.sizeBytes) }
 		guard song.duration > 0 else { return Int64(song.sizeBytes) }
 		return Int64(song.duration) * Int64(quality.bitRate) * 1000 / 8

@@ -107,6 +107,24 @@ final class SettingsStore {
 		didSet { defaults.set(downloadUnmeteredOnly, forKey: Self.unmeteredOnlyKey) }
 	}
 
+	/// Play videos for their soundtrack alone: no picture, through the audio
+	/// path, so a concert streams, caches and downloads like an album.
+	///
+	/// Global rather than per track, as on Android: a pin has to know before
+	/// anything is fetched whether what it stores for a film is its soundtrack
+	/// or nothing. Off by default - a video library is a video library until
+	/// someone says otherwise.
+	var videoAudioOnly: Bool {
+		didSet { defaults.set(videoAudioOnly, forKey: Self.videoAudioOnlyKey) }
+	}
+
+	/// Whether this song plays with a picture. **The one question** every
+	/// "is it a video" decision in playback asks, so the setting cannot be
+	/// honoured in one place and forgotten in another.
+	func showsPicture(_ song: Song) -> Bool {
+		song.isVideo && !videoAudioOnly
+	}
+
 	static let defaultCacheCapBytes: Int64 = 4 * 1024 * 1024 * 1024
 	static let cacheCapChoices: [Int64] = [
 		1 * 1024 * 1024 * 1024,
@@ -128,6 +146,7 @@ final class SettingsStore {
 	private static let offlineKey = "offline_mode"
 	private static let cacheOnPlayKey = "cache_on_play"
 	private static let unmeteredOnlyKey = "download_unmetered_only"
+	private static let videoAudioOnlyKey = "video_audio_only"
 
 	init(defaults: UserDefaults = .standard) {
 		self.defaults = defaults
@@ -152,5 +171,6 @@ final class SettingsStore {
 		cacheCapBytes = storedCap.map { Int64($0) } ?? Self.defaultCacheCapBytes
 		cacheOnPlay = defaults.object(forKey: Self.cacheOnPlayKey) as? Bool ?? true
 		downloadUnmeteredOnly = defaults.object(forKey: Self.unmeteredOnlyKey) as? Bool ?? true
+		videoAudioOnly = defaults.bool(forKey: Self.videoAudioOnlyKey)
 	}
 }

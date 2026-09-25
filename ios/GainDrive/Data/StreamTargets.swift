@@ -61,6 +61,18 @@ struct StreamTargets {
 		await target(for: ref, wanted: settings.audioQuality, playable: playable)
 	}
 
+	/// A video's **soundtrack**: the configured quality through
+	/// `forVideoAudio`, and nothing declared.
+	///
+	/// Nothing declared because the server guards the audio declaration on
+	/// the song not being a video, and a parameter it drops invites the next
+	/// reader to believe it does something. The one resolver for both callers
+	/// that want a film's sound - local playback with "audio only" on, and a
+	/// receiver with no screen - so the two cannot ask for different bytes.
+	func soundtrack(for ref: ItemRef) async -> StreamTarget? {
+		await target(for: ref, wanted: settings.audioQuality.forVideoAudio())
+	}
+
 	/// A target at a stated quality rather than the configured one.
 	///
 	/// **The ceiling still applies**, which is the whole reason this is here

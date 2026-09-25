@@ -109,6 +109,21 @@ struct PinsTests {
 		#expect(Pins.estimatedBytes(of: flac, quality: .original) == 40_000_000)
 	}
 
+	/// A video is pinned for its soundtrack, so "Original" must not estimate
+	/// it at the size of the film and refuse it for its picture.
+	@Test func aVideoIsEstimatedAsItsSoundtrack() {
+		let base = song("1", seconds: 3600, bytes: 2_500_000_000)
+		let film = Song(
+			ref: base.ref, title: "T", artistName: "A", albumTitle: "B", albumRef: nil,
+			track: nil, discNumber: nil, year: nil, duration: 3600, bitRate: nil,
+			suffix: nil, contentType: nil, sizeBytes: 2_500_000_000, coverArt: nil,
+			starredAt: nil, lastPlayedAt: nil, isVideo: true, nativeSeek: true,
+			width: nil, height: nil)
+		#expect(
+			Pins.estimatedBytes(of: film, quality: .original)
+				== Pins.estimatedBytes(of: base, quality: .default))
+	}
+
 	/// A duration of zero is "not known", and arithmetic over it would say a
 	/// track costs nothing at all.
 	@Test func anUnknownDurationFallsBackToTheStoredSize() {

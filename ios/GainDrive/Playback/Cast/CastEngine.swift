@@ -44,6 +44,8 @@ final class CastEngine: PlaybackEngine {
 
 	private let session: CastSession
 	private let urls: CastUrls
+	/// For `showsPicture`: "Play videos as audio only" casts the sound too.
+	private let settings: SettingsStore
 	/// **Warmed before the LOAD, not after it**, and awaited.
 	///
 	/// The server's transcode cache is blocking: it runs ffmpeg over the whole
@@ -74,9 +76,10 @@ final class CastEngine: PlaybackEngine {
 	private var reported: Double = 0
 	private var ticker: Task<Void, Never>?
 
-	init(session: CastSession, urls: CastUrls) {
+	init(session: CastSession, urls: CastUrls, settings: SettingsStore) {
 		self.session = session
 		self.urls = urls
+		self.settings = settings
 		session.onStatus = { [weak self] status in self?.received(status) }
 	}
 
@@ -131,8 +134,11 @@ final class CastEngine: PlaybackEngine {
 		// `videoOut` nil means the device announced nothing, and is read as
 		// *capable* - the server's rule, because refusing the picture on a
 		// guess is worse than the guess.
+		//
+		// "Play videos as audio only" reaches the same answer from this end:
+		// the user asked for the sound, whatever the receiver can show.
 		let showsPicture = session.device?.videoOut ?? true
-		let asSound = song.isVideo && !showsPicture
+		let asSound = song.isVideo && (!showsPicture || !settings.showsPicture(song))
 
 		// **A film the server can only re-encode is refused rather than sent.**
 		// That tier is a chunked response with no length and no index, which a
@@ -253,7 +259,9 @@ final class CastEngine: PlaybackEngine {
 	/// device would ask for: no stored file, no rewritten scheme, and paced. See
 	/// `CastUrls`.
 	func target(for song: Song) async -> StreamTarget? {
-		song.isVideo ? urls.video(for: song) : await urls.audio(for: song)
+		if settings.showsPicture(song) { return urls.video(for: song) }
+		if song.isVideo { return await urls.soundtrack(for: song) }
+		return await urls.audio(for: song)
 	}
 
 	// MARK: - Status

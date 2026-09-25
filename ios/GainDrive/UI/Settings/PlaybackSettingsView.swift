@@ -41,6 +41,21 @@ struct PlaybackSettingsView: View {
 			} footer: {
 				Text(footerText)
 			}
+
+			// Here rather than under Storage, where Android has it: the
+			// question is what a video *plays as*, and the storage half of
+			// it follows from that answer.
+			Section {
+				@Bindable var settings = settings
+				Toggle("Play videos as audio only", isOn: $settings.videoAudioOnly)
+			} footer: {
+				Text(
+					"""
+					Videos play their soundtrack in the chosen format, with no \
+					picture, and can be downloaded like any track. Takes effect \
+					from the next track.
+					""")
+			}
 		}
 		.navigationTitle("Playback")
 		.navigationBarTitleDisplayMode(.inline)

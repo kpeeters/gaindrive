@@ -189,11 +189,18 @@ struct CastUrls {
 	/// **The mechanism is one query parameter**, and `audio(for:)` already
 	/// produces it: naming an audio `format` for a video *is* the server's
 	/// request for its soundtrack. So
-	/// this is a name rather than an implementation - the call site should read
-	/// as the decision it is making, and "ask for the audio of a video" is not
-	/// obviously that.
+	/// this is mostly a name - the call site should read as the decision it is
+	/// making, and "ask for the audio of a video" is not obviously that.
+	///
+	/// **Not `audio(for:)` any more.** That applies the configured quality, and
+	/// with "Original" set it sent no `format` - which for a video is the film,
+	/// the very thing this exists to keep off a receiver with no screen.
+	/// `StreamTargets.soundtrack` names a container whatever the setting.
 	func soundtrack(for song: Song) async -> StreamTarget? {
-		await audio(for: song)
+		guard let target = await targets.soundtrack(for: song.ref) else { return nil }
+		return StreamTarget(
+			url: paced(target.url), quality: target.quality, cacheKey: target.cacheKey,
+			contentType: target.contentType)
 	}
 
 	/// The sleeve the television shows. An ordinary cover URL - the receiver

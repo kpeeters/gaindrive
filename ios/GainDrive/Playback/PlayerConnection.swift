@@ -62,6 +62,10 @@ final class PlayerConnection {
 	/// carries on.
 	var showingVideo = false
 
+	/// The watchdog paused a film. Drawn by the video screen with a Retry;
+	/// cleared by that, by a change of track, and by stopping.
+	private(set) var stallNotice = false
+
 	var hasNext: Bool { model.hasNext }
 	var hasPrevious: Bool { model.hasPrevious }
 	var isActive: Bool { current != nil }
@@ -96,14 +100,25 @@ final class PlayerConnection {
 	/// actually loaded rather than re-derived from the device, because the
 	/// decision is `CastEngine`'s and a second copy of it would be a second
 	/// answer.
+	///
+	/// Not for a video the user asked to hear rather than watch: nothing about
+	/// that needs explaining.
 	var castSendsSoundOnly: Bool {
-		guard current?.isVideo == true, let media = castSession.loaded else { return false }
+		guard currentShowsPicture, let media = castSession.loaded else { return false }
 		return !media.isVideo
+	}
+
+	/// Whether what is playing has a picture to show, which is what the
+	/// "Watch" buttons and the video cover ask. See `SettingsStore.showsPicture`.
+	var currentShowsPicture: Bool {
+		current.map(settings.showsPicture) ?? false
 	}
 
 	/// Only for cover art: the stream URL belongs to the engine, which knows
 	/// what kind of URL it can consume.
 	@ObservationIgnored private let registry: ServerRegistry
+	/// For `showsPicture`, which decides whether a video raises the picture.
+	@ObservationIgnored private let settings: SettingsStore
 	@ObservationIgnored private let nowPlaying = NowPlayingCenter()
 	// The three that attach to the **role** rather than to the player: swapping
 	// in a cast engine must not silence any of them. Android is where that
@@ -122,6 +137,7 @@ final class PlayerConnection {
 		targets: StreamTargets, store: AudioStore, settings: SettingsStore
 	) {
 		self.registry = registry
+		self.settings = settings
 		self.scrobbler = Scrobbler(library: library)
 		self.castUrls = CastUrls(targets: targets, registry: registry)
 		let local = LocalEngine(targets: targets, store: store, settings: settings)
@@ -145,7 +161,7 @@ final class PlayerConnection {
 	func startCasting(to device: CastDevice) {
 		guard castSession.device != device || cast == nil else { return }
 		let resumeAt = position
-		let engine = CastEngine(session: castSession, urls: castUrls)
+		let engine = CastEngine(session: castSession, urls: castUrls, settings: settings)
 		cast = engine
 		castSession.connect(to: device)
 		adopt(engine)
@@ -298,12 +314,23 @@ final class PlayerConnection {
 		model.clear()
 		clearLoading()
 		errorMessage = nil
+		stallNotice = false
 		publishQueue()
 		nowPlaying.clear()
 	}
 
 	func clearError() {
 		errorMessage = nil
+	}
+
+	/// After a stall: rebuilt at the same position rather than resumed, since
+	/// a wedged item is not one that pressing play reliably revives.
+	func retryAfterStall() {
+		stallNotice = false
+		guard let song = current else { return }
+		beginLoading(song.ref)
+		let at = position
+		Task { await reconcile(thenPlay: true, forceRebuild: true, offset: at) }
 	}
 
 	/// **The video surface attaches to this directly**, which is a deliberate
@@ -469,7 +496,11 @@ final class PlayerConnection {
 			// stalls", which is buffering *and* wanting to play - the pair the
 			// watchdog needs, and the same predicate Android spells as
 			// `STATE_BUFFERING && playWhenReady`.
-			return PlaybackWatchdog.Sample(stalled: self.isBuffering, position: self.position)
+			// Any video, film or soundtrack, may be a transcode the server
+			// builds in full before sending anything.
+			return PlaybackWatchdog.Sample(
+				stalled: self.isBuffering, position: self.position,
+				building: self.current?.isVideo == true)
 		}
 		watchdog.onStall = { [weak self] in
 			guard let self else { return }
@@ -480,7 +511,13 @@ final class PlayerConnection {
 			// throw the queue away. Pausing keeps it, and pressing play is the
 			// retry.
 			self.pause()
-			self.errorMessage = "Playback stalled and was paused."
+			// Over the picture the shell's alert cannot show - a full-screen
+			// cover hides it - so the video screen draws its own notice.
+			if self.showingVideo {
+				self.stallNotice = true
+			} else {
+				self.errorMessage = "Playback stalled and was paused."
+			}
 		}
 	}
 
@@ -502,13 +539,16 @@ final class PlayerConnection {
 		// The one place in the class that means "a different track is current
 		// now", which is what both of these hang off.
 		if changed {
+			stallNotice = false
 			scrobbler.trackChanged(to: song?.ref)
 			prewarmNext()
 			// The one place a video becomes current, however it got there - a
 			// tap, or the queue reaching it. **Not while casting**, where there
 			// is no local picture to show and raising the surface would cover
 			// the app with a rectangle that never fills in.
-			if song?.isVideo == true, !isCasting { showingVideo = true }
+			//
+			// Nor for a video played for its soundtrack, which has no picture.
+			if let song, settings.showsPicture(song), !isCasting { showingVideo = true }
 		}
 
 		guard let song else {
@@ -563,7 +603,10 @@ final class PlayerConnection {
 		// `format` for everything and the URL was therefore a soundtrack. Now
 		// it is a film's own URL, and warming it would ask the server to begin
 		// a re-encode nobody has asked to watch.
-		guard !next.isVideo else { return }
+		// A video played for its soundtrack *is* warmed: that is an ordinary
+		// audio transcode, and a long one, so it is the case that most needs
+		// it.
+		guard !settings.showsPicture(next) else { return }
 		Task { [weak self] in
 			guard let self, let target = await self.engine.target(for: next) else { return }
 			await self.prewarmer.warm(target)

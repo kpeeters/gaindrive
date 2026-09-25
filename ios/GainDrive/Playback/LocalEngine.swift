@@ -158,7 +158,7 @@ final class LocalEngine: PlaybackEngine {
 				if built.isEmpty { return nil }
 				break
 			}
-			if song.isVideo {
+			if settings.showsPicture(song) {
 				built.append(await videoItem(for: song, target: target))
 			} else {
 				built.append(item(for: song, target: target))
@@ -194,7 +194,11 @@ final class LocalEngine: PlaybackEngine {
 		// name a URL, and `target(for:)` never substitutes a stored file for a
 		// video. The guard stays because the rule it states is about the film
 		// rather than about who happens to call this.
-		guard !song.isVideo else {
+		//
+		// A video played for its soundtrack is not a film here: what arrives
+		// is an ordinary audio transcode with a real length, which is why
+		// Android caches and downloads it too.
+		guard !settings.showsPicture(song) else {
 			return (song.ref, AVPlayerItem(url: target.url), nil)
 		}
 		// "Store music as it plays" off: stream as this app did before the
@@ -287,17 +291,21 @@ final class LocalEngine: PlaybackEngine {
 		// playback is the only route where that is true of whoever reads the
 		// bytes: `CastUrls.video(for:)` calls the same builder and must keep
 		// passing nothing.
-		if song.isVideo {
+		if settings.showsPicture(song) {
 			return targets.video(for: song, playable: avfoundationContainers)
 		}
 		// And the audio half of the same declaration, at the same one call
 		// site and for the same reason: this is the route whose bytes this
 		// framework reads. `CastUrls.audio(for:)` reaches the same resolver
-		// and must keep passing nothing.
-		guard
-			var target = await targets.target(
-				for: song.ref, playable: avfoundationPlayable(for:))
-		else { return nil }
+		// and must keep passing nothing. A video here is one played for its
+		// soundtrack, which declares nothing; see `StreamTargets.soundtrack`.
+		let resolved: StreamTarget?
+		if song.isVideo {
+			resolved = await targets.soundtrack(for: song.ref)
+		} else {
+			resolved = await targets.target(for: song.ref, playable: avfoundationPlayable(for:))
+		}
+		guard var target = resolved else { return nil }
 		if let local = await store.storedFile(for: song.ref) {
 			target = StreamTarget(
 				url: local, quality: target.quality, cacheKey: target.cacheKey,

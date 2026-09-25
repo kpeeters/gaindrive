@@ -75,7 +75,7 @@ struct MiniPlayer: View {
 					// next keep their positions as this one comes and goes -
 					// the rule Android's Now Playing row follows for the same
 					// reason.
-					if song.isVideo {
+					if player.currentShowsPicture {
 						Button {
 							player.showingVideo = true
 						} label: {
@@ -204,7 +204,7 @@ private struct VideoPresentation: ViewModifier {
 
 	func body(content: Content) -> some View {
 		content.fullScreenCover(isPresented: showing) {
-			if let song = player.current, song.isVideo {
+			if let song = player.current, player.currentShowsPicture {
 				VideoView(song: song)
 			}
 		}
@@ -212,7 +212,7 @@ private struct VideoPresentation: ViewModifier {
 
 	private var showing: Binding<Bool> {
 		Binding(
-			get: { active && player.showingVideo && player.current?.isVideo == true },
+			get: { active && player.showingVideo && player.currentShowsPicture },
 			set: { player.showingVideo = $0 })
 	}
 }

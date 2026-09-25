@@ -35,6 +35,10 @@ final class PlaybackWatchdog {
 		/// paused player is not making progress either, and is fine.
 		let stalled: Bool
 		let position: Double
+		/// The server may be building the whole transcode before sending a
+		/// byte - a film's remux or a video's soundtrack - so a long silence
+		/// is expected rather than a wedge. See `buildTimeout`.
+		var building = false
 	}
 
 	/// Reads the player's state. Set by `PlayerConnection`.
@@ -49,19 +53,20 @@ final class PlaybackWatchdog {
 	/// a minute without reaching that is not a bandwidth problem - and short
 	/// enough that nobody sits watching a spinner wondering.
 	///
-	/// **Video will need a second, much longer tier**, and phase 6 is where it
-	/// arrives. gaindrive's transcode cache is blocking: it runs ffmpeg over
-	/// the whole source and sends nothing until the file is complete, so a
-	/// remux or a soundtrack extraction from a multi-gigabyte file is minutes
-	/// of buffering in which no byte can arrive. That is indistinguishable from
-	/// a wedge by every signal this class has. Android allows five minutes for
-	/// it. Without the tier, the first film played would be cut off after half
-	/// a minute.
 	private let timeout: Duration
+	/// **The second, much longer tier, for a video.** gaindrive's transcode
+	/// cache is blocking: it runs ffmpeg over the whole source and sends
+	/// nothing until the file is complete, so a remux or a soundtrack
+	/// extraction from a multi-gigabyte file is minutes of buffering in which
+	/// no byte can arrive. That is indistinguishable from a wedge by every
+	/// signal this class has. Five minutes, as Android allows; without it a
+	/// film was cut off after half a minute.
+	private let buildTimeout: Duration
 	private var countdown: Task<Void, Never>?
 
-	init(timeout: Duration = .seconds(30)) {
+	init(timeout: Duration = .seconds(30), buildTimeout: Duration = .seconds(300)) {
 		self.timeout = timeout
+		self.buildTimeout = buildTimeout
 	}
 
 	/// Called whenever the transport changes. Arms while stalled, disarms
@@ -73,7 +78,7 @@ final class PlaybackWatchdog {
 			disarm()
 			return
 		}
-		arm(from: now.position)
+		arm(from: now.position, deadline: now.building ? buildTimeout : timeout)
 	}
 
 	func disarm() {
@@ -84,9 +89,8 @@ final class PlaybackWatchdog {
 	/// **Starts counting, or leaves an existing count alone.** Not restarted on
 	/// every call: the transport publishes repeatedly through a stall, and
 	/// re-arming each time would push the deadline out for ever.
-	private func arm(from position: Double) {
+	private func arm(from position: Double, deadline: Duration) {
 		guard countdown == nil else { return }
-		let deadline = timeout
 		countdown = Task { [weak self] in
 			try? await Task.sleep(for: deadline)
 			guard !Task.isCancelled else { return }

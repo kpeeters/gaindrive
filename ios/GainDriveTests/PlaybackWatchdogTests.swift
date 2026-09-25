@@ -85,6 +85,18 @@ struct PlaybackWatchdogTests {
 		#expect(fake.stalls == 1)
 	}
 
+	/// A video may be a transcode the server builds in full before sending a
+	/// byte, so the short deadline must not apply to one.
+	@Test func aVideoGetsTheLongerTier() async throws {
+		let fake = FakePlayer()
+		fake.sample = PlaybackWatchdog.Sample(stalled: true, position: 12, building: true)
+		let watchdog = makeWatchdog(fake)
+		watchdog.update()
+		try await Task.sleep(for: .milliseconds(300))
+		#expect(fake.stalls == 0)
+		watchdog.disarm()
+	}
+
 	/// A player that never stalls is never armed, so nothing to re-check and
 	/// nothing to cancel.
 	@Test func aHealthyPlayerIsNeverArmed() async throws {

@@ -84,4 +84,12 @@ struct AudioQualityTests {
 	@Test func theOriginalNamesNoExtension() {
 		#expect(AudioFormat.original.fileExtension == nil)
 	}
+
+	/// No `format` on a video fetches the film, so a soundtrack always names
+	/// a container; every other quality is honoured as set.
+	@Test func aVideosSoundtrackNeverAsksForTheOriginal() {
+		#expect(AudioQuality.original.forVideoAudio() == .default)
+		let low = AudioQuality(format: .mp3, bitRate: 96)
+		#expect(low.forVideoAudio() == low)
+	}
 }

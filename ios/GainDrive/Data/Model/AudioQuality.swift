@@ -106,6 +106,18 @@ struct AudioQuality: Hashable, Sendable {
 		return AudioQuality(format: format, bitRate: accountCap)
 	}
 
+	/// This quality as it applies to a video played for its soundtrack.
+	///
+	/// `.original` cannot mean anything here: it is spelled by sending no
+	/// `format`, and for a video that fetches the film - the opposite of what
+	/// was asked, and a film in the audio cache. There is no "original audio
+	/// track" to ask for either, since extracting one is a re-encode, so a
+	/// container has to be named and `.default` is that name. Every other
+	/// quality passes through. Android's `forVideoAudio`, for the same reason.
+	func forVideoAudio() -> AudioQuality {
+		format == .original ? .default : self
+	}
+
 	static func parse(_ tag: String) -> AudioQuality? {
 		if tag == "orig" { return .original }
 		for format in AudioFormat.allCases where format != .original {

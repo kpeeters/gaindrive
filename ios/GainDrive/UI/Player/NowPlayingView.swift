@@ -176,7 +176,7 @@ struct NowPlayingView: View {
 			// This one has to dismiss a sheet before a cover can present, which
 			// is the less reliable of the two - the bar's is one tap with no
 			// modal involved, and is the one to trust.
-			if song.isVideo {
+			if player.currentShowsPicture {
 				Button {
 					player.showingVideo = true
 					dismiss()

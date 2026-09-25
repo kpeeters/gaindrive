@@ -37,13 +37,31 @@ struct VideoView: View {
 	@State private var cues: [Cue] = []
 	@State private var chapters = ChapterList()
 	@State private var chaptersOpen = false
+	/// What a side swipe is doing, and what the indicator still shows for a
+	/// moment after the finger lifts.
+	@State private var adjustment: SideAdjustment?
+	@State private var shown: SideAdjustment?
 
 	var body: some View {
-		VideoSurface(player: player.videoPlayer, caption: caption)
+		VideoSurface(
+			player: player.videoPlayer, caption: caption, onAdjust: { adjustment = $0 })
 			.ignoresSafeArea()
 			.overlay(alignment: .topLeading) { close }
 			.overlay(alignment: .topTrailing) { controls }
 			.overlay(alignment: .trailing) { chapterPanel }
+			.overlay { indicator }
+			.overlay { stallNotice }
+			// Held briefly after the swipe ends, so the figure it stopped on
+			// can be read; a new swipe cancels the fade.
+			.task(id: adjustment) {
+				if let adjustment {
+					shown = adjustment
+					return
+				}
+				try? await Task.sleep(for: .milliseconds(800))
+				guard !Task.isCancelled else { return }
+				shown = nil
+			}
 			// Nothing is touching the screen while a film plays, so the system
 			// has no other reason to believe anybody is there.
 			.onAppear { UIApplication.shared.isIdleTimerDisabled = true }
@@ -80,6 +98,54 @@ struct VideoView: View {
 				}
 				cues = await CaptionTracks(registry: registry).cues(for: song.ref, track: chosen)
 			}
+	}
+
+	/// The level a swipe has reached, in white over a scrim like the rest of
+	/// what sits on the picture. Hidden from VoiceOver: a gesture is not
+	/// something it can reach, and the accessible routes - the buttons and
+	/// Control Centre - are untouched.
+	@ViewBuilder
+	private var indicator: some View {
+		if let shown {
+			VStack(spacing: 10) {
+				Image(systemName: Self.symbol(for: shown))
+					.font(.title2)
+				ProgressView(value: shown.level)
+					.tint(.white)
+					.frame(width: 120)
+				Text("\(Int((shown.level * 100).rounded()))%")
+					.font(.callout.monospacedDigit())
+			}
+			.foregroundStyle(.white)
+			.padding(20)
+			.background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 12))
+			.accessibilityHidden(true)
+			.allowsHitTesting(false)
+		}
+	}
+
+	private static func symbol(for adjustment: SideAdjustment) -> String {
+		switch adjustment.control {
+		case .volume: adjustment.level <= 0 ? "speaker.slash.fill" : "speaker.wave.2.fill"
+		case .brightness: adjustment.level < 0.4 ? "sun.min.fill" : "sun.max.fill"
+		}
+	}
+
+	/// The watchdog paused the film. Drawn here because the shell's alert
+	/// cannot show over this full-screen cover, and with a Retry because the
+	/// answer to a wedged stream is to fetch it again.
+	@ViewBuilder
+	private var stallNotice: some View {
+		if player.stallNotice {
+			VStack(spacing: 12) {
+				Text("Playback stalled and was paused.")
+				Button("Retry") { player.retryAfterStall() }
+					.buttonStyle(.borderedProminent)
+			}
+			.foregroundStyle(.white)
+			.padding(20)
+			.background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 12))
+		}
 	}
 
 	/// Read from the same clock the seek bar is drawn from, so there is no
@@ -204,12 +270,16 @@ struct VideoView: View {
 private struct VideoSurface: UIViewControllerRepresentable {
 	let player: AVPlayer
 	let caption: String?
+	let onAdjust: (SideAdjustment?) -> Void
 
 	func makeUIViewController(context: Context) -> AVPlayerViewController {
 		let controller = AVPlayerViewController()
 		controller.player = player
 		controller.allowsPictureInPicturePlayback = true
 		controller.videoGravity = .resizeAspect
+		// On the controller's own view; see `VideoSideGestures` for why not a
+		// SwiftUI layer.
+		context.coordinator.gestures.attach(to: controller.view)
 
 		let label = context.coordinator.label
 		label.numberOfLines = 0
@@ -244,11 +314,19 @@ private struct VideoSurface: UIViewControllerRepresentable {
 
 	func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
 		if controller.player !== player { controller.player = player }
+		context.coordinator.gestures.onAdjust = onAdjust
 		context.coordinator.label.text = caption
 		context.coordinator.label.isHidden = caption == nil
 	}
 
 	func makeCoordinator() -> Coordinator { Coordinator() }
+
+	/// Leaving the picture hands the brightness back to the device.
+	static func dismantleUIViewController(
+		_ controller: AVPlayerViewController, coordinator: Coordinator
+	) {
+		coordinator.gestures.restoreBrightness()
+	}
 
 	/// Holds the label so `updateUIViewController` can find it again without
 	/// searching the view hierarchy for it.
@@ -261,5 +339,6 @@ private struct VideoSurface: UIViewControllerRepresentable {
 	@MainActor
 	final class Coordinator {
 		let label = UILabel()
+		let gestures = VideoSideGestures()
 	}
 }
