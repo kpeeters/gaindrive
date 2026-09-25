@@ -14,14 +14,17 @@ import SwiftUI
 /// automatic eviction always earns is that it deletes the thing you were about
 /// to want, and pinning answers it from the other end: instead of policing what
 /// gets removed, you name what may never be removed. So this shows how much is
-/// used, lists the pins you placed, and has one button that empties the lot -
-/// `android/CACHING.md` reaches the same three.
+/// used, lists the pins you placed, and offers to empty what was merely kept or
+/// everything - `android/CACHING.md` reaches the same shape.
 struct StorageSettingsView: View {
 	@Environment(SettingsStore.self) private var settings
 	@Environment(PinRepository.self) private var pins
 
 	@State private var removing: Pin?
 	@State private var removingEverything = false
+	/// Measured when the screen appears and after a clear; the cover cache
+	/// is not observable, and a figure that is a moment stale is harmless.
+	@State private var coverBytes: Int?
 
 	var body: some View {
 		@Bindable var settings = settings
@@ -42,14 +45,50 @@ struct StorageSettingsView: View {
 					Task { await pins.capChanged() }
 				}
 			} footer: {
-				// The cap is a refusal rather than an evictor, and saying so is
-				// what stops it reading as a promise to tidy up on its own.
+				// Both halves said, so the cap reads neither as a promise to keep
+				// everything nor as a threat to the downloads.
 				Text(
 					"""
-					Downloads are never removed to make room, so a download \
-					that would not fit is refused instead.
+					Music kept from playing is removed oldest first to make room. \
+					Downloads are never removed, so a download that would not fit \
+					is refused instead.
 					"""
 				)
+			}
+
+			Section {
+				Toggle("Store music as it plays", isOn: $settings.cacheOnPlay)
+				Toggle("Download on Wi-Fi only", isOn: $settings.downloadUnmeteredOnly)
+					// A download carries its network policy from when it was
+					// created, so the ones in flight have to be restarted.
+					.onChange(of: settings.downloadUnmeteredOnly) {
+						Task { await pins.downloadPolicyChanged() }
+					}
+			} footer: {
+				Text(
+					"""
+					Wi-Fi only applies to downloads. Storing what is already \
+					playing costs no extra data.
+					"""
+				)
+			}
+
+			Section {
+				// No confirmation for either: what goes is re-fetched on the next
+				// play or the next scroll, unlike a download.
+				Button("Free \(PinRepository.readable(pins.evictableBytes))") {
+					Task { await pins.freeEvictable() }
+				}
+				.disabled(pins.evictableBytes == 0)
+				Button(coverLabel) {
+					Task {
+						await ImageStore.shared.clear()
+						coverBytes = await ImageStore.shared.diskUsage()
+					}
+				}
+				.disabled(coverBytes == 0)
+			} footer: {
+				Text("Free removes music kept from playing. Downloads stay.")
 			}
 
 			Section("Downloads") {
@@ -74,7 +113,10 @@ struct StorageSettingsView: View {
 		.navigationBarTitleDisplayMode(.inline)
 		// Re-reads what each pin covers, which is what makes a pinned playlist
 		// pick up a track added since it was pinned.
-		.task { await pins.refresh() }
+		.task {
+			coverBytes = await ImageStore.shared.diskUsage()
+			await pins.refresh()
+		}
 		// **This screen confirms and the album screen's toggle does not.** It
 		// is the managing surface, where a row says only a name and a mis-tap
 		// is much less obviously reversible than a control with its state on
@@ -99,6 +141,11 @@ struct StorageSettingsView: View {
 		} message: {
 			Text("Everything downloaded is deleted from this device.")
 		}
+	}
+
+	private var coverLabel: String {
+		guard let coverBytes else { return "Clear cover art" }
+		return "Clear cover art (\(PinRepository.readable(Int64(coverBytes))))"
 	}
 
 	private func row(_ pin: Pin) -> some View {

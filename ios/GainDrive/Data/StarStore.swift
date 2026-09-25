@@ -70,25 +70,30 @@ final class StarStore {
 		await reconcile(server: ref.server)
 	}
 
-	/// Folds a `getStarred2` answer in, and - as importantly - drops overrides
-	/// for that server which it does *not* mention. An override that survived a
-	/// contradicting fetch would be the client insisting on something the
-	/// server has already denied.
+	/// Folds a `getStarred2` answer into the overrides for that server.
 	func reconcile(server: ServerId) async {
 		guard let starred = try? await library.starred(server: server) else { return }
 		let truth = Set(
 			starred.artists.map(\.ref) + starred.albums.map(\.ref) + starred.songs.map(\.ref))
+		overrides = Self.reconciled(overrides, server: server, truth: truth)
+	}
 
-		for (ref, value) in overrides where ref.server == server {
-			let actually = truth.contains(ref)
-			if actually == value {
-				// Agreed - the model's own `starredAt` will say so on the next
-				// fetch, so nothing needs remembering.
-				overrides[ref] = nil
-			} else {
-				overrides[ref] = actually
-			}
+	/// Every override on `server` is set to what the server says; other
+	/// servers' are untouched.
+	///
+	/// **An override the server agrees with is kept, not dropped.** Dropping it
+	/// fell back to the `starredAt` the screen was loaded with, which is the
+	/// value from *before* the toggle - so a star that took flipped back until
+	/// that screen reloaded. Android's `StarStore` keeps it for the same reason.
+	/// Pure and static so the rule is tested without a server.
+	static func reconciled(
+		_ overrides: [ItemRef: Bool], server: ServerId, truth: Set<ItemRef>
+	) -> [ItemRef: Bool] {
+		var result = overrides
+		for ref in overrides.keys where ref.server == server {
+			result[ref] = truth.contains(ref)
 		}
+		return result
 	}
 
 	/// Removing a server must not leave its stars behind to be applied to

@@ -128,6 +128,7 @@ struct AlbumRow: View {
 				}
 			}
 			Spacer(minLength: 0)
+			ContainerMark(ref: item.album.ref, kind: .album)
 		}
 		.contentShape(.rect)
 	}
@@ -195,6 +196,7 @@ struct TrackRow: View {
 			}
 			Spacer(minLength: 0)
 			if let trailing { trailing }
+			StarMark(song: song)
 			StoredMark(song: song.ref)
 			Text(formatDuration(song.duration))
 				.font(.footnote.monospacedDigit())
@@ -226,11 +228,22 @@ struct SongRow: View {
 	let item: SongUi
 	var trailingText: String?
 
+	/// Read here rather than passed in as `TrackRow`'s is: every caller of this
+	/// row would pass the same thing, and three of them had no player to hand.
+	@Environment(PlayerConnection.self) private var player
+
+	/// Drawn over the cover, since there is no number column to put it in -
+	/// Android's `SongRow` does the same, so the row's geometry never moves.
+	private var state: TrackState { player.trackState(of: item.song.ref) }
+
 	var body: some View {
 		HStack(spacing: 12) {
 			CoverThumb(source: item.cover)
+				.overlay { indicator }
 			VStack(alignment: .leading, spacing: 2) {
-				Text(item.song.title).lineLimit(1)
+				Text(item.song.title)
+					.lineLimit(1)
+					.foregroundStyle(state == .idle ? Color.primary : Color.accentColor)
 				HStack(spacing: 6) {
 					Text(subtitle)
 						.font(.footnote)
@@ -240,6 +253,7 @@ struct SongRow: View {
 				}
 			}
 			Spacer(minLength: 0)
+			StarMark(song: item.song)
 			StoredMark(song: item.song.ref)
 			if let trailingText {
 				Text(trailingText)
@@ -248,6 +262,26 @@ struct SongRow: View {
 			}
 		}
 		.contentShape(.rect)
+	}
+
+	/// White on a scrim rather than accent: it lies over arbitrary artwork,
+	/// where red on dark is the one pairing that can vanish. The title beside
+	/// it carries the accent.
+	@ViewBuilder
+	private var indicator: some View {
+		if state != .idle {
+			ZStack {
+				RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.5))
+				if state == .loading {
+					ProgressView().controlSize(.mini).tint(.white)
+				} else {
+					Image(systemName: "speaker.wave.2.fill")
+						.font(.caption)
+						.foregroundStyle(.white)
+				}
+			}
+			.accessibilityLabel(state == .loading ? "Loading" : "Playing")
+		}
 	}
 
 	private var subtitle: String {
@@ -261,11 +295,15 @@ struct PlaylistRow: View {
 	let playlist: Playlist
 
 	var body: some View {
-		VStack(alignment: .leading, spacing: 2) {
-			Text(playlist.name).lineLimit(1)
-			Text(subtitle)
-				.font(.footnote)
-				.foregroundStyle(.secondary)
+		HStack(spacing: 12) {
+			VStack(alignment: .leading, spacing: 2) {
+				Text(playlist.name).lineLimit(1)
+				Text(subtitle)
+					.font(.footnote)
+					.foregroundStyle(.secondary)
+			}
+			Spacer(minLength: 0)
+			ContainerMark(ref: playlist.ref, kind: .playlist)
 		}
 		.contentShape(.rect)
 	}
@@ -279,6 +317,24 @@ struct PlaylistRow: View {
 		let minutes = (playlist.duration % 3600) / 60
 		let length = hours > 0 ? "\(hours) h \(minutes) min" : "\(minutes) min"
 		return "\(tracks) · \(length)"
+	}
+}
+
+/// A starred track, in accent like the star that set it. Only the filled state
+/// is drawn: an outline on every other row would be noise. Read through the
+/// store, so a toggle made this session shows before any reload.
+struct StarMark: View {
+	let song: Song
+
+	@Environment(StarStore.self) private var stars
+
+	var body: some View {
+		if stars.isStarred(song.ref, fallback: song.isStarred) {
+			Image(systemName: "star.fill")
+				.font(.caption)
+				.foregroundStyle(Color.accentColor)
+				.accessibilityLabel("Starred")
+		}
 	}
 }
 

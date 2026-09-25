@@ -111,6 +111,25 @@ actor ImageStore {
 		return image
 	}
 
+	/// Bytes on disk, for the Storage screen's "Clear cover art".
+	func diskUsage() -> Int {
+		let total = diskBytes ?? Self.measure(directory)
+		diskBytes = total
+		return total
+	}
+
+	/// Drops every stored cover, in memory and on disk. Fetches in flight
+	/// finish and write as usual; that is a cover somebody is looking at.
+	func clear() {
+		memory.removeAllObjects()
+		missing = []
+		let files =
+			(try? FileManager.default.contentsOfDirectory(
+				at: directory, includingPropertiesForKeys: nil)) ?? []
+		for file in files { try? FileManager.default.removeItem(at: file) }
+		diskBytes = 0
+	}
+
 	// MARK: - Bookkeeping
 
 	private struct Fetched: Sendable {

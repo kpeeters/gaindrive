@@ -69,7 +69,8 @@ struct GainDriveApp: App {
 		let targets = StreamTargets(registry: registry, settings: settings, accounts: accounts)
 		let queue = DownloadQueue(store: store)
 		let pins = PinRepository(
-			library: library, store: store, queue: queue, targets: targets, settings: settings)
+			library: library, store: store, queue: queue, targets: targets, settings: settings,
+			network: NetworkPath())
 		_pins = State(initialValue: pins)
 		AppDelegate.adopt(queue)
 		// The store is the authority on what is held; this is how a track that
@@ -81,7 +82,8 @@ struct GainDriveApp: App {
 		_castDevices = State(initialValue: CastDeviceStore())
 		_player = State(
 			initialValue: PlayerConnection(
-				registry: registry, library: library, targets: targets, store: store))
+				registry: registry, library: library, targets: targets, store: store,
+					settings: settings))
 		// Editing a server may have pointed it at a different account, whose
 		// ceiling and roles are otherwise cached from the old one for the rest
 		// of the session.

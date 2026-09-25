@@ -13,6 +13,10 @@ import UniformTypeIdentifiers
 enum DownloadState: Hashable, Sendable {
 	case absent
 	case running(fraction: Double)
+	/// Asked for, but held back by "Wi-Fi only" while the network is metered.
+	/// Its own state so the mark says why nothing is moving, rather than a
+	/// ring that sits at zero looking stuck.
+	case waiting
 	/// Here because it was played, and evictable tonight.
 	case cached
 	/// Here because it was asked for, and safe from eviction.
@@ -92,8 +96,13 @@ final class DownloadQueue: NSObject, @unchecked Sendable {
 		session.getAllTasks { _ in }
 	}
 
-	func start(_ ref: ItemRef, quality: AudioQuality, url: URL) {
-		let task = session.downloadTask(with: url)
+	/// `allowsExpensive` false is "Wi-Fi only": the system holds the task
+	/// until a network that is not metered appears, which a background session
+	/// does across launches without anything here having to watch.
+	func start(_ ref: ItemRef, quality: AudioQuality, url: URL, allowsExpensive: Bool) {
+		var request = URLRequest(url: url)
+		request.allowsExpensiveNetworkAccess = allowsExpensive
+		let task = session.downloadTask(with: request)
 		// The one piece of state that outlives the process.
 		task.taskDescription = CacheKeys.of(ref, quality: quality)
 		task.resume()
@@ -112,6 +121,12 @@ final class DownloadQueue: NSObject, @unchecked Sendable {
 
 	func cancelAll() {
 		session.getAllTasks { $0.forEach { $0.cancel() } }
+	}
+
+	/// As `cancelAll`, but finished before it returns - so tasks started right
+	/// after cannot be caught by a cancellation still on its way.
+	func cancelAllNow() async {
+		for task in await session.allTasks { task.cancel() }
 	}
 
 	/// What is in flight, so a relaunch can show progress rather than "absent"

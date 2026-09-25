@@ -30,6 +30,13 @@ struct PlaylistDetailView: View {
 		}
 		.navigationTitle(playlistName)
 		.navigationBarTitleDisplayMode(.inline)
+		// The pin is on the playlist, not on its current tracks, so a track
+		// added later is covered too; see `Pin`.
+		.toolbar {
+			ToolbarItem(placement: .topBarTrailing) {
+				DownloadControl(pin: Pin(ref: ref, kind: .playlist, name: playlistName))
+			}
+		}
 		.task {
 			if model == nil, let library {
 				model = PlaylistDetailViewModel(library: library, ref: ref)

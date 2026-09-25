@@ -74,19 +74,37 @@ final class SettingsStore {
 		albumSorts[section.rawValue] = sort.rawValue
 	}
 
-	/// How much downloaded audio may sit on the device.
+	/// How much audio may sit on the device.
 	///
-	/// **A ceiling on a refusal, not on an evictor** - for now. Nothing here is
-	/// cached-on-play yet, so everything stored was explicitly asked for and
-	/// nothing may be reclaimed; pinning past the cap is refused instead. When
-	/// cache-on-play arrives this becomes the evictor's bound as well, and the
-	/// refusal stays, because eviction cannot reclaim pinned bytes.
+	/// **Two jobs.** It bounds the evictor, which removes music kept from
+	/// playing, oldest first. And it refuses a download that would not fit,
+	/// because eviction cannot reclaim pinned bytes and pinning past the cap
+	/// would quietly turn it into a lie.
 	///
 	/// 4 GB to match Android's `DEFAULT_CACHE_BYTES`. Stored as a `Double`
 	/// because `UserDefaults` has no `Int64` accessor and a music library
 	/// passes what an `Int` is guaranteed to hold on a 32-bit device.
 	var cacheCapBytes: Int64 {
 		didSet { defaults.set(Double(cacheCapBytes), forKey: Self.cacheCapKey) }
+	}
+
+	/// Whether playing a track also keeps it.
+	///
+	/// On by default, as on Android: replaying an album is the common case,
+	/// and the cap plus eviction stop it running away. Off, a track streams as
+	/// it did before the cache existed, and what is already stored still plays.
+	var cacheOnPlay: Bool {
+		didSet { defaults.set(cacheOnPlay, forKey: Self.cacheOnPlayKey) }
+	}
+
+	/// Whether downloads wait for a network that is not metered.
+	///
+	/// On by default, as on Android. Only downloads: keeping what is already
+	/// being streamed costs no extra data, so gating that would penalise the
+	/// mobile listener for nothing. "Metered" is the system's `isExpensive`,
+	/// which covers cellular and a personal hotspot.
+	var downloadUnmeteredOnly: Bool {
+		didSet { defaults.set(downloadUnmeteredOnly, forKey: Self.unmeteredOnlyKey) }
 	}
 
 	static let defaultCacheCapBytes: Int64 = 4 * 1024 * 1024 * 1024
@@ -108,6 +126,8 @@ final class SettingsStore {
 	private static let albumSortsKey = "album_sort"
 	private static let cacheCapKey = "cache_max_bytes"
 	private static let offlineKey = "offline_mode"
+	private static let cacheOnPlayKey = "cache_on_play"
+	private static let unmeteredOnlyKey = "download_unmetered_only"
 
 	init(defaults: UserDefaults = .standard) {
 		self.defaults = defaults
@@ -130,5 +150,7 @@ final class SettingsStore {
 		offlineMode = defaults.bool(forKey: Self.offlineKey)
 		let storedCap = defaults.object(forKey: Self.cacheCapKey) as? Double
 		cacheCapBytes = storedCap.map { Int64($0) } ?? Self.defaultCacheCapBytes
+		cacheOnPlay = defaults.object(forKey: Self.cacheOnPlayKey) as? Bool ?? true
+		downloadUnmeteredOnly = defaults.object(forKey: Self.unmeteredOnlyKey) as? Bool ?? true
 	}
 }

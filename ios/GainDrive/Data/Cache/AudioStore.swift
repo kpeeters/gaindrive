@@ -200,6 +200,25 @@ actor AudioStore {
 		didChange?()
 	}
 
+	/// Everything eviction could take: all that is kept from playing, none of
+	/// what is pinned. Part files are left for the fetch writing them.
+	func removeUnprotected() {
+		let protectedFiles = Set(protected.flatMap { copies(of: $0) })
+		guard
+			let walk = FileManager.default.enumerator(
+				at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+		else { return }
+		var removed = false
+		for case let url as URL in walk
+		where url.pathExtension != "part" && !protectedFiles.contains(url)
+			&& Self.ref(of: url) != nil
+		{
+			try? FileManager.default.removeItem(at: url)
+			removed = true
+		}
+		if removed { didChange?() }
+	}
+
 	/// What eviction cannot reclaim, which is what the pin cap is really
 	/// against: unpinned bytes give way, pinned ones do not.
 	func protectedBytes() -> Int64 {

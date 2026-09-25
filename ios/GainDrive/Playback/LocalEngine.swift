@@ -55,6 +55,9 @@ final class LocalEngine: PlaybackEngine {
 
 	private let targets: StreamTargets
 	private let store: AudioStore
+	/// Read per item for `cacheOnPlay`, so the switch applies from the next
+	/// track rather than needing the queue rebuilt.
+	private let settings: SettingsStore
 	private let session = AudioSessionController()
 
 	private var observations: [NSKeyValueObservation] = []
@@ -75,9 +78,10 @@ final class LocalEngine: PlaybackEngine {
 	/// removing the periodic time observer. That token must be removed before
 	/// the player is deallocated or the process traps, so if this type ever
 	/// becomes something with a shorter life, that is the first thing to add.
-	init(targets: StreamTargets, store: AudioStore) {
+	init(targets: StreamTargets, store: AudioStore, settings: SettingsStore) {
 		self.targets = targets
 		self.store = store
+		self.settings = settings
 		observe()
 		wireSession()
 	}
@@ -191,6 +195,11 @@ final class LocalEngine: PlaybackEngine {
 		// video. The guard stays because the rule it states is about the film
 		// rather than about who happens to call this.
 		guard !song.isVideo else {
+			return (song.ref, AVPlayerItem(url: target.url), nil)
+		}
+		// "Store music as it plays" off: stream as this app did before the
+		// cache existed. A stored copy still plays, from the guard above.
+		guard settings.cacheOnPlay else {
 			return (song.ref, AVPlayerItem(url: target.url), nil)
 		}
 		let loader = CachingResourceLoader(

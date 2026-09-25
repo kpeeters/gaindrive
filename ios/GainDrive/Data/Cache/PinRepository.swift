@@ -20,6 +20,8 @@ import Foundation
 final class PinRepository {
 	private(set) var pins: [Pin] = []
 	private(set) var usageBytes: Int64 = 0
+	/// What "Free" would give back: everything kept from playing.
+	private(set) var evictableBytes: Int64 = 0
 	/// A refusal worth showing - today only "this would not fit". Cleared when
 	/// the screen that showed it says so.
 	private(set) var message: String?
@@ -44,17 +46,19 @@ final class PinRepository {
 	@ObservationIgnored private let queue: DownloadQueue
 	@ObservationIgnored private let targets: StreamTargets
 	@ObservationIgnored private let settings: SettingsStore
+	@ObservationIgnored private let network: NetworkPath
 	@ObservationIgnored private let file: URL
 
 	init(
 		library: LibraryRepository, store: AudioStore, queue: DownloadQueue,
-		targets: StreamTargets, settings: SettingsStore
+		targets: StreamTargets, settings: SettingsStore, network: NetworkPath
 	) {
 		self.library = library
 		self.store = store
 		self.queue = queue
 		self.targets = targets
 		self.settings = settings
+		self.network = network
 		let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
 		self.file = base.appending(path: "pins.json")
 		load()
@@ -89,7 +93,9 @@ final class PinRepository {
 	/// collapsing them would promise a permanence the second does not have.
 	func state(for song: ItemRef) -> DownloadState {
 		if stored.contains(song) { return .stored }
-		if let fraction = progress[song] { return .running(fraction: fraction) }
+		if let fraction = progress[song] {
+			return isHeldBack ? .waiting : .running(fraction: fraction)
+		}
 		if failed.contains(song) { return .failed }
 		if held.contains(song) { return .cached }
 		return .absent
@@ -104,6 +110,7 @@ final class PinRepository {
 	private func reloadHeld() async {
 		held = await store.heldRefs()
 		usageBytes = await store.totalBytes()
+		evictableBytes = max(usageBytes - (await store.protectedBytes()), 0)
 	}
 
 	/// A whole pin's state, which is what the album screen's control shows.
@@ -122,7 +129,20 @@ final class PinRepository {
 		if songs.contains(where: { failed.contains($0) }) { return .failed }
 		let here = songs.filter { stored.contains($0) }.count
 		if here == songs.count { return .stored }
+		if isHeldBack { return .waiting }
 		return .running(fraction: Double(here) / Double(songs.count))
+	}
+
+	/// "Wi-Fi only" is on and the network is metered, so nothing in flight
+	/// is moving. Read from the observed path, so the marks follow it.
+	private var isHeldBack: Bool {
+		settings.downloadUnmeteredOnly && network.isExpensive
+	}
+
+	/// A pinned album's or playlist's state for its row in a listing, or nil
+	/// when it is not pinned.
+	func containerState(_ ref: ItemRef, kind: PinKind) -> DownloadState? {
+		pins.first { $0.ref == ref && $0.kind == kind }.map { state(of: $0) }
 	}
 
 	func clearMessage() {
@@ -203,8 +223,17 @@ final class PinRepository {
 		await reloadHeld()
 	}
 
-	/// Everything, including the pins - there is nothing on disk that is not
-	/// pinned, so a flush that kept them would re-download immediately.
+	/// Empties what was kept from playing and leaves every download. The
+	/// limits are pushed first, so the store's idea of what is protected is
+	/// this class's current one and not whatever it last heard.
+	func freeEvictable() async {
+		await pushLimits()
+		await store.removeUnprotected()
+		await reloadHeld()
+	}
+
+	/// Everything, including the pins - a flush that kept them would
+	/// re-download them immediately.
 	func removeEverything() async {
 		queue.cancelAll()
 		pins = []
@@ -216,6 +245,16 @@ final class PinRepository {
 		await pushLimits()
 		await store.removeAll()
 		await reloadHeld()
+	}
+
+	/// "Wi-Fi only" was switched. A task carries its network policy from the
+	/// moment it was created, so the ones in flight are restarted under the
+	/// new one; what had arrived of them is fetched again.
+	func downloadPolicyChanged() async {
+		await queue.cancelAllNow()
+		progress = [:]
+		failed = []
+		await startMissing(Array(Pins.expand(pins, membership: membership)))
 	}
 
 	// MARK: - Refresh
@@ -277,7 +316,9 @@ final class PinRepository {
 					for: ref, playable: avfoundationPlayable(for:))
 			else { continue }
 			progress[ref] = 0
-			queue.start(ref, quality: target.quality, url: target.url)
+			queue.start(
+				ref, quality: target.quality, url: target.url,
+				allowsExpensive: !settings.downloadUnmeteredOnly)
 		}
 	}
 

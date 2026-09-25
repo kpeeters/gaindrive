@@ -119,12 +119,12 @@ final class PlayerConnection {
 
 	init(
 		registry: ServerRegistry, library: LibraryRepository,
-		targets: StreamTargets, store: AudioStore
+		targets: StreamTargets, store: AudioStore, settings: SettingsStore
 	) {
 		self.registry = registry
 		self.scrobbler = Scrobbler(library: library)
 		self.castUrls = CastUrls(targets: targets, registry: registry)
-		let local = LocalEngine(targets: targets, store: store)
+		let local = LocalEngine(targets: targets, store: store, settings: settings)
 		self.local = local
 		self.engine = local
 		// Observers and command handlers only. No session activation and no

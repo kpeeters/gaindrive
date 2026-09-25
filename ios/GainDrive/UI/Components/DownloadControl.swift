@@ -49,6 +49,7 @@ struct DownloadControl: View {
 		case .failed: return "Download failed. Tap to remove"
 		case .running(let fraction):
 			return "Downloading, \(Int(fraction * 100)) per cent. Tap to remove"
+		case .waiting: return "Waiting for Wi-Fi. Tap to remove"
 		case .absent: return "Download"
 		}
 	}
@@ -74,6 +75,9 @@ struct DownloadStateIcon: View {
 			ProgressView(value: max(fraction, 0.02))
 				.progressViewStyle(.circular)
 				.controlSize(.small)
+		case .waiting:
+			Image(systemName: "clock")
+				.foregroundStyle(.secondary)
 		case .stored:
 			Image(systemName: "arrow.down.circle.fill")
 				.foregroundStyle(Color.accentColor)
@@ -115,8 +119,48 @@ struct StoredMark: View {
 				.font(.system(size: 5))
 				.foregroundStyle(.secondary)
 				.accessibilityLabel("Stored")
-		default:
+		// The same ring, clock and error the album's control shows, so a track
+		// row never disagrees with the header above it about what is happening.
+		case .running(let fraction):
+			ProgressView(value: max(fraction, 0.02))
+				.progressViewStyle(.circular)
+				.controlSize(.mini)
+				.accessibilityLabel("Downloading, \(Int(fraction * 100)) per cent")
+		case .waiting:
+			Image(systemName: "clock")
+				.font(.caption)
+				.foregroundStyle(.secondary)
+				.accessibilityLabel("Waiting for Wi-Fi")
+		case .failed:
+			Image(systemName: "exclamationmark.circle")
+				.font(.caption)
+				.foregroundStyle(.red)
+				.accessibilityLabel("Download failed")
+		case .absent:
 			EmptyView()
+		}
+	}
+}
+
+/// Where a whole album or playlist stands, beside its row in a listing.
+///
+/// **Only for a pin.** Nothing is drawn for one that is not pinned: the
+/// control's own "absent" state is a download arrow, which on a button is an
+/// invitation and down the side of a list is a column of buttons that do
+/// nothing - `android/SCREENS.md`'s reason for the same rule. Android also
+/// draws a dot for an unpinned album whose every track was kept from playing;
+/// that needs the album's membership, which only a pin records here.
+struct ContainerMark: View {
+	let ref: ItemRef
+	let kind: PinKind
+
+	@Environment(PinRepository.self) private var pins
+
+	var body: some View {
+		if let state = pins.containerState(ref, kind: kind) {
+			DownloadStateIcon(state: state)
+				.font(.caption)
+				.controlSize(.mini)
 		}
 	}
 }
