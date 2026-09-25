@@ -166,4 +166,57 @@ struct CastStatusTests {
 		let reply = try json(#"{"requestId":1}"#)
 		#expect(CastStatus.type(of: reply) == nil)
 	}
+
+	// MARK: - Volume
+
+	@Test func aReceiverStatusVolumeParses() throws {
+		let message = try json(
+			#"{"type":"RECEIVER_STATUS","status":{"volume":{"level":0.35,"muted":true}}}"#)
+		#expect(CastStatus.volume(in: message) == CastVolume(level: 0.35, muted: true))
+	}
+
+	/// Absent is "not stated", never "silent": a caller keeps its last value.
+	@Test func noVolumeBlockIsNotZero() throws {
+		let message = try json(#"{"type":"RECEIVER_STATUS","status":{"applications":[]}}"#)
+		#expect(CastStatus.volume(in: message) == nil)
+	}
+
+	/// **The trap Android fell into.** A volume change carries no
+	/// `applications`, and must not read as "our app has gone".
+	@Test func aVolumeOnlyStatusListsNoApplications() throws {
+		let volumeOnly = try json(
+			#"{"type":"RECEIVER_STATUS","status":{"volume":{"level":0.5}}}"#)
+		#expect(!CastStatus.listsApplications(volumeOnly))
+		let empty = try json(#"{"type":"RECEIVER_STATUS","status":{"applications":[]}}"#)
+		#expect(CastStatus.listsApplications(empty))
+	}
+
+	// MARK: - Payloads
+
+	@Test func setVolumeHasTheReceiverShape() throws {
+		let payload = CastSession.setVolumePayload(requestId: 7, level: 0.4)
+		#expect(payload["type"] as? String == "SET_VOLUME")
+		#expect(payload["requestId"] as? Int == 7)
+		#expect((payload["volume"] as? [String: Any])?["level"] as? Double == 0.4)
+	}
+
+	/// A subtitle track without a language can be dropped with no diagnostic.
+	@Test func aCaptionTrackCarriesEverythingTheReceiverNeeds() throws {
+		let url = try #require(URL(string: "https://example.org/rest/getCaptions.view?id=1"))
+		let track = try #require(
+			CastSession.tracksPayload([CastCaption(trackId: 1, url: url, name: "English")]).first)
+		#expect(track["trackId"] as? Int == 1)
+		#expect(track["type"] as? String == "TEXT")
+		#expect(track["subtype"] as? String == "SUBTITLES")
+		#expect(track["trackContentType"] as? String == "text/vtt")
+		#expect(track["language"] as? String == "und")
+		#expect(track["trackContentId"] as? String == url.absoluteString)
+	}
+
+	@Test func aPlaylistIsKnownByItsPath() throws {
+		let hls = try #require(URL(string: "https://example.org/rest/hls.m3u8?id=4&u=a"))
+		let file = try #require(URL(string: "https://example.org/rest/stream.view?id=4"))
+		#expect(CastUrls.isPlaylist(hls))
+		#expect(!CastUrls.isPlaylist(file))
+	}
 }

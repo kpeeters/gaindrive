@@ -140,18 +140,8 @@ final class CastEngine: PlaybackEngine {
 		let showsPicture = session.device?.videoOut ?? true
 		let asSound = song.isVideo && (!showsPicture || !settings.showsPicture(song))
 
-		// **A film the server can only re-encode is refused rather than sent.**
-		// That tier is a chunked response with no length and no index, which a
-		// receiver cannot seek and frequently cannot start; `nativeSeek` is the
-		// server's own word for "this arrives as a real MP4". Saying so is far
-		// better than a LOAD that fails a minute in. It does not apply to a
-		// soundtrack, which is an ordinary audio stream whatever the film's
-		// tier.
-		if song.isVideo, !asSound, !song.nativeSeek {
-			failure = "This video has to be converted as it plays, which a Cast device cannot do."
-			onStateChange?()
-			return false
-		}
+		// A film the server can only re-encode goes as an HLS playlist, which
+		// `CastUrls.video` picks on `nativeSeek`; it used to be refused here.
 		let sendsVideo = song.isVideo && !asSound
 		guard
 			let target = sendsVideo
@@ -166,14 +156,18 @@ final class CastEngine: PlaybackEngine {
 		reported = offset
 		reportedAt = nil
 		position = offset
-		// Reported as buffering while this runs, which is what it is. A film is
-		// not warmed: the tiers a receiver will take are served off disk or
-		// remuxed, and a remux of a multi-gigabyte file is minutes in which
-		// nothing could be shown anyway.
-		// A soundtrack is a transcode like any other and wants warming; the
-		// picture tiers are served off disk or remuxed, and a remux of a
-		// multi-gigabyte film is minutes in which nothing could be shown anyway.
-		if !sendsVideo {
+		// Reported as buffering while this runs, which is what it is.
+		//
+		// **A film is warmed too, unless it is a playlist.** A remux is blocking
+		// on the server - nothing is sent until the whole file is written - so
+		// a multi-gigabyte `.mkv` is minutes of silence, and a receiver gives up
+		// after about a minute of that. Waiting here moves those minutes to a
+		// place where nobody is counting; untreated, the first cast of every
+		// such film fails and the second works. A playlist has no whole-file
+		// build, since each segment is made per request, so a byte of it would
+		// warm nothing. Android does the same.
+		let isPlaylist = CastUrls.isPlaylist(target.url)
+		if !isPlaylist {
 			// Said explicitly rather than left to the next status push: nothing
 			// arrives from the receiver during the warm, so a client would
 			// otherwise show whatever it was showing before - which after a
@@ -181,7 +175,7 @@ final class CastEngine: PlaybackEngine {
 			isBuffering = true
 			isPlaying = false
 			onStateChange?()
-			await prewarmer.warm(target)
+			await prewarmer.warm(target, isFilm: sendsVideo)
 		}
 		// **Minted here and nowhere else**, and after the warm rather than
 		// before it. This is the one point at which a URL actually reaches a
@@ -198,7 +192,19 @@ final class CastEngine: PlaybackEngine {
 		// One token, two URLs. The sleeve travels to the receiver in the
 		// metadata and is fetched by it, so a grant applied only to the audio
 		// would leave the account's password on the television regardless.
-		let token = await urls.castToken(for: song)
+		//
+		// **A playlist keeps the ordinary credentials, and must.** Its segment
+		// URIs are relative and are fetched with whatever the playlist request
+		// carried; a grant covers one song id and cannot be handed down to them,
+		// so a tokened playlist would authorise the document and leave every
+		// segment refused - a film that starts and immediately stops. Android
+		// makes the same exception.
+		var token: String?
+		if !isPlaylist { token = await urls.castToken(for: song) }
+		// Declared whether or not one is chosen, since a LOAD is the only
+		// place a track can be introduced. None for a soundtrack.
+		var captions: [CastCaption] = []
+		if sendsVideo { captions = await urls.captions(for: song) }
 		session.load(
 			CastMedia(
 				url: withCastToken(target.url, token),
@@ -214,7 +220,11 @@ final class CastEngine: PlaybackEngine {
 				// or the amp's app - is given a movie's fields and shows
 				// nothing.
 				isVideo: sendsVideo,
-				quality: sendsVideo ? nil : target.quality))
+				quality: sendsVideo ? nil : target.quality,
+				captions: captions.map {
+					CastCaption(
+						trackId: $0.trackId, url: withCastToken($0.url, token), name: $0.name)
+				}))
 		startTicking()
 		return true
 	}

@@ -77,6 +77,13 @@ enum CastPlayerState: String, Sendable {
 	}
 }
 
+/// The receiver's own device volume, 0 to 1. This is the television's or the
+/// amplifier's volume, not a gain applied to our stream.
+struct CastVolume: Hashable, Sendable {
+	var level: Double
+	var muted = false
+}
+
 /// A parsed `MEDIA_STATUS`, mirroring `CastManager::CastStatus` in
 /// `src/castmanager.cc`.
 ///
@@ -140,6 +147,28 @@ struct CastStatus: Hashable, Sendable {
 	/// LAUNCH it.
 	static func transportId(in message: [String: Any], appId: String) -> String? {
 		runningApp(in: message, appId: appId)?.string("transportId")
+	}
+
+	/// **Whether the message enumerated the running applications at all**,
+	/// which `transportId(in:appId:)` cannot say: it answers nil both for "our
+	/// app is not running" and for "this status was not about applications".
+	/// A volume change is the second - it carries `volume` and nothing else -
+	/// and reading it as the first threw away a working transport mid-session
+	/// on Android.
+	static func listsApplications(_ message: [String: Any]) -> Bool {
+		message.object("status")?.array("applications") != nil
+	}
+
+	/// The receiver's device volume from a `RECEIVER_STATUS`, or nil when the
+	/// message carries none. Absent means "not stated", never "silent", so a
+	/// caller keeps its last value on nil.
+	static func volume(in message: [String: Any]) -> CastVolume? {
+		guard let block = message.object("status")?.object("volume"),
+			let level = block.number("level")
+		else { return nil }
+		return CastVolume(
+			level: min(max(level, 0), 1),
+			muted: (block["muted"] as? Bool) ?? false)
 	}
 
 	/// The `sessionId` of that same application, needed to STOP it.

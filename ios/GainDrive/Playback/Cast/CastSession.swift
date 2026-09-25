@@ -9,6 +9,20 @@
 import Foundation
 import OSLog
 
+/// One side-loaded subtitle track, as the receiver is told about it.
+///
+/// `trackId` is 1-based and is what `EDIT_TRACKS_INFO` names. The receiver
+/// fetches `url` itself, so it carries the same grant as the film.
+struct CastCaption: Sendable, Equatable {
+	let trackId: Int
+	let url: URL
+	let name: String
+	/// Required by the receiver for a subtitle track, which may otherwise be
+	/// dropped with no diagnostic - hence ISO 639-2 "undetermined" rather than
+	/// an empty string. The server's caption list names no language.
+	var language = "und"
+}
+
 /// What to play, and where the receiver should fetch it from.
 struct CastMedia: Sendable, Equatable {
 	let url: URL
@@ -30,6 +44,14 @@ struct CastMedia: Sendable, Equatable {
 	/// answer it: the receiver reports no codec and no bitrate, and the
 	/// `contentType` it echoes is only what our own LOAD told it.
 	var quality: AudioQuality?
+	/// **Declared in every LOAD of a film, whether or not one is on.**
+	/// `EDIT_TRACKS_INFO` can activate a track the LOAD declared but cannot
+	/// introduce one, so a track left out here is one the viewer can never
+	/// reach without reloading the film. Android learned it that way round.
+	var captions: [CastCaption] = []
+	/// Which of `captions` are on. Updated by `selectCaption`, so a LOAD retry
+	/// replays the viewer's choice rather than the one the film started with.
+	var activeTrackIds: [Int] = []
 }
 
 /// The Cast v2 control channel: one live connection to a receiver, its status,
@@ -63,6 +85,9 @@ final class CastSession {
 	private(set) var loaded: CastMedia?
 	/// Something a person can act on. The engine turns it into a message.
 	private(set) var failure: String?
+	/// The receiver's device volume. Nil until it has stated one; the
+	/// connect-time GET_STATUS answer carries the first.
+	private(set) var volume: CastVolume?
 
 	/// Fired for every status push, after `status` is updated.
 	@ObservationIgnored var onStatus: ((CastStatus) -> Void)?
@@ -155,6 +180,7 @@ final class CastSession {
 		gaveUpOn = 0
 		loaded = nil
 		failure = nil
+		volume = nil
 	}
 
 	// MARK: - Commands
@@ -180,6 +206,56 @@ final class CastSession {
 
 	func seek(to seconds: Double) {
 		mediaCommand("SEEK", extra: ["currentTime": seconds])
+	}
+
+	/// Turns on the subtitle track with this `trackId`, or subtitles off for
+	/// nil. Refused for a track the LOAD did not declare, which the receiver
+	/// would ignore anyway.
+	func selectCaption(trackId: Int?) {
+		guard var media = loaded else { return }
+		let ids = trackId.map { [$0] } ?? []
+		if let trackId, !media.captions.contains(where: { $0.trackId == trackId }) {
+			Self.log.warning("cast caption \(trackId) is not in the loaded track list; ignored")
+			return
+		}
+		media.activeTrackIds = ids
+		loaded = media
+		mediaCommand("EDIT_TRACKS_INFO", extra: ["activeTrackIds": ids])
+	}
+
+	/// Device volume, on the **receiver** namespace rather than the media one,
+	/// so it needs no media session and works from the moment the channel is
+	/// up. Shown at once; the receiver answers with a volume-only status that
+	/// then overwrites the guess.
+	func setVolume(_ level: Double) {
+		let clamped = min(max(level, 0), 1)
+		volume = CastVolume(level: clamped, muted: volume?.muted ?? false)
+		Task { [weak self] in
+			guard let self, let open = await self.awaitChannel() else { return }
+			guard
+				let text = castJSONString(
+					Self.setVolumePayload(requestId: self.nextRequestId(), level: clamped))
+			else { return }
+			try? await open.send(
+				namespace: CastNamespace.receiver, destination: CastNamespace.receiverId,
+				payload: text)
+		}
+	}
+
+	/// Top level of the wire shape, so it is testable without a socket.
+	nonisolated static func setVolumePayload(requestId: Int, level: Double) -> [String: Any] {
+		["type": "SET_VOLUME", "requestId": requestId, "volume": ["level": level]]
+	}
+
+	/// The LOAD's `tracks` array, for the same reason.
+	nonisolated static func tracksPayload(_ captions: [CastCaption]) -> [[String: Any]] {
+		captions.map {
+			[
+				"trackId": $0.trackId, "type": "TEXT", "subtype": "SUBTITLES",
+				"trackContentId": $0.url.absoluteString, "trackContentType": "text/vtt",
+				"language": $0.language, "name": $0.name,
+			]
+		}
 	}
 
 	/// **Refused while there is no media session**, which is not defensiveness:
@@ -307,6 +383,8 @@ final class CastSession {
 			// Logged whole: a STOP and an idle teardown both invalidate our
 			// transport, and this is the only warning of either.
 			Self.log.info("cast rx RECEIVER_STATUS: \(String(describing: message), privacy: .public)")
+			// Every kind carries it or not at all; nil keeps the last value.
+			if let stated = CastStatus.volume(in: message) { volume = stated }
 			await onReceiverStatus(message, on: open)
 		case "MEDIA_STATUS":
 			Self.log.info("cast rx MEDIA_STATUS: \(String(describing: message), privacy: .public)")
@@ -327,7 +405,11 @@ final class CastSession {
 			let transport = CastStatus.transportId(
 				in: message, appId: CastNamespace.defaultMediaApp)
 		else {
-			transportId = nil
+			// Only when the receiver actually listed what it runs and ours was
+			// not there. A volume change carries no `applications` at all, and
+			// reading that as "the app is gone" would throw away a working
+			// transport the moment somebody touched the volume.
+			if CastStatus.listsApplications(message) { transportId = nil }
 			return
 		}
 		guard transport != transportId else { return }
@@ -414,6 +496,7 @@ final class CastSession {
 		// hint before any byte-range request is made.
 		if let duration = media.duration, duration > 0 { content["duration"] = duration }
 		if let metadata = metadata(for: media) { content["metadata"] = metadata }
+		if !media.captions.isEmpty { content["tracks"] = Self.tracksPayload(media.captions) }
 
 		var payload: [String: Any] = [
 			"type": "LOAD",
@@ -424,6 +507,7 @@ final class CastSession {
 			"media": content,
 		]
 		if media.startAt > 0 { payload["currentTime"] = media.startAt }
+		if !media.activeTrackIds.isEmpty { payload["activeTrackIds"] = media.activeTrackIds }
 
 		guard let text = castJSONString(payload) else { return }
 		Self.log.info("cast LOAD \(text, privacy: .public)")

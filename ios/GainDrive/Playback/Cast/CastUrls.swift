@@ -165,11 +165,18 @@ struct CastUrls {
 			contentType: target.contentType ?? song.contentType)
 	}
 
-	/// A film, on the one tier a receiver can take: `nativeSeek` means the
-	/// server serves it off disk or remuxes with `-c copy`, and either way it
-	/// arrives as a real MP4 with a `Content-Length` that answers byte ranges.
-	/// Anything else can only be re-encoded, which `CastEngine` refuses rather
-	/// than sending.
+	/// A film. With `nativeSeek` the server serves it off disk or remuxes with
+	/// `-c copy`, and it arrives as a real MP4 that answers byte ranges.
+	/// Anything else can only be re-encoded, and its progressive answer is
+	/// chunked with no ranges; the seekable form of that is **`hls.m3u8`**,
+	/// where seeking is picking a segment. `StreamUrls.video` already chooses
+	/// between the two on `nativeSeek`. Android casts the playlist the same
+	/// way; this used to refuse it.
+	///
+	/// A playlist's segment URIs are relative, so the receiver fetches them
+	/// from the server's own `/rest/` with whatever credentials the playlist
+	/// URL carried - which is why `CastEngine` does not swap in a cast token
+	/// for one. See `isPlaylist`.
 	func video(for song: Song) -> StreamTarget? {
 		// No `playable`, and that omission is the load-bearing one on
 		// this route. A receiver demuxes none of them, and the `contentType`
@@ -179,9 +186,38 @@ struct CastUrls {
 		// outright: the film never starts and nothing on the phone says why.
 		// See `StreamUrls.video`.
 		guard let target = targets.video(for: song) else { return nil }
+		// A playlist is typed as one, whatever the film inside it was.
+		let type =
+			Self.isPlaylist(target.url)
+			? "application/x-mpegURL" : target.contentType ?? song.contentType
 		return StreamTarget(
 			url: paced(target.url), quality: target.quality, cacheKey: target.cacheKey,
-			contentType: target.contentType ?? song.contentType)
+			contentType: type)
+	}
+
+	/// Whether a URL is an HLS playlist, which is spelled by its path.
+	nonisolated static func isPlaylist(_ url: URL) -> Bool {
+		url.path().hasSuffix(".m3u8")
+	}
+
+	/// The film's subtitle tracks, for the receiver to fetch itself.
+	///
+	/// Declared in the LOAD whether or not one is chosen - see
+	/// `CastMedia.captions`. Numbered from 1 in the server's order, which is
+	/// the order `CaptionTracks.list` gives the picker, so the two agree on
+	/// which track is which.
+	func captions(for song: Song) async -> [CastCaption] {
+		guard let client = registry.clientsSnapshot().client(for: song.ref.server) else {
+			return []
+		}
+		let tracks = await CaptionTracks(registry: registry).list(for: song.ref)
+		return tracks.enumerated().map { index, track in
+			CastCaption(
+				trackId: index + 1,
+				url: client.url(
+					"getCaptions", parameters: ["id": song.ref.id, "captionId": track.id]),
+				name: track.name)
+		}
 	}
 
 	/// A film's **soundtrack**, for a receiver with no screen.

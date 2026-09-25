@@ -38,10 +38,14 @@ actor TranscodePrewarmer {
 		self.session = session
 	}
 
-	func warm(_ target: StreamTarget) async {
+	/// `isFilm` because a film's target always says `.original` - nothing
+	/// was asked for - while the server may still remux it, and a remux is
+	/// the longest build there is. Only the cast route passes it, and only
+	/// for a film that is not a playlist.
+	func warm(_ target: StreamTarget, isFilm: Bool = false) async {
 		// The original is served straight off disk with no ffmpeg involved, so
 		// there is no transcode to build and nothing to wait for.
-		guard target.quality.format != .original else { return }
+		guard isFilm || target.quality.format != .original else { return }
 
 		// One more skip belongs here and has nothing to skip on yet: offline
 		// mode, which means requests are not to be made at all rather than

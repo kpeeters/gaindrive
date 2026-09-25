@@ -33,6 +33,7 @@ struct CastDeviceSheet: View {
 	var body: some View {
 		NavigationStack {
 			List {
+				volume
 				thisDevice
 				discovered
 				configured
@@ -58,6 +59,22 @@ struct CastDeviceSheet: View {
 	}
 
 	// MARK: - Rows
+
+	/// The receiver's own volume, while casting. **Here rather than a button of
+	/// its own in Now Playing**, whose row is already full on a phone: this is
+	/// the sheet the cast button opens while casting, and it is where the
+	/// system's AirPlay menu keeps its volume too. Android puts the same row
+	/// in a sheet behind a speaker button.
+	@ViewBuilder
+	private var volume: some View {
+		if let device = player.castDevice {
+			Section {
+				CastVolumeRow(session: player.castSession)
+			} header: {
+				Text(device.name)
+			}
+		}
+	}
 
 	/// **First, and always present.** Coming back is the action somebody is
 	/// most likely to want from this sheet - a device list with no way off it
@@ -224,5 +241,34 @@ struct CastButton: View {
 		}
 		.accessibilityLabel(
 			player.castDevice.map { "Casting to \($0.name)" } ?? "Play on another device")
+	}
+}
+
+/// A slider over the receiver's device volume, disabled until the receiver has
+/// said what it is: moving from a guess could jump the volume. SET_VOLUME is
+/// one code path for every receiver, a WiiM included.
+struct CastVolumeRow: View {
+	let session: CastSession
+
+	var body: some View {
+		HStack(spacing: 12) {
+			Image(systemName: "speaker.fill").foregroundStyle(.secondary)
+			Slider(value: level, in: 0...1)
+				.disabled(session.volume == nil)
+				.accessibilityLabel("Volume")
+			Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
+		}
+	}
+
+	/// Rounded to a hundredth before it is sent, so one drag across is at
+	/// most a hundred messages rather than one per pixel.
+	private var level: Binding<Double> {
+		Binding(
+			get: { session.volume?.level ?? 0 },
+			set: { new in
+				let rounded = (new * 100).rounded() / 100
+				guard rounded != session.volume?.level else { return }
+				session.setVolume(rounded)
+			})
 	}
 }

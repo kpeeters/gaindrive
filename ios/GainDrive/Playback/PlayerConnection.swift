@@ -165,13 +165,9 @@ final class PlayerConnection {
 		cast = engine
 		castSession.connect(to: device)
 		adopt(engine)
-		// **The picture goes with the playback.** `adopt` stops the local
-		// engine, so a surface left up would be a dead rectangle over a film
-		// playing in another room. The web client keeps a muted local copy
-		// slaved to the receiver's clock and Android draws a "casting
-		// elsewhere" panel; neither is built here, so the honest thing is to
-		// close it.
-		showingVideo = false
+		// The picture is not closed: `VideoView` swaps its surface for a
+		// "playing on" panel while casting, as Android's video screen does, and
+		// keeps the caption picker and chapters working against the receiver.
 		// **It plays, whatever was happening here.** A LOAD autoplays by
 		// construction, so preserving a paused state would mean sending a PAUSE
 		// chasing after it - and choosing a device is in any case an act that

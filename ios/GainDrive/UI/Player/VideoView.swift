@@ -43,8 +43,7 @@ struct VideoView: View {
 	@State private var shown: SideAdjustment?
 
 	var body: some View {
-		VideoSurface(
-			player: player.videoPlayer, caption: caption, onAdjust: { adjustment = $0 })
+		surface
 			.ignoresSafeArea()
 			.overlay(alignment: .topLeading) { close }
 			.overlay(alignment: .topTrailing) { controls }
@@ -98,6 +97,51 @@ struct VideoView: View {
 				}
 				cues = await CaptionTracks(registry: registry).cues(for: song.ref, track: chosen)
 			}
+	}
+
+	/// **Casting replaces the picture rather than closing it.** The local
+	/// engine is stopped while a receiver plays, so the surface would be a
+	/// dead rectangle; this panel says where the film is instead, and the
+	/// caption picker and chapters above it drive the receiver. Android's
+	/// video screen does the same.
+	@ViewBuilder
+	private var surface: some View {
+		if let device = player.castDevice {
+			ZStack {
+				Color.black
+				VStack(spacing: 20) {
+					CoverHero(source: player.coverSource(for: song, size: CoverSize.hero))
+						.frame(maxWidth: 280, maxHeight: 280)
+					Label("Playing on \(device.name)", systemImage: "tv")
+						.font(.headline)
+						.foregroundStyle(.white)
+				}
+				.padding()
+			}
+		} else {
+			VideoSurface(
+				player: player.videoPlayer, caption: caption, onAdjust: { adjustment = $0 })
+		}
+	}
+
+	/// The receiver's selection while casting, which is what its tick must
+	/// show; the local choice otherwise. Track ids are the list order plus
+	/// one - see `CastUrls.captions`.
+	private var shownCaption: CaptionTrack? {
+		guard player.castDevice != nil else { return chosen }
+		guard let id = player.castSession.loaded?.activeTrackIds.first,
+			tracks.indices.contains(id - 1)
+		else { return nil }
+		return tracks[id - 1]
+	}
+
+	private func choose(_ track: CaptionTrack?) {
+		guard player.castDevice != nil else {
+			chosen = track
+			return
+		}
+		let id = track.flatMap { tracks.firstIndex(of: $0) }.map { $0 + 1 }
+		player.castSession.selectCaption(trackId: id)
 	}
 
 	/// The level a swipe has reached, in white over a scrim like the rest of
@@ -236,19 +280,20 @@ struct VideoView: View {
 		if !tracks.isEmpty {
 			Menu {
 				Button {
-					chosen = nil
+					choose(nil)
 				} label: {
-					Label("Off", systemImage: chosen == nil ? "checkmark" : "")
+					Label("Off", systemImage: shownCaption == nil ? "checkmark" : "")
 				}
 				ForEach(tracks) { track in
 					Button {
-						chosen = track
+						choose(track)
 					} label: {
-						Label(track.name, systemImage: chosen == track ? "checkmark" : "")
+						Label(track.name, systemImage: shownCaption == track ? "checkmark" : "")
 					}
 				}
 			} label: {
-				Image(systemName: chosen == nil ? "captions.bubble" : "captions.bubble.fill")
+				Image(
+					systemName: shownCaption == nil ? "captions.bubble" : "captions.bubble.fill")
 					.font(.title3)
 					.padding(12)
 					.background(.thinMaterial, in: Circle())
