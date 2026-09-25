@@ -669,6 +669,63 @@ final class LibraryRepository: Sendable {
 		await events.playlistsChanged()
 	}
 
+	// MARK: - Uploads
+
+	/// Refused offline rather than attempted: a move or a delete is not
+	/// something to wait out a timeout for.
+	struct Offline: LocalizedError {
+		var errorDescription: String? { "You are offline, so nothing can change on the server." }
+	}
+
+	/// Whether this account administers `server`, which is what moving an
+	/// upload into the shared library needs. The server checks again; this
+	/// only decides whether to offer the action.
+	func isAdmin(on server: ServerId) async -> Bool {
+		guard await !offline else { return false }
+		let clients = await registry.clientsSnapshot()
+		return await accounts.facts(for: server, using: clients).isAdmin
+	}
+
+	/// The roots an upload can be moved into, as `getMusicFolders` names them.
+	func destinationRoots(on server: ServerId) async throws -> [MusicRoot] {
+		guard let client = await client(for: server) else { return [] }
+		return try await Self.rootsOf(client, server, cache: roots)
+	}
+
+	/// The names already at the level under one root - artists or categories -
+	/// as suggestions for where a move should file the album.
+	func folders(on server: ServerId, in musicFolderId: String) async -> [String] {
+		guard let client = await client(for: server),
+			let indexes = try? await client.artists(musicFolderId: musicFolderId)
+		else { return [] }
+		return indexes.flatMap { $0.artist.compactMap(\.name) }
+	}
+
+	/// Moves an upload into the shared library.
+	///
+	/// **The mirror of that server is dropped afterwards**, because the move
+	/// happened on its disk: stored listings would show the album where it no
+	/// longer is. Then every browse screen is told to re-read.
+	func moveUpload(_ album: ItemRef, to musicFolderId: String, folder: String) async throws {
+		guard await !offline else { throw Offline() }
+		guard let client = await client(for: album.server) else { return }
+		try await client.moveAlbum(
+			id: album.id, musicFolderId: musicFolderId,
+			folder: folder.trimmingCharacters(in: .whitespaces))
+		await mirror.forget(album.server)
+		await events.libraryChanged()
+	}
+
+	/// Deletes one of this account's uploads, files and all. Same aftermath
+	/// as a move.
+	func deleteUpload(_ album: ItemRef) async throws {
+		guard await !offline else { throw Offline() }
+		guard let client = await client(for: album.server) else { return }
+		try await client.deleteUpload(id: album.id)
+		await mirror.forget(album.server)
+		await events.libraryChanged()
+	}
+
 	// MARK: - Covers
 
 	func coverUrls() async -> CoverUrls {

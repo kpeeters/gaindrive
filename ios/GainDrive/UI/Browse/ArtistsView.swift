@@ -40,6 +40,7 @@ struct ArtistsView: View {
 	@Environment(SettingsStore.self) private var settings
 	@Environment(\.library) private var library
 	@Environment(\.horizontalSizeClass) private var sizeClass
+	@Environment(LibraryEvents.self) private var events
 	/// **The selections carry the domain values, not ids.** A `List` would
 	/// default to the element's `id`, which here is an `ItemRef` - and both
 	/// trailing panes need more than that: the albums pane wants the
@@ -67,6 +68,9 @@ struct ArtistsView: View {
 			.onChange(of: settings.offlineMode) { clearSelection() }
 			// A different artist cannot still have the same album showing.
 			.onChange(of: selectedChoice) { selectedAlbum = nil }
+			// Moved or deleted on the server: the album showing may no longer
+			// be where it was, or be at all.
+			.onChange(of: events.libraryRevision) { selectedAlbum = nil }
 			// A cover rather than a sheet: this hosts a second pane layout, which
 			// needs the full width on an iPad - a centred sheet card cannot give
 			// it three panes - and collapses to a stack on a phone exactly like
@@ -211,7 +215,7 @@ struct ArtistsView: View {
 	@ViewBuilder
 	private var tracks: some View {
 		if let album = selectedAlbum {
-			AlbumDetailView(ref: album.ref, albumTitle: album.title)
+			AlbumDetailView(ref: album.ref, albumTitle: album.title, fromUploads: uploads)
 				.id(album.ref)
 		} else {
 			ContentUnavailableView("Choose an album", systemImage: "music.note.list")
@@ -253,10 +257,14 @@ private struct ArtistsList: View {
 
 	@Environment(ServerSelection.self) private var servers
 	@Environment(SettingsStore.self) private var settings
+	@Environment(LibraryEvents.self) private var events
+	@Environment(Fetches.self) private var fetches
+	@Environment(\.library) private var library
 	@Environment(\.dismiss) private var dismiss
 	/// Held in the *view*, not the view model: dismissing a note must not cost
 	/// a second fan-out across every server.
 	@State private var notesDismissed = false
+	@State private var fetching = false
 
 	var body: some View {
 		LoadStateBox(state: model.state, onRetry: { model.retry() }) { listing in
@@ -270,6 +278,15 @@ private struct ArtistsList: View {
 			if uploads {
 				ToolbarItem(placement: .cancellationAction) {
 					Button("Done") { dismiss() }
+				}
+				// Where Android and the web put the fetch panel: in the
+				// uploads, which is where a fetch lands.
+				ToolbarItem(placement: .topBarTrailing) {
+					Button {
+						fetching = true
+					} label: {
+						Label("Fetch from a URL", systemImage: "link.badge.plus")
+					}
 				}
 			}
 			if let onOpenUploads, model.canUpload {
@@ -301,6 +318,17 @@ private struct ArtistsList: View {
 		// The listing is a different one offline, and nothing else would ask
 		// for it: `appear` is keyed on the scope, which has not changed.
 		.onChange(of: settings.offlineMode) { model.retry() }
+		// An upload moved or deleted, or a fetch landed. Kept on screen while
+		// it re-reads, as a pull does.
+		.onChange(of: events.libraryRevision) { Task { await model.refresh() } }
+		// Handed over explicitly: a sheet from inside a cover is the case
+		// where an inherited environment has already gone missing once.
+		.sheet(isPresented: $fetching) {
+			FetchUrlView()
+				.environment(fetches)
+				.environment(settings)
+				.environment(\.library, library)
+		}
 	}
 
 	@ViewBuilder

@@ -190,7 +190,12 @@ extension View {
 	/// `@State`, so only the one that was tapped is true.
 	func miniPlayerInset(active: Bool) -> some View {
 		safeAreaInset(edge: .bottom, spacing: 0) {
-			MiniPlayer()
+			// The fetch strip rides in the same inset, so lists make room for
+			// both and neither covers the other.
+			VStack(spacing: 0) {
+				FetchStrip()
+				MiniPlayer()
+			}
 		}
 		.modifier(VideoPresentation(active: active))
 	}

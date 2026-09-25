@@ -32,6 +32,8 @@ struct GainDriveApp: App {
 	/// at a list, and an object in the environment would browse for the life of
 	/// the app.
 	@State private var castDevices: CastDeviceStore
+	@State private var fetches: Fetches
+	@Environment(\.scenePhase) private var scenePhase
 
 	/// Read once, here, before any view exists. `RootView` explains why this
 	/// cannot be derived inside the view hierarchy.
@@ -80,6 +82,11 @@ struct GainDriveApp: App {
 		// re-evaluation of this body - `@State` would keep the first player and
 		// silently discard the rest, each with its own audio session.
 		_castDevices = State(initialValue: CastDeviceStore())
+		// URL fetches: what may be offered, what is running, and telling the
+		// library when one lands. Polled while the app is in the foreground.
+		let fetches = Fetches(
+			registry: registry, accounts: accounts, events: events, settings: settings)
+		_fetches = State(initialValue: fetches)
 		_player = State(
 			initialValue: PlayerConnection(
 				registry: registry, library: library, targets: targets, store: store,
@@ -93,6 +100,8 @@ struct GainDriveApp: App {
 			// A removed server's rows go with it, or its library would go on
 			// being browsable under a server that is no longer configured.
 			Task { await mirror.forget(id) }
+			// A different account may have different upload rights.
+			Task { @MainActor in fetches.forget(id) }
 		}
 	}
 
@@ -109,6 +118,7 @@ struct GainDriveApp: App {
 			.environment(pins)
 			.environment(player)
 			.environment(castDevices)
+			.environment(fetches)
 			.environment(\.library, library)
 			.preferredColorScheme(settings.themeMode.colorScheme)
 			// Re-reads what each pin covers and fetches anything missing, which
@@ -116,6 +126,12 @@ struct GainDriveApp: App {
 			// pinned - and what re-adopts a background download the system
 			// carried on with while the app was not running.
 			.task { await pins.refresh() }
+			// Only while somebody could be looking: a suspended app cannot poll
+			// anyway, and the first sweep on coming back is what notices a
+			// fetch that finished meanwhile.
+			.onChange(of: scenePhase, initial: true) { _, phase in
+				if phase == .active { fetches.start() } else { fetches.stop() }
+			}
 		}
 	}
 }

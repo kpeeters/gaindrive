@@ -16,6 +16,10 @@ struct AlbumDetailView: View {
 	/// Where in that track to start, in seconds. Non-zero for a chapter hit,
 	/// which names a marker inside a recording rather than the recording.
 	var autoPlayAt: Double = 0
+	/// Reached through the uploads listing, which is what offers moving the
+	/// album into the library or deleting it. Only the Library tab's uploads
+	/// cover sets it; no other route leads into uploads.
+	var fromUploads = false
 
 	@Environment(\.library) private var library
 	@Environment(PlayerConnection.self) private var player
@@ -41,6 +45,13 @@ struct AlbumDetailView: View {
 		.toolbar {
 			ToolbarItem(placement: .topBarTrailing) {
 				DownloadControl(pin: Pin(ref: ref, kind: .album, name: albumTitle))
+			}
+			if fromUploads {
+				ToolbarItem(placement: .topBarTrailing) {
+					UploadActionsMenu(
+						album: ref, albumTitle: albumTitle,
+						artistName: model?.state.value?.album.artistName)
+				}
 			}
 		}
 		.task {

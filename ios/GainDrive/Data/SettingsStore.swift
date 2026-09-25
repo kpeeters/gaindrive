@@ -118,6 +118,22 @@ final class SettingsStore {
 		didSet { defaults.set(videoAudioOnly, forKey: Self.videoAudioOnlyKey) }
 	}
 
+	/// What the fetch form was last set to, so the next fetch starts there.
+	/// The names are sticky because a run of fetches is usually one album's
+	/// worth of tracks or one series' episodes.
+	var fetchServer: String? {
+		didSet { defaults.set(fetchServer, forKey: Self.fetchServerKey) }
+	}
+	var fetchAudio: Bool {
+		didSet { defaults.set(fetchAudio, forKey: Self.fetchAudioKey) }
+	}
+	var fetchArtist: String {
+		didSet { defaults.set(fetchArtist, forKey: Self.fetchArtistKey) }
+	}
+	var fetchAlbum: String {
+		didSet { defaults.set(fetchAlbum, forKey: Self.fetchAlbumKey) }
+	}
+
 	/// Whether this song plays with a picture. **The one question** every
 	/// "is it a video" decision in playback asks, so the setting cannot be
 	/// honoured in one place and forgotten in another.
@@ -147,6 +163,10 @@ final class SettingsStore {
 	private static let cacheOnPlayKey = "cache_on_play"
 	private static let unmeteredOnlyKey = "download_unmetered_only"
 	private static let videoAudioOnlyKey = "video_audio_only"
+	private static let fetchServerKey = "fetch_server"
+	private static let fetchAudioKey = "fetch_audio"
+	private static let fetchArtistKey = "fetch_artist"
+	private static let fetchAlbumKey = "fetch_album"
 
 	init(defaults: UserDefaults = .standard) {
 		self.defaults = defaults
@@ -172,5 +192,9 @@ final class SettingsStore {
 		cacheOnPlay = defaults.object(forKey: Self.cacheOnPlayKey) as? Bool ?? true
 		downloadUnmeteredOnly = defaults.object(forKey: Self.unmeteredOnlyKey) as? Bool ?? true
 		videoAudioOnly = defaults.bool(forKey: Self.videoAudioOnlyKey)
+		fetchServer = defaults.string(forKey: Self.fetchServerKey)
+		fetchAudio = defaults.object(forKey: Self.fetchAudioKey) as? Bool ?? true
+		fetchArtist = defaults.string(forKey: Self.fetchArtistKey) ?? ""
+		fetchAlbum = defaults.string(forKey: Self.fetchAlbumKey) ?? ""
 	}
 }

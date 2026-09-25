@@ -32,4 +32,14 @@ final class LibraryEvents {
 	func playlistsChanged() {
 		playlistRevision += 1
 	}
+
+	/// Bumped when the library itself changed on the server under the screens
+	/// showing it: an upload moved into the shared library or deleted, or a
+	/// fetch that finished. Every browse listing re-reads on it - Android's
+	/// `LibraryRevision`.
+	private(set) var libraryRevision = 0
+
+	func libraryChanged() {
+		libraryRevision += 1
+	}
 }

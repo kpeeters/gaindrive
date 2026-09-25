@@ -33,6 +33,7 @@ struct AlbumsView: View {
 	// above, which is what `List(selection:)` wants it called.
 	@Environment(ServerSelection.self) private var servers
 	@Environment(SettingsStore.self) private var settings
+	@Environment(LibraryEvents.self) private var events
 	@State private var model: AlbumsViewModel?
 	@State private var notesDismissed = false
 
@@ -64,6 +65,8 @@ struct AlbumsView: View {
 			}
 			model?.appear()
 		}
+		// An upload moved or deleted: this artist's albums may have changed.
+		.onChange(of: events.libraryRevision) { model?.retry() }
 	}
 
 	/// The server answers in year order alone (`ORDER BY al.year, al.title`),
