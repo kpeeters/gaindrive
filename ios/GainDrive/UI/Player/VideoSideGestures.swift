@@ -144,8 +144,18 @@ final class VideoSideGestures: NSObject, UIGestureRecognizerDelegate {
 		case .brightness:
 			return Double(screen?.brightness ?? 0.5)
 		case .volume:
+			// **The slider, not `AVAudioSession.outputVolume`.** That value is
+			// not reliably updated by a change made through this same slider,
+			// so every swipe after the first started again from 100%. The
+			// slider is kept in step with the system volume by `MPVolumeView`
+			// itself, which is why it is the one to read as well as write.
+			if let slider { return Double(slider.value) }
 			return Double(AVAudioSession.sharedInstance().outputVolume)
 		}
+	}
+
+	private var slider: UISlider? {
+		volumeView.subviews.compactMap { $0 as? UISlider }.first
 	}
 
 	private func write(_ value: Double, to control: SideControl) {
@@ -155,7 +165,7 @@ final class VideoSideGestures: NSObject, UIGestureRecognizerDelegate {
 			if originalBrightness == nil { originalBrightness = screen.brightness }
 			screen.brightness = max(CGFloat(value), Self.minBrightness)
 		case .volume:
-			guard let slider = volumeView.subviews.compactMap({ $0 as? UISlider }).first else {
+			guard let slider else {
 				// A future iOS that rearranges `MPVolumeView` would make this a
 				// swipe that silently does nothing; say so where it can be read.
 				Self.log.error("no slider inside MPVolumeView; volume swipe does nothing")
