@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -26,6 +27,8 @@ import org.gaindrive.android.data.parseTrackLink
 import org.gaindrive.android.ui.AvailabilityViewModel
 import org.gaindrive.android.ui.GainDriveApp
 import org.gaindrive.android.ui.LocalAvailability
+import org.gaindrive.android.ui.LocalStars
+import org.gaindrive.android.ui.StarsViewModel
 import org.gaindrive.android.ui.TvEnvironment
 import org.gaindrive.android.ui.isTvDevice
 import org.gaindrive.android.ui.settings.SettingsViewModel
@@ -90,10 +93,24 @@ class MainActivity : ComponentActivity() {
 			val availability: AvailabilityViewModel = hiltViewModel()
 			val availabilityState by availability.state.collectAsStateWithLifecycle()
 
+			// Ambient for the same reason, and the refusals toasted from here
+			// because the sheet a star was tapped in has closed by the time
+			// the server says no.
+			val stars: StarsViewModel = hiltViewModel()
+			val starsState by stars.state.collectAsStateWithLifecycle()
+			LaunchedEffect(stars) {
+				stars.errors.collect {
+					Toast.makeText(applicationContext, it, Toast.LENGTH_LONG).show()
+				}
+			}
+
 			GainDriveTheme(mode = state.themeMode, isTv = isTv) {
 				// Inside the theme, so the TV indication wraps the themed ripple.
 				TvEnvironment(isTv) {
-					CompositionLocalProvider(LocalAvailability provides availabilityState) {
+					CompositionLocalProvider(
+						LocalAvailability provides availabilityState,
+						LocalStars provides starsState,
+					) {
 						GainDriveApp(
 							settingsViewModel = viewModel,
 							sharedUrl = sharedUrl.asStateFlow(),

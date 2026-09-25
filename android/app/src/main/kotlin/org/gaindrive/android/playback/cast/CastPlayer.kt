@@ -281,6 +281,25 @@ class CastPlayer(
 		return Futures.immediateVoidFuture()
 	}
 
+	/**
+	 * A reorder of the queue. The receiver goes on playing what it has, so
+	 * nothing is loaded; only [index] follows the current entry to wherever it
+	 * now sits. Without this override Media3's default throws, because
+	 * `COMMAND_CHANGE_MEDIA_ITEMS` is advertised.
+	 */
+	override fun handleMoveMediaItems(
+		fromIndex: Int,
+		toIndex: Int,
+		newIndex: Int,
+	): ListenableFuture<*> {
+		val current = entries.getOrNull(index)
+		val moving = entries.subList(fromIndex, toIndex)
+		val rest = entries.subList(0, fromIndex) + entries.subList(toIndex, entries.size)
+		entries = rest.subList(0, newIndex) + moving + rest.subList(newIndex, rest.size)
+		current?.let { cur -> index = entries.indexOfFirst { it.uid == cur.uid } }
+		return Futures.immediateVoidFuture()
+	}
+
 	override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
 		this.playWhenReady = playWhenReady
 		if (playWhenReady) session.play() else session.pause()

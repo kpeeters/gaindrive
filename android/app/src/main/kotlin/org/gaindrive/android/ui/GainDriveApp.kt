@@ -613,6 +613,7 @@ fun GainDriveApp(
 			onEqualizer = { equalizerOpen = true },
 			onInfo = { trackInfoOpen = true },
 			onRemoveFromQueue = playerViewModel::removeFromQueue,
+			onMoveInQueue = playerViewModel::moveInQueue,
 			onWatch = {
 				nowPlayingOpen = false
 				navController.navigate(Route.Video)

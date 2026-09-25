@@ -224,6 +224,12 @@ class BrowseApiTest {
 	}
 
 	@Test
+	fun `getAlbumImages parses the count`() = runTest {
+		respond("""{"subsonic-response":{"status":"ok","albumImages":{"count":3}}}""")
+		assertEquals(3, api.getAlbumImages("77").requireOk().albumImages!!.count)
+	}
+
+	@Test
 	fun `star returns a bare ok`() = runTest {
 		respond("""{"subsonic-response":{"status":"ok"}}""")
 		assertEquals("ok", api.star("501", null, null).requireOk().status)

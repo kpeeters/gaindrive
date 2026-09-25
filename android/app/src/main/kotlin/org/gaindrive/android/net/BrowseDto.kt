@@ -281,6 +281,23 @@ data class GetAlbumInfoBody(
 ) : SubsonicBody
 
 /**
+ * A gaindrive extension: how many images an album folder holds, the cover
+ * included. Only a count comes back; each image is then `getCoverArt` with
+ * `index` running from 1 to `count - 1`.
+ */
+@Serializable
+data class AlbumImagesDto(
+	val count: Int = 0,
+)
+
+@Serializable
+data class GetAlbumImagesBody(
+	override val status: String = "failed",
+	override val error: SubsonicError? = null,
+	val albumImages: AlbumImagesDto? = null,
+) : SubsonicBody
+
+/**
  * Portrait URLs here point at MusicBrainz/Wikipedia, not at the server. The
  * app ignores them and asks `getCoverArt` for the artist folder instead, which
  * keeps the fetch on one authenticated path the server can cache - and working

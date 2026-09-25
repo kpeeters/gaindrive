@@ -85,6 +85,27 @@ class QueueBoundaryTest {
 		assertEquals(3, QueueBoundary(3).afterRemove(index = 3).value)
 	}
 
+	@Test
+	fun `moving within the manual region leaves the boundary alone`() {
+		assertEquals(3, QueueBoundary(3).afterMove(from = 2, to = 0).value)
+	}
+
+	/** A dragged track is a chosen one, so pulling it forward keeps it. */
+	@Test
+	fun `moving a tail track into the manual region lengthens it`() {
+		assertEquals(4, QueueBoundary(3).afterMove(from = 7, to = 1).value)
+	}
+
+	/**
+	 * Dropping a track in the tail makes everything up to it manual: what it
+	 * was dropped behind is now what the user placed it after.
+	 */
+	@Test
+	fun `moving into the tail pulls the boundary in behind it`() {
+		assertEquals(6, QueueBoundary(3).afterMove(from = 0, to = 5).value)
+		assertEquals(9, QueueBoundary(3).afterMove(from = 5, to = 8).value)
+	}
+
 	/**
 	 * A queue restored after process death is treated as entirely hand-picked,
 	 * so the next enqueue cannot wipe it.

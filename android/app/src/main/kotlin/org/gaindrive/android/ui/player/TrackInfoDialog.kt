@@ -42,6 +42,7 @@ import org.gaindrive.android.playback.NowPlaying
 import org.gaindrive.android.playback.demuxedLocally
 import org.gaindrive.android.playback.cast.CastMedia
 import org.gaindrive.android.playback.cast.CastRoute
+import org.gaindrive.android.ui.LocalStars
 import org.gaindrive.android.ui.components.formatDuration
 
 /**
@@ -132,7 +133,11 @@ private fun TrackRows(current: NowPlaying, song: Song?) {
 	InfoRow("Year", song?.year?.toString())
 	InfoRow("Length", song?.duration?.let(::formatDuration))
 	InfoRow("File", song?.let(::fileLabel))
-	InfoRow("Starred", song?.let { if (it.isStarred) "Yes" else "No" })
+	// Through the star store, so a toggle made in this session is reflected;
+	// the queued flag is the fallback when the mirror does not hold the track.
+	val stars = LocalStars.current
+	val starred = current.ref?.let { stars.isStarred(it, song?.isStarred ?: current.starred) }
+	InfoRow("Starred", starred?.let { if (it) "Yes" else "No" })
 }
 
 @Composable

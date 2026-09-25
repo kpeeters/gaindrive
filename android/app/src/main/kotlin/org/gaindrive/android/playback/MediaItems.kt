@@ -84,6 +84,13 @@ private const val KEY_AUDIO_ONLY_VIDEO = "org.gaindrive.audioOnlyVideo"
 private const val KEY_QUALITY = "org.gaindrive.quality"
 
 /**
+ * Whether the song was starred when it was queued, so the player's star has a
+ * starting point without a mirror lookup. Stale by design: a toggle made since
+ * is held by `StarStore`, which the UI reads over this.
+ */
+private const val KEY_STARRED = "org.gaindrive.starred"
+
+/**
  * The size the server is asked to scale notification artwork to, and the size
  * `CoilBitmapLoader` then asks Coil for. Here rather than in `PlayerConnection`
  * because the two have to agree: a different number on the loading side would
@@ -120,6 +127,7 @@ fun Song.toMediaItem(artworkUrl: String?): MediaItem {
 				putString(KEY_TRANSCODED_TYPE, transcodedContentType)
 				putBoolean(KEY_IS_VIDEO, isVideo)
 				putBoolean(KEY_NATIVE_SEEK, nativeSeek)
+				putBoolean(KEY_STARRED, isStarred)
 				// 0 rather than null: a Bundle float has no absent value, and
 				// the reader treats anything non-positive as "not known yet",
 				// which is also what an unprobed video gives.
@@ -304,6 +312,8 @@ data class NowPlaying(
 	val aspectRatio: Float? = null,
 	/** What the server was asked to send; see [KEY_QUALITY]. Null for video. */
 	val quality: AudioQuality? = null,
+	/** Starred when queued; see [KEY_STARRED]. */
+	val starred: Boolean = false,
 )
 
 fun MediaItem.toNowPlaying(): NowPlaying = NowPlaying(
@@ -317,4 +327,5 @@ fun MediaItem.toNowPlaying(): NowPlaying = NowPlaying(
 	nativeSeek = nativeSeek(),
 	aspectRatio = aspectRatio(),
 	quality = quality(),
+	starred = mediaMetadata.extras?.getBoolean(KEY_STARRED) == true,
 )

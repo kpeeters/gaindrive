@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,6 +47,7 @@ import org.gaindrive.android.ui.Availability
 import org.gaindrive.android.ui.ContainerMark
 import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.LocalIsTv
+import org.gaindrive.android.ui.LocalStars
 import org.gaindrive.android.ui.tvFocusHighlight
 
 /** Shared row composables. Every browse screen is built from these. */
@@ -311,6 +313,7 @@ fun TrackRow(
 				)
 			}
 		}
+		StarMark(song)
 		VideoMark(song)
 		TrackDownloadMark(song.ref)
 		Text(
@@ -361,6 +364,21 @@ private fun VideoMark(song: Song) {
 		imageVector = Icons.Default.Movie,
 		contentDescription = "Video",
 		tint = MaterialTheme.colorScheme.onSurfaceVariant,
+		modifier = Modifier.size(16.dp),
+	)
+}
+
+/**
+ * A starred track, marked in accent like the star button that set it. Only the
+ * filled state is drawn: an outline on every other row would be noise.
+ */
+@Composable
+private fun StarMark(song: Song) {
+	if (!LocalStars.current.isStarred(song.ref, song.isStarred)) return
+	Icon(
+		imageVector = Icons.Default.Star,
+		contentDescription = "Starred",
+		tint = MaterialTheme.colorScheme.primary,
 		modifier = Modifier.size(16.dp),
 	)
 }
@@ -444,6 +462,7 @@ fun SongRow(
 				overflow = TextOverflow.Ellipsis,
 			)
 		}
+		StarMark(song)
 		VideoMark(song)
 		TrackDownloadMark(song.ref)
 		ServerBadge(badge)

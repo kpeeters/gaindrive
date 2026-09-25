@@ -101,6 +101,9 @@ interface SubsonicApi {
 	@GET("rest/getAlbumInfo2.view")
 	suspend fun getAlbumInfo2(@Query("id") id: String): SubsonicEnvelope<GetAlbumInfoBody>
 
+	@GET("rest/getAlbumImages.view")
+	suspend fun getAlbumImages(@Query("id") id: String): SubsonicEnvelope<GetAlbumImagesBody>
+
 	// ── Video ───────────────────────────────────────────────────────────
 
 	/**

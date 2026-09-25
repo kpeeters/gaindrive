@@ -16,6 +16,8 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -42,7 +44,9 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.cache.PinKind
 import org.gaindrive.android.data.model.Song
+import org.gaindrive.android.data.model.StarKind
 import org.gaindrive.android.ui.Load
+import org.gaindrive.android.ui.LocalStars
 import org.gaindrive.android.ui.PinViewModel
 import org.gaindrive.android.ui.components.DownloadIndicator
 import org.gaindrive.android.ui.components.downloadActionLabel
@@ -62,6 +66,7 @@ fun TrackActionsSheet(
 	pins: PinViewModel = hiltViewModel(),
 ) {
 	val sheetState = rememberModalBottomSheetState()
+	val stars = LocalStars.current
 
 	// The picker replaces the actions inside this sheet rather than opening a
 	// second one on top: stacked modal sheets fight over the scrim and leave
@@ -125,6 +130,21 @@ fun TrackActionsSheet(
 					label = "Add to queue",
 				) {
 					onAddToQueue()
+					onDismiss()
+				}
+				val starred = stars.isStarred(song.ref, song.isStarred)
+				SheetAction(
+					leading = {
+						Icon(
+							if (starred) Icons.Default.Star else Icons.Default.StarBorder,
+							contentDescription = null,
+						)
+					},
+					label = if (starred) "Unstar" else "Star",
+				) {
+					// Refusals are toasted by the shell, since this sheet is gone
+					// before the server answers.
+					stars.toggle(song.ref, StarKind.SONG, song.isStarred)
 					onDismiss()
 				}
 				SheetAction(

@@ -38,6 +38,13 @@ value class QueueBoundary(val value: Int) {
 		QueueBoundary(if (index < value) value - 1 else value)
 
 	/**
+	 * Moving the entry at [from] to [to]. A track the user dragged is a track
+	 * the user chose, so landing at or past the boundary pulls the boundary
+	 * in behind it; the same rule as the iOS queue.
+	 */
+	fun afterMove(from: Int, to: Int) = afterRemove(from).afterInsert(to)
+
+	/**
 	 * The automatic tail to discard before appending, or null when there is
 	 * none. Returned as a half-open range so the caller can hand it straight to
 	 * `removeMediaItems`.

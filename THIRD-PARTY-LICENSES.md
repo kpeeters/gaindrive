@@ -207,6 +207,10 @@ From `android/gradle/libs.versions.toml` and `android/app/build.gradle.kts`.
   coil-compose, coil-network-okhttp
   https://github.com/coil-kt/coil
 
+* Reorderable 3.1.0 · Copyright (c) Calvin Liang
+  Drag to reorder the Now Playing queue.
+  https://github.com/Calvin-LL/Reorderable
+
 The Cast protocol is a port of `src/castmanager.cc`, not a dependency -
 neither `media3-cast` nor `play-services-cast-framework` is used. That is
 deliberate: Google Play Services is proprietary and would be incompatible with

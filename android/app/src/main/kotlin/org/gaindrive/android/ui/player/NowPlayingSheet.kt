@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -17,8 +18,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -30,23 +34,34 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.data.model.StarKind
 import org.gaindrive.android.playback.PlayerState
+import org.gaindrive.android.playback.NowPlaying
 import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.components.CoverHero
 import org.gaindrive.android.ui.components.CoverThumb
+import org.gaindrive.android.ui.components.StarButton
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,6 +80,7 @@ fun NowPlayingSheet(
 	onEqualizer: () -> Unit,
 	onInfo: () -> Unit,
 	onRemoveFromQueue: (Int) -> Unit,
+	onMoveInQueue: (from: Int, to: Int) -> Unit,
 	onWatch: () -> Unit,
 ) {
 	val current = state.current ?: return
@@ -96,6 +112,33 @@ fun NowPlayingSheet(
 	}
 
 	ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+		// The queue as drawn, which during a drag is the local order the rows
+		// have been dragged into. It follows the player the rest of the time;
+		// publish() rebuilds the queue on every player event, and following it
+		// mid-drag would snap the lifted row back. One move is sent on drop.
+		val published = remember(state.queue) { queueRows(state.queue) }
+		var rows by remember { mutableStateOf(published) }
+		var dragging by remember { mutableStateOf<String?>(null) }
+		LaunchedEffect(published) {
+			if (dragging == null) rows = published
+		}
+		// The drag handle's pointer input is started once and keeps the
+		// lambdas it was first given, so the drop reads the queue through this
+		// rather than capturing a copy that is stale by the second move.
+		val latestPublished by rememberUpdatedState(published)
+		// By key, not index, so the highlight stays on the playing track while
+		// it is being dragged past others.
+		val currentKey = published.getOrNull(state.queueIndex)?.key
+		// Only queue rows are ReorderableItems, so the cover, controls and
+		// headings around them are never offered as drop targets.
+		val reorderState = rememberReorderableLazyListState(listState) { from, to ->
+			rows = rows.toMutableList().apply {
+				val f = indexOfFirst { it.key == from.key }
+				val t = indexOfFirst { it.key == to.key }
+				if (f >= 0 && t >= 0) add(t, removeAt(f))
+			}
+		}
+
 		LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
 			item(key = "art") {
 				CoverHero(
@@ -117,14 +160,30 @@ fun NowPlayingSheet(
 						.fillMaxWidth()
 						.padding(horizontal = 24.dp, vertical = 16.dp),
 				) {
-					Text(
-						text = current.title,
-						style = MaterialTheme.typography.titleLarge,
-						maxLines = 2,
-						overflow = TextOverflow.Ellipsis,
-						textAlign = TextAlign.Center,
-						modifier = Modifier.fillMaxWidth(),
-					)
+					// The star sits beside the title rather than in the
+					// transport row, whose sides are already full on a phone.
+					// A spacer of the same width on the left keeps the title
+					// centred over the cover.
+					Row(verticalAlignment = Alignment.CenterVertically) {
+						val ref = current.ref
+						if (ref != null) Spacer(Modifier.size(48.dp))
+						Text(
+							text = current.title,
+							style = MaterialTheme.typography.titleLarge,
+							maxLines = 2,
+							overflow = TextOverflow.Ellipsis,
+							textAlign = TextAlign.Center,
+							modifier = Modifier.weight(1f),
+						)
+						if (ref != null) {
+							StarButton(
+								ref = ref,
+								kind = StarKind.SONG,
+								fallback = current.starred,
+								noun = "track",
+							)
+						}
+					}
 					// Tinted primary when it leads somewhere: the sleeve alone is
 					// not a discoverable way through to the album.
 					Text(
@@ -314,44 +373,103 @@ fun NowPlayingSheet(
 						modifier = Modifier.padding(start = 24.dp, top = 24.dp, bottom = 8.dp),
 					)
 				}
-				itemsIndexed(state.queue) { index, entry ->
-					Row(
-						modifier = Modifier
-							.fillMaxWidth()
-							.clickable { onJumpTo(index) }
-							.padding(horizontal = 24.dp, vertical = 8.dp),
-						verticalAlignment = Alignment.CenterVertically,
-						horizontalArrangement = Arrangement.spacedBy(12.dp),
-					) {
-						CoverThumb(entry.artworkUrl, entry.album, size = 32.dp)
-						Column(modifier = Modifier.weight(1f)) {
-							// Wraps, as the track rows in the listings do.
-							Text(
-								text = entry.title,
-								style = MaterialTheme.typography.bodyMedium,
-								color = if (index == state.queueIndex) {
-									MaterialTheme.colorScheme.primary
+				itemsIndexed(rows, key = { _, row -> row.key }) { index, row ->
+					val entry = row.entry
+					val isCurrent = row.key == currentKey
+					ReorderableItem(reorderState, key = row.key) { isDragging ->
+						Surface(
+							// Only while lifted: at rest the row sits on the sheet
+							// like any other, and a surface of its own would show.
+							color = if (isDragging) {
+								MaterialTheme.colorScheme.surfaceContainerHigh
+							} else {
+								Color.Transparent
+							},
+							shadowElevation = if (isDragging) 4.dp else 0.dp,
+						) {
+							Row(
+								modifier = Modifier
+									.fillMaxWidth()
+									.clickable { onJumpTo(index) }
+									.padding(start = 24.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(12.dp),
+							) {
+								CoverThumb(entry.artworkUrl, entry.album, size = 32.dp)
+								Column(modifier = Modifier.weight(1f)) {
+									// Wraps, as the track rows in the listings do.
+									Text(
+										text = entry.title,
+										style = MaterialTheme.typography.bodyMedium,
+										color = if (isCurrent) {
+											MaterialTheme.colorScheme.primary
+										} else {
+											MaterialTheme.colorScheme.onSurface
+										},
+									)
+									Text(
+										text = entry.artist,
+										style = MaterialTheme.typography.bodySmall,
+										color = MaterialTheme.colorScheme.onSurfaceVariant,
+										maxLines = 1,
+										overflow = TextOverflow.Ellipsis,
+									)
+								}
+								// The track playing cannot be removed: dropping it
+								// would mean deciding what plays instead, which is
+								// what skip is for. It can be moved; Media3 keeps
+								// it playing through that.
+								if (!isCurrent) {
+									IconButton(onClick = { onRemoveFromQueue(index) }) {
+										Icon(
+											Icons.Default.Close,
+											contentDescription = "Remove from queue",
+										)
+									}
+								}
+								if (isTv) {
+									// A remote cannot drag, so the move is a step
+									// at a time.
+									IconButton(
+										onClick = { onMoveInQueue(index, index - 1) },
+										enabled = index > 0,
+									) {
+										Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up")
+									}
+									IconButton(
+										onClick = { onMoveInQueue(index, index + 1) },
+										enabled = index < rows.size - 1,
+									) {
+										Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down")
+									}
 								} else {
-									MaterialTheme.colorScheme.onSurface
-								},
-							)
-							Text(
-								text = entry.artist,
-								style = MaterialTheme.typography.bodySmall,
-								color = MaterialTheme.colorScheme.onSurfaceVariant,
-								maxLines = 1,
-								overflow = TextOverflow.Ellipsis,
-							)
-						}
-						// The track playing cannot be removed: dropping it would
-						// mean deciding what plays instead, which is what skip is
-						// for.
-						if (index != state.queueIndex) {
-							IconButton(onClick = { onRemoveFromQueue(index) }) {
-								Icon(
-									Icons.Default.Close,
-									contentDescription = "Remove from queue",
-								)
+									Icon(
+										Icons.Default.DragHandle,
+										contentDescription = "Reorder",
+										tint = MaterialTheme.colorScheme.onSurfaceVariant,
+										modifier = Modifier
+											.draggableHandle(
+												// Only the key is taken from the row: it
+												// is the one thing about it that cannot
+												// go stale (see latestPublished).
+												onDragStarted = { dragging = row.key },
+												onDragStopped = {
+													val key = dragging
+													dragging = null
+													val from = latestPublished.indexOfFirst { it.key == key }
+													val to = rows.indexOfFirst { it.key == key }
+													if (from >= 0 && to >= 0 && to != from) {
+														onMoveInQueue(from, to)
+													} else {
+														// Nothing to send, so no publish
+														// will come to reset the rows.
+														rows = published
+													}
+												},
+											)
+											.padding(12.dp),
+									)
+								}
 							}
 						}
 					}
@@ -369,6 +487,24 @@ fun NowPlayingSheet(
 				}
 			}
 		}
+	}
+}
+
+/** One queue entry as drawn, under a key that survives reordering. */
+private data class QueueRow(val key: String, val entry: NowPlaying)
+
+/**
+ * Keys the queue by ref plus occurrence, since the same track can be queued
+ * twice and a lazy list refuses duplicate keys. Prefixed so none can collide
+ * with the sheet's fixed items.
+ */
+private fun queueRows(queue: List<NowPlaying>): List<QueueRow> {
+	val seen = mutableMapOf<String, Int>()
+	return queue.map { entry ->
+		val id = entry.ref?.encode() ?: entry.title
+		val n = (seen[id] ?: 0) + 1
+		seen[id] = n
+		QueueRow("queue:$id#$n", entry)
 	}
 }
 

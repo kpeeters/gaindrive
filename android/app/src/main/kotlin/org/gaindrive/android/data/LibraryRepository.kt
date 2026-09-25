@@ -315,6 +315,23 @@ class LibraryRepository @Inject constructor(
 		}
 
 	/**
+	 * How many images the album folder holds, the cover included; 1 when
+	 * there are no extras, offline, or on any failure.
+	 *
+	 * Not mirrored: the extra images are not pinned with the album, so a
+	 * stored count would offer pages that cannot load. The failure is
+	 * swallowed because a server without the extension still has a cover.
+	 */
+	suspend fun albumImageCount(album: ItemRef): Int {
+		if (offline) return 1
+		return runCatchingCancellable {
+			onServer(album.server) { client ->
+				client.getAlbumImages(album.id).requireOk().albumImages?.count ?: 1
+			}
+		}.getOrDefault(1).coerceAtLeast(1)
+	}
+
+	/**
 	 * The chapter markers of every chaptered item in one album folder, keyed by
 	 * the item they belong to.
 	 *

@@ -499,6 +499,18 @@ class PlayerConnection @Inject constructor(
 		}
 	}
 
+	/**
+	 * Media3 keeps the current item playing through a move and renumbers
+	 * `currentMediaItemIndex` itself, so only the boundary needs updating.
+	 */
+	fun moveInQueue(from: Int, to: Int) {
+		val controller = controller ?: return
+		val count = controller.mediaItemCount
+		if (from == to || from !in 0 until count || to !in 0 until count) return
+		controller.moveMediaItem(from, to)
+		autoFrom = autoFrom.afterMove(from, to)
+	}
+
 	fun stop() {
 		controller?.run {
 			clearMediaItems()

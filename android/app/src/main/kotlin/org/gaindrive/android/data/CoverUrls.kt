@@ -23,9 +23,17 @@ class CoverUrls internal constructor(
 	 * actually displayed: `ArtKeys` strips the auth off this before Coil sees
 	 * it but keeps the size, because the server serves a different ladder rung
 	 * per size, so a consistent size per context is what makes the cache hit.
+	 *
+	 * [index] picks one of an album folder's extra images (see
+	 * `getAlbumImages`). 0 is the cover and is left off the URL, so every
+	 * existing cache entry keeps its key.
 	 */
-	fun url(ref: ItemRef?, size: Int): String? {
+	fun url(ref: ItemRef?, size: Int, index: Int = 0): String? {
 		val client = clients[ref?.server] ?: return null
-		return client.url("getCoverArt", mapOf("id" to ref!!.id, "size" to size.toString()))
+		val params = mapOf("id" to ref!!.id, "size" to size.toString())
+		return client.url(
+			"getCoverArt",
+			if (index > 0) params + ("index" to index.toString()) else params,
+		)
 	}
 }
