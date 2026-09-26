@@ -13,6 +13,7 @@
 #include "chapters.hh"
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -339,7 +340,7 @@ void GainDrive::routes_edit()
 		                use_json ? "application/json" : "application/xml");
 		});
 
-	// Upload a music archive (zip / tar / tar.gz / tgz) and extract it into
+	// Upload a music archive (zip / tar / tar.gz / tgz / 7z) and extract it into
 	// the calling user's personal folder under <uploads root>/<username>/.
 	// The content-reader form, and that is the security boundary as much as a
 	// convenience: httplib hands the handler control *before* reading a byte
@@ -353,20 +354,13 @@ void GainDrive::routes_edit()
 	                               const httplib::ContentReader& content_reader) {
 		if (!check_auth(req, res, store_)) return;
 
-		auto json_err = [&](const std::string& msg) {
+		auto json_err = [&](const std::string& msg, int status = 400) {
 			nlohmann::json j;
 			j["status"]  = "error";
 			j["message"] = msg;
-			res.status = 400;
+			res.status = status;
 			res.set_content(j.dump(), "application/json");
 			};
-
-		// Refuse rather than fall back to a library root: an upload landing in
-		// a shared library would be scanned as somebody's album.
-		if (users_dir_.empty()) {
-			json_err("No uploads root is configured on this server.");
-			return;
-			}
 
 		// Require upload_allowed (or admin); capture the username for the dest path.
 		std::string uname;
@@ -379,6 +373,28 @@ void GainDrive::routes_edit()
 			return;
 			}
 		}
+
+		// Every refusal from here on reads the rest of the body first. httplib
+		// closes the connection after any 4xx/5xx, and a reverse proxy that is
+		// still streaming the body into it then gets EPIPE, never reads our
+		// answer, and hands the client a bare 502 instead. The caller is
+		// authenticated and allowed to upload by now, so the cost is bounded
+		// bandwidth from a known account; the refusals above stay cheap.
+		auto drain = [&]{
+			if (req.is_multipart_form_data())
+				content_reader([](const httplib::FormData&) { return true; },
+				               [](const char*, size_t) { return true; });
+			else
+				content_reader([](const char*, size_t) { return true; });
+			};
+
+		// Refuse rather than fall back to a library root: an upload landing in
+		// a shared library would be scanned as somebody's album.
+		if (users_dir_.empty()) {
+			drain();
+			json_err("No uploads root is configured on this server.");
+			return;
+			}
 
 		// Typed names, exactly as fetchUrl takes them - the two producers are
 		// the same steps around a different source of bytes, and scan_batch()
@@ -398,15 +414,15 @@ void GainDrive::routes_edit()
 			return !out.empty();
 			};
 		if (!typed("artist", want_artist)) {
-			json_err("The artist name contains nothing usable."); return;
+			drain(); json_err("The artist name contains nothing usable."); return;
 			}
 		if (!typed("album", want_album)) {
-			json_err("The album name contains nothing usable."); return;
+			drain(); json_err("The album name contains nothing usable."); return;
 			}
 		}
 
 		if (!req.is_multipart_form_data()) {
-			json_err("Expected multipart/form-data."); return;
+			drain(); json_err("Expected multipart/form-data."); return;
 			}
 
 		namespace fs = std::filesystem;
@@ -427,9 +443,12 @@ void GainDrive::routes_edit()
 		uint64_t received = 0;
 		bool too_big = false, bad_type = false, io_failed = false;
 
-		auto type_ok = [](const std::string& n) {
+		auto type_ok = [](std::string n) {
+			std::transform(n.begin(), n.end(), n.begin(),
+			               [](unsigned char c) { return std::tolower(c); });
 			return n.ends_with(".zip") || n.ends_with(".tar")
-			    || n.ends_with(".tar.gz") || n.ends_with(".tgz");
+			    || n.ends_with(".tar.gz") || n.ends_with(".tgz")
+			    || n.ends_with(".7z");
 			};
 
 		bool read_ok = content_reader(
@@ -437,21 +456,25 @@ void GainDrive::routes_edit()
 				cur_part = fd.name;
 				if (cur_part != "file") return true;   // other parts: ignored
 				name = fd.filename;
-				// Refusing here aborts the read, so a wrong extension costs
-				// the client its upload time, not the server its disk.
-				if (!type_ok(name)) { bad_type = true; return false; }
+				// Neither refusal aborts the read, for the proxy's sake (see
+				// drain() above): the rest of the file is read and dropped,
+				// which costs bandwidth but never disk.
+				if (!type_ok(name)) { bad_type = true; return true; }
 				std::error_code ec;
 				fs::create_directories(part.parent_path(), ec);
 				out.open(part, std::ios::binary | std::ios::trunc);
-				if (!out) { io_failed = true; return false; }
+				if (!out) io_failed = true;
 				return true;
 				},
 			[&](const char* data, size_t n) {
 				if (cur_part != "file") return true;
 				received += n;
+				// Still an abort: past this httplib's own cap stops the read
+				// anyway, so there is nothing a drain could save.
 				if (received > MAX_REQUEST_BYTES) { too_big = true; return false; }
+				if (bad_type || io_failed) return true;
 				out.write(data, static_cast<std::streamsize>(n));
-				if (!out) { io_failed = true; return false; }
+				if (!out) io_failed = true;
 				return true;
 				});
 		if (out.is_open()) out.close();
@@ -460,13 +483,11 @@ void GainDrive::routes_edit()
 
 		if (bad_type) {
 			drop_part();
-			json_err("Unsupported file type. Use zip, tar, tar.gz, or tgz.");
+			json_err("Unsupported file type. Use zip, tar, tar.gz, tgz, or 7z.");
 			return;
 			}
-		if (too_big)   { drop_part(); res.status = 413;
-		                 json_err("Upload too large."); return; }
-		if (io_failed) { drop_part(); res.status = 500;
-		                 json_err("Could not store the upload."); return; }
+		if (too_big)   { drop_part(); json_err("Upload too large.", 413); return; }
+		if (io_failed) { drop_part(); json_err("Could not store the upload.", 500); return; }
 		if (!read_ok)  { drop_part(); json_err("Upload was interrupted."); return; }
 		if (name.empty()) { drop_part(); json_err("Missing file part."); return; }
 

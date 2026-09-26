@@ -2218,7 +2218,8 @@ function makeUploadBar() {
 
    const fileInput = document.createElement('input');
    fileInput.type   = 'file';
-   fileInput.accept = '.zip,.tar,.tar.gz,.tgz';
+   const uploadTypes = ['.zip', '.tar', '.tar.gz', '.tgz', '.7z'];
+   fileInput.accept = uploadTypes.join(',');
    row.appendChild(fileInput);
 
    const uploadBtn = document.createElement('button');
@@ -2228,7 +2229,7 @@ function makeUploadBar() {
 
    const hint = document.createElement('p');
    hint.className   = 'admin-hint';
-   hint.textContent = 'Upload music archive: zip, tar, tar.gz:';
+   hint.textContent = 'Upload music archive: zip, tar, tar.gz, 7z:';
    // Says where an upload actually goes, because "Uploads" is a place people
    // reasonably expect to be the library itself. It is not: an admin has to
    // move it, and until then only this account can see it.
@@ -2460,6 +2461,15 @@ function makeUploadBar() {
    uploadBtn.addEventListener('click', () => {
       const file = fileInput.files[0];
       if (!file) { uploadStatus.textContent = 'No file selected.'; return; }
+      // The picker's accept list is only a suggestion. Checked here because a
+      // refusal the server sends mid-body reaches us through a proxy as a bare
+      // 502, and only after the whole file has gone up.
+      const lower = file.name.toLowerCase();
+      if (!uploadTypes.some(t => lower.endsWith(t))) {
+         uploadStatus.textContent =
+            'Error: Unsupported file type. Use zip, tar, tar.gz, tgz, or 7z.';
+         return;
+         }
 
       const server = serverBase();
       const p = new URLSearchParams({
