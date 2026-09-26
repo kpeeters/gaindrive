@@ -55,7 +55,6 @@ struct ArtistsView: View {
 	/// discarded on dismiss - Android's fresh-listing-per-visit lifecycle,
 	/// and what stops a stale `loadedFor` surviving a re-presentation.
 	@State private var uploadsModel: ArtistsViewModel?
-	@State private var showingUploads = false
 
 	var body: some View {
 		layout
@@ -77,8 +76,13 @@ struct ArtistsView: View {
 			// the view underneath. Presented from within the tab's content, so it
 			// inherits the environment; the caveat in RootView about sheets losing
 			// it applies only to presentations hung off the TabView itself.
-			.fullScreenCover(isPresented: $showingUploads, onDismiss: { uploadsModel = nil }) {
-				uploadsCover
+			//
+			// **Presented from the model, not from a separate flag.** With
+			// `isPresented:` the content closure could be built before it saw the
+			// model set a line earlier, and rendered its empty branch - a blank
+			// cover. `item:` hands the content the very value that raised it.
+			.fullScreenCover(item: $uploadsModel) { model in
+				ArtistsView(model: model, uploads: true)
 			}
 	}
 
@@ -171,21 +175,11 @@ struct ArtistsView: View {
 		return { openUploads() }
 	}
 
-	/// Out of the body for the same reason as `openUploadsAction`: the
-	/// smaller each expression the body has to solve, the better.
-	@ViewBuilder
-	private var uploadsCover: some View {
-		if let uploadsModel {
-			ArtistsView(model: uploadsModel, uploads: true)
-		}
-	}
-
 	private func openUploads() {
 		guard let library else { return }
 		// Built here rather than held ready: initialisers do no work, and a
 		// model that exists only while its screen does cannot go stale.
 		uploadsModel = ArtistsViewModel(library: library, selection: servers, uploads: true)
-		showingUploads = true
 	}
 
 	@ViewBuilder
