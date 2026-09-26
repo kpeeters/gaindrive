@@ -21,8 +21,13 @@ struct TrackInfoView: View {
 
 	@Environment(PlayerConnection.self) private var player
 	@Environment(StarStore.self) private var stars
+	@Environment(ServerRegistry.self) private var registry
 	@Environment(\.dismiss) private var dismiss
 	@State private var sent: AudioQuality?
+	/// Where playback was when this opened, if this is the track playing.
+	/// Taken once, so the link offered does not tick along while it is read.
+	@State private var openedAt: Double = 0
+	@State private var chapters: [Chapter] = []
 
 	var body: some View {
 		NavigationStack {
@@ -58,6 +63,8 @@ struct TrackInfoView: View {
 				} footer: {
 					Text(footer)
 				}
+
+				share
 			}
 			.navigationTitle("Track info")
 			.navigationBarTitleDisplayMode(.inline)
@@ -68,6 +75,44 @@ struct TrackInfoView: View {
 			}
 		}
 		.task { sent = await player.streamQuality(for: song) }
+		.task {
+			if player.current?.ref == song.ref { openedAt = player.position.rounded(.down) }
+			chapters = await ChapterTracks(registry: registry).chapters(for: song.ref).chapters
+		}
+	}
+
+	/// The web client's link, `<server>/?track=<id>[&t=<s>]`, so it lands in
+	/// the same chooser page and web player as one copied from a browser. It
+	/// names a server and a track and **carries no credentials** by
+	/// construction, unlike the stream URL, which is why it may be shown.
+	@ViewBuilder
+	private var share: some View {
+		if let server = registry.servers.first(where: { $0.id == song.ref.server }),
+			let plain = TrackLink.shareURL(serverURL: server.urlString, trackId: song.ref.id)
+		{
+			Section("Share") {
+				ShareLink(item: plain) { Label("Link to this track", systemImage: "link") }
+				if openedAt >= 1,
+					let here = TrackLink.shareURL(
+						serverURL: server.urlString, trackId: song.ref.id, seconds: openedAt)
+				{
+					ShareLink(item: here) {
+						Label("From \(formatDuration(Int(openedAt)))", systemImage: "clock")
+					}
+				}
+				// The chapter under the position, for a concert or a mix: the
+				// start of the song rather than wherever the playhead happened
+				// to be.
+				if let chapter = TrackLink.chapter(in: chapters, at: openedAt),
+					let atChapter = TrackLink.shareURL(
+						serverURL: server.urlString, trackId: song.ref.id, seconds: chapter.start)
+				{
+					ShareLink(item: atChapter) {
+						Label("From “\(chapter.displayName)”", systemImage: "list.bullet")
+					}
+				}
+			}
+		}
 	}
 
 	/// The last row is the reason the screen exists, so the footer is what makes

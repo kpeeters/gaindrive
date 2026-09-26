@@ -258,6 +258,10 @@ struct GetAlbumBody: Decodable, Sendable {
 	let album: AlbumDto?
 }
 
+struct GetSongBody: Decodable, Sendable {
+	let song: SongDto?
+}
+
 /// The grant `getCastToken` mints, or nil from a server too old to have the
 /// endpoint - which answers a failed envelope, so this type is never reached
 /// in that case and the caller sees a thrown `SubsonicError` instead.

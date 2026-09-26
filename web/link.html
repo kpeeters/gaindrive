@@ -1,6 +1,6 @@
 <!doctype html>
-<!-- The chooser an Android browser is served instead of the SPA when the URL
-     carries ?track= (see the index handler in gaindrive.cc).  Self-contained
+<!-- The chooser an Android or iOS browser is served instead of the SPA when
+     the URL carries ?track= (see index_page in apiweb.cc).  Self-contained
      on purpose: it must not pull in the SPA's stylesheet or icon font for two
      anchors, and it is served unauthenticated, so it shows no track data. -->
 <html lang="en">
@@ -91,12 +91,20 @@ document.getElementById('open-web').href = web.href;
 // every web link on Androids old enough to predate app-link verification.
 // The app re-finds the server by the authority, which its own configured
 // URL already spells with the right scheme.
-document.getElementById('open-app').href =
-   'intent://' + here.host + here.pathname + here.search
- + '#Intent;scheme=gaindrive'
- + ';package=org.gaindrive.android'
- + ';S.browser_fallback_url=' + encodeURIComponent(web.href)
- + ';end';
+//
+// iOS has no intent:// and no fallback URL: Safari follows the app's own
+// scheme directly, and says it cannot open the page when the app is not
+// installed - which is what the browser link below the button is for.
+// iPadOS's Safari presents a Mac agent, hence the touch-point test.
+const ios = /iPhone|iPad|iPod/.test(navigator.userAgent)
+         || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+document.getElementById('open-app').href = ios
+   ? 'gaindrive://' + here.host + here.pathname + here.search
+   : 'intent://' + here.host + here.pathname + here.search
+      + '#Intent;scheme=gaindrive'
+      + ';package=org.gaindrive.android'
+      + ';S.browser_fallback_url=' + encodeURIComponent(web.href)
+      + ';end';
 </script>
 </body>
 </html>

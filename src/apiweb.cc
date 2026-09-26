@@ -256,9 +256,9 @@ void GainDrive::routes_web()
 
 	// Web client - serve embedded static files.
 	//
-	// A track link opened on an Android device is answered with a chooser
-	// page - an intent:// anchor aimed at the app, and a browser link -
-	// instead of the SPA.  web=1 is the loop-breaker: the chooser's own
+	// A track link opened on an Android or iOS device is answered with a
+	// chooser page - an anchor aimed at the app, and a browser link - instead
+	// of the SPA.  web=1 is the loop-breaker: the chooser's own
 	// browser link and the intent's fallback URL both carry it, or an
 	// Android browser would be handed the chooser again for ever.  The page
 	// composes its anchors from location.href itself, so nothing from the
@@ -339,9 +339,14 @@ void GainDrive::routes_web()
 	auto index_page = [revalidated](const httplib::Request& req,
 	                                httplib::Response& res) {
 		res.set_header("X-Frame-Options", "DENY");
-		if (req.has_param("track") && !req.has_param("web")
-		    && req.get_header_value("User-Agent").find("Android")
-		       != std::string::npos) {
+		// Android, and iOS by its phone and tablet agents. An iPad's Safari
+		// presents a Mac agent by default and cannot be told apart from one, so
+		// it gets the SPA - where the link still plays, just not in the app.
+		const std::string agent = req.get_header_value("User-Agent");
+		const bool has_app = agent.find("Android") != std::string::npos
+		                  || agent.find("iPhone") != std::string::npos
+		                  || agent.find("iPad") != std::string::npos;
+		if (req.has_param("track") && !req.has_param("web") && has_app) {
 			res.set_header("Content-Security-Policy",
 			               "default-src 'none'; script-src 'unsafe-inline'; "
 			               "style-src 'unsafe-inline'; base-uri 'none'; "

@@ -29,6 +29,13 @@ struct SearchView: View {
 		.searchable(text: $model.query, prompt: "Artists, albums and tracks")
 		.task(id: selection.scope) { model.scopeChanged() }
 		.onChange(of: selection.scope) { path.removeAll() }
+		// A track link: replaces whatever was pushed, since what was asked
+		// for is this album and not a detour behind another one.
+		.onChange(of: model.pendingRoute, initial: true) {
+			guard let route = model.pendingRoute else { return }
+			path = [route]
+			model.consumePendingRoute()
+		}
 	}
 
 	@ViewBuilder

@@ -78,6 +78,20 @@ final class SearchViewModel {
 
 	private(set) var phase: SearchPhase = .idle
 
+	/// A screen to push that did not come from a tap in this tab - an opened
+	/// track link. Search is where it lands because it already owns a
+	/// navigation path and is where "find me this" belongs; `SearchView` pushes
+	/// it and hands it back.
+	private(set) var pendingRoute: Route?
+
+	func open(_ route: Route) {
+		pendingRoute = route
+	}
+
+	func consumePendingRoute() {
+		pendingRoute = nil
+	}
+
 	@ObservationIgnored private let library: LibraryRepository
 	@ObservationIgnored private let selection: ServerSelection
 	@ObservationIgnored private var task: Task<Void, Never>?

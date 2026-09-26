@@ -21,6 +21,8 @@ import UIKit
 struct NowPlayingView: View {
 	@Environment(PlayerConnection.self) private var player
 	@Environment(CastDeviceStore.self) private var castDevices
+	@Environment(StarStore.self) private var stars
+	@Environment(ServerRegistry.self) private var registry
 	@Environment(\.dismiss) private var dismiss
 	@Environment(\.verticalSizeClass) private var verticalSizeClass
 
@@ -55,7 +57,14 @@ struct NowPlayingView: View {
 			}
 		}
 		.sheet(item: $addingTo) { AddToPlaylistView(song: $0) }
-		.sheet(item: $showingInfo) { TrackInfoView(song: $0) }
+		// Handed over explicitly, as the cast sheet below is: on the Mac a sheet
+		// raised from here has been presented without its environment.
+		.sheet(item: $showingInfo) {
+			TrackInfoView(song: $0)
+				.environment(player)
+				.environment(stars)
+				.environment(registry)
+		}
 		// Handed over explicitly rather than inherited: on the Mac this sheet
 		// was presented with an environment missing `PlayerConnection`, and
 		// crashed on its first lookup. Resolved here, where the lookup works -

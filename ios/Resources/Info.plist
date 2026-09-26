@@ -115,5 +115,22 @@
 	     entertainment because that is what the app is primarily for. -->
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.music</string>
+
+	<!-- Track links. The server's chooser page (web/link.html) turns a shared
+	     https link into gaindrive://<host>/<path>?track=<id> for the app; the
+	     same scheme Android registers. A custom scheme because universal
+	     links need the domain listed at build time, and every server here is
+	     somebody's own. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>org.gaindrive.ios-player.track</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>gaindrive</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

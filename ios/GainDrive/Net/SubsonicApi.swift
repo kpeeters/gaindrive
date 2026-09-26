@@ -64,6 +64,12 @@ extension SubsonicClient {
 		try await perform("getAlbum", parameters: ["id": id], expecting: GetAlbumBody.self).album
 	}
 
+	/// One track, which is what a shared track link names: its album is what
+	/// the app then opens.
+	func song(id: String) async throws -> SongDto? {
+		try await perform("getSong", parameters: ["id": id], expecting: GetSongBody.self).song
+	}
+
 	/// Answering this may send the *server* out to MusicBrainz and Wikipedia,
 	/// so it can take seconds. Never await it before the thing the user asked
 	/// for.
