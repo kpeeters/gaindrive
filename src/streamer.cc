@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 #include <string>
@@ -44,6 +45,48 @@ static std::atomic<int> piped_ffmpeg_count{0};
 int Streamer::piped_ffmpeg_running()
 	{
 	return piped_ffmpeg_count.load();
+	}
+
+// Running transcodes that a newer request with the same key may kill.  An
+// entry leaves this list before its process is reaped, and kill() only ever
+// happens under the lock, so a kill can never land on a reused pid.
+struct LiveTranscode {
+	std::string                        key;
+	uint64_t                           seq;
+	std::shared_ptr<reproc::process>   proc;
+	std::shared_ptr<std::atomic<bool>> superseded;
+	};
+static std::mutex                 live_mu;
+static std::vector<LiveTranscode> live_transcodes;
+static uint64_t                   live_seq = 0;
+
+// Kills every transcode registered under `key` and registers this one in the
+// same step, so two racing requests cannot both miss each other.
+static uint64_t supersede_and_register(const std::string& key,
+                                       std::shared_ptr<reproc::process> proc,
+                                       std::shared_ptr<std::atomic<bool>> flag)
+	{
+	std::lock_guard<std::mutex> lock(live_mu);
+	std::erase_if(live_transcodes, [&](const LiveTranscode& t) {
+		if (t.key != key) return false;
+		// Flag first: the killed pump reads EOF next and must see it.
+		t.superseded->store(true);
+		t.proc->kill();
+		// Not the key: for a cast or a grant it holds the token.
+		std::cout << stamp() << "stream: killed superseded ffmpeg"
+		          << std::endl;
+		return true;
+		});
+	live_transcodes.push_back({key, ++live_seq, std::move(proc),
+	                           std::move(flag)});
+	return live_seq;
+	}
+
+static void unregister_transcode(uint64_t seq)
+	{
+	std::lock_guard<std::mutex> lock(live_mu);
+	std::erase_if(live_transcodes,
+	              [seq](const LiveTranscode& t) { return t.seq == seq; });
 	}
 
 // ---- Streamer --------------------------------------------------------
@@ -976,8 +1019,11 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	// Unpaced for the same reason as Tier 0, and with the same residual risk
 	// recorded there: the audio throttle's 15 s window starves a player that
 	// wants to buffer a video.
+	std::string key = video.owner.empty()
+	                ? std::string()
+	                : video.owner + "#" + std::to_string(song.id);
 	serve_transcoded(res, std::move(argv), mime, bps, false, TARGET_BUF,
-	                 std::move(get_position));
+	                 std::move(get_position), 0, key);
 	}
 
 void Streamer::serve_transcoded(httplib::Response& res,
@@ -985,7 +1031,8 @@ void Streamer::serve_transcoded(httplib::Response& res,
                                 const std::string& mime, float bps,
                                 bool pace, float pace_lead,
                                 std::function<float()> get_position,
-                                int64_t est_length)
+                                int64_t est_length,
+                                const std::string& supersede_key)
 	{
 	{
 	std::string cmd;
@@ -1036,6 +1083,12 @@ void Streamer::serve_transcoded(httplib::Response& res,
 		return;
 		}
 
+	// Registered only after a successful start, so the releaser below, which
+	// unregisters, is guaranteed to exist for every entry.
+	auto     superseded = std::make_shared<std::atomic<bool>>(false);
+	uint64_t live_id    = supersede_key.empty() ? 0
+	                    : supersede_and_register(supersede_key, proc, superseded);
+
 	std::cout << stamp() << "stream: bps=" << bps << std::endl;
 	// total_sent persists across repeated provider calls (one per chunk).
 	auto total_sent = std::make_shared<size_t>(0);
@@ -1057,7 +1110,7 @@ void Streamer::serve_transcoded(httplib::Response& res,
 	// out so the chunked and known-length variants below share it exactly;
 	// `cap` bounds what may be written this call, which is how the estimate
 	// variant stops precisely on the length it promised.
-	auto pump = [proc, bps, total_sent, t_start, pace, pace_lead,
+	auto pump = [proc, bps, total_sent, t_start, pace, pace_lead, superseded,
 	             get_position = std::move(get_position)]
 	            (httplib::DataSink& sink, size_t cap) -> Pump {
 			if (get_position && get_position() < CAST_POS_BUFFERING) {
@@ -1069,6 +1122,9 @@ void Streamer::serve_transcoded(httplib::Response& res,
 			auto [n, err] = proc->read(reproc::stream::out, buf,
 			                           std::min(cap, sizeof(buf)));
 			if (n == 0 || err) {
+				// A killed encode ends in EOF too, and must not then be framed
+				// as a complete response: the body is cut short.
+				if (superseded->load()) return Pump::Abort;
 				// Check err before n: reproc wraps negative C return values into
 				// size_t, so err is the reliable EOF/error indicator.
 				if (err && err != std::make_error_code(std::errc::broken_pipe))
@@ -1144,7 +1200,9 @@ void Streamer::serve_transcoded(httplib::Response& res,
 			return Pump::More;
 			};
 
-	auto releaser = [proc, total_sent, errf, slot](bool success) {
+	auto releaser = [proc, total_sent, errf, slot, live_id](bool success) {
+			// Before the wait reaps the pid; see LiveTranscode.
+			if (live_id) unregister_transcode(live_id);
 			if (!success) proc->kill();
 			auto [status, ec] = proc->wait(reproc::infinite);
 			std::cout << stamp() << "stream: ffmpeg exit status=" << status

@@ -46,6 +46,12 @@ struct VideoOptions {
 	// silently defeat the Android client's warmTranscode(), which fetches one
 	// byte precisely *because* the build blocks.
 	bool             start_immediately = false;
+	// Who is watching.  A new encode for the same owner and film kills the
+	// older ones: a seek abandons them, and the abort otherwise reaches us
+	// only once Apache and httplib notice, seconds of all-core x264 later.
+	// Empty means never superseded.  An account today, because nothing in a
+	// request tells one device from another.
+	std::string      owner;
 	};
 
 class Streamer {
@@ -192,10 +198,13 @@ class Streamer {
 		// bps paces the throttle; est_length > 0 switches from a chunked
 		// response to a known-length one carrying that Content-Length,
 		// truncating or zero-padding to match (estimateContentLength).
+		// A non-empty supersede_key kills every running transcode started
+		// with the same key; see VideoOptions::owner.
 		static void serve_transcoded(httplib::Response& res,
 		                             std::vector<std::string> args,
 		                             const std::string& mime, float bps,
 		                             bool pace, float pace_lead,
 		                             std::function<float()> get_position,
-		                             int64_t est_length = 0);
+		                             int64_t est_length = 0,
+		                             const std::string& supersede_key = {});
 	};

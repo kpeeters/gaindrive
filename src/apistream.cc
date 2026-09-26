@@ -428,6 +428,13 @@ void GainDrive::routes_stream()
 			// estimateContentLength read it.
 			.start_immediately = !cast_authed
 			                  && qp("startImmediately") == "true",
+			// The one place that says who a viewer is.  Per account for now,
+			// so one account watching the same film on two devices makes
+			// them kill each other's encodes.  Per-device auth would fix
+			// that here and nowhere else.
+			.owner = cast_authed  ? "cast:"  + tok_it->second
+			       : grant_authed ? "grant:" + tok_it->second
+			       :                "user:"  + req.get_param_value("u"),
 			};
 		// What the client can be sent untouched.  Never for a cast token, and
 		// that is not caution.  A server-driven cast URL is fetched by the
