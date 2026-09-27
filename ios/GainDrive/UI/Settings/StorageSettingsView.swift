@@ -88,7 +88,11 @@ struct StorageSettingsView: View {
 				}
 				.disabled(coverBytes == 0)
 			} footer: {
-				Text("Free removes music kept from playing. Downloads stay.")
+				Text(
+					"""
+					Free removes music kept from playing. Downloads stay, and so \
+					do their covers when cover art is cleared.
+					""")
 			}
 
 			Section("Downloads") {

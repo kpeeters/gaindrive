@@ -42,6 +42,18 @@ struct MirrorKeyTests {
 		#expect(LibraryMirror.Key.indexes(server, .artists).server == server)
 	}
 
+	/// The extras about one album are three different answers, and none may
+	/// land on the album itself.
+	@Test func theExtrasHaveKeysOfTheirOwn() {
+		let ref = ItemRef(server: server, id: "12")
+		let names = [
+			LibraryMirror.Key.album(ref).name, LibraryMirror.Key.albumNotes(ref).name,
+			LibraryMirror.Key.albumChapters(ref).name, LibraryMirror.Key.artistInfo(ref).name,
+		]
+		#expect(Set(names).count == names.count)
+		#expect(LibraryMirror.Key.albumChapters(ref).server == server)
+	}
+
 	/// A Subsonic id is a string somebody else chose; one with a slash in it
 	/// would otherwise write outside the directory it was meant for.
 	@Test func anIdWithASlashStaysOneComponent() {
@@ -65,6 +77,27 @@ struct MirroredValueTests {
 			duration: 210, bitRate: 160, suffix: "m4a", contentType: "audio/mp4",
 			sizeBytes: 4_200_000, coverArt: nil, starredAt: nil, lastPlayedAt: nil,
 			isVideo: false, nativeSeek: true, width: nil, height: nil)
+	}
+
+	@Test func notesAndABiographySurviveTheRoundTrip() throws {
+		let notes = AlbumNotes(notes: "Recorded in 1979.", wikiUrl: "https://w", allMusicUrl: nil)
+		#expect(try JSONDecoder().decode(AlbumNotes.self, from: JSONEncoder().encode(notes)) == notes)
+		let info = ArtistInfo(
+			biography: "A band.", wikiUrl: nil, allMusicUrl: nil, lastFmUrl: "https://l",
+			discogsUrl: nil, imageUrl: nil)
+		#expect(try JSONDecoder().decode(ArtistInfo.self, from: JSONEncoder().encode(info)) == info)
+	}
+
+	@Test func storedChaptersKeepTheirRecordingAndMarkers() throws {
+		let stored = [
+			LibraryRepository.StoredRecording(
+				ref: ItemRef(server: server, id: "9"),
+				chapters: [Chapter(index: 1, start: 12.5, duration: 200, name: "Opening")])
+		]
+		let back = try JSONDecoder().decode(
+			[LibraryRepository.StoredRecording].self, from: JSONEncoder().encode(stored))
+		#expect(back.first?.ref == stored.first?.ref)
+		#expect(back.first?.chapters == stored.first?.chapters)
 	}
 
 	@Test func anAlbumSurvivesTheRoundTrip() throws {

@@ -172,7 +172,7 @@ struct Playlist: Identifiable, Hashable, Sendable, Codable {
 	var id: ItemRef { ref }
 }
 
-struct ArtistInfo: Hashable, Sendable {
+struct ArtistInfo: Hashable, Sendable, Codable {
 	let biography: String?
 	let wikiUrl: String?
 	let allMusicUrl: String?
@@ -189,7 +189,7 @@ struct ArtistInfo: Hashable, Sendable {
 	}
 }
 
-struct AlbumNotes: Hashable, Sendable {
+struct AlbumNotes: Hashable, Sendable, Codable {
 	let notes: String?
 	let wikiUrl: String?
 	let allMusicUrl: String?

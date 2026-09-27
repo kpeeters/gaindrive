@@ -560,18 +560,28 @@ final class LibraryRepository: Sendable {
 	//	for** - a biography that fails should cost the biography, not the album
 	//	list.
 
+	/// Mirrored, network-first: a stored copy answers offline or when the
+	/// server does not. An empty answer is never stored - a blank read back
+	/// for ever would hide the biography the server finds next time.
 	func artistInfo(_ ref: ItemRef) async -> ArtistInfo? {
-		guard let client = await client(for: ref.server) else { return nil }
-		guard let dto = try? await client.artistInfo2(id: ref.id) else { return nil }
-		let info = LibraryMapper.artistInfo(dto)
-		return info.isEmpty ? nil : info
+		await storedOrFetched(.artistInfo(ref)) { [self] in
+			guard let client = await client(for: ref.server),
+				let dto = try await client.artistInfo2(id: ref.id)
+			else { return nil }
+			let info = LibraryMapper.artistInfo(dto)
+			return info.isEmpty ? nil : info
+		}
 	}
 
+	/// Mirrored, network-first, as `artistInfo`.
 	func albumNotes(_ ref: ItemRef) async -> AlbumNotes? {
-		guard let client = await client(for: ref.server) else { return nil }
-		guard let dto = try? await client.albumInfo2(id: ref.id) else { return nil }
-		let notes = LibraryMapper.albumNotes(dto)
-		return notes.isEmpty ? nil : notes
+		await storedOrFetched(.albumNotes(ref)) { [self] in
+			guard let client = await client(for: ref.server),
+				let dto = try await client.albumInfo2(id: ref.id)
+			else { return nil }
+			let notes = LibraryMapper.albumNotes(dto)
+			return notes.isEmpty ? nil : notes
+		}
 	}
 
 	/// The chapter markers of every chaptered item in one album folder, keyed by
@@ -583,22 +593,43 @@ final class LibraryRepository: Sendable {
 	/// somebody opens an album. The playback path uses the file instead; see
 	/// `ChapterTracks`.
 	///
-	/// **Not mirrored**, like the notes above: a marker has no id the mirror
-	/// could key on, and the mirror answers "what can I still reach offline",
-	/// which a position inside a partly cached file is not. So this is empty
-	/// offline and the album lists its tracks exactly as it did before chapters
-	/// existed.
+	/// **Mirrored**, so a downloaded concert keeps its markers offline, as on
+	/// Android. Stored as a list of recordings rather than the dictionary: a
+	/// dictionary keyed by anything but a string encodes as an unreadable
+	/// alternating array.
 	func albumChapters(_ ref: ItemRef) async -> [ItemRef: [Chapter]] {
-		if await offline { return [:] }
-		guard let client = await client(for: ref.server) else { return [:] }
-		guard let found = try? await client.albumChapters(id: ref.id) else { return [:] }
-		// An entry with no markers cannot happen - the server omits those - but
-		// dropping one here is what lets every caller treat "in the map" and
-		// "has chapters" as the same question.
-		return found
-			.compactMap { LibraryMapper.recording($0, server: ref.server) }
-			.filter { !$0.chapters.isEmpty }
-			.reduce(into: [:]) { $0[$1.ref] = $1.chapters }
+		let recordings = await storedOrFetched(.albumChapters(ref)) { [self] () -> [StoredRecording]? in
+			guard let client = await client(for: ref.server) else { return nil }
+			// An entry with no markers cannot happen - the server omits those -
+			// but dropping one here is what lets every caller treat "in the
+			// map" and "has chapters" as the same question.
+			return try await client.albumChapters(id: ref.id)
+				.compactMap { LibraryMapper.recording($0, server: ref.server) }
+				.filter { !$0.chapters.isEmpty }
+				.map { StoredRecording(ref: $0.ref, chapters: $0.chapters) }
+		}
+		return (recordings ?? []).reduce(into: [:]) { $0[$1.ref] = $1.chapters }
+	}
+
+	struct StoredRecording: Codable, Sendable {
+		let ref: ItemRef
+		let chapters: [Chapter]
+	}
+
+	/// Network-first with the mirror as the fallback, for the extras above:
+	/// offline, only the stored copy; online, the fresh answer (stored when
+	/// there is one), and the stored copy when the server fails.
+	private func storedOrFetched<Value: Codable & Sendable>(
+		_ key: LibraryMirror.Key, fetch: @Sendable () async throws -> Value?
+	) async -> Value? {
+		if await offline { return await mirror.load(Value.self, at: key) }
+		do {
+			guard let fresh = try await fetch() else { return nil }
+			await mirror.store(fresh, at: key)
+			return fresh
+		} catch {
+			return await mirror.load(Value.self, at: key)
+		}
 	}
 
 	/// How many images the album folder holds, cover included. Drives the hero

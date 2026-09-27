@@ -32,6 +32,11 @@ final class PinRepository {
 	/// through the ordinary audio path with "Original" set would download the
 	/// film.
 	private var videos: Set<ItemRef> = []
+	/// The covers each pin's songs are drawn with, so they can be kept out of
+	/// the image cache's eviction - a downloaded album offline should not lose
+	/// its sleeve to a scroll through the library. Per pin, so removing one
+	/// releases exactly its covers and not another's.
+	private var coversOf: [Pin.ID: [ItemRef]] = [:]
 	/// Pinned **and** here. Everything else on disk is `cached`, which the
 	/// store answers for directly - there is no list of it, because the list
 	/// would be out of date the moment eviction ran.
@@ -157,15 +162,17 @@ final class PinRepository {
 	// MARK: - Writing
 
 	/// `isVideo` matters only for a song pin, whose ref is all it carries.
-	func toggle(_ pin: Pin, isVideo: Bool = false) async {
+	/// `isVideo` and `cover` matter only for a song pin, whose ref is all it
+	/// carries; an album or playlist learns both from its songs.
+	func toggle(_ pin: Pin, isVideo: Bool = false, cover: ItemRef? = nil) async {
 		if isPinned(pin.ref, kind: pin.kind) {
 			await remove(pin)
 		} else {
-			await add(pin, isVideo: isVideo)
+			await add(pin, isVideo: isVideo, cover: cover)
 		}
 	}
 
-	private func add(_ pin: Pin, isVideo: Bool) async {
+	private func add(_ pin: Pin, isVideo: Bool, cover: ItemRef?) async {
 		// A song pin is its own membership and needs no read, which is also
 		// why it is the one kind that cannot fail to resolve.
 		let songs = pin.kind == .song ? [] : await resolve(pin)
@@ -204,6 +211,7 @@ final class PinRepository {
 		if pin.kind != .song { membership[pin.id] = refs }
 		if pin.kind == .song, isVideo { videos.insert(pin.ref) }
 		videos.formUnion(songs.filter(\.isVideo).map(\.ref))
+		coversOf[pin.id] = pin.kind == .song ? [cover].compactMap { $0 } : Self.covers(of: songs)
 		persist()
 		await pushLimits()
 		await startMissing(refs)
@@ -213,6 +221,7 @@ final class PinRepository {
 		let before = Pins.expand(pins, membership: membership)
 		pins.removeAll { $0.id == pin.id }
 		membership = Pins.pruned(membership, to: pins)
+		coversOf[pin.id] = nil
 		persist()
 
 		// **Unpinning removes the bytes**, which is what "remove download" is
@@ -246,6 +255,7 @@ final class PinRepository {
 		queue.cancelAll()
 		pins = []
 		membership = [:]
+		coversOf = [:]
 		progress = [:]
 		failed = []
 		stored = []
@@ -287,6 +297,9 @@ final class PinRepository {
 			let songs = await resolve(pin)
 			resolved[pin.id] = songs.map(\.ref)
 			videos.formUnion(songs.filter(\.isVideo).map(\.ref))
+			// Only a pin that resolved: one that could not be read keeps the
+			// covers it had, as its membership does.
+			if !songs.isEmpty { coversOf[pin.id] = Self.covers(of: songs) }
 		}
 		membership = Pins.pruned(
 			Pins.merging(membership, resolved: resolved), to: pins)
@@ -367,6 +380,8 @@ final class PinRepository {
 		/// Optional so a file written before it existed still decodes: the
 		/// synthesised decoder skips a missing key only for an optional.
 		var videos: [ItemRef]?
+		/// Optional for the same reason.
+		var covers: [String: [ItemRef]]?
 	}
 
 	private func load() {
@@ -376,15 +391,30 @@ final class PinRepository {
 		pins = record.pins
 		membership = record.membership
 		videos = Set(record.videos ?? [])
+		coversOf = record.covers ?? [:]
+		pushCovers()
 	}
 
 	private func persist() {
 		// Only what a pin still covers, so the set cannot grow without bound.
 		let covered = Pins.expand(pins, membership: membership)
 		videos = videos.intersection(covered)
-		let record = Record(pins: pins, membership: membership, videos: Array(videos))
+		coversOf = coversOf.filter { id, _ in pins.contains { $0.id == id } }
+		pushCovers()
+		let record = Record(
+			pins: pins, membership: membership, videos: Array(videos), covers: coversOf)
 		guard let data = try? JSONEncoder().encode(record) else { return }
 		try? data.write(to: file, options: .atomic)
+	}
+
+	/// Tells the image store which covers to keep out of eviction's reach.
+	private func pushCovers() {
+		let covers = Set(coversOf.values.joined().map(\.encoded))
+		Task { await ImageStore.shared.setPinned(covers) }
+	}
+
+	private static func covers(of songs: [Song]) -> [ItemRef] {
+		Array(Set(songs.compactMap(\.coverArt)))
 	}
 
 	static func readable(_ bytes: Int64) -> String {

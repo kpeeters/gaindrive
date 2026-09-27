@@ -41,6 +41,16 @@ actor ImageStore {
 	/// its own, which a scrolling grid of artwork will eventually need.
 	private let memory = NSCache<NSString, UIImage>()
 	private let directory: URL
+	/// Covers of downloaded content, **out of reach of eviction**: under
+	/// Application Support rather than Caches, which the system purges under
+	/// storage pressure - exactly when somebody is offline with their
+	/// downloads - and never trimmed or cleared here. A downloaded album
+	/// without its cover is what this prevents; Android's `PinnedArt` keeps
+	/// them apart for the same reason.
+	private let pinnedDirectory: URL
+	/// Cover prefixes (`<serverId>/<coverId>`, hashed as file names start)
+	/// whose files belong in `pinnedDirectory`. Pushed by `PinRepository`.
+	private var pinnedPrefixes: Set<String> = []
 	private let session: URLSession
 
 	/// Requests in flight, keyed by cache key. A grid scrolled quickly asks for
@@ -82,6 +92,16 @@ actor ImageStore {
 		let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
 		directory = caches.appending(path: "covers", directoryHint: .isDirectory)
 		try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+		let support = FileManager.default.urls(
+			for: .applicationSupportDirectory, in: .userDomainMask)[0]
+		pinnedDirectory = support.appending(path: "PinnedCovers", directoryHint: .isDirectory)
+		try? FileManager.default.createDirectory(
+			at: pinnedDirectory, withIntermediateDirectories: true)
+		// Re-fetchable, so not worth a backup.
+		var pinned = pinnedDirectory
+		var values = URLResourceValues()
+		values.isExcludedFromBackup = true
+		try? pinned.setResourceValues(values)
 		memory.countLimit = 400
 		// Bytes as well as count: 400 hero images at 800 px is a great deal
 		// more memory than 400 thumbnails, and only one of those numbers
@@ -99,9 +119,13 @@ actor ImageStore {
 		// miss and both start a fetch. The gate is taken *inside* the task for
 		// the same reason: waiting for a slot out here would suspend between
 		// the check above and the insert below.
-		let task = Task<UIImage?, Never> { [session, directory] in
+		let home = Entry.prefixHash(of: key)
+		let target = pinnedPrefixes.contains(home) ? pinnedDirectory : directory
+		let task = Task<UIImage?, Never> { [session, directory, pinnedDirectory] in
 			await self.acquire()
-			let fetched = await Self.load(source, session: session, directory: directory)
+			let fetched = await Self.load(
+				source, session: session, directory: target,
+				fallbacks: [directory, pinnedDirectory])
 			self.finish(fetched, for: key)
 			return fetched.image
 		}
@@ -118,8 +142,33 @@ actor ImageStore {
 		return total
 	}
 
-	/// Drops every stored cover, in memory and on disk. Fetches in flight
-	/// finish and write as usual; that is a cover somebody is looking at.
+	/// Which covers belong to downloaded content, as `ItemRef.encoded` of the
+	/// cover id - the part of `CoverSource.cacheKey` before its `@size`.
+	///
+	/// Files move between the two directories to match: a cover cached before
+	/// its album was pinned is moved out of eviction's reach at once, and one
+	/// whose pin went is handed back to the ordinary cache.
+	func setPinned(_ covers: Set<String>) {
+		let prefixes = Set(covers.map(Entry.prefixHash(of:)))
+		guard prefixes != pinnedPrefixes else { return }
+		pinnedPrefixes = prefixes
+		let manager = FileManager.default
+		for file in (try? manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+		where prefixes.contains(Entry.prefix(ofFileName: file.lastPathComponent)) {
+			try? manager.moveItem(
+				at: file, to: pinnedDirectory.appending(path: file.lastPathComponent))
+		}
+		for file in (try? manager.contentsOfDirectory(at: pinnedDirectory, includingPropertiesForKeys: nil)) ?? []
+		where !prefixes.contains(Entry.prefix(ofFileName: file.lastPathComponent)) {
+			try? manager.moveItem(at: file, to: directory.appending(path: file.lastPathComponent))
+		}
+		diskBytes = nil
+	}
+
+	/// Drops every stored cover in the ordinary cache, in memory and on disk.
+	/// Covers of downloaded content stay: clearing art is not meant to take a
+	/// downloaded album's sleeve with it. Fetches in flight finish and write as
+	/// usual; that is a cover somebody is looking at.
 	func clear() {
 		memory.removeAllObjects()
 		missing = []
@@ -150,7 +199,11 @@ actor ImageStore {
 			memory.setObject(image, forKey: key as NSString, cost: Int(pixels) * 4)
 		}
 		if fetched.isMissing { missing.insert(key) }
-		guard fetched.bytesWritten > 0 else { return }
+		// A pinned cover was written outside the trimmed directory, so it is
+		// no part of what the limit bounds.
+		guard fetched.bytesWritten > 0,
+			!pinnedPrefixes.contains(Entry.prefixHash(of: key))
+		else { return }
 
 		// Measured once, on the first write of the session, and tracked from
 		// there. The walk when the cap is genuinely exceeded is rare enough to
@@ -190,11 +243,15 @@ actor ImageStore {
 	/// pair is what keeps the disk read, the decode and the write off the
 	/// actor's serial executor - where they used to make disk concurrency
 	/// exactly one.
+	/// `directory` is where the entry belongs now; `fallbacks` are read too,
+	/// so a cover stored before its pin changed is still found where it was.
 	private static func load(
-		_ source: CoverSource, session: URLSession, directory: URL
+		_ source: CoverSource, session: URLSession, directory: URL, fallbacks: [URL]
 	) async -> Fetched {
 		let entry = Entry(directory: directory, key: source.cacheKey)
-		let stored = entry.read()
+		let stored =
+			entry.read()
+			?? fallbacks.lazy.compactMap { Entry(directory: $0, key: source.cacheKey).read() }.first
 
 		var request = URLRequest(url: source.url)
 		// **Our `ETag` is the authoritative one.** Left on the default policy,
@@ -245,17 +302,32 @@ actor ImageStore {
 
 		static let etagSuffix = ".etag"
 
+		/// `<cover>-<key>`: a hash of the cover the file belongs to, then a
+		/// hash of the whole key. The first half is what lets a pinned cover be
+		/// recognised by its file name alone, at every size it was stored at.
+		///
+		/// The key contains `/` and `#`, neither of which can be in a file
+		/// name, and a hash also bounds the length. **SHA-256 rather than
+		/// `hashValue`**: Swift seeds `Hasher` per process, so `hashValue`
+		/// would miss the entire disk cache on every launch.
 		private var name: String {
-			// The key contains `/` and `#`, neither of which can be in a file
-			// name, and a hash also bounds the length - a server UUID plus a
-			// long album id does not.
-			//
-			// **SHA-256 rather than `hashValue`.** Swift seeds `Hasher` per
-			// process, so `hashValue` gives a different answer on every launch
-			// - which would miss the entire disk cache exactly when it is
-			// supposed to hit, and this cache exists for no other reason.
-			SHA256.hash(data: Data(key.utf8))
-				.prefix(16)
+			Self.prefixHash(of: key) + "-" + Self.hash(key, bytes: 16)
+		}
+
+		/// The cover a key belongs to - everything before its `@size` - hashed.
+		/// Accepts a bare cover id too, which has no `@` to cut at.
+		static func prefixHash(of key: String) -> String {
+			let cover = key.lastIndex(of: "@").map { String(key[..<$0]) } ?? key
+			return hash(cover, bytes: 8)
+		}
+
+		static func prefix(ofFileName name: String) -> String {
+			String(name.prefix { $0 != "-" })
+		}
+
+		private static func hash(_ text: String, bytes: Int) -> String {
+			SHA256.hash(data: Data(text.utf8))
+				.prefix(bytes)
 				.map { String(format: "%02x", $0) }
 				.joined()
 		}

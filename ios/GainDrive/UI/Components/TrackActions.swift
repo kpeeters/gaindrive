@@ -63,7 +63,7 @@ struct TrackActions: ViewModifier {
 				// Android's sheet draws the same line.
 				if !settings.showsPicture(song) || isPinned {
 					Button {
-						Task { await pins.toggle(pin, isVideo: song.isVideo) }
+						Task { await pins.toggle(pin, isVideo: song.isVideo, cover: song.coverArt) }
 					} label: {
 						Label(
 							isPinned ? "Remove download" : "Download",

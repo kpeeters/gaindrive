@@ -48,12 +48,20 @@ actor LibraryMirror {
 		case playlists(ServerId)
 		case albums(ItemRef)
 		case album(ItemRef)
+		/// The prose around a listing: a biography, album notes, and the
+		/// chapter markers an album's recordings carry. Android mirrors all
+		/// three, so a downloaded album keeps its notes and its markers
+		/// offline.
+		case artistInfo(ItemRef)
+		case albumNotes(ItemRef)
+		case albumChapters(ItemRef)
 
 		var server: ServerId {
 			switch self {
 			case .indexes(let server, _), .playlists(let server):
 				server
-			case .albums(let ref), .album(let ref):
+			case .albums(let ref), .album(let ref), .artistInfo(let ref), .albumNotes(let ref),
+				.albumChapters(let ref):
 				ref.server
 			}
 		}
@@ -64,6 +72,9 @@ actor LibraryMirror {
 			case .playlists: "playlists"
 			case .albums(let ref): "albums-\(FileNames.component(ref.id))"
 			case .album(let ref): "album-\(FileNames.component(ref.id))"
+			case .artistInfo(let ref): "artistinfo-\(FileNames.component(ref.id))"
+			case .albumNotes(let ref): "notes-\(FileNames.component(ref.id))"
+			case .albumChapters(let ref): "chapters-\(FileNames.component(ref.id))"
 			}
 		}
 	}
