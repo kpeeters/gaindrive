@@ -113,8 +113,9 @@ static void write_chapters_response(httplib::Response& res, int song_id,
 	}
 
 
-// Bounds for the web position table.  POS_STALE is when a report stops
-// steering the pacer; POS_FORGET is when the row is dropped altogether.
+// Bounds for the web position table.  POS_STALE is when a playing report
+// stops steering the pacer - a paused one is exact at any age, so the client
+// does not repeat it; POS_FORGET is when a full table may drop the row.
 static constexpr size_t POS_MAX_ENTRIES = 512;
 static constexpr auto   POS_STALE  = std::chrono::seconds(30);
 static constexpr auto   POS_FORGET = std::chrono::minutes(10);
@@ -153,12 +154,13 @@ float GainDrive::web_position_lookup(const std::string& user,
 	std::lock_guard<std::mutex> lock(web_pos_mu_);
 	auto it = web_positions_.find(user + "\n" + token);
 	if (it == web_positions_.end()) return CAST_POS_BUFFERING;
-	const auto age = now - it->second.at;
-	if (age > POS_STALE) return CAST_POS_BUFFERING;
 	// While playing the playhead has moved since the report; while paused it
 	// has not.  The paused case is exact, so a pause of any length keeps the
-	// stream held at the lead instead of drifting ahead by the pause.
+	// stream held at the lead instead of drifting ahead by the pause - and it
+	// never goes stale, which is what lets a paused player stop reporting.
 	if (!it->second.playing) return it->second.pos;
+	const auto age = now - it->second.at;
+	if (age > POS_STALE) return CAST_POS_BUFFERING;
 	return it->second.pos + std::chrono::duration<float>(age).count();
 	}
 

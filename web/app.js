@@ -7846,10 +7846,10 @@ function scrobbleCurrentSong() {
 
 // Tells the server's pacer where the playhead really is: reportPosition in
 // doc/api.toml, consumed by the get_pos lambda stream.view builds for a
-// posToken.  Sent while paused too: a paused report is what holds the stream
-// at the lead instead of letting the wall clock drift it ahead.  A failed or
-// missing report only degrades the stream to unpaced delivery, never stalls
-// it, so errors are logged and otherwise ignored.
+// posToken.  The timer skips a paused player: the pause event has already
+// reported it, and the server holds a paused report as exact however old it
+// gets.  A failed or missing report only degrades the stream to unpaced
+// delivery, never stalls it, so errors are logged and otherwise ignored.
 function posReportNow() {
    if (castDeviceId !== null || !player.posToken || !player.media?.src) return;
    apiCall('reportPosition', {
@@ -7858,7 +7858,7 @@ function posReportNow() {
       playing: player.media.paused ? 'false' : 'true',
       }).catch(err => console.warn('[pos-report] failed', err));
 }
-setInterval(posReportNow, 5000);
+setInterval(() => { if (!player.media?.paused) posReportNow(); }, 5000);
 
 // Bound to both the audio and the video element, so whichever is active
 // behaves identically.  The handler bodies address player.media rather than
