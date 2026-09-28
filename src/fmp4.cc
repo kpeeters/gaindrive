@@ -132,6 +132,14 @@ std::optional<Fmp4Run> fmp4_parse(std::string_view file)
 			int64_t start = movie_ts
 			    ? int64_t(empty * ts / movie_ts) - media : -media;
 			run.tracks[id] = { ts, start };
+			// H.264's length-prefix size, from the avcC deep inside stsd.
+			// Searched for rather than walked to: the sample entry in front of
+			// it has a layout of its own, and the four letters cannot occur
+			// earlier in a trak that holds no media.
+			std::string_view trak = file.substr(mb.body, mb.end - mb.body);
+			if (auto at = trak.find("avcC"); at != std::string_view::npos
+			    && at + 9 <= trak.size())
+				run.tracks[id].nal_length = (uint8_t(trak[at + 8]) & 3) + 1;
 			if (video && run.video_track == 0) run.video_track = id;
 			});
 		});
@@ -173,7 +181,42 @@ struct Sample {
 	uint32_t flags    = 0;
 	int32_t  cto      = 0;
 	size_t   data     = 0;   // offset of its bytes in the file
+	// Set when the bytes had to change; then they are these, not the file's.
+	std::optional<std::string> rewritten;
 	};
+
+// An H.264 sample without its End of Sequence (10) and End of Stream (11) NAL
+// units, or nothing when it has none - the usual case, which then costs no
+// copy.  A sample that would be left empty is kept as it is: a decoder is
+// better served by a marker than by a hole.
+std::optional<std::string> strip_end_markers(std::string_view sample,
+                                             uint8_t nal_length)
+	{
+	auto nal_at = [&](size_t q, size_t& len) {
+		len = 0;
+		for (uint8_t i = 0; i < nal_length; ++i)
+			len = (len << 8) | uint8_t(sample[q + i]);
+		};
+	bool   found = false;
+	size_t q = 0, len = 0;
+	for (; q + nal_length < sample.size(); q += nal_length + len) {
+		nal_at(q, len);
+		if (q + nal_length + len > sample.size()) return std::nullopt;
+		uint8_t type = uint8_t(sample[q + nal_length]) & 0x1f;
+		found = found || type == 10 || type == 11;
+		}
+	if (!found) return std::nullopt;
+
+	std::string out;
+	for (q = 0; q + nal_length < sample.size(); q += nal_length + len) {
+		nal_at(q, len);
+		uint8_t type = uint8_t(sample[q + nal_length]) & 0x1f;
+		if (type != 10 && type != 11)
+			out.append(sample.substr(q, nal_length + len));
+		}
+	if (out.empty()) return std::nullopt;
+	return out;
+	}
 
 struct Traf {
 	uint32_t            track = 0;
@@ -243,7 +286,7 @@ bool read_traf(std::string_view file, const Box& traf, size_t moof,
 				o += 4;
 				}
 			for (uint32_t i = 0; i < n; ++i) {
-				Sample s{ def_dur, def_size, def_flags, 0, next };
+				Sample s{ def_dur, def_size, def_flags, 0, next, {} };
 				if (i == 0 && have_first) s.flags = first_flags;
 				for (uint32_t bit : { 0x100u, 0x200u, 0x400u, 0x800u }) {
 					if (!(fl & bit)) continue;
@@ -352,6 +395,15 @@ std::optional<std::string> fmp4_media(std::string_view file, const Fmp4Run& run,
 		            trafs.end());
 		if (trafs.empty()) return;
 
+		for (auto& t : trafs) {
+			const uint8_t nl = run.tracks.at(t.track).nal_length;
+			if (nl == 0) continue;
+			for (auto& s : t.samples) {
+				s.rewritten = strip_end_markers(file.substr(s.data, s.size), nl);
+				if (s.rewritten) s.size = uint32_t(s.rewritten->size());
+				}
+			}
+
 		// moof: mfhd, then per track a tfhd naming only the track (so the
 		// data offsets count from this moof), a version 1 tfdt, and one
 		// version 1 trun (signed composition offsets) spelling out every
@@ -394,8 +446,10 @@ std::optional<std::string> fmp4_media(std::string_view file, const Fmp4Run& run,
 		out += moof_box;
 		size_t mdat_at = open_box(out, "mdat", 0, false);
 		for (const auto& t : trafs)
-			for (const auto& s : t.samples)
-				out.append(file.data() + s.data, s.size);
+			for (const auto& s : t.samples) {
+				if (s.rewritten) out += *s.rewritten;
+				else             out.append(file.data() + s.data, s.size);
+				}
 		close_box(out, mdat_at);
 		});
 

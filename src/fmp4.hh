@@ -25,6 +25,9 @@ struct Fmp4Run {
 		uint32_t duration  = 0;
 		uint32_t size      = 0;
 		uint32_t flags     = 0;
+		// The length-prefix size of an H.264 track's NAL units, 0 for
+		// anything else.
+		uint8_t  nal_length = 0;
 		};
 	size_t                    first_moof  = 0;
 	uint32_t                  video_track = 0;
@@ -60,7 +63,10 @@ double fmp4_video_start(const Fmp4Run& run);
 //
 // The fragments are written back in one fixed shape - tfhd with only a track
 // id, one trun spelling out every sample - whatever optional fields the
-// ffmpeg at hand chose to write.  Empty on a structure this does not
-// understand.
+// ffmpeg at hand chose to write.  H.264 samples lose any End of Sequence and
+// End of Stream NAL units on the way: a source spliced from separate encodes
+// carries one at each join, and Firefox's decoder takes it as the end of the
+// stream and refuses every frame after it.  Empty on a structure this does
+// not understand.
 std::optional<std::string> fmp4_media(std::string_view file, const Fmp4Run& run,
                                       double shift, double end);
