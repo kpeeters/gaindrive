@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -98,11 +99,9 @@ void session_codecs(std::vector<std::string>& a, const HlsPlan& p,
 	}
 
 // Segment k of a fully copied plan, or with `init` the short run whose moov
-// becomes the init segment.  The cut at the end is a bitstream filter rather
-// than -to: -to stops on decode time, which keeps the next segment's keyframe
-// and its first B-frames, while this drops every packet presented at or after
-// E - on every stream at once, so the audio tiles exactly too.  -to still
-// bounds how much is read.
+// becomes the init segment.  The run goes a second past E, and fmp4_media()
+// cuts every stream at E exactly: -to stops on decode time, which would keep
+// the next segment's keyframe and its first B-frames.
 std::vector<std::string> copy_argv(const Streamer::SongInfo& song,
                                    const HlsPlan& p, size_t k, bool init)
 	{
@@ -115,8 +114,7 @@ std::vector<std::string> copy_argv(const Streamer::SongInfo& song,
 	if (init)
 		append(a, { "-to", secs(S + 1), "-use_editlist", "0" });
 	else if (!last)
-		append(a, { "-to", secs(E + 1),
-		            "-bsf", "noise=drop=gte(pts*tb\\," + secs(E - p.tick / 2) + ")" });
+		append(a, { "-to", secs(E + 1) });
 	append(a, { "-video_track_timescale", VIDEO_TIMESCALE,
 	            "-f", "mp4", "-movflags", MOVFLAGS, "pipe:1" });
 	return a;
@@ -377,7 +375,8 @@ struct Hls::Session {
 		if (!fmp4_complete(*b)) { pending = true; return std::nullopt; }
 		auto run = fmp4_parse(*b);
 		if (!run) return std::nullopt;
-		return fmp4_media(*b, *run, shift);
+		// Uncut: the segment muxer has already cut the run at the boundaries.
+		return fmp4_media(*b, *run, shift, INFINITY);
 		}
 
 	// Called from the reaper: keep the encoder a bounded distance ahead and
@@ -529,7 +528,12 @@ void Hls::serve_segment(httplib::Response& res, const Streamer::SongInfo& song,
 	if (p.stateless()) {
 		auto out = run_capture(copy_argv(song, p, k, false));
 		auto run = out ? fmp4_parse(*out) : std::nullopt;
-		auto seg = run ? fmp4_media(*out, *run, p.bounds[k] - fmp4_video_start(*run))
+		// Half a tick early, so a sample exactly on the boundary goes to the
+		// next segment whatever the rounding.
+		const double end = k + 1 == p.segments()
+		                 ? INFINITY : p.bounds[k + 1] - p.tick / 2;
+		auto seg = run ? fmp4_media(*out, *run,
+		                            p.bounds[k] - fmp4_video_start(*run), end)
 		               : std::nullopt;
 		if (!seg) { res.status = 500; return; }
 		send_mp4(res, std::move(*seg));
