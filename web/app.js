@@ -4063,8 +4063,6 @@ function castSyncTick(absCurrent) {
       return;
       }
 
-   const localOffset = player.localOffset || 0;
-
    if (el.paused) {
       // Not `ended`: play() on a finished element restarts it from zero, and
       // the picture always runs out while the receiver is still reporting
@@ -4072,7 +4070,7 @@ function castSyncTick(absCurrent) {
       // begin again under it.  The receiver owns the advance either way.
       if (el.ended) return;
       // The receiver has started, or resumed. Jump to it and go.
-      const want = Math.max(0, target - localOffset);
+      const want = Math.max(0, target);
       if (castSyncCanSeek(el, want)) el.currentTime = want;
       el.playbackRate = 1;
       castSyncWarned = false;
@@ -4081,7 +4079,7 @@ function castSyncTick(absCurrent) {
       return;
       }
 
-   const err = target - (el.currentTime + localOffset);
+   const err = target - el.currentTime;
 
    // The loop is the settle detector, and that is the signal the control never
    // had.  A change takes 5-15 s to be absorbed when it cannot be stepped, and
@@ -4095,7 +4093,7 @@ function castSyncTick(absCurrent) {
       castSyncDone();
 
    if (Math.abs(err) > SYNC_HARD) {
-      const want = Math.max(0, target - localOffset);
+      const want = Math.max(0, target);
       if (castSyncCanSeek(el, want)) {
          console.log('[cast] resync', err.toFixed(2), 's');
          el.currentTime  = want;
@@ -4163,26 +4161,12 @@ function castApplyLocalVideo(song, offset) {
 // branch decides it, because it *is* that stream - a divergence here would be
 // a second answer to "which tier does this video take".
 function castLocalVideoStart(song, offset) {
-   // castRedirect=false is not optional here.  apiUrl() puts castController on
-   // every URL, and stream.view answers the owner of a live cast session with
-   // 204 - pushing the track to the receiver instead, on the assumption that
-   // an owner asking for a stream is about to play it a second time.  This
-   // request is the opposite: it is the picture belonging to the soundtrack
-   // the receiver is already playing.  Without the parameter the picture never
-   // arrives, and worse, the 204 path re-issues the LOAD.
-   //
-   // No startImmediately here, unlike playerPlay(), and the difference is
-   // deliberate: this element is a muted picture chasing the receiver's clock,
-   // and castSyncTick() seeks it whenever the two drift past SYNC_HARD.  It
-   // wants the seekable file, not the earliest byte - and waiting costs
-   // nothing anyway, because the soundtrack the receiver is playing has its
-   // own transcode to get through first.
-   const streamParams = {id: song.id, castRedirect: 'false'};
-   const chunked = song.nativeSeek === false;
-   if (chunked && offset > 0) streamParams.timeOffset = Math.floor(offset);
-   player.streamIsTranscoded = chunked;
+   // Both kinds of video stream seek, so castSyncTick() can always move this
+   // picture to the receiver's clock.
+   const viaHls = !!song.transcodedSuffix;
+   player.streamIsTranscoded = false;
    player.streamFormat       = null;
-   player.localOffset        = (chunked && offset > 0) ? offset : 0;
+   player.localOffset        = 0;
 
    castVideoLocal = true;
    castSyncWarned = false;
@@ -4201,8 +4185,20 @@ function castLocalVideoStart(song, offset) {
    // audible - muting is what makes playbackRate a free correction.
    player.videoEl.muted = true;
    player.videoEl.playbackRate = 1;
-   player.videoEl.src = apiUrl('stream', streamParams);
-   if (offset > 0 && !chunked) player.videoEl.currentTime = offset;
+   if (viaHls)
+      hlsStart(player.videoEl, apiUrl('hls', {id: song.id}), offset);
+   else {
+      // castRedirect=false is not optional here.  apiUrl() puts castController
+      // on every URL, and stream.view answers the owner of a live cast session
+      // with 204 - pushing the track to the receiver instead, on the
+      // assumption that an owner asking for a stream is about to play it a
+      // second time.  This request is the opposite: it is the picture
+      // belonging to the soundtrack the receiver is already playing.  Without
+      // the parameter the picture never arrives, and worse, the 204 path
+      // re-issues the LOAD.
+      player.videoEl.src = apiUrl('stream', {id: song.id, castRedirect: 'false'});
+      if (offset > 0) player.videoEl.currentTime = offset;
+      }
    videoSyncButton();
 }
 
@@ -4217,6 +4213,7 @@ function castLocalVideoStop() {
    castSyncPhase  = 'idle';
    const el = player.videoEl;
    if (el) {
+      hlsStop();
       el.pause();
       el.removeAttribute('src');   // never src='' - that resolves to GET /
       el.load();
@@ -4422,8 +4419,8 @@ async function openInfoModal() {
                      ? (castStream.tier === 'remux'
                            ? 'soundtrack only, copied'
                            : 'soundtrack only, re-encoded')
-                : castStream.tier === 'remux'  ? 'remuxed to MP4'
-                : castStream.tier === 'encode' ? 're-encoded as it plays'
+                : castStream.tier === 'copy'   ? 'HLS, picture copied'
+                : castStream.tier === 'encode' ? 'HLS, re-encoded'
                 :                                'as stored';
       sent = kbps ? `${kbps} - ${how}` : how;
       }
@@ -4460,8 +4457,8 @@ async function openInfoModal() {
       ['Output',        output],
       ['Sent',          sent],
       // What the receiver picks its decode pipeline from, and not the same
-      // thing as the container: everything the remux or encode tier touches
-      // is announced as video/mp4.
+      // thing as the container: every film not sent as it stands is announced
+      // as an HLS playlist.
       ['Declared type', casting ? castStream?.contentType : null],
       ];
 
@@ -4773,6 +4770,7 @@ async function selectCastDevice(id, label = '') {
          const offset = (player.localOffset || 0) + player.media.currentTime;
          castStartOffset  = offset;
          lastCastPosition = offset;
+         hlsStop();
          player.media.pause();
          // removeAttribute, never src = '': an empty src resolves against the
          // page and makes the browser fetch GET /, which is the whole SPA.
@@ -6098,11 +6096,223 @@ player.media = player.audioEl;
 function playerSelectMedia(isVideo) {
    const want = isVideo ? player.videoEl : player.audioEl;
    if (!want || want === player.media) return false;
+   if (player.media === player.videoEl) hlsStop();
    player.media.pause();
    player.media.removeAttribute('src');
    player.media.load();   // drops the buffered stream and cancels the fetch
    player.media = want;
    return true;
+}
+
+// ── HLS ─────────────────────────────────────────────────────────────────────
+
+// A film the browser cannot take as it is arrives as HLS: a playlist of short
+// fragmented-MP4 segments, cut on the source's own keyframes when the picture
+// is copied.  Safari plays that natively.  Everywhere else it goes through
+// Media Source Extensions, and because the segments are already the form MSE
+// takes there is nothing to repackage - this only fetches the segment the
+// playhead needs and appends it.  The element's clock is the film's clock
+// either way, so a seek is an ordinary currentTime assignment and the caption
+// cues are used as they are.
+
+// Seconds kept buffered ahead of the playhead, and kept behind it for a short
+// skip back.  The second is what keeps a feature film inside the
+// SourceBuffer's quota, which in Firefox is a few hundred MB.
+const HLS_AHEAD  = 30;
+const HLS_BEHIND = 60;
+
+// The one stream being fed, or null.  Every step checks it is still current,
+// since a new film or a stop can arrive while a fetch is in flight.
+let hlsCur = null;
+
+function hlsStart(el, url, startAt) {
+   hlsStop();
+   if (!window.MediaSource) {
+      el.src = url;
+      if (startAt > 0)
+         el.addEventListener('loadedmetadata',
+                             () => { el.currentTime = startAt; }, {once: true});
+      return;
+      }
+   const h = {el, url, segs: [], sb: null, ms: new MediaSource(),
+              busy: false, again: false, ctrl: null, failures: 0};
+   hlsCur = h;
+   // A seek abandons the segment being fetched unless it is the one wanted,
+   // and the pump then starts again from the new playhead.
+   h.onSeek = () => { h.ctrl?.abort(); hlsPump(h); };
+   h.onTime = () => hlsPump(h);
+   el.addEventListener('seeking', h.onSeek);
+   el.addEventListener('timeupdate', h.onTime);
+   h.ms.addEventListener('sourceopen',
+      () => hlsOpen(h, startAt).catch(err => hlsFail(h, err)), {once: true});
+   el.src = URL.createObjectURL(h.ms);
+}
+
+// Detaches the feeder.  The caller still clears the element's src, as it does
+// for any other stream.
+function hlsStop() {
+   const h = hlsCur;
+   if (!h) return;
+   hlsCur = null;
+   h.ctrl?.abort();
+   h.el.removeEventListener('seeking', h.onSeek);
+   h.el.removeEventListener('timeupdate', h.onTime);
+}
+
+async function hlsFetch(url, kind, signal) {
+   const r = await fetch(url, {signal});
+   if (!r.ok) throw new Error(`HTTP ${r.status}`);
+   return kind === 'text' ? r.text() : new Uint8Array(await r.arrayBuffer());
+}
+
+// Whether the init segment has a track of this handler type.  Read from the
+// bytes rather than from the song, because a SourceBuffer declared with an
+// audio codec refuses an init segment that has no sound track.
+function hlsHasHandler(bytes, type) {
+   const want = [...'hdlr'].map(c => c.charCodeAt(0));
+   const kind = [...type].map(c => c.charCodeAt(0));
+   for (let i = 0; i + 16 <= bytes.length; i++) {
+      if (want.every((c, j) => bytes[i + j] === c)
+          && kind.every((c, j) => bytes[i + 12 + j] === c))
+         return true;
+      }
+   return false;
+}
+
+// SourceBuffer operations complete asynchronously, and one must finish before
+// the next may start.
+function hlsBufferOp(sb, op) {
+   return new Promise((resolve, reject) => {
+      const done = () => { off(); resolve(); };
+      const fail = () => { off(); reject(new Error('SourceBuffer error')); };
+      const off  = () => {
+         sb.removeEventListener('updateend', done);
+         sb.removeEventListener('error', fail);
+         };
+      sb.addEventListener('updateend', done);
+      sb.addEventListener('error', fail);
+      try { op(); }
+      catch (err) { off(); reject(err); }
+      });
+}
+
+async function hlsOpen(h, startAt) {
+   URL.revokeObjectURL(h.el.src);
+   const text = await hlsFetch(h.url, 'text');
+   let t = 0, len = null, init = null;
+   for (const raw of text.split('\n')) {
+      const line = raw.trim();
+      if (line.startsWith('#EXT-X-MAP:'))
+         init = /URI="([^"]*)"/.exec(line)?.[1] ?? null;
+      else if (line.startsWith('#EXTINF:'))
+         len = parseFloat(line.slice(8));
+      else if (line && !line.startsWith('#') && len !== null) {
+         h.segs.push({start: t, end: t + len, url: new URL(line, h.url).href});
+         t  += len;
+         len = null;
+         }
+      }
+   if (!init || !h.segs.length) throw new Error('empty playlist');
+   const head = await hlsFetch(new URL(init, h.url).href, 'bytes');
+   if (h !== hlsCur) return;
+   // The server copies only H.264 and AAC, and encodes to nothing else, so
+   // the codecs are known.  The profile named is a ceiling rather than the
+   // stream's own: decoders take the real one from the init segment.
+   const audio = hlsHasHandler(head, 'soun');
+   h.sb = h.ms.addSourceBuffer(
+      `video/mp4; codecs="avc1.640033${audio ? ',mp4a.40.2' : ''}"`);
+   h.ms.duration = t;
+   await hlsBufferOp(h.sb, () => h.sb.appendBuffer(head));
+   if (startAt > 0) h.el.currentTime = startAt;
+   hlsPump(h);
+}
+
+function hlsFail(h, err) {
+   if (h !== hlsCur) return;
+   console.warn('[hls]', err);
+   videoPreparing(false);
+   const song = player.queue[player.index];
+   showError(`Cannot play “${song?.title ?? 'this video'}”: ${err.message}`);
+}
+
+// The first segment from the playhead on that is not already buffered, or -1
+// when everything to the end is.
+function hlsNextSegment(h, t) {
+   const b = h.sb.buffered;
+   // A little slack either way: audio and video never end on quite the same
+   // instant, and buffered reports only where both are present.
+   const have = (from, to) => {
+      for (let r = 0; r < b.length; r++)
+         if (b.start(r) <= from + 0.2 && b.end(r) >= to - 0.2) return true;
+      return false;
+      };
+   for (let i = 0; i < h.segs.length; i++) {
+      const s = h.segs[i];
+      if (s.end <= t + 0.2) continue;
+      if (!have(Math.max(s.start, t), s.end)) return i;
+      }
+   return -1;
+}
+
+// Single-flight: a call while one is running asks it to look again once it
+// is done, which is what a seek in the middle of a fetch needs.
+async function hlsPump(h) {
+   if (h !== hlsCur || !h.sb) return;
+   if (h.busy) { h.again = true; return; }
+   h.busy = true;
+   try {
+      do {
+         h.again = false;
+         await hlsFill(h);
+         } while (h.again && h === hlsCur);
+      }
+   catch (err) { hlsFail(h, err); }
+   finally { h.busy = false; }
+}
+
+async function hlsFill(h) {
+   for (;;) {
+      if (h !== hlsCur || h.again) return;
+      const t = h.el.currentTime;
+      const i = hlsNextSegment(h, t);
+      if (i < 0) {
+         if (h.ms.readyState === 'open' && !h.sb.updating) h.ms.endOfStream();
+         return;
+         }
+      if (h.segs[i].start > t + HLS_AHEAD) return;
+
+      const b = h.sb.buffered;
+      if (b.length && b.start(0) < t - HLS_BEHIND)
+         await hlsBufferOp(h.sb, () => h.sb.remove(0, t - HLS_BEHIND));
+
+      h.ctrl = new AbortController();
+      let data;
+      try {
+         data = await hlsFetch(h.segs[i].url, 'bytes', h.ctrl.signal);
+         }
+      catch (err) {
+         if (err.name === 'AbortError') return;
+         // A session that is busy starting answers 503; the next try usually
+         // finds the segment written.
+         if (++h.failures > 5) throw err;
+         await new Promise(r => setTimeout(r, 1000));
+         continue;
+         }
+      h.failures = 0;
+      if (h !== hlsCur) return;
+      try {
+         await hlsBufferOp(h.sb, () => h.sb.appendBuffer(data));
+         }
+      catch (err) {
+         // The quota is reached before HLS_BEHIND on a high-bitrate film:
+         // drop everything but the last few seconds and try once more.
+         if (err.name !== 'QuotaExceededError') throw err;
+         const keep = h.el.currentTime - 5;
+         if (keep <= 0) throw err;
+         await hlsBufferOp(h.sb, () => h.sb.remove(0, keep));
+         await hlsBufferOp(h.sb, () => h.sb.appendBuffer(data));
+         }
+      }
 }
 
 // ── Video surface ───────────────────────────────────────────────────────────
@@ -6169,14 +6379,10 @@ function videoCastPanel(on, note = false) {
    document.getElementById('video-fullscreen').hidden = on;
 }
 
-// Shown rather than a black rectangle that looks broken.
-//
-// It used to cover the remux tier blocking on ffmpeg copying a whole film into
-// the transcode cache before it sent a byte - tens of seconds of nothing.
-// playerPlay() now sends startImmediately, so that wait is gone and this is
-// back to covering the ordinary gap before the first frame decodes.  It still
-// earns its place on the re-encode tier, and on the cast paths, where the
-// soundtrack of a disc rip really does take a minute to appear.
+// Shown rather than a black rectangle that looks broken: the gap before the
+// first frame decodes, which is longest when the first HLS segment has to be
+// encoded, and on the cast paths, where the soundtrack of a disc rip really
+// does take a minute to appear.
 //
 // Note it is cleared only by `loadeddata` and `error`, so a stream that
 // arrives and then stalls leaves it up indefinitely; there is no watchdog here
@@ -6261,17 +6467,19 @@ function playerPosition() {
 }
 
 // One definition of "go to this absolute second", shared by the seek bar, the
-// skip buttons and the arrow keys.  The three branches are not interchangeable:
+// skip buttons, the arrow keys and the system's media controls.  The three
+// branches are not interchangeable:
 //
 //  * Casting, re-LOAD with a server-side timeOffset rather than sending a
 //    Chromecast SEEK.  SEEK relies on the device seeking within its buffered
 //    byte stream, which fails silently for formats without clean seek points
 //    (FLAC without a seektable, etc.).  playerPlay resets cast state and
 //    triggers a fresh stream from the right position.
-//  * A chunked transcode has no Range, so the server has to start ffmpeg at the
-//    seek point instead.  The paused state is preserved, or seeking while
-//    paused would unexpectedly resume playback.
-//  * Anything else is Range-capable and the element can seek itself.
+//  * A chunked audio transcode has no Range, so the server has to start ffmpeg
+//    at the seek point instead.  The paused state is preserved, or seeking
+//    while paused would unexpectedly resume playback.
+//  * Anything else seeks itself: a file with Range support, or a video fed
+//    through hlsStart(), whose timeline is the whole film.
 //
 // The flag to test is player.streamIsTranscoded rather than song.nativeSeek:
 // the latter is undefined for audio and for an audio-only request, which is why
@@ -6286,86 +6494,8 @@ function playerSeekTo(target) {
          player.media.addEventListener('canplay',
             () => player.media.pause(), {once: true});
          }
-      } else if (player.queue[player.index]?.isVideo
-                 && !mediaStreamSeekable(player.media)) {
-      videoRemuxSeek(target);
       } else {
       player.media.currentTime = target;
-      }
-}
-
-// Whether this *response* can be seeked at all, as opposed to whether the file
-// could be.
-//
-// `nativeSeek` promises a Content-Length and Range support, and it is right
-// about the file - but the server can still answer a remuxable video from a
-// pipe, and does whenever the transcode cache is disabled, full, unable to run
-// ffmpeg, or still building after its 20 s wait.  The assignment below this
-// then sets currentTime on a chunked stream, which the browser refuses
-// silently: no event, no exception, a scrub bar that simply does not move.
-//
-// The test is `seekable` and not `buffered`, for the reason spelled out at
-// castSyncCanSeek() - and it is made here, at the point of use, rather than
-// latched on an event, because nothing fires when `seekable` changes.
-//
-// readyState is checked first because before metadata `seekable` is
-// legitimately empty, and an assignment there is not a seek at all: it becomes
-// the element's default playback start position, which is what makes
-// playerPlay()'s own `offset > 0 && !chunked` line work.
-function mediaStreamSeekable(el) {
-   if (el.readyState < 1) return true;
-   return el.seekable.length > 0
-       && el.seekable.end(el.seekable.length - 1) > 0;
-}
-
-// A seek on a video the server promised was seekable and then piped anyway.
-//
-// The remux is very likely being built right now - serve_video starts one in
-// the background when it answers from a pipe - and a -c copy runs far faster
-// than playback, so the answer is usually "it is there now, ask again".  What
-// must not happen is re-fetching blind: a re-fetch that comes back piped
-// restarts the film from zero, which is worse than the seek doing nothing.
-//
-// So ask first and read the header the server sets.  A `fetch` rather than the
-// element, because a page cannot see response headers for anything a
-// <video src> loads - the same trick the Android client's warmTranscode() uses
-// for a different question.
-//
-// startImmediately is on the probe deliberately: it must never be the request
-// that waits.  What that costs is one short-lived ffmpeg, because a piped
-// answer ignores the Range and starts producing - the body is cancelled the
-// moment the header has been read, which aborts it.  The background build is a
-// separate process and is not touched.  One per seek attempt a person actually
-// made, which is the bound that makes it affordable.
-async function videoRemuxSeek(target) {
-   const song = player.queue[player.index];
-   if (!song) return;
-   let ready = false;
-   try {
-      const r = await fetch(apiUrl('stream',
-                                   {id: song.id, startImmediately: 'true'}),
-                            {headers: {Range: 'bytes=0-0'}});
-      ready = r.headers.get('X-Gaindrive-Transcode') !== 'building';
-      // fetch() resolves on headers, so the body is still arriving.  Drop it
-      // rather than leaving the connection to garbage collection.
-      r.body?.cancel().catch(() => {});
-      }
-   catch (err) {
-      // Offline, or the request was cancelled.  Declining is the safe answer:
-      // the picture carries on from where it was.
-      console.warn('[player] seek probe failed', err);
-      return;
-      }
-   if (!ready) {
-      videoPreparing(true, 'Still preparing - seeking will work shortly');
-      setTimeout(() => videoPreparing(false), 2500);
-      return;
-      }
-   const wasPaused = player.media.paused;
-   playerPlay(target);
-   if (wasPaused) {
-      player.media.addEventListener('canplay',
-         () => player.media.pause(), {once: true});
       }
 }
 
@@ -6393,6 +6523,7 @@ function playerSkip(delta) {
 // seek for something the user can no longer see, and would go on downloading.
 // The queue is deliberately left intact, so Next still works.
 function playerStop() {
+   hlsStop();
    player.media.pause();
    player.media.removeAttribute('src');
    player.media.load();   // drops the buffered data and cancels the fetch
@@ -6653,9 +6784,8 @@ function videoClearCaptions(song) {
 async function videoLoadCaptions(song) {
    player.videoEl.querySelectorAll('track').forEach(t => t.remove());
 
-   // A seek comes back through here for the *same* film - on a transcoded
-   // stream because it re-fetches, while casting because a seek is a fresh
-   // LOAD. Two things follow. The chosen track is forgotten only when the film
+   // A seek comes back through here for the *same* film while casting,
+   // because there a seek is a fresh LOAD. Two things follow. The chosen track is forgotten only when the film
    // changes, or every seek would silently turn the subtitles off. And the
    // list itself is not asked for again: getVideoInfo runs ffprobe over the
    // container on every call, which is not a thing to do once per seek, and a
@@ -6687,16 +6817,11 @@ async function videoLoadCaptions(song) {
    // sound went out, it is us again.  The menu is built either way, because
    // choosing the track is this client's job whoever draws it.
    if (castDeviceId === null || castVideoLocal) {
-      // Read now rather than in the handler: by the time a track loads, another
-      // seek may have moved it, and these elements would then belong to the
-      // stream before last.
-      const offset = player.localOffset || 0;
       for (const c of caps) {
          const t = document.createElement('track');
          t.kind  = 'subtitles';
          t.label = c.name || 'Subtitles';
          t.src   = apiUrl('getCaptions', {id: song.id, captionId: c.id});
-         t.addEventListener('load', () => videoShiftCues(t.track, offset));
          player.videoEl.appendChild(t);
          }
       }
@@ -6707,29 +6832,6 @@ async function videoLoadCaptions(song) {
                caps.map(c => `${c.id}:${c.name}`).join(', '));
    // After the elements, so a menu index is a textTracks index.
    videoCaptionsMenu(caps);
-}
-
-// Rebases a caption file onto the stream actually being played.
-//
-// A <track> is timed against the media element's own clock, and for a
-// transcoded seek that clock has been rebased: the server started ffmpeg at
-// the seek point, so currentTime is zero there.  The caption file still
-// describes the whole film, so without this a seek to twenty minutes shows the
-// opening lines - which is what `localOffset` corrects everywhere else.
-// Shifting the cues is the only lever, since nothing else about a <track> can
-// be offset.
-//
-// On 'load' because that is the one moment the cues are known to exist and to
-// be unshifted: a mode change that reuses already-parsed cues fires no such
-// event, so this cannot apply twice.
-function videoShiftCues(track, offset) {
-   if (!offset || !track?.cues) return;
-   // Snapshot first - removeCue mutates the live list underneath the loop.
-   for (const cue of [...track.cues]) {
-      if (cue.endTime <= offset) { track.removeCue(cue); continue; }
-      cue.startTime = Math.max(0, cue.startTime - offset);
-      cue.endTime  -= offset;
-      }
 }
 
 // Fills the subtitle picker, or hides it when there is nothing to pick.
@@ -7383,7 +7485,7 @@ function playerPlay(offset = 0, forceMp3 = false) {
          // the wait is between the reply and the receiver making a sound.
          // onCastStatus clears this on the first status that is not IDLE,
          // which is the only thing that knows the film has actually started.
-         // Same wait the remux tier has, same notice.
+         // The same notice a local film shows while its first segment is made.
          videoPreparing(true);
          // Provisional, from what the *last* load decided, and corrected by
          // castApplyLocalVideo when the reply lands.  Guessing rather than
@@ -7409,17 +7511,8 @@ function playerPlay(offset = 0, forceMp3 = false) {
    // A video otherwise skips format negotiation entirely.  pickStreamFormat()
    // probes with an *audio* element and answers 'mp3' when it is unsure, which
    // for a video would fetch the soundtrack when the user wanted the picture.
-   // The server already knows which tier a video takes; asking for nothing
-   // lets it decide.
-   //
-   // nativeSeek is the server's answer to "will this stream carry a
-   // Content-Length and answer Range requests".  It is true for both the
-   // direct and remux tiers and false only for a re-encode, which is exactly
-   // the distinction streamIsTranscoded already means.  Getting this wrong in
-   // the pessimistic direction is not harmless: sending timeOffset for a
-   // remuxable file demotes it from a cheap -c copy to a full re-encode.  It
-   // describes the *video* stream, so it says nothing about an audio-only
-   // request - which seeks the way every other transcode does.
+   // The server already knows how a video is sent; asking for nothing lets
+   // it decide.
    let fmt;
    if (audioOnly)         fmt = audioOnlyFormat();
    else if (song.isVideo) fmt = null;
@@ -7430,23 +7523,18 @@ function playerPlay(offset = 0, forceMp3 = false) {
    // answers Range, so the element can seek it itself rather than the code
    // below re-fetching from timeOffset.  Same rule as the "Sent" row, so the
    // two cannot disagree about one stream.
-   const chunked = (song.isVideo && !audioOnly)
-      ? (song.nativeSeek === false)
-      : (!!fmt && !servedUnchanged(fmt, song));
+   //
+   // A video is never chunked: it is either the file itself, Range and all,
+   // or HLS, whose timeline is the whole film.
+   const chunked = !(song.isVideo && !audioOnly)
+                && !!fmt && !servedUnchanged(fmt, song);
+   // A video the server would not send as it is - the transcoded* fields say
+   // so - goes through hls.m3u8 instead of stream.view.
+   const viaHls = song.isVideo && !audioOnly && !!song.transcodedSuffix;
    // For transcoded streams the browser can't seek to un-buffered offsets
    // (chunked, no Range support), so ask the server to start ffmpeg at the
    // seek point instead - the served stream is already the slice we want.
    if (chunked && offset > 0) streamParams.timeOffset = Math.floor(offset);
-   // Ask the server not to wait out a whole-file remux before sending
-   // anything: it answers from a fragmented pipe and builds the seekable
-   // entry beside it.  The picture starts in about a second instead of tens.
-   //
-   // **Only on a fresh play.**  A seek needs the seekable file, so its
-   // re-fetch omits this and takes the waiting path - by which time the
-   // background build is done or nearly, because a -c copy far outruns
-   // playback.  videoRemuxSeek() is what checks before getting there.
-   if (song.isVideo && !audioOnly && offset === 0)
-      streamParams.startImmediately = 'true';
    player.streamIsTranscoded = chunked;
    player.streamFormat       = fmt ?? null;
    player.localOffset        = (chunked && offset > 0) ? offset : 0;
@@ -7479,12 +7567,18 @@ function playerPlay(offset = 0, forceMp3 = false) {
    // This is the right place for it because playback always begins from a
    // click, and an AudioContext created outside a gesture starts suspended.
    if (eqPrefs.on() && eqEnsureGraph()) eqApply();
-   player.media.src = apiUrl('stream', streamParams);
-   if (offset > 0 && !chunked) {
-      // Range-capable stream - let the browser seek natively.  Keyed on
-      // `chunked` rather than on `fmt`: a video never sets fmt, so testing it
-      // here would re-apply the offset to a stream that already starts there.
-      player.media.currentTime = offset;
+   hlsStop();
+   if (viaHls)
+      hlsStart(player.media, apiUrl('hls', {id: song.id}), offset);
+   else {
+      player.media.src = apiUrl('stream', streamParams);
+      if (offset > 0 && !chunked) {
+         // Range-capable stream - let the browser seek natively.  Keyed on
+         // `chunked` rather than on `fmt`: a video never sets fmt, so testing
+         // it here would re-apply the offset to a stream that already starts
+         // there.
+         player.media.currentTime = offset;
+         }
       }
    // Before play(), and unconditionally: on a cache miss the server answers
    // nothing at all - not even headers - until ffmpeg has finished, so this
@@ -8026,8 +8120,10 @@ function setupPlayer() {
       navigator.mediaSession.setActionHandler('nexttrack',     () => {
          document.getElementById('player-next').click();
          });
+      // Through playerSeekTo(), like every other seek: a transcoded stream or
+      // a cast cannot be moved by setting currentTime.
       navigator.mediaSession.setActionHandler('seekto', details => {
-         player.media.currentTime = details.seekTime;
+         playerSeekTo(details.seekTime);
          });
       }
 

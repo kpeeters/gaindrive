@@ -262,7 +262,7 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	// of the negotiation below applies to it: TARGETS has no entry for a video
 	// container, and format/maxBitRate here are about audio muxers.
 	if (song.is_video && !audio_only) {
-		serve_video(req, res, song, cache, max_bitrate, format, time_offset,
+		serve_video(req, res, song, max_bitrate, format, time_offset,
 		            video, playable, std::move(get_position));
 		return;
 		}
@@ -706,17 +706,61 @@ std::vector<std::string> Streamer::ffmpeg_argv(const SongInfo& song,
 
 // ---- Video -----------------------------------------------------------
 
+std::vector<std::string> Streamer::video_encode_args(const std::string& size,
+                                                     int max_bitrate)
+	{
+	std::vector<std::string> a;
+	a.push_back("-c:v");
+	a.push_back("libx264");
+	a.push_back("-preset");
+	a.push_back("veryfast");
+	a.push_back("-crf");
+	a.push_back("23");
+	// yadif=deint=interlaced only touches frames the decoder flagged as
+	// interlaced, so this can be unconditional - no stored per-file flag,
+	// and progressive material passes through untouched.
+	std::string vf = "yadif=deint=interlaced";
+	if (!size.empty()) {
+		auto x = size.find('x');
+		if (x != std::string::npos)
+			vf += ",scale=" + size.substr(0, x) + ":" + size.substr(x + 1)
+			    + ":force_original_aspect_ratio=decrease";
+		}
+	// x264 inherits the decoded pixel format, so a 10-bit or 4:4:4 source
+	// becomes High 10 / High 4:4:4 output (avc1.6E0028 and friends), which
+	// no phone and no browser hardware path decodes.  8-bit 4:2:0 is the
+	// one shape every client plays.
+	vf += ",format=yuv420p";
+	a.push_back("-vf");
+	a.push_back(vf);
+	if (max_bitrate > 0) {
+		// Leave room for the audio track inside the requested ceiling; a
+		// client that asked for 2000 kbps means the whole stream.
+		int vkbps = std::max(200, max_bitrate - 128);
+		a.push_back("-maxrate");
+		a.push_back(std::to_string(vkbps) + "k");
+		a.push_back("-bufsize");
+		a.push_back(std::to_string(vkbps * 2) + "k");
+		}
+	a.push_back("-c:a");
+	a.push_back("aac");
+	a.push_back("-b:a");
+	a.push_back("128k");
+	a.push_back("-ac");
+	a.push_back("2");
+	return a;
+	}
+
 std::vector<std::string> Streamer::video_ffmpeg_argv(
 	const SongInfo& song, bool copy, int max_bitrate,
-	const std::string& size, int time_offset, int segment_duration,
-	bool mpegts, const std::string& out)
+	const std::string& size, int time_offset)
 	{
 	std::vector<std::string> a;
 	a.push_back("ffmpeg");
 	if (time_offset > 0) {
-		// -ss before -i is the fast input seek, and lands on a keyframe.  That
-		// makes HLS segment boundaries drift slightly; Subsonic lives with the
-		// same thing rather than pay for output-accurate seeking.
+		// -ss before -i is the fast input seek.  A re-encode still starts
+		// exactly here; a copy starts on the keyframe before, which is what
+		// Subsonic's own clients have always lived with on this endpoint.
 		a.push_back("-ss");
 		a.push_back(std::to_string(time_offset));
 		}
@@ -727,10 +771,6 @@ std::vector<std::string> Streamer::video_ffmpeg_argv(
 	// is not part of a titleset.  ffmpeg's concat protocol seeks across the
 	// joined files, so the -ss above still lands where it should.
 	a.push_back(dvd_input(song.path));
-	if (segment_duration > 0) {
-		a.push_back("-t");
-		a.push_back(std::to_string(segment_duration));
-		}
 	// First video and first audio stream only.  The trailing '?' makes the
 	// audio mapping optional so a silent video still produces output instead
 	// of ffmpeg exiting with "Stream map matches no streams".  Subtitles are
@@ -747,125 +787,44 @@ std::vector<std::string> Streamer::video_ffmpeg_argv(
 		a.push_back("copy");
 		}
 	else {
-		a.push_back("-c:v");
-		a.push_back("libx264");
-		a.push_back("-preset");
-		a.push_back("veryfast");
-		a.push_back("-crf");
-		a.push_back("23");
-		// yadif=deint=interlaced only touches frames the decoder flagged as
-		// interlaced, so this can be unconditional - no stored per-file flag,
-		// and progressive material passes through untouched.
-		std::string vf = "yadif=deint=interlaced";
-		if (!size.empty()) {
-			auto x = size.find('x');
-			if (x != std::string::npos)
-				vf += ",scale=" + size.substr(0, x) + ":" + size.substr(x + 1)
-				    + ":force_original_aspect_ratio=decrease";
-			}
-		// x264 inherits the decoded pixel format, so a 10-bit or 4:4:4 source
-		// becomes High 10 / High 4:4:4 output (avc1.6E0028 and friends), which
-		// no phone and no browser hardware path decodes.  8-bit 4:2:0 is the
-		// one shape every client plays.
-		vf += ",format=yuv420p";
-		a.push_back("-vf");
-		a.push_back(vf);
-		if (max_bitrate > 0) {
-			// Leave room for the audio track inside the requested ceiling; a
-			// client that asked for 2000 kbps means the whole stream.
-			int vkbps = std::max(200, max_bitrate - 128);
-			a.push_back("-maxrate");
-			a.push_back(std::to_string(vkbps) + "k");
-			a.push_back("-bufsize");
-			a.push_back(std::to_string(vkbps * 2) + "k");
-			}
-		a.push_back("-c:a");
-		a.push_back("aac");
-		a.push_back("-b:a");
-		a.push_back("128k");
-		a.push_back("-ac");
-		a.push_back("2");
+		auto enc = video_encode_args(size, max_bitrate);
+		a.insert(a.end(), enc.begin(), enc.end());
 		// Keeps audio aligned with video after a keyframe seek, which is the
 		// same reason Subsonic passes it.
 		a.push_back("-async");
 		a.push_back("1");
 		}
 
-	// An HLS segment must carry the timestamps its position in the playlist
-	// claims.  -ss before -i rebases the output, so without this every segment
-	// starts at PTS 0 while the playlist says segment 190 belongs at 1900s.  A
-	// player seeds its timestamp adjuster from the first segment it loads and
-	// reuses it for the rest, so the second segment maps to the same instant as
-	// the first and the timeline simply stops advancing - the stream stalls
-	// with no error, because bytes are still arriving and nothing has failed.
+	// A normal moov atom is written after the media and needs a seek back to
+	// the start of the output.  A pipe cannot do that and ffmpeg aborts rather
+	// than emit a headerless file, so the fragmented layout is the only form
+	// that streams.
 	//
-	// NOT -copyts, which is the more accurate answer: it keeps the input's own
-	// timestamps, so a keyframe at 1897 stays at 1897 rather than being labelled
-	// 1900.  But -t is measured from zero unless -start_at_zero is also given,
-	// so with absolute timestamps ffmpeg sees a first packet far beyond the
-	// requested 10 seconds and writes an empty segment.  -output_ts_offset is
-	// applied by the muxer, after -t has already done its work.
-	//
-	// Segments only.  A bare timeOffset with no duration is the progressive
-	// tier-2 path, where web/app.js adds player.localOffset back itself and
-	// therefore needs the stream to start at zero.
-	if (mpegts && time_offset > 0) {
-		a.push_back("-output_ts_offset");
-		a.push_back(std::to_string(time_offset));
-		}
-
+	// The option is spelled `default_base_moof`.  "default-base-is-moof" is
+	// the ISO BMFF field name and appears only in ffmpeg's description of the
+	// option; using it as the value makes ffmpeg reject the whole movflags
+	// argument and exit before writing a byte.
 	a.push_back("-f");
-	if (mpegts)
-		a.push_back("mpegts");
-	else {
-		a.push_back("mp4");
-		// The layout depends on the destination, exactly as it does in the
-		// audio builder above.
-		//
-		// A normal moov atom is written after the media and needs a seek back
-		// to the start of the output.  A pipe cannot do that and ffmpeg aborts
-		// rather than emit a headerless file, so the fragmented layout is the
-		// only form that streams there.  For a cache file it is the wrong
-		// choice: the remux tier exists to produce a *seekable file with a
-		// real index*, and an empty moov is precisely the weaker form of that.
-		//
-		// The option is spelled `default_base_moof`.  "default-base-is-moof"
-		// is the ISO BMFF field name and appears only in ffmpeg's description
-		// of the option; using it as the value makes ffmpeg reject the whole
-		// movflags argument and exit before writing a byte.
-		// A file gets NO movflags at all, deliberately.  ffmpeg then writes a
-		// normal MP4 with the moov at the end, in a single pass, and that is
-		// fully seekable over HTTP: the response carries a Content-Length and
-		// honours Range, so the client fetches the tail once to find the index
-		// and then seeks freely.  +faststart would move the index to the front
-		// but rewrites the whole output to do it, doubling the I/O of a
-		// multi-gigabyte remux to save exactly one request.
-		if (out == "pipe:1") {
-			a.push_back("-movflags");
-			a.push_back("frag_keyframe+empty_moov+default_base_moof");
-			}
-		}
-	a.push_back(out);
+	a.push_back("mp4");
+	a.push_back("-movflags");
+	a.push_back("frag_keyframe+empty_moov+default_base_moof");
+	a.push_back("pipe:1");
 	return a;
 	}
 
 void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
-                           const SongInfo& song, TranscodeCache& cache,
-                           int max_bitrate, const std::string& format,
-                           int time_offset, const VideoOptions& video,
-                           const Playable& playable,
+                           const SongInfo& song, int max_bitrate,
+                           const std::string& format, int time_offset,
+                           const VideoOptions& video, const Playable& playable,
                            std::function<float()> get_position)
 	{
-	// Same predicate the API uses to tell the client whether it may seek
-	// natively - see video_seeks_natively() in codecs.hh for why the two must
-	// not drift apart.
-	bool codecs_ok = video_seeks_natively(song.video_codec, song.audio_codec);
-	// Anything that changes the picture or bounds the output forces a real
-	// encode; a seek or a segment forces the pipe because neither a raw file
-	// nor a whole-file remux can start partway in.
+	// This is the progressive endpoint, which gaindrive's own clients use only
+	// for a file they play as it is; everything else they fetch through
+	// hls.m3u8.  What remains here beyond the direct file is for third-party
+	// Subsonic clients, which seek by asking again with timeOffset.
+	bool codecs_ok   = video_seeks_natively(song.video_codec, song.audio_codec);
 	bool constrained = !video.size.empty() || max_bitrate > 0
 	                || (!format.empty() && format != "raw");
-	bool partial     = time_offset > 0 || video.segment_duration > 0;
 
 	// A VP9/Opus .mkv is a WebM file wearing the wrong extension: it can be
 	// served untouched, but only once relabelled (see the Direct branch).
@@ -873,25 +832,22 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	                 && webm_codecs(song.video_codec, song.audio_codec);
 
 	// video_direct_playable_for(), not video_direct_playable(): a client may
-	// have said it demuxes this container itself, which moves the file from
-	// Remux to Direct and changes nothing else.  Both tiers are
-	// video_seeks_natively()-true, so nativeSeek - which the API advertised
-	// before this request existed - is right either way.  See codecs.hh.
-	enum class Tier { Direct, Remux, Encode };
-	Tier tier = Tier::Encode;
-	if (codecs_ok && !constrained && !partial)
-		tier = video_direct_playable_for(song.codec, song.video_codec,
-		                                 song.audio_codec, playable)
-		     ? Tier::Direct : Tier::Remux;
+	// have said it demuxes this container itself.  See codecs.hh.
+	enum class Tier { Direct, Copy, Encode };
+	Tier tier = !codecs_ok || constrained ? Tier::Encode
+	          : time_offset == 0
+	            && video_direct_playable_for(song.codec, song.video_codec,
+	                                         song.audio_codec, playable)
+	          ? Tier::Direct : Tier::Copy;
 	const char* tier_name = tier == Tier::Direct ? "direct"
-	                      : tier == Tier::Remux  ? "remux" : "encode";
+	                      : tier == Tier::Copy   ? "copy" : "encode";
 
 	// Logged for the reason given on the audio line: a receiver fetching for
 	// itself is not the client that asked, and nothing else records what it is.
 	std::string ua = req.get_header_value("User-Agent");
 
 	// What the client said it can be sent untouched, which is the only way "the
-	// app sent playable and the server remuxed anyway" gets diagnosed - nine
+	// app sent playable and the server piped anyway" gets diagnosed - nine
 	// times in ten a proxy dropping the query string.  Printed verbatim, unlike
 	// the id on the audio line: the handler dropped every token that was not
 	// declarable, so there is nothing here for log_safe() to clean.
@@ -905,10 +861,7 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	          << (video.size.empty() ? "" : " size=" + video.size)
 	          << (max_bitrate > 0 ? " max=" + std::to_string(max_bitrate) : "")
 	          << (time_offset > 0 ? " offset=" + std::to_string(time_offset) : "")
-	          << (video.segment_duration > 0
-	              ? " seg=" + std::to_string(video.segment_duration) : "")
 	          << " declared=[" << declared << "]"
-	          << (video.start_immediately ? " nowait" : "")
 	          << " ua=[" << (ua.empty() ? "none" : ua) << "]"
 	          << std::endl;
 
@@ -916,13 +869,6 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 		// The raw file, byte ranges and all, and never paced: TARGET_BUF is
 		// 15 s of *audio* and would cap a 6 Mbps video at 15 s of buffer on a
 		// link that could do far better.
-		//
-		// Note what that leaves.  A cast video has exactly the shape the audio
-		// path was fixed for - a receiver that stops reading, a connection that
-		// then goes idle past somebody's 60 s timeout - because serve_video
-		// honours no pace= at any tier.  If a cast film ever dies about a
-		// minute in, this is the first place to look, and the answer is a
-		// video-sized pacing window, not the absence of one.
 		//
 		// A qualifying .mkv is relabelled video/webm on the way out: the bytes
 		// are already a valid WebM stream, but browsers refuse
@@ -940,90 +886,22 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 		return;
 		}
 
-	if (tier == Tier::Remux) {
-		// Worth materialising, unlike an encode: -c copy runs at disk speed,
-		// the key is still id+mtime, and the result is a real MP4 with a
-		// Content-Length that answers Range requests.
-		std::string key = std::to_string(song.id) + "-"
-		                + std::to_string(song.file_modified) + "-remux";
-		static const std::string OUT = TranscodeCache::OUT_PLACEHOLDER;
-		auto argv = video_ffmpeg_argv(song, true, 0, "", 0, 0, false, OUT);
-
-		// A warm entry answers everybody the same way, whatever was asked for:
-		// it is already the better stream, and looking first is what keeps
-		// start_immediately from making a second copy of a file we have.
-		auto entry = cache.get_if_present(key, ".mp4");
-
-		// Cold, and the client would rather start now.  Two different files
-		// are wanted here and that is the whole shape of this branch: what
-		// goes out is *fragmented* MP4, which streams as it is produced, while
-		// the entry being built beside it has its moov at the end, which is
-		// what makes every later play Range-seekable.  A moov-at-end file
-		// cannot be streamed as it grows - the player fetches the tail for the
-		// index first - and a fragmented one carries no index at all, so
-		// neither layout can do both jobs.
-		//
-		// Two independent ffmpegs rather than one with -f tee, deliberately.
-		// A tee's outputs share one loop, so the client draining the pipe
-		// would pace the cache write too: a paused viewer stalls the build and
-		// holds its slot, and the SIGKILL this path sends on disconnect would
-		// truncate the .part - making whether the cache is ever populated a
-		// function of whether somebody watched to the end.  Separate runs give
-		// each half the lifecycle it needs, and cost a second read of the
-		// source that the page cache largely absorbs.
-		if (!entry && video.start_immediately)
-			cache.build_in_background(key, ".mp4", argv, OUT);
-		else if (!entry)
-			entry = cache.get_or_build(key, ".mp4", argv, OUT);
-
-		if (entry) {
-			SongInfo cached{ entry->path().string(), "mp4", song.bitrate,
-			                 song.duration, entry->size(), song.id,
-			                 song.file_modified };
-			res.set_header("X-Gaindrive-Transcode",
-			               entry->hit() ? "hit" : "miss");
-			serve_direct(req, res, cached, false, TARGET_BUF,
-			             std::move(get_position),
-			             entry);
-			return;
-			}
-		// Asked to start now, or the cache is disabled, full or unhappy -
-		// fall through and pipe it instead.  The user still sees the video.
-		//
-		// `building` rather than hit/miss, and it is not decoration: this
-		// response carries no Content-Length, so a client that was told
-		// nativeSeek is true cannot seek it, and the header is the only way
-		// for one to find that out before trying.  web/app.js's
-		// videoRemuxSeek() reads exactly this.
-		res.set_header("X-Gaindrive-Transcode", "building");
-		std::cout << stamp() << "video: remux "
-		          << (video.start_immediately ? "streaming while it builds"
-		                                      : "cache unavailable, piping")
-		          << std::endl;
-		}
-
 	// Chunked output has no length to range into, and a browser's automatic
 	// "Range: bytes=0-" would otherwise be rejected as 416 by httplib's
 	// post-handler range check.  Same reasoning as the audio path.
 	const_cast<httplib::Request&>(req).ranges.clear();
 
-	bool  copy = (tier == Tier::Remux);
 	float bps  = (song.bitrate > 0 ? static_cast<float>(song.bitrate)
 	                               : 2000.0f) * 125.0f;
-	auto  argv = video_ffmpeg_argv(song, copy, max_bitrate, video.size,
-	                               time_offset, video.segment_duration,
-	                               video.segment_duration > 0, "pipe:1");
-	std::string mime(video.segment_duration > 0 ? VIDEO_TS_MIME
-	                                            : VIDEO_MP4_MIME);
+	auto  argv = video_ffmpeg_argv(song, tier == Tier::Copy, max_bitrate,
+	                               video.size, time_offset);
 
-	// Unpaced for the same reason as Tier 0, and with the same residual risk
-	// recorded there: the audio throttle's 15 s window starves a player that
-	// wants to buffer a video.
+	// Unpaced for the same reason as the direct tier.
 	std::string key = video.owner.empty()
 	                ? std::string()
 	                : video.owner + "#" + std::to_string(song.id);
-	serve_transcoded(res, std::move(argv), mime, bps, false, TARGET_BUF,
-	                 std::move(get_position), 0, key);
+	serve_transcoded(res, std::move(argv), std::string(VIDEO_MP4_MIME), bps,
+	                 false, TARGET_BUF, std::move(get_position), 0, key);
 	}
 
 void Streamer::serve_transcoded(httplib::Response& res,

@@ -189,14 +189,14 @@ private fun fileLabel(song: Song): String? {
  *
  * Video has no such choice - `format` and `maxBitRate` are never sent, because
  * either one demotes a file that could have been served off disk - so its
- * answer comes from `nativeSeek`, which is the same flag `StreamUrls.forVideo`
- * branches on and therefore cannot drift from what actually happens.
+ * answer is the same one the playback paths give when choosing between
+ * `stream.view` and `hls.m3u8`: the file as stored, or the playlist.
  *
- * Within `nativeSeek` there are still two tiers, and which one this playback
- * got is not a property of the file alone: local playback declares the
- * containers media3 demuxes and is handed those untouched, while the cast route
- * declares nothing and takes the remux. Hence [casting] - the same track can
- * honestly answer this differently depending on who is reading the bytes.
+ * Which one this playback got is not a property of the file alone: local
+ * playback declares the containers media3 demuxes and is handed those
+ * untouched, while the cast route declares nothing and takes the playlist.
+ * Hence [casting] - the same track can honestly answer this differently
+ * depending on who is reading the bytes.
  *
  * **Audio is now the same shape.** A local playback request declares the
  * formats media3 takes as they stand, so a track asked for at Opus 160 may
@@ -228,7 +228,7 @@ private fun sentLabel(
 		if (song == null) null
 		else if (song.transcodedContentType == null ||
 			(!casting && demuxedLocally(song.suffix))
-		) "As stored" else "Remuxed to MP4"
+		) "As stored" else "HLS, remuxed as it plays"
 	current.isVideo -> "HLS, re-encoded as it plays"
 	quality == null -> null
 	quality.format == AudioFormat.ORIGINAL ->

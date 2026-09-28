@@ -1,6 +1,7 @@
 package org.gaindrive.android.playback.cast
 
 import android.util.Log
+import androidx.media3.common.MimeTypes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -509,6 +510,12 @@ class CastSession @Inject constructor(
 			put("media", buildJsonObject {
 				put("contentId", media.url)
 				media.mimeType?.let { put("contentType", it) }
+				// The Default Media Receiver assumes MPEG-TS segments unless
+				// told otherwise, and the server's playlists are fMP4.
+				if (media.mimeType == MimeTypes.APPLICATION_M3U8) {
+					put("hlsSegmentFormat", "fmp4")
+					put("hlsVideoSegmentFormat", "fmp4")
+				}
 				put("streamType", "BUFFERED")
 				// Redundant against the receiver's own parsing, but it gives an
 				// early hint before any byte-range request is made.

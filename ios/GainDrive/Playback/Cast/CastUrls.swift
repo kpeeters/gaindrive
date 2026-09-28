@@ -165,26 +165,17 @@ struct CastUrls {
 			contentType: target.contentType ?? song.contentType)
 	}
 
-	/// A film. With `nativeSeek` the server serves it off disk or remuxes with
-	/// `-c copy`, and it arrives as a real MP4 that answers byte ranges.
-	/// Anything else can only be re-encoded, and its progressive answer is
-	/// chunked with no ranges; the seekable form of that is **`hls.m3u8`**,
-	/// where seeking is picking a segment. `StreamUrls.video` already chooses
-	/// between the two on `nativeSeek`. Android casts the playlist the same
-	/// way; this used to refuse it.
-	///
-	/// A playlist's segment URIs are relative, so the receiver fetches them
-	/// from the server's own `/rest/` with whatever credentials the playlist
-	/// URL carried - which is why `CastEngine` does not swap in a cast token
-	/// for one. See `isPlaylist`.
+	/// A film. A file the server serves untouched arrives as itself and
+	/// answers byte ranges; anything else goes as **`hls.m3u8`**, where seeking
+	/// is picking a segment, because the progressive answer for it is a pipe
+	/// with no ranges. `StreamUrls.video` chooses between the two, by the
+	/// server's own castLoad rule less the case `serverFileContainers` names.
 	func video(for song: Song) -> StreamTarget? {
-		// No `playable`, and that omission is the load-bearing one on
-		// this route. A receiver demuxes none of them, and the `contentType`
-		// below is the entry's `transcodedContentType` - `video/mp4` for
-		// exactly the files a declaration would change. Adding the argument
-		// here announces MP4 and sends QuickTime, which a receiver refuses
-		// outright: the film never starts and nothing on the phone says why.
-		// See `StreamUrls.video`.
+		// No `files`, and that omission is the load-bearing one on this
+		// route. A receiver demuxes nothing beyond the server's own set, and
+		// declaring more would have `stream.view` send QuickTime to a receiver
+		// told MP4, which it refuses outright: the film never starts and
+		// nothing on the phone says why. See `StreamUrls.video`.
 		guard let target = targets.video(for: song) else { return nil }
 		// A playlist is typed as one, whatever the film inside it was.
 		let type =

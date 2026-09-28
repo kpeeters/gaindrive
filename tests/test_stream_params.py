@@ -120,7 +120,7 @@ def test_m3u8_body_has_no_injected_lines():
             f"a URL was injected into the playlist body: {text[:300]!r}"
         )
         for line in text.splitlines():
-            assert line.startswith("#") or line.startswith("stream.view?"), (
+            assert line.startswith("#") or line.startswith("hlsSegment.view?"), (
                 f"unexpected playlist line {line!r} for bitRate={bitrate!r}"
             )
     print("PASS  hls.m3u8 body cannot be injected through bitRate or size")
@@ -157,7 +157,7 @@ def test_master_playlist_body_has_no_injected_lines():
         assert "/etc/passwd" not in text, text[:300]
         for line in text.splitlines():
             assert (line.startswith("#")
-                    or line.startswith("stream.view?")
+                    or line.startswith("hlsSegment.view?")
                     or line.startswith("hls.m3u8?")), (
                 f"unexpected playlist line {line!r} for bitRate={a!r},{b!r}"
             )
@@ -181,7 +181,7 @@ def test_credentials_are_not_echoed_unencoded():
     _, body = _fetch("hls.m3u8", {"id": vid})
     text = body.decode("utf-8", "replace")
     for line in text.splitlines():
-        if line.startswith("stream.view?"):
+        if line.startswith("hlsSegment.view?"):
             assert "&u=" in line, f"no credentials on a segment line: {line!r}"
             break
     else:

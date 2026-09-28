@@ -12,9 +12,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <vector>
 
 #include <iostream>
@@ -414,20 +417,11 @@ void GainDrive::routes_stream()
 			          << std::endl;
 		bool estimate_length = qp("estimateContentLength") == "true";
 		// Video-only per the spec, and ignored for audio by Streamer::serve().
-		// `duration` is what makes an HLS segment a segment: hls.m3u8 points
-		// every segment back here with a timeOffset and a length.
 		// Validated here rather than in Streamer, so the one caller that can be
 		// reached from outside is the one that checks. Anything unparseable
 		// becomes empty, which means "do not scale" - the same as omitting it.
 		VideoOptions vopts{
-			.size             = sane_video_size(qp("size")),
-			.segment_duration = to_int(qp("duration"), 0),
-			// A receiver fetches for itself, and a stream with no
-			// Content-Length is the one thing it must not be handed after a
-			// LOAD announced video/mp4.  The literal "true" only, as pace and
-			// estimateContentLength read it.
-			.start_immediately = !cast_authed
-			                  && qp("startImmediately") == "true",
+			.size  = sane_video_size(qp("size")),
 			// The one place that says who a viewer is.  Per account for now,
 			// so one account watching the same film on two devices makes
 			// them kill each other's encodes.  Per-device auth would fix
@@ -909,23 +903,46 @@ void GainDrive::routes_stream()
 		                        use_json);
 		});
 
-	// hls.m3u8 - a playlist computed from the stored duration.  Deliberately
-	// stateless: no segment directory, no session, no temp files.  Every
-	// segment URL is an ordinary stream.view transcode bounded by timeOffset
-	// and duration, which is exactly how Subsonic does it.  Nothing here needs
-	// cleaning up if a client walks away mid-playlist.
+	// Who may fetch a film's playlist and segments: the three stream.view
+	// accepts.  A receiver carries the server's cast token, which is scoped to
+	// this one song; an app's cast carries a grant; everyone else signs the
+	// request as usual.  Fills `owner`, the viewer an HLS session belongs to,
+	// spelled as stream.view spells it.  False means the response is written.
+	auto hls_auth = [this](const httplib::Request& req, httplib::Response& res,
+	                       const MediaStore::SongInfo& song, bool use_json,
+	                       std::string& owner) {
+		auto tok_it = req.params.find("castToken");
+		if (tok_it != req.params.end()) {
+			if (cast_manager_.valid_token(tok_it->second, song.id)) {
+				owner = "cast:" + tok_it->second;
+				return true;
+				}
+			if (!stream_grant_user(tok_it->second, song.id).empty()) {
+				owner = "grant:" + tok_it->second;
+				return true;
+				}
+			}
+		if (!check_auth(req, res, store_)) return false;
+		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		                          song.path, use_json)) return false;
+		owner = "user:" + req.get_param_value("u");
+		return true;
+		};
+
+	// hls.m3u8 - the playlist of a film in fragmented-MP4 segments, which is
+	// how every gaindrive client plays a film it cannot take as it is.  The
+	// cut points come from Hls::plan(): the source's own keyframes when the
+	// video can be copied, fixed six-second steps when it is re-encoded.
 	//
 	// Registered at two paths.  `hls.m3u8` is the spec's spelling and the one
 	// the Android and iOS clients build, because ExoPlayer and AVFoundation
 	// infer HLS from that extension; `hls.view` is what a client composing
-	// every URL as <name>.view asks for, and it reached the "Not implemented"
-	// catch-all before.  One handler can serve both only because every URI in
-	// the body is *relative* - a segment resolves against /rest/ whichever
-	// path was fetched - and the one place that is not true, a variant URI
-	// naming this endpoint again, spells itself from req.path.
-	auto hls_handler = [this](const httplib::Request& req,
-	                           httplib::Response& res) {
-		if (!check_auth(req, res, store_)) return;
+	// every URL as <name>.view asks for.  One handler can serve both only
+	// because every URI in the body is *relative* - a segment resolves against
+	// /rest/ whichever path was fetched - and the one place that is not true,
+	// a variant URI naming this endpoint again, spells itself from req.path.
+	auto hls_handler = [this, hls_auth](const httplib::Request& req,
+	                                    httplib::Response& res) {
 		const bool use_json = (fmt_of(req) == "json");
 		auto err = [&](int code, const char* msg) {
 			res.set_content(use_json ? subsonic_error_json(code, msg)
@@ -935,16 +952,18 @@ void GainDrive::routes_stream()
 
 		auto it = req.params.find("id");
 		if (it == req.params.end()) {
+			if (!check_auth(req, res, store_)) return;
 			err(10, "Required parameter missing: id.");
 			return;
 			}
 		auto song = store_.get_song(to_int(it->second, -1));
 		if (!song || !song->is_video) {
+			if (!check_auth(req, res, store_)) return;
 			err(70, "Video not found.");
 			return;
 			}
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
-		                          song->path, use_json)) return;
+		std::string owner;
+		if (!hls_auth(req, res, *song, use_json, owner)) return;
 
 		auto qp = [&](const std::string& k, const std::string& def = "") {
 			auto it2 = req.params.find(k);
@@ -953,20 +972,17 @@ void GainDrive::routes_stream()
 		// bitRate is the spec's spelling here; it may carry an "@WxH" suffix
 		// (e.g. "1000@640x480") naming the frame size for that variant, and
 		// the spec allows it more than once, which is the request for a master
-		// playlist.  Reading it with params.find() was wrong on both counts:
-		// std::multimap does not promise *which* of several equal keys it
-		// hands back, so the answer to a repeated bitRate was unspecified.
+		// playlist.  Read with equal_range(): std::multimap does not promise
+		// *which* of several equal keys find() hands back.
 		//
 		// Both halves are normalised through the same validators stream.view
 		// uses, and not merely escaped. They are written into the playlist
-		// *body* - a variant's URI and its RESOLUTION attribute as much as a
-		// segment's query string - which is not a URL and not XML, so nothing
-		// downstream would have caught a newline in either: a forged "#EXT-X-"
-		// line, or a second URL of the sender's choosing. Round-tripping
-		// through to_int/sane_video_size means only a number and a WxH can
-		// ever be emitted, whatever arrived.
-		struct Variant { int kbps; std::string size; };
-		std::vector<Variant> variants;
+		// *body*, which is not a URL and not XML, so nothing downstream would
+		// have caught a newline in either: a forged "#EXT-X-" line, or a
+		// second URL of the sender's choosing. Round-tripping through
+		// to_int/sane_video_size means only a number and a WxH can ever be
+		// emitted, whatever arrived.
+		std::vector<HlsVariant> variants;
 		auto [blo, bhi] = req.params.equal_range("bitRate");
 		for (auto b = blo; b != bhi; ++b) {
 			std::string kb = b->second, size;
@@ -974,21 +990,19 @@ void GainDrive::routes_stream()
 				size = kb.substr(at + 1);
 				kb   = kb.substr(0, at);
 				}
-			const Variant v{ to_int(kb, 0), sane_video_size(size) };
+			const HlsVariant v{ to_int(kb, 0), sane_video_size(size) };
 			// Nothing to say: neither half survived validation.  Note a bare
 			// "bitRate=0@640x480" does survive - 0 is the spec's "no limit",
 			// and the frame size still governs.
-			if (v.kbps <= 0 && v.size.empty()) continue;
+			if (!v.constrained()) continue;
 			if (std::none_of(variants.begin(), variants.end(),
-			                 [&](const Variant& o) {
+			                 [&](const HlsVariant& o) {
 			                 	return o.kbps == v.kbps && o.size == v.size;
 			                 	}))
 				variants.push_back(v);
 			}
 
-		const int SEGMENT = 10;
-		int total = static_cast<int>(song->duration);
-		if (total <= 0) {
+		if (song->duration <= 0) {
 			err(70, "Video has no known duration.");
 			return;
 			}
@@ -999,7 +1013,7 @@ void GainDrive::routes_stream()
 		// echoed - an empty p= alongside t=/s= would send check_auth down the
 		// password branch with a blank password and fail every segment.
 		std::string auth;
-		for (const char* k : { "u", "p", "t", "s", "c" }) {
+		for (const char* k : { "u", "p", "t", "s", "c", "castToken" }) {
 			auto v = qp(k);
 			if (!v.empty())
 				auth += "&" + std::string(k) + "=" + url_encode(v);
@@ -1009,7 +1023,7 @@ void GainDrive::routes_stream()
 		// A master playlist announces each variant's BANDWIDTH, so only a
 		// variant that named a bitrate can be one; a frame size alone still
 		// governs a media playlist, as it always did.
-		std::vector<Variant> announced;
+		std::vector<HlsVariant> announced;
 		for (const auto& v : variants)
 			if (v.kbps > 0) announced.push_back(v);
 		// A total order rather than one on kbps alone: two variants may name
@@ -1017,7 +1031,7 @@ void GainDrive::routes_stream()
 		// stable, so ordering on the bitrate alone would let two identical
 		// requests produce two different playlists.
 		std::sort(announced.begin(), announced.end(),
-		          [](const Variant& a, const Variant& c) {
+		          [](const HlsVariant& a, const HlsVariant& c) {
 		          	return a.kbps != c.kbps ? a.kbps < c.kbps
 		          	                        : a.size < c.size;
 		          	});
@@ -1031,14 +1045,13 @@ void GainDrive::routes_stream()
 
 			std::ostringstream mst;
 			mst << "#EXTM3U\n"
-			    << "#EXT-X-VERSION:3\n";
+			    << "#EXT-X-VERSION:7\n"
+			    << "#EXT-X-INDEPENDENT-SEGMENTS\n";
 			for (const auto& v : announced) {
-				// BANDWIDTH is honest for this encoder: video_ffmpeg_argv()
+				// BANDWIDTH is honest for this encoder: video_encode_args()
 				// caps the picture at max(200, kbps-128) and adds a 128 kbps
-				// AAC track on top.  PROGRAM-ID is gone from protocol version
-				// 6, but is legal at the version 3 declared above and is what
-				// Subsonic and Airsonic emit, so older players still get it.
-				mst << "#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH="
+				// AAC track on top.
+				mst << "#EXT-X-STREAM-INF:BANDWIDTH="
 				    << static_cast<long long>(v.kbps) * 1000;
 				if (!v.size.empty()) mst << ",RESOLUTION=" << v.size;
 				mst << "\n" << self << "?id=" << song->id
@@ -1057,33 +1070,43 @@ void GainDrive::routes_stream()
 			return;
 			}
 
-		const std::string bitrate = (!variants.empty() && variants[0].kbps > 0)
-		                          ? std::to_string(variants[0].kbps) : "";
-		const std::string size    = variants.empty() ? "" : variants[0].size;
+		const HlsVariant variant = variants.empty() ? HlsVariant{} : variants[0];
+		std::string query = "?id=" + std::to_string(song->id);
+		if (variant.kbps > 0)      query += "&maxBitRate=" + std::to_string(variant.kbps);
+		if (!variant.size.empty()) query += "&size=" + variant.size;
+
+		auto si   = streamer_song(*song, store_.abs_path(song->path));
+		auto plan = hls_.plan(si, variant);
+		// Counted from zero rather than from the first keyframe, which a
+		// copied film may have a few milliseconds in: a player adds these up
+		// to place each segment, and the sums must land on the real cuts.
+		auto length = [&](size_t k) {
+			return plan.bounds[k + 1] - (k == 0 ? 0.0 : plan.bounds[k]);
+			};
+		double longest = 0;
+		for (size_t k = 0; k < plan.segments(); ++k)
+			longest = std::max(longest, length(k));
 
 		std::ostringstream m3u;
 		m3u << "#EXTM3U\n"
-		    << "#EXT-X-VERSION:3\n"
-		    << "#EXT-X-TARGETDURATION:" << SEGMENT << "\n"
+		    << "#EXT-X-VERSION:7\n"
+		    << "#EXT-X-TARGETDURATION:" << static_cast<int>(std::ceil(longest)) << "\n"
 		    << "#EXT-X-MEDIA-SEQUENCE:0\n"
-		    << "#EXT-X-PLAYLIST-TYPE:VOD\n";
-		// song->id rather than the raw id parameter: it is the same value once
-		// resolved, and it is an int rather than whatever the client sent.
-		for (int off = 0; off < total; off += SEGMENT) {
-			int len = std::min(SEGMENT, total - off);
-			m3u << "#EXTINF:" << len << ".0,\n"
-			    << "stream.view?id=" << song->id
-			    << "&timeOffset=" << off
-			    << "&duration="   << len;
-			if (!bitrate.empty()) m3u << "&maxBitRate=" << bitrate;
-			if (!size.empty())    m3u << "&size=" << size;
-			m3u << auth << "\n";
-			}
+		    << "#EXT-X-PLAYLIST-TYPE:VOD\n"
+		    << "#EXT-X-INDEPENDENT-SEGMENTS\n"
+		    << "#EXT-X-MAP:URI=\"hlsSegment.view" << query << "&init=true"
+		    << auth << "\"\n";
+		m3u << std::fixed << std::setprecision(3);
+		for (size_t k = 0; k < plan.segments(); ++k)
+			m3u << "#EXTINF:" << length(k) << ",\n"
+			    << "hlsSegment.view" << query << "&seg=" << k << auth << "\n";
 		m3u << "#EXT-X-ENDLIST\n";
 
 		std::cout << stamp() << "hls: id=" << log_safe(it->second, 64)
-		          << " duration=" << total
-		          << " segments=" << ((total + SEGMENT - 1) / SEGMENT)
+		          << " duration=" << song->duration
+		          << " segments=" << plan.segments()
+		          << " video=" << (plan.copy_video ? "copy" : "encode")
+		          << " audio=" << (plan.copy_audio ? "copy" : "encode")
 		          << " path=" << req.path << std::endl;
 		// This body contains the caller's credentials, once per segment, and
 		// the player writes it to disk. It is also served under
@@ -1094,4 +1117,43 @@ void GainDrive::routes_stream()
 		};
 	server_.Get("/rest/hls.m3u8", hls_handler);
 	server_.Get("/rest/hls.view", hls_handler);
+
+	// hlsSegment - one segment of a playlist above, or with init=true its init
+	// segment.  A gaindrive extension: the spec leaves segment URLs to the
+	// server, and these are only ever reached through a playlist.
+	server_.Get("/rest/hlsSegment.view", [this, hls_auth](const httplib::Request& req,
+	                                                      httplib::Response& res) {
+		const bool use_json = (fmt_of(req) == "json");
+		auto song = store_.get_song(to_int(req.get_param_value("id"), -1));
+		if (!song || !song->is_video) {
+			if (!check_auth(req, res, store_)) return;
+			res.set_content(use_json ? subsonic_error_json(70, "Video not found.")
+			                         : subsonic_error(70, "Video not found."),
+			                use_json ? "application/json" : "application/xml");
+			return;
+			}
+		std::string owner;
+		if (!hls_auth(req, res, *song, use_json, owner)) return;
+
+		std::string song_abs = store_.abs_path(song->path);
+		if (!store_.path_is_within_root(song_abs)) {
+			std::cout << stamp() << "hls: refusing path outside every root: "
+			          << song_abs << std::endl;
+			res.status = 403;
+			return;
+			}
+		const HlsVariant v{ to_int(req.get_param_value("maxBitRate"), 0),
+		                    sane_video_size(req.get_param_value("size")) };
+		auto si = streamer_song(*song, song_abs);
+		if (req.get_param_value("init") == "true") {
+			hls_.serve_init(res, si, v);
+			return;
+			}
+		int seg = to_int(req.get_param_value("seg"), -1);
+		if (seg < 0) {
+			res.status = 404;
+			return;
+			}
+		hls_.serve_segment(res, si, v, static_cast<size_t>(seg), owner);
+		});
 	}

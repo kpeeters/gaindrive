@@ -259,8 +259,8 @@ interface SubsonicApi {
 	 *
 	 * One token covers the track's stream, its cover art and its subtitles,
 	 * expires in twelve hours, and reaches nothing the account could not
-	 * already read. It does **not** cover `hls.m3u8`, whose playlist copies the
-	 * request's credentials onto every segment.
+	 * already read. It also covers `hls.m3u8`, whose playlist copies the token
+	 * onto every segment URI.
 	 *
 	 * Needs no `castRole` and no local network - a client casting for itself is
 	 * not asking the server to cast. Older servers do not have it, which is why

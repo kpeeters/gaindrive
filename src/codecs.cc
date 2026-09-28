@@ -118,17 +118,9 @@ CastTier cast_tier_for(std::string_view container,
 	// The film-soundtrack case is not this - it puts `format` on the URL, and
 	// so is decided by cast_load_song() rather than by the codec pair.
 	if (!is_video_ext(container)) return CastTier::Direct;
-	if (!video_seeks_natively(video_codec, audio_codec))
-		return CastTier::Encode;
-	return video_direct_playable(container, video_codec, audio_codec)
-	     ? CastTier::Direct : CastTier::Remux;
-	}
-
-std::string_view cast_tier_name(CastTier t)
-	{
-	return t == CastTier::Direct ? std::string_view("direct")
-	     : t == CastTier::Remux  ? std::string_view("remux")
-	                             : std::string_view("encode");
+	return video_seeks_natively(video_codec, audio_codec)
+	    && video_direct_playable(container, video_codec, audio_codec)
+	     ? CastTier::Direct : CastTier::Hls;
 	}
 
 std::string_view cast_mime_for(std::string_view container,
@@ -137,7 +129,7 @@ std::string_view cast_mime_for(std::string_view container,
 	{
 	if (!is_video_ext(container)) return codec_to_mime(container);
 	if (cast_tier_for(container, video_codec, audio_codec) != CastTier::Direct)
-		return VIDEO_MP4_MIME;
+		return HLS_MIME;
 	if (container == "mkv" && webm_codecs(video_codec, audio_codec))
 		return std::string_view("video/webm");
 	return codec_to_mime(container);

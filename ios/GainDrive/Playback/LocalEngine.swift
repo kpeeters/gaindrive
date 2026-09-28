@@ -238,13 +238,13 @@ final class LocalEngine: PlaybackEngine {
 	///
 	/// The probe costs one metadata load, and the asset it reads is the one the
 	/// item is then built from, so nothing is fetched twice. It is skipped
-	/// entirely for a film already on the HLS transport, which is the re-encode
-	/// and has nothing to fall back to.
+	/// entirely for a film already on the HLS transport, which has nothing to
+	/// fall back to.
 	private func videoItem(for song: Song, target: StreamTarget) async
 		-> (ref: ItemRef, item: AVPlayerItem, loader: CachingResourceLoader?)
 	{
 		let asset = AVURLAsset(url: target.url)
-		guard song.nativeSeek, await Self.cannotDecode(asset),
+		guard !CastUrls.isPlaylist(target.url), await Self.cannotDecode(asset),
 			let fallback = targets.video(for: song, transcoded: true)
 		else {
 			return (song.ref, AVPlayerItem(asset: asset), nil)
@@ -285,14 +285,15 @@ final class LocalEngine: PlaybackEngine {
 	/// mislabelled, but the music is the same music.
 	func target(for song: Song) async -> StreamTarget? {
 		// A film asks a different question: no format, no ceiling, and a
-		// transport chosen by `nativeSeek`. See `StreamUrls.video`.
+		// transport chosen by `nativeSeek` and the container. See
+		// `StreamUrls.video`.
 		//
 		// The one call site that declares what AVFoundation demuxes. Local
 		// playback is the only route where that is true of whoever reads the
 		// bytes: `CastUrls.video(for:)` calls the same builder and must keep
-		// passing nothing.
+		// the server's own set.
 		if settings.showsPicture(song) {
-			return targets.video(for: song, playable: avfoundationContainers)
+			return targets.video(for: song, files: avfoundationFileContainers)
 		}
 		// And the audio half of the same declaration, at the same one call
 		// site and for the same reason: this is the route whose bytes this

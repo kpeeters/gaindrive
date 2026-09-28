@@ -124,48 +124,6 @@ enum StreamUrls {
 		return p
 	}
 
-	/// A film, which is a different question from a track.
-	///
-	/// **Neither `format` nor `maxBitRate` goes on a video URL**, and that is
-	/// not tidiness. `format` is validated against the *audio* target table, so
-	/// naming an audio one is the server's switch for sending the soundtrack
-	/// alone - a film played through `target(for:)` above comes back as sound
-	/// with no picture, which is what happened until this existed. And
-	/// `maxBitRate` sets `constrained` server-side, which disqualifies both the
-	/// direct and the remux tiers and forces a full re-encode of a file that
-	/// could have been served off disk.
-	///
-	/// The transport follows `nativeSeek`, **trusted as given**: it is false on
-	/// a video reached through search, a playlist or starred, because the codec
-	/// columns it is computed from are not selected by those queries. That is
-	/// the safe direction - the film plays and seeks by re-request.
-	/// `transcoded` forces the HLS transport for a film the server says can be
-	/// served untouched.
-	///
-	/// **Because `nativeSeek` answers a browser's question, not this one.** It
-	/// derives from `video_direct_playable()`, built from `browser_video_codec()`
-	/// - and a browser plays AV1 anywhere because Chrome and Firefox bundle
-	/// dav1d and decode in software. AVFoundation ships **no** software AV1
-	/// decoder: decode is hardware-only, arrived with the M3 family and A17 Pro,
-	/// and there is no fallback on anything older. A yt-dlp download is
-	/// frequently AV1, deliberately - forcing H.264 would cap YouTube at 1080p -
-	/// so this is a common file rather than an exotic one, and the symptom is a
-	/// film that plays its sound over an audio placeholder with nothing
-	/// anywhere saying why.
-	///
-	/// The HLS tier is the server re-encoding to H.264, which always plays. It
-	/// costs a re-encode, so it is only ever reached by `LocalEngine` having
-	/// *asked AVFoundation* and been told the track cannot be decoded.
-	///
-	/// `playable` is the one parameter that *is* sent, and only from
-	/// local playback. It names containers this player demuxes itself, so the
-	/// server hands the file over instead of remuxing it - see
-	/// `LocalEngine.target(for:)`, which is the single call site that passes
-	/// one. It defaults to empty because **`CastUrls.video(for:)` calls this
-	/// same function**: a receiver demuxes none of them, and the `LOAD` it was
-	/// sent declared a `contentType` of `video/mp4` for exactly the files a
-	/// declaration would change. Told MP4 and handed QuickTime, it refuses the
-	/// media outright and the film simply never starts.
 	/// The query a progressive video request carries: the id, and the
 	/// containers we told the server we demux ourselves.
 	///
@@ -186,16 +144,63 @@ enum StreamUrls {
 		return p
 	}
 
+	/// The containers `stream.view` hands over untouched without being told
+	/// anything, given codecs `nativeSeek` vouches for: the server's
+	/// `browser_container()`. Its other direct case, an `.mkv` holding WebM
+	/// codecs, needs the codec pair, which the API does not carry, so such a
+	/// file takes the playlist.
+	static let serverFileContainers: Set<String> = ["mp4", "m4v", "webm"]
+
+	/// A film, which is a different question from a track.
+	///
+	/// **Neither `format` nor `maxBitRate` goes on a video URL**, and that is
+	/// not tidiness. `format` is validated against the *audio* target table, so
+	/// naming an audio one is the server's switch for sending the soundtrack
+	/// alone - a film played through `target(for:)` above comes back as sound
+	/// with no picture, which is what happened until this existed. And
+	/// `maxBitRate` sets `constrained` server-side, which forces a full
+	/// re-encode of a file that could have been served off disk.
+	///
+	/// **Two transports.** `stream.view` is the file itself, with byte ranges,
+	/// but only when the server will serve it untouched; anything else it
+	/// answers with an unseekable pipe, so every other film goes as
+	/// `hls.m3u8`, where seeking is picking a segment and the server copies
+	/// the video when it can. `files` names the containers whoever reads the
+	/// bytes should be sent as a file. Those beyond `serverFileContainers` are
+	/// declared as `playable`, since without that the server would pipe them.
+	/// It defaults to the server's own set because **`CastUrls.video(for:)`
+	/// calls this same function** and a receiver declares nothing: told MP4
+	/// and handed QuickTime, it refuses the media and the film never starts.
+	///
+	/// `nativeSeek` is **trusted as given**: it is false on a video reached
+	/// through search, a playlist or starred, because the codec columns it is
+	/// computed from are not selected by those queries. That is the safe
+	/// direction - the playlist always plays.
+	///
+	/// `transcoded` forces the playlist for a film the server would send as a
+	/// file, because **`nativeSeek` answers a browser's question**. It derives
+	/// from `browser_video_codec()`, and a browser plays AV1 anywhere because
+	/// Chrome and Firefox bundle dav1d and decode in software. AVFoundation
+	/// ships **no** software AV1 decoder: decode is hardware-only, arrived with
+	/// the M3 family and A17 Pro, and there is no fallback on anything older. A
+	/// yt-dlp download is frequently AV1, deliberately, so this is a common
+	/// file, and the symptom is a film that plays its sound over an audio
+	/// placeholder with nothing anywhere saying why. `LocalEngine` asks
+	/// AVFoundation and takes the playlist when told the track cannot be
+	/// decoded.
 	static func video(
 		for song: Song,
 		client: SubsonicClient,
 		transcoded: Bool = false,
-		playable: Set<String> = []
+		files: Set<String> = serverFileContainers
 	) -> StreamTarget {
+		let asFile =
+			!transcoded && song.nativeSeek
+			&& song.suffix.map { files.contains($0.lowercased()) } == true
 		let url =
-			song.nativeSeek && !transcoded
+			asFile
 			? client.url("stream", parameters: videoParameters(
-				id: song.ref.id, containers: playable))
+				id: song.ref.id, containers: files.subtracting(serverFileContainers)))
 			// `.m3u8` rather than `.view`: the server answers both, and the
 			// extension is how AVFoundation knows it is a playlist. That is
 			// what `SubsonicClient.url`'s `suffix` has been there for since

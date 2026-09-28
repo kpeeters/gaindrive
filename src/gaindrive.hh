@@ -26,6 +26,7 @@
 #include "castmanager.hh"
 #include "coverart.hh"
 #include "folderwatcher.hh"
+#include "hls.hh"
 #include "transcodecache.hh"
 #include "urlfetch.hh"
 
@@ -131,6 +132,8 @@ class GainDrive {
 		std::string     uploads_root_name_;
 		MediaStore      store_;
 		TranscodeCache  transcode_cache_;
+		// HLS segments, and the encoders of viewers whose audio is re-encoded.
+		Hls             hls_;
 		CoverArtCache   cover_cache_;
 		CastManager     cast_manager_;
 		std::string     last_cast_song_id_;

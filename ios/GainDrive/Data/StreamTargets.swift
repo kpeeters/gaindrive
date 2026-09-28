@@ -27,19 +27,18 @@ struct StreamTargets {
 	let accounts: Accounts
 
 	/// A film. See `StreamUrls.video` for why it carries neither `format` nor
-	/// `maxBitRate`, why the account ceiling is not applied, and why `playable`
-	/// defaults to empty rather than being filled in here.
+	/// `maxBitRate`, why the account ceiling is not applied, and why `files`
+	/// defaults to the server's own set rather than being filled in here.
 	func video(
 		for song: Song,
 		transcoded: Bool = false,
-		playable: Set<String> = []
+		files: Set<String> = StreamUrls.serverFileContainers
 	) -> StreamTarget? {
 		guard let client = registry.clientsSnapshot().client(for: song.ref.server) else {
 			return nil
 		}
 		return StreamUrls.video(
-			for: song, client: client, transcoded: transcoded,
-			playable: playable)
+			for: song, client: client, transcoded: transcoded, files: files)
 	}
 
 	/// `playable` is a **function** rather than a set, unlike `video(for:)`

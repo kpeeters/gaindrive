@@ -498,6 +498,12 @@ final class CastSession {
 			"streamType": "BUFFERED",
 		]
 		if let type = media.contentType { content["contentType"] = type }
+		// The receiver assumes MPEG-TS segments unless told otherwise, and the
+		// server's playlists are fragmented MP4.
+		if CastUrls.isPlaylist(media.url) {
+			content["hlsSegmentFormat"] = "fmp4"
+			content["hlsVideoSegmentFormat"] = "fmp4"
+		}
 		// Redundant against the receiver's own parsing, but it gives an early
 		// hint before any byte-range request is made.
 		if let duration = media.duration, duration > 0 { content["duration"] = duration }

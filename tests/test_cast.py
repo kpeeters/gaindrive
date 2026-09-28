@@ -187,20 +187,21 @@ if "wiim" in model.lower():
     print(f"WiiM presets: {pr!r}")
 
 # A receiver demuxes no more containers than a browser does, so a video whose
-# container a browser will not take must still be remuxed for it - whatever any
-# *client* said about what it can demux itself.  `playable` on
-# stream.view moves an .mkv to the direct tier for the request that sent it, and
-# it must never reach this decision: the LOAD above announced a contentType
-# computed before a byte was served, and Matroska arriving under video/mp4 is
-# refused outright by the receiver, which reads as a broken file.
+# container a browser will not take must go to it as HLS - whatever any
+# *client* said about what it can demux itself.  `playable` on stream.view
+# moves an .mkv to the direct tier for the request that sent it, and it must
+# never reach this decision: the LOAD above announced a contentType computed
+# before a byte was served, and Matroska arriving under another type is refused
+# outright by the receiver, which reads as a broken file.
 song = get_json("getSong", id=SONG)["song"]
 if song.get("isVideo") and song.get("suffix") in ("mkv", "mov", "avi"):
-    if load.get("tier") != "remux":
+    if load.get("tier") not in ("copy", "encode"):
         print(f"\nWRONG TIER: a .{song['suffix']} cast as "
-              f"{load.get('tier')!r}, expected 'remux'.")
+              f"{load.get('tier')!r}, expected 'copy' or 'encode'.")
         sys.exit(1)
-    if load.get("contentType") != "video/mp4":
+    if load.get("contentType") != "application/x-mpegURL":
         print(f"\nWRONG TYPE: a .{song['suffix']} announced as "
-              f"{load.get('contentType')!r}, expected 'video/mp4'.")
+              f"{load.get('contentType')!r}, expected 'application/x-mpegURL'.")
         sys.exit(1)
-    print(f"A .{song['suffix']} is still remuxed for the receiver.")
+    print(f"A .{song['suffix']} is sent to the receiver as HLS "
+          f"({load.get('tier')}).")

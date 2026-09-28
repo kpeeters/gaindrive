@@ -28,24 +28,8 @@ inline constexpr float CAST_POS_BUFFERING = -1.0f;  // receiver seeking → supp
 // it out* is the property worth keeping.
 struct VideoOptions {
 	// Caps the output frame size ("1280x720"); empty keeps the source size.
-	// Any value disqualifies the direct and remux tiers.
+	// Any value disqualifies the direct and copy tiers.
 	std::string      size;
-	// > 0 bounds the output to that many seconds from time_offset and switches
-	// the container to MPEG-TS - that is one HLS segment.
-	int              segment_duration = 0;
-	// "I would rather have bytes now than a seekable stream."  Only the remux
-	// tier reads it: with the cache cold, this request is answered from a
-	// fragmented pipe while the real entry is built beside it, instead of
-	// waiting out a whole-file -c copy.
-	//
-	// Opt-in because the server cannot tell who is reading the bytes, and here
-	// the client it would guess wrong about is a television.  Note pace's
-	// User-Agent sniff is no guide: a Chromecast's media player sends a UA
-	// containing Mozilla/.  Guessing wrong about pacing costs pacing; guessing
-	// wrong about this costs a film that will not seek on a TV - and it would
-	// silently defeat the Android client's warmTranscode(), which fetches one
-	// byte precisely *because* the build blocks.
-	bool             start_immediately = false;
 	// Who is watching.  A new encode for the same owner and film kills the
 	// older ones: a seek abandons them, and the abort otherwise reaches us
 	// only once Apache and httplib notice, seconds of all-core x264 later.
@@ -118,6 +102,13 @@ class Streamer {
 		                                            int time_offset,
 		                                            const std::string& out);
 
+		// The x264/AAC half of a video re-encode, from -c:v to -ac: one
+		// definition for the progressive pipe and for HLS, so the two cannot
+		// drift into producing different pictures.  `size` is WxH or empty,
+		// max_bitrate is the whole stream's ceiling in kbps (0 = none).
+		static std::vector<std::string> video_encode_args(
+			const std::string& size, int max_bitrate);
+
 		// Decides direct-serve vs transcode and sends the audio response.
 		// max_bitrate=0 means no limit.  format="" or "raw" means pass-through.
 		// time_offset is in whole seconds (0 = from the start).
@@ -170,24 +161,20 @@ class Streamer {
 		                         std::shared_ptr<const TranscodeCache::Entry>
 		                             keepalive = {});
 
-		// Builds the ffmpeg command line for one video transcode.  The video
-		// counterpart of ffmpeg_argv(), and shared by the remux-to-cache and
-		// encode-to-pipe paths for the same reason: two builders would drift.
-		// copy=true remuxes without re-encoding; mpegts=true emits one HLS
-		// segment instead of fragmented MP4.
+		// Builds the ffmpeg command line for one progressive video stream, a
+		// copy or a re-encode to fragmented MP4 on stdout.
 		static std::vector<std::string> video_ffmpeg_argv(
 			const SongInfo& song, bool copy, int max_bitrate,
-			const std::string& size, int time_offset, int segment_duration,
-			bool mpegts, const std::string& out);
+			const std::string& size, int time_offset);
 
-		// Picks Tier 0/1/2 and sends the response.  Split out of serve() only
-		// for length; it is not separately callable.  It takes no `pace`: every
-		// tier passes false, for the reason given at the first of them.
+		// Picks direct, copy or encode and sends the response.  Split out of
+		// serve() only for length; it is not separately callable.  It takes
+		// no `pace`: every tier passes false, for the reason given at the
+		// first of them.
 		static void serve_video(const httplib::Request& req,
 		                        httplib::Response& res, const SongInfo& song,
-		                        TranscodeCache& cache, int max_bitrate,
-		                        const std::string& format, int time_offset,
-		                        const VideoOptions& video,
+		                        int max_bitrate, const std::string& format,
+		                        int time_offset, const VideoOptions& video,
 		                        const Playable& playable,
 		                        std::function<float()> get_position);
 

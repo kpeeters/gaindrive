@@ -22,11 +22,11 @@ struct VideoUrlTests {
 			auth: AuthParameters(username: "admin", password: "secret", salt: "aa11"))
 	}
 
-	private func video(nativeSeek: Bool) -> Song {
+	private func video(nativeSeek: Bool, suffix: String = "mp4") -> Song {
 		Song(
 			ref: ItemRef(server: server, id: "42"), title: "Film", artistName: "A",
 			albumTitle: "B", albumRef: nil, track: nil, discNumber: nil, year: nil,
-			duration: 5400, bitRate: nil, suffix: "mkv", contentType: nil, sizeBytes: 0,
+			duration: 5400, bitRate: nil, suffix: suffix, contentType: nil, sizeBytes: 0,
 			coverArt: nil, starredAt: nil, lastPlayedAt: nil, isVideo: true,
 			nativeSeek: nativeSeek, width: 1920, height: 1080)
 	}
@@ -58,5 +58,33 @@ struct VideoUrlTests {
 		// The extension, not `.view`: it is how AVFoundation knows it is a
 		// playlist, and the server answers both spellings.
 		#expect(hls.path.hasSuffix("hls.m3u8"))
+	}
+
+	/// The server pipes anything it would not serve as the file, with no
+	/// ranges, so a container nobody declared goes as the playlist however
+	/// seekable its codecs are. Matroska is the common case.
+	@Test func anUndeclaredContainerTakesThePlaylist() {
+		let mkv = StreamUrls.video(
+			for: video(nativeSeek: true, suffix: "mkv"), client: client
+		).url
+		#expect(mkv.path.hasSuffix("hls.m3u8"))
+
+		let mov = video(nativeSeek: true, suffix: "mov")
+		#expect(StreamUrls.video(for: mov, client: client).url.path.hasSuffix("hls.m3u8"))
+		let local = StreamUrls.video(
+			for: mov, client: client, files: avfoundationFileContainers
+		).url
+		#expect(local.path.hasSuffix("stream.view"))
+		#expect(local.query?.contains("playable=mov") == true)
+	}
+
+	/// WebM is Matroska too, served as a file to a browser or a receiver but
+	/// never to AVFoundation.
+	@Test func webmIsAFileForACastButNotHere() {
+		let webm = video(nativeSeek: true, suffix: "webm")
+		#expect(StreamUrls.video(for: webm, client: client).url.path.hasSuffix("stream.view"))
+		#expect(
+			StreamUrls.video(for: webm, client: client, files: avfoundationFileContainers)
+				.url.path.hasSuffix("hls.m3u8"))
 	}
 }

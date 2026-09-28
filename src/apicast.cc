@@ -1272,13 +1272,19 @@ GainDrive::cast_load_song(const httplib::Request& req,
 			}
 		const std::string tok = "&castToken=" + token;
 
-		lr.url  = base + "stream.view?id=" + sid_s + tok;
+		CastTier t = cast_tier_for(song.codec, song.video_codec,
+		                           song.audio_codec);
+		// A film the receiver cannot take as it stands goes as HLS, as it does
+		// to every gaindrive client: the playlist carries the token on to its
+		// segments.  The file itself otherwise, whole, which is also what lets
+		// the receiver seek it natively.
+		lr.url  = base + (t == CastTier::Direct ? "stream.view" : "hls.m3u8")
+		        + "?id=" + sid_s + tok;
 		lr.mime = std::string(cast_mime_for(song.codec, song.video_codec,
 		                                    song.audio_codec));
-		// Native seek: the URL serves the whole file and the LOAD says where to
-		// begin, so the receiver's clock is absolute.  That is also why the
-		// caption cues need no shifting here, unlike the browser's own transcoded
-		// seek - see videoShiftCues() in web/app.js for the case where they do.
+		// The LOAD says where to begin, and both kinds of stream carry the
+		// film's own timeline, so the receiver's clock is absolute and the
+		// caption cues need no shifting.
 		lr.current_time = offset;
 		lr.duration     = song.duration;
 
@@ -1293,22 +1299,23 @@ GainDrive::cast_load_song(const httplib::Request& req,
 		// screen.
 		stream.receiver_video = song.is_video
 		                     && cast_manager_.device_video_out();
-		CastTier t  = cast_tier_for(song.codec, song.video_codec,
-		                            song.audio_codec);
-		stream.tier = std::string(cast_tier_name(t));
-		// A remux and a re-encode both arrive as MP4; only the direct tier sends
-		// the file as it stands, so only there is the file's own bitrate the one
-		// going over the wire.  That is the fact a client cannot get from
-		// anywhere else: the transcoded* fields describe the account ceiling,
-		// which stream.view exempts for a cast token, so they describe a
-		// conversion that is not happening.
-		//
-		// 0 on the other two tiers rather than the source's figure.  A -c copy is
-		// close enough to it that quoting it would be nearly right, and nearly
-		// right is the worst thing a diagnostic can be; a re-encode is not
-		// fixed-rate at all.
-		stream.suffix  = t == CastTier::Direct ? song.codec : "mp4";
-		stream.bitrate = t == CastTier::Direct ? song.bitrate : 0;
+		// Only the direct tier sends the file as it stands, so only there is
+		// the file's own bitrate the one going over the wire.  0 otherwise
+		// rather than the source's figure: a copy is close enough to it that
+		// quoting it would be nearly right, and nearly right is the worst thing
+		// a diagnostic can be; a re-encode is not fixed-rate at all.
+		if (t == CastTier::Direct) {
+			stream.tier    = "direct";
+			stream.suffix  = song.codec;
+			stream.bitrate = song.bitrate;
+			}
+		else {
+			auto plan = hls_.plan(streamer_song(song, store_.abs_path(song.path)),
+			                      HlsVariant{});
+			stream.tier    = plan.copy_video ? "copy" : "encode";
+			stream.suffix  = "m3u8";
+			stream.bitrate = 0;
+			}
 
 		if (song.is_video) {
 			int  n = 0;

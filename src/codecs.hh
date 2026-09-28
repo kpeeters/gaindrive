@@ -137,15 +137,15 @@ bool audio_form_needs_read(std::string_view ext);
 // consulted as a fallback.  Audio wins on a tie; there is no overlap today.
 std::string_view codec_to_mime(std::string_view codec);
 
-// What a video transcode produces.  Tier 1 (remux) and Tier 2 (re-encode)
-// share the fragmented-MP4 form; HLS segments use MPEG-TS.
+// What a video transcode produces: fragmented MP4, progressive or as HLS
+// segments, and the type of the playlist that lists the latter.
 inline constexpr std::string_view VIDEO_MP4_MIME = "video/mp4";
-inline constexpr std::string_view VIDEO_TS_MIME  = "video/mp2t";
+inline constexpr std::string_view HLS_MIME       = "application/x-mpegURL";
 
 // Codecs a browser can be expected to decode without help, and containers it
 // will accept them in.  The lists are deliberately conservative: being wrong
 // in the permissive direction means a black player and a support question,
-// while being wrong in the strict direction only costs a remux.
+// while being wrong in the strict direction only costs a trip through HLS.
 //
 // These live here rather than in streamer.cc because two callers must agree on
 // them: Streamer::serve_video() picks the tier, and the API advertises to the
@@ -158,15 +158,10 @@ bool browser_audio_codec(std::string_view c);
 
 bool browser_container(std::string_view ext);
 
-// True when the served stream will carry a Content-Length and answer Range
-// requests, so the client can let the media element seek by itself.
-//
-// This is deliberately **not** "does ffmpeg run": the remux tier runs ffmpeg
-// but writes a real file through the transcode cache, so it seeks just as well
-// as the untouched original.  Only a re-encode is chunked and unseekable.
-// Conflating the two would make a client send timeOffset for a remuxable MKV,
-// which sets partial=true in serve_video() and demotes a cheap -c copy into a
-// full re-encode - the exact opposite of what the tier ladder is for.
+// True when the codecs are ones every client decodes, which is what the API
+// reports as nativeSeek.  A client that also takes the container plays the file
+// as it stands, Range and all; one that does not plays it through hls.m3u8,
+// where these are also the codecs that can be copied instead of re-encoded.
 //
 // An empty audio codec counts as playable: a silent video is fine, and a file
 // the scanner could not probe at all is better handled by the fallbacks in
@@ -184,8 +179,7 @@ bool webm_codecs(std::string_view video_codec,
 // advertises - for the same reason as video_seeks_natively() above.
 //
 // The .mkv case is not a technicality: a VP9/Opus Matroska (yt-dlp's usual
-// output) would otherwise pay a whole-file remux to produce something it
-// already is.  It must be *relabelled* video/webm when served, though -
+// output) would otherwise go through HLS to become something it already is.  It must be *relabelled* video/webm when served, though -
 // browsers reject video/x-matroska on the MIME alone, whatever the bytes hold.
 bool video_direct_playable(std::string_view container,
                            std::string_view video_codec,
@@ -222,9 +216,8 @@ using Playable = std::set<std::string, std::less<>>;
 // forget.
 //
 // **Only the container is widened.  video_seeks_natively() is untouched**, and
-// that is the whole safety argument: the two tiers this moves a file between
-// are both seekable, so nativeSeek is identical either side of it and no
-// advertised field becomes client-dependent.  Widening the *codec* pair could
+// that is the whole safety argument: nativeSeek is identical either side of
+// this, so no advertised field becomes client-dependent.  Widening the *codec* pair could
 // not be done this way - nativeSeek is what a client picks its transport with,
 // and what the Android app refuses to cast on.
 //
@@ -261,42 +254,31 @@ bool video_direct_playable_for(std::string_view container,
 // "ogg/" and "/vorbis" can never be declared, so there is nothing to equal.
 bool audio_declared(const AudioForm& form, const Playable& client);
 
-// Which of serve_video()'s three tiers a Chromecast's fetch will land on.
+// How a Chromecast is sent a video: the file as it stands, or as HLS.
 //
 // A cast URL carries no format, no size, no maxBitRate and no timeOffset - the
 // receiver seeks natively and the account ceiling is skipped for a cast token -
-// so `constrained` and `partial` are both false in serve_video() and the tier
-// follows from the codec pair alone.  That is what makes it answerable here,
-// before a byte is served, which two things need: the LOAD message announces a
-// contentType in advance, and castLoad/castSession report the tier to the
-// client rather than letting it work the ladder out a second time.
-//
-// The third caller of the tier predicate, after serve_video() and
-// transcode_target() - the same drift rule those two document applies here.
-// Note it is written the way serve_video() writes it, on video_seeks_natively()
-// *and* video_direct_playable(), rather than on the second alone: those two
-// disagree exactly on the remux tier, which is a file whose codecs a browser
-// takes in a container it does not, and collapsing them would report an H.264
-// AVI as a re-encode when it is a -c copy.
-enum class CastTier { Direct, Remux, Encode };
+// so the answer follows from the file alone.  That is what makes it answerable
+// before a byte is served, which the LOAD needs: it announces a contentType in
+// advance.  Written on video_seeks_natively() *and* video_direct_playable(), as
+// serve_video() writes its direct tier, so the two cannot disagree about which
+// files go out untouched.
+enum class CastTier { Direct, Hls };
 
 CastTier cast_tier_for(std::string_view container,
                        std::string_view video_codec,
                        std::string_view audio_codec);
 
-std::string_view cast_tier_name(CastTier t);
-
-// What a Chromecast will actually receive from stream.view, which is not the
-// same thing as what the file is.
+// What a Chromecast will actually receive, which is not the same thing as what
+// the file is.
 //
 // It has to be computable in advance: the LOAD message announces a contentType
 // before a byte is served, and a receiver told video/x-matroska while being
-// sent MP4 refuses the media outright.  Every source the remux or encode tier
-// touches arrives as MP4 whatever it started as.
+// sent something else refuses the media outright.  Everything that is not sent
+// as it stands goes as an HLS playlist.
 //
 // The .mkv relabel is the one case where the bytes go out untouched under a
-// type that is not the container's own, and it is the case transcode_target()
-// does not have to answer because it only reports *that* a transcode happens.
+// type that is not the container's own.
 std::string_view cast_mime_for(std::string_view container,
                                std::string_view video_codec,
                                std::string_view audio_codec);

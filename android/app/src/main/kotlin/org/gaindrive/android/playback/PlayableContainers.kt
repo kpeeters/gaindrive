@@ -7,25 +7,19 @@ package org.gaindrive.android.playback
  * `stream.view` picks its tier from `browser_container()` in `src/codecs.hh`:
  * `mp4`, `m4v`, `webm` and nothing else. Everything else carrying codecs a
  * browser *would* take - an H.264/AAC `.mkv` above all, which is what yt-dlp
- * writes and what most TV rips are - is remuxed to MP4 with `-c copy`. That
- * costs nothing in quality and a great deal in time: the transcode cache is
- * blocking, so nothing is sent until ffmpeg has written the whole file, and
- * there is no prewarm on the local video path the way there is for a cast.
- * Declaring the container skips the remux entirely.
+ * writes and what most TV rips are - is otherwise remuxed, and a remux
+ * arrives as a pipe with no `Range`, so it has to be played as HLS. Declaring
+ * the container gets the file as stored, seekable by byte range.
  *
  * **Only containers, never codecs.** The server still applies its own codec
  * test, so an HEVC or AC3 file is unaffected by anything here - those are
  * re-encoded, and asking for them would be asking for bytes no tier produces.
- * That restriction is what makes this safe to send per request: the two tiers
- * it moves a file between are both natively seekable, so `nativeSeek` - which
- * decides the transport and whether the file may be cast at all - means the
- * same thing either way.
  *
  * `wmv` is absent because media3 has no ASF extractor. `avi` is absent even
  * though media3 ships an `AviExtractor`: it hands MP3 audio to MediaCodec in
  * raw AVI chunk sizes rather than frame-aligned, so `c2.android.mp3.decoder`
- * throws `IllegalStateException` mid-file. The server's `-c copy` remux to
- * MP4 is the version that actually plays. `mpg`/`mpeg` are absent
+ * throws `IllegalStateException` mid-file. The server's HLS copy is the
+ * version that actually plays. `mpg`/`mpeg` are absent
  * because MPEG-PS essentially always carries MPEG-2, which the server's codec
  * test rejects, so declaring it would change nothing. `vob` is absent and the
  * server refuses it regardless: a DVD titleset is one stream split across

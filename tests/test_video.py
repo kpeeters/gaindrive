@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Video endpoint tests.
 
-Covers the tier ladder (direct / remux / re-encode), the Child fields that
-mark an entry as video, and the stateless HLS playlist - every segment URL it
-emits must resolve, because nothing materialises them in advance. The playlist
-answers at three paths and, given a repeated bitRate, as a master playlist.
+Covers stream.view's tiers (direct / copy / re-encode), the Child fields that
+mark an entry as video, and HLS: a playlist of fragmented-MP4 segments, every
+one of which must resolve, carry the film's own timestamps, and join the next
+without a gap. The playlist answers at three paths and, given a repeated
+bitRate, as a master playlist.
 
 Start the server first, against a collection containing at least one video:
     ./build/gaindrive --db /tmp/gd_test.db --music-root /music
@@ -14,10 +15,10 @@ Then run:
 """
 
 import json
+import re
 import shutil
 import subprocess
 import sys
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,16 +32,16 @@ CLIENT = "test"
 
 NS = "http://subsonic.org/restapi"
 
-# Containers the server serves untouched; anything else is remuxed or encoded.
+# Containers the server serves untouched; anything else goes through HLS.
 DIRECT_SUFFIXES = {"mp4", "m4v", "webm"}
 
 # Containers a client may declare it demuxes itself, which moves them from the
-# remux tier to the direct one for that one request.  Not vob: a DVD titleset's
+# copy tier to the direct one for that one request.  Not vob: a DVD titleset's
 # stored path names only the first of its concatenated VOBs.
 DECLARABLE_SUFFIXES = {"mkv", "mov", "avi"}
 
 # What the server labels each of those when it hands it over untouched, and how
-# to recognise the bytes.  A remux answers video/mp4 whatever it started as, so
+# to recognise the bytes.  A copy answers video/mp4 whatever it started as, so
 # the type is most of the test; the magic number is what catches a direct serve
 # that was somehow mislabelled.
 CONTAINER_MIMES = {
@@ -191,17 +192,24 @@ def test_transcoded_tier_returns_video():
     print("PASS  a constrained request re-encodes to fragmented mp4")
 
 
-def test_segment_request_returns_mpegts():
-    """A duration bound is what makes a request an HLS segment."""
-    _need_video()
+def test_offset_request_on_copyable_video_is_fragmented_mp4():
+    """A third-party client's seek on a file it cannot take as it is.
+
+    The codecs allow a copy, so a timeOffset must not demote it to a re-encode:
+    the answer is -c copy from the keyframe before the offset, as fragmented
+    MP4 with no Content-Length.
+    """
+    vs = _remuxable()
+    if not vs:
+        print("SKIP  no copyable mkv/mov/avi in the library")
+        return
     status, hdrs, body = _raw("stream.view",
-                              {"id": _video()["id"], "timeOffset": "0",
-                               "duration": "10"})
+                              {"id": vs[0]["id"], "timeOffset": "30"})
     assert status == 200, status
-    assert hdrs.get("Content-Type") == "video/mp2t", hdrs.get("Content-Type")
-    # Every MPEG-TS packet starts with the sync byte 0x47.
-    assert body[:1] == b"\x47", f"not a transport stream: {body[:4]!r}"
-    print("PASS  a bounded request returns one MPEG-TS segment")
+    assert hdrs.get("Content-Type") == "video/mp4", hdrs.get("Content-Type")
+    assert body[4:8] == b"ftyp", f"not MP4: {body[:12]!r}"
+    assert b"moof" in body[:1 << 20], "no moof - not fragmented"
+    print("PASS  a seek on a copyable video is a fragmented -c copy")
 
 
 # ---- declared containers ----------------------------------------------
@@ -216,7 +224,7 @@ def test_segment_request_returns_mpegts():
 
 
 def _remuxable():
-    """A video the server would remux: right codecs, wrong container."""
+    """A video the server would copy: right codecs, wrong container."""
     return [v for v in _videos()
             if v.get("nativeSeek") is True
             and v.get("suffix") not in DIRECT_SUFFIXES
@@ -224,10 +232,10 @@ def _remuxable():
 
 
 def test_declared_container_is_served_untouched():
-    """The point of the feature: a remux becomes a direct serve."""
+    """The point of the feature: a copy becomes a direct serve."""
     vs = _remuxable()
     if not vs:
-        print("SKIP  no remuxable mkv/mov/avi in the library")
+        print("SKIP  no copyable mkv/mov/avi in the library")
         return
     v = vs[0]
     status, hdrs, body = _raw("stream.view",
@@ -236,14 +244,12 @@ def test_declared_container_is_served_untouched():
                               {"Range": "bytes=0-1023"})
     assert status == 206, f"expected 206, got {status}"
     assert "Content-Range" in hdrs, hdrs
-    assert "X-Gaindrive-Transcode" not in hdrs, \
-        "still went through the transcode cache: " + str(hdrs)
     ctype = hdrs.get("Content-Type", "")
     assert ctype == CONTAINER_MIMES[v["suffix"]], \
         f"expected {CONTAINER_MIMES[v['suffix']]}, got {ctype!r}"
     # The headers alone cannot tell a served container from a mislabelled
-    # remux, so check the bytes where the container has a magic number worth
-    # checking.  Not .mov: it is MP4-family, so its header and a remux's are
+    # copy, so check the bytes where the container has a magic number worth
+    # checking.  Not .mov: it is MP4-family, so its header and a copy's are
     # the same shape and only the Content-Type above separates them.
     magic = CONTAINER_MAGIC.get(v["suffix"])
     if magic:
@@ -261,7 +267,7 @@ def test_declared_container_does_not_change_metadata():
     """
     vs = _remuxable()
     if not vs:
-        print("SKIP  no remuxable mkv/mov/avi in the library")
+        print("SKIP  no copyable mkv/mov/avi in the library")
         return
     v = vs[0]
     plain = _json("getSong.view", {"id": v["id"]})["song"]
@@ -290,10 +296,10 @@ def test_vob_is_never_declarable():
 
 
 def test_declared_container_still_honours_constraints():
-    """A declaration skips a remux; it never overrides a real constraint."""
+    """A declaration skips a copy; it never overrides a real constraint."""
     vs = _remuxable()
     if not vs:
-        print("SKIP  no remuxable mkv/mov/avi in the library")
+        print("SKIP  no copyable mkv/mov/avi in the library")
         return
     v = vs[0]
     status, hdrs, body = _raw("stream.view",
@@ -322,119 +328,8 @@ def test_garbage_declaration_is_ignored():
                                {"id": vs[0]["id"],
                                 "playable": "MKV"},
                                {"Range": "bytes=0-1023"})
-        assert "X-Gaindrive-Transcode" not in hdrs, \
-            "MKV was not folded to mkv: " + str(hdrs)
+        assert status == 206, "MKV was not folded to mkv: HTTP " + str(status)
     print("PASS  a malformed declaration is ignored rather than fatal")
-
-
-# ---- streaming while the remux builds ---------------------------------
-#
-# `startImmediately` asks the server not to wait out a whole-file `-c copy`
-# before sending anything: it answers from a fragmented pipe and builds the
-# seekable cache entry beside it.  What is worth testing is the boundaries -
-# that it touches no other tier, overrides no constraint, changes nothing the
-# API advertises, and is refused for a cast token, which is the one whose
-# failure would only ever show up on somebody's television.
-
-
-def test_start_immediately_streams_and_then_caches():
-    """The feature, end to end: piped now, seekable afterwards."""
-    vs = _remuxable()
-    if not vs:
-        print("SKIP  no remuxable mkv/mov/avi in the library")
-        return
-    v = vs[0]
-    status, hdrs, body = _raw("stream.view",
-                              {"id": v["id"], "startImmediately": "true"})
-    assert status == 200, status
-    assert len(body) > 0, "empty body"
-    # Two well-formed answers, and which one arrives depends on whether the
-    # cache happened to be warm - so accept either rather than demanding a
-    # cold cache the test cannot arrange.
-    state = hdrs.get("X-Gaindrive-Transcode")
-    assert state in ("building", "hit", "miss"), state
-    if state == "building":
-        assert "Content-Length" not in hdrs, hdrs
-        assert hdrs.get("Accept-Ranges") == "none", hdrs.get("Accept-Ranges")
-        # A fragmented MP4: ftyp first, and a moof rather than a moov, which
-        # is what distinguishes it from the cache entry's layout.
-        assert body[4:8] == b"ftyp", f"not MP4: {body[:12]!r}"
-        assert b"moof" in body[:65536], "no moof - not fragmented"
-    else:
-        assert "Content-Length" in hdrs, hdrs
-
-    # Whatever happened above, the entry must exist shortly afterwards: the
-    # background build is the half that makes later plays cheap.
-    for _ in range(120):
-        _, h2, _ = _raw("stream.view", {"id": v["id"]},
-                        {"Range": "bytes=0-1023"})
-        if h2.get("X-Gaindrive-Transcode") == "hit":
-            print("PASS  streamed at once, and the cache entry landed")
-            return
-        time.sleep(1)
-    raise AssertionError("the background build never produced an entry")
-
-
-def test_start_immediately_does_not_change_metadata():
-    """The advertised fields describe what *any* client is sent, and must.
-
-    A Cast receiver picks its decode pipeline from transcodedContentType, so
-    the day these start varying per request is the day casting breaks.
-    """
-    _need_video()
-    vid = _video()["id"]
-    plain = _json("getSong.view", {"id": vid})["song"]
-    asked = _json("getSong.view",
-                  {"id": vid, "startImmediately": "true"})["song"]
-    for field in ("transcodedContentType", "transcodedSuffix", "nativeSeek"):
-        assert plain.get(field) == asked.get(field), \
-            f"{field} moved: {plain.get(field)!r} -> {asked.get(field)!r}"
-    print("PASS  browse metadata is unchanged by startImmediately")
-
-
-def test_start_immediately_leaves_the_direct_tier_alone():
-    """Nothing to skip when the file is already served off disk."""
-    direct = [v for v in _videos() if v.get("suffix") in DIRECT_SUFFIXES]
-    if not direct:
-        print("SKIP  no mp4/m4v/webm video in the library")
-        return
-    status, hdrs, _ = _raw("stream.view",
-                           {"id": direct[0]["id"],
-                            "startImmediately": "true"},
-                           {"Range": "bytes=0-1023"})
-    assert status == 206, status
-    assert "Content-Range" in hdrs, hdrs
-    assert "X-Gaindrive-Transcode" not in hdrs, hdrs
-    print("PASS  startImmediately does not touch the direct tier")
-
-
-def test_start_immediately_does_not_beat_a_constraint():
-    """It skips a remux.  It does not make a re-encode seekable."""
-    _need_video()
-    status, hdrs, body = _raw("stream.view",
-                              {"id": _video()["id"], "size": "320x240",
-                               "startImmediately": "true"})
-    assert status == 200, status
-    assert hdrs.get("Content-Type") == "video/mp4", hdrs.get("Content-Type")
-    assert len(body) > 0, "empty body - ffmpeg produced nothing"
-    print("PASS  startImmediately does not override size=")
-
-
-def test_start_immediately_only_accepts_true():
-    """Pinned to the literal, as pace and estimateContentLength are."""
-    vs = _remuxable()
-    if not vs:
-        print("SKIP  no remuxable mkv/mov/avi in the library")
-        return
-    v = vs[0]
-    for value in ("yes", "1", "TRUE", "", "../../etc/passwd"):
-        status, hdrs, _ = _raw("stream.view",
-                               {"id": v["id"], "startImmediately": value},
-                               {"Range": "bytes=0-1023"})
-        assert status in (200, 206), f"{value!r} gave HTTP {status}"
-        assert hdrs.get("X-Gaindrive-Transcode") != "building", \
-            f"{value!r} was read as true"
-    print("PASS  only the literal 'true' asks for the fast path")
 
 
 # ---- audio only -------------------------------------------------------
@@ -519,81 +414,160 @@ def test_raw_and_absent_format_still_serve_video():
 
 # ---- HLS --------------------------------------------------------------
 
+def _playlist(vid, extra=None):
+    """(init URI, [(start, end, URI)]) from a media playlist."""
+    params = {"id": vid}
+    params.update(extra or {})
+    _, _, body = _raw("hls.m3u8", params)
+    text = body.decode()
+    m = re.search(r'#EXT-X-MAP:URI="([^"]*)"', text)
+    assert m, f"no EXT-X-MAP in the playlist: {text[:300]!r}"
+    segs, t, dur = [], 0.0, None
+    for line in text.splitlines():
+        if line.startswith("#EXTINF:"):
+            dur = float(line[len("#EXTINF:"):].split(",")[0])
+        elif line and not line.startswith("#") and dur is not None:
+            segs.append((t, t + dur, line))
+            t  += dur
+            dur = None
+    return m.group(1), segs
+
+
+def _get(uri):
+    with urllib.request.urlopen(f"{BASE}/{uri}") as r:
+        return r.status, r.headers.get("Content-Type", ""), r.read()
+
+
+def _top_boxes(data):
+    """Types of the top-level MP4 boxes."""
+    out, off = [], 0
+    while off + 8 <= len(data):
+        size = int.from_bytes(data[off:off + 4], "big")
+        kind = data[off + 4:off + 8].decode("latin1")
+        if size == 1:
+            size = int.from_bytes(data[off + 8:off + 16], "big")
+        if size < 8:
+            break
+        out.append(kind)
+        off += size
+    return out
+
+
+def _packets(data, selector):
+    """[(pts, duration)] of one stream in an init+media concatenation."""
+    out = subprocess.run(
+        [shutil.which("ffprobe"), "-v", "error", "-select_streams", selector,
+         "-show_entries", "packet=pts_time,duration_time", "-of", "csv=p=0",
+         "-"],
+        input=data, capture_output=True)
+    rows = []
+    for line in out.stdout.decode().splitlines():
+        parts = line.strip().rstrip(",").split(",")
+        try:
+            rows.append((float(parts[0]), float(parts[1])))
+        except (ValueError, IndexError):
+            continue
+    return sorted(rows)
+
+
 def test_hls_playlist_is_well_formed():
     _need_video()
-    status, hdrs, body = _raw("hls.m3u8", {"id": _video()["id"]})
+    v = _video()
+    status, hdrs, body = _raw("hls.m3u8", {"id": v["id"]})
     assert status == 200, status
     text = body.decode()
     assert text.startswith("#EXTM3U"), text[:40]
+    assert "#EXT-X-VERSION:7" in text, "fragmented MP4 needs version 7"
     assert "#EXT-X-ENDLIST" in text, "playlist is not terminated"
-    segs = [l for l in text.splitlines() if l.startswith("stream.view")]
-    expected = (int(_video()["duration"]) + 9) // 10
-    assert len(segs) == expected, f"{len(segs)} segments, expected {expected}"
-    print(f"PASS  hls.m3u8 lists {len(segs)} segments for a "
-          f"{_video()['duration']}s video")
+    _, segs = _playlist(v["id"])
+    assert segs, "playlist has no segments"
+    assert all(u.startswith("hlsSegment.view?") for _, _, u in segs), segs[0]
+    total = segs[-1][1]
+    assert abs(total - float(v["duration"])) < 1.5, \
+        f"segments add up to {total:.1f}s, the video is {v['duration']}s"
+    print(f"PASS  hls.m3u8 lists {len(segs)} segments covering "
+          f"{total:.0f}s")
 
 
 def test_hls_segments_resolve():
-    """Nothing pre-materialises these, so each one has to transcode on demand."""
+    """The init segment is ftyp+moov, and each media segment is moof+mdat."""
     _need_video()
-    _, _, body = _raw("hls.m3u8", {"id": _video()["id"]})
-    segs = [l for l in body.decode().splitlines()
-            if l.startswith("stream.view")]
-    assert segs, "playlist had no segments"
-    # First, middle and last: enough to catch an offset that runs past the end.
-    for i in {0, len(segs) // 2, len(segs) - 1}:
-        req = urllib.request.Request(f"{BASE}/{segs[i]}")
-        with urllib.request.urlopen(req) as r:
-            data = r.read()
-        assert r.status == 200, f"segment {i}: {r.status}"
-        assert data[:1] == b"\x47", f"segment {i} is not MPEG-TS"
-    print("PASS  first, middle and last HLS segments all transcode")
+    init, segs = _playlist(_video()["id"])
+    status, ctype, data = _get(init)
+    assert status == 200 and ctype == "video/mp4", (status, ctype)
+    boxes = _top_boxes(data)
+    assert boxes[:2] == ["ftyp", "moov"], boxes
+    assert "moof" not in boxes, "init segment carries media"
+    # First, middle and last: enough to catch a cut that runs past the end.
+    for i in sorted({0, len(segs) // 2, len(segs) - 1}):
+        status, ctype, data = _get(segs[i][2])
+        assert status == 200 and ctype == "video/mp4", (i, status, ctype)
+        boxes = _top_boxes(data)
+        assert boxes and boxes[0] == "moof", f"segment {i}: {boxes[:4]}"
+        assert "moov" not in boxes, f"segment {i} repeats the init segment"
+    print("PASS  init, first, middle and last HLS segments are fragmented MP4")
 
 
 def test_hls_segments_carry_absolute_timestamps():
-    """Each segment must be stamped where the playlist says it belongs.
+    """Each segment is stamped where the playlist says it begins.
 
-    -ss before -i rebases the output, so without -output_ts_offset every
-    segment starts at PTS 0.  A player seeds its timestamp adjuster from the
-    first segment it loads and reuses it, so the second maps to the same
-    instant as the first and the timeline stops advancing - playback stalls
-    with no error at all, because bytes keep arriving and nothing has failed.
+    Every ffmpeg run starts its own timeline at zero; the server moves each
+    segment's tfdt to the film's time.  A player places segments by those
+    timestamps, so one left at zero lands on top of the first.
     """
     _need_video()
-    ffprobe = shutil.which("ffprobe")
-    if not ffprobe:
+    if not shutil.which("ffprobe"):
         print("SKIP  ffprobe not on PATH")
         return
+    init, segs = _playlist(_video()["id"])
+    _, _, head = _get(init)
+    for i in sorted({0, len(segs) // 2, len(segs) - 1}):
+        start = segs[i][0]
+        _, _, data = _get(segs[i][2])
+        video = _packets(head + data, "v:0")
+        assert video, f"no video packets in segment {i}"
+        assert abs(video[0][0] - start) < 0.25, (
+            f"segment {i} starts at {video[0][0]:.3f}s, "
+            f"the playlist says {start:.3f}s")
+    print("PASS  HLS segments carry the film's own timestamps")
 
-    _, _, body = _raw("hls.m3u8", {"id": _video()["id"]})
-    segs = [l for l in body.decode().splitlines()
-            if l.startswith("stream.view")]
+
+def _check_joins(vid, extra, label):
+    init, segs = _playlist(vid, extra)
     if len(segs) < 3:
-        print("SKIP  video too short to have three segments")
+        print(f"SKIP  {label}: too short to have three segments")
         return
+    _, _, data = _get(init)
+    for _, _, uri in segs[:3]:
+        data += _get(uri)[2]
+    for sel, slack in (("v:0", 0.1), ("a:0", 0.03)):
+        rows = _packets(data, sel)
+        if not rows:
+            continue
+        gaps = [(b[0] - (a[0] + a[1]), a[0])
+                for a, b in zip(rows, rows[1:])]
+        worst = max(gaps)
+        assert worst[0] < slack, (
+            f"{label}: {sel} jumps {worst[0] * 1000:.0f} ms after "
+            f"{worst[1]:.3f}s")
+    print(f"PASS  {label}: three segments join without gaps")
 
-    def first_pts(seg):
-        with urllib.request.urlopen(f"{BASE}/{seg}") as r:
-            data = r.read()
-        out = subprocess.run(
-            [ffprobe, "-v", "error", "-select_streams", "v:0",
-             "-show_entries", "packet=pts_time", "-of", "csv=p=0", "-"],
-            input=data, capture_output=True)
-        for line in out.stdout.decode().splitlines():
-            value = line.strip().rstrip(",")
-            if value:
-                return float(value)
-        raise AssertionError(f"no video packets in segment: {seg}")
 
-    # The first and the third, so the gap is two whole segments and a keyframe
-    # snap of a second or two cannot be mistaken for the real thing.
-    start, later = first_pts(segs[0]), first_pts(segs[2])
-    gap = later - start
-    assert gap > 10.0, (
-        f"segments start {gap:.2f}s apart; two segments should be ~20s. "
-        "Timestamps are being rebased to zero - see -output_ts_offset in "
-        "video_ffmpeg_argv.")
-    print(f"PASS  HLS segments advance ({gap:.1f}s across two segments)")
+def test_hls_segments_join_without_gaps():
+    """No gap in picture or sound across a boundary - the old HLS's flaw.
+
+    Encoding each segment on its own starts a fresh AAC encoder every time,
+    whose priming frame is a short silence at every boundary.  The default
+    plan and a re-encoded variant are both checked: the second is the one a
+    continuous per-viewer encoder has to get right.
+    """
+    _need_video()
+    if not shutil.which("ffprobe"):
+        print("SKIP  ffprobe not on PATH")
+        return
+    vid = _video()["id"]
+    _check_joins(vid, None, "default plan")
+    _check_joins(vid, {"bitRate": "0@320x240"}, "re-encoded variant")
 
 
 def test_hls_is_served_at_every_spelling():
@@ -657,7 +631,7 @@ def test_hls_variant_playlist():
         with urllib.request.urlopen(f"{BASE}/{uris[0]}") as r:
             media = r.read().decode()
         assert "#EXT-X-ENDLIST" in media, "variant is not a media playlist"
-        segs = [l for l in media.splitlines() if l.startswith("stream.view")]
+        segs = [l for l in media.splitlines() if l.startswith("hlsSegment.view")]
         assert segs, "variant playlist had no segments"
         assert all("maxBitRate=800" in s for s in segs), segs[0]
     print("PASS  a repeated bitRate yields a master playlist on both paths")
@@ -869,17 +843,12 @@ TESTS = [
     test_audio_is_not_marked_as_video,
     test_direct_tier_honours_ranges,
     test_transcoded_tier_returns_video,
-    test_segment_request_returns_mpegts,
+    test_offset_request_on_copyable_video_is_fragmented_mp4,
     test_declared_container_is_served_untouched,
     test_declared_container_does_not_change_metadata,
     test_vob_is_never_declarable,
     test_declared_container_still_honours_constraints,
     test_garbage_declaration_is_ignored,
-    test_start_immediately_streams_and_then_caches,
-    test_start_immediately_does_not_change_metadata,
-    test_start_immediately_leaves_the_direct_tier_alone,
-    test_start_immediately_does_not_beat_a_constraint,
-    test_start_immediately_only_accepts_true,
     test_audio_format_returns_the_soundtrack,
     test_audio_only_stream_is_seekable,
     test_audio_only_covers_the_whole_video,
@@ -887,6 +856,7 @@ TESTS = [
     test_hls_playlist_is_well_formed,
     test_hls_segments_resolve,
     test_hls_segments_carry_absolute_timestamps,
+    test_hls_segments_join_without_gaps,
     test_hls_rejects_audio,
     test_hls_is_served_at_every_spelling,
     test_hls_variant_playlist,

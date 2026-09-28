@@ -6,8 +6,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.gaindrive.android.data.ServerRegistry
 import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.StreamTarget
@@ -15,7 +13,6 @@ import org.gaindrive.android.data.StreamUrls
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.ItemRef
-import org.gaindrive.android.di.MediaHttp
 import org.gaindrive.android.net.SubsonicClientFactory
 import org.gaindrive.android.net.requireOk
 import org.gaindrive.android.net.runCatchingCancellable
@@ -186,10 +183,6 @@ class CastUrls @Inject constructor(
 	private val reachability: CastReachability,
 	private val bridge: CastBridge,
 	private val audioCache: AudioCache,
-	// The client whose read timeout a whole-film transcode fits inside; see
-	// MediaHttp, which is where this requirement now lives for every caller
-	// that waits on one.
-	@MediaHttp private val httpClient: OkHttpClient,
 	private val settings: SettingsStore,
 	private val clients: SubsonicClientFactory,
 ) {
@@ -358,16 +351,20 @@ class CastUrls @Inject constructor(
 	 * building the URL.
 	 *
 	 * The same rule [forVideo] applies, and deliberately the only other place
-	 * it is written down: a seekable file goes over either route, and one the
-	 * server can only re-encode goes as HLS, which the bridge cannot carry. A
+	 * it is written down: a file the server serves as stored goes over either
+	 * route, and anything else goes as HLS, which the bridge cannot carry. A
 	 * second copy of that in the UI is exactly how a button and the thing it
 	 * does come to disagree.
 	 *
 	 * It is cheap to ask: [CastReachability] memoises per server and network,
 	 * so this costs a map lookup after the first call.
 	 */
-	suspend fun videoIsCastable(ref: ItemRef, nativeSeek: Boolean): Boolean {
-		if (nativeSeek) return true
+	suspend fun videoIsCastable(
+		ref: ItemRef,
+		nativeSeek: Boolean,
+		transcodedMime: String?,
+	): Boolean {
+		if (servedAsStored(nativeSeek, transcodedMime)) return true
 		val config = registry.get(ref.server) ?: return false
 		return reachability.canReachDirectly(config)
 	}
@@ -376,17 +373,17 @@ class CastUrls @Inject constructor(
 	 * The same decision for a video, which differs from audio in three ways.
 	 *
 	 * **Two tiers are offered, and which one is available depends on the
-	 * route.** A file whose codec pair a browser takes arrives as a real MP4
-	 * with a `Content-Length` that answers byte ranges - that is what
-	 * `nativeSeek` names, and it is what the bridge already relays. Anything
-	 * else the server can only re-encode, and its progressive answer is chunked
-	 * with `Accept-Ranges: none`; the seekable form of it is `hls.m3u8`, where
-	 * seeking is picking a segment.
+	 * route.** A file the server serves as stored - see [servedAsStored] -
+	 * arrives with a `Content-Length` that answers byte ranges, and it is what
+	 * the bridge already relays. Anything else the server has to remux or
+	 * re-encode, and its progressive answer is a pipe with neither; the
+	 * seekable form of it is `hls.m3u8`, where seeking is picking a segment.
 	 *
 	 * The playlist's segment URIs are **relative**, so they resolve against
 	 * whatever base served the playlist. On the direct route that base is the
 	 * gaindrive server's own `/rest/`, exactly as for any other client, and
-	 * nothing else is needed - the server already sends the CORS headers a
+	 * the server copies the playlist's `castToken` onto each of them, so the
+	 * grant covers the whole film. The server already sends the CORS headers a
 	 * receiver requires for an adaptive stream. Through the bridge, whose
 	 * grammar is a flat `/<token>/<key>`, a segment arrives as an unrecognised
 	 * key and 404s. So HLS is refused *there and only there*, below the route
@@ -416,38 +413,24 @@ class CastUrls @Inject constructor(
 	 */
 	private suspend fun forVideo(ref: ItemRef, source: CastSource): CastTarget? {
 		// No `playable`, and that omission is the load-bearing one on this
-		// route. A receiver demuxes none of them, and [mime] below is
-		// `transcodedContentType` - `video/mp4` for exactly the files declaring
-		// would change. Adding the argument here announces MP4 and sends Matroska,
-		// which a receiver refuses outright: the film never starts and nothing
-		// anywhere says why. See `StreamUrls.forVideo`.
+		// route. A receiver demuxes none of those containers, so declaring
+		// them would send it Matroska it refuses outright: the film never
+		// starts and nothing anywhere says why. See `StreamUrls.forVideo`.
 		//
-		// The flag is passed through rather than pinned true, which is what
-		// selects the playlist for a file the server can only re-encode.
-		val target = streamUrls.forVideo(ref, source.nativeSeek) ?: return null
+		// Having declared nothing, the server's own rule is the only one that
+		// decides whether the file comes as stored; everything else would be
+		// an unseekable pipe on stream.view, so it goes as the playlist.
+		val target = streamUrls.forVideo(
+			ref,
+			servedAsStored(source.nativeSeek, source.transcodedMime),
+		) ?: return null
 		val config = registry.get(ref.server) ?: return null
 
 		// For a playlist the type is the playlist's, which only [target] knows.
-		// Otherwise the server's own answer, not one worked out from the codecs:
-		// `transcodedMime` is present exactly when the file will be remuxed, and
-		// the source type is wrong in precisely that case.
-		val mime = if (target.isHls) target.mimeType
-		           else source.transcodedMime ?: source.sourceMime
+		// Otherwise the file goes as stored, so its own type is the true one.
+		val mime = if (target.isHls) target.mimeType else source.sourceMime
 
-		// Nothing to warm for a playlist: an HLS segment is transcoded per
-		// request and no whole-file build blocks the first byte, so this would
-		// fetch one byte of playlist text and warm nothing.
-		if (!target.isHls) warmTranscode(target.url)
-
-		// **A playlist keeps the ordinary credentials, and must.** The grant
-		// does not cover `hls.m3u8`, and could not usefully: the playlist's
-		// segment URIs are relative, so each segment is fetched with whatever
-		// the playlist request carried, and the server has no way to hand a
-		// per-song grant down to them. Tokening the playlist would authorise
-		// the one document and leave every segment unauthorised, which is a
-		// film that starts and immediately stops.
 		if (reachability.canReachDirectly(config)) {
-			if (target.isHls) return CastTarget(target.url, mime, CastRoute.DIRECT)
 			val token = castToken(ref)
 			return CastTarget(
 				token?.let { withCastToken(target.url, it) } ?: target.url,
@@ -475,35 +458,13 @@ class CastUrls @Inject constructor(
 	}
 
 	/**
-	 * Fetches one byte, so that a remux happens while the phone waits rather
-	 * than while the receiver does.
-	 *
-	 * An H.264/AAC `.mkv` is not directly playable - the container is not one a
-	 * browser takes - so the server remuxes it, and its transcode cache is
-	 * *blocking*: nothing is sent until ffmpeg has written the whole file. For a
-	 * multi-gigabyte film that is minutes, and a receiver that has gone that long
-	 * without data gives up with a network error. Untreated, the first cast of
-	 * every `.mkv` fails and the second works, which reads as a random fault.
-	 *
-	 * A one-byte range is enough to force the build, and costs nothing on a file
-	 * the server serves directly. Failure is ignored on purpose: this is a warm,
-	 * not a fetch, and if it went wrong the receiver's own request is still
-	 * entitled to try.
+	 * Whether `stream.view` hands a receiver the file as stored, with a length
+	 * and byte ranges. `transcodedContentType` is absent exactly then; the
+	 * `nativeSeek` half keeps an item restored with no extras, which reports
+	 * neither, off the progressive route.
 	 */
-	private suspend fun warmTranscode(url: String) {
-		withContext(Dispatchers.IO) {
-			runCatching {
-				val request = Request.Builder().url(url).header("Range", "bytes=0-0").build()
-				httpClient.newCall(request).execute().use { response ->
-					Log.i(
-						TAG,
-						"warm ${response.code}" +
-							" transcode=${response.header("X-Gaindrive-Transcode") ?: "none"}",
-					)
-				}
-			}.onFailure { Log.w(TAG, "warm failed: $it") }
-		}
-	}
+	private fun servedAsStored(nativeSeek: Boolean, transcodedMime: String?): Boolean =
+		nativeSeek && transcodedMime == null
 
 	/**
 	 * The length of a complete copy held under [cacheKey], or null if there is

@@ -139,7 +139,7 @@ class PlayerConnection @Inject constructor(
 	private val watchdog: PlaybackWatchdog,
 	private val castSession: CastSession,
 	// For videoIsCastable() alone: whether a receiver could fetch a film the
-	// server can only re-encode. The rule lives there so the refusal here and
+	// server cannot serve as stored. The rule lives there so the refusal here and
 	// the URL builder cannot disagree.
 	private val castUrls: CastUrls,
 	private val settings: SettingsStore,
@@ -272,7 +272,7 @@ class PlayerConnection @Inject constructor(
 	/**
 	 * Whether [songs] can be played where playback is currently going.
 	 *
-	 * A video the server can only re-encode is cast as `hls.m3u8`, where
+	 * A video the server cannot serve as stored is cast as `hls.m3u8`, where
 	 * seeking is picking a segment - so it plays and seeks on a receiver that
 	 * fetches from the server itself. Through the bridge it cannot: the
 	 * playlist's segment URIs are relative and the bridge's flat
@@ -291,7 +291,9 @@ class PlayerConnection @Inject constructor(
 		if (castSession.device.value == null) return false
 		if (settings.videoAudioOnly.first()) return false
 		val blocked = songs.any {
-			it.isVideo && !castUrls.videoIsCastable(it.ref, it.nativeSeek)
+			it.isVideo && !castUrls.videoIsCastable(
+				it.ref, it.nativeSeek, it.transcodedContentType,
+			)
 		}
 		if (!blocked) return false
 		_message.value = "This video has to be converted as it plays, and this " +

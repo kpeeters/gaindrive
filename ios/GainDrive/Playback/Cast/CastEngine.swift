@@ -140,8 +140,8 @@ final class CastEngine: PlaybackEngine {
 		let showsPicture = session.device?.videoOut ?? true
 		let asSound = song.isVideo && (!showsPicture || !settings.showsPicture(song))
 
-		// A film the server can only re-encode goes as an HLS playlist, which
-		// `CastUrls.video` picks on `nativeSeek`; it used to be refused here.
+		// A film the server would not send as a file goes as an HLS playlist,
+		// which `CastUrls.video` picks; it used to be refused here.
 		let sendsVideo = song.isVideo && !asSound
 		guard
 			let target = sendsVideo
@@ -156,18 +156,12 @@ final class CastEngine: PlaybackEngine {
 		reported = offset
 		reportedAt = nil
 		position = offset
-		// Reported as buffering while this runs, which is what it is.
-		//
-		// **A film is warmed too, unless it is a playlist.** A remux is blocking
-		// on the server - nothing is sent until the whole file is written - so
-		// a multi-gigabyte `.mkv` is minutes of silence, and a receiver gives up
-		// after about a minute of that. Waiting here moves those minutes to a
-		// place where nobody is counting; untreated, the first cast of every
-		// such film fails and the second works. A playlist has no whole-file
-		// build, since each segment is made per request, so a byte of it would
-		// warm nothing. Android does the same.
-		let isPlaylist = CastUrls.isPlaylist(target.url)
-		if !isPlaylist {
+		// Reported as buffering while this runs, which is what it is. A
+		// transcode is built whole before the server sends a byte of it, and a
+		// receiver gives up after about a minute of silence; waiting here moves
+		// that wait to where nobody is counting. A film has no such build: it
+		// is either the file or a stream made as it is read.
+		if !sendsVideo {
 			// Said explicitly rather than left to the next status push: nothing
 			// arrives from the receiver during the warm, so a client would
 			// otherwise show whatever it was showing before - which after a
@@ -175,32 +169,21 @@ final class CastEngine: PlaybackEngine {
 			isBuffering = true
 			isPlaying = false
 			onStateChange?()
-			await prewarmer.warm(target, isFilm: sendsVideo)
+			await prewarmer.warm(target)
 		}
-		// **Minted here and nowhere else**, and after the warm rather than
-		// before it. This is the one point at which a URL actually reaches a
-		// receiver: `target(for:)` is also called by the track-info sheet, which
-		// wants only the quality, and by `prewarmNext()`, and minting in
-		// `CastUrls` would burn a grant on each of those to say nothing.
+		// **Minted here and nowhere else**, and after the warm, which is a
+		// request *this app* makes and keeps the ordinary credentials. This is
+		// the one point at which a URL actually reaches a receiver:
+		// `target(for:)` is also called by the track-info sheet, which wants
+		// only the quality, and by `prewarmNext()`, and minting in `CastUrls`
+		// would burn a grant on each of those to say nothing.
 		//
-		// The warm keeps the ordinary credentials on purpose. It is a request
-		// *this app* makes, and it warms the same transcode either way: the
-		// server's cache is keyed on the file and the plan, and the account's
-		// ceiling is the same whether the server reads it from `u` or from the
-		// grant.
-		//
-		// One token, two URLs. The sleeve travels to the receiver in the
-		// metadata and is fetched by it, so a grant applied only to the audio
-		// would leave the account's password on the television regardless.
-		//
-		// **A playlist keeps the ordinary credentials, and must.** Its segment
-		// URIs are relative and are fetched with whatever the playlist request
-		// carried; a grant covers one song id and cannot be handed down to them,
-		// so a tokened playlist would authorise the document and leave every
-		// segment refused - a film that starts and immediately stops. Android
-		// makes the same exception.
-		var token: String?
-		if !isPlaylist { token = await urls.castToken(for: song) }
+		// One token, every URL. The sleeve travels to the receiver in the
+		// metadata and is fetched by it, so a grant applied only to the media
+		// would leave the account's password on the television regardless. A
+		// playlist takes it too: the server hands it down to every segment URI
+		// it writes.
+		let token = await urls.castToken(for: song)
 		// Declared whether or not one is chosen, since a LOAD is the only
 		// place a track can be introduced. None for a soundtrack.
 		var captions: [CastCaption] = []

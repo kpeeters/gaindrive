@@ -39,6 +39,10 @@ GainDrive::GainDrive(const std::string& db_path,
 	      static_cast<int64_t>(transcode_cache_mb) * 1024 * 1024,
 	      transcode_jobs > 0 ? transcode_jobs
 	          : std::max(2u, std::thread::hardware_concurrency() / 2)),
+	  // Beside the database rather than in the transcode cache: that one is
+	  // pruned by size and may be switched off, and this directory is wiped
+	  // on every start.
+	  hls_(std::filesystem::path(db_path).parent_path() / "hls-sessions"),
 	  cover_cache_(store_),
 	  url_fetcher_(url_handlers, url_fetch_timeout_s),
 	  watcher_(store_)

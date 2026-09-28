@@ -216,48 +216,46 @@ class StreamUrls @Inject constructor(
 	 *    off disk. The account ceiling is applied by the server regardless of
 	 *    what is asked for, so sending one buys nothing and costs the tier.
 	 *
-	 * [nativeSeek] comes from the entry the caller already has. False means the
-	 * server can only re-encode this file, which is chunked with no
-	 * `Content-Length` and no `Range` - unseekable as a progressive stream, so
-	 * it is played as HLS, where seeking is picking a segment.
+	 * [progressive] is the caller's answer to whether the server will hand
+	 * over the file as stored. Only then does `stream.view` carry a
+	 * `Content-Length` and answer `Range`; anything it has to remux or
+	 * re-encode arrives as a pipe with neither, so it is played as HLS, where
+	 * seeking is picking a segment. The answer depends on who reads the bytes,
+	 * which is why it is decided at the call site and not here.
 	 *
 	 * [playable] is a third parameter that is *usually* absent, and the default
 	 * is the safety. It tells the server we demux those containers ourselves -
 	 * the video half of one parameter that also carries the audio declaration,
 	 * see [audioStreamParams] - so it can skip a remux it would otherwise pay.
 	 * But the same URL builder serves the Cast route, and a receiver demuxes
-	 * none of them. Worse,
-	 * the `LOAD` sent to that receiver declared a `contentType` taken from the
-	 * entry's `transcodedContentType`, which is `video/mp4` for exactly the files
-	 * this affects; a receiver told `video/mp4` and handed Matroska refuses the
-	 * media outright, which reads as a broken file rather than a mislabelled one.
+	 * none of them: handed Matroska it refuses the media outright, which reads
+	 * as a broken file rather than a misrouted one.
 	 *
 	 * So it is passed at the call site that plays locally and nowhere else,
 	 * exactly as `CastUrls.paced()` is applied at the route rather than here.
-	 * Empty on the HLS branch too: every segment carries a `duration`, which
-	 * makes it an encode whatever the container holds, so declaring there would
-	 * be a claim the server cannot act on.
+	 * Not sent on the HLS branch: the playlist is fragmented MP4 whatever the
+	 * container was, so declaring there would be a claim the server cannot
+	 * act on.
 	 */
 	suspend fun forVideo(
 		ref: ItemRef,
-		nativeSeek: Boolean,
+		progressive: Boolean,
 		playable: Set<String> = emptySet(),
 	): VideoTarget? =
 		withContext(Dispatchers.IO) {
 			val config = registry.get(ref.server) ?: return@withContext null
 			val client = clients.clientFor(config)
 
-			if (nativeSeek) {
+			if (progressive) {
 				VideoTarget(
 					url = client.url(
 						"stream",
 						videoStreamParams(ref.id, playable),
 					),
 					// No declared type: sniffing is the only honest answer, the
-					// same argument AudioFormat.ORIGINAL makes. The remux tier
-					// turns an .mkv into MP4, and a VP9/Opus .mkv is served
-					// relabelled video/webm - so the entry's own contentType is
-					// wrong in exactly the cases that matter.
+					// same argument AudioFormat.ORIGINAL makes. A VP9/Opus .mkv
+					// is served relabelled video/webm, so the entry's own
+					// contentType is wrong in exactly the cases that matter.
 					mimeType = null,
 					isHls = false,
 				)

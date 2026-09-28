@@ -132,7 +132,8 @@ void GainDrive::routes_web()
 		const bool cast_fetched = r.path == "/rest/stream.view"
 		                       || r.path == "/rest/getCaptions.view"
 		                       || r.path == "/rest/hls.m3u8"
-		                       || r.path == "/rest/hls.view";
+		                       || r.path == "/rest/hls.view"
+		                       || r.path == "/rest/hlsSegment.view";
 		if (cast_fetched) {
 			res.set_header("Access-Control-Allow-Origin",  "*");
 			res.set_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");

@@ -1141,6 +1141,14 @@ nlohmann::json CastManager::build_load(const LoadRequest& req, int request_id)
 		{"streamType",  "BUFFERED"},
 		{"duration",    req.duration}
 		};
+	// The receiver assumes MPEG-TS segments unless told otherwise, and ours
+	// are fragmented MP4.  Spelled out rather than taken from codecs.hh's
+	// HLS_MIME, because this file stays free of project headers for the
+	// gaindrive-cast tool's sake.
+	if (req.mime == "application/x-mpegURL") {
+		media["hlsSegmentFormat"]      = "fmp4";
+		media["hlsVideoSegmentFormat"] = "fmp4";
+		}
 	// Omitted rather than sent empty when there are none: an empty tracks array
 	// is legal but says "this medium has no subtitles", and some receiver
 	// versions take the trouble to render a disabled CC control for it.
