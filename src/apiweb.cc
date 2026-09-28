@@ -333,7 +333,11 @@ void GainDrive::routes_web()
 	// http: matters only when gaindrive itself is served over plain http,
 	// where setCoverArt would accept such a URL and the preview should not
 	// disagree with it; over https the browser blocks it as mixed content
-	// whatever the policy says. link.html is deliberately self-contained (it
+	// whatever the policy says. media-src also takes blob:, because the web
+	// player feeds a film's HLS segments to the <video> element through a
+	// MediaSource, which it can only attach as a blob: URL; such a URL is
+	// minted by the page itself, so it widens nothing. Firefox lets 'self'
+	// cover it and Chrome does not. link.html is deliberately self-contained (it
 	// must survive with no other asset loading), so its policy allows its own
 	// inline script and style and nothing else. X-Frame-Options is the same
 	// rule for browsers that predate frame-ancestors.
@@ -361,7 +365,7 @@ void GainDrive::routes_web()
 			               "default-src 'none'; script-src 'self'; "
 			               "style-src 'self' 'unsafe-inline'; "
 			               "img-src 'self' data: https: http:; "
-			               "media-src 'self'; connect-src 'self'; "
+			               "media-src 'self' blob:; connect-src 'self'; "
 			               "font-src 'self'; base-uri 'none'; "
 			               "form-action 'self'; frame-ancestors 'none'");
 			if (revalidated(req, res, embedded::index_html)) return;
