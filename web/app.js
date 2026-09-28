@@ -3562,9 +3562,10 @@ async function viewAlbums(artistId, artistName, isCategory = false,
 }
 
 function fmtDuration(secs) {
-   const m = Math.floor(secs / 60);
+   const h = Math.floor(secs / 3600);
+   const m = Math.floor(secs / 60) % 60;
    const s = String(secs % 60).padStart(2, '0');
-   return `${m}:${s}`;
+   return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
 }
 
 function timeAgo(isoStr) {
@@ -6141,8 +6142,18 @@ function hlsStart(el, url, startAt) {
    // and the pump then starts again from the new playhead.
    h.onSeek = () => { h.ctrl?.abort(); hlsPump(h); };
    h.onTime = () => hlsPump(h);
+   // Firefox's H.264 decoder can end up drained after a run of seeks and then
+   // refuses everything it is given, although the same segments play in
+   // Chrome.  The element reports that as a decode error, and a fresh
+   // MediaSource is the only thing that resets the decoder - so act on the
+   // error at once rather than on the next append that throws because of it.
+   h.onError = () => {
+      if (el.error?.code === MediaError.MEDIA_ERR_DECODE)
+         hlsFail(h, new Error(`decode error: ${el.error.message ?? ''}`));
+      };
    el.addEventListener('seeking', h.onSeek);
    el.addEventListener('timeupdate', h.onTime);
+   el.addEventListener('error', h.onError);
    h.ms.addEventListener('sourceopen',
       () => hlsOpen(h, startAt).catch(err => hlsFail(h, err)), {once: true});
    el.src = URL.createObjectURL(h.ms);
@@ -6157,6 +6168,7 @@ function hlsStop() {
    h.ctrl?.abort();
    h.el.removeEventListener('seeking', h.onSeek);
    h.el.removeEventListener('timeupdate', h.onTime);
+   h.el.removeEventListener('error', h.onError);
 }
 
 async function hlsFetch(url, kind, signal) {
@@ -6262,18 +6274,21 @@ async function hlsOpen(h, startAt) {
    hlsPump(h);
 }
 
-// When the last rebuild happened, across the feeders it replaced.
-let hlsRebuiltAt = 0;
+// When the recent rebuilds happened, across the feeders they replaced.
+let hlsRebuilds = [];
 
 // A failed MediaSource is not the end of the film.  Rebuilding it at the
 // playhead - what starting the film there would do - also clears an error the
-// element has latched, after which every append throws.  Once per ten seconds,
-// so a stream that fails every time still ends in a message rather than a loop.
+// element has latched, after which every append throws.  Up to three in thirty
+// seconds: enough for a burst of seeking in Firefox, few enough that a stream
+// that fails every time still ends in a message rather than a loop.
 function hlsFail(h, err) {
    if (h !== hlsCur) return;
    const el = h.el;
-   if (!err.fetchGaveUp && Date.now() - hlsRebuiltAt > 10000) {
-      hlsRebuiltAt = Date.now();
+   const now = Date.now();
+   hlsRebuilds = hlsRebuilds.filter(t => now - t < 30000);
+   if (!err.fetchGaveUp && hlsRebuilds.length < 3) {
+      hlsRebuilds.push(now);
       console.warn('[hls] rebuilding after:', err.message);
       const pos = el.currentTime, paused = el.paused;
       hlsStart(el, h.url, pos);
@@ -7962,6 +7977,10 @@ for (const ev of ['playing', 'canplay', 'error']) {
 // know up-front which (browser, container, codec) triples are bad - letting
 // the actual decoder be the source of truth keeps this format-list free.
 el.addEventListener('error', () => {
+   // A film fed through hlsStart() recovers from its own errors; see
+   // hlsFail().  Reporting it here too would put up a dialog over a picture
+   // that is about to come back.
+   if (hlsCur?.el === el) return;
    if (castDeviceId !== null) {
       // The sound is on the receiver and is unaffected; only the picture
       // failed.  Fall back to the panel rather than tearing down the session,
