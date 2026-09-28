@@ -6200,11 +6200,21 @@ function hlsCovers(h, from, to) {
 }
 
 // SourceBuffer operations complete asynchronously, and one must finish before
-// the next may start.
-function hlsBufferOp(sb, op) {
+// the next may start.  A failure is rethrown saying which operation it was and
+// what state everything was in, because the browser's own message ("an object
+// that is not, or is no longer, usable") names none of it.
+function hlsBufferOp(h, sb, op, what) {
+   const explain = err => {
+      const e = h.el.error;
+      const wrapped = new Error(`${what}: ${err?.message ?? 'SourceBuffer error'}`
+         + ` (MediaSource ${h.ms.readyState}, updating ${sb.updating}`
+         + (e ? `, element error ${e.code} ${e.message ?? ''}` : '') + ')');
+      wrapped.name = err?.name ?? 'Error';
+      return wrapped;
+      };
    return new Promise((resolve, reject) => {
       const done = () => { off(); resolve(); };
-      const fail = () => { off(); reject(new Error('SourceBuffer error')); };
+      const fail = () => { off(); reject(explain(null)); };
       const off  = () => {
          sb.removeEventListener('updateend', done);
          sb.removeEventListener('error', fail);
@@ -6212,7 +6222,7 @@ function hlsBufferOp(sb, op) {
       sb.addEventListener('updateend', done);
       sb.addEventListener('error', fail);
       try { op(); }
-      catch (err) { off(); reject(err); }
+      catch (err) { off(); reject(explain(err)); }
       });
 }
 
@@ -6239,16 +6249,37 @@ async function hlsOpen(h, startAt) {
    // ceiling rather than the stream's own: decoders take the real one from
    // the init segment.
    const audio = hlsAudioCodec(head);
-   h.sb = h.ms.addSourceBuffer(
+   const sb = h.ms.addSourceBuffer(
       `video/mp4; codecs="avc1.640033${audio ? ',' + audio : ''}"`);
    h.ms.duration = t;
-   await hlsBufferOp(h.sb, () => h.sb.appendBuffer(head));
+   // Published to the pump only once the init segment is in: a seek or a
+   // timeupdate before then would otherwise start an append alongside this
+   // one, which the SourceBuffer refuses.
+   await hlsBufferOp(h, sb, () => sb.appendBuffer(head), 'init');
+   if (h !== hlsCur) return;
+   h.sb = sb;
    if (startAt > 0) h.el.currentTime = startAt;
    hlsPump(h);
 }
 
+// When the last rebuild happened, across the feeders it replaced.
+let hlsRebuiltAt = 0;
+
+// A failed MediaSource is not the end of the film.  Rebuilding it at the
+// playhead - what starting the film there would do - also clears an error the
+// element has latched, after which every append throws.  Once per ten seconds,
+// so a stream that fails every time still ends in a message rather than a loop.
 function hlsFail(h, err) {
    if (h !== hlsCur) return;
+   const el = h.el;
+   if (!err.fetchGaveUp && Date.now() - hlsRebuiltAt > 10000) {
+      hlsRebuiltAt = Date.now();
+      console.warn('[hls] rebuilding after:', err.message);
+      const pos = el.currentTime, paused = el.paused;
+      hlsStart(el, h.url, pos);
+      if (!paused) el.play().catch(e => console.warn('[hls] play failed', e));
+      return;
+      }
    console.warn('[hls]', err);
    videoPreparing(false);
    const song = player.queue[player.index];
@@ -6288,14 +6319,20 @@ async function hlsFill(h) {
       const t = h.el.currentTime;
       const i = hlsNextSegment(h, t);
       if (i < 0) {
-         if (h.ms.readyState === 'open' && !h.sb.updating) h.ms.endOfStream();
+         // Refused if the state changed underneath; the next seek or
+         // timeupdate simply finds everything buffered and tries again.
+         if (h.ms.readyState === 'open' && !h.sb.updating) {
+            try { h.ms.endOfStream(); }
+            catch (err) { console.warn('[hls] endOfStream refused', err); }
+            }
          return;
          }
       if (h.segs[i].start > t + HLS_AHEAD) return;
 
       const b = h.sb.buffered;
       if (b.length && b.start(0) < t - HLS_BEHIND)
-         await hlsBufferOp(h.sb, () => h.sb.remove(0, t - HLS_BEHIND));
+         await hlsBufferOp(h, h.sb, () => h.sb.remove(0, t - HLS_BEHIND),
+                           'remove');
 
       h.ctrl = new AbortController();
       let data;
@@ -6306,14 +6343,17 @@ async function hlsFill(h) {
          if (err.name === 'AbortError') return;
          // A session that is busy starting answers 503; the next try usually
          // finds the segment written.
-         if (++h.failures > 5) throw err;
+         // A fetch that keeps failing is the server's problem, which a
+         // rebuild here would not solve.
+         if (++h.failures > 5) { err.fetchGaveUp = true; throw err; }
          await new Promise(r => setTimeout(r, 1000));
          continue;
          }
       h.failures = 0;
       if (h !== hlsCur) return;
       try {
-         await hlsBufferOp(h.sb, () => h.sb.appendBuffer(data));
+         await hlsBufferOp(h, h.sb, () => h.sb.appendBuffer(data),
+                           `append segment ${i}`);
          }
       catch (err) {
          // The quota is reached before HLS_BEHIND on a high-bitrate film:
@@ -6321,8 +6361,9 @@ async function hlsFill(h) {
          if (err.name !== 'QuotaExceededError') throw err;
          const keep = h.el.currentTime - 5;
          if (keep <= 0) throw err;
-         await hlsBufferOp(h.sb, () => h.sb.remove(0, keep));
-         await hlsBufferOp(h.sb, () => h.sb.appendBuffer(data));
+         await hlsBufferOp(h, h.sb, () => h.sb.remove(0, keep), 'remove');
+         await hlsBufferOp(h, h.sb, () => h.sb.appendBuffer(data),
+                           `append segment ${i}`);
          }
       if (h !== hlsCur || h.again) return;
 
@@ -6343,7 +6384,7 @@ async function hlsFill(h) {
                    + ` did not buffer; buffered: ${have || 'nothing'}`);
       if (h.retried === i) throw new Error(`segment ${i} could not be buffered`);
       h.retried = i;
-      h.sb.abort();
+      if (h.ms.readyState === 'open' && !h.sb.updating) h.sb.abort();
       }
 }
 
