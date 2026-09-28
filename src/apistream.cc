@@ -990,7 +990,7 @@ void GainDrive::routes_stream()
 				size = kb.substr(at + 1);
 				kb   = kb.substr(0, at);
 				}
-			const HlsVariant v{ to_int(kb, 0), sane_video_size(size) };
+			const HlsVariant v{ to_int(kb, 0), sane_video_size(size), "" };
 			// Nothing to say: neither half survived validation.  Note a bare
 			// "bitRate=0@640x480" does survive - 0 is the spec's "no limit",
 			// and the frame size still governs.
@@ -1019,6 +1019,12 @@ void GainDrive::routes_stream()
 				auth += "&" + std::string(k) + "=" + url_encode(v);
 			}
 		auth += "&v=" + std::string(SUBSONIC_VER);
+
+		// Audio codecs the client plays besides AAC, handed on to every URL
+		// below so that the segments are cut to the same plan as this list.
+		const std::string audio = hls_audio_codecs(qp("audioCodecs"));
+		const std::string audio_param = audio.empty()
+		                              ? "" : "&audioCodecs=" + audio;
 
 		// A master playlist announces each variant's BANDWIDTH, so only a
 		// variant that named a bitrate can be one; a frame size alone still
@@ -1057,7 +1063,7 @@ void GainDrive::routes_stream()
 				mst << "\n" << self << "?id=" << song->id
 				    << "&bitRate=" << v.kbps;
 				if (!v.size.empty()) mst << "@" << v.size;
-				mst << auth << "\n";
+				mst << audio_param << auth << "\n";
 				}
 			// No #EXT-X-ENDLIST here: that tag terminates a media playlist,
 			// and a master holds no segments to terminate.
@@ -1070,10 +1076,12 @@ void GainDrive::routes_stream()
 			return;
 			}
 
-		const HlsVariant variant = variants.empty() ? HlsVariant{} : variants[0];
+		HlsVariant variant = variants.empty() ? HlsVariant{} : variants[0];
+		variant.audio = audio;
 		std::string query = "?id=" + std::to_string(song->id);
 		if (variant.kbps > 0)      query += "&maxBitRate=" + std::to_string(variant.kbps);
 		if (!variant.size.empty()) query += "&size=" + variant.size;
+		query += audio_param;
 
 		auto si   = streamer_song(*song, store_.abs_path(song->path));
 		auto plan = hls_.plan(si, variant);
@@ -1143,7 +1151,8 @@ void GainDrive::routes_stream()
 			return;
 			}
 		const HlsVariant v{ to_int(req.get_param_value("maxBitRate"), 0),
-		                    sane_video_size(req.get_param_value("size")) };
+		                    sane_video_size(req.get_param_value("size")),
+		                    hls_audio_codecs(req.get_param_value("audioCodecs")) };
 		auto si = streamer_song(*song, song_abs);
 		if (req.get_param_value("init") == "true") {
 			hls_.serve_init(res, si, v);

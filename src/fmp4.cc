@@ -141,6 +141,17 @@ double fmp4_video_start(const Fmp4Run& run)
 	return double(it->second.start) / it->second.timescale;
 	}
 
+bool fmp4_complete(std::string_view file)
+	{
+	size_t end  = 0;
+	bool   mdat = false;
+	for_each_box(file, 0, file.size(), [&](const Box& b) {
+		end  = b.end;
+		mdat = mdat || b.type == "mdat";
+		});
+	return mdat && end == file.size();
+	}
+
 std::optional<std::string> fmp4_media(std::string_view file, const Fmp4Run& run,
                                       double shift)
 	{

@@ -30,6 +30,12 @@ struct Fmp4Run {
 // Empty when the bytes are not the layout above.
 std::optional<Fmp4Run> fmp4_parse(std::string_view file);
 
+// Whether the top-level boxes add up to exactly the bytes there are, with media
+// in them.  A file still being written ends partway through a box, and a player
+// handed one keeps that box open waiting for the rest - so it takes nothing
+// appended after it either.
+bool fmp4_complete(std::string_view file);
+
 // Where the run's first video sample is presented, in seconds of the run's own
 // timeline.  Relies on +negative_cts_offsets, which gives that sample a
 // composition offset of zero.

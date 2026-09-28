@@ -13,14 +13,25 @@
 #include "mkvcues.hh"
 #include "streamer.hh"
 
-// One rendition of a film: the constraints a client put on the picture.  Both
-// empty means "as close to the source as possible", which is the only case in
-// which the video may be copied.
+// One rendition of a film: the constraints a client put on the picture, and the
+// audio codecs beyond AAC it said it plays in fragmented MP4.  No constraint
+// means "as close to the source as possible", which is the only case in which
+// the video may be copied.
 struct HlsVariant {
 	int         kbps = 0;
 	std::string size;
+	// Canonical, from hls_audio_codecs(): so it can go into a URL and into a
+	// session's identity as it is.
+	std::string audio;
 	bool constrained() const { return kbps > 0 || !size.empty(); }
+	bool takes(const std::string& codec) const;
 	};
+
+// The audioCodecs parameter, reduced to the codecs it may name - opus and flac,
+// the two besides AAC that ffmpeg copies into MP4 and browsers play from it -
+// in a fixed order, comma-separated.  Anything else is dropped: the value is
+// written into playlist bodies.
+std::string hls_audio_codecs(const std::string& param);
 
 // How a film is cut and what each segment is made of.  Segment k covers
 // [bounds[k], bounds[k+1]).

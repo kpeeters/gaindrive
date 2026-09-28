@@ -570,6 +570,29 @@ def test_hls_segments_join_without_gaps():
     _check_joins(vid, {"bitRate": "0@320x240"}, "re-encoded variant")
 
 
+def test_hls_copies_declared_opus():
+    """audioCodecs=opus lets an Opus track be copied rather than re-encoded.
+
+    The API does not report a video's audio codec, so the videos are tried in
+    turn and the init segment says which way each went.  Without the
+    declaration Opus must never appear: undeclared clients get AAC.
+    """
+    _need_video()
+    for v in _videos()[:10]:
+        init, segs = _playlist(v["id"], {"audioCodecs": "opus"})
+        _, _, head = _get(init)
+        if b"Opus" not in head:
+            continue
+        assert all("audioCodecs=opus" in u for _, _, u in segs), segs[0]
+        status, _, data = _get(segs[0][2])
+        assert status == 200 and _top_boxes(data)[:1] == ["moof"], status
+        plain, _ = _playlist(v["id"])
+        assert b"Opus" not in _get(plain)[2], "Opus sent to an undeclared client"
+        print("PASS  declared Opus is copied, undeclared becomes AAC")
+        return
+    print("SKIP  no copyable H.264/Opus mkv among the first ten videos")
+
+
 def test_hls_is_served_at_every_spelling():
     """The spec spells it .m3u8; a client composing <name>.view needs both.
 
@@ -857,6 +880,7 @@ TESTS = [
     test_hls_segments_resolve,
     test_hls_segments_carry_absolute_timestamps,
     test_hls_segments_join_without_gaps,
+    test_hls_copies_declared_opus,
     test_hls_rejects_audio,
     test_hls_is_served_at_every_spelling,
     test_hls_variant_playlist,

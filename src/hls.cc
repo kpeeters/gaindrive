@@ -364,11 +364,17 @@ struct Hls::Session {
 			}
 		}
 
-	std::optional<std::string> segment(size_t k)
+	// Empty with `pending` set when the file is not finished yet: ffmpeg's
+	// segment list can name a file before its last bytes are on disk, and a
+	// truncated segment wedges the player's parser rather than merely losing
+	// a few frames.
+	std::optional<std::string> segment(size_t k, bool& pending)
 		{
-		if (!have_shift) return std::nullopt;
+		pending = false;
+		if (!have_shift) { pending = true; return std::nullopt; }
 		auto b = read_file(dir / (std::to_string(k) + ".mp4"));
 		if (!b) return std::nullopt;
+		if (!fmp4_complete(*b)) { pending = true; return std::nullopt; }
 		auto run = fmp4_parse(*b);
 		if (!run) return std::nullopt;
 		return fmp4_media(*b, *run, shift);
@@ -431,6 +437,30 @@ Hls::~Hls()
 	fs::remove_all(work_, ec);
 	}
 
+bool HlsVariant::takes(const std::string& codec) const
+	{
+	std::string_view rest(audio);
+	while (!rest.empty()) {
+		auto comma = rest.find(',');
+		if (rest.substr(0, comma) == codec) return true;
+		if (comma == std::string_view::npos) break;
+		rest.remove_prefix(comma + 1);
+		}
+	return false;
+	}
+
+std::string hls_audio_codecs(const std::string& param)
+	{
+	std::string out;
+	for (const char* c : { "flac", "opus" }) {
+		HlsVariant probe{ 0, "", param };
+		if (!probe.takes(c)) continue;
+		if (!out.empty()) out += ',';
+		out += c;
+		}
+	return out;
+	}
+
 HlsPlan Hls::plan(const Streamer::SongInfo& song, const HlsVariant& v)
 	{
 	HlsPlan p;
@@ -469,9 +499,11 @@ HlsPlan Hls::plan(const Streamer::SongInfo& song, const HlsVariant& v)
 		}
 	p.bounds.push_back(total);
 
-	// AAC is the one audio codec every HLS player takes in fragmented MP4.
+	// AAC is the one audio codec every HLS player takes in fragmented MP4;
+	// anything else only for a client that said it plays it.
 	p.copy_audio = p.copy_video
-	            && (song.audio_codec.empty() || song.audio_codec == "aac");
+	            && (song.audio_codec.empty() || song.audio_codec == "aac"
+	                || v.takes(song.audio_codec));
 	return p;
 	}
 
@@ -521,22 +553,27 @@ void Hls::serve_segment(httplib::Response& res, const Streamer::SongInfo& song,
 		// Segments behind `pruned` were deleted to bound the directory; a
 		// request for one is a seek back, like any other before `first`.
 		const size_t oldest = std::max(s->first, s->pruned);
+		bool pending = false;
 		if (k >= oldest && k < s->produced) {
 			s->last_request = k;
-			auto seg = s->segment(k);
-			if (!seg) {
+			auto seg = s->segment(k, pending);
+			if (seg) {
+				send_mp4(res, std::move(*seg));
+				return;
+				}
+			// Unfinished is worth waiting for only while something can
+			// still finish it.
+			if (!pending || !s->running) {
 				std::cout << stamp() << "hls: session "
 				          << s->dir.filename().string()
 				          << " cannot read segment " << k << std::endl;
 				res.status = 500;
 				return;
 				}
-			send_mp4(res, std::move(*seg));
-			return;
 			}
 		bool coming = s->running && k >= oldest
 		           && k < s->produced + WAIT_AHEAD;
-		if (!coming) {
+		if (!pending && !coming) {
 			if (restarted) {
 				std::cout << stamp() << "hls: session "
 				          << s->dir.filename().string()
@@ -567,7 +604,8 @@ std::shared_ptr<Hls::Session> Hls::session_for(const Streamer::SongInfo& song,
 	{
 	const std::string film = std::to_string(song.id) + "/"
 	                       + std::to_string(song.file_modified) + "/"
-	                       + std::to_string(v.kbps) + "/" + v.size;
+	                       + std::to_string(v.kbps) + "/" + v.size + "/"
+	                       + v.audio;
 	std::shared_ptr<Session> old, s;
 	{
 	std::lock_guard<std::mutex> lk(mu_);

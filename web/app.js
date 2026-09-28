@@ -4186,7 +4186,7 @@ function castLocalVideoStart(song, offset) {
    player.videoEl.muted = true;
    player.videoEl.playbackRate = 1;
    if (viaHls)
-      hlsStart(player.videoEl, apiUrl('hls', {id: song.id}), offset);
+      hlsStart(player.videoEl, hlsUrl(song), offset);
    else {
       // castRedirect=false is not optional here.  apiUrl() puts castController
       // on every URL, and stream.view answers the owner of a live cast session
@@ -6165,17 +6165,37 @@ async function hlsFetch(url, kind, signal) {
    return kind === 'text' ? r.text() : new Uint8Array(await r.arrayBuffer());
 }
 
-// Whether the init segment has a track of this handler type.  Read from the
-// bytes rather than from the song, because a SourceBuffer declared with an
-// audio codec refuses an init segment that has no sound track.
-function hlsHasHandler(bytes, type) {
-   const want = [...'hdlr'].map(c => c.charCodeAt(0));
-   const kind = [...type].map(c => c.charCodeAt(0));
-   for (let i = 0; i + 16 <= bytes.length; i++) {
-      if (want.every((c, j) => bytes[i + j] === c)
-          && kind.every((c, j) => bytes[i + 12 + j] === c))
-         return true;
+// The playlist for a film, declaring the audio codecs besides AAC this browser
+// plays in fragmented MP4.  The server copies those instead of re-encoding
+// them, which for the usual H.264/Opus download also spares it running an
+// encoder per viewer.
+function hlsUrl(song) {
+   const takes = c => window.MediaSource?.isTypeSupported(`audio/mp4; codecs="${c}"`);
+   const audio = ['opus', 'flac'].filter(takes).join(',');
+   return apiUrl('hls', audio ? {id: song.id, audioCodecs: audio} : {id: song.id});
+}
+
+// The audio codec the init segment declares, as a SourceBuffer names it, or
+// null for a silent film.  Read from the bytes rather than from the song:
+// whether the sound was copied or encoded is the server's decision, and a
+// SourceBuffer declared with an audio codec refuses an init segment without it.
+function hlsAudioCodec(bytes) {
+   const entries = {mp4a: 'mp4a.40.2', Opus: 'opus', fLaC: 'flac'};
+   for (const [box, codec] of Object.entries(entries)) {
+      const want = [...box].map(c => c.charCodeAt(0));
+      for (let i = 0; i + 4 <= bytes.length; i++)
+         if (want.every((c, j) => bytes[i + j] === c)) return codec;
       }
+   return null;
+}
+
+// Whether the buffer holds [from, to), with a little slack either way: audio
+// and video never end on quite the same instant, and buffered reports only
+// where both are present.
+function hlsCovers(h, from, to) {
+   const b = h.sb.buffered;
+   for (let r = 0; r < b.length; r++)
+      if (b.start(r) <= from + 0.2 && b.end(r) >= to - 0.2) return true;
    return false;
 }
 
@@ -6215,12 +6235,12 @@ async function hlsOpen(h, startAt) {
    if (!init || !h.segs.length) throw new Error('empty playlist');
    const head = await hlsFetch(new URL(init, h.url).href, 'bytes');
    if (h !== hlsCur) return;
-   // The server copies only H.264 and AAC, and encodes to nothing else, so
-   // the codecs are known.  The profile named is a ceiling rather than the
-   // stream's own: decoders take the real one from the init segment.
-   const audio = hlsHasHandler(head, 'soun');
+   // The picture is always H.264, copied or encoded.  The profile named is a
+   // ceiling rather than the stream's own: decoders take the real one from
+   // the init segment.
+   const audio = hlsAudioCodec(head);
    h.sb = h.ms.addSourceBuffer(
-      `video/mp4; codecs="avc1.640033${audio ? ',mp4a.40.2' : ''}"`);
+      `video/mp4; codecs="avc1.640033${audio ? ',' + audio : ''}"`);
    h.ms.duration = t;
    await hlsBufferOp(h.sb, () => h.sb.appendBuffer(head));
    if (startAt > 0) h.el.currentTime = startAt;
@@ -6238,18 +6258,10 @@ function hlsFail(h, err) {
 // The first segment from the playhead on that is not already buffered, or -1
 // when everything to the end is.
 function hlsNextSegment(h, t) {
-   const b = h.sb.buffered;
-   // A little slack either way: audio and video never end on quite the same
-   // instant, and buffered reports only where both are present.
-   const have = (from, to) => {
-      for (let r = 0; r < b.length; r++)
-         if (b.start(r) <= from + 0.2 && b.end(r) >= to - 0.2) return true;
-      return false;
-      };
    for (let i = 0; i < h.segs.length; i++) {
       const s = h.segs[i];
       if (s.end <= t + 0.2) continue;
-      if (!have(Math.max(s.start, t), s.end)) return i;
+      if (!hlsCovers(h, Math.max(s.start, t), s.end)) return i;
       }
    return -1;
 }
@@ -6312,6 +6324,26 @@ async function hlsFill(h) {
          await hlsBufferOp(h.sb, () => h.sb.remove(0, keep));
          await hlsBufferOp(h.sb, () => h.sb.appendBuffer(data));
          }
+      if (h !== hlsCur || h.again) return;
+
+      // A segment that did not land where the playlist puts it would be
+      // fetched again for ever.  A truncated one leaves the parser inside an
+      // unfinished box, where every later append is read as its missing tail,
+      // so the parser is reset before the one retry.
+      const s = h.segs[i];
+      if (h.el.currentTime >= s.end
+          || hlsCovers(h, Math.max(s.start, h.el.currentTime), s.end)) {
+         h.retried = null;
+         continue;
+         }
+      const b2 = h.sb.buffered;
+      const have = [...Array(b2.length)].map((_, r) =>
+         `${b2.start(r).toFixed(2)}-${b2.end(r).toFixed(2)}`).join(', ');
+      console.warn(`[hls] segment ${i} (${s.start.toFixed(2)}-${s.end.toFixed(2)})`
+                   + ` did not buffer; buffered: ${have || 'nothing'}`);
+      if (h.retried === i) throw new Error(`segment ${i} could not be buffered`);
+      h.retried = i;
+      h.sb.abort();
       }
 }
 
@@ -7569,7 +7601,7 @@ function playerPlay(offset = 0, forceMp3 = false) {
    if (eqPrefs.on() && eqEnsureGraph()) eqApply();
    hlsStop();
    if (viaHls)
-      hlsStart(player.media, apiUrl('hls', {id: song.id}), offset);
+      hlsStart(player.media, hlsUrl(song), offset);
    else {
       player.media.src = apiUrl('stream', streamParams);
       if (offset > 0 && !chunked) {
