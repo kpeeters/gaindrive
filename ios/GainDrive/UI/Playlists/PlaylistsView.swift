@@ -19,27 +19,19 @@ struct PlaylistsView: View {
 	@State private var notesDismissed = false
 
 	var body: some View {
-		NavigationStack(path: $path) {
-			LoadStateBox(state: model.state, onRetry: { model.retry() }) { sections in
-				content(sections)
-			}
-			.navigationTitle("Playlists")
-			.navigationDestination(for: Route.self) { route in
+		// Two levels, so at most two panes: a list and the playlist open.
+		PaneNavigator(
+			path: $path, maxLevels: 2,
+			root: { list },
+			destination: { route in
 				if case .playlist(let ref, let name) = route {
 					PlaylistDetailView(ref: ref, playlistName: name)
 				}
+			},
+			placeholder: { _ in
+				ContentUnavailableView("Choose a playlist", systemImage: "music.note.list")
 			}
-			.toolbar {
-				ToolbarItem(placement: .topBarLeading) { LibrarySelector() }
-				ToolbarItem(placement: .topBarTrailing) {
-					Button {
-						Task { await model.refresh() }
-					} label: {
-						Label("Refresh", systemImage: "arrow.clockwise")
-					}
-				}
-			}
-		}
+		)
 		.task(id: selection.scope) { model.appear() }
 		.onChange(of: settings.offlineMode) { model.retry() }
 		// A playlist edited from an album three screens away has to show up
@@ -72,6 +64,24 @@ struct PlaylistsView: View {
 			Button("OK") { model.clearError() }
 		} message: {
 			Text(model.error ?? "")
+		}
+	}
+
+	/// The root level: the playlists, with the bar they always had.
+	private var list: some View {
+		LoadStateBox(state: model.state, onRetry: { model.retry() }) { sections in
+			content(sections)
+		}
+		.navigationTitle("Playlists")
+		.toolbar {
+			ToolbarItem(placement: .topBarLeading) { LibrarySelector() }
+			ToolbarItem(placement: .topBarTrailing) {
+				Button {
+					Task { await model.refresh() }
+				} label: {
+					Label("Refresh", systemImage: "arrow.clockwise")
+				}
+			}
 		}
 	}
 

@@ -17,27 +17,16 @@ struct RecentsView: View {
 	@State private var notesDismissed = false
 
 	var body: some View {
-		NavigationStack(path: $path) {
-			LoadStateBox(state: model.state, onRetry: { model.retry() }) { sections in
-				content(sections)
+		// Three levels at most: the list, the artist (filled in once the album
+		// has loaded), and the album.
+		PaneNavigator(
+			path: $path, maxLevels: 3,
+			root: { list },
+			destination: { destination($0) },
+			placeholder: { _ in
+				ContentUnavailableView("Choose a track", systemImage: "clock.arrow.circlepath")
 			}
-			.navigationTitle("Recents")
-			.navigationDestination(for: Route.self) { route in
-				if case .album(let ref, let title, let autoPlay, let at) = route {
-					AlbumDetailView(ref: ref, albumTitle: title, autoPlay: autoPlay, autoPlayAt: at)
-				}
-			}
-			.toolbar {
-				ToolbarItem(placement: .topBarLeading) { LibrarySelector() }
-				ToolbarItem(placement: .topBarTrailing) {
-					Button {
-						Task { await model.refresh() }
-					} label: {
-						Label("Refresh", systemImage: "arrow.clockwise")
-					}
-				}
-			}
-		}
+		)
 		.task(id: selection.scope) { model.appear() }
 		.onChange(of: settings.offlineMode) { model.retry() }
 		.onChange(of: selection.scope) { path.removeAll() }
@@ -78,6 +67,50 @@ struct RecentsView: View {
 			.listStyle(.plain)
 			.refreshable { await model.refresh() }
 		}
+	}
+
+	private var list: some View {
+		LoadStateBox(state: model.state, onRetry: { model.retry() }) { sections in
+			content(sections)
+		}
+		.navigationTitle("Recents")
+		.toolbar {
+			ToolbarItem(placement: .topBarLeading) { LibrarySelector() }
+			ToolbarItem(placement: .topBarTrailing) {
+				Button {
+					Task { await model.refresh() }
+				} label: {
+					Label("Refresh", systemImage: "arrow.clockwise")
+				}
+			}
+		}
+	}
+
+	@ViewBuilder
+	private func destination(_ route: Route) -> some View {
+		switch route {
+		case .album(let ref, let title, let autoPlay, let at):
+			AlbumDetailView(
+				ref: ref, albumTitle: title, autoPlay: autoPlay, autoPlayAt: at,
+				onAlbumLoaded: backfill)
+		case .albums(let artists, let name, let fromCategories, let fromUploads):
+			AlbumsView(
+				refs: artists, artistName: name,
+				fromCategories: fromCategories, fromUploads: fromUploads)
+		case .playlist:
+			EmptyView()
+		}
+	}
+
+	/// Puts the artist in front of an album opened from the list, so the
+	/// middle pane shows where it came from - the web client's and Android's
+	/// layout. Only for an album opened straight from the list: one reached
+	/// through the artist already has it.
+	private func backfill(_ album: Album) {
+		guard path.count == 1, case .album(let ref, _, _, _) = path[0], ref == album.ref,
+			let artist = album.artistRef
+		else { return }
+		path.insert(.albums(artists: [artist], name: album.artistName), at: 0)
 	}
 
 	/// Opens the song's album **and starts it there**, which is what the web

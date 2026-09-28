@@ -37,61 +37,74 @@ struct SettingsView: View {
 	}
 
 	var body: some View {
-		NavigationStack(path: $path) {
-			List {
-				Section {
-					NavigationLink(value: Route.servers) {
-						LabeledContent("Servers", value: serversSummary)
-					}
-					NavigationLink(value: Route.library) {
-						LabeledContent("Library", value: librarySummary)
-					}
-					NavigationLink(value: Route.playback) {
-						LabeledContent("Playback", value: settings.audioQuality.label)
-					}
-					NavigationLink(value: Route.casting) {
-						LabeledContent("Casting", value: castingSummary)
-					}
-					NavigationLink(value: Route.storage) {
-						LabeledContent("Storage", value: storageSummary)
-					}
-					NavigationLink(value: Route.appearance) {
-						LabeledContent("Appearance", value: settings.themeMode.label)
-					}
-				}
+		// Two levels: the categories, and the one open beside them on a wide
+		// screen, as the web client's settings are laid out.
+		PaneNavigator(
+			path: $path, maxLevels: 2,
+			root: { categories },
+			destination: { destination($0) },
+			placeholder: { _ in
+				ContentUnavailableView("Choose a category", systemImage: "gearshape")
+			}
+		)
+	}
 
-				// Inline rather than a category of its own: a screen holding
-				// one sentence is a tap for nothing.
-				Section("About") {
-					HStack(spacing: 12) {
-						Image("Logo")
-							.resizable()
-							.scaledToFit()
-							.frame(width: 40, height: 40)
-							.clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-						VStack(alignment: .leading) {
-							Text("GainDrive")
-							Text(Self.versionText)
-								.font(.footnote)
-								.foregroundStyle(.secondary)
-						}
+	private var categories: some View {
+		List {
+			Section {
+				NavigationLink(value: Route.servers) {
+					LabeledContent("Servers", value: serversSummary)
+				}
+				NavigationLink(value: Route.library) {
+					LabeledContent("Library", value: librarySummary)
+				}
+				NavigationLink(value: Route.playback) {
+					LabeledContent("Playback", value: settings.audioQuality.label)
+				}
+				NavigationLink(value: Route.casting) {
+					LabeledContent("Casting", value: castingSummary)
+				}
+				NavigationLink(value: Route.storage) {
+					LabeledContent("Storage", value: storageSummary)
+				}
+				NavigationLink(value: Route.appearance) {
+					LabeledContent("Appearance", value: settings.themeMode.label)
+				}
+			}
+
+			// Inline rather than a category of its own: a screen holding
+			// one sentence is a tap for nothing.
+			Section("About") {
+				HStack(spacing: 12) {
+					Image("Logo")
+						.resizable()
+						.scaledToFit()
+						.frame(width: 40, height: 40)
+						.clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+					VStack(alignment: .leading) {
+						Text("GainDrive")
+						Text(Self.versionText)
+							.font(.footnote)
+							.foregroundStyle(.secondary)
 					}
-					Text("A client for your own GainDrive music server.")
-						.font(.footnote)
-						.foregroundStyle(.secondary)
 				}
+				Text("A client for your own GainDrive music server.")
+					.font(.footnote)
+					.foregroundStyle(.secondary)
 			}
-			.navigationTitle("Settings")
-			.navigationDestination(for: Route.self) { route in
-				switch route {
-				case .servers: ServersSettingsView(startAdding: startOnServers)
-				case .library: LibrarySettingsView()
-				case .playback: PlaybackSettingsView()
-				case .casting: CastSettingsView()
-				case .storage: StorageSettingsView()
-				case .appearance: AppearanceSettingsView()
-				}
-			}
+		}
+		.navigationTitle("Settings")
+	}
+
+	@ViewBuilder
+	private func destination(_ route: Route) -> some View {
+		switch route {
+		case .servers: ServersSettingsView(startAdding: startOnServers)
+		case .library: LibrarySettingsView()
+		case .playback: PlaybackSettingsView()
+		case .casting: CastSettingsView()
+		case .storage: StorageSettingsView()
+		case .appearance: AppearanceSettingsView()
 		}
 	}
 

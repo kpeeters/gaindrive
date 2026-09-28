@@ -9,211 +9,135 @@
 import SwiftUI
 
 /// The Library tab: the merged listing, one artist's albums, and one album's
-/// tracks - and, presented over it, the same three panes a second time for
-/// the account's own uploads.
+/// tracks - or the same for the account's own uploads.
 ///
-/// **The only tab with three panes**, and that is a decision rather than an
-/// accident. It is the one with three genuine levels, which is exactly three
-/// panes' worth. Playlists and Recents are two levels deep and would gain a
-/// pane that mostly stood empty; Search keeps its results whatever the width,
-/// which a pane layout cannot express. Those three keep their
-/// `NavigationStack`s, and this one no longer has one.
+/// Laid out by `PaneNavigator`: a stack on a phone or a narrow window, two or
+/// three panes side by side from 650 and 900 points. The rows select rather
+/// than link, and the path is derived from the two selections, so choosing a
+/// row pushes on a phone and fills the next pane on a tablet, and popping or
+/// going back clears the selection it came from.
 ///
-/// **Regular width draws the three panes by hand; compact keeps a
-/// `NavigationSplitView`.** A three-column split view drew the wide layout
-/// once, but nested inside the `.sidebarAdaptable` `TabView` its automatic
-/// style resolves to prominent-detail behaviour: the artists column becomes a
-/// floating overlay that hides the albums column, and the visible columns get
-/// unequal, width-dependent sizes. An `HStack` of three equal panes has no
-/// such state machine. The split view survives on compact for the one thing
-/// it did reliably - collapsing to a push stack driven by the same
-/// `List(selection:)` bindings - so the iPhone behaves as it always did,
-/// which is the thing most worth checking.
+/// **Uploads replaces the listing at the root rather than covering the tab.**
+/// A full-screen cover hid the sidebar on an iPad and the Mac, which the web
+/// client never does; there, Uploads opens inside the layout and the rest of
+/// the navigation stays. The same everywhere, a phone included, since one
+/// behaviour is simpler than two and the stack treats it like any other root.
 struct ArtistsView: View {
 	let model: ArtistsViewModel
-	/// The uploads flavour: same screen, same panes, the personal listing.
-	/// A parameter rather than module state, so the two instances cannot
-	/// share or leak a selection.
-	var uploads = false
 
 	@Environment(ServerSelection.self) private var servers
 	@Environment(SettingsStore.self) private var settings
 	@Environment(\.library) private var library
-	@Environment(\.horizontalSizeClass) private var sizeClass
 	@Environment(LibraryEvents.self) private var events
-	/// **The selections carry the domain values, not ids.** A `List` would
-	/// default to the element's `id`, which here is an `ItemRef` - and both
-	/// trailing panes need more than that: the albums pane wants the
-	/// artist's `refs`, name and the section the row was picked from, and the
-	/// tracks pane wants the album's title for its bar before the load
-	/// returns. Tagging the value means neither has to look anything up, and
-	/// there is no stale id to resolve against a list that has since reloaded.
+	/// **The selections carry the domain values, not ids.** The albums pane
+	/// wants the artist's `refs`, name and the section it was picked from, and
+	/// the tracks pane wants the album's title for its bar before the load
+	/// returns. Tagging the value means neither has to look anything up.
 	@State private var selectedChoice: ArtistChoice?
 	@State private var selectedAlbum: Album?
 
-	/// The uploads listing's own model, built when the icon is tapped and
-	/// discarded on dismiss - Android's fresh-listing-per-visit lifecycle,
-	/// and what stops a stale `loadedFor` surviving a re-presentation.
+	/// The uploads listing's model while Uploads is showing, nil otherwise.
+	/// Built when the icon is tapped and dropped on leaving - Android's
+	/// fresh-listing-per-visit lifecycle, and what stops a stale `loadedFor`
+	/// surviving a second visit.
 	@State private var uploadsModel: ArtistsViewModel?
 
+	/// The levels past the root, as the navigator reads them.
+	enum Level: Hashable {
+		case artist(ArtistChoice)
+		case album(Album)
+	}
+
 	var body: some View {
-		layout
-			// Replaces what a `NavigationStack` path did here: a different scope
-			// is a different library, so what was chosen in the old one is not a
-			// screen the user can act on.
+		PaneNavigator(
+			path: path, maxLevels: 3,
+			root: { root },
+			destination: { destination($0) },
+			placeholder: { level in
+				ContentUnavailableView(
+					level == 1 ? "Choose an artist" : "Choose an album",
+					systemImage: level == 1 ? "music.mic" : "music.note.list")
+			})
+			// A different scope is a different library, so what was chosen in
+			// the old one is not a screen the user can act on.
 			.onChange(of: servers.scope) { clearSelection() }
-			// Going offline is a different library, so what was chosen in the other
-			// one is not a screen the user can act on.
+			// Going offline is a different library, for the same reason.
 			.onChange(of: settings.offlineMode) { clearSelection() }
 			// A different artist cannot still have the same album showing.
 			.onChange(of: selectedChoice) { selectedAlbum = nil }
 			// Moved or deleted on the server: the album showing may no longer
 			// be where it was, or be at all.
 			.onChange(of: events.libraryRevision) { selectedAlbum = nil }
-			// A cover rather than a sheet: this hosts a second pane layout, which
-			// needs the full width on an iPad - a centred sheet card cannot give
-			// it three panes - and collapses to a stack on a phone exactly like
-			// the view underneath. Presented from within the tab's content, so it
-			// inherits the environment; the caveat in RootView about sheets losing
-			// it applies only to presentations hung off the TabView itself.
-			//
-			// **Presented from the model, not from a separate flag.** With
-			// `isPresented:` the content closure could be built before it saw the
-			// model set a line earlier, and rendered its empty branch - a blank
-			// cover. `item:` hands the content the very value that raised it.
-			.fullScreenCover(item: $uploadsModel) { model in
-				ArtistsView(model: model, uploads: true)
-			}
 	}
 
-	/// The branch, with everything cross-cutting hung on the container above
-	/// it: the clearing rules and the uploads cover must survive a size-class
-	/// flip (rotation into a multitasking split, a Catalyst window resize)
-	/// rather than being torn down with the branch they happened to sit on.
-	/// The selections live above it too, so a flip keeps them; the pane view
-	/// models rebuild and refetch, which is the same cost `.id()` already
-	/// pays on every change of artist.
+	/// Derived from the selections, and written back into them: a shorter
+	/// path is a pop, which clears what was popped.
+	private var path: Binding<[Level]> {
+		Binding(
+			get: {
+				guard let choice = selectedChoice else { return [] }
+				guard let album = selectedAlbum else { return [.artist(choice)] }
+				return [.artist(choice), .album(album)]
+			},
+			set: { levels in
+				var choice: ArtistChoice?
+				var album: Album?
+				for level in levels {
+					switch level {
+					case .artist(let picked): choice = picked
+					case .album(let picked): album = picked
+					}
+				}
+				if choice != selectedChoice { selectedChoice = choice }
+				selectedAlbum = album
+			})
+	}
+
 	@ViewBuilder
-	private var layout: some View {
-		if sizeClass == .regular {
-			panes
-		} else {
-			splitView
-		}
-	}
-
-	/// Three equal panes, by hand. One `NavigationStack` *per pane*, so each
-	/// pane hosts exactly the bar its view already declares - which is what
-	/// leaves `ArtistsList`, `AlbumsView` and `AlbumDetailView` untouched,
-	/// and with them the phone path. Nothing ever pushes: a non-nil selection
-	/// binding makes `AlbumsView` render tagged rows rather than links, so
-	/// the stacks are pure chrome hosts.
-	private var panes: some View {
-		HStack(spacing: 0) {
-			pane {
-				ArtistsList(
-					model: model, uploads: uploads, selection: $selectedChoice,
-					onOpenUploads: openUploadsAction)
-				// Inline like its neighbours: a large title beside two inline
-				// bars is three bars of two heights.
-				.navigationBarTitleDisplayMode(.inline)
-			}
-			Divider()
-			// The empty titles keep an (empty, inline) bar over the
-			// placeholder branches, so the bars stay one height before
-			// anything is selected; a deeper `.navigationTitle` wins the
-			// moment a selection exists.
-			pane { albums.navigationTitle("") }
-			Divider()
-			pane { tracks.navigationTitle("") }
-		}
-	}
-
-	/// Out of line for the same reason as `openUploadsAction`: the smaller
-	/// each expression the body has to solve, the better.
-	///
-	/// Clipped, because a pane flush against a safe-area edge is extended
-	/// into it by SwiftUI's full-bleed rule for scrollables - the artists
-	/// list's selection highlight drew under (and in the floating gap left
-	/// of) the TabView sidebar, through its translucent material. Row
-	/// content was already safe-area inset; only the background leaked, so
-	/// the clip moves nothing. In the helper so all three panes get it: the
-	/// trailing pane has the mirror-image bleed on the right, with nothing
-	/// tinted to show it.
-	private func pane(@ViewBuilder _ content: () -> some View) -> some View {
-		NavigationStack { content() }
-			.frame(maxWidth: .infinity)
-			.clipped()
-	}
-
-	/// Compact only, kept for the one thing the split view does reliably:
-	/// collapsing to a push stack derived from the live selections, so
-	/// shrinking into a multitasking split lands on the screen that was
-	/// showing. A hand-built `NavigationStack` path would need pops
-	/// synchronised back to the selection clearing - exactly the identity-bug
-	/// class the `.id()` comments below warn about. No visibility binding:
-	/// compact ignores it.
-	private var splitView: some View {
-		NavigationSplitView {
+	private var root: some View {
+		if let uploadsModel {
 			ArtistsList(
-				model: model, uploads: uploads, selection: $selectedChoice,
-				onOpenUploads: openUploadsAction)
-		} content: {
-			albums
-		} detail: {
-			tracks
+				model: uploadsModel, uploads: true, selection: $selectedChoice,
+				onOpenUploads: nil, onClose: closeUploads)
+		} else {
+			ArtistsList(
+				model: model, uploads: false, selection: $selectedChoice,
+				onOpenUploads: openUploadsAction, onClose: nil)
 		}
 	}
 
-	/// Typed out of line rather than written as `uploads ? nil : openUploads`
-	/// at the call site: a `nil` against an unapplied method reference, with
-	/// the optional-closure type left to inference inside the body's builder,
-	/// is what pushed the type checker into "failed to produce diagnostic".
-	/// A property with a declared type gives the solver nothing to infer.
-	private var openUploadsAction: (() -> Void)? {
-		if uploads { return nil }
-		return { openUploads() }
-	}
-
-	private func openUploads() {
-		guard let library else { return }
-		// Built here rather than held ready: initialisers do no work, and a
-		// model that exists only while its screen does cannot go stale.
-		uploadsModel = ArtistsViewModel(library: library, selection: servers, uploads: true)
-	}
-
 	@ViewBuilder
-	private var albums: some View {
-		if let choice = selectedChoice {
+	private func destination(_ level: Level) -> some View {
+		switch level {
+		case .artist(let choice):
 			AlbumsView(
 				refs: choice.artist.refs, artistName: choice.artist.name,
 				fromCategories: choice.section == .categories,
 				fromUploads: choice.section == .uploads,
-				selection: $selectedAlbum
-			)
-			// **A fresh identity per artist.** `AlbumsView` builds its view
-			// model once and keeps it in `@State`, so without this SwiftUI
-			// reuses the view across a change of artist and it goes on showing
-			// the previous one's albums - which reads as a stale list rather
-			// than as an error, and is the failure here most likely to be
-			// missed.
-			.id(choice.artist.ref)
-		} else {
-			// One line rather than a blank pane. `android/SCREENS.md`: the
-			// web client leaves it empty, which is fine for a `<div>` and
-			// reads as a rendering fault on a tablet.
-			ContentUnavailableView("Choose an artist", systemImage: "music.mic")
+				selection: $selectedAlbum)
+		case .album(let album):
+			AlbumDetailView(
+				ref: album.ref, albumTitle: album.title, fromUploads: uploadsModel != nil)
 		}
 	}
 
-	@ViewBuilder
-	private var tracks: some View {
-		if let album = selectedAlbum {
-			AlbumDetailView(ref: album.ref, albumTitle: album.title, fromUploads: uploads)
-				.id(album.ref)
-		} else {
-			ContentUnavailableView("Choose an album", systemImage: "music.note.list")
-		}
+	/// Typed out of line rather than written as a conditional at the call
+	/// site: a `nil` against an unapplied method reference, left to inference
+	/// inside the body's builder, pushed the type checker into "failed to
+	/// produce diagnostic". A declared type gives it nothing to infer.
+	private var openUploadsAction: (() -> Void)? {
+		{ openUploads() }
+	}
+
+	private func openUploads() {
+		guard let library else { return }
+		clearSelection()
+		uploadsModel = ArtistsViewModel(library: library, selection: servers, uploads: true)
+	}
+
+	private func closeUploads() {
+		clearSelection()
+		uploadsModel = nil
 	}
 
 	private func clearSelection() {
@@ -248,13 +172,15 @@ private struct ArtistsList: View {
 	/// instance - on the uploads listing the icon would be a door into the
 	/// room you are standing in.
 	let onOpenUploads: (() -> Void)?
+	/// The way back to the library from the uploads listing; nil on the
+	/// library itself.
+	let onClose: (() -> Void)?
 
 	@Environment(ServerSelection.self) private var servers
 	@Environment(SettingsStore.self) private var settings
 	@Environment(LibraryEvents.self) private var events
 	@Environment(Fetches.self) private var fetches
 	@Environment(\.library) private var library
-	@Environment(\.dismiss) private var dismiss
 	/// Held in the *view*, not the view model: dismissing a note must not cost
 	/// a second fan-out across every server.
 	@State private var notesDismissed = false
@@ -266,13 +192,17 @@ private struct ArtistsList: View {
 		}
 		.navigationTitle(uploads ? "Uploads" : "Library")
 		.toolbar {
-			ToolbarItem(placement: .topBarLeading) { LibrarySelector() }
-			// A cover has no back gesture of its own on every platform this
-			// runs on; Done is the way out, in the slot iOS reserves for it.
-			if uploads {
-				ToolbarItem(placement: .cancellationAction) {
-					Button("Done") { dismiss() }
+			// Uploads replaces the listing at the root, so the way back to the
+			// library is a button where a back button would be - first.
+			if let onClose {
+				ToolbarItem(placement: .topBarLeading) {
+					Button(action: onClose) {
+						Label("Library", systemImage: "chevron.backward")
+					}
 				}
+			}
+			ToolbarItem(placement: .topBarLeading) { LibrarySelector() }
+			if uploads {
 				// Where Android and the web put the fetch panel: in the
 				// uploads, which is where a fetch lands.
 				ToolbarItem(placement: .topBarTrailing) {
@@ -315,8 +245,8 @@ private struct ArtistsList: View {
 		// An upload moved or deleted, or a fetch landed. Kept on screen while
 		// it re-reads, as a pull does.
 		.onChange(of: events.libraryRevision) { Task { await model.refresh() } }
-		// Handed over explicitly: a sheet from inside a cover is the case
-		// where an inherited environment has already gone missing once.
+		// Handed over explicitly: on the Mac, sheets raised from tab content
+		// have been presented without their environment.
 		.sheet(isPresented: $fetching) {
 			FetchUrlView()
 				.environment(fetches)

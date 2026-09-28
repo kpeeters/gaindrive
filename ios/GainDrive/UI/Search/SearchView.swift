@@ -16,17 +16,25 @@ struct SearchView: View {
 	@State private var notesDismissed = false
 
 	var body: some View {
-		NavigationStack(path: $path) {
-			content
-				.navigationTitle("Search")
-				.navigationDestination(for: Route.self) { route in
-					destination(route)
-				}
-				.toolbar {
-					ToolbarItem(placement: .topBarLeading) { LibrarySelector() }
-				}
-		}
-		.searchable(text: $model.query, prompt: "Artists, albums and tracks")
+		// Results stay in the first pane whatever is opened beside them, which
+		// is what a search wants: the next hit is one tap away. Three levels:
+		// results, an artist, one of their albums.
+		PaneNavigator(
+			path: $path, maxLevels: 3,
+			root: {
+				content
+					.navigationTitle("Search")
+					.toolbar {
+						ToolbarItem(placement: .topBarLeading) { LibrarySelector() }
+					}
+					// On the root, so the field sits in the results pane's bar.
+					.searchable(text: $model.query, prompt: "Artists, albums and tracks")
+			},
+			destination: { destination($0) },
+			placeholder: { _ in
+				ContentUnavailableView("Choose a result", systemImage: "magnifyingglass")
+			}
+		)
 		.task(id: selection.scope) { model.scopeChanged() }
 		.onChange(of: selection.scope) { path.removeAll() }
 		// A track link: replaces whatever was pushed, since what was asked

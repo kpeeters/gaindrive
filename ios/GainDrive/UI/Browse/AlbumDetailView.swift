@@ -20,11 +20,16 @@ struct AlbumDetailView: View {
 	/// album into the library or deleting it. Only the Library tab's uploads
 	/// cover sets it; no other route leads into uploads.
 	var fromUploads = false
+	/// Called once the album has loaded, **only beside other panes**: Recents
+	/// uses it to fill in the artist as the middle pane, as Android and the web
+	/// client do. On a phone there is no pane to fill.
+	var onAlbumLoaded: ((Album) -> Void)?
 
 	@Environment(\.library) private var library
 	@Environment(PlayerConnection.self) private var player
 	@Environment(PinRepository.self) private var pins
 	@Environment(SettingsStore.self) private var settings
+	@Environment(\.paneCount) private var paneCount
 	@State private var model: AlbumDetailViewModel?
 	/// Once per screen, not once per load: a pull-to-refresh must not restart
 	/// the track the user has since navigated away from inside.
@@ -59,6 +64,10 @@ struct AlbumDetailView: View {
 				model = AlbumDetailViewModel(library: library, ref: ref)
 			}
 			model?.appear()
+		}
+		.task(id: model?.state.value?.album.ref) {
+			guard paneCount > 1, let album = model?.state.value?.album else { return }
+			onAlbumLoaded?(album)
 		}
 	}
 

@@ -121,8 +121,3 @@ final class ArtistsViewModel {
 		ArtistUi(artist: artist, badges: artist.sources.compactMap { badgeNames[$0] })
 	}
 }
-
-/// So the uploads cover can be presented from the model itself; a class gets
-/// its identity from `ObjectIdentifier`, which is what "this listing" means.
-extension ArtistsViewModel: Identifiable {}
-
