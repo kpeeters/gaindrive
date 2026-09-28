@@ -6580,6 +6580,10 @@ function playerPosition() {
          : 0;
       return castStartOffset + castBaseTime + elapsed;
       }
+   // A seek waiting for its segment (see hlsSeek) is where the listener asked
+   // to be; the element only follows once the data is in, and the bar would
+   // otherwise jump back to the old position in between.
+   if (hlsCur?.el === player.media && hlsCur.seekTo !== null) return hlsCur.seekTo;
    return player.media.currentTime + (player.localOffset || 0);
 }
 
@@ -7935,10 +7939,10 @@ el.addEventListener('timeupdate', () => {
    if (castDeviceId !== null) return;
    const seek = document.getElementById('player-seek');
    const time = document.getElementById('player-time');
-   // localOffset > 0 when the server is transcoding from a seek point - the
-   // audio element's currentTime is relative to that slice, so add the
-   // offset back to recover absolute song time.
-   const cur  = player.media.currentTime + (player.localOffset || 0);
+   // Absolute song time: playerPosition() adds localOffset back when the
+   // server is transcoding from a seek point, and holds a pending HLS seek at
+   // its target.
+   const cur  = playerPosition();
    // Prefer the duration from the song metadata over the audio element's
    // reported duration: a transcoded mp3 stream (Transfer-Encoding: chunked,
    // no XING header) makes Firefox extrapolate duration from bytes received,
