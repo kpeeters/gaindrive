@@ -77,7 +77,11 @@ void append(std::vector<std::string>& a, std::initializer_list<std::string> more
 std::vector<std::string> front(const Streamer::SongInfo& song, double start,
                                bool copyts)
 	{
-	std::vector<std::string> a = { "ffmpeg", "-nostdin", "-ss", secs(start) };
+	std::vector<std::string> a = { "ffmpeg", "-nostdin" };
+	// No seek at all from the very start.  Even -ss 0 is a seek, and after one
+	// ffmpeg (6.1 as much as 4.4) can start an AVI's audio well after its
+	// video - 1.6 s of silence on an XviD/AC3 test file.
+	if (start > 0) append(a, { "-ss", secs(start) });
 	if (copyts) a.push_back("-copyts");
 	append(a, { "-i", dvd_input(song.path),
 	            "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1" });
