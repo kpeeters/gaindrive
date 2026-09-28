@@ -6136,7 +6136,8 @@ function hlsStart(el, url, startAt) {
       return;
       }
    const h = {el, url, segs: [], sb: null, ms: new MediaSource(),
-              busy: false, again: false, ctrl: null, failures: 0};
+              busy: false, again: false, ctrl: null, failures: 0,
+              seekTo: null};
    hlsCur = h;
    // A seek abandons the segment being fetched unless it is the one wanted,
    // and the pump then starts again from the new playhead.
@@ -6270,7 +6271,9 @@ async function hlsOpen(h, startAt) {
    await hlsBufferOp(h, sb, () => sb.appendBuffer(head), 'init');
    if (h !== hlsCur) return;
    h.sb = sb;
-   if (startAt > 0) h.el.currentTime = startAt;
+   // Not straight to startAt: see hlsSeek().  The pump fetches its segment
+   // first and moves the playhead once it is in.
+   if (startAt > 0) h.seekTo = startAt;
    hlsPump(h);
 }
 
@@ -6328,10 +6331,36 @@ async function hlsPump(h) {
    finally { h.busy = false; }
 }
 
+// Moves the playhead only once there is data where it is going.  Firefox
+// (156, with the system's FFmpeg) drains its H.264 decoder when the element
+// stands at a position with nothing buffered, and then fails every frame it is
+// given afterwards with "avcodec_send_packet: End of file"; the same segments
+// play in Chrome.  So the segment holding the target is fetched first, while
+// the picture carries on where it was, and the seek happens into data.
+function hlsSeek(h, target) {
+   if (!h.sb || hlsCovers(h, target, Math.min(target + 0.5, h.el.duration || target))) {
+      h.seekTo = null;
+      h.el.currentTime = target;
+      return;
+      }
+   h.seekTo = target;
+   h.ctrl?.abort();
+   hlsPump(h);
+}
+
 async function hlsFill(h) {
    for (;;) {
       if (h !== hlsCur || h.again) return;
-      const t = h.el.currentTime;
+      // A pending seek whose data is already in - kept from before, or
+      // appended while it was being asked for - goes ahead at once.
+      if (h.seekTo !== null
+          && hlsCovers(h, h.seekTo, Math.min(h.seekTo + 0.5, h.el.duration || h.seekTo))) {
+         const to = h.seekTo;
+         h.seekTo = null;
+         h.el.currentTime = to;
+         }
+      // A pending seek is where the data is needed, not the playhead.
+      const t = h.seekTo ?? h.el.currentTime;
       const i = hlsNextSegment(h, t);
       if (i < 0) {
          // Refused if the state changed underneath; the next seek or
@@ -6386,9 +6415,9 @@ async function hlsFill(h) {
       // fetched again for ever.  A truncated one leaves the parser inside an
       // unfinished box, where every later append is read as its missing tail,
       // so the parser is reset before the one retry.
-      const s = h.segs[i];
-      if (h.el.currentTime >= s.end
-          || hlsCovers(h, Math.max(s.start, h.el.currentTime), s.end)) {
+      const s   = h.segs[i];
+      const now = h.seekTo ?? h.el.currentTime;
+      if (now >= s.end || hlsCovers(h, Math.max(s.start, now), s.end)) {
          h.retried = null;
          continue;
          }
@@ -6582,6 +6611,8 @@ function playerSeekTo(target) {
          player.media.addEventListener('canplay',
             () => player.media.pause(), {once: true});
          }
+      } else if (hlsCur?.el === player.media) {
+      hlsSeek(hlsCur, target);
       } else {
       player.media.currentTime = target;
       }
