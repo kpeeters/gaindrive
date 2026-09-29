@@ -82,13 +82,25 @@ struct PaneNavigator<R: Hashable, Root: View, Destination: View, Placeholder: Vi
 	private func row(_ panes: Int) -> some View {
 		let first = PaneMath.firstLevel(levels: path.count + 1, panes: panes)
 		let shown = (first..<(first + panes)).map { Shown(level: $0, key: identity($0)) }
-		return HStack(spacing: 0) {
+		let panesRow = HStack(spacing: 0) {
 			ForEach(shown, id: \.key) { pane in
 				if pane.level > first { Divider() }
 				column(pane.level, leading: pane.level == first)
 					.environment(\.paneCount, panes)
 			}
 		}
+		#if targetEnvironment(macCatalyst)
+			// **An experiment, 2026-09-29.** With the system title hidden (see
+			// `RootView`), the Mac keeps a ~27 pt strip at the top as a safe-area
+			// inset, and the panes' bars sat below it with an empty band above
+			// each title. Ignoring the top safe area is meant to move the bars and
+			// the dividers up into that strip. Whether a UIKit navigation bar
+			// follows SwiftUI here is exactly what is being tried; if nothing
+			// moves, this goes again.
+			return panesRow.ignoresSafeArea(.container, edges: .top)
+		#else
+			return panesRow
+		#endif
 	}
 
 	/// Clipped, because a pane flush against a safe-area edge is extended
