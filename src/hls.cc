@@ -42,6 +42,14 @@ constexpr const char* MOVFLAGS =
 // milliseconds and every common frame rate exactly.
 constexpr const char* VIDEO_TIMESCALE = "90000";
 
+// How far before a boundary a re-encode is cut.  A forced keyframe lands on
+// the frame nearest its time, which with ffmpeg 4.4 can be up to half a frame
+// early (23.983 s for 24 s at 23.976 fps); a cut asked for any later misses
+// it, and every later file then holds the segment after the one its number
+// says.  ffmpeg's docs suggest half a frame of slack (segment_time_delta) for
+// this.  The frame rate is not known here, so enough for 10 fps and up.
+constexpr double ENCODE_CUT_SLACK = 0.05;
+
 // One stateless segment or init run.
 constexpr auto RUN_DEADLINE = reproc::milliseconds(60000);
 
@@ -153,10 +161,12 @@ std::vector<std::string> session_argv(const Streamer::SongInfo& song,
 	session_codecs(a, p, v);
 
 	std::string cuts, keys;
+	const double early = p.copy_video ? p.tick / 2 : ENCODE_CUT_SLACK;
 	for (size_t k = n + 1; k < p.segments(); ++k) {
-		// Half a tick early, so a keyframe exactly on the boundary is never
-		// lost to rounding in the comparison.
-		cuts += (cuts.empty() ? "" : ",") + secs(p.bounds[k] - S - p.tick / 2);
+		// Early, so a keyframe on the boundary is never lost to rounding in
+		// the comparison: half a tick for a copy, see ENCODE_CUT_SLACK
+		// otherwise.
+		cuts += (cuts.empty() ? "" : ",") + secs(p.bounds[k] - S - early);
 		keys += (keys.empty() ? "" : ",") + secs(p.bounds[k] - S);
 		}
 	if (!p.copy_video && !keys.empty()) append(a, { "-force_key_frames", keys });

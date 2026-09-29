@@ -6299,6 +6299,9 @@ function hlsFail(h, err) {
       return;
       }
    console.warn('[hls]', err);
+   // Detached, or the picture that is still playing fires timeupdates that
+   // fail the same way and put the message up again as soon as it is closed.
+   hlsStop();
    videoPreparing(false);
    const song = player.queue[player.index];
    showError(`Cannot play “${song?.title ?? 'this video'}”: ${err.message}`);
