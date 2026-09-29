@@ -9,6 +9,11 @@
 import AVKit
 import SwiftUI
 
+// iOS only for now: the Mac gets its own video surface in phase M2 of
+// `.ai/macos/PLAN.md`, and until then plays a video's soundtrack
+// (`SettingsStore.showsPicture`).
+#if os(iOS)
+
 /// The picture.
 ///
 /// **A destination of its own, not part of Now Playing.** That sheet is
@@ -387,3 +392,5 @@ private struct VideoSurface: UIViewControllerRepresentable {
 		let gestures = VideoSideGestures()
 	}
 }
+
+#endif

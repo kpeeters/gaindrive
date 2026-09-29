@@ -20,7 +20,7 @@ struct CoverArt: View {
 	var symbol: String = "music.note"
 	var cornerRadius: CGFloat = 4
 
-	@State private var image: UIImage?
+	@State private var image: PlatformImage?
 
 	var body: some View {
 		// The placeholder is the **base** and the artwork an overlay, rather
@@ -48,7 +48,7 @@ struct CoverArt: View {
 			}
 			.overlay {
 				if let image {
-					Image(uiImage: image)
+					Image(platformImage: image)
 						.resizable()
 						.scaledToFill()
 				}

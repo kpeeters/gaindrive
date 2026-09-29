@@ -114,7 +114,7 @@ struct StorageSettingsView: View {
 			}
 		}
 		.navigationTitle("Storage")
-		.navigationBarTitleDisplayMode(.inline)
+		.inlineTitle()
 		// Re-reads what each pin covers, which is what makes a pinned playlist
 		// pick up a track added since it was pinned.
 		.task {

@@ -105,9 +105,10 @@ final class NowPlayingCenter {
 			// invokes this one on its own serial queue whenever the system asks
 			// for artwork. The runtime then traps on the executor assertion, and
 			// nothing warns beforehand because the isolation is inferred and the
-			// parameter is a plain `(CGSize) -> UIImage`. `@Sendable` opts the
+			// parameter is a plain `(CGSize) -> UIImage`, or `NSImage` on the Mac. `@Sendable` opts the
 			// closure out of inheriting isolation, so it carries no claim to
-			// break; the capture is legal because `UIImage` is `Sendable`.
+			// break; the capture is legal because the image is `Sendable` (see
+			// `PlatformImage`).
 			info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) {
 				@Sendable _ in image
 			}

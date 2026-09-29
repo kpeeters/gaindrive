@@ -27,7 +27,7 @@ struct SearchView: View {
 				content
 					.navigationTitle("Search")
 					.toolbar {
-						ToolbarItem(placement: .topBarLeading) { LibrarySelector() }
+						ToolbarItem(placement: .leadingBar) { LibrarySelector() }
 					}
 					// On the root, so the field sits in the results pane's bar.
 					.searchable(text: $model.query, prompt: "Artists, albums and tracks")

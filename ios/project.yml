@@ -9,6 +9,9 @@ options:
   bundleIdPrefix: org.gaindrive
   deploymentTarget:
     iOS: "18.0"
+    # The macOS contemporary of the iOS 18 floor, so an availability guard
+    # never has to differ between the two.
+    macOS: "15.0"
   createIntermediateGroups: true
   # Empty directories in the package layout are placeholders for phases that
   # have not landed yet; they should not become groups in the project.
@@ -58,35 +61,23 @@ settings:
   #   Release:
   #     SWIFT_ACTIVE_COMPILATION_CONDITIONS: GD_GLASS_HEADERS
 
-# Mac Catalyst, giving the "My Mac (Mac Catalyst)" destination from the same
-# single target and the same sources. Why this
-# rather than a native macOS target: AVAudioSession, which the interruption and
-# route-change handling is built on, does not exist on macOS.
+# **One target, two platforms** (XcodeGen `supportedDestinations`, which is
+# Xcode's multiplatform app). iPhone and iPad build against the iOS SDK; "My
+# Mac" builds a native AppKit app from the same sources against the macOS SDK.
+# It replaced the Mac Catalyst destination on 2026-09-29: Catalyst is the iPad
+# app on the Mac, and its window chrome kept fighting the Mac's conventions.
+# See `.ai/macos/PLAN.md` for the phases.
 #
-# A group rather than a per-target block because **the test bundle needs the
-# same settings as the app**. A test target that does not itself support
-# Catalyst is simply not built for the destination, so `make test-mac` would
-# report success having run nothing.
-settingGroups:
-  catalyst:
-    SUPPORTS_MACCATALYST: YES
-    # Mutually exclusive with the above in practice; kept explicit so enabling
-    # it later is a decision rather than a default.
-    SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
-    # The default (YES) would ship the Mac build as
-    # `maccatalyst.org.gaindrive.ios-player`. One identifier across both is what
-    # universal purchase expects, and it keeps `Bundle.main.bundleIdentifier`
-    # the same constant everywhere - the tests assert on it and would otherwise
-    # need a platform branch.
-    DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
-    # The macOS contemporary of the iOS 18 floor, so an availability guard never
-    # has to differ between the two.
-    MACOSX_DEPLOYMENT_TARGET: "15.0"
+# Platform differences live in `#if os(...)` in code and in per-SDK build
+# settings (`[sdk=macosx*]`) below. The test target lists the same
+# destinations: one that did not would simply not be built for the Mac, and
+# `make test-mac` would pass having run nothing.
 
 targets:
   GainDrive:
     type: application
-    platform: iOS
+    platform: auto
+    supportedDestinations: [iOS, macOS]
     sources:
       - path: GainDrive
         # Placeholders that hold the package layout in git. Without these
@@ -104,8 +95,6 @@ targets:
           - Info.plist
           - GainDrive.entitlements
     settings:
-      groups:
-        - catalyst
       base:
         PRODUCT_NAME: GainDrive
         # Debug and release share this deliberately, so switching between them
@@ -122,18 +111,16 @@ targets:
         CURRENT_PROJECT_VERSION: "${GAINDRIVE_BUILD}"
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Resources/Info.plist
-        # iPhone and iPad from one adaptive layout. The iPad idiom is also what
-        # makes Mac Catalyst possible at all - a phone-only target is not
-        # offered the destination.
+        # iPhone and iPad from one adaptive layout; ignored by the Mac build.
         TARGETED_DEVICE_FAMILY: "1,2"
 
-        # Required by Catalyst, which must adopt the App Sandbox; the file also
-        # carries the outgoing-network permission without which the app cannot
-        # reach a server at all.
+        # The Mac App Store requires the App Sandbox; the file also carries
+        # the outgoing-network permission without which the app cannot reach
+        # a server at all, and the keychain group.
         #
-        # Scoped to the Mac build rather than applied to both. A Catalyst
-        # target compiles against the macOS SDK, which is what the condition
-        # keys on, and the two entitlements in the file mean nothing on iOS -
+        # Scoped to the Mac build rather than applied to both. The Mac build
+        # compiles against the macOS SDK, which is what the condition keys on,
+        # and the entitlements in the file mean nothing on iOS -
         # where the app is sandboxed unconditionally and may open outgoing
         # connections without asking. Handing them to the iOS signer instead of
         # withholding them buys nothing and gives provisioning one more thing
@@ -163,17 +150,13 @@ targets:
 
   GainDriveTests:
     type: bundle.unit-test
-    platform: iOS
+    platform: auto
+    supportedDestinations: [iOS, macOS]
     sources:
       - path: GainDriveTests
     dependencies:
       - target: GainDrive
     settings:
-      # Same group as the app: a test bundle that does not support Catalyst is
-      # not built for that destination, and `make test-mac` would then pass
-      # without having run a thing.
-      groups:
-        - catalyst
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.gaindrive.ios-player.tests
         GENERATE_INFOPLIST_FILE: YES

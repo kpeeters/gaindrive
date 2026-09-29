@@ -217,11 +217,16 @@ private struct VideoPresentation: ViewModifier {
 	@Environment(PlayerConnection.self) private var player
 
 	func body(content: Content) -> some View {
-		content.fullScreenCover(isPresented: showing) {
-			if let song = player.current, player.currentShowsPicture {
-				VideoView(song: song)
+		#if os(iOS)
+			content.fullScreenCover(isPresented: showing) {
+				if let song = player.current, player.currentShowsPicture {
+					VideoView(song: song)
+				}
 			}
-		}
+		#else
+			// No picture on the Mac yet (`.ai/macos/PLAN.md`, M2).
+			content
+		#endif
 	}
 
 	private var showing: Binding<Bool> {

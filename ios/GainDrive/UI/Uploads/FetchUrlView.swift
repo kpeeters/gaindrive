@@ -30,7 +30,7 @@ struct FetchUrlView: View {
 				}
 			}
 			.navigationTitle("Fetch from a URL")
-			.navigationBarTitleDisplayMode(.inline)
+			.inlineTitle()
 			.toolbar {
 				ToolbarItem(placement: .confirmationAction) {
 					Button("Done") { dismiss() }
@@ -62,9 +62,7 @@ struct FetchUrlView: View {
 			} else {
 				Section {
 					TextField("https://…", text: $model.url)
-						.keyboardType(.URL)
-						.textContentType(.URL)
-						.textInputAutocapitalization(.never)
+						.urlEntry()
 						.autocorrectionDisabled()
 					PasteButton(payloadType: String.self) { strings in
 						if let first = strings.first { model.url = Self.firstLink(in: first) }

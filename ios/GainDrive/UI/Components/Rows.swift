@@ -49,7 +49,7 @@ extension View {
 			.frame(maxWidth: .infinity, alignment: .leading)
 			.padding(.horizontal, 10)
 			.padding(.vertical, 8)
-			.background(Color(.systemBackground))
+			.background(Color.platformBackground)
 			.listRowInsets(EdgeInsets())
 		#endif
 	}

@@ -8,7 +8,12 @@
 
 import Foundation
 import Testing
-import UIKit
+
+#if os(macOS)
+	import AppKit
+#else
+	import UIKit
+#endif
 
 /// Phase 0 has no behaviour to test, but it does have configuration that is
 /// silently wrong when it is wrong: a plist key that never reaches the bundle,
@@ -73,13 +78,21 @@ struct BundleConfigurationTests {
 	/// same product. A typo in the colour set name degrades to the system
 	/// blue without any error.
 	@Test func accentColourResolves() {
-		#expect(UIColor(named: "AccentColor") != nil)
+		#if os(macOS)
+			#expect(NSColor(named: "AccentColor") != nil)
+		#else
+			#expect(UIColor(named: "AccentColor") != nil)
+		#endif
 	}
 
 	/// Same silent failure as the colour, and worse to spot: SwiftUI's
 	/// `Image("Logo")` renders an empty space for a missing asset rather than
 	/// complaining, so a renamed or dropped image set looks like a layout bug.
 	@Test func logoResolves() {
-		#expect(UIImage(named: "Logo") != nil)
+		#if os(macOS)
+			#expect(NSImage(named: "Logo") != nil)
+		#else
+			#expect(UIImage(named: "Logo") != nil)
+		#endif
 	}
 }

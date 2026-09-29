@@ -8,7 +8,6 @@
 
 import AVKit
 import SwiftUI
-import UIKit
 
 /// The expanded player, raised by tapping the mini player.
 ///
@@ -24,7 +23,9 @@ struct NowPlayingView: View {
 	@Environment(StarStore.self) private var stars
 	@Environment(ServerRegistry.self) private var registry
 	@Environment(\.dismiss) private var dismiss
-	@Environment(\.verticalSizeClass) private var verticalSizeClass
+	#if os(iOS)
+		@Environment(\.verticalSizeClass) private var verticalSizeClass
+	#endif
 
 	@State private var path: [Route] = []
 	@State private var addingTo: Song?
@@ -42,17 +43,17 @@ struct NowPlayingView: View {
 					ContentUnavailableView("Nothing playing", systemImage: "music.note")
 				}
 			}
-			.navigationBarTitleDisplayMode(.inline)
+			.inlineTitle()
 			.navigationDestination(for: Route.self) { destination($0) }
 			.toolbar {
-				ToolbarItem(placement: .topBarLeading) {
+				ToolbarItem(placement: .leadingBar) {
 					Button("Done") { dismiss() }
 				}
-				ToolbarItem(placement: .topBarTrailing) {
+				ToolbarItem(placement: .trailingBar) {
 					// Dragging a row in a `List` needs edit mode; swiping one
 					// away does not. So the button is what reordering costs,
 					// and removal is free either way.
-					EditButton()
+					PlatformEditButton()
 				}
 			}
 		}
@@ -110,7 +111,11 @@ struct NowPlayingView: View {
 	/// is still right for 200 points on a 3x screen, and asking for a different
 	/// one per size class would be two cache entries for one image.
 	private var coverSide: CGFloat {
-		verticalSizeClass == .compact ? 110 : 200
+		#if os(iOS)
+			verticalSizeClass == .compact ? 110 : 200
+		#else
+			200
+		#endif
 	}
 
 	@ViewBuilder
@@ -226,7 +231,7 @@ struct NowPlayingView: View {
 			// wish and are not the same mechanism, and `AVRoutePickerView` is
 			// UIKit's own and cannot be taught about a third kind of route.
 			CastButton(showing: $castPicker)
-			AirPlayButton()
+			AirPlayButton(player: player.videoPlayer)
 				.frame(width: 30, height: 30)
 		}
 		.font(.title3)
@@ -310,19 +315,41 @@ struct NowPlayingScrubber: View {
 
 /// The system route picker.
 ///
-/// AirPlay itself comes free with `AVPlayer` - the audio session routes itself
-/// - but the button does not, and `AVRoutePickerView` is UIKit. This is the
-/// one capability iOS gets that Android does not.
-struct AirPlayButton: UIViewRepresentable {
-	func makeUIView(context: Context) -> AVRoutePickerView {
-		let view = AVRoutePickerView()
-		// Audio only. Video is its own surface in phase 6, and prioritising
-		// video devices here would put a TV above the speaker someone is
-		// listening on.
-		view.prioritizesVideoDevices = false
-		view.tintColor = .secondaryLabel
-		return view
-	}
-
-	func updateUIView(_ view: AVRoutePickerView, context: Context) {}
+/// AirPlay itself comes free with `AVPlayer`, but the button does not, and
+/// `AVRoutePickerView` is a UIKit view on iOS and an AppKit one on the Mac.
+/// This is the one capability iOS gets that Android does not.
+///
+/// **On the Mac it routes one player**, not the device: there is no audio
+/// session, so the picker is told which `AVPlayer` to send. iOS ignores it.
+struct AirPlayButton {
+	var player: AVPlayer?
 }
+
+#if os(iOS)
+	extension AirPlayButton: UIViewRepresentable {
+		func makeUIView(context: Context) -> AVRoutePickerView {
+			let view = AVRoutePickerView()
+			// Audio only. Video is its own surface, and prioritising video
+			// devices here would put a TV above the speaker someone is
+			// listening on.
+			view.prioritizesVideoDevices = false
+			view.tintColor = .secondaryLabel
+			return view
+		}
+
+		func updateUIView(_ view: AVRoutePickerView, context: Context) {}
+	}
+#else
+	extension AirPlayButton: NSViewRepresentable {
+		func makeNSView(context: Context) -> AVRoutePickerView {
+			let view = AVRoutePickerView()
+			view.isRoutePickerButtonBordered = false
+			view.player = player
+			return view
+		}
+
+		func updateNSView(_ view: AVRoutePickerView, context: Context) {
+			if view.player !== player { view.player = player }
+		}
+	}
+#endif

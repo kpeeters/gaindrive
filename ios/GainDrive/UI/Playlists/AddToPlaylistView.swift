@@ -63,7 +63,7 @@ struct AddToPlaylistView: View {
 				}
 			}
 			.navigationTitle("Add to Playlist")
-			.navigationBarTitleDisplayMode(.inline)
+			.inlineTitle()
 			.toolbar {
 				ToolbarItem(placement: .cancellationAction) {
 					Button("Cancel") { dismiss() }

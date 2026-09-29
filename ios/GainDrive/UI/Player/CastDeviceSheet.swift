@@ -39,7 +39,7 @@ struct CastDeviceSheet: View {
 				configured
 			}
 			.navigationTitle("Play on")
-			.navigationBarTitleDisplayMode(.inline)
+			.inlineTitle()
 			.toolbar {
 				ToolbarItem(placement: .confirmationAction) {
 					Button("Done") { dismiss() }

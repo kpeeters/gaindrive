@@ -67,9 +67,9 @@ struct TrackInfoView: View {
 				share
 			}
 			.navigationTitle("Track info")
-			.navigationBarTitleDisplayMode(.inline)
+			.inlineTitle()
 			.toolbar {
-				ToolbarItem(placement: .topBarTrailing) {
+				ToolbarItem(placement: .trailingBar) {
 					Button("Done") { dismiss() }
 				}
 			}

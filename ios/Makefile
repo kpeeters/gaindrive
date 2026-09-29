@@ -32,10 +32,10 @@ LOGO_ASSET := Resources/Assets.xcassets/Logo.imageset/gaindrive.svg
 #   make test DEST='platform=iOS Simulator,name=iPad Pro 13-inch (M4)'
 DEST ?= platform=iOS Simulator,name=iPhone 16
 
-# The Mac Catalyst destination - Xcode's "My Mac (Mac Catalyst)". The variant
-# is what distinguishes it from a native macOS build, which this project does
-# not have; omitting it asks for a platform the target does not support.
-DEST_MAC ?= platform=macOS,variant=Mac Catalyst
+# The native macOS destination - Xcode's "My Mac". Until 2026-09-29 this was
+# Mac Catalyst (`variant=Mac Catalyst`); the target now builds for macOS
+# itself, and a Catalyst variant is no longer offered.
+DEST_MAC ?= platform=macOS
 
 # xcodebuild echoes the entire compiler invocation for every file it touches,
 # which buries the handful of lines that matter - a failing build is thousands
@@ -103,7 +103,7 @@ test: generate
 	 -destination '$(DEST)' $(SIGNING) $(XCFLAGS) $(PIPE)
 
 # Worth running on both: the bundle assertions cover Info.plist keys that
-# Catalyst treats differently from iOS, and a derived bundle identifier or a
+# macOS treats differently from iOS, and a derived bundle identifier or a
 # resource that failed to reach the Mac bundle shows up here rather than as a
 # puzzling runtime failure.
 test-mac: generate
@@ -173,7 +173,7 @@ help:
 	@echo "  generate   Regenerate GainDrive.xcodeproj from project.yml (default)"
 	@echo "  open       Regenerate and open the project in Xcode"
 	@echo "  build      Build for \$$DEST (an iOS simulator by default)"
-	@echo "  build-mac  Build for \$$DEST_MAC (My Mac, Mac Catalyst)"
+	@echo "  build-mac  Build for \$$DEST_MAC (My Mac, native macOS)"
 	@echo "  test       Run the unit tests on \$$DEST"
 	@echo "  test-mac   Run the unit tests on \$$DEST_MAC"
 	@echo "  art        Re-derive both assets from graphics/gaindrive.svg"

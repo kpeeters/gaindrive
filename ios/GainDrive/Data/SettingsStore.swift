@@ -137,8 +137,16 @@ final class SettingsStore {
 	/// Whether this song plays with a picture. **The one question** every
 	/// "is it a video" decision in playback asks, so the setting cannot be
 	/// honoured in one place and forgotten in another.
+	///
+	/// Always false on the Mac until it has a video surface of its own (phase
+	/// M2 of `.ai/macos/PLAN.md`): a video there plays its soundtrack, exactly
+	/// as with "Play videos as audio only".
 	func showsPicture(_ song: Song) -> Bool {
-		song.isVideo && !videoAudioOnly
+		#if os(macOS)
+			false
+		#else
+			song.isVideo && !videoAudioOnly
+		#endif
 	}
 
 	static let defaultCacheCapBytes: Int64 = 4 * 1024 * 1024 * 1024

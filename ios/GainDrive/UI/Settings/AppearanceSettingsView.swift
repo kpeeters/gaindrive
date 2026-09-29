@@ -23,7 +23,7 @@ struct AppearanceSettingsView: View {
 			.labelsHidden()
 		}
 		.navigationTitle("Appearance")
-		.navigationBarTitleDisplayMode(.inline)
+		.inlineTitle()
 	}
 }
 

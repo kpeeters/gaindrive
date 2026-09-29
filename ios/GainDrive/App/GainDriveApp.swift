@@ -17,7 +17,9 @@ import SwiftUI
 struct GainDriveApp: App {
 	/// Only so a background download finishing while the app is not running
 	/// can be acknowledged - see `AppDelegate`.
-	@UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+	#if os(iOS)
+		@UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+	#endif
 
 	@State private var registry: ServerRegistry
 	@State private var settings: SettingsStore

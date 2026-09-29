@@ -6,6 +6,10 @@
 //	Exception in ios/LICENSE. See LICENSE at the repository root for the
 //	full text of the GPL.
 
+// iOS only: the swipes are a touch idiom, and the Mac plays a video's
+// soundtrack until phase M2 of `.ai/macos/PLAN.md` gives it a surface.
+#if os(iOS)
+
 import AVFoundation
 import MediaPlayer
 import UIKit
@@ -175,3 +179,5 @@ final class VideoSideGestures: NSObject, UIGestureRecognizerDelegate {
 		}
 	}
 }
+
+#endif

@@ -8,7 +8,7 @@
 
 import CryptoKit
 import Foundation
-import UIKit
+import SwiftUI
 
 /// Cover art: memory cache, disk cache, and one request per image no matter how
 /// many rows ask for it.
@@ -39,7 +39,7 @@ actor ImageStore {
 
 	/// `NSCache` rather than a dictionary: it evicts under memory pressure on
 	/// its own, which a scrolling grid of artwork will eventually need.
-	private let memory = NSCache<NSString, UIImage>()
+	private let memory = NSCache<NSString, PlatformImage>()
 	private let directory: URL
 	/// Covers of downloaded content, **out of reach of eviction**: under
 	/// Application Support rather than Caches, which the system purges under
@@ -56,7 +56,7 @@ actor ImageStore {
 	/// Requests in flight, keyed by cache key. A grid scrolled quickly asks for
 	/// the same cover from several cells at once; without this each would issue
 	/// its own request for bytes the others are already fetching.
-	private var inFlight: [String: Task<UIImage?, Never>] = [:]
+	private var inFlight: [String: Task<PlatformImage?, Never>] = [:]
 
 	/// Keys the server has answered 404 for.
 	///
@@ -109,7 +109,7 @@ actor ImageStore {
 		memory.totalCostLimit = 64 << 20
 	}
 
-	func image(for source: CoverSource) async -> UIImage? {
+	func image(for source: CoverSource) async -> PlatformImage? {
 		let key = source.cacheKey
 		if let cached = memory.object(forKey: key as NSString) { return cached }
 		if missing.contains(key) { return nil }
@@ -121,7 +121,7 @@ actor ImageStore {
 		// the check above and the insert below.
 		let home = Entry.prefixHash(of: key)
 		let target = pinnedPrefixes.contains(home) ? pinnedDirectory : directory
-		let task = Task<UIImage?, Never> { [session, directory, pinnedDirectory] in
+		let task = Task<PlatformImage?, Never> { [session, directory, pinnedDirectory] in
 			await self.acquire()
 			let fetched = await Self.load(
 				source, session: session, directory: target,
@@ -182,7 +182,7 @@ actor ImageStore {
 	// MARK: - Bookkeeping
 
 	private struct Fetched: Sendable {
-		let image: UIImage?
+		let image: PlatformImage?
 		let bytesWritten: Int
 		/// The server said there is no such image, as opposed to failing to
 		/// answer. Only the first is worth remembering.
@@ -195,8 +195,7 @@ actor ImageStore {
 			// The decoded footprint, not the transferred bytes - those are zero
 			// on the 304 and disk paths, which would let the cache fill with
 			// images it believes are free.
-			let pixels = image.size.width * image.size.height * image.scale * image.scale
-			memory.setObject(image, forKey: key as NSString, cost: Int(pixels) * 4)
+			memory.setObject(image, forKey: key as NSString, cost: image.pixelCount * 4)
 		}
 		if fetched.isMissing { missing.insert(key) }
 		// A pinned cover was written outside the trimmed directory, so it is
@@ -277,14 +276,14 @@ actor ImageStore {
 			// Unreachable, not absent. Show what is on disk and do not record a
 			// miss - the next attempt may well succeed.
 			return Fetched(
-				image: stored.flatMap { UIImage(data: $0.data) }, bytesWritten: 0,
+				image: stored.flatMap { PlatformImage(data: $0.data) }, bytesWritten: 0,
 				isMissing: false)
 		}
 
 		if http.statusCode == 304, let stored {
-			return Fetched(image: UIImage(data: stored.data), bytesWritten: 0, isMissing: false)
+			return Fetched(image: PlatformImage(data: stored.data), bytesWritten: 0, isMissing: false)
 		}
-		guard (200..<300).contains(http.statusCode), let image = UIImage(data: data) else {
+		guard (200..<300).contains(http.statusCode), let image = PlatformImage(data: data) else {
 			// 404 is the ordinary answer for a folder with no artwork, so it is
 			// not worth logging or retrying - the caller draws a placeholder.
 			return Fetched(image: nil, bytesWritten: 0, isMissing: http.statusCode == 404)

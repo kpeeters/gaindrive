@@ -89,18 +89,7 @@ struct PaneNavigator<R: Hashable, Root: View, Destination: View, Placeholder: Vi
 					.environment(\.paneCount, panes)
 			}
 		}
-		#if targetEnvironment(macCatalyst)
-			// **An experiment, 2026-09-29.** With the system title hidden (see
-			// `RootView`), the Mac keeps a ~27 pt strip at the top as a safe-area
-			// inset, and the panes' bars sat below it with an empty band above
-			// each title. Ignoring the top safe area is meant to move the bars and
-			// the dividers up into that strip. Whether a UIKit navigation bar
-			// follows SwiftUI here is exactly what is being tried; if nothing
-			// moves, this goes again.
-			return panesRow.ignoresSafeArea(.container, edges: .top)
-		#else
-			return panesRow
-		#endif
+		return panesRow
 	}
 
 	/// Clipped, because a pane flush against a safe-area edge is extended
@@ -112,7 +101,7 @@ struct PaneNavigator<R: Hashable, Root: View, Destination: View, Placeholder: Vi
 			content(level)
 				.toolbar {
 					if leading, level > 0 {
-						ToolbarItem(placement: .topBarLeading) {
+						ToolbarItem(placement: .leadingBar) {
 							Button {
 								path.removeLast()
 							} label: {
@@ -131,7 +120,7 @@ struct PaneNavigator<R: Hashable, Root: View, Destination: View, Placeholder: Vi
 		if level == 0 {
 			// Inline like its neighbours: a large title beside inline bars is
 			// bars of two heights.
-			root().navigationBarTitleDisplayMode(.inline)
+			root().inlineTitle()
 		} else if level <= path.count {
 			destination(path[level - 1])
 		} else {

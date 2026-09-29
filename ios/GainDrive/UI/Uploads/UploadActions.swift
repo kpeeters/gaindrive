@@ -223,7 +223,7 @@ struct MoveUploadView: View {
 				}
 			}
 			.navigationTitle("Move to the library")
-			.navigationBarTitleDisplayMode(.inline)
+			.inlineTitle()
 			.toolbar {
 				ToolbarItem(placement: .cancellationAction) {
 					Button("Cancel") { dismiss() }

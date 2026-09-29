@@ -29,11 +29,11 @@ struct PlaylistDetailView: View {
 			}
 		}
 		.navigationTitle(playlistName)
-		.navigationBarTitleDisplayMode(.inline)
+		.inlineTitle()
 		// The pin is on the playlist, not on its current tracks, so a track
 		// added later is covered too; see `Pin`.
 		.toolbar {
-			ToolbarItem(placement: .topBarTrailing) {
+			ToolbarItem(placement: .trailingBar) {
 				DownloadControl(pin: Pin(ref: ref, kind: .playlist, name: playlistName))
 			}
 		}

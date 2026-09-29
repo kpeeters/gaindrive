@@ -27,6 +27,6 @@ struct LibrarySettingsView: View {
 			}
 		}
 		.navigationTitle("Library")
-		.navigationBarTitleDisplayMode(.inline)
+		.inlineTitle()
 	}
 }

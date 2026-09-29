@@ -46,13 +46,13 @@ struct AlbumDetailView: View {
 			}
 		}
 		.navigationTitle(albumTitle)
-		.navigationBarTitleDisplayMode(.inline)
+		.inlineTitle()
 		.toolbar {
-			ToolbarItem(placement: .topBarTrailing) {
+			ToolbarItem(placement: .trailingBar) {
 				DownloadControl(pin: Pin(ref: ref, kind: .album, name: albumTitle))
 			}
 			if fromUploads {
-				ToolbarItem(placement: .topBarTrailing) {
+				ToolbarItem(placement: .trailingBar) {
 					UploadActionsMenu(
 						album: ref, albumTitle: albumTitle,
 						artistName: model?.state.value?.album.artistName)
@@ -191,17 +191,23 @@ struct AlbumDetailView: View {
 
 	private func header(_ detail: AlbumDetail, model: AlbumDetailViewModel) -> some View {
 		VStack(alignment: .leading, spacing: 12) {
-			if model.heroes.count > 1 {
-				// The extras `getAlbumImages` counted - booklet scans, a back
-				// cover - as a pager rather than a wall of thumbnails.
-				TabView {
-					ForEach(model.heroes, id: \.cacheKey) { CoverHero(source: $0) }
+			#if os(iOS)
+				if model.heroes.count > 1 {
+					// The extras `getAlbumImages` counted - booklet scans, a back
+					// cover - as a pager rather than a wall of thumbnails.
+					TabView {
+						ForEach(model.heroes, id: \.cacheKey) { CoverHero(source: $0) }
+					}
+					.tabViewStyle(.page)
+					.aspectRatio(1, contentMode: .fit)
+				} else {
+					CoverHero(source: model.heroes.first)
 				}
-				.tabViewStyle(.page)
-				.aspectRatio(1, contentMode: .fit)
-			} else {
+			#else
+				// A paged `TabView` is iOS only; the Mac shows the cover until
+				// its own layout (`.ai/macos/PLAN.md`, M3).
 				CoverHero(source: model.heroes.first)
-			}
+			#endif
 
 			HStack(alignment: .firstTextBaseline) {
 				VStack(alignment: .leading, spacing: 2) {

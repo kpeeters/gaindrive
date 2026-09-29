@@ -6,7 +6,11 @@
 //	Exception in ios/LICENSE. See LICENSE at the repository root for the
 //	full text of the GPL.
 
-import UIKit
+#if os(iOS)
+	import UIKit
+#else
+	import Foundation
+#endif
 
 /// The one thing a SwiftUI `App` cannot do for itself.
 ///
@@ -20,26 +24,12 @@ import UIKit
 /// It is the whole reason `@UIApplicationDelegateAdaptor` is here, and it is
 /// deliberately the only thing in it: the composition root is
 /// `GainDriveApp.init` and should stay there.
-final class AppDelegate: NSObject, UIApplicationDelegate {
+final class AppDelegate: NSObject {
 	/// Set by `GainDriveApp` once the queue exists. Reached before that only if
 	/// the system woke us for a session we have not built yet, in which case
 	/// the handler is held until it is.
 	@MainActor static var queue: DownloadQueue?
 	@MainActor private static var pending: (() -> Void)?
-
-	func application(
-		_ application: UIApplication,
-		handleEventsForBackgroundURLSession identifier: String,
-		completionHandler: @escaping () -> Void
-	) {
-		MainActor.assumeIsolated {
-			guard let queue = Self.queue else {
-				Self.pending = completionHandler
-				return
-			}
-			queue.backgroundCompletion = { completionHandler() }
-		}
-	}
 
 	/// Called by `GainDriveApp` as soon as the queue is built, so a handler
 	/// that arrived first is not dropped.
@@ -53,3 +43,25 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 		queue.resume()
 	}
 }
+
+/// iOS only. The Mac never suspends an app, so there is no background-session
+/// hand-off to receive there; `adopt` still resumes the session on both.
+#if os(iOS)
+	extension AppDelegate: UIApplicationDelegate {
+		func application(
+			_ application: UIApplication,
+			handleEventsForBackgroundURLSession identifier: String,
+			completionHandler: @escaping () -> Void
+		) {
+			MainActor.assumeIsolated {
+				guard let queue = Self.queue else {
+					Self.pending = completionHandler
+					return
+				}
+				queue.backgroundCompletion = { completionHandler() }
+			}
+		}
+
+	}
+#endif
+

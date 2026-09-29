@@ -42,9 +42,9 @@ struct CastSettingsView: View {
 			manualSection
 		}
 		.navigationTitle("Casting")
-		.navigationBarTitleDisplayMode(.inline)
+		.inlineTitle()
 		.toolbar {
-			ToolbarItem(placement: .topBarTrailing) {
+			ToolbarItem(placement: .trailingBar) {
 				Button {
 					editing = ManualCastDevice(address: "", name: "")
 				} label: {
@@ -244,7 +244,7 @@ private struct CastDeviceEditor: View {
 			Form {
 				Section {
 					TextField("Address", text: $device.address)
-						.textInputAutocapitalization(.never)
+						.noAutocapitalization()
 						.autocorrectionDisabled()
 					TextField("Name", text: $device.name)
 					TextField("Port", value: $device.port, format: .number)
@@ -253,7 +253,7 @@ private struct CastDeviceEditor: View {
 				}
 			}
 			.navigationTitle("Device")
-			.navigationBarTitleDisplayMode(.inline)
+			.inlineTitle()
 			.toolbar {
 				ToolbarItem(placement: .cancellationAction) {
 					Button("Cancel") { dismiss() }

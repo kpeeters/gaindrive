@@ -9,6 +9,8 @@
 import AVFoundation
 import Foundation
 
+#if os(iOS)
+
 /// The audio session: category, activation, interruptions and route changes.
 ///
 /// Owns no playback state. It reaches `PlayerConnection` through three
@@ -137,3 +139,22 @@ final class AudioSessionController {
 		onReset?()
 	}
 }
+
+#else
+
+	/// The Mac has no `AVAudioSession`: there is no category to set, nothing
+	/// to activate, and no phone call or unplugged headphone arriving as an
+	/// interruption or a route change. So the same interface does nothing, and
+	/// the callbacks are simply never called. The player needs no branch.
+	@MainActor
+	final class AudioSessionController {
+		var onPause: (() -> Void)?
+		var onResume: (() -> Void)?
+		var onReset: (() -> Void)?
+
+		func activate() throws {}
+		func deactivate() {}
+	}
+
+#endif
+

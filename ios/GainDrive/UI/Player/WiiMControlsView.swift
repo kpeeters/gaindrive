@@ -43,7 +43,7 @@ struct WiiMControlsView: View {
 			}
 		}
 		.navigationTitle("Equalizer")
-		.navigationBarTitleDisplayMode(.inline)
+		.inlineTitle()
 		.task { await model.refresh() }
 		.alert(
 			"Something went wrong",

@@ -48,10 +48,10 @@ struct AlbumsView: View {
 			}
 		}
 		.navigationTitle(artistName)
-		.navigationBarTitleDisplayMode(.inline)
+		.inlineTitle()
 		.toolbar {
 			if let model {
-				ToolbarItem(placement: .topBarTrailing) { sortMenu(model) }
+				ToolbarItem(placement: .trailingBar) { sortMenu(model) }
 			}
 		}
 		.task {

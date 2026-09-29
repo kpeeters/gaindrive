@@ -60,9 +60,7 @@ struct ServerEditView: View {
 			Form {
 				Section {
 					TextField("Server address", text: $urlText)
-						.keyboardType(.URL)
-						.textContentType(.URL)
-						.textInputAutocapitalization(.never)
+						.urlEntry()
 						.autocorrectionDisabled()
 				} header: {
 					Text("Address")
@@ -79,7 +77,7 @@ struct ServerEditView: View {
 				Section("Account") {
 					TextField("Username", text: $username)
 						.textContentType(.username)
-						.textInputAutocapitalization(.never)
+						.noAutocapitalization()
 						.autocorrectionDisabled()
 					SecureField("Password", text: $password)
 						.textContentType(.password)
@@ -87,7 +85,7 @@ struct ServerEditView: View {
 
 				Section {
 					TextField("Display name", text: $name, prompt: Text(namePlaceholder))
-						.textInputAutocapitalization(.words)
+						.wordsAutocapitalization()
 				} footer: {
 					Text("Optional. Defaults to the server's host name.")
 				}
@@ -115,7 +113,7 @@ struct ServerEditView: View {
 				}
 			}
 			.navigationTitle(isNew ? "Add Server" : "Edit Server")
-			.navigationBarTitleDisplayMode(.inline)
+			.inlineTitle()
 			.toolbar {
 				ToolbarItem(placement: .cancellationAction) {
 					Button("Cancel") { dismiss() }

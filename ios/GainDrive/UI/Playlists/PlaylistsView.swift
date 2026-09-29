@@ -74,8 +74,8 @@ struct PlaylistsView: View {
 		}
 		.navigationTitle("Playlists")
 		.toolbar {
-			ToolbarItem(placement: .topBarLeading) { LibrarySelector() }
-			ToolbarItem(placement: .topBarTrailing) {
+			ToolbarItem(placement: .leadingBar) { LibrarySelector() }
+			ToolbarItem(placement: .trailingBar) {
 				Button {
 					Task { await model.refresh() }
 				} label: {

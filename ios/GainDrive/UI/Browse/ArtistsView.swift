@@ -195,17 +195,17 @@ private struct ArtistsList: View {
 			// Uploads replaces the listing at the root, so the way back to the
 			// library is a button where a back button would be - first.
 			if let onClose {
-				ToolbarItem(placement: .topBarLeading) {
+				ToolbarItem(placement: .leadingBar) {
 					Button(action: onClose) {
 						Label("Library", systemImage: "chevron.backward")
 					}
 				}
 			}
-			ToolbarItem(placement: .topBarLeading) { LibrarySelector() }
+			ToolbarItem(placement: .leadingBar) { LibrarySelector() }
 			if uploads {
 				// Where Android and the web put the fetch panel: in the
 				// uploads, which is where a fetch lands.
-				ToolbarItem(placement: .topBarTrailing) {
+				ToolbarItem(placement: .trailingBar) {
 					Button {
 						fetching = true
 					} label: {
@@ -214,7 +214,7 @@ private struct ArtistsList: View {
 				}
 			}
 			if let onOpenUploads, model.canUpload {
-				ToolbarItem(placement: .topBarTrailing) {
+				ToolbarItem(placement: .trailingBar) {
 					Button(action: onOpenUploads) {
 						// Not `square.and.arrow.up`, which is the share glyph
 						// and would read as "share this screen": this is the
@@ -227,7 +227,7 @@ private struct ArtistsList: View {
 			// Unconditional rather than iOS-only: Mac Catalyst has
 			// `.refreshable` but no gesture that comfortably reaches it, so
 			// without this the Catalyst build has no way to reload at all.
-			ToolbarItem(placement: .topBarTrailing) {
+			ToolbarItem(placement: .trailingBar) {
 				Button {
 					Task { await model.refresh() }
 				} label: {

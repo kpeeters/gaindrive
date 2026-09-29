@@ -58,7 +58,7 @@ struct PlaybackSettingsView: View {
 			}
 		}
 		.navigationTitle("Playback")
-		.navigationBarTitleDisplayMode(.inline)
+		.inlineTitle()
 	}
 
 	/// Written as whole `AudioQuality` values rather than as bindings into its
