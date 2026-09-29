@@ -41,13 +41,15 @@ enum PaneMath {
 /// of the path side by side, each in a `NavigationStack` of its own so it keeps
 /// the bar its view declares.
 ///
-/// **A pane never pushes.** Its path binding always reads empty, and a write
-/// to it - which is what a `NavigationLink(value:)` inside it does - lands in
-/// the shared path, cut at that pane's level. So the row that opened the next
-/// level opens it in the next pane, and every existing `NavigationLink` keeps
-/// working unchanged in both layouts. The leftmost pane gets a back button
-/// when it is not the root; the web client's rule, since at two or three
-/// panes the level above is on screen and an arrow at it would be noise.
+/// **Rows select; they never link.** Each level's list takes
+/// `PaneSelection.selection(path, level:)`, so a tap extends the path: the
+/// next pane changes, or on one pane the stack pushes. A pane's own
+/// `NavigationStack` is there for its bar and never pushes. An earlier
+/// version let `NavigationLink`s push into a pane whose path refused them,
+/// which relied on undocumented behaviour and showed as a slide out and back
+/// on every tap. The leftmost pane gets a back button when it is not the
+/// root; the web client's rule, since at two or three panes the level above
+/// is on screen and an arrow at it would be noise.
 ///
 /// `maxLevels` caps the panes at what the tab can ever show - Playlists never
 /// has a third level, so it never draws a third pane.
@@ -93,11 +95,9 @@ struct PaneNavigator<R: Hashable, Root: View, Destination: View, Placeholder: Vi
 	/// into it by SwiftUI's full-bleed rule for scrollables - a selection
 	/// highlight drew under the sidebar through its translucent material.
 	private func column(_ level: Int, leading: Bool) -> some View {
-		NavigationStack(path: columnPath(level)) {
+		// A stack for the bar alone: nothing in a pane pushes.
+		NavigationStack {
 			content(level)
-				// Registered so a link inside resolves; never shown, since this
-				// stack's path always reads empty.
-				.navigationDestination(for: R.self) { _ in EmptyView() }
 				.toolbar {
 					if leading, level > 0 {
 						ToolbarItem(placement: .topBarLeading) {
@@ -142,12 +142,27 @@ struct PaneNavigator<R: Hashable, Root: View, Destination: View, Placeholder: Vi
 		if level <= path.count { return AnyHashable(path[level - 1]) }
 		return AnyHashable("empty-\(level)")
 	}
+}
 
-	/// Reads empty, and writes into the shared path below this level.
-	private func columnPath(_ level: Int) -> Binding<[R]> {
+/// How a level's list opens the next one. Not a member of `PaneNavigator`,
+/// whose generic parameters a call site could not spell.
+enum PaneSelection {
+	/// The selection of a list at `level`: what the next level is showing.
+	///
+	/// **This is how every level opens the next one**, and the reason no row
+	/// is a `NavigationLink`. A tap selects; the path grows by what was
+	/// selected; the next pane changes, or on one pane the stack pushes. A
+	/// pop or a back shrinks the path, and the selection reads nil again.
+	/// Only documented behaviour - `List(selection:)` and a stack's path -
+	/// and the list highlights what is open, as a pane layout should.
+	static func selection<R>(_ path: Binding<[R]>, level: Int) -> Binding<R?> {
 		Binding(
-			get: { [] },
-			set: { pushed in path = Array(path.prefix(level)) + pushed })
+			get: { level < path.wrappedValue.count ? path.wrappedValue[level] : nil },
+			set: { picked in
+				var next = Array(path.wrappedValue.prefix(level))
+				if let picked { next.append(picked) }
+				path.wrappedValue = next
+			})
 	}
 }
 
@@ -158,3 +173,29 @@ extension EnvironmentValues {
 	@Entry var paneCount = 1
 }
 
+extension View {
+	/// A disclosure chevron on a row that opens a level, **on one pane
+	/// only**: there the row pushes and the chevron says so, as a
+	/// `NavigationLink` row would. Beside other panes it opens the next one
+	/// and the highlight is the cue, so nothing is drawn.
+	func paneDisclosure() -> some View {
+		modifier(PaneDisclosure())
+	}
+}
+
+private struct PaneDisclosure: ViewModifier {
+	@Environment(\.paneCount) private var paneCount
+
+	func body(content: Content) -> some View {
+		if paneCount > 1 {
+			content
+		} else {
+			HStack {
+				content
+				Image(systemName: "chevron.forward")
+					.font(.footnote.weight(.semibold))
+					.foregroundStyle(.tertiary)
+			}
+		}
+	}
+}

@@ -14,6 +14,8 @@ struct SearchView: View {
 	@Environment(ServerSelection.self) private var selection
 	@State private var path: [Route] = []
 	@State private var notesDismissed = false
+	/// The album picked in an artist's pane; see `Route.albumSelection`.
+	@State private var chosenAlbum: Album?
 
 	var body: some View {
 		// Results stay in the first pane whatever is opened beside them, which
@@ -71,7 +73,7 @@ struct SearchView: View {
 	}
 
 	private func list(_ results: SearchResults) -> some View {
-		List {
+		List(selection: PaneSelection.selection($path, level: 0)) {
 			filterChips
 
 			if !results.failures.isEmpty, !notesDismissed {
@@ -86,11 +88,8 @@ struct SearchView: View {
 			if !results.artists.isEmpty {
 				Section {
 					ForEach(results.artists) { item in
-						NavigationLink(
-							value: Route.albums(artists: item.artist.refs, name: item.artist.name)
-						) {
-							ArtistRow(item: item)
-						}
+						ArtistRow(item: item)
+							.tag(Route.albums(artists: item.artist.refs, name: item.artist.name))
 					}
 				} header: {
 					SectionHeading(text: "Artists").pinnedHeaderBackground()
@@ -100,9 +99,8 @@ struct SearchView: View {
 			if !results.albums.isEmpty {
 				Section {
 					ForEach(results.albums) { item in
-						NavigationLink(value: Route.album(item.album.ref, title: item.album.title)) {
-							AlbumRow(item: item)
-						}
+						AlbumRow(item: item)
+							.tag(Route.album(item.album.ref, title: item.album.title))
 					}
 				} header: {
 					SectionHeading(text: "Albums").pinnedHeaderBackground()
@@ -150,13 +148,9 @@ struct SearchView: View {
 	@ViewBuilder
 	private func songRow(_ item: SongUi) -> some View {
 		if let album = item.song.albumRef {
-			NavigationLink(
-				value: Route.album(
-					album, title: item.song.albumTitle, autoPlay: item.song.ref)
-			) {
-				SongRow(item: item)
-			}
-			.trackActions(for: item.song)
+			SongRow(item: item)
+				.tag(Route.album(album, title: item.song.albumTitle, autoPlay: item.song.ref))
+				.trackActions(for: item.song)
 		} else {
 			SongRow(item: item)
 				.trackActions(for: item.song)
@@ -175,12 +169,10 @@ struct SearchView: View {
 	@ViewBuilder
 	private func chapterRow(_ hit: ChapterHit) -> some View {
 		if let album = hit.albumRef {
-			NavigationLink(
-				value: Route.album(
-					album, title: hit.albumTitle, autoPlay: hit.songRef, autoPlayAt: hit.start)
-			) {
-				ChapterHitRow(hit: hit)
-			}
+			ChapterHitRow(hit: hit)
+				.tag(
+					Route.album(
+						album, title: hit.albumTitle, autoPlay: hit.songRef, autoPlayAt: hit.start))
 		} else {
 			ChapterHitRow(hit: hit)
 		}
@@ -202,9 +194,12 @@ struct SearchView: View {
 	private func destination(_ route: Route) -> some View {
 		switch route {
 		case .albums(let artists, let name, let fromCategories, let fromUploads):
+			// Only ever at level 1, opened from a result, so the album it
+			// opens is level 2.
 			AlbumsView(
 				refs: artists, artistName: name,
-				fromCategories: fromCategories, fromUploads: fromUploads)
+				fromCategories: fromCategories, fromUploads: fromUploads,
+				selection: Route.albumSelection($path, level: 1, chosen: $chosenAlbum))
 		case .album(let ref, let title, let autoPlay, let at):
 			AlbumDetailView(ref: ref, albumTitle: title, autoPlay: autoPlay, autoPlayAt: at)
 		case .playlist(let ref, let name):

@@ -90,7 +90,7 @@ struct PlaylistsView: View {
 		if sections.isEmpty {
 			EmptyMessage(text: "No playlists")
 		} else {
-			List {
+			List(selection: PaneSelection.selection($path, level: 0)) {
 				if !model.failures.isEmpty, !notesDismissed {
 					PartialFailureNote(
 						failures: model.failures,
@@ -102,16 +102,16 @@ struct PlaylistsView: View {
 				ForEach(sections) { section in
 					Section {
 						ForEach(section.items) { playlist in
-							NavigationLink(value: Route.playlist(playlist.ref, name: playlist.name)) {
-								PlaylistRow(playlist: playlist)
-							}
-							.swipeActions(edge: .trailing) {
-								Button(role: .destructive) {
-									confirmingDelete = playlist
-								} label: {
-									Label("Delete", systemImage: "trash")
+							PlaylistRow(playlist: playlist)
+								.paneDisclosure()
+								.tag(Route.playlist(playlist.ref, name: playlist.name))
+								.swipeActions(edge: .trailing) {
+									Button(role: .destructive) {
+										confirmingDelete = playlist
+									} label: {
+										Label("Delete", systemImage: "trash")
+									}
 								}
-							}
 						}
 					} header: {
 						// Suppressed when there is only one section, since a

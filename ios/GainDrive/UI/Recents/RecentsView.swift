@@ -14,6 +14,9 @@ struct RecentsView: View {
 	@Environment(ServerSelection.self) private var selection
 	@Environment(SettingsStore.self) private var settings
 	@State private var path: [Route] = []
+	/// The album picked in the back-filled artist pane; see
+	/// `Route.albumSelection`.
+	@State private var chosenAlbum: Album?
 	@State private var notesDismissed = false
 
 	var body: some View {
@@ -41,7 +44,7 @@ struct RecentsView: View {
 				text: settings.offlineMode ? "Not available offline" : "Nothing played yet",
 				symbol: "clock.arrow.circlepath")
 		} else {
-			List {
+			List(selection: PaneSelection.selection($path, level: 0)) {
 				if !model.failures.isEmpty, !notesDismissed {
 					PartialFailureNote(
 						failures: model.failures,
@@ -94,9 +97,12 @@ struct RecentsView: View {
 				ref: ref, albumTitle: title, autoPlay: autoPlay, autoPlayAt: at,
 				onAlbumLoaded: backfill)
 		case .albums(let artists, let name, let fromCategories, let fromUploads):
+			// Always the back-filled level, at the front of the path, so the
+			// album it opens is the one after it.
 			AlbumsView(
 				refs: artists, artistName: name,
-				fromCategories: fromCategories, fromUploads: fromUploads)
+				fromCategories: fromCategories, fromUploads: fromUploads,
+				selection: Route.albumSelection($path, level: 1, chosen: $chosenAlbum))
 		case .playlist:
 			EmptyView()
 		}
@@ -120,13 +126,9 @@ struct RecentsView: View {
 	@ViewBuilder
 	private func row(_ item: SongUi) -> some View {
 		if let album = item.song.albumRef {
-			NavigationLink(
-				value: Route.album(
-					album, title: item.song.albumTitle, autoPlay: item.song.ref)
-			) {
-				SongRow(item: item, trailingText: relativeTime(item.song.lastPlayedAt))
-			}
-			.trackActions(for: item.song)
+			SongRow(item: item, trailingText: relativeTime(item.song.lastPlayedAt))
+				.tag(Route.album(album, title: item.song.albumTitle, autoPlay: item.song.ref))
+				.trackActions(for: item.song)
 		} else {
 			SongRow(item: item, trailingText: relativeTime(item.song.lastPlayedAt))
 				.trackActions(for: item.song)

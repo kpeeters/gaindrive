@@ -50,26 +50,26 @@ struct SettingsView: View {
 	}
 
 	private var categories: some View {
-		List {
+		List(selection: PaneSelection.selection($path, level: 0)) {
 			Section {
-				NavigationLink(value: Route.servers) {
-					LabeledContent("Servers", value: serversSummary)
-				}
-				NavigationLink(value: Route.library) {
-					LabeledContent("Library", value: librarySummary)
-				}
-				NavigationLink(value: Route.playback) {
-					LabeledContent("Playback", value: settings.audioQuality.label)
-				}
-				NavigationLink(value: Route.casting) {
-					LabeledContent("Casting", value: castingSummary)
-				}
-				NavigationLink(value: Route.storage) {
-					LabeledContent("Storage", value: storageSummary)
-				}
-				NavigationLink(value: Route.appearance) {
-					LabeledContent("Appearance", value: settings.themeMode.label)
-				}
+				LabeledContent("Servers", value: serversSummary)
+					.paneDisclosure()
+					.tag(Route.servers)
+				LabeledContent("Library", value: librarySummary)
+					.paneDisclosure()
+					.tag(Route.library)
+				LabeledContent("Playback", value: settings.audioQuality.label)
+					.paneDisclosure()
+					.tag(Route.playback)
+				LabeledContent("Casting", value: castingSummary)
+					.paneDisclosure()
+					.tag(Route.casting)
+				LabeledContent("Storage", value: storageSummary)
+					.paneDisclosure()
+					.tag(Route.storage)
+				LabeledContent("Appearance", value: settings.themeMode.label)
+					.paneDisclosure()
+					.tag(Route.appearance)
 			}
 
 			// Inline rather than a category of its own: a screen holding
