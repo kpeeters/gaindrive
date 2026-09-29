@@ -78,31 +78,3 @@ enum Route: Hashable {
 		.album(ref, title: title, autoPlay: autoPlay, autoPlayAt: 0)
 	}
 }
-
-extension Route {
-	/// An albums pane's selection, as the path's next level.
-	///
-	/// `AlbumsView` selects `Album` values - its rows need the album itself -
-	/// while the path holds `Route`s, so `chosen` keeps the album that was
-	/// picked, and the selection reads it back only while the path still shows
-	/// that album. Used where an artist's albums sit inside another tab's
-	/// panes: Search and Recents. Library keeps its own selections.
-	static func albumSelection(
-		_ path: Binding<[Route]>, level: Int, chosen: Binding<Album?>
-	) -> Binding<Album?> {
-		Binding(
-			get: {
-				guard level < path.wrappedValue.count,
-					case .album(let ref, _, _, _) = path.wrappedValue[level],
-					let album = chosen.wrappedValue, album.ref == ref
-				else { return nil }
-				return album
-			},
-			set: { album in
-				chosen.wrappedValue = album
-				var next = Array(path.wrappedValue.prefix(level))
-				if let album { next.append(.album(album.ref, title: album.title)) }
-				path.wrappedValue = next
-			})
-	}
-}
