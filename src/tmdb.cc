@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <exception>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <thread>
@@ -94,6 +95,30 @@ static std::string fold(const std::string& s)
 		if (std::isalnum(c)) out += static_cast<char>(std::tolower(c));
 	return out;
 	}
+
+// Lower-case words, single-spaced and padded at both ends, so that finding
+// one inside another is a whole-word test. fold() cannot serve here: it would
+// find the band Yes inside "eyes".
+static std::string words(const std::string& s)
+	{
+	std::string out = " ";
+	for (unsigned char c : s) {
+		if (std::isalnum(c))      out += static_cast<char>(std::tolower(c));
+		else if (out.back() != ' ') out += ' ';
+		}
+	if (out.back() != ' ') out += ' ';
+	return out;
+	}
+
+static bool mentions(const std::string& text, const std::string& artist)
+	{
+	std::string a = words(artist);
+	return a.size() > 1 && words(text).find(a) != std::string::npos;
+	}
+
+// The part of the artist check that needs the network, supplied by
+// Tmdb::search() and absent from tmdb_pick().
+using ArtistCheck = std::function<bool(const TmdbMatch&)>;
 
 // "1949-03-02" -> 1949. Anything else -> 0.
 static int year_of(const std::string& date)
@@ -222,7 +247,8 @@ std::optional<std::string> Tmdb::get(const std::string& path,
 
 static std::optional<TmdbMatch> pick_impl(const std::string& results_json,
                                            const std::string& title, int year,
-                                           bool tv)
+                                           bool tv, const std::string& artist,
+                                           const ArtistCheck& check)
 	{
 	auto j = nlohmann::json::parse(results_json, nullptr, false);
 	if (j.is_discarded() || !j.contains("results") || !j["results"].is_array())
@@ -232,6 +258,27 @@ static std::optional<TmdbMatch> pick_impl(const std::string& results_json,
 	int n = std::min(static_cast<int>(results.size()), MAX_CANDIDATES);
 
 	std::string want = fold(title);
+
+	// Evaluated last in every test below, so the credits request is only made
+	// for a candidate the title has already accepted.
+	auto by_artist = [&](const TmdbMatch& m) {
+		if (artist.empty()) return true;
+		if (mentions(m.title, artist) || mentions(m.overview, artist)) return true;
+		return check && check(m);
+		};
+
+	// "Queen: Live at Wembley" for "Live at Wembley" under Queen. The artist
+	// is inside the title, so nothing else needs verifying, and a year only
+	// rejects when both sides have one.
+	if (!artist.empty()) {
+		std::string both = fold(artist) + want;
+		for (int i = 0; i < n; ++i) {
+			TmdbMatch m = match_from(results[i], tv);
+			if (fold(m.title) != both) continue;
+			if (year > 0 && m.year > 0 && std::abs(m.year - year) > 1) continue;
+			return m;
+			}
+		}
 
 	if (year > 0) {
 		// A year within one is a match. The gap is normal - TMDB records the
@@ -245,7 +292,7 @@ static std::optional<TmdbMatch> pick_impl(const std::string& results_json,
 		for (int i = 0; i < n; ++i) {
 			TmdbMatch m = match_from(results[i], tv);
 			if (m.year > 0 && std::abs(m.year - year) <= 1
-			    && fold(m.title) == want) return m;
+			    && fold(m.title) == want && by_artist(m)) return m;
 			}
 		// Then containment, which is what accepts a dropped article or a
 		// dropped subtitle ("Intouchables" against "The Intouchables"). Only
@@ -258,11 +305,13 @@ static std::optional<TmdbMatch> pick_impl(const std::string& results_json,
 			const std::string& small = want.size() < have.size() ? want : have;
 			const std::string& large = want.size() < have.size() ? have : want;
 			if (small.size() >= MIN_CONTAIN_FOLD
-			    && large.find(small) != std::string::npos) return m;
+			    && large.find(small) != std::string::npos
+			    && by_artist(m)) return m;
 			}
 		std::cout << stamp() << "tmdb: no title and year match for \"" << title
-		          << "\" (" << year << ") in " << n << " result(s)"
-		          << std::endl;
+		          << "\" (" << year << ")"
+		          << (artist.empty() ? "" : " by " + artist)
+		          << " in " << n << " result(s)" << std::endl;
 		return std::nullopt;
 		}
 
@@ -272,11 +321,12 @@ static std::optional<TmdbMatch> pick_impl(const std::string& results_json,
 	// signal that it is wrong - which is worse than leaving it bare.
 	for (int i = 0; i < n; ++i) {
 		TmdbMatch m = match_from(results[i], tv);
-		if (fold(m.title) == want) return m;
+		if (fold(m.title) == want && by_artist(m)) return m;
 		}
 	std::cout << stamp() << "tmdb: no exact title match for \"" << title
-	          << "\" (no year to check against) in " << n << " result(s)"
-	          << std::endl;
+	          << "\" (no year to check against)"
+	          << (artist.empty() ? "" : " by " + artist)
+	          << " in " << n << " result(s)" << std::endl;
 	return std::nullopt;
 	}
 
@@ -285,18 +335,26 @@ static std::optional<TmdbMatch> pick_impl(const std::string& results_json,
 // error and a 404 as "no match"; an unreadable body is the same answer. The
 // catch is here and not around the caller so that whatever a future field does
 // cannot escape into the scanner, which runs in a detached thread.
-std::optional<TmdbMatch> tmdb_pick(const std::string& results_json,
-                                    const std::string& title, int year,
-                                    bool tv)
+static std::optional<TmdbMatch> pick_safe(const std::string& results_json,
+                                           const std::string& title, int year,
+                                           bool tv, const std::string& artist,
+                                           const ArtistCheck& check)
 	{
 	try {
-		return pick_impl(results_json, title, year, tv);
+		return pick_impl(results_json, title, year, tv, artist, check);
 		}
 	catch (const std::exception& e) {
 		std::cout << stamp() << "tmdb: unreadable search response for \""
 		          << title << "\": " << e.what() << std::endl;
 		return std::nullopt;
 		}
+	}
+
+std::optional<TmdbMatch> tmdb_pick(const std::string& results_json,
+                                    const std::string& title, int year,
+                                    bool tv, const std::string& artist)
+	{
+	return pick_safe(results_json, title, year, tv, artist, {});
 	}
 
 // The id->name lists, fetched once. Both types go into one map: they share an
@@ -372,10 +430,47 @@ void Tmdb::resolve_genres(TmdbMatch& m) const
 		}
 	}
 
+bool Tmdb::credited(const TmdbMatch& m, const std::string& artist) const
+	{
+	auto body = get(std::string("/3/") + (m.is_tv ? "tv/" : "movie/")
+	                + std::to_string(m.id) + "/credits", "");
+	if (!body) return false;
+	// Equality, not containment: the artist Queen is not Queen Latifah.
+	const std::string want = words(artist);
+	try {
+		auto j = nlohmann::json::parse(*body, nullptr, false);
+		for (const char* part : { "cast", "crew" })
+			if (const auto& ps = jsub(j, part); ps.is_array())
+				for (const auto& p : ps)
+					if (words(jstr(p, "name")) == want) return true;
+		}
+	catch (const std::exception& e) {
+		std::cout << stamp() << "tmdb: unreadable credits for id " << m.id
+		          << ": " << e.what() << std::endl;
+		}
+	return false;
+	}
+
 std::optional<TmdbMatch> Tmdb::search(const std::string& title, int year,
-                                       bool tv) const
+                                       bool tv, const std::string& artist) const
 	{
 	if (!configured() || title.empty()) return std::nullopt;
+
+	// Both queries can offer the same candidate, and a credits answer does
+	// not change between them.
+	std::map<int, bool> credited_ids;
+	ArtistCheck check;
+	if (!artist.empty())
+		check = [&](const TmdbMatch& m) {
+			auto it = credited_ids.find(m.id);
+			if (it == credited_ids.end())
+				it = credited_ids.emplace(m.id, credited(m, artist)).first;
+			return it->second;
+			};
+
+	std::vector<std::string> queries;
+	if (!artist.empty()) queries.push_back(artist + " " + title);
+	queries.push_back(title);
 
 	// The year is deliberately *not* sent as a query parameter. TMDB treats it
 	// as a hard filter, so a film whose release year differs from the one in
@@ -385,14 +480,19 @@ std::optional<TmdbMatch> Tmdb::search(const std::string& title, int year,
 	// encode_query_component, not encode_uri: the latter leaves '&' and '='
 	// alone, which a film title can contain. space_as_plus=false keeps the
 	// %20 spelling the pinned 0.18 encoder produced.
-	std::string q = "query=" + httplib::encode_query_component(title, false)
-	              + "&include_adult=false";
-	auto body = get(std::string("/3/search/") + (tv ? "tv" : "movie"), q);
-	if (!body) return std::nullopt;
+	for (const auto& text : queries) {
+		std::string q = "query=" + httplib::encode_query_component(text, false)
+		              + "&include_adult=false";
+		auto body = get(std::string("/3/search/") + (tv ? "tv" : "movie"), q);
+		if (!body) continue;
 
-	auto m = tmdb_pick(*body, title, year, tv);
-	if (m) resolve_genres(*m);
-	return m;
+		auto m = pick_safe(*body, title, year, tv, artist, check);
+		if (m) {
+			resolve_genres(*m);
+			return m;
+			}
+		}
+	return std::nullopt;
 	}
 
 std::optional<TmdbMatch> Tmdb::by_id(int id, bool tv) const

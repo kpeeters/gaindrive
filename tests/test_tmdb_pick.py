@@ -22,9 +22,9 @@ import sys
 BINARY = sys.argv[1] if len(sys.argv) > 1 else "./build/gaindrive"
 
 
-def movie(mid, title, date):
+def movie(mid, title, date, overview="x"):
     return {"id": mid, "title": title, "release_date": date,
-            "overview": "x", "poster_path": "/x.jpg", "genre_ids": []}
+            "overview": overview, "poster_path": "/x.jpg", "genre_ids": []}
 
 
 def body(*movies):
@@ -82,13 +82,43 @@ CASES = [
      None),
 ]
 
+# Under a music root the performer is known, and a candidate must show it.
+# (label, query title, query year, artist, response body, expected id or None)
+ARTIST_CASES = [
+    ("the artist-prefixed title is accepted outright",
+     "Live at Wembley", 0, "Queen",
+     body(movie(1, "Queen: Live at Wembley", "1986-07-12")),
+     1),
+    ("a bare title with the artist in the overview",
+     "Live at Wembley", 1986, "Queen",
+     body(movie(2, "Live at Wembley", "1986-07-12",
+                "Queen play Wembley Stadium in 1986.")),
+     2),
+    ("a bare title with no sign of the artist is another band's film",
+     "Live at Wembley", 1986, "Queen",
+     body(movie(3, "Live at Wembley", "1986-06-01",
+                "The other band's stadium show.")),
+     None),
+    ("a short artist name is matched as a word, not inside one",
+     "Close to the Edge", 0, "Yes",
+     body(movie(4, "Close to the Edge", "",
+                "Before their eyes the stage fills.")),
+     None),
+    ("the artist-prefixed title rejects a year far off",
+     "Live at Wembley", 1986, "Queen",
+     body(movie(5, "Queen: Live at Wembley", "2003-01-01")),
+     None),
+]
+
 
 def run():
     failed = 0
-    for label, title, year, resp, want in CASES:
+    cases = [(l, t, y, "", r, w) for (l, t, y, r, w) in CASES] + ARTIST_CASES
+    for label, title, year, artist, resp, want in cases:
         try:
             p = subprocess.run(
-                [BINARY, "--tmdb-pick-test", title, "--tmdb-year", str(year)],
+                [BINARY, "--tmdb-pick-test", title, "--tmdb-year", str(year)]
+                + (["--tmdb-artist", artist] if artist else []),
                 input=resp, capture_output=True, text=True, timeout=30)
         except FileNotFoundError:
             print(f"FAIL  no binary at {BINARY}; pass its path as the first "
@@ -113,7 +143,7 @@ def run():
             print(f"FAIL  {label!r}: expected id {want}, got {verdict!r}")
             failed += 1
 
-    print(f"\n{len(CASES) - failed}/{len(CASES)} cases passed")
+    print(f"\n{len(cases) - failed}/{len(cases)} cases passed")
     return 1 if failed else 0
 
 

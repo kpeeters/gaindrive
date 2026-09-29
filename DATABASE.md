@@ -440,7 +440,9 @@ CREATE TABLE artist_art (
 -- tomorrow would get the same answer.
 CREATE TABLE video_meta (
     path        TEXT PRIMARY KEY,   -- "<root>/<rest>"
-    query       TEXT NOT NULL,      -- "title|year|type"
+    query       TEXT NOT NULL,      -- "title|year|type",
+                                    -- plus "|artist" under
+                                    -- an artist root
     media_type  TEXT NOT NULL,      -- movie | tv
     tmdb_id     INTEGER,
     title       TEXT,

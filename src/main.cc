@@ -523,7 +523,7 @@ static int run_video_name_test(const std::string& target)
 // of this feature that decides whether a poster is right or confidently wrong,
 // so being able to try a name without running a scan is what it is for.
 static int run_tmdb_test(const std::string& title, int year, bool tv,
-                          const std::string& key)
+                          const std::string& artist, const std::string& key)
 	{
 	Tmdb tmdb(key);
 	if (!tmdb.configured()) {
@@ -531,7 +531,7 @@ static int run_tmdb_test(const std::string& title, int year, bool tv,
 		             "client's Settings screen.\n";
 		return 1;
 		}
-	auto m = tmdb.search(title, year, tv);
+	auto m = tmdb.search(title, year, tv, artist);
 	if (!m) {
 		std::cout << "no confident match for \"" << title << "\""
 		          << (year ? " (" + std::to_string(year) + ")" : "") << "\n";
@@ -554,11 +554,12 @@ static int run_tmdb_test(const std::string& title, int year, bool tv,
 // --tmdb-pick-test: the matching rule against a canned search response on
 // stdin, with no network and no key. tmdb_pick() is split off Tmdb exactly
 // so this seam exists; a wrong poster comes from this rule and nowhere else.
-static int run_tmdb_pick_test(const std::string& title, int year, bool tv)
+static int run_tmdb_pick_test(const std::string& title, int year, bool tv,
+                               const std::string& artist)
 	{
 	std::string body((std::istreambuf_iterator<char>(std::cin)),
 	                  std::istreambuf_iterator<char>());
-	auto m = tmdb_pick(body, title, year, tv);
+	auto m = tmdb_pick(body, title, year, tv, artist);
 	if (!m) {
 		std::cout << "(no match)\n";
 		return 0;
@@ -705,7 +706,8 @@ int main(int argc, char* argv[])
 		("tmdb-year",     "Year for --tmdb-test", cxxopts::value<int>()->default_value("0"))
 		("tmdb-key",      "API key for --tmdb-test (default: the stored setting)", cxxopts::value<std::string>())
 		("tmdb-tv",       "Search series rather than films for --tmdb-test")
-		("tmdb-pick-test","Pick from a TMDB search response on stdin and exit; honours --tmdb-year and --tmdb-tv", cxxopts::value<std::string>())
+		("tmdb-artist",   "Performer the video is filed under, for --tmdb-test and --tmdb-pick-test", cxxopts::value<std::string>()->default_value(""))
+		("tmdb-pick-test","Pick from a TMDB search response on stdin and exit; honours --tmdb-year, --tmdb-tv and --tmdb-artist", cxxopts::value<std::string>())
 		("url-fetch-test","Show which handler claims one URL and what would be run, then exit", cxxopts::value<std::string>())
 		("no-scan",    "Skip startup filesystem scan")
 		("debug",      "Print all API responses to stdout")
@@ -749,7 +751,8 @@ int main(int argc, char* argv[])
 	if (args.count("tmdb-pick-test"))
 		return run_tmdb_pick_test(args["tmdb-pick-test"].as<std::string>(),
 		                           args["tmdb-year"].as<int>(),
-		                           args.count("tmdb-tv") > 0);
+		                           args.count("tmdb-tv") > 0,
+		                           args["tmdb-artist"].as<std::string>());
 
 	// Also before any database or root: asking one device whether it is there
 	// needs neither, and this is the check that says whether an address put in
@@ -1152,7 +1155,8 @@ int main(int argc, char* argv[])
 			}
 		return run_tmdb_test(args["tmdb-test"].as<std::string>(),
 		                      args["tmdb-year"].as<int>(),
-		                      args.count("tmdb-tv") > 0, key);
+		                      args.count("tmdb-tv") > 0,
+		                      args["tmdb-artist"].as<std::string>(), key);
 		}
 
 	// After the config read, since the handler table is the thing being tested;

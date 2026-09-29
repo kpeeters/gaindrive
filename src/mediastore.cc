@@ -2652,9 +2652,33 @@ static void make_video_art(MediaStore& store, const VideoArt& art,
 static constexpr int64_t TMDB_ERROR_RETRY_S = 24 * 60 * 60;
 
 // What was asked, stored so a rename can be detected as a different question.
-static std::string tmdb_query_key(const std::string& title, int year, bool tv)
+// The artist is appended only when there is one, so every key cached under a
+// categories root keeps its old spelling and is not asked again.
+static std::string tmdb_query_key(const std::string& title, int year, bool tv,
+                                  const std::string& artist)
 	{
-	return title + "|" + std::to_string(year) + "|" + (tv ? "tv" : "movie");
+	std::string key = title + "|" + std::to_string(year) + "|"
+	                + (tv ? "tv" : "movie");
+	if (!artist.empty()) key += "|" + artist;
+	return key;
+	}
+
+// "Queen: Live at Wembley" filed under Queen reads as "Live at Wembley": the
+// folder above already says whose it is. Anything else is left as TMDB has it.
+static std::string strip_artist_prefix(const std::string& title,
+                                       const std::string& artist)
+	{
+	if (artist.empty() || title.size() <= artist.size()) return title;
+	for (size_t i = 0; i < artist.size(); ++i)
+		if (std::tolower(static_cast<unsigned char>(title[i]))
+		    != std::tolower(static_cast<unsigned char>(artist[i])))
+			return title;
+	std::string rest = title.substr(artist.size());
+	if      (rest.rfind(":", 0) == 0)   rest.erase(0, 1);
+	else if (rest.rfind(" - ", 0) == 0) rest.erase(0, 3);
+	else return title;
+	while (!rest.empty() && rest.front() == ' ') rest.erase(0, 1);
+	return rest.empty() ? title : rest;
 	}
 
 // A parsed title that is nothing but an article. Asking TMDB about it could
@@ -2673,9 +2697,10 @@ static bool bare_article_title(const std::string& title)
 // the outcome either way. Returns the row to act on, matched or not.
 static MediaStore::VideoMetaRow tmdb_lookup(
 	MediaStore& store, const Tmdb& tmdb, const std::string& rel_key,
-	const std::string& title, int year, bool tv, int explicit_id)
+	const std::string& title, int year, bool tv, int explicit_id,
+	const std::string& artist)
 	{
-	std::string query = tmdb_query_key(title, year, tv);
+	std::string query = tmdb_query_key(title, year, tv, artist);
 
 	if (auto cached = store.get_video_meta(rel_key)) {
 		bool stale = cached->status == "error"
@@ -2701,7 +2726,7 @@ static MediaStore::VideoMetaRow tmdb_lookup(
 	if (explicit_id > 0)
 		m = tmdb.by_id(explicit_id, tv);
 	else if (!bare_article_title(title))
-		m = tmdb.search(title, year, tv);
+		m = tmdb.search(title, year, tv, artist);
 
 	if (m) {
 		row.status      = "matched";
@@ -2788,8 +2813,12 @@ static bool tmdb_fetch_poster(MediaStore& store, const Tmdb& tmdb,
 // only remedy the client offers. It is recorded in the client DB rather than
 // beside the album because the music DB is a cache: a rebuild would otherwise
 // throw the choice away and let the wrong poster win all over again.
+//
+// `artist` is the level-1 folder when that is a performer, and empty under a
+// categories root, where level 1 is a section and would only mislead TMDB.
 static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
-                              std::vector<AlbumReadData>& albums)
+                              std::vector<AlbumReadData>& albums,
+                              const std::string& artist)
 	{
 	for (auto& adat : albums) {
 		// The first video in sort order: the one whose path carries the album's
@@ -2829,8 +2858,9 @@ static void lookup_video_meta(MediaStore& store, const Tmdb& tmdb,
 			// file's own path - the very key the per-file lookup used, so
 			// every cached match and every cached rejection survives.
 			auto row = tmdb_lookup(store, tmdb, store.rel_path(adat.path),
-			                        title, year, is_tv, explicit_id);
+			                        title, year, is_tv, explicit_id, artist);
 			if (row.status != "matched") continue;
+			row.title = strip_artist_prefix(row.title, artist);
 
 			adat.tmdb_title = row.title;
 			adat.tmdb_year  = row.year;
@@ -3666,10 +3696,11 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	const std::set<std::string> chapter_keys = load_chapter_keys(prefix);
 
 	// ---- Phase 3c: identify films and series online (no lock) ----
-	// Only under a categories root. A concert or a music video sitting under a
-	// performer stays local: both layouts are L1/L2/files and the scanner
-	// cannot tell a concert film from a documentary by shape, which is the
-	// same reason is_category_folder() exists - pointed the other way.
+	// Under every root type: what a root's type changes is only what level 1
+	// means. Under a performer the folder name is half the question, which
+	// makes a concert film easier to identify rather than harder, and
+	// tmdb_pick() insists on seeing that name. Under a categories root level 1
+	// is a section and is left out of the question altogether.
 	//
 	// **Started here, before Phase 3, and joined after it.**  This is the only
 	// phase whose cost is not the disk's - 250 ms of deliberate pacing plus a
@@ -3692,7 +3723,9 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// one video. Both tiers are off by default, so the common case overlaps and
 	// the configured case keeps exactly the behaviour it had.
 	const bool art_on   = video_art_ && video_art_->enabled();
-	const bool want_tmdb = tmdb_.configured() && root->cfg.type == "categories";
+	const bool want_tmdb = tmdb_.configured();
+	const std::string tmdb_artist = root->cfg.type == "categories"
+	    ? std::string() : artist_path.filename().string();
 
 	std::thread        tmdb_thread;
 	std::exception_ptr tmdb_err;
@@ -3709,7 +3742,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 			// Caught rather than allowed to escape: this is a thread's
 			// top-level function, so a contended store_video_meta() would be
 			// std::terminate instead of the "Scan aborted" it is today.
-			try { lookup_video_meta(*this, tmdb_, albums); }
+			try { lookup_video_meta(*this, tmdb_, albums, tmdb_artist); }
 			catch (...) { tmdb_err = std::current_exception(); }
 			});
 
@@ -3770,7 +3803,7 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// the order they have always had. See the note above Phase 3.
 	if (want_tmdb && art_on) {
 		PhaseTimer pt(scan_times_.tmdb);
-		lookup_video_meta(*this, tmdb_, albums);
+		lookup_video_meta(*this, tmdb_, albums, tmdb_artist);
 		}
 
 	// ---- Phase 4: short write txns ----
@@ -4226,9 +4259,12 @@ void MediaStore::scan_root_files(const RootRec& root)
 	// No wrapping and no special case left: these *are* albums, and every one
 	// of them is a file-album, which is the case lookup_video_meta() now
 	// handles as its ordinary one.
-	if (tmdb_.configured() && root.cfg.type == "categories") {
+	//
+	// No artist: the root's own name stands in for one here, and "music" is
+	// nobody's name.
+	if (tmdb_.configured()) {
 		PhaseTimer pt(scan_times_.tmdb);
-		lookup_video_meta(*this, tmdb_, albums);
+		lookup_video_meta(*this, tmdb_, albums, "");
 		}
 
 	// ---- Phase 4: write ----
@@ -4503,8 +4539,12 @@ void MediaStore::refresh_album(const std::string& rel)
 	// ---- Phases 3b and 3c, serial, in the order the art_on path keeps ----
 	if (video_art_ && video_art_->enabled())
 		make_video_art(*this, *video_art_, albums, rel + "%");
-	if (tmdb_.configured() && root->cfg.type == "categories")
-		lookup_video_meta(*this, tmdb_, albums);
+	if (tmdb_.configured()) {
+		const bool at_root = fs::path(rel).parent_path() == fs::path(root->cfg.name);
+		const std::string artist = at_root || root->cfg.type == "categories"
+		    ? std::string() : abs.parent_path().filename().string();
+		lookup_video_meta(*this, tmdb_, albums, artist);
+		}
 
 	// ---- Phase 4: parent rows, then the one album ----
 	int parent_folder_id, artist_id;

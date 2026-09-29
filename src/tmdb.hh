@@ -52,9 +52,15 @@ struct TmdbMatch
 // or an API key - this is where a wrong poster would come from, so it is the
 // part worth being able to test directly. `results_json` is a TMDB search
 // response body.
+//
+// A non-empty `artist` is the level-1 folder of a music root. A concert film
+// is often titled "Artist: Title", so that form is accepted outright; any
+// other candidate must also name the artist in its title or overview. Without
+// that, "Live at Wembley" under one band takes another band's film. The
+// credits check Tmdb::search() adds is the one part that needs the network.
 std::optional<TmdbMatch> tmdb_pick(const std::string& results_json,
                                    const std::string& title, int year,
-                                   bool tv);
+                                   bool tv, const std::string& artist = "");
 
 class Tmdb
 	{
@@ -79,8 +85,13 @@ class Tmdb
 		// thing from nothing being found, and the distinction is the point.
 		// See the rule in tmdb.cc: a wrong poster is worse than none, because
 		// nothing in the UI signals that it is wrong.
+		//
+		// With an artist, "<artist> <title>" is asked first and the bare
+		// title second: TMDB's search ranks the artist-prefixed title far
+		// higher when the artist is in the query.
 		std::optional<TmdbMatch> search(const std::string& title, int year,
-		                                 bool tv) const;
+		                                 bool tv,
+		                                 const std::string& artist = "") const;
 
 		// An explicit [tmdbid=550] from the filename. No verification, because
 		// the user said so - this is the override for whatever the rule above
@@ -118,6 +129,12 @@ class Tmdb
 		// (the detail endpoint supplies them) or when there is nothing to
 		// resolve.
 		void resolve_genres(TmdbMatch& m) const;
+
+		// True when someone in the match's cast or crew is called `artist`.
+		// What catches a solo performer's concert film, whose overview may
+		// name the tour rather than the performer; a band is caught by the
+		// overview instead, since its credits list the members.
+		bool credited(const TmdbMatch& m, const std::string& artist) const;
 
 		// Guards the key (settable while a scan may be reading it), the pacing
 		// clock, the genre map and the two clients below.
