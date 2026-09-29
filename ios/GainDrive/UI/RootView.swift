@@ -95,6 +95,23 @@ struct RootView: View {
 		// rather than a stretched phone, which is the whole
 		// point of taking the Catalyst destination.
 		.tabViewStyle(.sidebarAdaptable)
+		// **On the Mac, the window's top strip is handed to the app.** Left to
+		// the system it is a title bar of its own: transparent above the
+		// sidebar, an opaque grey above everything else. So it was two tones,
+		// and a video - which covers the window - turned only the sidebar's
+		// part black, since nothing the app draws can reach the system's grey.
+		// Hiding the title, with no toolbar, is Catalyst's documented way to
+		// let the content run to the top edge, as Apple's own Catalyst apps
+		// do: the window buttons float over the sidebar, the panes' bars rise
+		// into the strip, and a video fills it.
+		.onAppear {
+			#if targetEnvironment(macCatalyst)
+				for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+					scene.titlebar?.titleVisibility = .hidden
+					scene.titlebar?.toolbar = nil
+				}
+			#endif
+		}
 		// **These are alerts and not a sheet, and that is why they may live
 		// here.** Their content closures capture `player` and `pins` already
 		// resolved in this view's scope, so nothing performs an environment
