@@ -28,6 +28,7 @@ struct MacRootView: View {
 	@State private var section: SidebarItem?
 	@State private var showsInspector = false
 	@State private var columns: NavigationSplitViewVisibility = .all
+	@Environment(PlayerConnection.self) private var player
 	/// Built here for the reason `RootView` gives: a `@State` initial value
 	/// cannot read `@Environment`.
 	@State private var artists: ArtistsViewModel
@@ -53,7 +54,7 @@ struct MacRootView: View {
 			initialValue: SearchViewModel(library: library, selection: selection))
 	}
 
-	enum SidebarItem: CaseIterable, Identifiable {
+	enum SidebarItem: CaseIterable, Identifiable, Hashable {
 		case library, playlists, recents, search, settings
 
 		var id: Self { self }
@@ -110,6 +111,16 @@ struct MacRootView: View {
 			}
 		}
 		.frame(minWidth: 720, minHeight: 480)
+		// For the menu bar; see `MacCommands`.
+		.focusedSceneValue(\.shellSection, $section)
+		.focusedSceneValue(\.showsNowPlaying, $showsInspector)
+		// Space plays and pauses, as in every Mac player. Here rather than as
+		// the menu's key equivalent so a focused text field gets it first.
+		.onKeyPress(.space) {
+			guard player.current != nil else { return .ignored }
+			player.togglePlayPause()
+			return .handled
+		}
 		// One window, so it is always the one on screen.
 		.modifier(VideoPresentation(active: true))
 		// A link opens in Search, which owns a path to push onto, as on iOS.

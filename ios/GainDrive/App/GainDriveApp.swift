@@ -149,6 +149,7 @@ struct GainDriveApp: App {
 			// A slim strip for the traffic lights and the sidebar toggle: the
 			// window has no toolbar content of its own.
 			.windowToolbarStyle(.unifiedCompact)
+			.commands { MacCommands(player: player) }
 		#endif
 
 		#if os(macOS)
