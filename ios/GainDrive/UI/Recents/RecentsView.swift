@@ -27,7 +27,7 @@ struct RecentsView: View {
 			root: { list },
 			destination: { destination($0) },
 			placeholder: { _ in
-				ContentUnavailableView("Choose a track", systemImage: "clock.arrow.circlepath")
+				ContentUnavailableView("Choose an album or a track", systemImage: "clock.arrow.circlepath")
 			}
 		)
 		.task(id: selection.scope) { model.appear() }
@@ -36,12 +36,12 @@ struct RecentsView: View {
 	}
 
 	@ViewBuilder
-	private func content(_ sections: [ServerSection<SongUi>]) -> some View {
-		if sections.isEmpty {
+	private func content(_ content: RecentsContent) -> some View {
+		if content.isEmpty {
 			// Recents is the server's record, so offline there is nothing to
 			// show rather than nothing to have played.
 			EmptyMessage(
-				text: settings.offlineMode ? "Not available offline" : "Nothing played yet",
+				text: settings.offlineMode ? "Not available offline" : "Nothing added or played yet",
 				symbol: "clock.arrow.circlepath")
 		} else {
 			List(selection: PaneSelection.selection($path, level: 0)) {
@@ -53,7 +53,18 @@ struct RecentsView: View {
 					)
 					.listRowSeparator(.hidden)
 				}
-				ForEach(sections) { section in
+				ForEach(content.added) { section in
+					Section {
+						ForEach(section.items) { item in
+							AlbumRow(item: item)
+								.tag(Route.album(item.album.ref, title: item.album.title))
+						}
+					} header: {
+						SectionHeading(text: heading("Recently added", section.server, content))
+							.pinnedHeaderBackground()
+					}
+				}
+				ForEach(content.played) { section in
 					Section {
 						// A track played twice appears twice, so the ref alone
 						// is not a unique identity here.
@@ -61,9 +72,8 @@ struct RecentsView: View {
 							row(item)
 						}
 					} header: {
-						if sections.count > 1 {
-							SectionHeading(text: section.server.displayName).pinnedHeaderBackground()
-						}
+						SectionHeading(text: heading("Recently played", section.server, content))
+							.pinnedHeaderBackground()
 					}
 				}
 			}
@@ -72,9 +82,16 @@ struct RecentsView: View {
 		}
 	}
 
+	/// One heading level only: with several servers the server's name joins
+	/// the section's rather than nesting a second heading under it.
+	private func heading(_ text: String, _ server: ServerConfig, _ content: RecentsContent) -> String {
+		let servers = Set(content.added.map(\.id) + content.played.map(\.id))
+		return servers.count > 1 ? "\(text) · \(server.displayName)" : text
+	}
+
 	private var list: some View {
-		LoadStateBox(state: model.state, onRetry: { model.retry() }) { sections in
-			content(sections)
+		LoadStateBox(state: model.state, onRetry: { model.retry() }) { loaded in
+			content(loaded)
 		}
 		.paneHeader("Recents") {
 			LibrarySelector()

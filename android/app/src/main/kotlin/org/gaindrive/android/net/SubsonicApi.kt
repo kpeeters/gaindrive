@@ -229,6 +229,13 @@ interface SubsonicApi {
 	@GET("rest/getStarred2.view")
 	suspend fun getStarred2(): SubsonicEnvelope<Starred2Body>
 
+	/** Only `type=newest` is used, for the Recents screen's "Recently added". */
+	@GET("rest/getAlbumList2.view")
+	suspend fun getAlbumList2(
+		@Query("type") type: String,
+		@Query("size") size: Int,
+	): SubsonicEnvelope<GetAlbumList2Body>
+
 	// ── Play reporting ──────────────────────────────────────────────────
 
 	/**

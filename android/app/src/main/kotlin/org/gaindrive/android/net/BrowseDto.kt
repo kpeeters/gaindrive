@@ -493,6 +493,18 @@ data class GetPlaylistBody(
 ) : SubsonicBody
 
 @Serializable
+data class AlbumListContainer(
+	val album: List<AlbumDto> = emptyList(),
+)
+
+@Serializable
+data class GetAlbumList2Body(
+	override val status: String = "failed",
+	override val error: SubsonicError? = null,
+	val albumList2: AlbumListContainer? = null,
+) : SubsonicBody
+
+@Serializable
 data class RecentSongsContainer(
 	val song: List<SongDto> = emptyList(),
 )

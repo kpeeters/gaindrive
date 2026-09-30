@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -22,9 +24,18 @@ import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.net.runCatchingCancellable
 import org.gaindrive.android.net.userMessage
 import org.gaindrive.android.playback.PlayerConnection
+import org.gaindrive.android.ui.AlbumUi
 import org.gaindrive.android.ui.Load
 import org.gaindrive.android.ui.SongUi
 import javax.inject.Inject
+
+/** What the Recents screen shows: albums first seen by the scanner, then plays. */
+data class RecentsContent(
+	val added: List<ServerSection<AlbumUi>>,
+	val played: List<ServerSection<SongUi>>,
+) {
+	val isEmpty: Boolean get() = added.isEmpty() && played.isEmpty()
+}
 
 @HiltViewModel
 class RecentsViewModel @Inject constructor(
@@ -38,8 +49,8 @@ class RecentsViewModel @Inject constructor(
 	 * played against it, so ordering them together by timestamp would imply a
 	 * completeness that does not exist.
 	 */
-	private val _state = MutableStateFlow<Load<List<ServerSection<SongUi>>>>(Load.Loading)
-	val state: StateFlow<Load<List<ServerSection<SongUi>>>> = _state.asStateFlow()
+	private val _state = MutableStateFlow<Load<RecentsContent>>(Load.Loading)
+	val state: StateFlow<Load<RecentsContent>> = _state.asStateFlow()
 
 	private val _failures = MutableStateFlow<List<ServerFailure>>(emptyList())
 	val failures: StateFlow<List<ServerFailure>> = _failures.asStateFlow()
@@ -108,24 +119,40 @@ class RecentsViewModel @Inject constructor(
 
 			runCatchingCancellable {
 				val covers = library.coverUrls()
-				library.recentSongs(scope, RECENT_SIZE).map { sections ->
-					sections.map { section ->
+				val (addedResult, playedResult) = coroutineScope {
+					val added = async { library.recentlyAdded(scope, ADDED_SIZE) }
+					val played = async { library.recentSongs(scope, RECENT_SIZE) }
+					added.await() to played.await()
+				}
+				val content = RecentsContent(
+					added = addedResult.items.map { section ->
+						ServerSection(
+							server = section.server,
+							items = section.items.map {
+								AlbumUi(it, covers.url(it.coverArt, COVER_PX))
+							},
+						)
+					},
+					played = playedResult.items.map { section ->
 						ServerSection(
 							server = section.server,
 							items = section.items.map {
 								SongUi(it, covers.url(it.coverArt, COVER_PX))
 							},
 						)
-					}
-				}
+					},
+				)
+				// A server that is down fails both queries; say so once.
+				content to (addedResult.failures + playedResult.failures)
+					.distinctBy { it.server }
 			}.fold(
-				onSuccess = { merged ->
-					if (merged.items.isEmpty() && merged.isPartial) {
-						_state.value = Load.Failed(merged.failures.first().message)
+				onSuccess = { (content, failures) ->
+					if (content.isEmpty && failures.isNotEmpty()) {
+						_state.value = Load.Failed(failures.first().message)
 					} else {
-						_state.value = Load.Ready(merged.items)
+						_state.value = Load.Ready(content)
 					}
-					_failures.value = merged.failures
+					_failures.value = failures
 				},
 				onFailure = {
 					_state.value = Load.Failed(it.userMessage())
@@ -156,6 +183,7 @@ class RecentsViewModel @Inject constructor(
 
 	private companion object {
 		const val RECENT_SIZE = 50
+		const val ADDED_SIZE = 12
 
 		/** Matches the 40dp thumbnail at roughly 3x density. */
 		const val COVER_PX = 144

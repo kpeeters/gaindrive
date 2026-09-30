@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
@@ -17,9 +18,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.gaindrive.android.data.ServerSection
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.ui.claimsFocus
+import org.gaindrive.android.ui.components.AlbumRow
 import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.components.PartialFailureNote
 import org.gaindrive.android.ui.components.RefreshableLoadBox
@@ -86,18 +89,36 @@ fun RecentsScreen(
 				isRefreshing = isRefreshing,
 				onRefresh = viewModel::refresh,
 				onRetry = viewModel::load,
-			) { sections ->
-				if (sections.all { it.items.isEmpty() }) {
-					EmptyMessage("Nothing played yet.")
+			) { content ->
+				if (content.isEmpty) {
+					EmptyMessage("Nothing added or played yet.")
 					return@RefreshableLoadBox
 				}
 
+				// One heading level only: in merged scope the server name joins
+				// the section name rather than nesting a second heading under it.
+				fun heading(text: String, section: ServerSection<*>) =
+					badgeNames[section.server.id]?.let { "$text · $it" } ?: text
+
 				LazyColumn(modifier = Modifier.fillMaxSize().claimsFocus()) {
-					sections.forEach { section ->
-						badgeNames[section.server.id]?.let { name ->
-							item(key = "hdr-${section.server.id.value}") {
-								SectionHeading(name)
-							}
+					content.added.forEach { section ->
+						item(key = "hdr-added-${section.server.id.value}") {
+							SectionHeading(heading("Recently added", section))
+						}
+						items(
+							items = section.items,
+							key = { "added-${it.album.ref.encode()}" },
+						) { row ->
+							AlbumRow(
+								album = row.album,
+								coverUrl = row.coverUrl,
+								onClick = { onOpenAlbum(row.album.ref, row.album.title) },
+							)
+						}
+					}
+					content.played.forEach { section ->
+						item(key = "hdr-played-${section.server.id.value}") {
+							SectionHeading(heading("Recently played", section))
 						}
 						itemsIndexed(
 							items = section.items,

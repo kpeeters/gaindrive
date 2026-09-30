@@ -353,6 +353,21 @@ final class LibraryRepository: Sendable {
 		return MergedResult(items: sections(gathered), failures: gathered.failures)
 	}
 
+	/// Recently added albums, per server. Not mirrored and empty offline, for
+	/// the same reason as `recentSongs`: it is the server's current view.
+	/// Standard Subsonic, so unlike `recentSongs` a refusal is a real failure.
+	func recentlyAdded(scope: BrowseScope, size: Int) async -> MergedResult<[ServerSection<Album>]> {
+		if await offline { return MergedResult(items: []) }
+		let clients = await registry.clientsSnapshot()
+		let gathered = await gather(over: clients.servers(in: scope), clients: clients) {
+			client, config in
+			try await client.newestAlbums(size: size).compactMap {
+				LibraryMapper.album($0, server: config.id)
+			}
+		}
+		return MergedResult(items: sections(gathered), failures: gathered.failures)
+	}
+
 	/// **Not mirrored, and empty offline.** What was recently played is state
 	/// the *server* keeps, per account; a stored copy would be a list frozen at
 	/// whenever it was last fetched, presented as though it were current.

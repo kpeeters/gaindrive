@@ -8,7 +8,26 @@
 
 import Foundation
 
-/// Recently played, per server.
+/// What the Recents screen shows: albums the server first saw recently, then
+/// what was played.
+struct RecentsContent: Equatable, Sendable {
+	var added: [ServerSection<AlbumUi>] = []
+	var played: [ServerSection<SongUi>] = []
+
+	var isEmpty: Bool { added.isEmpty && played.isEmpty }
+}
+
+// The same "empty and partial is failed" rule as the other listings.
+extension MergedResult where Value == RecentsContent {
+	var load: Load<Value> {
+		if items.isEmpty, let first = failures.first {
+			return .failed(first.message)
+		}
+		return .ready(items)
+	}
+}
+
+/// Recently added and recently played, per server.
 ///
 /// Never interleaved by timestamp, however right that would look: each server
 /// only knows what was played against *it*, so one ordering across all of them
@@ -16,7 +35,7 @@ import Foundation
 @MainActor
 @Observable
 final class RecentsViewModel {
-	private(set) var state: Load<[ServerSection<SongUi>]> = .loading
+	private(set) var state: Load<RecentsContent> = .loading
 	private(set) var failures: [ServerFailure] = []
 
 	@ObservationIgnored private let library: LibraryRepository
@@ -52,10 +71,21 @@ final class RecentsViewModel {
 		task?.cancel()
 		task = Task { [library] in
 			let covers = await library.coverUrls()
-			let merged = await library.recentSongs(scope: scope)
+			async let addedResult = library.recentlyAdded(scope: scope, size: 12)
+			async let playedResult = library.recentSongs(scope: scope)
+			let (added, played) = await (addedResult, playedResult)
 			guard !Task.isCancelled else { return }
-			state = merged.map { sections in
-				sections.map { section in
+			let content = RecentsContent(
+				added: added.items.map { section in
+					ServerSection(
+						server: section.server,
+						items: section.items.map {
+							AlbumUi(
+								album: $0,
+								cover: covers.source($0.coverArt, size: CoverSize.thumb))
+						})
+				},
+				played: played.items.map { section in
 					ServerSection(
 						server: section.server,
 						items: section.items.map {
@@ -63,8 +93,13 @@ final class RecentsViewModel {
 								song: $0,
 								cover: covers.source($0.coverArt, size: CoverSize.thumb))
 						})
-				}
-			}.load
+				})
+			// A server that is down fails both queries; say so once.
+			var seen = Set<ServerId>()
+			let merged = MergedResult(
+				items: content,
+				failures: (added.failures + played.failures).filter { seen.insert($0.server).inserted })
+			state = merged.load
 			failures = merged.failures
 		}
 	}

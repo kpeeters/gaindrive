@@ -48,7 +48,7 @@ fun RecentsTab(stack: PaneStack) {
 		},
 		waiting = { level ->
 			PaneWaiting(
-				if (level == 1) "Choose something you played to open its album"
+				if (level == 1) "Choose an album or a track"
 				else "Choose an album to see its tracks"
 			)
 		},

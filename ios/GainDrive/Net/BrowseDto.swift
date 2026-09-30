@@ -305,6 +305,14 @@ struct GetPlaylistBody: Decodable, Sendable {
 	let playlist: PlaylistDto?
 }
 
+struct AlbumListContainer: Decodable, Sendable {
+	@Listed var album: [AlbumDto] = []
+}
+
+struct GetAlbumList2Body: Decodable, Sendable {
+	let albumList2: AlbumListContainer?
+}
+
 struct RecentSongsContainer: Decodable, Sendable {
 	@Listed var song: [SongDto] = []
 }

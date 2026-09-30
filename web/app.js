@@ -2788,9 +2788,11 @@ async function viewRecents() {
    paneReset('pane-albums');
    paneReset('pane-tracks');
 
-   let sr;
+   let sr, ar;
    try {
-      sr = await apiCall('getRecentSongs', {size: 50});
+      [sr, ar] = await Promise.all([
+         apiCall('getRecentSongs', {size: 50}),
+         apiCall('getAlbumList2', {type: 'newest', size: 12})]);
       }
    catch {
       if (!renderStale(gen))
@@ -2799,8 +2801,9 @@ async function viewRecents() {
       }
    if (renderStale(gen)) return;
 
-   const songs = sr.recentSongs?.song ?? [];
-   console.log('[recents] got', songs.length, 'songs');
+   const songs  = sr.recentSongs?.song ?? [];
+   const albums = ar.albumList2?.album ?? [];
+   console.log('[recents] got', songs.length, 'songs,', albums.length, 'albums');
 
    const frag = document.createDocumentFragment();
    const hdr = document.createElement('div');
@@ -2811,13 +2814,28 @@ async function viewRecents() {
    hdr.appendChild(h1);
    frag.appendChild(hdr);
 
-   if (songs.length === 0) {
+   if (songs.length === 0 && albums.length === 0) {
       const msg = document.createElement('p');
       msg.style.color = 'var(--text-dim)';
       msg.style.padding = '1rem';
-      msg.textContent = 'No recently played songs.';
+      msg.textContent = 'Nothing added or played yet.';
       frag.appendChild(msg);
-      } else {
+      }
+
+   if (albums.length > 0) {
+      const h = document.createElement('h2');
+      h.className = 'index-heading';
+      h.textContent = 'Recently added';
+      frag.appendChild(h);
+      for (const album of albums)
+         frag.appendChild(makeAlbumHitRow(album));
+      }
+
+   if (songs.length > 0) {
+      const h = document.createElement('h2');
+      h.className = 'index-heading';
+      h.textContent = 'Recently played';
+      frag.appendChild(h);
       for (const song of songs) {
          const row = document.createElement('div');
          row.className = 'search-song-row';
@@ -9289,6 +9307,37 @@ async function runSearch() {
    renderSearchResults(sr.searchResult3 ?? {}, gen);
 }
 
+// An album row outside its artist's listing, as search and Recents show it:
+// the artist is named on the row, and a click opens the album with the
+// artist pane filled in behind it.
+function makeAlbumHitRow(album) {
+   const row = document.createElement('div');
+   row.className = 'album-row';
+
+   const cover = makeAlbumCover(album);
+
+   const info = document.createElement('div');
+   info.className = 'album-info';
+
+   const title = document.createElement('span');
+   title.className = 'album-title';
+   title.textContent = album.title;
+
+   const meta = document.createElement('span');
+   meta.className = 'album-meta';
+   const parts = [];
+   if (album.artist) parts.push(album.artist);
+   if (album.year)   parts.push(album.year);
+   meta.textContent = parts.join(' · ');
+
+   info.appendChild(title);
+   info.appendChild(meta);
+   row.appendChild(cover);
+   row.appendChild(info);
+   row.addEventListener('click', () => viewTracksFromSearch(album.id, album.title, album.parent, album.artist));
+   return row;
+   }
+
 function renderSearchResults(res, gen) {
    const pane = paneReset('pane-artists', 'search');
    paneReset('pane-albums');
@@ -9354,33 +9403,8 @@ function renderSearchResults(res, gen) {
       h.textContent = 'Albums';
       frag.appendChild(h);
 
-      for (const album of albums) {
-         const row = document.createElement('div');
-         row.className = 'album-row';
-
-         const cover = makeAlbumCover(album);
-
-         const info = document.createElement('div');
-         info.className = 'album-info';
-
-         const title = document.createElement('span');
-         title.className = 'album-title';
-         title.textContent = album.title;
-
-         const meta = document.createElement('span');
-         meta.className = 'album-meta';
-         const parts = [];
-         if (album.artist) parts.push(album.artist);
-         if (album.year)   parts.push(album.year);
-         meta.textContent = parts.join(' · ');
-
-         info.appendChild(title);
-         info.appendChild(meta);
-         row.appendChild(cover);
-         row.appendChild(info);
-         row.addEventListener('click', () => viewTracksFromSearch(album.id, album.title, album.parent, album.artist));
-         frag.appendChild(row);
-         }
+      for (const album of albums)
+         frag.appendChild(makeAlbumHitRow(album));
       }
 
    if (songs.length > 0) {

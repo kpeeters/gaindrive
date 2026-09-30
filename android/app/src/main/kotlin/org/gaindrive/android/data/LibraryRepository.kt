@@ -543,6 +543,16 @@ class LibraryRepository @Inject constructor(
 		}
 
 	/**
+	 * Recently added albums, grouped by server. Standard Subsonic, so unlike
+	 * [recentSongs] a failure here is a real one and is reported as such.
+	 */
+	suspend fun recentlyAdded(scope: BrowseScope, size: Int): MergedResult<List<ServerSection<Album>>> =
+		fanOutSections(scope) { client, config ->
+			client.getAlbumList2("newest", size).requireOk().albumList2?.album.orEmpty()
+				.map { it.toDomain(config.id) }
+		}
+
+	/**
 	 * Reports a play. Failures are swallowed: a lost scrobble costs a play
 	 * count, whereas letting it propagate would interrupt playback - a bad
 	 * trade in a music player.

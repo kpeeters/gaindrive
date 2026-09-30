@@ -251,6 +251,16 @@ extension SubsonicClient {
 
 	// MARK: - Recents
 
+	/// Albums in the order the server first saw them, newest first. Standard
+	/// Subsonic; only `type=newest` is used, by the Recents screen.
+	func newestAlbums(size: Int) async throws -> [AlbumDto] {
+		try await perform(
+			"getAlbumList2",
+			parameters: ["type": "newest", "size": String(size)],
+			expecting: GetAlbumList2Body.self
+		).albumList2?.album ?? []
+	}
+
 	/// A gaindrive extension. A server without it answers an error, which the
 	/// repository degrades to an empty section rather than a failure - the
 	/// feature being absent is not the server being down.
