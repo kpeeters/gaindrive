@@ -57,7 +57,7 @@ struct PlaybackSettingsView: View {
 					""")
 			}
 		}
-		.navigationTitle("Playback")
+		.paneHeader("Playback")
 		.inlineTitle()
 	}
 

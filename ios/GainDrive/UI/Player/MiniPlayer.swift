@@ -211,7 +211,7 @@ extension View {
 /// Entering is the *connection's* decision rather than a row handler's, which
 /// is what makes a video reached by the queue advancing behave like one that
 /// was tapped.
-private struct VideoPresentation: ViewModifier {
+struct VideoPresentation: ViewModifier {
 	let active: Bool
 
 	@Environment(PlayerConnection.self) private var player

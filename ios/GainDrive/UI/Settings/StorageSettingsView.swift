@@ -113,7 +113,7 @@ struct StorageSettingsView: View {
 				.disabled(pins.pins.isEmpty)
 			}
 		}
-		.navigationTitle("Storage")
+		.paneHeader("Storage")
 		.inlineTitle()
 		// Re-reads what each pin covers, which is what makes a pinned playlist
 		// pick up a track added since it was pinned.

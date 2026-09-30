@@ -190,7 +190,7 @@ private struct ArtistsList: View {
 		LoadStateBox(state: model.state, onRetry: { model.retry() }) { listing in
 			content(listing)
 		}
-		.navigationTitle(uploads ? "Uploads" : "Library")
+		.paneHeader(uploads ? "Uploads" : "Library")
 		.toolbar {
 			// Uploads replaces the listing at the root, so the way back to the
 			// library is a button where a back button would be - first.

@@ -28,15 +28,12 @@ struct PlaylistDetailView: View {
 				ProgressView()
 			}
 		}
-		.navigationTitle(playlistName)
-		.inlineTitle()
 		// The pin is on the playlist, not on its current tracks, so a track
 		// added later is covered too; see `Pin`.
-		.toolbar {
-			ToolbarItem(placement: .trailingBar) {
-				DownloadControl(pin: Pin(ref: ref, kind: .playlist, name: playlistName))
-			}
+		.paneHeader(playlistName) {
+			DownloadControl(pin: Pin(ref: ref, kind: .playlist, name: playlistName))
 		}
+		.inlineTitle()
 		.task {
 			if model == nil, let library {
 				model = PlaylistDetailViewModel(library: library, ref: ref)

@@ -26,7 +26,7 @@ struct LibrarySettingsView: View {
 				)
 			}
 		}
-		.navigationTitle("Library")
+		.paneHeader("Library")
 		.inlineTitle()
 	}
 }

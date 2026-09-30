@@ -45,20 +45,15 @@ struct AlbumDetailView: View {
 				ProgressView()
 			}
 		}
-		.navigationTitle(albumTitle)
-		.inlineTitle()
-		.toolbar {
-			ToolbarItem(placement: .trailingBar) {
-				DownloadControl(pin: Pin(ref: ref, kind: .album, name: albumTitle))
-			}
+		.paneHeader(albumTitle) {
+			DownloadControl(pin: Pin(ref: ref, kind: .album, name: albumTitle))
 			if fromUploads {
-				ToolbarItem(placement: .trailingBar) {
-					UploadActionsMenu(
-						album: ref, albumTitle: albumTitle,
-						artistName: model?.state.value?.album.artistName)
-				}
+				UploadActionsMenu(
+					album: ref, albumTitle: albumTitle,
+					artistName: model?.state.value?.album.artistName)
 			}
 		}
+		.inlineTitle()
 		.task {
 			if model == nil, let library {
 				model = AlbumDetailViewModel(library: library, ref: ref)

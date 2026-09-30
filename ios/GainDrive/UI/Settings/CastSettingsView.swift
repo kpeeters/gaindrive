@@ -41,17 +41,14 @@ struct CastSettingsView: View {
 			discoveredSection
 			manualSection
 		}
-		.navigationTitle("Casting")
-		.inlineTitle()
-		.toolbar {
-			ToolbarItem(placement: .trailingBar) {
-				Button {
-					editing = ManualCastDevice(address: "", name: "")
-				} label: {
-					Label("Add a device", systemImage: "plus")
-				}
+		.paneHeader("Casting") {
+			Button {
+				editing = ManualCastDevice(address: "", name: "")
+			} label: {
+				Label("Add a device", systemImage: "plus")
 			}
 		}
+		.inlineTitle()
 		.sheet(item: $editing) { device in
 			CastDeviceEditor(device: device) { store.save($0) }
 		}

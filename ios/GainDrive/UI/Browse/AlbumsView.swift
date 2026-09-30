@@ -47,13 +47,10 @@ struct AlbumsView: View {
 				ProgressView()
 			}
 		}
-		.navigationTitle(artistName)
-		.inlineTitle()
-		.toolbar {
-			if let model {
-				ToolbarItem(placement: .trailingBar) { sortMenu(model) }
-			}
+		.paneHeader(artistName) {
+			if let model { sortMenu(model) }
 		}
+		.inlineTitle()
 		.task {
 			// Built here rather than in an initialiser because a `@State`
 			// initial value cannot read `@Environment`. Assigned once, so the

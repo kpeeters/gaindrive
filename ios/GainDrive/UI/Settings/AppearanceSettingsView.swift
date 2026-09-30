@@ -22,7 +22,7 @@ struct AppearanceSettingsView: View {
 			.pickerStyle(.inline)
 			.labelsHidden()
 		}
-		.navigationTitle("Appearance")
+		.paneHeader("Appearance")
 		.inlineTitle()
 	}
 }

@@ -46,9 +46,13 @@ struct NowPlayingView: View {
 			.inlineTitle()
 			.navigationDestination(for: Route.self) { destination($0) }
 			.toolbar {
-				ToolbarItem(placement: .leadingBar) {
-					Button("Done") { dismiss() }
-				}
+				#if os(iOS)
+					// A sheet on iOS; on the Mac this is the inspector, which its
+					// own toggle closes.
+					ToolbarItem(placement: .leadingBar) {
+						Button("Done") { dismiss() }
+					}
+				#endif
 				ToolbarItem(placement: .trailingBar) {
 					// Dragging a row in a `List` needs edit mode; swiping one
 					// away does not. So the button is what reordering costs,
@@ -202,7 +206,11 @@ struct NowPlayingView: View {
 			if player.currentShowsPicture {
 				Button {
 					player.showingVideo = true
-					dismiss()
+					// Only the iOS sheet stands in the cover's way; the Mac's
+					// inspector stays open beside the video window.
+					#if os(iOS)
+						dismiss()
+					#endif
 				} label: {
 					Image(systemName: "film")
 				}

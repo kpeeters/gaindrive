@@ -25,7 +25,7 @@ struct SearchView: View {
 			path: $path, maxLevels: 3,
 			root: {
 				content
-					.navigationTitle("Search")
+					.paneHeader("Search")
 					.toolbar {
 						ToolbarItem(placement: .leadingBar) { LibrarySelector() }
 					}

@@ -93,7 +93,7 @@ struct SettingsView: View {
 					.foregroundStyle(.secondary)
 			}
 		}
-		.navigationTitle("Settings")
+		.paneHeader("Settings")
 	}
 
 	@ViewBuilder

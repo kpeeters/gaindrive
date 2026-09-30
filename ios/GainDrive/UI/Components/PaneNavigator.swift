@@ -63,6 +63,18 @@ struct PaneNavigator<R: Hashable, Root: View, Destination: View, Placeholder: Vi
 	@ViewBuilder let placeholder: (Int) -> Placeholder
 
 	var body: some View {
+		#if os(macOS)
+			// Plain panes with a header row each; no stacks, no bars. See
+			// `MacPaneRow`.
+			MacPaneRow(
+				path: $path, maxLevels: maxLevels, root: root, destination: destination,
+				placeholder: placeholder)
+		#else
+			stackOrPanes
+		#endif
+	}
+
+	private var stackOrPanes: some View {
 		GeometryReader { geometry in
 			let panes = min(PaneMath.count(width: geometry.size.width), maxLevels)
 			if panes <= 1 {

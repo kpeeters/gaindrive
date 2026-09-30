@@ -17,12 +17,7 @@ struct RootView: View {
 	/// their first server, resetting the navigation stack mid-task.
 	let firstRun: Bool
 
-	@Environment(PlayerConnection.self) private var player
-	@Environment(PinRepository.self) private var pins
-	@Environment(ServerRegistry.self) private var registry
 	@State private var tab: Destination
-	/// Why a track link could not be followed.
-	@State private var linkMessage: String?
 	/// The tab-root view model is built here rather than inside `ArtistsView`
 	/// because a `@State` initial value cannot read `@Environment`, and the
 	/// usual workaround - an optional filled in from `.task` - puts a spinner
@@ -95,63 +90,12 @@ struct RootView: View {
 		// rather than a stretched phone, which is the whole
 		// point of taking the Catalyst destination.
 		.tabViewStyle(.sidebarAdaptable)
-		// **These are alerts and not a sheet, and that is why they may live
-		// here.** Their content closures capture `player` and `pins` already
-		// resolved in this view's scope, so nothing performs an environment
-		// lookup at presentation time. A sheet whose content is a *view* does,
-		// and one presented from a `TabView` under `.sidebarAdaptable` is not
-		// given the environment to look in - which is why the Now Playing sheet
-		// is raised from `MiniPlayer` instead.
-		//
-		// **Playback errors belong to the shell, not to a screen.** They arrive
-		// from the audio session, from an item that failed to load and from the
-		// watchdog, none of which is any one screen's business - and a track
-		// that could not be played leaves no mini player to hang an alert on,
-		// which is exactly when there is something to say.
-		.alert(
-			"Playback problem",
-			isPresented: Binding(
-				get: { player.errorMessage != nil },
-				set: { if !$0 { player.clearError() } })
-		) {
-			Button("OK") { player.clearError() }
-		} message: {
-			Text(player.errorMessage ?? "")
-		}
-		// Pinning is reached from four listings, not only from the album
-		// screen, so a refusal belongs to the shell for the same reason a
-		// playback error does.
-		.alert(
-			"Cannot download that",
-			isPresented: Binding(
-				get: { pins.message != nil }, set: { if !$0 { pins.clearMessage() } })
-		) {
-			Button("OK") { pins.clearMessage() }
-		} message: {
-			Text(pins.message ?? "")
-		}
-		// A shared track link, arriving as `gaindrive://` from the server's
-		// chooser page. Opened in Search, which owns a path to push onto; the
-		// album starts at the track, and at the time the link carried.
-		.onOpenURL { url in
-			guard let link = TrackLink(url) else { return }
-			Task {
-				switch await TrackLinkResolver(registry: registry).resolve(link) {
-				case .album(let ref, let title, let song, let at):
-					tab = .search
-					search.open(.album(ref, title: title, autoPlay: song, autoPlayAt: at))
-				case .failure(let message):
-					linkMessage = message
-				}
-			}
-		}
-		.alert(
-			"Cannot open that link",
-			isPresented: Binding(get: { linkMessage != nil }, set: { if !$0 { linkMessage = nil } })
-		) {
-			Button("OK") { linkMessage = nil }
-		} message: {
-			Text(linkMessage ?? "")
-		}
+		// The shell's alerts and track links, shared with the Mac's root. A
+		// link opens in Search, which owns a path to push onto.
+		.modifier(
+			ShellMessages { route in
+				tab = .search
+				search.open(route)
+			})
 	}
 }

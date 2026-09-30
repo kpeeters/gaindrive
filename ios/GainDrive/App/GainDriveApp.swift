@@ -107,11 +107,21 @@ struct GainDriveApp: App {
 		}
 	}
 
+	/// The Mac has its own shell; see `MacRootView`.
+	@ViewBuilder
+	private var root: some View {
+		#if os(macOS)
+			MacRootView(
+				firstRun: firstRun, library: library, selection: selection, events: events)
+		#else
+			RootView(
+				firstRun: firstRun, library: library, selection: selection, events: events)
+		#endif
+	}
+
 	var body: some Scene {
 		WindowGroup {
-			RootView(
-				firstRun: firstRun, library: library, selection: selection, events: events
-			)
+			root
 			.environment(registry)
 			.environment(settings)
 			.environment(selection)
@@ -137,6 +147,23 @@ struct GainDriveApp: App {
 		}
 
 		#if os(macOS)
+			// Preferences, as every Mac app has them: Cmd-, and the app menu.
+			// Its own scene, so the environment is handed over again.
+			Settings {
+				MacSettingsView(startOnServers: firstRun)
+					.environment(registry)
+					.environment(settings)
+					.environment(selection)
+					.environment(events)
+					.environment(stars)
+					.environment(pins)
+					.environment(player)
+					.environment(castDevices)
+					.environment(fetches)
+					.environment(\.library, library)
+					.preferredColorScheme(settings.themeMode.colorScheme)
+			}
+
 			// The picture, in a window of its own; see `VideoWindow`.
 			Window("Video", id: VideoWindow.id) {
 				VideoWindow()

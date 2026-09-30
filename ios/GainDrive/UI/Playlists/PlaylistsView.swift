@@ -72,7 +72,7 @@ struct PlaylistsView: View {
 		LoadStateBox(state: model.state, onRetry: { model.retry() }) { sections in
 			content(sections)
 		}
-		.navigationTitle("Playlists")
+		.paneHeader("Playlists")
 		.toolbar {
 			ToolbarItem(placement: .leadingBar) { LibrarySelector() }
 			ToolbarItem(placement: .trailingBar) {

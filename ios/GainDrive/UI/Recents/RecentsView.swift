@@ -76,7 +76,7 @@ struct RecentsView: View {
 		LoadStateBox(state: model.state, onRetry: { model.retry() }) { sections in
 			content(sections)
 		}
-		.navigationTitle("Recents")
+		.paneHeader("Recents")
 		.toolbar {
 			ToolbarItem(placement: .leadingBar) { LibrarySelector() }
 			ToolbarItem(placement: .trailingBar) {
