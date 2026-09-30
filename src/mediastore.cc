@@ -6505,8 +6505,10 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 	// GROUP BY needed when aggregating play counts.
 	if (play_count_join) sql += " GROUP BY al.id";
 
-	// ORDER BY.
-	if      (type == "newest")              sql += " ORDER BY al.created DESC";
+	// ORDER BY. created has one-second resolution and a scan inserts many
+	// albums per second; the id tie-break keeps a paged "newest" listing from
+	// repeating or skipping albums across pages.
+	if      (type == "newest")              sql += " ORDER BY al.created DESC, al.id DESC";
 	else if (type == "random")              sql += " ORDER BY RANDOM()";
 	else if (type == "alphabeticalByName")  sql += " ORDER BY al.title COLLATE NOCASE";
 	else if (type == "alphabeticalByArtist")
@@ -6516,7 +6518,7 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 	else if (type == "starred")             sql += " ORDER BY sa.created DESC";
 	else if (type == "byYear")              sql += " ORDER BY al.year";
 	else if (type == "byGenre")             sql += " ORDER BY al.title COLLATE NOCASE";
-	else                                    sql += " ORDER BY al.created DESC"; // fallback
+	else                                    sql += " ORDER BY al.created DESC, al.id DESC"; // fallback
 
 	sql += " LIMIT ? OFFSET ?";
 
