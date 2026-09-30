@@ -24,13 +24,7 @@ struct SearchView: View {
 		PaneNavigator(
 			path: $path, maxLevels: 3,
 			root: {
-				content
-					.paneHeader("Search")
-					.toolbar {
-						ToolbarItem(placement: .leadingBar) { LibrarySelector() }
-					}
-					// On the root, so the field sits in the results pane's bar.
-					.searchable(text: $model.query, prompt: "Artists, albums and tracks")
+				searchRoot
 			},
 			destination: { destination($0) },
 			placeholder: { _ in
@@ -46,6 +40,31 @@ struct SearchView: View {
 			path = [route]
 			model.consumePendingRoute()
 		}
+	}
+
+	/// The results pane. On iOS the field is `.searchable`, in the results
+	/// pane's bar. On the Mac `.searchable` would put it in the window's
+	/// toolbar, above every pane, so there it is a field in this pane's
+	/// header instead.
+	private var searchRoot: some View {
+		#if os(macOS)
+			content
+				.paneHeader("Search") {
+					LibrarySelector()
+				} actions: {
+					TextField("Artists, albums and tracks", text: $model.query)
+						.textFieldStyle(.roundedBorder)
+						.frame(maxWidth: 240)
+				}
+		#else
+			content
+				.paneHeader("Search") {
+					LibrarySelector()
+				} actions: {
+					EmptyView()
+				}
+				.searchable(text: $model.query, prompt: "Artists, albums and tracks")
+		#endif
 	}
 
 	@ViewBuilder

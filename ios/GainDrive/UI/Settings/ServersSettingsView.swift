@@ -73,15 +73,12 @@ struct ServersSettingsView: View {
 			}
 		}
 		.paneHeader("Servers") {
+			if registry.servers.count > 1 { PlatformEditButton() }
+		} actions: {
 			Button {
 				editing = .new
 			} label: {
 				Label("Add server", systemImage: "plus")
-			}
-		}
-		.toolbar {
-			ToolbarItem(placement: .leadingBar) {
-				if registry.servers.count > 1 { PlatformEditButton() }
 			}
 		}
 		.overlay {

@@ -145,25 +145,13 @@ struct GainDriveApp: App {
 				if phase == .active { fetches.start() } else { fetches.stop() }
 			}
 		}
+		#if os(macOS)
+			// A slim strip for the traffic lights and the sidebar toggle: the
+			// window has no toolbar content of its own.
+			.windowToolbarStyle(.unifiedCompact)
+		#endif
 
 		#if os(macOS)
-			// Preferences, as every Mac app has them: Cmd-, and the app menu.
-			// Its own scene, so the environment is handed over again.
-			Settings {
-				MacSettingsView(startOnServers: firstRun)
-					.environment(registry)
-					.environment(settings)
-					.environment(selection)
-					.environment(events)
-					.environment(stars)
-					.environment(pins)
-					.environment(player)
-					.environment(castDevices)
-					.environment(fetches)
-					.environment(\.library, library)
-					.preferredColorScheme(settings.themeMode.colorScheme)
-			}
-
 			// The picture, in a window of its own; see `VideoWindow`.
 			Window("Video", id: VideoWindow.id) {
 				VideoWindow()

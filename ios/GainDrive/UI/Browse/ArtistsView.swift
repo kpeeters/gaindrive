@@ -190,49 +190,41 @@ private struct ArtistsList: View {
 		LoadStateBox(state: model.state, onRetry: { model.retry() }) { listing in
 			content(listing)
 		}
-		.paneHeader(uploads ? "Uploads" : "Library")
-		.toolbar {
+		.paneHeader(uploads ? "Uploads" : "Library") {
 			// Uploads replaces the listing at the root, so the way back to the
 			// library is a button where a back button would be - first.
 			if let onClose {
-				ToolbarItem(placement: .leadingBar) {
-					Button(action: onClose) {
-						Label("Library", systemImage: "chevron.backward")
-					}
+				Button(action: onClose) {
+					Label("Library", systemImage: "chevron.backward")
 				}
 			}
-			ToolbarItem(placement: .leadingBar) { LibrarySelector() }
+			LibrarySelector()
+		} actions: {
 			if uploads {
 				// Where Android and the web put the fetch panel: in the
 				// uploads, which is where a fetch lands.
-				ToolbarItem(placement: .trailingBar) {
-					Button {
-						fetching = true
-					} label: {
-						Label("Fetch from a URL", systemImage: "link.badge.plus")
-					}
+				Button {
+					fetching = true
+				} label: {
+					Label("Fetch from a URL", systemImage: "link.badge.plus")
 				}
 			}
 			if let onOpenUploads, model.canUpload {
-				ToolbarItem(placement: .trailingBar) {
-					Button(action: onOpenUploads) {
-						// Not `square.and.arrow.up`, which is the share glyph
-						// and would read as "share this screen": this is the
-						// Android app's Upload icon - putting something into
-						// a holding area.
-						Label("Uploads", systemImage: "tray.and.arrow.up")
-					}
+				Button(action: onOpenUploads) {
+					// Not `square.and.arrow.up`, which is the share glyph and
+					// would read as "share this screen": this is the Android
+					// app's Upload icon - putting something into a holding
+					// area.
+					Label("Uploads", systemImage: "tray.and.arrow.up")
 				}
 			}
-			// Unconditional rather than iOS-only: Mac Catalyst has
-			// `.refreshable` but no gesture that comfortably reaches it, so
-			// without this the Catalyst build has no way to reload at all.
-			ToolbarItem(placement: .trailingBar) {
-				Button {
-					Task { await model.refresh() }
-				} label: {
-					Label("Refresh", systemImage: "arrow.clockwise")
-				}
+			// Unconditional rather than iOS-only: the Mac has `.refreshable`
+			// but no gesture that comfortably reaches it, so without this it
+			// has no way to reload at all.
+			Button {
+				Task { await model.refresh() }
+			} label: {
+				Label("Refresh", systemImage: "arrow.clockwise")
 			}
 		}
 		.task(id: servers.scope) {

@@ -18,13 +18,14 @@ import SwiftUI
 ///
 /// `NavigationSplitView` in its two-column form, because it stops at three
 /// columns and the panes need more; they are `MacPaneRow`, inside the detail.
-/// Settings is not a section: on the Mac it is the Settings window (Cmd-,).
+/// The window's own toolbar is left empty: every control belongs to a pane's
+/// header, as on the other platforms, where no bar spans all the panes.
 struct MacRootView: View {
 	let firstRun: Bool
 
 	/// Optional only because `List(selection:)` wants it so; nil reads as
 	/// Library.
-	@State private var section: SidebarItem? = .library
+	@State private var section: SidebarItem?
 	@State private var showsInspector = false
 	/// Built here for the reason `RootView` gives: a `@State` initial value
 	/// cannot read `@Environment`.
@@ -32,13 +33,14 @@ struct MacRootView: View {
 	@State private var playlists: PlaylistsViewModel
 	@State private var recents: RecentsViewModel
 	@State private var search: SearchViewModel
-	@Environment(\.openSettings) private var openSettings
 
 	init(
 		firstRun: Bool, library: LibraryRepository, selection: ServerSelection,
 		events: LibraryEvents
 	) {
 		self.firstRun = firstRun
+		// Nothing to browse without a server, and the servers are in Settings.
+		_section = State(initialValue: firstRun ? .settings : .library)
 		_artists = State(
 			initialValue: ArtistsViewModel(library: library, selection: selection))
 		_playlists = State(
@@ -51,7 +53,7 @@ struct MacRootView: View {
 	}
 
 	enum SidebarItem: CaseIterable, Identifiable {
-		case library, playlists, recents, search
+		case library, playlists, recents, search, settings
 
 		var id: Self { self }
 
@@ -61,6 +63,7 @@ struct MacRootView: View {
 			case .playlists: "Playlists"
 			case .recents: "Recents"
 			case .search: "Search"
+			case .settings: "Settings"
 			}
 		}
 
@@ -70,6 +73,7 @@ struct MacRootView: View {
 			case .playlists: "music.note.list"
 			case .recents: "clock.arrow.circlepath"
 			case .search: "magnifyingglass"
+			case .settings: "gearshape"
 			}
 		}
 	}
@@ -82,7 +86,8 @@ struct MacRootView: View {
 			.navigationSplitViewColumnWidth(min: 140, ideal: 170, max: 240)
 		} detail: {
 			detail
-				.navigationTitle((section ?? .library).title)
+				// A title here would span all the panes; each names itself.
+				.toolbar(removing: .title)
 		}
 		// Inside the bottom inset, so the inspector ends above the player bar
 		// and the bar spans the whole window, as a transport should.
@@ -105,8 +110,6 @@ struct MacRootView: View {
 				section = .search
 				search.open(route)
 			})
-		// Nothing to browse without a server, and the servers are in Settings.
-		.task { if firstRun { openSettings() } }
 	}
 
 	/// Switched rather than kept alive side by side: a hidden section would
@@ -118,6 +121,7 @@ struct MacRootView: View {
 		case .playlists: PlaylistsView(model: playlists)
 		case .recents: RecentsView(model: recents)
 		case .search: SearchView(model: search)
+		case .settings: SettingsView(startOnServers: firstRun)
 		}
 	}
 }

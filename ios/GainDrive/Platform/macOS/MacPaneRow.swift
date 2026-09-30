@@ -43,8 +43,12 @@ struct MacPaneRow<R: Hashable, Root: View, Destination: View, Placeholder: View>
 				if pane.level > first { Divider() }
 				column(pane.level, leading: pane.level == first)
 					.environment(\.paneCount, panes)
+					.transition(.move(edge: .trailing).combined(with: .opacity))
 			}
 		}
+		// Opening a level slides the panes along and closing one slides them
+		// back, as the per-pane stacks of the iPad layout do.
+		.animation(.default, value: path)
 	}
 
 	private func column(_ level: Int, leading: Bool) -> some View {
@@ -107,6 +111,10 @@ struct PaneHeaderBar: View {
 				}
 				.buttonStyle(.borderless)
 				.accessibilityLabel("Back")
+			}
+			if let leading = value?.leading {
+				HStack(spacing: 8) { leading }
+					.buttonStyle(.borderless)
 			}
 			Text(value?.title ?? "")
 				.font(.headline)

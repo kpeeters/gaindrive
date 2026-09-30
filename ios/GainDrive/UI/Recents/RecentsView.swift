@@ -76,15 +76,13 @@ struct RecentsView: View {
 		LoadStateBox(state: model.state, onRetry: { model.retry() }) { sections in
 			content(sections)
 		}
-		.paneHeader("Recents")
-		.toolbar {
-			ToolbarItem(placement: .leadingBar) { LibrarySelector() }
-			ToolbarItem(placement: .trailingBar) {
-				Button {
-					Task { await model.refresh() }
-				} label: {
-					Label("Refresh", systemImage: "arrow.clockwise")
-				}
+		.paneHeader("Recents") {
+			LibrarySelector()
+		} actions: {
+			Button {
+				Task { await model.refresh() }
+			} label: {
+				Label("Refresh", systemImage: "arrow.clockwise")
 			}
 		}
 	}
