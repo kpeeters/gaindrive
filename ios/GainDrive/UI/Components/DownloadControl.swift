@@ -40,7 +40,9 @@ struct DownloadControl: View {
 		pins.isPinned(pin.ref, kind: pin.kind) ? pins.state(of: pin) : .absent
 	}
 
-	private var icon: some View { DownloadStateIcon(state: state) }
+	/// Accented when idle: here it is a button in a bar, drawn like the bar's
+	/// other buttons, where the plain icon is a state mark.
+	private var icon: some View { DownloadStateIcon(state: state, accented: true) }
 
 	private var label: String {
 		switch state {
@@ -63,12 +65,13 @@ struct DownloadControl: View {
 /// thing that screen is not supposed to do.
 struct DownloadStateIcon: View {
 	let state: DownloadState
+	var accented = false
 
 	var body: some View {
 		switch state {
 		case .absent:
 			Image(systemName: "arrow.down.circle")
-				.foregroundStyle(.secondary)
+				.foregroundStyle(accented ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
 		case .running(let fraction):
 			// Determinate as soon as anything has arrived: a spinner says
 			// "working", a ring says how much longer.

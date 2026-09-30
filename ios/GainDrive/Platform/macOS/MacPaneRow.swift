@@ -126,8 +126,14 @@ struct PaneHeaderBar: View {
 				.lineLimit(1)
 			Spacer(minLength: 8)
 			if let actions = value?.actions {
+				// Icons only, in the app's red, as bar buttons are on iOS; a
+				// header has no room for words beside its title.
 				HStack(spacing: 12) { actions }
-					.buttonStyle(.borderless)
+					.labelStyle(.iconOnly)
+					.buttonStyle(HeaderButtonStyle())
+					.menuStyle(.button)
+					.menuIndicator(.hidden)
+					.tint(Color.accentColor)
 			}
 		}
 		.padding(.horizontal, 12)
@@ -141,6 +147,17 @@ struct PaneHeaderBar: View {
 		.gesture(WindowDragGesture())
 		.allowsWindowActivationEvents(true)
 		.overlay(alignment: .bottom) { Divider() }
+	}
+}
+
+/// A header button: the label alone, in the accent colour, dimmed while
+/// pressed.
+private struct HeaderButtonStyle: ButtonStyle {
+	func makeBody(configuration: Configuration) -> some View {
+		configuration.label
+			.foregroundStyle(Color.accentColor)
+			.opacity(configuration.isPressed ? 0.5 : 1)
+			.contentShape(.rect)
 	}
 }
 
