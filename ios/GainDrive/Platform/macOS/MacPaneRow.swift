@@ -146,7 +146,10 @@ struct PaneHeaderBar: View {
 		.contentShape(.rect)
 		.gesture(WindowDragGesture())
 		.allowsWindowActivationEvents(true)
-		.overlay(alignment: .bottom) { Divider() }
+		// In a VStack of its own: a Divider takes its direction from the
+		// nearest stack, which is otherwise the row of panes, and it drew as a
+		// vertical line through the middle of the header.
+		.overlay(alignment: .bottom) { VStack(spacing: 0) { Divider() } }
 	}
 }
 

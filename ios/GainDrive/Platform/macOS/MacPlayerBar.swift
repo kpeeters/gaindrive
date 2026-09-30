@@ -34,7 +34,8 @@ struct MacPlayerBar: View {
 		.padding(.horizontal, 16)
 		.padding(.vertical, 8)
 		.background(.bar)
-		.overlay(alignment: .top) { Divider() }
+		// In a VStack for the reason `PaneHeaderBar` gives.
+		.overlay(alignment: .top) { VStack(spacing: 0) { Divider() } }
 		.sheet(isPresented: $castPicker) {
 			CastDeviceSheet()
 				.environment(player)
