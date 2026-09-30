@@ -1,4 +1,4 @@
-//	GainDrive for iOS
+//	GainDrive for iOS and macOS
 //	Copyright (C) 2026 Kasper Peeters
 //
 //	This file is part of GainDrive, distributed under the GNU General
@@ -8,11 +8,6 @@
 
 import AVKit
 import SwiftUI
-
-// iOS only for now: the Mac gets its own video surface in phase M2 of
-// `.ai/macos/PLAN.md`, and until then plays a video's soundtrack
-// (`SettingsStore.showsPicture`).
-#if os(iOS)
 
 /// The picture.
 ///
@@ -30,6 +25,11 @@ import SwiftUI
 ///
 /// Leaving does not stop the film - a concert is listened to as often as it is
 /// watched - and the mini player leads back in.
+///
+/// **On the Mac it is a window of its own** (`VideoWindow`) around AppKit's
+/// `AVPlayerView`, which brings the Mac's own controls, full screen and
+/// Picture-in-Picture. The overlays here - captions, chapters, the casting
+/// panel, the stall notice - are the same on both.
 struct VideoView: View {
 	let song: Song
 
@@ -50,7 +50,10 @@ struct VideoView: View {
 	var body: some View {
 		surface
 			.ignoresSafeArea()
-			.overlay(alignment: .topLeading) { close }
+			#if os(iOS)
+				// A window has its own close button; a full-screen cover does not.
+				.overlay(alignment: .topLeading) { close }
+			#endif
 			.overlay(alignment: .topTrailing) { controls }
 			.overlay(alignment: .trailing) { chapterPanel }
 			.overlay { indicator }
@@ -66,10 +69,7 @@ struct VideoView: View {
 				guard !Task.isCancelled else { return }
 				shown = nil
 			}
-			// Nothing is touching the screen while a film plays, so the system
-			// has no other reason to believe anybody is there.
-			.onAppear { UIApplication.shared.isIdleTimerDisabled = true }
-			.onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+			.keepsDisplayAwake()
 			.task(id: song.ref) {
 				chosen = nil
 				cues = []
@@ -309,6 +309,8 @@ struct VideoView: View {
 	}
 }
 
+#if os(iOS)
+
 /// `AVPlayerViewController`, with the cues drawn into its `contentOverlayView`.
 ///
 /// That view exists for content-related overlays, which is what a subtitle is.
@@ -393,4 +395,56 @@ private struct VideoSurface: UIViewControllerRepresentable {
 	}
 }
 
+#else
+
+/// AppKit's `AVPlayerView`, with the Mac's own floating controls, full screen
+/// and Picture-in-Picture, and the cues drawn over it in SwiftUI.
+///
+/// Over it rather than in its `contentOverlayView`: a SwiftUI overlay that
+/// takes no clicks needs no AppKit label to be built and kept in step, and the
+/// Mac's controls float at the bottom, so the cue sits above where they appear.
+/// The side swipes are a touch idiom and have no Mac counterpart; `onAdjust`
+/// is never called here.
+private struct VideoSurface: View {
+	let player: AVPlayer
+	let caption: String?
+	let onAdjust: (SideAdjustment?) -> Void
+
+	var body: some View {
+		PlayerView(player: player)
+			.overlay(alignment: .bottom) {
+				if let caption {
+					Text(caption)
+						.font(.title3)
+						.foregroundStyle(.white)
+						.multilineTextAlignment(.center)
+						// A shadow rather than a plate, as on iOS.
+						.shadow(color: .black, radius: 3)
+						.padding(.horizontal, 24)
+						.padding(.bottom, 72)
+						.allowsHitTesting(false)
+				}
+			}
+	}
+}
+
+private struct PlayerView: NSViewRepresentable {
+	let player: AVPlayer
+
+	func makeNSView(context: Context) -> AVPlayerView {
+		let view = AVPlayerView()
+		view.player = player
+		view.controlsStyle = .floating
+		view.allowsPictureInPicturePlayback = true
+		view.showsFullScreenToggleButton = true
+		view.videoGravity = .resizeAspect
+		return view
+	}
+
+	func updateNSView(_ view: AVPlayerView, context: Context) {
+		if view.player !== player { view.player = player }
+	}
+}
+
 #endif
+

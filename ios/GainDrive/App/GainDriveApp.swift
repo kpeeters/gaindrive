@@ -135,5 +135,17 @@ struct GainDriveApp: App {
 				if phase == .active { fetches.start() } else { fetches.stop() }
 			}
 		}
+
+		#if os(macOS)
+			// The picture, in a window of its own; see `VideoWindow`.
+			Window("Video", id: VideoWindow.id) {
+				VideoWindow()
+					.environment(registry)
+					.environment(settings)
+					.environment(player)
+					.environment(castDevices)
+			}
+			.defaultSize(width: 960, height: 540)
+		#endif
 	}
 }

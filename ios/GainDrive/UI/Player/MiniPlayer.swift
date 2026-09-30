@@ -215,6 +215,9 @@ private struct VideoPresentation: ViewModifier {
 	let active: Bool
 
 	@Environment(PlayerConnection.self) private var player
+	#if os(macOS)
+		@Environment(\.openWindow) private var openWindow
+	#endif
 
 	func body(content: Content) -> some View {
 		#if os(iOS)
@@ -224,8 +227,12 @@ private struct VideoPresentation: ViewModifier {
 				}
 			}
 		#else
-			// No picture on the Mac yet (`.ai/macos/PLAN.md`, M2).
+			// The Mac opens the picture in a window of its own; see
+			// `VideoWindow`. Only the tab on screen asks, as on iOS.
 			content
+				.onChange(of: showing.wrappedValue, initial: true) {
+					if showing.wrappedValue { openWindow(id: VideoWindow.id) }
+				}
 		#endif
 	}
 
