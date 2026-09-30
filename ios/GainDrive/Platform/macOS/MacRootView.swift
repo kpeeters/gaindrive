@@ -27,6 +27,7 @@ struct MacRootView: View {
 	/// Library.
 	@State private var section: SidebarItem?
 	@State private var showsInspector = false
+	@State private var columns: NavigationSplitViewVisibility = .all
 	/// Built here for the reason `RootView` gives: a `@State` initial value
 	/// cannot read `@Environment`.
 	@State private var artists: ArtistsViewModel
@@ -79,15 +80,22 @@ struct MacRootView: View {
 	}
 
 	var body: some View {
-		NavigationSplitView {
+		NavigationSplitView(columnVisibility: $columns) {
 			List(SidebarItem.allCases, selection: $section) { section in
 				Label(section.title, systemImage: section.symbol)
 			}
 			.navigationSplitViewColumnWidth(min: 140, ideal: 170, max: 240)
 		} detail: {
 			detail
-				// A title here would span all the panes; each names itself.
+				// The panes run up into the title bar, so their headers are the
+				// top of the window, as Xcode's editors are; a strip spanning
+				// them all exists on no other platform.
+				.ignoresSafeArea(.container, edges: .top)
+				// With the sidebar collapsed, the traffic lights and the
+				// sidebar toggle sit over the first pane's header.
+				.environment(\.paneHeaderLeadingInset, columns == .detailOnly ? 110 : 0)
 				.toolbar(removing: .title)
+				.toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
 		}
 		// Inside the bottom inset, so the inspector ends above the player bar
 		// and the bar spans the whole window, as a transport should.

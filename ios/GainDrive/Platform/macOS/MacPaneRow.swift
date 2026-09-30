@@ -27,6 +27,8 @@ struct MacPaneRow<R: Hashable, Root: View, Destination: View, Placeholder: View>
 	let destination: (R) -> Destination
 	let placeholder: (Int) -> Placeholder
 
+	@Environment(\.paneHeaderLeadingInset) private var leadingInset
+
 	var body: some View {
 		GeometryReader { geometry in
 			row(min(PaneMath.count(width: geometry.size.width), maxLevels))
@@ -54,7 +56,9 @@ struct MacPaneRow<R: Hashable, Root: View, Destination: View, Placeholder: View>
 	private func column(_ level: Int, leading: Bool) -> some View {
 		content(level)
 			.frame(maxWidth: .infinity, maxHeight: .infinity)
-			.paneHeaderHost(onBack: leading && level > 0 ? { path.removeLast() } : nil)
+			.paneHeaderHost(
+				onBack: leading && level > 0 ? { path.removeLast() } : nil,
+				leadingInset: leading ? leadingInset : 0)
 			.clipped()
 	}
 
@@ -85,12 +89,12 @@ extension View {
 	/// Draws the header this view's screen declared with `.paneHeader`. Its
 	/// room is reserved as a top inset, so a list scrolls beneath it rather
 	/// than starting under it; the header is then drawn over that room.
-	func paneHeaderHost(onBack: (() -> Void)? = nil) -> some View {
+	func paneHeaderHost(onBack: (() -> Void)?, leadingInset: CGFloat) -> some View {
 		safeAreaInset(edge: .top, spacing: 0) {
 			Color.clear.frame(height: PaneHeaderBar.height)
 		}
 		.overlayPreferenceValue(PaneHeaderKey.self, alignment: .top) { value in
-			PaneHeaderBar(value: value, onBack: onBack)
+			PaneHeaderBar(value: value, onBack: onBack, leadingInset: leadingInset)
 		}
 	}
 }
@@ -102,6 +106,7 @@ struct PaneHeaderBar: View {
 
 	let value: PaneHeaderValue?
 	let onBack: (() -> Void)?
+	let leadingInset: CGFloat
 
 	var body: some View {
 		HStack(spacing: 8) {
@@ -126,11 +131,23 @@ struct PaneHeaderBar: View {
 			}
 		}
 		.padding(.horizontal, 12)
+		.padding(.leading, leadingInset)
 		.frame(height: Self.height)
 		.frame(maxWidth: .infinity)
 		.background(.bar)
+		// The headers are where the title bar was, so they are what the window
+		// is moved by; the buttons in them still take their own clicks.
+		.contentShape(.rect)
+		.gesture(WindowDragGesture())
+		.allowsWindowActivationEvents(true)
 		.overlay(alignment: .bottom) { Divider() }
 	}
+}
+
+extension EnvironmentValues {
+	/// Room kept at the leading end of the first pane's header for the window
+	/// controls, which lie over it when the sidebar is collapsed.
+	@Entry var paneHeaderLeadingInset: CGFloat = 0
 }
 
 #endif
