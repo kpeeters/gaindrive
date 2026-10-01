@@ -6520,6 +6520,8 @@ function videoCastPanel(on, note = false) {
    // and close means "stop the film", which while casting is the television's
    // film and not this element's.
    document.getElementById('video-fullscreen').hidden = on;
+   document.getElementById('video-pip').hidden =
+      on || !document.pictureInPictureEnabled;
 }
 
 // Shown rather than a black rectangle that looks broken: the gap before the
@@ -6808,7 +6810,23 @@ function setupVideoSurface() {
    // "Back to tab" keeps playing and wants the picture here again.  Closing
    // the window pauses, and then the surface stays away until play.
    player.videoEl.addEventListener('leavepictureinpicture', () => {
+      player.videoEl.disablePictureInPicture = true;
       if (!player.videoEl.paused) videoSurfaceSet(surf.dataset.state || 'theatre');
+      });
+
+   // Ours rather than the browser's, because Firefox's own PiP is invisible
+   // to the page.  The attribute that turns the browser's off also refuses
+   // this request, and setting it during PiP would close the window, so it
+   // is lifted here and restored only once PiP has ended.  No way back out
+   // is needed: in PiP the surface, and this button with it, is hidden.
+   const pip = document.getElementById('video-pip');
+   pip.hidden = !document.pictureInPictureEnabled;
+   pip.addEventListener('click', () => {
+      player.videoEl.disablePictureInPicture = false;
+      player.videoEl.requestPictureInPicture().catch(err => {
+         player.videoEl.disablePictureInPicture = true;
+         console.warn('[video] picture-in-picture refused', err);
+         });
       });
 
    // Closing the surface dismisses the picture; it does not stop the cast.
