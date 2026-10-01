@@ -604,6 +604,11 @@ void GainDrive::routes_browse()
 					s["minutesAgo"] = e.minutes_ago;
 					s["playerId"]   = ++idx;
 					if (!e.client.empty()) s["playerName"] = e.client;
+					if (!e.state.empty()) {
+						s["state"]        = e.state;
+						s["positionMs"]   = e.position_ms;
+						s["playbackRate"] = e.rate;
+						}
 					arr.push_back(std::move(s));
 					}
 				r["nowPlaying"] = {{"entry", arr}};
@@ -619,6 +624,11 @@ void GainDrive::routes_browse()
 					el->SetAttribute("playerId", ++idx);
 					if (!e.client.empty())
 						el->SetAttribute("playerName", e.client.c_str());
+					if (!e.state.empty()) {
+						el->SetAttribute("state",        e.state.c_str());
+						el->SetAttribute("positionMs",   e.position_ms);
+						el->SetAttribute("playbackRate", e.rate);
+						}
 					np->InsertEndChild(el);
 					}
 				root->InsertEndChild(np);

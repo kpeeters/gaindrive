@@ -555,6 +555,10 @@ class MediaStore {
 			std::string client;      // player name, from scrobble's c= param
 			std::string song_path;   // relative path, for the uploads read check
 			int         minutes_ago = 0;
+			// From reportPlayback; state is empty when only scrobble wrote it.
+			std::string state;
+			int64_t     position_ms = 0;
+			double      rate        = 1.0;
 			};
 
 		std::vector<NowPlayingEntry> get_now_playing();
@@ -902,6 +906,16 @@ class MediaStore {
 		// Records a play. submission=true increments play_counts; false updates now_playing.
 		void scrobble(const std::string& username, const std::string& song_path,
 		              bool submission, const std::string& client);
+
+		// OpenSubsonic reportPlayback. `stopped` removes the user's now-playing
+		// row if it still names this song and client; any other state updates
+		// it and, unless ignore_scrobble, counts the play once it has run past
+		// half the track or four minutes. False for an unknown user.
+		bool report_playback(const std::string& username,
+		                     const std::string& song_path,
+		                     const std::string& client, const std::string& state,
+		                     int64_t position_ms, double rate,
+		                     bool ignore_scrobble);
 
 		// Creates or updates a bookmark for a single song.
 		void create_bookmark(const std::string& username,

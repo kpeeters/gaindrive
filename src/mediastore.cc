@@ -1337,6 +1337,16 @@ void MediaStore::create_schema()
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE client.users ADD COLUMN cast_allowed INTEGER DEFAULT 0"); }
 	catch (const SQLite::Exception&) {}
+	// reportPlayback's timeline. `counted` says the play this row belongs to
+	// has already been scrobbled, so reports past the threshold count it once.
+	try { db_music_.exec("ALTER TABLE client.now_playing ADD COLUMN state TEXT"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE client.now_playing ADD COLUMN position_ms INTEGER"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE client.now_playing ADD COLUMN rate REAL"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE client.now_playing ADD COLUMN counted INTEGER DEFAULT 0"); }
+	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE songs ADD COLUMN is_video INTEGER DEFAULT 0"); }
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE video_art ADD COLUMN poster_path TEXT NOT NULL DEFAULT ''"); }
@@ -6638,6 +6648,7 @@ std::vector<MediaStore::NowPlayingEntry> MediaStore::get_now_playing()
 		"            AS INTEGER),"
 		"       COALESCE(s.artist,'') AS track_artist"
 		+ SONG_VIDEO_COLS_SQL +
+		", np.state, np.position_ms, np.rate"
 		" FROM client.now_playing np"
 		" JOIN client.users u ON u.id = np.user_id"
 		" JOIN songs s ON s.path = np.song_path"
@@ -6674,6 +6685,12 @@ std::vector<MediaStore::NowPlayingEntry> MediaStore::get_now_playing()
 		e.song.video_codec  = q.getColumn(19).isNull() ? "" : q.getColumn(19).getString();
 		e.song.audio_codec  = q.getColumn(20).isNull() ? "" : q.getColumn(20).getString();
 		e.song.season       = q.getColumn(21).getInt();
+		// NULL on a row written by scrobble alone, which carries no timeline.
+		if (!q.getColumn(22).isNull()) {
+			e.state         = q.getColumn(22).getString();
+			e.position_ms   = q.getColumn(23).getInt64();
+			e.rate          = q.getColumn(24).getDouble();
+			}
 		result.push_back(std::move(e));
 		}
 	return result;
@@ -7049,7 +7066,9 @@ void MediaStore::scrobble(const std::string& username, const std::string& song_p
 		ins.bind(2, song_path);
 		ins.exec();
 		} else {
-		// Now-playing notification - update or replace the single row.
+		// Now-playing notification - update or replace the single row. No
+		// timeline: scrobble does not carry one, and a stale one left by an
+		// earlier reportPlayback would describe some other play.
 		SQLite::Statement ins(db_music_,
 			"INSERT OR REPLACE INTO client.now_playing (user_id, song_path, client, started)"
 			" VALUES (?, ?, ?, CURRENT_TIMESTAMP)");
@@ -7058,6 +7077,89 @@ void MediaStore::scrobble(const std::string& username, const std::string& song_p
 		ins.bind(3, client);
 		ins.exec();
 		}
+	}
+
+bool MediaStore::report_playback(const std::string& username,
+                                  const std::string& song_path,
+                                  const std::string& client,
+                                  const std::string& state, int64_t position_ms,
+                                  double rate, bool ignore_scrobble)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	SQLite::Statement uid_q(db_music_, "SELECT id FROM client.users WHERE username = ?");
+	uid_q.bind(1, username);
+	if (!uid_q.executeStep()) return false;
+	int user_id = uid_q.getColumn(0).getInt();
+
+	if (state == "stopped") {
+		// Guarded on song and client: the row is one per user, and the same
+		// account's other device may have taken it over since this one began.
+		SQLite::Statement del(db_music_,
+			"DELETE FROM client.now_playing"
+			" WHERE user_id = ? AND song_path = ? AND COALESCE(client,'') = ?");
+		del.bind(1, user_id);
+		del.bind(2, song_path);
+		del.bind(3, client);
+		del.exec();
+		return true;
+		}
+
+	// A new play resets `counted`; so does a report naming a different song or
+	// client than the row, which is a play whose `starting` we never saw.
+	// Otherwise the row is the same play and keeps its flag.
+	SQLite::Statement up(db_music_,
+		"INSERT INTO client.now_playing"
+		"   (user_id, song_path, client, started, state, position_ms, rate, counted)"
+		" VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, 0)"
+		" ON CONFLICT(user_id) DO UPDATE SET"
+		"   counted     = CASE WHEN ? = 'starting'"
+		"                        OR song_path IS NOT excluded.song_path"
+		"                        OR client    IS NOT excluded.client"
+		"                      THEN 0 ELSE counted END,"
+		"   song_path   = excluded.song_path,"
+		"   client      = excluded.client,"
+		"   started     = CURRENT_TIMESTAMP,"
+		"   state       = excluded.state,"
+		"   position_ms = excluded.position_ms,"
+		"   rate        = excluded.rate");
+	up.bind(1, user_id);
+	up.bind(2, song_path);
+	up.bind(3, client);
+	up.bind(4, state);
+	up.bind(5, position_ms);
+	up.bind(6, rate);
+	up.bind(7, state);
+	up.exec();
+
+	if (ignore_scrobble) return true;
+
+	// The Last.fm rule: a play counts once half the track, or four minutes of
+	// it, has gone by. Judged on the reported position, which is all we have.
+	// An unknown duration falls back to the four minutes rather than to zero,
+	// which would count the play on its first report.
+	SQLite::Statement mark(db_music_,
+		"UPDATE client.now_playing SET counted = 1"
+		" WHERE user_id = ? AND counted = 0"
+		"   AND ? >= MIN(COALESCE(NULLIF((SELECT duration FROM songs WHERE path = ?), 0)"
+		"                         * 500, 240000),"
+		"                240000)");
+	mark.bind(1, user_id);
+	mark.bind(2, position_ms);
+	mark.bind(3, song_path);
+	mark.exec();
+	if (db_music_.getChanges() == 0) return true;
+
+	SQLite::Statement ins(db_music_,
+		"INSERT INTO client.play_counts (user_id, song_path, count, last_played)"
+		" VALUES (?, ?, 1, CURRENT_TIMESTAMP)"
+		" ON CONFLICT(user_id, song_path) DO UPDATE SET"
+		"   count       = count + 1,"
+		"   last_played = CURRENT_TIMESTAMP");
+	ins.bind(1, user_id);
+	ins.bind(2, song_path);
+	ins.exec();
+	return true;
 	}
 
 void MediaStore::add_star(const std::string& username,

@@ -75,16 +75,20 @@ void GainDrive::routes_system()
 				// transcodeOffset is the standard extension meaning no more
 				// than that stream honours timeOffset for audio, which it has
 				// always done - so it names behaviour rather than adding any.
+				// playbackReport is reportPlayback and the timeline fields it
+				// adds to getNowPlaying.
 				r["openSubsonicExtensions"] = {
 					{{"name", "gaindrive"},
 					 {"versions", nlohmann::json::array({1})}},
 					{{"name", "transcodeOffset"},
+					 {"versions", nlohmann::json::array({1})}},
+					{{"name", "playbackReport"},
 					 {"versions", nlohmann::json::array({1})}}};
 				});
 		else
 			body = subsonic_ok([](XMLDocument& doc, XMLElement* root) {
 				auto* exts = doc.NewElement("openSubsonicExtensions");
-				for (const char* name : {"gaindrive", "transcodeOffset"}) {
+				for (const char* name : {"gaindrive", "transcodeOffset", "playbackReport"}) {
 					auto* ext = doc.NewElement("extension");
 					ext->SetAttribute("name", name);
 					ext->SetAttribute("versions", "1");

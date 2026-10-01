@@ -677,6 +677,10 @@ CREATE TABLE now_playing (
     song_path   TEXT NOT NULL,
     client      TEXT,
     started     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    state       TEXT,     -- reportPlayback; NULL when set by scrobble
+    position_ms INTEGER,
+    rate        REAL,
+    counted     INTEGER DEFAULT 0,  -- this play already scrobbled
     PRIMARY KEY (user_id)
 );
 

@@ -99,12 +99,12 @@
 <p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span>
 <span class="api-badge">no auth</span></p>
 <p>Carried by <code>getOpenSubsonicExtensions</code>. Only the gaindrive additions are listed here.</p>
-<p>Advertises the gaindrive extension, and the standard <code>transcodeOffset</code> beside it, with the versions this server implements.</p>
+<p>Advertises the gaindrive extension, and the standard <code>transcodeOffset</code> and <code>playbackReport</code> beside it, with the versions this server implements.</p>
 <h4>Response</h4>
 <table class="doc-table">
 <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
-<tr><td><code>openSubsonicExtensions.name</code></td><td>string</td><td><code>gaindrive</code> for this page. <code>transcodeOffset</code> is advertised beside it and is the standard extension of that name.</td></tr>
+<tr><td><code>openSubsonicExtensions.name</code></td><td>string</td><td><code>gaindrive</code> for this page. <code>transcodeOffset</code> and <code>playbackReport</code> are advertised beside it and are the standard extensions of those names.</td></tr>
 <tr><td><code>openSubsonicExtensions.versions</code></td><td>int[]</td><td>In XML, a comma-separated <code>versions</code> attribute.</td></tr>
 </tbody>
 </table>
@@ -306,6 +306,17 @@
 </div>
 <div class="doc-sec" id="playback">
 <h2>Playback</h2>
+<div class="api-ep">
+<h3 id="ep-reportplayback-getnowplaying">reportPlayback / getNowPlaying</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>reportPlayback</code>, <code>getNowPlaying</code>. Only the gaindrive additions are listed here.</p>
+<p>The OpenSubsonic <code>playbackReport</code> extension, and what GainDrive decides where the standard leaves it open.</p>
+<p>Advertised as <code>playbackReport</code> version 1. <code>mediaType=podcast</code> is answered with error 0, <code>Not implemented.</code></p>
+<p>Each account has <b>one</b> now-playing entry, whichever of its clients reported last. <code>stopped</code> removes it only while it still names the reported song and the same client name <code>c</code>, so a client that stops after another device of the same account took over leaves that device&#x27;s entry alone.</p>
+<p>An entry not reported for five minutes is dropped from <code>getNowPlaying</code>, in every state. A client that keeps playing must therefore report at least that often; a paused one need not, and simply disappears.</p>
+<p>Unless <code>ignoreScrobble=true</code>, a play is counted once per <code>starting</code>, when a report puts the position at or past half the track or four minutes, whichever comes first. A report naming a different song from the entry it replaces starts a new play, <code>starting</code> or not. A client that scrobbles with <code>submission=true</code> itself should send <code>ignoreScrobble=true</code>, or the play is counted twice.</p>
+<p><code>scrobble</code> with <code>submission=false</code> still sets the entry, without a timeline: its <code>getNowPlaying</code> entry carries no <code>state</code>, <code>positionMs</code> or <code>playbackRate</code>. <code>positionMs</code> is the position as last reported, not extrapolated.</p>
+</div>
 <div class="api-ep">
 <h3 id="ep-reportPosition">reportPosition</h3>
 <p class="api-meta"><code>GET /rest/reportPosition.view</code></p>
@@ -1537,7 +1548,7 @@ stay distinguishable; a client should keep its volume controls disabled on
 <p><b>Retrieval and annotation.</b></p>
 <ul class="doc-list"><li><code>getLyrics</code>, and <code>getLyricsBySongId</code> of the OpenSubsonic <code>songLyrics</code> extension. No lyric tag and no <code>.lrc</code> sidecar is read.</li><li><code>getAvatar</code>. An account carries no picture.</li></ul>
 <p><b>The play queue.</b></p>
-<ul class="doc-list"><li><code>getPlayQueueByIndex</code> and <code>savePlayQueueByIndex</code> of the OpenSubsonic <code>indexBasedQueue</code> extension. The by-id pair is implemented; the index pair exists so a queue may hold the same track twice, which the by-id form cannot express.</li><li><code>reportPlayback</code> of the OpenSubsonic <code>playbackReport</code> extension. <code>scrobble</code> is the implemented equivalent, and it carries no playback timeline.</li></ul>
+<ul class="doc-list"><li><code>getPlayQueueByIndex</code> and <code>savePlayQueueByIndex</code> of the OpenSubsonic <code>indexBasedQueue</code> extension. The by-id pair is implemented; the index pair exists so a queue may hold the same track twice, which the by-id form cannot express.</li></ul>
 <p><b>Whole subsystems.</b> Each of these is a feature rather than an endpoint, and the roles GainDrive already reports say so: <code>shareRole</code>, <code>podcastRole</code>, <code>jukeboxRole</code> and <code>commentRole</code> are false on every account, so a client that reads them need not probe.</p>
 <ul class="doc-list"><li>The jukebox - <code>jukeboxControl</code>, which plays through the sound card of the machine running the server. Casting is GainDrive&#x27;s answer to playing somewhere other than the client.</li></ul>
 <p><b>Users and system.</b></p>

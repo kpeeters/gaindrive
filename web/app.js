@@ -7549,8 +7549,7 @@ function playerPlay(offset = 0, forceMp3 = false) {
    if (!song) return;
    // Tell the server what is playing, so getNowPlaying can answer.  Re-entry
    // (seek, mp3 fallback) is harmless: the server just refreshes the row.
-   apiCall('scrobble', {id: song.id, submission: false})
-      .catch(err => console.warn('[now-playing] failed', err));
+   playbackReport('starting', offset);
    // Track whether this attempt is the mp3 fallback. The 'error' listener
    // below uses this to retry exactly once before giving up.
    player.streamFallbackTried = forceMp3;
@@ -7872,9 +7871,11 @@ async function pollNowPlaying() {
    const song    = player.queue[player.index];
    const playing = castDeviceId !== null ? castPlayerState === 'PLAYING'
                                          : !player.media.paused;
-   if (song && playing)
-      apiCall('scrobble', {id: song.id, submission: false})
-         .catch(err => console.warn('[now-playing] failed', err));
+   // A paused cast is reported here and nowhere else: the cast poll loop has
+   // no pause event to hang it on, and the media element is idle.
+   if (song && playing) playbackReport('playing');
+   else if (song && castDeviceId !== null && castPlayerState === 'PAUSED')
+      playbackReport('paused');
 
    let sr;
    try {
@@ -7883,7 +7884,10 @@ async function pollNowPlaying() {
       return;   // transient blip; leave the list as it was
    }
    const me      = creds.load().user;
-   const entries = (sr.nowPlaying?.entry ?? []).filter(e => e.username !== me);
+   // The server keeps listing a paused entry, as playbackReport intends; this
+   // list is "what is audible", so it leaves them out.
+   const entries = (sr.nowPlaying?.entry ?? [])
+      .filter(e => e.username !== me && e.state !== 'paused');
 
    const section  = document.getElementById('sidebar-users');
    const list     = document.getElementById('sidebar-users-list');
@@ -7935,6 +7939,33 @@ document.getElementById('player-cover').addEventListener('click', () => {
    if (!ctx) return;
    history.pushState({view: 'tracks', albumId: ctx.albumId, albumTitle: ctx.albumTitle, artistId: ctx.artistId, artistName: ctx.artistName}, '');
    viewTracks(ctx.albumId, ctx.albumTitle, ctx.artistId, ctx.artistName);
+   });
+
+// OpenSubsonic reportPlayback for the current track.  ignoreScrobble because
+// play counts still come from scrobbleCurrentSong(); without it the server
+// would count each play a second time.  Returns the call so logout can wait
+// for it, since the credentials go right after.
+function playbackReport(state, pos = playerPosition()) {
+   const song = player.queue[player.index];
+   if (!song) return Promise.resolve();
+   return apiCall('reportPlayback', playbackReportParams(song, state, pos))
+      .catch(err => console.warn('[now-playing] failed', err));
+}
+
+function playbackReportParams(song, state, pos) {
+   return {mediaId: song.id, mediaType: 'song', state,
+           positionMs: Math.round((pos || 0) * 1000), ignoreScrobble: 'true'};
+}
+
+// Closing the tab ends local playback, so say so rather than leaving the
+// entry up for five minutes.  keepalive, because an ordinary request is
+// cancelled with the page.  Not while casting: the device plays on.
+window.addEventListener('pagehide', () => {
+   const song = player.queue[player.index];
+   if (!song || castDeviceId !== null || !creds.load().user) return;
+   fetch(apiUrl('reportPlayback',
+                playbackReportParams(song, 'stopped', playerPosition())),
+         {keepalive: true}).catch(() => {});
    });
 
 function scrobbleCurrentSong() {
@@ -8019,11 +8050,19 @@ el.addEventListener('play',  () => {
    if (castDeviceId !== null) return;
    playerPlayGlyph('pause');
    posReportNow();
+   playbackReport('playing');
    });
 el.addEventListener('pause', () => {
    if (castDeviceId !== null) return;
    playerPlayGlyph('play_arrow');
    posReportNow();
+   // Held back a moment and re-checked: a track change and playerStop() both
+   // pause the element on their way, and reporting those would race the
+   // `starting` or `stopped` sent beside them, possibly landing last.
+   setTimeout(() => {
+      if (castDeviceId === null && player.media.paused && player.media.src)
+         playbackReport('paused');
+      }, 1000);
    });
 // A native seek moves the playhead without a new stream URL, so the pacer
 // must hear about it at once: a backward seek would otherwise leave it
@@ -10735,6 +10774,22 @@ async function showShell() {
          // Tear down any active cast session before dropping creds - otherwise
          // the Chromecast keeps playing and the SSE listener stays open server-side.
          if (castDeviceId !== null) await stopCast({resumeLocal: false});
+         // Before creds.clear(), which the call needs.
+         await playbackReport('stopped');
+         // The next account must not inherit this one's stream, queue or
+         // OS media controls.  The queue empties before the pause that
+         // playerStop() causes is handled, so that handler finds nothing to
+         // report.
+         playerStop();
+         player.queue    = [];
+         player.index    = -1;
+         player.autoFrom = 0;
+         player.albumCtx = null;
+         sidebarQueueUpdate();
+         if ('mediaSession' in navigator) navigator.mediaSession.metadata = null;
+         // An engaged equaliser's AudioContext keeps the tab marked as
+         // playing; eqEnsureGraph() resumes it on the next play.
+         eqCtx?.suspend();
          creds.clear();
          showLogin();
          });

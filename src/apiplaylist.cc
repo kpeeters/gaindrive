@@ -132,6 +132,58 @@ void GainDrive::routes_playlist()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
+	// reportPlayback - OpenSubsonic playbackReport: the now-playing row with a
+	// timeline, and the only way a client can say it stopped.
+	server_.Get("/rest/reportPlayback.view", [this](const httplib::Request& req,
+	                                                httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+
+		auto err = [&](int code, const char* msg) {
+			if (use_json)
+				res.set_content(subsonic_error_json(code, msg), "application/json");
+			else
+				res.set_content(subsonic_error(code, msg),      "application/xml");
+			};
+		auto qp = [&](const std::string& k, const std::string& def = "") {
+			auto it = req.params.find(k);
+			return it != req.params.end() ? it->second : def;
+			};
+
+		for (const char* k : {"mediaId", "mediaType", "positionMs", "state"})
+			if (!req.has_param(k)) {
+				err(10, (std::string("Required parameter missing: ") + k + ".").c_str());
+				return;
+				}
+
+		std::string type  = qp("mediaType");
+		std::string state = qp("state");
+		if (type == "podcast") { err(0, "Not implemented."); return; }
+		if (type != "song") { err(10, "Unknown mediaType."); return; }
+		if (state != "starting" && state != "playing" && state != "paused"
+		    && state != "stopped") {
+			err(10, "Unknown state.");
+			return;
+			}
+
+		// Same read check as scrobble: the row comes back out through
+		// getNowPlaying with the full song entry.
+		auto song_path = store_.song_path_by_id(to_int(qp("mediaId"), -1));
+		if (!song_path
+		    || !item_read_allowed(req, store_, uploads_root_name_, *song_path)) {
+			err(70, "Song not found.");
+			return;
+			}
+
+		store_.report_playback(qp("u"), *song_path, qp("c"), state,
+		                       to_int64(qp("positionMs"), 0),
+		                       to_float(qp("playbackRate", "1"), 1.0f),
+		                       qp("ignoreScrobble") == "true");
+
+		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	server_.Get("/rest/createBookmark.view", [this](const httplib::Request& req,
 	                                                httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;

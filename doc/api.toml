@@ -311,12 +311,12 @@ kind       = 'additions'
 applies_to = ["getOpenSubsonicExtensions"]
 section    = "extension"
 auth       = 'none'
-summary    = 'Advertises the gaindrive extension, and the standard `transcodeOffset` beside it, with the versions this server implements.'
+summary    = 'Advertises the gaindrive extension, and the standard `transcodeOffset` and `playbackReport` beside it, with the versions this server implements.'
 
   [[endpoint.field]]
   name = "openSubsonicExtensions.name"
   type = "string"
-  doc  = '`gaindrive` for this page. `transcodeOffset` is advertised beside it and is the standard extension of that name.'
+  doc  = '`gaindrive` for this page. `transcodeOffset` and `playbackReport` are advertised beside it and are the standard extensions of those names.'
 
   [[endpoint.field]]
   name = "openSubsonicExtensions.versions"
@@ -648,6 +648,36 @@ the account's own ceiling, so the two cannot disagree.
 # ===========================================================================
 # Playback
 # ===========================================================================
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["reportPlayback", "getNowPlaying"]
+section    = "playback"
+summary    = 'The OpenSubsonic `playbackReport` extension, and what GainDrive decides where the standard leaves it open.'
+notes      = '''
+Advertised as `playbackReport` version 1. `mediaType=podcast` is answered
+with error 0, `Not implemented.`
+
+Each account has **one** now-playing entry, whichever of its clients reported
+last. `stopped` removes it only while it still names the reported song and
+the same client name `c`, so a client that stops after another device of the
+same account took over leaves that device's entry alone.
+
+An entry not reported for five minutes is dropped from `getNowPlaying`, in
+every state. A client that keeps playing must therefore report at least that
+often; a paused one need not, and simply disappears.
+
+Unless `ignoreScrobble=true`, a play is counted once per `starting`, when a
+report puts the position at or past half the track or four minutes,
+whichever comes first. A report naming a different song from the entry it
+replaces starts a new play, `starting` or not. A client that scrobbles with
+`submission=true` itself should send `ignoreScrobble=true`, or the play is
+counted twice.
+
+`scrobble` with `submission=false` still sets the entry, without a timeline:
+its `getNowPlaying` entry carries no `state`, `positionMs` or `playbackRate`.
+`positionMs` is the position as last reported, not extrapolated.
+'''
 
 [[endpoint]]
 kind    = 'endpoint'
@@ -3269,8 +3299,6 @@ arrives as 200 and a page of HTML.
   `indexBasedQueue` extension. The by-id pair is implemented; the index pair
   exists so a queue may hold the same track twice, which the by-id form
   cannot express.
-* `reportPlayback` of the OpenSubsonic `playbackReport` extension. `scrobble`
-  is the implemented equivalent, and it carries no playback timeline.
 
 **Whole subsystems.** Each of these is a feature rather than an endpoint, and
 the roles GainDrive already reports say so: `shareRole`, `podcastRole`,
