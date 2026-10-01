@@ -2597,15 +2597,12 @@ input.chapter-time.bad { border-color: #e06c6c; }
    white-space: nowrap;
 }
 
-/* writing-mode is the standard way to stand a range input on end; the
-   -webkit appearance below it is deprecated but is the only thing older
-   Safari and Firefox understand, and a horizontal slider in a column of
-   vertical ones is not a graceful degradation. */
+/* writing-mode alone stands a range input on end in Chrome 124+, Firefox
+   120+ and Safari 17.4+; appearance: slider-vertical is deprecated and
+   Chrome warns about it. direction: rtl puts the maximum at the top. */
 .eq-band input[type="range"] {
    writing-mode: vertical-lr;
    direction: rtl;
-   -webkit-appearance: slider-vertical;
-   appearance: slider-vertical;
    width: 1.1rem;
    height: 7rem;
    margin: 0;
