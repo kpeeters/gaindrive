@@ -7,6 +7,7 @@
 //	full text of the GPL.
 
 import Foundation
+import OSLog
 
 /// Every read and write the browse screens make, mirroring
 /// `data/LibraryRepository.kt`.
@@ -34,6 +35,8 @@ final class LibraryRepository: Sendable {
 	private let roots: MusicRoots
 	private let mirror: LibraryMirror
 	private let store: AudioStore
+
+	private static let log = Logger(subsystem: "org.gaindrive.ios-player", category: "library")
 
 	init(
 		registry: ServerRegistry, settings: SettingsStore, events: LibraryEvents,
@@ -663,6 +666,31 @@ final class LibraryRepository: Sendable {
 	func scrobble(_ ref: ItemRef, submission: Bool) async {
 		guard let client = await client(for: ref.server) else { return }
 		try? await client.scrobble(id: ref.id, submission: submission)
+	}
+
+	/// Tells the server what this device is doing with `ref`. Plays are still
+	/// counted by `scrobble`, so the server is asked not to count them again.
+	/// Swallows, for the reason `scrobble` does.
+	///
+	/// A server without `reportPlayback` gets the now-playing scrobble instead,
+	/// but only for the states that mean "playing": that scrobble announces a
+	/// track as playing, so sending it for "paused" would refresh exactly the
+	/// entry the pause should retire.
+	func reportPlayback(_ ref: ItemRef, state: PlaybackState, position: Double) async {
+		if await offline { return }
+		guard let client = await client(for: ref.server) else { return }
+		let ms = position.isFinite ? Int(max(position, 0) * 1000) : 0
+		do {
+			try await client.reportPlayback(
+				id: ref.id, state: state.rawValue, positionMs: ms, ignoreScrobble: true)
+		} catch {
+			Self.log.warning(
+				"reportPlayback \(state.rawValue, privacy: .public) failed: \(error.localizedDescription, privacy: .public)"
+			)
+			if state == .starting || state == .playing {
+				try? await client.scrobble(id: ref.id, submission: false)
+			}
+		}
 	}
 
 	func setStarred(_ ref: ItemRef, kind: StarKind, starred: Bool) async throws {

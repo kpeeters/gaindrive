@@ -454,6 +454,7 @@ final class PlayerConnection {
 			// last track, so the mini player does not vanish and the track can
 			// be replayed.
 			self.model.parkAtEnd()
+			self.scrobbler.ended()
 			self.publishQueue()
 			self.publishTransport()
 		}
@@ -577,6 +578,7 @@ final class PlayerConnection {
 			clearLoading()
 		}
 		nowPlaying.setPlayback(isPlaying: isPlaying, position: position)
+		scrobbler.transport(playing: isPlaying || isBuffering, position: position)
 		nowPlaying.setAvailability(hasNext: model.hasNext, canSeek: canSeek)
 		// **The watchdog is armed from here and nowhere else.** A poll over
 		// `position` would compile and never fire: progress is reported as the

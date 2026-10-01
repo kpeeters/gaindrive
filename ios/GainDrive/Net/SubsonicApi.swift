@@ -249,6 +249,23 @@ extension SubsonicClient {
 			expecting: EmptyBody.self)
 	}
 
+	/// OpenSubsonic `playbackReport`: the now-playing entry with a state, and
+	/// the only way to say playback stopped. Servers without the extension
+	/// answer with an error; `scrobble` with `submission=false` is the
+	/// fallback.
+	func reportPlayback(
+		id: String, state: String, positionMs: Int, ignoreScrobble: Bool
+	) async throws {
+		_ = try await perform(
+			"reportPlayback",
+			parameters: [
+				"mediaId": id, "mediaType": "song", "state": state,
+				"positionMs": String(positionMs),
+				"ignoreScrobble": ignoreScrobble ? "true" : "false",
+			],
+			expecting: EmptyBody.self)
+	}
+
 	// MARK: - Recents
 
 	/// Albums in the order the server first saw them, newest first. Standard
