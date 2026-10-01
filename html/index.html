@@ -138,24 +138,26 @@
 	solutions, but most non-trivial ones often take a lot of
 	careful testing and pushing back against what the AI wants to
 	do. It can produce insanely complex solutions for problems
-	that do not require them. I went back on earlier choices
-	several times because I did not attempt to fully internalise
-	the AI-written plan before approval, and found that we had
-	painted ourselves into a corner. So you still need extensive
-	manual testing to find logic bugs or things which work
-	different on different devices, and you still need to know
-	what is possible and have a feeling for the good and bad
+	that do not require them, or insist on using old broken APIs
+	even when told new improved ones exist. I went back on earlier
+	choices several times because I did not attempt to fully
+	internalise the AI-written plan before approval, and found
+	that we had painted ourselves into a corner. So you still need
+	extensive manual testing to find logic bugs or things which
+	work different on different devices, and you still need to
+	know what is possible and have a feeling for the good and bad
 	solutions yourself. This took many more months.
       <p>
       <p>I did occasionally write some of the source by hand when that
 	would get me to a bug fix or feature quicker (more so in the
 	server than the clients), but the vast majority of it was
 	written by <a href="https://claude.ai" target="_blank"
-	rel="noopener">Claude</a> (first Opus 5, later Fable 5.1)
-	under my supervision.  It cranks out enormous amounts of code
-	if you let it, often much more than I would like, and I did
-	need to force it several times into a refactoring mode to
-	avoid things from becoming unreadable by humans.
+	rel="noopener">Claude</a> (first Opus 5, later Fable 5.1 and
+	then Opus 5.5) under my supervision.  It cranks out enormous
+	amounts of code if you let it, often much more than I would
+	like, and I did need to force it several times into a
+	refactoring mode to avoid things from becoming unreadable by
+	humans.
       </p>
       <p>In any case, GainDrive is what I need to self-host all the
 	audio and video that I listen to and watch, without the things

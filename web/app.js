@@ -6470,8 +6470,13 @@ function videoSurfaceSet(state) {
       el.classList.add('hidden');
       return;
       }
-   el.classList.remove('hidden');
    el.dataset.state = state;
+   // While the picture is in a PiP window the surface would only show the
+   // browser's placeholder over the panes, so every path that would bring it
+   // back - a play pressed in that window, the next episode - leaves it
+   // hidden.  The state is still recorded for leavepictureinpicture.
+   if (document.pictureInPictureElement === player.videoEl) return;
+   el.classList.remove('hidden');
    document.getElementById('video-restore').hidden = (state !== 'minimised');
    // The button does two different things and must not claim otherwise: it
    // stops local playback, but while casting it only puts the picture away.
@@ -6794,6 +6799,17 @@ function setupVideoSurface() {
    surf.addEventListener('pointermove', videoControlsMove);
    surf.addEventListener('pointerdown', videoControlsWake);
    surf.addEventListener('pointerleave', videoControlsSleep);
+
+   // The film went to a PiP window, so give the panes back.  Hidden rather
+   // than stopped, and that also means showView() no longer pauses it on a
+   // pane change, since a hidden surface covers nothing.
+   player.videoEl.addEventListener('enterpictureinpicture',
+      () => videoSurfaceSet(null));
+   // "Back to tab" keeps playing and wants the picture here again.  Closing
+   // the window pauses, and then the surface stays away until play.
+   player.videoEl.addEventListener('leavepictureinpicture', () => {
+      if (!player.videoEl.paused) videoSurfaceSet(surf.dataset.state || 'theatre');
+      });
 
    // Closing the surface dismisses the picture; it does not stop the cast.
    //
