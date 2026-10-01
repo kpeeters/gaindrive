@@ -1,5 +1,6 @@
 package org.gaindrive.android.data
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -570,7 +571,9 @@ class LibraryRepository @Inject constructor(
 	 * [scrobble], so the server is asked not to count them again.
 	 *
 	 * A server without `reportPlayback` gets the now-playing scrobble instead,
-	 * which is all it ever had; it has no way to hear "stopped". Failures are
+	 * which is all it ever had, but only for the states that mean "playing":
+	 * that scrobble announces a track as playing, so sending it for "paused"
+	 * would refresh exactly the entry the pause should retire. Failures are
 	 * swallowed, as in [scrobble].
 	 */
 	suspend fun reportPlayback(ref: ItemRef, state: String, positionMs: Long) {
@@ -581,7 +584,10 @@ class LibraryRepository @Inject constructor(
 					.requireOk()
 			}
 		}
-		if (reported.isFailure && state != "stopped") scrobble(ref, submission = false)
+		reported.exceptionOrNull()?.let {
+			Log.w(TAG, "reportPlayback $state failed, ${it.message}")
+			if (state == "starting" || state == "playing") scrobble(ref, submission = false)
+		}
 	}
 
 	suspend fun setStarred(ref: ItemRef, kind: StarKind, starred: Boolean) {
@@ -974,3 +980,5 @@ class LibraryRepository @Inject constructor(
 			else cause.userMessage(),
 		)
 }
+
+private const val TAG = "GainDriveLibrary"
