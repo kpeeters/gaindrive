@@ -238,6 +238,13 @@ body {
    overflow-y: auto;
 }
 
+/* Only the queue gives way when the sidebar runs out of height, so a long
+   queue cannot push "Other users" off the bottom. The sidebar's own scroll
+   stays as the last resort for a window too short for the fixed parts. */
+#sidebar > * {
+   flex-shrink: 0;
+}
+
 .nav-title {
    display: flex;
    align-items: center;
@@ -330,6 +337,10 @@ body {
    margin-top: 1rem;
    border-top: 1px solid var(--divider);
    padding-top: 0.5rem;
+   display: flex;
+   flex-direction: column;
+   flex-shrink: 1;
+   min-height: 0;
 }
 
 .sidebar-queue-heading {
@@ -343,6 +354,8 @@ body {
 
 #sidebar-queue-list {
    list-style: none;
+   overflow-y: auto;
+   min-height: 0;
 }
 
 #sidebar-queue-list li {
