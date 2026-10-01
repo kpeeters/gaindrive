@@ -406,6 +406,11 @@ body {
 #sidebar-users-list li {
    padding: 0.3rem 1rem;
    font-size: 0.8rem;
+   cursor: pointer;
+}
+
+#sidebar-users-list li:hover .su-track {
+   color: var(--text);
 }
 
 .su-user {
@@ -1891,6 +1896,19 @@ input.chapter-time.bad { border-color: #e06c6c; }
    font-variation-settings: 'FILL' 1;
    color: var(--accent);
    font-size: 1.5rem;
+}
+
+/* Another user's track, opened from the sidebar.  Hover and our own playing
+   or queued state take the slot, since those are what a click acts on. */
+.track-row.peer:not(:hover):not(.playing):not(.queued) .track-icon::before {
+   font-family: 'Material Symbols Rounded';
+   font-feature-settings: 'liga';
+   content: 'headphones';
+   color: var(--text-dim);
+}
+
+.track-row.peer .track-title {
+   color: var(--accent);
 }
 
 /* The track has been asked for but nothing is audible yet - most often the

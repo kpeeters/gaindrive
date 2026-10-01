@@ -7900,6 +7900,16 @@ async function pollNowPlaying() {
       track.title       = e.artist ? `${e.artist} - ${e.title}` : e.title;
       li.appendChild(user);
       li.appendChild(track);
+      // Opens the album and marks the track without playing it: the user is
+      // looking at what someone else hears, and cutting off their own playback
+      // would punish the curiosity.
+      li.addEventListener('click', () => {
+         history.pushState({view: 'tracks', albumId: e.parent,
+                            albumTitle: e.album ?? '', artistId: null,
+                            artistName: e.artist ?? ''}, '');
+         viewTracks(e.parent, e.album ?? '', null, e.artist ?? '',
+                    null, 0, null, e.id);
+         });
       list.appendChild(li);
       });
 }
@@ -8306,8 +8316,12 @@ function setupPlayer() {
 // `gen`, as in viewAlbums(): viewTracksFromSearch() takes the generation and
 // then has to know whether this render still held it, so it cannot let this
 // function take its own.
+// `markId` points at a track without playing it: what another user is
+// listening to, opened from the sidebar, where autoPlayId would cut off the
+// viewer's own playback.
 async function viewTracks(albumId, albumTitle, artistId, artistName,
-                           autoPlayId = null, autoPlayOffset = 0, gen = null) {
+                           autoPlayId = null, autoPlayOffset = 0, gen = null,
+                           markId = null) {
    console.log('[tracks] loading album', albumId, albumTitle);
    gen = beginRender(gen);
    const pane = paneReset('pane-tracks', `tracks:${albumId}`);
@@ -8592,6 +8606,17 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
    // track starts.
    markPlayingRow(player.queue[player.index]?.id);
    renderSlideTo(gen, 2);
+
+   if (markId !== null) {
+      const row = pane.querySelector(`.track-row[data-id="${CSS.escape(String(markId))}"]`);
+      if (row) {
+         row.classList.add('peer');
+         // pane.scrollTop rather than scrollIntoView(): the latter also scrolls
+         // any ancestor it sees fit, and the pane strip is mid-slide here.
+         const off = row.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+         pane.scrollTop += off - (pane.clientHeight - row.offsetHeight) / 2;
+         }
+      }
 
    if (autoPlayId !== null) {
       const idx = songs.findIndex(s => s.id === autoPlayId);
