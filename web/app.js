@@ -8401,6 +8401,10 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
       await viewAlbums(album.parent, album.artist ?? artistName ?? '',
                        false, false, gen);
       if (renderStale(gen)) return;
+      // viewAlbums() empties pane 2 without a key, wiping the stamp this
+      // render wrote; the notes loader checks that stamp and would otherwise
+      // decide the album had been navigated away from.
+      paneReset('pane-tracks', `tracks:${albumId}`);
       }
 
    // Back link + headings + Edit link.
