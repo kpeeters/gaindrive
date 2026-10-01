@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 import org.gaindrive.android.MainActivity
 import org.gaindrive.android.data.CaptionTracks
@@ -302,13 +304,78 @@ class PlaybackService : MediaLibraryService() {
 	private var currentRef: ItemRef? = null
 	private var submitted = false
 
+	/** The last state sent for [currentRef], so a restart after "stopped" is
+	 * announced again and the refresh knows whether there is anything to keep
+	 * alive. */
+	private var reportedState: String? = null
+
+	/** Reports leave in the order they were made. They are separate requests,
+	 * and a "paused" overtaken by the "playing" before it would leave the
+	 * entry wrong until the next refresh. */
+	private val reportLock = Mutex()
+
+	private fun report(ref: ItemRef, state: String, positionMs: Long, on: CoroutineScope = scope) {
+		if (ref == currentRef) reportedState = state
+		on.launch {
+			reportLock.withLock { library.reportPlayback(ref, state, positionMs.coerceAtLeast(0)) }
+		}
+	}
+
+	/**
+	 * "stopped" on the way out. On its own scope, because [releaseEverything]
+	 * cancels the service's straight after; and [currentRef] is cleared first,
+	 * so the pause that follows finds nothing to report and cannot overtake it.
+	 */
+	private fun reportStoppedOnExit() {
+		val ref = currentRef ?: return
+		val position = activePlayer?.currentPosition ?: 0L
+		currentRef = null
+		if (reportedState == "stopped") return
+		report(ref, "stopped", position, on = CoroutineScope(Dispatchers.IO))
+	}
+
 	private val scrobbler = object : Player.Listener {
-		override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-			val ref = mediaItem?.itemRef()
-			currentRef = ref
-			submitted = false
-			if (ref != null) {
-				scope.launch { library.scrobble(ref, submission = false) }
+		override fun onEvents(player: Player, events: Player.Events) {
+			// Both players carry this listener; only the one the session plays
+			// through speaks for the device. The other is being paused or
+			// stopped as part of a handover.
+			if (player !== activePlayer) return
+
+			if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
+				val previous = currentRef
+				val ref = player.currentMediaItem?.itemRef()
+				// The entry is one per account per server, so a queue moving to
+				// another server has to end the one it leaves behind.
+				if (previous != null && previous.server != ref?.server && reportedState != "stopped")
+					report(previous, "stopped", 0)
+				currentRef = ref
+				submitted = false
+				reportedState = null
+				if (ref != null)
+					report(ref, if (player.playWhenReady) "starting" else "paused", player.currentPosition)
+				return
+			}
+
+			val ref = currentRef ?: return
+			val state = player.playbackState
+			when {
+				// The end of the queue, or a stop: nothing is coming out of
+				// this device any more.
+				events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED)
+					&& (state == Player.STATE_ENDED || state == Player.STATE_IDLE) -> {
+					if (reportedState != "stopped") report(ref, "stopped", player.currentPosition)
+				}
+				// playWhenReady rather than isPlaying: buffering after a seek
+				// is not the user pausing, and must not hide them from others.
+				events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED)
+					|| (events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) && reportedState == "stopped") -> {
+					val next = when {
+						reportedState == "stopped" -> if (player.playWhenReady) "starting" else "paused"
+						player.playWhenReady -> "playing"
+						else -> "paused"
+					}
+					if (next != reportedState) report(ref, next, player.currentPosition)
+				}
 			}
 		}
 	}
@@ -359,10 +426,21 @@ class PlaybackService : MediaLibraryService() {
 	 * needing to finish before it counts.
 	 */
 	private fun startScrobbleWatcher() = scope.launch {
+		var sinceRefresh = 0L
 		while (true) {
 			delay(SCROBBLE_POLL_MS)
 			val player = activePlayer ?: continue
 			val ref = currentRef ?: continue
+
+			// The server drops an entry not heard from in five minutes, and a
+			// single track can outlast that.
+			sinceRefresh += SCROBBLE_POLL_MS
+			if (sinceRefresh >= REFRESH_MS && player.playWhenReady
+				&& (reportedState == "starting" || reportedState == "playing")) {
+				sinceRefresh = 0
+				report(ref, "playing", player.currentPosition)
+			}
+
 			if (submitted || !player.isPlaying) continue
 
 			val duration = player.duration
@@ -398,6 +476,7 @@ class PlaybackService : MediaLibraryService() {
 	 * first, so a cast receiver hears it before the bridge is torn down.
 	 */
 	override fun onTaskRemoved(rootIntent: android.content.Intent?) {
+		reportStoppedOnExit()
 		pauseAllPlayersAndStopSelf()
 		releaseEverything()
 	}
@@ -405,6 +484,7 @@ class PlaybackService : MediaLibraryService() {
 	/** Idempotent: everything is null-checked and nulled, so the second run
 	 * (onTaskRemoved first, then onDestroy) is a no-op. */
 	private fun releaseEverything() {
+		reportStoppedOnExit()
 		session?.release()
 		session = null
 		libraryCallback = null
@@ -428,6 +508,9 @@ class PlaybackService : MediaLibraryService() {
 	private companion object {
 		const val SCROBBLE_POLL_MS = 5_000L
 		const val SUBMIT_AFTER_MS = 4 * 60 * 1000L
+		// Well inside the server's five minutes, so one lost refresh is not
+		// enough to drop the entry.
+		const val REFRESH_MS = 60_000L
 	}
 
 	private inner class LibraryCallback : MediaLibrarySession.Callback {

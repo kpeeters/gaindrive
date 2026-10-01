@@ -564,6 +564,26 @@ class LibraryRepository @Inject constructor(
 		}
 	}
 
+	/**
+	 * Tells the server what this device is doing with [ref]: "starting",
+	 * "playing", "paused" or "stopped". Plays are still counted by
+	 * [scrobble], so the server is asked not to count them again.
+	 *
+	 * A server without `reportPlayback` gets the now-playing scrobble instead,
+	 * which is all it ever had; it has no way to hear "stopped". Failures are
+	 * swallowed, as in [scrobble].
+	 */
+	suspend fun reportPlayback(ref: ItemRef, state: String, positionMs: Long) {
+		if (offline) return
+		val reported = runCatchingCancellable {
+			onServer(ref.server) { client ->
+				client.reportPlayback(ref.id, "song", positionMs, state, ignoreScrobble = true)
+					.requireOk()
+			}
+		}
+		if (reported.isFailure && state != "stopped") scrobble(ref, submission = false)
+	}
+
 	suspend fun setStarred(ref: ItemRef, kind: StarKind, starred: Boolean) {
 		requireOnline()
 		onServer(ref.server) { client ->

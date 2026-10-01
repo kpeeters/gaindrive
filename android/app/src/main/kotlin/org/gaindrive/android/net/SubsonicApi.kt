@@ -249,6 +249,20 @@ interface SubsonicApi {
 		@Query("submission") submission: Boolean,
 	): SubsonicEnvelope<EmptyBody>
 
+	/**
+	 * OpenSubsonic `playbackReport`: the now-playing entry with a state, and
+	 * the only way to say playback stopped. Servers without the extension
+	 * answer with an error; [scrobble] with `submission=false` is the fallback.
+	 */
+	@GET("rest/reportPlayback.view")
+	suspend fun reportPlayback(
+		@Query("mediaId") mediaId: String,
+		@Query("mediaType") mediaType: String,
+		@Query("positionMs") positionMs: Long,
+		@Query("state") state: String,
+		@Query("ignoreScrobble") ignoreScrobble: Boolean,
+	): SubsonicEnvelope<EmptyBody>
+
 	// ── gaindrive extensions ────────────────────────────────────────────
 
 	@GET("rest/getRecentSongs.view")
