@@ -6717,12 +6717,24 @@ let videoControlsTimer = null;
 // is requested on #video-frame *inside* it - an ancestor keeps matching, and
 // pointer events from the frame keep bubbling here, so neither state needs a
 // case of its own.
+//
+// The timer is the only thing that hides them, short of leaving the surface.
+// A pointer resting on a button when it fires re-arms it rather than hiding,
+// so aiming at a control never makes it vanish underneath.  It asks about the
+// buttons and not the clusters: #video-controls spans the gaps between its
+// discs, dead centre of the picture, where a parked cursor is common.  This
+// replaced enter/leave listeners that cancelled the timer with nothing to
+// re-arm it, which pinned the overlay up whenever they misfired.
 function videoControlsWake() {
    const surf = document.getElementById('video-surface');
    surf.classList.add('controls-on');
    clearTimeout(videoControlsTimer);
-   videoControlsTimer = setTimeout(
-      () => surf.classList.remove('controls-on'), VIDEO_CONTROLS_IDLE);
+   videoControlsTimer = setTimeout(() => {
+      if (document.querySelector('#video-controls button:hover, #video-close:hover'))
+         videoControlsWake();
+      else
+         surf.classList.remove('controls-on');
+      }, VIDEO_CONTROLS_IDLE);
    }
 
 function videoControlsSleep() {
@@ -6731,33 +6743,16 @@ function videoControlsSleep() {
    document.getElementById('video-surface').classList.remove('controls-on');
    }
 
-// A pointer or a finger resting on a control holds it open: entering cancels
-// the idle timer and leaving restarts it.
-//
-// This is what the CSS :hover and :has(button:hover) rules used to do, and it
-// had to move here once a faded control stopped taking pointer events - it
-// cannot be hovered, so hover could never have brought it back.  Doing it from
-// JS is better than what it replaced on two counts: it draws the line at the
-// cluster's real bounds rather than at one disc, and it works for a finger,
-// which no hover rule does.
-function videoControlsHold() {
-   clearTimeout(videoControlsTimer);
-   videoControlsTimer = null;
-   }
-
-// Pointer events from the clusters bubble to the surface too, so the surface
-// listeners route by where the pointer actually is: over a cluster they hold,
-// elsewhere they wake.  If the idle timer could fire while the pointer rests
-// on a cluster, removing the class would make the cluster unhittable and the
-// browser would send a synthetic leave/enter pair under the stationary
-// cursor; the enter cancels the timer and nothing re-arms it, pinning the
-// overlay up until the pointer left the surface.  A cluster is only
-// hittable while the class is on, so the hold branch never needs to add it.
-function videoControlsPoint(ev) {
-   if (ev.target.closest('#video-controls, #video-close'))
-      videoControlsHold();
-   else
-      videoControlsWake();
+// Hiding changes pointer-events under a cursor that has not moved, and a
+// browser may answer that with a pointermove of its own; counting it as
+// movement would bring the overlay straight back.
+let videoControlsLastX = null, videoControlsLastY = null;
+function videoControlsMove(ev) {
+   if (ev.clientX === videoControlsLastX && ev.clientY === videoControlsLastY)
+      return;
+   videoControlsLastX = ev.clientX;
+   videoControlsLastY = ev.clientY;
+   videoControlsWake();
    }
 
 // Requested on #video-frame rather than on the video element, so everything
@@ -6796,18 +6791,9 @@ function setupVideoSurface() {
    // Leaving the surface hides them at once, which is what :hover did and is
    // still the right answer - the pointer has gone somewhere else entirely.
    const surf = document.getElementById('video-surface');
-   surf.addEventListener('pointermove', videoControlsPoint);
-   surf.addEventListener('pointerdown', videoControlsPoint);
+   surf.addEventListener('pointermove', videoControlsMove);
+   surf.addEventListener('pointerdown', videoControlsWake);
    surf.addEventListener('pointerleave', videoControlsSleep);
-
-   // Inner before outer, so a pointer leaving a control for somewhere else on
-   // the picture restarts the countdown, and one leaving the surface entirely
-   // still hits the sleep above and goes at once.
-   for (const id of ['video-controls', 'video-close']) {
-      const el = document.getElementById(id);
-      el.addEventListener('pointerenter', videoControlsHold);
-      el.addEventListener('pointerleave', videoControlsWake);
-      }
 
    // Closing the surface dismisses the picture; it does not stop the cast.
    //

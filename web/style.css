@@ -817,9 +817,8 @@ body {
 
    It is also why :hover is no longer in this list.  A faded control takes no
    pointer events, so it cannot be hovered, so :hover could never have brought
-   it back -- and once shown, the enter/leave listeners in setupVideoSurface()
-   hold it open far better than :hover did: for the whole cluster rather than
-   for a single disc. */
+   it back -- and once shown, the idle timer in app.js keeps it up while the
+   pointer rests on a button. */
 #video-surface.controls-on #video-close,
 #video-close:focus-visible {
    opacity: 1;
@@ -891,14 +890,11 @@ body {
       }
 }
 
-/* Held open from JS rather than by a :hover rule here.  This was
-   :has(button:hover) -- not :hover on the cluster, whose box spans the gaps
-   between the discs and a good part of the middle of the picture, so a pointer
-   merely resting near them would have held the controls up.  The enter/leave
-   pair in setupVideoSurface() draws that line at the cluster's real bounds and
-   works for a finger as well as a pointer, which no hover rule does. */
+/* :focus-visible rather than :focus-within: a mouse click focuses the button
+   it lands on, and :focus-within then held the transport over the film until
+   something else took focus.  Keyboard focus still reveals it. */
 #video-surface.controls-on #video-controls,
-#video-controls:focus-within {
+#video-controls:has(:focus-visible) {
    opacity: 1;
    pointer-events: auto;
 }
