@@ -1,6 +1,7 @@
 #include "artistmatch.hh"
 #include "jsonread.hh"
 
+#include <algorithm>
 #include <cctype>
 
 #include <nlohmann/json.hpp>
@@ -94,7 +95,7 @@ static std::string fold_diacritics(const std::string& s)
 	}
 
 // The key mb_pick_artist() compares with: artist_key()'s rule, plus the fold.
-static std::string provider_key(const std::string& s)
+std::string provider_key(const std::string& s)
 	{
 	return artist_key(fold_diacritics(s));
 	}
@@ -115,21 +116,24 @@ std::string mb_artist_query(const std::string& name)
 	return "artist:\"" + esc + "\" OR alias:\"" + esc + "\"";
 	}
 
-std::optional<MbArtistMatch> mb_pick_artist(const std::string& body,
-                                             const std::string& name)
+// Every candidate in the search reply, in MusicBrainz's order, with its
+// exactness decided. Shared by mb_pick_artist() and mb_exact_artists() so the
+// two cannot disagree about what counts as exact.
+static std::vector<MbArtistMatch> mb_candidates(const std::string& body,
+                                                const std::string& name)
 	{
 	// Non-throwing, and note a discarded parse is *not* null -- is_null() is
 	// false for it and every jsonread helper narrows on the positive type, so
 	// garbage falls through to "no candidates" rather than to a throw.
 	auto j = nlohmann::json::parse(body, nullptr, false);
 
+	std::vector<MbArtistMatch> out;
 	const std::string want = provider_key(name);
-	if (want.empty()) return std::nullopt;
+	if (want.empty()) return out;
 
 	const auto& artists = jsub(j, "artists");
-	if (!artists.is_array()) return std::nullopt;
+	if (!artists.is_array()) return out;
 
-	std::optional<MbArtistMatch> best;
 	for (const auto& a : artists) {
 		MbArtistMatch cand;
 		cand.mbid  = jstr(a, "id");
@@ -150,7 +154,16 @@ std::optional<MbArtistMatch> mb_pick_artist(const std::string& body,
 		if (!cand.exact && aliases.is_array())
 			for (const auto& al : aliases)
 				if (provider_key(jstr(al, "name")) == want) { cand.exact = true; break; }
+		out.push_back(cand);
+		}
+	return out;
+	}
 
+std::optional<MbArtistMatch> mb_pick_artist(const std::string& body,
+                                             const std::string& name)
+	{
+	std::optional<MbArtistMatch> best;
+	for (const auto& cand : mb_candidates(body, name)) {
 		// Exactness first, then MusicBrainz's own score.  Ties keep the order
 		// MusicBrainz returned, which is why this is a strict improvement
 		// rather than >=.
@@ -163,4 +176,18 @@ std::optional<MbArtistMatch> mb_pick_artist(const std::string& body,
 	if (!best) return std::nullopt;
 	if (!best->exact && best->score < MB_MIN_SCORE) return std::nullopt;
 	return best;
+	}
+
+std::vector<MbArtistMatch> mb_exact_artists(const std::string& body,
+                                            const std::string& name)
+	{
+	std::vector<MbArtistMatch> out;
+	for (const auto& cand : mb_candidates(body, name))
+		if (cand.exact) out.push_back(cand);
+	// Stable, so equal scores keep MusicBrainz's order: the first entry is
+	// then exactly what mb_pick_artist() picks whenever anything is exact.
+	std::stable_sort(out.begin(), out.end(),
+	                 [](const MbArtistMatch& a, const MbArtistMatch& b) {
+	                 	return a.score > b.score; });
+	return out;
 	}

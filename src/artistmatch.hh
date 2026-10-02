@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 // Turning an artist folder's name into a MusicBrainz artist id.
 //
@@ -75,6 +76,13 @@ std::string mb_artist_query(const std::string& name);
 std::optional<MbArtistMatch> mb_pick_artist(const std::string& body,
                                              const std::string& name);
 
+// Every exact match (name or alias) in the same search reply, best score
+// first, so the first entry is mb_pick_artist()'s pick whenever one is exact.
+// The rest are for when the pick turns out to be an empty duplicate record:
+// two exact matches are a tie that the score breaks arbitrarily.
+std::vector<MbArtistMatch> mb_exact_artists(const std::string& body,
+                                            const std::string& name);
+
 // Comparison key for "do these two strings name the same artist".  Deliberately
 // loose about case, punctuation and underscores: an artist folder is a
 // *filename*, so "AC/DC" is on disk as "AC-DC" and "Pink_Floyd" is a legal
@@ -100,3 +108,7 @@ std::optional<MbArtistMatch> mb_pick_artist(const std::string& body,
 // that anyone can see and fix in the tag or the folder name.  ignoredArticles
 // exists for *sorting*, which may guess; identity may not.
 std::string artist_key(const std::string& s);
+
+// artist_key() after folding diacritics: the comparison for a name that came
+// from a provider rather than from the library (see above).
+std::string provider_key(const std::string& s);

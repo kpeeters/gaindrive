@@ -276,6 +276,61 @@ static std::string discogs_plain(const std::string& s)
 	return out;
 	}
 
+// ---- Wikidata ----------------------------------------------------------
+
+static httplib::Result wikidata_get(const httplib::Params& params)
+	{
+	httplib::SSLClient wd("www.wikidata.org");
+	provider_timeouts(wd);
+	wd.set_default_headers({
+		{"User-Agent", USER_AGENT}
+		});
+	return wd.Get("/w/api.php", params, httplib::Headers{});
+	}
+
+// Item ids for a Wikidata full-text search, best first. Used with
+// haswbstatement: terms, which is what finds an item by the MusicBrainz id it
+// carries even when MusicBrainz does not link back to it. Only ids shaped like
+// Q<digits> come out, because they go into further request parameters and log
+// lines. `failed` is set when Wikidata did not answer, which is not the same
+// as answering with nothing.
+static std::vector<std::string> wikidata_search(const std::string& srsearch,
+                                                bool* failed = nullptr)
+	{
+	std::vector<std::string> ids;
+	auto r = wikidata_get(httplib::Params{
+		{"action", "query"}, {"list", "search"}, {"srsearch", srsearch},
+		{"srlimit", "5"}, {"format", "json"}
+		});
+	if (!r || r->status != 200) {
+		std::cout << stamp() << "Wikidata search [" << srsearch << "] failed"
+		          << (r ? " HTTP " + std::to_string(r->status) : " (no response)")
+		          << std::endl;
+		if (failed) *failed = true;
+		return ids;
+		}
+	auto j = nlohmann::json::parse(r->body, nullptr, false);
+	for (const auto& hit : jsub(jsub(j, "query"), "search")) {
+		std::string t = jstr(hit, "title");
+		if (t.size() > 1 && t[0] == 'Q'
+		    && std::all_of(t.begin() + 1, t.end(), [](char c) {
+		       	return std::isdigit(static_cast<unsigned char>(c)); }))
+			ids.push_back(t);
+		}
+	return ids;
+	}
+
+// The one item carrying `prop` = `mbid`, or "" when there is none or more
+// than one. Two items claiming the same MusicBrainz id is a Wikidata error,
+// and guessing between them would attach the wrong article for good.
+static std::string wikidata_by_mbid(const char* prop, const std::string& mbid,
+                                    bool* failed = nullptr)
+	{
+	auto ids = wikidata_search(std::string("haswbstatement:") + prop + "=" + mbid,
+	                           failed);
+	return ids.size() == 1 ? ids[0] : std::string();
+	}
+
 // ---- Artist info helper -----------------------------------------------
 
 // Performs the MusicBrainz -> Wikidata -> Wikipedia -> TheAudioDB -> Discogs
@@ -355,6 +410,10 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 	// runs and every request re-resolves the whole chain for ever. The Last.fm
 	// URL is composed from the name rather than fetched, so it is copied out of
 	// the search branch rather than skipped with it.
+	// The other exact matches of the search, for step 2. Empty when the tags
+	// supplied the id: that is never second-guessed.
+	std::vector<MbArtistMatch> alternates;
+
 	std::string tag_mbid = store.get_artist_tag_mbid(id);
 	if (!tag_mbid.empty()) {
 		std::cout << stamp() << "getArtistInfo [" << name
@@ -405,6 +464,9 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 			if (pick) {
 				info.mbid        = pick->mbid;
 				info.last_fm_url = "https://www.last.fm/music/" + url_encode(name);
+				for (auto& alt : mb_exact_artists(r->body, name))
+					if (alt.mbid != pick->mbid && is_uuid(alt.mbid))
+						alternates.push_back(alt);
 				std::cout << stamp() << "getArtistInfo [" << name
 				          << "] matched [" << pick->name << "] "
 				          << pick->mbid << " score=" << pick->score
@@ -421,36 +483,117 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 
 	// Step 2 - MusicBrainz URL relations → Wikipedia article URL.
 	if (!info.mbid.empty()) {
+		// One artist's url-rels, or nothing when MusicBrainz did not answer.
 		// The one-second wait that used to sit here is mb_get()'s job now;
 		// doing it in both places only made every lookup a second slower.
-		httplib::Params p2{{"inc","url-rels"},{"fmt","json"}};
-		auto r2 = mb_get(mb, "/ws/2/artist/" + info.mbid, p2,
-		                 "getArtistInfo [" + name + "] url-rels");
-		note(r2);
-		if (!r2) {
-			std::cout << stamp() << "getArtistInfo [" << name
-			          << "] MusicBrainz url-rels request failed" << std::endl;
-			}
-		else if (r2->status != 200) {
-			std::cout << stamp() << "getArtistInfo [" << name
-			          << "] MusicBrainz url-rels HTTP " << r2->status
-			          << (mb_rate_limited(r2) ? " - rate limited" : "")
-			          << std::endl;
-			}
-		else {
+		auto fetch_rels = [&](const std::string& mbid)
+			-> std::optional<nlohmann::json>
+			{
+			auto r2 = mb_get(mb, "/ws/2/artist/" + mbid,
+			                 httplib::Params{{"inc","url-rels"},{"fmt","json"}},
+			                 "getArtistInfo [" + name + "] url-rels");
+			note(r2);
+			if (!r2) {
+				std::cout << stamp() << "getArtistInfo [" << name
+				          << "] MusicBrainz url-rels request failed" << std::endl;
+				return std::nullopt;
+				}
+			if (r2->status != 200) {
+				std::cout << stamp() << "getArtistInfo [" << name
+				          << "] MusicBrainz url-rels HTTP " << r2->status
+				          << (mb_rate_limited(r2) ? " - rate limited" : "")
+				          << std::endl;
+				return std::nullopt;
+				}
 			auto j2 = nlohmann::json::parse(r2->body, nullptr, false);
-			const auto& rels = jsub(j2, "relations");
+			nlohmann::json rels = jsub(j2, "relations");
+			if (!rels.is_array()) rels = nlohmann::json::array();
 			std::cout << stamp() << "getArtistInfo [" << name
-			          << "] MusicBrainz url-rels: " << rels.size() << " relation(s)";
+			          << "] MusicBrainz url-rels of " << mbid << ": "
+			          << rels.size() << " relation(s)";
 			for (auto& rel : rels) {
 				std::string t = jstr(rel, "type");
 				std::cout << " [" << (t.empty() ? "?" : t) << "]";
 				}
 			std::cout << std::endl;
+			return rels;
+			};
+		auto has_wiki = [](const nlohmann::json& rels) {
+			for (auto& rel : rels) {
+				std::string t = jstr(rel, "type");
+				if (t == "wikipedia" || t == "wikidata") return true;
+				}
+			return false;
+			};
+
+		auto fetched = fetch_rels(info.mbid);
+		// Two exact matches are a tie the score breaks arbitrarily, and the
+		// winner can be an empty duplicate record: "Alexander Borodin" picks
+		// one with no type, no dates and no links over the composer himself,
+		// who matches through an alias. So when the pick links no
+		// encyclopedia, the next exact matches get a turn, and the first that
+		// does replaces it outright - id and every relation - rather than
+		// lending it an article that may belong to somebody else.
+		if (fetched && !has_wiki(*fetched))
+			for (size_t i = 0; i < alternates.size() && i < 2; ++i) {
+				auto alt = fetch_rels(alternates[i].mbid);
+				if (alt && has_wiki(*alt)) {
+					std::cout << stamp() << "getArtistInfo [" << name
+					          << "] switching to [" << alternates[i].name << "] "
+					          << alternates[i].mbid << " score="
+					          << alternates[i].score
+					          << ", which links Wikipedia or Wikidata" << std::endl;
+					info.mbid = alternates[i].mbid;
+					fetched   = std::move(alt);
+					break;
+					}
+				}
+
+		if (fetched) {
+			const auto& rels = *fetched;
+
+			// The enwiki title of a Wikidata item, plus its P18 image as a
+			// fallback portrait.
+			std::string wd_image_url;
+			auto from_wikidata = [&](const std::string& entity) -> std::string {
+				std::cout << stamp() << "getArtistInfo [" << name
+				          << "] Wikidata entity: " << entity << std::endl;
+				auto rwd = wikidata_get(httplib::Params{
+					{"action","wbgetentities"},{"ids",entity},
+					{"props","sitelinks|claims"},{"sitefilter","enwiki"},
+					{"format","json"}
+					});
+				note(rwd);
+				if (!rwd || rwd->status != 200) return {};
+				auto jwd = nlohmann::json::parse(rwd->body, nullptr, false);
+				const auto& ent = jsub(jsub(jwd, "entities"), entity);
+				std::string t = jstr(jsub(jsub(ent, "sitelinks"), "enwiki"), "title");
+				if (!t.empty())
+					std::cout << stamp() << "getArtistInfo [" << name
+					          << "] Wikipedia (via Wikidata): " << t << std::endl;
+				else
+					// The step that most often ends the bio chain, and it used to
+					// end it in silence: a log line only for the sitelink that
+					// was found says nothing about the one that was not. A
+					// MusicBrainz *group* commonly has no article of its own
+					// while the person does.
+					std::cout << stamp() << "getArtistInfo [" << name
+					          << "] no English Wikipedia article for "
+					          << entity << std::endl;
+
+				// Wikidata P18 (image) as fallback when no Wikipedia article.
+				const auto& p18 = jidx(jsub(jsub(ent, "claims"), "P18"), 0);
+				std::string fn = jstr(jsub(jsub(p18, "mainsnak"), "datavalue"), "value");
+				if (!fn.empty()) {
+					for (char& c : fn) if (c == ' ') c = '_';
+					wd_image_url = "https://commons.wikimedia.org/wiki/Special:FilePath/"
+					             + url_encode(fn);
+					}
+				return t;
+				};
 
 			// Prefer direct wikipedia relation; fall back to wikidata.
 			std::string wiki_title;
-			std::string wd_image_url;
 			for (auto& rel : rels) {
 				std::string type     = jstr(rel, "type");
 				std::string resource = jstr(jsub(rel, "url"), "resource");
@@ -476,54 +619,22 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 				else if (type == "wikidata" && wiki_title.empty()) {
 					auto pos = resource.rfind('/');
 					if (pos == std::string::npos) continue;
-					std::string entity = resource.substr(pos + 1);
-					std::cout << stamp() << "getArtistInfo [" << name
-					          << "] Wikidata entity: " << entity << std::endl;
-					httplib::SSLClient wd("www.wikidata.org");
-					provider_timeouts(wd);
-					wd.set_default_headers({
-						{"User-Agent",USER_AGENT}
-						});
-					auto rwd = wd.Get("/w/api.php",
-						httplib::Params{
-							{"action","wbgetentities"},{"ids",entity},
-							{"props","sitelinks|claims"},{"sitefilter","enwiki"},
-							{"format","json"}
-							},
-						httplib::Headers{});
-					note(rwd);
-					if (rwd && rwd->status == 200) {
-						auto jwd = nlohmann::json::parse(rwd->body, nullptr, false);
-						const auto& ent = jsub(jsub(jwd, "entities"), entity);
-						wiki_title = jstr(jsub(jsub(ent, "sitelinks"), "enwiki"),
-						                  "title");
-						if (!wiki_title.empty())
-							std::cout << stamp() << "getArtistInfo [" << name
-							          << "] Wikipedia (via Wikidata): "
-							          << wiki_title << std::endl;
-						else
-							// The step that most often ends the bio chain, and it
-							// used to end it in silence: a log line only for the
-							// sitelink that was found says nothing about the one
-							// that was not. A MusicBrainz *group* commonly has no
-							// article of its own while the person does.
-							std::cout << stamp() << "getArtistInfo [" << name
-							          << "] no English Wikipedia article for "
-							          << entity << std::endl;
-
-						// Wikidata P18 (image) as fallback when no Wikipedia article.
-						const auto& p18 =
-							jidx(jsub(jsub(ent, "claims"), "P18"), 0);
-						std::string fn =
-							jstr(jsub(jsub(p18, "mainsnak"), "datavalue"), "value");
-						if (!fn.empty()) {
-							for (char& c : fn) if (c == ' ') c = '_';
-							wd_image_url =
-								"https://commons.wikimedia.org/wiki/Special:FilePath/"
-								+ url_encode(fn);
-							}
-						}
+					wiki_title = from_wikidata(resource.substr(pos + 1));
 					}
+				}
+
+			// Wikidata often knows the MusicBrainz id when MusicBrainz does not
+			// link back, and the id is exact where a name search would not be.
+			if (!has_wiki(rels)) {
+				bool wd_failed = false;
+				std::string entity = wikidata_by_mbid("P434", info.mbid, &wd_failed);
+				if (wd_failed && provider_error) *provider_error = true;
+				if (!entity.empty())
+					wiki_title = from_wikidata(entity);
+				else
+					std::cout << stamp() << "getArtistInfo [" << name
+					          << "] no Wikidata item carries " << info.mbid
+					          << std::endl;
 				}
 
 			// Step 3 - Wikipedia REST summary → bio + thumbnail.
@@ -1137,18 +1248,95 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 			          << "] no release-group taken from the search" << std::endl;
 		}
 
-	// A Discogs master named by the release group itself, for step 4.
-	std::string rg_discogs;
+	// Gathered from the release group in step 2 for the later steps.
+	std::string rg_discogs;    // a Discogs master
+	std::string rg_title;      // MusicBrainz's title, often not the folder's
+	std::string artist_mbid;   // first credited artist
+	std::string wiki_title;
 
-	// Step 2 - fetch URL relations for the release-group.
+	// The enwiki title of a Wikidata item, or "" when it has none.
+	auto from_wikidata = [&](const std::string& entity) -> std::string {
+		std::cout << stamp() << "getAlbumInfo [" << title
+		          << "] Wikidata entity: " << entity << std::endl;
+		auto rwd = wikidata_get(httplib::Params{
+			{"action","wbgetentities"},{"ids",entity},
+			{"props","sitelinks"},{"sitefilter","enwiki"},
+			{"format","json"}
+			});
+		if (!rwd || rwd->status != 200) return {};
+		auto jwd = nlohmann::json::parse(rwd->body, nullptr, false);
+		const auto& ent = jsub(jsub(jwd, "entities"), entity);
+		std::string t = jstr(jsub(jsub(ent, "sitelinks"), "enwiki"), "title");
+		std::cout << stamp() << "getAlbumInfo [" << title << "] "
+		          << (t.empty() ? "no English Wikipedia article for " + entity
+		                        : "Wikipedia (via Wikidata): " + t)
+		          << std::endl;
+		return t;
+		};
+	// A wikipedia relation anywhere in the list beats a wikidata one.
+	auto wiki_from_rels = [&](const nlohmann::json& rels) -> std::string {
+		for (auto& rel : rels) {
+			if (jstr(rel, "type") != "wikipedia") continue;
+			std::string resource = jstr(jsub(rel, "url"), "resource");
+			auto pos = resource.find("/wiki/");
+			if (pos == std::string::npos) continue;
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] Wikipedia (direct): " << resource.substr(pos + 6)
+			          << std::endl;
+			return resource.substr(pos + 6);
+			}
+		for (auto& rel : rels) {
+			if (jstr(rel, "type") != "wikidata") continue;
+			std::string resource = jstr(jsub(rel, "url"), "resource");
+			auto pos = resource.rfind('/');
+			if (pos != std::string::npos)
+				return from_wikidata(resource.substr(pos + 1));
+			}
+		return {};
+		};
+
+	// The release group's releases with their url-rels, asked for at most
+	// once and only by a step that needs them: the Wikipedia rung below and
+	// the Discogs step both read it.
+	std::optional<nlohmann::json> releases;
+	auto release_list = [&]() -> const nlohmann::json& {
+		if (releases) return *releases;
+		releases = nlohmann::json::array();
+		auto rr = mb_get(mb, "/ws/2/release",
+		                 httplib::Params{{"release-group", info.mbid},
+		                                 {"inc", "url-rels"},
+		                                 {"limit", "10"},
+		                                 {"fmt", "json"}},
+		                 "getAlbumInfo [" + title + "] releases");
+		if (rr && rr->status == 200) {
+			auto jr = nlohmann::json::parse(rr->body, nullptr, false);
+			const auto& list = jsub(jr, "releases");
+			if (list.is_array()) *releases = list;
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] MusicBrainz release list: " << releases->size()
+			          << " release(s)" << std::endl;
+			}
+		else {
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] MusicBrainz release list "
+			          << (rr ? "HTTP " + std::to_string(rr->status)
+			                 : std::string("failed (no response)"))
+			          << std::endl;
+			}
+		return *releases;
+		};
+
+	// Step 2 - fetch URL relations for the release-group. The artist credit
+	// rides along in the same request, for the Wikidata search in step 2d.
 	if (!info.mbid.empty()) {
 		// The one-second wait that used to sit here is mb_get()'s job now;
 		// doing it in both places only made every lookup a second slower.
 		std::cout << stamp() << "getAlbumInfo [" << title
 		          << "] fetching /ws/2/release-group/" << info.mbid
-		          << "?inc=url-rels" << std::endl;
+		          << "?inc=url-rels+artist-credits" << std::endl;
 		auto r2 = mb_get(mb, "/ws/2/release-group/" + info.mbid,
-		                 httplib::Params{{"inc","url-rels"},{"fmt","json"}},
+		                 httplib::Params{{"inc","url-rels+artist-credits"},
+		                                 {"fmt","json"}},
 		                 "getAlbumInfo [" + title + "] url-rels");
 		if (!r2) {
 			std::cout << stamp() << "getAlbumInfo [" << title
@@ -1172,8 +1360,10 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 				}
 			std::cout << std::endl;
 
-			// Prefer direct wikipedia relation; fall back to wikidata.
-			std::string wiki_title;
+			rg_title    = jstr(j2, "title");
+			artist_mbid = jstr(jsub(jidx(jsub(j2, "artist-credit"), 0), "artist"), "id");
+			if (!is_uuid(artist_mbid)) artist_mbid.clear();
+
 			for (auto& rel : rels) {
 				std::string type     = jstr(rel, "type");
 				std::string resource = jstr(jsub(rel, "url"), "resource");
@@ -1187,84 +1377,123 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 					std::cout << stamp() << "getAlbumInfo [" << title
 					          << "] Discogs: " << resource << std::endl;
 					}
-				else if (type == "wikipedia") {
-					auto pos = resource.find("/wiki/");
-					if (pos != std::string::npos) {
-						wiki_title = resource.substr(pos + 6);
-						std::cout << stamp() << "getAlbumInfo [" << title
-						          << "] Wikipedia (direct): " << wiki_title
-						          << std::endl;
-						break;
-						}
-					}
-				else if (type == "wikidata" && wiki_title.empty()) {
-					auto pos = resource.rfind('/');
-					if (pos == std::string::npos) continue;
-					std::string entity = resource.substr(pos + 1);
-					std::cout << stamp() << "getAlbumInfo [" << title
-					          << "] Wikidata entity: " << entity << std::endl;
-					httplib::SSLClient wd("www.wikidata.org");
-					provider_timeouts(wd);
-					wd.set_default_headers({
-						{"User-Agent",USER_AGENT}
-						});
-					auto rwd = wd.Get("/w/api.php",
-						httplib::Params{
-							{"action","wbgetentities"},{"ids",entity},
-							{"props","sitelinks"},{"sitefilter","enwiki"},
-							{"format","json"}
-							},
-						httplib::Headers{});
-					if (rwd && rwd->status == 200) {
-						auto jwd = nlohmann::json::parse(rwd->body, nullptr, false);
-						const auto& ent = jsub(jsub(jwd, "entities"), entity);
-						wiki_title = jstr(jsub(jsub(ent, "sitelinks"), "enwiki"),
-						                  "title");
-						if (!wiki_title.empty())
-							std::cout << stamp() << "getAlbumInfo [" << title
-							          << "] Wikipedia (via Wikidata): "
-							          << wiki_title << std::endl;
-						}
-					}
 				}
-
-			// Step 3 - Wikipedia REST summary → notes text.
+			wiki_title = wiki_from_rels(rels);
 			if (wiki_title.empty())
 				std::cout << stamp() << "getAlbumInfo [" << title
-				          << "] no Wikipedia or Wikidata relation on this"
-				             " release-group" << std::endl;
-			if (!wiki_title.empty()) {
-				httplib::SSLClient wp("en.wikipedia.org");
-				provider_timeouts(wp);
-				wp.set_default_headers({
-					{"User-Agent",USER_AGENT}
-					});
-				// Percent-encoded before it becomes a request line - see
-				// the artist chain above for what a CR/LF there would be.
-				std::string path_title = wiki_title;
-				for (char& c : path_title) if (c == ' ') c = '_';
-				path_title = url_encode(path_title);
-				auto r3 = wp.Get("/api/rest_v1/page/summary/" + path_title,
-				                 httplib::Params{}, httplib::Headers{});
-				if (!r3) {
-					std::cout << stamp() << "getAlbumInfo [" << title
-					          << "] Wikipedia request failed" << std::endl;
-					}
-				else if (r3->status != 200) {
-					std::cout << stamp() << "getAlbumInfo [" << title
-					          << "] Wikipedia HTTP " << r3->status << std::endl;
-					}
-				else {
-					auto j3 = nlohmann::json::parse(r3->body, nullptr, false);
-					if (!j3.is_discarded()) {
-						info.notes    = clean_prose(jstr(j3, "extract"),
-						                            MAX_PROSE_BYTES);
-						info.wiki_url = "https://en.wikipedia.org/wiki/" + path_title;
-						std::cout << stamp() << "getAlbumInfo [" << title
-						          << "] notes=" << info.notes.size()
-						          << " chars" << std::endl;
-						}
-					}
+				          << "] no Wikipedia article via the release-group's"
+				             " relations" << std::endl;
+			}
+		}
+
+	// Step 2b - the releases' own relations. MusicBrainz editors attach
+	// links to whichever entity they were looking at, so an article can sit
+	// on one pressing while the group has none.
+	if (!info.mbid.empty() && wiki_title.empty()) {
+		nlohmann::json all = nlohmann::json::array();
+		for (const auto& rel_obj : release_list())
+			for (const auto& rel : jsub(rel_obj, "relations"))
+				all.push_back(rel);
+		wiki_title = wiki_from_rels(all);
+		if (wiki_title.empty())
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] no Wikipedia article via the releases' relations"
+			          << std::endl;
+		}
+
+	// Step 2c - Wikidata often carries the release-group id (P436) where
+	// MusicBrainz does not link back.
+	if (!info.mbid.empty() && wiki_title.empty()) {
+		std::string entity = wikidata_by_mbid("P436", info.mbid);
+		if (!entity.empty())
+			wiki_title = from_wikidata(entity);
+		else
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] no Wikidata item carries " << info.mbid << std::endl;
+		}
+
+	// Step 2d - an album item with no MusicBrainz id at all, found as "an
+	// album whose performer (P175) is this artist's item" plus the title.
+	// The search matches words, so it also returns "Unplugged Deluxe" for
+	// "Unplugged"; only an item whose English label keys the same as one of
+	// our titles is taken.
+	if (wiki_title.empty() && !artist_mbid.empty()) {
+		std::string artist_q = wikidata_by_mbid("P434", artist_mbid);
+		const std::string bare = strip_album_decoration(title);
+		std::string phrase;
+		for (char c : bare) if (c != '"') phrase += c;
+		std::vector<std::string> ids;
+		if (artist_q.empty())
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] no Wikidata item for artist " << artist_mbid
+			          << std::endl;
+		else
+			ids = wikidata_search("\"" + phrase + "\" haswbstatement:P175="
+			                      + artist_q);
+		std::string joined;
+		for (const auto& q : ids) joined += (joined.empty() ? "" : "|") + q;
+		if (!joined.empty()) {
+			auto rwd = wikidata_get(httplib::Params{
+				{"action","wbgetentities"},{"ids",joined},
+				{"props","labels|sitelinks"},{"languages","en"},
+				{"sitefilter","enwiki"},{"format","json"}
+				});
+			auto jwd = rwd && rwd->status == 200
+			         ? nlohmann::json::parse(rwd->body, nullptr, false)
+			         : nlohmann::json();
+			std::set<std::string> want;
+			for (const std::string& t : { title, bare, rg_title })
+				if (!t.empty()) want.insert(provider_key(t));
+			for (const auto& q : ids) {
+				const auto& ent = jsub(jsub(jwd, "entities"), q);
+				std::string label = jstr(jsub(jsub(ent, "labels"), "en"), "value");
+				if (label.empty() || !want.count(provider_key(label))) continue;
+				wiki_title = jstr(jsub(jsub(ent, "sitelinks"), "enwiki"), "title");
+				std::cout << stamp() << "getAlbumInfo [" << title
+				          << "] Wikidata performer search: " << q << " ["
+				          << label << "] "
+				          << (wiki_title.empty() ? "has no English article"
+				                                 : "-> " + wiki_title)
+				          << std::endl;
+				break;
+				}
+			}
+		if (wiki_title.empty() && !artist_q.empty())
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] Wikidata performer search found no article ("
+			          << ids.size() << " candidate(s))" << std::endl;
+		}
+
+	// Step 3 - Wikipedia REST summary → notes text.
+	if (!wiki_title.empty()) {
+		httplib::SSLClient wp("en.wikipedia.org");
+		provider_timeouts(wp);
+		wp.set_default_headers({
+			{"User-Agent",USER_AGENT}
+			});
+		// Percent-encoded before it becomes a request line - see the artist
+		// chain above for what a CR/LF there would be.
+		std::string path_title = wiki_title;
+		for (char& c : path_title) if (c == ' ') c = '_';
+		path_title = url_encode(path_title);
+		auto r3 = wp.Get("/api/rest_v1/page/summary/" + path_title,
+		                 httplib::Params{}, httplib::Headers{});
+		if (!r3) {
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] Wikipedia request failed" << std::endl;
+			}
+		else if (r3->status != 200) {
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] Wikipedia HTTP " << r3->status << std::endl;
+			}
+		else {
+			auto j3 = nlohmann::json::parse(r3->body, nullptr, false);
+			if (!j3.is_discarded()) {
+				info.notes    = clean_prose(jstr(j3, "extract"), MAX_PROSE_BYTES);
+				info.wiki_url = "https://en.wikipedia.org/wiki/" + path_title;
+				std::cout << stamp() << "getAlbumInfo [" << title
+				          << "] notes=" << info.notes.size() << " chars"
+				          << std::endl;
 				}
 			}
 		}
@@ -1272,7 +1501,7 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 	// Step 4 - Discogs notes, when Wikipedia had none. A release group links
 	// a Discogs *master*, which many albums never got; the Discogs links
 	// MusicBrainz does have are mostly on the individual releases, so those
-	// are asked for when the master gave nothing.
+	// are tried when the master gave nothing.
 	if (!info.mbid.empty() && info.notes.empty()) {
 		std::string token = store.get_setting("discogs_token");
 		// Capped because each page costs a Discogs request and a second, and
@@ -1317,34 +1546,18 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 			if (!rg_discogs.empty())
 				try_pages({ rg_discogs });
 			if (info.notes.empty()) {
-				auto rr = mb_get(mb, "/ws/2/release",
-				                 httplib::Params{{"release-group", info.mbid},
-				                                 {"inc", "url-rels"},
-				                                 {"limit", "10"},
-				                                 {"fmt", "json"}},
-				                 "getAlbumInfo [" + title + "] releases");
 				std::vector<std::string> pages;
-				if (rr && rr->status == 200) {
-					auto jr = nlohmann::json::parse(rr->body, nullptr, false);
-					for (const auto& rel_obj : jsub(jr, "releases"))
-						for (const auto& rel : jsub(rel_obj, "relations")) {
-							if (jstr(rel, "type") != "discogs") continue;
-							std::string u = clean_url(jstr(jsub(rel, "url"), "resource"));
-							if (!u.empty() && std::find(pages.begin(), pages.end(), u)
-							                  == pages.end())
-								pages.push_back(u);
-							}
-					std::cout << stamp() << "getAlbumInfo [" << title
-					          << "] " << pages.size()
-					          << " Discogs page(s) on the releases" << std::endl;
-					}
-				else {
-					std::cout << stamp() << "getAlbumInfo [" << title
-					          << "] MusicBrainz release list "
-					          << (rr ? "HTTP " + std::to_string(rr->status)
-					                 : std::string("failed (no response)"))
-					          << std::endl;
-					}
+				for (const auto& rel_obj : release_list())
+					for (const auto& rel : jsub(rel_obj, "relations")) {
+						if (jstr(rel, "type") != "discogs") continue;
+						std::string u = clean_url(jstr(jsub(rel, "url"), "resource"));
+						if (!u.empty() && std::find(pages.begin(), pages.end(), u)
+						                  == pages.end())
+							pages.push_back(u);
+						}
+				std::cout << stamp() << "getAlbumInfo [" << title
+				          << "] " << pages.size()
+				          << " Discogs page(s) on the releases" << std::endl;
 				try_pages(pages);
 				}
 			}
