@@ -1,6 +1,6 @@
 // The online info resolver: MusicBrainz, Wikidata, Wikipedia, TheAudioDB and
-// Discogs for an artist, MusicBrainz plus Wikidata, Wikipedia and Discogs for
-// an album, and the single background queue that runs both.
+// Discogs for an artist and for an album, and the single background queue that
+// runs both.
 //
 // Split out of gaindrive.cc as one unit rather than two because the two
 // resolvers share the MusicBrainz client below, and mb_pace() is one gate for
@@ -209,6 +209,27 @@ static httplib::Result mb_get(httplib::SSLClient& cli, const std::string& path,
 		std::this_thread::sleep_for(wait);
 		}
 	return r;
+	}
+
+// ---- TheAudioDB --------------------------------------------------------
+
+// TheAudioDB's public test key. It was "2" until TheAudioDB retired that one,
+// after which every request under it was a 404 - which reads as "no such
+// artist", so the fallback stopped working without a single error.
+static constexpr const char* AUDIODB_KEY = "123";
+
+// One lookup by MusicBrainz id: `what` is "artist-mb" or "album-mb". The
+// second's wait keeps a run of lookups under the free key's 30 a minute.
+static httplib::Result audiodb_get(const char* what, const std::string& mbid)
+	{
+	std::this_thread::sleep_for(std::chrono::seconds(1));
+	httplib::SSLClient tadb("www.theaudiodb.com");
+	provider_timeouts(tadb);
+	tadb.set_default_headers({
+		{"User-Agent", USER_AGENT}
+		});
+	return tadb.Get(std::string("/api/v1/json/") + AUDIODB_KEY + "/" + what + ".php",
+	                httplib::Params{{"i", mbid}}, httplib::Headers{});
 	}
 
 // ---- Discogs -----------------------------------------------------------
@@ -708,15 +729,7 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 			// Each field is taken independently and only when empty, so
 			// Wikipedia goes on winning wherever it answered.
 			if (info.image_url.empty() || info.biography.empty()) {
-				std::this_thread::sleep_for(std::chrono::seconds(1));
-				httplib::SSLClient tadb("www.theaudiodb.com");
-				provider_timeouts(tadb);
-				tadb.set_default_headers({
-					{"User-Agent",USER_AGENT}
-					});
-				auto rt = tadb.Get("/api/v1/json/2/artist-mb.php",
-				                   httplib::Params{{"i", info.mbid}},
-				                   httplib::Headers{});
+				auto rt = audiodb_get("artist-mb", info.mbid);
 				note(rt);
 				if (rt && rt->status == 200) {
 					// A miss here is "artists": null, not an empty array.
@@ -1047,10 +1060,10 @@ static std::string strip_album_decoration(const std::string& title)
 // request and yields the same kind of id.
 enum class MbBy { ReleaseGroup, Release };
 
-// Performs the MusicBrainz -> Wikidata -> Wikipedia -> Discogs lookup for one
-// album and caches the result. Runs on the resolver thread and nowhere else; it
-// is paced by mb_pace() and it must never be reached from a request handler
-// again.
+// Performs the MusicBrainz -> Wikidata -> Wikipedia -> TheAudioDB -> Discogs
+// lookup for one album and caches the result. Runs on the resolver thread and
+// nowhere else; it is paced by mb_pace() and it must never be reached from a
+// request handler again.
 //
 // **It never reads album_info_cache**, the same rule resolve_artist_info()
 // states and for the same reason: its one caller is lookup_run_job(), which
@@ -1498,7 +1511,32 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 			}
 		}
 
-	// Step 4 - Discogs notes, when Wikipedia had none. A release group links
+	// Step 3b - TheAudioDB, looked up by the release-group id, so there is no
+	// name matching to get wrong. Before Discogs because its text is about
+	// the album, where Discogs notes are often about one pressing.
+	if (!info.mbid.empty() && info.notes.empty()) {
+		auto rt = audiodb_get("album-mb", info.mbid);
+		if (rt && rt->status == 200) {
+			// A miss here is "album": null, not an empty array.
+			auto jt = nlohmann::json::parse(rt->body, nullptr, false);
+			const auto& ta = jidx(jsub(jt, "album"), 0);
+			// Both spellings, for the reason the artist side gives.
+			info.notes = clean_prose(jstr(ta, "strDescriptionEN"), MAX_PROSE_BYTES);
+			if (info.notes.empty())
+				info.notes = clean_prose(jstr(ta, "strDescription"), MAX_PROSE_BYTES);
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] TheAudioDB: notes=" << info.notes.size() << " chars"
+			          << std::endl;
+			}
+		else {
+			std::cout << stamp() << "getAlbumInfo [" << title << "] TheAudioDB "
+			          << (rt ? "HTTP " + std::to_string(rt->status)
+			                 : std::string("failed (no response)"))
+			          << std::endl;
+			}
+		}
+
+	// Step 4 - Discogs notes, when Wikipedia and TheAudioDB had none. A release group links
 	// a Discogs *master*, which many albums never got; the Discogs links
 	// MusicBrainz does have are mostly on the individual releases, so those
 	// are tried when the master gave nothing.
