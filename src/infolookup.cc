@@ -93,7 +93,7 @@ static constexpr auto MB_REQUEST_GAP = std::chrono::milliseconds(1100);
 // resolver queue is a single thread, so one unreachable provider stalls every
 // job behind it.
 //
-// The numbers are the ones portrait_fetch() and setCoverArt's url= already use
+// The numbers are the ones image_fetch() and setCoverArt's url= already use
 // for the same kind of request, and nothing here is worth waiting longer for -
 // a provider that has not answered in fifteen seconds is not going to.
 //
@@ -1765,18 +1765,32 @@ void GainDrive::lookup_seed()
 		// once, which artists_needing_art() handles by not excluding it at all.
 		const int64_t month_ago = static_cast<int64_t>(std::time(nullptr))
 		    - 30LL * 24 * 3600;
-		auto jobs = store_.artists_needing_art(month_ago);
+		auto jobs   = store_.artists_needing_art(month_ago);
+		auto albums = store_.albums_needing_art(month_ago);
 
 		std::lock_guard<std::mutex> lk(lookup_mu_);
+		size_t n_artists = 0, n_albums = 0;
 		for (auto& j : jobs) {
 			if (lookup_queued_.count(j.path)) continue;
 			lookup_queued_.insert(j.path);
 			lookup_queue_.push_back(
 				LookupJob{LookupKind::Artist, j.folder_id, j.path, j.name});
+			n_artists++;
 			}
-		if (!lookup_queue_.empty())
-			std::cout << stamp() << "Artist portraits: " << lookup_queue_.size()
-			          << " to resolve" << std::endl;
+		// Behind every artist: a portrait shows on more screens than any one
+		// album cover does. info = false, so an album whose notes are cached
+		// costs no MusicBrainz request at all.
+		for (auto& j : albums) {
+			if (lookup_queued_.count(j.path)) continue;
+			lookup_queued_.insert(j.path);
+			lookup_queue_.push_back(
+				LookupJob{LookupKind::Album, j.folder_id, j.path, j.name, false});
+			n_albums++;
+			}
+		if (n_artists > 0 || n_albums > 0)
+			std::cout << stamp() << "Info resolver: " << n_artists
+			          << " artist portrait(s) and " << n_albums
+			          << " album cover(s) to resolve" << std::endl;
 		}
 	catch (const std::exception& e) {
 		std::cout << stamp() << "Info resolver seed failed: " << e.what()
@@ -1818,6 +1832,7 @@ void GainDrive::lookup_request_front(LookupKind kind, int folder_id,
 	for (auto it = lookup_queue_.begin(); it != lookup_queue_.end(); ++it) {
 		if (it->path == path) {
 			LookupJob j = *it;
+			j.info = true;
 			lookup_queue_.erase(it);
 			lookup_queue_.push_front(std::move(j));
 			lookup_cv_.notify_one();
@@ -1843,7 +1858,12 @@ bool GainDrive::lookup_request_back(LookupKind kind, int folder_id,
 	{
 	{
 	std::lock_guard<std::mutex> lk(lookup_mu_);
-	if (lookup_queued_.count(path)) return false;
+	if (lookup_queued_.count(path)) {
+		// Queued by the cover sweep, perhaps: make sure it asks for the text.
+		for (auto& j : lookup_queue_)
+			if (j.path == path) j.info = true;
+		return false;
+		}
 	lookup_queued_.insert(path);
 	lookup_queue_.push_back(LookupJob{kind, folder_id, path, name});
 	}
@@ -1885,8 +1905,10 @@ bool GainDrive::lookup_pending(const std::string& path)
 // Downloads one image URL and normalises it to something that can be stored
 // and scaled later. Never throws: this runs on a background thread, where an
 // escaping exception is std::terminate.
-MediaStore::ArtistArtRow GainDrive::portrait_fetch(const std::string& url)
+MediaStore::ArtistArtRow GainDrive::image_fetch(const std::string& url,
+                                                int* http_status)
 	{
+	if (http_status) *http_status = 0;
 	MediaStore::ArtistArtRow row;
 	row.status     = "error";
 	row.source_url = url;
@@ -1929,14 +1951,14 @@ MediaStore::ArtistArtRow GainDrive::portrait_fetch(const std::string& url)
 		httplib::Result r;
 		for (int hop = 0; ; ++hop) {
 			if (hop > MAX_COVER_REDIRECTS) {
-				std::cout << stamp() << "Artist portrait: too many redirects for "
+				std::cout << stamp() << "Image fetch: too many redirects for "
 				          << url << std::endl;
 				return row;
 				}
 			bool hop_https = next.rfind("https://", 0) == 0;
 			bool hop_http  = next.rfind("http://",  0) == 0;
 			if (!hop_https && !hop_http) {
-				std::cout << stamp() << "Artist portrait: refusing a non-http(s)"
+				std::cout << stamp() << "Image fetch: refusing a non-http(s)"
 				             " redirect from " << url << std::endl;
 				return row;
 				}
@@ -1948,7 +1970,7 @@ MediaStore::ArtistArtRow GainDrive::portrait_fetch(const std::string& url)
 			                                                 : next.substr(slash);
 
 			if (!host_is_global(host)) {
-				std::cout << stamp() << "Artist portrait: refusing non-global host: "
+				std::cout << stamp() << "Image fetch: refusing non-global host: "
 				          << host << std::endl;
 				return row;
 				}
@@ -1964,6 +1986,7 @@ MediaStore::ArtistArtRow GainDrive::portrait_fetch(const std::string& url)
 			if (hop_https) { httplib::SSLClient cli(hname, hport); r = get(cli); }
 			else           { httplib::Client    cli(hname, hport); r = get(cli); }
 			if (!r) return row;
+			if (http_status) *http_status = r->status;
 			if (r->status == 301 || r->status == 302 || r->status == 303
 			    || r->status == 307 || r->status == 308) {
 				std::string loc = r->get_header_value("Location");
@@ -1978,7 +2001,7 @@ MediaStore::ArtistArtRow GainDrive::portrait_fetch(const std::string& url)
 		// These are arbitrary third-party URLs; nothing about them is bounded
 		// except by us.
 		if (r->body.size() > MAX_PORTRAIT_BYTES) {
-			std::cout << stamp() << "Artist portrait: " << url << " is "
+			std::cout << stamp() << "Image fetch: " << url << " is "
 			          << r->body.size() << " bytes; refusing it" << std::endl;
 			return row;
 			}
@@ -1994,7 +2017,7 @@ MediaStore::ArtistArtRow GainDrive::portrait_fetch(const std::string& url)
 		auto s = imagescale::scale_to_fit(r->body, PORTRAIT_PX,
 		                                  imagescale::Fit::Long);
 		if (!s.ok) {
-			std::cout << stamp() << "Artist portrait: cannot decode " << url
+			std::cout << stamp() << "Image fetch: cannot decode " << url
 			          << " (" << s.error << ")" << std::endl;
 			return row;
 			}
@@ -2007,14 +2030,97 @@ MediaStore::ArtistArtRow GainDrive::portrait_fetch(const std::string& url)
 		return row;
 		}
 	catch (const std::exception& e) {
-		std::cout << stamp() << "Artist portrait: " << url << ": " << e.what()
+		std::cout << stamp() << "Image fetch: " << url << ": " << e.what()
 		          << std::endl;
 		}
 	catch (...) {
-		std::cout << stamp() << "Artist portrait: " << url
+		std::cout << stamp() << "Image fetch: " << url
 		          << ": unknown exception while fetching" << std::endl;
 		}
 	return row;
+	}
+
+// Cover Art Archive first, by the tagged release (the edition on disk) and then
+// by the release group; TheAudioDB's thumbnail last. All by MusicBrainz id, so
+// there is no name to match wrongly. Cover Art Archive answers a missing cover
+// with a 404, and so does a release group TheAudioDB does not know; those are
+// recorded as 'none', anything else that went wrong as 'error'.
+void GainDrive::album_cover_fetch(const LookupJob& job)
+	{
+	const std::string& path = job.path;
+	// The same exclusions as albums_needing_art(), re-checked because a demand
+	// job from getAlbumInfo reaches here without that query.
+	if (!store_.get_cover_path(job.folder_id).empty()) return;
+	if (store_.in_categories_root(path) || store_.is_song_path(path)) return;
+	if (auto st = store_.get_album_art_state(path)) {
+		const int64_t month_ago = static_cast<int64_t>(std::time(nullptr))
+		    - 30LL * 24 * 3600;
+		if (st->status == "ok"
+		    || (st->status == "none" && st->fetched_at > month_ago))
+			return;
+		}
+
+	const std::string release = store_.get_album_tag_release_mbid(job.folder_id);
+	std::string group = store_.get_album_tag_releasegroup_mbid(job.folder_id);
+	if (group.empty())
+		if (auto cached = store_.get_cached_album_info(job.folder_id))
+			group = cached->mbid;
+
+	MediaStore::ArtistArtRow row;
+	row.status = "none";
+	bool failed = false;
+	auto try_url = [&](const std::string& url, const char* source) {
+		int code = 0;
+		auto got = image_fetch(url, &code);
+		std::cout << stamp() << "getAlbumInfo [" << job.name << "] cover from "
+		          << source << ": " << (got.status == "ok" ? "ok" : "nothing")
+		          << " (HTTP " << code << ") " << url << std::endl;
+		if (got.status == "ok") {
+			row = std::move(got);
+			row.source = source;
+			return true;
+			}
+		if (code != 404) failed = true;
+		return false;
+		};
+
+	bool done = false;
+	if (is_uuid(release))
+		done = try_url("https://coverartarchive.org/release/" + release
+		               + "/front-500", "coverartarchive");
+	if (!done && is_uuid(group))
+		done = try_url("https://coverartarchive.org/release-group/" + group
+		               + "/front-500", "coverartarchive");
+	if (!done && is_uuid(group)) {
+		auto rt = audiodb_get("album-mb", group);
+		if (rt && rt->status == 200) {
+			auto jt = nlohmann::json::parse(rt->body, nullptr, false);
+			std::string thumb = clean_url(jstr(jidx(jsub(jt, "album"), 0),
+			                                   "strAlbumThumb"));
+			if (!thumb.empty())
+				done = try_url(thumb, "theaudiodb");
+			}
+		else if (!rt || rt->status != 404)
+			failed = true;
+		}
+
+	if (!done && failed) row.status = "error";
+	if (!done && !is_uuid(release) && !is_uuid(group))
+		std::cout << stamp() << "getAlbumInfo [" << job.name
+		          << "] cover: no MusicBrainz id to look one up by" << std::endl;
+
+	store_.store_album_art(path, job.name, row);
+	cover_cache_.invalidate(path);
+	std::cout << stamp() << "getAlbumInfo [" << job.name << "] cover: "
+	          << row.status;
+	if (row.status == "ok")
+		std::cout << " " << row.width << "x" << row.height << ", "
+		          << row.bytes.size() << " bytes from " << row.source;
+	else
+		std::cout << (row.status == "error"
+		                  ? " (a provider did not answer; will retry)"
+		                  : " (no provider has one)");
+	std::cout << std::endl;
 	}
 
 // One job, providers and all. Split out of lookup_worker() so that the guard
@@ -2036,8 +2142,13 @@ void GainDrive::lookup_run_job(const LookupJob& job)
 		// and nothing to complain about: a rescan is allowed to remove an
 		// album while a pass over the library is running.
 		if (!album) return;
-		resolve_album_info(job.folder_id, album->album.title,
-		                   album->album.artist, store_);
+		// The cover search runs on the release-group id the text lookup
+		// finds, so a sweep job still runs it once for an album never looked
+		// up at all.
+		if (job.info || !store_.get_cached_album_info(job.folder_id))
+			resolve_album_info(job.folder_id, album->album.title,
+			                   album->album.artist, store_);
+		album_cover_fetch(job);
 		return;
 		}
 
@@ -2072,7 +2183,7 @@ void GainDrive::lookup_run_job(const LookupJob& job)
 			row.status = "none";
 			}
 		else {
-			row = portrait_fetch(info.image_url);
+			row = image_fetch(info.image_url);
 			}
 		}
 

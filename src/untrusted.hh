@@ -99,7 +99,7 @@ std::string clean_prose(std::string_view s, size_t max_bytes);
 // no link at all.
 //
 // The character rejections are not decoration. A space or a control character
-// in a URL that is later split into host and path - which portrait_fetch()
+// in a URL that is later split into host and path - which image_fetch()
 // does - is a request-splitting attempt, and `<`, `>` and `"` are there
 // because a URL is the one provider string that reaches an HTML attribute in
 // every client that renders one.

@@ -77,7 +77,7 @@ bool client_is_local(const httplib::Request& req);
 
 // How many redirects an outbound image fetch will follow before giving up.
 // Shared by setCoverArt, which follows a URL a person typed, and by
-// portrait_fetch, which follows one a metadata provider returned.
+// image_fetch, which follows one a metadata provider returned.
 inline constexpr int MAX_COVER_REDIRECTS = 5;
 
 

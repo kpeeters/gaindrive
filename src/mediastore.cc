@@ -712,6 +712,7 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	db_music_.exec("PRAGMA client.synchronous=FULL");
 	create_schema();
 	purge_disabled_video_art();
+	repair_album_art();
 	sync_roots();
 	}
 
@@ -768,6 +769,27 @@ void MediaStore::purge_disabled_video_art()
 		" WHERE source_key IN (SELECT path FROM songs)"
 		"   AND source_key NOT IN (SELECT path FROM video_art)");
 
+	txn.commit();
+	}
+
+void MediaStore::repair_album_art()
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Transaction txn(db_music_);
+	// Nothing deletes an album_art row when its album goes, because the album
+	// prunes are folder-id driven and this table is keyed on a path. A row
+	// for a path with no folder is unreachable, so it is simply dropped here.
+	db_music_.exec(
+		"DELETE FROM album_art WHERE folder_path NOT IN (SELECT path FROM folders)");
+	// A cover_path that names a folder (and is not a song, which is the
+	// video_art convention) points at album_art; without an 'ok' row there it
+	// would promise clients a cover getCoverArt cannot serve.
+	db_music_.exec(
+		"UPDATE albums SET cover_path = ''"
+		" WHERE cover_path IN (SELECT path FROM folders)"
+		"   AND cover_path NOT IN (SELECT path FROM songs)"
+		"   AND cover_path NOT IN (SELECT folder_path FROM album_art"
+		"                           WHERE status = 'ok')");
 	txn.commit();
 	}
 
@@ -997,6 +1019,23 @@ void MediaStore::create_schema()
 		CREATE TABLE IF NOT EXISTS artist_art (
 			folder_path TEXT PRIMARY KEY,     -- "<root>/<artist>"
 			name        TEXT NOT NULL,        -- what the providers were asked
+			status      TEXT NOT NULL,        -- ok | none | error
+			source      TEXT NOT NULL DEFAULT '',
+			source_url  TEXT NOT NULL DEFAULT '',
+			mime        TEXT NOT NULL DEFAULT '',
+			width       INTEGER NOT NULL DEFAULT 0,
+			height      INTEGER NOT NULL DEFAULT 0,
+			image       BLOB,
+			fetched_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+		);
+
+		-- An album cover fetched online because the folder has none: Cover
+		-- Art Archive or TheAudioDB. Same columns and verdicts as artist_art.
+		-- An 'ok' row is reached through albums.cover_path, which then names
+		-- the album folder itself rather than an image file.
+		CREATE TABLE IF NOT EXISTS album_art (
+			folder_path TEXT PRIMARY KEY,     -- "<root>/<artist>/<album>"
+			name        TEXT NOT NULL,        -- the album title asked about
 			status      TEXT NOT NULL,        -- ok | none | error
 			source      TEXT NOT NULL DEFAULT '',
 			source_url  TEXT NOT NULL DEFAULT '',
@@ -5206,16 +5245,19 @@ void MediaStore::drop_cover_thumbs(const std::string& source_key)
 	del.exec();
 	}
 
-std::optional<MediaStore::ArtistArtRow>
-MediaStore::get_artist_art(const std::string& folder_path)
+// artist_art and album_art share their columns, so one implementation each
+// for reading and writing, with the table named by the caller. Never a value
+// from outside: the two call sites pass a literal.
+static std::optional<MediaStore::ArtistArtRow>
+read_art_row(SQLite::Database& db, const char* table,
+             const std::string& folder_path)
 	{
-	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement q(db_music_,
-		"SELECT status, source, source_url, mime, image, width, height,"
-		"       fetched_at FROM artist_art WHERE folder_path = ?");
+	SQLite::Statement q(db,
+		std::string("SELECT status, source, source_url, mime, image, width,"
+		            " height, fetched_at FROM ") + table + " WHERE folder_path = ?");
 	q.bind(1, folder_path);
 	if (!q.executeStep()) return std::nullopt;
-	ArtistArtRow r;
+	MediaStore::ArtistArtRow r;
 	r.status     = q.getColumn(0).getString();
 	r.source     = q.getColumn(1).getString();
 	r.source_url = q.getColumn(2).getString();
@@ -5233,29 +5275,30 @@ MediaStore::get_artist_art(const std::string& folder_path)
 	return r;
 	}
 
-std::optional<MediaStore::ArtistArtState>
-MediaStore::get_artist_art_state(const std::string& folder_path)
+static std::optional<MediaStore::ArtistArtState>
+read_art_state(SQLite::Database& db, const char* table,
+               const std::string& folder_path)
 	{
-	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Statement q(db_music_,
-		"SELECT status, fetched_at FROM artist_art WHERE folder_path = ?");
+	SQLite::Statement q(db,
+		std::string("SELECT status, fetched_at FROM ") + table
+		+ " WHERE folder_path = ?");
 	q.bind(1, folder_path);
 	if (!q.executeStep()) return std::nullopt;
-	ArtistArtState s;
+	MediaStore::ArtistArtState s;
 	s.status     = q.getColumn(0).getString();
 	s.fetched_at = q.getColumn(1).getInt64();
 	return s;
 	}
 
-void MediaStore::store_artist_art(const std::string& folder_path,
-                                   const std::string& name,
-                                   const ArtistArtRow& row)
+// The caller holds db_mutex_ and a transaction.
+static void write_art_row(SQLite::Database& db, const char* table,
+                          const std::string& folder_path,
+                          const std::string& name,
+                          const MediaStore::ArtistArtRow& row)
 	{
-	std::lock_guard<std::mutex> lock(db_mutex_);
-	SQLite::Transaction tx(db_music_);
 	{
-	SQLite::Statement ins(db_music_,
-		"INSERT OR REPLACE INTO artist_art"
+	SQLite::Statement ins(db,
+		std::string("INSERT OR REPLACE INTO ") + table +
 		" (folder_path, name, status, source, source_url, mime, width, height,"
 		"  image, fetched_at)"
 		" VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'))");
@@ -5271,16 +5314,130 @@ void MediaStore::store_artist_art(const std::string& folder_path,
 	ins.exec();
 	}
 	{
-	// Anything scaled from the previous portrait. fetched_at is this row's
+	// Anything scaled from the previous image. fetched_at is this row's
 	// stamp in cover_thumbs, so a stale thumbnail would miss on its own - but
 	// only after the second in which both were written, and a re-fetch is
 	// exactly when somebody is looking.
-	SQLite::Statement del(db_music_,
+	SQLite::Statement del(db,
 		"DELETE FROM cover_thumbs WHERE source_key = ?");
 	del.bind(1, folder_path);
 	del.exec();
 	}
+	}
+
+std::optional<MediaStore::ArtistArtRow>
+MediaStore::get_artist_art(const std::string& folder_path)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	return read_art_row(db_music_, "artist_art", folder_path);
+	}
+
+std::optional<MediaStore::ArtistArtState>
+MediaStore::get_artist_art_state(const std::string& folder_path)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	return read_art_state(db_music_, "artist_art", folder_path);
+	}
+
+void MediaStore::store_artist_art(const std::string& folder_path,
+                                   const std::string& name,
+                                   const ArtistArtRow& row)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Transaction tx(db_music_);
+	write_art_row(db_music_, "artist_art", folder_path, name, row);
 	tx.commit();
+	}
+
+std::optional<MediaStore::ArtistArtRow>
+MediaStore::get_album_art(const std::string& folder_path)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	return read_art_row(db_music_, "album_art", folder_path);
+	}
+
+std::optional<MediaStore::ArtistArtState>
+MediaStore::get_album_art_state(const std::string& folder_path)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	return read_art_state(db_music_, "album_art", folder_path);
+	}
+
+void MediaStore::store_album_art(const std::string& folder_path,
+                                  const std::string& title,
+                                  const ArtistArtRow& row)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Transaction tx(db_music_);
+	write_art_row(db_music_, "album_art", folder_path, title, row);
+	if (row.status == "ok") {
+		// Only over an empty cover_path: a cover file the scan found while
+		// this was being fetched is the user's, and wins.
+		SQLite::Statement upd(db_music_,
+			"UPDATE albums SET cover_path = ?"
+			" WHERE cover_path = ''"
+			"   AND folder_id = (SELECT id FROM folders WHERE path = ?)");
+		upd.bind(1, folder_path);
+		upd.bind(2, folder_path);
+		upd.exec();
+		}
+	tx.commit();
+	}
+
+std::string MediaStore::get_album_tag_release_mbid(int folder_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_,
+		"SELECT COALESCE(musicbrainz_id, '') FROM albums WHERE folder_id = ?");
+	q.bind(1, folder_id);
+	if (!q.executeStep()) return "";
+	return q.getColumn(0).getString();
+	}
+
+bool MediaStore::is_song_path(const std::string& rel_path)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement q(db_music_, "SELECT 1 FROM songs WHERE path = ?");
+	q.bind(1, rel_path);
+	return q.executeStep();
+	}
+
+std::vector<MediaStore::LookupTarget>
+MediaStore::albums_needing_art(int64_t retry_none_before)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	// The roots test is albums_needing_info()'s, both arms. The songs test
+	// drops loose-file albums, whose folder path is their song path: pointing
+	// cover_path there would read as video art.
+	std::string sql =
+		"SELECT al.folder_id, COALESCE(al.title, f.name), f.path"
+		" FROM albums al"
+		" JOIN folders f ON f.id = al.folder_id"
+		" JOIN folders p ON p.id = f.parent_id"
+		" WHERE (p.parent_id IN (SELECT id FROM folders WHERE parent_id IS NULL"
+		"                         AND COALESCE(content_type, 'artists') = 'artists')"
+		"        OR (p.parent_id IS NULL"
+		"            AND COALESCE(p.content_type, 'artists') = 'artists'))"
+		"   AND COALESCE(al.cover_path, '') = ''"
+		"   AND f.path NOT IN (SELECT path FROM songs)"
+		"   AND NOT EXISTS (SELECT 1 FROM album_art a"
+		"                    WHERE a.folder_path = f.path"
+		"                      AND (a.status = 'ok'"
+		"                           OR (a.status = 'none' AND a.fetched_at > ?)))";
+	sql += not_uploads("f.path");
+	sql += " ORDER BY f.path COLLATE NOCASE";
+
+	SQLite::Statement q(db_music_, sql);
+	q.bind(1, retry_none_before);
+	std::vector<LookupTarget> out;
+	while (q.executeStep()) {
+		LookupTarget j;
+		j.folder_id = q.getColumn(0).getInt();
+		j.name      = q.getColumn(1).getString();
+		j.path      = q.getColumn(2).getString();
+		out.push_back(std::move(j));
+		}
+	return out;
 	}
 
 std::vector<MediaStore::LookupTarget>
@@ -7571,6 +7728,12 @@ void MediaStore::sync_roots()
 		s.exec();
 		}
 		{
+		SQLite::Statement s(db_music_,
+			"DELETE FROM album_art WHERE folder_path LIKE ?");
+		s.bind(1, name + "/%");
+		s.exec();
+		}
+		{
 		// Same shape, same reason. Note video_art and video_meta are *not*
 		// torn down here and should be; a de-configured root
 		// leaves its posters and TMDB answers behind with nothing able to
@@ -7703,6 +7866,7 @@ bool MediaStore::relocate_prefix(const std::string& old_rel,
 		rewrite("albums",       "cover_path");
 		rewrite("video_art",    "path");
 		rewrite("artist_art",   "folder_path");
+		rewrite("album_art",    "folder_path");
 		rewrite("cover_thumbs", "source_key");
 		rewrite("video_meta",   "path");
 		rewrite("chapters",     "path");

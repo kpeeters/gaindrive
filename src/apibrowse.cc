@@ -819,7 +819,8 @@ void GainDrive::routes_browse()
 			// from that file and lives in the video_art table - see videoart.hh.
 			// Storing the media path rather than inventing a marker is what lets
 			// every cover-art query, and the whole web client, stay unchanged.
-			if (is_video_ext(ext_of(rel_path))) {
+			const std::string ext = ext_of(rel_path);
+			if (is_video_ext(ext)) {
 				auto art = store_.get_video_art(rel_path);
 				if (!art) {
 					// no-store, as the artist branch above: the poster may be
@@ -836,6 +837,26 @@ void GainDrive::routes_browse()
 				// move when a poster is replaced, so a same-length
 				// replacement would 304 its way to the stale image.
 				src.stamp = art->created_at;
+				orig_len  = static_cast<int64_t>(art->bytes.size());
+				orig_mime = art->mime.empty() ? "image/jpeg" : art->mime;
+				src.bytes = std::move(art->bytes);
+				}
+			// Neither media nor an image: cover_path names the album folder
+			// itself, and the cover was fetched online into album_art. Told
+			// apart by the name alone, as the video test is, so the album
+			// grid's hot path costs no extra query. Every cover file the scan
+			// picks is a .jpg, .jpeg or .png.
+			else if (ext != "jpg" && ext != "jpeg" && ext != "png") {
+				auto art = store_.get_album_art(rel_path);
+				if (!art || art->status != "ok") {
+					// no-store for the reason the video branch gives.
+					res.set_header("Cache-Control", "no-store");
+					res.status = 404;
+					return;
+					}
+				src.kind  = CoverArtCache::Source::Kind::Blob;
+				src.key   = rel_path;
+				src.stamp = art->fetched_at;
 				orig_len  = static_cast<int64_t>(art->bytes.size());
 				orig_mime = art->mime.empty() ? "image/jpeg" : art->mime;
 				src.bytes = std::move(art->bytes);

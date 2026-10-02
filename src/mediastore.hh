@@ -356,6 +356,25 @@ class MediaStore {
 		void store_artist_art(const std::string& folder_path,
 		                      const std::string& name, const ArtistArtRow& row);
 
+		// ---- Online album covers ----
+		//
+		// The same shape as the portraits, for an album with no cover file:
+		// fetched from Cover Art Archive or TheAudioDB, keyed on the album
+		// folder's stored path, never written into the library. An 'ok' row
+		// also points albums.cover_path at the album folder itself, which is
+		// how getCoverArt finds it and why every query emitting coverArt
+		// needed no change - the video_art convention, one kind of path over.
+		std::optional<ArtistArtRow>   get_album_art(const std::string& folder_path);
+		std::optional<ArtistArtState> get_album_art_state(
+			const std::string& folder_path);
+		void store_album_art(const std::string& folder_path,
+		                     const std::string& title, const ArtistArtRow& row);
+		// The tagged MUSICBRAINZ_ALBUMID: one *release*, the edition on disk.
+		std::string get_album_tag_release_mbid(int folder_id);
+		// Whether a stored path names a song: true for a loose file's album
+		// folder, which is the file itself.
+		bool is_song_path(const std::string& rel_path);
+
 		// One folder for the online resolver to work through: an artist to be
 		// looked up, or an album. Only ever produced by the three queries
 		// below, all of which restrict themselves to *artists* roots - a
@@ -376,6 +395,10 @@ class MediaStore {
 		// Artist folders with no usable portrait yet, in name order - what the
 		// background resolver works through on its own timer.
 		std::vector<LookupTarget> artists_needing_art(int64_t retry_none_before);
+		// Albums with no cover at all and no usable album_art verdict, same
+		// retry rule. A loose file that is its own album is left out: its
+		// folder path is its song path, which already means video_art.
+		std::vector<LookupTarget> albums_needing_art(int64_t retry_none_before);
 
 		// The two backfill queries behind startInfoLookup, asking the question
 		// artists_needing_art() does not: not "has this ever been resolved"
@@ -1277,6 +1300,9 @@ class MediaStore {
 		// repairs the cover_path pointers left dangling by it. Called once
 		// from the constructor.
 		void purge_disabled_video_art();
+		// Clears album_art rows whose folder is gone and cover_path pointers
+		// whose album_art row is gone. Startup, next to the video repair.
+		void repair_album_art();
 
 		// Reconciles the folders table's root rows with the configuration.
 		// Called once from the constructor.

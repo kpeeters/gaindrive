@@ -413,6 +413,35 @@ CREATE TABLE artist_art (
                   DEFAULT (strftime('%s','now'))
 );
 
+-- An album cover fetched online because the album
+-- folder has no cover file: Cover Art Archive (by
+-- the tagged release, then the release group), then
+-- TheAudioDB. Never written into the library; only
+-- what a user chose (setCoverArt) becomes a file.
+--
+-- Same columns and verdicts as artist_art, keyed on
+-- the album folder's path. An 'ok' row sets
+-- albums.cover_path to that folder path, which is
+-- how getCoverArt finds it: a cover_path that is
+-- neither media nor .jpg/.jpeg/.png names an
+-- album_art row. Loose-file albums are left out,
+-- since their folder path is a song path and that
+-- already means video_art.
+CREATE TABLE album_art (
+    folder_path TEXT PRIMARY KEY,   -- album folder
+    name        TEXT NOT NULL,      -- album title
+    status      TEXT NOT NULL,      -- ok | none | error
+    -- coverartarchive | theaudiodb
+    source      TEXT NOT NULL DEFAULT '',
+    source_url  TEXT NOT NULL DEFAULT '',
+    mime        TEXT NOT NULL DEFAULT '',
+    width       INTEGER NOT NULL DEFAULT 0,
+    height      INTEGER NOT NULL DEFAULT 0,
+    image       BLOB,
+    fetched_at  INTEGER NOT NULL
+                  DEFAULT (strftime('%s','now'))
+);
+
 -- What TMDB was asked about a video, and what it
 -- said. The filename parser (src/videoname.hh)
 -- produces the question; a match supplies the

@@ -50,7 +50,7 @@ inline constexpr size_t MAX_SMALL_BODY_BYTES = 1024 * 1024;
 // The bound on a cover fetched by setCoverArt, which is a URL a person typed
 // rather than one a provider returned, and so is bounded for the same reason
 // as a portrait and one more: this one is reachable by any account allowed to
-// edit the item. The redirect bound sits in netaddr.hh, because portrait_fetch
+// edit the item. The redirect bound sits in netaddr.hh, because image_fetch
 // needs the same one.
 inline constexpr size_t MAX_COVER_BYTES = 16u * 1024 * 1024;
 
@@ -437,6 +437,11 @@ class GainDrive {
 			// The artist's name, or the album's title. Only for the log and
 			// for the providers; the album branch re-reads the row it needs.
 			std::string name;
+			// Album only: whether to (re-)run the text lookup. False for the
+			// cover sweep, which must not re-ask MusicBrainz about every album
+			// that already has notes. A request for a path already queued
+			// sets it, so a forced getAlbumInfo is never downgraded.
+			bool        info = true;
 			};
 		void lookup_worker();
 		// One job, providers and all. Separate from the loop so the guard
@@ -483,10 +488,16 @@ class GainDrive {
 		// the same change. `key` is "albumInfo" or "albumInfo2".
 		void handle_album_info(const httplib::Request& req,
 		                       httplib::Response& res, const char* key);
-		// Downloads one portrait URL and normalises it to something storable.
-		// Empty on any failure; it never throws. Still named for the portrait
-		// because that is all it is: an album has no image to fetch.
-		MediaStore::ArtistArtRow portrait_fetch(const std::string& url);
+		// Downloads one image URL (a portrait or an album cover) and
+		// normalises it to something storable. Status "error" on any failure;
+		// it never throws. `http_status`, when given, receives the final
+		// response's status, 0 when there was none: a 404 is a provider saying
+		// it has no image, which a caller may record differently from silence.
+		MediaStore::ArtistArtRow image_fetch(const std::string& url,
+		                                     int* http_status = nullptr);
+		// The cover half of an album job: Cover Art Archive, then TheAudioDB,
+		// for an album with no cover file. Writes album_art.
+		void album_cover_fetch(const LookupJob& job);
 
 		std::thread             lookup_thread_;
 		std::mutex              lookup_mu_;
