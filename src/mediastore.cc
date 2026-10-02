@@ -943,6 +943,7 @@ void MediaStore::create_schema()
 			notes        TEXT NOT NULL DEFAULT '',
 			wiki_url     TEXT NOT NULL DEFAULT '',
 			allmusic_url TEXT NOT NULL DEFAULT '',
+			discogs_url  TEXT NOT NULL DEFAULT '',
 			fetched_at   INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 		);
 
@@ -1330,6 +1331,8 @@ void MediaStore::create_schema()
 	try { db_music_.exec("ALTER TABLE album_info_cache ADD COLUMN allmusic_url TEXT NOT NULL DEFAULT ''"); }
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE artist_info_cache ADD COLUMN discogs_url TEXT NOT NULL DEFAULT ''"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE album_info_cache ADD COLUMN discogs_url TEXT NOT NULL DEFAULT ''"); }
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE client.users ADD COLUMN upload_allowed INTEGER DEFAULT 0"); }
 	catch (const SQLite::Exception&) {}
@@ -5447,7 +5450,7 @@ MediaStore::get_cached_album_info(int folder_id)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement q(db_music_,
-		"SELECT mbid, notes, wiki_url, allmusic_url FROM album_info_cache WHERE folder_id = ?");
+		"SELECT mbid, notes, wiki_url, allmusic_url, discogs_url FROM album_info_cache WHERE folder_id = ?");
 	q.bind(1, folder_id);
 	if (!q.executeStep()) return std::nullopt;
 	// On read for the reason get_cached_artist_info() gives.  notes has two
@@ -5460,6 +5463,7 @@ MediaStore::get_cached_album_info(int folder_id)
 	a.notes        = clean_prose(q.getColumn(1).getString(), MAX_PROSE_BYTES);
 	a.wiki_url     = clean_url(q.getColumn(2).getString());
 	a.allmusic_url = clean_url(q.getColumn(3).getString());
+	a.discogs_url  = clean_url(q.getColumn(4).getString());
 	return a;
 	}
 
@@ -5468,13 +5472,14 @@ void MediaStore::cache_album_info(int folder_id, const CachedAlbumInfo& info)
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement ins(db_music_,
 		"INSERT OR REPLACE INTO album_info_cache"
-		" (folder_id, mbid, notes, wiki_url, allmusic_url, fetched_at)"
-		" VALUES (?, ?, ?, ?, ?, strftime('%s','now'))");
+		" (folder_id, mbid, notes, wiki_url, allmusic_url, discogs_url, fetched_at)"
+		" VALUES (?, ?, ?, ?, ?, ?, strftime('%s','now'))");
 	ins.bind(1, folder_id);
 	ins.bind(2, info.mbid);
 	ins.bind(3, info.notes);
 	ins.bind(4, info.wiki_url);
 	ins.bind(5, info.allmusic_url);
+	ins.bind(6, info.discogs_url);
 	ins.exec();
 	}
 

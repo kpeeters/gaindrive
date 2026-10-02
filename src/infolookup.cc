@@ -1,6 +1,6 @@
 // The online info resolver: MusicBrainz, Wikidata, Wikipedia, TheAudioDB and
-// Discogs for an artist, MusicBrainz plus Wikidata and Wikipedia for an album,
-// and the single background queue that runs both.
+// Discogs for an artist, MusicBrainz plus Wikidata, Wikipedia and Discogs for
+// an album, and the single background queue that runs both.
 //
 // Split out of gaindrive.cc as one unit rather than two because the two
 // resolvers share the MusicBrainz client below, and mb_pace() is one gate for
@@ -209,6 +209,71 @@ static httplib::Result mb_get(httplib::SSLClient& cli, const std::string& path,
 		std::this_thread::sleep_for(wait);
 		}
 	return r;
+	}
+
+// ---- Discogs -----------------------------------------------------------
+
+// One authenticated Discogs API request. The second's wait keeps a run of
+// lookups under Discogs' 60 requests a minute for a token.
+static httplib::Result discogs_get(const std::string& path,
+                                   const std::string& token)
+	{
+	std::this_thread::sleep_for(std::chrono::seconds(1));
+	httplib::SSLClient disc("api.discogs.com");
+	provider_timeouts(disc);
+	disc.set_default_headers({
+		{"User-Agent", USER_AGENT},
+		{"Authorization", "Discogs token=" + token}
+		});
+	return disc.Get(path, httplib::Params{}, httplib::Headers{});
+	}
+
+// The numeric id after `kind` ("/artist/", "/master/", "/release/") in a
+// Discogs page URL, or "" when the URL is not that kind of page. Digits only,
+// because it is concatenated into an API path.
+static std::string discogs_id(const std::string& url, const char* kind)
+	{
+	auto pos = url.find(kind);
+	if (pos == std::string::npos) return {};
+	std::string id;
+	for (size_t i = pos + std::strlen(kind); i < url.size(); ++i) {
+		if (!std::isdigit(static_cast<unsigned char>(url[i]))) break;
+		id += url[i];
+		}
+	return id;
+	}
+
+// Discogs notes carry their own link markup: [a=Name] or [a12345] for an
+// artist, likewise l (label), r (release) and m (master), plus
+// [url=...]text[/url] and [b] [i] [u]. A named link keeps its name; a numbered
+// one cannot be named without another request per link, so it goes, as do the
+// formatting tags. Any other bracketed text is left alone.
+static std::string discogs_plain(const std::string& s)
+	{
+	static const std::set<std::string> drop = {
+		"b", "/b", "i", "/i", "u", "/u", "url", "/url"
+		};
+	std::string out;
+	size_t i = 0;
+	while (i < s.size()) {
+		size_t close = s[i] == '[' ? s.find(']', i) : std::string::npos;
+		if (close == std::string::npos) {
+			out += s[i++];
+			continue;
+			}
+		std::string tag = s.substr(i + 1, close - i - 1);
+		bool link = tag.size() >= 2 && std::string_view("almr").find(tag[0])
+		                                != std::string_view::npos;
+		if (link && tag[1] == '=')
+			out += tag.substr(2);
+		else if (link && std::all_of(tag.begin() + 1, tag.end(), [](char c) {
+		                   return std::isdigit(static_cast<unsigned char>(c)); }))
+			;
+		else if (!drop.count(tag) && tag.rfind("url=", 0) != 0)
+			out += s.substr(i, close - i + 1);
+		i = close + 1;
+		}
+	return out;
 	}
 
 // ---- Artist info helper -----------------------------------------------
@@ -581,45 +646,32 @@ static MediaStore::CachedArtistInfo resolve_artist_info(int id, const std::strin
 					          << std::endl;
 					}
 				else {
-					auto apos = info.discogs_url.find("/artist/");
-					if (apos != std::string::npos) {
-						std::string id_str;
-						for (char c : info.discogs_url.substr(apos + 8))
-							{ if (!std::isdigit(c)) break; id_str += c; }
-						if (!id_str.empty()) {
-							std::this_thread::sleep_for(std::chrono::seconds(1));
-							httplib::SSLClient disc("api.discogs.com");
-							provider_timeouts(disc);
-							disc.set_default_headers({
-								{"User-Agent", USER_AGENT},
-								{"Authorization", "Discogs token=" + token}
-								});
-							auto rd = disc.Get("/artists/" + id_str,
-							                   httplib::Params{}, httplib::Headers{});
-							note(rd);
-							if (rd && rd->status == 200) {
-								auto jd = nlohmann::json::parse(rd->body, nullptr, false);
-								const auto& imgs = jsub(jd, "images");
-								std::string uri;
-								for (auto& img : imgs)
-									if (jstr(img, "type") == "primary")
-										{ uri = jstr(img, "uri"); break; }
-								if (uri.empty()) uri = jstr(jidx(imgs, 0), "uri");
-								uri = clean_url(uri);
-								if (!uri.empty()) {
-									info.image_url = uri;
-									std::cout << stamp() << "getArtistInfo [" << name
-									          << "] image from Discogs API: "
-									          << uri << std::endl;
-									}
-								}
-							else {
+					std::string id_str = discogs_id(info.discogs_url, "/artist/");
+					if (!id_str.empty()) {
+						auto rd = discogs_get("/artists/" + id_str, token);
+						note(rd);
+						if (rd && rd->status == 200) {
+							auto jd = nlohmann::json::parse(rd->body, nullptr, false);
+							const auto& imgs = jsub(jd, "images");
+							std::string uri;
+							for (auto& img : imgs)
+								if (jstr(img, "type") == "primary")
+									{ uri = jstr(img, "uri"); break; }
+							if (uri.empty()) uri = jstr(jidx(imgs, 0), "uri");
+							uri = clean_url(uri);
+							if (!uri.empty()) {
+								info.image_url = uri;
 								std::cout << stamp() << "getArtistInfo [" << name
-								          << "] Discogs API failed"
-								          << (rd ? " HTTP " + std::to_string(rd->status)
-								                : " (no response)")
-								          << std::endl;
+								          << "] image from Discogs API: "
+								          << uri << std::endl;
 								}
+							}
+						else {
+							std::cout << stamp() << "getArtistInfo [" << name
+							          << "] Discogs API failed"
+							          << (rd ? " HTTP " + std::to_string(rd->status)
+							                : " (no response)")
+							          << std::endl;
 							}
 						}
 					}
@@ -884,9 +936,10 @@ static std::string strip_album_decoration(const std::string& title)
 // request and yields the same kind of id.
 enum class MbBy { ReleaseGroup, Release };
 
-// Performs the MusicBrainz -> Wikidata -> Wikipedia lookup for one album and
-// caches the result. Runs on the resolver thread and nowhere else; it is paced
-// by mb_pace() and it must never be reached from a request handler again.
+// Performs the MusicBrainz -> Wikidata -> Wikipedia -> Discogs lookup for one
+// album and caches the result. Runs on the resolver thread and nowhere else; it
+// is paced by mb_pace() and it must never be reached from a request handler
+// again.
 //
 // **It never reads album_info_cache**, the same rule resolve_artist_info()
 // states and for the same reason: its one caller is lookup_run_job(), which
@@ -1084,6 +1137,9 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 			          << "] no release-group taken from the search" << std::endl;
 		}
 
+	// A Discogs master named by the release group itself, for step 4.
+	std::string rg_discogs;
+
 	// Step 2 - fetch URL relations for the release-group.
 	if (!info.mbid.empty()) {
 		// The one-second wait that used to sit here is mb_get()'s job now;
@@ -1125,6 +1181,11 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 					info.allmusic_url = clean_url(resource);
 					std::cout << stamp() << "getAlbumInfo [" << title
 					          << "] AllMusic: " << resource << std::endl;
+					}
+				else if (type == "discogs" && rg_discogs.empty()) {
+					rg_discogs = clean_url(resource);
+					std::cout << stamp() << "getAlbumInfo [" << title
+					          << "] Discogs: " << resource << std::endl;
 					}
 				else if (type == "wikipedia") {
 					auto pos = resource.find("/wiki/");
@@ -1204,6 +1265,87 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 						          << " chars" << std::endl;
 						}
 					}
+				}
+			}
+		}
+
+	// Step 4 - Discogs notes, when Wikipedia had none. A release group links
+	// a Discogs *master*, which many albums never got; the Discogs links
+	// MusicBrainz does have are mostly on the individual releases, so those
+	// are asked for when the master gave nothing.
+	if (!info.mbid.empty() && info.notes.empty()) {
+		std::string token = store.get_setting("discogs_token");
+		// Capped because each page costs a Discogs request and a second, and
+		// releases of one album mostly carry the same notes or none.
+		constexpr size_t MAX_DISCOGS_PAGES = 3;
+		auto try_pages = [&](const std::vector<std::string>& pages) {
+			for (size_t i = 0; i < pages.size() && i < MAX_DISCOGS_PAGES
+			                   && info.notes.empty(); ++i) {
+				std::string path, num;
+				if (!(num = discogs_id(pages[i], "/master/")).empty())
+					path = "/masters/" + num;
+				else if (!(num = discogs_id(pages[i], "/release/")).empty())
+					path = "/releases/" + num;
+				else
+					continue;
+				auto rd = discogs_get(path, token);
+				if (!rd || rd->status != 200) {
+					std::cout << stamp() << "getAlbumInfo [" << title
+					          << "] Discogs " << path << " failed"
+					          << (rd ? " HTTP " + std::to_string(rd->status)
+					                : " (no response)")
+					          << std::endl;
+					continue;
+					}
+				auto jd = nlohmann::json::parse(rd->body, nullptr, false);
+				info.notes = clean_prose(discogs_plain(jstr(jd, "notes")),
+				                         MAX_PROSE_BYTES);
+				if (!info.notes.empty())
+					info.discogs_url = pages[i];
+				std::cout << stamp() << "getAlbumInfo [" << title
+				          << "] Discogs " << path << ": notes="
+				          << info.notes.size() << " chars" << std::endl;
+				}
+			};
+
+		if (token.empty()) {
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] no Wikipedia notes; Discogs skipped, no token"
+			             " configured" << std::endl;
+			}
+		else {
+			if (!rg_discogs.empty())
+				try_pages({ rg_discogs });
+			if (info.notes.empty()) {
+				auto rr = mb_get(mb, "/ws/2/release",
+				                 httplib::Params{{"release-group", info.mbid},
+				                                 {"inc", "url-rels"},
+				                                 {"limit", "10"},
+				                                 {"fmt", "json"}},
+				                 "getAlbumInfo [" + title + "] releases");
+				std::vector<std::string> pages;
+				if (rr && rr->status == 200) {
+					auto jr = nlohmann::json::parse(rr->body, nullptr, false);
+					for (const auto& rel_obj : jsub(jr, "releases"))
+						for (const auto& rel : jsub(rel_obj, "relations")) {
+							if (jstr(rel, "type") != "discogs") continue;
+							std::string u = clean_url(jstr(jsub(rel, "url"), "resource"));
+							if (!u.empty() && std::find(pages.begin(), pages.end(), u)
+							                  == pages.end())
+								pages.push_back(u);
+							}
+					std::cout << stamp() << "getAlbumInfo [" << title
+					          << "] " << pages.size()
+					          << " Discogs page(s) on the releases" << std::endl;
+					}
+				else {
+					std::cout << stamp() << "getAlbumInfo [" << title
+					          << "] MusicBrainz release list "
+					          << (rr ? "HTTP " + std::to_string(rr->status)
+					                 : std::string("failed (no response)"))
+					          << std::endl;
+					}
+				try_pages(pages);
 				}
 			}
 		}
@@ -1326,6 +1468,7 @@ void GainDrive::handle_album_info(const httplib::Request& req,
 			if (!info.notes.empty())          ai["notes"]         = info.notes;
 			if (!info.wiki_url.empty())       ai["wikiUrl"]       = info.wiki_url;
 			if (!info.allmusic_url.empty())   ai["allMusicUrl"]   = info.allmusic_url;
+			if (!info.discogs_url.empty())    ai["discogsUrl"]    = info.discogs_url;
 			if (resolving)                    ai["resolving"]     = true;
 			r[key] = ai;
 			});
@@ -1344,6 +1487,7 @@ void GainDrive::handle_album_info(const httplib::Request& req,
 			add_text_el(doc, ai, "notes",         info.notes);
 			add_text_el(doc, ai, "wikiUrl",       info.wiki_url);
 			add_text_el(doc, ai, "allMusicUrl",   info.allmusic_url);
+			add_text_el(doc, ai, "discogsUrl",    info.discogs_url);
 			if (resolving) add_text_el(doc, ai, "resolving", "true");
 			root->InsertEndChild(ai);
 			});

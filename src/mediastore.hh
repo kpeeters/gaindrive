@@ -431,9 +431,10 @@ class MediaStore {
 
 		struct CachedAlbumInfo {
 			std::string mbid;           // MusicBrainz release-group ID
-			std::string notes;          // Wikipedia plain-text extract
+			std::string notes;          // Wikipedia or Discogs plain text
 			std::string wiki_url;       // Full Wikipedia article URL
 			std::string allmusic_url;   // AllMusic album page URL
+			std::string discogs_url;    // Discogs page the notes came from
 			};
 
 		std::optional<CachedAlbumInfo> get_cached_album_info(int folder_id);
