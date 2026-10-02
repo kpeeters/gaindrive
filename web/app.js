@@ -10142,7 +10142,15 @@ function isearchKey(e) {
       }
 
    if (e.key === 'Escape')                 { isearchEnd(true);  return true; }
-   if (e.key === 'Enter')                  { isearchEnd(false); return true; }
+   // Unclaimed, so the same press goes on to activate the row the search
+   // found: a search is how you get to a row, and Enter is what you came for.
+   // Except when failing, where the cursor sits on a row that does not match
+   // what is shown, and opening it would be a surprise.
+   if (e.key === 'Enter') {
+      const failing = isearch.failing;
+      isearchEnd(false);
+      return failing;
+      }
    if (e.ctrlKey && e.key.toLowerCase() === 's') {
       isearch.back = false;
       isearchStep(navCursor[paneNav.depth] + 1);
