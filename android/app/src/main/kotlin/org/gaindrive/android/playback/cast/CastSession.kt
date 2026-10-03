@@ -59,6 +59,13 @@ data class CastMedia(
 	val durationSeconds: Double?,
 	/** Where to start. The receiver seeks using the file's own index. */
 	val startSeconds: Float = 0f,
+	/**
+	 * Non-null for a stream the server starts at this many seconds into the
+	 * track, which is then seeked by loading again rather than by `SEEK`; see
+	 * [CastTarget.streamOffsetSeconds]. The receiver's clock and duration
+	 * both count from the offset, and [durationSeconds] is the remainder.
+	 */
+	val streamOffsetSeconds: Int? = null,
 	val title: String? = null,
 	val artist: String? = null,
 	val album: String? = null,
@@ -258,7 +265,8 @@ class CastSession @Inject constructor(
 		Log.i(
 			TAG,
 			"load gen=$gen route=${media.route} url=${media.url}" +
-				" start=${media.startSeconds}",
+				" start=${media.startSeconds}" +
+				(media.streamOffsetSeconds?.let { " offset=$it" } ?: ""),
 		)
 
 		// Reset the visible status for the new track, seeding the duration we

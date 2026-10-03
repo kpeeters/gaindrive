@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -90,6 +91,61 @@ static void unregister_transcode(uint64_t seq)
 	}
 
 // ---- Streamer --------------------------------------------------------
+
+// The soundtrack's own bitrate in kbps, 0 when ffprobe cannot say.
+//
+// Needed to pace a soundtrack copied out of a video into a pipe: songs.bitrate
+// is the *container's* rate, around eight times too fast for the audio, and a
+// receiver fed that far ahead stops reading until something on the path times
+// the idle connection out.  Asked at request time rather than stored by the
+// scan, which would have meant re-probing every existing film once; memoised
+// so only the first load of a film pays for the ffprobe, not every seek.
+// Remembered by id and mtime, so a replaced file is asked again.
+static int soundtrack_kbps(const Streamer::SongInfo& song)
+	{
+	static std::mutex                            mu;
+	static std::map<std::pair<int, int64_t>, int> known;
+	const auto key = std::make_pair(song.id, song.file_modified);
+	{
+	std::lock_guard<std::mutex> lock(mu);
+	if (auto it = known.find(key); it != known.end()) return it->second;
+	}
+
+	// The stream's bit_rate is in an MP4's header; Matroska has none, and
+	// mkvmerge writes the figure as a BPS tag instead.  Whichever is present.
+	std::vector<std::string> args = {
+		"ffprobe", "-v", "quiet", "-select_streams", "a:0",
+		"-show_entries", "stream=bit_rate:stream_tags=BPS,BPS-eng",
+		"-of", "default=nw=1:nk=1", song.path };
+	reproc::process proc;
+	reproc::options opts;
+	opts.redirect.err.type = reproc::redirect::type::discard;
+	opts.deadline          = reproc::milliseconds(5000);
+	int kbps = 0;
+	if (!proc.start(args, opts)) {
+		std::string          out;
+		reproc::sink::string sink(out);
+		auto ec            = reproc::drain(proc, sink, reproc::sink::null);
+		auto [status, wec] = proc.wait(reproc::infinite);
+		if (!ec && !wec && status == 0) {
+			size_t pos = 0;
+			while (pos < out.size()) {
+				size_t nl = out.find('\n', pos);
+				if (nl == std::string::npos) nl = out.size();
+				try { kbps = std::max(kbps, static_cast<int>(
+				          std::stoll(out.substr(pos, nl - pos)) / 1000)); }
+				catch (const std::exception&) {}   // "N/A", or an empty line
+				pos = nl + 1;
+				}
+			}
+		}
+	std::cout << stamp() << "stream: soundtrack bitrate of id=" << song.id
+	          << " is " << (kbps > 0 ? std::to_string(kbps) + " kbps"
+	                                 : std::string("unknown")) << std::endl;
+	std::lock_guard<std::mutex> lock(mu);
+	known[key] = kbps;
+	return kbps;
+	}
 
 // A declaration as one log token.  Both ladders print it, because "the client
 // sent playable and the server transcoded anyway" is the same question on
@@ -267,8 +323,26 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 		return;
 		}
 
-	const TranscodePlan plan = plan_transcode(song, format, max_bitrate,
-	                                          time_offset, playable);
+	TranscodePlan plan = plan_transcode(song, format, max_bitrate,
+	                                    time_offset, playable);
+
+	// A timeOffset on the URL, 0 included, says the client seeks by asking
+	// again from a new offset rather than inside what it was sent.  So it
+	// wants the stream now, not a file built to the end first - for a film's
+	// soundtrack that build is minutes, and a receiver gives up long before.
+	bool offset_given = req.has_param("timeOffset");
+	bool use_cache    = (!cast_stream || audio_only) && time_offset == 0
+	                 && !offset_given;
+
+	// A soundtrack copied into a pipe is paced at its own rate, so it needs
+	// one.  Without it, encode to the same target instead: the container, and
+	// so the type the client announced, stay what was asked for.
+	int copy_kbps = 0;
+	if (plan.needed && song.is_video && plan.bitrate == 0 && !use_cache) {
+		copy_kbps = soundtrack_kbps(song);
+		if (copy_kbps <= 0) plan.bitrate = 320;
+		}
+
 	bool                  needs_transcode = plan.needed;
 	const auto&           target          = plan.target;
 	const int             target_bitrate  = plan.bitrate;
@@ -327,18 +401,18 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	// It does **not** cover the Android app's direct route, and that is worth
 	// knowing before trusting this guard.  The app runs its own cast session,
 	// so its URLs carry no castToken and cast_stream is false here; and it does
-	// send format+maxBitRate whenever castOriginal is off, the item is a
-	// video's soundtrack, or the type is not one the receiver plays.  Such a
-	// request goes through the cache like any other, and a cold entry answers
-	// nothing until ffmpeg has finished - the same >60 s of silence, arriving
-	// before the first byte, where pacing cannot help.  The remedy if it ever
-	// bites is CastUrls.warmTranscode for audio, which already exists on the
-	// video side for exactly this reason.
+	// send format+maxBitRate whenever castOriginal is off or the type is not
+	// one the receiver plays.  Such a request goes through the cache like any
+	// other, and a cold entry answers nothing until ffmpeg has finished - the
+	// same >60 s of silence, arriving before the first byte, where pacing
+	// cannot help.  A music track is short enough for that to pass unnoticed.
+	// A video's soundtrack is not, which is why the app sends those with a
+	// timeOffset and seeks them by reloading: see `offset_given` above.
 	//
 	// A seek is not cached either: the web client's local-seek trick needs the
 	// stream to *start* at the offset, and caching one file per offset has no
 	// bound.
-	if ((!cast_stream || audio_only) && time_offset == 0) {
+	if (use_cache) {
 		if (auto entry = cache_entry(song, cache, plan)) {
 			// Serving a real file rather than a pipe is the whole point: it
 			// carries a Content-Length, answers Range requests, and (because
@@ -376,19 +450,21 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	// Only meaningful on this path: a cache hit already carries a real length.
 	int64_t est_length = 0;
 	if (estimate_length) {
-		int    kbps = target_bitrate > 0 ? target_bitrate : song.bitrate;
+		int    kbps = target_bitrate > 0 ? target_bitrate
+		           : copy_kbps > 0      ? copy_kbps : song.bitrate;
 		double secs = song.duration - time_offset;
 		if (kbps > 0 && secs > 0)
 			est_length = static_cast<int64_t>(secs * kbps * 125.0);
 		}
 
-	// For copy mode use the source bitrate for throttling; otherwise the target.
-	// Fall back to 1000 kbps when the database has no bitrate (e.g. FLAC files
+	// For copy mode use the source bitrate for throttling - the soundtrack's
+	// own for a video, see soundtrack_kbps() - otherwise the target.  Fall
+	// back to 1000 kbps when the database has no bitrate (e.g. FLAC files
 	// stored without a bitrate tag) so the throttle always fires.
+	const int   src_kbps = copy_kbps > 0 ? copy_kbps : song.bitrate;
 	const float bps = target_bitrate > 0
 	    ? static_cast<float>(target_bitrate) * 125.0f
-	    : (song.bitrate > 0 ? static_cast<float>(song.bitrate) : 1000.0f)
-	      * 125.0f;
+	    : (src_kbps > 0 ? static_cast<float>(src_kbps) : 1000.0f) * 125.0f;
 
 	serve_transcoded(res, ffmpeg_argv(song, target_bitrate, *target,
 	                                  time_offset, "pipe:1"),

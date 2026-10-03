@@ -70,6 +70,18 @@ data class CastTarget(
 	 * the same thing.
 	 */
 	val castToken: String? = null,
+	/**
+	 * Non-null when [url] asks the server to start this many seconds in, which
+	 * makes the stream one to seek by loading again at a new offset.
+	 *
+	 * That is how a video's soundtrack is cast. Handed one big file of a film,
+	 * a receiver has to seek inside it, and in Ogg that is a bisection a WiiM
+	 * abandons after one probe; the server also builds such a file to the end
+	 * before sending a byte, which on a long film outlasts the receiver's
+	 * patience. A `timeOffset` on the URL, 0 included, has it pipe from there
+	 * at once instead.
+	 */
+	val streamOffsetSeconds: Int? = null,
 ) {
 	/** Whether artwork has to travel the same road; see [CastUrls.artworkFor]. */
 	val bridged: Boolean get() = route != CastRoute.DIRECT
@@ -132,6 +144,23 @@ internal fun castPlaysNatively(mime: String?): Boolean = mime in CAST_NATIVE_TYP
 internal fun paced(url: String): String {
 	val parsed = url.toHttpUrlOrNull() ?: return url
 	return parsed.newBuilder().addQueryParameter("pace", "true").build().toString()
+}
+
+/**
+ * Asks the server to start this stream [seconds] into the track, and to send
+ * it as it goes rather than build the whole file first; see
+ * [CastTarget.streamOffsetSeconds]. Sent for 0 as well, since that is what
+ * tells the server the stream will be seeked by asking again.
+ *
+ * Applied at the route, for the reason [paced] is.
+ */
+internal fun withTimeOffset(url: String, seconds: Int): String {
+	val parsed = url.toHttpUrlOrNull() ?: return url
+	return parsed.newBuilder()
+		.removeAllQueryParameters("timeOffset")
+		.addQueryParameter("timeOffset", seconds.toString())
+		.build()
+		.toString()
 }
 
 /**
@@ -202,8 +231,12 @@ class CastUrls @Inject constructor(
 	 * [source] is what the queue entry already knows. Its MIME types are used
 	 * rather than re-derived so that the type declared in the `LOAD` and the type
 	 * the bridge puts on the response are the same answer and cannot drift.
+	 *
+	 * [startSeconds] only reaches the URL for a video's soundtrack, as its
+	 * [CastTarget.streamOffsetSeconds]; everything else starts with the LOAD's
+	 * own `currentTime`.
 	 */
-	suspend fun forCast(ref: ItemRef, source: CastSource): CastTarget? {
+	suspend fun forCast(ref: ItemRef, source: CastSource, startSeconds: Float = 0f): CastTarget? {
 		// One load starts here, and everything published for it - the stream,
 		// the artwork, each subtitle track - is pinned against eviction until
 		// the next one. A caption is published now and fetched only if somebody
@@ -212,10 +245,12 @@ class CastUrls @Inject constructor(
 		if (source.isVideo) return forVideo(ref, source)
 
 		val config = registry.get(ref.server) ?: return null
+		val offset = if (source.audioOnlyVideo) startSeconds.toInt().coerceAtLeast(0) else null
+		fun fromOffset(url: String) = offset?.let { withTimeOffset(url, it) } ?: url
 
 		if (reachability.canReachDirectly(config)) {
 			val direct = directTarget(ref, source) ?: return null
-			val url = paced(direct.url)
+			val url = fromOffset(paced(direct.url))
 			val token = castToken(ref)
 			return CastTarget(
 				token?.let { withCastToken(url, it) } ?: url,
@@ -223,6 +258,7 @@ class CastUrls @Inject constructor(
 				CastRoute.DIRECT,
 				direct.quality,
 				token,
+				offset,
 			)
 		}
 
@@ -269,7 +305,10 @@ class CastUrls @Inject constructor(
 		// idle when the receiver stops reading, and that is the leg crossing
 		// a reverse proxy, since the relay exists for precisely the topologies
 		// that have one.
-		val upstream = paced(target.url)
+		//
+		// The stored copy above is a whole file, which the bridge serves with
+		// Range, so only from here on does a soundtrack carry its offset.
+		val upstream = fromOffset(paced(target.url))
 		val relayed = bridge.publish(upstream)
 		if (relayed != null) {
 			// No token, and not an oversight: on this route the server URL
@@ -278,7 +317,10 @@ class CastUrls @Inject constructor(
 			// request this device makes - which is the one place they belong.
 			// Minting here would cost a round trip per track and one of the
 			// server's grant slots to protect nothing.
-			return CastTarget(relayed, mime, CastRoute.RELAY, target.quality)
+			return CastTarget(
+				relayed, mime, CastRoute.RELAY, target.quality,
+				streamOffsetSeconds = offset,
+			)
 		}
 		// The bridge would not start, so the fallback really does hand a server
 		// URL to the receiver - and therefore really does need a credential of
@@ -290,6 +332,7 @@ class CastUrls @Inject constructor(
 			CastRoute.DIRECT,
 			target.quality,
 			token,
+			offset,
 		)
 	}
 
@@ -303,19 +346,26 @@ class CastUrls @Inject constructor(
 	 * over. It is logged, because "why is the password still going to the
 	 * television" deserves an answer in the log rather than a shrug.
 	 *
-	 * One per track, and not per seek: this app seeks the receiver rather than
-	 * reloading it, so the receiver goes on fetching the URL it already has.
-	 * That is why the server's grant lasts hours.
+	 * One per track, and not per seek. Most tracks are seeked on the receiver,
+	 * which goes on fetching the URL it already has; a video's soundtrack is
+	 * seeked by loading again (see [CastTarget.streamOffsetSeconds]), so the
+	 * last grant is kept and reused for the same track rather than burning a
+	 * server slot on every seek. That is why the server's grant lasts hours.
 	 */
 	private suspend fun castToken(ref: ItemRef): String? {
+		lastToken?.let { (forRef, token) -> if (forRef == ref) return token }
 		val config = registry.get(ref.server) ?: return null
 		val token = runCatchingCancellable {
 			clients.clientFor(config).getCastToken(ref.id).requireOk().castToken
 		}.onFailure {
 			Log.i(TAG, "no cast token ($it); sending the account's own credentials")
-		}.getOrNull()
-		return token?.takeIf { it.isNotBlank() }
+		}.getOrNull()?.takeIf { it.isNotBlank() }
+		lastToken = token?.let { ref to it }
+		return token
 	}
+
+	/** The grant [castToken] minted last, and the track it opens. */
+	@Volatile private var lastToken: Pair<ItemRef, String>? = null
 
 	/**
 	 * What to hand a receiver that will fetch from the server itself.

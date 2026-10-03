@@ -101,7 +101,7 @@ class CastPlayer(
 		// file - and the server's estimate covers the rest of the queue.
 		val durationUs = when {
 			position == index && status.duration > 0f ->
-				(status.duration * 1_000_000).toLong()
+				((status.duration + streamOffset()) * 1_000_000).toLong()
 
 			else -> entry.item.mediaMetadata.durationMs
 				?.takeIf { it > 0 }
@@ -135,11 +135,11 @@ class CastPlayer(
 	 * The subtitle selection to re-send with this load: the one in force if
 	 * [entry] is the item already loaded, and none if it is a different one.
 	 *
-	 * A seek is a whole fresh LOAD, so without this every seek would turn the
-	 * subtitles off - the same fault, and the same fix, as `player.captionIndex`
-	 * in the web client. Moving to another film deliberately starts clean:
-	 * nothing here knows the viewer's language, and a track number means
-	 * something different in the next film.
+	 * A reload of the same entry is a whole fresh LOAD, so without this it
+	 * would turn the subtitles off - the same fault, and the same fix, as
+	 * `player.captionIndex` in the web client. Moving to another film
+	 * deliberately starts clean: nothing here knows the viewer's language, and
+	 * a track number means something different in the next film.
 	 */
 	private fun carriedCaptions(entry: Entry): List<Int> {
 		val carried =
@@ -185,13 +185,22 @@ class CastPlayer(
 	 * do not own.
 	 */
 	private fun positionSupplier(): PositionSupplier {
-		val known = (status.currentTime * 1000).toLong().coerceAtLeast(0)
+		val known = ((status.currentTime + streamOffset()) * 1000).toLong().coerceAtLeast(0)
 		return if (status.playerState == CastPlayerState.PLAYING) {
 			PositionSupplier.getExtrapolating(known, 1f)
 		} else {
 			PositionSupplier.getConstant(known)
 		}
 	}
+
+	/**
+	 * Where the loaded stream starts in the track, in seconds: 0 except for a
+	 * stream the server starts part-way in (see [CastMedia.streamOffsetSeconds]),
+	 * whose receiver counts both position and duration from there. Added here
+	 * and nowhere else, so everything reading this player - the UI, scrobbling,
+	 * the hand-back to local playback - sees positions in the whole track.
+	 */
+	private fun streamOffset(): Int = session.loaded.value?.streamOffsetSeconds ?: 0
 
 	private fun playbackState(): Int = when {
 		entries.isEmpty() -> Player.STATE_IDLE
@@ -319,6 +328,11 @@ class CastPlayer(
 			index = target.coerceIn(entries.indices)
 			ended = false
 			loadCurrent(position)
+		} else if (session.loaded.value?.streamOffsetSeconds != null) {
+			// A stream that starts at an offset is seeked by starting a new
+			// one there; see [CastMedia.streamOffsetSeconds].
+			ended = false
+			loadCurrent(position)
 		} else {
 			// Within the current track the receiver seeks itself, using the
 			// file's own index. Re-loading would restart buffering for nothing.
@@ -363,7 +377,7 @@ class CastPlayer(
 		ended = false
 		loadJob?.cancel()
 		loadJob = scope.launch {
-			val target = castUrls.forCast(ref, source) ?: run {
+			val target = castUrls.forCast(ref, source, positionMs / 1000f) ?: run {
 				Log.i(TAG, "nothing castable for $ref, skipping")
 				// Said out loud, not merely logged. The only way to get here
 				// is a film the server can only re-encode on a receiver that
@@ -384,14 +398,19 @@ class CastPlayer(
 				return@launch
 			}
 			val metadata = entry.item.mediaMetadata
+			// A stream the server starts at an offset is already there, and
+			// is that much shorter.
+			val offset = target.streamOffsetSeconds
 			session.load(
 				CastMedia(
 					url = target.url,
 					mimeType = target.mimeType,
 					durationSeconds = metadata.durationMs
 						?.takeIf { it > 0 }
-						?.let { it / 1000.0 },
-					startSeconds = positionMs / 1000f,
+						?.let { it / 1000.0 - (offset ?: 0) }
+						?.takeIf { it > 0 },
+					startSeconds = if (offset != null) 0f else positionMs / 1000f,
+					streamOffsetSeconds = offset,
 					title = metadata.title?.toString(),
 					artist = metadata.artist?.toString(),
 					album = metadata.albumTitle?.toString(),
@@ -412,7 +431,7 @@ class CastPlayer(
 						bridged = target.bridged,
 						castToken = target.castToken,
 					),
-					// Carried across the reload a seek performs, which is the
+					// Carried across a reload of the same entry, which is the
 					// only way the receiver is ever told twice about one film.
 					//
 					// Keyed on the queue entry, not on the URL: a bridged load
