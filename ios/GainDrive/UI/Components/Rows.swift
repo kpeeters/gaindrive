@@ -71,19 +71,24 @@ extension View {
 struct ArtistRow: View {
 	let item: ArtistUi
 
+	/// One line with no separator, as on Android and the web: with rows this
+	/// dense, a ruled list reads worse than a plain column of names.
 	var body: some View {
-		VStack(alignment: .leading, spacing: 2) {
+		HStack(spacing: 8) {
 			Text(item.artist.name)
 				.lineLimit(1)
-			HStack(spacing: 6) {
+				.frame(maxWidth: .infinity, alignment: .leading)
+			ServerBadges(names: item.badges)
+			// Omitted rather than zero: search and the folder index do not
+			// count albums.
+			if item.artist.albumCount > 0 {
 				Text(albumCountText)
 					.font(.footnote)
 					.foregroundStyle(.secondary)
-				ServerBadges(names: item.badges)
 			}
 		}
-		.frame(maxWidth: .infinity, alignment: .leading)
 		.contentShape(.rect)
+		.listRowSeparator(.hidden)
 	}
 
 	private var albumCountText: String {
