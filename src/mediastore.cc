@@ -790,6 +790,15 @@ void MediaStore::repair_album_art()
 		"   AND cover_path NOT IN (SELECT path FROM songs)"
 		"   AND cover_path NOT IN (SELECT folder_path FROM album_art"
 		"                           WHERE status = 'ok')");
+	// And the opposite: an 'ok' row whose album has no cover_path, because
+	// the pointer was never written or a row was rebuilt. The bytes are
+	// there; only the way to them is missing.
+	db_music_.exec(
+		"UPDATE albums SET cover_path ="
+		"   (SELECT f.path FROM folders f WHERE f.id = albums.folder_id)"
+		" WHERE COALESCE(cover_path, '') = ''"
+		"   AND (SELECT f.path FROM folders f WHERE f.id = albums.folder_id)"
+		"       IN (SELECT folder_path FROM album_art WHERE status = 'ok')");
 	txn.commit();
 	}
 
@@ -5372,10 +5381,11 @@ void MediaStore::store_album_art(const std::string& folder_path,
 	write_art_row(db_music_, "album_art", folder_path, title, row);
 	if (row.status == "ok") {
 		// Only over an empty cover_path: a cover file the scan found while
-		// this was being fetched is the user's, and wins.
+		// this was being fetched is the user's, and wins. COALESCE because an
+		// album that never had a cover holds NULL, not ''.
 		SQLite::Statement upd(db_music_,
 			"UPDATE albums SET cover_path = ?"
-			" WHERE cover_path = ''"
+			" WHERE COALESCE(cover_path, '') = ''"
 			"   AND folder_id = (SELECT id FROM folders WHERE path = ?)");
 		upd.bind(1, folder_path);
 		upd.bind(2, folder_path);

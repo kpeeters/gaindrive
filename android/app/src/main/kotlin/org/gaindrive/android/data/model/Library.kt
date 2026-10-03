@@ -117,6 +117,13 @@ data class Song(
 	 */
 	val nativeSeek: Boolean = false,
 	/**
+	 * For a video, the `format` that has the server copy its soundtrack out as
+	 * it stands, and the type that arrives as. Null when it would have to be
+	 * encoded. Only casting reads them; see `CastUrls.directTarget`.
+	 */
+	val soundtrackFormat: String? = null,
+	val soundtrackContentType: String? = null,
+	/**
 	 * The season an episode belongs to, or null. [discNumber] holds the same
 	 * number and is what orders and groups tracks; this only decides whether
 	 * the group is headed "Series 2" or "Disc 2".

@@ -334,7 +334,15 @@ class CastUrls @Inject constructor(
 		// the one thing this route must not fetch. It is also the only place
 		// the audio-only flag is read: everything else about such an item is
 		// already audio, which is why it is not marked as a video at all.
-		if (source.audioOnlyVideo) return streamUrls.forPlayback(ref, audioOnlyVideo = true)
+		// The nearest thing to an original is the soundtrack copied out
+		// untouched, when the server can do that and the receiver plays it.
+		if (source.audioOnlyVideo) {
+			val format = source.soundtrackFormat
+			val mime = source.soundtrackMime
+			if (format != null && mime != null && castPlaysNatively(mime))
+				streamUrls.forSoundtrackCopy(ref, format, mime)?.let { return it }
+			return streamUrls.forPlayback(ref, audioOnlyVideo = true)
+		}
 		if (!castPlaysNatively(source.sourceMime)) {
 			Log.i(
 				TAG,

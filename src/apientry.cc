@@ -149,6 +149,16 @@ nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
 	// the remux and re-encode tiers, and those differ precisely here.
 	if (is_video) s["nativeSeek"] = video_seeks_natively(c.video_codec,
 	                                                     c.audio_codec);
+	// gaindrive extension.  The format= that gets this video's soundtrack
+	// stream-copied rather than encoded, and the type it arrives as.  A cast
+	// LOAD has to announce that type before a byte is served, so a client
+	// that casts the soundtrack alone cannot find it out by sniffing.  Omitted
+	// when the soundtrack has to be encoded.
+	if (is_video)
+		if (auto t = audio_copy_target(c.audio_codec)) {
+			s["soundtrackFormat"]      = std::string(t->name);
+			s["soundtrackContentType"] = std::string(t->mime);
+			}
 	return s;
 	}
 
@@ -200,6 +210,11 @@ XMLElement* song_entry_xml(XMLDocument& doc,
 	if (is_video)
 		el->SetAttribute("nativeSeek",
 		                 video_seeks_natively(c.video_codec, c.audio_codec));
+	if (is_video)
+		if (auto t = audio_copy_target(c.audio_codec)) {
+			el->SetAttribute("soundtrackFormat",      std::string(t->name).c_str());
+			el->SetAttribute("soundtrackContentType", std::string(t->mime).c_str());
+			}
 	return el;
 	}
 

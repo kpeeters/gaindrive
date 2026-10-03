@@ -115,6 +115,8 @@ fun SongDto.toDomain(server: ServerId, albumRef: ItemRef? = null) = Song(
 	lastPlayedAt = lastPlayed,
 	isVideo = isVideo,
 	nativeSeek = nativeSeek,
+	soundtrackFormat = soundtrackFormat,
+	soundtrackContentType = soundtrackContentType,
 	season = season?.takeIf { it > 0 },
 	transcodedContentType = transcodedContentType,
 	width = originalWidth?.takeIf { it > 0 },

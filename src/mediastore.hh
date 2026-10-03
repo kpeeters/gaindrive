@@ -1300,8 +1300,9 @@ class MediaStore {
 		// repairs the cover_path pointers left dangling by it. Called once
 		// from the constructor.
 		void purge_disabled_video_art();
-		// Clears album_art rows whose folder is gone and cover_path pointers
-		// whose album_art row is gone. Startup, next to the video repair.
+		// Keeps album_art and albums.cover_path in step: drops rows whose
+		// folder is gone, clears pointers whose row is gone, and restores
+		// pointers to rows that are 'ok'. Startup, next to the video repair.
 		void repair_album_art();
 
 		// Reconciles the folders table's root rows with the configuration.

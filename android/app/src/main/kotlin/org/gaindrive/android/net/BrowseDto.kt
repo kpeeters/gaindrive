@@ -115,6 +115,13 @@ data class SongDto(
 	 */
 	val nativeSeek: Boolean = false,
 	/**
+	 * gaindrive extension: the `format` that gets this video's soundtrack
+	 * stream-copied rather than encoded, and the type it then arrives as. Both
+	 * absent when the soundtrack has to be encoded, and on an older server.
+	 */
+	val soundtrackFormat: String? = null,
+	val soundtrackContentType: String? = null,
+	/**
 	 * gaindrive extension: the season an episode belongs to, absent for
 	 * anything that is not one. `discNumber` already carries the same number -
 	 * it is what orders and groups the tracks - so this only decides whether a

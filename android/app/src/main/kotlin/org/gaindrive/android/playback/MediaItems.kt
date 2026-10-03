@@ -54,6 +54,14 @@ private const val KEY_NATIVE_SEEK = "org.gaindrive.nativeSeek"
 private const val KEY_ASPECT = "org.gaindrive.aspect"
 
 /**
+ * What a video's soundtrack can be copied out as, from the browse response.
+ * Carried for casting alone: the receiver is told the type before it fetches,
+ * so the item has to know it in advance. Absent when it would be encoded.
+ */
+private const val KEY_SOUNDTRACK_FORMAT = "org.gaindrive.soundtrackFormat"
+private const val KEY_SOUNDTRACK_TYPE = "org.gaindrive.soundtrackContentType"
+
+/**
  * Set when this item is a video resolved for its soundtrack alone.
  *
  * It is deliberately *not* [KEY_IS_VIDEO]. Such an item is an audio stream in
@@ -127,6 +135,8 @@ fun Song.toMediaItem(artworkUrl: String?): MediaItem {
 				putString(KEY_TRANSCODED_TYPE, transcodedContentType)
 				putBoolean(KEY_IS_VIDEO, isVideo)
 				putBoolean(KEY_NATIVE_SEEK, nativeSeek)
+				putString(KEY_SOUNDTRACK_FORMAT, soundtrackFormat)
+				putString(KEY_SOUNDTRACK_TYPE, soundtrackContentType)
 				putBoolean(KEY_STARRED, isStarred)
 				// 0 rather than null: a Bundle float has no absent value, and
 				// the reader treats anything non-positive as "not known yet",
@@ -170,6 +180,9 @@ data class CastSource(
 	val transcodedMime: String?,
 	/** See [KEY_AUDIO_ONLY_VIDEO]. Never true at the same time as [isVideo]. */
 	val audioOnlyVideo: Boolean = false,
+	/** See [KEY_SOUNDTRACK_FORMAT]. */
+	val soundtrackFormat: String? = null,
+	val soundtrackMime: String? = null,
 )
 
 /**
@@ -187,6 +200,8 @@ fun MediaItem.castSource(): CastSource = CastSource(
 	sourceMime = sourceContentType(),
 	transcodedMime = mediaMetadata.extras?.getString(KEY_TRANSCODED_TYPE),
 	audioOnlyVideo = isAudioOnlyVideo(),
+	soundtrackFormat = mediaMetadata.extras?.getString(KEY_SOUNDTRACK_FORMAT),
+	soundtrackMime = mediaMetadata.extras?.getString(KEY_SOUNDTRACK_TYPE),
 )
 
 /** Whether this item is a video resolved as audio; see [KEY_AUDIO_ONLY_VIDEO]. */

@@ -199,6 +199,30 @@ class StreamUrls @Inject constructor(
 		build(ref, AudioQuality.ORIGINAL)
 
 	/**
+	 * A video's soundtrack copied out as it stands, in the [format] the browse
+	 * response named for it, for a receiver that will be told [mime] up front.
+	 *
+	 * No `maxBitRate`: the server only copies when none is given, since a
+	 * video's stored bitrate is the container's and says nothing about its
+	 * audio. Null on a capped account, where the server would encode at the
+	 * cap after all and [AudioQuality] has no way to name what that sends.
+	 */
+	suspend fun forSoundtrackCopy(ref: ItemRef, format: String, mime: String): StreamTarget? =
+		withContext(Dispatchers.IO) {
+			val config = registry.get(ref.server) ?: return@withContext null
+			if (accounts.capFor(config) > 0) return@withContext null
+			StreamTarget(
+				url = clients.clientFor(config).url(
+					"stream",
+					mapOf("id" to ref.id, "format" to format),
+				),
+				quality = AudioQuality.ORIGINAL,
+				cacheKey = CacheKeys.of(ref, AudioQuality.ORIGINAL),
+				mimeType = mime,
+			)
+		}
+
+	/**
 	 * Where to fetch a video from, and how it will have to be seeked.
 	 *
 	 * Two parameters are conspicuously absent, and both omissions are
