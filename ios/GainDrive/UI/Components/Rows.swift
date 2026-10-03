@@ -63,6 +63,8 @@ extension View {
 			.padding(.vertical, 8)
 			.background(Color.platformBackground)
 			.listRowInsets(EdgeInsets())
+			// No rule under the header, as on Android and the web.
+			.listRowSeparator(.hidden)
 		#endif
 	}
 }
@@ -83,8 +85,8 @@ extension View {
 struct ArtistRow: View {
 	let item: ArtistUi
 
-	/// One line with no separator, as on Android and the web: with rows this
-	/// dense, a ruled list reads worse than a plain column of names.
+	/// One line with no separator, as on Android and the web. Every row type
+	/// here hides its separator: a ruled list reads worse than a plain column.
 	var body: some View {
 		HStack(spacing: 8) {
 			Text(item.artist.name)
@@ -151,6 +153,7 @@ struct AlbumRow: View {
 			ContainerMark(ref: item.album.ref, kind: .album)
 		}
 		.contentShape(.rect)
+		.listRowSeparator(.hidden)
 	}
 
 	private var subtitle: String {
@@ -223,6 +226,7 @@ struct TrackRow: View {
 				.foregroundStyle(.secondary)
 		}
 		.contentShape(.rect)
+		.listRowSeparator(.hidden)
 	}
 
 	@ViewBuilder
@@ -282,6 +286,7 @@ struct SongRow: View {
 			}
 		}
 		.contentShape(.rect)
+		.listRowSeparator(.hidden)
 	}
 
 	/// White on a scrim rather than accent: it lies over arbitrary artwork,
@@ -326,6 +331,7 @@ struct PlaylistRow: View {
 			ContainerMark(ref: playlist.ref, kind: .playlist)
 		}
 		.contentShape(.rect)
+		.listRowSeparator(.hidden)
 	}
 
 	/// Hours and minutes rather than `formatDuration`'s mm:ss - "184:07" is not
@@ -397,6 +403,7 @@ struct ChapterRow: View {
 			}
 		}
 		.contentShape(.rect)
+		.listRowSeparator(.hidden)
 	}
 }
 
@@ -427,6 +434,7 @@ struct ChapterHitRow: View {
 				.foregroundStyle(.secondary)
 		}
 		.contentShape(.rect)
+		.listRowSeparator(.hidden)
 	}
 
 	/// Artist, album, then the recording itself: a marker means nothing without
