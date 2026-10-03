@@ -21,6 +21,19 @@ struct SectionHeading: View {
 	}
 }
 
+extension CGFloat {
+	/// The leading inset pinned headers pad to. A row's default inset cannot
+	/// be read and differs per platform, so a row that must line up with its
+	/// header states this one explicitly.
+	static var listLeading: CGFloat {
+		#if os(macOS)
+			10
+		#else
+			16
+		#endif
+	}
+}
+
 extension View {
 	/// For the pinned header of a `.plain` list, and nowhere else. iOS 26
 	/// pins those on translucent Liquid Glass, so the rows scroll visibly
@@ -30,8 +43,7 @@ extension View {
 	///
 	/// The zeroed `listRowInsets` remove the default header margins, which
 	/// would otherwise survive as translucent slivers at the pane edges; the
-	/// padding puts back what the margins provided, so the text keeps lining
-	/// up with the rows.
+	/// padding puts back `listLeading`, which rows that state it share.
 	///
 	/// An extension rather than part of `SectionHeading`, because that view
 	/// is also drawn *inside* rows (the recording headings in
@@ -47,7 +59,7 @@ extension View {
 		#else
 		self
 			.frame(maxWidth: .infinity, alignment: .leading)
-			.padding(.horizontal, 10)
+			.padding(.horizontal, CGFloat.listLeading)
 			.padding(.vertical, 8)
 			.background(Color.platformBackground)
 			.listRowInsets(EdgeInsets())
@@ -89,6 +101,9 @@ struct ArtistRow: View {
 		}
 		.contentShape(.rect)
 		.listRowSeparator(.hidden)
+		// Explicit, so the name lines up with the pinned header's text.
+		.listRowInsets(
+			EdgeInsets(top: 4, leading: .listLeading, bottom: 4, trailing: .listLeading))
 	}
 
 	private var albumCountText: String {

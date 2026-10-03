@@ -278,6 +278,7 @@ private struct ArtistsList: View {
 						} header: {
 							IndexHeading(text: "Categories")
 						}
+						.listSectionSeparator(.hidden)
 					}
 					ForEach(listing.artists) { bucket in
 						Section {
@@ -291,6 +292,7 @@ private struct ArtistsList: View {
 						} header: {
 							IndexHeading(text: bucket.label).id(bucket.label)
 						}
+						.listSectionSeparator(.hidden)
 					}
 				}
 				.listStyle(.plain)
