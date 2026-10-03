@@ -82,11 +82,12 @@ extension View {
 }
 
 extension Color {
-	/// The window's own background, for a pinned header that must be opaque
-	/// over the rows scrolling beneath it.
+	/// A plain list's own background, for a pinned header that must be opaque
+	/// over the rows scrolling beneath it without showing as a bar. On the Mac
+	/// that is the control background; the window's is a grey that did show.
 	static var platformBackground: Color {
 		#if os(macOS)
-			Color(nsColor: .windowBackgroundColor)
+			Color(nsColor: .controlBackgroundColor)
 		#else
 			Color(.systemBackground)
 		#endif

@@ -276,7 +276,7 @@ private struct ArtistsList: View {
 									.tag(ArtistChoice(artist: artist, section: .categories))
 							}
 						} header: {
-							Text("Categories").pinnedHeaderBackground()
+							IndexHeading(text: "Categories")
 						}
 					}
 					ForEach(listing.artists) { bucket in
@@ -289,7 +289,7 @@ private struct ArtistsList: View {
 											section: uploads ? .uploads : .artists))
 							}
 						} header: {
-							Text(bucket.label).id(bucket.label).pinnedHeaderBackground()
+							IndexHeading(text: bucket.label).id(bucket.label)
 						}
 					}
 				}
@@ -330,5 +330,19 @@ private struct ArtistsList: View {
 	/// not a stop.
 	private func showsRail(_ indexes: [ArtistIndex]) -> Bool {
 		indexes.count > 1 && indexes.allSatisfy { $0.label.count == 1 }
+	}
+}
+
+/// The artist index's headers in the accent colour, as Android's
+/// `IndexHeader`: the letters are what the eye scans for, unlike the grey
+/// `SectionHeading` elsewhere.
+private struct IndexHeading: View {
+	let text: String
+
+	var body: some View {
+		Text(text)
+			.font(.subheadline.weight(.semibold))
+			.foregroundStyle(Color.accentColor)
+			.pinnedHeaderBackground()
 	}
 }
