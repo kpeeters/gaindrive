@@ -235,8 +235,19 @@ class CastUrls @Inject constructor(
 	 * [startSeconds] only reaches the URL for a video's soundtrack, as its
 	 * [CastTarget.streamOffsetSeconds]; everything else starts with the LOAD's
 	 * own `currentTime`.
+	 *
+	 * [reuseToken] is the grant of the load this one replaces, passed only when
+	 * a seek reloads the same track; see [CastPlayer]. Anything else mints a
+	 * fresh one, because a grant lives in the server's memory and a restart
+	 * forgets it - an old one reused there is refused, and the receiver is
+	 * handed an error document where it expected audio.
 	 */
-	suspend fun forCast(ref: ItemRef, source: CastSource, startSeconds: Float = 0f): CastTarget? {
+	suspend fun forCast(
+		ref: ItemRef,
+		source: CastSource,
+		startSeconds: Float = 0f,
+		reuseToken: String? = null,
+	): CastTarget? {
 		// One load starts here, and everything published for it - the stream,
 		// the artwork, each subtitle track - is pinned against eviction until
 		// the next one. A caption is published now and fetched only if somebody
@@ -251,7 +262,7 @@ class CastUrls @Inject constructor(
 		if (reachability.canReachDirectly(config)) {
 			val direct = directTarget(ref, source) ?: return null
 			val url = fromOffset(paced(direct.url))
-			val token = castToken(ref)
+			val token = reuseToken ?: castToken(ref)
 			return CastTarget(
 				token?.let { withCastToken(url, it) } ?: url,
 				direct.mimeType ?: source.sourceMime,
@@ -325,7 +336,7 @@ class CastUrls @Inject constructor(
 		// The bridge would not start, so the fallback really does hand a server
 		// URL to the receiver - and therefore really does need a credential of
 		// its own, exactly as the direct branch above.
-		val token = castToken(ref)
+		val token = reuseToken ?: castToken(ref)
 		return CastTarget(
 			token?.let { withCastToken(upstream, it) } ?: upstream,
 			mime,
@@ -348,24 +359,18 @@ class CastUrls @Inject constructor(
 	 *
 	 * One per track, and not per seek. Most tracks are seeked on the receiver,
 	 * which goes on fetching the URL it already has; a video's soundtrack is
-	 * seeked by loading again (see [CastTarget.streamOffsetSeconds]), so the
-	 * last grant is kept and reused for the same track rather than burning a
-	 * server slot on every seek. That is why the server's grant lasts hours.
+	 * seeked by loading again, and that reload is handed the grant it replaces
+	 * (`reuseToken` on [forCast]). That is why the server's grant lasts hours.
 	 */
 	private suspend fun castToken(ref: ItemRef): String? {
-		lastToken?.let { (forRef, token) -> if (forRef == ref) return token }
 		val config = registry.get(ref.server) ?: return null
 		val token = runCatchingCancellable {
 			clients.clientFor(config).getCastToken(ref.id).requireOk().castToken
 		}.onFailure {
 			Log.i(TAG, "no cast token ($it); sending the account's own credentials")
-		}.getOrNull()?.takeIf { it.isNotBlank() }
-		lastToken = token?.let { ref to it }
-		return token
+		}.getOrNull()
+		return token?.takeIf { it.isNotBlank() }
 	}
-
-	/** The grant [castToken] minted last, and the track it opens. */
-	@Volatile private var lastToken: Pair<ItemRef, String>? = null
 
 	/**
 	 * What to hand a receiver that will fetch from the server itself.

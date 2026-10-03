@@ -330,9 +330,11 @@ class CastPlayer(
 			loadCurrent(position)
 		} else if (session.loaded.value?.streamOffsetSeconds != null) {
 			// A stream that starts at an offset is seeked by starting a new
-			// one there; see [CastMedia.streamOffsetSeconds].
+			// one there; see [CastMedia.streamOffsetSeconds]. Its grant is
+			// live - the receiver is fetching with it - so it is reused
+			// rather than spending a server slot on every seek.
 			ended = false
-			loadCurrent(position)
+			loadCurrent(position, reuseToken = session.loaded.value?.castToken)
 		} else {
 			// Within the current track the receiver seeks itself, using the
 			// file's own index. Re-loading would restart buffering for nothing.
@@ -370,14 +372,14 @@ class CastPlayer(
 	 * thing and refuses to enqueue one, but neither guard covers connecting a
 	 * device to a queue that already holds it.
 	 */
-	private fun loadCurrent(positionMs: Long) {
+	private fun loadCurrent(positionMs: Long, reuseToken: String? = null) {
 		val entry = entries.getOrNull(index) ?: return
 		val ref = entry.item.itemRef() ?: return
 		val source = entry.item.castSource()
 		ended = false
 		loadJob?.cancel()
 		loadJob = scope.launch {
-			val target = castUrls.forCast(ref, source, positionMs / 1000f) ?: run {
+			val target = castUrls.forCast(ref, source, positionMs / 1000f, reuseToken) ?: run {
 				Log.i(TAG, "nothing castable for $ref, skipping")
 				// Said out loud, not merely logged. The only way to get here
 				// is a film the server can only re-encode on a receiver that
@@ -411,6 +413,7 @@ class CastPlayer(
 						?.takeIf { it > 0 },
 					startSeconds = if (offset != null) 0f else positionMs / 1000f,
 					streamOffsetSeconds = offset,
+					castToken = target.castToken,
 					title = metadata.title?.toString(),
 					artist = metadata.artist?.toString(),
 					album = metadata.albumTitle?.toString(),

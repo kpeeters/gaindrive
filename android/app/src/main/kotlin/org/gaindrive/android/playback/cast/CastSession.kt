@@ -66,6 +66,8 @@ data class CastMedia(
 	 * both count from the offset, and [durationSeconds] is the remainder.
 	 */
 	val streamOffsetSeconds: Int? = null,
+	/** The grant [url] carries, or null; see [CastTarget.castToken]. */
+	val castToken: String? = null,
 	val title: String? = null,
 	val artist: String? = null,
 	val album: String? = null,
