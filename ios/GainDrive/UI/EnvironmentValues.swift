@@ -23,4 +23,9 @@ extension EnvironmentValues {
 	/// without a registry to build one from. `GainDriveApp` always supplies it,
 	/// so a `nil` here means a preview that did not.
 	@Entry var library: LibraryRepository? = nil
+
+	/// Shows a route from outside any pane, the way a track link is shown:
+	/// the shell switches to Search and pushes it there. Set by both roots;
+	/// the player bar's cover uses it to open the album.
+	@Entry var openRoute: @MainActor (Route) -> Void = { _ in }
 }

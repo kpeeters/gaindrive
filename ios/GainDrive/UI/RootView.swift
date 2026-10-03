@@ -91,11 +91,14 @@ struct RootView: View {
 		// point of taking the Catalyst destination.
 		.tabViewStyle(.sidebarAdaptable)
 		// The shell's alerts and track links, shared with the Mac's root. A
-		// link opens in Search, which owns a path to push onto.
-		.modifier(
-			ShellMessages { route in
-				tab = .search
-				search.open(route)
-			})
+		// link, and the wide player bar's cover, open in Search, which owns a
+		// path to push onto.
+		.environment(\.openRoute) { open($0) }
+		.modifier(ShellMessages { open($0) })
+	}
+
+	private func open(_ route: Route) {
+		tab = .search
+		search.open(route)
 	}
 }

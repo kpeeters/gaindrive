@@ -11,8 +11,7 @@
 import SwiftUI
 
 /// The Mac's window: a sections column, then the chosen section's panes side
-/// by side, the player bar along the bottom and Now Playing as an inspector on
-/// the right. The web client's layout, which is why it is not Apple Music's:
+/// by side, and the player bar along the bottom. The web client's layout, which is why it is not Apple Music's:
 /// Music keeps one list beside a detail stack and so hides the level between,
 /// and the point here is to see all of them at once.
 ///
@@ -26,7 +25,6 @@ struct MacRootView: View {
 	/// Optional only because `List(selection:)` wants it so; nil reads as
 	/// Library.
 	@State private var section: SidebarItem?
-	@State private var showsInspector = false
 	@State private var columns: NavigationSplitViewVisibility = .all
 	@Environment(PlayerConnection.self) private var player
 	/// Built here for the reason `RootView` gives: a `@State` initial value
@@ -87,12 +85,12 @@ struct MacRootView: View {
 		VStack(spacing: 0) {
 			split
 			FetchStrip()
-			MacPlayerBar(showsInspector: $showsInspector)
+			PlayerBar()
 		}
 		.frame(minWidth: 720, minHeight: 480)
+		.environment(\.openRoute) { open($0) }
 		// For the menu bar; see `MacCommands`.
 		.focusedSceneValue(\.shellSection, $section)
-		.focusedSceneValue(\.showsNowPlaying, $showsInspector)
 		// Space plays and pauses, as in every Mac player. Here rather than as
 		// the menu's key equivalent so a focused text field gets it first.
 		.onKeyPress(.space) {
@@ -103,15 +101,16 @@ struct MacRootView: View {
 		// One window, so it is always the one on screen.
 		.modifier(VideoPresentation(active: true))
 		// A link opens in Search, which owns a path to push onto, as on iOS.
-		.modifier(
-			ShellMessages { route in
-				section = .search
-				search.open(route)
-			})
+		.modifier(ShellMessages { open($0) })
 	}
 
-	/// Above the player bar, so the inspector ends there too and the bar
-	/// spans the whole window, as a transport should.
+	private func open(_ route: Route) {
+		section = .search
+		search.open(route)
+	}
+
+	/// Above the player bar, so the bar spans the whole window, as a
+	/// transport should.
 	private var split: some View {
 		NavigationSplitView(columnVisibility: $columns) {
 			List(SidebarItem.allCases, selection: $section) { section in
@@ -129,10 +128,6 @@ struct MacRootView: View {
 				.environment(\.paneHeaderLeadingInset, columns == .detailOnly ? 110 : 0)
 				.toolbar(removing: .title)
 				.toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-		}
-		.inspector(isPresented: $showsInspector) {
-			NowPlayingView()
-				.inspectorColumnWidth(min: 280, ideal: 320, max: 440)
 		}
 	}
 

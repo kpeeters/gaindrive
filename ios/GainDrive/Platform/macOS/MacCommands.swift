@@ -24,7 +24,6 @@ struct MacCommands: Commands {
 	/// The front window's shell, published by `MacRootView`; nil while no main
 	/// window is in front (the video window, say).
 	@FocusedValue(\.shellSection) private var section
-	@FocusedValue(\.showsNowPlaying) private var showsNowPlaying
 
 	var body: some Commands {
 		// One window: a second would be a second shell raising the same
@@ -45,12 +44,6 @@ struct MacCommands: Commands {
 					.disabled(section == nil)
 			}
 			Divider()
-			Button(showsNowPlaying?.wrappedValue == true ? "Hide Now Playing" : "Show Now Playing") {
-				showsNowPlaying?.wrappedValue.toggle()
-			}
-			.keyboardShortcut("i", modifiers: [.command, .option])
-			.disabled(showsNowPlaying == nil)
-			Divider()
 		}
 
 		CommandMenu("Playback") {
@@ -70,7 +63,6 @@ struct MacCommands: Commands {
 
 extension FocusedValues {
 	@Entry var shellSection: Binding<MacRootView.SidebarItem?>?
-	@Entry var showsNowPlaying: Binding<Bool>?
 }
 
 #endif

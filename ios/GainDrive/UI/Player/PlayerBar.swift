@@ -1,4 +1,4 @@
-//	GainDrive for macOS
+//	GainDrive for iOS and macOS
 //	Copyright (C) 2026 Kasper Peeters
 //
 //	This file is part of GainDrive, distributed under the GNU General
@@ -6,19 +6,19 @@
 //	Exception in ios/LICENSE. See LICENSE at the repository root for the
 //	full text of the GPL.
 
-#if os(macOS)
-
 import SwiftUI
 
-/// The transport along the bottom of the Mac window: what is playing, the
-/// controls, the position, and where the sound goes. The iOS mini player is a
-/// doorway into a sheet; on the Mac there is room for the controls themselves,
-/// and Now Playing is an inspector the bar toggles.
-struct MacPlayerBar: View {
-	@Binding var showsInspector: Bool
-
+/// The transport along the bottom of the Mac window and of a wide iPad: what
+/// is playing, the controls, the position, and where the sound goes. The web
+/// client's player bar, with no Now Playing panel behind it: track info is a
+/// button, and the cover opens the album.
+struct PlayerBar: View {
 	@Environment(PlayerConnection.self) private var player
+	@Environment(StarStore.self) private var stars
+	@Environment(ServerRegistry.self) private var registry
+	@Environment(\.openRoute) private var openRoute
 	@State private var castPicker = false
+	@State private var showingInfo: Song?
 
 	var body: some View {
 		HStack(spacing: 16) {
@@ -39,9 +39,17 @@ struct MacPlayerBar: View {
 			CastDeviceSheet()
 				.environment(player)
 		}
+		// Handed over explicitly: on the Mac a sheet raised from here has been
+		// presented without its environment.
+		.sheet(item: $showingInfo) {
+			TrackInfoView(song: $0)
+				.environment(player)
+				.environment(stars)
+				.environment(registry)
+		}
 	}
 
-	/// A click opens or closes the inspector, as Music's artwork does.
+	/// A click opens the album, as the web's cover does.
 	@ViewBuilder
 	private var nowPlaying: some View {
 		if let song = player.current {
@@ -59,9 +67,12 @@ struct MacPlayerBar: View {
 				}
 			}
 			.contentShape(.rect)
-			.onTapGesture { showsInspector.toggle() }
+			.onTapGesture {
+				guard let album = song.albumRef else { return }
+				openRoute(.album(album, title: song.albumTitle))
+			}
 			.accessibilityAddTraits(.isButton)
-			.accessibilityHint("Shows Now Playing")
+			.accessibilityHint("Opens the album")
 		} else {
 			Text("Nothing playing")
 				.foregroundStyle(.secondary)
@@ -108,18 +119,19 @@ struct MacPlayerBar: View {
 				}
 				.accessibilityLabel("Watch")
 			}
+			// Info before cast, as on Android: the button that is always
+			// there is the one that must not move.
+			Button {
+				showingInfo = player.current
+			} label: {
+				Image(systemName: "info.circle")
+			}
+			.disabled(player.current == nil)
+			.accessibilityLabel("Track info")
 			CastButton(showing: $castPicker, size: 16)
 			AirPlayButton(player: player.videoPlayer)
 				.frame(width: 24, height: 24)
-			Button {
-				showsInspector.toggle()
-			} label: {
-				Image(systemName: "sidebar.trailing")
-			}
-			.accessibilityLabel(showsInspector ? "Hide Now Playing" : "Show Now Playing")
 		}
 		.buttonStyle(.borderless)
 	}
 }
-
-#endif

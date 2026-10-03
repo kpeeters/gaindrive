@@ -61,16 +61,7 @@ extension View {
 			.frame(maxWidth: .infinity, alignment: .leading)
 			.padding(.horizontal, CGFloat.listLeading)
 			.padding(.vertical, 8)
-			.background {
-				#if os(macOS)
-					// AppKit draws a 1pt rule along a section header's bottom
-					// edge that no list modifier removes; reaching 2pt past
-					// the edge paints over it.
-					Color.platformBackground.padding(.bottom, -2)
-				#else
-					Color.platformBackground
-				#endif
-			}
+			.background(Color.platformBackground)
 			.listRowInsets(EdgeInsets())
 		#endif
 	}

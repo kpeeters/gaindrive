@@ -35,102 +35,123 @@ struct MiniPlayer: View {
 	/// Local for the same reason `expanded` is: only the selected tab's bar is
 	/// in the hierarchy, so one sheet per bar is not one sheet on screen.
 	@State private var castPicker = false
+	/// Room for a second pane, which is room for the full player bar: the
+	/// panes' own threshold, as Android's `MiniPlayer` uses `paneCount`.
+	@State private var wide = false
 
 	var body: some View {
-		if let song = player.current {
-			VStack(spacing: 0) {
-				progress
-					.accessibilityHidden(true)
-				HStack(spacing: 12) {
-					// The tap target is the cover and the text, not the whole
-					// bar: wrapping the row in a `Button` would swallow the
-					// transport buttons inside it.
-					HStack(spacing: 12) {
-						CoverThumb(source: cover(for: song), size: 40)
-						VStack(alignment: .leading, spacing: 1) {
-							Text(song.title)
-								.font(.footnote.weight(.medium))
-								.lineLimit(1)
-							Text(song.artistName)
-								.font(.caption)
-								.foregroundStyle(.secondary)
-								.lineLimit(1)
-						}
-						Spacer(minLength: 0)
-					}
-					.contentShape(.rect)
-					.onTapGesture { expanded = true }
-					.accessibilityAddTraits(.isButton)
-					.accessibilityHint("Opens the player")
+		Group {
+			if let song = player.current {
+				// The web's bar on a wide iPad, with no Now Playing sheet; a
+				// phone, or an iPad window too narrow for two panes, keeps the
+				// row below and the sheet it opens.
+				if wide {
+					PlayerBar()
+				} else {
+					compact(song)
+				}
+			}
+		}
+		.onGeometryChange(for: Bool.self) {
+			PaneMath.count(width: $0.size.width) > 1
+		} action: {
+			wide = $0
+		}
+	}
 
-					// **The way back to the picture**, and it is here because
-					// this is where you are the moment it goes: closing the
-					// video leaves the film playing, and the bar is what is
-					// left on screen. It was reachable only through the Now
-					// Playing sheet before, which is one icon among four and
-					// needs a sheet to hand over to a cover - findable by
-					// nobody, and unreliable when found.
-					//
-					// Before the transport rather than after, so play/pause and
-					// next keep their positions as this one comes and goes -
-					// the rule Android's Now Playing row follows for the same
-					// reason.
-					if player.currentShowsPicture {
-						Button {
-							player.showingVideo = true
-						} label: {
-							Image(systemName: "film")
-								.font(.body)
-								.frame(width: 32, height: 32)
-						}
-						.accessibilityLabel("Watch")
+	private func compact(_ song: Song) -> some View {
+		VStack(spacing: 0) {
+			progress
+				.accessibilityHidden(true)
+			HStack(spacing: 12) {
+				// The tap target is the cover and the text, not the whole
+				// bar: wrapping the row in a `Button` would swallow the
+				// transport buttons inside it.
+				HStack(spacing: 12) {
+					CoverThumb(source: cover(for: song), size: 40)
+					VStack(alignment: .leading, spacing: 1) {
+						Text(song.title)
+							.font(.footnote.weight(.medium))
+							.lineLimit(1)
+						Text(song.artistName)
+							.font(.caption)
+							.foregroundStyle(.secondary)
+							.lineLimit(1)
 					}
-					// **Only while casting**, and that is the point of it being
-					// here rather than always: this bar is narrow, and the way
-					// *in* to casting is Now Playing, beside AirPlay, where it
-					// belongs. What the bar owes is the state - sound coming out
-					// of another room with nothing on screen saying so is the
-					// one thing about casting that is genuinely confusing - and
-					// a way back out of it in one tap.
-					if player.isCasting {
-						CastButton(showing: $castPicker, size: 18)
-							.frame(width: 32, height: 32)
-					}
+					Spacer(minLength: 0)
+				}
+				.contentShape(.rect)
+				.onTapGesture { expanded = true }
+				.accessibilityAddTraits(.isButton)
+				.accessibilityHint("Opens the player")
+
+				// **The way back to the picture**, and it is here because
+				// this is where you are the moment it goes: closing the
+				// video leaves the film playing, and the bar is what is
+				// left on screen. It was reachable only through the Now
+				// Playing sheet before, which is one icon among four and
+				// needs a sheet to hand over to a cover - findable by
+				// nobody, and unreliable when found.
+				//
+				// Before the transport rather than after, so play/pause and
+				// next keep their positions as this one comes and goes -
+				// the rule Android's Now Playing row follows for the same
+				// reason.
+				if player.currentShowsPicture {
 					Button {
-						player.togglePlayPause()
+						player.showingVideo = true
 					} label: {
-						Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-							.font(.title3)
-							.frame(width: 32, height: 32)
-					}
-					.accessibilityLabel(player.isPlaying ? "Pause" : "Play")
-					Button {
-						player.next()
-					} label: {
-						Image(systemName: "forward.fill")
+						Image(systemName: "film")
 							.font(.body)
 							.frame(width: 32, height: 32)
 					}
-					.disabled(!player.hasNext)
-					.accessibilityLabel("Next")
+					.accessibilityLabel("Watch")
 				}
-				.padding(.horizontal, 12)
-				.padding(.vertical, 8)
+				// **Only while casting**, and that is the point of it being
+				// here rather than always: this bar is narrow, and the way
+				// *in* to casting is Now Playing, beside AirPlay, where it
+				// belongs. What the bar owes is the state - sound coming out
+				// of another room with nothing on screen saying so is the
+				// one thing about casting that is genuinely confusing - and
+				// a way back out of it in one tap.
+				if player.isCasting {
+					CastButton(showing: $castPicker, size: 18)
+						.frame(width: 32, height: 32)
+				}
+				Button {
+					player.togglePlayPause()
+				} label: {
+					Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+						.font(.title3)
+						.frame(width: 32, height: 32)
+				}
+				.accessibilityLabel(player.isPlaying ? "Pause" : "Play")
+				Button {
+					player.next()
+				} label: {
+					Image(systemName: "forward.fill")
+						.font(.body)
+						.frame(width: 32, height: 32)
+				}
+				.disabled(!player.hasNext)
+				.accessibilityLabel("Next")
 			}
-			.background(.bar)
-			.overlay(alignment: .top) {
-				Divider()
-			}
-			.accessibilityElement(children: .contain)
-			.sheet(isPresented: $expanded) { NowPlayingView() }
-			// Handed over explicitly rather than inherited: on the Mac this sheet
-			// was presented with an environment missing `PlayerConnection`, and
-			// crashed on its first lookup. Resolved here, where the lookup works -
-			// the cure `RootView` records for sheets under the sidebar `TabView`.
-			.sheet(isPresented: $castPicker) {
-				CastDeviceSheet()
-					.environment(player)
-			}
+			.padding(.horizontal, 12)
+			.padding(.vertical, 8)
+		}
+		.background(.bar)
+		.overlay(alignment: .top) {
+			Divider()
+		}
+		.accessibilityElement(children: .contain)
+		.sheet(isPresented: $expanded) { NowPlayingView() }
+		// Handed over explicitly rather than inherited: on the Mac this sheet
+		// was presented with an environment missing `PlayerConnection`, and
+		// crashed on its first lookup. Resolved here, where the lookup works -
+		// the cure `RootView` records for sheets under the sidebar `TabView`.
+		.sheet(isPresented: $castPicker) {
+			CastDeviceSheet()
+				.environment(player)
 		}
 	}
 
