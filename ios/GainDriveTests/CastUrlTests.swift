@@ -158,4 +158,24 @@ struct CastUrlTests {
 		#expect(!castPlaysNatively(nil))
 		#expect(!castPlaysNatively(""))
 	}
+
+	// MARK: - Time offset
+
+	/// A seek reloads at a new offset by applying this to the URL already
+	/// built, so an old offset must be replaced rather than joined.
+	@Test func timeOffsetReplacesAnEarlierOne() throws {
+		let first = withTimeOffset(
+			try url("https://music.example.com/rest/stream.view?id=42&pace=true"), 0)
+		let second = withTimeOffset(first, 1800)
+		let items = try #require(
+			URLComponents(url: second, resolvingAgainstBaseURL: false)?.queryItems)
+		#expect(items.filter { $0.name == "timeOffset" }.map(\.value) == ["1800"])
+		#expect(items.first { $0.name == "pace" }?.value == "true")
+		#expect(items.first { $0.name == "id" }?.value == "42")
+		#expect(hasTimeOffset(second))
+	}
+
+	@Test func aPlainUrlHasNoTimeOffset() throws {
+		#expect(!hasTimeOffset(try url("https://music.example.com/rest/stream.view?id=42")))
+	}
 }

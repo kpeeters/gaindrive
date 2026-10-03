@@ -72,6 +72,24 @@ struct StreamTargets {
 		await target(for: ref, wanted: settings.audioQuality.forVideoAudio())
 	}
 
+	/// A video's soundtrack copied out as it stands, in the `format` the
+	/// browse response named for it, for a receiver told `mime` up front.
+	///
+	/// No `maxBitRate`: the server only copies when none is given, since a
+	/// video's stored bitrate is the container's and says nothing about its
+	/// audio. Nil on a capped account, where the server would encode at the
+	/// cap after all and `AudioQuality` has no way to name what that sends.
+	func soundtrackCopy(for ref: ItemRef, format: String, mime: String) async -> StreamTarget? {
+		let clients = registry.clientsSnapshot()
+		guard let client = clients.client(for: ref.server) else { return nil }
+		guard await accounts.cap(for: ref.server, using: clients) <= 0 else { return nil }
+		return StreamTarget(
+			url: client.url("stream", parameters: ["id": ref.id, "format": format]),
+			quality: .original,
+			cacheKey: CacheKeys.of(ref, quality: .original),
+			contentType: mime)
+	}
+
 	/// A target at a stated quality rather than the configured one.
 	///
 	/// **The ceiling still applies**, which is the whole reason this is here

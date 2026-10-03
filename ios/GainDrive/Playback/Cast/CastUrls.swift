@@ -91,6 +91,27 @@ func withCastToken(_ url: URL, _ token: String?) -> URL {
 ///
 /// A nil type is refused for the same reason as an unknown one: not knowing is
 /// not the same as knowing it is fine.
+/// Asks the server to start this stream `seconds` into the track, and to send
+/// it as it goes rather than build the whole file first. Sent for 0 as well,
+/// since that is what tells the server the stream will be seeked by asking
+/// again. That is how a film's soundtrack is cast: in one big Ogg file a
+/// receiver has to seek by bisection, which a WiiM abandons after one probe.
+///
+/// Applied at the route, for the reason `paced(_:)` is.
+func withTimeOffset(_ url: URL, _ seconds: Int) -> URL {
+	guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+	let kept = (parts.queryItems ?? []).filter { $0.name != "timeOffset" }
+	parts.queryItems = kept + [URLQueryItem(name: "timeOffset", value: String(seconds))]
+	return parts.url ?? url
+}
+
+/// Whether a URL starts its stream at an offset; see `withTimeOffset(_:_:)`.
+/// The server pipes such a stream and builds no cache file for it.
+func hasTimeOffset(_ url: URL) -> Bool {
+	URLComponents(url: url, resolvingAgainstBaseURL: false)?
+		.queryItems?.contains { $0.name == "timeOffset" } == true
+}
+
 func castPlaysNatively(_ contentType: String?) -> Bool {
 	guard let contentType else { return false }
 	return castNativeTypes.contains(contentType)
@@ -176,7 +197,12 @@ struct CastUrls {
 		// declaring more would have `stream.view` send QuickTime to a receiver
 		// told MP4, which it refuses outright: the film never starts and
 		// nothing on the phone says why. See `StreamUrls.video`.
-		guard let target = targets.video(for: song) else { return nil }
+		//
+		// `transcoded` when the server says a receiver gets the playlist:
+		// `nativeSeek` answers for a browser, and a browser decodes AV1 where
+		// most receivers do not, playing the sound over no picture.
+		guard let target = targets.video(for: song, transcoded: song.castDirect != true)
+		else { return nil }
 		// A playlist is typed as one, whatever the film inside it was.
 		let type =
 			Self.isPlaylist(target.url)
@@ -223,11 +249,26 @@ struct CastUrls {
 	/// with "Original" set it sent no `format` - which for a video is the film,
 	/// the very thing this exists to keep off a receiver with no screen.
 	/// `StreamTargets.soundtrack` names a container whatever the setting.
-	func soundtrack(for song: Song) async -> StreamTarget? {
-		guard let target = await targets.soundtrack(for: song.ref) else { return nil }
+	///
+	/// **Copied rather than encoded** when the quality is set to Original and
+	/// the server can copy it into something the receiver plays; the nearest
+	/// thing to an original that is not the film itself.
+	///
+	/// **From `offset` seconds in**, always, 0 included: see
+	/// `withTimeOffset(_:_:)`. The stream is seeked by loading it again.
+	func soundtrack(for song: Song, from offset: Int) async -> StreamTarget? {
+		var found: StreamTarget?
+		if targets.settings.audioQuality.format == .original,
+			let format = song.soundtrackFormat, let mime = song.soundtrackContentType,
+			castPlaysNatively(mime)
+		{
+			found = await targets.soundtrackCopy(for: song.ref, format: format, mime: mime)
+		}
+		if found == nil { found = await targets.soundtrack(for: song.ref) }
+		guard let target = found else { return nil }
 		return StreamTarget(
-			url: paced(target.url), quality: target.quality, cacheKey: target.cacheKey,
-			contentType: target.contentType)
+			url: withTimeOffset(paced(target.url), offset), quality: target.quality,
+			cacheKey: target.cacheKey, contentType: target.contentType)
 	}
 
 	/// The sleeve the television shows. An ordinary cover URL - the receiver

@@ -44,6 +44,9 @@ actor TranscodePrewarmer {
 		// every film too, whose target always says `.original`: the server
 		// sends it as the file or as a stream made while it is read.
 		guard target.quality.format != .original else { return }
+		// A stream from an offset is piped and builds no cache file, so there
+		// is nothing to warm, and a GET would read the whole of it.
+		guard !hasTimeOffset(target.url) else { return }
 
 		// One more skip belongs here and has nothing to skip on yet: offline
 		// mode, which means requests are not to be made at all rather than

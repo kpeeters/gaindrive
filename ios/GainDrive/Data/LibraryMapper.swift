@@ -112,7 +112,10 @@ enum LibraryMapper {
 			isVideo: dto.isVideo ?? false,
 			nativeSeek: dto.nativeSeek ?? false,
 			width: positive(dto.originalWidth),
-			height: positive(dto.originalHeight)
+			height: positive(dto.originalHeight),
+			castDirect: dto.castDirect,
+			soundtrackFormat: nonEmpty(dto.soundtrackFormat),
+			soundtrackContentType: nonEmpty(dto.soundtrackContentType)
 		)
 	}
 

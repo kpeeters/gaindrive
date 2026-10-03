@@ -113,6 +113,15 @@ struct SongDto: Decodable, Sendable {
 	@Loose var nativeSeek: Bool?
 	@Loose var originalWidth: Int?
 	@Loose var originalHeight: Int?
+	/// Whether a Cast receiver is handed this video as the stored file rather
+	/// than as HLS. Not derivable from `nativeSeek`, which answers for a
+	/// browser: an AV1 film is direct for a browser and HLS for a receiver.
+	@Loose var castDirect: Bool?
+	/// The `format` that gets this video's soundtrack copied out as it
+	/// stands, and the type it then arrives as. Absent when it would have to
+	/// be encoded.
+	@Loose var soundtrackFormat: String?
+	@Loose var soundtrackContentType: String?
 }
 
 struct ChapterDto: Decodable, Sendable {

@@ -27,10 +27,10 @@ final class CastEngine: PlaybackEngine {
 	private(set) var isPlaying = false
 	private(set) var isBuffering = false
 	private(set) var position: Double = 0
-	/// **Always true.** A receiver seeks using the file's own index, and every
-	/// URL sent to one is a real file with a `Content-Length` - the re-encode
-	/// tier, which is the only thing that would not be, is refused rather than
-	/// sent. So unlike the local engine there is nothing to discover here.
+	/// **Always true.** A receiver seeks a file or playlist using its own
+	/// index, and a film's soundtrack, which is neither, is seeked by loading
+	/// it again from the new offset. So unlike the local engine there is
+	/// nothing to discover here.
 	let canSeek = true
 	private(set) var failure: String?
 
@@ -74,6 +74,16 @@ final class CastEngine: PlaybackEngine {
 	/// The right way round for a clock we do not own.
 	private var reportedAt: ContinuousClock.Instant?
 	private var reported: Double = 0
+	/// Where the loaded stream starts in the track, for a film's soundtrack,
+	/// which the server pipes from an offset and which is seeked by loading it
+	/// again there; nil for everything the receiver seeks itself. The receiver
+	/// counts from the offset, so it is added to every position it reports.
+	private var streamOffset: Double?
+	/// The grant the loaded URLs carry, reused by a seek that reloads the same
+	/// track rather than spending a server slot on each one. Never across
+	/// tracks or loads of anything else: grants live in the server's memory,
+	/// and one minted before a restart is refused.
+	private var token: String?
 	private var ticker: Task<Void, Never>?
 
 	init(session: CastSession, urls: CastUrls, settings: SettingsStore) {
@@ -118,7 +128,7 @@ final class CastEngine: PlaybackEngine {
 		}
 	}
 
-	private func load(_ song: Song, at offset: Double) async -> Bool {
+	private func load(_ song: Song, at offset: Double, reuseToken: String? = nil) async -> Bool {
 		// **A picture is never sent to a receiver that says it has no screen.**
 		// Its soundtrack is, which is what the server does, and it is what
 		// `CastDiscovery` reads bit 0 of the `ca` record for.
@@ -143,13 +153,17 @@ final class CastEngine: PlaybackEngine {
 		// A film the server would not send as a file goes as an HLS playlist,
 		// which `CastUrls.video` picks; it used to be refused here.
 		let sendsVideo = song.isVideo && !asSound
+		let start = Int(max(offset, 0))
 		guard
 			let target = sendsVideo
 				? urls.video(for: song)
-				: await (song.isVideo ? urls.soundtrack(for: song) : urls.audio(for: song))
+				: await (song.isVideo
+					? urls.soundtrack(for: song, from: start) : urls.audio(for: song))
 		else {
 			return false
 		}
+		let fromOffset = song.isVideo && !sendsVideo
+		streamOffset = fromOffset ? Double(start) : nil
 		loaded = [song.ref]
 		playing = song
 		advancedFrom = 0
@@ -160,8 +174,9 @@ final class CastEngine: PlaybackEngine {
 		// transcode is built whole before the server sends a byte of it, and a
 		// receiver gives up after about a minute of silence; waiting here moves
 		// that wait to where nobody is counting. A film has no such build: it
-		// is either the file or a stream made as it is read.
-		if !sendsVideo {
+		// is either the file or a stream made as it is read, and so is a
+		// soundtrack from an offset, which the server pipes as it goes.
+		if !sendsVideo && !fromOffset {
 			// Said explicitly rather than left to the next status push: nothing
 			// arrives from the receiver during the warm, so a client would
 			// otherwise show whatever it was showing before - which after a
@@ -183,7 +198,11 @@ final class CastEngine: PlaybackEngine {
 		// would leave the account's password on the television regardless. A
 		// playlist takes it too: the server hands it down to every segment URI
 		// it writes.
-		let token = await urls.castToken(for: song)
+		var token = reuseToken
+		if token == nil { token = await urls.castToken(for: song) }
+		self.token = token
+		// A stream from an offset is already there, and that much shorter.
+		let remaining = song.duration - (fromOffset ? start : 0)
 		// Declared whether or not one is chosen, since a LOAD is the only
 		// place a track can be introduced. None for a soundtrack.
 		var captions: [CastCaption] = []
@@ -192,8 +211,8 @@ final class CastEngine: PlaybackEngine {
 			CastMedia(
 				url: withCastToken(target.url, token),
 				contentType: target.contentType,
-				duration: song.duration > 0 ? Double(song.duration) : nil,
-				startAt: offset,
+				duration: remaining > 0 ? Double(remaining) : nil,
+				startAt: fromOffset ? 0 : offset,
 				title: song.title,
 				artist: song.artistName.isEmpty ? nil : song.artistName,
 				album: song.albumTitle.isEmpty ? nil : song.albumTitle,
@@ -231,7 +250,14 @@ final class CastEngine: PlaybackEngine {
 		reported = seconds
 		reportedAt = ContinuousClock.now
 		position = seconds
-		session.seek(to: seconds)
+		if streamOffset != nil, let song = playing {
+			// A stream that starts at an offset is seeked by starting a new
+			// one there. Its grant is live, so it is reused.
+			let reuse = token
+			Task { _ = await self.load(song, at: seconds, reuseToken: reuse) }
+		} else {
+			session.seek(to: seconds)
+		}
 		onStateChange?()
 	}
 
@@ -241,6 +267,8 @@ final class CastEngine: PlaybackEngine {
 		loaded = []
 		playing = nil
 		position = 0
+		streamOffset = nil
+		token = nil
 		isPlaying = false
 		isBuffering = false
 		session.stopPlayback()
@@ -253,7 +281,7 @@ final class CastEngine: PlaybackEngine {
 	/// `CastUrls`.
 	func target(for song: Song) async -> StreamTarget? {
 		if settings.showsPicture(song) { return urls.video(for: song) }
-		if song.isVideo { return await urls.soundtrack(for: song) }
+		if song.isVideo { return await urls.soundtrack(for: song, from: 0) }
 		return await urls.audio(for: song)
 	}
 
@@ -268,9 +296,9 @@ final class CastEngine: PlaybackEngine {
 		// ever.
 		isBuffering =
 			playing != nil && status.playerState != .playing && status.playerState != .paused
-		reported = status.currentTime
+		reported = status.currentTime + (streamOffset ?? 0)
 		reportedAt = status.playerState == .playing ? ContinuousClock.now : nil
-		position = status.currentTime
+		position = reported
 
 		if let message = session.failure {
 			failure = message

@@ -154,6 +154,14 @@ struct Song: Identifiable, Hashable, Sendable, Codable {
 	let nativeSeek: Bool
 	let width: Int?
 	let height: Int?
+	/// Whether a receiver gets this video as stored. Nil is unknown and goes
+	/// as HLS, which always plays. Optional, as the two below, so a queue
+	/// saved before these existed still decodes.
+	var castDirect: Bool? = nil
+	/// For a video, the `format` that has the server copy its soundtrack out
+	/// as it stands, and the type that arrives as. Only casting reads them.
+	var soundtrackFormat: String? = nil
+	var soundtrackContentType: String? = nil
 
 	var id: ItemRef { ref }
 	var isStarred: Bool { starredAt != nil }
