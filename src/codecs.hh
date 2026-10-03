@@ -261,8 +261,9 @@ bool audio_declared(const AudioForm& form, const Playable& client);
 // so the answer follows from the file alone.  That is what makes it answerable
 // before a byte is served, which the LOAD needs: it announces a contentType in
 // advance.  Written on video_seeks_natively() *and* video_direct_playable(), as
-// serve_video() writes its direct tier, so the two cannot disagree about which
-// files go out untouched.
+// serve_video() writes its direct tier, so a receiver is never sent untouched
+// a file serve_video() would not send untouched.  It is stricter in one way:
+// AV1 goes as HLS, since browsers decode it and most receivers do not.
 enum class CastTier { Direct, Hls };
 
 CastTier cast_tier_for(std::string_view container,

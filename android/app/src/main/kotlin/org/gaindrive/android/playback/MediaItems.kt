@@ -23,21 +23,21 @@ private const val KEY_ALBUM_REF = "org.gaindrive.albumRef"
  * send the file as it stands. A Cast receiver picks its decode pipeline from
  * `contentType`, and a wrong guess surfaces as a decode error minutes into
  * playback rather than as a refusal to start. Every transcoded audio quality
- * knows its own MIME already, and for video [KEY_TRANSCODED_TYPE] does.
+ * knows its own MIME already, and a video sent as HLS is the playlist's.
  */
 private const val KEY_CONTENT_TYPE = "org.gaindrive.contentType"
 
 /**
- * What the server will send if it has to convert this one, and absent when it
- * will send the file as it stands.
+ * Whether the server hands a Cast receiver this video as the stored file, and
+ * otherwise it goes as HLS.
  *
- * Also read only by casting, and it is what saves the cast path from working
- * out the server's tier for itself: an H.264/AAC `.mkv` is remuxed and reaches
- * the receiver as `video/mp4`, so [KEY_CONTENT_TYPE] - the *source* container -
- * is wrong in exactly the case that matters most. Deriving it here instead
- * would be a second copy of `video_direct_playable()`, in another language.
+ * The server's answer rather than one worked out here from `nativeSeek` and
+ * `transcodedContentType`: those describe a browser, and a receiver decodes
+ * less. An AV1 film is direct for a browser, while a Chromecast plays its
+ * soundtrack over no picture. Working it out here would be a second copy of
+ * `cast_tier_for()`, in another language.
  */
-private const val KEY_TRANSCODED_TYPE = "org.gaindrive.transcodedContentType"
+private const val KEY_CAST_DIRECT = "org.gaindrive.castDirect"
 
 /**
  * Whether this entry is a video, and if so what the server said about seeking
@@ -132,9 +132,9 @@ fun Song.toMediaItem(artworkUrl: String?): MediaItem {
 			Bundle().apply {
 				putString(KEY_ALBUM_REF, albumRef?.encode())
 				putString(KEY_CONTENT_TYPE, contentType)
-				putString(KEY_TRANSCODED_TYPE, transcodedContentType)
 				putBoolean(KEY_IS_VIDEO, isVideo)
 				putBoolean(KEY_NATIVE_SEEK, nativeSeek)
+				putBoolean(KEY_CAST_DIRECT, castDirect)
 				putString(KEY_SOUNDTRACK_FORMAT, soundtrackFormat)
 				putString(KEY_SOUNDTRACK_TYPE, soundtrackContentType)
 				putBoolean(KEY_STARRED, isStarred)
@@ -167,17 +167,15 @@ fun MediaItem.sourceContentType(): String? =
  * Everything the cast path needs from a queue entry that it would otherwise
  * have to go and fetch again.
  *
- * It travels as one value rather than four arguments because the four are only
+ * It travels as one value rather than separate arguments because they are only
  * meaningful together: whether this is a video decides which stream builder to
- * use, whether it seeks natively decides whether it can be cast at all, and the
- * two MIME types are a pair - the second overrides the first exactly when the
- * server is going to convert.
+ * use, and for a video [castDirect] decides between the stored file and HLS.
  */
 data class CastSource(
 	val isVideo: Boolean,
-	val nativeSeek: Boolean,
+	/** Whether the server hands a receiver this video as stored; else HLS. */
+	val castDirect: Boolean,
 	val sourceMime: String?,
-	val transcodedMime: String?,
 	/** See [KEY_AUDIO_ONLY_VIDEO]. Never true at the same time as [isVideo]. */
 	val audioOnlyVideo: Boolean = false,
 	/** See [KEY_SOUNDTRACK_FORMAT]. */
@@ -196,9 +194,8 @@ data class CastSource(
  */
 fun MediaItem.castSource(): CastSource = CastSource(
 	isVideo = isVideo(),
-	nativeSeek = nativeSeek(),
+	castDirect = mediaMetadata.extras?.getBoolean(KEY_CAST_DIRECT) == true,
 	sourceMime = sourceContentType(),
-	transcodedMime = mediaMetadata.extras?.getString(KEY_TRANSCODED_TYPE),
 	audioOnlyVideo = isAudioOnlyVideo(),
 	soundtrackFormat = mediaMetadata.extras?.getString(KEY_SOUNDTRACK_FORMAT),
 	soundtrackMime = mediaMetadata.extras?.getString(KEY_SOUNDTRACK_TYPE),

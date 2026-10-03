@@ -116,6 +116,8 @@ data class Song(
 	 * sends playback to `hls.m3u8` instead. Meaningless for audio.
 	 */
 	val nativeSeek: Boolean = false,
+	/** Whether a receiver gets this video as stored rather than as HLS. */
+	val castDirect: Boolean = false,
 	/**
 	 * For a video, the `format` that has the server copy its soundtrack out as
 	 * it stands, and the type that arrives as. Null when it would have to be

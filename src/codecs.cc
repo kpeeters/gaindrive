@@ -118,6 +118,10 @@ CastTier cast_tier_for(std::string_view container,
 	// The film-soundtrack case is not this - it puts `format` on the URL, and
 	// so is decided by cast_load_song() rather than by the codec pair.
 	if (!is_video_ext(container)) return CastTier::Direct;
+	// Browsers decode AV1, but Cast receivers before the Google TV Streamer
+	// do not, and they fail quietly: the soundtrack plays over no picture.
+	// HLS re-encodes it to H.264, which every receiver takes.
+	if (video_codec == "av1") return CastTier::Hls;
 	return video_seeks_natively(video_codec, audio_codec)
 	    && video_direct_playable(container, video_codec, audio_codec)
 	     ? CastTier::Direct : CastTier::Hls;

@@ -422,12 +422,8 @@ class CastUrls @Inject constructor(
 	 * It is cheap to ask: [CastReachability] memoises per server and network,
 	 * so this costs a map lookup after the first call.
 	 */
-	suspend fun videoIsCastable(
-		ref: ItemRef,
-		nativeSeek: Boolean,
-		transcodedMime: String?,
-	): Boolean {
-		if (servedAsStored(nativeSeek, transcodedMime)) return true
+	suspend fun videoIsCastable(ref: ItemRef, castDirect: Boolean): Boolean {
+		if (castDirect) return true
 		val config = registry.get(ref.server) ?: return false
 		return reachability.canReachDirectly(config)
 	}
@@ -436,7 +432,8 @@ class CastUrls @Inject constructor(
 	 * The same decision for a video, which differs from audio in three ways.
 	 *
 	 * **Two tiers are offered, and which one is available depends on the
-	 * route.** A file the server serves as stored - see [servedAsStored] -
+	 * route.** A file the server serves as stored - see
+	 * [CastSource.castDirect] -
 	 * arrives with a `Content-Length` that answers byte ranges, and it is what
 	 * the bridge already relays. Anything else the server has to remux or
 	 * re-encode, and its progressive answer is a pipe with neither; the
@@ -485,7 +482,7 @@ class CastUrls @Inject constructor(
 		// an unseekable pipe on stream.view, so it goes as the playlist.
 		val target = streamUrls.forVideo(
 			ref,
-			servedAsStored(source.nativeSeek, source.transcodedMime),
+			source.castDirect,
 		) ?: return null
 		val config = registry.get(ref.server) ?: return null
 
@@ -519,15 +516,6 @@ class CastUrls @Inject constructor(
 			castToken = token,
 		)
 	}
-
-	/**
-	 * Whether `stream.view` hands a receiver the file as stored, with a length
-	 * and byte ranges. `transcodedContentType` is absent exactly then; the
-	 * `nativeSeek` half keeps an item restored with no extras, which reports
-	 * neither, off the progressive route.
-	 */
-	private fun servedAsStored(nativeSeek: Boolean, transcodedMime: String?): Boolean =
-		nativeSeek && transcodedMime == null
 
 	/**
 	 * The length of a complete copy held under [cacheKey], or null if there is

@@ -115,6 +115,12 @@ data class SongDto(
 	 */
 	val nativeSeek: Boolean = false,
 	/**
+	 * gaindrive extension: whether a Cast receiver is handed this video as the
+	 * stored file rather than as HLS. A browser answer and a receiver answer
+	 * differ, for AV1 above all, so it cannot be worked out from the above.
+	 */
+	val castDirect: Boolean = false,
+	/**
 	 * gaindrive extension: the `format` that gets this video's soundtrack
 	 * stream-copied rather than encoded, and the type it then arrives as. Both
 	 * absent when the soundtrack has to be encoded, and on an older server.

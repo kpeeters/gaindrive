@@ -149,6 +149,13 @@ nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
 	// the remux and re-encode tiers, and those differ precisely here.
 	if (is_video) s["nativeSeek"] = video_seeks_natively(c.video_codec,
 	                                                     c.audio_codec);
+	// gaindrive extension.  Whether a Cast receiver is handed this video as
+	// the stored file rather than as HLS.  Not derivable from nativeSeek and
+	// transcodedContentType, which answer for a browser: an AV1 film is
+	// direct for a browser and HLS for a receiver.
+	if (is_video) s["castDirect"] = cast_tier_for(c.codec, c.video_codec,
+	                                              c.audio_codec)
+	                                == CastTier::Direct;
 	// gaindrive extension.  The format= that gets this video's soundtrack
 	// stream-copied rather than encoded, and the type it arrives as.  A cast
 	// LOAD has to announce that type before a byte is served, so a client
@@ -210,6 +217,10 @@ XMLElement* song_entry_xml(XMLDocument& doc,
 	if (is_video)
 		el->SetAttribute("nativeSeek",
 		                 video_seeks_natively(c.video_codec, c.audio_codec));
+	if (is_video)
+		el->SetAttribute("castDirect",
+		                 cast_tier_for(c.codec, c.video_codec, c.audio_codec)
+		                 == CastTier::Direct);
 	if (is_video)
 		if (auto t = audio_copy_target(c.audio_codec)) {
 			el->SetAttribute("soundtrackFormat",      std::string(t->name).c_str());

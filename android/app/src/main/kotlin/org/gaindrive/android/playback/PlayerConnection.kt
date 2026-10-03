@@ -291,9 +291,7 @@ class PlayerConnection @Inject constructor(
 		if (castSession.device.value == null) return false
 		if (settings.videoAudioOnly.first()) return false
 		val blocked = songs.any {
-			it.isVideo && !castUrls.videoIsCastable(
-				it.ref, it.nativeSeek, it.transcodedContentType,
-			)
+			it.isVideo && !castUrls.videoIsCastable(it.ref, it.castDirect)
 		}
 		if (!blocked) return false
 		_message.value = "This video has to be converted as it plays, and this " +
