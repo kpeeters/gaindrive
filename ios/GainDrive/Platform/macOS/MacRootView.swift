@@ -81,34 +81,13 @@ struct MacRootView: View {
 	}
 
 	var body: some View {
-		NavigationSplitView(columnVisibility: $columns) {
-			List(SidebarItem.allCases, selection: $section) { section in
-				Label(section.title, systemImage: section.symbol)
-			}
-			.navigationSplitViewColumnWidth(min: 140, ideal: 170, max: 240)
-		} detail: {
-			detail
-				// The panes run up into the title bar, so their headers are the
-				// top of the window, as Xcode's editors are; a strip spanning
-				// them all exists on no other platform.
-				.ignoresSafeArea(.container, edges: .top)
-				// With the sidebar collapsed, the traffic lights and the
-				// sidebar toggle sit over the first pane's header.
-				.environment(\.paneHeaderLeadingInset, columns == .detailOnly ? 110 : 0)
-				.toolbar(removing: .title)
-				.toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-		}
-		// Inside the bottom inset, so the inspector ends above the player bar
-		// and the bar spans the whole window, as a transport should.
-		.inspector(isPresented: $showsInspector) {
-			NowPlayingView()
-				.inspectorColumnWidth(min: 280, ideal: 320, max: 440)
-		}
-		.safeAreaInset(edge: .bottom, spacing: 0) {
-			VStack(spacing: 0) {
-				FetchStrip()
-				MacPlayerBar(showsInspector: $showsInspector)
-			}
+		// Stacked rather than a bottom `safeAreaInset`: an inset only shifts
+		// the safe area, and the panes' lists went on scrolling underneath the
+		// bar. Stacked, everything above ends where the bar begins.
+		VStack(spacing: 0) {
+			split
+			FetchStrip()
+			MacPlayerBar(showsInspector: $showsInspector)
 		}
 		.frame(minWidth: 720, minHeight: 480)
 		// For the menu bar; see `MacCommands`.
@@ -129,6 +108,32 @@ struct MacRootView: View {
 				section = .search
 				search.open(route)
 			})
+	}
+
+	/// Above the player bar, so the inspector ends there too and the bar
+	/// spans the whole window, as a transport should.
+	private var split: some View {
+		NavigationSplitView(columnVisibility: $columns) {
+			List(SidebarItem.allCases, selection: $section) { section in
+				Label(section.title, systemImage: section.symbol)
+			}
+			.navigationSplitViewColumnWidth(min: 140, ideal: 170, max: 240)
+		} detail: {
+			detail
+				// The panes run up into the title bar, so their headers are the
+				// top of the window, as Xcode's editors are; a strip spanning
+				// them all exists on no other platform.
+				.ignoresSafeArea(.container, edges: .top)
+				// With the sidebar collapsed, the traffic lights and the
+				// sidebar toggle sit over the first pane's header.
+				.environment(\.paneHeaderLeadingInset, columns == .detailOnly ? 110 : 0)
+				.toolbar(removing: .title)
+				.toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+		}
+		.inspector(isPresented: $showsInspector) {
+			NowPlayingView()
+				.inspectorColumnWidth(min: 280, ideal: 320, max: 440)
+		}
 	}
 
 	/// Switched rather than kept alive side by side: a hidden section would
