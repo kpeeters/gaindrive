@@ -15,7 +15,6 @@ import SwiftUI
 /// does - `miniPlayerInset` is the only thing that should attach it.
 struct MiniPlayer: View {
 	@Environment(PlayerConnection.self) private var player
-	@Environment(CastDeviceStore.self) private var castDevices
 	/// **The sheet is raised from here, not from the shell.**
 	///
 	/// It was on the `TabView` for a while, on the reasoning that one bar per
@@ -131,7 +130,6 @@ struct MiniPlayer: View {
 			.sheet(isPresented: $castPicker) {
 				CastDeviceSheet()
 					.environment(player)
-					.environment(castDevices)
 			}
 		}
 	}

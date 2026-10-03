@@ -24,7 +24,6 @@ struct SettingsView: View {
 	@Environment(ServerRegistry.self) private var registry
 	@Environment(SettingsStore.self) private var settings
 	@Environment(PinRepository.self) private var pins
-	@Environment(CastDeviceStore.self) private var castDevices
 	@State private var path: [Route]
 
 	init(startOnServers: Bool = false) {
@@ -116,13 +115,10 @@ struct SettingsView: View {
 		return disabled > 0 ? "\(configured), \(disabled) disabled" : configured
 	}
 
-	/// Configured devices only. What discovery has found is not summarised here:
-	/// browsing runs only while the pane is open, so any figure would be a
-	/// count from whenever it last was.
+	/// The one setting the pane holds. Devices are not counted: browsing runs
+	/// only while the picker is open, so any figure would be stale.
 	private var castingSummary: String {
-		let total = castDevices.devices.count
-		guard total > 0 else { return "Discovering" }
-		return total == 1 ? "1 device added" : "\(total) devices added"
+		settings.castOriginal ? "Original quality" : "Same as playback"
 	}
 
 	/// The figure, not the word "Storage" said twice - a summary line states

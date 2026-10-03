@@ -22,7 +22,6 @@ import SwiftUI
 /// in Now Playing and stay distinct.
 struct CastDeviceSheet: View {
 	@Environment(PlayerConnection.self) private var player
-	@Environment(CastDeviceStore.self) private var store
 	@Environment(\.dismiss) private var dismiss
 
 	/// Owned here, so **browsing runs only while somebody is looking**.
@@ -36,7 +35,6 @@ struct CastDeviceSheet: View {
 				volume
 				thisDevice
 				discovered
-				configured
 			}
 			.navigationTitle("Play on")
 			.inlineTitle()
@@ -46,6 +44,11 @@ struct CastDeviceSheet: View {
 				}
 			}
 		}
+		#if os(macOS)
+			// An unsized macOS sheet gives a `List` zero height, which left only
+			// the title and Done visible.
+			.frame(minWidth: 360, idealWidth: 420, minHeight: 400, idealHeight: 520)
+		#endif
 		.presentationDetents([.medium, .large])
 		.onAppear { discovery.start() }
 		.onDisappear { discovery.stop() }
@@ -125,20 +128,6 @@ struct CastDeviceSheet: View {
 		}
 	}
 
-	/// The configured devices a discovered one does not already stand for.
-	/// Their own section, as on Android: an entry somebody typed is a different
-	/// kind of thing from one that announced itself, and merging the two lists
-	/// would hide which is which.
-	@ViewBuilder
-	private var configured: some View {
-		let manual = store.notDiscovered(among: discovery.devices)
-		if !manual.isEmpty {
-			Section("Added by hand") {
-				ForEach(manual) { deviceRow($0.device) }
-			}
-		}
-	}
-
 	@ViewBuilder
 	private var looking: some View {
 		HStack(spacing: 8) {
@@ -154,8 +143,7 @@ struct CastDeviceSheet: View {
 			Text(
 				"""
 				Nothing has answered. If there is a receiver here, check that \
-				GainDrive may find devices on your local network in Settings, \
-				or add one by its address in Settings → Casting.
+				GainDrive may find devices on your local network in Settings.
 				"""
 			)
 			.font(.footnote)
@@ -166,10 +154,9 @@ struct CastDeviceSheet: View {
 	private func deviceRow(_ device: CastDevice) -> some View {
 		row(
 			name: device.name,
-			// The model ahead of the address, as Android's picker does:
-			// `WiiM Pro` says far more about which box this is than a number,
-			// and the address is only known once something has connected.
-			detail: [device.model, device.address].compactMap { $0 }.first,
+			// The model, as Android's picker shows: `WiiM Pro` says which box
+			// this is, and a discovered device has no address until connected.
+			detail: device.model,
 			// **The device, not the action.** A row says what kind of box this
 			// is; the cast glyph belongs on the control that starts a session
 			// and would say nothing here, where every row is a receiver.

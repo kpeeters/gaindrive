@@ -18,7 +18,6 @@ struct MacPlayerBar: View {
 	@Binding var showsInspector: Bool
 
 	@Environment(PlayerConnection.self) private var player
-	@Environment(CastDeviceStore.self) private var castDevices
 	@State private var castPicker = false
 
 	var body: some View {
@@ -39,7 +38,6 @@ struct MacPlayerBar: View {
 		.sheet(isPresented: $castPicker) {
 			CastDeviceSheet()
 				.environment(player)
-				.environment(castDevices)
 		}
 	}
 

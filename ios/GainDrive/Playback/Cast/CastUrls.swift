@@ -165,13 +165,16 @@ struct CastUrls {
 		// media outright - the audio shape of the QuickTime failure on
 		// `video(for:)`. `PlayableAudioTests.castRouteDeclaresNothing` guards
 		// the seam; there is nothing to assert at this line itself.
-		guard var target = await targets.target(for: song.ref) else { return nil }
-		// **The original is only sent when the receiver can decode it.** Asking
-		// for `raw` is a setting about *this device's* ears, and a receiver that
-		// meets a container it cannot type fails the LOAD, is retried once by
-		// `LoadRetryWatcher`, fails again, and stalls silently. Falling back to
-		// the default transcode costs quality on a route that is crossing the
-		// network twice anyway.
+		// The cast setting, when on, overrides the playback quality; see
+		// `SettingsStore.castOriginal`.
+		let wanted = targets.settings.castOriginal
+			? AudioQuality.original : targets.settings.audioQuality
+		guard var target = await targets.target(for: song.ref, wanted: wanted) else { return nil }
+		// **The original is only sent when the receiver can decode it.** A
+		// receiver that meets a container it cannot type fails the LOAD, is
+		// retried once by `LoadRetryWatcher`, fails again, and stalls silently.
+		// Falling back to the default transcode costs quality on a route that
+		// is crossing the network twice anyway.
 		if target.quality.format == .original, !castPlaysNatively(song.contentType) {
 			guard let transcoded = await targets.target(for: song.ref, wanted: .default) else {
 				return nil
@@ -250,7 +253,7 @@ struct CastUrls {
 	/// the very thing this exists to keep off a receiver with no screen.
 	/// `StreamTargets.soundtrack` names a container whatever the setting.
 	///
-	/// **Copied rather than encoded** when the quality is set to Original and
+	/// **Copied rather than encoded** when "Cast at original quality" is on and
 	/// the server can copy it into something the receiver plays; the nearest
 	/// thing to an original that is not the film itself.
 	///
@@ -258,7 +261,7 @@ struct CastUrls {
 	/// `withTimeOffset(_:_:)`. The stream is seeked by loading it again.
 	func soundtrack(for song: Song, from offset: Int) async -> StreamTarget? {
 		var found: StreamTarget?
-		if targets.settings.audioQuality.format == .original,
+		if targets.settings.castOriginal,
 			let format = song.soundtrackFormat, let mime = song.soundtrackContentType,
 			castPlaysNatively(mime)
 		{

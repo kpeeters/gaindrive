@@ -19,11 +19,10 @@ import OSLog
 /// something connects to it, so a browse result *is* an endpoint and none of
 /// that machinery is needed.
 ///
-/// The consequence is that a discovered device has **no address until something
-/// connects to it** - `CastDevice.address` is filled in by `CastProbe`, and by
-/// the session later. That is a fair trade: the address is diagnostic rather
-/// than functional, and buying it here would mean a TCP connection to every
-/// device every time the browser sees one.
+/// The consequence is that a discovered device has **no address until the
+/// session connects to it** (`CastSession.address`). That is a fair trade:
+/// buying it here would mean a TCP connection to every device every time the
+/// browser sees one.
 ///
 /// `@MainActor @Observable`, the shape `ServerRegistry` uses: it feeds a SwiftUI
 /// list and nothing else.
@@ -148,15 +147,6 @@ final class CastDiscovery {
 		quiet = true
 	}
 
-	/// Records the address a connection reached, so a device that has been
-	/// probed can be told apart from a manual entry naming the same box.
-	func note(address: String, for id: String) {
-		guard var device = found[id], device.address != address else { return }
-		device.address = address
-		found[id] = device
-		publish()
-	}
-
 	// MARK: - Machinery
 
 	private func browserChanged(_ state: NWBrowser.State) {
@@ -177,14 +167,7 @@ final class CastDiscovery {
 	}
 
 	private func replace(with devices: [CastDevice]) {
-		// Addresses learned by probing are kept: they came from a connection
-		// this browser cannot make, and losing them on every announcement would
-		// make them flicker.
-		found = devices.reduce(into: [:]) { table, device in
-			var device = device
-			device.address = found[device.id]?.address ?? device.address
-			table[device.id] = device
-		}
+		found = Dictionary(devices.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
 		publish()
 	}
 

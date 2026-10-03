@@ -118,6 +118,16 @@ final class SettingsStore {
 		didSet { defaults.set(videoAudioOnly, forKey: Self.videoAudioOnlyKey) }
 	}
 
+	/// Send a Cast receiver the file as stored rather than `audioQuality`.
+	///
+	/// `audioQuality` is about what is worth fetching to *this device*, where
+	/// a transcode saves battery, data and cache. A receiver pulls straight
+	/// off the server and spends none of those. Off by default, as on Android,
+	/// so turning it on is a choice rather than a change to every cast.
+	var castOriginal: Bool {
+		didSet { defaults.set(castOriginal, forKey: Self.castOriginalKey) }
+	}
+
 	/// What the fetch form was last set to, so the next fetch starts there.
 	/// The names are sticky because a run of fetches is usually one album's
 	/// worth of tracks or one series' episodes.
@@ -163,6 +173,7 @@ final class SettingsStore {
 	private static let cacheOnPlayKey = "cache_on_play"
 	private static let unmeteredOnlyKey = "download_unmetered_only"
 	private static let videoAudioOnlyKey = "video_audio_only"
+	private static let castOriginalKey = "cast_original"
 	private static let fetchServerKey = "fetch_server"
 	private static let fetchAudioKey = "fetch_audio"
 	private static let fetchArtistKey = "fetch_artist"
@@ -192,6 +203,7 @@ final class SettingsStore {
 		cacheOnPlay = defaults.object(forKey: Self.cacheOnPlayKey) as? Bool ?? true
 		downloadUnmeteredOnly = defaults.object(forKey: Self.unmeteredOnlyKey) as? Bool ?? true
 		videoAudioOnly = defaults.bool(forKey: Self.videoAudioOnlyKey)
+		castOriginal = defaults.bool(forKey: Self.castOriginalKey)
 		fetchServer = defaults.string(forKey: Self.fetchServerKey)
 		fetchAudio = defaults.object(forKey: Self.fetchAudioKey) as? Bool ?? true
 		fetchArtist = defaults.string(forKey: Self.fetchArtistKey) ?? ""

@@ -29,11 +29,6 @@ struct GainDriveApp: App {
 	@State private var stars: StarStore
 	@State private var pins: PinRepository
 	@State private var player: PlayerConnection
-	/// The configured receivers, not the discovered ones. `CastDiscovery` is
-	/// deliberately **not** here: browsing runs only while something is looking
-	/// at a list, and an object in the environment would browse for the life of
-	/// the app.
-	@State private var castDevices: CastDeviceStore
 	@State private var fetches: Fetches
 	@Environment(\.scenePhase) private var scenePhase
 
@@ -80,10 +75,6 @@ struct GainDriveApp: App {
 		// The store is the authority on what is held; this is how a track that
 		// arrived or was evicted reaches the marks on screen.
 		Task { await store.setChangeHandler { Task { @MainActor in pins.storeChanged() } } }
-		// Built here, never in `RootView.init`, which re-runs on every
-		// re-evaluation of this body - `@State` would keep the first player and
-		// silently discard the rest, each with its own audio session.
-		_castDevices = State(initialValue: CastDeviceStore())
 		// URL fetches: what may be offered, what is running, and telling the
 		// library when one lands. Polled while the app is in the foreground.
 		let fetches = Fetches(
@@ -129,7 +120,6 @@ struct GainDriveApp: App {
 			.environment(stars)
 			.environment(pins)
 			.environment(player)
-			.environment(castDevices)
 			.environment(fetches)
 			.environment(\.library, library)
 			.preferredColorScheme(settings.themeMode.colorScheme)
@@ -159,7 +149,6 @@ struct GainDriveApp: App {
 					.environment(registry)
 					.environment(settings)
 					.environment(player)
-					.environment(castDevices)
 			}
 			.defaultSize(width: 960, height: 540)
 		#endif

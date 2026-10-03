@@ -10,11 +10,12 @@ import Foundation
 
 /// Where a receiver is, in the form something can connect to.
 ///
-/// Two cases because there are two ways to learn about a device, and
-/// Network.framework takes either directly - **a discovered one needs no
-/// resolution step at all**, which is most of what this port saves over
-/// Android's. There, `NsdManager.resolveService` cannot be called concurrently,
-/// so `CastDiscovery` carries a serialised resolve queue, a five-second timeout
+/// A discovered device is a `service`; `host` is the address a connection
+/// resolved it to, kept so a reconnect can skip Bonjour. Network.framework
+/// takes either directly - **a discovered one needs no resolution step at
+/// all**, which is most of what this port saves over Android's. There,
+/// `NsdManager.resolveService` cannot be called concurrently, so
+/// `CastDiscovery` carries a serialised resolve queue, a five-second timeout
 /// and a workaround for "listener already in use"; here the browse result *is*
 /// the endpoint.
 enum CastEndpoint: Hashable, Sendable, Codable {
@@ -26,19 +27,18 @@ enum CastEndpoint: Hashable, Sendable, Codable {
 ///
 /// `model` is the mDNS `md` record - the model name the receiver announces for
 /// itself, `Chromecast` or `WiiM Pro` or a television's marketing name. It is
-/// nil for a manually added device, which has no announcement to read.
+/// nil for a device whose announcement leaves it out.
 struct CastDevice: Identifiable, Hashable, Sendable {
-	/// The Cast id from the `id` TXT record, or `manual:<address>:<port>` for a
-	/// configured one - **derived rather than random**, and spelled exactly as
-	/// the server spells it in `listCastDevices`, so the two describe the same
-	/// device by the same name.
+	/// The Cast id from the `id` TXT record - **derived rather than random**,
+	/// and spelled exactly as the server spells it in `listCastDevices`, so the
+	/// two describe the same device by the same name.
 	let id: String
 	let name: String
 	let endpoint: CastEndpoint
 	var model: String? = nil
 	/// Whether the device can show a picture, from **bit 0 of the `ca` record**.
 	///
-	/// `nil` means it announced nothing, which is every manually added device.
+	/// `nil` means it announced nothing.
 	/// The server treats that as *true* - refusing the picture on a guess is
 	/// worse than the guess - and so must anything here that acts on it.
 	///
@@ -48,11 +48,6 @@ struct CastDevice: Identifiable, Hashable, Sendable {
 	/// receiver that fetches a film it cannot decode, resets, and asks again,
 	/// for as long as the session stands.
 	var videoOut: Bool? = nil
-	/// Filled in once something has actually connected - `NWBrowser` reports a
-	/// service, not an address. It is diagnostic rather than functional: nothing
-	/// connects by it, but "which box did I just reach" is the question a device
-	/// that half-works raises, and nothing else can answer it.
-	var address: String? = nil
 
 	var kind: CastDeviceKind { castDeviceKind(model) }
 }

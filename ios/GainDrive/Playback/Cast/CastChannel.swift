@@ -274,8 +274,8 @@ actor CastChannel {
 }
 
 /// Every Cast receiver listens here; a multizone group gets a dynamic one, which
-/// only ever arrives through discovery. It is the default a typed-in address
-/// takes, and the same number `CastDeviceStore` writes.
+/// only ever arrives through discovery. `nwEndpoint` falls back to it for a
+/// resolved port Network.framework will not take.
 let castDefaultPort: NWEndpoint.Port = 8009
 
 extension CastEndpoint {

@@ -19,7 +19,6 @@ import SwiftUI
 /// all into a shared navigator for this one case.
 struct NowPlayingView: View {
 	@Environment(PlayerConnection.self) private var player
-	@Environment(CastDeviceStore.self) private var castDevices
 	@Environment(StarStore.self) private var stars
 	@Environment(ServerRegistry.self) private var registry
 	@Environment(\.dismiss) private var dismiss
@@ -77,7 +76,6 @@ struct NowPlayingView: View {
 		.sheet(isPresented: $castPicker) {
 			CastDeviceSheet()
 				.environment(player)
-				.environment(castDevices)
 		}
 	}
 
