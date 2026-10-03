@@ -1,4 +1,5 @@
 #include "gaindrive.hh"
+#include "netaddr.hh"
 #include "subsonic.hh"
 #include "authz.hh"
 #include "stamp.hh"
@@ -865,7 +866,7 @@ void GainDrive::routes_browse()
 				// Compose absolute filesystem path for the actual file open.
 				std::string path = store_.abs_path(rel_path);
 				if (!store_.path_is_within_root(path)) {
-					std::cout << stamp()
+					std::cout << stamp(client_addr(req))
 					          << "getCoverArt: refusing path outside every root: "
 					          << path << std::endl;
 					res.status = 403;
@@ -998,7 +999,7 @@ void GainDrive::routes_browse()
 			}
 		std::string folder = store_.abs_path(folder_rel);
 		if (!store_.path_is_within_root(folder)) {
-			std::cout << stamp() << "getAlbumTexts: refusing path outside every root: "
+			std::cout << stamp(client_addr(req)) << "getAlbumTexts: refusing path outside every root: "
 			          << folder << std::endl;
 			res.status = 403;
 			return;
@@ -1152,7 +1153,7 @@ void GainDrive::routes_browse()
 		else
 			full = fs::path(album_abs) / name;
 		if (!store_.path_is_within_root(full)) {
-			std::cout << stamp() << "getAlbumText: refusing path outside every root: "
+			std::cout << stamp(client_addr(req)) << "getAlbumText: refusing path outside every root: "
 			          << full.string() << std::endl;
 			res.status = 403;
 			return;

@@ -231,7 +231,7 @@ void GainDrive::routes_system()
 			}
 
 		auto n = lookup_seed_missing_info(what != "albums", what != "artists");
-		std::cout << stamp() << "startInfoLookup: queued " << n.artists
+		std::cout << stamp(client_addr(req)) << "startInfoLookup: queued " << n.artists
 		          << " artist(s) and " << n.albums << " album(s)" << std::endl;
 
 		std::string body;

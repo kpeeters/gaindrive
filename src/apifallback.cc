@@ -1,4 +1,5 @@
 #include "gaindrive.hh"
+#include "netaddr.hh"
 #include "subsonic.hh"
 #include "authz.hh"
 #include "stamp.hh"
@@ -18,7 +19,7 @@ void GainDrive::routes_fallback()
 	server_.Get("/rest/:endpoint", [](const httplib::Request& req, httplib::Response& res) {
 		// log_safe: this is the one unauthenticated route that echoed the
 		// percent-decoded path into the log verbatim.
-		std::cout << stamp() << "NOT IMPLEMENTED: " << log_safe(req.path) << std::endl;
+		std::cout << stamp(client_addr(req)) << "NOT IMPLEMENTED: " << log_safe(req.path) << std::endl;
 		res.set_content(subsonic_error(0, "Not implemented."), "application/xml");
 		});
 	}

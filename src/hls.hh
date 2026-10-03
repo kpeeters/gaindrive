@@ -70,9 +70,10 @@ class Hls {
 
 		// Media segment k.  `owner` names the viewer; a session belongs to
 		// one owner, and a new film for the same owner ends the old session.
+		// `who` is the requesting address, for the log.
 		void serve_segment(httplib::Response& res, const Streamer::SongInfo& song,
 		                   const HlsVariant& v, size_t k,
-		                   const std::string& owner);
+		                   const std::string& owner, const std::string& who);
 
 	private:
 		struct Session;
@@ -82,7 +83,8 @@ class Hls {
 		std::shared_ptr<Session> session_for(const Streamer::SongInfo& song,
 		                                     const HlsVariant& v,
 		                                     const HlsPlan& p,
-		                                     const std::string& owner);
+		                                     const std::string& owner,
+		                                     const std::string& who);
 		void reap();
 
 		std::filesystem::path                           work_;

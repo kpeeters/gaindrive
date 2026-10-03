@@ -245,7 +245,7 @@ void GainDrive::routes_cast()
 		// that inherited the address, and with it the id - would be judged for
 		// ever on what its predecessor could not play.
 		store_.set_setting(CAST_NOVIDEO_KEY + id, "");
-		std::cout << stamp() << "Cast: device " << id << " videoPref=" << pref
+		std::cout << stamp(client_addr(req)) << "Cast: device " << id << " videoPref=" << pref
 		          << " (any refused codecs forgotten)" << std::endl;
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
@@ -309,7 +309,7 @@ void GainDrive::routes_cast()
 		// that cleared its site data and lost the id it started the session
 		// with.
 		if (cast_manager_.active() && !cast_owned_by(req)) {
-			std::cout << stamp() << "Cast: session taken over by user="
+			std::cout << stamp(client_addr(req)) << "Cast: session taken over by user="
 			          << req.get_param_value("u") << " device=" << chosen.name
 			          << std::endl;
 			cast_teardown();
@@ -370,7 +370,7 @@ void GainDrive::routes_cast()
 		// pool with a loop over EventSource(). A real client holds one; the
 		// allowance covers a reload race and a second tab.
 		if (cast_sse_listeners_.load() >= CAST_SSE_MAX_LISTENERS) {
-			std::cout << stamp() << "Cast: refusing SSE listener, "
+			std::cout << stamp(client_addr(req)) << "Cast: refusing SSE listener, "
 			          << CAST_SSE_MAX_LISTENERS << " already attached"
 			          << std::endl;
 			res.status = 503;
@@ -389,20 +389,22 @@ void GainDrive::routes_cast()
 		// whether it ended via sink.write returning false (client gone),
 		// wait_status seeing !active(), or normal completion.
 		struct ListenerGuard {
-			GainDrive* self;
-			int        gen;
-			ListenerGuard(GainDrive* s, int g) : self(s), gen(g) {
+			GainDrive*  self;
+			int         gen;
+			std::string who;
+			ListenerGuard(GainDrive* s, int g, std::string w)
+				: self(s), gen(g), who(std::move(w)) {
 				int n = ++self->cast_sse_listeners_;
 				++self->cast_wd_gen_;
 				if (self->debug_)
-					std::cout << stamp() << "Cast: SSE listener attached, count="
+					std::cout << stamp(who) << "Cast: SSE listener attached, count="
 					          << n << std::endl;
 				}
 			~ListenerGuard() {
 				int n = --self->cast_sse_listeners_;
 				int g = ++self->cast_wd_gen_;
 				if (self->debug_)
-					std::cout << stamp() << "Cast: SSE listener detached, count="
+					std::cout << stamp(who) << "Cast: SSE listener detached, count="
 					          << n << std::endl;
 				if (n != 0 || !self->cast_manager_.active()) return;
 				// A listener displaced by a takeover must not arm a watchdog
@@ -425,7 +427,8 @@ void GainDrive::routes_cast()
 					}).detach();
 				}
 			};
-		auto guard = std::make_shared<ListenerGuard>(this, session_gen);
+		auto guard = std::make_shared<ListenerGuard>(this, session_gen,
+		                                            client_addr(req));
 
 		res.set_chunked_content_provider("text/event-stream",
 			[this, guard, session_gen](size_t, httplib::DataSink& sink) -> bool {
@@ -590,7 +593,7 @@ void GainDrive::routes_cast()
 			std::vector<int> ids;
 			if (track_id > 0) ids.push_back(track_id);
 			if (!cast_manager_.cast_tracks(ids))
-				std::cout << stamp() << "Cast: captions trackId=" << track_id
+				std::cout << stamp(client_addr(req)) << "Cast: captions trackId=" << track_id
 				          << " not applied - no media session yet" << std::endl;
 			}
 		else if (action == "volume") {
@@ -1239,7 +1242,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	if (audio_only) {
 		lr = soundtrack_load(base, song, song_id, offset, false, stream);
 		if (lr.url.empty()) {
-			std::cout << stamp() << "Cast: no soundtrack load for song=" << sid_s
+			std::cout << stamp(client_addr(req)) << "Cast: no soundtrack load for song=" << sid_s
 			          << "; refusing to load" << std::endl;
 			// Nothing was loaded, so nothing is being sent: an empty description.
 			// The client hides a row it has no value for, which is the right
@@ -1266,7 +1269,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 		// what a leak costs: one song, for as long as this LOAD is current.
 		const std::string token = cast_manager_.mint_token(song_id, caption_ids);
 		if (token.empty()) {
-			std::cout << stamp() << "Cast: no stream token; refusing to load"
+			std::cout << stamp(client_addr(req)) << "Cast: no stream token; refusing to load"
 			          << std::endl;
 			return {};
 			}
@@ -1375,7 +1378,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	// tracks it offered, and which one it asked for.  It is also the line to
 	// compare a client's info panel against, since the panel is drawn from
 	// exactly these values rather than from a second derivation.
-	std::cout << stamp() << "Cast: load song=" << sid_s
+	std::cout << stamp(client_addr(req)) << "Cast: load song=" << sid_s
 	          << " video=" << (song.is_video ? "yes" : "no")
 	          << " audio_only=" << (audio_only ? "yes" : "no")
 	          << (video_pref.empty() ? "" : " pref=" + video_pref)

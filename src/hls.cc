@@ -247,6 +247,9 @@ void send_mp4(httplib::Response& res, std::string bytes)
 
 struct Hls::Session {
 	std::string                      owner;
+	// The address that started the session, for the log: the viewer's
+	// device, which with a TV is not the one that chose the film.
+	std::string                      who;
 	std::string                      film;
 	Streamer::SongInfo               song;
 	HlsVariant                       variant;
@@ -297,7 +300,7 @@ struct Hls::Session {
 		have_shift = false;
 
 		auto argv = session_argv(song, plan, variant, n, dir);
-		std::cout << stamp() << "hls: session " << dir.filename().string()
+		std::cout << stamp(who) << "hls: session " << dir.filename().string()
 		          << " starts at segment " << n << ":" << log_argv(argv)
 		          << std::endl;
 		proc = std::make_unique<reproc::process>();
@@ -312,7 +315,7 @@ struct Hls::Session {
 			opts.redirect.err.type = reproc::redirect::type::discard;
 		opts.redirect.out.type = reproc::redirect::type::discard;
 		if (auto ec = proc->start(argv, opts)) {
-			std::cout << stamp() << "hls: ffmpeg launch failed: " << ec.message()
+			std::cout << stamp(who) << "hls: ffmpeg launch failed: " << ec.message()
 			          << std::endl;
 			proc.reset();
 			return;
@@ -337,13 +340,13 @@ struct Hls::Session {
 				running = false;
 				paused  = false;
 				if (ec || status != 0) {
-					std::cout << stamp() << "hls: session "
+					std::cout << stamp(who) << "hls: session "
 					          << dir.filename().string()
 					          << " encoder exited with status " << status
 					          << std::endl;
 					auto tail = errf ? stderr_tail(errf.get()) : std::string();
 					if (!tail.empty())
-						std::cout << stamp() << "hls: ffmpeg stderr: " << tail
+						std::cout << stamp(who) << "hls: ffmpeg stderr: " << tail
 						          << std::endl;
 					}
 				}
@@ -534,7 +537,8 @@ void Hls::serve_init(httplib::Response& res, const Streamer::SongInfo& song,
 	}
 
 void Hls::serve_segment(httplib::Response& res, const Streamer::SongInfo& song,
-                        const HlsVariant& v, size_t k, const std::string& owner)
+                        const HlsVariant& v, size_t k, const std::string& owner,
+                        const std::string& who)
 	{
 	HlsPlan p = plan(song, v);
 	if (k >= p.segments()) { res.status = 404; return; }
@@ -554,7 +558,7 @@ void Hls::serve_segment(httplib::Response& res, const Streamer::SongInfo& song,
 		return;
 		}
 
-	auto s = session_for(song, v, p, owner);
+	auto s = session_for(song, v, p, owner, who);
 	if (!s) { res.status = 503; return; }
 
 	const auto deadline  = Clock::now() + WAIT_LIMIT;
@@ -582,7 +586,7 @@ void Hls::serve_segment(httplib::Response& res, const Streamer::SongInfo& song,
 			// Unfinished is worth waiting for only while something can
 			// still finish it.
 			if (!pending || !s->running) {
-				std::cout << stamp() << "hls: session "
+				std::cout << stamp(who) << "hls: session "
 				          << s->dir.filename().string()
 				          << " cannot read segment " << k << std::endl;
 				res.status = 500;
@@ -593,7 +597,7 @@ void Hls::serve_segment(httplib::Response& res, const Streamer::SongInfo& song,
 		           && k < s->produced + WAIT_AHEAD;
 		if (!pending && !coming) {
 			if (restarted) {
-				std::cout << stamp() << "hls: session "
+				std::cout << stamp(who) << "hls: session "
 				          << s->dir.filename().string()
 				          << " ended without segment " << k << std::endl;
 				res.status = 500;
@@ -605,7 +609,7 @@ void Hls::serve_segment(httplib::Response& res, const Streamer::SongInfo& song,
 			}
 		}
 		if (Clock::now() > deadline) {
-			std::cout << stamp() << "hls: session "
+			std::cout << stamp(who) << "hls: session "
 			          << s->dir.filename().string()
 			          << " timed out waiting for segment " << k << std::endl;
 			res.status = 503;
@@ -618,7 +622,8 @@ void Hls::serve_segment(httplib::Response& res, const Streamer::SongInfo& song,
 std::shared_ptr<Hls::Session> Hls::session_for(const Streamer::SongInfo& song,
                                                const HlsVariant& v,
                                                const HlsPlan& p,
-                                               const std::string& owner)
+                                               const std::string& owner,
+                                               const std::string& who)
 	{
 	const std::string film = std::to_string(song.id) + "/"
 	                       + std::to_string(song.file_modified) + "/"
@@ -637,6 +642,7 @@ std::shared_ptr<Hls::Session> Hls::session_for(const Streamer::SongInfo& song,
 	if (sessions_.size() < MAX_SESSIONS) {
 		s          = std::make_shared<Session>();
 		s->owner   = owner;
+		s->who     = who;
 		s->film    = film;
 		s->song    = song;
 		s->variant = v;
@@ -647,7 +653,7 @@ std::shared_ptr<Hls::Session> Hls::session_for(const Streamer::SongInfo& song,
 		sessions_[owner] = s;
 		}
 	else
-		std::cout << stamp() << "hls: refusing a session, " << MAX_SESSIONS
+		std::cout << stamp(who) << "hls: refusing a session, " << MAX_SESSIONS
 		          << " already running" << std::endl;
 	}
 	if (old) {
@@ -685,7 +691,7 @@ void Hls::reap()
 		lk.unlock();
 		for (auto& s : idle) {
 			std::lock_guard<std::mutex> slk(s->mu);
-			std::cout << stamp() << "hls: session "
+			std::cout << stamp(s->who) << "hls: session "
 			          << s->dir.filename().string() << " idle, ending"
 			          << std::endl;
 			s->stop();

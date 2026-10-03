@@ -186,8 +186,11 @@ class Streamer {
 		// response to a known-length one carrying that Content-Length,
 		// truncating or zero-padding to match (estimateContentLength).
 		// A non-empty supersede_key kills every running transcode started
-		// with the same key; see VideoOptions::owner.
+		// with the same key; see VideoOptions::owner.  `who` is the client's
+		// address, for the log: a receiver fetches for itself, so it is
+		// often not the device that asked.
 		static void serve_transcoded(httplib::Response& res,
+		                             const std::string& who,
 		                             std::vector<std::string> args,
 		                             const std::string& mime, float bps,
 		                             bool pace, float pace_lead,

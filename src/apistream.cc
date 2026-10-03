@@ -224,7 +224,7 @@ void GainDrive::routes_stream()
 		// the configured roots before handing it off.
 		std::string song_abs = store_.abs_path(song->path);
 		if (!store_.path_is_within_root(song_abs)) {
-			std::cout << stamp() << "stream: refusing path outside every root: "
+			std::cout << stamp(client_addr(req)) << "stream: refusing path outside every root: "
 			          << song_abs << std::endl;
 			res.status = 403;
 			return;
@@ -349,7 +349,7 @@ void GainDrive::routes_stream()
 		        && req.params.find("timeOffset") == req.params.end()
 		        && last_cast_offset_ > 0.0f
 		        && req.get_header_value("Range").empty()) {
-			std::cout << stamp() << "cast probe: id=" << log_safe(it->second, 64)
+			std::cout << stamp(client_addr(req)) << "cast probe: id=" << log_safe(it->second, 64)
 			          << " offset=" << last_cast_offset_ << std::endl;
 			auto probe_si = streamer_song(*song, song_abs,
 			                              std::min(song->file_size,
@@ -364,7 +364,7 @@ void GainDrive::routes_stream()
 		if (cast_authed) {
 			// Log Range header so we can see what the Cast receiver is requesting.
 			auto range = req.get_header_value("Range");
-			std::cout << stamp() << "cast stream: id=" << log_safe(it->second, 64)
+			std::cout << stamp(client_addr(req)) << "cast stream: id=" << log_safe(it->second, 64)
 			          << " size=" << song->file_size
 			          << " range=[" << (range.empty() ? "none" : range) << "]"
 			          << std::endl;
@@ -410,7 +410,7 @@ void GainDrive::routes_stream()
 			}
 
 		if (!cast_authed)
-			std::cout << stamp() << "stream: id=" << log_safe(it->second, 64)
+			std::cout << stamp(client_addr(req)) << "stream: id=" << log_safe(it->second, 64)
 			          << " codec=" << song->codec
 			          << " size=" << song->file_size
 			          << " duration=" << song->duration
@@ -505,7 +505,7 @@ void GainDrive::routes_stream()
 
 		std::string song_abs = store_.abs_path(song->path);
 		if (!store_.path_is_within_root(song_abs)) {
-			std::cout << stamp() << "download: refusing path outside every root: "
+			std::cout << stamp(client_addr(req)) << "download: refusing path outside every root: "
 			          << song_abs << std::endl;
 			res.status = 403;
 			return;
@@ -532,7 +532,7 @@ void GainDrive::routes_stream()
 		               "attachment; filename=\"" + ascii + "\"; "
 		               "filename*=UTF-8''" + enc.str());
 
-		std::cout << stamp() << "download: id=" << log_safe(it->second, 64)
+		std::cout << stamp(client_addr(req)) << "download: id=" << log_safe(it->second, 64)
 		          << " path=" << song->path
 		          << " size=" << song->file_size << std::endl;
 
@@ -696,7 +696,7 @@ void GainDrive::routes_stream()
 
 		auto vtt = store_.get_captions_vtt(to_int(it->second, -1), index);
 		if (vtt.empty()) {
-			std::cout << stamp() << "getCaptions: nothing for id=" << log_safe(it->second, 64)
+			std::cout << stamp(client_addr(req)) << "getCaptions: nothing for id=" << log_safe(it->second, 64)
 			          << " captionId=" << index << std::endl;
 			res.status = 404;
 			return;
@@ -706,7 +706,7 @@ void GainDrive::routes_stream()
 		// the television's address is the proof that the receiver accepted the
 		// tracks the LOAD declared and went looking for one. Its absence is the
 		// single most useful fact when captions do not appear on a cast.
-		std::cout << stamp() << "getCaptions: id=" << log_safe(it->second, 64)
+		std::cout << stamp(client_addr(req)) << "getCaptions: id=" << log_safe(it->second, 64)
 		          << " captionId=" << index << " " << vtt.size() << " bytes"
 		          << (cast_authed ? " (cast token)"
 		                          : grant_authed ? " (grant)" : "")
@@ -794,7 +794,7 @@ void GainDrive::routes_stream()
 			// happens to an album whose markers were listed a moment ago --
 			// INSERT OR REPLACE hands out fresh rowids, so a rescan can strand
 			// the id a client is holding.
-			std::cout << stamp() << "getAlbumChapters: no folder with id "
+			std::cout << stamp(client_addr(req)) << "getAlbumChapters: no folder with id "
 			          << folder_id << "; the album view will list this one"
 			             " without its chapters" << std::endl;
 			err(70, "Album folder not found."); return;
@@ -890,7 +890,7 @@ void GainDrive::routes_stream()
 		if (!store_.save_chapters(song_id, parsed.chapters)) {
 			err(0, "Could not write the chapter file."); return;
 			}
-		std::cout << stamp() << "saveChapters: id=" << song_id << " "
+		std::cout << stamp(client_addr(req)) << "saveChapters: id=" << song_id << " "
 		          << parsed.chapters.size() << " marker(s), "
 		          << parsed.skipped << " line(s) skipped, from "
 		          << client_addr(req) << std::endl;
@@ -1070,7 +1070,7 @@ void GainDrive::routes_stream()
 			// No #EXT-X-ENDLIST here: that tag terminates a media playlist,
 			// and a master holds no segments to terminate.
 
-			std::cout << stamp() << "hls: id=" << log_safe(it->second, 64)
+			std::cout << stamp(client_addr(req)) << "hls: id=" << log_safe(it->second, 64)
 			          << " variants=" << announced.size()
 			          << " path=" << req.path << std::endl;
 			res.set_header("Cache-Control", "no-store");
@@ -1112,7 +1112,7 @@ void GainDrive::routes_stream()
 			    << "hlsSegment.view" << query << "&seg=" << k << auth << "\n";
 		m3u << "#EXT-X-ENDLIST\n";
 
-		std::cout << stamp() << "hls: id=" << log_safe(it->second, 64)
+		std::cout << stamp(client_addr(req)) << "hls: id=" << log_safe(it->second, 64)
 		          << " duration=" << song->duration
 		          << " segments=" << plan.segments()
 		          << " video=" << (plan.copy_video ? "copy" : "encode")
@@ -1147,7 +1147,7 @@ void GainDrive::routes_stream()
 
 		std::string song_abs = store_.abs_path(song->path);
 		if (!store_.path_is_within_root(song_abs)) {
-			std::cout << stamp() << "hls: refusing path outside every root: "
+			std::cout << stamp(client_addr(req)) << "hls: refusing path outside every root: "
 			          << song_abs << std::endl;
 			res.status = 403;
 			return;
@@ -1165,6 +1165,7 @@ void GainDrive::routes_stream()
 			res.status = 404;
 			return;
 			}
-		hls_.serve_segment(res, si, v, static_cast<size_t>(seg), owner);
+		hls_.serve_segment(res, si, v, static_cast<size_t>(seg), owner,
+		                   client_addr(req));
 		});
 	}

@@ -97,7 +97,7 @@ void GainDrive::routes_edit()
 			try {
 				std::string song_abs = store_.abs_path(song->path);
 				if (!store_.path_is_within_root(song_abs)) {
-					std::cout << stamp() << "updateSong: refusing path outside every root: "
+					std::cout << stamp(client_addr(req)) << "updateSong: refusing path outside every root: "
 					          << song_abs << std::endl;
 					err(0, "Refusing to write outside the configured roots.");
 					return;
@@ -209,7 +209,7 @@ void GainDrive::routes_edit()
 				// private", deliberately: the difference is exactly what makes
 				// this endpoint a port scanner otherwise.
 				if (!host_is_global(host)) {
-					std::cout << stamp() << "setCoverArt: refusing non-global host: "
+					std::cout << stamp(client_addr(req)) << "setCoverArt: refusing non-global host: "
 					          << host << std::endl;
 					err(0, "Failed to fetch URL."); return;
 					}
@@ -289,7 +289,7 @@ void GainDrive::routes_edit()
 		    : (fs::path(folder_rel) / (is_png ? "cover.png" : "cover.jpg")).string();
 		fs::path cover_abs = fs::path(store_.abs_path(cover_rel));
 		if (!store_.path_is_within_root(cover_abs)) {
-			std::cout << stamp() << "setCoverArt: refusing path outside every root: "
+			std::cout << stamp(client_addr(req)) << "setCoverArt: refusing path outside every root: "
 			          << cover_abs.string() << std::endl;
 			err(0, "Refusing to write outside the configured roots.");
 			return;
@@ -499,7 +499,7 @@ void GainDrive::routes_edit()
 		auto hold = std::make_shared<BatchHold>(dest);
 		fs::create_directories(dest);
 
-		std::cout << stamp() << "Upload: extracting " << log_safe(name)
+		std::cout << stamp(client_addr(req)) << "Upload: extracting " << log_safe(name)
 		          << " (" << received << " bytes)"
 		          << " for user " << uname
 		          << " into " << dest << std::endl;
@@ -512,7 +512,7 @@ void GainDrive::routes_edit()
 		// libarchive's own words are already in the log.
 		if (n == -2) { json_err("Could not write the archive's contents."); return; }
 
-		std::cout << stamp() << "Upload: extracted " << n << " file(s) to " << dest << std::endl;
+		std::cout << stamp(client_addr(req)) << "Upload: extracted " << n << " file(s) to " << dest << std::endl;
 
 		std::string rel_batch = uploads_root_name_ + "/" + uname + "/" + uuid;
 		// Normalising and scanning is the same three steps for both producers -
@@ -802,7 +802,7 @@ void GainDrive::routes_edit()
 		// path_is_within_root uses weakly_canonical, so it answers for a target
 		// that does not exist yet.
 		if (!store_.path_is_within_root(abs_target)) {
-			std::cout << stamp() << "moveAlbum: refusing target outside every root: "
+			std::cout << stamp(client_addr(req)) << "moveAlbum: refusing target outside every root: "
 			          << abs_target << std::endl;
 			err(0, "Refusing to write outside the configured roots.");
 			return;
@@ -836,7 +836,7 @@ void GainDrive::routes_edit()
 			fs::remove_all(abs_src, ec);
 			}
 
-		std::cout << stamp() << "Move: " << old_rel << " → " << new_rel << std::endl;
+		std::cout << stamp(client_addr(req)) << "Move: " << old_rel << " → " << new_rel << std::endl;
 
 		// Carry the DB across with the directory.  Without this the rescan
 		// below deletes the old folder and inserts the new one cold, and every
@@ -1171,7 +1171,7 @@ void GainDrive::routes_edit()
 
 		// Says who asked as well as what went, because those differ when an
 		// admin clears somebody else's and the log is the only record of it.
-		std::cout << stamp() << "Delete upload: " << uname << " removed "
+		std::cout << stamp(client_addr(req)) << "Delete upload: " << uname << " removed "
 		          << item_rel << std::endl;
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),

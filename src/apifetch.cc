@@ -1,4 +1,5 @@
 #include "gaindrive.hh"
+#include "netaddr.hh"
 #include "subsonic.hh"
 #include "authz.hh"
 #include "stamp.hh"
@@ -190,7 +191,7 @@ void GainDrive::routes_fetch()
 		}
 		fetch_cv_.notify_one();
 
-		std::cout << stamp() << "url fetch: queued " << job.id << " for "
+		std::cout << stamp(client_addr(req)) << "url fetch: queued " << job.id << " for "
 		          << uname << " (" << h->name << ", "
 		          << (audio ? "audio" : "video") << "): " << url << std::endl;
 
@@ -338,7 +339,7 @@ void GainDrive::routes_fetch()
 		}
 		if (!found) { err(70, "Item not found."); return; }
 		url_fetcher_.cancel(id);
-		std::cout << stamp() << "url fetch: cancelled " << id << std::endl;
+		std::cout << stamp(client_addr(req)) << "url fetch: cancelled " << id << std::endl;
 
 		res.set_content(use_json ? subsonic_ok_json() : subsonic_ok(),
 		                use_json ? "application/json" : "application/xml");

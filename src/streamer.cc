@@ -2,6 +2,7 @@
 #include "stamp.hh"
 #include "dvd.hh"
 #include "proc.hh"
+#include "netaddr.hh"
 
 #include <algorithm>
 #include <atomic>
@@ -360,7 +361,7 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	std::string ua    = req.get_header_value("User-Agent");
 	std::string range = req.get_header_value("Range");
 
-	std::cout << stamp() << "stream ["
+	std::cout << stamp(client_addr(req)) << "stream ["
 	          << song.path << "] codec=" << song.codec
 	          << " a=" << (song.audio_codec.empty() ? "?" : song.audio_codec)
 	          << " src_bitrate=" << song.bitrate
@@ -466,8 +467,9 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	    ? static_cast<float>(target_bitrate) * 125.0f
 	    : (src_kbps > 0 ? static_cast<float>(src_kbps) : 1000.0f) * 125.0f;
 
-	serve_transcoded(res, ffmpeg_argv(song, target_bitrate, *target,
-	                                  time_offset, "pipe:1"),
+	serve_transcoded(res, client_addr(req),
+	                 ffmpeg_argv(song, target_bitrate, *target,
+	                             time_offset, "pipe:1"),
 	                 std::string(target->mime), bps,
 	                 pace, pace_lead, std::move(get_position), est_length);
 	}
@@ -541,6 +543,7 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 	// is nonsense; the real bitrate outvotes it there and the probe stays
 	// effectively unthrottled, as before.  Erring high is the right direction
 	// throughout: too fast costs client buffer, too slow costs a dropout.
+	const std::string who = client_addr(req);
 	const float rate_tag  = song.bitrate > 0
 	    ? static_cast<float>(song.bitrate) * 125.0f : 0.0f;
 	const float rate_file = song.duration > 0
@@ -553,7 +556,7 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 	// The rate is the first question a stutter report raises, and nothing
 	// else logs it.
 	if (pace || get_position)
-		std::cout << stamp() << "stream pace: rate="
+		std::cout << stamp(who) << "stream pace: rate="
 		          << static_cast<int>(bytes_per_sec) << " B/s"
 		          << " lead=" << pace_lead << "s"
 		          << (get_position ? " position-driven" : " wall-clock")
@@ -563,7 +566,7 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 	res.set_content_provider(
 		static_cast<size_t>(song.file_size),
 		std::string(codec_to_mime(song.codec)),
-		[path = song.path, bytes_per_sec, prebuf_bytes, pace, pace_lead,
+		[path = song.path, who, bytes_per_sec, prebuf_bytes, pace, pace_lead,
 		 get_position = std::move(get_position), keepalive = std::move(keepalive)]
 		(size_t offset, size_t length, httplib::DataSink& sink) {
 			std::ifstream f(path, std::ios::binary);
@@ -597,7 +600,7 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 						int   err  = errno;
 						float secs = std::chrono::duration<float>(
 						    std::chrono::steady_clock::now() - t_start).count();
-						std::cout << stamp()
+						std::cout << stamp(who)
 						          << (get_position ? "cast " : "") << "stream: write failed at "
 						          << (offset + length - remaining + woff + piece)
 						          << " bytes (range offset=" << offset << ")"
@@ -929,7 +932,7 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	// declarable, so there is nothing here for log_safe() to clean.
 	std::string declared = playable_log(playable);
 
-	std::cout << stamp() << "video [" << song.path << "]"
+	std::cout << stamp(client_addr(req)) << "video [" << song.path << "]"
 	          << " v=" << (song.video_codec.empty() ? "?" : song.video_codec)
 	          << " a=" << (song.audio_codec.empty() ? "?" : song.audio_codec)
 	          << " " << song.width << "x" << song.height
@@ -976,11 +979,13 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	std::string key = video.owner.empty()
 	                ? std::string()
 	                : video.owner + "#" + std::to_string(song.id);
-	serve_transcoded(res, std::move(argv), std::string(VIDEO_MP4_MIME), bps,
+	serve_transcoded(res, client_addr(req), std::move(argv),
+	                 std::string(VIDEO_MP4_MIME), bps,
 	                 false, TARGET_BUF, std::move(get_position), 0, key);
 	}
 
 void Streamer::serve_transcoded(httplib::Response& res,
+                                const std::string& who,
                                 std::vector<std::string> args,
                                 const std::string& mime, float bps,
                                 bool pace, float pace_lead,
@@ -991,7 +996,7 @@ void Streamer::serve_transcoded(httplib::Response& res,
 	{
 	std::string cmd;
 	for (const auto& a : args) { cmd += ' '; cmd += a; }
-	std::cout << stamp() << "stream: ffmpeg:" << cmd << std::endl;
+	std::cout << stamp(who) << "stream: ffmpeg:" << cmd << std::endl;
 	}
 
 	// A ceiling on concurrent *piped* transcodes.  TranscodeCache bounds its
@@ -1005,7 +1010,7 @@ void Streamer::serve_transcoded(httplib::Response& res,
 	// down.
 	if (piped_ffmpeg_count.fetch_add(1) >= MAX_PIPED_FFMPEG) {
 		piped_ffmpeg_count.fetch_sub(1);
-		std::cout << stamp() << "stream: refusing piped transcode, "
+		std::cout << stamp(who) << "stream: refusing piped transcode, "
 		          << MAX_PIPED_FFMPEG << " already running" << std::endl;
 		res.status = 503;
 		return;
@@ -1031,7 +1036,7 @@ void Streamer::serve_transcoded(httplib::Response& res,
 
 	auto ec = proc->start(args, opts);
 	if (ec) {
-		std::cout << stamp() << "stream: ffmpeg launch failed: "
+		std::cout << stamp(who) << "stream: ffmpeg launch failed: "
 		          << ec.message() << std::endl;
 		res.status = 500;
 		return;
@@ -1043,7 +1048,7 @@ void Streamer::serve_transcoded(httplib::Response& res,
 	uint64_t live_id    = supersede_key.empty() ? 0
 	                    : supersede_and_register(supersede_key, proc, superseded);
 
-	std::cout << stamp() << "stream: bps=" << bps << std::endl;
+	std::cout << stamp(who) << "stream: bps=" << bps << std::endl;
 	// total_sent persists across repeated provider calls (one per chunk).
 	auto total_sent = std::make_shared<size_t>(0);
 
@@ -1064,11 +1069,11 @@ void Streamer::serve_transcoded(httplib::Response& res,
 	// out so the chunked and known-length variants below share it exactly;
 	// `cap` bounds what may be written this call, which is how the estimate
 	// variant stops precisely on the length it promised.
-	auto pump = [proc, bps, total_sent, t_start, pace, pace_lead, superseded,
+	auto pump = [proc, bps, total_sent, t_start, pace, pace_lead, superseded, who,
 	             get_position = std::move(get_position)]
 	            (httplib::DataSink& sink, size_t cap) -> Pump {
 			if (get_position && get_position() < CAST_POS_BUFFERING) {
-				std::cout << stamp() << "stream: transcoded abort (gen mismatch or stop)" << std::endl;
+				std::cout << stamp(who) << "stream: transcoded abort (gen mismatch or stop)" << std::endl;
 				return Pump::Abort;
 				}
 			if (cap == 0) return Pump::Eof;
@@ -1082,7 +1087,7 @@ void Streamer::serve_transcoded(httplib::Response& res,
 				// Check err before n: reproc wraps negative C return values into
 				// size_t, so err is the reliable EOF/error indicator.
 				if (err && err != std::make_error_code(std::errc::broken_pipe))
-					std::cout << stamp() << "stream: ffmpeg pipe error: "
+					std::cout << stamp(who) << "stream: ffmpeg pipe error: "
 					          << err.message() << std::endl;
 				return Pump::Eof;
 				}
@@ -1096,7 +1101,7 @@ void Streamer::serve_transcoded(httplib::Response& res,
 					int   sys_err = errno;
 					float secs    = std::chrono::duration<float>(
 					    std::chrono::steady_clock::now() - t_start).count();
-					std::cout << stamp() << "stream: transcoded write failed at "
+					std::cout << stamp(who) << "stream: transcoded write failed at "
 					          << *total_sent << " bytes"
 					          << " after " << secs << "s"
 					          << " errno=" << sys_err
@@ -1154,12 +1159,12 @@ void Streamer::serve_transcoded(httplib::Response& res,
 			return Pump::More;
 			};
 
-	auto releaser = [proc, total_sent, errf, slot, live_id](bool success) {
+	auto releaser = [proc, total_sent, errf, slot, live_id, who](bool success) {
 			// Before the wait reaps the pid; see LiveTranscode.
 			if (live_id) unregister_transcode(live_id);
 			if (!success) proc->kill();
 			auto [status, ec] = proc->wait(reproc::infinite);
-			std::cout << stamp() << "stream: ffmpeg exit status=" << status
+			std::cout << stamp(who) << "stream: ffmpeg exit status=" << status
 			          << " total=" << *total_sent << " bytes"
 			          << (ec ? " (" + ec.message() + ")" : "") << std::endl;
 			// Only on a real failure: a killed-on-seek ffmpeg exits non-zero
@@ -1167,7 +1172,7 @@ void Streamer::serve_transcoded(httplib::Response& res,
 			if (success && status != 0) {
 				auto tail = stderr_tail(errf.get());
 				if (!tail.empty())
-					std::cout << stamp() << "stream: ffmpeg stderr: "
+					std::cout << stamp(who) << "stream: ffmpeg stderr: "
 					          << tail << std::endl;
 				}
 			};
@@ -1183,12 +1188,12 @@ void Streamer::serve_transcoded(httplib::Response& res,
 		// Note this is the *known-length* provider, not the chunked one: a
 		// Content-Length alongside Transfer-Encoding: chunked is malformed
 		// (RFC 9112 6.1) and recipients are required to ignore the length.
-		std::cout << stamp() << "stream: estimateContentLength=" << est_length
+		std::cout << stamp(who) << "stream: estimateContentLength=" << est_length
 		          << std::endl;
 		auto padded = std::make_shared<bool>(false);
 		res.set_content_provider(
 			static_cast<size_t>(est_length), mime,
-			[pump, est_length, padded](size_t offset, size_t /*length*/,
+			[pump, est_length, padded, who](size_t offset, size_t /*length*/,
 			                            httplib::DataSink& sink) {
 				size_t remaining = static_cast<size_t>(est_length) - offset;
 				if (remaining == 0) return true;
@@ -1198,7 +1203,7 @@ void Streamer::serve_transcoded(httplib::Response& res,
 					case Pump::Eof:   break;
 					}
 				if (!*padded) {
-					std::cout << stamp() << "stream: ffmpeg ended "
+					std::cout << stamp(who) << "stream: ffmpeg ended "
 					          << remaining << " bytes short of the estimate, "
 					          << "padding" << std::endl;
 					*padded = true;
