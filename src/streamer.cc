@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
 
 // Outcome of one transcode-provider iteration.  Eof and Abort are distinct
