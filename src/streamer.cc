@@ -771,6 +771,16 @@ std::vector<std::string> Streamer::ffmpeg_argv(const SongInfo& song,
 		// Seek only - copy audio without re-encoding.
 		args.push_back("-c:a");
 		args.push_back("copy");
+		// An input seek lands on the source's keyframe before the offset -
+		// the *video's*, on a film, seconds early - and a copy keeps those
+		// packets with negative timestamps.  The Ogg muxer writes them as
+		// negative granule positions, which is invalid: ffmpeg's own demuxer
+		// rejects the pages, and a WiiM played none of it.  An output -ss 0
+		// drops them, where an encode's decoder would have discarded them.
+		if (time_offset > 0) {
+			args.push_back("-ss");
+			args.push_back("0");
+			}
 		}
 	// The MP4 family writes its index after the audio and so needs to seek
 	// back in the output.  A cache file can be seeked; a pipe cannot, and
