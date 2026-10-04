@@ -594,7 +594,8 @@ final class PlayerConnection {
 	/// The first transition fires when playback begins, so the second track of
 	/// a queue is prepared while the first plays - the case that matters.
 	private func prewarmNext() {
-		guard model.hasNext else { return }
+		// Offline means no requests at all, not requests expected to fail.
+		guard model.hasNext, !settings.offlineMode else { return }
 		let next = model.songs[model.index + 1]
 		// **Not a video.** The comment below used to say a video was warmed
 		// deliberately, and it was right while `StreamUrls` sent an audio

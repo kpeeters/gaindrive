@@ -48,11 +48,10 @@ actor TranscodePrewarmer {
 		// is nothing to warm, and a GET would read the whole of it.
 		guard !hasTimeOffset(target.url) else { return }
 
-		// One more skip belongs here and has nothing to skip on yet: offline
-		// mode, which means requests are not to be made at all rather than
-		// expected to fail.
+		// Offline mode is skipped by the caller, `PlayerConnection.prewarmNext`,
+		// since this actor does not see the settings.
 		//
-		// The other - a track already on disk - is handled a step earlier, in
+		// A track already on disk is handled a step earlier too, in
 		// `PlayerConnection.streamTarget`: a stored track comes back with a
 		// file URL, and a `file:` URL is not something to warm. That is why
 		// there is no check for it here.

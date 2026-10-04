@@ -293,6 +293,8 @@ final class LocalEngine: PlaybackEngine {
 		// bytes: `CastUrls.video(for:)` calls the same builder and must keep
 		// the server's own set.
 		if settings.showsPicture(song) {
+			// A film is never stored, so offline there is nothing to play.
+			guard !settings.offlineMode else { return nil }
 			return targets.video(for: song, files: avfoundationFileContainers)
 		}
 		// And the audio half of the same declaration, at the same one call
@@ -311,6 +313,11 @@ final class LocalEngine: PlaybackEngine {
 			target = StreamTarget(
 				url: local, quality: target.quality, cacheKey: target.cacheKey,
 				contentType: target.contentType)
+		} else if settings.offlineMode {
+			// Offline means no requests at all. A server URL here would let
+			// the queue tail pre-buffer, and later play, a track that is not
+			// stored; nil ends the window at the last stored track instead.
+			return nil
 		}
 		return target
 	}
