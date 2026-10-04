@@ -28,28 +28,18 @@ struct CastDeviceSheet: View {
 	/// Multicast is not free, and this sheet is the only consumer.
 	@State private var discovery = CastDiscovery()
 	@Environment(\.scenePhase) private var scenePhase
+	#if os(macOS)
+		@State private var showingEqualizer = false
+	#endif
 
 	var body: some View {
-		NavigationStack {
-			List {
-				volume
-				thisDevice
-				discovered
-			}
-			.navigationTitle("Play on")
-			.inlineTitle()
-			.toolbar {
-				ToolbarItem(placement: .confirmationAction) {
-					Button("Done") { dismiss() }
-				}
-			}
+		Group {
+			#if os(macOS)
+				dialog
+			#else
+				listSheet
+			#endif
 		}
-		#if os(macOS)
-			// An unsized macOS sheet gives a `List` zero height, which left only
-			// the title and Done visible.
-			.frame(minWidth: 360, idealWidth: 420, minHeight: 400, idealHeight: 520)
-		#endif
-		.presentationDetents([.medium, .large])
 		.onAppear { discovery.start() }
 		.onDisappear { discovery.stop() }
 		// iOS tears the browser down when the app is suspended and Mac Catalyst
@@ -60,6 +50,100 @@ struct CastDeviceSheet: View {
 			discovery.restart()
 		}
 	}
+
+	// MARK: - iOS
+
+	#if !os(macOS)
+		private var listSheet: some View {
+			NavigationStack {
+				List {
+					volume
+					thisDevice
+					discovered
+				}
+				.navigationTitle("Play on")
+				.inlineTitle()
+				.toolbar {
+					ToolbarItem(placement: .confirmationAction) {
+						Button("Done") { dismiss() }
+					}
+				}
+			}
+			.presentationDetents([.medium, .large])
+		}
+	#endif
+
+	// MARK: - macOS
+
+	#if os(macOS)
+		/// A Mac dialog, as `TrackInfoView` is: **stacks have an ideal size**,
+		/// so the sheet takes its size from the rows and grows as receivers
+		/// answer. A `List` scrolls, has no ideal height, and collapsed the
+		/// sheet to its title.
+		private var dialog: some View {
+			VStack(alignment: .leading, spacing: 12) {
+				Text("Play on").font(.headline)
+				if let device = player.castDevice {
+					VStack(alignment: .leading, spacing: 6) {
+						Text(device.name).foregroundStyle(.secondary)
+						CastVolumeRow(session: player.castSession)
+							.frame(minWidth: 260)
+						if device.kind == .wiim, let address = player.castSession.address {
+							Button("Equalizer…") { showingEqualizer = true }
+								.sheet(isPresented: $showingEqualizer) {
+									equalizer(deviceId: device.id, address: address)
+								}
+						}
+					}
+					Divider()
+				}
+				thisDeviceRow
+				Text("On this network")
+					.font(.subheadline)
+					.foregroundStyle(.secondary)
+					.padding(.top, 4)
+				switch discovery.state {
+				case .failed(let message):
+					Label(message, systemImage: "exclamationmark.triangle")
+						.font(.footnote)
+						.foregroundStyle(.secondary)
+						.fixedSize(horizontal: false, vertical: true)
+						.frame(maxWidth: 320, alignment: .leading)
+				case .idle, .browsing:
+					if discovery.devices.isEmpty {
+						looking
+							.fixedSize(horizontal: false, vertical: true)
+							// A cap on the hint's line length, not a size for
+							// the dialog.
+							.frame(maxWidth: 320, alignment: .leading)
+					} else {
+						ForEach(discovery.devices) { deviceRow($0) }
+					}
+				}
+				HStack {
+					Spacer()
+					Button("Done") { dismiss() }
+						.keyboardShortcut(.defaultAction)
+				}
+				.padding(.top, 4)
+			}
+			.padding(20)
+		}
+
+		/// The WiiM's equalizer, a sheet over this one: there is no navigation
+		/// stack in a dialog to push it onto.
+		private func equalizer(deviceId: String, address: String) -> some View {
+			VStack(alignment: .leading, spacing: 12) {
+				WiiMControlsView(deviceId: deviceId, address: address)
+				HStack {
+					Spacer()
+					Button("Done") { showingEqualizer = false }
+						.keyboardShortcut(.defaultAction)
+				}
+			}
+			.padding(20)
+		}
+	#endif
 
 	// MARK: - Rows
 
@@ -95,14 +179,22 @@ struct CastDeviceSheet: View {
 	/// most likely to want from this sheet - a device list with no way off it
 	/// makes leaving feel like a setting rather than a tap.
 	private var thisDevice: some View {
-		Section {
-			row(
-				name: "This device", detail: nil, systemImage: "iphone",
-				selected: player.castDevice == nil
-			) {
-				player.stopCasting()
-				dismiss()
-			}
+		Section { thisDeviceRow }
+	}
+
+	#if os(macOS)
+		private static let thisDeviceSymbol = "desktopcomputer"
+	#else
+		private static let thisDeviceSymbol = "iphone"
+	#endif
+
+	private var thisDeviceRow: some View {
+		row(
+			name: "This device", detail: nil, systemImage: Self.thisDeviceSymbol,
+			selected: player.castDevice == nil
+		) {
+			player.stopCasting()
+			dismiss()
 		}
 	}
 
