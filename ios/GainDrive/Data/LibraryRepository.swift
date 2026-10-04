@@ -693,6 +693,23 @@ final class LibraryRepository: Sendable {
 		}
 	}
 
+	/// Where `song` was left, in seconds, for the resume prompt; 0 means
+	/// "from the top". Swallows, logging: offline or on a failure the play
+	/// should simply start, a missed prompt being better than no playback.
+	func resumePosition(_ song: Song) async -> Double {
+		if await offline { return 0 }
+		guard let client = await client(for: song.ref.server) else { return 0 }
+		do {
+			let ms = try await client.bookmarks()
+				.first { $0.entry?.id == song.ref.id }?.position ?? 0
+			return Double(ms) / 1000
+		} catch {
+			Self.log.warning(
+				"getBookmarks failed: \(error.localizedDescription, privacy: .public)")
+			return 0
+		}
+	}
+
 	func setStarred(_ ref: ItemRef, kind: StarKind, starred: Bool) async throws {
 		guard let client = await client(for: ref.server) else { return }
 		let songs = kind == .song ? [ref.id] : []

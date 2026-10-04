@@ -302,6 +302,20 @@ struct Starred2Body: Decodable, Sendable {
 	let starred2: SearchResultDto?
 }
 
+/// One `getBookmarks` entry; `position` is in milliseconds.
+struct BookmarkDto: Decodable, Sendable {
+	@Loose var position: Int?
+	let entry: SongDto?
+}
+
+struct BookmarksContainer: Decodable, Sendable {
+	@Listed var bookmark: [BookmarkDto] = []
+}
+
+struct GetBookmarksBody: Decodable, Sendable {
+	let bookmarks: BookmarksContainer?
+}
+
 struct PlaylistsContainer: Decodable, Sendable {
 	@Listed var playlist: [PlaylistDto] = []
 }

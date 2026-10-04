@@ -125,6 +125,14 @@ enum class TrackState { IDLE, LOADING, CURRENT }
 data class TextTrack(val index: Int, val label: String, val selected: Boolean)
 
 /**
+ * A play held back to ask whether to continue at [positionMs]; see
+ * [PlayerConnection.resumeOffer].
+ */
+data class ResumeOffer(val songs: List<Song>, val startIndex: Int, val positionMs: Long) {
+	val title: String get() = songs[startIndex].title
+}
+
+/**
  * The UI's only route to playback.
  *
  * Deliberately a [MediaController] rather than the [androidx.media3.exoplayer.ExoPlayer]
@@ -165,6 +173,27 @@ class PlayerConnection @Inject constructor(
 
 	fun consumeMessage() {
 		_message.value = null
+	}
+
+	private val _resumeOffer = MutableStateFlow<ResumeOffer?>(null)
+
+	/**
+	 * A video or long audio file the user started from the top while the
+	 * server holds a resume point for it. Held here for the same reason as
+	 * [message]; the shell asks and answers with [resume] or [dismissResume].
+	 */
+	val resumeOffer: StateFlow<ResumeOffer?> = _resumeOffer.asStateFlow()
+
+	fun resume(fromStart: Boolean) {
+		val offer = _resumeOffer.value ?: return
+		_resumeOffer.value = null
+		scope.launch {
+			playNow(offer.songs, offer.startIndex, if (fromStart) 0L else offer.positionMs)
+		}
+	}
+
+	fun dismissResume() {
+		_resumeOffer.value = null
 	}
 
 	/**
@@ -316,12 +345,26 @@ class PlayerConnection @Inject constructor(
 	 */
 	fun play(songs: List<Song>, startIndex: Int, startPositionMs: Long = 0L) = scope.launch {
 		if (refuseIfCasting(songs)) return@launch
+		// Only a play from the top asks: an explicit offset, such as a chapter,
+		// already says where to start.
+		val song = songs.getOrNull(startIndex)
+		if (song != null && startPositionMs == 0L) {
+			val at = library.resumePositionMs(song)
+			if (at > 0) {
+				_resumeOffer.value = ResumeOffer(songs, startIndex, at)
+				return@launch
+			}
+		}
+		playNow(songs, startIndex, startPositionMs)
+	}
+
+	private suspend fun playNow(songs: List<Song>, startIndex: Int, startPositionMs: Long) {
 		markPending(songs.getOrNull(startIndex)?.ref)
 		// Publish before awaiting the controller: on the very first tap the
 		// session is not bound yet, and that wait is precisely the delay the
 		// spinner exists to explain.
 		publish()
-		val controller = awaitController() ?: return@launch
+		val controller = awaitController() ?: return
 		val covers: CoverUrls = library.coverUrls()
 		val items = songs.map { it.toMediaItem(covers.url(it.coverArt, ARTWORK_PX)) }
 		controller.setMediaItems(items, startIndex, startPositionMs)

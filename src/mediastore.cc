@@ -7251,6 +7251,48 @@ void MediaStore::scrobble(const std::string& username, const std::string& song_p
 		}
 	}
 
+void MediaStore::update_resume_point(int user_id, const std::string& song_path,
+                                     int64_t position_ms)
+	{
+	// Twenty minutes: no ordinary song is that long, but a DJ mix or an
+	// audiobook chapter is, and those are worth resuming.
+	constexpr double  long_audio_s = 20 * 60;
+	// Below this the play has barely begun; above all, Android reports
+	// `stopped` at 0 on a track change, which must not wipe the point.
+	constexpr int64_t min_pos_ms   = 30000;
+
+	SQLite::Statement q(db_music_,
+		"SELECT is_video, COALESCE(duration, 0) FROM songs WHERE path = ?");
+	q.bind(1, song_path);
+	if (!q.executeStep()) return;
+	bool   is_video = q.getColumn(0).getInt() != 0;
+	double duration = q.getColumn(1).getDouble();
+	if (!is_video && duration < long_audio_s) return;
+
+	// Past 95% counts as watched: a film's credits should not leave it
+	// asking to resume.
+	if (duration > 0 && position_ms >= duration * 950) {
+		SQLite::Statement del(db_music_,
+			"DELETE FROM client.bookmarks WHERE user_id = ? AND song_path = ?");
+		del.bind(1, user_id);
+		del.bind(2, song_path);
+		del.exec();
+		return;
+		}
+	if (position_ms < min_pos_ms) return;
+
+	SQLite::Statement ins(db_music_,
+		"INSERT INTO client.bookmarks (user_id, song_path, position, comment, changed)"
+		" VALUES (?, ?, ?, '', CURRENT_TIMESTAMP)"
+		" ON CONFLICT(user_id, song_path) DO UPDATE SET"
+		"   position = excluded.position,"
+		"   changed  = CURRENT_TIMESTAMP");
+	ins.bind(1, user_id);
+	ins.bind(2, song_path);
+	ins.bind(3, position_ms);
+	ins.exec();
+	}
+
 bool MediaStore::report_playback(const std::string& username,
                                   const std::string& song_path,
                                   const std::string& client,
@@ -7263,6 +7305,8 @@ bool MediaStore::report_playback(const std::string& username,
 	uid_q.bind(1, username);
 	if (!uid_q.executeStep()) return false;
 	int user_id = uid_q.getColumn(0).getInt();
+
+	update_resume_point(user_id, song_path, position_ms);
 
 	if (state == "stopped") {
 		// Guarded on song and client: the row is one per user, and the same

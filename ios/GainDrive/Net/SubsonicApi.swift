@@ -266,6 +266,13 @@ extension SubsonicClient {
 			expecting: EmptyBody.self)
 	}
 
+	/// The user's bookmarks. gaindrive writes one itself for a video or long
+	/// audio file from `reportPlayback`, which is what the resume prompt reads.
+	func bookmarks() async throws -> [BookmarkDto] {
+		try await perform("getBookmarks", expecting: GetBookmarksBody.self)
+			.bookmarks?.bookmark ?? []
+	}
+
 	// MARK: - Recents
 
 	/// Albums in the order the server first saw them, newest first. Standard

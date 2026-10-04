@@ -26,6 +26,13 @@ struct ShellMessages: ViewModifier {
 	/// Why a track link could not be followed.
 	@State private var linkMessage: String?
 
+	private static func clock(_ seconds: Double) -> String {
+		let s = Int(seconds)
+		return s >= 3600
+			? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
+			: String(format: "%d:%02d", s / 60, s % 60)
+	}
+
 	func body(content: Content) -> some View {
 		content
 			// **Playback errors belong to the shell, not to a screen.** They
@@ -41,6 +48,25 @@ struct ShellMessages: ViewModifier {
 				Button("OK") { player.clearError() }
 			} message: {
 				Text(player.errorMessage ?? "")
+			}
+			// Asked from the shell because the row that started the play may
+			// be gone by the time the bookmark lookup answers.
+			.alert(
+				"Resume",
+				isPresented: Binding(
+					get: { player.resumeOffer != nil },
+					// The buttons answer. Answering here too could clear the
+					// offer before a button's own action ran, if SwiftUI
+					// dismissed first.
+					set: { _ in })
+			) {
+				Button("Resume at \(Self.clock(player.resumeOffer?.position ?? 0))") {
+					player.answerResume(fromStart: false)
+				}
+				Button("Start over") { player.answerResume(fromStart: true) }
+				Button("Cancel", role: .cancel) { player.answerResume(fromStart: nil) }
+			} message: {
+				Text("Continue \"\(player.resumeOffer?.title ?? "")\" where you left off?")
 			}
 			// Pinning is reached from several listings, so a refusal belongs
 			// to the shell for the same reason a playback error does.

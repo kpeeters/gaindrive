@@ -18,10 +18,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
@@ -236,6 +238,30 @@ fun GainDriveApp(
 			Toast.makeText(context, it, Toast.LENGTH_LONG).show()
 			playerViewModel.consumeMessage()
 		}
+	}
+
+	// Asked from the shell, like playerMessage, because the row that started
+	// the play may be gone by the time the bookmark lookup answers.
+	val resumeOffer by playerViewModel.resumeOffer.collectAsStateWithLifecycle()
+	resumeOffer?.let { offer ->
+		val secs = offer.positionMs / 1000
+		val at = if (secs >= 3600) "%d:%02d:%02d".format(secs / 3600, secs / 60 % 60, secs % 60)
+			else "%d:%02d".format(secs / 60, secs % 60)
+		AlertDialog(
+			onDismissRequest = { playerViewModel.dismissResume() },
+			title = { Text("Resume") },
+			text = { Text("Continue \"${offer.title}\" where you left off?") },
+			confirmButton = {
+				TextButton(onClick = { playerViewModel.resume(fromStart = false) }) {
+					Text("Resume at $at")
+				}
+			},
+			dismissButton = {
+				TextButton(onClick = { playerViewModel.resume(fromStart = true) }) {
+					Text("Start over")
+				}
+			},
+		)
 	}
 
 	// Sends the user to the picture when what starts playing is a video.

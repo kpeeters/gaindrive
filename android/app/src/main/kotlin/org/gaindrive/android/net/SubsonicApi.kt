@@ -263,6 +263,13 @@ interface SubsonicApi {
 		@Query("ignoreScrobble") ignoreScrobble: Boolean,
 	): SubsonicEnvelope<EmptyBody>
 
+	/**
+	 * The user's bookmarks. gaindrive writes one itself for a video or long
+	 * audio file from [reportPlayback], which is what the resume prompt reads.
+	 */
+	@GET("rest/getBookmarks.view")
+	suspend fun getBookmarks(): SubsonicEnvelope<GetBookmarksBody>
+
 	// ── gaindrive extensions ────────────────────────────────────────────
 
 	@GET("rest/getRecentSongs.view")

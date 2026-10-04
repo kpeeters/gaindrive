@@ -529,6 +529,25 @@ data class GetRecentSongsBody(
 	val recentSongs: RecentSongsContainer? = null,
 ) : SubsonicBody
 
+/** One `getBookmarks` entry; [position] is in milliseconds. */
+@Serializable
+data class BookmarkDto(
+	val position: Long = 0,
+	val entry: SongDto? = null,
+)
+
+@Serializable
+data class BookmarksContainer(
+	val bookmark: List<BookmarkDto> = emptyList(),
+)
+
+@Serializable
+data class GetBookmarksBody(
+	override val status: String = "failed",
+	override val error: SubsonicError? = null,
+	val bookmarks: BookmarksContainer? = null,
+) : SubsonicBody
+
 /**
  * The token [SubsonicApi.getCastToken] mints, or null on a server too old to
  * have the endpoint - which answers an error rather than a token, and which

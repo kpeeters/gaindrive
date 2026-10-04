@@ -37,6 +37,21 @@ enum TrackState: Sendable {
 /// not invalidated twice a second by `position`. The corollary to hold to:
 /// `trackState(of:)` must never read `position`, or every track list starts
 /// re-rendering at 2 Hz and nothing will say why.
+struct ResumeOffer {
+	let songs: [Song]
+	let startIndex: Int
+	/// Seconds.
+	let position: Double
+	var title: String { songs[startIndex].title }
+}
+
+private extension Song {
+	/// The server's rule for keeping a resume point at all: any video, and
+	/// audio of 20 minutes or more. Asked here too, so that starting an
+	/// ordinary song costs no request.
+	var mayResume: Bool { isVideo || duration >= 20 * 60 }
+}
+
 @MainActor
 @Observable
 final class PlayerConnection {
@@ -50,6 +65,9 @@ final class PlayerConnection {
 	private(set) var duration: Double = 0
 	private(set) var canSeek = false
 	private(set) var errorMessage: String?
+	/// A play held back to ask whether to continue; see `play`. Answered by
+	/// the shell with `answerResume`.
+	private(set) var resumeOffer: ResumeOffer?
 	private(set) var queue: [Song] = []
 	private(set) var queueIndex = 0
 	private(set) var autoFrom = 0
@@ -124,6 +142,7 @@ final class PlayerConnection {
 	// in a cast engine must not silence any of them. Android is where that
 	// rule was learned, by breaking it.
 	@ObservationIgnored private let scrobbler: Scrobbler
+	@ObservationIgnored private let library: LibraryRepository
 	@ObservationIgnored private let watchdog = PlaybackWatchdog()
 	@ObservationIgnored private let prewarmer = TranscodePrewarmer()
 
@@ -139,6 +158,7 @@ final class PlayerConnection {
 		self.registry = registry
 		self.settings = settings
 		self.scrobbler = Scrobbler(library: library)
+		self.library = library
 		self.castUrls = CastUrls(targets: targets, registry: registry)
 		let local = LocalEngine(targets: targets, store: store, settings: settings)
 		self.local = local
@@ -223,8 +243,38 @@ final class PlayerConnection {
 	/// meaning "from the beginning" is unchanged. How it is honoured is the
 	/// engine's business - locally it waits for the item to become seekable,
 	/// on a receiver it rides in the LOAD.
+	///
+	/// A video or long audio file started from the top first asks, through
+	/// `resumeOffer`, whether to continue where it was left. An explicit
+	/// `startPosition` already says where to start, so it never asks.
 	func play(_ songs: [Song], startIndex: Int, startPosition: Double = 0) {
 		guard songs.indices.contains(startIndex) else { return }
+		let song = songs[startIndex]
+		guard startPosition == 0, song.mayResume else {
+			playNow(songs, startIndex: startIndex, startPosition: startPosition)
+			return
+		}
+		Task {
+			let at = await library.resumePosition(song)
+			if at > 0 {
+				resumeOffer = ResumeOffer(songs: songs, startIndex: startIndex, position: at)
+			} else {
+				playNow(songs, startIndex: startIndex, startPosition: 0)
+			}
+		}
+	}
+
+	/// Answers `resumeOffer`; nil when the prompt was dismissed, which plays
+	/// nothing.
+	func answerResume(fromStart: Bool?) {
+		guard let offer = resumeOffer else { return }
+		resumeOffer = nil
+		guard let fromStart else { return }
+		playNow(offer.songs, startIndex: offer.startIndex,
+		        startPosition: fromStart ? 0 : offer.position)
+	}
+
+	private func playNow(_ songs: [Song], startIndex: Int, startPosition: Double) {
 		beginLoading(songs[startIndex].ref)
 		model.play(songs, startIndex: startIndex)
 		publishQueue()

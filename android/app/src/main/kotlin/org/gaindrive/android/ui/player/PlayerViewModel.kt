@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.playback.PlayerConnection
 import org.gaindrive.android.playback.PlayerState
+import org.gaindrive.android.playback.ResumeOffer
 import javax.inject.Inject
 
 /**
@@ -27,6 +28,11 @@ class PlayerViewModel @Inject constructor(
 	val message: StateFlow<String?> = player.message
 
 	fun consumeMessage() = player.consumeMessage()
+
+	val resumeOffer: StateFlow<ResumeOffer?> = player.resumeOffer
+
+	fun resume(fromStart: Boolean) = player.resume(fromStart)
+	fun dismissResume() = player.dismissResume()
 
 	init {
 		// Binding early means the bar can restore an already-playing session

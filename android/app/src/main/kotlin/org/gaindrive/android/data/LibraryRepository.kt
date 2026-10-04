@@ -590,6 +590,27 @@ class LibraryRepository @Inject constructor(
 		}
 	}
 
+	/**
+	 * Where [song] was left, for the resume prompt, or 0 for "from the top".
+	 *
+	 * Only a video or an audio file of 20 minutes or more is asked about,
+	 * which is the server's rule for keeping a resume point at all, so
+	 * starting an ordinary song costs no request. Offline, or on a failure,
+	 * the answer is 0: a missed prompt is better than a play that never starts.
+	 */
+	suspend fun resumePositionMs(song: Song): Long {
+		if (offline || !(song.isVideo || song.duration >= 20 * 60)) return 0
+		return runCatchingCancellable {
+			onServer(song.ref.server) { client ->
+				client.getBookmarks().requireOk().bookmarks?.bookmark.orEmpty()
+					.firstOrNull { it.entry?.id == song.ref.id }?.position ?: 0
+			}
+		}.getOrElse {
+			Log.w(TAG, "getBookmarks failed, ${it.message}")
+			0
+		}
+	}
+
 	suspend fun setStarred(ref: ItemRef, kind: StarKind, starred: Boolean) {
 		requireOnline()
 		onServer(ref.server) { client ->

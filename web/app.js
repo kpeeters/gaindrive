@@ -625,12 +625,16 @@ function makeSecretInput(placeholder) {
    }
 
 let _confirmYes = null;
-function showConfirm(msg, onYes, {title='Confirm', yes='OK', no='Cancel'} = {}) {
+// `onNo` answers the No button only; Escape still just dismisses, so a choice
+// between two actions can also be walked away from.
+let _confirmNo = null;
+function showConfirm(msg, onYes, {title='Confirm', yes='OK', no='Cancel', onNo=null} = {}) {
    document.getElementById('confirm-modal-title').textContent = title;
    document.getElementById('confirm-modal-msg').textContent = msg;
    document.getElementById('confirm-yes-btn').textContent = yes;
    document.getElementById('confirm-no-btn').textContent = no;
    _confirmYes = onYes;
+   _confirmNo  = onNo;
    document.getElementById('confirm-modal').classList.remove('hidden');
    }
 
@@ -7527,7 +7531,38 @@ function makeChapterRow(song, chapter, songs, songIndex, ctx) {
 // knows all three answers -- a cast LOAD carries it, a chunked stream puts it
 // in timeOffset, and a Range-capable one gets `currentTime = offset` once the
 // source is set.
-function playerLoad(songs, startIndex, offset = 0) {
+//
+// A video or long audio file started from the top first asks whether to pick
+// up where it was left.  The server keeps that point as a bookmark, written
+// from our own reportPlayback calls.
+async function playerLoad(songs, startIndex, offset = 0) {
+   const song = songs[startIndex];
+   const resume = offset === 0 ? await resumePoint(song) : 0;
+   if (resume > 0) {
+      showConfirm(`Continue "${song.title}" where you left off?`,
+                  () => playerLoadNow(songs, startIndex, resume),
+                  {title: 'Resume', yes: `Resume at ${fmtDuration(Math.floor(resume))}`,
+                   no: 'Start over', onNo: () => playerLoadNow(songs, startIndex, 0)});
+      return;
+   }
+   playerLoadNow(songs, startIndex, offset);
+}
+
+// Seconds into `song` to offer resuming at, or 0.  Mirrors the server's rule
+// for which items get a resume point, so a three-minute song costs no request.
+async function resumePoint(song) {
+   if (!song || !(song.isVideo || (song.duration || 0) >= 20 * 60)) return 0;
+   try {
+      const sr = await apiCall('getBookmarks');
+      const bm = (sr.bookmarks?.bookmark || []).find(b => b.entry?.id === song.id);
+      return bm ? bm.position / 1000 : 0;
+   } catch (err) {
+      console.warn('[resume] getBookmarks failed', err);
+      return 0;
+   }
+}
+
+function playerLoadNow(songs, startIndex, offset) {
    document.querySelectorAll('.track-row.queued').forEach(r => r.classList.remove('queued'));
    player.queue    = [...songs];
    player.index    = startIndex;
@@ -8261,12 +8296,14 @@ function setupPlayer() {
       });
    document.getElementById('confirm-no-btn').addEventListener('click', () => {
       document.getElementById('confirm-modal').classList.add('hidden');
-      _confirmYes = null;
+      const cb = _confirmNo;
+      _confirmYes = _confirmNo = null;
+      if (cb) cb();
       });
    document.getElementById('confirm-yes-btn').addEventListener('click', () => {
       document.getElementById('confirm-modal').classList.add('hidden');
       const cb = _confirmYes;
-      _confirmYes = null;
+      _confirmYes = _confirmNo = null;
       if (cb) cb();
       });
    document.getElementById('playlist-new-btn').addEventListener('click', async () => {
@@ -10462,7 +10499,7 @@ function keyDismissModal(modal) {
       case 'cover-art-modal': _closeCoverArtDialog(); return;
       case 'promote-modal':   _closePromoteDialog();  return;
       case 'cover-lightbox':  closeLightbox();        return;
-      case 'confirm-modal':   _confirmYes = null;     break;
+      case 'confirm-modal':   _confirmYes = _confirmNo = null; break;
       }
    modal.classList.add('hidden');
 }

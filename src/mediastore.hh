@@ -934,7 +934,9 @@ class MediaStore {
 		// OpenSubsonic reportPlayback. `stopped` removes the user's now-playing
 		// row if it still names this song and client; any other state updates
 		// it and, unless ignore_scrobble, counts the play once it has run past
-		// half the track or four minutes. False for an unknown user.
+		// half the track or four minutes. Every state also moves the resume
+		// point of a long item, see update_resume_point(). False for an
+		// unknown user.
 		bool report_playback(const std::string& username,
 		                     const std::string& song_path,
 		                     const std::string& client, const std::string& state,
@@ -1337,6 +1339,13 @@ class MediaStore {
 		void commit_album(const AlbumReadData& adat, int parent_folder_id,
 		                   int artist_id,
 		                   const std::set<std::string>& chapter_keys);
+
+		// The resume point of a video or a long audio file, kept as the
+		// user's bookmark for it. Fed by report_playback() so that every
+		// client which reports playback gets it without writing bookmarks
+		// itself. Caller holds db_mutex_.
+		void update_resume_point(int user_id, const std::string& song_path,
+		                         int64_t position_ms);
 
 		// Helpers used by scan(); all called within a single transaction.
 		int  upsert_folder(const std::filesystem::path& path, int parent_id,
