@@ -31,16 +31,41 @@ struct NotesSection: View {
 	var collapsedLines = 4
 
 	@State private var expanded = false
+	/// The text's height in full and at `collapsedLines`, measured, so the
+	/// toggle can animate a clip between them; see `body`.
+	@State private var fullHeight: CGFloat?
+	@State private var collapsedHeight: CGFloat?
 
 	var body: some View {
 		if text != nil || !links.isEmpty {
 			VStack(alignment: .leading, spacing: 8) {
 				if let text, !text.isEmpty {
+					// **Only the height animates.** The text is always laid out
+					// in full and a frame clips it to the collapsed height:
+					// toggling `lineLimit` inside `withAnimation` re-wrapped the
+					// text, slid its ellipsis about and animated every other
+					// size in the row, the cover's included.
 					Text(text)
 						.font(.callout)
-						.lineLimit(expanded ? nil : collapsedLines)
+						.fixedSize(horizontal: false, vertical: true)
+						.onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+							fullHeight = $0
+						}
+						.background(alignment: .top) {
+							Text(text)
+								.font(.callout)
+								.lineLimit(collapsedLines)
+								.fixedSize(horizontal: false, vertical: true)
+								.hidden()
+								.onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+									collapsedHeight = $0
+								}
+						}
+						.frame(height: expanded ? fullHeight : collapsedHeight, alignment: .top)
+						.clipped()
+						.animation(.easeInOut(duration: 0.2), value: expanded)
 					Button(expanded ? "Show less" : "Show more") {
-						withAnimation { expanded.toggle() }
+						expanded.toggle()
 					}
 					.font(.footnote)
 				}
