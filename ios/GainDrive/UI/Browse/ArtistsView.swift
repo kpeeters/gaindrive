@@ -63,8 +63,13 @@ struct ArtistsView: View {
 			.onChange(of: servers.scope) { clearSelection() }
 			// Going offline is a different library, for the same reason.
 			.onChange(of: settings.offlineMode) { clearSelection() }
-			// A different artist cannot still have the same album showing.
-			.onChange(of: selectedChoice) { selectedAlbum = nil }
+			.onChange(of: model.pendingReveal, initial: true) {
+				guard let reveal = model.pendingReveal else { return }
+				if uploadsModel != nil { uploadsModel = nil }
+				selectedChoice = reveal.choice
+				selectedAlbum = reveal.album
+				model.consumeReveal()
+			}
 			// Moved or deleted on the server: the album showing may no longer
 			// be where it was, or be at all.
 			.onChange(of: events.libraryRevision) { selectedAlbum = nil }
@@ -93,15 +98,27 @@ struct ArtistsView: View {
 			})
 	}
 
+	/// A different artist cannot still have the same album showing. Cleared
+	/// here rather than in an `onChange`, which would also undo a reveal
+	/// that sets both at once.
+	private var choiceSelection: Binding<ArtistChoice?> {
+		Binding(
+			get: { selectedChoice },
+			set: { choice in
+				if choice != selectedChoice { selectedAlbum = nil }
+				selectedChoice = choice
+			})
+	}
+
 	@ViewBuilder
 	private var root: some View {
 		if let uploadsModel {
 			ArtistsList(
-				model: uploadsModel, uploads: true, selection: $selectedChoice,
+				model: uploadsModel, uploads: true, selection: choiceSelection,
 				onOpenUploads: nil, onClose: closeUploads)
 		} else {
 			ArtistsList(
-				model: model, uploads: false, selection: $selectedChoice,
+				model: model, uploads: false, selection: choiceSelection,
 				onOpenUploads: openUploadsAction, onClose: nil)
 		}
 	}

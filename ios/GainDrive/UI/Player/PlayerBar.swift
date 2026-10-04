@@ -16,7 +16,7 @@ struct PlayerBar: View {
 	@Environment(PlayerConnection.self) private var player
 	@Environment(StarStore.self) private var stars
 	@Environment(ServerRegistry.self) private var registry
-	@Environment(\.openRoute) private var openRoute
+	@Environment(\.revealAlbum) private var revealAlbum
 	@State private var castPicker = false
 	@State private var showingInfo: Song?
 
@@ -69,7 +69,7 @@ struct PlayerBar: View {
 			.contentShape(.rect)
 			.onTapGesture {
 				guard let album = song.albumRef else { return }
-				openRoute(.album(album, title: song.albumTitle))
+				revealAlbum(album)
 			}
 			.accessibilityAddTraits(.isButton)
 			.accessibilityHint("Opens the album")

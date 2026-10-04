@@ -24,8 +24,8 @@ extension EnvironmentValues {
 	/// so a `nil` here means a preview that did not.
 	@Entry var library: LibraryRepository? = nil
 
-	/// Shows a route from outside any pane, the way a track link is shown:
-	/// the shell switches to Search and pushes it there. Set by both roots;
-	/// the player bar's cover uses it to open the album.
-	@Entry var openRoute: @MainActor (Route) -> Void = { _ in }
+	/// Opens an album from outside any pane, under its artist in the
+	/// Library, as the web's player cover does. Set by both roots; the player
+	/// bar's cover uses it.
+	@Entry var revealAlbum: @MainActor (ItemRef) -> Void = { _ in }
 }

@@ -7,6 +7,7 @@
 //	full text of the GPL.
 
 import Foundation
+import OSLog
 
 /// The merged library listing - or, with `uploads` set, the account's own
 /// uploads - mirroring `ui/browse/ArtistsViewModel.kt`.
@@ -50,6 +51,19 @@ final class ArtistsViewModel {
 	/// was two screens deep.
 	@ObservationIgnored private var loadedFor: BrowseScope?
 	@ObservationIgnored private var task: Task<Void, Never>?
+	@ObservationIgnored private var revealTask: Task<Void, Never>?
+
+	/// An album opened from outside the listing, the player bar's cover, with
+	/// the artist it sits under. `ArtistsView` selects both and hands it back,
+	/// so the listing stays and the panes beside it fill, as on the web.
+	private(set) var pendingReveal: Reveal?
+
+	struct Reveal: Equatable {
+		let choice: ArtistChoice
+		let album: Album
+	}
+
+	private static let log = Logger(subsystem: "org.gaindrive.ios-player", category: "browse")
 
 	init(library: LibraryRepository, selection: ServerSelection, uploads: Bool = false) {
 		self.library = library
@@ -111,6 +125,52 @@ final class ArtistsViewModel {
 			self.state = merged.load
 			self.failures = merged.failures
 		}
+	}
+
+	/// A song names its album but not its artist, so `getAlbum` is asked.
+	/// The artist and album are then taken from the listing and the artist's
+	/// album list where they appear there: the rows are tagged with those
+	/// values, and a value built from `getAlbum` alone would highlight none.
+	func reveal(album ref: ItemRef) {
+		revealTask?.cancel()
+		revealTask = Task { [library] in
+			let detail: AlbumDetail?
+			do {
+				detail = try await library.albumDetail(ref)
+			} catch {
+				Self.log.error(
+					"reveal: album \(ref.id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+				return
+			}
+			guard !Task.isCancelled, let fetched = detail?.album,
+				let artistRef = fetched.artistRef
+			else { return }
+			let choice = self.choice(for: artistRef, name: fetched.artistName)
+			let albums = await library.albumsOfArtist(choice.artist.refs).items
+			guard !Task.isCancelled else { return }
+			let album = albums.first { $0.refs.contains(ref) } ?? fetched
+			self.pendingReveal = Reveal(choice: choice, album: album)
+		}
+	}
+
+	func consumeReveal() {
+		pendingReveal = nil
+	}
+
+	/// The listing's own row where it has one, so a merged artist keeps every
+	/// server's refs; otherwise one built from the album, which still opens.
+	private func choice(for ref: ItemRef, name: String) -> ArtistChoice {
+		if let listing = state.value {
+			if let category = listing.categories.first(where: { $0.refs.contains(ref) }) {
+				return ArtistChoice(artist: category, section: .categories)
+			}
+			for index in listing.artists {
+				if let artist = index.artists.first(where: { $0.refs.contains(ref) }) {
+					return ArtistChoice(artist: artist, section: .artists)
+				}
+			}
+		}
+		return ArtistChoice(artist: Artist(ref: ref, name: name, albumCount: 0), section: .artists)
 	}
 
 	func dismissFailures() {
