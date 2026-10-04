@@ -30,49 +30,12 @@ struct TrackInfoView: View {
 	@State private var chapters: [Chapter] = []
 
 	var body: some View {
-		NavigationStack {
-			Form {
-				Section {
-					row("Title", song.title)
-					row("Artist", song.artistName)
-					row("Album", song.albumTitle)
-					row("Track", song.track.map(String.init))
-					row("Year", song.year.map(String.init))
-					row("Length", song.duration > 0 ? formatDuration(song.duration) : nil)
-					// Through the store, not off the song: this view is handed a
-					// snapshot, and the star may have been toggled from the
-					// sheet behind it a second ago.
-					row("Starred", stars.isStarred(song.ref, fallback: song.isStarred) ? "Yes" : "No")
-				}
-
-				Section {
-					row("Stored", stored)
-					// **Where, before what.** With a receiver in the picture
-					// "Sent" is answering a different question - what went over
-					// the network to something else - and reading it without
-					// knowing that is how "why does this sound different"
-					// acquires a wrong answer.
-					row("Playing on", player.castDevice?.name)
-					// nil while the account ceiling is still being asked for,
-					// which is a request to that track's own server and can be
-					// the slow half of a first play.
-					row("Sent", sent?.label)
-					if player.castSendsSoundOnly {
-						row("Picture", "Not sent")
-					}
-				} footer: {
-					Text(footer)
-				}
-
-				share
-			}
-			.navigationTitle("Track info")
-			.inlineTitle()
-			.toolbar {
-				ToolbarItem(placement: .trailingBar) {
-					Button("Done") { dismiss() }
-				}
-			}
+		Group {
+			#if os(macOS)
+				dialog
+			#else
+				form
+			#endif
 		}
 		.task { sent = await player.streamQuality(for: song) }
 		.task {
@@ -81,35 +44,200 @@ struct TrackInfoView: View {
 		}
 	}
 
+	// MARK: - The facts, shared by both layouts
+
+	private struct Fact {
+		let label: String
+		let value: String?
+		init(_ label: String, _ value: String?) {
+			self.label = label
+			self.value = value
+		}
+	}
+
+	private struct Shown: Identifiable {
+		let label: String
+		let value: String
+		var id: String { label }
+	}
+
+	private var details: [Fact] {
+		[
+			Fact("Title", song.title),
+			Fact("Artist", song.artistName),
+			Fact("Album", song.albumTitle),
+			Fact("Track", song.track.map(String.init)),
+			Fact("Year", song.year.map(String.init)),
+			Fact("Length", song.duration > 0 ? formatDuration(song.duration) : nil),
+			// Through the store, not off the song: this view is handed a
+			// snapshot, and the star may have been toggled from the
+			// sheet behind it a second ago.
+			Fact("Starred", stars.isStarred(song.ref, fallback: song.isStarred) ? "Yes" : "No"),
+		]
+	}
+
+	private var delivery: [Fact] {
+		var facts: [Fact] = [
+			Fact("Stored", stored),
+			// **Where, before what.** With a receiver in the picture "Sent" is
+			// answering a different question - what went over the network to
+			// something else - and reading it without knowing that is how "why
+			// does this sound different" acquires a wrong answer.
+			Fact("Playing on", player.castDevice?.name),
+			// nil while the account ceiling is still being asked for, which is
+			// a request to that track's own server and can be the slow half of
+			// a first play.
+			Fact("Sent", sent?.label),
+		]
+		if player.castSendsSoundOnly { facts.append(Fact("Picture", "Not sent")) }
+		return facts
+	}
+
+	/// A fact with nothing in it is left out entirely rather than drawn empty:
+	/// almost every field beyond the title is optional on the wire, and a
+	/// column of blanks reads as a failed load.
+	private func shown(_ facts: [Fact]) -> [Shown] {
+		facts.compactMap { fact in
+			guard let value = fact.value, !value.isEmpty else { return nil }
+			return Shown(label: fact.label, value: value)
+		}
+	}
+
+	// MARK: - iOS
+
+	#if !os(macOS)
+		private var form: some View {
+			NavigationStack {
+				Form {
+					Section {
+						rows(details)
+					}
+					Section {
+						rows(delivery)
+					} footer: {
+						Text(footer)
+					}
+					if serverURL != nil {
+						Section("Share") { shareLinks }
+					}
+				}
+				.navigationTitle("Track info")
+				.inlineTitle()
+				.toolbar {
+					ToolbarItem(placement: .trailingBar) {
+						Button("Done") { dismiss() }
+					}
+				}
+			}
+		}
+
+		private func rows(_ facts: [Fact]) -> some View {
+			ForEach(shown(facts)) { fact in
+				// The view builder rather than `LabeledContent(_:value:)`, whose
+				// first parameter is a `LocalizedStringKey` and so takes a
+				// literal and not the `String` this is handed.
+				LabeledContent {
+					Text(fact.value)
+				} label: {
+					Text(fact.label)
+				}
+			}
+		}
+	#endif
+
+	// MARK: - macOS
+
+	#if os(macOS)
+		/// A Mac dialog rather than a phone screen in a sheet. **Built from
+		/// stacks and a `Grid`, which have an ideal size**, so the sheet takes
+		/// its size from the content; a `Form` or `List` scrolls, has no ideal
+		/// height, and would need a fixed frame.
+		private var dialog: some View {
+			VStack(alignment: .leading, spacing: 16) {
+				Text("Track info").font(.headline)
+				Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 6) {
+					grid(details)
+					GridRow {
+						Divider().gridCellColumns(2)
+					}
+					grid(delivery)
+				}
+				Text(footer)
+					.font(.footnote)
+					.foregroundStyle(.secondary)
+					.fixedSize(horizontal: false, vertical: true)
+					// A cap on the line length, so a long note wraps rather
+					// than widening the dialog. Not a size for the dialog.
+					.frame(maxWidth: 380, alignment: .leading)
+				if serverURL != nil {
+					HStack(spacing: 8) {
+						Text("Share").foregroundStyle(.secondary)
+						shareLinks
+					}
+					.buttonStyle(.bordered)
+					.controlSize(.small)
+				}
+				HStack {
+					Spacer()
+					Button("Done") { dismiss() }
+						.keyboardShortcut(.defaultAction)
+				}
+			}
+			.padding(20)
+		}
+
+		@ViewBuilder
+		private func grid(_ facts: [Fact]) -> some View {
+			ForEach(shown(facts)) { fact in
+				GridRow {
+					Text(fact.label)
+						.foregroundStyle(.secondary)
+						.gridColumnAlignment(.trailing)
+					Text(fact.value)
+						.textSelection(.enabled)
+						.fixedSize(horizontal: false, vertical: true)
+						// Wraps a long album title instead of widening the
+						// dialog, as the footer does.
+						.frame(maxWidth: 320, alignment: .leading)
+				}
+			}
+		}
+	#endif
+
+	// MARK: - Sharing
+
+	/// The track's server address, when this song's server is still known.
+	private var serverURL: String? {
+		registry.servers.first(where: { $0.id == song.ref.server })?.urlString
+	}
+
 	/// The web client's link, `<server>/?track=<id>[&t=<s>]`, so it lands in
 	/// the same chooser page and web player as one copied from a browser. It
 	/// names a server and a track and **carries no credentials** by
 	/// construction, unlike the stream URL, which is why it may be shown.
 	@ViewBuilder
-	private var share: some View {
-		if let server = registry.servers.first(where: { $0.id == song.ref.server }),
-			let plain = TrackLink.shareURL(serverURL: server.urlString, trackId: song.ref.id)
+	private var shareLinks: some View {
+		if let server = serverURL,
+			let plain = TrackLink.shareURL(serverURL: server, trackId: song.ref.id)
 		{
-			Section("Share") {
-				ShareLink(item: plain) { Label("Link to this track", systemImage: "link") }
-				if openedAt >= 1,
-					let here = TrackLink.shareURL(
-						serverURL: server.urlString, trackId: song.ref.id, seconds: openedAt)
-				{
-					ShareLink(item: here) {
-						Label("From \(formatDuration(Int(openedAt)))", systemImage: "clock")
-					}
+			ShareLink(item: plain) { Label("Link to this track", systemImage: "link") }
+			if openedAt >= 1,
+				let here = TrackLink.shareURL(
+					serverURL: server, trackId: song.ref.id, seconds: openedAt)
+			{
+				ShareLink(item: here) {
+					Label("From \(formatDuration(Int(openedAt)))", systemImage: "clock")
 				}
-				// The chapter under the position, for a concert or a mix: the
-				// start of the song rather than wherever the playhead happened
-				// to be.
-				if let chapter = TrackLink.chapter(in: chapters, at: openedAt),
-					let atChapter = TrackLink.shareURL(
-						serverURL: server.urlString, trackId: song.ref.id, seconds: chapter.start)
-				{
-					ShareLink(item: atChapter) {
-						Label("From “\(chapter.displayName)”", systemImage: "list.bullet")
-					}
+			}
+			// The chapter under the position, for a concert or a mix: the
+			// start of the song rather than wherever the playhead happened to
+			// be.
+			if let chapter = TrackLink.chapter(in: chapters, at: openedAt),
+				let atChapter = TrackLink.shareURL(
+					serverURL: server, trackId: song.ref.id, seconds: chapter.start)
+			{
+				ShareLink(item: atChapter) {
+					Label("From “\(chapter.displayName)”", systemImage: "list.bullet")
 				}
 			}
 		}
@@ -139,22 +267,5 @@ struct TrackInfoView: View {
 					fromByteCount: Int64(song.sizeBytes), countStyle: .file))
 		}
 		return parts.isEmpty ? nil : parts.joined(separator: " · ")
-	}
-
-	/// A row with nothing in it is left out entirely rather than drawn empty:
-	/// almost every field beyond the title is optional on the wire, and a
-	/// column of blanks reads as a failed load.
-	@ViewBuilder
-	private func row(_ label: String, _ value: String?) -> some View {
-		if let value, !value.isEmpty {
-			// The view builder rather than `LabeledContent(_:value:)`, whose
-			// first parameter is a `LocalizedStringKey` and so takes a literal
-			// and not the `String` this helper is handed.
-			LabeledContent {
-				Text(value)
-			} label: {
-				Text(label)
-			}
-		}
 	}
 }

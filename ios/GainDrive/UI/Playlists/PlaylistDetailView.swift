@@ -77,6 +77,9 @@ struct PlaylistDetailView: View {
 						SongRow(item: item)
 					}
 					.buttonStyle(.plain)
+					// Here and not only in the row: a button's label does not
+					// pass row settings up to the list.
+					.listRowSeparator(.hidden)
 					.disabled(settings.offlineMode && !pins.state(for: item.song.ref).isHere)
 					.opacity(
 						settings.offlineMode && !pins.state(for: item.song.ref).isHere ? 0.4 : 1)

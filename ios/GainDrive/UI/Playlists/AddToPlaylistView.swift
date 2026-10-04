@@ -54,6 +54,7 @@ struct AddToPlaylistView: View {
 									PlaylistRow(playlist: playlist)
 								}
 								.buttonStyle(.plain)
+								.listRowSeparator(.hidden)
 								.disabled(isSaving)
 							}
 						}

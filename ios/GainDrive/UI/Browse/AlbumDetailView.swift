@@ -167,6 +167,9 @@ struct AlbumDetailView: View {
 				playing: playing == PlayingMarker(song: row.song.ref, index: chapter.index))
 		}
 		.buttonStyle(.plain)
+		// Here and not only in the row: a button's label does not pass
+		// row settings up to the list.
+		.listRowSeparator(.hidden)
 		.disabled(unplayable)
 		.opacity(unplayable ? 0.4 : 1)
 		// The recording's own row is gone, so this is the only way left to
@@ -241,6 +244,9 @@ struct AlbumDetailView: View {
 			TrackRow(song: song, state: player.trackState(of: song.ref), number: number)
 		}
 		.buttonStyle(.plain)
+		// Here and not only in the row: a button's label does not pass
+		// row settings up to the list.
+		.listRowSeparator(.hidden)
 		.disabled(unplayable)
 		.opacity(unplayable ? 0.4 : 1)
 		.trackActions(for: song)
