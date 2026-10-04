@@ -12,9 +12,8 @@ import SwiftUI
 /// and the ones saved in this app. Android's `WiiMControlsSheet`, shown in
 /// the tune panel (`CastTunePanel`) under the receiver's volume.
 ///
-/// Horizontal sliders rather than Android's vertical faders: ten rotated
-/// sliders side by side are cramped on a phone, and a labelled list is how an
-/// iOS settings screen shows ten values.
+/// The bands are ten vertical faders side by side, as the web and Android
+/// draw them: the curve reads as a shape, which ten labelled rows do not.
 struct WiiMControlsView<Header: View>: View {
 	@State private var model: WiiMControlsModel
 	@State private var naming = false
@@ -87,10 +86,9 @@ struct WiiMControlsView<Header: View>: View {
 
 	#if os(macOS)
 		/// A Mac popover body: **stacks have an ideal height**, so the popover
-		/// fits the content, where a `Form` has none. The width is set, as the
-		/// cast picker's is. The presets are a pop-up rather than rows: a WiiM
-		/// ships some twenty, and twenty rows make a popover taller than the
-		/// window.
+		/// fits the content, where a `Form` has none. The width is the
+		/// presenter's. The presets are a pop-up rather than rows: a WiiM ships
+		/// some twenty, and twenty rows make a popover taller than the window.
 		private func panel(_ ui: WiiMEqUi) -> some View {
 			VStack(alignment: .leading, spacing: 14) {
 				HStack {
@@ -105,11 +103,7 @@ struct WiiMControlsView<Header: View>: View {
 					.disabled(model.busy)
 				}
 				if let bands = ui.bands {
-					VStack(spacing: 4) {
-						ForEach(Array(WiiMEq.bands.enumerated()), id: \.offset) { index, band in
-							bandRow(band.label, value: bands[index], index: index)
-						}
-					}
+					faders(bands)
 					// Inert while off, and while a write is in flight, whose
 					// answer would move the faders anyway.
 					.disabled(!ui.enabled || model.busy)
@@ -117,28 +111,38 @@ struct WiiMControlsView<Header: View>: View {
 						.font(.footnote)
 						.foregroundStyle(.secondary)
 				}
+				// Icons beside the pop-up, as the web's row has: labelled
+				// buttons pushed the row wider than the popover.
 				HStack(spacing: 8) {
 					presetPicker(ui)
 					if ui.bands != nil {
-						Button("Save as Preset…") {
+						Button {
 							newName = ""
 							naming = true
+						} label: {
+							Image(systemName: "square.and.arrow.down")
 						}
+						.help("Save as preset")
 						.disabled(!ui.enabled || model.busy)
 					}
 					// No swipe on a Mac, so deleting a saved preset is a menu.
 					if !ui.saved.isEmpty {
-						Menu("Delete") {
+						Menu {
 							ForEach(ui.saved, id: \.self) { name in
 								Button(name, role: .destructive) { model.deleteSaved(name) }
 							}
+						} label: {
+							Image(systemName: "trash")
 						}
+						.menuStyle(.borderlessButton)
+						.menuIndicator(.hidden)
 						.fixedSize()
+						.help("Delete a saved preset")
 					}
 				}
+				.buttonStyle(.borderless)
 				.disabled(model.busy)
 			}
-			.frame(width: 400)
 		}
 
 		/// The speaker's presets and this app's in one pop-up, tagged by where
@@ -171,7 +175,8 @@ struct WiiMControlsView<Header: View>: View {
 					}
 				}
 			}
-			.fixedSize()
+			.labelsHidden()
+			.frame(maxWidth: .infinity)
 		}
 	#endif
 
@@ -186,9 +191,8 @@ struct WiiMControlsView<Header: View>: View {
 
 		if let bands = ui.bands {
 			Section {
-				ForEach(Array(WiiMEq.bands.enumerated()), id: \.offset) { index, band in
-					bandRow(band.label, value: bands[index], index: index)
-				}
+				faders(bands)
+					.padding(.vertical, 4)
 				Button("Save as preset…") {
 					newName = ""
 					naming = true
@@ -225,26 +229,33 @@ struct WiiMControlsView<Header: View>: View {
 		.disabled(model.busy)
 	}
 
-	private func bandRow(_ label: String, value: Int, index: Int) -> some View {
-		HStack(spacing: 12) {
-			Text(label)
-				.font(.footnote.monospacedDigit())
-				.frame(width: 36, alignment: .trailing)
-			Slider(
-				value: Binding(
-					get: { Double(value) },
-					set: { model.setBand(index, to: Int($0.rounded())) }),
-				in: Double(WiiMEq.levelMin)...Double(WiiMEq.levelMax),
-				step: 1,
-				// Written on release, as the whole curve: one command per drag
-				// rather than one per step.
-				onEditingChanged: { editing in if !editing { model.commitBands() } }
-			)
-			.accessibilityLabel("\(label) hertz")
-			Text(Self.offset(value))
-				.font(.footnote.monospacedDigit())
-				.foregroundStyle(.secondary)
-				.frame(width: 32, alignment: .trailing)
+	/// One column per band: the offset above, the fader, the frequency below.
+	/// Each column takes an equal share of the width, so the ten narrow evenly
+	/// rather than pushing the panel wider.
+	private func faders(_ bands: [Int]) -> some View {
+		HStack(spacing: 2) {
+			ForEach(Array(WiiMEq.bands.enumerated()), id: \.offset) { index, band in
+				VStack(spacing: 4) {
+					Text(Self.offset(bands[index]))
+						.foregroundStyle(.secondary)
+					VerticalFader(
+						value: bands[index],
+						range: WiiMEq.levelMin...WiiMEq.levelMax,
+						onChange: { model.setBand(index, to: $0) },
+						// Written on release, as the whole curve: one command
+						// per drag rather than one per step.
+						onCommit: { model.commitBands() }
+					)
+					.frame(height: 112)
+					.accessibilityLabel("\(band.label) hertz")
+					.accessibilityValue(Self.offset(bands[index]))
+					Text(band.label)
+						.foregroundStyle(.secondary)
+				}
+				.font(.caption2.monospacedDigit())
+				.lineLimit(1)
+				.frame(maxWidth: .infinity)
+			}
 		}
 	}
 
@@ -263,5 +274,71 @@ struct WiiMControlsView<Header: View>: View {
 	private static func offset(_ value: Int) -> String {
 		let delta = value - WiiMEq.levelFlat
 		return delta > 0 ? "+\(delta)" : "\(delta)"
+	}
+}
+
+/// A vertical fader drawn as the web's range input is: a thin track filled
+/// from the bottom up to a round knob. Drawn rather than a rotated `Slider`,
+/// whose layout keeps its unrotated frame and so overlaps its neighbours.
+private struct VerticalFader: View {
+	let value: Int
+	let range: ClosedRange<Int>
+	let onChange: (Int) -> Void
+	let onCommit: () -> Void
+	@Environment(\.isEnabled) private var isEnabled
+
+	private let knob: CGFloat = 14
+	private let track: CGFloat = 4
+
+	var body: some View {
+		GeometryReader { geo in
+			let travel = max(geo.size.height - knob, 1)
+			let fraction = CGFloat(value - range.lowerBound)
+				/ CGFloat(range.upperBound - range.lowerBound)
+			let knobTop = travel * (1 - fraction)
+			let tint = isEnabled ? Color.accentColor : Color.secondary
+			ZStack(alignment: .top) {
+				Capsule()
+					.fill(.quaternary)
+					.frame(width: track)
+				Capsule()
+					.fill(tint)
+					.frame(width: track, height: geo.size.height - knobTop - knob / 2)
+					.offset(y: knobTop + knob / 2)
+				Circle()
+					.fill(tint)
+					.frame(width: knob, height: knob)
+					.offset(y: knobTop)
+			}
+			.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+			.contentShape(.rect)
+			// Distance zero, so a click on the track jumps the knob there,
+			// as a range input does.
+			.gesture(
+				DragGesture(minimumDistance: 0)
+					.onChanged { drag in
+						guard isEnabled else { return }
+						let f = 1 - (drag.location.y - knob / 2) / travel
+						set(range.lowerBound
+							+ Int((CGFloat(range.count - 1) * min(max(f, 0), 1)).rounded()))
+					}
+					.onEnded { _ in
+						if isEnabled { onCommit() }
+					})
+		}
+		.accessibilityElement()
+		.accessibilityAdjustableAction { direction in
+			switch direction {
+			case .increment: set(value + 1)
+			case .decrement: set(value - 1)
+			default: return
+			}
+			onCommit()
+		}
+	}
+
+	private func set(_ next: Int) {
+		let clamped = min(max(next, range.lowerBound), range.upperBound)
+		if clamped != value { onChange(clamped) }
 	}
 }

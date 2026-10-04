@@ -57,11 +57,14 @@ struct CastTunePanel: View {
 	@ViewBuilder
 	private var content: some View {
 		#if os(macOS)
+			// The web panel's width; the height follows the content, so the
+			// popover is as tall as what is in it and no taller.
 			VStack(alignment: .leading, spacing: 14) {
 				panelBody
 			}
+			.frame(width: 320)
+			.fixedSize(horizontal: false, vertical: true)
 			.padding(16)
-			.frame(minWidth: 320)
 		#else
 			NavigationStack {
 				panelBody
