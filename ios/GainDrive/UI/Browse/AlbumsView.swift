@@ -144,5 +144,9 @@ struct AlbumsView: View {
 			}
 		}
 		.padding(.vertical, 4)
+		// Pinned to the top of its row: the list sets the row's new height at
+		// once while the notes' clip is still animating, and a row centres its
+		// content, which pushed the header down and let it climb back up.
+		.frame(maxHeight: .infinity, alignment: .top)
 	}
 }
