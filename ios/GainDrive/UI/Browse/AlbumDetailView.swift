@@ -34,6 +34,10 @@ struct AlbumDetailView: View {
 	/// Once per screen, not once per load: a pull-to-refresh must not restart
 	/// the track the user has since navigated away from inside.
 	@State private var autoPlayed = false
+	#if os(macOS)
+		/// The pane's width, read outside the list; see `header`.
+		@State private var paneWidth: CGFloat = 0
+	#endif
 
 	var body: some View {
 		Group {
@@ -118,6 +122,9 @@ struct AlbumDetailView: View {
 			}
 		}
 		.listStyle(.plain)
+		#if os(macOS)
+			.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
+		#endif
 		.refreshable { await model.refresh() }
 		.task(id: detail) { startAutoPlay(detail) }
 	}
@@ -204,9 +211,22 @@ struct AlbumDetailView: View {
 					CoverHero(source: model.heroes.first)
 				}
 			#else
-				// A paged `TabView` is iOS only; the Mac shows the cover until
-				// its own layout (`.ai/macos/PLAN.md`, M3).
+				// A paged `TabView` is iOS only; the Mac shows the cover alone.
+				//
+				// **A size taken from the pane, not from the row.** A square
+				// cover filling the row is as tall as the row is wide, and the
+				// row narrows when a legacy scroller appears. A film, one track
+				// under a cover and notes, is just about one pane high, so the
+				// scroller shrank the cover until it was not needed, its removal
+				// grew the cover until it was, and AppKit looped on the window's
+				// layout. The pane's width does not move with the scroller. The
+				// 40 points are the row insets plus a scroller, and 320 is the
+				// web client's cap.
 				CoverHero(source: model.heroes.first)
+					.frame(
+						width: max(min(paneWidth - 40, 320), 0),
+						height: max(min(paneWidth - 40, 320), 0))
+					.frame(maxWidth: .infinity)
 			#endif
 
 			HStack(alignment: .firstTextBaseline) {
