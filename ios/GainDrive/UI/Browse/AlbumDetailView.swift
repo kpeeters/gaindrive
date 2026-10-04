@@ -211,7 +211,18 @@ struct AlbumDetailView: View {
 
 			HStack(alignment: .firstTextBaseline) {
 				VStack(alignment: .leading, spacing: 2) {
-					Text(detail.album.title).font(.title3.weight(.semibold))
+					Text(detail.album.title)
+						.font(.title3.weight(.semibold))
+						#if os(macOS)
+							// **A height that does not follow the width.** Left
+							// free, a long title near the wrap point flipped
+							// between one line and two as the list's scroller
+							// came and went, and AppKit looped on the window's
+							// layout until it crashed. Two lines reserved, the
+							// rest in the tooltip.
+							.lineLimit(2, reservesSpace: true)
+							.help(detail.album.title)
+						#endif
 					Text(subtitle(detail)).font(.subheadline).foregroundStyle(.secondary)
 				}
 				Spacer(minLength: 12)
