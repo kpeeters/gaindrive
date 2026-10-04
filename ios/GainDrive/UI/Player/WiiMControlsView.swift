@@ -9,28 +9,32 @@
 import SwiftUI
 
 /// A WiiM's equalizer: the switch, the ten graphic bands, the device's presets
-/// and the ones saved in this app. Android's `WiiMControlsSheet`, pushed from
-/// the cast device sheet (a sheet over it on the Mac) rather than opened from
-/// its own button, which keeps the Now Playing row as it is and puts it
-/// beside the volume it belongs with.
+/// and the ones saved in this app. Android's `WiiMControlsSheet`, shown in
+/// the tune panel (`CastTunePanel`) under the receiver's volume.
 ///
 /// Horizontal sliders rather than Android's vertical faders: ten rotated
 /// sliders side by side are cramped on a phone, and a labelled list is how an
 /// iOS settings screen shows ten values.
-struct WiiMControlsView: View {
+struct WiiMControlsView<Header: View>: View {
 	@State private var model: WiiMControlsModel
 	@State private var naming = false
 	@State private var newName = ""
+	/// The receiver's volume, which the tune panel shows above the equalizer.
+	/// Passed in rather than drawn beside this view because on iOS both have
+	/// to be sections of the one `Form`.
+	private let header: Header
 
-	init(deviceId: String, address: String) {
+	init(deviceId: String, address: String, @ViewBuilder header: () -> Header) {
 		_model = State(initialValue: WiiMControlsModel(deviceId: deviceId, address: address))
+		self.header = header()
 	}
 
 	var body: some View {
-		Group {
+		container {
 			switch model.state {
 			case .loading:
 				ProgressView()
+					.frame(maxWidth: .infinity)
 			case .failed(let message):
 				ContentUnavailableView {
 					Label("Equalizer unavailable", systemImage: "slider.vertical.3")
@@ -47,8 +51,6 @@ struct WiiMControlsView: View {
 				#endif
 			}
 		}
-		.navigationTitle("Equalizer")
-		.inlineTitle()
 		.task { await model.refresh() }
 		.alert(
 			"Something went wrong",
@@ -67,12 +69,28 @@ struct WiiMControlsView: View {
 		}
 	}
 
+	@ViewBuilder
+	private func container(@ViewBuilder _ content: () -> some View) -> some View {
+		#if os(macOS)
+			VStack(alignment: .leading, spacing: 14) {
+				header
+				Divider()
+				content()
+			}
+		#else
+			Form {
+				header
+				content()
+			}
+		#endif
+	}
+
 	#if os(macOS)
-		/// A Mac dialog body, as the cast picker's: **stacks have an ideal
-		/// height**, so the sheet's height fits the content, where a `Form`
-		/// has none. The width is set, as the picker's is. The presets are a pop-up rather than
-		/// rows: a WiiM ships some twenty, and twenty rows make a dialog
-		/// taller than the window. The Done button is the presenter's.
+		/// A Mac popover body: **stacks have an ideal height**, so the popover
+		/// fits the content, where a `Form` has none. The width is set, as the
+		/// cast picker's is. The presets are a pop-up rather than rows: a WiiM
+		/// ships some twenty, and twenty rows make a popover taller than the
+		/// window.
 		private func panel(_ ui: WiiMEqUi) -> some View {
 			VStack(alignment: .leading, spacing: 14) {
 				HStack {
@@ -157,55 +175,54 @@ struct WiiMControlsView: View {
 		}
 	#endif
 
+	@ViewBuilder
 	private func form(_ ui: WiiMEqUi) -> some View {
-		Form {
+		Section {
+			Toggle(
+				"Equalizer",
+				isOn: Binding(get: { ui.enabled }, set: { model.setEnabled($0) }))
+		}
+		.disabled(model.busy)
+
+		if let bands = ui.bands {
 			Section {
-				Toggle(
-					"Equalizer",
-					isOn: Binding(get: { ui.enabled }, set: { model.setEnabled($0) }))
-			}
-			.disabled(model.busy)
-
-			if let bands = ui.bands {
-				Section {
-					ForEach(Array(WiiMEq.bands.enumerated()), id: \.offset) { index, band in
-						bandRow(band.label, value: bands[index], index: index)
-					}
-					Button("Save as preset…") {
-						newName = ""
-						naming = true
-					}
-				} header: {
-					Text("Bands")
-				} footer: {
-					// Offsets from flat, not decibels: how the device's 0-99
-					// maps to dB has not been measured.
-					Text("Steps from flat on the device's own scale.")
+				ForEach(Array(WiiMEq.bands.enumerated()), id: \.offset) { index, band in
+					bandRow(band.label, value: bands[index], index: index)
 				}
-				// Faders are inert while the equalizer is off, and while a write
-				// is in flight, whose answer would move them anyway.
-				.disabled(!ui.enabled || model.busy)
-			}
-
-			if !ui.saved.isEmpty {
-				Section("Saved in this app") {
-					ForEach(ui.saved, id: \.self) { name in
-						presetRow(name, ticked: ui.preset == name) { model.applySaved(name) }
-							.swipeActions {
-								Button("Delete", role: .destructive) { model.deleteSaved(name) }
-							}
-					}
+				Button("Save as preset…") {
+					newName = ""
+					naming = true
 				}
-				.disabled(model.busy)
+			} header: {
+				Text("Bands")
+			} footer: {
+				// Offsets from flat, not decibels: how the device's 0-99
+				// maps to dB has not been measured.
+				Text("Steps from flat on the device's own scale.")
 			}
+			// Faders are inert while the equalizer is off, and while a write
+			// is in flight, whose answer would move them anyway.
+			.disabled(!ui.enabled || model.busy)
+		}
 
-			Section("On the speaker") {
-				ForEach(ui.presets, id: \.self) { name in
-					presetRow(name, ticked: ui.preset == name) { model.selectPreset(name) }
+		if !ui.saved.isEmpty {
+			Section("Saved in this app") {
+				ForEach(ui.saved, id: \.self) { name in
+					presetRow(name, ticked: ui.preset == name) { model.applySaved(name) }
+						.swipeActions {
+							Button("Delete", role: .destructive) { model.deleteSaved(name) }
+						}
 				}
 			}
 			.disabled(model.busy)
 		}
+
+		Section("On the speaker") {
+			ForEach(ui.presets, id: \.self) { name in
+				presetRow(name, ticked: ui.preset == name) { model.selectPreset(name) }
+			}
+		}
+		.disabled(model.busy)
 	}
 
 	private func bandRow(_ label: String, value: Int, index: Int) -> some View {

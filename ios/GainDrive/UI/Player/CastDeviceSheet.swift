@@ -28,9 +28,6 @@ struct CastDeviceSheet: View {
 	/// Multicast is not free, and this sheet is the only consumer.
 	@State private var discovery = CastDiscovery()
 	@Environment(\.scenePhase) private var scenePhase
-	#if os(macOS)
-		@State private var showingEqualizer = false
-	#endif
 
 	var body: some View {
 		Group {
@@ -57,7 +54,6 @@ struct CastDeviceSheet: View {
 		private var listSheet: some View {
 			NavigationStack {
 				List {
-					volume
 					thisDevice
 					discovered
 				}
@@ -86,19 +82,6 @@ struct CastDeviceSheet: View {
 		private var dialog: some View {
 			VStack(alignment: .leading, spacing: 12) {
 				Text("Play on").font(.headline)
-				if let device = player.castDevice {
-					VStack(alignment: .leading, spacing: 6) {
-						Text(device.name).foregroundStyle(.secondary)
-						CastVolumeRow(session: player.castSession)
-						if device.kind == .wiim, let address = player.castSession.address {
-							Button("Equalizer…") { showingEqualizer = true }
-								.sheet(isPresented: $showingEqualizer) {
-									equalizer(deviceId: device.id, address: address)
-								}
-						}
-					}
-					Divider()
-				}
 				thisDeviceRow
 				Text("On this network")
 					.font(.subheadline)
@@ -126,51 +109,9 @@ struct CastDeviceSheet: View {
 			.padding(20)
 			.frame(width: 380)
 		}
-
-		/// The WiiM's equalizer, a sheet over this one: there is no navigation
-		/// stack in a dialog to push it onto.
-		private func equalizer(deviceId: String, address: String) -> some View {
-			VStack(alignment: .leading, spacing: 12) {
-				WiiMControlsView(deviceId: deviceId, address: address)
-				HStack {
-					Spacer()
-					Button("Done") { showingEqualizer = false }
-						.keyboardShortcut(.defaultAction)
-				}
-			}
-			.padding(20)
-		}
 	#endif
 
 	// MARK: - Rows
-
-	/// The receiver's own volume, while casting. **Here rather than a button of
-	/// its own in Now Playing**, whose row is already full on a phone: this is
-	/// the sheet the cast button opens while casting, and it is where the
-	/// system's AirPlay menu keeps its volume too. Android puts the same row
-	/// in a sheet behind a speaker button.
-	@ViewBuilder
-	private var volume: some View {
-		if let device = player.castDevice {
-			Section {
-				CastVolumeRow(session: player.castSession)
-				// A WiiM also speaks a private HTTP API on the same address,
-				// which reaches the equalizer the Cast protocol cannot. Only
-				// once the channel has resolved an address to reach it on.
-				if device.kind == .wiim {
-					if let address = player.castSession.address {
-						NavigationLink("Equalizer") {
-							WiiMControlsView(deviceId: device.id, address: address)
-						}
-					} else {
-						Text("Equalizer").foregroundStyle(.secondary)
-					}
-				}
-			} header: {
-				Text(device.name)
-			}
-		}
-	}
 
 	/// **First, and always present.** Coming back is the action somebody is
 	/// most likely to want from this sheet - a device list with no way off it
@@ -329,63 +270,5 @@ struct CastButton: View {
 		}
 		.accessibilityLabel(
 			player.castDevice.map { "Casting to \($0.name)" } ?? "Play on another device")
-	}
-}
-
-/// The receiver's device volume: a bar that shows it and two buttons that step
-/// it, one per cent a tap, as on Android.
-///
-/// **Deliberately not a slider.** A slider can take an amplifier from quiet to
-/// 100% in one careless drag or a stray tap at its end, and on a WiiM driving
-/// real speakers that is a way to damage them or somebody's ears. Steps make
-/// every change small and deliberate. The bar is information only.
-///
-/// Both buttons wait until the receiver has said what the volume is: stepping
-/// from a guess could jump it. SET_VOLUME is one code path for every receiver,
-/// a WiiM included.
-struct CastVolumeRow: View {
-	let session: CastSession
-
-	/// One per cent. The receiver's own step size is unknowable, so this is a
-	/// feel choice rather than a mapping - Android's `CAST_VOLUME_STEP`.
-	static let step = 0.01
-
-	var body: some View {
-		HStack(spacing: 12) {
-			Button {
-				stepBy(-Self.step)
-			} label: {
-				Image(systemName: "speaker.minus.fill")
-			}
-			.disabled(level == nil || level == 0)
-			.accessibilityLabel("Volume down")
-			ProgressView(value: level ?? 0)
-				.accessibilityLabel("Volume")
-				.accessibilityValue(level.map { "\(Int(($0 * 100).rounded())) per cent" } ?? "Unknown")
-			Text(level.map { "\(Int(($0 * 100).rounded()))%" } ?? "–")
-				.font(.footnote.monospacedDigit())
-				.foregroundStyle(.secondary)
-				.frame(minWidth: 36, alignment: .trailing)
-			Button {
-				stepBy(Self.step)
-			} label: {
-				Image(systemName: "speaker.plus.fill")
-			}
-			.disabled(level == nil || level == 1)
-			.accessibilityLabel("Volume up")
-		}
-		// In a List row, a plain button style keeps each button its own tap
-		// target rather than the whole row answering for the first one.
-		.buttonStyle(.borderless)
-	}
-
-	private var level: Double? { session.volume?.level }
-
-	/// Rounded to the step, so repeated taps land on whole per cents rather
-	/// than drifting with whatever fraction the receiver reported.
-	private func stepBy(_ delta: Double) {
-		guard let level else { return }
-		let next = ((level + delta) * 100).rounded() / 100
-		session.setVolume(min(max(next, 0), 1))
 	}
 }

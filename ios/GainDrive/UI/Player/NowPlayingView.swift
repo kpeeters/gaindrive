@@ -236,6 +236,7 @@ struct NowPlayingView: View {
 			// and goes on playing if the phone sleeps. They answer the same
 			// wish and are not the same mechanism, and `AVRoutePickerView` is
 			// UIKit's own and cannot be taught about a third kind of route.
+			CastTuneButton()
 			CastButton(showing: $castPicker)
 			AirPlayButton(player: player.videoPlayer)
 				.frame(width: 30, height: 30)

@@ -128,6 +128,9 @@ struct PlayerBar: View {
 			}
 			.disabled(player.current == nil)
 			.accessibilityLabel("Track info")
+			// Beside the cast button, as on the web: the receiver it adjusts is
+			// the one that button chose.
+			CastTuneButton()
 			CastButton(showing: $castPicker, size: 16)
 			AirPlayButton(player: player.videoPlayer)
 				.frame(width: 24, height: 24)
