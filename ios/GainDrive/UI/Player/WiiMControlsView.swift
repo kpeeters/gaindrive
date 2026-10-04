@@ -10,8 +10,9 @@ import SwiftUI
 
 /// A WiiM's equalizer: the switch, the ten graphic bands, the device's presets
 /// and the ones saved in this app. Android's `WiiMControlsSheet`, pushed from
-/// the cast device sheet rather than opened from its own button, which keeps
-/// the Now Playing row as it is and puts it beside the volume it belongs with.
+/// the cast device sheet (a sheet over it on the Mac) rather than opened from
+/// its own button, which keeps the Now Playing row as it is and puts it
+/// beside the volume it belongs with.
 ///
 /// Horizontal sliders rather than Android's vertical faders: ten rotated
 /// sliders side by side are cramped on a phone, and a labelled list is how an
@@ -39,7 +40,11 @@ struct WiiMControlsView: View {
 					Button("Try again") { Task { await model.refresh() } }
 				}
 			case .ready(let ui):
-				form(ui)
+				#if os(macOS)
+					panel(ui)
+				#else
+					form(ui)
+				#endif
 			}
 		}
 		.navigationTitle("Equalizer")
@@ -61,6 +66,96 @@ struct WiiMControlsView: View {
 			Text("Kept in this app, not on the speaker.")
 		}
 	}
+
+	#if os(macOS)
+		/// A Mac dialog body, as the cast picker's: **stacks have an ideal
+		/// height**, so the sheet's height fits the content, where a `Form`
+		/// has none. The width is set, as the picker's is. The presets are a pop-up rather than
+		/// rows: a WiiM ships some twenty, and twenty rows make a dialog
+		/// taller than the window. The Done button is the presenter's.
+		private func panel(_ ui: WiiMEqUi) -> some View {
+			VStack(alignment: .leading, spacing: 14) {
+				HStack {
+					Text("Equalizer").font(.headline)
+					Spacer()
+					Toggle(
+						"Equalizer",
+						isOn: Binding(get: { ui.enabled }, set: { model.setEnabled($0) })
+					)
+					.labelsHidden()
+					.toggleStyle(.switch)
+					.disabled(model.busy)
+				}
+				if let bands = ui.bands {
+					VStack(spacing: 4) {
+						ForEach(Array(WiiMEq.bands.enumerated()), id: \.offset) { index, band in
+							bandRow(band.label, value: bands[index], index: index)
+						}
+					}
+					// Inert while off, and while a write is in flight, whose
+					// answer would move the faders anyway.
+					.disabled(!ui.enabled || model.busy)
+					Text("Steps from flat on the device's own scale.")
+						.font(.footnote)
+						.foregroundStyle(.secondary)
+				}
+				HStack(spacing: 8) {
+					presetPicker(ui)
+					if ui.bands != nil {
+						Button("Save as Preset…") {
+							newName = ""
+							naming = true
+						}
+						.disabled(!ui.enabled || model.busy)
+					}
+					// No swipe on a Mac, so deleting a saved preset is a menu.
+					if !ui.saved.isEmpty {
+						Menu("Delete") {
+							ForEach(ui.saved, id: \.self) { name in
+								Button(name, role: .destructive) { model.deleteSaved(name) }
+							}
+						}
+						.fixedSize()
+					}
+				}
+				.disabled(model.busy)
+			}
+			.frame(width: 400)
+		}
+
+		/// The speaker's presets and this app's in one pop-up, tagged by where
+		/// they live, since the two lists may share a name.
+		private func presetPicker(_ ui: WiiMEqUi) -> some View {
+			Picker(
+				"Preset",
+				selection: Binding<String?>(
+					get: {
+						ui.preset.map { ui.saved.contains($0) ? "saved:" + $0 : "speaker:" + $0 }
+					},
+					set: { tag in
+						guard let tag else { return }
+						if tag.hasPrefix("saved:") {
+							model.applySaved(String(tag.dropFirst("saved:".count)))
+						} else {
+							model.selectPreset(String(tag.dropFirst("speaker:".count)))
+						}
+					})
+			) {
+				if ui.preset == nil {
+					Text("Custom").tag(String?.none)
+				}
+				Section("On the speaker") {
+					ForEach(ui.presets, id: \.self) { Text($0).tag(Optional("speaker:" + $0)) }
+				}
+				if !ui.saved.isEmpty {
+					Section("Saved in this app") {
+						ForEach(ui.saved, id: \.self) { Text($0).tag(Optional("saved:" + $0)) }
+					}
+				}
+			}
+			.fixedSize()
+		}
+	#endif
 
 	private func form(_ ui: WiiMEqUi) -> some View {
 		Form {

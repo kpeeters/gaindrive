@@ -76,10 +76,13 @@ struct CastDeviceSheet: View {
 	// MARK: - macOS
 
 	#if os(macOS)
-		/// A Mac dialog, as `TrackInfoView` is: **stacks have an ideal size**,
-		/// so the sheet takes its size from the rows and grows as receivers
-		/// answer. A `List` scrolls, has no ideal height, and collapsed the
-		/// sheet to its title.
+		/// A Mac dialog: **stacks have an ideal height**, so the sheet takes its
+		/// height from the rows and grows as receivers answer; a `List` scrolls,
+		/// has none, and collapsed the sheet to its title.
+		///
+		/// **The width is set**, as an alert's is. Left to the content, the
+		/// wrapped hint's height depended on a width that depended on it, and
+		/// AppKit looped on the window's constraints until it crashed.
 		private var dialog: some View {
 			VStack(alignment: .leading, spacing: 12) {
 				Text("Play on").font(.headline)
@@ -87,7 +90,6 @@ struct CastDeviceSheet: View {
 					VStack(alignment: .leading, spacing: 6) {
 						Text(device.name).foregroundStyle(.secondary)
 						CastVolumeRow(session: player.castSession)
-							.frame(minWidth: 260)
 						if device.kind == .wiim, let address = player.castSession.address {
 							Button("Equalizer…") { showingEqualizer = true }
 								.sheet(isPresented: $showingEqualizer) {
@@ -107,15 +109,9 @@ struct CastDeviceSheet: View {
 					Label(message, systemImage: "exclamationmark.triangle")
 						.font(.footnote)
 						.foregroundStyle(.secondary)
-						.fixedSize(horizontal: false, vertical: true)
-						.frame(maxWidth: 320, alignment: .leading)
 				case .idle, .browsing:
 					if discovery.devices.isEmpty {
 						looking
-							.fixedSize(horizontal: false, vertical: true)
-							// A cap on the hint's line length, not a size for
-							// the dialog.
-							.frame(maxWidth: 320, alignment: .leading)
 					} else {
 						ForEach(discovery.devices) { deviceRow($0) }
 					}
@@ -128,6 +124,7 @@ struct CastDeviceSheet: View {
 				.padding(.top, 4)
 			}
 			.padding(20)
+			.frame(width: 380)
 		}
 
 		/// The WiiM's equalizer, a sheet over this one: there is no navigation

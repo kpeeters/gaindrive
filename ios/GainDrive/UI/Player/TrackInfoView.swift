@@ -149,9 +149,11 @@ struct TrackInfoView: View {
 
 	#if os(macOS)
 		/// A Mac dialog rather than a phone screen in a sheet. **Built from
-		/// stacks and a `Grid`, which have an ideal size**, so the sheet takes
-		/// its size from the content; a `Form` or `List` scrolls, has no ideal
-		/// height, and would need a fixed frame.
+		/// stacks and a `Grid`, which have an ideal height**, so the sheet takes
+		/// its height from the content; a `Form` or `List` scrolls and has none.
+		/// The width is set, as an alert's is: wrapped text whose height
+		/// depends on a content-driven width can loop AppKit's window layout,
+		/// which crashed the cast picker.
 		private var dialog: some View {
 			VStack(alignment: .leading, spacing: 16) {
 				Text("Track info").font(.headline)
@@ -166,9 +168,6 @@ struct TrackInfoView: View {
 					.font(.footnote)
 					.foregroundStyle(.secondary)
 					.fixedSize(horizontal: false, vertical: true)
-					// A cap on the line length, so a long note wraps rather
-					// than widening the dialog. Not a size for the dialog.
-					.frame(maxWidth: 380, alignment: .leading)
 				if serverURL != nil {
 					HStack(spacing: 8) {
 						Text("Share").foregroundStyle(.secondary)
@@ -184,6 +183,7 @@ struct TrackInfoView: View {
 				}
 			}
 			.padding(20)
+			.frame(width: 440)
 		}
 
 		@ViewBuilder
@@ -196,9 +196,6 @@ struct TrackInfoView: View {
 					Text(fact.value)
 						.textSelection(.enabled)
 						.fixedSize(horizontal: false, vertical: true)
-						// Wraps a long album title instead of widening the
-						// dialog, as the footer does.
-						.frame(maxWidth: 320, alignment: .leading)
 				}
 			}
 		}
