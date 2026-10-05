@@ -99,6 +99,9 @@ final class SettingsStore {
 	/// On by default, as on Android: replaying an album is the common case,
 	/// and the cap plus eviction stop it running away. Off, a track streams as
 	/// it did before the cache existed, and what is already stored still plays.
+	///
+	/// Off by default on macOS: a desktop is rarely away from its network, so
+	/// keeping every played track would only fill the disk.
 	var cacheOnPlay: Bool {
 		didSet { defaults.set(cacheOnPlay, forKey: Self.cacheOnPlayKey) }
 	}
@@ -158,6 +161,11 @@ final class SettingsStore {
 	}
 
 	static let defaultCacheCapBytes: Int64 = 4 * 1024 * 1024 * 1024
+#if os(macOS)
+	static let defaultCacheOnPlay = false
+#else
+	static let defaultCacheOnPlay = true
+#endif
 	static let cacheCapChoices: [Int64] = [
 		1 * 1024 * 1024 * 1024,
 		2 * 1024 * 1024 * 1024,
@@ -211,7 +219,7 @@ final class SettingsStore {
 		offlineMode = defaults.bool(forKey: Self.offlineKey)
 		let storedCap = defaults.object(forKey: Self.cacheCapKey) as? Double
 		cacheCapBytes = storedCap.map { Int64($0) } ?? Self.defaultCacheCapBytes
-		cacheOnPlay = defaults.object(forKey: Self.cacheOnPlayKey) as? Bool ?? true
+		cacheOnPlay = defaults.object(forKey: Self.cacheOnPlayKey) as? Bool ?? Self.defaultCacheOnPlay
 		downloadUnmeteredOnly = defaults.object(forKey: Self.unmeteredOnlyKey) as? Bool ?? true
 		videoAudioOnly = defaults.bool(forKey: Self.videoAudioOnlyKey)
 		castOriginal = defaults.bool(forKey: Self.castOriginalKey)
