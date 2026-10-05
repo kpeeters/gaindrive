@@ -257,8 +257,11 @@ void GainDrive::routes_stream()
 			float cast_offset = to_it != req.params.end()
 			    ? to_float(to_it->second, 0.0f) : 0.0f;
 			// No caption: a client redirected here never asked for one, and
-			// the picker sends its choice through castLoad.
-			cast_load_song(req, *song, to_int(it->second, -1), cast_offset, 0);
+			// the picker sends its choice through castLoad.  The session's
+			// quality rather than this URL's: a URL built for local playback
+			// carries a declaration a receiver did not make.
+			cast_load_song(req, *song, to_int(it->second, -1), cast_offset, 0,
+			               last_cast_format_, last_cast_max_bitrate_);
 			res.status = 204;
 			return;
 			}

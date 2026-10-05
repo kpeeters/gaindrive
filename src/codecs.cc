@@ -139,6 +139,12 @@ std::string_view cast_mime_for(std::string_view container,
 	return codec_to_mime(container);
 	}
 
+bool cast_plays_audio(std::string_view mime)
+	{
+	return mime == "audio/flac" || mime == "audio/mpeg" || mime == "audio/mp4"
+	    || mime == "audio/aac"  || mime == "audio/ogg"  || mime == "audio/wav";
+	}
+
 std::optional<Target> audio_copy_target(std::string_view audio_codec)
 	{
 	std::string_view name;

@@ -194,6 +194,61 @@ const videoAudioOnly = {
       },
    };
 
+// The audio quality, as the apps have it: the original, or a rough ceiling in
+// kbps (0 is the original), and separately what to convert to when the
+// ceiling makes a conversion unavoidable.  A file this browser plays that fits
+// under the ceiling is sent as stored whatever its format, and with no ceiling
+// a file it cannot play arrives as FLAC - see plan_transcode in
+// src/streamer.cc.  The format survives a spell on Original, as it does on
+// the apps.
+const QUALITY_CAPS = [96, 128, 160, 192, 256];
+
+// What a ceiling may convert to, best first; only the ones this browser plays
+// are offered.  Opus leads where it decodes, as on Android.
+const TRANSCODE_FORMATS = [
+   {param: 'opus', label: 'Opus', mime: 'audio/ogg; codecs="opus"'},
+   {param: 'm4a',  label: 'AAC',  mime: 'audio/mp4; codecs="mp4a.40.2"'},
+   {param: 'mp3',  label: 'MP3',  mime: 'audio/mpeg'},
+];
+
+function transcodeFormats() {
+   return TRANSCODE_FORMATS.filter(f => _canPlayProbe.canPlayType(f.mime) !== '');
+}
+
+const audioQuality = {
+   cap() {
+      const v = parseInt(localStorage.getItem('gd_quality_cap') ?? '', 10);
+      return QUALITY_CAPS.includes(v) ? v : 0;
+      },
+   setCap(kbps) {
+      if (QUALITY_CAPS.includes(kbps)) localStorage.setItem('gd_quality_cap', String(kbps));
+      else                             localStorage.removeItem('gd_quality_cap');
+      },
+   format() {
+      const offered = transcodeFormats();
+      const stored  = localStorage.getItem('gd_transcode_format');
+      return offered.find(f => f.param === stored)?.param ?? offered[0]?.param ?? 'mp3';
+      },
+   setFormat(param) { localStorage.setItem('gd_transcode_format', param); },
+   label() {
+      const cap = this.cap();
+      if (!cap) return 'Original';
+      const f = TRANSCODE_FORMATS.find(f => f.param === this.format());
+      return `Up to ${cap} kbps, ${f?.label ?? this.format()} when converted`;
+      },
+   };
+
+// "Cast at original quality": a receiver fetching from the server is sent the
+// file as stored rather than the quality above, as on the apps.  Off by
+// default there too.  A file the receiver cannot play goes as FLAC either way.
+const castOriginal = {
+   get()   { return localStorage.getItem('gd_cast_original') === '1'; },
+   set(on) {
+      if (on) localStorage.setItem('gd_cast_original', '1');
+      else    localStorage.removeItem('gd_cast_original');
+      },
+   };
+
 // ── Library preferences ────────────────────────────────────
 
 // Which order the album pane lists an artist's albums in.  The server answers
@@ -296,6 +351,41 @@ function pickStreamFormat(song) {
    return 'mp3';
 }
 
+// What this browser plays as it stands, for `playable` on stream.view: the
+// apps' declaration (PlayableAudio on both), asked of the browser rather than
+// known in advance.  A capability, not a request for the file - the ceiling
+// decides size - so lossless is included whatever the setting.
+//
+// Every token is the server's `container/codec` pair, never an extension; see
+// audio_declared() in src/codecs.hh.  The probe MIMEs name the codec wherever
+// the container can hold several, so 'probably' is the answer that counts, and
+// 'maybe' only for the containers that settle the codec - the same rule
+// pickStreamFormat() applies, for the same reason.
+const PLAYABLE_PROBES = {
+   'mpeg/mp3':   'audio/mpeg',
+   'adts/aac':   'audio/aac',
+   'flac/flac':  'audio/flac',
+   'mp4/aac':    'audio/mp4; codecs="mp4a.40.2"',
+   'mp4/alac':   'audio/mp4; codecs="alac"',
+   'ogg/opus':   'audio/ogg; codecs="opus"',
+   'ogg/vorbis': 'audio/ogg; codecs="vorbis"',
+   'ogg/flac':   'audio/ogg; codecs="flac"',
+};
+
+let _playableAudio = null;
+function playableAudio() {
+   if (_playableAudio) return _playableAudio;
+   _playableAudio = Object.entries(PLAYABLE_PROBES)
+      .filter(([, mime]) => {
+         const verdict = _canPlayProbe.canPlayType(mime);
+         return verdict === 'probably'
+             || (verdict === 'maybe' && UNAMBIGUOUS_AUDIO_MIMES.has(mime));
+         })
+      .map(([token]) => token)
+      .sort();
+   return _playableAudio;
+}
+
 // What ffmpeg would be asked to do for a `format`, as "<muxer>/<encoder>".
 //
 // A transcribed slice of TARGETS in `src/codecs.hh`, holding only the formats
@@ -327,6 +417,39 @@ function sameEncoder(fmt, suffix) {
    if (!fmt || !suffix) return false;
    const want = FORMAT_ENCODERS[fmt];
    return want !== undefined && want === FORMAT_ENCODERS[suffix];
+}
+
+// One byte of a stream URL, for what the response says rather than what it
+// carries: X-Gaindrive-Sent, and whether it answered the Range at all (206 is
+// a file, 200 a pipe).  Aborted once the headers are in, so a pipe is not
+// read to the end.  Null when the fetch fails; the caller then guesses as it
+// used to.
+async function streamProbe(url) {
+   const ctl = new AbortController();
+   try {
+      const r = await fetch(url, {headers: {Range: 'bytes=0-0'}, signal: ctl.signal});
+      const out = {sent: r.headers.get('X-Gaindrive-Sent'), ranged: r.status === 206};
+      ctl.abort();
+      return out;
+      }
+   catch (err) {
+      console.warn('[player] stream probe failed', err);
+      return null;
+      }
+}
+
+// X-Gaindrive-Sent in words, as the apps' track info puts it: "original" is
+// the stored file, a target with a rate a lossy encode, a target alone a
+// lossless one.
+function describeSent(sent, song) {
+   const [target, kbps] = sent.split(' ');
+   if (target === 'original')
+      return [song?.suffix?.toUpperCase(), 'unconverted'].filter(Boolean).join(', ');
+   const name = {m4a: 'AAC', aac: 'AAC', opus: 'Opus', mp3: 'MP3', flac: 'FLAC',
+                 ogg: 'Vorbis', oga: 'Vorbis', vorbis: 'Vorbis'}[target]
+             ?? target.toUpperCase();
+   if (kbps) return `${name} ${kbps} kbps`;
+   return name === 'FLAC' ? 'FLAC, converted losslessly' : `${name}, converted`;
 }
 
 // Whether asking for `fmt` leaves this song's bytes untouched.  This client
@@ -1113,10 +1236,12 @@ async function viewSettings() {
       }
    }
 
-// What the index says under Playback. Audio-only wins the line when it is on:
-// it changes what every video in the library will do, which counts for more
-// than where the picture goes while casting.
+// What the index says under Playback. A quality limit wins the line, since it
+// changes every track; then audio-only, which changes what every video in the
+// library will do and counts for more than where the picture goes while
+// casting.
 function playbackSummary() {
+   if (audioQuality.cap())    return audioQuality.label();
    if (videoAudioOnly.get())  return 'Videos as audio only';
    if (!castLocalVideo.get()) return 'Video stops here when casting';
    return 'Videos play with picture';
@@ -1204,9 +1329,78 @@ function settingsSection(pane, title) {
 
 // ── Settings: Playback ───────────────────────────────────────────────────────
 
+// A labelled <select> in a settings row; [options] are [value, text] pairs.
+function settingsSelect(sec, labelText, options, value, onChange) {
+   const row   = document.createElement('div');
+   row.className = 'form-row';
+   const label = document.createElement('label');
+   label.appendChild(document.createTextNode(labelText + ' '));
+   const sel = document.createElement('select');
+   for (const [v, text] of options) {
+      const opt = document.createElement('option');
+      opt.value = v;
+      opt.textContent = text;
+      sel.appendChild(opt);
+      }
+   sel.value = value;
+   sel.addEventListener('change', () => onChange(sel.value));
+   label.appendChild(sel);
+   row.appendChild(label);
+   sec.appendChild(row);
+   return row;
+   }
+
 function viewSettingsPlayback() {
    const {pane, gen} = settingsPane('playback', 'Playback');
-   const sec = settingsSection(pane);
+
+   // The apps' two settings, in the same words: a ceiling, and what a
+   // ceiling converts to - the second only while there is a ceiling, since
+   // with Original nothing is converted to a format anyone chose.
+   const quality = settingsSection(pane);
+   let formatRow = null;
+   settingsSelect(quality, 'Quality',
+      [['0', 'Original'], ...QUALITY_CAPS.map(k => [String(k), `Up to ${k} kbps`])],
+      String(audioQuality.cap()),
+      v => {
+         audioQuality.setCap(parseInt(v, 10));
+         formatRow.hidden = !audioQuality.cap();
+         settingsSummariesChanged();
+         });
+   formatRow = settingsSelect(quality, 'Convert to',
+      transcodeFormats().map(f => [f.param, f.label]),
+      audioQuality.format(),
+      v => {
+         audioQuality.setFormat(v);
+         settingsSummariesChanged();
+         });
+   formatRow.hidden = !audioQuality.cap();
+   const qualityHint = document.createElement('p');
+   qualityHint.className = 'admin-hint';
+   qualityHint.textContent =
+      'A file this browser plays that fits under the limit is sent as it is; '
+      + 'anything else is converted. With Original, a file this browser '
+      + 'cannot play arrives as FLAC. Takes effect on the next track.';
+   quality.appendChild(qualityHint);
+
+   const castOrigRow   = document.createElement('div');
+   castOrigRow.className = 'form-row';
+   const castOrigLabel = document.createElement('label');
+   const castOrigBox   = document.createElement('input');
+   castOrigBox.type    = 'checkbox';
+   castOrigBox.checked = castOriginal.get();
+   castOrigBox.addEventListener('change', () => castOriginal.set(castOrigBox.checked));
+   castOrigLabel.appendChild(castOrigBox);
+   castOrigLabel.appendChild(document.createTextNode('Cast at original quality'));
+   castOrigRow.appendChild(castOrigLabel);
+   quality.appendChild(castOrigRow);
+   const castOrigHint = document.createElement('p');
+   castOrigHint.className = 'admin-hint';
+   castOrigHint.textContent =
+      'A receiver fetches from the server itself, so the limit above need not '
+      + 'apply to it. A file it cannot play is sent as FLAC either way.';
+   quality.appendChild(castOrigHint);
+
+   const sec = settingsSection(pane, 'Video');
 
    const audioOnlyRow   = document.createElement('div');
    audioOnlyRow.className = 'form-row';
@@ -4166,6 +4360,7 @@ function castLocalVideoStart(song, offset) {
    const viaHls = !!song.transcodedSuffix;
    player.streamIsTranscoded = false;
    player.streamFormat       = null;
+   player.streamSent         = null;
    player.localOffset        = 0;
 
    castVideoLocal = true;
@@ -4415,28 +4610,36 @@ async function openInfoModal() {
       // the television" - and a copied track and a 320 kbps re-encode are
       // exactly the two answers, so collapsing them into one phrase would
       // leave the row unable to say the thing it is for.
+      // An audio track the server converted - for the quality setting, or
+      // because the receiver cannot play the original - is `encode` too,
+      // and is no HLS stream.
       const how = castStream.audioOnly
                      ? (castStream.tier === 'remux'
                            ? 'soundtrack only, copied'
                            : 'soundtrack only, re-encoded')
                 : castStream.tier === 'copy'   ? 'HLS, picture copied'
+                : castStream.tier === 'encode' && !song.isVideo ? 'converted'
                 : castStream.tier === 'encode' ? 'HLS, re-encoded'
                 :                                'as stored';
       sent = kbps ? `${kbps} - ${how}` : how;
       }
    else {
-      // Local playback.  The one transcode trigger is the browser asking for
-      // format=mp3 because it cannot decode the source codec (or fell back
-      // after a decode error), which only the client knows about.
-      // player.streamFormat is the format the player asked for on the most
-      // recent playerPlay() call.
+      // Local playback.  player.streamFormat is the format the player asked
+      // for on the most recent playerPlay() call: the quality setting's, or
+      // mp3 after a decode error.
       //
       // **Asking is not the same as being converted.** A format naming the
       // source's own encoder is served untouched, so servedUnchanged() takes
       // that request back out and lets the file describe itself.
       // This row read "MP3 320 kbps" over a 128 kbps MP3 before it did.
+      //
+      // The server's own answer comes first when the probe got one: with a
+      // declaration and a ceiling, what arrives cannot be told from the
+      // request.  The reasoning below is for an older server.
       let suffix, bitRate;
-      if (player.streamFormat && !servedUnchanged(player.streamFormat, song)) {
+      if (player.streamSent)
+         sent = describeSent(player.streamSent, song);
+      else if (player.streamFormat && !servedUnchanged(player.streamFormat, song)) {
          // plan_transcode encodes a requested format at 320 kbps when no
          // maxBitRate is given.
          suffix  = player.streamFormat;
@@ -6068,6 +6271,9 @@ const player = {
    // if the source is being served as-is.  Used by the info dialog to show
    // the format the user is actually hearing rather than the on-disk format.
    streamFormat: null,
+   // The server's X-Gaindrive-Sent for the current local stream, from the
+   // probe playerPlay() makes; null while casting or when it could not ask.
+   streamSent: null,
    // The chosen subtitle track, and the song it was chosen for.  Held across a
    // re-fetch because a seek on a transcoded stream is one: without this, every
    // seek would silently turn the subtitles off.
@@ -6617,7 +6823,9 @@ function playerSeekTo(target) {
       playerPlay(target);
       } else if (player.streamIsTranscoded) {
       const wasPaused = player.media.paused;
-      playerPlay(target, true);
+      // The same request as before but from `target`: still the MP3
+      // fallback if it already was, and otherwise the quality setting.
+      playerPlay(target, player.streamFallbackTried);
       if (wasPaused) {
          player.media.addEventListener('canplay',
             () => player.media.pause(), {once: true});
@@ -7554,9 +7762,14 @@ function playerEnqueue(song) {
    sidebarQueueUpdate();
 }
 
-function playerPlay(offset = 0, forceMp3 = false) {
+// Bumped by every playerPlay(), so one that awaited the stream probe can tell
+// it was overtaken by a skip and stand down.
+let playerPlaySeq = 0;
+
+async function playerPlay(offset = 0, forceMp3 = false) {
    const song = player.queue[player.index];
    if (!song) return;
+   const seq = ++playerPlaySeq;
    // Tell the server what is playing, so getNowPlaying can answer.  Re-entry
    // (seek, mp3 fallback) is harmless: the server just refreshes the row.
    playbackReport('starting', offset);
@@ -7592,15 +7805,25 @@ function playerPlay(offset = 0, forceMp3 = false) {
       // "Playing on <amp>" for as long as the reply takes.  The reply
       // overwrites both either way.
       //
-      // A cast URL names no format, so the receiver plays the source codec -
-      // except for a soundtrack on a device with no screen, where the server
-      // adds one.  Cleared because it describes the *local* element's stream
+      // A cast URL names a format only when the server converts: for the
+      // quality below, for a soundtrack on a device with no screen, or for
+      // an original the receiver cannot play.  Cleared because it describes
+      // the *local* element's stream
       // and there is no local stream while casting; the info dialog reads
       // castStream instead, which the reply below fills in.
       player.streamFormat = null;
       player.posToken     = null;
+      player.streamSent   = null;
       const params = {id: song.id};
       if (offset > 0) params.timeOffset = Math.floor(offset);
+      // The quality for the receiver, as on the apps: the playback setting
+      // unless "Cast at original quality" is on.  The server ignores it for
+      // a video, and sends FLAC for an original the receiver cannot play.
+      const castCap = castOriginal.get() ? 0 : audioQuality.cap();
+      if (castCap) {
+         params.format     = audioQuality.format();
+         params.maxBitRate = castCap;
+         }
       // Carried on the LOAD rather than sent afterwards, because a track has
       // to be declared in the LOAD to exist at all - EDIT_TRACKS_INFO can turn
       // one on but cannot introduce it.  This is also what makes the choice
@@ -7682,21 +7905,58 @@ function playerPlay(offset = 0, forceMp3 = false) {
    // for a video would fetch the soundtrack when the user wanted the picture.
    // The server already knows how a video is sent; asking for nothing lets
    // it decide.
+   //
+   // Audio follows the quality setting, as on the apps.  A ceiling names the
+   // format to convert to; the declaration says what this browser plays as
+   // stored, so a file within the ceiling, or any playable file with no
+   // ceiling, comes untouched, and an unplayable original comes as FLAC.
+   // The fallback after a decode error declares nothing and asks for MP3:
+   // whatever the browser claimed, this file did not play.
+   //
+   // A film's soundtrack names a format whatever happens, there being no
+   // "original" soundtrack to ask for.  With no ceiling no maxBitRate goes
+   // with it, because that is what lets the server copy a soundtrack already
+   // in that codec rather than encode it.
+   const cap = audioQuality.cap();
    let fmt;
-   if (audioOnly)         fmt = audioOnlyFormat();
+   if (audioOnly) {
+      fmt = cap ? audioQuality.format() : audioOnlyFormat();
+      if (cap) streamParams.maxBitRate = cap;
+      }
    else if (song.isVideo) fmt = null;
-   else                   fmt = forceMp3 ? 'mp3' : pickStreamFormat(song);
+   else if (forceMp3) {
+      fmt = 'mp3';
+      if (cap) streamParams.maxBitRate = cap;
+      }
+   else {
+      fmt = cap ? audioQuality.format() : null;
+      if (cap) streamParams.maxBitRate = cap;
+      const playable = playableAudio();
+      if (playable.length) streamParams.playable = playable.join(',');
+      }
    if (fmt) streamParams.format = fmt;
-   // A format the server answers with the original file is not a transcode,
-   // and saying it is costs the seek: the stream carries a Content-Length and
-   // answers Range, so the element can seek it itself rather than the code
-   // below re-fetching from timeOffset.  Same rule as the "Sent" row, so the
-   // two cannot disagree about one stream.
+   // Audio is asked about before it is played: one byte of the same URL says
+   // what the server decided to send (X-Gaindrive-Sent, for the "Sent" row)
+   // and whether the answer is a file that takes Range or a pipe that does
+   // not.  With a declaration that can no longer be predicted from here.  It
+   // also builds a transcode before the element waits on it, after which the
+   // element's own request is a cache hit with a length.
    //
    // A video is never chunked: it is either the file itself, Range and all,
    // or HLS, whose timeline is the whole film.
+   let probe = null;
+   if (!(song.isVideo && !audioOnly)) {
+      player.buffering = true;
+      playerUpdateUI();
+      probe = await streamProbe(apiUrl('stream', streamParams));
+      if (seq !== playerPlaySeq) return;
+      }
+   // Without a probe answer - an older server, or a failed fetch - the old
+   // guess: a format the server answers with the original file is not a
+   // transcode.
    const chunked = !(song.isVideo && !audioOnly)
-                && !!fmt && !servedUnchanged(fmt, song);
+                && (probe ? !probe.ranged : !!fmt && !servedUnchanged(fmt, song));
+   player.streamSent = probe?.sent ?? null;
    // A video the server would not send as it is - the transcoded* fields say
    // so - goes through hls.m3u8 instead of stream.view.
    const viaHls = song.isVideo && !audioOnly && !!song.transcodedSuffix;
@@ -8194,7 +8454,7 @@ function setupPlayer() {
          if (player.streamIsTranscoded && player.localOffset > 0) {
             // Re-fetch from offset 0 so "rewind to start" works even when the
             // current stream began at a seek point.
-            playerPlay(0, true);
+            playerPlay(0, player.streamFallbackTried);
             } else {
             player.media.currentTime = 0;
             }

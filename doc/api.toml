@@ -2867,6 +2867,26 @@ see = ["castControl", "castSession"]
   doc      = 'Song id.'
 
   [[endpoint.param]]
+  name  = "format"
+  type  = "string"
+  doc   = 'Audio only. What to convert to, as on `stream`; omit for the original.'
+  notes = '''
+With `maxBitRate`, the client's quality setting for the receiver. No
+declaration travels - the receiver declared nothing, and the LOAD names the
+type before a byte is fetched - so this follows `stream`'s rules for a client
+that sent no `playable`. An original the receiver cannot play (WMA, say) is
+sent as FLAC whatever is asked. A converted track is built in full before the
+receiver is told anything, as a soundtrack is, and the reply says `encode`.
+The session remembers both values, so an IDLE recovery reloads at the same
+quality.
+'''
+
+  [[endpoint.param]]
+  name = "maxBitRate"
+  type = "int"
+  doc  = 'Audio only. The ceiling for `format`, in kbps; 0 or absent for none.'
+
+  [[endpoint.param]]
   name = "timeOffset"
   type = "float"
   doc  = 'Seek position in seconds, sent to the receiver as `currentTime`.'

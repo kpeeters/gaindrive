@@ -1333,11 +1333,15 @@
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
 <tbody>
 <tr><td><code>id</code> <b class="api-req">*</b></td><td>string</td><td>Song id.</td></tr>
+<tr><td><code>format</code></td><td>string</td><td>Audio only. What to convert to, as on <code>stream</code>; omit for the original.</td></tr>
+<tr><td><code>maxBitRate</code></td><td>int</td><td>Audio only. The ceiling for <code>format</code>, in kbps; 0 or absent for none.</td></tr>
 <tr><td><code>timeOffset</code></td><td>float</td><td>Seek position in seconds, sent to the receiver as <code>currentTime</code>.</td></tr>
 <tr><td><code>trackId</code></td><td>int</td><td>Subtitle track to start with, numbered from 1 in the order <code>getVideoInfo</code> lists captions. 0 or absent means none. default <code>0</code>.</td></tr>
 <tr><td><code>castController</code></td><td>string</td><td>The id given to <code>startCast</code>. Without a match this caller is treated as having no session.</td></tr>
 </tbody>
 </table>
+<div class="api-note"><p class="api-note-h"><code>format</code></p>
+<p>With <code>maxBitRate</code>, the client&#x27;s quality setting for the receiver. No declaration travels - the receiver declared nothing, and the LOAD names the type before a byte is fetched - so this follows <code>stream</code>&#x27;s rules for a client that sent no <code>playable</code>. An original the receiver cannot play (WMA, say) is sent as FLAC whatever is asked. A converted track is built in full before the receiver is told anything, as a soundtrack is, and the reply says <code>encode</code>. The session remembers both values, so an IDLE recovery reloads at the same quality.</p></div>
 <div class="api-note"><p class="api-note-h"><code>trackId</code></p>
 <p><code>trackId</code>, not <code>captionId</code>: the cast API numbers tracks 1..n by position, and 0 means off. <code>captionId</code> cannot express &quot;off&quot; - the sidecar caption index and a missing parameter are both -1, so &quot;no subtitles&quot; and &quot;the sidecar file&quot; would be one value.</p></div>
 <h4>Response</h4>

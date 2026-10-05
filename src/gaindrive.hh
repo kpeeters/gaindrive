@@ -138,6 +138,11 @@ class GainDrive {
 		CastManager     cast_manager_;
 		std::string     last_cast_song_id_;
 		float           last_cast_offset_ = 0.0f;
+		// The client's quality for the session's audio, as castLoad last gave
+		// it, so castControl's IDLE recovery reloads at the same one. Empty
+		// and 0 for the original.
+		std::string     last_cast_format_;
+		int             last_cast_max_bitrate_ = 0;
 		// Holds the transcode-cache entry a cast LOAD was warmed against, for
 		// as long as that LOAD is the current one.  TranscodeCache::Entry is
 		// an RAII in-use count and prune() skips in-use keys, so dropping it
@@ -357,9 +362,14 @@ class GainDrive {
 		// receiver will actually get.  castLoad and castSession report all of
 		// it to the client, which draws it rather than working it out again
 		// from the device list and the codec pair.
+		// [format] and [max_bitrate] are the client's quality for audio, as
+		// on stream.view; empty and 0 ask for the original. A video ignores
+		// them.
 		CastStreamInfo cast_load_song(const httplib::Request& req,
 		                              const MediaStore::SongInfo& song,
-		                              int song_id, float offset, int track_id);
+		                              int song_id, float offset, int track_id,
+		                              const std::string& format = "",
+		                              int max_bitrate = 0);
 
 		// One LOAD carrying a film's soundtrack rather than the film.
 		//

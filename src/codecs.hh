@@ -280,6 +280,11 @@ std::string_view cast_mime_for(std::string_view container,
                                std::string_view video_codec,
                                std::string_view audio_codec);
 
+// Whether a Cast receiver plays an audio file of this type as it stands.  The
+// same list the apps keep for the casts they drive themselves (CastUrls on
+// both); a type outside it fails the LOAD, so cast_load_song() sends FLAC.
+bool cast_plays_audio(std::string_view mime);
+
 // The format a server-driven cast asks for when the receiver cannot show a
 // picture and the soundtrack cannot be copied out as it stands - see
 // audio_copy_target() below, which is tried first and covers AAC, MP3, FLAC,

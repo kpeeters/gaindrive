@@ -139,9 +139,11 @@ void GainDrive::routes_web()
 			res.set_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
 			res.set_header("Access-Control-Allow-Headers", "Range, Content-Type");
 			// Without this a cross-origin reader is allowed the body but not
-			// the headers that say how long it is or which part this was.
+			// the headers that say how long it is, which part this was, or
+			// what the server decided to send.
 			res.set_header("Access-Control-Expose-Headers",
-			               "Content-Length, Content-Range, Accept-Ranges");
+			               "Content-Length, Content-Range, Accept-Ranges, "
+			               "X-Gaindrive-Sent");
 			}
 
 		// Answered here because nothing routes it: there is no Options()

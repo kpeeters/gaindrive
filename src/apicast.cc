@@ -577,7 +577,8 @@ void GainDrive::routes_cast()
 					int  track = cap.active_track_ids.empty()
 					    ? 0 : cap.active_track_ids.front();
 					cast_load_song(req, *song, sid,
-					               pos > 0.5f ? pos : 0.0f, track);
+					               pos > 0.5f ? pos : 0.0f, track,
+					               last_cast_format_, last_cast_max_bitrate_);
 					}
 				}
 			}
@@ -761,6 +762,18 @@ void GainDrive::routes_cast()
 		// cannot say "none" - SIDECAR_CAPTION_INDEX is -1 and so is a missing
 		// parameter, so "off" and "the sidecar file" would be one value.
 		int track_id = to_int(req.get_param_value("trackId"), 0);
+		// The client's quality for audio, as stream.view takes it. An encoder
+		// we do not have is dropped rather than refused: the original plays,
+		// which beats a LOAD that never happens.
+		std::string format = req.get_param_value("format");
+		if (format == "raw") format.clear();
+		if (!format.empty()) {
+			auto t = target_for(format);
+			if (!t || t->encoder.empty()) format.clear();
+			}
+		int max_bitrate = std::max(0, to_int(req.get_param_value("maxBitRate"), 0));
+		last_cast_format_      = format;
+		last_cast_max_bitrate_ = max_bitrate;
 		// The reply says what was actually sent - the picture or only the
 		// soundtrack, the contentType declared, and the container, bitrate and
 		// tier the receiver will get - so the client draws what happened
@@ -768,7 +781,8 @@ void GainDrive::routes_cast()
 		// codec pair.
 		CastStreamInfo sent = cast_load_song(req, *song,
 		                                     to_int(it->second, -1),
-		                                     cast_offset, track_id);
+		                                     cast_offset, track_id,
+		                                     format, max_bitrate);
 		res.set_content(
 			use_json
 			    ? subsonic_ok_json([&sent](nlohmann::json& r) {
@@ -1144,7 +1158,8 @@ GainDrive::soundtrack_load(const std::string& base,
 GainDrive::CastStreamInfo
 GainDrive::cast_load_song(const httplib::Request& req,
                           const MediaStore::SongInfo& song,
-                          int song_id, float offset, int track_id)
+                          int song_id, float offset, int track_id,
+                          const std::string& format, int max_bitrate)
 	{
 	// Everything the receiver fetches hangs off this, and every one of them
 	// carries the cast token rather than the account's credentials: a
@@ -1285,6 +1300,30 @@ GainDrive::cast_load_song(const httplib::Request& req,
 		        + "?id=" + sid_s + tok;
 		lr.mime = std::string(cast_mime_for(song.codec, song.video_codec,
 		                                    song.audio_codec));
+
+		// Audio is converted for two reasons, the same two the apps act on
+		// for the casts they drive: the client asked for a quality, or the
+		// receiver cannot play the original - which then goes as FLAC, so a
+		// lossy source is given no second generation of loss.  No declaration
+		// travels: the receiver declared nothing, and the LOAD has to name
+		// the type before a byte is fetched.
+		std::optional<Streamer::TranscodePlan> convert;
+		Streamer::SongInfo si;
+		if (!song.is_video) {
+			std::string fmt = format;
+			int         cap = max_bitrate;
+			if (fmt.empty() && !cast_plays_audio(lr.mime)) { fmt = "flac"; cap = 0; }
+			if (!fmt.empty()) {
+				si = streamer_song(song, store_.abs_path(song.path));
+				auto plan = Streamer::plan_transcode(si, fmt, cap, 0);
+				if (plan.needed && plan.target) {
+					convert = plan;
+					lr.url += "&format=" + fmt
+					        + (cap > 0 ? "&maxBitRate=" + std::to_string(cap) : "");
+					lr.mime = std::string(plan.target->mime);
+					}
+				}
+			}
 		// The LOAD says where to begin, and both kinds of stream carry the
 		// film's own timeline, so the receiver's clock is absolute and the
 		// caption cues need no shifting.
@@ -1307,7 +1346,33 @@ GainDrive::cast_load_song(const httplib::Request& req,
 		// rather than the source's figure: a copy is close enough to it that
 		// quoting it would be nearly right, and nearly right is the worst thing
 		// a diagnostic can be; a re-encode is not fixed-rate at all.
-		if (t == CastTier::Direct) {
+		if (convert) {
+			stream.tier    = "encode";
+			stream.suffix  = std::string(convert->target->name);
+			// The marker for a lossless target is not a rate.
+			stream.bitrate = convert->target->lossy ? convert->bitrate : 0;
+			// Built whole before the first byte, and a receiver gives up after
+			// about a minute of silence - so built before it is told anything,
+			// as a soundtrack is.  Kept alive for the same reason; see
+			// cast_warm_entry_.
+			lr.prepare = [this, si, sid_s, plan = *convert]() {
+				auto entry = Streamer::cache_entry(si, transcode_cache_, plan);
+				if (!entry) {
+					// May still play as a pipe, so the LOAD goes out; logged
+					// because a cast that dies a minute in is this line.
+					std::cout << stamp() << "Cast: no cache entry for song="
+					          << sid_s << ", streaming unwarmed" << std::endl;
+					return true;
+					}
+				std::cout << stamp() << "Cast: warmed song=" << sid_s << " "
+				          << (entry->hit() ? "hit" : "built")
+				          << " bytes=" << entry->size() << std::endl;
+				std::lock_guard<std::mutex> lk(cast_warm_mu_);
+				cast_warm_entry_ = std::move(entry);
+				return true;
+				};
+			}
+		else if (t == CastTier::Direct) {
 			stream.tier    = "direct";
 			stream.suffix  = song.codec;
 			stream.bitrate = song.bitrate;

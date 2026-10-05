@@ -384,7 +384,11 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	// wants the stream now, not a file built to the end first - for a film's
 	// soundtrack that build is minutes, and a receiver gives up long before.
 	bool offset_given = req.has_param("timeOffset");
-	bool use_cache    = (!cast_stream || audio_only) && time_offset == 0
+	// A cast request names a format only when cast_load_song() decided to
+	// convert, and then it has warmed this entry first; see the long note on
+	// the cache below.
+	bool cast_format  = !format.empty() && format != "raw";
+	bool use_cache    = (!cast_stream || cast_format) && time_offset == 0
 	                 && !offset_given;
 
 	// A soundtrack copied into a pipe is paced at its own rate, so it needs
@@ -451,14 +455,16 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 		return;
 		}
 
-	// A *server-driven* cast reaches the cache for exactly one kind of request:
-	// a video's soundtrack.  Every other cast URL castLoad builds carries no
-	// format and no maxBitRate, and its time_offset is always 0 under native
-	// seek, so needs_transcode is already false and this branch is not reached.
+	// A *server-driven* cast reaches the cache only for a URL that names a
+	// format: a video's soundtrack, or a track converted for the client's
+	// quality setting or because the receiver cannot play the original.  Every
+	// other cast URL castLoad builds carries no format, and its time_offset is
+	// always 0 under native seek, so needs_transcode is false and this branch
+	// is not reached.
 	//
-	// **The audio_only exception is only sound because cast_load_song() warms
-	// the entry before the receiver is told anything** - see the `prepare` hook
-	// on CastManager::LoadRequest.  A cold entry answers nothing until ffmpeg
+	// **That is only sound because cast_load_song() warms the entry before the
+	// receiver is told anything** - see the `prepare` hook on
+	// CastManager::LoadRequest.  A cold entry answers nothing until ffmpeg
 	// has finished, which for a film's soundtrack is minutes; a receiver drops
 	// the session after ~60 s with no data on the HTTP body, which surfaces as
 	// error 103 and reads as a metadata bug.  Remove the warm and this line
