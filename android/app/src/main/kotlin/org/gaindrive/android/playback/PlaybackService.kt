@@ -575,7 +575,7 @@ class PlaybackService : MediaLibraryService() {
 			val target = streamUrls.forPlayback(
 				ref,
 				audioOnlyVideo,
-				::playableAudioFor,
+				MEDIA3_AUDIO,
 			) ?: return null
 			// The quality is recorded on the item on the way past, the same way
 			// resolveVideo marks what it learned: it is decided here and

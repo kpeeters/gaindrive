@@ -74,9 +74,10 @@ internal fun videoStreamParams(id: String, containers: Set<String>): Map<String,
  * and refuses the media outright.
  *
  * `format` and `maxBitRate` are omitted together for the original, because the
- * server serves the file directly with no ffmpeg involved at all. They are what
- * the declaration is *not*: these say what to produce, [playable] says what to
- * leave alone, and the two are independent.
+ * server serves the file directly with no ffmpeg involved at all - unless
+ * [playable] says this device cannot play it, in which case it arrives as FLAC.
+ * They are what the declaration is *not*: these say what to produce, [playable]
+ * says what this device can play as stored.
  *
  * Sorted for the same reason the video list is: a `Set`'s iteration order is not
  * a promise, and this string lands in OkHttp's cache key and the server's log.
@@ -97,28 +98,6 @@ internal fun audioStreamParams(
 	}
 
 /**
- * What a request may declare it takes as it stands, given the quality that
- * request settled on.
- *
- * A function rather than a set, because the set follows from a quality the
- * caller does not have: `forPlayback` may build for a copy already held rather
- * than for the current setting, and the declaration has to match whatever it
- * lands on. A function rather than a flag, because [StreamUrls] must not be the
- * thing that knows - what media3 decodes is a claim about a player, and the
- * same argument that keeps `MEDIA3_CONTAINERS` out of this file keeps its audio
- * counterpart out too. `PlaybackService` passes `::playableAudioFor`.
- *
- * [DECLARES_NOTHING] is the default, and the default is the safety. It covers
- * every caller that has not thought about it, which is the property that
- * matters: a Cast receiver demuxes none of this and was told in advance what it
- * was about to be sent.
- */
-typealias PlayableFor = (AudioQuality) -> Set<String>
-
-/** Declares nothing at all; see [PlayableFor]. */
-val DECLARES_NOTHING: PlayableFor = { emptySet() }
-
-/**
  * The single builder of stream URLs, used by both the download queue and the
  * player.
  *
@@ -131,7 +110,6 @@ class StreamUrls @Inject constructor(
 	private val registry: ServerRegistry,
 	private val clients: SubsonicClientFactory,
 	private val settings: SettingsStore,
-	private val accounts: Accounts,
 	private val audioCache: AudioCache,
 ) {
 
@@ -142,7 +120,7 @@ class StreamUrls @Inject constructor(
 	suspend fun forDownload(
 		ref: ItemRef,
 		audioOnlyVideo: Boolean = false,
-		playable: PlayableFor = DECLARES_NOTHING,
+		playable: Set<String> = emptySet(),
 	): StreamTarget? =
 		build(ref, settings.audioQuality.first(), audioOnlyVideo, playable)
 
@@ -154,7 +132,7 @@ class StreamUrls @Inject constructor(
 	 * copy turns out to need topping up, the bytes that arrive have to match the
 	 * bytes already there.
 	 *
-	 * [playable] decides what the request may declare it takes as it stands,
+	 * [playable] is what the request declares this device plays as stored,
 	 * and the default declares nothing. **This function serves the Cast route as
 	 * well as the local player** - `CastUrls.directTarget` reaches the server
 	 * through it in three of its branches - so the declaration cannot live in
@@ -163,7 +141,7 @@ class StreamUrls @Inject constructor(
 	suspend fun forPlayback(
 		ref: ItemRef,
 		audioOnlyVideo: Boolean = false,
-		playable: PlayableFor = DECLARES_NOTHING,
+		playable: Set<String> = emptySet(),
 	): StreamTarget? {
 		val preferred = settings.audioQuality.first().let {
 			if (audioOnlyVideo) it.forVideoAudio() else it
@@ -185,11 +163,6 @@ class StreamUrls @Inject constructor(
 	 * to a different question here, and preferring it would defeat the setting
 	 * on precisely the tracks the user listens to most.
 	 *
-	 * The account ceiling still applies - `AudioQuality.cappedBy` turns a
-	 * request for the original into mp3 at the cap - because the server would
-	 * enforce it whatever was asked for. So "original" means "as far as the
-	 * account allows", which the track info dialog's `Sent` row makes visible.
-	 *
 	 * The returned `cacheKey` names bytes nobody will store: the receiver
 	 * fetches this URL, not the phone. It is carried only because
 	 * [StreamTarget] travels as one value, and the direct cast path returns
@@ -199,18 +172,39 @@ class StreamUrls @Inject constructor(
 		build(ref, AudioQuality.ORIGINAL)
 
 	/**
+	 * The original converted to FLAC, for a receiver that cannot play the
+	 * stored file. Lossless rather than a lossy encode, so a lossy source is
+	 * given no second generation of loss: the rule the server applies to an
+	 * original this device cannot play, and to a film's soundtrack on its own
+	 * cast (`CAST_AUDIO_ONLY_FORMAT`). The cache key is carried for the reason
+	 * [forCastOriginal] gives; the quality says FLAC so the track info dialog
+	 * can tell this from the original sent untouched.
+	 */
+	suspend fun forCastLossless(ref: ItemRef): StreamTarget? =
+		withContext(Dispatchers.IO) {
+			val config = registry.get(ref.server) ?: return@withContext null
+			StreamTarget(
+				url = clients.clientFor(config).url(
+					"stream",
+					mapOf("id" to ref.id, "format" to "flac"),
+				),
+				quality = LOSSLESS,
+				cacheKey = CacheKeys.of(ref, LOSSLESS),
+				mimeType = MimeTypes.AUDIO_FLAC,
+			)
+		}
+
+	/**
 	 * A video's soundtrack copied out as it stands, in the [format] the browse
 	 * response named for it, for a receiver that will be told [mime] up front.
 	 *
 	 * No `maxBitRate`: the server only copies when none is given, since a
 	 * video's stored bitrate is the container's and says nothing about its
-	 * audio. Null on a capped account, where the server would encode at the
-	 * cap after all and [AudioQuality] has no way to name what that sends.
+	 * audio.
 	 */
 	suspend fun forSoundtrackCopy(ref: ItemRef, format: String, mime: String): StreamTarget? =
 		withContext(Dispatchers.IO) {
 			val config = registry.get(ref.server) ?: return@withContext null
-			if (accounts.capFor(config) > 0) return@withContext null
 			StreamTarget(
 				url = clients.clientFor(config).url(
 					"stream",
@@ -237,8 +231,7 @@ class StreamUrls @Inject constructor(
 	 *    away. `web/app.js` splits the same two cases the same way.
 	 *  - **`maxBitRate`** sets `constrained` server-side, which forces the
 	 *    re-encode tier and demotes a file that could have been served straight
-	 *    off disk. The account ceiling is applied by the server regardless of
-	 *    what is asked for, so sending one buys nothing and costs the tier.
+	 *    off disk.
 	 *
 	 * [progressive] is the caller's answer to whether the server will hand
 	 * over the file as stored. Only then does `stream.view` carry a
@@ -306,26 +299,17 @@ class StreamUrls @Inject constructor(
 		ref: ItemRef,
 		wanted: AudioQuality,
 		audioOnlyVideo: Boolean = false,
-		playable: PlayableFor = DECLARES_NOTHING,
+		playable: Set<String> = emptySet(),
 	): StreamTarget? =
 		withContext(Dispatchers.IO) {
 			val config = registry.get(ref.server) ?: return@withContext null
-			// Named rather than folded into the line below, because the
-			// declaration reads this value and the capped one would be wrong:
-			// a capped account asking for the original is sent mp3 at the cap,
-			// so `quality` has already lost the fact that originals were wanted.
-			val asked = if (audioOnlyVideo) wanted.forVideoAudio() else wanted
-			// The account ceiling is applied here, where this track's own server
-			// is in hand. A queue may span servers, so there is no single
-			// "current" cap to read.
-			val quality = asked.cappedBy(accounts.capFor(config))
+			val quality = if (audioOnlyVideo) wanted.forVideoAudio() else wanted
 
 			// Nothing for a video played as audio, and not merely because it
 			// would be ignored: `plan_transcode` guards the audio declaration on
 			// `!song.is_video`, and a parameter the server drops on the floor
 			// invites the next reader to believe it does something.
-			val declared: Set<String> =
-				if (audioOnlyVideo) emptySet() else playable(asked)
+			val declared: Set<String> = if (audioOnlyVideo) emptySet() else playable
 
 			StreamTarget(
 				url = clients.clientFor(config).url(
@@ -343,4 +327,8 @@ class StreamUrls @Inject constructor(
 				mimeType = if (declared.isEmpty()) quality.format.mime else null,
 			)
 		}
+
+	private companion object {
+		val LOSSLESS = AudioQuality(AudioFormat.FLAC, 0)
+	}
 }

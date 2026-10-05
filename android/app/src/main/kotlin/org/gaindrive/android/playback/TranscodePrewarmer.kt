@@ -69,14 +69,16 @@ class TranscodePrewarmer @Inject constructor(
 		val target = streamUrls.forPlayback(
 			ref,
 			audioOnlyVideo,
-			::playableAudioFor,
+			MEDIA3_AUDIO,
 		) ?: return
 		// The original is served straight off disk with no ffmpeg involved, so
-		// there is no transcode to build and nothing to wait for. A declared
-		// format the server passes through costs the same nothing, but it
-		// cannot be recognised from here - whether a `.m4a` holds AAC or ALAC
-		// is not on a song entry - so that request goes out and finds a 206
-		// waiting for it.
+		// there is no transcode to build and nothing to wait for. Not warmed,
+		// and accepted: an original media3 cannot play, which the server
+		// converts to FLAC on the strength of `playable` alone - rare, and the
+		// wait happens when the track is reached. A declared format the server
+		// passes through costs nothing either, but it cannot be recognised
+		// from here - whether a `.m4a` holds AAC or ALAC is not on a song
+		// entry - so that request goes out and finds a 206 waiting for it.
 		if (target.quality.format == AudioFormat.ORIGINAL) return
 
 		// Claimed only now that a request is actually going out, and keyed by

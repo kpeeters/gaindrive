@@ -73,28 +73,4 @@ class AudioQualityTest {
 			assertNull("expected null for '$it'", AudioQuality.parse(it))
 		}
 	}
-
-	@Test
-	fun `an account cap lowers the bitrate`() {
-		val capped = AudioQuality(AudioFormat.OPUS, 256).cappedBy(128)
-		assertEquals(AudioQuality(AudioFormat.OPUS, 128), capped)
-	}
-
-	@Test
-	fun `a cap below nothing leaves the quality alone`() {
-		val quality = AudioQuality(AudioFormat.OPUS, 160)
-		assertEquals(quality, quality.cappedBy(0))
-		assertEquals(quality, quality.cappedBy(320))
-	}
-
-	/**
-	 * The server answers a capped request for the original with mp3 at the cap,
-	 * so a key claiming `orig` would be filed against bytes that are not.
-	 */
-	@Test
-	fun `original under a cap becomes mp3 at the cap`() {
-		val capped = AudioQuality.ORIGINAL.cappedBy(192)
-		assertEquals(AudioQuality(AudioFormat.MP3, 192), capped)
-		assertEquals("mp3192", capped.tag)
-	}
 }

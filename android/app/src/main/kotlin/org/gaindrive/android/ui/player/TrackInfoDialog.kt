@@ -207,10 +207,14 @@ private fun fileLabel(song: Song): String? {
  * nothing is being decoded here - and then the request is the best available
  * answer, which is what this said before.
  *
- * One case it cannot resolve, and nothing could: a *capped* account is sent
- * mp3, so a passed-through MP3 and an MP3 transcode are the same codec. That
- * one still reads as converted. Telling them apart would mean comparing
- * bitrates, which is a lot of machinery for a row of text.
+ * An original media3 cannot play is converted to FLAC, which the decoder's
+ * answer shows the same way; a cast of one says FLAC in [quality] itself,
+ * since nothing is decoded here then.
+ *
+ * One case it cannot resolve: a file converted to its own codec because it
+ * was over the ceiling, an MP3 above an MP3 limit say, reads as unconverted.
+ * Telling them apart would mean comparing bitrates, which is a lot of
+ * machinery for a row of text.
  */
 private fun sentLabel(
 	current: NowPlaying,
@@ -231,6 +235,11 @@ private fun sentLabel(
 		) "As stored" else "HLS, remuxed as it plays"
 	current.isVideo -> "HLS, re-encoded as it plays"
 	quality == null -> null
+	quality.format == AudioFormat.FLAC -> "FLAC, converted losslessly"
+	quality.format == AudioFormat.ORIGINAL &&
+		!casting && deliveredMime == AudioFormat.FLAC.sampleMime &&
+		!song?.suffix.equals("flac", ignoreCase = true) ->
+		"FLAC, converted losslessly"
 	quality.format == AudioFormat.ORIGINAL ->
 		listOfNotNull(song?.suffix?.uppercase(), "unconverted").joinToString(", ")
 	!casting && deliveredMime != null && deliveredMime != quality.format.sampleMime ->

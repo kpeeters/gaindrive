@@ -22,7 +22,7 @@ import org.gaindrive.android.data.model.AudioFormat
 import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
-import org.gaindrive.android.playback.playableAudioFor
+import org.gaindrive.android.playback.MEDIA3_AUDIO
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -396,7 +396,7 @@ class PinRepository @Inject constructor(
 			val target = streamUrls.forDownload(
 				song.ref,
 				song.isVideo,
-				::playableAudioFor,
+				MEDIA3_AUDIO,
 			) ?: return@forEach
 			downloads.add(song.ref, target)
 		}

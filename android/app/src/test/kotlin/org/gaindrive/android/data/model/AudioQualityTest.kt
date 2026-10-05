@@ -38,11 +38,15 @@ class AudioQualityTest {
 	}
 
 	@Test
-	fun `the account ceiling still applies after the substitution`() {
-		// Order matters: substituting first means a capped account gets Opus at
-		// the cap, rather than ORIGINAL's mp3-at-the-cap fallback, which would
-		// be a different container from the one the key claims.
-		val capped = AudioQuality.ORIGINAL.forVideoAudio().cappedBy(96)
-		assertEquals(AudioQuality(AudioFormat.OPUS, 96), capped)
+	fun `aac tags round-trip`() {
+		val aac = AudioQuality(AudioFormat.M4A, 128)
+		assertEquals("m4a128", aac.tag)
+		assertEquals(aac, AudioQuality.parse(aac.tag))
+	}
+
+	@Test
+	fun `the limit reads as a ceiling`() {
+		assertEquals("Original", AudioQuality.ORIGINAL.limitLabel)
+		assertEquals("up to 160 kbps", AudioQuality.DEFAULT.limitLabel)
 	}
 }

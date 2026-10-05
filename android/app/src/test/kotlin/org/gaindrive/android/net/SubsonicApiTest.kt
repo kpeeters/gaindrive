@@ -123,7 +123,6 @@ class SubsonicApiTest {
 		assertEquals("admin", user.username)
 		assertTrue(user.adminRole)
 		assertTrue(!user.uploadRole)
-		assertEquals(320, user.maxBitRate)
 	}
 
 	/** Absent optional fields must fall back rather than throw. */
@@ -133,7 +132,6 @@ class SubsonicApiTest {
 		val user = api.getUser("bob").requireOk().user!!
 		assertEquals("bob", user.username)
 		assertTrue(!user.adminRole)
-		assertEquals(0, user.maxBitRate)
 		assertNull(user.email)
 	}
 }

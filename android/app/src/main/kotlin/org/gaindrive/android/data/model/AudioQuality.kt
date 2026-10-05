@@ -17,18 +17,24 @@ package org.gaindrive.android.data.model
 enum class AudioFormat(val param: String, val mime: String?, val sampleMime: String?) {
 	ORIGINAL("raw", null, null),
 	OPUS("opus", "audio/ogg", "audio/opus"),
+	M4A("m4a", "audio/mp4", "audio/mp4a-latm"),
+	MP3("mp3", "audio/mpeg", "audio/mpeg"),
 
 	/**
-	 * Never chosen directly - it is what an account bitrate cap turns a request
-	 * for [ORIGINAL] into, because that is what the server sends in that case.
-	 * See [AudioQuality.cappedBy].
+	 * Never chosen: what an original a Cast receiver cannot play is sent as,
+	 * so the track info dialog can say so. See `StreamUrls.forCastLossless`.
 	 */
-	MP3("mp3", "audio/mpeg", "audio/mpeg"),
+	FLAC("flac", "audio/flac", "audio/flac"),
 }
 
 /**
  * What quality to ask the server for, and - via [tag] - how to tell bytes of one
  * quality apart from another in the cache.
+ *
+ * [ORIGINAL], or a rough ceiling of [bitRate] with [format] as what to encode to
+ * when the ceiling (or this device) makes an encode unavoidable. A file media3
+ * plays that fits under the ceiling is sent as stored, whatever its format -
+ * see `MEDIA3_AUDIO`.
  *
  * One value governs downloads, cache-on-play and streaming alike. There is
  * deliberately no per-connection variant: everything played on the phone is
@@ -45,30 +51,19 @@ data class AudioQuality(val format: AudioFormat, val bitRate: Int) {
 	val tag: String
 		get() = if (format == AudioFormat.ORIGINAL) "orig" else "${format.param}$bitRate"
 
-	/** For the settings row; [ORIGINAL] has no bitrate to name. */
+	/** What a conversion at this quality produces; [ORIGINAL] has no bitrate. */
 	val label: String
 		get() = when (format) {
 			AudioFormat.ORIGINAL -> "Original"
 			AudioFormat.OPUS -> "Opus $bitRate"
+			AudioFormat.M4A -> "AAC $bitRate"
 			AudioFormat.MP3 -> "MP3 $bitRate"
+			AudioFormat.FLAC -> "FLAC"
 		}
 
-	/**
-	 * Applies the account's `maxBitRate` ceiling, which the server enforces
-	 * whatever the client asks for.
-	 *
-	 * The [AudioFormat.ORIGINAL] branch is load-bearing rather than cosmetic: a
-	 * capped account asking for the raw file receives *mp3 at the cap* instead
-	 * (`src/streamer.cc`, the bitrate-limit branch). Without modelling that, the
-	 * cache key would claim `@orig` for bytes that are really MP3, and a later
-	 * request for genuinely original audio would be served those bytes.
-	 */
-	fun cappedBy(accountCap: Int): AudioQuality = when {
-		accountCap <= 0 -> this
-		format == AudioFormat.ORIGINAL -> AudioQuality(AudioFormat.MP3, accountCap)
-		bitRate > accountCap -> copy(bitRate = accountCap)
-		else -> this
-	}
+	/** The setting as a person would say it: a ceiling, not a format. */
+	val limitLabel: String
+		get() = if (format == AudioFormat.ORIGINAL) "Original" else "up to $bitRate kbps"
 
 	/**
 	 * This quality as it applies to a video played for its soundtrack alone.
@@ -102,12 +97,14 @@ data class AudioQuality(val format: AudioFormat, val bitRate: Int) {
 		/** Offered in settings, low to high. */
 		val BITRATES = listOf(96, 128, 160, 192, 256)
 
+		/** What a ceiling may convert to, offered in settings. */
+		val TRANSCODE_FORMATS = listOf(AudioFormat.OPUS, AudioFormat.M4A, AudioFormat.MP3)
+
 		/** Inverse of [tag]; null when the string is not one we wrote. */
 		fun parse(tag: String): AudioQuality? {
 			if (tag == "orig") return ORIGINAL
-			val format = AudioFormat.entries.firstOrNull {
-				it != AudioFormat.ORIGINAL && tag.startsWith(it.param)
-			} ?: return null
+			val format = TRANSCODE_FORMATS.firstOrNull { tag.startsWith(it.param) }
+				?: return null
 			val rate = tag.removePrefix(format.param).toIntOrNull() ?: return null
 			if (rate <= 0) return null
 			return AudioQuality(format, rate)

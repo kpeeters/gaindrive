@@ -11,6 +11,7 @@ import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.StreamTarget
 import org.gaindrive.android.data.StreamUrls
 import org.gaindrive.android.data.cache.AudioCache
+import org.gaindrive.android.data.model.AudioFormat
 import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.net.SubsonicClientFactory
@@ -375,16 +376,16 @@ class CastUrls @Inject constructor(
 	/**
 	 * What to hand a receiver that will fetch from the server itself.
 	 *
-	 * Two conditions have to hold before the original is sent, and the second
-	 * is not a caution but a fix: a `.wma` handed over as it stands fails the
-	 * `LOAD` with `IDLE`/`ERROR`, is retried once by [LoadRetryWatcher], fails
-	 * again and stalls - with nothing on screen to say why. Falling back to the
-	 * streaming quality plays the track instead, and the log line is what makes
-	 * "why is this one still Opus" answerable.
+	 * The original goes only when the receiver plays it, and that is not a
+	 * caution but a fix: a `.wma` handed over as it stands fails the `LOAD`
+	 * with `IDLE`/`ERROR`, is retried once by [LoadRetryWatcher], fails again
+	 * and stalls - with nothing on screen to say why. Anything else goes as
+	 * FLAC, which every receiver plays, so a lossy source is given no second
+	 * generation of loss. That holds however the original was reached: the
+	 * cast setting, or a quality setting of Original, or a copy held at it.
 	 */
 	private suspend fun directTarget(ref: ItemRef, source: CastSource): StreamTarget? {
-		if (!settings.castOriginal.first())
-			return streamUrls.forPlayback(ref, source.audioOnlyVideo)
+		val original = settings.castOriginal.first()
 		// "The original file" for a video played as audio is the film, which is
 		// the one thing this route must not fetch. It is also the only place
 		// the audio-only flag is read: everything else about such an item is
@@ -394,19 +395,23 @@ class CastUrls @Inject constructor(
 		if (source.audioOnlyVideo) {
 			val format = source.soundtrackFormat
 			val mime = source.soundtrackMime
-			if (format != null && mime != null && castPlaysNatively(mime))
+			if (original && format != null && mime != null && castPlaysNatively(mime))
 				streamUrls.forSoundtrackCopy(ref, format, mime)?.let { return it }
 			return streamUrls.forPlayback(ref, audioOnlyVideo = true)
 		}
-		if (!castPlaysNatively(source.sourceMime)) {
+		val target =
+			if (original) streamUrls.forCastOriginal(ref) else streamUrls.forPlayback(ref)
+		if (target?.quality?.format == AudioFormat.ORIGINAL &&
+			!castPlaysNatively(source.sourceMime)
+		) {
 			Log.i(
 				TAG,
 				"original ${source.sourceMime ?: "type unknown"} is not one the" +
-					" receiver takes; sending the streaming quality",
+					" receiver takes; sending FLAC",
 			)
-			return streamUrls.forPlayback(ref)
+			return streamUrls.forCastLossless(ref)
 		}
-		return streamUrls.forCastOriginal(ref)
+		return target
 	}
 
 	/**

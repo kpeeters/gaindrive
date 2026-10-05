@@ -52,5 +52,4 @@ data class UserDto(
 	val adminRole: Boolean = false,
 	val uploadRole: Boolean = false,
 	val downloadRole: Boolean = false,
-	val maxBitRate: Int = 0,
 )

@@ -44,8 +44,7 @@ data class TrackInfoState(
  * The library half is read from the offline mirror rather than from the server,
  * which is what the web client's `getSong` re-fetch does. It re-fetches to
  * refresh `transcodedSuffix`/`transcodedBitRate`, and this app needs neither:
- * the phone decides the quality itself, through `AudioQuality.cappedBy`, and
- * records the answer on the item. So a local read is both sufficient and the
+ * the phone decides the quality itself and records the answer on the item. So a local read is both sufficient and the
  * only version that works with no connectivity - which is exactly the state a
  * downloaded library, and the cast route that serves it, exist for.
  */

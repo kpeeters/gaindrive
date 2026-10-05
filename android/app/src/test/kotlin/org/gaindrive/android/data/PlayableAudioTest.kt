@@ -2,87 +2,35 @@ package org.gaindrive.android.data
 
 import org.gaindrive.android.data.model.AudioFormat
 import org.gaindrive.android.data.model.AudioQuality
-import org.gaindrive.android.playback.MEDIA3_AUDIO_LOSSLESS
-import org.gaindrive.android.playback.MEDIA3_AUDIO_LOSSY
-import org.gaindrive.android.playback.playableAudioFor
+import org.gaindrive.android.playback.MEDIA3_AUDIO
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The audio half of `playable`: what this device says it will take as it
+ * The audio half of `playable`: what this device says it can play as it
  * stands, and - the half worth testing - what it must never say.
  *
- * Two failures are being guarded against and they are opposites. Declaring too
- * little wastes a re-encode, which is slow and invisible. Declaring too much
- * hands someone who asked for Opus 160 a lossless file over mobile data, and
- * hands a Cast receiver a container its `LOAD` did not announce - which it
- * refuses outright, on a television, with nothing on the phone to say why.
+ * Declaring too little wastes a re-encode, which is slow and invisible.
+ * Declaring something media3 cannot decode hands over a file that plays as
+ * silence; declaring anything at all on the cast route hands a receiver a
+ * container its `LOAD` did not announce.
  */
 class PlayableAudioTest {
 
 	private val opus160 = AudioQuality(AudioFormat.OPUS, 160)
 
 	/**
-	 * The rule the feature turns on, and the one a future edit is most likely
-	 * to undo by adding a token to the wrong set.
+	 * Lossless is declared whatever the setting: size is `maxBitRate`'s job,
+	 * and with no ceiling a declared FLAC is what an unplayable original is
+	 * converted to.
 	 */
 	@Test
-	fun `a lossy setting declares nothing lossless`() {
-		val declared = playableAudioFor(opus160)
-		MEDIA3_AUDIO_LOSSLESS.forEach {
-			assertFalse("declared $it at Opus 160", declared.contains(it))
-		}
-		assertEquals(MEDIA3_AUDIO_LOSSY, declared)
-	}
-
-	@Test
-	fun `original declares the lossless formats too`() {
-		val declared = playableAudioFor(AudioQuality.ORIGINAL)
-		assertTrue(declared.containsAll(MEDIA3_AUDIO_LOSSLESS))
-		assertTrue(declared.containsAll(MEDIA3_AUDIO_LOSSY))
-	}
-
-	/**
-	 * ALAC and FLAC-in-Ogg are lossless in exactly the way `.flac` is, and
-	 * declaring either at a lossy setting is the same mistake wearing a
-	 * different extension. Named individually because the sets above could be
-	 * edited to agree with each other and still be wrong.
-	 */
-	@Test
-	fun `alac and ogg flac are treated as lossless`() {
-		assertTrue(MEDIA3_AUDIO_LOSSLESS.contains("mp4/alac"))
-		assertTrue(MEDIA3_AUDIO_LOSSLESS.contains("ogg/flac"))
-		assertTrue(MEDIA3_AUDIO_LOSSLESS.contains("flac/flac"))
-		assertFalse(playableAudioFor(opus160).contains("mp4/alac"))
-		assertFalse(playableAudioFor(opus160).contains("ogg/flac"))
-	}
-
-	/**
-	 * `cappedBy` turns a request for the original into mp3 at the cap, so
-	 * reading the capped value would silently stop declaring lossless for every
-	 * capped account - the one group whose originals the server was going to
-	 * convert anyway, but for a reason that has nothing to do with this.
-	 */
-	@Test
-	fun `the account cap is not what the declaration reads`() {
-		val capped = AudioQuality.ORIGINAL.cappedBy(192)
-		assertEquals(AudioFormat.MP3, capped.format)
-		val uncapped = playableAudioFor(AudioQuality.ORIGINAL)
-		assertTrue(uncapped.containsAll(MEDIA3_AUDIO_LOSSLESS))
-		assertFalse(playableAudioFor(capped).containsAll(MEDIA3_AUDIO_LOSSLESS))
-	}
-
-	/**
-	 * "The original" for a film played as audio is the film, which is why
-	 * `forVideoAudio` substitutes before this is asked - and why asking after
-	 * it gives the lossy set even for someone whose setting says Original.
-	 */
-	@Test
-	fun `a film played as audio declares nothing lossless`() {
-		val asked = AudioQuality.ORIGINAL.forVideoAudio()
-		assertEquals(MEDIA3_AUDIO_LOSSY, playableAudioFor(asked))
+	fun `the lossless formats are declared`() {
+		assertTrue(MEDIA3_AUDIO.contains("flac/flac"))
+		assertTrue(MEDIA3_AUDIO.contains("mp4/alac"))
+		assertTrue(MEDIA3_AUDIO.contains("ogg/flac"))
 	}
 
 	/**
@@ -92,7 +40,7 @@ class PlayableAudioTest {
 	 */
 	@Test
 	fun `speex wav and wma are never declared`() {
-		val everything = MEDIA3_AUDIO_LOSSY + MEDIA3_AUDIO_LOSSLESS
+		val everything = MEDIA3_AUDIO
 		assertFalse(everything.contains("ogg/speex"))
 		assertTrue(everything.none { it.startsWith("riff/") })
 		assertTrue(everything.none { it.startsWith("asf/") })
@@ -105,7 +53,7 @@ class PlayableAudioTest {
 	 */
 	@Test
 	fun `the ambiguous containers are declared for each codec`() {
-		val everything = MEDIA3_AUDIO_LOSSY + MEDIA3_AUDIO_LOSSLESS
+		val everything = MEDIA3_AUDIO
 		assertEquals(
 			setOf("mp4/aac", "mp4/alac"),
 			everything.filter { it.startsWith("mp4/") }.toSet(),
@@ -124,7 +72,7 @@ class PlayableAudioTest {
 	 */
 	@Test
 	fun `no token names a file extension`() {
-		val everything = MEDIA3_AUDIO_LOSSY + MEDIA3_AUDIO_LOSSLESS
+		val everything = MEDIA3_AUDIO
 		val containers = everything.map { it.substringBefore('/') }.toSet()
 		listOf("oga", "m4a", "mp3", "opus", "wav", "wma").forEach {
 			assertFalse("$it is an extension, not a container", it in containers)
@@ -138,7 +86,7 @@ class PlayableAudioTest {
 	 */
 	@Test
 	fun `every token is one container over one codec`() {
-		(MEDIA3_AUDIO_LOSSY + MEDIA3_AUDIO_LOSSLESS).forEach {
+		MEDIA3_AUDIO.forEach {
 			assertTrue("$it is not lowercase", it == it.lowercase())
 			assertEquals("$it is not one pair", 1, it.count { c -> c == '/' })
 			assertFalse("$it has an empty half", it.startsWith("/") || it.endsWith("/"))

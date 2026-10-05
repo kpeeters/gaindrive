@@ -58,6 +58,15 @@ fun StorageSettingsScreen(
 	// re-download; otherwise the change applies immediately.
 	var confirmQuality by remember { mutableStateOf<AudioQuality?>(null) }
 	val evictable = (storage.usedBytes - storage.pinnedBytes).coerceAtLeast(0)
+	val qualities = listOf(AudioQuality.ORIGINAL) +
+		AudioQuality.BITRATES.map { AudioQuality(storage.transcodeFormat, it) }
+	fun choose(quality: AudioQuality) {
+		if (storage.quality == quality) return
+		// Nothing downloaded means nothing to re-fetch, so there is nothing
+		// to warn about.
+		if (state.pins.isEmpty()) viewModel.setAudioQuality(quality)
+		else confirmQuality = quality
+	}
 
 	SettingsScaffold(title = "Storage & offline", onBack = onBack) {
 		item {
@@ -74,28 +83,51 @@ fun StorageSettingsScreen(
 
 		item {
 			Text(
-				text = "Set the Opus bitrate for playback, caching and download.",
+				text = "The original, or a limit in kbps, for playback, caching and " +
+					"download. A file this phone plays that fits under the limit is " +
+					"kept as it is; anything else is converted. With Original, a " +
+					"file this phone cannot play arrives as FLAC.",
 				style = MaterialTheme.typography.bodySmall,
 				color = MaterialTheme.colorScheme.onSurfaceVariant,
 			)
 		}
 		item {
 			ChipRow(
-				selectedIndex = QUALITIES.indexOf(storage.quality),
-				chipCount = QUALITIES.size,
+				selectedIndex = qualities.indexOf(storage.quality),
+				chipCount = qualities.size,
 			) {
-				QUALITIES.forEach { quality ->
+				qualities.forEach { quality ->
 					FilterChip(
 						selected = storage.quality == quality,
-						onClick = {
-							if (storage.quality == quality) return@FilterChip
-							// Nothing downloaded means nothing to re-fetch, so
-							// there is nothing to warn about.
-							if (state.pins.isEmpty()) viewModel.setAudioQuality(quality)
-							else confirmQuality = quality
-						},
+						onClick = { choose(quality) },
 						label = { Text(quality.chipLabel, maxLines = 1) },
 					)
+				}
+			}
+		}
+		// Only under a limit: with Original nothing is converted to a format
+		// anyone chose - an unplayable file becomes FLAC.
+		if (storage.quality.format != AudioFormat.ORIGINAL) {
+			item {
+				Text(
+					text = "Convert to",
+					style = MaterialTheme.typography.bodySmall,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+				)
+			}
+			item {
+				val formats = AudioQuality.TRANSCODE_FORMATS
+				ChipRow(
+					selectedIndex = formats.indexOf(storage.quality.format),
+					chipCount = formats.size,
+				) {
+					formats.forEach { format ->
+						FilterChip(
+							selected = storage.quality.format == format,
+							onClick = { choose(storage.quality.copy(format = format)) },
+							label = { Text(format.chipLabel, maxLines = 1) },
+						)
+					}
 				}
 			}
 		}
@@ -320,23 +352,23 @@ fun StorageSettingsScreen(
 	}
 }
 
-/**
- * Original plus the Opus rates worth offering. Below 96 the artefacts start to
- * be audible on anything but speech; above 256 the saving over the original
- * stops being the point.
- */
-private val QUALITIES: List<AudioQuality> =
-	listOf(AudioQuality.ORIGINAL) +
-		AudioQuality.BITRATES.map { AudioQuality(AudioFormat.OPUS, it) }
-
-/** Chips are narrow: "160" reads fine under a heading that already says Opus. */
+/** Chips are narrow: "160" reads fine under a description that says kbps. */
 private val AudioQuality.chipLabel: String
 	get() = if (format == AudioFormat.ORIGINAL) "Original" else bitRate.toString()
+
+private val AudioFormat.chipLabel: String
+	get() = when (this) {
+		AudioFormat.ORIGINAL -> "Original"
+		AudioFormat.OPUS -> "Opus"
+		AudioFormat.M4A -> "AAC"
+		AudioFormat.MP3 -> "MP3"
+		AudioFormat.FLAC -> "FLAC"
+	}
 
 /** Reads as part of a sentence, where the bare label does not. */
 private val AudioQuality.phrase: String
 	get() = if (format == AudioFormat.ORIGINAL) "the original quality"
-	else "$label kbps"
+	else "$limitLabel, converting to ${format.chipLabel}"
 
 /** The caps offered. A slider would imply a precision nobody wants here. */
 private val CACHE_SIZES = listOf(
@@ -397,7 +429,7 @@ private fun pinSubtitle(
 	quality: AudioQuality,
 ): String {
 	val kind = item.pin.kind.name.lowercase().replaceFirstChar { it.uppercase() }
-	val parts = mutableListOf(kind, quality.label)
+	val parts = mutableListOf(kind, quality.limitLabel)
 	when (status?.phase) {
 		null, PinPhase.COMPLETE -> Unit
 		PinPhase.WAITING -> parts += "waiting for Wi-Fi"

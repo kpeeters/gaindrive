@@ -286,15 +286,15 @@
         </div>
         <p>Without <code>ffmpeg</code> on <code>PATH</code>, GainDrive streams original files only; everything else keeps working.</p>
 
-        <h3>What the macOS and iOS app receives</h3>
-        <p>The app has two settings. <em>Quality</em> is either <em>Original</em> or a rough limit (<em>up to N kbps</em>). <em>Convert to</em> (AAC or MP3) says what to encode to when a conversion cannot be avoided. With every request the app also tells the server which files it can play as stored: MP3, AAC, FLAC and ALAC. The same rules apply to playing and to downloading. The server never converts from one lossy format to another unless the limit forces it.</p>
+        <h3>What the Android, macOS and iOS apps receive</h3>
+        <p>The apps have two settings. <em>Quality</em> is either <em>Original</em> or a rough limit (<em>up to N kbps</em>). <em>Convert to</em> says what to encode to when a conversion cannot be avoided: Opus, AAC or MP3 on Android, AAC or MP3 on Apple devices. With every request the app also tells the server which files it can play as stored: MP3, AAC, FLAC and ALAC everywhere, plus Ogg Vorbis, Opus and FLAC-in-Ogg on Android. The same rules apply to playing and to downloading. The server never converts from one lossy format to another unless the limit forces it.</p>
         <ul class="doc-list">
           <li><b>Original, playable file</b>: sent untouched.</li>
-          <li><b>Original, file the app cannot play</b> (Ogg Vorbis, Opus, WMA, ...): converted to FLAC, so nothing more is lost.</li>
+          <li><b>Original, file the app cannot play</b> (WMA, WAV, and on Apple devices Ogg Vorbis and Opus): converted to FLAC, so nothing more is lost.</li>
           <li><b>Limit, playable file within the limit</b>: sent untouched, whatever its format. A low-bitrate FLAC counts. A file up to 10% over the limit still counts as within it.</li>
           <li><b>Limit, file over it or not playable</b>: converted to the chosen format at the limit.</li>
           <li><b>Server accounts</b> have no bitrate limit. The limit belongs to the player, which knows its own network and storage.</li>
-          <li><b>Videos</b>: the quality setting does not apply. A film the app can decode is sent as the file itself, anything else (including AV1 on Macs without an AV1 decoder) as an HLS stream, for which the server copies the video where it can and re-encodes it otherwise. When only the soundtrack is played, the setting applies, and Original means AAC 160.</li>
+          <li><b>Videos</b>: the quality setting does not apply. A film the app can decode is sent as the file itself, anything else (including AV1 on Macs without an AV1 decoder) as an HLS stream, for which the server copies the video where it can and re-encodes it otherwise. When only the soundtrack is played, the setting applies, and Original means AAC 160 (Opus 160 on Android).</li>
           <li><b>Casting</b> follows the quality setting unless <em>Cast at original quality</em> is on. For the original, a receiver gets the file if it can play it and FLAC if it cannot. With a limit, it always gets the chosen format at the limit, even for a file within it, because the app has to announce the type before the receiver fetches anything.</li>
         </ul>
         <p>Seeking never causes a transcode: the app seeks within the file it received.</p>

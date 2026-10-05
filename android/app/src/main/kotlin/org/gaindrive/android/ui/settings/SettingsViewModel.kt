@@ -16,6 +16,7 @@ import org.gaindrive.android.data.cache.ImageCache
 import org.gaindrive.android.data.cache.PinRepository
 import org.gaindrive.android.data.cache.PinStatus
 import org.gaindrive.android.data.cache.PinnedItem
+import org.gaindrive.android.data.model.AudioFormat
 import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerConfig
@@ -43,6 +44,8 @@ data class StorageUiState(
 	val unmeteredOnly: Boolean = true,
 	val offlineMode: Boolean = false,
 	val quality: AudioQuality = AudioQuality.DEFAULT,
+	/** What a ceiling converts to; remembered while [quality] is Original. */
+	val transcodeFormat: AudioFormat = AudioQuality.DEFAULT.format,
 	val usedBytes: Long = 0,
 	val pinnedBytes: Long = 0,
 	/** Coil's disk cache; see [ImageCache.sizeBytes] for what it leaves out. */
@@ -67,7 +70,13 @@ private data class StoragePrefs(
 	val cacheOnPlay: Boolean,
 	val unmeteredOnly: Boolean,
 	val offlineMode: Boolean,
+	val quality: QualityPrefs,
+)
+
+/** The quality and the format it converts to, sharing one `combine` slot. */
+private data class QualityPrefs(
 	val quality: AudioQuality,
+	val transcodeFormat: AudioFormat,
 )
 
 @HiltViewModel
@@ -87,7 +96,7 @@ class SettingsViewModel @Inject constructor(
 		settings.cacheOnPlay,
 		settings.downloadUnmeteredOnly,
 		settings.offlineMode,
-		settings.audioQuality,
+		combine(settings.audioQuality, settings.transcodeFormat, ::QualityPrefs),
 		::StoragePrefs,
 	)
 
@@ -102,7 +111,8 @@ class SettingsViewModel @Inject constructor(
 			cacheOnPlay = prefs.cacheOnPlay,
 			unmeteredOnly = prefs.unmeteredOnly,
 			offlineMode = prefs.offlineMode,
-			quality = prefs.quality,
+			quality = prefs.quality.quality,
+			transcodeFormat = prefs.quality.transcodeFormat,
 			usedBytes = used,
 			pinnedBytes = pinned,
 			imageBytes = images,
@@ -207,9 +217,13 @@ class SettingsViewModel @Inject constructor(
 	 * asked for". The old copies are not deleted - they stop being protected,
 	 * so eviction reclaims them when the space is next needed, and until then
 	 * they keep playing.
+	 *
+	 * A ceiling's format is also remembered as the one to convert to, so it
+	 * comes back after a spell on Original.
 	 */
 	fun setAudioQuality(quality: AudioQuality) = viewModelScope.launch {
 		settings.setAudioQuality(quality)
+		if (quality.format != AudioFormat.ORIGINAL) settings.setTranscodeFormat(quality.format)
 		pins.refreshDownloads()
 	}
 

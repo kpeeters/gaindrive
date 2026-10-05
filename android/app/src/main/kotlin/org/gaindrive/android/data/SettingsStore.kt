@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.gaindrive.android.data.model.AlbumSort
+import org.gaindrive.android.data.model.AudioFormat
 import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.LibrarySection
 import org.gaindrive.android.data.model.ThemeMode
@@ -147,6 +148,23 @@ class SettingsStore @Inject constructor(
 	}
 
 	/**
+	 * What to encode to when a ceiling makes an encode unavoidable. Kept apart
+	 * from [audioQuality] only so that it survives a spell on Original, which
+	 * has no format; while a ceiling is set the two agree.
+	 */
+	val transcodeFormat: Flow<AudioFormat> = dataStore.data.map { prefs ->
+		prefs[TRANSCODE_FORMAT]
+			?.let { stored -> AudioQuality.TRANSCODE_FORMATS.firstOrNull { it.param == stored } }
+			?: prefs[AUDIO_QUALITY]?.let(AudioQuality::parse)?.format
+				?.takeIf { it != AudioFormat.ORIGINAL }
+			?: AudioQuality.DEFAULT.format
+	}
+
+	suspend fun setTranscodeFormat(format: AudioFormat) {
+		dataStore.edit { it[TRANSCODE_FORMAT] = format.param }
+	}
+
+	/**
 	 * Whether a Chromecast fetching from the server itself is sent the file as
 	 * it stands, rather than the streaming quality above.
 	 *
@@ -262,6 +280,7 @@ class SettingsStore @Inject constructor(
 		private val DOWNLOAD_UNMETERED_ONLY = booleanPreferencesKey("download_unmetered_only")
 		private val OFFLINE_MODE = booleanPreferencesKey("offline_mode")
 		private val AUDIO_QUALITY = stringPreferencesKey("audio_quality")
+		private val TRANSCODE_FORMAT = stringPreferencesKey("transcode_format")
 		private val CAST_ORIGINAL = booleanPreferencesKey("cast_original")
 		private val VIDEO_AUDIO_ONLY = booleanPreferencesKey("video_audio_only")
 		private val FETCH_SERVER = stringPreferencesKey("fetch_server")
