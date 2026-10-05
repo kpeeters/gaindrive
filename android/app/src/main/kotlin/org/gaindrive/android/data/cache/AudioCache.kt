@@ -241,15 +241,28 @@ class AudioCache @Inject constructor(
 	suspend fun flush(keepKeys: Set<String> = emptySet()) {
 		withContext(Dispatchers.IO) {
 			cache.keys.forEach { key ->
-				// keepKeys arrives as bare refs from the player's queue, while
-				// cache keys carry a quality - spare every quality of a track
-				// that is in use, not just the one currently set.
+				// keepKeys arrives as bare refs, while cache keys carry a
+				// quality - spare every quality of a track that is in use, not
+				// just the one currently set.
 				if (pinned.isPinned(key) || CacheKeys.refKeyOf(key) in keepKeys) return@forEach
-				// One locked or vanished key must not abort the whole flush.
+				// One locked or vanished key must not abort the whole flush,
+				// but it is said: a flush that frees nothing and logs nothing
+				// is indistinguishable from one that was never asked for.
 				runCatching { cache.removeResource(key) }
+					.onFailure { Log.w(TAG, "flush: could not remove $key", it) }
 			}
 		}
 		refresh()
+	}
+
+	/**
+	 * What [flush] would leave behind for this track: every unpinned quality
+	 * of it, so the screen can offer what a flush will actually free.
+	 */
+	suspend fun unpinnedBytesOf(refKey: String): Long = withContext(Dispatchers.IO) {
+		cache.keys
+			.filter { CacheKeys.refKeyOf(it) == refKey && !pinned.isPinned(it) }
+			.sumOf { cachedBytesOf(it) }
 	}
 
 	private suspend fun refresh() {

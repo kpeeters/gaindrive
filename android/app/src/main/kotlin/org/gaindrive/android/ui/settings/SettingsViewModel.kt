@@ -3,10 +3,13 @@ package org.gaindrive.android.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.gaindrive.android.data.ServerRegistry
@@ -48,6 +51,8 @@ data class StorageUiState(
 	val transcodeFormat: AudioFormat = AudioQuality.DEFAULT.format,
 	val usedBytes: Long = 0,
 	val pinnedBytes: Long = 0,
+	/** The playing track's unpinned bytes, which a flush keeps. */
+	val sparedBytes: Long = 0,
 	/** Coil's disk cache; see [ImageCache.sizeBytes] for what it leaves out. */
 	val imageBytes: Long = 0,
 )
@@ -100,12 +105,25 @@ class SettingsViewModel @Inject constructor(
 		::StoragePrefs,
 	)
 
+	/**
+	 * The playing track's unpinned bytes: what [flushCache] spares. Recounted
+	 * when the track changes and whenever the cache's size does, which is
+	 * also how its download filling in reaches the screen.
+	 */
+	@OptIn(ExperimentalCoroutinesApi::class)
+	private val sparedBytes = combine(
+		player.state.map { it.current?.ref?.encode() }.distinctUntilChanged(),
+		audioCache.usedBytes,
+	) { ref, _ -> ref }
+		.mapLatest { ref -> ref?.let { audioCache.unpinnedBytesOf(it) } ?: 0L }
+
 	private val storage = combine(
 		storagePrefs,
 		audioCache.usedBytes,
 		audioCache.pinnedBytes,
 		imageCache.sizeBytes,
-	) { prefs, used, pinned, images ->
+		sparedBytes,
+	) { prefs, used, pinned, images, spared ->
 		StorageUiState(
 			maxBytes = prefs.maxBytes,
 			cacheOnPlay = prefs.cacheOnPlay,
@@ -115,6 +133,7 @@ class SettingsViewModel @Inject constructor(
 			transcodeFormat = prefs.quality.transcodeFormat,
 			usedBytes = used,
 			pinnedBytes = pinned,
+			sparedBytes = spared,
 			imageBytes = images,
 		)
 	}
@@ -230,15 +249,18 @@ class SettingsViewModel @Inject constructor(
 	fun unpin(ref: ItemRef) = viewModelScope.launch { pins.unpin(ref) }
 
 	/**
-	 * Drops everything unpinned.
+	 * Drops everything unpinned except the track playing, whose bytes the
+	 * player has open.
 	 *
-	 * The whole queue is spared, not just the track playing: the next track is
-	 * likely to be part-cached already, and pulling that out from under the
-	 * player would restart its download for no gain.
+	 * Not the whole queue, which is what this used to spare: a queue is often
+	 * the very album that was cached, so the flush freed nothing while the
+	 * button promised it all. The rest of the queue fetches again when
+	 * reached; a next track being pre-buffered may refuse to go, and that is
+	 * logged rather than fatal.
 	 */
 	fun flushCache() = viewModelScope.launch {
-		val inUse = player.state.value.queue.mapNotNull { it.ref?.encode() }.toSet()
-		audioCache.flush(keepKeys = inUse)
+		val current = player.state.value.current?.ref?.encode()
+		audioCache.flush(keepKeys = setOfNotNull(current))
 	}
 
 	/**

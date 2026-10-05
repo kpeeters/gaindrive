@@ -57,7 +57,9 @@ fun StorageSettingsScreen(
 	// The quality awaiting confirmation. Only set when there are pins to
 	// re-download; otherwise the change applies immediately.
 	var confirmQuality by remember { mutableStateOf<AudioQuality?>(null) }
-	val evictable = (storage.usedBytes - storage.pinnedBytes).coerceAtLeast(0)
+	// What a flush frees: not the downloads, and not the track playing.
+	val evictable =
+		(storage.usedBytes - storage.pinnedBytes - storage.sparedBytes).coerceAtLeast(0)
 	val qualities = listOf(AudioQuality.ORIGINAL) +
 		AudioQuality.BITRATES.map { AudioQuality(storage.transcodeFormat, it) }
 	fun choose(quality: AudioQuality) {
@@ -279,7 +281,7 @@ fun StorageSettingsScreen(
 			text = {
 				Text(
 					"Removes ${formatBytes(evictable)} of stored music. Downloads " +
-						"and anything currently queued are kept."
+						"and the track playing are kept."
 				)
 			},
 			confirmButton = {
